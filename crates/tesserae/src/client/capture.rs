@@ -25,6 +25,8 @@ struct Capture {
     taken: bool,
     /// Whether the screenshot entity has actually been observed in the World.
     pending_seen: bool,
+    /// Worst frame since `SETTLES_AFTER_S`, for sizing the streaming budget.
+    worst_frame_s: f32,
 }
 
 fn seconds(var: &str, fallback: f32) -> f32 {
@@ -45,8 +47,24 @@ pub(super) fn plugin(app: &mut App) {
         at_s: fly_for_s + seconds("TESSERAE_SCREENSHOT_SETTLE_S", SETTLE_FOR_S),
         taken: false,
         pending_seen: false,
+        worst_frame_s: 0.0,
     })
-    .add_systems(Update, (fly_forward, shutter, exit_when_written).chain());
+    .add_systems(
+        Update,
+        (watch_frames, fly_forward, shutter, exit_when_written).chain(),
+    );
+}
+
+/// Ignores the first second and a half: window creation, pipeline
+/// specialisation and the first shader compile all land there and say nothing
+/// about what streaming costs.
+const SETTLES_AFTER_S: f32 = 1.5;
+
+fn watch_frames(time: Res<Time>, mut capture: ResMut<Capture>) {
+    if time.elapsed_secs() < SETTLES_AFTER_S {
+        return;
+    }
+    capture.worst_frame_s = capture.worst_frame_s.max(time.delta_secs());
 }
 
 /// Stands in for the player holding W, so the screenshot exercises streaming
@@ -74,6 +92,7 @@ fn shutter(
     mut capture: ResMut<Capture>,
     stats: Res<crate::server::streaming::stats::StreamingStats>,
     generator: Res<crate::server::WorldGenerator>,
+    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
     camera: Single<&Transform, With<Camera3d>>,
     drawn: Query<(), With<Mesh3d>>,
 ) {
@@ -81,8 +100,14 @@ fn shutter(
         return;
     }
     capture.taken = true;
+    let worst_frame_ms = diagnostics
+        .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .map(|d| d.values().copied().fold(0.0f64, f64::max))
+        .unwrap_or(0.0);
     info!(
-        "shutter at {:.1}s: camera {:?} surface {:.1}m chunk {} loaded {} delivered {} entities {}",
+        "shutter at {:.1}s: camera {:?} surface {:.1}m chunk {} loaded {} \
+         delivered {} entities {} worst frame {worst_frame_ms:.1}ms \
+         (since {SETTLES_AFTER_S}s: {:.1}ms)",
         time.elapsed_secs(),
         camera.translation,
         generator.surface_height_m(camera.translation.x, camera.translation.z),
@@ -90,6 +115,7 @@ fn shutter(
         stats.loaded,
         stats.meshed,
         drawn.iter().count(),
+        capture.worst_frame_s * 1000.0,
     );
     commands
         .spawn(Screenshot::primary_window())

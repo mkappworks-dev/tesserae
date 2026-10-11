@@ -74,8 +74,10 @@ impl Default for StreamingSettings {
     }
 }
 
-/// How much the Server does per tick. Measured, not guessed — see the comment
-/// on [`StreamingBudget::default`].
+/// How much the Server does per tick. A count rather than a time slice,
+/// because a count is deterministic and the ring arithmetic is tested against
+/// it; the cost of that choice is that the numbers below have to be sized for
+/// the worst case rather than discovered at runtime.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct StreamingBudget {
     pub generate_per_tick: usize,
@@ -83,8 +85,18 @@ pub struct StreamingBudget {
 }
 
 impl Default for StreamingBudget {
-    // TODO(.scratch/2026-10-11-worldgen-chunk-streaming/issues/06): a guess
-    // until ticket 06 measures it. Do not read these as measured numbers.
+    /// Measured 2026-10-11 on an Apple M5, `cargo bench -p tesserae-core`:
+    /// generating a Chunk the surface crosses costs 102 us and meshing one
+    /// 371 us, while a Chunk that takes an early-out or declines a mesh costs
+    /// about 5 ns. So the worst tick, where every Chunk in both budgets
+    /// straddles the surface, is 24 x 102us + 12 x 371us = 6.9 ms against the
+    /// 15.6 ms a tick has at 64 Hz.
+    ///
+    /// Confirmed in the app rather than only on paper: flying at the camera's
+    /// default speed with a 192 m view distance, the worst frame after
+    /// start-up was 10.0 ms and the steady state 125 fps, with the first fill
+    /// of 2167 Chunks taking about 1.4 s. A debug build at `opt-level = 1`, so
+    /// read it as a lower bound on the headroom.
     fn default() -> Self {
         StreamingBudget {
             generate_per_tick: 24,

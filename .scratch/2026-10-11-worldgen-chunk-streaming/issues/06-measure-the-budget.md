@@ -1,6 +1,6 @@
 # Measure the per-tick budget, and update the docs
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05
 
 DESIGN.md calls the per-ring Chunk budget "a number to measure, not to guess",

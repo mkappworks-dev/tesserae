@@ -119,6 +119,8 @@ tesserae/
 │   │   │   ├── voxel.rs        Voxel = material | shape | orientation       ▸ 1
 │   │   │   ├── chunk.rs        palette-compressed 32³ storage               ▸ 1
 │   │   │   ├── mesh.rs         greedy mesher, pass 1 (full cubes)           ▸ 1
+│   │   │   ├── noise.rs        value noise — the one spatial primitive      ▸ 3
+│   │   │   ├── worldgen.rs     seed + position → Chunk, tuned in metres     ▸ 3
 │   │   │   ├── light.rs        incremental flood-fill                       ▸ 4
 │   │   │   ├── shape.rs        mesher pass 2 + per-shape opacity/collision  ▸ 5
 │   │   │   ├── lod.rs          2×2×2 dominant-material downsample           ▸ 6
@@ -129,8 +131,12 @@ tesserae/
 │   │   └── wit/                the versioned contract
 │   └── tesserae/               the Bevy app
 │       └── src/
-│           ├── server/         tick, world state, streaming — sole authority ▸ 3
+│           ├── world.rs        Voxel size, seed, the Chunk lattice          ▸ 2
+│           ├── server/         the sole authority over World state         ▸ 3
+│           │   ├── world_state.rs  Chunk store — mutators Server-private    ▸ 3
+│           │   └── streaming.rs    load/mesh/evict rings, per-tick budget   ▸ 3
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
+│           │   └── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
 │           └── render/         MaterialExtension + look-pack API            ▸ 9
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
