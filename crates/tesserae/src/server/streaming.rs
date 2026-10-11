@@ -87,14 +87,17 @@ pub struct StreamingBudget {
 }
 
 impl Default for StreamingBudget {
-    /// Measured 2026-10-11 on an Apple M5, `cargo bench -p tesserae-core`:
-    /// generating a Chunk the surface crosses costs 99 us, solving its light
-    /// 131 us at worst, and meshing it 386 us, while a Chunk that takes an
+    /// Measured 2026-10-12 on an Apple M5, `cargo bench -p tesserae-core`:
+    /// generating a Chunk the surface crosses costs 98 us, solving its light
+    /// 139 us at worst, and meshing it 343 us, while a Chunk that takes an
     /// early-out, answers its light from `uniform()` alone or declines a mesh
     /// costs a few nanoseconds. So the worst tick, where every Chunk in all
     /// three budgets straddles the surface, is
-    /// `24 x 99us + 12 x 131us + 12 x 386us` = 8.6 ms against the 15.6 ms a
-    /// tick has at 64 Hz, so light cost 1.7 ms of the 8.7 ms headroom.
+    /// `24 x 98us + 12 x 139us + 12 x 343us` = 8.1 ms against the 15.6 ms a
+    /// tick has at 64 Hz. Shaped Voxels did not move it: terrain has none, and
+    /// pass 2 is skipped for a Chunk whose palette holds no shaped entry. A Chunk
+    /// at the shaped cap costs 527 us to mesh and 139 us to light, which is
+    /// 10.3 ms for the worst tick even if all twelve were.
     ///
     /// Relight is **half** of generation, which looks like the wrong way round
     /// — every Chunk that arrives needs its light solved. It is not, because

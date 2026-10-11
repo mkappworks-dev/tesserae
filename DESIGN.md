@@ -130,6 +130,24 @@ Four consequences, all of which must be designed in from the start:
 Keep shaped voxels sparse in worldgen and cap them per chunk, or the mesher's
 fast path stops mattering.
 
+All four are resolved:
+
+1. A Voxel is (Material, Shape, Orientation); a Shape is table data, so a Mod
+   can declare one, and Orientation is `up * 4 + turn`, 0 to 23.
+2. Collision is the Shape's own boxes, rotated, swept in metres.
+3. Light crosses a face unless the Voxel entered seals its side or a shaped
+   Voxel left seals its. There is no authored light-reduction value: that is a
+   property of a Material, and belongs with them.
+4. A stair at half resolution is a full cube or air by **volume**: a coarse
+   Voxel is solid if its eight children's Shape volumes sum to at least half. So
+   no level above 0 ever holds a shaped Voxel, pass 2 never runs there, and the
+   mesher still does not need to know which level it is meshing. Step 6 writes
+   the downsample; `ShapeTable::volume` is the datum.
+
+Terrain places none, and a Chunk may hold at most `MAX_SHAPED_PER_CHUNK` (1024),
+the largest round number that keeps a Chunk at the cap within +50% of a terrain
+mesh. The edit path enforces it and the mesher does not police it.
+
 ## LOD
 
 Geometric rings. LOD0 covers the configured full-detail radius; each level
@@ -299,6 +317,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    contiguous sweep for a Chunk arriving, and a Voxel-granular BFS for an edit,
    which is the half that makes "a torch re-floods a small region" true.
 5. Shaped voxels — second mesher pass, per-shape collision and opacity.
+   **Done.** A Shape is a row in a table of sixteenth-unit nodeboxes, and
+   Orientation is one of 24 rotations
+   ([ADR-0006](docs/adr/0006-shapes-are-table-data.md)). Everything else is
+   derived from one rotated 16³ grid per Shape: which faces a Voxel seals, the
+   geometry pass 2 emits, collision, and volume. Occlusion and light are per
+   face. The Server's edit path is live, with a ray as the Client's only intent,
+   and `collide.rs` has a metre-valued sweep and ray.
 6. LOD mip chain out to 4km.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
@@ -314,13 +339,20 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   itself cannot be the Licensor — it names the Licensed Work, and the Covenants
   run from a person or a company, not from a product name.
 - Chunk dimensions: 32³ assumed, not measured.
-- Per-ring LOD chunk budget: measured twice now, and still only for one case. At
-  1m Voxels and a 192m view distance the streaming tick holds at 24 Chunks
-  generated, 12 relit and 12 meshed, an 8.6ms worst tick against 15.6ms at 64Hz.
-  Light cost 1.7ms of the headroom. Still open for the same reason as before — a
-  single Voxel size, a single view distance, LOD level 0 only, and the number
-  this item is really about is per _ring_ — and now also because the three
-  budgets are sized against each other rather than independently.
+- Per-ring LOD chunk budget: measured three times now, and still only for one
+  case. At 1m Voxels and a 192m view distance the streaming tick holds at 24
+  Chunks generated, 12 relit and 12 meshed, an 8.1ms worst tick against 15.6ms
+  at 64Hz. Shaped Voxels did not move it. Still open for the same reason as
+  before — a single Voxel size, a single view distance, LOD level 0 only, and
+  the number this item is really about is per _ring_ — and now also because the
+  three budgets are sized against each other rather than independently.
+- **Shaped Voxels have loose ends worth a ticket each.** Terrain contains none
+  (slope-smoothing stairs and slabs are the obvious worldgen use, and must stay
+  under the cap). Fence arms and collision taller than the cell need a Shape to
+  look at its neighbours. Two partial Shapes that only jointly cover a face leak
+  light through the seam. Material transparency (glass, water, leaves) is not a
+  Shape property. The Client's hotbar is a stopgap. The ray origin in an intent
+  is not checked against a player position, because there is no player entity.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.
