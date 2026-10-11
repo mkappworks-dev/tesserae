@@ -21,10 +21,10 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, ChunkLight, ChunkMesh, LitChunk, mesh_chunk};
+use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, ChunkMesh, LitChunk, ShapeTable, mesh_chunk};
 
-use super::WorldGenerator;
 use super::world_state::ChunkStore;
+use super::{Shapes, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// The entity the World streams around. The Client puts this on its camera and
@@ -87,14 +87,17 @@ pub struct StreamingBudget {
 }
 
 impl Default for StreamingBudget {
-    /// Measured 2026-10-11 on an Apple M5, `cargo bench -p tesserae-core`:
-    /// generating a Chunk the surface crosses costs 99 us, solving its light
-    /// 131 us at worst, and meshing it 386 us, while a Chunk that takes an
+    /// Measured 2026-10-12 on an Apple M5, `cargo bench -p tesserae-core`:
+    /// generating a Chunk the surface crosses costs 98 us, solving its light
+    /// 139 us at worst, and meshing it 343 us, while a Chunk that takes an
     /// early-out, answers its light from `uniform()` alone or declines a mesh
     /// costs a few nanoseconds. So the worst tick, where every Chunk in all
     /// three budgets straddles the surface, is
-    /// `24 x 99us + 12 x 131us + 12 x 386us` = 8.6 ms against the 15.6 ms a
-    /// tick has at 64 Hz, so light cost 1.7 ms of the 8.7 ms headroom.
+    /// `24 x 98us + 12 x 139us + 12 x 343us` = 8.1 ms against the 15.6 ms a
+    /// tick has at 64 Hz. Shaped Voxels did not move it: terrain has none, and
+    /// pass 2 is skipped for a Chunk whose palette holds no shaped entry. A Chunk
+    /// at the shaped cap costs 527 us to mesh and 139 us to light, which is
+    /// 10.3 ms for the worst tick even if all twelve were.
     ///
     /// Relight is **half** of generation, which looks like the wrong way round
     /// — every Chunk that arrives needs its light solved. It is not, because
@@ -201,9 +204,6 @@ pub(in crate::server) struct MeshState {
     delivered: HashSet<ChunkCoord>,
 }
 
-// The `dev` lightbox is the only caller until build-order step 5 brings a real
-// Voxel-edit path; see the same note in `world_state`.
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 impl MeshState {
     /// Whether this Chunk's light is still waiting on a solve. A Server system
     /// that wants to edit a Voxel waits for this: an edit re-floods light
@@ -222,6 +222,21 @@ impl MeshState {
     /// `tesserae_core::relight`'s doc comment describes.
     pub(in crate::server) fn edited(&mut self, coord: ChunkCoord) {
         self.dirty.insert(coord);
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn is_dirty(&self, coord: ChunkCoord) -> bool {
+        self.dirty.contains(&coord)
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn mark_unlit(&mut self, coord: ChunkCoord) {
+        self.unlit.insert(coord);
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn mark_lit(&mut self, coord: ChunkCoord) {
+        self.unlit.remove(&coord);
     }
 }
 
@@ -269,6 +284,7 @@ fn stream(
     mut ready: MessageWriter<ChunkMeshReady>,
     mut unloaded: MessageWriter<ChunkUnloaded>,
     generator: Res<WorldGenerator>,
+    shapes: Res<Shapes>,
     world: Res<WorldSettings>,
     settings: Res<StreamingSettings>,
     budget: Res<StreamingBudget>,
@@ -314,6 +330,7 @@ fn stream(
         &world,
         center,
         budget.relight_per_tick,
+        &shapes,
     );
     publish(
         &store,
@@ -323,6 +340,7 @@ fn stream(
         center,
         rings.mesh,
         budget.mesh_per_tick,
+        &shapes,
     );
 }
 
@@ -401,11 +419,20 @@ fn generate(
     }
 }
 
+/// The Voxels of the synthetic Chunk above the surface: air, which is all the
+/// generator makes there.
+static SKY_CHUNK: Chunk = Chunk::air();
+
 /// Solves up to `budget` Chunks whose light is out of date, highest first.
 ///
 /// The bulk path: a Chunk arriving starts dark, so every change here is an
 /// increase and re-solving from the current boundary converges. A Voxel
 /// **edit** must not come through here — see `tesserae_core::relight`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the last argument is the World's Shape table; bundling the rest \
+              would invent a type used once"
+)]
 fn relight(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
@@ -414,6 +441,7 @@ fn relight(
     world: &WorldSettings,
     center: ChunkCoord,
     budget: usize,
+    shapes: &ShapeTable,
 ) {
     let mut done = 0;
     for &d in &order.descending {
@@ -433,14 +461,16 @@ fn relight(
         // The boundary that the relaxation cannot discover for itself. Held in
         // a local so the borrow below can point at it.
         let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
-        let border: [Option<&ChunkLight>; 6] = std::array::from_fn(|face| {
-            store.light(faces[face]).or_else(|| {
-                (face == POS_Y && above_the_surface(generator, world, faces[face]))
-                    .then_some(&open_sky)
-            })
+        let border: [Option<LitChunk>; 6] = std::array::from_fn(|face| {
+            let n = faces[face];
+            match (store.get(n), store.light(n)) {
+                (Some(chunk), Some(light)) => Some(LitChunk::new(chunk, light)),
+                _ => (face == POS_Y && above_the_surface(generator, world, n))
+                    .then_some(LitChunk::new(&SKY_CHUNK, &open_sky)),
+            }
         });
 
-        let solved = light_chunk(chunk, border);
+        let solved = light_chunk(chunk, border, shapes);
         meshes.unlit.remove(&coord);
         done += 1;
         let Some(before) = store.light(coord) else {
@@ -484,6 +514,11 @@ fn above_the_surface(generator: &WorldGenerator, world: &WorldSettings, coord: C
 ///
 /// Requiring all six neighbours before meshing is what lets `generate` get
 /// away with not re-dirtying them; see the comment there.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the last argument is the World's Shape table; bundling the rest \
+              would invent a type used once"
+)]
 fn publish(
     store: &ChunkStore,
     meshes: &mut MeshState,
@@ -492,6 +527,7 @@ fn publish(
     center: ChunkCoord,
     mesh: Extent,
     budget: usize,
+    shapes: &ShapeTable,
 ) {
     let mut sent = 0;
     for &d in &order.offsets {
@@ -521,7 +557,7 @@ fn publish(
 
         ready.write(ChunkMeshReady {
             coord,
-            mesh: mesh_chunk(LitChunk::new(chunk, light), neighbors),
+            mesh: mesh_chunk(LitChunk::new(chunk, light), neighbors, shapes),
         });
         meshes.dirty.remove(&coord);
         meshes.delivered.insert(coord);
@@ -579,8 +615,9 @@ pub mod stats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::edit;
     use bevy::ecs::system::RunSystemOnce;
-    use tesserae_core::{Worldgen, WorldgenParams};
+    use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
         let world = WorldSettings {
@@ -742,6 +779,7 @@ mod tests {
                 .insert_resource(settings)
                 .insert_resource(budget)
                 .insert_resource(WorldGenerator(generator))
+                .init_resource::<Shapes>()
                 .init_resource::<ChunkStore>()
                 .init_resource::<LoadOrder>()
                 .init_resource::<MeshState>()
@@ -887,7 +925,7 @@ mod tests {
             let store = h.store();
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(*coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, *coord), neighbors);
+            let fresh = mesh_chunk(lit(store, *coord), neighbors, &ShapeTable::builtin());
             assert!(
                 same_mesh(held, &fresh),
                 "{coord}: the Client holds a stale mesh ({} quads, should be {})",
@@ -895,6 +933,48 @@ mod tests {
                 fresh.quad_count()
             );
         }
+    }
+
+    /// The Edit's end to end: a Voxel removed in the dark moves no light, yet the
+    /// Chunk it was in and the one across the boundary both get a new face, so
+    /// both must be republished, and republished as what `mesh_chunk` makes of the
+    /// store as it now stands. The neighbour is the one only the boundary rule in
+    /// `edit::set_voxel` reaches.
+    #[test]
+    fn an_edit_on_a_chunk_boundary_republishes_both_chunks_with_fresh_meshes() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.tick();
+        // Deep rock, a boundary apart: both inside the mesh extent and solid.
+        let (here, next) = (ChunkCoord::new(0, -1, 0), ChunkCoord::new(1, -1, 0));
+        assert!(h.delivered().contains(&here) && h.delivered().contains(&next));
+
+        let at = [CHUNK_SIZE as i32 - 1, -16, 16];
+        h.app
+            .world_mut()
+            .run_system_once(
+                move |mut store: ResMut<ChunkStore>,
+                      mut meshes: ResMut<MeshState>,
+                      shapes: Res<Shapes>| {
+                    edit::set_voxel(&mut store, &mut meshes, &shapes, at, Voxel::AIR)
+                        .expect("the Chunk is loaded");
+                },
+            )
+            .unwrap();
+        let (ready, _) = h.tick();
+
+        let store = h.store();
+        for coord in [here, next] {
+            let republished = ready
+                .iter()
+                .find(|m| m.coord == coord)
+                .unwrap_or_else(|| panic!("{coord} was not republished"));
+            assert!(!republished.mesh.is_empty(), "{coord} has a new face");
+            let neighbors: [Option<LitChunk>; 6] =
+                face_neighbors(coord).map(|n| Some(lit(store, n)));
+            let fresh = mesh_chunk(lit(store, coord), neighbors, &ShapeTable::builtin());
+            assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
+        }
+        assert_eq!(ready.len(), 2, "nothing else was touched");
     }
 
     #[test]

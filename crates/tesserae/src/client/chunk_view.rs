@@ -153,7 +153,7 @@ fn spawn_camera(mut commands: Commands, spawn: Res<crate::server::world_state::S
 mod tests {
     use super::*;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, Voxel, mesh_chunk, worldgen};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, ShapeTable, Voxel, mesh_chunk, worldgen};
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
     /// assets and messages, and `DefaultPlugins` wants a window.
@@ -179,7 +179,11 @@ mod tests {
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut neighbors = [Some(LitChunk::new(&solid, &dark)); 6];
         neighbors[0] = Some(LitChunk::new(&air, &sky));
-        let mesh = mesh_chunk(LitChunk::new(&solid, &dark), neighbors);
+        let mesh = mesh_chunk(
+            LitChunk::new(&solid, &dark),
+            neighbors,
+            &ShapeTable::builtin(),
+        );
         assert!(!mesh.is_empty(), "the fixture must have geometry");
         mesh
     }

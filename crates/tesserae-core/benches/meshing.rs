@@ -1,10 +1,16 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
+use std::sync::OnceLock;
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Neighborhood, Voxel, Worldgen, WorldgenParams,
-    greedy_mesh, mesh_chunk, testgen,
+    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
+    SHAPE_STAIR, ShapeTable, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk, testgen,
 };
+
+fn shapes() -> &'static ShapeTable {
+    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
+    TABLE.get_or_init(ShapeTable::builtin)
+}
 
 /// Flat full sky, which is what `light_chunk` answers for open terrain and so
 /// what the mesher is handed in the common case.
@@ -27,6 +33,31 @@ fn worldgen() -> (Worldgen, i32, i32, i32) {
     (g, straddling, sky, deep)
 }
 
+/// Terrain whose top `n` Voxels - the exposed ones, one per column - are stairs
+/// facing every which way: pass 2 as it would meet a building, which is more
+/// than a Chunk is allowed to hold once `n` passes `MAX_SHAPED_PER_CHUNK`.
+fn terrain_with_stairs(n: usize) -> Chunk {
+    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    let mut placed = 0;
+    'columns: for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            if placed == n {
+                break 'columns;
+            }
+            let Some(y) = (0..CHUNK_SIZE)
+                .rev()
+                .find(|&y| !chunk.get(x, y, z).is_air())
+            else {
+                continue;
+            };
+            let o = Orientation::from_bits(((x * 7 + z * 3) % 24) as u8).unwrap();
+            chunk.set(x, y, z, Voxel::shaped(testgen::STONE, SHAPE_STAIR, o));
+            placed += 1;
+        }
+    }
+    chunk
+}
+
 fn mesher(c: &mut Criterion) {
     let mut group = c.benchmark_group("greedy_mesh");
 
@@ -34,20 +65,20 @@ fn mesher(c: &mut Criterion) {
     let terrain = testgen::terrain_chunk(0, 0, 0);
     let terrain_nb = Neighborhood::isolated(LitChunk::new(&terrain, &sky));
     group.bench_function("terrain", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&terrain_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&terrain_nb), shapes())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     let solid_nb = Neighborhood::isolated(LitChunk::new(&solid, &sky));
     group.bench_function("solid", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&solid_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&solid_nb), shapes())))
     });
 
     // Nothing merges here; this is the ceiling on per-chunk mesh cost.
     let checker = testgen::checkerboard_chunk();
     let checker_nb = Neighborhood::isolated(LitChunk::new(&checker, &sky));
     group.bench_function("checkerboard", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&checker_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&checker_nb), shapes())))
     });
 
     // What the merge key actually costs. Light is in the key, so a gradient
@@ -63,7 +94,24 @@ fn mesher(c: &mut Criterion) {
     }
     let gradient_nb = Neighborhood::isolated(LitChunk::new(&terrain, &gradient));
     group.bench_function("terrain_light_gradient", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&gradient_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&gradient_nb), shapes())))
+    });
+
+    // Pass 2, which terrain never reaches. The first is the most a Chunk may
+    // hold; the second is why there is a cap.
+    let stairs = terrain_with_stairs(MAX_SHAPED_PER_CHUNK);
+    let stairs_nb = Neighborhood::isolated(LitChunk::new(&stairs, &sky));
+    group.bench_function("terrain_stairs_at_cap", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&stairs_nb), shapes())))
+    });
+    let all = Chunk::filled(Voxel::shaped(
+        testgen::STONE,
+        SHAPE_STAIR,
+        Orientation::IDENTITY,
+    ));
+    let all_nb = Neighborhood::isolated(LitChunk::new(&all, &sky));
+    group.bench_function("all_stairs", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&all_nb), shapes())))
     });
 
     group.finish();
@@ -77,19 +125,20 @@ fn lighting(c: &mut Criterion) {
     let (g, straddling, _, _) = worldgen();
 
     let sky = open_sky();
+    let air_above = Chunk::air();
     let mut border = [None; 6];
-    border[tesserae_core::mesh::POS_Y] = Some(&sky);
+    border[tesserae_core::mesh::POS_Y] = Some(LitChunk::new(&air_above, &sky));
 
     let center = g.chunk(0, straddling, 0);
     group.bench_function("straddling", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&center), black_box(border))))
+        b.iter(|| black_box(light_chunk(black_box(&center), black_box(border), shapes())))
     });
 
     // The same Chunk once its neighbours have light of their own, which is what
     // a Chunk at the surface is re-solved against after the first pass. Every
     // face delivers something and nothing is uniform, so no fast path applies
     // and both channels flood — the case the relight budget is sized from.
-    let around: Vec<ChunkLight> = [
+    let beside: Vec<Chunk> = [
         (-1, 0, 0),
         (1, 0, 0),
         (0, -1, 0),
@@ -98,26 +147,44 @@ fn lighting(c: &mut Criterion) {
         (0, 0, 1),
     ]
     .iter()
-    .map(|(dx, dy, dz)| {
-        let mut lit = light_chunk(&g.chunk(*dx, straddling + dy, *dz), border);
-        // A lantern's worth of block light, so the second channel floods too.
-        lit.set(16, 16, 16, Light::new(MAX_LIGHT, MAX_LIGHT));
-        lit
-    })
+    .map(|(dx, dy, dz)| g.chunk(*dx, straddling + dy, *dz))
     .collect();
-    let settled: [Option<&ChunkLight>; 6] = std::array::from_fn(|i| Some(&around[i]));
+    let around: Vec<ChunkLight> = beside
+        .iter()
+        .map(|chunk| {
+            let mut lit = light_chunk(chunk, border, shapes());
+            // A lantern's worth of block light, so the second channel floods too.
+            lit.set(16, 16, 16, Light::new(MAX_LIGHT, MAX_LIGHT));
+            lit
+        })
+        .collect();
+    let settled: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&beside[i], &around[i])));
     group.bench_function("straddling_settled", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&center), black_box(settled))))
+        b.iter(|| {
+            black_box(light_chunk(
+                black_box(&center),
+                black_box(settled),
+                shapes(),
+            ))
+        })
+    });
+
+    // The general edge rule, which a Chunk with a shaped Voxel in it pays for and
+    // terrain does not: the surface Chunk with a stair on top of every column.
+    let stairs = terrain_with_stairs(MAX_SHAPED_PER_CHUNK);
+    group.bench_function("straddling_shaped", |b| {
+        b.iter(|| black_box(light_chunk(black_box(&stairs), black_box(border), shapes())))
     });
 
     let air = Chunk::air();
     group.bench_function("open_sky", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&air), black_box(border))))
+        b.iter(|| black_box(light_chunk(black_box(&air), black_box(border), shapes())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     group.bench_function("opaque", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&solid), black_box(border))))
+        b.iter(|| black_box(light_chunk(black_box(&solid), black_box(border), shapes())))
     });
 
     // An air Chunk beside a wall, so the sky arriving from above is no longer
@@ -132,9 +199,9 @@ fn lighting(c: &mut Criterion) {
         }
     }
     let mut partial = border;
-    partial[tesserae_core::mesh::POS_Y] = Some(&ragged);
+    partial[tesserae_core::mesh::POS_Y] = Some(LitChunk::new(&air_above, &ragged));
     group.bench_function("flooded_air", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&air), black_box(partial))))
+        b.iter(|| black_box(light_chunk(black_box(&air), black_box(partial), shapes())))
     });
 
     group.finish();
@@ -161,20 +228,26 @@ fn streamed_mesher(c: &mut Criterion) {
         std::array::from_fn(|i| Some(LitChunk::new(&around[i], &sky)));
     let lit_center = LitChunk::new(&center, &sky);
     group.bench_function("straddling", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs))))
+        b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs), shapes())))
     });
 
     let air = Chunk::air();
     let lit_air = LitChunk::new(&air, &sky);
     group.bench_function("declined_air", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_air), black_box(refs))))
+        b.iter(|| black_box(mesh_chunk(black_box(lit_air), black_box(refs), shapes())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     let lit_solid = LitChunk::new(&solid, &sky);
     let enclosed: [Option<LitChunk>; 6] = [Some(lit_solid); 6];
     group.bench_function("declined_enclosed", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_solid), black_box(enclosed))))
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_solid),
+                black_box(enclosed),
+                shapes(),
+            ))
+        })
     });
 
     group.finish();
@@ -214,8 +287,17 @@ fn generation(c: &mut Criterion) {
     });
 }
 
+/// Registering the built-in Shapes: derived once at load, so the number only has
+/// to be small next to starting up. A Mod registering all 255 pays 64 times it.
+fn shapes_table(c: &mut Criterion) {
+    c.bench_function("shape_table_builtin", |b| {
+        b.iter(|| black_box(ShapeTable::builtin()))
+    });
+}
+
 criterion_group!(
     benches,
+    shapes_table,
     mesher,
     streamed_mesher,
     neighborhood,

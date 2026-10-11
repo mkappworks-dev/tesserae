@@ -113,19 +113,20 @@ tesserae/
 │   ├── positioning.md          vs Minecraft/Luanti — internal, not README
 │   └── adr/                    0001 wasm · 0002 client-server · 0003 voxel size
 │                               0004 demo game · 0005 asset root
+│                               0006 shapes are table data
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/
 │   │   │   ├── voxel.rs        Voxel = material | shape | orientation       ▸ 1
 │   │   │   ├── chunk.rs        palette-compressed 32³ storage               ▸ 1
-│   │   │   ├── mesh.rs         greedy mesher, pass 1 (full cubes)           ▸ 1
+│   │   │   ├── mesh.rs         mesher: pass 1 cubes, pass 2 shapes        ▸ 1, 5
 │   │   │   ├── noise.rs        value noise — the one spatial primitive      ▸ 3
 │   │   │   ├── worldgen.rs     seed + position → Chunk, tuned in metres     ▸ 3
 │   │   │   ├── light.rs        incremental flood-fill                       ▸ 4
-│   │   │   ├── shape.rs        mesher pass 2 + per-shape opacity/collision  ▸ 5
+│   │   │   ├── shape.rs        Shape table, Orientation; derived geometry   ▸ 5
 │   │   │   ├── lod.rs          2×2×2 dominant-material downsample           ▸ 6
 │   │   │   ├── fluid.rs        cellular automaton                           ▸ 8
-│   │   │   └── collide.rs      AABB swept vs grid
+│   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   └── benches/meshing.rs  criterion — the number that gates step 1     ▸ 1
 │   ├── tesserae-mods/          NO Bevy — wasmtime host, WIT, command queue  ▸ 7
 │   │   └── wit/                the versioned contract
@@ -134,9 +135,11 @@ tesserae/
 │           ├── world.rs        Voxel size, seed, the Chunk lattice          ▸ 2
 │           ├── server/         the sole authority over World state         ▸ 3
 │           │   ├── world_state.rs  Chunk store — mutators Server-private    ▸ 3
-│           │   └── streaming.rs    load/mesh/evict rings, per-tick budget   ▸ 3
+│           │   ├── streaming.rs    load/mesh/evict rings, per-tick budget   ▸ 3
+│           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
-│           │   └── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
+│           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
+│           │   └── edit.rs         place/break intents, hotbar, crosshair   ▸ 5
 │           └── render/         MaterialExtension + look-pack API            ▸ 9
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check

@@ -9,6 +9,7 @@
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use tesserae_core::collide::VoxelVolume;
 use tesserae_core::light::{Light, LightVolume};
 use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, Voxel};
 
@@ -33,7 +34,6 @@ impl ChunkStore {
         self.light.get(&coord)
     }
 
-    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
     /// One Voxel's light, in lattice coordinates. `Light::DARK` where the
     /// volume does not extend, which is also what [`LightVolume`] reports.
     pub fn light_at(&self, at: [i32; 3]) -> Light {
@@ -63,10 +63,8 @@ impl ChunkStore {
         self.light.insert(coord, light);
     }
 
-    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
     /// Replaces one Voxel. The caller re-floods light around it with
-    /// `tesserae_core::relight` — see `super::lightbox`, which is the only
-    /// caller until build-order step 5 brings a real edit path.
+    /// `tesserae_core::relight`, which is what `super::edit::set_voxel` does.
     pub(in crate::server) fn set_voxel(&mut self, at: VoxelCoord, voxel: Voxel) {
         if let Some(chunk) = self.chunks.get_mut(&at.chunk) {
             chunk.set(at.x, at.y, at.z, voxel);
@@ -79,20 +77,12 @@ impl ChunkStore {
     }
 }
 
-// The types and mutators below are the Server's Voxel-edit path. Its only
-// caller today is the `dev` lightbox, so a default-feature build has none and
-// `-D warnings` would reject them; each carries
-// `cfg_attr(not(feature = "dev"), allow(dead_code))` rather than a blanket
-// allow, so the lint still fires once build-order step 5 brings the real edit
-// path and something later removes its last caller.
-
 /// A Voxel's position, split into the Chunk that holds it and its index inside.
 ///
 /// The split is the whole content of the type: `tesserae_core`'s flood-fill
 /// addresses Voxels in one continuous lattice and knows nothing about Chunks,
 /// so something has to do this arithmetic and it is not core's job.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 pub struct VoxelCoord {
     pub chunk: ChunkCoord,
     pub x: usize,
@@ -100,7 +90,6 @@ pub struct VoxelCoord {
     pub z: usize,
 }
 
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 impl VoxelCoord {
     /// A floor division, not a truncation: `-1 / 32` truncates towards zero and
     /// would put the Voxel one below a Chunk's origin into that same Chunk.
@@ -127,13 +116,11 @@ impl VoxelCoord {
 /// Records which Chunks it wrote to, so `super::streaming` knows what to
 /// re-mesh: an edit's light can reach one Chunk in every direction, and the
 /// caller has no other way to find out which.
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 pub(in crate::server) struct LightLattice<'a> {
     pub store: &'a mut ChunkStore,
     pub touched: Vec<ChunkCoord>,
 }
 
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 impl<'a> LightLattice<'a> {
     pub fn new(store: &'a mut ChunkStore) -> Self {
         LightLattice {
@@ -143,12 +130,18 @@ impl<'a> LightLattice<'a> {
     }
 }
 
-impl LightVolume for LightLattice<'_> {
+/// Read-only: a Client system can hold the store and still has nothing to write
+/// with, and the Server's own picking and collision go through here.
+impl VoxelVolume for ChunkStore {
     fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
         let at = VoxelCoord::of(at);
-        self.store
-            .get(at.chunk)
-            .map(|chunk| chunk.get(at.x, at.y, at.z))
+        self.get(at.chunk).map(|chunk| chunk.get(at.x, at.y, at.z))
+    }
+}
+
+impl LightVolume for LightLattice<'_> {
+    fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
+        self.store.voxel(at)
     }
 
     fn light(&self, at: [i32; 3]) -> Light {
@@ -195,7 +188,7 @@ impl SpawnPoint {
 mod tests {
     use super::*;
     use tesserae_core::light::MAX_LIGHT;
-    use tesserae_core::{CHUNK_SIZE, relight, worldgen};
+    use tesserae_core::{CHUNK_SIZE, ShapeTable, relight, worldgen};
 
     #[test]
     fn a_voxel_coord_floors_rather_than_truncating_below_the_origin() {
@@ -234,7 +227,7 @@ mod tests {
         lattice
             .store
             .set_voxel(VoxelCoord::of(at), Voxel::cube(worldgen::LANTERN));
-        relight(&mut lattice, at, Light::DARK);
+        relight(&mut lattice, &ShapeTable::builtin(), at, Light::DARK);
 
         assert_eq!(store.light_at(at).block(), MAX_LIGHT);
         assert_eq!(
@@ -263,7 +256,7 @@ mod tests {
         lattice
             .store
             .set_voxel(VoxelCoord::of(at), Voxel::cube(worldgen::LANTERN));
-        relight(&mut lattice, at, Light::DARK);
+        relight(&mut lattice, &ShapeTable::builtin(), at, Light::DARK);
         let touched = lattice.touched;
 
         // Both, because the caller has no other way to learn that the Chunk

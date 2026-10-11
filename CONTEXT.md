@@ -31,7 +31,14 @@ post-process settings. The equivalent of a Minecraft shaderpack.
 voxel" and "a stone stair" share a Material and differ in Shape, so neither word
 alone identifies a Voxel.
 
-**Orientation** — a Shape's rotation. Meaningless for a full cube.
+**Orientation** — a Shape's rotation: one of the 24 axis-aligned rotations.
+Meaningless for a full cube, which looks the same under all of them.
+
+**Nodebox** — an axis-aligned box inside one Voxel, in sixteenths of its edge. A
+Shape is a union of them.
+
+**Sealed face** — a face of a Voxel that its Shape covers completely. What
+occlusion and light both ask about; derived from geometry, never authored.
 
 **Voxel size** — the edge length of one Voxel in metres. A property of a World,
 not of the engine. Default 1.0.
@@ -72,3 +79,6 @@ a Chunk.
 
 **Integrated server** — a Server running in the Client's process, for single
 player. Not a different Server.
+
+**Edit** — a change to one Voxel, applied by the Server. A Client sends an
+intent; it never makes an Edit.

@@ -71,13 +71,15 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn filled(voxel: Voxel) -> Self {
+    /// `const` so a caller that only needs a Chunk to lend - a test, a bench, a
+    /// synthetic boundary - can hold one in a `static`.
+    pub const fn filled(voxel: Voxel) -> Self {
         Chunk {
             storage: Storage::Uniform(voxel),
         }
     }
 
-    pub fn air() -> Self {
+    pub const fn air() -> Self {
         Self::filled(Voxel::AIR)
     }
 
@@ -147,6 +149,35 @@ impl Chunk {
         }
     }
 
+    /// Whether any Voxel here might be shaped, from the palette alone.
+    ///
+    /// A palette never demotes, so a shaped entry outlives the last Voxel that
+    /// used it and this can err towards `true` and never towards `false`. That is
+    /// the direction a gate needs: terrain, which never held a shaped Voxel,
+    /// skips the work, and a Chunk that did pays for an exact count.
+    pub fn may_contain_shaped(&self) -> bool {
+        match &self.storage {
+            Storage::Uniform(v) => v.is_shaped(),
+            Storage::Palette { palette, .. } => palette.iter().any(|v| v.is_shaped()),
+        }
+    }
+
+    /// How many shaped Voxels there are, exactly. A scan, so only call it on
+    /// the edit path; the mesher's gate is [`Chunk::may_contain_shaped`].
+    pub fn shaped_count(&self) -> usize {
+        match &self.storage {
+            Storage::Uniform(v) if v.is_shaped() => CHUNK_VOLUME,
+            Storage::Palette {
+                palette,
+                bits,
+                words,
+            } if palette.iter().any(|v| v.is_shaped()) => (0..CHUNK_VOLUME)
+                .filter(|&i| palette[read_index(words, *bits, i)].is_shaped())
+                .count(),
+            _ => 0,
+        }
+    }
+
     pub fn palette_len(&self) -> usize {
         match &self.storage {
             Storage::Uniform(_) => 1,
@@ -175,6 +206,37 @@ mod tests {
         assert_eq!(c.heap_bytes(), 0);
         assert_eq!(c.get(0, 0, 0), Voxel::cube(7));
         assert_eq!(c.get(31, 31, 31), Voxel::cube(7));
+    }
+
+    #[test]
+    fn shaped_voxels_are_counted_exactly_and_the_gate_errs_towards_true() {
+        let stair = Voxel::new(1, 2, 0);
+        let mut c = Chunk::air();
+        assert!(!c.may_contain_shaped());
+        assert_eq!(c.shaped_count(), 0);
+
+        c.set(1, 2, 3, stair);
+        c.set(4, 5, 6, Voxel::new(1, 1, 3));
+        c.set(7, 7, 7, Voxel::cube(1));
+        assert!(c.may_contain_shaped());
+        assert_eq!(c.shaped_count(), 2);
+
+        // The palette keeps the stair after the last one is overwritten: the
+        // cheap gate still says maybe, and the exact count says none.
+        c.set(1, 2, 3, Voxel::AIR);
+        c.set(4, 5, 6, Voxel::AIR);
+        assert!(c.may_contain_shaped());
+        assert_eq!(c.shaped_count(), 0);
+    }
+
+    #[test]
+    fn a_uniform_chunk_of_shaped_voxels_is_all_of_them() {
+        assert_eq!(
+            Chunk::filled(Voxel::new(1, 2, 0)).shaped_count(),
+            CHUNK_VOLUME
+        );
+        assert_eq!(Chunk::filled(Voxel::cube(1)).shaped_count(), 0);
+        assert!(!Chunk::filled(Voxel::cube(1)).may_contain_shaped());
     }
 
     #[test]

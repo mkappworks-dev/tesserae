@@ -145,9 +145,17 @@ you can fly around.
 | `Shift`               | sprint, 5x                                             |
 | scroll                | movement speed, 0.5 to 64 m/s                          |
 | `R`                   | back to the spawn point                                |
+| left click            | break the block under the crosshair (cursor grabbed)   |
+| right click           | place the held block against the face you are aimed at |
+| `1` to `5`            | hold stone, slab, stair, post or lantern               |
+| `Q` / `E`             | turn the held shape a quarter / flip which way is up   |
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.
+
+Edits are the Client asking and the Server deciding: a click sends the ray
+through the crosshair, and a rejection (nothing in reach, a chunk that already
+holds the most shaped blocks it may) shows in the corner of the screen.
 
 ### The dev loop
 

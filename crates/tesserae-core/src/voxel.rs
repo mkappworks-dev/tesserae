@@ -1,5 +1,7 @@
 //! The atomic unit of world volume.
 
+use crate::shape::Orientation;
+
 /// What a Voxel is made of.
 pub type MaterialId = u16;
 
@@ -55,12 +57,23 @@ impl Voxel {
         self.material() == AIR
     }
 
-    /// Whether this Voxel both emits greedy-mergeable faces and fully occludes
-    /// its neighbours'. A shaped Voxel does neither until the second mesher pass
-    /// and per-Shape opacity exist, so it is conservatively transparent.
+    /// Whether this is the one thing pass 1 of the mesher merges. It says
+    /// nothing about what a *neighbour* hides: that is per face and per Shape,
+    /// and [`crate::ShapeTable::seals`] answers it.
     #[inline]
     pub const fn is_full_cube(self) -> bool {
         !self.is_air() && self.shape() == SHAPE_FULL_CUBE
+    }
+
+    /// Solid, but not a cube: pass 2 of the mesher gives it geometry of its own.
+    #[inline]
+    pub const fn is_shaped(self) -> bool {
+        !self.is_air() && self.shape() != SHAPE_FULL_CUBE
+    }
+
+    #[inline]
+    pub const fn shaped(material: MaterialId, shape: ShapeId, orientation: Orientation) -> Self {
+        Self::new(material, shape, orientation.bits())
     }
 }
 
@@ -94,6 +107,14 @@ mod tests {
         assert!(Voxel::cube(1).is_full_cube());
         assert!(!Voxel::AIR.is_full_cube());
         assert!(!Voxel::new(1, 5, 0).is_full_cube());
+    }
+
+    #[test]
+    fn shaped_is_solid_and_not_a_cube() {
+        assert!(Voxel::new(1, 5, 0).is_shaped());
+        assert!(!Voxel::cube(1).is_shaped());
+        assert!(!Voxel::AIR.is_shaped());
+        assert!(!Voxel::new(AIR, 5, 0).is_shaped());
     }
 
     #[test]

@@ -12,9 +12,12 @@ use tesserae_core::ChunkMesh;
 /// Which Material each vertex belongs to, for the chunk [`MaterialExtension`].
 ///
 /// A high id keeps custom attributes sorted after Bevy's built-ins and away from
-/// their ids. `Uint32` rather than a narrower type because the Voxel format
-/// already budgets 16 bits for Material and shaped Voxels will want the Shape
-/// alongside it.
+/// their ids. `Uint32` with the Material in the low 16 bits.
+///
+/// The high 16 are spare and stay that way. A Shape's geometry is already in the
+/// mesh, so nothing in the shader varies by it; what would earn the bits is a
+/// look pack that shades by Shape (wind in a fence, say), which is step 9's
+/// decision and not worth bytes per vertex before then.
 ///
 /// [`MaterialExtension`]: bevy::pbr::MaterialExtension
 pub const ATTRIBUTE_MATERIAL: MeshVertexAttribute =
@@ -27,9 +30,8 @@ pub const ATTRIBUTE_MATERIAL: MeshVertexAttribute =
 /// flood-fill and this attribute is how it reaches the shader.
 ///
 /// `Uint32` for one byte of payload. Folding it into [`ATTRIBUTE_MATERIAL`]'s
-/// spare 16 bits would save four bytes a vertex, but those bits are reserved
-/// for the Shape that build-order step 5 adds, and four bytes is noise against
-/// the 32 in position, normal and UV.
+/// spare 16 bits would save four bytes a vertex, which is noise against the 32 in
+/// position, normal and UV and not worth entangling two attributes for.
 pub const ATTRIBUTE_LIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("Vertex_Light", 2_084_155_062, VertexFormat::Uint32);
 
@@ -61,14 +63,19 @@ mod tests {
     use super::*;
     use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, Neighborhood, Voxel, greedy_mesh, testgen};
+    use tesserae_core::{
+        Chunk, ChunkLight, LitChunk, Neighborhood, ShapeTable, Voxel, greedy_mesh, testgen,
+    };
 
     /// Full sky, which is what the solver answers for open terrain.
     static SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
 
     fn terrain_mesh(voxel_size: f32) -> (ChunkMesh, Mesh) {
         let chunk = testgen::terrain_chunk(0, 0, 0);
-        let source = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &SKY)));
+        let source = greedy_mesh(
+            &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
+            &ShapeTable::builtin(),
+        );
         let mesh = chunk_mesh_to_mesh(&source, voxel_size);
         (source, mesh)
     }
@@ -123,7 +130,10 @@ mod tests {
     fn material_indices_survive_as_uint32() {
         let mut chunk = Chunk::air();
         chunk.set(0, 0, 0, Voxel::cube(testgen::GRASS));
-        let source = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &SKY)));
+        let source = greedy_mesh(
+            &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
+            &ShapeTable::builtin(),
+        );
         let mesh = chunk_mesh_to_mesh(&source, 1.0);
 
         let Some(VertexAttributeValues::Uint32(materials)) = mesh.attribute(ATTRIBUTE_MATERIAL)
@@ -143,7 +153,10 @@ mod tests {
         // At a corner, three of them look into the isolated Neighborhood's dark
         // shell and the assertion below is about the shell instead.
         chunk.set(16, 16, 16, Voxel::cube(testgen::GRASS));
-        let source = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &SKY)));
+        let source = greedy_mesh(
+            &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
+            &ShapeTable::builtin(),
+        );
 
         for voxel_size in [1.0, 0.25] {
             let mesh = chunk_mesh_to_mesh(&source, voxel_size);

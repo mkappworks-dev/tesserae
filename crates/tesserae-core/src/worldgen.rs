@@ -21,8 +21,8 @@ pub const STONE: MaterialId = 1;
 pub const DIRT: MaterialId = 2;
 pub const GRASS: MaterialId = 3;
 /// Emits block light; see [`crate::light::emission`]. Generation places none of
-/// it — placing one is a Voxel edit, which is build-order step 5. It exists so
-/// that the block-light channel has a source to be tested against.
+/// it; a player places one with an Edit. It exists so that the block-light
+/// channel has a source to be tested against.
 pub const LANTERN: MaterialId = 4;
 
 /// What a Mod parameterises. Plain `Copy` data with no callbacks, because
@@ -252,6 +252,20 @@ mod tests {
             let grass: Vec<usize> = (0..c.len()).filter(|&y| c[y].material() == GRASS).collect();
             assert_eq!(grass.len(), 1, "column {x},{z} has {grass:?}");
             assert_eq!(Some(grass[0]), highest_solid(&c), "grass is not on top");
+        }
+    }
+
+    /// The contract the shaped-Voxel cap rests on: terrain is cubes. A generator
+    /// that places stairs or slabs - slope smoothing is the obvious use - changes
+    /// this test deliberately and stays under `MAX_SHAPED_PER_CHUNK`, because
+    /// nothing downstream polices it. See `crate::shape::MAX_SHAPED_PER_CHUNK`.
+    #[test]
+    fn generation_places_no_shaped_voxels() {
+        let g = generator(1.0);
+        for cy in -1..5 {
+            for (cx, cz) in [(0, 0), (3, -2), (-5, 7), (11, 11)] {
+                assert_eq!(g.chunk(cx, cy, cz).shaped_count(), 0, "{cx} {cy} {cz}");
+            }
         }
     }
 

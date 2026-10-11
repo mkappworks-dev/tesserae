@@ -10,12 +10,17 @@
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
 #[cfg(feature = "dev")]
+mod builder;
+pub mod edit;
+#[cfg(feature = "dev")]
+mod gallery;
+#[cfg(feature = "dev")]
 mod lightbox;
 pub mod streaming;
 pub mod world_state;
 
 use bevy::prelude::*;
-use tesserae_core::{Worldgen, WorldgenParams};
+use tesserae_core::{ShapeTable, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
 use world_state::SpawnPoint;
@@ -30,12 +35,22 @@ const SPAWN_CLEARANCE_M: f32 = 2.0;
 #[derive(Resource, Deref)]
 pub struct WorldGenerator(pub Worldgen);
 
+/// The World's Shape table, read by everything that has to know what a Voxel
+/// covers: the mesher, both light solvers, collision and picking. A newtype for
+/// the same reason as [`WorldGenerator`].
+///
+/// Server-only. The Client is sent finished meshes and needs no Shape to draw
+/// one, and a Mod registers its Shapes here at load.
+#[derive(Resource, Deref, Default)]
+pub struct Shapes(pub ShapeTable);
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()
+        .init_resource::<Shapes>()
         .add_systems(Startup, open_world)
-        .add_plugins(streaming::plugin);
+        .add_plugins((streaming::plugin, edit::plugin));
     #[cfg(feature = "dev")]
-    app.add_plugins(lightbox::plugin);
+    app.add_plugins((lightbox::plugin, gallery::plugin));
 }
 
 /// Builds the generator and picks the spawn point. One system so there is no
