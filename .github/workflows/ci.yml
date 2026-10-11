@@ -30,9 +30,15 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      # bevy's app crate links alsa and udev on Linux; clippy builds it.
+      # bevy links alsa, udev, wayland and xkbcommon on Linux. Wayland is a
+      # default bevy feature and wayland-sys resolves wayland-client through
+      # pkg-config at build time, so a missing -dev package fails the build
+      # rather than degrading to X11. macOS needs none of this, which is why
+      # it only ever shows up here.
       - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -77,10 +83,24 @@ jobs:
       # Invariant 3 in docs/architecture.md. tesserae-core and tesserae-mods stay
       # headless so every expensive algorithm is testable and benchmarkable; a
       # transitive bevy or wgpu edge silently ends that.
+      #
+      # tesserae-mods arrives in build-order step 7, and `cargo tree -p` exits
+      # non-zero for a package the workspace does not have. Skipping a crate that
+      # is not written yet keeps the check honest meanwhile; tesserae-core going
+      # missing means the check itself is broken, so that one is required.
       - name: No engine dependency in headless crates
         run: |
-          set -e
+          set -euo pipefail
+          members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
           for crate in tesserae-core tesserae-mods; do
+            if ! grep -qxF "$crate" <<< "$members"; then
+              if [ "$crate" = tesserae-core ]; then
+                echo "::error::tesserae-core is not a workspace member, so the boundary check cannot run"
+                exit 1
+              fi
+              echo "$crate does not exist yet, skipping"
+              continue
+            fi
             if cargo tree -p "$crate" --edges normal --prefix none \
                  | grep -qE '^(bevy|wgpu)'; then
               echo "::error::$crate must not depend on bevy or wgpu — see docs/architecture.md invariant 3"
@@ -119,20 +139,41 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
+      # The workspace manifest builds dependencies at opt-level 3 so a local
+      # debug run of a Bevy app is not an order of magnitude too slow. CI never
+      # runs the app — it runs 37 unit tests in well under a second — so that
+      # setting buys nothing here and costs a full LLVM pass over ~600 crates.
+      # The glob matches dependencies only, so our own crates keep
+      # [profile.dev]'s opt-level 1.
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: |
+          cargo test --workspace --locked \
+            --config 'profile.dev.package."*".opt-level=0'
 
       # The mesher is the hot path; a bench that no longer compiles is a bench
       # nobody runs. This does not measure, it only builds.
+      #
+      # `--exclude tesserae` rather than `--workspace` alone: the Bevy app has no
+      # benches, but cargo still builds its binary in the bench profile, which
+      # means compiling the whole Bevy tree a second time at release
+      # optimisation in a job that has already compiled it once. Excluding by
+      # name rather than naming tesserae-core keeps future headless crates, such
+      # as tesserae-mods, covered automatically.
       - name: Build benches
-        run: cargo bench --workspace --no-run --locked
+        run: cargo bench --workspace --exclude tesserae --no-run --locked
 
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [test, boundaries]
+    # Deliberately not `needs: [test, boundaries]`. Gating saved runner minutes
+    # on a red PR, but it serialised the two slowest jobs: wall clock was test
+    # plus build rather than the larger of the two. Build is also a required
+    # status check and there is no merge queue configured, so it cannot be moved
+    # off pull requests — running it in parallel is the only lever left.
 
     steps:
       - name: Checkout
@@ -145,7 +186,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Build
         run: cargo build --workspace --release --locked

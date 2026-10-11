@@ -112,6 +112,7 @@ tesserae/
 │   ├── architecture.md         this file
 │   ├── positioning.md          vs Minecraft/Luanti — internal, not README
 │   └── adr/                    0001 wasm · 0002 client-server · 0003 voxel size
+│                               0004 demo game · 0005 asset root
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/

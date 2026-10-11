@@ -60,7 +60,9 @@ jobs:
 
       - name: Install Linux build deps
         if: matrix.os_label == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       # No version injection: release-please bumps Cargo.toml and the binary reads
       # it through env!("CARGO_PKG_VERSION").
@@ -73,8 +75,17 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
           ARCHIVE="tesserae_${TAG}_${{ matrix.os_label }}_${{ matrix.arch }}.tar.gz"
-          tar -C "target/${{ matrix.target }}/release" -czf "${ARCHIVE}" tesserae
+          # A shipped binary resolves its asset root to its own directory, so
+          # assets/ must sit beside it. Staged under one top-level directory
+          # rather than packed flat, so extracting does not scatter two entries
+          # into the user's working directory.
+          STAGE="$(mktemp -d)"
+          mkdir -p "${STAGE}/tesserae"
+          cp "target/${{ matrix.target }}/release/tesserae" "${STAGE}/tesserae/"
+          cp -R assets "${STAGE}/tesserae/"
+          tar -C "${STAGE}" -czf "${ARCHIVE}" tesserae
           shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 
@@ -84,8 +95,14 @@ jobs:
         env:
           TAG: ${{ inputs.tag }}
         run: |
+          set -euo pipefail
           ARCHIVE="tesserae_${TAG}_windows_${{ matrix.arch }}.zip"
-          7z a "${ARCHIVE}" "./target/${{ matrix.target }}/release/tesserae.exe"
+          STAGE="$(mktemp -d)"
+          mkdir -p "${STAGE}/tesserae"
+          cp "target/${{ matrix.target }}/release/tesserae.exe" "${STAGE}/tesserae/"
+          cp -R assets "${STAGE}/tesserae/"
+          (cd "${STAGE}" && 7z a "${ARCHIVE}" tesserae)
+          mv "${STAGE}/${ARCHIVE}" .
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
 

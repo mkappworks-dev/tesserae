@@ -27,7 +27,8 @@ Single-context repo:
 │   ├── 0001-wasm-mod-boundary.md
 │   ├── 0002-client-server-from-day-one.md
 │   ├── 0003-voxel-size-is-per-world.md
-│   └── 0004-demo-game-in-repo-real-game-out.md
+│   ├── 0004-demo-game-in-repo-real-game-out.md
+│   └── 0005-assets-live-at-the-repository-root.md
 └── crates/
 ```
 

@@ -3,6 +3,11 @@
 
 [advisories]
 yanked = "deny"
+# Narrows only the "unmaintained" class to crates one of our own crates depends
+# on directly; vulnerabilities still fail anywhere in the graph. Bevy brings
+# ~600 transitive crates, and an unmaintained advisory on one of them is Bevy's
+# to resolve — our only move would be to add another id to an ignore list.
+unmaintained = "workspace"
 
 [licenses]
 allow = [
@@ -17,8 +22,23 @@ allow = [
   "Unicode-3.0",
   "MPL-2.0",
   "BSL-1.0",
+  # MIT without the attribution clause, so strictly more permissive than MIT
+  # above. Reaches us through encase, under bevy_render.
+  "MIT-0",
 ]
 confidence-threshold = 0.9
+
+# Our own crates are the BSL-licensed work, not third-party code linked into it,
+# so the list above — which exists to keep copyleft out of the binary — does not
+# describe them. Scoped per crate rather than allowed globally, so a third-party
+# BUSL dependency is still rejected.
+[[licenses.exceptions]]
+name = "tesserae"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "tesserae-core"
+allow = ["BUSL-1.1"]
 
 [bans]
 multiple-versions = "warn"

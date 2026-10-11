@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Everything CI checks, in CI's order, fail-fast.
+#
+# Named `cargo-ci` rather than `ci.sh` because cargo resolves `cargo <name>` to
+# a `cargo-<name>` executable on PATH: put this directory on PATH and it becomes
+# `cargo ci`. A `[alias]` entry cannot do this — cargo aliases expand to cargo
+# subcommands and arguments only, with no shell escape, so `!./scripts/ci.sh`
+# fails with "no such subcommand".
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+# CI sets this globally; clippy must fail on a warning, not just print one.
+export RUSTFLAGS="${RUSTFLAGS:--D warnings}"
+
+step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+
+step "Lint: rustfmt"
+cargo fmt --all --check
+
+step "Format: prettier"
+npm run fmt:check --silent
+
+step "Lint: clippy"
+cargo clippy --workspace --all-targets --all-features
+
+step "Test"
+cargo test --workspace --locked
+
+# CI builds the benches without measuring. A bench that no longer compiles is a
+# bench nobody runs; measuring it here would make this script take minutes.
+step "Test: benches compile"
+cargo bench --workspace --no-run --locked
+
+step "Boundaries"
+members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
+for crate in tesserae-core tesserae-mods; do
+  if ! grep -qxF "$crate" <<<"$members"; then
+    if [ "$crate" = tesserae-core ]; then
+      echo "error: tesserae-core is not a workspace member" >&2
+      exit 1
+    fi
+    echo "  $crate does not exist yet, skipping"
+    continue
+  fi
+  if cargo tree -p "$crate" --edges normal --prefix none | grep -qE '^(bevy|wgpu)'; then
+    echo "error: $crate must not depend on bevy or wgpu" >&2
+    cargo tree -p "$crate" --edges normal --prefix none | grep -E '^(bevy|wgpu)'
+    exit 1
+  fi
+  echo "  $crate is clean"
+done
+
+step "Dependencies"
+if command -v cargo-deny >/dev/null 2>&1; then
+  cargo deny check advisories licenses bans sources
+else
+  # Not fatal: CI runs it on every PR regardless, and installing it is a
+  # several-minute build nobody should be forced into to run the tests.
+  echo "  cargo-deny not installed, skipping - cargo install cargo-deny --locked"
+fi
+
+printf '\n\033[1;32mAll CI checks passed.\033[0m\n'
