@@ -77,10 +77,24 @@ jobs:
       # Invariant 3 in docs/architecture.md. tesserae-core and tesserae-mods stay
       # headless so every expensive algorithm is testable and benchmarkable; a
       # transitive bevy or wgpu edge silently ends that.
+      #
+      # tesserae-mods arrives in build-order step 7, and `cargo tree -p` exits
+      # non-zero for a package the workspace does not have. Skipping a crate that
+      # is not written yet keeps the check honest meanwhile; tesserae-core going
+      # missing means the check itself is broken, so that one is required.
       - name: No engine dependency in headless crates
         run: |
-          set -e
+          set -euo pipefail
+          members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
           for crate in tesserae-core tesserae-mods; do
+            if ! grep -qxF "$crate" <<< "$members"; then
+              if [ "$crate" = tesserae-core ]; then
+                echo "::error::tesserae-core is not a workspace member, so the boundary check cannot run"
+                exit 1
+              fi
+              echo "$crate does not exist yet, skipping"
+              continue
+            fi
             if cargo tree -p "$crate" --edges normal --prefix none \
                  | grep -qE '^(bevy|wgpu)'; then
               echo "::error::$crate must not depend on bevy or wgpu — see docs/architecture.md invariant 3"
