@@ -183,6 +183,18 @@ impl Orientation {
         self.0 % 4
     }
 
+    /// The next quarter-turn about the same `up`.
+    pub const fn turned(self) -> Self {
+        Orientation(self.0 / 4 * 4 + (self.0 % 4 + 1) % 4)
+    }
+
+    /// The next `up`, with the same `turn`. Alternating this with
+    /// [`Orientation::turned`] reaches all 24, which is how a player steps
+    /// through them with two keys.
+    pub const fn flipped(self) -> Self {
+        Orientation((self.0 + 4) % ORIENTATIONS as u8)
+    }
+
     pub fn all() -> impl Iterator<Item = Orientation> {
         (0..ORIENTATIONS as u8).map(Orientation)
     }
@@ -651,6 +663,25 @@ mod tests {
             assert_eq!(turned, Orientation::new(up, 0).matrix());
         }
         assert_eq!(Orientation::new(POS_Y, 5), Orientation::new(POS_Y, 1));
+    }
+
+    #[test]
+    fn turning_and_flipping_reach_every_orientation_and_come_home() {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut frontier = vec![Orientation::IDENTITY];
+        while let Some(o) = frontier.pop() {
+            if seen.insert(o.bits()) {
+                frontier.extend([o.turned(), o.flipped()]);
+            }
+        }
+        assert_eq!(seen.len(), ORIENTATIONS);
+        assert!(seen.iter().all(|&b| Orientation::from_bits(b).is_some()));
+
+        let o = Orientation::new(POS_Z, 1);
+        assert_eq!((0..4).fold(o, |o, _| o.turned()), o);
+        assert_eq!((0..6).fold(o, |o, _| o.flipped()), o);
+        assert_eq!((o.turned().up(), o.turned().turn()), (o.up(), 2));
+        assert_eq!((o.flipped().up() != o.up(), o.flipped().turn()), (true, 1));
     }
 
     #[test]

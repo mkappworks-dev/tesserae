@@ -1,6 +1,6 @@
 # The Server's edit path
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03, 04, 05
 
 What finally gives `relight` a real caller, and turns the step-4 `dev`
@@ -59,3 +59,25 @@ scaffolding into the thing it was a model for. Spec decision 7.
 ## Comments
 
 The `Shapes` resource landed in ticket 02, where `publish` first needed it.
+
+The cfg attributes: every `cfg_attr(not(feature = "dev"), allow(dead_code))` on
+`ChunkStore`, `VoxelCoord`, `LightLattice`, `set_voxel`, `light_at` and
+`MeshState` came off, and the build is warning-free without `--features dev`.
+`WorldSettings::voxel_at` keeps its, because converting a metre position to a
+Voxel is still done only by the dev builders; the edit path gets its Voxel from
+the ray.
+
+Landed in one commit with ticket 07: `EditAction` and `EditRejected` are dead
+code until the Client constructs and reads them, so neither passes `-D warnings`
+without the other.
+
+A cube is stored with its orientation dropped (a turn on a cube is validated and
+then discarded), so two cubes that look identical are one palette entry.
+
+Mutation check: removing the boundary-neighbour marking fails both the unit test
+and the streaming end-to-end test.
+
+One test needed care: `run_system_once` builds a fresh `MessageReader` on every
+call, so a helper that delivers one intent at a time re-reads every earlier one.
+The helper empties the buffer after each delivery; the real system keeps its
+reader across frames.

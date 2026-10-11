@@ -21,6 +21,16 @@ pub const POS_Y: usize = 3;
 pub const NEG_Z: usize = 4;
 pub const POS_Z: usize = 5;
 
+/// Which way each face looks, as the offset to the neighbour across it.
+pub const FACE_STEPS: [[i32; 3]; 6] = [
+    [-1, 0, 0], // NEG_X
+    [1, 0, 0],  // POS_X
+    [0, -1, 0], // NEG_Y
+    [0, 1, 0],  // POS_Y
+    [0, 0, -1], // NEG_Z
+    [0, 0, 1],  // POS_Z
+];
+
 /// A Chunk and its light, which the mesher always needs together.
 ///
 /// One parameter instead of two parallel arrays, so [`Neighborhood::new`] and

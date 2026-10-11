@@ -13,16 +13,18 @@
 //! the torch case DESIGN.md names.
 //!
 //! On the Server because it mutates World state, which rules out the Client
-//! side of `docs/adr/0002-client-server-from-day-one.md` at any price. It is
-//! not an edit *API* — that is build-order step 5 — but a `dev` system in the
-//! same family as `streaming::stats`.
+//! side of `docs/adr/0002-client-server-from-day-one.md` at any price. It does
+//! not take an intent from a Client: it is a `dev` system in the same family as
+//! `streaming::stats` that places Voxels through `edit::set_voxel`, the same
+//! function a player's click ends in.
 
 use bevy::prelude::*;
+use tesserae_core::Voxel;
 use tesserae_core::worldgen::{LANTERN, STONE};
-use tesserae_core::{Voxel, relight};
 
+use super::edit;
 use super::streaming::MeshState;
-use super::world_state::{ChunkStore, LightLattice, SpawnPoint, VoxelCoord};
+use super::world_state::{ChunkStore, SpawnPoint, VoxelCoord};
 use super::{Shapes, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
 
@@ -109,18 +111,10 @@ fn build(
     }
 
     let until = (progress.placed + EDITS_PER_TICK).min(plan.len());
-    let mut lattice = LightLattice::new(&mut store);
     for (at, voxel) in &plan[progress.placed..until] {
-        let was = lattice.store.light_at(*at);
-        lattice.store.set_voxel(VoxelCoord::of(*at), *voxel);
-        relight(&mut lattice, &shapes, *at, was);
-    }
-    let lit = std::mem::take(&mut lattice.touched);
-    for coord in lit {
-        meshes.edited(coord);
-    }
-    for (at, _) in &plan[progress.placed..until] {
-        meshes.edited(VoxelCoord::of(*at).chunk);
+        if let Err(reason) = edit::set_voxel(&mut store, &mut meshes, &shapes, *at, *voxel) {
+            warn!("lightbox: {at:?}: {}", reason.message());
+        }
     }
     progress.placed = until;
     if progress.placed == plan.len() {

@@ -9,6 +9,7 @@
 //!
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
+pub mod edit;
 #[cfg(feature = "dev")]
 mod lightbox;
 pub mod streaming;
@@ -43,7 +44,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()
         .init_resource::<Shapes>()
         .add_systems(Startup, open_world)
-        .add_plugins(streaming::plugin);
+        .add_plugins((streaming::plugin, edit::plugin));
     #[cfg(feature = "dev")]
     app.add_plugins(lightbox::plugin);
 }

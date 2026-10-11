@@ -201,9 +201,6 @@ pub(in crate::server) struct MeshState {
     delivered: HashSet<ChunkCoord>,
 }
 
-// The `dev` lightbox is the only caller until build-order step 5 brings a real
-// Voxel-edit path; see the same note in `world_state`.
-#[cfg_attr(not(feature = "dev"), allow(dead_code))]
 impl MeshState {
     /// Whether this Chunk's light is still waiting on a solve. A Server system
     /// that wants to edit a Voxel waits for this: an edit re-floods light
@@ -222,6 +219,21 @@ impl MeshState {
     /// `tesserae_core::relight`'s doc comment describes.
     pub(in crate::server) fn edited(&mut self, coord: ChunkCoord) {
         self.dirty.insert(coord);
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn is_dirty(&self, coord: ChunkCoord) -> bool {
+        self.dirty.contains(&coord)
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn mark_unlit(&mut self, coord: ChunkCoord) {
+        self.unlit.insert(coord);
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn mark_lit(&mut self, coord: ChunkCoord) {
+        self.unlit.remove(&coord);
     }
 }
 
@@ -600,8 +612,9 @@ pub mod stats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::edit;
     use bevy::ecs::system::RunSystemOnce;
-    use tesserae_core::{Worldgen, WorldgenParams};
+    use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
         let world = WorldSettings {
@@ -917,6 +930,48 @@ mod tests {
                 fresh.quad_count()
             );
         }
+    }
+
+    /// The Edit's end to end: a Voxel removed in the dark moves no light, yet the
+    /// Chunk it was in and the one across the boundary both get a new face, so
+    /// both must be republished, and republished as what `mesh_chunk` makes of the
+    /// store as it now stands. The neighbour is the one only the boundary rule in
+    /// `edit::set_voxel` reaches.
+    #[test]
+    fn an_edit_on_a_chunk_boundary_republishes_both_chunks_with_fresh_meshes() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.tick();
+        // Deep rock, a boundary apart: both inside the mesh extent and solid.
+        let (here, next) = (ChunkCoord::new(0, -1, 0), ChunkCoord::new(1, -1, 0));
+        assert!(h.delivered().contains(&here) && h.delivered().contains(&next));
+
+        let at = [CHUNK_SIZE as i32 - 1, -16, 16];
+        h.app
+            .world_mut()
+            .run_system_once(
+                move |mut store: ResMut<ChunkStore>,
+                      mut meshes: ResMut<MeshState>,
+                      shapes: Res<Shapes>| {
+                    edit::set_voxel(&mut store, &mut meshes, &shapes, at, Voxel::AIR)
+                        .expect("the Chunk is loaded");
+                },
+            )
+            .unwrap();
+        let (ready, _) = h.tick();
+
+        let store = h.store();
+        for coord in [here, next] {
+            let republished = ready
+                .iter()
+                .find(|m| m.coord == coord)
+                .unwrap_or_else(|| panic!("{coord} was not republished"));
+            assert!(!republished.mesh.is_empty(), "{coord} has a new face");
+            let neighbors: [Option<LitChunk>; 6] =
+                face_neighbors(coord).map(|n| Some(lit(store, n)));
+            let fresh = mesh_chunk(lit(store, coord), neighbors, &ShapeTable::builtin());
+            assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
+        }
+        assert_eq!(ready.len(), 2, "nothing else was touched");
     }
 
     #[test]

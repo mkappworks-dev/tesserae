@@ -21,8 +21,8 @@ pub const STONE: MaterialId = 1;
 pub const DIRT: MaterialId = 2;
 pub const GRASS: MaterialId = 3;
 /// Emits block light; see [`crate::light::emission`]. Generation places none of
-/// it — placing one is a Voxel edit, which is build-order step 5. It exists so
-/// that the block-light channel has a source to be tested against.
+/// it; a player places one with an Edit. It exists so that the block-light
+/// channel has a source to be tested against.
 pub const LANTERN: MaterialId = 4;
 
 /// What a Mod parameterises. Plain `Copy` data with no callbacks, because

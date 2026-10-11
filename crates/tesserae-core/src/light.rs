@@ -14,7 +14,7 @@
 //! with Voxel size. `docs/adr/0003-voxel-size-is-per-world.md`.
 
 use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, index};
-use crate::mesh::{LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use crate::mesh::{FACE_STEPS, LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use crate::shape::{LIGHT_EXIT_CHECKED, ShapeTable};
 use crate::voxel::Voxel;
 use crate::worldgen::LANTERN;
@@ -283,16 +283,6 @@ pub fn transmitted(channel: Channel, level: u8, face: usize) -> u8 {
         level.saturating_sub(1)
     }
 }
-
-/// The offset each face index steps by. Matches [`crate::mesh`]'s face order.
-const FACE_STEPS: [[i32; 3]; 6] = [
-    [-1, 0, 0], // NEG_X
-    [1, 0, 0],  // POS_X
-    [0, -1, 0], // NEG_Y
-    [0, 1, 0],  // POS_Y
-    [0, 0, -1], // NEG_Z
-    [0, 0, 1],  // POS_Z
-];
 
 const FACES: [usize; 6] = [NEG_X, POS_X, NEG_Y, POS_Y, NEG_Z, POS_Z];
 
