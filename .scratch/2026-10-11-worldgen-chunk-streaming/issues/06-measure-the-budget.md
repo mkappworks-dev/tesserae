@@ -50,7 +50,7 @@ Set `Status: done` on 01 to 06 in the commit that finishes each, per
 The full gate passes: `cargo test --workspace`, `cargo lint`,
 `cargo fmt --all --check`, `npm run fmt:check`,
 `cargo deny check advisories licenses bans sources`, and
-`cargo bench -p tesserae-core` with no regression. A screenshot of streamed
-terrain is in the PR.
+`cargo bench -p tesserae-core` with no regression, and the `dev` capture
+writes a PNG of streamed terrain.
 
 ## Comments

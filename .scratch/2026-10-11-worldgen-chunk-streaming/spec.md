@@ -176,6 +176,8 @@ Each of these is a mistake that will not look wrong in review.
 - `cargo bench -p tesserae-core` shows no regression against step 2's terrain
   ~360 us, solid ~339 us, checkerboard ~2.46 ms, worldgen ~114 us.
 - `scene.rs` is gone.
-- A screenshot is in the PR.
+- Streaming is verified in the running app, not only headlessly. The
+  `dev` capture flies a fixed distance and writes a PNG, so the check is
+  repeatable; whether the picture goes in the PR is a separate call.
 
 ## Comments
