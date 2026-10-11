@@ -10,9 +10,11 @@ pub const CHUNK_SIZE: usize = 32;
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
 /// `x` is contiguous. The mesher's inner loop walks x, and the padded
-/// neighbourhood it builds assumes the same order.
+/// neighbourhood it builds assumes the same order. `pub(crate)` so
+/// [`crate::light`]'s parallel per-Chunk array indexes identically rather than
+/// keeping a second copy of this that could drift.
 #[inline]
-const fn index(x: usize, y: usize, z: usize) -> usize {
+pub(crate) const fn index(x: usize, y: usize, z: usize) -> usize {
     (y * CHUNK_SIZE + z) * CHUNK_SIZE + x
 }
 

@@ -1,6 +1,6 @@
 # The incremental solver
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 What makes this step's title true: an edit re-floods the region it reaches, not
@@ -55,3 +55,12 @@ The decrease pass is sound only because it tracks provenance.
 - An edit 15 Voxels from a Chunk boundary touches the neighbour; one 16 Voxels
   away does not.
 - A `None` region bounds the fill rather than being treated as air.
+
+## Comments
+
+`ChunkLight`'s derived `PartialEq` compared how light was *stored*, not the
+light. A Chunk edited and then restored holds a dense array of exactly what a
+uniform one holds, because `set` promotes and never demotes — so the Server's
+"did this re-solve change anything?" test would have fired on a Chunk whose
+light had not moved, and re-meshed it for nothing. Equality is now written out
+by hand and compares values across the two representations.

@@ -1,6 +1,6 @@
 # Light and ChunkLight storage
 
-Status: ready-for-agent
+Status: done
 
 `tesserae-core/src/light.rs`, which `docs/architecture.md`'s layout block
 already reserves for this step. No dependencies: core has none and keeps none.

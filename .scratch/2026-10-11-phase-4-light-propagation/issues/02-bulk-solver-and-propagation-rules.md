@@ -1,6 +1,6 @@
 # The bulk solver and the propagation rules
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 The per-Chunk solve that streaming pays for on every tick. One contiguous
