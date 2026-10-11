@@ -6,6 +6,7 @@
 //! `Boundaries` job. See `docs/architecture.md`.
 
 pub mod chunk;
+pub mod light;
 pub mod mesh;
 pub mod noise;
 pub mod testgen;
@@ -13,6 +14,7 @@ pub mod voxel;
 pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
-pub use mesh::{ChunkMesh, Neighborhood, greedy_mesh, mesh_chunk};
+pub use light::{Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_chunk, relight};
+pub use mesh::{ChunkMesh, LitChunk, Neighborhood, greedy_mesh, mesh_chunk};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{Worldgen, WorldgenParams};

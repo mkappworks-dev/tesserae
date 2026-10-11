@@ -38,6 +38,17 @@ not of the engine. Default 1.0.
 
 **Air** — the absence of Material. A Voxel, not a null.
 
+**Light level** — how much light reaches a Voxel, from 0 to 15. The one quantity
+in the engine that is **dimensionless**: a count of attenuation steps, not a
+distance, so it does not scale with Voxel size the way everything physical does.
+
+**Sky light** — the light a Voxel receives from the sky. At full strength it
+falls straight down undimmed, so open ground is lit the same however tall the
+air column above it is.
+
+**Block light** — the light a Voxel receives from Materials that emit. Dims by
+one level per Voxel in every direction, downwards included.
+
 ## Space
 
 **Chunk** — the fixed-size cubic array of Voxels that storage, meshing and

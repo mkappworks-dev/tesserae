@@ -19,8 +19,9 @@
 
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
+use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{ChunkMesh, mesh_chunk};
+use tesserae_core::{CHUNK_SIZE, ChunkLight, ChunkMesh, LitChunk, mesh_chunk};
 
 use super::WorldGenerator;
 use super::world_state::ChunkStore;
@@ -81,25 +82,32 @@ impl Default for StreamingSettings {
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct StreamingBudget {
     pub generate_per_tick: usize,
+    pub relight_per_tick: usize,
     pub mesh_per_tick: usize,
 }
 
 impl Default for StreamingBudget {
     /// Measured 2026-10-11 on an Apple M5, `cargo bench -p tesserae-core`:
-    /// generating a Chunk the surface crosses costs 102 us and meshing one
-    /// 371 us, while a Chunk that takes an early-out or declines a mesh costs
-    /// about 5 ns. So the worst tick, where every Chunk in both budgets
-    /// straddles the surface, is 24 x 102us + 12 x 371us = 6.9 ms against the
-    /// 15.6 ms a tick has at 64 Hz.
+    /// generating a Chunk the surface crosses costs 99 us, solving its light
+    /// 131 us at worst, and meshing it 386 us, while a Chunk that takes an
+    /// early-out, answers its light from `uniform()` alone or declines a mesh
+    /// costs a few nanoseconds. So the worst tick, where every Chunk in all
+    /// three budgets straddles the surface, is
+    /// `24 x 99us + 12 x 131us + 12 x 386us` = 8.6 ms against the 15.6 ms a
+    /// tick has at 64 Hz, so light cost 1.7 ms of the 8.7 ms headroom.
     ///
-    /// Confirmed in the app rather than only on paper: flying at the camera's
-    /// default speed with a 192 m view distance, the worst frame after
-    /// start-up was 10.0 ms and the steady state 125 fps, with the first fill
-    /// of 2167 Chunks taking about 1.4 s. A debug build at `opt-level = 1`, so
-    /// read it as a lower bound on the headroom.
+    /// Relight is **half** of generation, which looks like the wrong way round
+    /// — every Chunk that arrives needs its light solved. It is not, because
+    /// relight is the one stage whose backlog costs nothing visible: a Chunk is
+    /// not published until its light is solved, and the Chunks queued behind
+    /// that are the ones out past the mesh extent, which nothing is drawing.
+    /// Measured, not reasoned: at 24 the worst frame during the first fill
+    /// ranged 65-115 ms over three runs, at 12 it was 39-48 ms, and the fill
+    /// itself finished inside 2 s either way.
     fn default() -> Self {
         StreamingBudget {
             generate_per_tick: 24,
+            relight_per_tick: 12,
             mesh_per_tick: 12,
         }
     }
@@ -178,13 +186,43 @@ impl Rings {
 struct LoadOrder {
     built_for: Option<Extent>,
     offsets: Vec<IVec3>,
+    /// The same offsets, highest first. Sky light flows downwards, so solving a
+    /// Chunk before the one above it means solving it again when the one above
+    /// arrives; nearest-first is right for generation and wrong here.
+    descending: Vec<IVec3>,
 }
 
-/// Which loaded Chunks need a mesh, and which the Client holds one for.
+/// Which loaded Chunks need light solved, which need a mesh, and which the
+/// Client holds one for.
 #[derive(Resource, Default)]
-struct MeshState {
+pub(in crate::server) struct MeshState {
+    unlit: HashSet<ChunkCoord>,
     dirty: HashSet<ChunkCoord>,
     delivered: HashSet<ChunkCoord>,
+}
+
+// The `dev` lightbox is the only caller until build-order step 5 brings a real
+// Voxel-edit path; see the same note in `world_state`.
+#[cfg_attr(not(feature = "dev"), allow(dead_code))]
+impl MeshState {
+    /// Whether this Chunk's light is still waiting on a solve. A Server system
+    /// that wants to edit a Voxel waits for this: an edit re-floods light
+    /// incrementally, and `relight`'s from-scratch solve landing afterwards
+    /// would discard the work even though it would reach the same answer.
+    pub(in crate::server) fn is_unlit(&self, coord: ChunkCoord) -> bool {
+        self.unlit.contains(&coord)
+    }
+
+    /// A Voxel in this Chunk changed and its light has already been re-flooded,
+    /// so the mesh that bakes both is stale.
+    ///
+    /// Deliberately not adding to `unlit`. The edit's own incremental pass is
+    /// the sound one in both directions; `relight`'s bulk solve converges
+    /// upwards only, so routing an edit through it is the mistake
+    /// `tesserae_core::relight`'s doc comment describes.
+    pub(in crate::server) fn edited(&mut self, coord: ChunkCoord) {
+        self.dirty.insert(coord);
+    }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -247,6 +285,8 @@ fn stream(
     let center = world.chunk_at(pose.translation);
     if order.built_for != Some(rings.load) {
         order.offsets = rings.load.offsets();
+        order.descending = order.offsets.clone();
+        order.descending.sort_by_key(|d| (-d.y, d.length_squared()));
         order.built_for = Some(rings.load);
     }
 
@@ -265,6 +305,15 @@ fn stream(
         &order,
         center,
         budget.generate_per_tick,
+    );
+    relight(
+        &mut store,
+        &mut meshes,
+        &generator,
+        &order,
+        &world,
+        center,
+        budget.relight_per_tick,
     );
     publish(
         &store,
@@ -309,6 +358,7 @@ fn retire(
     for coord in stale {
         store.remove(coord);
         meshes.dirty.remove(&coord);
+        meshes.unlit.remove(&coord);
     }
 }
 
@@ -332,23 +382,102 @@ fn generate(
             continue;
         }
         store.insert(coord, generator.chunk(coord.x, coord.y, coord.z));
-        // Only this Chunk, deliberately. An arriving Chunk changes the faces of
-        // its six neighbours, so re-dirtying them looks obviously necessary and
-        // is the first thing a reader will add here. It is not necessary, and
-        // the reason is worth the lines because it stops holding the moment a
-        // Voxel can be edited: a Chunk is never replaced while loaded, `dirty`
-        // is cleared only on a successful mesh, and `publish` will not mesh a
-        // Chunk until all six neighbours are present — so a neighbour arriving
-        // can never invalidate a mesh the Client already holds. The one thing
-        // that could, a neighbour being evicted, cannot happen while the Chunk
-        // is delivered; see the extent ordering in the module doc.
+        // Only this Chunk's *geometry* is affected, and only its own light is
+        // queued. Re-dirtying the six neighbours' meshes here looks obviously
+        // necessary and is not: `publish` will not mesh a Chunk until all six
+        // neighbours are present, so a neighbour arriving cannot invalidate a
+        // mesh the Client already holds by changing a face.
         //
-        // Build-order step 5 brings Voxel edits and with them the neighbour
-        // re-mesh. `no_mesh_the_client_still_holds_is_stale` is the test that
-        // will fail when this stops being true.
+        // It can invalidate one by changing the *light*, and that is what
+        // `relight` handles rather than this function. Light crosses a Chunk
+        // boundary and keeps going, so a Chunk two Cells away changes the light
+        // in between and so changes ours — further than any re-dirtying here
+        // could reach. `relight` re-publishes a Chunk whose light moved, and
+        // marks its neighbours for a re-solve so the change keeps travelling as
+        // far as it really goes.
+        meshes.unlit.insert(coord);
         meshes.dirty.insert(coord);
         made += 1;
     }
+}
+
+/// Solves up to `budget` Chunks whose light is out of date, highest first.
+///
+/// The bulk path: a Chunk arriving starts dark, so every change here is an
+/// increase and re-solving from the current boundary converges. A Voxel
+/// **edit** must not come through here — see `tesserae_core::relight`.
+fn relight(
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    generator: &WorldGenerator,
+    order: &LoadOrder,
+    world: &WorldSettings,
+    center: ChunkCoord,
+    budget: usize,
+) {
+    let mut done = 0;
+    for &d in &order.descending {
+        if done == budget {
+            break;
+        }
+        let coord = offset(center, d);
+        if !meshes.unlit.contains(&coord) {
+            continue;
+        }
+        let Some(chunk) = store.get(coord) else {
+            meshes.unlit.remove(&coord);
+            continue;
+        };
+
+        let faces = face_neighbors(coord);
+        // The boundary that the relaxation cannot discover for itself. Held in
+        // a local so the borrow below can point at it.
+        let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let border: [Option<&ChunkLight>; 6] = std::array::from_fn(|face| {
+            store.light(faces[face]).or_else(|| {
+                (face == POS_Y && above_the_surface(generator, world, faces[face]))
+                    .then_some(&open_sky)
+            })
+        });
+
+        let solved = light_chunk(chunk, border);
+        meshes.unlit.remove(&coord);
+        done += 1;
+        let Some(before) = store.light(coord) else {
+            continue;
+        };
+        if *before == solved {
+            continue;
+        }
+        // Per face, not once for the Chunk. A neighbour reads only the plane
+        // across the face it shares, so re-solving it because something changed
+        // deep inside this Chunk is work for nothing — and during a fill it is
+        // every Chunk about seven times over, which is enough to stop the
+        // relight queue ever draining.
+        let outward: [bool; 6] = std::array::from_fn(|f| before.boundary_differs(&solved, f));
+        store.set_light(coord, solved);
+        // This Chunk's own mesh bakes its own light, so it is stale either way.
+        meshes.dirty.insert(coord);
+        for (face, neighbor) in faces.into_iter().enumerate() {
+            if outward[face] && store.contains(neighbor) {
+                meshes.unlit.insert(neighbor);
+                // Its boundary faces are lit by the plane that just moved.
+                meshes.dirty.insert(neighbor);
+            }
+        }
+    }
+}
+
+/// Whether a Chunk is entirely above the band the surface can reach, so the
+/// generator makes nothing but air there and everything in it sees full sky.
+///
+/// The comparison is in metres, as `surface_bounds_m` and the Chunk floor both
+/// are. In Voxel indices it would be calibrated to one Voxel size, which is the
+/// mistake `docs/adr/0003-voxel-size-is-per-world.md` exists to prevent.
+fn above_the_surface(generator: &WorldGenerator, world: &WorldSettings, coord: ChunkCoord) -> bool {
+    let (_, highest_m) = generator.surface_bounds_m();
+    let floor_m = (coord.y * CHUNK_SIZE as i32) as f32 * world.voxel_size;
+    floor_m > highest_m
 }
 
 /// Meshes up to `budget` dirty Chunks inside the mesh extent, nearest first.
@@ -379,14 +508,20 @@ fn publish(
         let Some(chunk) = store.get(coord) else {
             continue;
         };
-        let neighbors = face_neighbors(coord).map(|n| store.get(n));
+        let Some(light) = store.light(coord) else {
+            continue;
+        };
+        // All six neighbours' Voxels *and* light: a boundary face is lit by the
+        // Voxel across it, so a neighbour without light would bake a black seam.
+        let neighbors: [Option<LitChunk>; 6] =
+            face_neighbors(coord).map(|n| Some(LitChunk::new(store.get(n)?, store.light(n)?)));
         if neighbors.iter().any(Option::is_none) {
             continue;
         }
 
         ready.write(ChunkMeshReady {
             coord,
-            mesh: mesh_chunk(chunk, neighbors),
+            mesh: mesh_chunk(LitChunk::new(chunk, light), neighbors),
         });
         meshes.dirty.remove(&coord);
         meshes.delivered.insert(coord);
@@ -585,6 +720,7 @@ mod tests {
 
     const UNLIMITED: StreamingBudget = StreamingBudget {
         generate_per_tick: usize::MAX,
+        relight_per_tick: usize::MAX,
         mesh_per_tick: usize::MAX,
     };
 
@@ -663,12 +799,22 @@ mod tests {
         }
     }
 
-    fn same_geometry(a: &ChunkMesh, b: &ChunkMesh) -> bool {
+    fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
         a.positions == b.positions
             && a.normals == b.normals
             && a.uvs == b.uvs
             && a.materials == b.materials
+            && a.light == b.light
             && a.indices == b.indices
+    }
+
+    /// The light of the Chunk a mesh was built from, which `publish` requires
+    /// to be present before it meshes at all.
+    fn lit<'a>(store: &'a ChunkStore, coord: ChunkCoord) -> LitChunk<'a> {
+        LitChunk::new(
+            store.get(coord).expect("loaded"),
+            store.light(coord).expect("lit"),
+        )
     }
 
     #[test]
@@ -700,16 +846,21 @@ mod tests {
         assert_eq!(h.delivered().len(), ready.len());
     }
 
-    /// The property dirty-marking exists for. Generation arrives over many
-    /// ticks, so a Chunk meshed early has neighbours that did not exist yet; if
-    /// an arriving Chunk did not mark its neighbours dirty, the Client would be
-    /// left holding a mesh with a skin of faces buried in rock.
+    /// The property dirty-marking exists for, and the test `generate`'s comment
+    /// names. Work arrives over many ticks, so a Chunk meshed early has
+    /// neighbours that did not exist yet and light that had not settled. Faces
+    /// are covered by `publish` refusing to mesh without all six neighbours;
+    /// light is not, because it crosses a Chunk boundary and keeps going, so
+    /// `relight` has to re-publish a Chunk whose light moved. If it did not,
+    /// the Client would be left holding a mesh baked against light that is no
+    /// longer true — a visible seam rather than a buried face.
     #[test]
     fn no_mesh_the_client_still_holds_is_stale() {
         let mut h = Harness::new(
             small(),
             StreamingBudget {
                 generate_per_tick: 3,
+                relight_per_tick: 3,
                 mesh_per_tick: 2,
             },
         );
@@ -733,11 +884,12 @@ mod tests {
         );
 
         for (coord, held) in &latest {
-            let chunk = h.store().get(*coord).expect("still loaded");
-            let neighbors = face_neighbors(*coord).map(|n| h.store().get(n));
-            let fresh = mesh_chunk(chunk, neighbors);
+            let store = h.store();
+            let neighbors: [Option<LitChunk>; 6] =
+                face_neighbors(*coord).map(|n| Some(lit(store, n)));
+            let fresh = mesh_chunk(lit(store, *coord), neighbors);
             assert!(
-                same_geometry(held, &fresh),
+                same_mesh(held, &fresh),
                 "{coord}: the Client holds a stale mesh ({} quads, should be {})",
                 held.quad_count(),
                 fresh.quad_count()
@@ -837,12 +989,132 @@ mod tests {
             small(),
             StreamingBudget {
                 generate_per_tick: 5,
+                relight_per_tick: 2,
                 mesh_per_tick: 1,
             },
         );
         let (ready, _) = h.tick();
         assert_eq!(h.store().coords().count(), 5);
         assert!(ready.len() <= 1);
+        // Three of the five generated Chunks are still waiting for light.
+        assert_eq!(h.app.world().resource::<MeshState>().unlit.len(), 3);
+    }
+
+    // Light. The Server owns it, so these tests live here rather than on the
+    // Client that renders it.
+
+    /// Everything above the band the surface can reach is air the generator
+    /// made, so the Chunk at the top of the load extent sees full sky. The
+    /// relaxation cannot discover this: there is no neighbour above to ask, and
+    /// guessing dark would darken every Voxel in the column below, because sky
+    /// light at full strength falls straight down undimmed.
+    #[test]
+    fn the_open_sky_boundary_is_taken_from_the_generator() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        let generator = Worldgen::new(
+            WorldSettings::default().seed,
+            WorldSettings::default().voxel_size,
+            WorldgenParams::default(),
+        );
+        let (_, highest_m) = generator.surface_bounds_m();
+        let cell = WorldSettings::default().cell_size();
+
+        // Well above the band, so every Chunk the extent holds is open air.
+        h.anchor_at(Vec3::new(0.0, highest_m + 4.0 * cell, 0.0));
+        h.tick();
+
+        let center = h
+            .app
+            .world()
+            .resource::<WorldSettings>()
+            .chunk_at(Vec3::new(0.0, highest_m + 4.0 * cell, 0.0));
+        let light = h.store().light(center).expect("solved");
+        assert_eq!(
+            light.uniform().map(|l| l.sky()),
+            Some(MAX_LIGHT),
+            "a Chunk of open air must be fully sky-lit"
+        );
+    }
+
+    #[test]
+    fn deep_rock_stays_dark() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        let generator = Worldgen::new(
+            WorldSettings::default().seed,
+            WorldSettings::default().voxel_size,
+            WorldgenParams::default(),
+        );
+        let (lowest_m, _) = generator.surface_bounds_m();
+        let cell = WorldSettings::default().cell_size();
+        let under = Vec3::new(0.0, lowest_m - 5.0 * cell, 0.0);
+
+        h.anchor_at(under);
+        h.tick();
+
+        let center = h.app.world().resource::<WorldSettings>().chunk_at(under);
+        assert_eq!(
+            h.store().light(center).and_then(ChunkLight::uniform),
+            Some(Light::DARK),
+            "the generator makes solid stone down here"
+        );
+    }
+
+    /// Light is baked into the vertex attribute, so a Chunk that reaches the
+    /// Client must already be lit — a mesh published before its light settled
+    /// would carry a black seam.
+    #[test]
+    fn nothing_is_published_before_its_light_is_solved() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        // Several ticks, so the relaxation reaches its fixed point.
+        for _ in 0..10 {
+            let (ready, _) = h.tick();
+            for message in ready {
+                assert!(
+                    h.store().light(message.coord).is_some(),
+                    "{} was published unlit",
+                    message.coord
+                );
+                for n in face_neighbors(message.coord) {
+                    assert!(
+                        h.store().light(n).is_some(),
+                        "{} was published while neighbour {n} was unlit",
+                        message.coord
+                    );
+                }
+            }
+        }
+    }
+
+    /// A relight that changes nothing must not re-publish, or the surface would
+    /// re-mesh every tick forever at 371 us a Chunk.
+    #[test]
+    fn a_relight_that_changes_nothing_does_not_republish() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        for _ in 0..20 {
+            h.tick();
+        }
+        let (ready, unloaded) = h.tick();
+        assert!(ready.is_empty(), "re-published {} Chunks", ready.len());
+        assert!(unloaded.is_empty());
+        assert!(
+            h.app.world().resource::<MeshState>().unlit.is_empty(),
+            "the relaxation never settled"
+        );
+    }
+
+    /// Visible light on visible faces, at the surface. The whole step is
+    /// pointless if the Client is handed zeroes.
+    #[test]
+    fn a_surface_chunk_is_published_with_light_on_it() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        let mut lit_faces = 0;
+        for _ in 0..20 {
+            let (ready, _) = h.tick();
+            for message in ready {
+                lit_faces += message.mesh.light.iter().filter(|&&l| l != 0).count();
+            }
+        }
+        assert!(lit_faces > 0, "every published face was baked dark");
     }
 
     #[test]

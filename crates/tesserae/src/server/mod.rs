@@ -9,6 +9,8 @@
 //!
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
+#[cfg(feature = "dev")]
+mod lightbox;
 pub mod streaming;
 pub mod world_state;
 
@@ -32,6 +34,8 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()
         .add_systems(Startup, open_world)
         .add_plugins(streaming::plugin);
+    #[cfg(feature = "dev")]
+    app.add_plugins(lightbox::plugin);
 }
 
 /// Builds the generator and picks the spawn point. One system so there is no

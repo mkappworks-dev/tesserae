@@ -148,6 +148,12 @@ These are from-scratch subsystems in `tesserae-core`:
   lights for torches is not viable on any GPU, so light is a per-voxel
   flood-fill (Minecraft's 0–15 model) baked into the mesh as a vertex attribute.
   Must be **incremental** — one torch re-floods a small region, not a chunk.
+  Built in step 4. Two consequences worth carrying forward: light is part of the
+  greedy mesher's merge key, because a merged quad has four vertices and cannot
+  hold a level per Voxel it spans, which forecloses a light-only re-mesh path;
+  and sky light drives `bevy_pbr`'s `diffuse_occlusion` and
+  `directional_shadow_factor` rather than being multiplied into base colour, so
+  albedo stays albedo and the BRDF keeps working.
 - **Fluid simulation.** Water _shading_ is a `MaterialExtension`, roughly a
   week. Water _flow_ is a per-tick cellular automaton over millions of cells
   that must be incremental, chunk-boundary-correct and savable. One of the
@@ -287,7 +293,11 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    camera. First time anything is on screen.
 3. Worldgen + chunk streaming, behind the client/server split with the server
    in-process.
-4. Light propagation (incremental flood-fill).
+4. Light propagation (incremental flood-fill). **Done.** Two channels packed
+   into a byte per Voxel, in a parallel per-Chunk array rather than in the
+   palette, baked into the mesh as a vertex attribute. Two solvers: one
+   contiguous sweep for a Chunk arriving, and a Voxel-granular BFS for an edit,
+   which is the half that makes "a torch re-floods a small region" true.
 5. Shaped voxels — second mesher pass, per-shape collision and opacity.
 6. LOD mip chain out to 4km.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
@@ -304,12 +314,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   itself cannot be the Licensor — it names the Licensed Work, and the Covenants
   run from a person or a company, not from a product name.
 - Chunk dimensions: 32³ assumed, not measured.
-- Per-ring LOD chunk budget: measured once, and only for one case. At 1m Voxels
-  and a 192m view distance the streaming tick holds at 24 Chunks generated and
-  12 meshed, a 6.9ms worst tick against 15.6ms at 64Hz, with a measured worst
-  frame of 10.0ms on an M5. Still open because that is a single Voxel size, a
-  single view distance and LOD level 0 only — the number this item is really
-  about is per _ring_, and there is still only one ring.
+- Per-ring LOD chunk budget: measured twice now, and still only for one case. At
+  1m Voxels and a 192m view distance the streaming tick holds at 24 Chunks
+  generated, 12 relit and 12 meshed, an 8.6ms worst tick against 15.6ms at 64Hz.
+  Light cost 1.7ms of the headroom. Still open for the same reason as before — a
+  single Voxel size, a single view distance, LOD level 0 only, and the number
+  this item is really about is per _ring_ — and now also because the three
+  budgets are sized against each other rather than independently.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

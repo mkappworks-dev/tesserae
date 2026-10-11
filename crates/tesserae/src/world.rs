@@ -61,6 +61,22 @@ impl WorldSettings {
         Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.cell_size()
     }
 
+    /// Which Voxel of the lattice holds a point, in the one continuous
+    /// coordinate space `tesserae_core`'s flood-fill works over.
+    ///
+    /// Only the `dev` lightbox converts a metre position to a Voxel today, so
+    /// a default-feature build has no caller; see the note in
+    /// `server/world_state.rs`.
+    ///
+    /// The single conversion from metres to a Voxel index, so everything
+    /// physical stays in metres: `docs/adr/0003-voxel-size-is-per-world.md`.
+    /// A floor division for the same reason as [`WorldSettings::chunk_at`].
+    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+    pub fn voxel_at(&self, metres: Vec3) -> [i32; 3] {
+        let v = (metres / self.voxel_size).floor();
+        [v.x as i32, v.y as i32, v.z as i32]
+    }
+
     /// Which Chunk holds a point. The inverse of [`WorldSettings::chunk_origin`],
     /// and a floor division rather than a truncation: `-1.0 / 32.0` truncates
     /// towards zero and would put everything in the Cell below the origin into
@@ -118,6 +134,23 @@ mod tests {
                 assert_eq!(world.chunk_at(inside), coord);
             }
         }
+    }
+
+    #[test]
+    fn voxel_at_scales_with_voxel_size_and_floors() {
+        let coarse = WorldSettings {
+            voxel_size: 1.0,
+            ..default()
+        };
+        let fine = WorldSettings {
+            voxel_size: 0.25,
+            ..default()
+        };
+        // The same point in metres is four times as many Voxels in.
+        assert_eq!(coarse.voxel_at(Vec3::new(3.0, 0.0, 0.0)), [3, 0, 0]);
+        assert_eq!(fine.voxel_at(Vec3::new(3.0, 0.0, 0.0)), [12, 0, 0]);
+        // Truncation would put this Voxel and the one above it both at 0.
+        assert_eq!(coarse.voxel_at(Vec3::new(-0.5, -0.5, -0.5)), [-1, -1, -1]);
     }
 
     #[test]
