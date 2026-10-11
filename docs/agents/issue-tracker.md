@@ -1,9 +1,9 @@
 # Issue tracker: Local Markdown
 
 Issues and specs for this repo live as markdown files in `.scratch/`. There is
-no GitHub remote yet; when one exists, this choice is still deliberate — the
-engine is solo-developed and the tickets travel with the branch that writes
-them.
+no GitHub issue tracker; the remote exists, but this choice is still deliberate
+— the engine is solo-developed and the tickets travel with the branch that
+writes them.
 
 PRs as a request surface: **off.**
 

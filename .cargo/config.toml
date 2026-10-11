@@ -9,3 +9,10 @@
 # directory, so it needs no configuration — only the release archive carrying
 # assets/ beside the binary. Not forced, so an outer BEVY_ASSET_ROOT still wins.
 BEVY_ASSET_ROOT = { value = ".", relative = true }
+
+[alias]
+# `cargo run -p tesserae dev` passes "dev" to the binary as an argument and
+# silently does not enable the feature, which is a hard mistake to see. These
+# exist so the two commands that matter cannot be typed wrong.
+dev = "run -p tesserae --features dev"
+lint = "clippy --workspace --all-targets --all-features"
