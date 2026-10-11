@@ -55,3 +55,7 @@ scaffolding into the thing it was a model for. Spec decision 7.
   shared entry.
 - A mesh produced by an edit is the mesh `mesh_chunk` would produce for the same
   store (no stale face).
+
+## Comments
+
+The `Shapes` resource landed in ticket 02, where `publish` first needed it.

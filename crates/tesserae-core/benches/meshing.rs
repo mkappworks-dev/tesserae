@@ -1,10 +1,16 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
+use std::sync::OnceLock;
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Neighborhood, Voxel, Worldgen, WorldgenParams,
-    greedy_mesh, mesh_chunk, testgen,
+    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Neighborhood, ShapeTable, Voxel, Worldgen,
+    WorldgenParams, greedy_mesh, mesh_chunk, testgen,
 };
+
+fn shapes() -> &'static ShapeTable {
+    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
+    TABLE.get_or_init(ShapeTable::builtin)
+}
 
 /// Flat full sky, which is what `light_chunk` answers for open terrain and so
 /// what the mesher is handed in the common case.
@@ -34,20 +40,20 @@ fn mesher(c: &mut Criterion) {
     let terrain = testgen::terrain_chunk(0, 0, 0);
     let terrain_nb = Neighborhood::isolated(LitChunk::new(&terrain, &sky));
     group.bench_function("terrain", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&terrain_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&terrain_nb), shapes())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     let solid_nb = Neighborhood::isolated(LitChunk::new(&solid, &sky));
     group.bench_function("solid", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&solid_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&solid_nb), shapes())))
     });
 
     // Nothing merges here; this is the ceiling on per-chunk mesh cost.
     let checker = testgen::checkerboard_chunk();
     let checker_nb = Neighborhood::isolated(LitChunk::new(&checker, &sky));
     group.bench_function("checkerboard", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&checker_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&checker_nb), shapes())))
     });
 
     // What the merge key actually costs. Light is in the key, so a gradient
@@ -63,7 +69,7 @@ fn mesher(c: &mut Criterion) {
     }
     let gradient_nb = Neighborhood::isolated(LitChunk::new(&terrain, &gradient));
     group.bench_function("terrain_light_gradient", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&gradient_nb))))
+        b.iter(|| black_box(greedy_mesh(black_box(&gradient_nb), shapes())))
     });
 
     group.finish();
@@ -161,20 +167,26 @@ fn streamed_mesher(c: &mut Criterion) {
         std::array::from_fn(|i| Some(LitChunk::new(&around[i], &sky)));
     let lit_center = LitChunk::new(&center, &sky);
     group.bench_function("straddling", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs))))
+        b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs), shapes())))
     });
 
     let air = Chunk::air();
     let lit_air = LitChunk::new(&air, &sky);
     group.bench_function("declined_air", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_air), black_box(refs))))
+        b.iter(|| black_box(mesh_chunk(black_box(lit_air), black_box(refs), shapes())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     let lit_solid = LitChunk::new(&solid, &sky);
     let enclosed: [Option<LitChunk>; 6] = [Some(lit_solid); 6];
     group.bench_function("declined_enclosed", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_solid), black_box(enclosed))))
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_solid),
+                black_box(enclosed),
+                shapes(),
+            ))
+        })
     });
 
     group.finish();

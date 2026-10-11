@@ -1,6 +1,6 @@
 # Pass 1 culls by coverage
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Today the greedy pass asks `is_full_cube()` of the Voxel across a face. That
@@ -42,3 +42,17 @@ it moves, find out why before rewriting it, and record the number.
   ticket 03).
 - `may_contain_shaped` and `shaped_count` across uniform, palette, and an
   edited-then-restored Chunk (the false positive is allowed and pinned).
+
+## Comments
+
+Asking `seals` of every neighbour measured 2-6% slower on `greedy_mesh/solid`
+and `/terrain` against the step-4 baseline. Testing `is_full_cube()` first and
+reaching the table only for a shaped neighbour recovered all of it: terrain
+-3.5%, solid +0.3%, mesh_chunk/straddling -3.3%. The comment in `greedy_mesh`
+records this.
+
+The `Shapes` resource, which ticket 06 listed, landed here instead: the Server's
+`publish` needed a table the moment `mesh_chunk` took one.
+
+`Neighborhood` does not record the may-contain-shaped flag yet; ticket 03 is its
+only reader and an unread field would fail `-D warnings`.

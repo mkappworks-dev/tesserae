@@ -15,7 +15,7 @@ pub mod streaming;
 pub mod world_state;
 
 use bevy::prelude::*;
-use tesserae_core::{Worldgen, WorldgenParams};
+use tesserae_core::{ShapeTable, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
 use world_state::SpawnPoint;
@@ -30,8 +30,18 @@ const SPAWN_CLEARANCE_M: f32 = 2.0;
 #[derive(Resource, Deref)]
 pub struct WorldGenerator(pub Worldgen);
 
+/// The World's Shape table, read by everything that has to know what a Voxel
+/// covers: the mesher, both light solvers, collision and picking. A newtype for
+/// the same reason as [`WorldGenerator`].
+///
+/// Server-only. The Client is sent finished meshes and needs no Shape to draw
+/// one, and a Mod registers its Shapes here at load.
+#[derive(Resource, Deref, Default)]
+pub struct Shapes(pub ShapeTable);
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()
+        .init_resource::<Shapes>()
         .add_systems(Startup, open_world)
         .add_plugins(streaming::plugin);
     #[cfg(feature = "dev")]

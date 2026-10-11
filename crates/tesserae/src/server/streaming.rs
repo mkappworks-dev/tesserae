@@ -21,10 +21,10 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, ChunkLight, ChunkMesh, LitChunk, mesh_chunk};
+use tesserae_core::{CHUNK_SIZE, ChunkLight, ChunkMesh, LitChunk, ShapeTable, mesh_chunk};
 
-use super::WorldGenerator;
 use super::world_state::ChunkStore;
+use super::{Shapes, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// The entity the World streams around. The Client puts this on its camera and
@@ -269,6 +269,7 @@ fn stream(
     mut ready: MessageWriter<ChunkMeshReady>,
     mut unloaded: MessageWriter<ChunkUnloaded>,
     generator: Res<WorldGenerator>,
+    shapes: Res<Shapes>,
     world: Res<WorldSettings>,
     settings: Res<StreamingSettings>,
     budget: Res<StreamingBudget>,
@@ -323,6 +324,7 @@ fn stream(
         center,
         rings.mesh,
         budget.mesh_per_tick,
+        &shapes,
     );
 }
 
@@ -484,6 +486,11 @@ fn above_the_surface(generator: &WorldGenerator, world: &WorldSettings, coord: C
 ///
 /// Requiring all six neighbours before meshing is what lets `generate` get
 /// away with not re-dirtying them; see the comment there.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the last argument is the World's Shape table; bundling the rest \
+              would invent a type used once"
+)]
 fn publish(
     store: &ChunkStore,
     meshes: &mut MeshState,
@@ -492,6 +499,7 @@ fn publish(
     center: ChunkCoord,
     mesh: Extent,
     budget: usize,
+    shapes: &ShapeTable,
 ) {
     let mut sent = 0;
     for &d in &order.offsets {
@@ -521,7 +529,7 @@ fn publish(
 
         ready.write(ChunkMeshReady {
             coord,
-            mesh: mesh_chunk(LitChunk::new(chunk, light), neighbors),
+            mesh: mesh_chunk(LitChunk::new(chunk, light), neighbors, shapes),
         });
         meshes.dirty.remove(&coord);
         meshes.delivered.insert(coord);
@@ -742,6 +750,7 @@ mod tests {
                 .insert_resource(settings)
                 .insert_resource(budget)
                 .insert_resource(WorldGenerator(generator))
+                .init_resource::<Shapes>()
                 .init_resource::<ChunkStore>()
                 .init_resource::<LoadOrder>()
                 .init_resource::<MeshState>()
@@ -887,7 +896,7 @@ mod tests {
             let store = h.store();
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(*coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, *coord), neighbors);
+            let fresh = mesh_chunk(lit(store, *coord), neighbors, &ShapeTable::builtin());
             assert!(
                 same_mesh(held, &fresh),
                 "{coord}: the Client holds a stale mesh ({} quads, should be {})",

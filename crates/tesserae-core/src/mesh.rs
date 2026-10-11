@@ -2,6 +2,7 @@
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
+use crate::shape::ShapeTable;
 use crate::voxel::{MaterialId, Voxel};
 
 /// Chunk edge plus one Voxel of neighbour on each side — exactly what face
@@ -157,16 +158,22 @@ fn corner(d: usize, u: usize, v: usize, plane: f32, au: usize, bv: usize) -> [f3
 /// Mesh one Chunk against its six face neighbours, declining without building
 /// a [`Neighborhood`] where no face can be emitted.
 ///
+/// `shapes` is how a neighbour's Shape is asked what it hides.
+///
 /// The padded copy costs 39 thousand Voxel writes before `greedy_mesh` sees
 /// anything, and a streamed 3D ring asks for a mesh of mostly uniform Chunks.
 /// A `None` neighbour means unknown, not air — the caller is expected to have
 /// all six loaded, and [`Neighborhood::isolated`]'s "outside is air" is a
 /// different question.
-pub fn mesh_chunk(center: LitChunk<'_>, neighbors: [Option<LitChunk<'_>>; 6]) -> ChunkMesh {
+pub fn mesh_chunk(
+    center: LitChunk<'_>,
+    neighbors: [Option<LitChunk<'_>>; 6],
+    shapes: &ShapeTable,
+) -> ChunkMesh {
     if emits_no_faces(center.chunk, neighbors) {
         return ChunkMesh::default();
     }
-    greedy_mesh(&Neighborhood::new(center, neighbors))
+    greedy_mesh(&Neighborhood::new(center, neighbors), shapes)
 }
 
 /// Whether `center` provably emits nothing, from `uniform()` alone.
@@ -210,7 +217,7 @@ fn emits_no_faces(center: &Chunk, neighbors: [Option<LitChunk<'_>>; 6]) -> bool 
 /// lantern splits quads only within the 15 Voxels it reaches.
 type FaceKey = (MaterialId, Light);
 
-pub fn greedy_mesh(n: &Neighborhood) -> ChunkMesh {
+pub fn greedy_mesh(n: &Neighborhood, shapes: &ShapeTable) -> ChunkMesh {
     let mut mesh = ChunkMesh::default();
     let mut mask = vec![None::<FaceKey>; CHUNK_SIZE * CHUNK_SIZE];
 
@@ -233,6 +240,9 @@ pub fn greedy_mesh(n: &Neighborhood) -> ChunkMesh {
 
         for positive in [false, true] {
             let step = if positive { 1 } else { -1 };
+            // Faces come in negative/positive pairs, so flipping the low bit is
+            // the face of the neighbour that looks back at this one.
+            let face = d * 2 + usize::from(positive);
 
             for s in 0..CHUNK_SIZE {
                 mask.fill(None);
@@ -247,7 +257,19 @@ pub fn greedy_mesh(n: &Neighborhood) -> ChunkMesh {
                             continue;
                         }
                         c[d] = s as i32 + step;
-                        if n.at(c[0], c[1], c[2]).is_full_cube() {
+                        // Hidden only if the Voxel across covers this whole
+                        // face. A slab beside a cube hides the cube's face on
+                        // the slab's sealed side and nowhere else.
+                        //
+                        // The cube test comes first and alone because it is
+                        // nearly every answer, and `seals` for all of them
+                        // measured 2-6% slower on `greedy_mesh/solid` and
+                        // `/terrain`. `seals` is the same question, asked of
+                        // the table only for a shaped Voxel.
+                        let across = n.at(c[0], c[1], c[2]);
+                        if across.is_full_cube()
+                            || (across.shape() != 0 && shapes.seals(across, face ^ 1))
+                        {
                             continue;
                         }
                         // The light of the Voxel across the face, not of the
