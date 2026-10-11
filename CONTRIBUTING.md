@@ -126,8 +126,28 @@ paragraph as one unit and let Prettier break the lines.
 **Quick start:**
 
 ```bash
-cargo run -p tesserae
+cargo run -p tesserae --features dev
 ```
+
+`--features dev` adds shader hot-reloading; without it the command still runs,
+and a shader edit then needs a restart. A window opens on nine Chunks of terrain
+you can fly around.
+
+**Controls:**
+
+| key                   | does                                                   |
+| --------------------- | ------------------------------------------------------ |
+| click                 | grab the cursor — mouse look does nothing until you do |
+| `Esc`                 | release the cursor                                     |
+| mouse                 | look                                                   |
+| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away  |
+| `Space` / `Left Ctrl` | up and down                                            |
+| `Shift`               | sprint, 5x                                             |
+| scroll                | movement speed, 0.5 to 64 m/s                          |
+| `R`                   | back to the spawn point                                |
+
+There is no zoom. Field of view is fixed, and in a fly camera the distance to
+what you are looking at is `W`/`S`.
 
 ### The dev loop
 
@@ -146,17 +166,25 @@ opt-level = 3
 
 What each kind of change costs:
 
-| you edit                                         | what happens                                                                  |
-| ------------------------------------------------ | ----------------------------------------------------------------------------- |
-| a `.wesl` / `.wgsl` shader, a texture, any asset | **hot-reloads in the running app** — no rebuild, no restart                   |
-| a mod or the demo game under `games/`            | rebuild the `.wasm`, reload the mod — **no engine rebuild**                   |
-| `tesserae` (the Bevy app)                        | rebuild, restart (~5–20s warm)                                                |
-| `tesserae-core`                                  | rebuild everything downstream, restart — it is a dependency of the whole tree |
+| you edit                              | what happens                                                                  |
+| ------------------------------------- | ----------------------------------------------------------------------------- |
+| a `.wesl` shader                      | **hot-reloads in the running app** — no rebuild, no restart                   |
+| a mod or the demo game under `games/` | rebuild the `.wasm`, reload the mod — **no engine rebuild**                   |
+| `tesserae` (the Bevy app)             | rebuild, restart (~5–20s warm)                                                |
+| `tesserae-core`                       | rebuild everything downstream, restart — it is a dependency of the whole tree |
 
-Asset hot-reloading needs Bevy's `file_watcher` feature, which is enabled in the
-dev profile. Shader hot reload is the reason look packs are authored as WGSL
-assets rather than compiled in: a pack author edits and sees the result
-immediately.
+Shader hot-reloading needs the `dev` feature, which turns on Bevy's
+`embedded_watcher`. The engine's own shaders are embedded in the binary, as
+`bevy_pbr`'s are, so `embedded_watcher` rather than `file_watcher` is what
+watches them.
+
+Textures and other on-disk assets do **not** hot-reload, because none exist:
+there is no `assets/` directory, nothing is loaded from disk, and the release
+workflow packages the bare binary. Where assets ship is settled with the
+look-pack API in step 9, and `bevy/file_watcher` joins the `dev` feature then.
+
+Hot reload is the reason look packs ship their WESL as an asset rather than
+compiled in: a pack author edits and sees the result immediately.
 
 ### Working on `tesserae-core`
 

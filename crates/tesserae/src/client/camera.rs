@@ -1,17 +1,26 @@
-//! A fly camera: WASD to move, mouse to look, shift to sprint, Esc to release
-//! the cursor.
+//! A fly camera: WASD to move, mouse to look, shift to sprint, scroll to change
+//! speed, R to return to the spawn point, Esc to release the cursor.
 //!
 //! Hand-rolled rather than a dependency so the Client's one piece of input
 //! handling stays small enough to read, and so it is already expressed in
 //! metres per second when the player controller replaces it.
 
-use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::f32::consts::FRAC_PI_2;
 
 /// Just inside ±90°, where the yaw/pitch basis degenerates.
 const PITCH_LIMIT: f32 = FRAC_PI_2 - 1e-3;
+
+/// Metres per second. The lower bound is a slow walk for inspecting a face; the
+/// upper is a Cell every half second, past which Chunks cannot be meshed fast
+/// enough to keep up once streaming exists.
+const SPEED_RANGE: std::ops::RangeInclusive<f32> = 0.5..=64.0;
+
+/// Multiplier per scroll line, so the range above crosses in about fifty
+/// notches regardless of where in it you start.
+const SPEED_PER_NOTCH: f32 = 1.1;
 
 #[derive(Component)]
 pub struct FlyCamera {
@@ -51,8 +60,52 @@ impl FlyCamera {
     }
 }
 
+/// Where [`reset`] returns to. Set by whatever spawns the camera, so the
+/// Server's spawn point can own it once step 3 exists.
+#[derive(Component, Clone, Copy)]
+pub struct CameraHome(pub Transform);
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, (grab_cursor, look, fly).chain());
+    app.add_systems(
+        Update,
+        (grab_cursor, reset, look, adjust_speed, fly).chain(),
+    );
+}
+
+fn reset(
+    keys: Res<ButtonInput<KeyCode>>,
+    camera: Single<(&mut Transform, &mut FlyCamera, &CameraHome)>,
+) {
+    if !keys.just_pressed(KeyCode::KeyR) {
+        return;
+    }
+    let (mut transform, mut fly, home) = camera.into_inner();
+    *transform = home.0;
+    let restored = FlyCamera::looking_along(*home.0.forward());
+    fly.yaw = restored.yaw;
+    fly.pitch = restored.pitch;
+}
+
+/// Scroll changes how fast you fly rather than the field of view: in a fly
+/// camera the distance to what you are looking at is the thing you actually
+/// want to control, and W/S already do that. Multiplicative so a notch means
+/// the same thing when crawling along a face and when crossing the grid.
+fn adjust_speed(
+    scroll: Res<AccumulatedMouseScroll>,
+    cursor: Single<&CursorOptions, With<PrimaryWindow>>,
+    mut fly: Single<&mut FlyCamera>,
+) {
+    if cursor.grab_mode == CursorGrabMode::None || scroll.delta.y == 0.0 {
+        return;
+    }
+    // A trackpad reports pixels and a wheel reports lines; without this a
+    // trackpad flick would cross the whole range in one gesture.
+    let notches = match scroll.unit {
+        MouseScrollUnit::Line => scroll.delta.y,
+        MouseScrollUnit::Pixel => scroll.delta.y / 16.0,
+    };
+    fly.speed =
+        (fly.speed * SPEED_PER_NOTCH.powf(notches)).clamp(*SPEED_RANGE.start(), *SPEED_RANGE.end());
 }
 
 fn grab_cursor(

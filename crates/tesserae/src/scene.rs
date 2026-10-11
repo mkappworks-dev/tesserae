@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{Chunk, Neighborhood, greedy_mesh, testgen};
 
-use crate::client::camera::FlyCamera;
+use crate::client::camera::{CameraHome, FlyCamera};
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -90,9 +90,11 @@ fn spawn_camera(mut commands: Commands, world: Res<WorldSettings>) {
     let target = Vec3::new(0.5, 0.6, 0.5) * cell;
     let eye = target + Vec3::new(-2.3, 1.3, -2.3) * cell;
 
+    let pose = Transform::from_translation(eye).looking_at(target, Vec3::Y);
     commands.spawn((
         Camera3d::default(),
-        Transform::from_translation(eye).looking_at(target, Vec3::Y),
+        pose,
         FlyCamera::looking_along(target - eye),
+        CameraHome(pose),
     ));
 }
