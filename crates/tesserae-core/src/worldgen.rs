@@ -255,6 +255,20 @@ mod tests {
         }
     }
 
+    /// The contract the shaped-Voxel cap rests on: terrain is cubes. A generator
+    /// that places stairs or slabs - slope smoothing is the obvious use - changes
+    /// this test deliberately and stays under `MAX_SHAPED_PER_CHUNK`, because
+    /// nothing downstream polices it. See `crate::shape::MAX_SHAPED_PER_CHUNK`.
+    #[test]
+    fn generation_places_no_shaped_voxels() {
+        let g = generator(1.0);
+        for cy in -1..5 {
+            for (cx, cz) in [(0, 0), (3, -2), (-5, 7), (11, 11)] {
+                assert_eq!(g.chunk(cx, cy, cz).shaped_count(), 0, "{cx} {cy} {cz}");
+            }
+        }
+    }
+
     #[test]
     fn generation_is_deterministic() {
         let g = generator(1.0);

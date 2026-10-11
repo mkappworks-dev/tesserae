@@ -12,9 +12,12 @@ use tesserae_core::ChunkMesh;
 /// Which Material each vertex belongs to, for the chunk [`MaterialExtension`].
 ///
 /// A high id keeps custom attributes sorted after Bevy's built-ins and away from
-/// their ids. `Uint32` rather than a narrower type because the Voxel format
-/// already budgets 16 bits for Material and shaped Voxels will want the Shape
-/// alongside it.
+/// their ids. `Uint32` with the Material in the low 16 bits.
+///
+/// The high 16 are spare and stay that way. A Shape's geometry is already in the
+/// mesh, so nothing in the shader varies by it; what would earn the bits is a
+/// look pack that shades by Shape (wind in a fence, say), which is step 9's
+/// decision and not worth bytes per vertex before then.
 ///
 /// [`MaterialExtension`]: bevy::pbr::MaterialExtension
 pub const ATTRIBUTE_MATERIAL: MeshVertexAttribute =
@@ -27,9 +30,8 @@ pub const ATTRIBUTE_MATERIAL: MeshVertexAttribute =
 /// flood-fill and this attribute is how it reaches the shader.
 ///
 /// `Uint32` for one byte of payload. Folding it into [`ATTRIBUTE_MATERIAL`]'s
-/// spare 16 bits would save four bytes a vertex, but those bits are reserved
-/// for the Shape that build-order step 5 adds, and four bytes is noise against
-/// the 32 in position, normal and UV.
+/// spare 16 bits would save four bytes a vertex, which is noise against the 32 in
+/// position, normal and UV and not worth entangling two attributes for.
 pub const ATTRIBUTE_LIGHT: MeshVertexAttribute =
     MeshVertexAttribute::new("Vertex_Light", 2_084_155_062, VertexFormat::Uint32);
 

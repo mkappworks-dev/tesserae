@@ -110,9 +110,10 @@ the one thing not taken from the grid: they are the declared boxes, rotated by
 the same matrix, because a collision shape may legitimately differ from the
 visible one (a pressure plate you walk through is `collision: Some(vec![])`).
 
-The cost is a few thousand cell visits per Shape per Orientation at
-registration, microseconds for the built-ins and a few milliseconds if a Mod
-registers the full 255.
+The cost, measured, is about 1.2 ms per Shape (`shape_table_builtin` is 4.8 ms
+for the four built-ins), paid once at load: roughly a third of a second if a Mod
+registers all 255. Orientations whose rotated grids come out identical could
+share a derivation if that ever matters; it does not today.
 
 ### 4. Occlusion is per face, by coverage, and never culls the unproven
 
@@ -370,10 +371,13 @@ Chunk of 32768 stairs is hundreds of thousands of quads.
   shipped, so every bench input that comes from it is unchanged, and a test pins
   `shaped_count() == 0` over a sweep of generated Chunks as the contract: a
   later generator that wants slope-smoothing stairs budgets under the cap.
-- `MAX_SHAPED_PER_CHUNK` lives in core. Its value is whatever keeps a Chunk
-  **at** the cap within +50% of `mesh_chunk/straddling` (the worst tick has 12
-  meshes in it); ticket 03 measures and records it, with 1024 (3% of a Chunk) as
-  the starting guess.
+- `MAX_SHAPED_PER_CHUNK` lives in core, and is 1024 (3% of a Chunk). The rule
+  that sized it: a Chunk **at** the cap meshes within +50% of
+  `mesh_chunk/straddling`, because a tick has twelve meshes in it. Measured,
+  terrain with a stair on top of every column (1024 of them) takes 527 us
+  against 350 us for the terrain alone, which is 41%; a Chunk of nothing but
+  stairs takes 5.2 ms. Pass 2 is linear at about 170 ns a stair, so 2048 would be
+  about +95% and fails it.
 - The **edit path** enforces it. At the cap a Place is rejected with
   `RejectReason::TooManyShaped` and the Client says so. Rejecting is chosen over
   silently placing a cube, which would change what the player built without

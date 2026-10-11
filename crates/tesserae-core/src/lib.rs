@@ -18,7 +18,8 @@ pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use light::{Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_chunk, relight};
 pub use mesh::{ChunkMesh, LitChunk, Neighborhood, greedy_mesh, mesh_chunk};
 pub use shape::{
-    NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,
+    MAX_SHAPED_PER_CHUNK, NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef,
+    ShapeError, ShapeTable,
 };
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{Worldgen, WorldgenParams};

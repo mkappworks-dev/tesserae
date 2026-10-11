@@ -1,8 +1,10 @@
-//! Greedy meshing: merge coplanar faces of identical full cubes into quads.
+//! Meshing in two passes. Pass 1 greedy-merges coplanar faces of identical full
+//! cubes into quads; pass 2 gives each shaped Voxel the geometry of its own
+//! Shape, which cannot merge with anything.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
-use crate::shape::ShapeTable;
+use crate::shape::{SUBDIV, ShapeQuad, ShapeTable};
 use crate::voxel::{MaterialId, Voxel};
 
 /// Chunk edge plus one Voxel of neighbour on each side — exactly what face
@@ -46,6 +48,7 @@ impl<'a> LitChunk<'a> {
 pub struct Neighborhood {
     voxels: Box<[Voxel]>,
     light: Box<[Light]>,
+    shaped: bool,
 }
 
 impl Neighborhood {
@@ -89,13 +92,24 @@ impl Neighborhood {
             }
         }
 
-        Neighborhood { voxels, light }
+        Neighborhood {
+            voxels,
+            light,
+            shaped: center.chunk.may_contain_shaped(),
+        }
     }
 
     /// Treats everything outside the Chunk as air. For tests, benches, and the
     /// edge of generated world.
     pub fn isolated(center: LitChunk<'_>) -> Self {
         Self::new(center, [None; 6])
+    }
+
+    /// Whether the centre might hold a shaped Voxel, from its palette. Only the
+    /// centre emits geometry, so a shaped Voxel in the shell is irrelevant here:
+    /// it hides or does not hide a face, which pass 1 and pass 2 ask of `at`.
+    pub fn may_contain_shaped(&self) -> bool {
+        self.shaped
     }
 
     #[inline]
@@ -130,8 +144,9 @@ pub struct ChunkMesh {
     /// level, and thousands of them as GPU point lights is not viable.
     pub light: Vec<u32>,
     pub indices: Vec<u32>,
-    /// Non-cube Voxels this pass ignored. The second mesher pass consumes them.
-    pub skipped_shaped: u32,
+    /// Shaped Voxels pass 2 gave geometry to, including those whose every face
+    /// turned out to be hidden.
+    pub shaped_voxels: u32,
 }
 
 impl ChunkMesh {
@@ -220,17 +235,6 @@ type FaceKey = (MaterialId, Light);
 pub fn greedy_mesh(n: &Neighborhood, shapes: &ShapeTable) -> ChunkMesh {
     let mut mesh = ChunkMesh::default();
     let mut mask = vec![None::<FaceKey>; CHUNK_SIZE * CHUNK_SIZE];
-
-    for y in 0..CHUNK_SIZE as i32 {
-        for z in 0..CHUNK_SIZE as i32 {
-            for x in 0..CHUNK_SIZE as i32 {
-                let v = n.at(x, y, z);
-                if !v.is_air() && !v.is_full_cube() {
-                    mesh.skipped_shaped += 1;
-                }
-            }
-        }
-    }
 
     for d in 0..3usize {
         // (d, u, v) is a cyclic permutation of (x, y, z), so u cross v = d and
@@ -365,5 +369,96 @@ pub fn greedy_mesh(n: &Neighborhood, shapes: &ShapeTable) -> ChunkMesh {
         }
     }
 
+    // Terrain has no shaped entry in its palette and so never pays for the scan.
+    if n.may_contain_shaped() {
+        mesh_shaped(n, shapes, &mut mesh);
+    }
     mesh
+}
+
+/// Pass 2: each shaped Voxel's own exposed surface, appended to pass 1's.
+///
+/// A quad on the cell's boundary looks out at the neighbour, so it is hidden
+/// when the neighbour covers its rectangle and otherwise lit by the
+/// neighbour's light, exactly as a pass-1 face is. Any other quad - a stair's
+/// tread - looks into the Voxel's own air and is lit by the Voxel's own light,
+/// which a partly open Voxel has and a cube does not.
+///
+/// Light is one flat level per quad, as in pass 1, so the shader and the
+/// vertex layout are untouched. Nothing merges across Voxels: that is what
+/// "cannot merge with anything" means.
+fn mesh_shaped(n: &Neighborhood, shapes: &ShapeTable, mesh: &mut ChunkMesh) {
+    for y in 0..CHUNK_SIZE as i32 {
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                let voxel = n.at(x, y, z);
+                if !voxel.is_shaped() {
+                    continue;
+                }
+                mesh.shaped_voxels += 1;
+                let own = n.light_at(x, y, z);
+
+                for q in shapes.quads(voxel) {
+                    let face = q.face as usize;
+                    let lit = if q.on_boundary() {
+                        let mut c = [x, y, z];
+                        c[face / 2] += if face % 2 == 1 { 1 } else { -1 };
+                        let across = n.at(c[0], c[1], c[2]);
+                        if shapes
+                            .coverage(across, face ^ 1)
+                            .contains_rect(q.u0, q.v0, q.u1, q.v1)
+                        {
+                            continue;
+                        }
+                        n.light_at(c[0], c[1], c[2])
+                    } else {
+                        own
+                    };
+                    push_shaped_quad(mesh, [x, y, z], q, voxel.material(), lit);
+                }
+            }
+        }
+    }
+}
+
+/// The same corner order, winding and UV axes as pass 1, so a pass-2 quad is
+/// indistinguishable from a merged one downstream.
+///
+/// UVs are the position inside the Voxel, so a half-height slab side shows the
+/// lower half of the texture rather than a squashed whole one, and a tiling
+/// sampler still repeats per Voxel.
+fn push_shaped_quad(
+    mesh: &mut ChunkMesh,
+    cell: [i32; 3],
+    q: &ShapeQuad,
+    material: MaterialId,
+    lit: Light,
+) {
+    const UNIT: f32 = 1.0 / SUBDIV as f32;
+    let face = q.face as usize;
+    let positive = face % 2 == 1;
+    let (d, u, v) = (face / 2, (face / 2 + 1) % 3, (face / 2 + 2) % 3);
+
+    let corners = if positive {
+        [(q.u0, q.v0), (q.u1, q.v0), (q.u1, q.v1), (q.u0, q.v1)]
+    } else {
+        [(q.u0, q.v0), (q.u0, q.v1), (q.u1, q.v1), (q.u1, q.v0)]
+    };
+    let mut normal = [0.0f32; 3];
+    normal[d] = if positive { 1.0 } else { -1.0 };
+
+    let base = mesh.positions.len() as u32;
+    for (cu, cv) in corners {
+        let mut p = [cell[0] as f32, cell[1] as f32, cell[2] as f32];
+        p[d] += q.plane as f32 * UNIT;
+        p[u] += cu as f32 * UNIT;
+        p[v] += cv as f32 * UNIT;
+        mesh.positions.push(p);
+        mesh.normals.push(normal);
+        mesh.uvs.push([cu as f32 * UNIT, cv as f32 * UNIT]);
+        mesh.materials.push(material as u32);
+        mesh.light.push(lit.packed() as u32);
+    }
+    mesh.indices
+        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }

@@ -3,8 +3,8 @@ use std::hint::black_box;
 use std::sync::OnceLock;
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Neighborhood, ShapeTable, Voxel, Worldgen,
-    WorldgenParams, greedy_mesh, mesh_chunk, testgen,
+    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
+    SHAPE_STAIR, ShapeTable, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk, testgen,
 };
 
 fn shapes() -> &'static ShapeTable {
@@ -31,6 +31,31 @@ fn worldgen() -> (Worldgen, i32, i32, i32) {
     let sky = ((params.sea_level_m + params.relief_m) / cell) as i32 + 2;
     let deep = (params.sea_level_m / cell) as i32 - 2;
     (g, straddling, sky, deep)
+}
+
+/// Terrain whose top `n` Voxels - the exposed ones, one per column - are stairs
+/// facing every which way: pass 2 as it would meet a building, which is more
+/// than a Chunk is allowed to hold once `n` passes `MAX_SHAPED_PER_CHUNK`.
+fn terrain_with_stairs(n: usize) -> Chunk {
+    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    let mut placed = 0;
+    'columns: for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            if placed == n {
+                break 'columns;
+            }
+            let Some(y) = (0..CHUNK_SIZE)
+                .rev()
+                .find(|&y| !chunk.get(x, y, z).is_air())
+            else {
+                continue;
+            };
+            let o = Orientation::from_bits(((x * 7 + z * 3) % 24) as u8).unwrap();
+            chunk.set(x, y, z, Voxel::shaped(testgen::STONE, SHAPE_STAIR, o));
+            placed += 1;
+        }
+    }
+    chunk
 }
 
 fn mesher(c: &mut Criterion) {
@@ -70,6 +95,23 @@ fn mesher(c: &mut Criterion) {
     let gradient_nb = Neighborhood::isolated(LitChunk::new(&terrain, &gradient));
     group.bench_function("terrain_light_gradient", |b| {
         b.iter(|| black_box(greedy_mesh(black_box(&gradient_nb), shapes())))
+    });
+
+    // Pass 2, which terrain never reaches. The first is the most a Chunk may
+    // hold; the second is why there is a cap.
+    let stairs = terrain_with_stairs(MAX_SHAPED_PER_CHUNK);
+    let stairs_nb = Neighborhood::isolated(LitChunk::new(&stairs, &sky));
+    group.bench_function("terrain_stairs_at_cap", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&stairs_nb), shapes())))
+    });
+    let all = Chunk::filled(Voxel::shaped(
+        testgen::STONE,
+        SHAPE_STAIR,
+        Orientation::IDENTITY,
+    ));
+    let all_nb = Neighborhood::isolated(LitChunk::new(&all, &sky));
+    group.bench_function("all_stairs", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&all_nb), shapes())))
     });
 
     group.finish();
@@ -226,8 +268,17 @@ fn generation(c: &mut Criterion) {
     });
 }
 
+/// Registering the built-in Shapes: derived once at load, so the number only has
+/// to be small next to starting up. A Mod registering all 255 pays 64 times it.
+fn shapes_table(c: &mut Criterion) {
+    c.bench_function("shape_table_builtin", |b| {
+        b.iter(|| black_box(ShapeTable::builtin()))
+    });
+}
+
 criterion_group!(
     benches,
+    shapes_table,
     mesher,
     streamed_mesher,
     neighborhood,

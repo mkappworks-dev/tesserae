@@ -31,6 +31,21 @@ pub const ORIENTATIONS: usize = 24;
 /// time or collision work.
 pub const MAX_BOXES: usize = 16;
 
+/// The most shaped Voxels a Chunk may hold.
+///
+/// A shaped Voxel emits up to about a dozen quads that nothing merges, where a
+/// cube merges into almost nothing, so a Chunk of them is hundreds of thousands
+/// of quads. Enforced where Voxels come from - the edit path rejects a Place
+/// that would cross it, and worldgen places none - and not by the mesher,
+/// which dropping geometry silently would make a hole nobody could explain.
+///
+/// Sized by measurement (`cargo bench -p tesserae-core`, Apple M5): terrain with
+/// a stair on top of every column, which is 1024 of them, meshes in 527 us
+/// against 350 us for the terrain alone - 41% of a `mesh_chunk/straddling`, and
+/// the rule was 50%, because a tick has twelve meshes in it. A Chunk of nothing
+/// but stairs takes 5.2 ms.
+pub const MAX_SHAPED_PER_CHUNK: usize = 1024;
+
 /// Set in [`ShapeTable::light_mask`] for a shaped Voxel, meaning light is also
 /// stopped from leaving through the sealed faces. A full cube lacks it: a cube
 /// only ever holds its own emission, which leaves freely.

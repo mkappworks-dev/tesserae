@@ -1,6 +1,6 @@
 # Mesher pass 2
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 The step's title. Spec decisions 4, 6 and 11.
@@ -53,3 +53,19 @@ The step's title. Spec decisions 4, 6 and 11.
   `light_does_not_revive_either_declined_case` still hold; a uniform shaped
   Chunk meshes and is not an occluder.
 - Worldgen emits no shaped Voxel in a sweep of Chunks.
+
+## Comments
+
+The hole-free property test was mutation-checked before being trusted: culling
+against any non-air neighbour (too eager) fails it with 4008 holes in scene 0,
+and a quad one sub-cell short fails it with 898.
+
+The oracle takes its geometry from `ShapeTable::collision`, which rotates the
+declared boxes by their corners, while the quads come from rotating the
+occupancy grid cell by cell. They are two routes to the same shape, so the test
+also checks that they agree.
+
+Measured on the M5 against the step-4 baseline: `greedy_mesh/terrain` -5.8%,
+because the unconditional shaped-Voxel count loop is gone. The cap rule gave
+1024 (see `MAX_SHAPED_PER_CHUNK`). Registering the built-ins takes 4.8 ms, not
+the microseconds the spec guessed; the spec is corrected.
