@@ -16,13 +16,14 @@ use bevy::render::render_resource::{
 };
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use crate::client::chunk_mesh::ATTRIBUTE_MATERIAL;
+use crate::client::chunk_mesh::{ATTRIBUTE_LIGHT, ATTRIBUTE_MATERIAL};
 
 /// What to spawn in `MeshMaterial3d`.
 pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>;
 
 /// Locations 0 to 7 are `bevy_pbr`'s own vertex attributes.
 const MATERIAL_SHADER_LOCATION: u32 = 10;
+const LIGHT_SHADER_LOCATION: u32 = 11;
 
 /// Enough for `testgen`'s three Materials with room to look at them. The real
 /// count is a Mod's business and arrives with the look-pack API in step 9.
@@ -50,6 +51,10 @@ impl Default for ChunkMaterialExtension {
         palette[tesserae_core::testgen::STONE as usize] = srgb(0.52, 0.52, 0.55);
         palette[tesserae_core::testgen::DIRT as usize] = srgb(0.42, 0.29, 0.18);
         palette[tesserae_core::testgen::GRASS as usize] = srgb(0.33, 0.56, 0.24);
+        // The one Material that emits. Near-white, because the shader tints a
+        // block-lit face by its own palette colour and a saturated emitter
+        // would wash its own glow with its albedo twice over.
+        palette[tesserae_core::worldgen::LANTERN as usize] = srgb(0.96, 0.89, 0.72);
         ChunkMaterialExtension { palette }
     }
 }
@@ -82,14 +87,18 @@ impl MaterialExtension for ChunkMaterialExtension {
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
             Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
             ATTRIBUTE_MATERIAL.at_shader_location(MATERIAL_SHADER_LOCATION),
+            ATTRIBUTE_LIGHT.at_shader_location(LIGHT_SHADER_LOCATION),
         ])?];
 
-        // Reaches the shader as `constants::CHUNK_PALETTE_LEN`, so the uniform's
-        // length cannot drift from `PALETTE_LEN`.
-        let palette_len = ShaderDefVal::UInt("CHUNK_PALETTE_LEN".into(), PALETTE_LEN as u32);
-        descriptor.vertex.shader_defs.push(palette_len.clone());
+        // Reach the shader as `constants::*`, so neither the uniform's length
+        // nor the light scale can drift from the Rust side.
+        let defs = [
+            ShaderDefVal::UInt("CHUNK_PALETTE_LEN".into(), PALETTE_LEN as u32),
+            ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
+        ];
+        descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
-            fragment.shader_defs.push(palette_len);
+            fragment.shader_defs.extend_from_slice(&defs);
         }
         Ok(())
     }
@@ -114,6 +123,7 @@ mod tests {
             tesserae_core::testgen::STONE,
             tesserae_core::testgen::DIRT,
             tesserae_core::testgen::GRASS,
+            tesserae_core::worldgen::LANTERN,
         ];
         for id in used {
             assert_ne!(palette[id as usize], missing, "Material {id} unset");
@@ -128,5 +138,13 @@ mod tests {
     #[test]
     fn every_material_id_the_shader_can_index_has_a_colour() {
         assert_eq!(ChunkMaterialExtension::default().palette.len(), PALETTE_LEN);
+    }
+
+    /// The shader clamps the Material index to the palette's last entry, so a
+    /// Material past the end silently renders as whatever sits there. Every id
+    /// `worldgen` can emit has to be inside it.
+    #[test]
+    fn no_material_worldgen_emits_falls_outside_the_palette() {
+        assert!((tesserae_core::worldgen::LANTERN as usize) < PALETTE_LEN);
     }
 }

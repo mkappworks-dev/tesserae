@@ -1,5 +1,5 @@
 // The chunk material: StandardMaterial lit by bevy_pbr, tinted by the Voxel's
-// Material index.
+// Material index and gated by the flood-fill's two light channels.
 //
 // A vertex stage is needed as well as a fragment stage only because bevy_pbr's
 // VertexOutput is a fixed struct: there is no way to forward an extra per-vertex
@@ -19,16 +19,31 @@ import bevy_pbr::render::{
 @group(constants::MATERIAL_BIND_GROUP) @binding(100)
 var<uniform> palette: array<vec4<f32>, constants::CHUNK_PALETTE_LEN>;
 
-// Locations 0-7 are bevy_pbr's; the greedy mesher's Material index takes 10.
-// Attributes arrive uncompressed because chunk_mesh_to_mesh leaves Bevy's
-// per-attribute vertex compression off. Turning it on needs decompress_vertex
-// here.
+// How a 0-15 light level becomes radiance. Minecraft's own curve, close enough:
+// each level down is a fixed fraction of the one above, which keeps the dim end
+// of the range usable instead of crushing it the way a linear ramp does.
+const LIGHT_FALLOFF: f32 = 0.8;
+
+// A lantern's colour. Warm, because every light a player places is a flame
+// until a Mod says otherwise. A WESL const and not a uniform: step 9's
+// look-pack API is where a pack gets to choose this.
+const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
+
+// How bright a full-strength block light is, in the same units bevy_pbr's
+// exposure works in.
+const BLOCK_LIGHT_STRENGTH: f32 = 4.0;
+
+// Locations 0-7 are bevy_pbr's; the greedy mesher's Material index takes 10 and
+// its packed light 11. Attributes arrive uncompressed because
+// chunk_mesh_to_mesh leaves Bevy's per-attribute vertex compression off.
+// Turning it on needs decompress_vertex here.
 struct ChunkVertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) uv: vec2<f32>,
     @location(10) material: u32,
+    @location(11) light: u32,
 }
 
 // Mirrors bevy_pbr's VertexOutput, which the fragment stage rebuilds from this.
@@ -39,6 +54,20 @@ struct ChunkVertexOutput {
     @location(2) uv: vec2<f32>,
     @location(6) @interpolate(flat) instance_index: u32,
     @location(10) @interpolate(flat) material: u32,
+    @location(11) @interpolate(flat) light: u32,
+}
+
+// Flat, like the Material index: every vertex of a greedy quad carries the same
+// level because light is part of the merge key, so interpolating would only
+// blur the seam between two quads that deliberately did not merge.
+fn light_level(packed: u32, shift: u32) -> f32 {
+    let level = (packed >> shift) & constants::CHUNK_MAX_LIGHT;
+    // Level 0 is not 0.8^15, it is nothing. Without this, a sealed cave would
+    // sit at four percent of full brightness and never reach black.
+    if level == 0u {
+        return 0.0;
+    }
+    return pow(LIGHT_FALLOFF, f32(constants::CHUNK_MAX_LIGHT - level));
 }
 
 @vertex
@@ -55,6 +84,7 @@ fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
     out.uv = in.uv;
     out.instance_index = in.instance_index;
     out.material = in.material;
+    out.light = in.light;
     return out;
 }
 
@@ -75,6 +105,35 @@ fn fragment(
     // Multiplied rather than assigned so the base material's base_color still
     // works as a whole-chunk tint.
     pbr_input.material.base_color *= palette[min(in.material, constants::CHUNK_PALETTE_LEN - 1u)];
+
+    // Sky light is how much of the sky dome and the sun this face can see, so it
+    // drives bevy_pbr's own two occlusion inputs rather than being multiplied
+    // into base_color the way Minecraft does it. That keeps albedo as albedo and
+    // leaves the BRDF working.
+    //
+    // Both of them, not one. diffuse_occlusion alone would leave the sun
+    // leaking into a roofed space, because the shadow map has no idea the roof
+    // is there once the fragment is past the last cascade;
+    // directional_shadow_factor alone would leave the ambient dome lighting a
+    // cave. pbr_types.wesl's own doc on that field says "use this for custom
+    // shadow maps", which is exactly what a sky-light flood-fill is.
+    let sky = light_level(in.light, 4u);
+    pbr_input.diffuse_occlusion *= vec3<f32>(sky);
+    pbr_input.directional_shadow_factor *= sky;
+
+    // Block light is a local source, so it is emissive: tinted by the Voxel's
+    // own palette colour, so a face a lantern reaches still shows its Material
+    // instead of turning into a flat glow. Alpha 1.0 puts it through exposure
+    // with the rest of the lighting.
+    let block = light_level(in.light, 0u);
+    // rgb only: emissive.a selects whether exposure applies, and adding to it
+    // would push it past 1.0, where bevy_pbr's mix() extrapolates.
+    pbr_input.material.emissive = vec4<f32>(
+        pbr_input.material.emissive.rgb
+            + pbr_input.material.base_color.rgb * BLOCK_LIGHT_TINT * block * BLOCK_LIGHT_STRENGTH,
+        pbr_input.material.emissive.a,
+    );
+
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material.flags,
         pbr_input.material.alpha_cutoff,

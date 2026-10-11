@@ -1,6 +1,6 @@
 # Light in the mesher
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Light becomes part of the greedy merge key and a vertex attribute on the
@@ -49,3 +49,11 @@ mesher benches compare against, and changing it retires every earlier number.
   Voxel in front of the face, not of the Voxel the face belongs to.
 - `light.len() == positions.len()`.
 - A face on a Chunk boundary is lit from the neighbour's light, not from 0.
+
+## Comments
+
+`Neighborhood::new`'s six `if let Some(n)` blocks became a table of
+`(face, where it lands, which cell of its own to read)`, because writing
+each face twice — once for the Voxel shell and once for the light shell —
+would have been twelve near-identical blocks and twelve chances to transpose a
+coordinate.

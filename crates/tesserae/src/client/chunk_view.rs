@@ -117,9 +117,10 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
         Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // A flat fill standing in for sky light. Without it every face the sun does
-    // not reach is black, which hides the Materials on vertical faces — the only
-    // place Dirt and Stone are visible at all. Step 4's flood-fill replaces it.
+    // The sky dome's radiance, no longer a flat fill: the chunk shader gates it
+    // per face by the flood-fill's sky channel, so a face that cannot see the
+    // sky does not receive it. The sun's own occlusion is the shadow map plus
+    // the same sky channel; see `render/chunk_material.wesl`.
     ambient.brightness = 900.0;
 }
 
@@ -151,7 +152,8 @@ fn spawn_camera(mut commands: Commands, spawn: Res<crate::server::world_state::S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tesserae_core::{Chunk, Voxel, mesh_chunk, worldgen};
+    use tesserae_core::light::{Light, MAX_LIGHT};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, Voxel, mesh_chunk, worldgen};
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
     /// assets and messages, and `DefaultPlugins` wants a window.
@@ -173,9 +175,11 @@ mod tests {
     fn geometry() -> tesserae_core::ChunkMesh {
         let solid = Chunk::filled(Voxel::cube(worldgen::STONE));
         let air = Chunk::air();
-        let mut neighbors = [Some(&solid); 6];
-        neighbors[0] = Some(&air);
-        let mesh = mesh_chunk(&solid, neighbors);
+        let dark = ChunkLight::dark();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mut neighbors = [Some(LitChunk::new(&solid, &dark)); 6];
+        neighbors[0] = Some(LitChunk::new(&air, &sky));
+        let mesh = mesh_chunk(LitChunk::new(&solid, &dark), neighbors);
         assert!(!mesh.is_empty(), "the fixture must have geometry");
         mesh
     }

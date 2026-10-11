@@ -1,6 +1,6 @@
 # The vertex attribute and the shader
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 What the Client does with the baked light, and the end of the flat ambient

@@ -1,9 +1,21 @@
-use tesserae_core::mesh::{NEG_X, POS_X};
-use tesserae_core::{CHUNK_SIZE, Chunk, Neighborhood, Voxel, greedy_mesh, mesh_chunk, testgen};
+use tesserae_core::light::{Channel, Light, MAX_LIGHT, transmitted};
+use tesserae_core::mesh::{NEG_X, NEG_Y, POS_X};
+use tesserae_core::{
+    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Neighborhood, Voxel, greedy_mesh, mesh_chunk, testgen,
+};
 use tesserae_core::{Worldgen, WorldgenParams};
 
+/// The light the tests that are about *geometry* use. Lent from a `static`
+/// because `LitChunk` borrows it; the light-specific tests below build their
+/// own.
+static DARK: ChunkLight = ChunkLight::dark();
+
+fn unlit(chunk: &Chunk) -> LitChunk<'_> {
+    LitChunk::new(chunk, &DARK)
+}
+
 fn mesh_isolated(chunk: &Chunk) -> tesserae_core::ChunkMesh {
-    greedy_mesh(&Neighborhood::isolated(chunk))
+    greedy_mesh(&Neighborhood::isolated(unlit(chunk)))
 }
 
 #[test]
@@ -67,10 +79,10 @@ fn an_interior_face_between_two_cubes_is_culled() {
 #[test]
 fn a_solid_neighbour_culls_the_boundary_face() {
     let solid = Chunk::filled(Voxel::cube(1));
-    let open = greedy_mesh(&Neighborhood::isolated(&solid));
+    let open = greedy_mesh(&Neighborhood::isolated(unlit(&solid)));
     let closed = greedy_mesh(&Neighborhood::new(
-        &solid,
-        [None, Some(&solid), None, None, None, None],
+        unlit(&solid),
+        [None, Some(unlit(&solid)), None, None, None, None],
     ));
     assert_eq!(open.quad_count(), 6);
     assert_eq!(closed.quad_count(), 5, "+X face should be occluded");
@@ -84,10 +96,10 @@ fn neighbours_are_read_from_the_correct_side() {
     let mut left = Chunk::air();
     left.set(CHUNK_SIZE - 1, 5, 5, Voxel::cube(1));
 
-    let open = greedy_mesh(&Neighborhood::isolated(&center));
+    let open = greedy_mesh(&Neighborhood::isolated(unlit(&center)));
     let closed = greedy_mesh(&Neighborhood::new(
-        &center,
-        [Some(&left), None, None, None, None, None],
+        unlit(&center),
+        [Some(unlit(&left)), None, None, None, None, None],
     ));
     assert_eq!(open.quad_count(), 6);
     assert_eq!(closed.quad_count(), 5, "-X face should be occluded");
@@ -157,6 +169,7 @@ fn vertex_attributes_stay_in_lockstep() {
     assert_eq!(mesh.normals.len(), n);
     assert_eq!(mesh.uvs.len(), n);
     assert_eq!(mesh.materials.len(), n);
+    assert_eq!(mesh.light.len(), n);
     assert_eq!(mesh.indices.len(), n / 4 * 6);
     assert!(mesh.indices.iter().all(|&i| (i as usize) < n));
 }
@@ -180,21 +193,22 @@ fn greedy_meshing_beats_the_naive_count_on_real_terrain() {
 // `mesh_chunk`: the streaming entry point, which declines where it provably can.
 
 /// Six of the same Chunk, for the enclosed case.
-fn enclosed_by(n: &Chunk) -> [Option<&Chunk>; 6] {
-    [Some(n); 6]
+fn enclosed_by(n: &Chunk) -> [Option<LitChunk<'_>>; 6] {
+    [Some(unlit(n)); 6]
 }
 
 #[test]
 fn a_uniform_air_chunk_declines_whatever_its_neighbours_hold() {
     let solid = Chunk::filled(Voxel::cube(1));
-    assert!(mesh_chunk(&Chunk::air(), enclosed_by(&solid)).is_empty());
-    assert!(mesh_chunk(&Chunk::air(), [None; 6]).is_empty());
+    let air = Chunk::air();
+    assert!(mesh_chunk(unlit(&air), enclosed_by(&solid)).is_empty());
+    assert!(mesh_chunk(unlit(&air), [None; 6]).is_empty());
 }
 
 #[test]
 fn a_fully_enclosed_solid_chunk_declines() {
     let solid = Chunk::filled(Voxel::cube(1));
-    assert!(mesh_chunk(&solid, enclosed_by(&solid)).is_empty());
+    assert!(mesh_chunk(unlit(&solid), enclosed_by(&solid)).is_empty());
 }
 
 #[test]
@@ -204,7 +218,7 @@ fn an_unknown_neighbour_is_not_an_occluder() {
     neighbors[0] = None;
     // Unknown, not air: the face has to be emitted or the Chunk is open to a
     // hole once that neighbour streams in.
-    assert_eq!(mesh_chunk(&solid, neighbors).quad_count(), 1);
+    assert_eq!(mesh_chunk(unlit(&solid), neighbors).quad_count(), 1);
 }
 
 #[test]
@@ -212,8 +226,8 @@ fn an_air_neighbour_opens_exactly_one_face() {
     let solid = Chunk::filled(Voxel::cube(1));
     let air = Chunk::air();
     let mut neighbors = enclosed_by(&solid);
-    neighbors[2] = Some(&air);
-    assert_eq!(mesh_chunk(&solid, neighbors).quad_count(), 1);
+    neighbors[2] = Some(unlit(&air));
+    assert_eq!(mesh_chunk(unlit(&solid), neighbors).quad_count(), 1);
 }
 
 #[test]
@@ -222,8 +236,8 @@ fn a_shaped_uniform_chunk_is_not_an_occluder() {
     // stairs must not satisfy the enclosed case.
     let stairs = Chunk::filled(Voxel::new(1, 1, 0));
     let solid = Chunk::filled(Voxel::cube(1));
-    assert!(mesh_chunk(&stairs, enclosed_by(&solid)).is_empty());
-    assert!(mesh_chunk(&solid, enclosed_by(&stairs)).quad_count() > 0);
+    assert!(mesh_chunk(unlit(&stairs), enclosed_by(&solid)).is_empty());
+    assert!(mesh_chunk(unlit(&solid), enclosed_by(&stairs)).quad_count() > 0);
 }
 
 /// The fast path is an optimisation, so where it does not fire the output must
@@ -240,14 +254,162 @@ fn declining_never_changes_the_mesh_it_would_have_produced() {
         g.chunk(0, 0, -1),
         g.chunk(0, 0, 1),
     ];
-    let refs: [Option<&Chunk>; 6] = std::array::from_fn(|i| Some(&neighbors[i]));
+    let refs: [Option<LitChunk>; 6] = std::array::from_fn(|i| Some(unlit(&neighbors[i])));
 
-    let fast = mesh_chunk(&center, refs);
-    let slow = greedy_mesh(&Neighborhood::new(&center, refs));
+    let fast = mesh_chunk(unlit(&center), refs);
+    let slow = greedy_mesh(&Neighborhood::new(unlit(&center), refs));
     assert_eq!(fast.positions, slow.positions);
     assert_eq!(fast.normals, slow.normals);
     assert_eq!(fast.uvs, slow.uvs);
     assert_eq!(fast.materials, slow.materials);
+    assert_eq!(fast.light, slow.light);
     assert_eq!(fast.indices, slow.indices);
     assert_eq!(fast.skipped_shaped, slow.skipped_shaped);
+}
+
+// Light in the merge key. A merged quad has four vertices and cannot carry a
+// different level per Voxel it spans, so light has to be part of what two
+// coplanar faces agree on - which is also why there is no light-only re-mesh
+// path: a light change can change the quad decomposition.
+
+/// A solid Chunk with air above it, so there is one unobstructed top face per
+/// column to put light on.
+fn floor() -> Chunk {
+    let mut chunk = Chunk::air();
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            chunk.set(x, 0, z, Voxel::cube(1));
+        }
+    }
+    chunk
+}
+
+#[test]
+fn uniform_light_costs_the_merge_key_nothing() {
+    let chunk = floor();
+    let flat = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    let lit = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &flat)));
+    let unlit = mesh_isolated(&chunk);
+    assert_eq!(
+        lit.quad_count(),
+        unlit.quad_count(),
+        "flat light must not split a quad"
+    );
+}
+
+#[test]
+fn two_faces_differing_only_in_light_do_not_merge() {
+    let chunk = floor();
+
+    let mut split = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    // One column of the air directly above the floor is dimmer, so the top face
+    // under it cannot join the run beside it.
+    for z in 0..CHUNK_SIZE {
+        split.set(16, 1, z, Light::new(MAX_LIGHT - 1, 0));
+    }
+
+    let flat = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    let merged = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &flat)));
+    let shredded = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &split)));
+    assert!(
+        shredded.quad_count() > merged.quad_count(),
+        "{} quads with a seam vs {} without",
+        shredded.quad_count(),
+        merged.quad_count()
+    );
+}
+
+#[test]
+fn a_face_carries_the_light_of_the_voxel_in_front_of_it() {
+    let chunk = floor();
+    let mut light = ChunkLight::dark();
+    // The air above the floor, which is what a +Y face looks out at. The floor
+    // itself stays dark, as an opaque Voxel does.
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            light.set(x, 1, z, Light::new(9, 4));
+        }
+    }
+
+    let mesh = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &light)));
+    let top: Vec<u32> = (0..mesh.positions.len())
+        .filter(|&i| mesh.normals[i] == [0.0, 1.0, 0.0])
+        .map(|i| mesh.light[i])
+        .collect();
+    assert!(!top.is_empty(), "the floor has a top face");
+    assert!(
+        top.iter().all(|&l| l == Light::new(9, 4).packed() as u32),
+        "a top face must be lit by the air above it, not by its own Voxel: {top:?}"
+    );
+
+    // And every vertex of one quad agrees, since they share the key.
+    for quad in mesh.light.chunks(4) {
+        assert!(quad.iter().all(|l| *l == quad[0]));
+    }
+}
+
+#[test]
+fn a_boundary_face_is_lit_from_the_neighbour_and_not_from_zero() {
+    let mut center = Chunk::air();
+    center.set(CHUNK_SIZE - 1, 5, 5, Voxel::cube(1));
+    let center_light = ChunkLight::dark();
+
+    let above = Chunk::air();
+    let mut above_light = ChunkLight::dark();
+    above_light.set(0, 5, 5, Light::new(MAX_LIGHT, 0));
+
+    let mut neighbors = [None; 6];
+    neighbors[POS_X] = Some(LitChunk::new(&above, &above_light));
+    let mesh = greedy_mesh(&Neighborhood::new(
+        LitChunk::new(&center, &center_light),
+        neighbors,
+    ));
+
+    let across: Vec<u32> = (0..mesh.positions.len())
+        .filter(|&i| mesh.normals[i] == [1.0, 0.0, 0.0])
+        .map(|i| mesh.light[i])
+        .collect();
+    assert_eq!(
+        across,
+        vec![Light::new(MAX_LIGHT, 0).packed() as u32; 4],
+        "the +X face reads the neighbour's light shell"
+    );
+}
+
+/// Light can only split a quad that would otherwise merge, never create or
+/// remove a face, because face visibility is a question about geometry alone.
+/// Both fast paths therefore still hold - checked against deliberately
+/// non-uniform light rather than argued.
+#[test]
+fn light_does_not_revive_either_declined_case() {
+    let air = Chunk::air();
+    let solid = Chunk::filled(Voxel::cube(1));
+
+    let mut lumpy = ChunkLight::dark();
+    lumpy.set(3, 4, 5, Light::new(MAX_LIGHT, MAX_LIGHT));
+    lumpy.set(31, 31, 31, Light::new(1, 2));
+
+    let neighbors: [Option<LitChunk>; 6] = [Some(LitChunk::new(&solid, &lumpy)); 6];
+    assert!(mesh_chunk(LitChunk::new(&air, &lumpy), neighbors).is_empty());
+    assert!(mesh_chunk(LitChunk::new(&solid, &lumpy), neighbors).is_empty());
+}
+
+/// The mesher bakes whatever light it is handed, so it must not quietly reject
+/// a level the solver can legitimately produce.
+#[test]
+fn every_level_the_solver_can_produce_survives_to_a_vertex() {
+    let chunk = floor();
+    let mut light = ChunkLight::dark();
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            let sky = transmitted(Channel::Sky, MAX_LIGHT, NEG_Y);
+            light.set(x, 1, z, Light::new(sky, (x % 16) as u8));
+        }
+    }
+    let mesh = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&chunk, &light)));
+    let seen: std::collections::BTreeSet<u8> = (0..mesh.positions.len())
+        .filter(|&i| mesh.normals[i] == [0.0, 1.0, 0.0])
+        .map(|i| (mesh.light[i] & 0x0F) as u8)
+        .collect();
+    assert_eq!(seen.len(), 16, "lost a block level: {seen:?}");
 }

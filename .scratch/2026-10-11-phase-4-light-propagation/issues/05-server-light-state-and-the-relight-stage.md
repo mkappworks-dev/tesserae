@@ -1,6 +1,6 @@
 # Server light state and the relight stage
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03, 04
 
 Light is World state, so the Server owns it outright and the Client gets it
@@ -64,3 +64,30 @@ comparison in Voxel indices would be calibrated to one Voxel size.
   does not.
 - `relight_per_tick` caps the work per tick.
 - Re-point `no_mesh_the_client_still_holds_is_stale` at what is now true.
+
+## Comments
+
+Two things only measurement found.
+
+**The relight queue did not drain.** Marking all six neighbours for a re-solve
+whenever a Chunk's light changed meant that during a fill — where every
+Chunk's light changes at least once — each Chunk was queued about seven
+times. The
+queue grew monotonically (20 to 850 and climbing) and the app spent the whole
+fill in its heaviest regime. The fix is `ChunkLight::boundary_differs`: a
+neighbour only needs re-solving if the plane it actually reads moved. Comparing
+1024 cells costs about 6 us against the 131 us re-solve and 386 us re-mesh it
+avoids.
+
+**The budget went the other way from the obvious one.** `relight_per_tick` is
+12 while `generate_per_tick` is 24, which reads backwards — every Chunk that
+arrives needs its light. It is right because relight is the one stage whose
+backlog is invisible: a Chunk is not published until its light is solved, so
+what queues up behind it is the Chunks out past the mesh extent that nothing
+draws. At 24 the worst frame during the first fill ranged 65-115 ms over
+three runs; at 12, 39-48 ms; the fill finished inside 2 s either way.
+
+A third attempt failed and is worth recording so nobody repeats it: gating
+relight on the Chunk above being solved, so sky light would settle in one
+top-down pass, made the worst frame *worse* (68 to 103 ms). The loop spent its
+time scanning past blocked Chunks instead of doing work.

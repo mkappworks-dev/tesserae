@@ -1,6 +1,6 @@
 # Docs, vocabulary and the measurements
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05, 06, 07
 
 ## What to change
@@ -38,3 +38,13 @@ the budget and say so in the PR rather than leaving the comment on
 Also confirm it in the app, as step 3 did: `TESSERAE_SCREENSHOT` reports the
 worst frame since start-up, and that number belongs in the PR beside the
 screenshot.
+
+## Comments
+
+The benches caught a pessimisation that reasoning had endorsed. `inside`, the
+flood's innermost line, was rewritten from an array plus a range check into a
+`match face` with a guard per arm — the shape that reads faster. It measured
+**2.6x slower** (`light_chunk/flooded_air`, 117 us to 311 us): the array form
+has no data-dependent branch and the three bounds tests fold into one, while the
+match branches per face. Reverted, with the number in a comment so the next
+reader does not try it again.

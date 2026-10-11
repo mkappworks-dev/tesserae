@@ -1,6 +1,6 @@
 # A dev structure that makes both channels visible
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05, 06
 
 Without this, nothing in this step is visible in `cargo dev`. `worldgen` is a
@@ -36,3 +36,19 @@ exists so a screenshot can show the feature working.
 - The structure lands once and not every tick.
 - After it lands, the Voxels under the roof have sky light below 15 and block
   light above 0, and the open ground beside it still has sky 15.
+
+## Comments
+
+Lives in `server/lightbox.rs` and orders itself through `FixedPostUpdate` rather
+than `.after(streaming::stream)`, which would have meant making a private system
+and a private resource type public for a `dev` feature's benefit.
+
+Two revisions came from actually looking at the screenshot. A roof on four
+corner pillars showed nothing: the camera starts 20 m above the spawn point, so
+it saw the slab's top. And at 5 m of clearance the interior was foreshortened
+into a two-Voxel sliver. It is now a 12 m tall, 18 m deep shelter walled on
+three sides with the fourth facing the camera.
+
+Its edits are budgeted per tick. Placing ~700 Voxels in one frame cost about
+33 ms, which is this tool building a building and not what an edit costs — a
+single edit is bounded by the 15 Voxels light reaches.
