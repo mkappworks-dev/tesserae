@@ -1,6 +1,6 @@
 # The Client's chunk view, and the end of scene.rs
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 `crates/tesserae/src/scene.rs` spawns a fixed 3x3 grid at `Startup`. Its module

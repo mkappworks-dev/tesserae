@@ -10,9 +10,13 @@ fn worldgen() -> (Worldgen, i32, i32, i32) {
     let params = WorldgenParams::default();
     let g = Worldgen::new(0x7e55_e2ae, 1.0, params);
     let cell = tesserae_core::CHUNK_SIZE as f32;
-    let (lowest, highest) = (params.sea_level_m, params.sea_level_m + params.relief_m);
-    let straddling = (highest / cell) as i32;
-    (g, straddling, straddling + 2, (lowest / cell) as i32 - 2)
+    // The Chunk the surface actually crosses over this column, not the top of
+    // the band it could reach: that one is usually empty sky, and benching it
+    // as "straddling" would measure the air early-out twice.
+    let straddling = (g.surface_height_m(0.0, 0.0) / cell).floor() as i32;
+    let sky = ((params.sea_level_m + params.relief_m) / cell) as i32 + 2;
+    let deep = (params.sea_level_m / cell) as i32 - 2;
+    (g, straddling, sky, deep)
 }
 
 fn mesher(c: &mut Criterion) {

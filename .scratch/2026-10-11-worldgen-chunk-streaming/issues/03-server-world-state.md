@@ -1,6 +1,6 @@
 # The Server: World state, the tick, and the spawn point
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 ADR-0002 says the Server is the sole authority permitted to mutate a Chunk, and

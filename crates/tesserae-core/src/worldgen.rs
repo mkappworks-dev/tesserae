@@ -46,10 +46,10 @@ impl Default for WorldgenParams {
     fn default() -> Self {
         WorldgenParams {
             sea_level_m: 24.0,
-            relief_m: 28.0,
-            feature_size_m: 112.0,
+            relief_m: 48.0,
+            feature_size_m: 96.0,
             soil_depth_m: 3.0,
-            octaves: 4,
+            octaves: 5,
         }
     }
 }
@@ -306,7 +306,11 @@ mod tests {
             "a Chunk below the band"
         );
 
-        let straddling = g.chunk(0, (highest / cell) as i32, 0);
+        // From the surface over this column, not from the top of the band: the
+        // band is where the surface *can* reach, and the Chunk at the top of it
+        // is usually empty sky.
+        let here = (g.surface_height_m(0.0, 0.0) / cell).floor() as i32;
+        let straddling = g.chunk(0, here, 0);
         assert_eq!(straddling.uniform(), None, "a Chunk holding the surface");
     }
 

@@ -1,6 +1,6 @@
 # Chunk streaming: three radii, a budget, and hysteresis
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03
 
 The Server now owns World state and ticks. This ticket makes it load and evict

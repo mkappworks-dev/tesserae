@@ -1,15 +1,15 @@
 //! World parameters and the Chunk lattice.
 //!
-//! The Server owns everything here from step 3 on; step 2 writes it once at
-//! startup and only reads it afterwards, so no Client system ever mutates World
-//! state. See `docs/adr/0002-client-server-from-day-one.md`.
+//! What a World owns: its Voxel size, its seed and its Chunks. How far the
+//! Server streams is not in here — that is a runtime setting and lives with the
+//! Server, because it is not save data. See `CONTEXT.md`.
 
 use bevy::prelude::*;
 use tesserae_core::CHUNK_SIZE;
 
 /// A Chunk's position in the Chunk lattice. Dimensionless: multiply by
 /// [`WorldSettings::cell_size`] to get metres.
-#[derive(Component, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub struct ChunkCoord {
     pub x: i32,
     pub y: i32,
@@ -22,6 +22,12 @@ impl ChunkCoord {
     }
 }
 
+impl std::fmt::Display for ChunkCoord {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {} {}", self.x, self.y, self.z)
+    }
+}
+
 /// One World's own parameters.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct WorldSettings {
@@ -29,11 +35,17 @@ pub struct WorldSettings {
     /// Voxel-index space and metres. Nothing else in the engine may assume a
     /// ratio. See `docs/adr/0003-voxel-size-is-per-world.md`.
     pub voxel_size: f32,
+    /// What the World generates from. Save data, so a World regenerates
+    /// identically after a Chunk is evicted.
+    pub seed: u64,
 }
 
 impl Default for WorldSettings {
     fn default() -> Self {
-        WorldSettings { voxel_size: 1.0 }
+        WorldSettings {
+            voxel_size: 1.0,
+            seed: 0x7e55_e2ae_0000_0001,
+        }
     }
 }
 
@@ -48,6 +60,15 @@ impl WorldSettings {
     pub fn chunk_origin(&self, coord: ChunkCoord) -> Vec3 {
         Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.cell_size()
     }
+
+    /// Which Chunk holds a point. The inverse of [`WorldSettings::chunk_origin`],
+    /// and a floor division rather than a truncation: `-1.0 / 32.0` truncates
+    /// towards zero and would put everything in the Cell below the origin into
+    /// Chunk 0 alongside everything above it.
+    pub fn chunk_at(&self, metres: Vec3) -> ChunkCoord {
+        let c = (metres / self.cell_size()).floor();
+        ChunkCoord::new(c.x as i32, c.y as i32, c.z as i32)
+    }
 }
 
 #[cfg(test)]
@@ -56,16 +77,60 @@ mod tests {
 
     #[test]
     fn cell_size_scales_with_voxel_size() {
-        assert_eq!(WorldSettings { voxel_size: 1.0 }.cell_size(), 32.0);
-        assert_eq!(WorldSettings { voxel_size: 0.25 }.cell_size(), 8.0);
+        let at = |voxel_size| {
+            WorldSettings {
+                voxel_size,
+                ..default()
+            }
+            .cell_size()
+        };
+        assert_eq!(at(1.0), 32.0);
+        assert_eq!(at(0.25), 8.0);
     }
 
     #[test]
     fn chunk_origins_are_metres_not_voxel_indices() {
-        let world = WorldSettings { voxel_size: 0.25 };
+        let world = WorldSettings {
+            voxel_size: 0.25,
+            ..default()
+        };
         assert_eq!(
             world.chunk_origin(ChunkCoord::new(2, 0, -1)),
             Vec3::new(16.0, 0.0, -8.0)
+        );
+    }
+
+    #[test]
+    fn chunk_at_is_the_inverse_of_chunk_origin() {
+        for voxel_size in [1.0, 0.25] {
+            let world = WorldSettings {
+                voxel_size,
+                ..default()
+            };
+            for coord in [
+                ChunkCoord::new(0, 0, 0),
+                ChunkCoord::new(3, -2, 7),
+                ChunkCoord::new(-11, 4, -1),
+            ] {
+                assert_eq!(world.chunk_at(world.chunk_origin(coord)), coord);
+                // And anywhere inside the Cell, not just at its corner.
+                let inside = world.chunk_origin(coord) + Vec3::splat(world.cell_size() * 0.5);
+                assert_eq!(world.chunk_at(inside), coord);
+            }
+        }
+    }
+
+    #[test]
+    fn chunk_at_floors_rather_than_truncating_below_the_origin() {
+        let world = WorldSettings::default();
+        // Truncation would put both of these in Chunk 0.
+        assert_eq!(
+            world.chunk_at(Vec3::new(-1.0, -1.0, -1.0)),
+            ChunkCoord::new(-1, -1, -1)
+        );
+        assert_eq!(
+            world.chunk_at(Vec3::new(1.0, 1.0, 1.0)),
+            ChunkCoord::new(0, 0, 0)
         );
     }
 }
