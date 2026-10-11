@@ -143,13 +143,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
+      # The workspace manifest builds dependencies at opt-level 3 so a local
+      # debug run of a Bevy app is not an order of magnitude too slow. CI never
+      # runs the app — it runs 37 unit tests in well under a second — so that
+      # setting buys nothing here and costs a full LLVM pass over ~600 crates.
+      # The glob matches dependencies only, so our own crates keep
+      # [profile.dev]'s opt-level 1.
       - name: Run tests
-        run: cargo test --workspace --locked
+        run: |
+          cargo test --workspace --locked \
+            --config 'profile.dev.package."*".opt-level=0'
 
       # The mesher is the hot path; a bench that no longer compiles is a bench
       # nobody runs. This does not measure, it only builds.
+      #
+      # `--exclude tesserae` rather than `--workspace` alone: the Bevy app has no
+      # benches, but cargo still builds its binary in the bench profile, which
+      # means compiling the whole Bevy tree a second time at release
+      # optimisation in a job that has already compiled it once. Excluding by
+      # name rather than naming tesserae-core keeps future headless crates, such
+      # as tesserae-mods, covered automatically.
       - name: Build benches
-        run: cargo bench --workspace --no-run --locked
+        run: cargo bench --workspace --exclude tesserae --no-run --locked
 
   build:
     name: Build
