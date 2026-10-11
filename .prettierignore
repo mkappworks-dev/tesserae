@@ -2,3 +2,7 @@ target/
 node_modules/
 CHANGELOG.md
 .release-please-manifest.json
+
+# Tickets carry machine-parsed "Status:" and "Blocked by:" lines. Prose reflow
+# merges adjacent metadata lines into one paragraph and breaks them.
+.scratch/
