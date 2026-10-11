@@ -169,7 +169,11 @@ jobs:
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: [test, boundaries]
+    # Deliberately not `needs: [test, boundaries]`. Gating saved runner minutes
+    # on a red PR, but it serialised the two slowest jobs: wall clock was test
+    # plus build rather than the larger of the two. Build is also a required
+    # status check and there is no merge queue configured, so it cannot be moved
+    # off pull requests — running it in parallel is the only lever left.
 
     steps:
       - name: Checkout
