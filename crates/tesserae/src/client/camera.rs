@@ -65,11 +65,50 @@ impl FlyCamera {
 #[derive(Component, Clone, Copy)]
 pub struct CameraHome(pub Transform);
 
+/// Shown whenever the cursor is free. Mouse look is gated on a click and nothing
+/// else on screen says so, which reads as the mouse not working at all.
+#[derive(Component)]
+struct CursorHint;
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(
+    app.add_systems(Startup, spawn_hint).add_systems(
         Update,
-        (grab_cursor, reset, look, adjust_speed, fly).chain(),
+        (grab_cursor, show_hint, reset, look, adjust_speed, fly).chain(),
     );
+}
+
+fn spawn_hint(mut commands: Commands) {
+    commands.spawn((
+        CursorHint,
+        // ASCII only: Bevy's embedded default font is a FiraMono subset and
+        // renders anything outside it, a middle dot included, as tofu.
+        Text::new("Click to look around  -  Esc to release the cursor"),
+        TextFont {
+            font_size: bevy::text::FontSize::Px(14.0),
+            ..default()
+        },
+        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.7)),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(16.0),
+            bottom: Val::Px(16.0),
+            ..default()
+        },
+    ));
+}
+
+fn show_hint(
+    cursor: Single<&CursorOptions, With<PrimaryWindow>>,
+    visibility: Single<&mut Visibility, With<CursorHint>>,
+) {
+    let wanted = if cursor.grab_mode == CursorGrabMode::None {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    // Through change detection rather than unconditionally, so the UI is not
+    // re-laid out every frame.
+    visibility.into_inner().set_if_neq(wanted);
 }
 
 fn reset(

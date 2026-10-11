@@ -166,22 +166,24 @@ opt-level = 3
 
 What each kind of change costs:
 
-| you edit                              | what happens                                                                  |
-| ------------------------------------- | ----------------------------------------------------------------------------- |
-| a `.wesl` shader                      | **hot-reloads in the running app** — no rebuild, no restart                   |
-| a mod or the demo game under `games/` | rebuild the `.wasm`, reload the mod — **no engine rebuild**                   |
-| `tesserae` (the Bevy app)             | rebuild, restart (~5–20s warm)                                                |
-| `tesserae-core`                       | rebuild everything downstream, restart — it is a dependency of the whole tree |
+| you edit                                  | what happens                                                                  |
+| ----------------------------------------- | ----------------------------------------------------------------------------- |
+| a `.wesl` shader or anything in `assets/` | **hot-reloads in the running app** — no rebuild, no restart                   |
+| a mod or the demo game under `games/`     | rebuild the `.wasm`, reload the mod — **no engine rebuild**                   |
+| `tesserae` (the Bevy app)                 | rebuild, restart (~5–20s warm)                                                |
+| `tesserae-core`                           | rebuild everything downstream, restart — it is a dependency of the whole tree |
 
-Shader hot-reloading needs the `dev` feature, which turns on Bevy's
-`embedded_watcher`. The engine's own shaders are embedded in the binary, as
-`bevy_pbr`'s are, so `embedded_watcher` rather than `file_watcher` is what
-watches them.
+Hot-reloading needs the `dev` feature, which turns on both of Bevy's watchers.
+The two halves live in different places: the engine's own shaders are embedded
+in the binary, as `bevy_pbr`'s are, so `embedded_watcher` watches those, while
+`file_watcher` watches the repo-root `assets/`.
 
-Textures and other on-disk assets do **not** hot-reload, because none exist:
-there is no `assets/` directory, nothing is loaded from disk, and the release
-workflow packages the bare binary. Where assets ship is settled with the
-look-pack API in step 9, and `bevy/file_watcher` joins the `dev` feature then.
+Assets are found through `BEVY_ASSET_ROOT`, set to the workspace root by
+[`.cargo/config.toml`](.cargo/config.toml). Without it Bevy would fall back to
+`CARGO_MANIFEST_DIR` and look in `crates/tesserae/assets`, putting CC0 content
+inside a BSL-licensed crate directory. A shipped binary sets neither variable
+and falls through to its own directory, so the release archive carries `assets/`
+beside the executable and needs no configuration.
 
 Hot reload is the reason look packs ship their WESL as an asset rather than
 compiled in: a pack author edits and sees the result immediately.

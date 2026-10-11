@@ -7,14 +7,14 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
-# Reloads a shader into the running app when its source file changes. Not on by
-# default: it pulls in a filesystem watcher and resolves paths against the
-# source tree, neither of which a shipped binary should do.
+# Reloads shaders and assets into the running app when their source file
+# changes. Not on by default: it pulls in a filesystem watcher and resolves
+# paths against the source tree, neither of which a shipped binary should do.
 #
-# bevy/file_watcher is deliberately absent. It watches an `assets/` directory,
-# and there is none — nothing is loaded from disk yet, and where one ships is
-# open until the look-pack API in step 9. Enabling it only logs two warnings.
-dev = ["bevy/embedded_watcher"]
+# Both watchers, because the two halves live in different places: the engine's
+# shaders are embedded in the binary as bevy_pbr's are, while everything else
+# loads from the repo-root assets/.
+dev = ["bevy/embedded_watcher", "bevy/file_watcher"]
 
 [dependencies]
 bevy = "0.20.0"
