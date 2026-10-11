@@ -21,7 +21,7 @@ use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, ChunkLight, ChunkMesh, LitChunk, ShapeTable, mesh_chunk};
+use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, ChunkMesh, LitChunk, ShapeTable, mesh_chunk};
 
 use super::world_state::ChunkStore;
 use super::{Shapes, WorldGenerator};
@@ -315,6 +315,7 @@ fn stream(
         &world,
         center,
         budget.relight_per_tick,
+        &shapes,
     );
     publish(
         &store,
@@ -403,11 +404,20 @@ fn generate(
     }
 }
 
+/// The Voxels of the synthetic Chunk above the surface: air, which is all the
+/// generator makes there.
+static SKY_CHUNK: Chunk = Chunk::air();
+
 /// Solves up to `budget` Chunks whose light is out of date, highest first.
 ///
 /// The bulk path: a Chunk arriving starts dark, so every change here is an
 /// increase and re-solving from the current boundary converges. A Voxel
 /// **edit** must not come through here — see `tesserae_core::relight`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the last argument is the World's Shape table; bundling the rest \
+              would invent a type used once"
+)]
 fn relight(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
@@ -416,6 +426,7 @@ fn relight(
     world: &WorldSettings,
     center: ChunkCoord,
     budget: usize,
+    shapes: &ShapeTable,
 ) {
     let mut done = 0;
     for &d in &order.descending {
@@ -435,14 +446,16 @@ fn relight(
         // The boundary that the relaxation cannot discover for itself. Held in
         // a local so the borrow below can point at it.
         let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
-        let border: [Option<&ChunkLight>; 6] = std::array::from_fn(|face| {
-            store.light(faces[face]).or_else(|| {
-                (face == POS_Y && above_the_surface(generator, world, faces[face]))
-                    .then_some(&open_sky)
-            })
+        let border: [Option<LitChunk>; 6] = std::array::from_fn(|face| {
+            let n = faces[face];
+            match (store.get(n), store.light(n)) {
+                (Some(chunk), Some(light)) => Some(LitChunk::new(chunk, light)),
+                _ => (face == POS_Y && above_the_surface(generator, world, n))
+                    .then_some(LitChunk::new(&SKY_CHUNK, &open_sky)),
+            }
         });
 
-        let solved = light_chunk(chunk, border);
+        let solved = light_chunk(chunk, border, shapes);
         meshes.unlit.remove(&coord);
         done += 1;
         let Some(before) = store.light(coord) else {

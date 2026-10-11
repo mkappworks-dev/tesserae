@@ -195,7 +195,7 @@ impl SpawnPoint {
 mod tests {
     use super::*;
     use tesserae_core::light::MAX_LIGHT;
-    use tesserae_core::{CHUNK_SIZE, relight, worldgen};
+    use tesserae_core::{CHUNK_SIZE, ShapeTable, relight, worldgen};
 
     #[test]
     fn a_voxel_coord_floors_rather_than_truncating_below_the_origin() {
@@ -234,7 +234,7 @@ mod tests {
         lattice
             .store
             .set_voxel(VoxelCoord::of(at), Voxel::cube(worldgen::LANTERN));
-        relight(&mut lattice, at, Light::DARK);
+        relight(&mut lattice, &ShapeTable::builtin(), at, Light::DARK);
 
         assert_eq!(store.light_at(at).block(), MAX_LIGHT);
         assert_eq!(
@@ -263,7 +263,7 @@ mod tests {
         lattice
             .store
             .set_voxel(VoxelCoord::of(at), Voxel::cube(worldgen::LANTERN));
-        relight(&mut lattice, at, Light::DARK);
+        relight(&mut lattice, &ShapeTable::builtin(), at, Light::DARK);
         let touched = lattice.touched;
 
         // Both, because the caller has no other way to learn that the Chunk

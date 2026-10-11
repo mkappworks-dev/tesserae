@@ -21,9 +21,9 @@ use bevy::prelude::*;
 use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{Voxel, relight};
 
-use super::WorldGenerator;
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, LightLattice, SpawnPoint, VoxelCoord};
+use super::{Shapes, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// Where the structure stands and how big it is, in **metres** — so it is the
@@ -81,6 +81,7 @@ fn build(
     mut meshes: ResMut<MeshState>,
     mut progress: Local<Progress>,
     generator: Res<WorldGenerator>,
+    shapes: Res<Shapes>,
     world: Res<WorldSettings>,
     spawn: Option<Res<SpawnPoint>>,
 ) {
@@ -112,7 +113,7 @@ fn build(
     for (at, voxel) in &plan[progress.placed..until] {
         let was = lattice.store.light_at(*at);
         lattice.store.set_voxel(VoxelCoord::of(*at), *voxel);
-        relight(&mut lattice, *at, was);
+        relight(&mut lattice, &shapes, *at, was);
     }
     let lit = std::mem::take(&mut lattice.touched);
     for coord in lit {
@@ -267,8 +268,7 @@ mod tests {
             "nothing emits block light"
         );
         assert!(
-            plan.iter()
-                .any(|(_, v)| tesserae_core::light::blocks_light(*v)),
+            plan.iter().any(|(_, v)| v.is_full_cube()),
             "nothing occludes the sky"
         );
     }
