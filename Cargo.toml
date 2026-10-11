@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/tesserae-core"]
+# A Game compiles to wasm32-wasip2, so a root `cargo build` must not try to build
+# it for the host. See docs/adr/0004-demo-game-in-repo-real-game-out.md.
+exclude = ["games/demo"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.97"
+license = "BUSL-1.1"
+
+# Without this a debug build of a Bevy app runs an order of magnitude slower than
+# it should, which reads as "the engine is slow" rather than "the build is
+# unoptimised".
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

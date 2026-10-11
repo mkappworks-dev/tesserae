@@ -1,0 +1,37 @@
+{
+  "name": "Protect main \u2014 CI required",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["~DEFAULT_BRANCH"],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "required_status_checks": [
+          {
+            "context": "Lint"
+          },
+          {
+            "context": "Format"
+          },
+          {
+            "context": "Boundaries"
+          },
+          {
+            "context": "Test"
+          },
+          {
+            "context": "Build"
+          }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}

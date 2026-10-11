@@ -1,0 +1,29 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "rust",
+  "pull-request-title-pattern": "chore: release v${version}",
+  "pull-request-header": "Release ready for review",
+  "pull-request-footer": "- Merging this PR triggers `build-and-publish.yml` (chained from `release-please.yml`) to build desktop binaries (macOS arm64/x86_64, Linux x86_64, Windows x86_64), package archives with SHA256 sums, and attach assets to the draft release. The git tag is created up front (`force-tag-creation: true`) so the chained build has a stable anchor before the release is published.\n- Do not edit `CHANGELOG.md` manually — release-please owns it. The version lives in `Cargo.toml` and reaches the binary through `env!(\"CARGO_PKG_VERSION\")`, so there is nothing to hand-edit and no build-time injection.\n- Each release carries its own BSL Change Date, four years from publication. Check `LICENSE` is correct for this version before merging.\n- To skip a release, close this PR; release-please will reopen it on the next merge to main.",
+  "include-component-in-tag": false,
+  "draft": true,
+  "force-tag-creation": true,
+  "packages": {
+    ".": {
+      "package-name": "tesserae",
+      "changelog-path": "CHANGELOG.md",
+      "bump-minor-pre-major": true
+    }
+  },
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "refactor", "section": "Refactors" },
+    { "type": "tech", "section": "Technical" },
+    { "type": "docs", "section": "Documentation" },
+    { "type": "build", "section": "Build" },
+    { "type": "ci", "section": "CI" },
+    { "type": "test", "section": "Tests" },
+    { "type": "chore", "section": "Chores", "hidden": true }
+  ]
+}

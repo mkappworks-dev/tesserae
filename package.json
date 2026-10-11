@@ -1,0 +1,12 @@
+{
+  "name": "tesserae-tooling",
+  "private": true,
+  "description": "Formatting tooling only. Tesserae itself is a Rust workspace; this exists so prettier's version is pinned rather than whatever npx resolves.",
+  "devDependencies": {
+    "prettier": "3.6.2"
+  },
+  "scripts": {
+    "fmt": "prettier --write .",
+    "fmt:check": "prettier --check ."
+  }
+}

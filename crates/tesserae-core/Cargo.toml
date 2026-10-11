@@ -1,0 +1,14 @@
+[package]
+name = "tesserae-core"
+description = "Chunk storage, world generation and meshing for Tesserae. Depends on no engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bench]]
+name = "meshing"
+harness = false
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }

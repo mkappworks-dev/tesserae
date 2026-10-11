@@ -1,0 +1,109 @@
+name: Build and Publish
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Git tag for the release (e.g. v0.1.0)
+        type: string
+        required: true
+      release_id:
+        description: GitHub release ID to attach assets to
+        type: string
+        required: true
+      sha:
+        description: Commit SHA being released
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    name: Build ${{ matrix.os_label }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+            os_label: macos
+            arch: arm64
+          - runner: macos-latest
+            target: x86_64-apple-darwin
+            os_label: macos
+            arch: x86_64
+          - runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            os_label: linux
+            arch: x86_64
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            os_label: windows
+            arch: x86_64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.sha }}
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Install Linux build deps
+        if: matrix.os_label == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+
+      # No version injection: release-please bumps Cargo.toml and the binary reads
+      # it through env!("CARGO_PKG_VERSION").
+      - name: Build
+        run: cargo build -p tesserae --release --locked --target ${{ matrix.target }}
+
+      - name: Package archive (unix)
+        if: matrix.os_label != 'windows'
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          ARCHIVE="tesserae_${TAG}_${{ matrix.os_label }}_${{ matrix.arch }}.tar.gz"
+          tar -C "target/${{ matrix.target }}/release" -czf "${ARCHIVE}" tesserae
+          shasum -a 256 "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Package archive (windows)
+        if: matrix.os_label == 'windows'
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          ARCHIVE="tesserae_${TAG}_windows_${{ matrix.arch }}.zip"
+          7z a "${ARCHIVE}" "./target/${{ matrix.target }}/release/tesserae.exe"
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Upload to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "${TAG}" "${ARCHIVE}" "${ARCHIVE}.sha256" --clobber
+
+  publish:
+    name: Publish release
+    needs: [binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Promote draft to published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+        run: gh release edit "${TAG}" --draft=false --latest

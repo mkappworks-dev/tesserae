@@ -1,0 +1,158 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  # A PR's run goes stale when a sibling merges first; these catch what it missed.
+  push:
+    branches: [main]
+  merge_group:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      # bevy's app crate links alsa and udev on Linux; clippy builds it.
+      - name: Install Linux build deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install Prettier
+        run: npm ci
+
+      - name: Check formatting of docs and config
+        run: npm run fmt:check
+
+  boundaries:
+    name: Boundaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      # Invariant 3 in docs/architecture.md. tesserae-core and tesserae-mods stay
+      # headless so every expensive algorithm is testable and benchmarkable; a
+      # transitive bevy or wgpu edge silently ends that.
+      - name: No engine dependency in headless crates
+        run: |
+          set -e
+          for crate in tesserae-core tesserae-mods; do
+            if cargo tree -p "$crate" --edges normal --prefix none \
+                 | grep -qE '^(bevy|wgpu)'; then
+              echo "::error::$crate must not depend on bevy or wgpu — see docs/architecture.md invariant 3"
+              cargo tree -p "$crate" --edges normal --prefix none | grep -E '^(bevy|wgpu)'
+              exit 1
+            fi
+          done
+
+  deny:
+    name: Dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Advisories plus a licence policy: a copyleft dependency cannot ship in a
+      # BSL-licensed binary, so catch it at the PR rather than at release.
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses bans sources
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+      # The mesher is the hot path; a bench that no longer compiles is a bench
+      # nobody runs. This does not measure, it only builds.
+      - name: Build benches
+        run: cargo bench --workspace --no-run --locked
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test, boundaries]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux build deps
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+
+      - name: Build
+        run: cargo build --workspace --release --locked
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v7
+        with:
+          name: tesserae-linux-x86_64
+          path: target/release/tesserae
+          retention-days: 7
