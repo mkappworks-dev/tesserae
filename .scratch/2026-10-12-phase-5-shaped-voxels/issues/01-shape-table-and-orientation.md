@@ -1,6 +1,6 @@
 # The Shape table and Orientation
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Everything else in the step reads this, so it goes first and has no consumer
