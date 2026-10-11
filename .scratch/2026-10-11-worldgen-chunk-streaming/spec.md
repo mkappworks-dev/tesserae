@@ -1,6 +1,6 @@
 # Worldgen and Chunk streaming, behind the client/server split
 
-Status: ready-for-agent
+Status: done
 
 Build-order step 3 in [`DESIGN.md`](../../DESIGN.md): "Worldgen + chunk
 streaming, behind the client/server split with the server in-process."
