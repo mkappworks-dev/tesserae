@@ -14,9 +14,13 @@ The full CLA text is available at [.github/CLA.md](.github/CLA.md).
 
 **Key terms:**
 
-- Contributors retain copyright ownership of their contributions.
-- The CLA grants Tesserae full commercial rights to use, modify, sublicense, and
-  distribute contributions.
+- You retain copyright ownership of your contributions.
+- You grant the Licensor a copyright license and a **patent license** (with
+  defensive termination), plus the right to sublicense and to relicense your
+  contribution under BSL 1.1, under the Apache-2.0 Change License, or under
+  other terms including proprietary ones.
+- The patent license is what lets the Licensor convey, at each Change Date, the
+  patent grant that Apache-2.0 requires.
 - The CLA is a one-time requirement per contributor.
 
 ## License

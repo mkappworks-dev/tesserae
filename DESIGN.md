@@ -297,6 +297,12 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 
 ## Open items
 
+- **Move the Licensor to a legal entity on incorporation.** It is currently the
+  individual, which is correct and enforceable. BSL applies separately per
+  version, so the switch costs nothing: name the company in the first release
+  after incorporating, and older versions keep their own parameters. "Tesserae"
+  itself cannot be the Licensor — it names the Licensed Work, and the Covenants
+  run from a person or a company, not from a product name.
 - Chunk dimensions: 32³ assumed, not measured.
 - Per-ring LOD chunk budget: unmeasured.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
