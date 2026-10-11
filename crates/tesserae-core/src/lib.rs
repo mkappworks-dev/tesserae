@@ -6,6 +6,7 @@
 //! `Boundaries` job. See `docs/architecture.md`.
 
 pub mod chunk;
+pub mod collide;
 pub mod light;
 pub mod mesh;
 pub mod noise;

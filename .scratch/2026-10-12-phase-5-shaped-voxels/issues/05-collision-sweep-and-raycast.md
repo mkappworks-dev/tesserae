@@ -1,6 +1,6 @@
 # Collision: a sweep and a ray, in metres
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 DESIGN.md: "Sweep an AABB against the voxel grid directly." The sweep has no
@@ -40,3 +40,14 @@ edit path's picking. Neither takes a dependency.
   reach is honoured; a ray starting inside a cell works; the reported face is
   the one entered.
 - A `None` region stops a sweep.
+
+## Comments
+
+Four mutations were applied and all were caught: collision reduced to "is it
+solid?" (7 tests fail, which is the point of the step), the ray testing whole
+cells instead of boxes (the notch test), `blocked` never reported (7 tests), and
+the struck face reversed (2 tests).
+
+A body that already overlaps a box is not pushed out and is not stopped by it;
+it can move out. A ray that starts inside a box strikes it at distance zero.
+Both are documented on the functions and tested for the ray.
