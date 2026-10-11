@@ -9,7 +9,11 @@
 //!
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
+#[cfg(feature = "dev")]
+mod builder;
 pub mod edit;
+#[cfg(feature = "dev")]
+mod gallery;
 #[cfg(feature = "dev")]
 mod lightbox;
 pub mod streaming;
@@ -46,7 +50,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, open_world)
         .add_plugins((streaming::plugin, edit::plugin));
     #[cfg(feature = "dev")]
-    app.add_plugins(lightbox::plugin);
+    app.add_plugins((lightbox::plugin, gallery::plugin));
 }
 
 /// Builds the generator and picks the spawn point. One system so there is no

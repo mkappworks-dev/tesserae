@@ -1,6 +1,6 @@
 # The dev gallery
 
-Status: ready-for-agent
+Status: done
 Blocked by: 06
 
 Nothing in this step is observable on terrain, which has no shaped Voxel (spec
@@ -32,3 +32,16 @@ through the real edit path.
   uses more than one Orientation of the stair.
 - The plan's footprint in metres is what it claims.
 - Every Voxel in the plan is valid (registered Shape, valid Orientation).
+
+## Comments
+
+The plan runner both builders share is `server/builder.rs`; the lightbox was
+moved onto it rather than duplicated. Run with
+`TESSERAE_SCREENSHOT=out.png TESSERAE_SCREENSHOT_FLY_S=0 TESSERAE_SCREENSHOT_SETTLE_S=10 cargo dev`
+and the default camera frames the gallery to the right of the lightbox. 679
+Voxels, 42 of them shaped, placed in a few ticks; the steady state is unchanged
+at 2167 Chunks loaded and 791 meshed.
+
+The first capture after a fresh build came out pure black and the identical
+command a few seconds later was fine, so it was the window not being presented,
+not the scene.

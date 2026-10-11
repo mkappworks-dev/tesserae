@@ -22,11 +22,11 @@ use bevy::prelude::*;
 use tesserae_core::Voxel;
 use tesserae_core::worldgen::{LANTERN, STONE};
 
-use super::edit;
+use super::builder::{self, Progress, Step};
 use super::streaming::MeshState;
-use super::world_state::{ChunkStore, SpawnPoint, VoxelCoord};
+use super::world_state::{ChunkStore, SpawnPoint};
 use super::{Shapes, WorldGenerator};
-use crate::world::{ChunkCoord, WorldSettings};
+use crate::world::WorldSettings;
 
 /// Where the structure stands and how big it is, in **metres** — so it is the
 /// same physical shelter at any Voxel size, per ADR-0003. A span in Voxels
@@ -49,15 +49,6 @@ const HALF_SPAN_M: f32 = 9.0;
 /// run out and only block light is left.
 const LANTERN_DEPTH: f32 = 0.7;
 
-/// Voxels placed per tick.
-///
-/// The structure is a few hundred Voxels and each one re-floods light, so
-/// placing them all in one tick costs more than a frame. A budget for the same
-/// reason `StreamingBudget` is one — and the cost is this tool building a
-/// building, not what a single edit costs: that is bounded by the 15 Voxels
-/// light reaches.
-const EDITS_PER_TICK: usize = 24;
-
 pub(super) fn plugin(app: &mut App) {
     // `FixedPostUpdate`, so the tick's own streaming has already run and the
     // Chunks this needs are either there or not yet. Ordering through the
@@ -66,18 +57,8 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(FixedPostUpdate, build);
 }
 
-/// How far through the plan this has got.
-#[derive(Default)]
-struct Progress {
-    placed: usize,
-}
-
 /// Places the structure a few Voxels a tick, starting once the Chunks it falls
-/// in are loaded and their light has settled.
-///
-/// Waiting on the light is not politeness: an edit re-floods incrementally, and
-/// the bulk solve `streaming::relight` runs for a Chunk that is still `unlit`
-/// would land afterwards and overwrite that work.
+/// in are loaded and their light has settled; see [`builder::step`].
 fn build(
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
@@ -95,29 +76,7 @@ fn build(
     let surface_m = generator.surface_height_m(ahead.x, ahead.z);
     let ground = Vec3::new(ahead.x, surface_m, ahead.z);
     let plan = plan(&world, ground);
-    if progress.placed >= plan.len() {
-        return;
-    }
-
-    let touched: Vec<ChunkCoord> = plan
-        .iter()
-        .map(|(at, _)| VoxelCoord::of(*at).chunk)
-        .collect();
-    if touched
-        .iter()
-        .any(|&c| !store.contains(c) || meshes.is_unlit(c))
-    {
-        return;
-    }
-
-    let until = (progress.placed + EDITS_PER_TICK).min(plan.len());
-    for (at, voxel) in &plan[progress.placed..until] {
-        if let Err(reason) = edit::set_voxel(&mut store, &mut meshes, &shapes, *at, *voxel) {
-            warn!("lightbox: {at:?}: {}", reason.message());
-        }
-    }
-    progress.placed = until;
-    if progress.placed == plan.len() {
+    if builder::step(&plan, &mut progress, &mut store, &mut meshes, &shapes) == Step::Completed {
         info!("lightbox: a shelter and a lantern at {ground:?}");
     }
 }
