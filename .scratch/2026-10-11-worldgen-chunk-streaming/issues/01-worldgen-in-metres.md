@@ -1,6 +1,6 @@
 # World generation, tuned in metres
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 `tesserae_core::testgen` is a bench fixture, not a generator: its noise

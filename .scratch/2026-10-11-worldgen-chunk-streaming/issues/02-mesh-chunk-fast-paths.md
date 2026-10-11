@@ -1,6 +1,6 @@
 # A meshing entry point that can decline
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 `greedy_mesh` takes a `Neighborhood`, so by the time it is called the padded

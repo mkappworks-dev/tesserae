@@ -6,61 +6,25 @@
 //! which would measure only the greedy fast path.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
+use crate::noise::fbm2;
 use crate::voxel::Voxel;
 
-pub const STONE: u16 = 1;
-pub const DIRT: u16 = 2;
-pub const GRASS: u16 = 3;
+pub use crate::worldgen::{DIRT, GRASS, STONE};
 
+/// Voxel indices, not metres — the point of the fixture. A World's own
+/// generation is `crate::worldgen` and is tuned in metres.
 const SEA_LEVEL: f32 = 12.0;
 const RELIEF: f32 = 18.0;
-
-#[inline]
-fn mix(mut x: u32) -> u32 {
-    x ^= x >> 16;
-    x = x.wrapping_mul(0x7feb_352d);
-    x ^= x >> 15;
-    x = x.wrapping_mul(0x846c_a68b);
-    x ^= x >> 16;
-    x
-}
-
-fn lattice(xi: i32, zi: i32, seed: u32) -> f32 {
-    let h = mix(mix(xi as u32 ^ 0x9e37_79b9)
-        .wrapping_add((zi as u32).wrapping_mul(0x85eb_ca6b))
-        .wrapping_add(seed));
-    (h >> 8) as f32 / ((1u32 << 24) as f32)
-}
-
-fn noise2(x: f32, z: f32, seed: u32) -> f32 {
-    let (x0, z0) = (x.floor(), z.floor());
-    let (tx, tz) = (x - x0, z - z0);
-    let sx = tx * tx * (3.0 - 2.0 * tx);
-    let sz = tz * tz * (3.0 - 2.0 * tz);
-    let (xi, zi) = (x0 as i32, z0 as i32);
-    let n0 = {
-        let a = lattice(xi, zi, seed);
-        a + (lattice(xi + 1, zi, seed) - a) * sx
-    };
-    let n1 = {
-        let a = lattice(xi, zi + 1, seed);
-        a + (lattice(xi + 1, zi + 1, seed) - a) * sx
-    };
-    n0 + (n1 - n0) * sz
-}
+const FEATURE_SIZE: f32 = 48.0;
+const OCTAVES: u32 = 3;
+const SEED: u32 = 0x5eed;
 
 fn surface_height(wx: f32, wz: f32) -> f32 {
-    let mut value = 0.0;
-    let mut amplitude = 1.0;
-    let mut frequency = 1.0 / 48.0;
-    let mut total = 0.0;
-    for octave in 0..3u32 {
-        value += noise2(wx * frequency, wz * frequency, 0x5eed + octave) * amplitude;
-        total += amplitude;
-        amplitude *= 0.5;
-        frequency *= 2.0;
-    }
-    SEA_LEVEL + (value / total) * RELIEF
+    // By the reciprocal rather than dividing: 1/48 is not representable, so the
+    // two differ in the last bit and the fixture's pinned output moves.
+    let scale = 1.0 / FEATURE_SIZE;
+    let n = fbm2(wx * scale, wz * scale, SEED, OCTAVES);
+    SEA_LEVEL + n * RELIEF
 }
 
 /// A Chunk of terrain at Chunk coordinates `(cx, cy, cz)`.
@@ -131,6 +95,28 @@ mod tests {
         let c = terrain_chunk(0, 0, 0);
         assert!(c.uniform().is_none(), "expected both solid and air");
         assert!(c.palette_len() >= 3, "expected stone, dirt and grass");
+    }
+
+    /// The fixture's output is the mesher benches' input, so a change here
+    /// silently invalidates every comparison against an earlier step's numbers.
+    /// The determinism test above does not catch a changed-but-still-
+    /// deterministic generator; this does.
+    #[test]
+    fn terrain_output_is_pinned() {
+        let c = terrain_chunk(0, 0, 0);
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    h ^= c.get(x, y, z).material() as u64;
+                    h = h.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+        }
+        assert_eq!(
+            h, 11_756_880_781_353_496_971,
+            "testgen::terrain_chunk output changed"
+        );
     }
 
     #[test]
