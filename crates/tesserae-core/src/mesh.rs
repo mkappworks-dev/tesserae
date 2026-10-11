@@ -121,6 +121,43 @@ fn corner(d: usize, u: usize, v: usize, plane: f32, au: usize, bv: usize) -> [f3
     c
 }
 
+/// Mesh one Chunk against its six face neighbours, declining without building
+/// a [`Neighborhood`] where no face can be emitted.
+///
+/// The padded copy costs 39 thousand Voxel writes before `greedy_mesh` sees
+/// anything, and a streamed 3D ring asks for a mesh of mostly uniform Chunks.
+/// A `None` neighbour means unknown, not air — the caller is expected to have
+/// all six loaded, and [`Neighborhood::isolated`]'s "outside is air" is a
+/// different question.
+pub fn mesh_chunk(center: &Chunk, neighbors: [Option<&Chunk>; 6]) -> ChunkMesh {
+    if emits_no_faces(center, neighbors) {
+        return ChunkMesh::default();
+    }
+    greedy_mesh(&Neighborhood::new(center, neighbors))
+}
+
+/// Whether `center` provably emits nothing, from `uniform()` alone.
+fn emits_no_faces(center: &Chunk, neighbors: [Option<&Chunk>; 6]) -> bool {
+    let Some(voxel) = center.uniform() else {
+        return false;
+    };
+
+    // Only Voxels inside the centre Chunk emit faces, so uniform air emits
+    // nothing whatever the neighbours hold. Deliberately not consulting them:
+    // next to the case below that reads like an oversight.
+    if voxel.is_air() {
+        return true;
+    }
+
+    // A uniform full cube has every face occluded from the other side only if
+    // all six neighbours are themselves uniform full cubes. One unknown
+    // neighbour disqualifies it.
+    voxel.is_full_cube()
+        && neighbors
+            .iter()
+            .all(|n| n.and_then(|n| n.uniform()).is_some_and(Voxel::is_full_cube))
+}
+
 pub fn greedy_mesh(n: &Neighborhood) -> ChunkMesh {
     let mut mesh = ChunkMesh::default();
     let mut mask = vec![None::<MaterialId>; CHUNK_SIZE * CHUNK_SIZE];

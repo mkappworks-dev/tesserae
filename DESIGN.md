@@ -304,7 +304,12 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   itself cannot be the Licensor — it names the Licensed Work, and the Covenants
   run from a person or a company, not from a product name.
 - Chunk dimensions: 32³ assumed, not measured.
-- Per-ring LOD chunk budget: unmeasured.
+- Per-ring LOD chunk budget: measured once, and only for one case. At 1m Voxels
+  and a 192m view distance the streaming tick holds at 24 Chunks generated and
+  12 meshed, a 6.9ms worst tick against 15.6ms at 64Hz, with a measured worst
+  frame of 10.0ms on an M5. Still open because that is a single Voxel size, a
+  single view distance and LOD level 0 only — the number this item is really
+  about is per _ring_, and there is still only one ring.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

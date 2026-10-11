@@ -1,5 +1,6 @@
 use tesserae_core::mesh::{NEG_X, POS_X};
-use tesserae_core::{CHUNK_SIZE, Chunk, Neighborhood, Voxel, greedy_mesh, testgen};
+use tesserae_core::{CHUNK_SIZE, Chunk, Neighborhood, Voxel, greedy_mesh, mesh_chunk, testgen};
+use tesserae_core::{Worldgen, WorldgenParams};
 
 fn mesh_isolated(chunk: &Chunk) -> tesserae_core::ChunkMesh {
     greedy_mesh(&Neighborhood::isolated(chunk))
@@ -174,4 +175,79 @@ fn greedy_meshing_beats_the_naive_count_on_real_terrain() {
         "merged {} quads vs {naive} naive faces",
         mesh.quad_count()
     );
+}
+
+// `mesh_chunk`: the streaming entry point, which declines where it provably can.
+
+/// Six of the same Chunk, for the enclosed case.
+fn enclosed_by(n: &Chunk) -> [Option<&Chunk>; 6] {
+    [Some(n); 6]
+}
+
+#[test]
+fn a_uniform_air_chunk_declines_whatever_its_neighbours_hold() {
+    let solid = Chunk::filled(Voxel::cube(1));
+    assert!(mesh_chunk(&Chunk::air(), enclosed_by(&solid)).is_empty());
+    assert!(mesh_chunk(&Chunk::air(), [None; 6]).is_empty());
+}
+
+#[test]
+fn a_fully_enclosed_solid_chunk_declines() {
+    let solid = Chunk::filled(Voxel::cube(1));
+    assert!(mesh_chunk(&solid, enclosed_by(&solid)).is_empty());
+}
+
+#[test]
+fn an_unknown_neighbour_is_not_an_occluder() {
+    let solid = Chunk::filled(Voxel::cube(1));
+    let mut neighbors = enclosed_by(&solid);
+    neighbors[0] = None;
+    // Unknown, not air: the face has to be emitted or the Chunk is open to a
+    // hole once that neighbour streams in.
+    assert_eq!(mesh_chunk(&solid, neighbors).quad_count(), 1);
+}
+
+#[test]
+fn an_air_neighbour_opens_exactly_one_face() {
+    let solid = Chunk::filled(Voxel::cube(1));
+    let air = Chunk::air();
+    let mut neighbors = enclosed_by(&solid);
+    neighbors[2] = Some(&air);
+    assert_eq!(mesh_chunk(&solid, neighbors).quad_count(), 1);
+}
+
+#[test]
+fn a_shaped_uniform_chunk_is_not_an_occluder() {
+    // Pass 1 treats a shaped Voxel as transparent, so a uniform Chunk of
+    // stairs must not satisfy the enclosed case.
+    let stairs = Chunk::filled(Voxel::new(1, 1, 0));
+    let solid = Chunk::filled(Voxel::cube(1));
+    assert!(mesh_chunk(&stairs, enclosed_by(&solid)).is_empty());
+    assert!(mesh_chunk(&solid, enclosed_by(&stairs)).quad_count() > 0);
+}
+
+/// The fast path is an optimisation, so where it does not fire the output must
+/// be the same triangle soup `greedy_mesh` would have produced.
+#[test]
+fn declining_never_changes_the_mesh_it_would_have_produced() {
+    let g = Worldgen::new(0x7e55, 1.0, WorldgenParams::default());
+    let center = g.chunk(0, 0, 0);
+    let neighbors = [
+        g.chunk(-1, 0, 0),
+        g.chunk(1, 0, 0),
+        g.chunk(0, -1, 0),
+        g.chunk(0, 1, 0),
+        g.chunk(0, 0, -1),
+        g.chunk(0, 0, 1),
+    ];
+    let refs: [Option<&Chunk>; 6] = std::array::from_fn(|i| Some(&neighbors[i]));
+
+    let fast = mesh_chunk(&center, refs);
+    let slow = greedy_mesh(&Neighborhood::new(&center, refs));
+    assert_eq!(fast.positions, slow.positions);
+    assert_eq!(fast.normals, slow.normals);
+    assert_eq!(fast.uvs, slow.uvs);
+    assert_eq!(fast.materials, slow.materials);
+    assert_eq!(fast.indices, slow.indices);
+    assert_eq!(fast.skipped_shaped, slow.skipped_shaped);
 }

@@ -7,9 +7,12 @@
 
 pub mod chunk;
 pub mod mesh;
+pub mod noise;
 pub mod testgen;
 pub mod voxel;
+pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
-pub use mesh::{ChunkMesh, Neighborhood, greedy_mesh};
+pub use mesh::{ChunkMesh, Neighborhood, greedy_mesh, mesh_chunk};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
+pub use worldgen::{Worldgen, WorldgenParams};

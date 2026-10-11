@@ -2,7 +2,7 @@
 
 mod client;
 mod render;
-mod scene;
+mod server;
 mod world;
 
 use bevy::prelude::*;
@@ -17,6 +17,6 @@ fn main() {
             ..default()
         }))
         .init_resource::<world::WorldSettings>()
-        .add_plugins((render::plugin, client::plugin, scene::plugin))
+        .add_plugins((render::plugin, server::plugin, client::plugin))
         .run();
 }
