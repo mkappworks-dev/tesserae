@@ -51,7 +51,14 @@ pub(super) fn plugin(app: &mut App) {
     })
     .add_systems(
         Update,
-        (watch_frames, fly_forward, shutter, exit_when_written).chain(),
+        (
+            watch_frames,
+            fly_forward,
+            report,
+            shutter,
+            exit_when_written,
+        )
+            .chain(),
     );
 }
 
@@ -86,12 +93,13 @@ fn fly_forward(
     transform.translation += heading * fly.speed * time.delta_secs();
 }
 
-fn shutter(
-    mut commands: Commands,
+/// Logs what the picture is of, so the screenshot in a PR comes with the
+/// numbers behind it. Runs before `shutter` rather than inside it, so neither
+/// function carries the other's system parameters.
+fn report(
     time: Res<Time>,
-    mut capture: ResMut<Capture>,
+    capture: Res<Capture>,
     stats: Res<crate::server::streaming::stats::StreamingStats>,
-    generator: Res<crate::server::WorldGenerator>,
     diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
     camera: Single<&Transform, With<Camera3d>>,
     drawn: Query<(), With<Mesh3d>>,
@@ -99,24 +107,28 @@ fn shutter(
     if capture.taken || time.elapsed_secs() < capture.at_s {
         return;
     }
-    capture.taken = true;
     let worst_frame_ms = diagnostics
         .get(&bevy::diagnostic::FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .map(|d| d.values().copied().fold(0.0f64, f64::max))
         .unwrap_or(0.0);
     info!(
-        "shutter at {:.1}s: camera {:?} surface {:.1}m chunk {} loaded {} \
-         delivered {} entities {} worst frame {worst_frame_ms:.1}ms \
-         (since {SETTLES_AFTER_S}s: {:.1}ms)",
+        "shutter at {:.1}s: camera {:?} chunk {} loaded {} meshed {} drawn {} \
+         worst frame {worst_frame_ms:.1}ms (since {SETTLES_AFTER_S}s: {:.1}ms)",
         time.elapsed_secs(),
         camera.translation,
-        generator.surface_height_m(camera.translation.x, camera.translation.z),
         stats.anchor,
         stats.loaded,
         stats.meshed,
         drawn.iter().count(),
         capture.worst_frame_s * 1000.0,
     );
+}
+
+fn shutter(mut commands: Commands, time: Res<Time>, mut capture: ResMut<Capture>) {
+    if capture.taken || time.elapsed_secs() < capture.at_s {
+        return;
+    }
+    capture.taken = true;
     commands
         .spawn(Screenshot::primary_window())
         .observe(save_to_disk(capture.path.clone()));
