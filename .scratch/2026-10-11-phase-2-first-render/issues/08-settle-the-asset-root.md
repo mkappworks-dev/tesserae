@@ -61,3 +61,9 @@ cursor and nothing on screen said so, which reads as the mouse not working.
 A one-line hint now sits at the bottom-left while the cursor is free and
 disappears once it is grabbed. ASCII only — Bevy's embedded default font is a
 FiraMono subset and renders a middle dot as tofu.
+
+Recorded as [ADR-0005](../../../docs/adr/0005-assets-live-at-the-repository-root.md).
+The reversibility cost is not the directory choice but the coupling: the
+location, `BEVY_ASSET_ROOT` in `.cargo/config.toml` and the release archive's
+layout have to move together, and getting it wrong yields a build that works in
+development and finds nothing when shipped.
