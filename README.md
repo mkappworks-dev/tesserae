@@ -55,6 +55,16 @@ cargo test --workspace && cargo lint
 cargo bench -p tesserae-core
 ```
 
+Everything CI checks, in CI's order, fail-fast:
+
+```bash
+./scripts/cargo-ci
+```
+
+Put `scripts/` on your PATH and that is `cargo ci` — cargo resolves
+`cargo <name>` to a `cargo-<name>` executable. It cannot be a `[alias]`: cargo
+aliases expand to cargo subcommands only, with no shell escape.
+
 The first two of those gate CI, and the bench gates any change to the mesher,
 chunk storage, lighting or fluids — put the before and after numbers in the PR.
 The full pre-merge checklist is in

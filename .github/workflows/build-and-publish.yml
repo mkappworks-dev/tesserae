@@ -60,7 +60,9 @@ jobs:
 
       - name: Install Linux build deps
         if: matrix.os_label == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       # No version injection: release-please bumps Cargo.toml and the binary reads
       # it through env!("CARGO_PKG_VERSION").

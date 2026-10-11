@@ -30,9 +30,15 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      # bevy's app crate links alsa and udev on Linux; clippy builds it.
+      # bevy links alsa, udev, wayland and xkbcommon on Linux. Wayland is a
+      # default bevy feature and wayland-sys resolves wayland-client through
+      # pkg-config at build time, so a missing -dev package fails the build
+      # rather than degrading to X11. macOS needs none of this, which is why
+      # it only ever shows up here.
       - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Check formatting
         run: cargo fmt --all --check
@@ -133,7 +139,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Run tests
         run: cargo test --workspace --locked
@@ -159,7 +167,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Install Linux build deps
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libudev-dev
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Build
         run: cargo build --workspace --release --locked
