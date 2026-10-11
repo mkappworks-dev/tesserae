@@ -332,23 +332,29 @@ fn generate(
             continue;
         }
         store.insert(coord, generator.chunk(coord.x, coord.y, coord.z));
+        // Only this Chunk, deliberately. An arriving Chunk changes the faces of
+        // its six neighbours, so re-dirtying them looks obviously necessary and
+        // is the first thing a reader will add here. It is not necessary, and
+        // the reason is worth the lines because it stops holding the moment a
+        // Voxel can be edited: a Chunk is never replaced while loaded, `dirty`
+        // is cleared only on a successful mesh, and `publish` will not mesh a
+        // Chunk until all six neighbours are present — so a neighbour arriving
+        // can never invalidate a mesh the Client already holds. The one thing
+        // that could, a neighbour being evicted, cannot happen while the Chunk
+        // is delivered; see the extent ordering in the module doc.
+        //
+        // Build-order step 5 brings Voxel edits and with them the neighbour
+        // re-mesh. `no_mesh_the_client_still_holds_is_stale` is the test that
+        // will fail when this stops being true.
         meshes.dirty.insert(coord);
         made += 1;
     }
 }
 
-/// Meshes up to `budget` dirty Chunks inside the mesh extent, nearest first,
-/// skipping any whose six neighbours are not all loaded.
+/// Meshes up to `budget` dirty Chunks inside the mesh extent, nearest first.
 ///
-/// Deliberately does **not** re-dirty a Chunk's neighbours when one arrives,
-/// which looks like the obvious omission. It is unnecessary here and the reason
-/// is worth stating, because it stops holding the moment a Voxel can be edited:
-/// a Chunk is never replaced while loaded, `dirty` is cleared only on a
-/// successful mesh, and a Chunk can only be meshed once all six neighbours are
-/// present — so no delivered mesh can be invalidated by a later arrival. The
-/// one thing that could invalidate it, a neighbour being evicted, cannot happen
-/// while the Chunk is delivered; see the extent ordering in the module doc.
-/// Build-order step 5 brings edits and with them the neighbour re-mesh.
+/// Requiring all six neighbours before meshing is what lets `generate` get
+/// away with not re-dirtying them; see the comment there.
 fn publish(
     store: &ChunkStore,
     meshes: &mut MeshState,
