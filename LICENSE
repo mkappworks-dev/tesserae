@@ -7,26 +7,27 @@ License text copyright © 2017 MariaDB Corporation Ab, All Rights Reserved.
 
 Parameters
 
-Licensor:             Malith Kuruppu
+Licensor:             Tesserae
 
 Licensed Work:        Tesserae 0.0.0
-                      The Licensed Work is (c) 2026 Malith Kuruppu.
+                      The Licensed Work is (c) 2026 Tesserae.
                       The Licensed Work excludes the contents of the
                       games/ and assets/ directories, which are
                       licensed separately and permissively; see
                       CONTRIBUTING.md.
 
-Additional Use Grant: You may make production use of the Licensed Work,
-                      including developing, distributing, and
-                      commercially selling games, applications, mods and
-                      other works built with or on top of the Licensed
-                      Work, and operating servers that run such works.
+Additional Use Grant: You may make production use of the Licensed
+                      Work, including developing, distributing, and
+                      commercially selling games, applications, mods
+                      and other works built with or on top of the
+                      Licensed Work, and operating servers that run
+                      such works.
 
                       This grant does not extend to offering the
-                      Licensed Work itself, or a modified version of it,
-                      to third parties as a game engine, development
-                      tool, or hosted or embedded service that competes
-                      with the Licensed Work.
+                      Licensed Work itself, or a modified version of
+                      it, to third parties as a game engine,
+                      development tool, or hosted or embedded service
+                      that competes with the Licensed Work.
 
 Change Date:          Four years from the date the Licensed Work is
                       published.
