@@ -26,3 +26,25 @@ writes no feature code.
 
 The baseline table is in this file, the new benches compile under `cargo bench
 --workspace --no-run --locked`, and `./scripts/cargo-ci` passes.
+
+## Comments
+
+Partly done, not closed. The collide benches are written
+(`crates/tesserae-core/benches/collide.rs`, registered in `Cargo.toml`) and
+compile; scenes are a one-Chunk room of cubes or slabs, plus terrain.
+
+**The baseline taken in this session is void and was deleted.** The machine's
+load average was 54 (other sessions compiling and running `target/debug/
+tesserae`), and the numbers it produced were roughly 8-10x the step-5 figures
+(`shape_table_builtin` 42 ms against 4.8 ms, `greedy_mesh/terrain` 2.9 ms against
+a few hundred microseconds), with confidence intervals of +-15% on the 500 ns
+benches. A "no change" against that baseline would mean nothing.
+
+Also learned: pass `--bench meshing --bench collide` to `cargo bench`, since a
+bare `-- --save-baseline` is also handed to the lib's test harness, which
+rejects it.
+
+To finish: on a quiet machine (`uptime` load below ~2), run `cargo bench -p
+tesserae-core --locked --bench meshing --bench collide -- --save-baseline main`,
+then the same with `--baseline main` and confirm criterion reports no change, and
+paste the median table here.
