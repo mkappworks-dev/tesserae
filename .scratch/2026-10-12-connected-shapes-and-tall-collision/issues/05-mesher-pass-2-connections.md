@@ -31,6 +31,8 @@ c)`. Non-connected Voxels take today's path with `Connections::NONE`.
 - Cross-check: for a random scene, the arms in the mesh, in `collision` and in
   `selection` agree voxel by voxel. (Ticket 06 supplies the sweep and ray sides
   and extends this; this ticket checks mesh against table.)
+- The mesher path takes no `VoxelVolume`, only the `Neighborhood` (ADR-0007: jobs
+  hold snapshots, never the live store).
 - `Neighborhood::isolated` treats the outside as air: a fence at the scene edge
   connects to nothing outside it.
 

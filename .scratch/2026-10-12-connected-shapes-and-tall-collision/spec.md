@@ -286,7 +286,19 @@ permanent id taken without a Mod to justify it. The `dev` build registers a
 demo fence at startup for the gallery and the hotbar, exactly as a Mod will in
 step 7.
 
-### 11. The WASM boundary
+### 11. Jobs compute connections from their snapshot
+
+ADR-0007: meshing and light run as off-thread jobs holding `Arc` snapshots, and
+the `ShapeTable` is immutable once the World is open (a job holds it by `Arc`;
+registering at runtime would need a table epoch). Both hold here. A mesh job
+derives a connected Voxel's arms from the `Neighborhood` shell it was handed
+(decision 6), never from the live store, and the shell already contains every
+Voxel `connections` reads. The sweep and the ray run on the Server's tick over
+`VoxelVolume`, not in a job. Connection groups, arms and overhang are fixed at
+registration like the rest of a Shape, so no new epoch is needed. Ticket 05
+asserts the mesher path takes no `VoxelVolume`.
+
+### 12. The WASM boundary
 
 Both features cross as data: `ShapeDef` grows `connect` and the type of
 `collision`, and a Mod hands the table a list of definitions once at load.
@@ -303,7 +315,7 @@ and the one that breaks ADR-0001.
 2. **`tesserae-core` gains no dependency.** `connections` takes six `Voxel`s;
    the sweep and the ray gather them through the existing `VoxelVolume`.
 3. **No Mod reaches `tesserae-core` directly.** One batched `register` per
-   Shape, native afterwards (decision 11).
+   Shape, native afterwards (decision 12).
 4. **Everything physical is in metres.** Boxes, arms and overhang are
    fractions of a Voxel and become distances only by `voxel_size`.
 5. **A connected Shape seals nothing, is unoriented, and keeps each arm to its

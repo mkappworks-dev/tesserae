@@ -8,7 +8,8 @@ writes no feature code.
 
 ## What to build
 
-- On the commit this branch starts from, run `cargo bench -p tesserae-core --
+- On `main` at or after f232c4e (the step-4/5 numbers quoted in older briefs
+  are stale, so take them fresh), run `cargo bench -p tesserae-core --
 --save-baseline main` and keep the output. Criterion baselines live in
   `target/` and are not committed; the table of medians goes in a `## Comments`
   section of this ticket so the numbers survive the machine.
