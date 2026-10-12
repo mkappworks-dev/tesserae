@@ -38,6 +38,5 @@ Spec decision 5. After this the Server reads no Client-owned pose.
 `Transform`. `stream` keeps its guard for "no Player" because a streaming test
 builds an app without one.
 
-**Not done:** the capture run comparing loaded and meshed counts against `main`.
-It needs the dev build and a window; the streaming tests pass unmodified in what
-they assert, which is the evidence this ticket has.
+The capture comparison against `main` was done in ticket 09: identical loaded,
+meshed and drawn counts in every run.
