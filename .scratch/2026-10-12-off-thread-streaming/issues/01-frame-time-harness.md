@@ -1,6 +1,6 @@
 # A frame-time harness that separates the fill from flight
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Everything after this is judged by it, so it goes first and lands on `main`'s
@@ -42,3 +42,51 @@ build is debug at `opt-level = 1`.
 - Five baseline runs are recorded in Comments.
 - `./scripts/cargo-ci` passes; the new fields are `dev`-gated, so the build
   without `--features dev` has no dead code.
+
+## Comments
+
+**Baseline**, `main` plus this ticket's harness only (streaming unchanged),
+Apple M5, debug at `opt-level = 1`, load average 2-3 from other sessions'
+builds. `scripts/frame-runs 5`; median (min-max). Times are virtual seconds from
+start.
+
+| Figure             | 12 m/s (walk)    | 60 m/s (sprint)  |
+| ------------------ | ---------------- | ---------------- |
+| `shown_s`          | 1.10 (1.09-1.10) | 1.10 (1.09-1.10) |
+| `fill_s`           | 7.24 (7.23-7.24) | 7.24 (7.24-7.24) |
+| `worst_fill_ms`    | 32.0 (24.7-32.0) | 27.5 (24.3-32.2) |
+| `worst_flight_ms`  | 7.4 (7.4-7.7)    | 7.5 (7.4-7.8)    |
+| `median_flight_ms` | 6.9              | 6.9              |
+| `p99_flight_ms`    | 7.3 (7.2-7.3)    | 7.3              |
+
+What the numbers say, which is not what the brief assumed:
+
+- **The fill is the whole problem.** Flight is already flat at the baseline,
+  even sprinting 360 m (11 Cells): worst frame 0.5 ms above the median. There is
+  no headroom to win there, so "lower and flatter while flying" can only mean
+  "not worse". The figure to move is `worst_fill_ms`.
+- **The slow frames are not at the start.** `fill_s` is 7.24 s, every run,
+  because the tick is count-based and the ticks are fixed, so it is reproducible
+  to a hundredth of a second. `shown_s` (every Chunk in the mesh extent has been
+  sent) is 1.10 s. The 12-32 ms frames sit at about 5.3-5.9 s with the load
+  volume already held and the mesh count unchanged, which fits the relight
+  backlog draining and republishing as light settles rather than generation. Not
+  profiled; ticket 04 will find out.
+- **The first 0.2 s is startup, not streaming.** With the view distance cut to
+  20 m the same frames at t = 0.02-0.16 s cost 16, 27, 57 and 25 ms, against 16,
+  27, 62 and 24 ms with the full ring. So the 1.5 s exclusion
+  (`SETTLES_AFTER_S`) hides window creation and shader compilation and nothing
+  streaming does, and stays.
+- `worst_fill_ms` varies 24-32 ms between runs while every other figure is
+  identical to the hundredth; the variation is the frame it lands on, not the
+  tick's work. Five runs is the floor.
+
+Changes beyond the ticket's list, all `dev` only:
+
+- The flight now starts when the fill ends (or after `FILL_TIMEOUT_S` = 30 s, in
+  which case `fill_s=never`), where it used to start at t = 0 and overlap the
+  fill. The shutter is `fly_for + settle_for` after that, so the screenshot is
+  taken later than it was.
+- `shown_s`, from a second `StreamingStats` flag, because `settled` also waits
+  for the margin's light and is not what a player sees fill in.
+- `TESSERAE_SCREENSHOT_SPEED_M_S`, because 12 m/s asks streaming for so little.

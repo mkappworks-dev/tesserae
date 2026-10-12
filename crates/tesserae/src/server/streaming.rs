@@ -586,6 +586,15 @@ pub mod stats {
         pub meshed: usize,
         /// The Chunk the anchor is standing in.
         pub anchor: ChunkCoord,
+        /// Nothing is left to do: the load volume is held, every Chunk's light
+        /// is solved, and every Chunk inside the mesh extent has a current
+        /// mesh. Chunks the Server holds only as margin stay dirty for ever and
+        /// are not waited for.
+        pub settled: bool,
+        /// Every Chunk inside the mesh extent has been sent a mesh at least
+        /// once. Earlier than `settled`, which also waits for the margin's
+        /// light, and the one that matches what a player sees fill in.
+        pub shown: bool,
     }
 
     pub(super) fn plugin(app: &mut App) {
@@ -593,21 +602,45 @@ pub mod stats {
             .add_systems(FixedPostUpdate, publish_stats);
     }
 
-    fn publish_stats(
+    pub(super) fn publish_stats(
         mut stats: ResMut<StreamingStats>,
         store: Res<ChunkStore>,
         meshes: Res<MeshState>,
+        order: Res<LoadOrder>,
+        settings: Res<StreamingSettings>,
         world: Res<WorldSettings>,
         anchor: Query<&Transform, With<StreamingAnchor>>,
     ) {
-        let anchor = anchor
+        let center = anchor
             .single()
             .map(|pose| world.chunk_at(pose.translation))
-            .unwrap_or_default();
+            .ok();
+        let mesh = Rings::new(*settings, world.cell_size()).mesh;
+        let shown = center.is_some_and(|center| {
+            mesh.offsets()
+                .into_iter()
+                .all(|d| meshes.delivered.contains(&offset(center, d)))
+        });
+        let settled = center.is_some_and(|center| {
+            // An empty order is the tick before the first `stream`, which would
+            // otherwise read as a held load volume.
+            !order.offsets.is_empty()
+                && order
+                    .offsets
+                    .iter()
+                    .all(|&d| store.contains(offset(center, d)))
+                && meshes.unlit.is_empty()
+                && !meshes
+                    .dirty
+                    .iter()
+                    .any(|&c| mesh.contains(delta(center, c)))
+        });
         *stats = StreamingStats {
             loaded: store.coords().count(),
             meshed: meshes.delivered.len(),
-            anchor,
+            anchor: center.unwrap_or_default(),
+            settled,
+            shown,
         };
     }
 }
@@ -1195,6 +1228,51 @@ mod tests {
             }
         }
         assert!(lit_faces > 0, "every published face was baked dark");
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn stats_report_settled_only_when_the_server_has_nothing_left_to_do() {
+        fn settled(h: &mut Harness) -> bool {
+            h.app
+                .world_mut()
+                .run_system_once(stats::publish_stats)
+                .expect("the summary ran");
+            h.app.world().resource::<stats::StreamingStats>().settled
+        }
+
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.app.init_resource::<stats::StreamingStats>();
+        assert!(!settled(&mut h), "settled before the first tick");
+        assert!(
+            !h.app.world().resource::<stats::StreamingStats>().shown,
+            "shown before the first tick"
+        );
+
+        for _ in 0..20 {
+            h.tick();
+        }
+        assert!(settled(&mut h), "the fill never settled");
+        assert!(
+            h.app.world().resource::<stats::StreamingStats>().shown,
+            "settled but the mesh extent was not all sent"
+        );
+
+        let cell = h.app.world().resource::<WorldSettings>().cell_size();
+        h.anchor_at(Vec3::new(10.0 * cell, 0.0, 0.0));
+        let mut slow = Harness::new(
+            small(),
+            StreamingBudget {
+                generate_per_tick: 1,
+                ..UNLIMITED
+            },
+        );
+        slow.app.init_resource::<stats::StreamingStats>();
+        slow.tick();
+        assert!(
+            !settled(&mut slow),
+            "settled with the load volume barely started"
+        );
     }
 
     #[test]
