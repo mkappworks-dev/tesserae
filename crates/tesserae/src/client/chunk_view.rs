@@ -39,6 +39,13 @@ fn add_material(mut commands: Commands, mut materials: ResMut<Assets<ChunkMateri
     })));
 }
 
+#[cfg_attr(
+    feature = "dev",
+    expect(
+        clippy::too_many_arguments,
+        reason = "a Bevy system; the extra parameter is the dev cost counter"
+    )
+)]
 fn upload_meshes(
     mut commands: Commands,
     mut incoming: MessageReader<ChunkMeshReady>,
@@ -47,13 +54,22 @@ fn upload_meshes(
     material: Res<TerrainMaterial>,
     world: Res<WorldSettings>,
     existing: Query<&Mesh3d>,
+    #[cfg(feature = "dev")] mut cost: ResMut<crate::cost::MainThreadCost>,
 ) {
+    #[cfg(feature = "dev")]
+    let started = std::time::Instant::now();
+    #[cfg(feature = "dev")]
+    let mut uploaded = 0;
     for ChunkMeshReady { coord, mesh } in incoming.read() {
         if mesh.is_empty() {
             despawn(&mut commands, &mut meshes, &mut entities, &existing, *coord);
             continue;
         }
 
+        #[cfg(feature = "dev")]
+        {
+            uploaded += 1;
+        }
         let handle = meshes.add(chunk_mesh_to_mesh(mesh, world.voxel_size));
         match entities.0.get(coord) {
             // Replacing rather than despawning and respawning keeps the
@@ -77,6 +93,10 @@ fn upload_meshes(
                 entities.0.insert(*coord, entity);
             }
         }
+    }
+    #[cfg(feature = "dev")]
+    if uploaded > 0 {
+        cost.uploaded(started.elapsed(), uploaded);
     }
 }
 

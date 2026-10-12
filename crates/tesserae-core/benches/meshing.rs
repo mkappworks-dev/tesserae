@@ -1,6 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
@@ -295,8 +295,71 @@ fn shapes_table(c: &mut Criterion) {
     });
 }
 
+/// What handing a mesh job its data costs the thread that dispatches it: the
+/// seven Chunks and seven `ChunkLight`s a mesh reads, copied or shared. The
+/// surface-crossing Chunk with its dense light is the expensive case for the
+/// copy; the second pair is what a write costs once the store holds `Arc`s.
+fn snapshot(c: &mut Criterion) {
+    let mut group = c.benchmark_group("snapshot");
+    let (g, straddling, _, _) = worldgen();
+    let chunk = g.chunk(0, straddling, 0);
+    let sky = open_sky();
+    let air_above = Chunk::air();
+    let mut border = [None; 6];
+    border[tesserae_core::mesh::POS_Y] = Some(LitChunk::new(&air_above, &sky));
+    let light = light_chunk(&chunk, border, shapes());
+
+    let chunks: Vec<Chunk> = vec![chunk.clone(); 7];
+    let lights: Vec<ChunkLight> = vec![light.clone(); 7];
+    group.bench_function("clone_seven_chunks_and_lights", |b| {
+        b.iter(|| black_box((black_box(&chunks).clone(), black_box(&lights).clone())))
+    });
+
+    let shared_chunks: Vec<Arc<Chunk>> = chunks.iter().cloned().map(Arc::new).collect();
+    let shared_lights: Vec<Arc<ChunkLight>> = lights.iter().cloned().map(Arc::new).collect();
+    group.bench_function("arc_clone_seven_chunks_and_lights", |b| {
+        b.iter(|| {
+            black_box((
+                black_box(&shared_chunks).clone(),
+                black_box(&shared_lights).clone(),
+            ))
+        })
+    });
+
+    let stone = Voxel::cube(testgen::STONE);
+    let mut unshared = Arc::new(chunk.clone());
+    let mut flip = false;
+    group.bench_function("make_mut_unshared", |b| {
+        b.iter(|| {
+            flip = !flip;
+            let voxel = if flip { stone } else { Voxel::AIR };
+            Arc::make_mut(&mut unshared).set(1, 1, 1, voxel);
+        })
+    });
+
+    let base = Arc::new(chunk.clone());
+    group.bench_function("make_mut_shared", |b| {
+        b.iter(|| {
+            let mut held = Arc::clone(&base);
+            Arc::make_mut(&mut held).set(1, 1, 1, stone);
+            black_box(held)
+        })
+    });
+
+    let base_light = Arc::new(light.clone());
+    group.bench_function("make_mut_shared_light", |b| {
+        b.iter(|| {
+            let mut held = Arc::clone(&base_light);
+            Arc::make_mut(&mut held).set(1, 1, 1, Light::new(MAX_LIGHT, 0));
+            black_box(held)
+        })
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
+    snapshot,
     shapes_table,
     mesher,
     streamed_mesher,
