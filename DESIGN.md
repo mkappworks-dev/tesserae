@@ -330,7 +330,10 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    derived from one rotated 16³ grid per Shape: which faces a Voxel seals, the
    geometry pass 2 emits, collision, and volume. Occlusion and light are per
    face. The Server's edit path is live, with a ray as the Client's only intent,
-   and `collide.rs` has a metre-valued sweep and ray.
+   and `collide.rs` has a metre-valued sweep and ray. Connected Shapes (a fence
+   growing arms) and collision up to a Voxel taller than the cell follow in the
+   same step, with connections derived from the neighbours and never stored
+   ([ADR-0008](docs/adr/0008-connections-are-derived-not-stored.md)).
 6. LOD mip chain out to 4km.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
@@ -362,11 +365,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   the band; see `StreamingBudget`.
 - **Shaped Voxels have loose ends worth a ticket each.** Terrain contains none
   (slope-smoothing stairs and slabs are the obvious worldgen use, and must stay
-  under the cap). Fence arms and collision taller than the cell need a Shape to
-  look at its neighbours. Two partial Shapes that only jointly cover a face leak
-  light through the seam. Material transparency (glass, water, leaves) is not a
-  Shape property. The Client's hotbar is a stopgap. The ray origin in an intent
-  is not checked against a player position, because there is no player entity.
+  under the cap). Connection groups belong to a Shape and not a Material until
+  step 7, a connected Shape cannot be rotated, and LOD counts only its bare
+  post. A fence costs 7 stairs of the cap, so 146 fit in a Chunk. Two partial
+  Shapes that only jointly cover a face leak light through the seam. Material
+  transparency (glass, water, leaves) is not a Shape property. The Client's
+  hotbar is a stopgap. The ray origin in an intent is not checked against a
+  player position, because there is no player entity.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

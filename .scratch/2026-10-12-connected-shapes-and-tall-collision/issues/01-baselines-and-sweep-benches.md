@@ -44,7 +44,24 @@ Also learned: pass `--bench meshing --bench collide` to `cargo bench`, since a
 bare `-- --save-baseline` is also handed to the lib's test harness, which
 rejects it.
 
-To finish: on a quiet machine (`uptime` load below ~2), run `cargo bench -p
-tesserae-core --locked --bench meshing --bench collide -- --save-baseline main`,
-then the same with `--baseline main` and confirm criterion reports no change, and
-paste the median table here.
+**Measured later, interleaved, and still not conclusive.** Other sessions kept
+the machine at a load average of 30-100 for the whole branch, so a saved
+criterion baseline could not be taken. Instead the `main` bench binary
+(f232c4e, built in a detached worktree) and the branch's were run alternately,
+five and then ten rounds each, so load hit both. Round to round the same bench
+varied 2-3x. Medians of those runs, branch against main: `greedy_mesh/terrain`
++10.6% then -6.9%, `/solid` -8.5% then +3.8%, `/checkerboard` -8.7% then -1.5%,
+`/terrain_stairs_at_cap` -2.4%, `/all_stairs` +2.5%, `mesh_chunk/straddling`
+-2.5%, `light_chunk/straddling_settled` +7.1%, `/flooded_air` +2.2%,
+`shape_table_builtin` -15.7%. The sign flips between runs of one bench, and
+minimums swung from -38% to +40%, so none of this distinguishes a change from
+noise. What can be said without a clean run: pass 1's code, `variant()` and
+`seals` are untouched, a terrain Chunk never reaches the table or pass 2, and
+the `Variant` struct grew by 10 bytes.
+
+**Still to do, by whoever has a quiet machine:** `cargo bench -p tesserae-core
+--locked --bench meshing --bench collide -- --save-baseline main` on f232c4e,
+then `-- --baseline main` on this branch, with `uptime` load below ~2, and paste
+the table here. The `collide` benches have no `main` side at all yet (the file
+did not exist), which is why they need the first command run on a checkout of
+this branch's `benches/collide.rs` against f232c4e's `collide.rs`.

@@ -1,6 +1,6 @@
 # ADR-0008, vocabulary, and the numbers
 
-Status: ready-for-agent
+Status: done
 Blocked by: 07
 
 ## What to build
@@ -25,3 +25,9 @@ Blocked by: 07
 ## Done when
 
 Every item in the spec's Done-when holds, with the evidence in the PR.
+
+## Comments
+
+Done except the measurements: ADR-0008, the ADR-0006 pointer, `CONTEXT.md` and
+DESIGN.md are written and formatted. The before/after table is not honest to
+produce on this machine; ticket 01 says what was tried and what is left.

@@ -37,6 +37,16 @@ Meaningless for a full cube, which looks the same under all of them.
 **Nodebox** — an axis-aligned box inside one Voxel, in sixteenths of its edge. A
 Shape is a union of them.
 
+**Connection** — an arm a connected Shape grows towards a face-neighbour because
+of what that neighbour is. Derived from the six Voxels around, never stored in a
+Voxel.
+
+**Connection group** — one of 32 bits a Shape can belong to and can connect to.
+A property of a Shape, not of a Material.
+
+**Overhang** — how far a Shape's collision extends beyond its own cell, in
+Voxels, at most one.
+
 **Sealed face** — a face of a Voxel that its Shape covers completely. What
 occlusion and light both ask about; derived from geometry, never authored.
 
