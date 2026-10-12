@@ -44,24 +44,38 @@ Also learned: pass `--bench meshing --bench collide` to `cargo bench`, since a
 bare `-- --save-baseline` is also handed to the lib's test harness, which
 rejects it.
 
-**Measured later, interleaved, and still not conclusive.** Other sessions kept
-the machine at a load average of 30-100 for the whole branch, so a saved
-criterion baseline could not be taken. Instead the `main` bench binary
-(f232c4e, built in a detached worktree) and the branch's were run alternately,
-five and then ten rounds each, so load hit both. Round to round the same bench
-varied 2-3x. Medians of those runs, branch against main: `greedy_mesh/terrain`
-+10.6% then -6.9%, `/solid` -8.5% then +3.8%, `/checkerboard` -8.7% then -1.5%,
-`/terrain_stairs_at_cap` -2.4%, `/all_stairs` +2.5%, `mesh_chunk/straddling`
--2.5%, `light_chunk/straddling_settled` +7.1%, `/flooded_air` +2.2%,
-`shape_table_builtin` -15.7%. The sign flips between runs of one bench, and
-minimums swung from -38% to +40%, so none of this distinguishes a change from
-noise. What can be said without a clean run: pass 1's code, `variant()` and
-`seals` are untouched, a terrain Chunk never reaches the table or pass 2, and
-the `Variant` struct grew by 10 bytes.
+**Measured, interleaved, on a quiet machine (load 3-5, medians within ~2% of
+minimums, five rounds).** No criterion baseline was saved: the `main` bench
+binary (origin/main 7a9d313, with the new `collide` bench copied in) and the
+branch's merged binary were run alternately instead. Apple M5, release.
 
-**Still to do, by whoever has a quiet machine:** `cargo bench -p tesserae-core
---locked --bench meshing --bench collide -- --save-baseline main` on f232c4e,
-then `-- --baseline main` on this branch, with `uptime` load below ~2, and paste
-the table here. The `collide` benches have no `main` side at all yet (the file
-did not exist), which is why they need the first command run on a checkout of
-this branch's `benches/collide.rs` against f232c4e's `collide.rs`.
+| Bench                                     |   main |  branch | change |
+| ----------------------------------------- | -----: | ------: | -----: |
+| `greedy_mesh/terrain`                     | 333 us |  352 us |  +5.7% |
+| `greedy_mesh/solid`                       | 317 us |  320 us |  +0.8% |
+| `greedy_mesh/checkerboard`                | 2.63 ms | 2.60 ms |  -1.0% |
+| `greedy_mesh/terrain_stairs_at_cap`       | 532 us |  559 us |  +4.9% |
+| `greedy_mesh/all_stairs`                  | 5.99 ms | 6.16 ms |  +2.9% |
+| `mesh_chunk/straddling`                   | 387 us |  404 us |  +4.5% |
+| `light_chunk/straddling_settled`          | 299 us |  302 us |  +1.1% |
+| `light_chunk/flooded_air`                 | 123 us |  122 us |  -0.8% |
+| `shape_table_builtin`                     | 4.87 ms | 4.28 ms | -12.1% |
+| `collide/fall_cubes` / `fall_slabs`       | 67 / 71 ns | 62 / 65 ns | -8% / -9% |
+| `collide/walk_into_wall_cubes` / `_slabs` | 74 / 74 ns | 91 / 91 ns | +23% / +23% |
+| `collide/ray_cubes` / `_slabs`            | 424 / 418 ns | 423 / 430 ns | -0.3% / +2.9% |
+| `collide/ray_terrain`                     | 492 ns |  498 ns |  +1.1% |
+| `collide/fall_terrain`                    | 442 ns |  162 ns | -63.3% |
+
+Read honestly: pass 1 itself is unchanged code, and `solid`/`checkerboard` are
+flat, but `terrain` reads +2% on minimums and +6% on medians, and
+`mesh_chunk/straddling` (which contains it) +4%. I have not found what moves it
+and a layout effect from `Variant` growing is the likely cause, so it is a
+reported cost and not a proven one. Pass 2 costs about 5% more per shaped
+Voxel (`is_connected`, `connections` and `coverage_against` each re-read the
+variant). The wall-walk sweep is 17 ns slower over about 30 cells; the fall
+sweeps are faster and `fall_terrain` is 63% faster because `obstacles` no
+longer allocates. The light solvers did not move.
+
+Still open: whether the +2-6% on terrain is layout noise (a second machine, or
+`perf stat` instruction counts, would say) and whether `coverage_against` and
+`is_connected` should do one lookup instead of two.
