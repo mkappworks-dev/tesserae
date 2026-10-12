@@ -382,7 +382,7 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
   Connection groups belong to a Shape and not a Material until step 7, a
   connected Shape cannot be rotated, and LOD counts only its bare post. A fence
-  costs 7 stairs of the cap, so 146 fit in a Chunk. Material transparency
+  costs 4 stairs of the cap, so 256 fit in a Chunk. Material transparency
   (glass, water, leaves) is a Material property and not a Shape one: the table,
   light dimming and occlusion are done, and the blended render pass is ticket 04
   of `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is

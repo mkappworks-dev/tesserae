@@ -18,15 +18,14 @@ pub const FENCE_GROUP: u32 = 1;
 /// Connection group of [`pipe`].
 pub const PIPE_GROUP: u32 = 2;
 
-/// A post with two rails towards each fence or wall beside it, 1.5 Voxels tall
+/// A post with a bar towards each fence or wall beside it, 1.5 Voxels tall
 /// to bump into so that it cannot be jumped.
 pub fn fence() -> ShapeDef {
-    let rails = |face: usize, from: [u8; 3], to: [u8; 3]| {
-        // Two rails, each the arm's width, at the same two heights on every side.
-        let rail = |y0, y1| NodeBox::new([from[0], y0, from[2]], [to[0], y1, to[2]]);
+    let bar = |face: usize, from: [u8; 3], to: [u8; 3]| {
+        // One bar per arm: each extra box is five more quads against the cap.
         Arm {
             face,
-            boxes: vec![rail(6, 9), rail(12, 15)],
+            boxes: vec![NodeBox::new([from[0], 7, from[2]], [to[0], 13, to[2]])],
             collision: Some(vec![CollisionBox::new(
                 [from[0] as i8, 0, from[2] as i8],
                 [to[0] as i8, 24, to[2] as i8],
@@ -41,10 +40,10 @@ pub fn fence() -> ShapeDef {
             connects_to: FENCE_GROUP,
             to_sealed: true,
             arms: vec![
-                rails(NEG_X, [0, 0, 7], [6, 0, 9]),
-                rails(POS_X, [10, 0, 7], [16, 0, 9]),
-                rails(NEG_Z, [7, 0, 0], [9, 0, 6]),
-                rails(POS_Z, [7, 0, 10], [9, 0, 16]),
+                bar(NEG_X, [0, 0, 7], [6, 0, 9]),
+                bar(POS_X, [10, 0, 7], [16, 0, 9]),
+                bar(NEG_Z, [7, 0, 0], [9, 0, 6]),
+                bar(POS_Z, [7, 0, 10], [9, 0, 16]),
             ],
         }),
     }

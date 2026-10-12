@@ -360,11 +360,11 @@ fn mesher(c: &mut Criterion) {
         b.iter(|| black_box(greedy_mesh(black_box(&all_nb), tables())))
     });
 
-    // The same cap with a connected Shape, which emits rails as well as a post.
+    // The same cap with a connected Shape, which emits arms as well as a post.
     // `terrain_fences_at_cap` is what a building looks like; `flat_fences_at_cap`
     // is every fence fully armed, the worst a Chunk at the cap can cost.
     // As many as the cap lets in, which is fewer than stairs: a fence is charged
-    // for its rails in stair-sized units.
+    // for its arms in stair-sized units.
     let units = fence_tables()
         .shapes
         .cap_units(Voxel::new(testgen::STONE, FENCE_ID, 0)) as usize;

@@ -48,8 +48,9 @@ pub const MAX_BOXES: usize = 16;
 /// the rule was 50%, because a tick has twelve meshes in it. A Chunk of nothing
 /// but stairs takes 5.2 ms.
 ///
-/// The reference fence costs 7 stairs, so 146 fit; 1024 of them meshed in 5.2 ms
-/// against 1.5 ms for 1024 stairs (same loaded run).
+/// The reference fence costs 4 stairs, so 256 fit. Terrain with 256 fences meshes
+/// in 547 us against 550 us for 1024 stairs and 337 us for the terrain alone
+/// (interleaved with the 7-stair fence's 534 us at 146, Apple M5, load 2-7).
 pub const MAX_SHAPED_PER_CHUNK: usize = 1024;
 
 /// Set in [`ShapeTable::light_mask`] for a shaped Voxel, meaning light is also
@@ -1359,10 +1360,10 @@ mod tests {
         let (t, fence, _) = fence_table();
         let arm = |face: usize| -> NodeBox {
             match face {
-                f if f == POS_X => NodeBox::new([10, 6, 7], [16, 9, 9]),
-                f if f == NEG_X => NodeBox::new([0, 6, 7], [6, 9, 9]),
-                f if f == POS_Z => NodeBox::new([7, 6, 10], [9, 9, 16]),
-                _ => NodeBox::new([7, 6, 0], [9, 9, 6]),
+                f if f == POS_X => NodeBox::new([10, 7, 7], [16, 13, 9]),
+                f if f == NEG_X => NodeBox::new([0, 7, 7], [6, 13, 9]),
+                f if f == POS_Z => NodeBox::new([7, 7, 10], [9, 13, 16]),
+                _ => NodeBox::new([7, 7, 0], [9, 13, 6]),
             }
         };
         let arms = [NEG_X, POS_X, NEG_Z, POS_Z];
@@ -1375,7 +1376,7 @@ mod tests {
                 .collect();
             let c = bits(&out);
             let drawn = t.selection(fence, c);
-            assert_eq!(drawn.len(), 1 + 2 * out.len(), "mask {mask}");
+            assert_eq!(drawn.len(), 1 + out.len(), "mask {mask}");
             for &f in &arms {
                 assert_eq!(
                     drawn.contains(&arm(f)),
@@ -1515,7 +1516,7 @@ mod tests {
     #[test]
     fn volume_is_the_bare_variants_whatever_the_arms() {
         let (t, fence, _) = fence_table();
-        // 4 x 16 x 4 sub-cells of post, and LOD is not told about rails.
+        // 4 x 16 x 4 sub-cells of post, and LOD is not told about arms.
         assert_eq!(t.volume(fence), 4 * 16 * 4);
     }
 
@@ -1588,7 +1589,7 @@ mod tests {
         assert_eq!(
             t.register(mutate(&|c| {
                 let extra = c.arms[0].boxes[0];
-                c.arms[0].boxes.extend(std::iter::repeat_n(extra, 8));
+                c.arms[0].boxes.extend(std::iter::repeat_n(extra, 12));
             })),
             Err(ShapeError::TooManyBoxes)
         );

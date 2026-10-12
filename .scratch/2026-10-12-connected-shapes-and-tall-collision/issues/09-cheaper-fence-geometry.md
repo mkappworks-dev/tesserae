@@ -1,6 +1,6 @@
 # Cheaper fence geometry, so more of them fit in a Chunk
 
-Status: ready-for-agent
+Status: done
 Blocked by: 07
 
 Spec decision 10's outcome. A Chunk of 1024 reference fences meshed in 5.2 ms
@@ -130,3 +130,29 @@ The doc comments that quote 7 and 146 quote the new numbers.
 - Merging rails across Voxels, or any change to pass 2
 - Redefining `cap_units` or the cap's rule
 - Changing the fence's collision, connection rules or the pipe
+
+## Done
+
+Done. Each arm is one bar (7/16 to 13/16 up) instead of two rails, and nothing
+else about the fence changed; its collision is still 1.5 Voxels high.
+
+**`cap_units` is 4, so 256 fit** (was 7 and 146), derived from the geometry. The
+arm tests that stated the rail boxes, the ray test (which had a gap between the
+rails to pass through, and now has under and over the bar), and the 16-box bound
+test (it needed 12 extra boxes to cross the bound, not 8) follow the new shape.
+
+Interleaved A/B, four rounds, old and new bench binaries alternately, load 2-7,
+Apple M5, medians:
+
+| Bench                                      |    old |    new |
+| ------------------------------------------ | -----: | -----: |
+| `greedy_mesh/terrain`                      | 337 us | 336 us |
+| `greedy_mesh/terrain_stairs_at_cap`        | 550 us | 550 us |
+| `greedy_mesh/terrain_fences_at_cap`        | 535 us | 547 us |
+| `greedy_mesh/flat_fences_at_cap`           | 483 us | 492 us |
+| `mesh_chunk/straddling`                    | 400 us | 398 us |
+
+Old is 146 fences, new is 256. A Chunk of fences at the cap adds 211 us over
+bare terrain, against 214 us for stairs at theirs, so the cap's rule holds with
+no more margin than stairs have. The quad counts I estimated by hand (70 and 38)
+were not checked directly; the weight of 4 is what the registered Shape yields.

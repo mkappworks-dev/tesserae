@@ -882,7 +882,7 @@ fn a_line_of_fences_draws_no_hidden_end_caps() {
     let hidden: Vec<_> = drawn.keys().filter(|f| !exposed.contains(f)).collect();
     assert!(hidden.is_empty(), "{} hidden faces drawn", hidden.len());
     assert!(exposed.iter().all(|f| drawn.contains_key(f)));
-    // And the rails are there: four posts alone would be 4 * 6 quads.
+    // And the arms are there: four posts alone would be 4 * 6 quads.
     assert!(mesh_isolated(&chunk).quad_count() > 4 * 6);
 }
 
@@ -892,7 +892,7 @@ fn a_fence_grows_an_arm_towards_a_cube_and_the_cube_hides_its_end() {
     let alone = mesh_isolated(&chunk).quad_count();
     chunk.set(11, 10, 10, Voxel::cube(1));
     assert_hole_free(&chunk, "fence beside cube");
-    // The cube's own face under the rails is drawn, because pass 1 culls only
+    // The cube's own face under the bars is drawn, because pass 1 culls only
     // against a neighbour that seals and a fence never does: hidden overdraw,
     // not a hole. The arm's end cap, on the same plane, is not drawn.
     let exposed = exposed_faces(&chunk);
@@ -907,7 +907,7 @@ fn a_fence_grows_an_arm_towards_a_cube_and_the_cube_hides_its_end() {
             .all(|&(face, cell)| face == NEG_X && cell[0] == cube_side),
         "{hidden:?}"
     );
-    assert_eq!(hidden.len(), 12, "two rails of 2 x 3 sub-cells");
+    assert_eq!(hidden.len(), 12, "one bar of 2 x 6 sub-cells");
     // The cube adds its own five faces, so the arm shows as the quads beyond it.
     let with = mesh_isolated(&chunk).quad_count();
     assert!(with > alone + 5, "{with} against {alone}");

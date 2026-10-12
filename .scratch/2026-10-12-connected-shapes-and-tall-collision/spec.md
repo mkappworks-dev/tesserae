@@ -284,12 +284,12 @@ instead of 1, and the edit path sums units; if it passes, nothing changes. The
 bench decides, not the argument.
 
 **Outcome:** it failed. 1024 fences meshed in about 5.2 ms against 1.5 ms for
-1024 stairs in the same run, so the fallback applies. The reference fence costs
+1024 stairs in the same run, so the fallback applies. The reference fence cost
 7 stairs (`ShapeTable::cap_units`, its worst-case quads over a stair's, rounded
-up) and 146 fit in a Chunk, at which a Chunk of fences takes about what a Chunk
-of stairs does. A fence line is the common case and 146 is a long one, but a
-fenced field would hit it; merging an arm's rails into fewer quads is the lever
-if that proves too tight.
+up) with two rails per arm and 146 fit in a Chunk. Ticket 09 cut it to one bar
+per arm: 4 stairs, 256 fit, and a Chunk of fences takes what a Chunk of stairs
+does (547 us against 550 us). Merging collinear faces across Voxels was weighed
+and cannot lower the weight; see `.scratch/2026-10-12-merged-rails-across-voxels/`.
 
 Worldgen still places nothing shaped (`shaped_count() == 0` over generated
 Chunks is a test), so none of this is reachable from terrain.

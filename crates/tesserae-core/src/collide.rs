@@ -743,7 +743,7 @@ mod tests {
     }
 
     #[test]
-    fn a_ray_strikes_the_arm_and_passes_between_the_rails_and_above_them() {
+    fn a_ray_strikes_the_arm_and_passes_below_and_above_its_bar() {
         let (t, fence, _) = fences();
         for s in [1.0, 0.25] {
             let mut g = Grid::new();
@@ -759,17 +759,18 @@ mod tests {
                 )
             };
 
-            // The lower rail is 6/16 to 9/16 up, 7/16 across the arm's width.
-            let rail = along(1.0 + 7.0 / 16.0).expect("a rail");
-            assert_eq!((rail.at, rail.face), ([6, 1, 5], NEG_Z));
+            // The bar is 7/16 to 13/16 up, 7/16 across the arm's width.
+            let bar = along(1.0 + 10.0 / 16.0).expect("a bar");
+            assert_eq!((bar.at, bar.face), ([6, 1, 5], NEG_Z));
             assert!(
-                close(rail.distance_m / s, 2.0 + 7.0 / 16.0),
+                close(bar.distance_m / s, 2.0 + 7.0 / 16.0),
                 "{}",
-                rail.distance_m
+                bar.distance_m
             );
-            // Between the rails, and above the drawn fence in the part only a body
-            // feels: nothing to pick.
-            assert!(along(1.0 + 10.0 / 16.0).is_none(), "between rails at {s}");
+            // Under and over the bar, and above the drawn fence in the part only a
+            // body feels: nothing to pick.
+            assert!(along(1.0 + 3.0 / 16.0).is_none(), "under the bar at {s}");
+            assert!(along(1.0 + 14.0 / 16.0).is_none(), "over the bar at {s}");
             assert!(along(2.2).is_none(), "above the fence at {s}");
             // The same height does stop a body.
             let walk = sweep(&g, &t, s, body_at(s, 6.0, 2.0, 3.0), [0.0, 0.0, 4.0 * s]);
@@ -829,8 +830,7 @@ mod tests {
                     assert_eq!(c, t.connections(v, around), "at {:?}", [x, y, z]);
                     // Every arm that is out is in both lists, and no other is.
                     let arms = c.bits().count_ones() as usize;
-                    let drawn_per_arm = if v == fence { 2 } else { 1 };
-                    assert_eq!(t.selection(v, c).len(), 1 + drawn_per_arm * arms);
+                    assert_eq!(t.selection(v, c).len(), 1 + arms);
                     assert_eq!(t.collision(v, c).len(), 1 + arms);
                 }
             }
