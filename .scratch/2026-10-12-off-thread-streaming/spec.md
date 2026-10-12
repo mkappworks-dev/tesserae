@@ -512,3 +512,33 @@ the invariants they were written for; and the PR says what replaced the
 deterministic per-tick count and what was given up for it: determinism of *when*
 work lands, in exchange for a frame time that no longer depends on how much work
 there is.
+
+
+## Outcome
+
+Where the build departed from, or settled, what this spec said. The tickets'
+Comments carry the numbers.
+
+- **Decision 3's cost of the copy was wrong.** Cloning seven Chunks and lights
+  is 5.6 us, not hundreds. `Arc` stayed for the reasons that survived: it is
+  free, and it makes "unchanged since the snapshot" a pointer comparison.
+- **Decision 1's inline early-out was not added.** A spawn costs the tick 0.7 us
+  against a 3.6 ns early-out, and 38 us a tick at 48 jobs.
+- **Decision 4, mesh landing**, held as written: a re-dirtied result is
+  delivered, and it was needed (a test fails without it).
+- **Decision 5 held**, and each part of it is now a test that fails when the
+  part is removed. One of them (a mark made during a flight surviving the
+  landing) is not caught by the scrambled-order test and has its own.
+- **Decision 6's settled gate is kept**, after looking like a mistake at
+  placeholder caps (nothing visible for 7.8 s). Its cost once relight is not the
+  long pole is 0.2-0.4 s to first appearance; its saving is 2.2x fewer meshes.
+- **Measurement changed.** Wall-clock frame time under vsync measures the
+  display, which changed refresh rate on the same commit within an hour. The
+  harness reports `MainThreadCost` (the tick and the mesh upload) instead, and
+  frame time as a secondary figure.
+- **The Client upload is 6-12 us a mesh**, so the spec's loose end about moving
+  it off the render thread is closed: not worth doing.
+- **More async threads hurt.** Six on this ten-core machine took the worst tick
+  from 0.7 ms to 12.7 ms.
+- **Flight had nothing to win.** The baseline's flight is flat, and the task's
+  "lower and flatter while flying" can only be "not worse".

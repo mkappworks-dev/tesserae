@@ -16,6 +16,15 @@
 //! wider than `load`, an evicted Chunk is never adjacent to a Chunk the Client
 //! holds a mesh for, so eviction can never leave a stale face behind and needs
 //! no re-mesh of its own.
+//!
+//! Generation, light solving and meshing run as jobs on a pool (see
+//! `super::jobs`); the tick dispatches them from snapshots and lands the
+//! results. The same ordering is what makes that safe. A mesh job reads six
+//! neighbours, and for one to be evicted before the mesh lands the anchor must
+//! have moved far enough that the Chunk being meshed is outside `mesh`; landing
+//! checks that extent, so **a mesh lands only if every neighbour it read is still
+//! held**. A light solve is validated differently - against Edits, and against
+//! the Chunk having been replaced - and not against the extents.
 
 use std::sync::Arc;
 
@@ -87,34 +96,113 @@ pub struct StageCounts {
 
 /// How much streaming work is allowed at once, and how much lands per tick.
 ///
-/// TODO(off-thread-streaming ticket 06): these are placeholders until they are
-/// sized from measurement, and this comment becomes what was measured.
+/// Not a count of work done per tick, which is what this used to be and what the
+/// tick's cost was once proportional to. The work runs on a pool now, so the
+/// tick pays for dispatching and landing, which cost the same however expensive
+/// the Chunk is. Two numbers per stage, bounding two different things:
+///
+/// - **`in_flight`** bounds the snapshots held and how stale a queued job's
+///   priority can get: the pool is FIFO, so an anchor that moves cannot reorder
+///   what is already queued. Dispatch only happens on the tick, so a cap below
+///   what the workers can do in one tick idles them and slows the fill rather
+///   than the frame.
+/// - **`landed_per_tick`** bounds what the tick itself pays: a hash write and a
+///   message per result, and for a mesh the Client's upload (11 us each).
+///
+/// A bad number here costs fill latency, not frame time. That is the trade
+/// against the old count, which was deterministic and had to be sized for the
+/// worst frame: this is not, and when work lands varies with the machine.
+///
+/// Measured 2026-10-12 on an Apple M5 (3 async compute threads), debug at
+/// `opt-level = 1`, five runs each, with the worst main-thread time per tick and
+/// per frame taken from `MainThreadCost` rather than frame time, because vsync
+/// turns the latter into the refresh interval:
+///
+/// | In flight (gen / relight / mesh) | shown | filled | worst tick |
+/// | -------------------------------- | ----- | ------ | ---------- |
+/// | 16 / 16 / 16                     | 5.9 s | 6.1 s  | 1.2 ms     |
+/// | 32 / 32 / 32                     | 3.1 s | 3.2 s  | 0.5 ms     |
+/// | 64 / 128 / 128 (these defaults)  | 1.5 s | 1.6 s  | 0.7 ms     |
+///
+/// against 1.1 s, 7.2 s and 22 ms before. Doubling the async compute threads
+/// made things worse, not better: at 6 the worst tick was 12.7 ms, because the
+/// workers took cores the render and ECS threads needed; 4 was within noise of 3.
+///
+/// The cap times the cost of a surface-crossing Chunk, over the workers, is how
+/// far behind the anchor a priority can lag: 64 x 98 us + 128 x 139 us + 128 x
+/// 342 us = 68 ms of work if every job were a surface Chunk, 23 ms across three
+/// workers, which is a tick and a half. Most are nanosecond early-outs. A cost
+/// per Chunk ten times that (caves) makes the window ten times longer, and is
+/// when these want to come down or become a worker-time window.
+///
+/// `wait_for_settled_light` holds a mesh back until its neighbourhood has no
+/// light solve pending. Off, a Chunk shows 0.2-0.4 s sooner but is built 2.2
+/// times as often (2427 meshes against 1111), each one a delivery and an upload.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct StreamingBudget {
-    /// Jobs allowed in flight, per stage. Bounds the snapshots held and how
-    /// stale a queued job's priority can get.
+    /// Jobs allowed in flight, per stage.
     pub in_flight: StageCounts,
-    /// Results applied to World state per tick, per stage. Bounds what the tick
-    /// itself pays. A stage still run on the tick uses this as its work per
-    /// tick.
+    /// Results applied to World state per tick, per stage.
     pub landed_per_tick: StageCounts,
+    /// Whether a mesh waits for its Chunk and the six around it to have no light
+    /// solve pending or running.
+    pub wait_for_settled_light: bool,
 }
 
 impl Default for StreamingBudget {
     fn default() -> Self {
         StreamingBudget {
             in_flight: StageCounts {
-                generate: 48,
-                relight: 24,
-                mesh: 24,
+                generate: 64,
+                relight: 128,
+                mesh: 128,
             },
             landed_per_tick: StageCounts {
-                generate: 48,
-                relight: 12,
-                mesh: 12,
+                generate: 64,
+                relight: 256,
+                mesh: 32,
             },
+            wait_for_settled_light: true,
         }
     }
+}
+
+#[cfg(feature = "dev")]
+impl StreamingBudget {
+    /// Overrides from the environment, so a sweep needs no rebuild:
+    /// `TESSERAE_BUDGET` is six comma-separated counts, the in-flight caps then
+    /// the landing caps, each generate, relight, mesh; `TESSERAE_SETTLE_GATE`
+    /// is 0 or 1.
+    fn with_env_overrides(mut self) -> Self {
+        if let Ok(v) = std::env::var("TESSERAE_BUDGET") {
+            let n: Vec<usize> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            if let [a, b, c, d, e, f] = n[..] {
+                self.in_flight = StageCounts {
+                    generate: a,
+                    relight: b,
+                    mesh: c,
+                };
+                self.landed_per_tick = StageCounts {
+                    generate: d,
+                    relight: e,
+                    mesh: f,
+                };
+            } else {
+                warn!("TESSERAE_BUDGET needs six counts, got {v:?}");
+            }
+        }
+        if let Ok(v) = std::env::var("TESSERAE_SETTLE_GATE") {
+            self.wait_for_settled_light = v != "0";
+        }
+        self
+    }
+}
+
+fn streaming_budget() -> StreamingBudget {
+    let budget = StreamingBudget::default();
+    #[cfg(feature = "dev")]
+    let budget = budget.with_env_overrides();
+    budget
 }
 
 /// A cylinder of Cells around the anchor: a radius in x and z, a half-extent in
@@ -266,13 +354,21 @@ impl MeshState {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<StreamingSettings>()
-        .init_resource::<StreamingBudget>()
+        .insert_resource(streaming_budget())
         .init_resource::<LoadOrder>()
         .init_resource::<MeshState>()
         .init_resource::<Jobs>()
         .add_message::<ChunkMeshReady>()
         .add_message::<ChunkUnloaded>()
         .add_systems(FixedUpdate, stream);
+    #[cfg(feature = "dev")]
+    app.add_systems(
+        FixedUpdate,
+        (
+            crate::cost::tick_started.before(stream),
+            crate::cost::tick_ended.after(stream),
+        ),
+    );
     #[cfg(feature = "dev")]
     app.add_plugins(stats::plugin);
 }
@@ -393,6 +489,7 @@ fn stream(
         center,
         rings.mesh,
         budget.in_flight.mesh,
+        budget.wait_for_settled_light,
         &shapes.0,
     );
 }
@@ -689,6 +786,7 @@ fn dispatch_meshes(
     center: ChunkCoord,
     mesh: Extent,
     in_flight: usize,
+    wait_for_settled_light: bool,
     shapes: &Arc<ShapeTable>,
 ) {
     let mut free = in_flight.saturating_sub(jobs.mesh.in_flight());
@@ -712,7 +810,7 @@ fn dispatch_meshes(
             continue;
         };
         let settled = |c: &ChunkCoord| !meshes.is_unlit(*c);
-        if !settled(&coord) || !faces.iter().all(settled) {
+        if wait_for_settled_light && !(settled(&coord) && faces.iter().all(settled)) {
             continue;
         }
         let around: [Shared; 6] = around
@@ -986,6 +1084,7 @@ mod tests {
             relight: usize::MAX,
             mesh: usize::MAX,
         },
+        wait_for_settled_light: true,
     };
 
     /// How long `settle` waits before it calls the streaming stuck. Wall time,
@@ -1197,6 +1296,7 @@ mod tests {
                     relight: 3,
                     mesh: 2,
                 },
+                wait_for_settled_light: true,
             },
         );
 
@@ -1370,6 +1470,7 @@ mod tests {
                     relight: 2,
                     mesh: 1,
                 },
+                wait_for_settled_light: true,
             },
         );
 
