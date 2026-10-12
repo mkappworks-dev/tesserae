@@ -9,11 +9,17 @@ pub mod chunk_view;
 pub mod edit;
 #[cfg(feature = "dev")]
 mod overlay;
+mod pose;
 
 use bevy::prelude::*;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((camera::plugin, chunk_view::plugin, edit::plugin));
+    app.add_plugins((
+        camera::plugin,
+        chunk_view::plugin,
+        edit::plugin,
+        pose::plugin,
+    ));
     #[cfg(feature = "dev")]
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),

@@ -144,10 +144,8 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
     ambient.brightness = 900.0;
 }
 
-/// Metres above the spawn point, and how far the view tips down. Framing is a
-/// Client decision; the spawn point is the Server's. In metres, so the framing
-/// survives a change of Voxel size.
-const VIEW_ALTITUDE_M: f32 = 18.0;
+/// How far the view tips down. Framing is a Client decision; where the Eye
+/// starts is the Server's, so the Client's camera starts where the Player does.
 const VIEW_PITCH: f32 = -0.3;
 
 /// In `PostStartup`, so the Server's `Startup` commands have been applied and
@@ -156,16 +154,18 @@ const VIEW_PITCH: f32 = -0.3;
 ///
 /// [`SpawnPoint`]: crate::server::world_state::SpawnPoint
 fn spawn_camera(mut commands: Commands, spawn: Res<crate::server::world_state::SpawnPoint>) {
-    let eye = spawn.metres() + Vec3::Y * VIEW_ALTITUDE_M;
+    let eye = spawn.eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
 
     commands.spawn((
         Camera3d::default(),
         pose,
+        // Propagation runs in `PostUpdate`; without this the first frame's pose
+        // report and intent would carry the origin, not the camera.
+        GlobalTransform::from(pose),
         super::camera::FlyCamera::looking_along(direction),
         super::camera::CameraHome(pose),
-        crate::server::streaming::StreamingAnchor,
     ));
 }
 
@@ -174,6 +174,23 @@ mod tests {
     use super::*;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::{Chunk, ChunkLight, LitChunk, ShapeTable, Voxel, mesh_chunk, worldgen};
+
+    #[test]
+    fn the_camera_is_where_it_is_placed_before_the_first_propagation() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut app = App::new();
+        app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(
+            Vec3::new(3.0, 4.0, 5.0),
+        ));
+        app.world_mut().run_system_once(spawn_camera).unwrap();
+        let (local, global) = app
+            .world_mut()
+            .query_filtered::<(&Transform, &GlobalTransform), With<Camera3d>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(global.translation(), local.translation);
+        assert_ne!(global.translation(), Vec3::ZERO);
+    }
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
     /// assets and messages, and `DefaultPlugins` wants a window.
