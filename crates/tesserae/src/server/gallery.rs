@@ -1,10 +1,10 @@
 //! A gallery of every built-in Shape near the spawn point. `dev` only.
 //!
 //! Terrain contains no shaped Voxel, so nothing in build-order step 5 is
-//! observable without this, and the `dev` capture cannot click. The step-4
-//! lightbox is the precedent. It places through the same `edit::set_voxel` a
-//! player's click ends in, so what it shows is the edit path, the second mesher
-//! pass and per-face light on the running app and not only in tests.
+//! observable without this, and the `dev` capture cannot click. It places
+//! through the same `edit::set_voxel` a player's click ends in, so what it shows
+//! is the edit path, the second mesher pass and per-face light on the running
+//! app and not only in tests.
 //!
 //! What is on show, left to right and front to back:
 //!
@@ -20,7 +20,7 @@
 //! **The pattern is in Voxels and the placement is in metres.** The point is the
 //! shape of individual Voxels, so the layout is a count of them, as `testgen`'s
 //! is; where it stands is a metre position ahead of the spawn point, converted
-//! once, as the lightbox's is.
+//! once.
 
 use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_Y, POS_X, POS_Y};
@@ -34,10 +34,10 @@ use super::{Shapes, WorldGenerator};
 use crate::world::WorldSettings;
 
 /// Where the gallery's near corner is, in metres from the spawn point: ahead
-/// along -Z, where the Client points its camera, and to the side of the
-/// lightbox so neither hides the other. Far enough ahead that the camera, which
-/// starts well above the spawn point and tipped down, has the whole of it in
-/// frame rather than its near edge below the bottom of the picture.
+/// along -Z, where the Client points its camera, and to one side. Far enough
+/// ahead that the camera, which starts well above the spawn point and tipped
+/// down, has the whole of it in frame rather than its near edge below the bottom
+/// of the picture.
 const AHEAD_M: f32 = 44.0;
 const ASIDE_M: f32 = 11.0;
 
@@ -48,7 +48,7 @@ const DEPTH: i32 = 14;
 type Plan = Vec<([i32; 3], Voxel)>;
 
 pub(super) fn plugin(app: &mut App) {
-    // After the tick's own streaming, as the lightbox is.
+    // After the tick's own streaming.
     app.add_systems(FixedPostUpdate, build);
 }
 

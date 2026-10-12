@@ -315,7 +315,9 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 2. `tesserae`: spawn meshed chunks as `Mesh3d` with a `MaterialExtension`, fly
    camera. First time anything is on screen.
 3. Worldgen + chunk streaming, behind the client/server split with the server
-   in-process.
+   in-process. Caves were added later, off the build order: tunnels in metres
+   below a floor height, behind an exact range test that keeps most deep Chunks
+   uniform. See `.scratch/2026-10-12-worldgen-caves/spec.md`.
 4. Light propagation (incremental flood-fill). **Done.** Two channels packed
    into a byte per Voxel, in a parallel per-Chunk array rather than in the
    palette, baked into the mesh as a vertex attribute. Two solvers: one

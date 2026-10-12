@@ -123,7 +123,7 @@ tesserae/
 │   │   │   ├── voxel.rs        Voxel = material | shape | orientation       ▸ 1
 │   │   │   ├── chunk.rs        palette-compressed 32³ storage               ▸ 1
 │   │   │   ├── mesh.rs         mesher: pass 1 cubes, pass 2 shapes        ▸ 1, 5
-│   │   │   ├── noise.rs        value noise — the one spatial primitive      ▸ 3
+│   │   │   ├── noise.rs        value noise 2D and 3D, and a range bound     ▸ 3
 │   │   │   ├── worldgen.rs     seed + position → Chunk, tuned in metres     ▸ 3
 │   │   │   ├── light.rs        incremental flood-fill                       ▸ 4
 │   │   │   ├── shape.rs        Shape table, Orientation; derived geometry   ▸ 5

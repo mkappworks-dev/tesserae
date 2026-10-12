@@ -1,12 +1,16 @@
 //! Writes a PNG of the running app and exits. `dev` only, and inert unless
-//! `TESSERAE_SCREENSHOT` names a path.
+//! `TESSERAE_SCREENSHOT` names a path. `TESSERAE_SCREENSHOT_OFFSCREEN` renders
+//! into an image instead of the window, which is what to use when nobody is
+//! looking at the screen.
 //!
 //! Through Bevy's own screenshot path rather than an OS screen grab, because a
 //! screen grab needs macOS Screen Recording permission that a build machine, or
 //! an agent, does not have — and because flying the camera for a fixed distance
 //! first makes the result the same picture every time.
 
+use bevy::camera::RenderTarget;
 use bevy::prelude::*;
+use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::PresentMode;
 
@@ -37,6 +41,8 @@ struct Capture {
     /// Earliest time the flight may start, so two builds whose fills end at
     /// different times fly at the same time since launch.
     fly_after_s: f32,
+    /// Render to an image instead of the window; see [`render_offscreen`].
+    offscreen: bool,
     taken: bool,
     /// Whether the screenshot entity has actually been observed in the World.
     pending_seen: bool,
@@ -177,6 +183,7 @@ pub(super) fn plugin(app: &mut App) {
         speed_m_s: std::env::var("TESSERAE_SCREENSHOT_SPEED_M_S")
             .ok()
             .and_then(|v| v.parse().ok()),
+        offscreen: std::env::var_os("TESSERAE_SCREENSHOT_OFFSCREEN").is_some(),
         taken: false,
         pending_seen: false,
         frames: FrameLog::default(),
@@ -185,6 +192,9 @@ pub(super) fn plugin(app: &mut App) {
     .add_systems(
         Update,
         (
+            render_offscreen.run_if(|capture: Res<Capture>, target: Option<Res<Offscreen>>| {
+                capture.offscreen && target.is_none()
+            }),
             watch_frames,
             fly_forward,
             report,
@@ -207,6 +217,32 @@ fn uncap_frame_rate(mut windows: Query<&mut Window>) {
     for mut window in &mut windows {
         window.present_mode = PresentMode::AutoNoVsync;
     }
+}
+
+/// What an offscreen capture renders into.
+#[derive(Resource)]
+struct Offscreen(Handle<Image>);
+
+/// Renders the camera into an image instead of the window, for a capture.
+/// `TESSERAE_SCREENSHOT_OFFSCREEN` turns it on.
+///
+/// A window that is not being presented is never drawn, and a capture of one is
+/// pure black: a locked screen does it, and so does a window on another Space or
+/// under a full-screen app. An image target does not depend on the display at
+/// all, so the picture is the same whoever is at the machine. Off by default
+/// because it leaves the window blank, and the frame figures want the real
+/// presentation path.
+fn render_offscreen(
+    mut commands: Commands,
+    mut images: ResMut<Assets<Image>>,
+    camera: Single<Entity, With<Camera3d>>,
+) {
+    let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
+    let handle = images.add(image);
+    commands
+        .entity(*camera)
+        .insert(RenderTarget::Image(handle.clone().into()));
+    commands.insert_resource(Offscreen(handle));
 }
 
 /// Ignores the first second and a half: window creation, pipeline
@@ -319,13 +355,22 @@ fn report(
     );
 }
 
-fn shutter(mut commands: Commands, time: Res<Time>, mut capture: ResMut<Capture>) {
+fn shutter(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut capture: ResMut<Capture>,
+    offscreen: Option<Res<Offscreen>>,
+) {
     if !capture.due(time.elapsed_secs()) {
         return;
     }
     capture.taken = true;
+    let screenshot = match offscreen {
+        Some(target) => Screenshot::image(target.0.clone()),
+        None => Screenshot::primary_window(),
+    };
     commands
-        .spawn(Screenshot::primary_window())
+        .spawn(screenshot)
         .observe(save_to_disk(capture.path.clone()));
 }
 

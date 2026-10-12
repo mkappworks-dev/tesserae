@@ -15,8 +15,6 @@ pub mod edit;
 #[cfg(feature = "dev")]
 mod gallery;
 mod jobs;
-#[cfg(feature = "dev")]
-mod lightbox;
 pub mod streaming;
 pub mod world_state;
 
@@ -54,7 +52,7 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, open_world)
         .add_plugins((streaming::plugin, edit::plugin));
     #[cfg(feature = "dev")]
-    app.add_plugins((lightbox::plugin, gallery::plugin));
+    app.add_plugins(gallery::plugin);
 }
 
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` turns the

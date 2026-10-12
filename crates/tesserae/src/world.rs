@@ -64,7 +64,7 @@ impl WorldSettings {
     /// Which Voxel of the lattice holds a point, in the one continuous
     /// coordinate space `tesserae_core`'s flood-fill works over.
     ///
-    /// Only the `dev` lightbox converts a metre position to a Voxel today, so
+    /// Only the `dev` gallery converts a metre position to a Voxel today, so
     /// a default-feature build has no caller; see the note in
     /// `server/world_state.rs`.
     ///
