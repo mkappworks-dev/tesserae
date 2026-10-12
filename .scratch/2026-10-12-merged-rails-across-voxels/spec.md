@@ -102,6 +102,8 @@ Interleaved A/B against the commit this builds on, on a quiet machine (load unde
 
 ## Done when
 
+**Done:** ticket 01 recorded a go and ticket 02 landed inside the gate.
+
 Either ticket 01 records a no-go with its numbers, DESIGN.md's step 5 loose end
 says merging was weighed and not done, and ticket 02 is `wontfix`; or ticket 02
 lands with `./scripts/cargo-ci` green, the hole-free test passing over all seeds,

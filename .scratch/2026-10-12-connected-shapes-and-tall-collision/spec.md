@@ -181,7 +181,8 @@ Pass 2 handles a connected Voxel by gathering its `around` from the
 already has), asking `connections`, and emitting `quads(voxel, c)`. Everything
 else about pass 2 stands: boundary quads culled by the neighbour's coverage and
 otherwise lit by the neighbour, interior quads lit by the Voxel's own light, one
-flat `Light` per quad, no merging across Voxels.
+flat `Light` per quad, no merging across Voxels (relaxed later: see
+`.scratch/2026-10-12-merged-rails-across-voxels/`).
 
 One thing needs more than that. A boundary quad is culled when the Voxel across
 it **covers** the rectangle, and a connected neighbour's coverage on its face

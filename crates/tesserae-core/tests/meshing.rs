@@ -1560,3 +1560,138 @@ fn declining_never_changes_the_mesh_of_a_ramp_chunk() {
     assert_eq!(fast.opaque.light, slow.opaque.light);
     assert!(fast.shaped_voxels > 0);
 }
+
+fn slabs(from: [usize; 3], to: [usize; 3], material: u16) -> Chunk {
+    let mut chunk = Chunk::air();
+    fill_slabs(&mut chunk, from, to, material);
+    chunk
+}
+
+fn fill_slabs(chunk: &mut Chunk, from: [usize; 3], to: [usize; 3], material: u16) {
+    for z in from[2]..to[2] {
+        for y in from[1]..to[1] {
+            for x in from[0]..to[0] {
+                chunk.set(
+                    x,
+                    y,
+                    z,
+                    Voxel::shaped(material, SHAPE_SLAB, Orientation::IDENTITY),
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_floor_of_slabs_is_one_top_one_bottom_and_four_sides() {
+    let floor = slabs([4, 8, 4], [12, 9, 12], 1);
+    assert_eq!(mesh_isolated(&floor).quad_count(), 6);
+    assert_hole_free(&floor, "slab floor");
+    let big = slabs([0, 8, 0], [32, 9, 32], 1);
+    assert_eq!(mesh_isolated(&big).quad_count(), 6);
+}
+
+#[test]
+fn a_line_of_fences_costs_the_same_for_each_fence_added_along_either_axis() {
+    // Post: a top, a bottom, two plain sides and two sides cut around the bar
+    // (4 each), 12; the bar between two posts is 4 quads in all, not 8. Adding
+    // a fence to a line of 4 or more adds one post and one link: 16.
+    for axis in [0, 2] {
+        let line = |n: usize| {
+            let mut chunk = Chunk::air();
+            for i in 0..n {
+                let mut at = [8, 8, 8];
+                at[axis] += i;
+                chunk.set(at[0], at[1], at[2], Voxel::new(1, FENCE, 0));
+            }
+            let count = mesh_isolated(&chunk).quad_count();
+            assert_hole_free(&chunk, &format!("line of {n} along {axis}"));
+            count
+        };
+        for n in 4..8 {
+            assert_eq!(line(n + 1) - line(n), 16, "axis {axis}, {n} to {}", n + 1);
+        }
+    }
+}
+
+#[test]
+fn nothing_merges_across_a_step_in_light() {
+    let floor = slabs([2, 8, 4], [10, 9, 12], 1);
+    let light = |step: bool| {
+        let mut l = ChunkLight::dark();
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let level = if step && x >= 5 { 8 } else { MAX_LIGHT };
+                    l.set(x, y, z, Light::new(level, 0));
+                }
+            }
+        }
+        l
+    };
+    let count = |l: &ChunkLight| {
+        greedy_mesh(&Neighborhood::isolated(LitChunk::new(&floor, l)), tables()).quad_count()
+    };
+    assert_eq!(count(&light(false)), 6);
+    // The top and bottom and the two long sides each split in two; the ends
+    // look out at one level each.
+    assert_eq!(count(&light(true)), 10);
+}
+
+#[test]
+fn nothing_merges_across_a_change_of_material() {
+    let mut floor = slabs([2, 8, 4], [6, 9, 12], 1);
+    fill_slabs(&mut floor, [6, 8, 4], [10, 9, 12], 2);
+    assert_eq!(mesh_isolated(&floor).quad_count(), 10);
+    assert_hole_free(&floor, "two materials");
+}
+
+#[test]
+fn a_gap_is_not_merged_across() {
+    let mut floor = slabs([2, 8, 4], [5, 9, 12], 1);
+    fill_slabs(&mut floor, [6, 8, 4], [9, 9, 12], 1);
+    assert_eq!(mesh_isolated(&floor).quad_count(), 12);
+}
+
+#[test]
+fn a_merged_quad_keeps_the_textures_per_voxel_repeat_and_a_slabs_half_height() {
+    let floor = slabs([2, 8, 4], [10, 9, 12], 1);
+    let layer = mesh_isolated(&floor).opaque;
+    for (i, (q, uv)) in layer
+        .positions
+        .chunks(4)
+        .zip(layer.uvs.chunks(4))
+        .enumerate()
+    {
+        let n = layer.normals[i * 4];
+        let d = (0..3).find(|&a| n[a] != 0.0).unwrap();
+        for (k, a) in [(d + 1) % 3, (d + 2) % 3].into_iter().enumerate() {
+            // The UV is the position less a whole number of Voxels, the same
+            // for all four corners, so a tiling sampler still repeats once per
+            // Voxel as it did before merging.
+            let shift = q[0][a] - uv[0][k];
+            assert!((shift - shift.round()).abs() < 1e-5, "{uv:?} against {q:?}");
+            for c in 1..4 {
+                assert!((q[c][a] - uv[c][k] - shift).abs() < 1e-5, "{uv:?} {q:?}");
+            }
+            // A slab's side is half a texture tall, not a squashed whole one.
+            if a == 1 {
+                let tall = uv.iter().map(|c| c[k]).fold(0.0f32, f32::max)
+                    - uv.iter().map(|c| c[k]).fold(f32::MAX, f32::min);
+                assert!((tall - 0.5).abs() < 1e-5, "{tall}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_row_of_slabs_never_leaves_its_chunk() {
+    let row = slabs([0, 8, 8], [32, 9, 9], 1);
+    let mesh = mesh_isolated(&row);
+    assert!(
+        mesh.opaque
+            .positions
+            .iter()
+            .all(|p| (0.0..=32.0).contains(&p[0]))
+    );
+}

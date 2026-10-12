@@ -1,6 +1,6 @@
 # Merge collinear faces across Voxels in pass 2
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Ticket 01's go, on the generic scope and with the +25% gate below, was accepted
@@ -72,3 +72,58 @@ winding and the shader are unchanged.
 - Merging quads that differ in `Light`, Material or render layer
 - Changing the vertex layout, the shader, or how light is baked
 - Changing which quads a Shape emits or how pass 2 culls them
+
+## Comments
+
+Done, inside the +25% gate. Pass 2 collects each surviving quad as a rectangle
+over the Chunk (after culling and lighting, as before), sorts by plane, Material,
+layer and light, merges abutting rows and then columns, and writes what is left.
+A quad with no edge on a Voxel boundary skips the sort and is written at once.
+The hole-free property test passes over all its seeds unchanged; the new tests
+(`a_floor_of_slabs_...`, `a_line_of_fences_costs_the_same_...`, and those for a
+light step, a change of Material, a gap, UVs and a Chunk's own extent) pass.
+
+**Quads, whole Chunk (terrain alone is 293):**
+
+| Scene                  | Before |  After |  Saved |
+| ---------------------- | -----: | -----: | -----: |
+| terrain + 256 fences   |  7,894 |  6,170 |    22% |
+| flat fences, 256       |  7,894 |  6,006 |    24% |
+| terrain + 1024 stairs  |  4,661 |  1,074 |    77% |
+| terrain + 1024 slabs   |  1,571 |    448 |    71% |
+| a Chunk of all stairs  | 137,216 |  4,288 |    97% |
+
+**Time, interleaved A/B**, base binary (`76d28a3`) against this one, five
+rounds, load 3.5-4, Apple M5, release, medians:
+
+| Bench                                |   base |    new | change |
+| ------------------------------------ | -----: | -----: | -----: |
+| `greedy_mesh/terrain_stairs_at_cap`  | 558 us | 661 us | +18.4% |
+| `greedy_mesh/terrain_stairs_at_budget` | 450 us | 499 us | +10.9% |
+| `greedy_mesh/all_stairs`             | 6.06 ms | 5.31 ms | -12.4% |
+| `greedy_mesh/terrain_fences_at_cap`  | 554 us | 663 us | +19.7% |
+| `greedy_mesh/flat_fences_at_cap`     | 491 us | 592 us | +20.6% |
+| `greedy_mesh/terrain`                | 343 us | 342 us |  -0.2% |
+| `greedy_mesh/solid`                  | 338 us | 324 us |  -4.2% |
+| `greedy_mesh/checkerboard`           | 2.53 ms | 2.68 ms | +6.0% |
+| `mesh_chunk/straddling`              | 397 us | 402 us |  +1.2% |
+| `light_chunk/straddling`             | 184 us | 184 us |  -0.2% |
+| `light_chunk/straddling_settled`     | 303 us | 299 us |  -1.2% |
+| `light_chunk/flooded_air`            | 123 us | 121 us |  -1.3% |
+
+The gate was `terrain_stairs_at_cap` and `all_stairs` at no more than +25%: +18%
+and -12% (a Chunk of stairs is faster because its mesh is 97% smaller to write).
+Two earlier runs of the same pair read +18% and +20% on `terrain_stairs_at_cap`.
+
+**One number to read honestly:** `checkerboard` reads +6.0% here and -4.5% and
++3.8% in two earlier runs of the same pair. It is cubes only, so neither pass 2
+nor any code in this change runs for it; the sign changes between runs, which
+makes it layout or machine noise and not a regression, but it is not proven.
+Nothing else in pass 1 or the light solvers moved.
+
+**Cost the cap does not see:** the fence benches are now +20% (they have no
+gate) and the stair benches +18%, because the sort is paid by every shaped Voxel
+that merges nothing as well as by those that do. A cheaper merge (bucketing by
+plane before sorting, or merging as quads are emitted) is the next thing to try
+and is not needed for the gate. `cap_units` and `MAX_SHAPED_PER_CHUNK` are
+unchanged, as the spec says.

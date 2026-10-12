@@ -119,9 +119,11 @@ metres scales as 1/`voxel_size`.
 ## Shaped voxels
 
 Greedy meshing merges coplanar faces of **identical full cubes**. A stair, slab
-or fence cannot merge with anything, so each becomes its own geometry. The
-mesher is therefore two-pass: greedy-mesh the full cubes, then append per-voxel
-custom geometry for shaped voxels.
+or fence cannot merge with a cube, so each becomes its own geometry. The mesher
+is therefore two-pass: greedy-mesh the full cubes, then append per-voxel custom
+geometry for shaped voxels, merging the quads of neighbouring shaped voxels that
+lie in one plane, abut along a full edge and share Material and light (a floor
+of slabs is a handful of quads).
 
 Four consequences, all of which must be designed in from the start:
 

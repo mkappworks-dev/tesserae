@@ -36,9 +36,9 @@ pub const MAX_BOXES: usize = 16;
 /// The most shaped Voxels a Chunk may hold, counted in stairs: a connected Shape
 /// is charged [`ShapeTable::cap_units`] of them.
 ///
-/// A shaped Voxel emits up to about a dozen quads that nothing merges, where a
-/// cube merges into almost nothing, so a Chunk of them is hundreds of thousands
-/// of quads. Enforced where Voxels come from - the edit path rejects a Place
+/// A shaped Voxel emits up to about a dozen quads, each found and culled on its
+/// own before any merging, where a cube merges into almost nothing, so a Chunk of
+/// them is hundreds of thousands of quads and the mesher's time. Enforced where Voxels come from - the edit path rejects a Place
 /// that would cross it, and worldgen places none - and not by the mesher,
 /// which dropping geometry silently would make a hole nobody could explain.
 ///
