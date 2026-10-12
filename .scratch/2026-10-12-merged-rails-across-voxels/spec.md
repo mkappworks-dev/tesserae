@@ -5,8 +5,10 @@ spec's decision 6 says pass 2 emits per Voxel and "nothing merges across
 Voxels"; ticket 09 asked whether lifting that, for the rails of a fence line, is
 worth it. This spec records the answer rather than leaving the question open.
 
-**Expect this to come out marginal.** The first ticket measures before anything
-is built, and a no-go from it is a successful outcome.
+**Ticket 01 measured it: go.** Fence arms alone save about 20% and are fragile
+under uneven light, but slab and stair tops merge to a fifth or less (up to
+99.6% for a flat floor), which is why the scope is every shaped quad. A no-go
+from ticket 02's benchmark gate is still a successful outcome.
 
 ## What it would buy, and what it cannot
 
@@ -35,8 +37,9 @@ nothing merges across a Chunk boundary.
 
 Light equality is the limit that matters: an arm's top and sides are interior
 quads, lit by the Voxel's own light, and two Voxels beside a torch or a shadow
-edge differ. Ticket 01 reports how often neighbours agree in the dev gallery and
-in terrain, because a merge that rarely fires is not worth its cost.
+edge differ. Ticket 01 measured it: next to a lantern a fence line loses every
+merge, while under sky light and one lantern on terrain only 0.3% (fences) to 6%
+(stairs, slabs) of the merges geometry allows are lost.
 
 ### 2. Scope: every shaped quad
 
@@ -44,8 +47,7 @@ A generic pass over pass-2's output would also merge a floor of slabs, whose
 tops are the same problem. The default is **every shaped quad**, because the
 test for "same face, same plane, same light, abutting" does not care which Shape
 a quad came from and a special case for arms would be more code, not less.
-Ticket 01 measures both so the scope can narrow to arms if the generic pass
-costs terrain with stairs anything.
+Ticket 01's numbers settle it: the saving is in slabs and stairs.
 
 ### 3. Mechanism
 
@@ -83,18 +85,18 @@ Interleaved A/B against the commit this builds on, on a quiet machine (load unde
 
 - **Must not move:** `greedy_mesh/terrain`, `/solid`, `/checkerboard`,
   `light_chunk/*`, `mesh_chunk/straddling`.
-- **May cost, but reported and justified:** `terrain_stairs_at_cap`,
-  `all_stairs` (every shaped Voxel pays the buffering).
-- **Must improve:** `terrain_fences_at_cap` and `flat_fences_at_cap`, by an amount
-  that justifies the cost above. The go/no-go threshold is ticket 01's to
-  propose from its measurement, and the maintainer's to accept.
+- **May cost, up to +25%:** `terrain_stairs_at_cap`, `all_stairs` (every shaped
+  Voxel pays the buffering). Over +25% is a no-go and ticket 02 is `wontfix`.
+- **Reported, no gate:** `terrain_fences_at_cap` and `flat_fences_at_cap`, with
+  their quad counts before and after.
 
 ## Questions for review
 
 1. ~~**Every shaped quad, or connected arms only** (decision 2).~~ Decided by the
    maintainer: every shaped quad.
-2. **Whether a ~20% line saving is worth a buffered pass 2** at all. The default
-   is that ticket 01 decides, on measurement, and that "no" is fine.
+2. ~~**Whether a ~20% line saving is worth a buffered pass 2** at all.~~ Decided
+   by the maintainer on ticket 01's numbers: go, with the +25% gate on
+   `terrain_stairs_at_cap` and `all_stairs`.
 3. **Redefining the cap on measured quads** would let merging buy capacity; it is
    deliberately out of scope here.
 
