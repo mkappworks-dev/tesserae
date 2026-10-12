@@ -1,5 +1,9 @@
 //! Chunk streaming: which Chunks exist, and which the Client has a mesh for.
 //!
+//! Streams around the Player's Eye, which the rest of this module calls the
+//! anchor: the Server's own idea of where the Player is, not a pose the Client
+//! owns.
+//!
 //! Four nested extents, in Cells, each with a job:
 //!
 //! | Extent  | Meaning                                                  |
@@ -34,18 +38,10 @@ use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, ShapeTable};
 
 use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
+use super::player::Player;
 use super::world_state::ChunkStore;
 use super::{Shapes, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
-
-/// The entity the World streams around. The Client puts this on its camera and
-/// the Server reads that entity's `Transform`.
-///
-/// Intent, not state: the camera is a Client entity and its pose is Client
-/// data. The component is declared here because the Server is the side that
-/// decides what intent it accepts.
-#[derive(Component)]
-pub struct StreamingAnchor;
 
 /// A Chunk's finished geometry, for the Client to upload.
 ///
@@ -424,17 +420,16 @@ fn stream(
     world: Res<WorldSettings>,
     settings: Res<StreamingSettings>,
     budget: Res<StreamingBudget>,
-    anchor: Query<&Transform, With<StreamingAnchor>>,
+    player: Query<&Player>,
 ) {
-    // No anchor, or more than one, is not an error: the Client has not spawned
-    // its camera yet on the first tick. Streaming around an arbitrary one of
+    // The Server spawns exactly one. Streaming around an arbitrary one of
     // several would be worse than streaming around none.
-    let Ok(pose) = anchor.single() else {
+    let Ok(player) = player.single() else {
         return;
     };
 
     let rings = Rings::new(*settings, world.cell_size());
-    let center = world.chunk_at(pose.translation);
+    let center = world.chunk_at(player.eye());
     if order.built_for != Some(rings.load) {
         order.offsets = rings.load.offsets();
         order.descending = order.offsets.clone();
@@ -892,11 +887,11 @@ pub mod stats {
         order: Res<LoadOrder>,
         settings: Res<StreamingSettings>,
         world: Res<WorldSettings>,
-        anchor: Query<&Transform, With<StreamingAnchor>>,
+        player: Query<&Player>,
     ) {
-        let center = anchor
+        let center = player
             .single()
-            .map(|pose| world.chunk_at(pose.translation))
+            .map(|player| world.chunk_at(player.eye()))
             .ok();
         let rings = Rings::new(*settings, world.cell_size());
         let mesh = rings.mesh;
@@ -1135,18 +1130,16 @@ mod tests {
                 .init_resource::<Jobs>()
                 .add_message::<ChunkMeshReady>()
                 .add_message::<ChunkUnloaded>();
-            let anchor = app
-                .world_mut()
-                .spawn((Transform::default(), StreamingAnchor))
-                .id();
+            let anchor = app.world_mut().spawn(Player::at(Vec3::ZERO)).id();
             Harness { app, anchor }
         }
 
         fn anchor_at(&mut self, metres: Vec3) {
             self.app
                 .world_mut()
-                .entity_mut(self.anchor)
-                .insert(Transform::from_translation(metres));
+                .get_mut::<Player>(self.anchor)
+                .unwrap()
+                .set_eye(metres);
         }
 
         fn tick(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
@@ -1206,9 +1199,9 @@ mod tests {
         }
 
         fn center(&self) -> ChunkCoord {
-            let pose = self.app.world().get::<Transform>(self.anchor);
+            let player = self.app.world().get::<Player>(self.anchor);
             let world = self.app.world().resource::<WorldSettings>();
-            world.chunk_at(pose.expect("the anchor exists").translation)
+            world.chunk_at(player.expect("the Player exists").eye())
         }
 
         fn jobs(&self) -> &Jobs {
@@ -1462,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tick_with_no_anchor_does_nothing() {
+    fn a_tick_with_no_player_does_nothing() {
         let mut h = Harness::new(small(), UNLIMITED);
         h.app.world_mut().entity_mut(h.anchor).despawn();
         let (ready, unloaded) = h.tick();

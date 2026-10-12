@@ -245,10 +245,25 @@ const fn edge_open(from: u8, into: u8, face: usize) -> bool {
     (leaves >> face | into >> opposite(face)) & 1 == 0
 }
 
-/// [`edge_open`] for two Voxels, for callers that have the Voxels and not their
-/// masks.
+/// Whether light may cross from one Voxel to the next, for callers that have
+/// the Voxels and not their masks: [`edge_open`], and then the joint test.
+///
+/// Two Shapes that are each partial on the faces that meet, a bottom slab beside
+/// a top slab, may still cover the plane between them together, and then the
+/// edge is blocked though neither side seals it. Only a pair of shaped Voxels can
+/// do that: a cube is sealed or absent, and as a source it leaves freely, so
+/// neither has a joint id.
 pub fn light_passes(shapes: &ShapeTable, from: Voxel, into: Voxel, face: usize) -> bool {
     edge_open(shapes.light_mask(from), shapes.light_mask(into), face)
+        && !jointly_sealed(shapes, from, into, face)
+}
+
+/// The joint half of [`light_passes`], for a caller that has already asked
+/// [`edge_open`].
+#[inline]
+fn jointly_sealed(shapes: &ShapeTable, from: Voxel, into: Voxel, face: usize) -> bool {
+    let (a, b) = (shapes.joint_id(from), shapes.joint_id(into));
+    a != 0 && b != 0 && shapes.jointly_seals(a, face, b)
 }
 
 /// How much block light a Voxel emits.
@@ -357,10 +372,17 @@ pub fn light_chunk(
     let mut cells = vec![Light::DARK; CHUNK_VOLUME];
     let mut queue: Vec<[u8; 3]> = Vec::with_capacity(CHUNK_SIZE * CHUNK_SIZE);
 
+    let shaped = center.may_contain_shaped();
+    // Terrain never allocates this, and its flood never reads it.
+    let mut joint = if shaped {
+        vec![0u16; CHUNK_VOLUME]
+    } else {
+        Vec::new()
+    };
+    let mut blocked = vec![0u8; CHUNK_VOLUME];
     // Air emits nothing and blocks nothing, so a uniform-air Chunk skips the
     // sweep entirely rather than reading 32768 identical Voxels out of a
     // palette to learn that.
-    let mut blocked = vec![0u8; CHUNK_VOLUME];
     if !uniform.is_some_and(Voxel::is_air) {
         for y in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
@@ -368,6 +390,9 @@ pub fn light_chunk(
                     let v = center.get(x, y, z);
                     let i = index(x, y, z);
                     blocked[i] = shapes.light_mask(v);
+                    if shaped {
+                        joint[i] = shapes.joint_id(v);
+                    }
                     let emitted = emission(v);
                     if emitted > 0 {
                         cells[i] = Light::DARK.with_block(emitted);
@@ -382,14 +407,12 @@ pub fn light_chunk(
     // block light by definition.
     let mut seeded = [false; CHANNELS];
     seeded[Channel::Block as usize] = !queue.is_empty();
-    seed_from_border(
-        &mut cells,
-        &mut queue,
-        &blocked,
-        border,
+    let walls = Walls {
         shapes,
-        &mut seeded,
-    );
+        blocked: &blocked,
+        joint: &joint,
+    };
+    seed_from_border(&mut cells, &mut queue, &walls, border, &mut seeded);
 
     // Both channels flood from the same seeds, because a border cell can raise
     // either. Skipping a channel nothing seeded is the difference between one
@@ -398,23 +421,32 @@ pub fn light_chunk(
     // Spelled out rather than looped: `flood` is specialised on both the channel
     // and whether the Chunk is shaped, and a loop over the channels leaves the
     // specialising to the optimiser's unrolling.
-    let shaped = center.may_contain_shaped();
     if seeded[SKY] {
         if shaped {
-            flood::<true, SKY>(&mut cells, &blocked, &queue);
+            flood::<true, SKY>(&mut cells, &walls, &queue);
         } else {
-            flood::<false, SKY>(&mut cells, &blocked, &queue);
+            flood::<false, SKY>(&mut cells, &walls, &queue);
         }
     }
     if seeded[BLOCK] {
         if shaped {
-            flood::<true, BLOCK>(&mut cells, &blocked, &queue);
+            flood::<true, BLOCK>(&mut cells, &walls, &queue);
         } else {
-            flood::<false, BLOCK>(&mut cells, &blocked, &queue);
+            flood::<false, BLOCK>(&mut cells, &walls, &queue);
         }
     }
 
     collapse(cells)
+}
+
+/// What the bulk solver knows about each cell of the Chunk it is solving.
+struct Walls<'a> {
+    shapes: &'a ShapeTable,
+    /// [`ShapeTable::light_mask`] per cell.
+    blocked: &'a [u8],
+    /// [`ShapeTable::joint_id`] per cell; empty unless the Chunk may hold a
+    /// shaped Voxel.
+    joint: &'a [u16],
 }
 
 /// Whether the bulk solver's open-sky fast path is exact for this boundary:
@@ -443,9 +475,8 @@ fn uniformly_open_sky(border: [Option<LitChunk<'_>>; 6]) -> bool {
 fn seed_from_border(
     cells: &mut [Light],
     queue: &mut Vec<[u8; 3]>,
-    blocked: &[u8],
+    walls: &Walls<'_>,
     border: [Option<LitChunk<'_>>; 6],
-    shapes: &ShapeTable,
     seeded: &mut [bool; CHANNELS],
 ) {
     let last = CHUNK_SIZE - 1;
@@ -474,11 +505,20 @@ fn seed_from_border(
                 };
                 let i = index(inside.0, inside.1, inside.2);
                 let leaving = if check_exit {
-                    shapes.light_mask(outside.chunk.get(across.0, across.1, across.2))
+                    walls
+                        .shapes
+                        .light_mask(outside.chunk.get(across.0, across.1, across.2))
                 } else {
                     0
                 };
-                if !edge_open(leaving, blocked[i], travel) {
+                if !edge_open(leaving, walls.blocked[i], travel) {
+                    continue;
+                }
+                if check_exit
+                    && !walls.joint.is_empty()
+                    && walls.joint[i] != 0
+                    && jointly_sealed_across(walls, outside.chunk, across, i, travel)
+                {
                     continue;
                 }
                 let arriving = outside.light.get(across.0, across.1, across.2);
@@ -504,7 +544,9 @@ fn seed_from_border(
 ///
 /// `SHAPED` is whether the Chunk holds a shaped Voxel. When it does not, every
 /// cell is air or a cube and the whole edge rule is "the cell I am entering is
-/// not a cube" - what this loop asked before Shapes existed. `CHANNEL` is
+/// not a cube" - what this loop asked before Shapes existed.
+/// When it does, the rule is [`edge_open`] and then the joint test, which only
+/// fires for a pair of cells that are both partial. `CHANNEL` is
 /// [`SKY`] or [`BLOCK`], a const so that `transmitted`'s sky-only case folds
 /// away for block light.
 ///
@@ -519,9 +561,10 @@ fn seed_from_border(
 /// [`MAX_LIGHT`] times.
 fn flood<const SHAPED: bool, const CHANNEL: usize>(
     cells: &mut [Light],
-    blocked: &[u8],
+    walls: &Walls<'_>,
     seeds: &[[u8; 3]],
 ) {
+    let blocked = walls.blocked;
     let channel = if CHANNEL == SKY {
         Channel::Sky
     } else {
@@ -548,6 +591,11 @@ fn flood<const SHAPED: bool, const CHANNEL: usize>(
             let ni = index(nx as usize, ny as usize, nz as usize);
             let open = if SHAPED {
                 edge_open(blocked[from], blocked[ni], face)
+                    && !(walls.joint[from] != 0
+                        && walls.joint[ni] != 0
+                        && walls
+                            .shapes
+                            .jointly_seals(walls.joint[from], face, walls.joint[ni]))
             } else {
                 blocked[ni] == 0
             };
@@ -576,6 +624,22 @@ fn inside(x: u8, y: u8, z: u8, face: usize) -> Option<[u8; 3]> {
         return None;
     }
     Some([n[0] as u8, n[1] as u8, n[2] as u8])
+}
+
+/// [`jointly_sealed`] across a Chunk boundary, for the neighbour's Voxel at
+/// `across` entering cell `i`, whose joint id is non-zero.
+fn jointly_sealed_across(
+    walls: &Walls<'_>,
+    outside: &Chunk,
+    across: (usize, usize, usize),
+    i: usize,
+    travel: usize,
+) -> bool {
+    let from = walls
+        .shapes
+        .joint_id(outside.get(across.0, across.1, across.2));
+    // The neighbour is the source, so it is the one looking out through `travel`.
+    from != 0 && walls.shapes.jointly_seals(from, travel, walls.joint[i])
 }
 
 /// Back to a [`ChunkLight`], uniform where it can be.
@@ -661,8 +725,8 @@ pub fn relight(volume: &mut impl LightVolume, shapes: &ShapeTable, edited: [i32;
 /// the old Voxel is gone, so the old seals are unknown; clearing a Voxel that was
 /// lit another way costs nothing, because the region it clears always ends at a
 /// Voxel strictly brighter than anything this source delivers, and that Voxel
-/// seeds the regrowth, which does follow the current seals. Clearing too little
-/// would be the bug.
+/// seeds the regrowth, which does follow the current seals, joint ones included.
+/// Clearing too little would be the bug.
 ///
 /// The comparison is against [`transmitted`] rather than against the level
 /// itself, and that is the whole correctness of the sky channel: full-strength
@@ -718,7 +782,9 @@ fn brighten(
         if level == 0 {
             continue;
         }
-        let source = volume.voxel(at).map_or(0, |v| shapes.light_mask(v));
+        let Some(source) = volume.voxel(at) else {
+            continue;
+        };
         for face in FACES {
             let t = transmitted(channel, level, face);
             if t == 0 {
@@ -728,9 +794,7 @@ fn brighten(
             let Some(voxel) = volume.voxel(next) else {
                 continue;
             };
-            if !edge_open(source, shapes.light_mask(voxel), face)
-                || volume.light(next).get(channel) >= t
-            {
+            if !light_passes(shapes, source, voxel, face) || volume.light(next).get(channel) >= t {
                 continue;
             }
             volume.set_light(next, volume.light(next).with(channel, t));
@@ -742,15 +806,33 @@ fn brighten(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shape::{Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR};
+    use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
     use crate::worldgen::{GRASS, STONE, Worldgen, WorldgenParams};
     use std::sync::OnceLock;
 
     const LAST: usize = CHUNK_SIZE - 1;
 
+    /// Covers the lower half of its -X face and the upper half of its +X face,
+    /// which no built-in does: every built-in's opposite faces match, so a joint
+    /// test that read the wrong one of the two would agree with the right one.
+    const SHAPE_DIAGONAL: u8 = 4;
+
     fn shapes() -> &'static ShapeTable {
         static TABLE: OnceLock<ShapeTable> = OnceLock::new();
-        TABLE.get_or_init(ShapeTable::builtin)
+        TABLE.get_or_init(|| {
+            let mut table = ShapeTable::builtin();
+            let id = table
+                .register(ShapeDef {
+                    boxes: vec![
+                        NodeBox::new([0, 0, 0], [8, 8, 16]),
+                        NodeBox::new([8, 8, 0], [16, 16, 16]),
+                    ],
+                    collision: None,
+                })
+                .unwrap();
+            assert_eq!(id, SHAPE_DIAGONAL);
+            table
+        })
     }
 
     /// Lent as the neighbour whose light a test cares about; its Voxels are air.
@@ -1350,6 +1432,30 @@ mod tests {
                 "two half walls",
                 vec![([12, 5, 16], slab(POS_Y)), ([13, 5, 16], slab(NEG_Y))],
             ),
+            (
+                "two half walls the other way round",
+                vec![([12, 5, 16], slab(NEG_Y)), ([13, 5, 16], slab(POS_Y))],
+            ),
+            (
+                "two bottom slabs",
+                vec![([12, 5, 16], slab(POS_Y)), ([13, 5, 16], slab(POS_Y))],
+            ),
+            (
+                "a stair and its mirror image",
+                vec![([12, 5, 16], stair(0)), ([13, 5, 16], upside_down_stair())],
+            ),
+            (
+                "a diagonal and a bottom slab",
+                vec![([12, 5, 16], diagonal()), ([13, 5, 16], slab(POS_Y))],
+            ),
+            (
+                "a top slab and a diagonal",
+                vec![([12, 5, 16], slab(NEG_Y)), ([13, 5, 16], diagonal())],
+            ),
+            (
+                "a stair and a copy of it",
+                vec![([12, 5, 16], stair(0)), ([13, 5, 16], stair(0))],
+            ),
         ];
         for (label, extra) in scenes {
             let mut plan = tunnel(8, 20, 9);
@@ -1424,6 +1530,103 @@ mod tests {
         }
     }
 
+    /// A wall up to the top of the room and one that rises past the middle of the
+    /// Chunk, where the bulk solver's per-cell arrays are in their second half.
+    const ROOM_HEIGHTS: [i32; 2] = [9, 29];
+
+    #[test]
+    fn the_two_solvers_agree_on_a_walled_room() {
+        for top in ROOM_HEIGHTS {
+            let plan = walled_room(top);
+            let mut chunk = Chunk::air();
+            let mut world = OneChunk::new(Chunk::air());
+            world.seed_sky();
+            for (at, voxel) in &plan {
+                chunk.set(at[0] as usize, at[1] as usize, at[2] as usize, *voxel);
+                world.place(*at, *voxel);
+            }
+            let above = full_sky();
+            let bulk = light_chunk(&chunk, sky_above(&above), shapes());
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        assert_eq!(
+                            world.light.get(x, y, z),
+                            bulk.get(x, y, z),
+                            "wall to {top}: at {x},{y},{z}"
+                        );
+                    }
+                }
+            }
+            assert_eq!(bulk.get(16, 5, 16).sky(), 0, "the room is dark in bulk too");
+        }
+    }
+
+    /// Two halves that only seal jointly, one on each side of the seam, and the
+    /// light going either way across it. The bulk solver sees one side of the
+    /// plane in `seed_from_border` and the other in `flood`, so each direction
+    /// is a different code path.
+    #[test]
+    fn the_two_solvers_agree_with_a_jointly_sealing_pair_on_the_seam() {
+        let pairs = [
+            ("slabs", slab(POS_Y), slab(NEG_Y)),
+            ("slabs, swapped", slab(NEG_Y), slab(POS_Y)),
+            ("stairs", stair(0), upside_down_stair()),
+            ("stairs, swapped", upside_down_stair(), stair(0)),
+            ("a copy of the same stair", stair(0), stair(0)),
+            ("diagonals", diagonal(), diagonal()),
+            ("a diagonal then a bottom slab", diagonal(), slab(POS_Y)),
+            ("a bottom slab then a diagonal", slab(POS_Y), diagonal()),
+            ("a diagonal then a top slab", diagonal(), slab(NEG_Y)),
+            ("a top slab then a diagonal", slab(NEG_Y), diagonal()),
+        ];
+        // The lantern west of the seam lights eastwards, and east of it lights
+        // westwards.
+        for lantern in [26, 38] {
+            for (label, west, east) in pairs {
+                let mut plan = tunnel(24, 40, lantern);
+                plan.extend([([31, 5, 16], west), ([32, 5, 16], east)]);
+
+                let mut lattice = Lattice::new(&[[0, 0, 0], [1, 0, 0]]);
+                for (at, voxel) in &plan {
+                    lattice.place(*at, *voxel);
+                }
+                let mut fresh = Lattice::new(&[[0, 0, 0], [1, 0, 0]]);
+                for (at, voxel) in &plan {
+                    fresh.set_voxel(*at, *voxel);
+                }
+                fresh.solve_bulk();
+                assert_eq!(
+                    lattice.snapshot(),
+                    fresh.snapshot(),
+                    "{label}, lantern at {lantern}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_jointly_sealing_pair_on_the_seam_blocks_in_either_direction() {
+        let beyond = |lantern: i32, west: Voxel, east: Voxel| {
+            let mut lattice = Lattice::new(&[[0, 0, 0], [1, 0, 0]]);
+            let mut plan = tunnel(24, 40, lantern);
+            plan.extend([([31, 5, 16], west), ([32, 5, 16], east)]);
+            for (at, voxel) in plan {
+                lattice.place(at, voxel);
+            }
+            // Past the pair, away from the lantern.
+            lattice
+                .light([if lantern < 31 { 36 } else { 28 }, 5, 16])
+                .block()
+        };
+        let sealing = (slab(POS_Y), slab(NEG_Y));
+        assert_eq!(beyond(26, sealing.0, sealing.1), 0, "eastwards");
+        assert_eq!(beyond(38, sealing.0, sealing.1), 0, "westwards");
+        // The same two cells with matching halves let it through both ways.
+        assert_eq!(beyond(26, slab(POS_Y), slab(POS_Y)), MAX_LIGHT - 10);
+        assert_eq!(beyond(38, slab(POS_Y), slab(POS_Y)), MAX_LIGHT - 10);
+    }
+
     #[test]
     fn a_stair_on_the_seam_blocks_in_either_chunk_exactly_as_it_does_inside_one() {
         let across = |voxels: Vec<([i32; 3], Voxel)>| {
@@ -1448,22 +1651,175 @@ mod tests {
         assert_eq!(across(vec![([32, 5, 16], stair(3))]), 0);
     }
 
-    /// Two partial shapes that only *jointly* cover a face do not seal it, and
-    /// light leaks through the seam between them. Pinned so that it is a
-    /// decision: closing it means testing joint coverage on every edge of the
-    /// flood, for a case that does not look wrong on screen.
-    #[test]
-    fn two_half_walls_that_only_jointly_seal_a_face_leak_light() {
+    fn diagonal() -> Voxel {
+        Voxel::shaped(STONE, SHAPE_DIAGONAL, Orientation::IDENTITY)
+    }
+
+    fn upside_down_stair() -> Voxel {
+        Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(NEG_Y, 0))
+    }
+
+    /// Block light at the three cells of the tunnel that matter for a pair of
+    /// Voxels at x = 12 and 13, with the lantern at x = 9: the first, the second,
+    /// and a cell two beyond them.
+    fn through_a_pair(first: Voxel, second: Voxel) -> [u8; 3] {
         let mut world = OneChunk::new(Chunk::air());
         for (at, voxel) in tunnel(8, 20, 9) {
             world.place(at, voxel);
         }
-        world.place([12, 5, 16], slab(POS_Y));
-        world.place([13, 5, 16], slab(NEG_Y));
-        assert!(
-            world.light([15, 5, 16]).block() > 0,
-            "the known leak was closed: update the spec and this test together"
+        world.place([12, 5, 16], first);
+        world.place([13, 5, 16], second);
+        [12, 13, 15].map(|x| world.light([x, 5, 16]).block())
+    }
+
+    /// Two partial shapes that only *jointly* cover a face seal it. Each leaves
+    /// the face open on its own, so a rule that asked one side at a time lets the
+    /// light through the seam between them.
+    #[test]
+    fn two_half_walls_that_only_jointly_seal_a_face_stop_light() {
+        let (bottom, top) = (slab(POS_Y), slab(NEG_Y));
+        // It reaches the first and goes no further, whichever way round they are.
+        assert_eq!(
+            through_a_pair(bottom, top),
+            [MAX_LIGHT - 3, 0, 0],
+            "bottom, top"
         );
+        assert_eq!(
+            through_a_pair(top, bottom),
+            [MAX_LIGHT - 3, 0, 0],
+            "top, bottom"
+        );
+    }
+
+    #[test]
+    fn a_stair_beside_its_mirror_image_seals_and_beside_a_copy_of_itself_does_not() {
+        assert_eq!(
+            through_a_pair(stair(0), upside_down_stair()),
+            [MAX_LIGHT - 3, 0, 0]
+        );
+        assert_eq!(
+            through_a_pair(stair(0), stair(0)),
+            [MAX_LIGHT - 3, MAX_LIGHT - 4, MAX_LIGHT - 6]
+        );
+    }
+
+    /// The seal is a statement about the plane, not about partial shapes in
+    /// general: two bottom slabs leave their upper halves facing each other.
+    #[test]
+    fn two_slabs_of_the_same_kind_leave_the_open_half_open() {
+        assert_eq!(
+            through_a_pair(slab(POS_Y), slab(POS_Y)),
+            [MAX_LIGHT - 3, MAX_LIGHT - 4, MAX_LIGHT - 6]
+        );
+        assert_eq!(
+            through_a_pair(slab(NEG_Y), slab(NEG_Y)),
+            [MAX_LIGHT - 3, MAX_LIGHT - 4, MAX_LIGHT - 6]
+        );
+    }
+
+    /// A partial shape and a cube or air are not a pair. A cube as a source holds
+    /// only its own emission and leaves freely, so a lantern beside a slab lights
+    /// it, and a slab beside air is open on its half.
+    #[test]
+    fn a_partial_shape_beside_a_cube_source_or_air_is_not_jointly_sealed() {
+        let mut world = OneChunk::new(Chunk::air());
+        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([17, 16, 16], slab(POS_Y));
+        world.place([15, 16, 16], slab(NEG_Y));
+        assert_eq!(world.light([17, 16, 16]).block(), MAX_LIGHT - 1);
+        assert_eq!(world.light([15, 16, 16]).block(), MAX_LIGHT - 1);
+        assert_eq!(world.light([18, 16, 16]).block(), MAX_LIGHT - 2);
+    }
+
+    #[test]
+    fn taking_either_half_of_a_sealing_pair_away_restores_the_light_exactly() {
+        for (first, second) in [(slab(POS_Y), slab(NEG_Y)), (stair(0), upside_down_stair())] {
+            for first_out_first in [true, false] {
+                let mut world = OneChunk::new(Chunk::air());
+                world.seed_sky();
+                for (at, voxel) in tunnel(8, 20, 9) {
+                    world.place(at, voxel);
+                }
+                let empty = world.light.clone();
+                world.place([12, 5, 16], first);
+                let one_half = world.light.clone();
+                world.place([13, 5, 16], second);
+                assert_ne!(world.light, one_half, "the second half changed nothing");
+
+                let (a, b) = if first_out_first {
+                    ([12, 5, 16], [13, 5, 16])
+                } else {
+                    ([13, 5, 16], [12, 5, 16])
+                };
+                world.place(a, Voxel::AIR);
+                world.place(b, Voxel::AIR);
+                assert_eq!(world.light, empty, "{first:?} then {second:?}");
+            }
+        }
+    }
+
+    /// Which of two neighbours seals which way round matters when a Shape covers
+    /// different halves of its two opposite faces, and the answer is worked out
+    /// here from the geometry: the diagonal covers the lower half of -X and the
+    /// upper half of +X, a bottom slab the lower half of both, a top slab the
+    /// upper half of both.
+    #[test]
+    fn the_halves_that_meet_are_the_ones_on_the_faces_that_face_each_other() {
+        let (bottom, top) = (slab(POS_Y), slab(NEG_Y));
+        // (west, east, light moving east is blocked, light moving west is blocked)
+        let cases = [
+            (diagonal(), diagonal(), true, true),
+            (diagonal(), bottom, true, true),
+            (bottom, diagonal(), false, false),
+            (diagonal(), top, false, false),
+            (top, diagonal(), true, true),
+        ];
+        for (west, east, eastwards, westwards) in cases {
+            assert_eq!(
+                !light_passes(shapes(), west, east, POS_X),
+                eastwards,
+                "{west:?} then {east:?}, eastwards"
+            );
+            assert_eq!(
+                !light_passes(shapes(), east, west, NEG_X),
+                westwards,
+                "{west:?} then {east:?}, westwards"
+            );
+        }
+    }
+
+    /// A wall of bottom slabs in front of a wall of top slabs, up to `top`, of a
+    /// room whose right half is roofed just above it. Sky reaches the room only
+    /// through the wall, and the wall only seals jointly. It spans the whole
+    /// Chunk in `z`, so it is also the one scene where the joint test is asked
+    /// about hundreds of faces at once.
+    fn walled_room(top: i32) -> Plan {
+        let mut plan = Plan::new();
+        for z in 0..CHUNK_SIZE as i32 {
+            for y in 0..=top {
+                plan.push(([12, y, z], slab(POS_Y)));
+                plan.push(([13, y, z], slab(NEG_Y)));
+            }
+            for x in 14..CHUNK_SIZE as i32 {
+                plan.push(([x, top + 1, z], Voxel::cube(STONE)));
+            }
+        }
+        plan
+    }
+
+    #[test]
+    fn sky_does_not_reach_a_room_behind_a_wall_of_two_half_walls() {
+        for top in ROOM_HEIGHTS {
+            let mut world = OneChunk::new(Chunk::air());
+            world.seed_sky();
+            for (at, voxel) in walled_room(top) {
+                world.place(at, voxel);
+            }
+            assert_eq!(world.light([11, 5, 16]).sky(), MAX_LIGHT, "outside it");
+            for x in 14..24 {
+                assert_eq!(world.light([x, 5, 16]).sky(), 0, "inside, at x={x}");
+            }
+        }
     }
 
     /// The open-sky shortcut says a Chunk of air under uniform full sky is
