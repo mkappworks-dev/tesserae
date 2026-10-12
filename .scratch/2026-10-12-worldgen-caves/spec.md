@@ -110,8 +110,11 @@ writing it. They are why the decisions below are what they are.
 - **Tunnels, not blobs.** Two independent fields that are both near their
   midline cross in a winding tube; one field above a threshold is a blob. A
   tube is thin, so little of the volume is carved even when most Chunks hold
-  some: at `feature_size_m = 64`, `radius_m = 3` about 4.6% of the ground in the
-  band is carved and about 4% of surface columns have a mouth.
+  some: at `feature_size_m = 64` about 4.6% of the ground in the band is carved
+  and about 4% of surface columns have a mouth. (The prototype called this
+  `radius_m = 3` with a guessed slope of 0.8; the measured slope is 0.51, which
+  makes the same window a radius of 4.8 m, the default shipped. Same tunnels,
+  honest label.)
 
 ## Decisions
 
@@ -123,11 +126,13 @@ metres, none ever a Voxel count, per ADR-0003:
 
 - `feature_size_m` (64): the period of the field's lowest octave, which is
   roughly how far apart two tunnels run.
-- `radius_m` (3): roughly how wide a tunnel is. **Approximate by construction:**
-  the window is `GRADIENT * radius_m / feature_size_m` and `GRADIENT` is a
-  calibration of how steep value noise is, not a derivation. The size is the
-  same physical size at every Voxel size, which is the property ADR-0003 needs;
-  it is not a measured radius, and the docs say so.
+- `radius_m` (4.8): roughly how wide a tunnel is, as the radius of the largest
+  sphere in it. **Approximate by construction:** the window is `GRADIENT *
+  radius_m / feature_size_m` and `GRADIENT` (0.5) is a calibration of how steep
+  two-octave value noise is near its midline (measured 0.51), not a derivation.
+  A test measures the median slab half-width and fails outside 0.8x-1.25x of the
+  radius, so a change to the noise forces a recalibration. The size is the same
+  physical size at every Voxel size, which is the property ADR-0003 needs.
 - `floor_m` (-24, i.e. `sea_level_m` less 48): no cave below this height.
 
 `octaves` (2) is a fourth field, a count and not a distance, like the terrain's.
@@ -237,3 +242,53 @@ and carves nothing. Before/after table in the PR.
 in their walls; `./scripts/cargo-ci` passes; `cargo bench -p tesserae-core`
 states what the streaming budget became; a screenshot is taken and shown; and
 `server/lightbox.rs` has been decided on deliberately, either way (ticket 06).
+
+## Outcome
+
+Built as decided, with three corrections the measurements forced, recorded where
+they happened (tickets 02, 05 and 06) and summarised here.
+
+- **The floor is the lever, not the range test.** The prototype's "82% of deep
+  Chunks stay uniform" counted layers under the floor. Inside the band the range
+  test keeps 27% (64 m features) to 76% (128 m) of Chunks uniform. It still
+  earns its place: culling sub-blocks cuts the cost of carving the rest by about
+  40% (390 us a Chunk against 640 us), and a Mod that sets a deep floor leans on
+  it.
+- **A tunnel's radius was mislabelled by 1.6x.** The calibration constant was
+  guessed; measured, it is 0.51 where the prototype used 0.8. The default is now
+  `radius_m = 4.8` with the constant at 0.5, which is the same window, so
+  nothing measured moved, and a test pins the calibration.
+- **Window captures are black while the screen is locked.** `main` too. The
+  `dev` capture gained `TESSERAE_SCREENSHOT_OFFSCREEN`, which renders into an
+  image and does not depend on the display.
+
+What it costs, from the benches and the interleaved runs (tickets 03 and 05):
+
+| Chunk                                   | Generate | Light    | Mesh     |
+| --------------------------------------- | -------- | -------- | -------- |
+| deep, no tunnel (floor or range test)   | 4-30 ns  | 3 ns     | 6 ns     |
+| deep, a tunnel crosses it               | 264 us   | 48 us    | 395 us   |
+| surface, no tunnel                      | 104 us   | 94 us    | 347 us   |
+| surface, a tunnel crosses it            | 252 us   | 102 us   | 360 us   |
+
+The streaming budget did not move: worst tick 0.6 ms, fill 1.58 s and 8 us a
+mesh upload with caves and without, ten runs each.
+
+Loose ends, declared rather than discovered:
+
+- **A deeper floor is not measured.** At the default one layer of a ring is in
+  the band. All 2442 loaded Chunks carved would be about 1.7 s of worker time
+  (arithmetic, not a run).
+- **The range bound is loose where it sums octaves.** A Chunk that passes it and
+  carves nothing costs tens of microseconds in sampled sub-blocks. A joint bound
+  over both octaves would be tighter; not built.
+- **A carved Chunk is built by `Chunk::set` per Voxel.** Writing whole rows into
+  the storage would cost less than the palette lookup each `set` pays. Nobody
+  asked.
+- **An enclosed cave is meshed and drawn although nobody can see it.** 327
+  Chunks drawn against 132 before. GPU occlusion culling, an open item in
+  DESIGN.md, is the answer, not a worldgen change.
+- **The generator's output is now a compatibility surface.** Nothing persists
+  chunks yet, so no migration exists to write; when saves arrive, the cave
+  constants (`GRADIENT`, the seed offsets, the octave count) are as pinned as
+  the terrain's.

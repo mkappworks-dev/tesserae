@@ -55,9 +55,9 @@ pub struct CaveParams {
     /// The period of the lowest octave of the field the tunnels follow, in
     /// metres: roughly how far apart two tunnels run.
     pub feature_size_m: f32,
-    /// Roughly how wide a tunnel is, as a radius in metres. Approximate by
-    /// construction (see [`CaveField`]); the physical size does not change with
-    /// Voxel size.
+    /// Roughly how wide a tunnel is: the radius, in metres, of the largest
+    /// sphere that fits in it. Approximate by construction (see [`GRADIENT`]);
+    /// the physical size does not change with Voxel size.
     pub radius_m: f32,
     /// No cave below this height. Everything under it is the uniform rock the
     /// deep early-out answers for without sampling anything.
@@ -69,7 +69,7 @@ impl Default for CaveParams {
     fn default() -> Self {
         CaveParams {
             feature_size_m: 64.0,
-            radius_m: 3.0,
+            radius_m: 4.8,
             floor_m: -24.0,
             octaves: 2,
         }
@@ -89,11 +89,13 @@ impl Default for WorldgenParams {
     }
 }
 
-/// Converts a tunnel radius into a window on the field. Value noise changes by
-/// about this much per lattice cell, so `|field - 0.5| < GRADIENT * r / L` is a
-/// slab roughly `r` metres thick at a feature size `L`. A calibration and not a
-/// derivation: the one place a tunnel's width is approximate.
-const GRADIENT: f32 = 0.8;
+/// Converts a tunnel radius into a window on the field. Two-octave value noise
+/// changes by about this much per lattice cell (measured near the midline: 0.51),
+/// so `|field - 0.5| < GRADIENT * r / L` is a slab about `r` metres either side
+/// at a feature size `L`. A calibration and not a derivation, and the one place
+/// a tunnel's width is approximate; `a_tunnel_is_as_wide_as_its_radius_says`
+/// fails if the noise changes enough to need a new number.
+const GRADIENT: f32 = 0.5;
 
 /// A tunnel is where two independent fields are both near their midline: each
 /// alone is a slab, and two slabs cross in a winding tube. A tube is thin, so
@@ -742,6 +744,48 @@ mod tests {
         let (a, b) = (share(&caved(1.0)), share(&caved(0.25)));
         assert_eq!(a, b);
         assert!((0.005..0.2).contains(&a), "{a} of the ground is cave");
+    }
+
+    /// The slab either side of a field's midline, measured: the distance along
+    /// the gradient from the midline to the edge of the carve window. Its median
+    /// over many points should be the radius the parameter asks for, within the
+    /// slack a calibration allows.
+    #[test]
+    fn a_tunnel_is_as_wide_as_its_radius_says() {
+        use crate::noise::fbm3;
+        let params = CaveParams::default();
+        let field = CaveField::new(7, params);
+        let k = field.inv_feature_size;
+        let h = 0.05;
+        let mut half_widths = vec![];
+        for i in 0..20_000u32 {
+            let unit = |salt: u32| {
+                let x = i
+                    .wrapping_mul(2_654_435_761)
+                    .wrapping_add(salt.wrapping_mul(40_503));
+                ((x ^ (x >> 15)).wrapping_mul(2_246_822_519) >> 8) as f32 / (1u32 << 24) as f32
+            };
+            let p = [unit(1) * 300.0, unit(2) * 300.0, unit(3) * 300.0];
+            let f = |p: [f32; 3]| fbm3(p[0] * k, p[1] * k, p[2] * k, field.seeds[0], field.octaves);
+            if (f(p) - 0.5).abs() > 0.02 {
+                continue;
+            }
+            let g: [f32; 3] = std::array::from_fn(|a| {
+                let (mut lo, mut hi) = (p, p);
+                lo[a] -= h;
+                hi[a] += h;
+                (f(hi) - f(lo)) / (2.0 * h)
+            });
+            let slope = (g[0] * g[0] + g[1] * g[1] + g[2] * g[2]).sqrt();
+            half_widths.push(field.half_width / slope);
+        }
+        half_widths.sort_by(f32::total_cmp);
+        let median = half_widths[half_widths.len() / 2];
+        assert!(
+            (0.8..1.25).contains(&(median / params.radius_m)),
+            "median half-width {median} m for a radius of {} m",
+            params.radius_m
+        );
     }
 
     #[test]

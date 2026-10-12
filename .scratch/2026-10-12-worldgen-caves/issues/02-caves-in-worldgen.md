@@ -67,3 +67,14 @@ the caveless generator, and the caved one asserts "at most one, and highest".
 82% of deep Chunks stayed uniform; that counted layers under the floor. Per
 layer in the band the range test keeps 27% (64 m features) to 76% (128 m)
 uniform, so the floor is the lever and the spec says so.
+
+**Calibration, corrected late.** The first constant for turning a radius into a
+window on the field was a guess (0.8). Measured, two-octave value noise changes
+by 0.51 per lattice cell near its midline, so the guess made every tunnel 1.6x
+the radius it was labelled with (7.6 m against 4.8 m, as the new test reports
+when the old constant is put back). The constant is now 0.5 and the default
+radius 4.8 m, which is the same window the prototype and every measurement
+used: the carved Voxels did not move, and the cave bench rows re-run within 1%.
+`a_tunnel_is_as_wide_as_its_radius_says` measures the median distance along the
+gradient from the midline to the edge of the window and fails outside 0.8x-1.25x
+of `radius_m`.
