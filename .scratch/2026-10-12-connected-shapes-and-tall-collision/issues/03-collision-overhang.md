@@ -1,6 +1,6 @@
 # Collision taller than the cell
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decisions 7 and 8: gap (b), a fence you cannot jump. Independent of
@@ -42,3 +42,12 @@ connected shapes, and useful on its own for any Shape (a tall post, a sign).
 
 `./scripts/cargo-ci` passes; the sweep benches from 01 are no slower, and faster
 on the paths that stop allocating - the PR says by how much.
+
+## Comments
+
+Done. `overhang()` folds over all 24 Orientations, so the first oriented Shape
+that overhangs widens all six faces (spec decision 7 now says so); a test pins
+it. Disabling the widening fails the three tests that need it. The sweep
+benches could not be compared, since the machine was too loaded to take a
+baseline (ticket 01); the allocation removal in `obstacles` is therefore
+unmeasured.

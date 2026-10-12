@@ -66,6 +66,32 @@ impl NodeBox {
     const CELL: NodeBox = NodeBox::new([0; 3], [SUBDIV as u8; 3]);
 }
 
+/// A box a body collides with, in sixteenths of a Voxel and signed so that it
+/// may stand outside the cell: `-16..=32` per axis, one whole Voxel of
+/// [overhang](ShapeTable::overhang) at most on each side. A fence is
+/// `[6, 0, 6]..[10, 24, 10]`, a post a Voxel and a half tall that you cannot
+/// jump. Drawn geometry stays a [`NodeBox`]: only collision acts at a distance.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CollisionBox {
+    pub min: [i8; 3],
+    pub max: [i8; 3],
+}
+
+impl CollisionBox {
+    pub const fn new(min: [i8; 3], max: [i8; 3]) -> Self {
+        CollisionBox { min, max }
+    }
+}
+
+impl From<NodeBox> for CollisionBox {
+    fn from(b: NodeBox) -> Self {
+        CollisionBox {
+            min: b.min.map(|c| c as i8),
+            max: b.max.map(|c| c as i8),
+        }
+    }
+}
+
 /// What a Mod declares for one Shape.
 #[derive(Clone, Debug)]
 pub struct ShapeDef {
@@ -74,7 +100,7 @@ pub struct ShapeDef {
     /// What a body collides with when it differs from what is drawn - a
     /// pressure plate is thin to look at and nothing to walk into. `None` means
     /// the same boxes.
-    pub collision: Option<Vec<NodeBox>>,
+    pub collision: Option<Vec<CollisionBox>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -300,8 +326,9 @@ pub struct ShapeTable {
     shapes: usize,
     variants: Vec<Variant>,
     quads: Vec<ShapeQuad>,
-    boxes: Vec<NodeBox>,
+    boxes: Vec<CollisionBox>,
     selection: Vec<NodeBox>,
+    overhang: [u8; 6],
 }
 
 impl Default for ShapeTable {
@@ -320,6 +347,7 @@ impl ShapeTable {
             quads: Vec::new(),
             boxes: Vec::new(),
             selection: Vec::new(),
+            overhang: [0; 6],
         };
         let b = NodeBox::new;
         let defs = [
@@ -353,12 +381,19 @@ impl ShapeTable {
                 return Err(ShapeError::TooManyBoxes);
             }
             for b in collision {
-                check_box(b)?;
+                check_collision_box(b)?;
             }
         }
 
         let grid = rasterise(&def.boxes);
-        let collision = def.collision.as_deref().unwrap_or(&def.boxes);
+        let declared: Vec<CollisionBox>;
+        let collision = match &def.collision {
+            Some(collision) => collision,
+            None => {
+                declared = def.boxes.iter().map(|&b| b.into()).collect();
+                &declared
+            }
+        };
         for orientation in Orientation::all() {
             let m = orientation.matrix();
             let rotated = rotate_grid(&grid, &m);
@@ -366,11 +401,16 @@ impl ShapeTable {
             let quads_start = self.quads.len() as u32;
             extract_quads(&rotated, &mut self.quads);
             let boxes_start = self.boxes.len() as u32;
-            self.boxes
-                .extend(collision.iter().map(|b| rotate_box(b, &m)));
+            for b in collision {
+                let rotated = rotate_collision_box(b, &m);
+                self.fold_overhang(&rotated);
+                self.boxes.push(rotated);
+            }
             let selection_start = self.selection.len() as u32;
-            self.selection
-                .extend(def.boxes.iter().map(|b| rotate_box(b, &m)));
+            self.selection.extend(def.boxes.iter().map(|b| {
+                let r = rotate_collision_box(&(*b).into(), &m);
+                NodeBox::new(r.min.map(|c| c as u8), r.max.map(|c| c as u8))
+            }));
 
             let coverage: [FaceMask; 6] = std::array::from_fn(|f| face_coverage(&rotated, f));
             let seals = (0..6)
@@ -443,9 +483,29 @@ impl ShapeTable {
     }
 
     /// What a body collides with, rotated, in sixteenths.
-    pub fn collision(&self, voxel: Voxel) -> &[NodeBox] {
+    pub fn collision(&self, voxel: Voxel) -> &[CollisionBox] {
         let (start, len) = self.variant(voxel).collision;
         &self.boxes[start as usize..(start + len) as usize]
+    }
+
+    /// How far any registered collision box reaches past each face of its cell,
+    /// in whole Voxels (0 or 1), indexed by face constant. A sweep has to look
+    /// that many cells further to find a box that belongs to a neighbour; all
+    /// zero, and so free, until a Shape overhangs.
+    pub fn overhang(&self) -> [u8; 6] {
+        self.overhang
+    }
+
+    fn fold_overhang(&mut self, b: &CollisionBox) {
+        let cell = SUBDIV as i8;
+        for a in 0..3 {
+            if b.min[a] < 0 {
+                self.overhang[2 * a] = 1;
+            }
+            if b.max[a] > cell {
+                self.overhang[2 * a + 1] = 1;
+            }
+        }
     }
 
     /// What a ray picks: the declared boxes, rotated. Not [`ShapeTable::collision`],
@@ -479,6 +539,12 @@ impl ShapeTable {
 fn check_box(b: &NodeBox) -> Result<(), ShapeError> {
     let cell = SUBDIV as u8;
     let ok = (0..3).all(|a| b.min[a] < b.max[a] && b.max[a] <= cell);
+    if ok { Ok(()) } else { Err(ShapeError::BadBox) }
+}
+
+fn check_collision_box(b: &CollisionBox) -> Result<(), ShapeError> {
+    let cell = SUBDIV as i8;
+    let ok = (0..3).all(|a| b.min[a] < b.max[a] && b.min[a] >= -cell && b.max[a] <= 2 * cell);
     if ok { Ok(()) } else { Err(ShapeError::BadBox) }
 }
 
@@ -545,14 +611,15 @@ fn rotate_grid(grid: &Grid, m: &Matrix) -> Grid {
 }
 
 /// A box's corners are on grid lines rather than sub-cell centres, so the
-/// centre is 8 and the arithmetic is the same without the doubling.
-fn rotate_box(b: &NodeBox, m: &Matrix) -> NodeBox {
+/// centre is 8 and the arithmetic is the same without the doubling. Signed, so a
+/// box standing outside the cell rotates onto the right axis.
+fn rotate_collision_box(b: &CollisionBox, m: &Matrix) -> CollisionBox {
     let half = SUBDIV as i32 / 2;
     let lo = apply(m, b.min.map(|c| c as i32 - half));
     let hi = apply(m, b.max.map(|c| c as i32 - half));
-    NodeBox {
-        min: std::array::from_fn(|a| (lo[a].min(hi[a]) + half) as u8),
-        max: std::array::from_fn(|a| (lo[a].max(hi[a]) + half) as u8),
+    CollisionBox {
+        min: std::array::from_fn(|a| (lo[a].min(hi[a]) + half) as i8),
+        max: std::array::from_fn(|a| (lo[a].max(hi[a]) + half) as i8),
     }
 }
 
@@ -662,7 +729,12 @@ mod tests {
         for shape in [SHAPE_FULL_CUBE, SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
             for o in Orientation::all() {
                 let v = Voxel::new(1, shape, o.bits());
-                assert_eq!(t.selection(v), t.collision(v), "shape {shape} {o:?}");
+                let collision: Vec<NodeBox> = t
+                    .collision(v)
+                    .iter()
+                    .map(|b| NodeBox::new(b.min.map(|c| c as u8), b.max.map(|c| c as u8)))
+                    .collect();
+                assert_eq!(t.selection(v), collision, "shape {shape} {o:?}");
             }
         }
     }
@@ -826,7 +898,7 @@ mod tests {
     fn collision_boxes_rotate_with_the_orientation_and_stay_in_the_cell() {
         let t = ShapeTable::builtin();
         let slab_top = t.collision(voxel(SHAPE_SLAB, NEG_Y, 0));
-        assert_eq!(slab_top, [NodeBox::new([0, 8, 0], [16, 16, 16])]);
+        assert_eq!(slab_top, [CollisionBox::new([0, 8, 0], [16, 16, 16])]);
         for shape in 0..t.len() as ShapeId {
             for o in Orientation::all() {
                 for b in t.collision(Voxel::new(1, shape, o.bits())) {
@@ -837,6 +909,28 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn collision_may_stand_one_voxel_outside_the_cell_and_no_further() {
+        let mut t = ShapeTable::builtin();
+        let tall = |min, max| ShapeDef {
+            boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
+            collision: Some(vec![CollisionBox::new(min, max)]),
+        };
+        assert!(t.register(tall([6, -16, 6], [10, 32, 10])).is_ok());
+        assert_eq!(
+            t.register(tall([6, -17, 6], [10, 16, 10])),
+            Err(ShapeError::BadBox)
+        );
+        assert_eq!(
+            t.register(tall([6, 0, 6], [10, 33, 10])),
+            Err(ShapeError::BadBox)
+        );
+        assert_eq!(
+            t.register(tall([6, 4, 6], [10, 4, 10])),
+            Err(ShapeError::BadBox)
+        );
     }
 
     #[test]

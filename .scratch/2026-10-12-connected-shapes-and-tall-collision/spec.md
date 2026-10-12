@@ -208,7 +208,13 @@ distance. `MAX_BOXES` bounds both lists as before.
 `rotate_box` already works on centred integers, so an overhanging box rotates
 into the right axis (a fence lying on its side overhangs sideways). `register`
 folds each box's reach beyond the cell into `ShapeTable::overhang() -> [u8; 6]`,
-the largest per face in Voxels, 0 or 1. The builtin table's is all zero.
+the largest per face in Voxels, 0 or 1. The builtin table's is all zero. A Shape registers under all 24
+Orientations, because any may be placed, so one oriented Shape that overhangs
+upward overhangs every face of the table and the sweep then looks one cell
+further on all six sides (up to 4x4x4 cells for a one-Voxel body, from 2x2x2).
+That is accepted for the general case. A connected Shape is unoriented
+(decision 4) and so folds only its identity, which is why a fence widens +Y
+alone.
 
 Everything physical stays in metres: an overhang is a number of Voxels, so a
 1.5-Voxel fence is 1.5 m at 1 m Voxels and 0.375 m at 0.25 m. That is ADR-0003

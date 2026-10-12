@@ -15,7 +15,7 @@
 //! controller's policy, not the grid's, and are not here.
 
 use crate::mesh::{NEG_X, POS_X};
-use crate::shape::{NodeBox, SUBDIV, ShapeTable};
+use crate::shape::{CollisionBox, NodeBox, SUBDIV, ShapeTable};
 use crate::voxel::Voxel;
 
 /// Random access to a World's Voxels, in Voxel coordinates.
@@ -113,8 +113,18 @@ fn clip(
     }
     // One cell of slack at the top: a box ending exactly on a grid line reaches
     // the cell beyond it, which costs one box test and is filtered by it.
-    let cells =
-        |a: usize| ((lo[a] / voxel_size).floor() as i32)..=((hi[a] / voxel_size).floor() as i32);
+    //
+    // And as many more as the table's Shapes overhang: a box belonging to the cell
+    // below that climbs into ours is found from the cell below, so the range
+    // reaches down by what boxes reach up. Zero, and the range unchanged, until a
+    // Shape overhangs.
+    let over = shapes.overhang();
+    let cells = |a: usize| {
+        let below = over[2 * a + 1] as i32;
+        let above = over[2 * a] as i32;
+        ((lo[a] / voxel_size).floor() as i32 - below)
+            ..=((hi[a] / voxel_size).floor() as i32 + above)
+    };
 
     let mut allowed = d;
     for z in cells(2) {
@@ -122,7 +132,7 @@ fn clip(
             for x in cells(0) {
                 let cell = [x, y, z];
                 for b in obstacles(vol, shapes, cell) {
-                    let (min, max) = in_metres(&b, cell, voxel_size);
+                    let (min, max) = in_metres(b, cell, voxel_size);
                     let overlaps =
                         |a: usize| aabb.min[a] < max[a] - EPS && aabb.max[a] > min[a] + EPS;
                     if !overlaps(o1) || !overlaps(o2) {
@@ -140,19 +150,26 @@ fn clip(
     allowed
 }
 
+const WHOLE_CELL: [CollisionBox; 1] = [CollisionBox::new([0; 3], [SUBDIV as i8; 3])];
+
 /// The collision boxes of the Voxel at `cell`, or the whole cell if the volume
-/// does not hold it.
-fn obstacles(vol: &impl VoxelVolume, shapes: &ShapeTable, cell: [i32; 3]) -> Vec<NodeBox> {
+/// does not hold it. Borrowed from the table, so visiting a cell allocates
+/// nothing.
+fn obstacles<'a>(
+    vol: &impl VoxelVolume,
+    shapes: &'a ShapeTable,
+    cell: [i32; 3],
+) -> &'a [CollisionBox] {
     match vol.voxel(cell) {
-        Some(voxel) => shapes.collision(voxel).to_vec(),
-        None => vec![NodeBox::new([0; 3], [SUBDIV as u8; 3])],
+        Some(voxel) => shapes.collision(voxel),
+        None => &WHOLE_CELL,
     }
 }
 
 /// A box in sixteenths of the Voxel at `cell`, as metres.
-fn in_metres(b: &NodeBox, cell: [i32; 3], voxel_size: f32) -> ([f32; 3], [f32; 3]) {
+fn in_metres(b: &CollisionBox, cell: [i32; 3], voxel_size: f32) -> ([f32; 3], [f32; 3]) {
     let unit = voxel_size / SUBDIV as f32;
-    let at = |a: usize, sixteenths: u8| (cell[a] * SUBDIV as i32 + sixteenths as i32) as f32 * unit;
+    let at = |a: usize, sixteenths: i8| (cell[a] * SUBDIV as i32 + sixteenths as i32) as f32 * unit;
     (
         std::array::from_fn(|a| at(a, b.min[a])),
         std::array::from_fn(|a| at(a, b.max[a])),
@@ -302,8 +319,8 @@ fn ray_box(o: [f32; 3], d: [f32; 3], cell: [i32; 3], b: &NodeBox) -> Option<(f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mesh::{NEG_Y, NEG_Z, POS_Y};
-    use crate::shape::{Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::mesh::{NEG_Y, NEG_Z, POS_X, POS_Y};
+    use crate::shape::{CollisionBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
     use crate::worldgen::STONE;
     use std::collections::HashMap;
 
@@ -551,7 +568,7 @@ mod tests {
         let sign = t
             .register(ShapeDef {
                 boxes: vec![NodeBox::new([0, 0, 14], [16, 16, 16])],
-                collision: Some(vec![NodeBox::new([0; 3], [16; 3])]),
+                collision: Some(vec![NodeBox::new([0; 3], [16; 3]).into()]),
             })
             .unwrap();
         let mut g = Grid::new();
@@ -566,6 +583,97 @@ mod tests {
         // A body, by contrast, is stopped at the front of the cell.
         let walk = sweep(&g, &t, 1.0, body(5.5, 1.0, 3.0, 1.8), [0.0, 0.0, 4.0]);
         assert!(close(walk.aabb.max[2], 5.0), "{}", walk.aabb.max[2]);
+    }
+
+    /// A post a Voxel and a half tall to bump into, drawn one Voxel tall.
+    fn fence_post(t: &mut ShapeTable) -> Voxel {
+        let id = t
+            .register(ShapeDef {
+                boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
+                collision: Some(vec![CollisionBox::new([6, 0, 6], [10, 24, 10])]),
+            })
+            .unwrap();
+        Voxel::new(STONE, id, 0)
+    }
+
+    #[test]
+    fn a_body_lands_on_the_overhang_of_the_voxel_below_it() {
+        let mut t = table();
+        let fence = fence_post(&mut t);
+        for voxel_size in [1.0, 0.25] {
+            let mut g = Grid::new();
+            g.put([5, 1, 5], fence);
+            // Feet in the cell above the fence: the fence is in the cell below,
+            // and only its overhang reaches this one.
+            let s = voxel_size;
+            let fall = sweep(
+                &g,
+                &t,
+                s,
+                Aabb::new(
+                    [5.5 * s - 0.2 * s, 2.6 * s, 5.5 * s - 0.2 * s],
+                    [5.5 * s + 0.2 * s, 4.4 * s, 5.5 * s + 0.2 * s],
+                ),
+                [0.0, -0.3 * s, 0.0],
+            );
+            assert!(fall.blocked[1], "at {voxel_size}");
+            assert!(
+                close(fall.aabb.min[1], 2.5 * s),
+                "rests at {} at {voxel_size}",
+                fall.aabb.min[1]
+            );
+        }
+    }
+
+    #[test]
+    fn a_fence_cannot_be_walked_into_at_the_height_of_its_overhang_and_can_above_it() {
+        let mut t = table();
+        let fence = fence_post(&mut t);
+        let mut g = Grid::new();
+        g.put([5, 1, 5], fence);
+        // Feet at 2.0 m, in the cell above the fence, whose collision is 2.5 m.
+        let low = sweep(&g, &t, 1.0, body(2.5, 2.0, 5.5, 1.8), [6.0, 0.0, 0.0]);
+        assert!(low.blocked[0]);
+        assert!(close(low.aabb.max[0], 5.375), "{}", low.aabb.max[0]);
+        let high = sweep(&g, &t, 1.0, body(2.5, 2.5, 5.5, 1.8), [6.0, 0.0, 0.0]);
+        assert!(!high.blocked[0]);
+    }
+
+    #[test]
+    fn a_box_reaching_down_into_the_cell_above_is_found_from_it() {
+        let mut t = table();
+        let id = t
+            .register(ShapeDef {
+                boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
+                collision: Some(vec![CollisionBox::new([6, -8, 6], [10, 16, 10])]),
+            })
+            .unwrap();
+        let mut g = Grid::new();
+        g.put([5, 3, 5], Voxel::new(STONE, id, 0));
+        // Head at 1.8 m, rising: the box's underside is half a Voxel below its
+        // cell, at 2.5 m, in a cell the head has not reached by its own cell.
+        let rise = sweep(&g, &t, 1.0, body(5.5, 0.0, 5.5, 1.8), [0.0, 1.0, 0.0]);
+        assert!(rise.blocked[1]);
+        assert!(close(rise.moved[1], 0.7), "{}", rise.moved[1]);
+    }
+
+    #[test]
+    fn an_overhang_rotates_with_its_shape() {
+        let mut t = table();
+        let fence = fence_post(&mut t);
+        let on_its_side = Voxel::new(STONE, fence.shape(), Orientation::new(POS_X, 0).bits());
+        let reach = t.collision(on_its_side)[0];
+        assert_eq!((reach.min[0], reach.max[0]), (0, 24));
+        assert_eq!((reach.min[1], reach.max[1]), (6, 10));
+    }
+
+    #[test]
+    fn the_builtin_table_overhangs_nothing_so_a_sweep_visits_the_cells_it_always_did() {
+        assert_eq!(table().overhang(), [0; 6]);
+        let mut t = table();
+        fence_post(&mut t);
+        // Registered at all 24 Orientations, so one tall Shape widens every face.
+        assert_eq!(t.overhang(), [1; 6]);
     }
 
     #[test]
