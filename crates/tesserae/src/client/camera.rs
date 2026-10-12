@@ -10,6 +10,8 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::f32::consts::FRAC_PI_2;
 
+use crate::server::player::{FLY_SPEED_CEILING_MPS, RespawnIntent};
+
 /// Just inside ±90°, where the yaw/pitch basis degenerates.
 const PITCH_LIMIT: f32 = FRAC_PI_2 - 1e-3;
 
@@ -60,8 +62,8 @@ impl FlyCamera {
     }
 }
 
-/// Where [`reset`] returns to. Set by whatever spawns the camera, so the
-/// Server's spawn point can own it once step 3 exists.
+/// How [`reset`] turns the camera back. Only the orientation: where the camera
+/// goes is the Server's spawn eye, which it sends back as a correction.
 #[derive(Component, Clone, Copy)]
 pub struct CameraHome(pub Transform);
 
@@ -114,12 +116,16 @@ fn show_hint(
 fn reset(
     keys: Res<ButtonInput<KeyCode>>,
     camera: Single<(&mut Transform, &mut FlyCamera, &CameraHome)>,
+    mut respawn: MessageWriter<RespawnIntent>,
 ) {
     if !keys.just_pressed(KeyCode::KeyR) {
         return;
     }
+    // Asked, not done: moving the camera here would be a teleport the Server
+    // clamps. Its reply puts the camera at the spawn eye.
+    respawn.write(RespawnIntent);
     let (mut transform, mut fly, home) = camera.into_inner();
-    *transform = home.0;
+    transform.rotation = home.0.rotation;
     let restored = FlyCamera::looking_along(*home.0.forward());
     fly.yaw = restored.yaw;
     fly.pitch = restored.pitch;
@@ -177,6 +183,17 @@ fn look(
     transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }
 
+/// Metres per second. Held to the Server's ceiling: it clamps a Player faster
+/// than that, so flying past it only rubber-bands.
+fn flight_speed(fly: &FlyCamera, sprinting: bool) -> f32 {
+    let speed = if sprinting {
+        fly.speed * fly.sprint_multiplier
+    } else {
+        fly.speed
+    };
+    speed.min(FLY_SPEED_CEILING_MPS)
+}
+
 fn fly(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
@@ -199,11 +216,7 @@ fn fly(
     }
 
     let sprinting = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let speed = if sprinting {
-        fly.speed * fly.sprint_multiplier
-    } else {
-        fly.speed
-    };
+    let speed = flight_speed(fly, sprinting);
     transform.translation += direction.normalize_or_zero() * speed * time.delta_secs();
 }
 
@@ -227,6 +240,64 @@ mod tests {
                 "{direction} became {forward}"
             );
         }
+    }
+
+    #[test]
+    fn flight_never_outruns_the_servers_ceiling() {
+        let mut fly = FlyCamera::default();
+        for speed in [*SPEED_RANGE.start(), 12.0, *SPEED_RANGE.end()] {
+            fly.speed = speed;
+            for sprinting in [false, true] {
+                assert!(flight_speed(&fly, sprinting) <= FLY_SPEED_CEILING_MPS);
+            }
+        }
+        fly.speed = 12.0;
+        assert_eq!(flight_speed(&fly, false), 12.0, "slow flight is untouched");
+        assert_eq!(
+            flight_speed(&fly, true),
+            60.0,
+            "and so is a sprint under it"
+        );
+        fly.speed = 20.0;
+        assert_eq!(flight_speed(&fly, true), FLY_SPEED_CEILING_MPS);
+    }
+
+    #[test]
+    fn the_reset_key_asks_the_server_and_turns_the_camera_but_does_not_move_it() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<RespawnIntent>()
+            .add_systems(Update, reset);
+        let home = Transform::from_xyz(0.0, 50.0, 0.0).looking_to(Vec3::NEG_Z, Vec3::Y);
+        let away =
+            Transform::from_xyz(300.0, 9.0, -40.0).looking_to(Vec3::new(1.0, 0.0, 0.0), Vec3::Y);
+        app.world_mut()
+            .spawn((away, FlyCamera::default(), CameraHome(home)));
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<Messages<RespawnIntent>>().len(),
+            0,
+            "nothing pressed"
+        );
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+
+        assert_eq!(app.world().resource::<Messages<RespawnIntent>>().len(), 1);
+        let transform = app
+            .world_mut()
+            .query_filtered::<&Transform, With<FlyCamera>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            transform.translation, away.translation,
+            "the Server moves it"
+        );
+        assert!(transform.rotation.abs_diff_eq(home.rotation, 1e-6));
     }
 
     #[test]
