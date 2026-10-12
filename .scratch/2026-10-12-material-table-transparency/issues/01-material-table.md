@@ -67,7 +67,6 @@ The sweep memoises on "same Voxel as the last", so it does fewer table reads
 than the old code did `match`es. `mesh.rs`, `chunk.rs` and `collide.rs` are
 untouched, so no `greedy_mesh/*` or `mesh_chunk/*` number can have moved.
 
-**Latent until 02:** the table says glass dims by 0, but nothing reads `dimming`
-yet, so a glass Voxel still lights and meshes as an opaque cube. Only emission is
-read. Nothing places one: the hotbar is unchanged and terrain has none.
-
+**Latent until 02:** the table said glass dims by 0 but nothing read `dimming`,
+so a glass Voxel still lit and meshed as an opaque cube. Tickets 02 and 03 were
+done in the same PR and read it; see their comments.

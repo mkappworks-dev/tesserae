@@ -1,6 +1,6 @@
 # Occlusion by Material and the two-layer ChunkMesh
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decisions 3 and 4.
@@ -33,3 +33,24 @@ Spec decisions 3 and 4.
   against `before`, with numbers in the PR; `./scripts/cargo-ci` passes.
 
 ## Comments
+
+**What differs from the ticket as written.**
+
+- `Neighborhood` records the Voxels of its seven palettes (`Chunk::kinds`) and
+  `greedy_mesh` takes `&Tables`, as does `mesh_chunk`.
+- `emits_no_faces` also requires the uniform Material to hide itself, which the
+  ticket missed: a Chunk of leaves draws every face inside it. A neighbour that
+  is the identical Voxel reuses that answer, so the declined case costs fewer
+  instructions than before the table, not more.
+- The client uploads `opaque` only. A Chunk with a blended layer and nothing
+  opaque is despawned; both are 04's to change.
+- The hole-free test states the rule itself, from the spec, and applies it at
+  Voxel boundaries only; a first draft applied it between sub-cells of one Voxel
+  and called a leaf's interior exposed. Forcing `hides` to `true` fails six tests.
+
+**Measured** (retired instructions per call, harness against `f232c4e`):
+`greedy_mesh` terrain -1.1%, solid -1.7%, checkerboard +0.0%; `mesh_chunk`
+straddling -0.7%, declined_enclosed 142 to 120. New, no baseline: terrain under
+water 12.9 M, with a canopy 13.3 M, a glass room 8.8 M, against 9.8 M for the
+terrain alone.
+

@@ -938,7 +938,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, ShapeTable, mesh_chunk};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, MeshLayer, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
@@ -1227,12 +1227,15 @@ mod tests {
     }
 
     fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
-        a.positions == b.positions
-            && a.normals == b.normals
-            && a.uvs == b.uvs
-            && a.materials == b.materials
-            && a.light == b.light
-            && a.indices == b.indices
+        let layer = |a: &MeshLayer, b: &MeshLayer| {
+            a.positions == b.positions
+                && a.normals == b.normals
+                && a.uvs == b.uvs
+                && a.materials == b.materials
+                && a.light == b.light
+                && a.indices == b.indices
+        };
+        layer(&a.opaque, &b.opaque) && layer(&a.blended, &b.blended)
     }
 
     /// The light of the Chunk a mesh was built from, which `publish` requires
@@ -1321,7 +1324,7 @@ mod tests {
             let store = h.store();
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(*coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, *coord), neighbors, &ShapeTable::builtin());
+            let fresh = mesh_chunk(lit(store, *coord), neighbors, &Tables::builtin());
             assert!(
                 same_mesh(held, &fresh),
                 "{coord}: the Client holds a stale mesh ({} quads, should be {})",
@@ -1367,7 +1370,7 @@ mod tests {
             assert!(!republished.mesh.is_empty(), "{coord} has a new face");
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, coord), neighbors, &ShapeTable::builtin());
+            let fresh = mesh_chunk(lit(store, coord), neighbors, &Tables::builtin());
             assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
         }
         assert_eq!(ready.len(), 2, "nothing else was touched");
@@ -1646,7 +1649,13 @@ mod tests {
         let mut h = Harness::new(small(), UNLIMITED);
         let mut lit_faces = 0;
         for message in h.settle().0 {
-            lit_faces += message.mesh.light.iter().filter(|&&l| l != 0).count();
+            lit_faces += message
+                .mesh
+                .opaque
+                .light
+                .iter()
+                .filter(|&&l| l != 0)
+                .count();
         }
         assert!(lit_faces > 0, "every published face was baked dark");
     }
@@ -1908,7 +1917,7 @@ mod tests {
                 let store = h.store();
                 let neighbors: [Option<LitChunk>; 6] =
                     face_neighbors(*coord).map(|n| Some(lit(store, n)));
-                let fresh = mesh_chunk(lit(store, *coord), neighbors, &ShapeTable::builtin());
+                let fresh = mesh_chunk(lit(store, *coord), neighbors, &Tables::builtin());
                 assert!(
                     same_mesh(held, &fresh),
                     "{coord} is stale, {cells} Cells away"

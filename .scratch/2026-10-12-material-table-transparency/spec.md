@@ -107,9 +107,12 @@ The light rule becomes `transmitted(channel, level, face)` minus the **entered**
 Voxel's dimming, saturating at zero. Nothing about `transmitted` changes, in
 particular the exception that makes full-strength sky fall straight down
 undimmed. So sky 15 falls into glass at 15 and into water at 13, and entering
-the same Voxels sideways it is 14 and 12. A dimming of 15 removes everything
-`transmitted` can deliver, so an opaque cube needs no special case in the
-arithmetic, only in the geometry.
+the same Voxels sideways it is 14 and 12. A dimming of 15 is the opaque case, and for it
+geometry decides instead and nothing is subtracted: a stone stair stores the
+light of its own notch undimmed, as it did in step 5, and blocks the faces it
+seals. Dimming below 15 is the reverse - every face open, the dimming subtracted
+once per entry. `Tables::light_params` is that one rule, as `transmitted` is the
+one rule for the step.
 
 Both channels use the one value: water dims a lantern's glow as it dims the
 sun. One number is also what Minecraft authors, and nothing here argues for two.
@@ -176,7 +179,8 @@ pub struct ChunkMesh { pub opaque: MeshLayer, pub blended: MeshLayer, pub shaped
 ```
 
 Pass 2 routes each shaped Voxel's quads by its Material the same way. The
-client builds one `Mesh` per non-empty layer (decision 6).
+client builds one `Mesh` per non-empty layer (decision 6); until ticket 04 it
+builds the opaque one only, so a blended layer is meshed and not drawn.
 
 ### 5. The hot paths pay nothing for terrain, by specialisation
 
@@ -202,9 +206,9 @@ of `may_contain_shaped`:
   neighbour's own.
 - Pass 1 becomes `pass1::<TRANSLUCENT>`. Meshing needs the centre **and** the
   six neighbours, because a glass neighbour fails to hide a stone face.
-  `Neighborhood::new` therefore records the Materials of the seven palettes
-  (a copy of tens of ids, against a 39 thousand Voxel copy it already does) so
-  `greedy_mesh` decides the gate without a table scan of the padded array.
+  `Neighborhood::new` therefore records the Voxels of the seven palettes (a copy
+  of tens of entries, against a 39 thousand Voxel copy it already does) so
+  `greedy_mesh` decides the gate without a scan of the padded array.
 - The gate is evaluated **after** `mesh_chunk`'s `emits_no_faces` and
   `light_chunk`'s uniform shortcuts, which answer in nanoseconds and must stay
   so.
@@ -317,7 +321,8 @@ in step 5. The streaming worst tick is re-derived if a stage's cost moves.
 
 ## Tickets
 
-Implement 01 first and stop; each later ticket is its own PR.
+01, 02 and 03 landed together in the first PR, at the author's request; 04 and
+05 are separate.
 
 | #   | Ticket                                                        | Blocked by |
 | --- | ------------------------------------------------------------- | ---------- |

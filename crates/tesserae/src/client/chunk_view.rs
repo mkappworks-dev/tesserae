@@ -61,7 +61,9 @@ fn upload_meshes(
     #[cfg(feature = "dev")]
     let mut uploaded = 0;
     for ChunkMeshReady { coord, mesh } in incoming.read() {
-        if mesh.is_empty() {
+        // The blended layer has no draw call yet (ticket 04), so a Chunk with
+        // nothing opaque is nothing to show.
+        if mesh.opaque.is_empty() {
             despawn(&mut commands, &mut meshes, &mut entities, &existing, *coord);
             continue;
         }
@@ -70,7 +72,7 @@ fn upload_meshes(
         {
             uploaded += 1;
         }
-        let handle = meshes.add(chunk_mesh_to_mesh(mesh, world.voxel_size));
+        let handle = meshes.add(chunk_mesh_to_mesh(&mesh.opaque, world.voxel_size));
         match entities.0.get(coord) {
             // Replacing rather than despawning and respawning keeps the
             // entity id stable, and dropping the old handle is what stops a
@@ -173,7 +175,7 @@ fn spawn_camera(mut commands: Commands, spawn: Res<crate::server::world_state::S
 mod tests {
     use super::*;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, ShapeTable, Voxel, mesh_chunk, worldgen};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, Tables, Voxel, mesh_chunk, worldgen};
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
     /// assets and messages, and `DefaultPlugins` wants a window.
@@ -199,11 +201,7 @@ mod tests {
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut neighbors = [Some(LitChunk::new(&solid, &dark)); 6];
         neighbors[0] = Some(LitChunk::new(&air, &sky));
-        let mesh = mesh_chunk(
-            LitChunk::new(&solid, &dark),
-            neighbors,
-            &ShapeTable::builtin(),
-        );
+        let mesh = mesh_chunk(LitChunk::new(&solid, &dark), neighbors, &Tables::builtin());
         assert!(!mesh.is_empty(), "the fixture must have geometry");
         mesh
     }

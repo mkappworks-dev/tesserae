@@ -290,11 +290,7 @@ pub(in crate::server) fn build_mesh(
 ) -> ChunkMesh {
     let neighbors: [Option<LitChunk>; 6] =
         std::array::from_fn(|face| Some(LitChunk::new(&around[face].0, &around[face].1)));
-    mesh_chunk(
-        LitChunk::new(&center.0, &center.1),
-        neighbors,
-        &tables.shapes,
-    )
+    mesh_chunk(LitChunk::new(&center.0, &center.1), neighbors, tables)
 }
 
 /// Every job in flight, by stage.

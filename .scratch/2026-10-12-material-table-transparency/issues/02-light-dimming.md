@@ -1,6 +1,6 @@
 # Light dimming in both solvers
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decisions 2 and 5.
@@ -38,3 +38,23 @@ Spec decisions 2 and 5.
   numbers in the PR; `./scripts/cargo-ci` passes.
 
 ## Comments
+
+**What differs from the ticket as written.**
+
+- The gate is `Chunk::kinds`, the palette as a slice, not a `palette_any`.
+- `Tables::light_params(voxel) -> (mask, dimming)` is the one rule: an opaque
+  Material (dimming 15) is blocked by its geometry and subtracts nothing, so a
+  stone stair keeps the light of its notch; anything clearer has no mask and
+  subtracts its dimming. The spec said "an opaque cube needs no special case in
+  the arithmetic", which is true for a cube and wrong for a stair, and is
+  corrected.
+- `flood` has a third const parameter and `light_chunk` a `sweep::<TRANSLUCENT>`;
+  with both false they are the code that shipped before the table.
+- `darken` compares against the dimmed delivery and never clears an emitter below
+  its emission. The new test fails if that guard is removed (checked).
+
+**Measured** (retired instructions per call, three runs, harness against
+`f232c4e`): `light_chunk` straddling -3.5%, settled -2.7%. New, no baseline:
+terrain under 3 Voxels of water 4.72 M, terrain with a leaf canopy 5.69 M,
+against 3.22 M for the same terrain with neither.
+
