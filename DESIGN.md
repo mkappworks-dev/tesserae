@@ -149,9 +149,16 @@ All four are resolved:
    mesher still does not need to know which level it is meshing. Step 6 writes
    the downsample; `ShapeTable::volume` is the datum.
 
-Terrain places none, and a Chunk may hold at most `MAX_SHAPED_PER_CHUNK` (1024),
-the largest round number that keeps a Chunk at the cap within +50% of a terrain
-mesh. The edit path enforces it and the mesher does not police it.
+A Chunk may hold at most `MAX_SHAPED_PER_CHUNK` (1024), the largest round number
+that keeps a Chunk at the cap within +50% of a terrain mesh. The edit path
+enforces it and the mesher does not police it.
+
+Terrain places stairs and slabs where the ground steps one Voxel (slope
+smoothing, see `.scratch/2026-10-12-worldgen-slope-smoothing/spec.md`): a stair
+facing a single higher neighbour, a slab where two or more rise. It is gated by
+a rise in **metres** (`SmoothingParams::min_rise_m`), so a World with Voxels
+smaller than that is not smoothed. The generator keeps to half the cap,
+`MAX_SMOOTHED_PER_CHUNK` (512), and leaves the other half to the player.
 
 ## LOD
 
@@ -359,12 +366,15 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   a worst tick of 0.6 ms and a fill of 1.58 s either way, because a ring holds
   one deep layer inside the cave band. The caps want revisiting when LOD adds
   rings, or when a Mod sets a cave floor deep enough to put several layers in
-  the band; see `StreamingBudget`.
-- **Shaped Voxels have loose ends worth a ticket each.** Terrain contains none
-  (slope-smoothing stairs and slabs are the obvious worldgen use, and must stay
-  under the cap). Fence arms and collision taller than the cell need a Shape to
-  look at its neighbours. Material transparency (glass, water, leaves) is not a
-  Shape property. The Client's hotbar is a stopgap.
+  the band; see `StreamingBudget`. Slope smoothing is the first terrain to pay
+  for shaped Voxels (about +65 us to generate, +10-20% to mesh and +80-100% to
+  light a surface Chunk) and moved the worst tick from 1.6 to 1.8 ms at load 20,
+  so the caps did not change either.
+- **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
+  stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
+  Fence arms and collision taller than the cell need a Shape to look at its
+  neighbours. Material transparency (glass, water, leaves) is not a Shape
+  property. The Client's hotbar is a stopgap.
 - **The Player's pose is rate-limited, not true.** The Server clamps a pose that
   moves faster than `PlayerLimits` and tells the Client, but flying is the only
   way to move, so a modified Client can still fly at the cap and edit within

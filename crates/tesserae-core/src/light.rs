@@ -1858,7 +1858,12 @@ mod tests {
     /// The World with its tunnels and the same World without, so a test can
     /// carve the difference by hand, the way a player would dig it.
     fn cave_worlds() -> (Worldgen, Worldgen) {
-        let params = WorldgenParams::default();
+        let params = WorldgenParams {
+            // These tests diff a World against the same one without tunnels; a
+            // stair beside a mouth would be a difference of its own.
+            smoothing: None,
+            ..WorldgenParams::default()
+        };
         assert!(params.caves.is_some());
         (
             Worldgen::new(0x7e55_e2ae, 1.0, params),
@@ -1994,6 +1999,182 @@ mod tests {
             dim > 0,
             "no tunnel Voxel is partly lit: the sky never got in"
         );
+    }
+
+    /// The World with slope-smoothing stairs and slabs and the same World
+    /// without them, with or without tunnels, so a test can place the difference
+    /// by hand the way a player would build it.
+    fn smoothing_worlds(caves: bool) -> (Worldgen, Worldgen) {
+        let params = WorldgenParams {
+            caves: caves.then(Default::default),
+            smoothing: Some(crate::worldgen::SmoothingParams::default()),
+            ..WorldgenParams::default()
+        };
+        (
+            Worldgen::new(0x7e55_e2ae, 1.0, params),
+            Worldgen::new(
+                0x7e55_e2ae,
+                1.0,
+                WorldgenParams {
+                    smoothing: None,
+                    ..params
+                },
+            ),
+        )
+    }
+
+    /// Every shaped Voxel smoothing placed in `coord`, in Voxel coordinates.
+    fn smoothed(with: &Worldgen, without: &Worldgen, coord: [i32; 3]) -> Vec<([i32; 3], Voxel)> {
+        let (a, b) = (
+            with.chunk(coord[0], coord[1], coord[2]),
+            without.chunk(coord[0], coord[1], coord[2]),
+        );
+        let origin = coord.map(|c| c * CHUNK_SIZE as i32);
+        let mut out = vec![];
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let (got, was) = (a.get(x, y, z), b.get(x, y, z));
+                    if got != was {
+                        assert!(was.is_air() && got.is_shaped(), "{was:?} -> {got:?}");
+                        let at = [x, y, z].map(|c| c as i32);
+                        out.push(([0, 1, 2].map(|k| origin[k] + at[k]), got));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Builds the ramp both ways over two columns of Chunks that share a seam,
+    /// the way the tunnel test does: the cube terrain solved in bulk and the
+    /// ramp placed on it Voxel by Voxel, against the finished terrain solved in
+    /// bulk. Returns the Voxels placed and the settled light of each.
+    fn ramp_both_ways(
+        with: &Worldgen,
+        without: &Worldgen,
+        coord: [i32; 3],
+    ) -> (usize, Lattice, Lattice) {
+        let [cx, cy, cz] = coord;
+        let solid: Vec<[i32; 3]> = [cx, cx + 1]
+            .into_iter()
+            .flat_map(|x| [[x, cy, cz], [x, cy - 1, cz]])
+            .collect();
+        let roof = [[cx, cy + 1, cz], [cx + 1, cy + 1, cz]];
+        let build = |world: &Worldgen| {
+            let mut lattice = Lattice::new(&solid).with_roof(&roof);
+            for &c in &solid {
+                fill(&mut lattice, world, c);
+            }
+            lattice
+        };
+
+        let mut placed = build(without);
+        placed.solve_bulk();
+        let ramp: Vec<([i32; 3], Voxel)> = solid
+            .iter()
+            .flat_map(|&c| smoothed(with, without, c))
+            .collect();
+        for &(at, voxel) in &ramp {
+            placed.place(at, voxel);
+        }
+        let mut fresh = build(with);
+        fresh.solve_bulk();
+
+        // And back: removing the ramp is the de-propagation pass on it.
+        let mut removed = build(with);
+        removed.solve_bulk();
+        for &(at, _) in ramp.iter().rev() {
+            removed.place(at, Voxel::AIR);
+        }
+        let mut cubes = build(without);
+        cubes.solve_bulk();
+        assert_eq!(removed.snapshot(), cubes.snapshot(), "ramp removed");
+
+        (ramp.len(), placed, fresh)
+    }
+
+    /// The first surface Chunk, in a fixed scan order, holding enough of a ramp
+    /// to be worth the lattice, and (when asked) a Grass cap a tunnel removed.
+    fn ramp_chunk(with: &Worldgen, without: &Worldgen, mouth: bool) -> [i32; 3] {
+        let cy = (with.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+        let bare = Worldgen::new(
+            0x7e55_e2ae,
+            1.0,
+            WorldgenParams {
+                caves: None,
+                smoothing: None,
+                ..WorldgenParams::default()
+            },
+        );
+        for cz in -8..8 {
+            for cx in -8..8 {
+                let a = with.chunk(cx, cy, cz);
+                if smoothed(with, without, [cx, cy, cz]).len() < 20 {
+                    continue;
+                }
+                let b = bare.chunk(cx, cy, cz);
+                let breached = (0..CHUNK_SIZE).any(|z| {
+                    (0..CHUNK_SIZE).any(|y| {
+                        (0..CHUNK_SIZE)
+                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == GRASS)
+                    })
+                });
+                if breached == mouth {
+                    return [cx, cy, cz];
+                }
+            }
+        }
+        panic!("no surface Chunk in the scan has a ramp (mouth: {mouth})");
+    }
+
+    /// Smoothing changes what is *drawn*, not what the sky reaches: a ramp rises
+    /// from open ground, nothing is under it, so the two solvers agree and the
+    /// light is exactly the light of the cube terrain.
+    #[test]
+    fn a_ramp_on_open_ground_agrees_between_solvers_and_casts_no_shadow() {
+        let (with, without) = smoothing_worlds(false);
+        let coord = ramp_chunk(&with, &without, false);
+        let (n, placed, fresh) = ramp_both_ways(&with, &without, coord);
+        assert!(n >= 20, "only {n} ramp Voxels");
+        assert_eq!(placed.snapshot(), fresh.snapshot());
+
+        let [cx, cy, cz] = coord;
+        let mut cubes = Lattice::new(&[
+            [cx, cy, cz],
+            [cx + 1, cy, cz],
+            [cx, cy - 1, cz],
+            [cx + 1, cy - 1, cz],
+        ])
+        .with_roof(&[[cx, cy + 1, cz], [cx + 1, cy + 1, cz]]);
+        for c in [
+            [cx, cy, cz],
+            [cx + 1, cy, cz],
+            [cx, cy - 1, cz],
+            [cx + 1, cy - 1, cz],
+        ] {
+            fill(&mut cubes, &without, c);
+        }
+        cubes.solve_bulk();
+        assert_eq!(fresh.snapshot(), cubes.snapshot());
+    }
+
+    /// Where it can matter: a ramp beside a tunnel mouth, sky light entering
+    /// round a stair's side and dimming into the tunnel.
+    #[test]
+    fn a_ramp_beside_a_tunnel_mouth_agrees_between_solvers() {
+        let (with, without) = smoothing_worlds(true);
+        let coord = ramp_chunk(&with, &without, true);
+        let (n, placed, fresh) = ramp_both_ways(&with, &without, coord);
+        assert!(n >= 20, "only {n} ramp Voxels");
+        assert_eq!(placed.snapshot(), fresh.snapshot());
+        let dim = fresh
+            .snapshot()
+            .values()
+            .flatten()
+            .filter(|l| (1..MAX_LIGHT).contains(&l.sky()))
+            .count();
+        assert!(dim > 0, "the sky never got into the tunnel");
     }
 
     /// On each face of `coord`, the first Voxel of its boundary plane that is

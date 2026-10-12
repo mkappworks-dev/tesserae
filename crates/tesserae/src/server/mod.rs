@@ -59,19 +59,27 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(gallery::plugin);
 }
 
-/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` turns the
-/// caves off, so a streaming change can be measured with and without them on one
-/// binary and not across two builds.
+/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
+/// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
+/// a streaming change can be measured with and without them on one binary and
+/// not across two builds.
 #[cfg(feature = "dev")]
 fn worldgen_params() -> WorldgenParams {
+    let off = |name: &str| std::env::var(name).is_ok_and(|v| v == "0");
     let params = WorldgenParams::default();
-    if std::env::var("TESSERAE_CAVES").is_ok_and(|v| v == "0") {
-        return WorldgenParams {
-            caves: None,
-            ..params
-        };
+    WorldgenParams {
+        caves: if off("TESSERAE_CAVES") {
+            None
+        } else {
+            params.caves
+        },
+        smoothing: if off("TESSERAE_SMOOTHING") {
+            None
+        } else {
+            params.smoothing
+        },
+        ..params
     }
-    params
 }
 
 #[cfg(not(feature = "dev"))]

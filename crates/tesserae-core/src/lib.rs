@@ -23,4 +23,4 @@ pub use shape::{
     ShapeError, ShapeTable,
 };
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
-pub use worldgen::{CaveParams, Worldgen, WorldgenParams};
+pub use worldgen::{CaveParams, MAX_SMOOTHED_PER_CHUNK, SmoothingParams, Worldgen, WorldgenParams};
