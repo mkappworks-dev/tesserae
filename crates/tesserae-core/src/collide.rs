@@ -15,7 +15,7 @@
 //! controller's policy, not the grid's, and are not here.
 
 use crate::mesh::{NEG_X, POS_X};
-use crate::shape::{CollisionBox, NodeBox, SUBDIV, ShapeTable};
+use crate::shape::{CollisionBox, Connections, NodeBox, SUBDIV, ShapeTable};
 use crate::voxel::Voxel;
 
 /// Random access to a World's Voxels, in Voxel coordinates.
@@ -161,7 +161,7 @@ fn obstacles<'a>(
     cell: [i32; 3],
 ) -> &'a [CollisionBox] {
     match vol.voxel(cell) {
-        Some(voxel) => shapes.collision(voxel),
+        Some(voxel) => shapes.collision(voxel, Connections::NONE),
         None => &WHOLE_CELL,
     }
 }
@@ -239,7 +239,7 @@ pub fn raycast(
     loop {
         let voxel = vol.voxel(cell)?;
         let nearest = shapes
-            .selection(voxel)
+            .selection(voxel, Connections::NONE)
             .iter()
             .filter_map(|b| ray_box(o, d, cell, b))
             .filter(|&(t, _)| t <= t_max)
@@ -530,6 +530,7 @@ mod tests {
         let mut t = table();
         let plate = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
             })
@@ -546,6 +547,7 @@ mod tests {
         let mut t = table();
         let plate = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
             })
@@ -567,6 +569,7 @@ mod tests {
         // A thin sign drawn on the cell's back wall, with a whole cell to bump into.
         let sign = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![NodeBox::new([0, 0, 14], [16, 16, 16])],
                 collision: Some(vec![NodeBox::new([0; 3], [16; 3]).into()]),
             })
@@ -589,6 +592,7 @@ mod tests {
     fn fence_post(t: &mut ShapeTable) -> Voxel {
         let id = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
                 collision: Some(vec![CollisionBox::new([6, 0, 6], [10, 24, 10])]),
             })
@@ -644,6 +648,7 @@ mod tests {
         let mut t = table();
         let id = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
                 collision: Some(vec![CollisionBox::new([6, -8, 6], [10, 16, 10])]),
             })
@@ -662,7 +667,7 @@ mod tests {
         let mut t = table();
         let fence = fence_post(&mut t);
         let on_its_side = Voxel::new(STONE, fence.shape(), Orientation::new(POS_X, 0).bits());
-        let reach = t.collision(on_its_side)[0];
+        let reach = t.collision(on_its_side, Connections::NONE)[0];
         assert_eq!((reach.min[0], reach.max[0]), (0, 24));
         assert_eq!((reach.min[1], reach.max[1]), (6, 10));
     }

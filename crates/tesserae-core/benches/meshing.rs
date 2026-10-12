@@ -2,9 +2,11 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::{Arc, OnceLock};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
+use tesserae_core::shape::examples::{fence, pipe};
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
-    SHAPE_STAIR, ShapeTable, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk, testgen,
+    SHAPE_STAIR, ShapeDef, ShapeTable, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk,
+    testgen,
 };
 
 fn shapes() -> &'static ShapeTable {
@@ -495,6 +497,21 @@ fn shapes_table(c: &mut Criterion) {
     c.bench_function("shape_table_builtin", |b| {
         b.iter(|| black_box(ShapeTable::builtin()))
     });
+
+    // Connected Shapes derive a variant per submask of their arms, from the
+    // same grid each time: 16 for the fence, 64 for the six-way pipe.
+    let base = ShapeTable::builtin();
+    for (name, def) in [
+        ("shape_register_fence", fence as fn() -> ShapeDef),
+        ("shape_register_pipe", pipe),
+    ] {
+        c.bench_function(name, |b| {
+            b.iter(|| {
+                let mut table = base.clone();
+                black_box(table.register(def()).unwrap())
+            })
+        });
+    }
 }
 
 /// What handing a mesh job its data costs the thread that dispatches it: the

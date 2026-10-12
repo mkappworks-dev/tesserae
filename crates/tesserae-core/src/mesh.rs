@@ -4,7 +4,7 @@
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
-use crate::shape::{SUBDIV, ShapeQuad, ShapeTable};
+use crate::shape::{Connections, SUBDIV, ShapeQuad, ShapeTable};
 use crate::voxel::{MaterialId, Voxel};
 
 /// Chunk edge plus one Voxel of neighbour on each side — exactly what face
@@ -408,7 +408,7 @@ fn mesh_shaped(n: &Neighborhood, shapes: &ShapeTable, mesh: &mut ChunkMesh) {
                 mesh.shaped_voxels += 1;
                 let own = n.light_at(x, y, z);
 
-                for q in shapes.quads(voxel) {
+                for q in shapes.quads(voxel, Connections::NONE) {
                     let face = q.face as usize;
                     let lit = if q.on_boundary() {
                         let mut c = [x, y, z];

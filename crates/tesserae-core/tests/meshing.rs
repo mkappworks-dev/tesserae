@@ -2,7 +2,8 @@ use std::sync::OnceLock;
 use tesserae_core::light::{Channel, Light, MAX_LIGHT, transmitted};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Neighborhood, Voxel, greedy_mesh, mesh_chunk, testgen,
+    CHUNK_SIZE, Chunk, ChunkLight, Connections, LitChunk, Neighborhood, Voxel, greedy_mesh,
+    mesh_chunk, testgen,
 };
 use tesserae_core::{
     Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Worldgen, WorldgenParams,
@@ -168,7 +169,8 @@ fn shaped_voxels_are_counted_and_emit_their_own_geometry() {
     assert_eq!(mesh.shaped_voxels, 2);
     assert_eq!(
         mesh.quad_count(),
-        shapes().quads(slab).len() + shapes().quads(stair).len(),
+        shapes().quads(slab, Connections::NONE).len()
+            + shapes().quads(stair, Connections::NONE).len(),
         "pass 2 emits exactly the Shapes' own quads"
     );
 }
@@ -565,7 +567,7 @@ fn exposed_faces(chunk: &Chunk) -> std::collections::BTreeSet<SubFace> {
                 if v.is_air() {
                     continue;
                 }
-                for b in shapes().selection(v) {
+                for b in shapes().selection(v, Connections::NONE) {
                     for sz in b.min[2]..b.max[2] {
                         for sy in b.min[1]..b.max[1] {
                             for sx in b.min[0]..b.max[0] {

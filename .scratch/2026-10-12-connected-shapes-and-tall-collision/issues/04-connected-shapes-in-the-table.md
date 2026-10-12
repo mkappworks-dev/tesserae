@@ -1,6 +1,6 @@
 # Connected shapes in the ShapeTable
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03
 
 Spec decisions 2-5. The table only: nothing meshes, sweeps or picks a connected
@@ -47,3 +47,12 @@ Shape yet, and no caller changes behaviour.
 
 `./scripts/cargo-ci` passes; `shape_table_builtin` and the pass-1 benches from
 01 are unmoved.
+
+## Comments
+
+Done. Reference fence and pipe live in `shape::examples` (not in `builtin()`,
+ids 0-3 being permanent), so tests, benches and the gallery build what a Mod
+will. A single arm can never seal a face without also touching another plane,
+so `ConnectedSeals` only fires for a base, or a base plus an arm, that does;
+the test uses a frame with a hole an arm fills. `shape_register_fence` and
+`_pipe` benches exist but are unrun: the machine is too loaded (ticket 01).
