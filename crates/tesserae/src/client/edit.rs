@@ -265,7 +265,7 @@ fn update_hud(held: Res<Held>, notice: Res<Notice>, mut hud: Single<&mut Text, W
 mod tests {
     use super::*;
     use crate::server::edit::RejectReason;
-    use crate::server::player::PoseReport;
+    use crate::server::player::{PoseCorrection, PoseReport};
 
     fn app(grab: CursorGrabMode) -> App {
         let mut app = App::new();
@@ -277,6 +277,7 @@ mod tests {
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
             .add_message::<PoseReport>()
+            .add_message::<PoseCorrection>()
             .add_plugins(crate::client::pose::plugin)
             .add_systems(
                 Update,

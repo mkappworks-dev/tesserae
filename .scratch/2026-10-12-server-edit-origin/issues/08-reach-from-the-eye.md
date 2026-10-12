@@ -1,6 +1,6 @@
 # Reach is measured from the Eye
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec decision 9. Independent of 06 and 07.
@@ -27,3 +27,8 @@ Spec decision 9. Independent of 06 and 07.
 ## Then
 
 `./scripts/cargo-ci`.
+
+## Comments
+
+Both new tests fail with the flat reach restored (checked by hand): an origin 2 m
+below an Eye 9 m from the ground used to strike it from 7 m.

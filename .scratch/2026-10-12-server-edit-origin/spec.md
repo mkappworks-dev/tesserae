@@ -179,15 +179,17 @@ step 10's, because it needs a clock shared with the Client.
 half second, past which Chunks cannot be meshed fast enough". In metres
 (ADR-0003), and a resource so the controller replaces the figure.
 
-`receive_pose` accepts a report whose `eye` is within
-`max_speed_mps * window + POSE_SLACK_M` of the Player's, where `window` is the
-Server time since the last accepted report, capped at `POSE_WINDOW_MAX_S`
-(0.5 s). Without the cap, a Client silent for a minute could jump 3.8 km.
-`POSE_SLACK_M` (1 m) absorbs jitter: over a wire the report's time is when it
-arrives, not when it was sent.
+`receive_pose` meters movement with a budget of metres. A Player's budget refills
+at `max_speed_mps` per second of Server time and is capped at
+`max_speed_mps * POSE_BURST_S` (0.25 s, so 16 m), which is what absorbs jitter:
+over a wire a report's time is when it arrives, not when it was sent. A report is
+accepted if its distance from the Eye is within the budget, and spends that
+distance. A budget that is not spent does not grow past the cap, so a Client
+silent for a minute can jump 16 m and no more. Nor does a slack added to every
+report: that would be `slack * reports_per_second` of free speed.
 
-A report that asks for more is not dropped. The Player moves the allowed
-distance toward it, `seq` is accepted, and the Server writes
+A report that asks for more is not dropped. The Player moves the whole budget
+toward it, the budget is spent, `seq` is accepted, and the Server writes
 
 ```rust
 #[derive(Message, Clone, Copy, Debug)]
@@ -252,10 +254,11 @@ report is at distance 0.
   away, then the tick, still applies (it was valid when it arrived).
 - A report and an intent from one frame, in either write order, are both taken
   in the right order by the real systems.
-- **Movement**: a report within the cap is accepted; one beyond it moves the
-  Player the allowed distance only and writes a `PoseCorrection` at that point; a
-  long silence does not buy a longer jump (`POSE_WINDOW_MAX_S`); the first report
-  is at distance 0 from the spawn eye.
+- **Movement**: a report within the budget is accepted; one beyond it moves the
+  Player the budget only and writes a `PoseCorrection` at that point; a long
+  silence does not buy more than the burst; many small reports do not buy more
+  than the speed (the budget, not a per-report slack); the first report is at
+  distance 0 from the spawn eye.
 - **Respawn**: a `RespawnIntent` puts the Player at the spawn eye and writes a
   `PoseCorrection` to it, from anywhere, at any speed.
 - **Client**: a correction moves the camera and its `GlobalTransform`; the
@@ -277,11 +280,12 @@ report is at distance 0.
 
 - **A pose is rate-limited, not true.** Decision 6. Gravity, collision and
   walking speed are ticket 05.
-- **The tolerance and the slack are constants**, not derived from latency.
+- **The tolerance and the burst are constants**, not derived from latency.
   Decisions 3 and 8, and decision 7.
 - **A correction can arrive after the Client has moved on.** In process it is
-  applied the frame it is written. Over a wire the Client will want to reconcile
-  by `seq`; the field is there and unused.
+  applied the frame it is written. The Client ignores one older by `seq` than one
+  it applied; reconciling the movement made since is client prediction, ticket
+  05.
 - **One Player.** `Single` in the systems. The transport makes it a lookup.
 - **`TESSERAE_SCREENSHOT_SPEED_M_S` above the cap** is corrected back to it. The
   capture harness's default is 12 m/s.

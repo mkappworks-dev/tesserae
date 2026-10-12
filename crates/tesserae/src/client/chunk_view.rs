@@ -144,10 +144,8 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
     ambient.brightness = 900.0;
 }
 
-/// Metres above the spawn point, and how far the view tips down. Framing is a
-/// Client decision; the spawn point is the Server's. In metres, so the framing
-/// survives a change of Voxel size.
-const VIEW_ALTITUDE_M: f32 = 18.0;
+/// How far the view tips down. Framing is a Client decision; where the Eye
+/// starts is the Server's, so the Client's camera starts where the Player does.
 const VIEW_PITCH: f32 = -0.3;
 
 /// In `PostStartup`, so the Server's `Startup` commands have been applied and
@@ -156,7 +154,7 @@ const VIEW_PITCH: f32 = -0.3;
 ///
 /// [`SpawnPoint`]: crate::server::world_state::SpawnPoint
 fn spawn_camera(mut commands: Commands, spawn: Res<crate::server::world_state::SpawnPoint>) {
-    let eye = spawn.metres() + Vec3::Y * VIEW_ALTITUDE_M;
+    let eye = spawn.eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
 

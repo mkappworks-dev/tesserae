@@ -1,6 +1,6 @@
 # Return-to-spawn goes through the Server
 
-Status: ready-for-agent
+Status: done
 Blocked by: 06
 
 Spec decision 10. Without it the reset key is a Client-side teleport, which is
@@ -28,3 +28,10 @@ what ticket 06 closes.
 ## Then
 
 `./scripts/cargo-ci`.
+
+## Comments
+
+`receive_pose`, `receive_respawn` and edit's `receive` are ordered by a
+`PlayerInput` system set, so an Edit is always judged after the pose and respawn
+of its frame. `a_pose_report_is_taken_before_the_intents_of_its_frame` still asks
+the schedule whether the pair is ambiguous, and still fails with the set removed.

@@ -188,6 +188,10 @@ impl LightVolume for LightLattice<'_> {
     }
 }
 
+/// Metres the spawn Eye is raised over the spawn point. In metres, as the
+/// clearance it is added to is.
+pub const SPAWN_EYE_ALTITUDE_M: f32 = 18.0;
+
 /// Where a player enters the World, in metres.
 ///
 /// Private field with a Server-only constructor, for the reason in the module
@@ -203,6 +207,12 @@ impl SpawnPoint {
 
     pub fn metres(self) -> Vec3 {
         self.0
+    }
+
+    /// Where a Player's Eye starts, and returns to: a view over the spawn point
+    /// and not at it, which a free-fly camera wants.
+    pub fn eye(self) -> Vec3 {
+        self.0 + Vec3::Y * SPAWN_EYE_ALTITUDE_M
     }
 
     /// For tests outside `server`, which cannot reach `new`.

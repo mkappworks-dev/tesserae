@@ -9,8 +9,9 @@
 //!
 //! The ray's origin is a claim too, checked against the Server's [`Player`]
 //! when the intent arrives (`docs/adr/0008-the-server-owns-the-players-pose.md`).
-//! That bounds the origin against a pose the Client also reported, so it stops a
-//! stale or mistaken origin and not a Client that lies about both.
+//! The pose is the Client's report, clamped to a speed the Server allows, so this
+//! stops a stale or invented origin and not a Client that flies to where it wants
+//! to edit; that is the player controller's.
 //!
 //! **Intents are queued, not read on the tick.** `server/mod.rs` explains why a
 //! message the Client writes can be dropped by a frame that runs no fixed tick,
@@ -34,9 +35,12 @@ use super::streaming::MeshState;
 use super::world_state::{ChunkStore, LightLattice, VoxelCoord};
 use crate::world::{ChunkCoord, WorldSettings};
 
-/// How far from the ray's origin an Edit can reach, in **metres**: a reach in
+/// How far from the Player's Eye an Edit can reach, in **metres**: a reach in
 /// Voxels would be calibrated to one Voxel size.
 /// `docs/adr/0003-voxel-size-is-per-world.md`.
+///
+/// The ray is shortened by however far its claimed origin is from the Eye, so
+/// the tolerance below cannot add to this.
 pub const EDIT_REACH_M: f32 = 8.0;
 
 /// How far an Edit's ray may start from the Player's Eye, in metres. An honest
@@ -44,9 +48,8 @@ pub const EDIT_REACH_M: f32 = 8.0;
 /// moves while an intent travels, so a third of a second at a sprint. A constant
 /// until the controller has a speed to derive it from.
 ///
-/// An Edit can therefore reach `EDIT_REACH_M` plus this from where the Server
-/// has the Player, and the Eye is only as true as the Client's reports
-/// (`player.rs`).
+/// It bounds how stale an origin may be and not how far an Edit reaches, which is
+/// [`EDIT_REACH_M`] from the Eye however far inside this the origin is.
 pub const EDIT_ORIGIN_TOLERANCE_M: f32 = 2.0;
 
 /// Edits applied per tick. Each costs a relight over at most the 15 Voxels light
@@ -122,6 +125,9 @@ pub struct EditRejected {
 struct Pending {
     intent: EditIntent,
     waited: u32,
+    /// [`EDIT_REACH_M`] less how far the origin was from the Eye on arrival, so
+    /// that whatever the ray strikes is within [`EDIT_REACH_M`] of the Eye.
+    reach_m: f32,
 }
 
 /// Intents received and not yet applied. Server-private: nothing outside this
@@ -138,7 +144,7 @@ pub(super) fn plugin(app: &mut App) {
             RunFixedMainLoop,
             receive
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
-                .after(player::receive_pose),
+                .after(player::PlayerInput),
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
@@ -154,10 +160,13 @@ fn receive(
     for intent in intents.read() {
         // Here and not in `apply_pending`: an intent can wait a second there, by
         // when the Player has moved on from where the Client meant.
-        if let Err(reason) = vet_origin(intent, player.eye()) {
-            rejected.write(EditRejected { reason });
-            continue;
-        }
+        let off_eye_m = match vet_origin(intent, player.eye()) {
+            Ok(distance) => distance,
+            Err(reason) => {
+                rejected.write(EditRejected { reason });
+                continue;
+            }
+        };
         if pending.0.len() >= MAX_PENDING {
             rejected.write(EditRejected {
                 reason: RejectReason::Busy,
@@ -167,18 +176,21 @@ fn receive(
         pending.0.push_back(Pending {
             intent: *intent,
             waited: 0,
+            reach_m: EDIT_REACH_M - off_eye_m,
         });
     }
 }
 
-fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<(), RejectReason> {
+/// How far the origin is from the Eye, if it is near enough.
+fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<f32, RejectReason> {
     if !intent.origin.is_finite() || !intent.direction.is_finite() {
         return Err(RejectReason::OutOfReach);
     }
-    if intent.origin.distance(eye) > EDIT_ORIGIN_TOLERANCE_M {
+    let distance = intent.origin.distance(eye);
+    if distance > EDIT_ORIGIN_TOLERANCE_M {
         return Err(RejectReason::OriginTooFar);
     }
-    Ok(())
+    Ok(distance)
 }
 
 fn apply_pending(
@@ -195,14 +207,15 @@ fn apply_pending(
         let Some(mut p) = pending.0.pop_front() else {
             break;
         };
-        let outcome = resolve(&store, &shapes, &world, &p.intent).and_then(|(at, voxel)| {
-            // The incremental relight and the bulk solve must not both write one
-            // Chunk, so an edit waits for its Chunk's light to settle.
-            if meshes.is_unlit(VoxelCoord::of(at).chunk) {
-                return Err(RejectReason::Busy);
-            }
-            set_voxel(&mut store, &mut meshes, &shapes, at, voxel)
-        });
+        let outcome =
+            resolve(&store, &shapes, &world, &p.intent, p.reach_m).and_then(|(at, voxel)| {
+                // The incremental relight and the bulk solve must not both write one
+                // Chunk, so an edit waits for its Chunk's light to settle.
+                if meshes.is_unlit(VoxelCoord::of(at).chunk) {
+                    return Err(RejectReason::Busy);
+                }
+                set_voxel(&mut store, &mut meshes, &shapes, at, voxel)
+            });
         match outcome {
             Ok(()) => applied += 1,
             Err(RejectReason::Busy) if p.waited < MAX_DEFERRED_TICKS => {
@@ -226,6 +239,7 @@ fn resolve(
     shapes: &ShapeTable,
     world: &WorldSettings,
     intent: &EditIntent,
+    reach_m: f32,
 ) -> Result<([i32; 3], Voxel), RejectReason> {
     if !intent.origin.is_finite() || !intent.direction.is_finite() {
         return Err(RejectReason::OutOfReach);
@@ -236,7 +250,7 @@ fn resolve(
         world.voxel_size,
         intent.origin.to_array(),
         intent.direction.to_array(),
-        EDIT_REACH_M,
+        reach_m,
     )
     .ok_or(RejectReason::OutOfReach)?;
 
@@ -352,7 +366,7 @@ mod tests {
     use tesserae_core::{CHUNK_SIZE, Chunk, NodeBox, SHAPE_STAIR, ShapeDef};
 
     use super::super::player::{Player, PoseReport};
-    use crate::server::world_state::SpawnPoint;
+    use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
 
     fn stone() -> Voxel {
         Voxel::cube(STONE)
@@ -707,7 +721,11 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(WorldSettings::default())
-            .insert_resource(SpawnPoint::new(Vec3::new(500.0, 500.0, 500.0)))
+            // The Player spawns 10 m from where the intent starts: too far for the
+            // intent alone, near enough for the report to bring it in budget.
+            .insert_resource(SpawnPoint::new(
+                DOWN_EYE + Vec3::new(10.0, -SPAWN_EYE_ALTITUDE_M, 0.0),
+            ))
             .init_resource::<Shapes>()
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
@@ -726,6 +744,48 @@ mod tests {
 
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
         assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Straight down at the ground over (5, 5), from `origin_y`, with the Player's
+    /// Eye at `eye_y`: whether the Voxel was broken.
+    fn broken_from(eye_y: f32, origin_y: f32) -> bool {
+        let mut app = app_with(&[(origin(), ground())]);
+        set_eye(&mut app, Vec3::new(5.5, eye_y, 5.5));
+        send_from_afar(
+            &mut app,
+            EditIntent {
+                origin: Vec3::new(5.5, origin_y, 5.5),
+                ..down(EditAction::Break)
+            },
+        );
+        tick(&mut app);
+        voxel_at(&app, [5, 7, 5]).is_air()
+    }
+
+    #[test]
+    fn reach_is_measured_from_the_eye_not_from_the_claimed_origin() {
+        // The ground is 7 m below the origin, in reach of it. The Eye is 2 m
+        // higher, so the Voxel is 9 m from the Player and not in reach of them.
+        assert!(!broken_from(17.0, 15.0));
+        // The same ray from an origin at the Eye is 7 m and is.
+        assert!(broken_from(15.0, 15.0));
+    }
+
+    #[test]
+    fn no_edit_lands_farther_from_the_eye_than_the_reach() {
+        let ground_top = 8.0;
+        for eye_y in [15.0, 16.0, 17.0] {
+            for step in -4..=4 {
+                let origin_y = eye_y + step as f32 * 0.5;
+                if broken_from(eye_y, origin_y) {
+                    assert!(
+                        eye_y - ground_top <= EDIT_REACH_M,
+                        "eye {eye_y}, origin {origin_y}: struck {} m from the Eye",
+                        eye_y - ground_top
+                    );
+                }
+            }
+        }
     }
 
     #[test]
