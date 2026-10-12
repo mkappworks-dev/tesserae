@@ -205,6 +205,8 @@ impl SpawnPoint {
         SpawnPoint(metres)
     }
 
+    /// The spawn point itself, on the ground; the Eye is [`SpawnPoint::eye`].
+    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
     pub fn metres(self) -> Vec3 {
         self.0
     }
