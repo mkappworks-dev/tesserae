@@ -82,3 +82,13 @@ player. Not a different Server.
 
 **Edit** — a change to one Voxel, applied by the Server. A Client sends an
 intent; it never makes an Edit.
+
+**Job** — one Chunk's worth of one streaming stage (generate, solve light,
+mesh), run on a worker from a Snapshot and returning an owned result. A Job
+never touches World state.
+
+**Snapshot** — the immutable view of World state a Job is handed: the Chunks and
+light it reads, as shared references.
+
+**Landing** — the Server applying a finished Job's result to World state, on its
+tick. The only way a Job's work becomes part of the World.

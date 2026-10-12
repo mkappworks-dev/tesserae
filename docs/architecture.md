@@ -22,6 +22,7 @@ flowchart TB
             TICK["Tick loop"]
             STATE["World state"]
             STREAM["Chunk streaming<br/>+ LOD rings"]
+            JOBS["Jobs on the async<br/>compute pool"]
         end
         subgraph CLI["Client — never mutates state"]
             INTENT["Camera · input · UI"]
@@ -53,12 +54,14 @@ flowchart TB
 
     INTENT -- intent only --> TICK
     TICK --> STATE --> STREAM
-    TICK --> GEN
-    TICK --> LIGHT
+    STREAM -- "Arc snapshots in,<br/>owned results out" --> JOBS
+    JOBS --> GEN
+    JOBS --> LIGHT
     TICK --> FLUID
     TICK --> COLL
     STATE --> STORE
-    STREAM --> MESHER --> UPLOAD
+    JOBS --> MESHER
+    STREAM -- "landed on the tick" --> UPLOAD
 
     LOOK -. WGSL asset .-> MATEXT
     UPLOAD --> PBR
@@ -135,7 +138,8 @@ tesserae/
 │           ├── world.rs        Voxel size, seed, the Chunk lattice          ▸ 2
 │           ├── server/         the sole authority over World state         ▸ 3
 │           │   ├── world_state.rs  Chunk store — mutators Server-private    ▸ 3
-│           │   ├── streaming.rs    load/mesh/evict rings, per-tick budget   ▸ 3
+│           │   ├── streaming.rs    rings, dispatch and landing              ▸ 3
+│           │   ├── jobs.rs         jobs on the async compute pool           ▸ 3
 │           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3

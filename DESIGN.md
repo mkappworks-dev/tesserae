@@ -81,9 +81,14 @@ crate to own, so the middle crate is modding.
 
 - **`tesserae-core`** — chunk storage, palette compression, LOD downsample,
   worldgen, greedy meshing, light propagation, fluid simulation, AABB-vs-voxel
-  collision. Deps: `glam`, `rayon`. No Bevy, no wgpu. Headless, unit-testable,
-  benchmarkable under `criterion`. This is the hot path and the only part worth
-  micro-optimising.
+  collision. No dependencies at all today, and no Bevy or wgpu ever: it uses
+  `[i32; 3]` and a `LightVolume` trait rather than `glam`, and it has no
+  scheduler, because streaming runs its functions as jobs on Bevy's task pools
+  from `tesserae` (see
+  [ADR-0007](./docs/adr/0007-streaming-jobs-run-on-bevy-task-pools.md)). `rayon`
+  is still a candidate, for work that is data-parallel inside one job. Headless,
+  unit-testable, benchmarkable under `criterion`. This is the hot path and the
+  only part worth micro-optimising.
 - **`tesserae-mods`** — WASM host, WIT interface definitions, the batched
   command queue. Deps: `wasmtime`. No Bevy.
 - **`tesserae`** — the Bevy app. `MaterialExtension` materials for
@@ -339,13 +344,15 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   itself cannot be the Licensor — it names the Licensed Work, and the Covenants
   run from a person or a company, not from a product name.
 - Chunk dimensions: 32³ assumed, not measured.
-- Per-ring LOD chunk budget: measured three times now, and still only for one
-  case. At 1m Voxels and a 192m view distance the streaming tick holds at 24
-  Chunks generated, 12 relit and 12 meshed, an 8.1ms worst tick against 15.6ms
-  at 64Hz. Shaped Voxels did not move it. Still open for the same reason as
-  before — a single Voxel size, a single view distance, LOD level 0 only, and
-  the number this item is really about is per _ring_ — and now also because the
-  three budgets are sized against each other rather than independently.
+- Per-ring LOD chunk budget: still a single Voxel size, a single view distance
+  and LOD level 0 only, so still not measured per _ring_. What changed is what
+  it bounds. Streaming runs on a task pool, so the budget is an in-flight cap
+  and a landing cap per stage rather than a count of work per tick, and a badly
+  sized one costs fill latency, not frame time. At 1m Voxels and a 192m view
+  distance (64 / 128 / 128 in flight, 64 / 256 / 32 landed) the worst tick on
+  the main thread is 0.7 ms against 22-27 ms, and the load volume fills in 1.6 s
+  against 7.2 s. The caps want revisiting when per-Chunk cost rises (caves) or
+  LOD adds rings; see `StreamingBudget`.
 - **Shaped Voxels have loose ends worth a ticket each.** Terrain contains none
   (slope-smoothing stairs and slabs are the obvious worldgen use, and must stay
   under the cap). Fence arms and collision taller than the cell need a Shape to

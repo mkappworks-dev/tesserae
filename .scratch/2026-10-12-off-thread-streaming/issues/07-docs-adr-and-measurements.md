@@ -1,6 +1,6 @@
 # Docs, ADR, measurements
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02, 03, 04, 05, 06
 
 ## What to build
@@ -29,3 +29,18 @@ Blocked by: 01, 02, 03, 04, 05, 06
 - `npm run fmt` and `cargo fmt --all` clean; `./scripts/cargo-ci` passes.
 - The PR body fills in the template, strikes through the inapplicable items, and
   does not end with the generated-by line.
+
+## Comments
+
+Landed: `CONTEXT.md` (Job, Snapshot, Landing); ADR-0007; `docs/architecture.md`
+(the diagram now has the jobs between streaming and the core functions, and the
+`streaming.rs` and `jobs.rs` lines); DESIGN.md (the crate-layout line that
+promised `rayon` and `glam` in core, and the per-ring budget open item); the
+module doc of `streaming.rs` (the in-flight case of the extent argument); the
+spec's Outcome section. DESIGN.md's step 3 and 4 notes in this tree do not
+mention a deferred off-thread move, so there was nothing to remove there.
+
+The flight screenshot is kept out of the repo (2.8 MB): the capture reports the
+same terrain, 2442 loaded and 910 meshed, with the camera 72 m in.
+
+The PR description is in the session, per the brief, and not committed.
