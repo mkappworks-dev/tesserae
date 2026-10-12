@@ -7,6 +7,11 @@
 
 use super::{Arm, CollisionBox, ConnectDef, NodeBox, ShapeDef};
 use crate::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use crate::voxel::ShapeId;
+
+/// The id a fence gets when it is the first Shape registered after the builtins,
+/// as it is in the `dev` build's table and in the tests that use one.
+pub const FENCE_ID: ShapeId = 4;
 
 /// Connection group of [`fence`].
 pub const FENCE_GROUP: u32 = 1;

@@ -178,6 +178,22 @@ impl Chunk {
         }
     }
 
+    /// The shaped Voxels here weighed by `cost`, exactly. [`Chunk::shaped_count`]
+    /// with a price per Voxel; the same scan, the same warning.
+    pub fn shaped_units(&self, cost: impl Fn(Voxel) -> u32) -> usize {
+        match &self.storage {
+            Storage::Uniform(v) if v.is_shaped() => CHUNK_VOLUME * cost(*v) as usize,
+            Storage::Palette {
+                palette,
+                bits,
+                words,
+            } if palette.iter().any(|v| v.is_shaped()) => (0..CHUNK_VOLUME)
+                .map(|i| cost(palette[read_index(words, *bits, i)]) as usize)
+                .sum(),
+            _ => 0,
+        }
+    }
+
     pub fn palette_len(&self) -> usize {
         match &self.storage {
             Storage::Uniform(_) => 1,

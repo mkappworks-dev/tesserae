@@ -43,8 +43,24 @@ pub struct WorldGenerator(pub Worldgen);
 /// Server-only. The Client is sent finished meshes and needs no Shape to draw
 /// one, and a Mod registers its Shapes here at load. Behind an `Arc` so a
 /// streaming job can hold the table; it is not written once the World is open.
-#[derive(Resource, Deref, Default)]
+#[derive(Resource, Deref)]
 pub struct Shapes(pub Arc<ShapeTable>);
+
+impl Default for Shapes {
+    /// The builtin Shapes, and under `dev` a fence registered as a Mod will, so
+    /// the gallery and the hotbar have a connected Shape to show.
+    fn default() -> Self {
+        #[cfg_attr(not(feature = "dev"), allow(unused_mut))]
+        let mut table = ShapeTable::builtin();
+        #[cfg(feature = "dev")]
+        assert_eq!(
+            table.register(tesserae_core::shape::examples::fence()),
+            Ok(tesserae_core::shape::examples::FENCE_ID),
+            "the demo fence is the first Shape after the builtins"
+        );
+        Shapes(Arc::new(table))
+    }
+}
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()

@@ -15,7 +15,10 @@
 //!   seen to join without a gap or a doubled face;
 //! - a floor of slabs with a wall behind it, whose interior faces are culled by
 //!   coverage and not left as four hidden quads on every slab;
-//! - a lantern, so block light falls on shaped faces.
+//! - a lantern, so block light falls on shaped faces;
+//! - a fence line that turns a corner, ends at a wall of cubes and starts beside
+//!   a stair, so the arms it grows towards each can be seen: rails to the next
+//!   fence, a rail into the cube, and one into the stair's sealed back.
 //!
 //! **The pattern is in Voxels and the placement is in metres.** The point is the
 //! shape of individual Voxels, so the layout is a count of them, as `testgen`'s
@@ -24,6 +27,7 @@
 
 use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_Y, POS_X, POS_Y};
+use tesserae_core::shape::examples::FENCE_ID;
 use tesserae_core::worldgen::{DIRT, GRASS, LANTERN, STONE};
 use tesserae_core::{MaterialId, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, Voxel};
 
@@ -137,6 +141,19 @@ fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32
     }
     put(1, 6, 0, Voxel::cube(LANTERN));
 
+    // A fence from a stair's back along x to a wall of cubes, with a corner
+    // turning towards the camera. Arms are not placed: each is grown by the
+    // fence's own neighbours, which is the thing on show.
+    let fence = Voxel::new(STONE, FENCE_ID, 0);
+    put(4, 0, 5, shaped(STONE, SHAPE_STAIR, POS_Y, 0));
+    for x in 4..=9 {
+        put(x, 0, 6, fence);
+    }
+    put(9, 0, 7, fence);
+    put(9, 0, 8, fence);
+    put(10, 0, 6, Voxel::cube(STONE));
+    put(10, 1, 6, Voxel::cube(STONE));
+
     // A slab floor, and a wall standing behind it.
     for z in 2..=4 {
         for x in 5..=8 {
@@ -156,7 +173,7 @@ mod tests {
     use super::*;
     use crate::server::world_state::VoxelCoord;
     use std::collections::{BTreeSet, HashMap};
-    use tesserae_core::{MAX_SHAPED_PER_CHUNK, ShapeTable};
+    use tesserae_core::MAX_SHAPED_PER_CHUNK;
 
     /// Sloping ground, so the plinth has something to do.
     fn hill(x: f32, _z: f32) -> f32 {
@@ -184,7 +201,7 @@ mod tests {
             .collect();
         assert_eq!(
             shapes,
-            BTreeSet::from([SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST])
+            BTreeSet::from([SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST, FENCE_ID])
         );
         let stairs: BTreeSet<u8> = plan
             .iter()
@@ -192,6 +209,38 @@ mod tests {
             .map(|(_, v)| v.orientation())
             .collect();
         assert!(stairs.len() >= 4, "{stairs:?}");
+    }
+
+    #[test]
+    fn its_fences_meet_a_fence_a_cube_and_a_stairs_sealed_back() {
+        let plan = plan(&world(1.0), corner(), hill);
+        let at: HashMap<[i32; 3], Voxel> = plan.iter().copied().collect();
+        let table = Shapes::default();
+        let fences: Vec<[i32; 3]> = at
+            .iter()
+            .filter(|(_, v)| v.shape() == FENCE_ID)
+            .map(|(&p, _)| p)
+            .collect();
+        assert!(fences.len() >= 8, "{}", fences.len());
+
+        // For each kind of neighbour, some fence has one on a side it grows an arm to.
+        let mut met = BTreeSet::new();
+        for p in &fences {
+            let around = tesserae_core::mesh::FACE_STEPS.map(|d| {
+                at.get(&[p[0] + d[0], p[1] + d[1], p[2] + d[2]])
+                    .copied()
+                    .unwrap_or(Voxel::AIR)
+            });
+            let c = table.connections(at[p], around);
+            for (_, across) in around.iter().enumerate().filter(|&(f, _)| c.has(f)) {
+                met.insert(match across.shape() {
+                    FENCE_ID => "fence",
+                    SHAPE_STAIR => "stair",
+                    _ => "cube",
+                });
+            }
+        }
+        assert_eq!(met, BTreeSet::from(["fence", "stair", "cube"]));
     }
 
     #[test]
@@ -211,7 +260,7 @@ mod tests {
 
     #[test]
     fn every_voxel_in_it_is_one_the_edit_path_would_accept() {
-        let table = ShapeTable::builtin();
+        let table = Shapes::default();
         for (at, v) in plan(&world(1.0), corner(), hill) {
             assert!(!v.is_air(), "{at:?}");
             assert!(table.contains(v.shape()), "{at:?}");

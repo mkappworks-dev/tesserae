@@ -2,7 +2,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::{Arc, OnceLock};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-use tesserae_core::shape::examples::{fence, pipe};
+use tesserae_core::shape::examples::{FENCE_ID, fence, pipe};
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
     SHAPE_STAIR, ShapeDef, ShapeTable, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk,
@@ -111,6 +111,16 @@ fn caved() -> Worldgen {
     Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default())
 }
 
+/// The builtin Shapes and a fence, which a Mod would register.
+fn fence_shapes() -> &'static ShapeTable {
+    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        let mut t = ShapeTable::builtin();
+        assert_eq!(t.register(fence()), Ok(FENCE_ID));
+        t
+    })
+}
+
 /// Terrain whose top `n` Voxels - the exposed ones, one per column - are stairs
 /// facing every which way: pass 2 as it would meet a building, which is more
 /// than a Chunk is allowed to hold once `n` passes `MAX_SHAPED_PER_CHUNK`.
@@ -131,6 +141,46 @@ fn terrain_with_stairs(n: usize) -> Chunk {
             let o = Orientation::from_bits(((x * 7 + z * 3) % 24) as u8).unwrap();
             chunk.set(x, y, z, Voxel::shaped(testgen::STONE, SHAPE_STAIR, o));
             placed += 1;
+        }
+    }
+    chunk
+}
+
+/// Terrain with a fence on top of every column, as many as `n`: what a building
+/// would be, where neighbours at the same height grow arms towards each other.
+fn terrain_with_fences(n: usize) -> Chunk {
+    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    let mut placed = 0;
+    'columns: for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            if placed == n {
+                break 'columns;
+            }
+            let Some(y) = (0..CHUNK_SIZE)
+                .rev()
+                .find(|&y| !chunk.get(x, y, z).is_air())
+            else {
+                continue;
+            };
+            chunk.set(x, y + 1, z, Voxel::new(testgen::STONE, FENCE_ID, 0));
+            placed += 1;
+        }
+    }
+    chunk
+}
+
+/// A flat floor with a fence on every column of it: every fence has all four
+/// arms out, the most a connected Shape can cost per Voxel.
+fn flat_fences(n: usize) -> Chunk {
+    let mut chunk = Chunk::air();
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            for y in 0..8 {
+                chunk.set(x, y, z, Voxel::cube(testgen::STONE));
+            }
+            if z * CHUNK_SIZE + x < n {
+                chunk.set(x, 8, z, Voxel::new(testgen::STONE, FENCE_ID, 0));
+            }
         }
     }
     chunk
@@ -190,6 +240,25 @@ fn mesher(c: &mut Criterion) {
     let all_nb = Neighborhood::isolated(LitChunk::new(&all, &sky));
     group.bench_function("all_stairs", |b| {
         b.iter(|| black_box(greedy_mesh(black_box(&all_nb), shapes())))
+    });
+
+    // The same cap with a connected Shape, which emits rails as well as a post.
+    // `terrain_fences_at_cap` is what a building looks like; `flat_fences_at_cap`
+    // is every fence fully armed, the worst a Chunk at the cap can cost.
+    // As many as the cap lets in, which is fewer than stairs: a fence is charged
+    // for its rails in stair-sized units.
+    let units = fence_shapes().cap_units(Voxel::new(testgen::STONE, FENCE_ID, 0)) as usize;
+    let at_cap = MAX_SHAPED_PER_CHUNK / units;
+    eprintln!("a fence costs {units} stairs of the cap: {at_cap} fit");
+    let fences = terrain_with_fences(at_cap);
+    let fences_nb = Neighborhood::isolated(LitChunk::new(&fences, &sky));
+    group.bench_function("terrain_fences_at_cap", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&fences_nb), fence_shapes())))
+    });
+    let flat = flat_fences(at_cap);
+    let flat_nb = Neighborhood::isolated(LitChunk::new(&flat, &sky));
+    group.bench_function("flat_fences_at_cap", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&flat_nb), fence_shapes())))
     });
 
     group.finish();

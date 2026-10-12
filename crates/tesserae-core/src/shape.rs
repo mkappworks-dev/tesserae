@@ -33,7 +33,8 @@ pub const ORIENTATIONS: usize = 24;
 /// time or collision work.
 pub const MAX_BOXES: usize = 16;
 
-/// The most shaped Voxels a Chunk may hold.
+/// The most shaped Voxels a Chunk may hold, counted in stairs: a connected Shape
+/// is charged [`ShapeTable::cap_units`] of them.
 ///
 /// A shaped Voxel emits up to about a dozen quads that nothing merges, where a
 /// cube merges into almost nothing, so a Chunk of them is hundreds of thousands
@@ -46,6 +47,11 @@ pub const MAX_BOXES: usize = 16;
 /// against 350 us for the terrain alone - 41% of a `mesh_chunk/straddling`, and
 /// the rule was 50%, because a tick has twelve meshes in it. A Chunk of nothing
 /// but stairs takes 5.2 ms.
+///
+/// A connected Shape is charged for its most armed self. The reference fence
+/// costs 7 stairs, so 146 fit: 1024 of them, uncharged, meshed in 5.2 ms against
+/// 1.5 ms for 1024 stairs in the same run (a loaded machine; the ratio is the
+/// point), and at 146 a Chunk of fences takes about what a Chunk of stairs does.
 pub const MAX_SHAPED_PER_CHUNK: usize = 1024;
 
 /// Set in [`ShapeTable::light_mask`] for a shaped Voxel, meaning light is also
@@ -423,6 +429,8 @@ struct ConnectInfo {
     /// Where its variants start in `mask_variants`; indexed by the connections
     /// squeezed onto `faces`.
     first: u32,
+    /// What it costs against [`MAX_SHAPED_PER_CHUNK`], in units of one stair.
+    weight: u32,
 }
 
 impl Default for ShapeTable {
@@ -558,11 +566,25 @@ impl ShapeTable {
                 .into_iter()
                 .map(|v| v.expect("every submask is derived")),
         );
+        // The cap was sized for stairs, and a fully armed fence emits several
+        // times a stair's quads, so a connected Shape is charged for the most it
+        // can emit: a Chunk at the cap then meshes about as fast whatever fills
+        // it.
+        let worst = self.mask_variants[first as usize..]
+            .iter()
+            .map(|v| v.quads.1)
+            .max()
+            .unwrap_or(0);
+        let stair = self.variants[SHAPE_STAIR as usize * ORIENTATIONS]
+            .quads
+            .1
+            .max(1);
         self.connects.push(ConnectInfo {
             connects_to: connect.connects_to,
             to_sealed: connect.to_sealed,
             faces,
             first,
+            weight: worst.div_ceil(stair),
         });
 
         let bare = Variant {
@@ -685,6 +707,19 @@ impl ShapeTable {
     pub fn collision(&self, voxel: Voxel, c: Connections) -> &[CollisionBox] {
         let (start, len) = self.variant_with(voxel, c).collision;
         &self.boxes[start as usize..(start + len) as usize]
+    }
+
+    /// What `voxel` costs against [`MAX_SHAPED_PER_CHUNK`]: nothing for air and
+    /// cubes, one for a Shape, and for a connected Shape as many as it has times
+    /// a stair's quads, at its most armed.
+    pub fn cap_units(&self, voxel: Voxel) -> u32 {
+        if !voxel.is_shaped() {
+            return 0;
+        }
+        match self.variant(voxel).connect {
+            NO_CONNECT => 1,
+            i => self.connects[i as usize].weight,
+        }
     }
 
     /// Whether `voxel` grows arms towards its neighbours at all.
@@ -1435,6 +1470,34 @@ mod tests {
         let (t, fence, _) = fence_table();
         // 4 x 16 x 4 sub-cells of post, and LOD is not told about rails.
         assert_eq!(t.volume(fence), 4 * 16 * 4);
+    }
+
+    #[test]
+    fn a_connected_shape_is_charged_against_the_cap_for_its_most_armed_self() {
+        let (t, fence, pipe) = fence_table();
+        let stair = Voxel::shaped(1, SHAPE_STAIR, Orientation::IDENTITY);
+        assert_eq!(t.cap_units(Voxel::AIR), 0);
+        assert_eq!(t.cap_units(Voxel::cube(1)), 0);
+        assert_eq!(t.cap_units(stair), 1);
+        assert_eq!(t.cap_units(Voxel::new(1, SHAPE_POST, 0)), 1);
+
+        let stair_quads = t.quads(stair, Connections::NONE).len();
+        for (voxel, all) in [
+            (fence, bits(&[NEG_X, POS_X, NEG_Z, POS_Z])),
+            (pipe, bits(&[0, 1, 2, 3, 4, 5])),
+        ] {
+            let worst = t.quads(voxel, all).len();
+            let units = t.cap_units(voxel) as usize;
+            assert!(units > 1, "{units}");
+            assert!(
+                units * stair_quads >= worst,
+                "{units} stairs of {stair_quads} < {worst}"
+            );
+            assert!(
+                (units - 1) * stair_quads < worst,
+                "{units} is more than it needs"
+            );
+        }
     }
 
     #[test]
