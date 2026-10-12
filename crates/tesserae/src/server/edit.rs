@@ -35,7 +35,7 @@ pub const EDIT_REACH_M: f32 = 8.0;
 
 /// Edits applied per tick. Each costs a relight over at most the 15 Voxels light
 /// reaches, so this bounds a tick rather than protecting the budget; the mesh
-/// each one dirties is paid for by `StreamingBudget::mesh_per_tick`.
+/// each one dirties is paid for by `StreamingBudget::landed_per_tick`.
 const EDITS_PER_TICK: usize = 16;
 
 /// Ticks an edit waits for its Chunk's light to be solved before it is dropped.

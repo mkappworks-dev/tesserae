@@ -5,11 +5,16 @@
 //! `super::streaming` lands the result by calling the Server-private mutators on
 //! its own tick. See `docs/adr/0002-client-server-from-day-one.md`.
 
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
-use tesserae_core::{Chunk, ChunkLight, ChunkMesh, ShapeTable, Worldgen};
+use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
+use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, ShapeTable, Worldgen};
 
 use crate::world::ChunkCoord;
 
@@ -33,6 +38,17 @@ pub(in crate::server) struct Stage<T> {
     finished: HashMap<ChunkCoord, T>,
     dispatched: usize,
     landed: usize,
+    /// Results that finished and were thrown away at landing because what they
+    /// were computed from had changed.
+    #[cfg(any(test, feature = "dev"))]
+    stale: usize,
+    /// While true, a job does not start its work, so a test can change the World
+    /// under a job it knows is in flight.
+    #[cfg(test)]
+    pub hold: Arc<AtomicBool>,
+    /// Finishes jobs in an order that has nothing to do with dispatch order.
+    #[cfg(test)]
+    pub scramble: bool,
 }
 
 impl<T> Default for Stage<T> {
@@ -42,6 +58,12 @@ impl<T> Default for Stage<T> {
             finished: HashMap::default(),
             dispatched: 0,
             landed: 0,
+            #[cfg(any(test, feature = "dev"))]
+            stale: 0,
+            #[cfg(test)]
+            hold: Arc::default(),
+            #[cfg(test)]
+            scramble: false,
         }
     }
 }
@@ -62,6 +84,18 @@ impl<T: Send + 'static> Stage<T> {
     /// hide it.
     pub fn spawn(&mut self, coord: ChunkCoord, work: impl FnOnce() -> T + Send + 'static) {
         debug_assert!(!self.contains(coord), "{coord} already has a job in flight");
+        #[cfg(test)]
+        let work = {
+            let hold = Arc::clone(&self.hold);
+            let delay_us = if self.scramble { scramble_us(coord) } else { 0 };
+            move || {
+                while hold.load(Ordering::Acquire) {
+                    std::thread::sleep(std::time::Duration::from_micros(50));
+                }
+                std::thread::sleep(std::time::Duration::from_micros(delay_us));
+                work()
+            }
+        };
         let task = AsyncComputeTaskPool::get().spawn(async move { work() });
         self.running.insert(coord, task);
         self.dispatched += 1;
@@ -100,6 +134,19 @@ impl<T: Send + 'static> Stage<T> {
         self.finished.retain(|&c, _| keep(c));
     }
 
+    /// Records a result thrown away at landing.
+    pub fn discard(&mut self) {
+        #[cfg(any(test, feature = "dev"))]
+        {
+            self.stale += 1;
+        }
+    }
+
+    #[cfg(test)]
+    pub fn stale(&self) -> usize {
+        self.stale
+    }
+
     /// Jobs dispatched and landed since the last [`Stage::reset_counts`].
     #[cfg(test)]
     pub fn counts(&self) -> (usize, usize) {
@@ -112,13 +159,74 @@ impl<T: Send + 'static> Stage<T> {
     }
 }
 
+/// A pseudo-random delay of up to 400 us, derived from the coord alone.
+#[cfg(test)]
+fn scramble_us(coord: ChunkCoord) -> u64 {
+    let h = (coord.x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        ^ (coord.y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
+        ^ (coord.z as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
+    (h >> 20) % 400
+}
+
+/// What a relight job reads of one face neighbour.
+pub(in crate::server) enum Border {
+    /// Not loaded, so a dark boundary.
+    Absent,
+    /// Above the band the surface can reach, where the generator makes only air
+    /// and everything sees full sky. The relaxation cannot discover this: there
+    /// is no neighbour to ask.
+    OpenSky,
+    Loaded(Arc<Chunk>, Arc<ChunkLight>),
+}
+
+/// The Voxels of the synthetic Chunk above the surface: air, which is all the
+/// generator makes there.
+static SKY_CHUNK: Chunk = Chunk::air();
+
+/// A finished light solve.
+pub(in crate::server) struct Solved {
+    /// The instance that was solved, so landing can tell it is still the one in
+    /// the store and has not been evicted and regenerated meanwhile.
+    pub chunk: Arc<Chunk>,
+    pub light: ChunkLight,
+    /// Whether `light` differs from the light the Chunk had when the job began.
+    pub changed: bool,
+    /// Per face, whether the plane that neighbour reads moved.
+    pub outward: [bool; 6],
+}
+
+/// Solves one Chunk's light from a snapshot. Equality and the per-face plane
+/// comparison run here, not on the tick: they are a 32768-cell compare each.
+pub(in crate::server) fn solve(
+    chunk: Arc<Chunk>,
+    before: &ChunkLight,
+    border: &[Border; 6],
+    shapes: &ShapeTable,
+) -> Solved {
+    let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    let lit: [Option<LitChunk>; 6] = std::array::from_fn(|face| match &border[face] {
+        Border::Absent => None,
+        Border::OpenSky => Some(LitChunk::new(&SKY_CHUNK, &open_sky)),
+        Border::Loaded(chunk, light) => Some(LitChunk::new(chunk, light)),
+    });
+    let light = light_chunk(&chunk, lit, shapes);
+    let changed = *before != light;
+    let outward = std::array::from_fn(|face| before.boundary_differs(&light, face));
+    Solved {
+        chunk,
+        light,
+        changed,
+        outward,
+    }
+}
+
 /// Every job in flight, by stage.
 #[derive(Resource, Default)]
 pub(in crate::server) struct Jobs {
     pub generate: Stage<Chunk>,
     // Landing for these arrives in later tickets; the stages exist so the type
     // the tests and the overlay read does not change shape three times.
-    pub relight: Stage<ChunkLight>,
+    pub relight: Stage<Solved>,
     pub mesh: Stage<ChunkMesh>,
 }
 

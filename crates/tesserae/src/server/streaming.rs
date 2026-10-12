@@ -17,13 +17,14 @@
 //! holds a mesh for, so eviction can never leave a stale face behind and needs
 //! no re-mesh of its own.
 
+use std::sync::Arc;
+
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
-use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, ChunkMesh, LitChunk, ShapeTable, mesh_chunk};
+use tesserae_core::{CHUNK_SIZE, ChunkMesh, LitChunk, ShapeTable, mesh_chunk};
 
-use super::jobs::Jobs;
+use super::jobs::{Border, Jobs, solve};
 use super::world_state::ChunkStore;
 use super::{Shapes, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -202,6 +203,14 @@ pub(in crate::server) struct MeshState {
     unlit: HashSet<ChunkCoord>,
     dirty: HashSet<ChunkCoord>,
     delivered: HashSet<ChunkCoord>,
+    /// Chunks with a light solve running. Removed from `unlit` when the job
+    /// starts, so anything that marks one stale again while it runs is still
+    /// recorded when it finishes.
+    relighting: HashSet<ChunkCoord>,
+    /// Chunks whose running solve read something an Edit has since changed. The
+    /// incremental path is not monotone, so a bulk result computed from the old
+    /// state must not land over it.
+    poisoned: HashSet<ChunkCoord>,
 }
 
 impl MeshState {
@@ -210,7 +219,7 @@ impl MeshState {
     /// incrementally, and `relight`'s from-scratch solve landing afterwards
     /// would discard the work even though it would reach the same answer.
     pub(in crate::server) fn is_unlit(&self, coord: ChunkCoord) -> bool {
-        self.unlit.contains(&coord)
+        self.unlit.contains(&coord) || self.relighting.contains(&coord)
     }
 
     /// A Voxel in this Chunk changed and its light has already been re-flooded,
@@ -222,6 +231,13 @@ impl MeshState {
     /// `tesserae_core::relight`'s doc comment describes.
     pub(in crate::server) fn edited(&mut self, coord: ChunkCoord) {
         self.dirty.insert(coord);
+        // A solve reads its Chunk and its six face neighbours, so the Edit
+        // invalidates the solve of any of the seven.
+        for c in std::iter::once(coord).chain(face_neighbors(coord)) {
+            if self.relighting.contains(&c) {
+                self.poisoned.insert(c);
+            }
+        }
     }
 
     /// Whether a Chunk inside `load` is waiting on a light solve. Outside it
@@ -335,6 +351,13 @@ fn stream(
         rings.evict,
         budget.landed_per_tick.generate,
     );
+    land_relight(
+        &mut store,
+        &mut meshes,
+        &mut jobs,
+        center,
+        budget.landed_per_tick.relight,
+    );
     dispatch_generation(
         &store,
         &mut jobs,
@@ -343,15 +366,16 @@ fn stream(
         center,
         budget.in_flight.generate,
     );
-    relight(
-        &mut store,
+    dispatch_relight(
+        &store,
         &mut meshes,
+        &mut jobs,
         &generator,
         &order,
         &world,
         center,
-        budget.landed_per_tick.relight,
-        &shapes,
+        budget.in_flight.relight,
+        &shapes.0,
     );
     publish(
         &store,
@@ -392,6 +416,13 @@ fn retire(
     }
 
     jobs.generate.retain(|c| evict.contains(delta(center, c)));
+    jobs.relight.retain(|c| evict.contains(delta(center, c)));
+    meshes
+        .relighting
+        .retain(|&c| evict.contains(delta(center, c)));
+    meshes
+        .poisoned
+        .retain(|&c| evict.contains(delta(center, c)));
 
     let stale: Vec<ChunkCoord> = store
         .coords()
@@ -471,82 +502,109 @@ fn dispatch_generation(
     }
 }
 
-/// The Voxels of the synthetic Chunk above the surface: air, which is all the
-/// generator makes there.
-static SKY_CHUNK: Chunk = Chunk::air();
-
-/// Solves up to `budget` Chunks whose light is out of date, highest first.
+/// Applies up to `budget` finished light solves, highest first.
 ///
 /// The bulk path: a Chunk arriving starts dark, so every change here is an
 /// increase and re-solving from the current boundary converges. A Voxel
-/// **edit** must not come through here — see `tesserae_core::relight`.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the last argument is the World's Shape table; bundling the rest \
-              would invent a type used once"
-)]
-fn relight(
+/// **edit** must not come through here — see `tesserae_core::relight`. A result
+/// from before an Edit that touched what it read is dropped for that reason, and
+/// the Chunk is queued again.
+fn land_relight(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
-    generator: &WorldGenerator,
-    order: &LoadOrder,
-    world: &WorldSettings,
+    jobs: &mut Jobs,
     center: ChunkCoord,
     budget: usize,
-    shapes: &ShapeTable,
 ) {
-    let mut done = 0;
-    for &d in &order.descending {
-        if done == budget {
-            break;
-        }
-        let coord = offset(center, d);
-        if !meshes.unlit.contains(&coord) {
-            continue;
-        }
-        let Some(chunk) = store.get(coord) else {
-            meshes.unlit.remove(&coord);
+    // Same order as dispatch: a landing that darkens nothing above it first
+    // would be solved again when the one above lands.
+    let mut finished: Vec<ChunkCoord> = jobs.relight.finished().collect();
+    finished.sort_unstable_by_key(|&c| {
+        let d = delta(center, c);
+        (-d.y, d.length_squared())
+    });
+    for coord in finished.into_iter().take(budget) {
+        let Some(solved) = jobs.relight.take(coord) else {
             continue;
         };
-
-        let faces = face_neighbors(coord);
-        // The boundary that the relaxation cannot discover for itself. Held in
-        // a local so the borrow below can point at it.
-        let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
-        let border: [Option<LitChunk>; 6] = std::array::from_fn(|face| {
-            let n = faces[face];
-            match (store.get(n), store.light(n)) {
-                (Some(chunk), Some(light)) => Some(LitChunk::new(chunk, light)),
-                _ => (face == POS_Y && above_the_surface(generator, world, n))
-                    .then_some(LitChunk::new(&SKY_CHUNK, &open_sky)),
-            }
-        });
-
-        let solved = light_chunk(chunk, border, shapes);
-        meshes.unlit.remove(&coord);
-        done += 1;
-        let Some(before) = store.light(coord) else {
+        meshes.relighting.remove(&coord);
+        let poisoned = meshes.poisoned.remove(&coord);
+        let Some((current, _)) = store.shared(coord) else {
             continue;
         };
-        if *before == solved {
+        if poisoned || !Arc::ptr_eq(&current, &solved.chunk) {
+            jobs.relight.discard();
+            meshes.unlit.insert(coord);
             continue;
         }
+        if !solved.changed {
+            continue;
+        }
+        store.set_light(coord, solved.light);
+        // This Chunk's own mesh bakes its own light, so it is stale either way.
+        meshes.dirty.insert(coord);
         // Per face, not once for the Chunk. A neighbour reads only the plane
         // across the face it shares, so re-solving it because something changed
         // deep inside this Chunk is work for nothing — and during a fill it is
         // every Chunk about seven times over, which is enough to stop the
         // relight queue ever draining.
-        let outward: [bool; 6] = std::array::from_fn(|f| before.boundary_differs(&solved, f));
-        store.set_light(coord, solved);
-        // This Chunk's own mesh bakes its own light, so it is stale either way.
-        meshes.dirty.insert(coord);
-        for (face, neighbor) in faces.into_iter().enumerate() {
-            if outward[face] && store.contains(neighbor) {
+        for (face, neighbor) in face_neighbors(coord).into_iter().enumerate() {
+            if solved.outward[face] && store.contains(neighbor) {
                 meshes.unlit.insert(neighbor);
                 // Its boundary faces are lit by the plane that just moved.
                 meshes.dirty.insert(neighbor);
             }
         }
+    }
+}
+
+/// Starts light solves for Chunks whose light is out of date, highest first,
+/// until `in_flight` are outstanding.
+///
+/// Highest first because sky light flows downwards: solving a Chunk before the
+/// one above it means solving it again when the one above lands.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one stage of the tick; bundling them would invent a type used once"
+)]
+fn dispatch_relight(
+    store: &ChunkStore,
+    meshes: &mut MeshState,
+    jobs: &mut Jobs,
+    generator: &WorldGenerator,
+    order: &LoadOrder,
+    world: &WorldSettings,
+    center: ChunkCoord,
+    in_flight: usize,
+    shapes: &Arc<ShapeTable>,
+) {
+    let mut free = in_flight.saturating_sub(jobs.relight.in_flight());
+    for &d in &order.descending {
+        if free == 0 {
+            break;
+        }
+        let coord = offset(center, d);
+        // A mark made while the Chunk's job runs stays in `unlit` and is acted
+        // on once that job has landed.
+        if !meshes.unlit.contains(&coord) || jobs.relight.contains(coord) {
+            continue;
+        }
+        let Some((chunk, before)) = store.shared(coord) else {
+            meshes.unlit.remove(&coord);
+            continue;
+        };
+        let border: [Border; 6] = face_neighbors(coord).map(|n| match store.shared(n) {
+            Some((chunk, light)) => Border::Loaded(chunk, light),
+            None if n.y > coord.y && above_the_surface(generator, world, n) => Border::OpenSky,
+            None => Border::Absent,
+        });
+        meshes.unlit.remove(&coord);
+        meshes.relighting.insert(coord);
+        meshes.poisoned.remove(&coord);
+        let shapes = Arc::clone(shapes);
+        jobs.relight
+            .spawn(coord, move || solve(chunk, &before, &border, &shapes));
+        free -= 1;
     }
 }
 
@@ -708,8 +766,11 @@ pub mod stats {
 mod tests {
     use super::*;
     use crate::server::edit;
+    use crate::server::world_state::VoxelCoord;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
+    use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
+    use tesserae_core::{Chunk, ChunkLight};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
@@ -970,6 +1031,10 @@ mod tests {
 
         fn jobs(&self) -> &Jobs {
             self.app.world().resource::<Jobs>()
+        }
+
+        fn jobs_mut(&mut self) -> Mut<'_, Jobs> {
+            self.app.world_mut().resource_mut::<Jobs>()
         }
 
         fn store(&self) -> &ChunkStore {
@@ -1409,6 +1474,255 @@ mod tests {
             lit_faces += message.mesh.light.iter().filter(|&&l| l != 0).count();
         }
         assert!(lit_faces > 0, "every published face was baked dark");
+    }
+
+    /// The light the bulk solver converges to, found the plainest way there is:
+    /// sweep every Chunk against its neighbours' current light, highest first,
+    /// until a whole pass changes nothing. What `relight` did tick by tick when
+    /// it ran on the tick, and so what the jobs must agree with whatever order
+    /// they finish in.
+    fn fixed_point(
+        store: &ChunkStore,
+        generator: &WorldGenerator,
+        world: &WorldSettings,
+    ) -> bevy::platform::collections::HashMap<ChunkCoord, ChunkLight> {
+        let shapes = ShapeTable::builtin();
+        let sky_chunk = Chunk::air();
+        let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mut coords: Vec<ChunkCoord> = store.coords().collect();
+        coords.sort_by_key(|c| -c.y);
+        let mut lights: bevy::platform::collections::HashMap<ChunkCoord, ChunkLight> =
+            coords.iter().map(|&c| (c, ChunkLight::dark())).collect();
+        loop {
+            let mut changed = false;
+            for &coord in &coords {
+                let border: [Option<LitChunk>; 6] =
+                    face_neighbors(coord).map(|n| match (store.get(n), lights.get(&n)) {
+                        (Some(chunk), Some(light)) => Some(LitChunk::new(chunk, light)),
+                        _ => (n.y > coord.y && above_the_surface(generator, world, n))
+                            .then_some(LitChunk::new(&sky_chunk, &open_sky)),
+                    });
+                let solved = light_chunk(store.get(coord).expect("loaded"), border, &shapes);
+                if solved != lights[&coord] {
+                    lights.insert(coord, solved);
+                    changed = true;
+                }
+            }
+            if !changed {
+                return lights;
+            }
+        }
+    }
+
+    fn assert_lit_like(
+        h: &Harness,
+        expected: &bevy::platform::collections::HashMap<ChunkCoord, ChunkLight>,
+    ) {
+        for coord in h.store().coords() {
+            assert_eq!(
+                h.store().light(coord).expect("lit"),
+                &expected[&coord],
+                "{coord} is not at the fixed point"
+            );
+        }
+    }
+
+    /// Spec decision 5, checked rather than argued: whatever order the jobs
+    /// finish in, and however many are allowed at once, the relaxation ends at
+    /// the light the synchronous sweep finds. A stale read costs another pass,
+    /// not a different answer.
+    #[test]
+    fn relight_in_scrambled_landing_order_reaches_the_synchronous_fixed_point() {
+        for cap in [1, 4, usize::MAX] {
+            let mut h = Harness::new(
+                small(),
+                StreamingBudget {
+                    in_flight: StageCounts {
+                        relight: cap,
+                        ..UNLIMITED.in_flight
+                    },
+                    ..UNLIMITED
+                },
+            );
+            h.app.world_mut().resource_mut::<Jobs>().relight.scramble = true;
+            h.settle();
+
+            let expected = fixed_point(
+                h.store(),
+                h.app.world().resource::<WorldGenerator>(),
+                h.app.world().resource::<WorldSettings>(),
+            );
+            assert_lit_like(&h, &expected);
+            let dense = expected.values().filter(|l| l.uniform().is_none()).count();
+            assert!(dense > 0, "cap {cap}: no Chunk had a gradient to get wrong");
+        }
+    }
+
+    /// Where a lantern next to a Chunk boundary lights two Chunks, and what
+    /// places it.
+    fn lantern_on_a_boundary(h: &mut Harness) -> ([i32; 3], ChunkCoord) {
+        let generator = h.app.world().resource::<WorldGenerator>();
+        let ground = generator.surface_height_m(16.0, 16.0).floor() as i32;
+        let at = [CHUNK_SIZE as i32 - 1, ground + 2, 16];
+        let neighbour = VoxelCoord::of([at[0] + 1, at[1], at[2]]).chunk;
+        (at, neighbour)
+    }
+
+    fn place_lantern(h: &mut Harness, at: [i32; 3]) {
+        h.app
+            .world_mut()
+            .run_system_once(
+                move |mut store: ResMut<ChunkStore>,
+                      mut meshes: ResMut<MeshState>,
+                      shapes: Res<Shapes>| {
+                    edit::set_voxel(
+                        &mut store,
+                        &mut meshes,
+                        &shapes,
+                        at,
+                        Voxel::cube(tesserae_core::worldgen::LANTERN),
+                    )
+                    .expect("the Chunk is loaded and lit");
+                },
+            )
+            .unwrap();
+    }
+
+    /// The fact spec decision 5 needs from the implementation: a neighbour's
+    /// landing marks this Chunk stale while this Chunk's own solve is running,
+    /// and that mark has to outlive the solve landing, or the Chunk is left
+    /// solved against a plane that has since moved.
+    #[test]
+    fn a_mark_made_while_a_solve_runs_survives_its_landing() {
+        use std::sync::atomic::Ordering::Release;
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let home = ChunkCoord::new(0, 0, 0);
+
+        h.jobs_mut().relight.hold.store(true, Release);
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(home);
+        h.tick();
+        assert!(h.jobs().relight.contains(home), "no solve started");
+        // What a neighbour's landing does to it mid-flight.
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(home);
+        h.jobs_mut().relight.hold.store(false, Release);
+
+        let mut solves = 0;
+        for _ in 0..SETTLE_CEILING {
+            h.tick();
+            solves += h.jobs().relight.counts().0;
+            if h.quiet() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        assert!(h.quiet(), "never went quiet");
+        assert!(
+            solves >= 1,
+            "the mark was lost and {home} was not solved again"
+        );
+    }
+
+    /// An Edit's incremental relight is not monotone, so a bulk solve begun
+    /// before it must not land over it. The neighbour across the boundary is the
+    /// Chunk whose solve read the plane the Edit then changed.
+    #[test]
+    fn an_edit_while_a_relight_is_in_flight_drops_that_result() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let (at, next) = lantern_on_a_boundary(&mut h);
+        assert!(h.store().contains(next));
+
+        h.app
+            .world_mut()
+            .resource_mut::<Jobs>()
+            .relight
+            .hold
+            .store(true, std::sync::atomic::Ordering::Release);
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(next);
+        h.tick();
+        assert!(
+            h.app.world().resource::<MeshState>().is_unlit(next),
+            "the solve for {next} never started"
+        );
+        place_lantern(&mut h, at);
+        h.app
+            .world()
+            .resource::<Jobs>()
+            .relight
+            .hold
+            .store(false, std::sync::atomic::Ordering::Release);
+        h.settle();
+
+        assert!(
+            h.jobs().relight.stale() >= 1,
+            "the stale solve landed over the Edit"
+        );
+        let expected = fixed_point(
+            h.store(),
+            h.app.world().resource::<WorldGenerator>(),
+            h.app.world().resource::<WorldSettings>(),
+        );
+        assert_lit_like(&h, &expected);
+        assert!(
+            h.store().light_at([at[0] + 1, at[1], at[2]]).block() > 0,
+            "the lantern's light never crossed the boundary"
+        );
+    }
+
+    /// A Chunk evicted and generated again at the same coord is a different
+    /// instance; a solve of the old one is not a solve of it.
+    #[test]
+    fn a_solve_of_a_chunk_that_was_replaced_meanwhile_does_not_land() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let home = ChunkCoord::new(0, 0, 0);
+
+        h.jobs_mut()
+            .relight
+            .hold
+            .store(true, std::sync::atomic::Ordering::Release);
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(home);
+        h.tick();
+        h.app
+            .world_mut()
+            .run_system_once(
+                move |mut store: ResMut<ChunkStore>, mut meshes: ResMut<MeshState>| {
+                    let again = store.get(home).expect("loaded").clone();
+                    store.remove(home);
+                    store.insert(home, again);
+                    meshes.mark_unlit(home);
+                },
+            )
+            .unwrap();
+        h.jobs_mut()
+            .relight
+            .hold
+            .store(false, std::sync::atomic::Ordering::Release);
+        h.settle();
+
+        assert!(
+            h.jobs().relight.stale() >= 1,
+            "the old instance's solve landed"
+        );
+        let expected = fixed_point(
+            h.store(),
+            h.app.world().resource::<WorldGenerator>(),
+            h.app.world().resource::<WorldSettings>(),
+        );
+        assert_lit_like(&h, &expected);
     }
 
     #[cfg(feature = "dev")]

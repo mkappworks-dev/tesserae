@@ -46,7 +46,6 @@ impl ChunkStore {
     ///
     /// Server-private because an `Arc<Chunk>` in Client hands would be the read
     /// access the Client is deliberately denied.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(in crate::server) fn shared(
         &self,
         coord: ChunkCoord,

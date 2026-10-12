@@ -39,7 +39,7 @@ pub(super) enum Step {
 /// and its light has settled.
 ///
 /// Waiting on the light is not politeness: an edit re-floods incrementally, and
-/// the bulk solve `streaming::relight` runs for a Chunk that is still `unlit`
+/// the bulk solve `streaming` runs for a Chunk that is still `unlit`
 /// would land afterwards and overwrite that work.
 pub(super) fn step(
     plan: &[([i32; 3], Voxel)],
