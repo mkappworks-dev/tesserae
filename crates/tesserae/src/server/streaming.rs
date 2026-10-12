@@ -128,12 +128,16 @@ pub struct StageCounts {
 /// made things worse, not better: at 6 the worst tick was 12.7 ms, because the
 /// workers took cores the render and ECS threads needed; 4 was within noise of 3.
 ///
-/// The cap times the cost of a surface-crossing Chunk, over the workers, is how
-/// far behind the anchor a priority can lag: 64 x 98 us + 128 x 139 us + 128 x
-/// 342 us = 68 ms of work if every job were a surface Chunk, 23 ms across three
-/// workers, which is a tick and a half. Most are nanosecond early-outs. A cost
-/// per Chunk ten times that (caves) makes the window ten times longer, and is
-/// when these want to come down or become a worker-time window.
+/// The cap times the cost of a Chunk, over the workers, is how far behind the
+/// anchor a priority can lag. With caves a surface Chunk a tunnel crosses costs
+/// 252 us to generate, 140 us to light and 395 us to mesh: 64 x 252 us + 128 x
+/// 140 us + 128 x 395 us = 85 ms of work if every job were such a Chunk, 28 ms
+/// across three workers, about two ticks (68 ms and 23 ms before caves). Most
+/// jobs are nanosecond early-outs or Chunks no tunnel crosses. Caves moved
+/// nothing measured: ten runs each, interleaved, with `TESSERAE_CAVES=0` against
+/// the default, give a worst tick of 0.6 ms, a fill of 1.58 s and 8 us a mesh
+/// upload either way. A cost ten times higher is when these want to come down or
+/// become a worker-time window.
 ///
 /// `wait_for_settled_light` holds a mesh back until its neighbourhood has no
 /// light solve pending. Off, a Chunk shows 0.2-0.4 s sooner but is built 2.2
