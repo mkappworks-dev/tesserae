@@ -793,3 +793,182 @@ fn uvs_are_the_position_inside_the_voxel() {
         }
     }
 }
+
+// Generated terrain. Slope smoothing puts stairs and slabs on real ground, so
+// the checks above are repeated on the input the mesher actually meets: a Chunk
+// with real neighbours, not a hand-built scene in an isolated shell.
+
+fn world() -> Worldgen {
+    Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default())
+}
+
+/// Chunk coordinates near the origin, at the height the surface crosses it,
+/// whose Chunk holds at least `min` shaped Voxels. In a fixed scan order.
+fn ramp_chunks(g: &Worldgen, min: usize) -> Vec<[i32; 3]> {
+    let cy = (g.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+    let mut found = vec![];
+    for cz in -3..3 {
+        for cx in -3..3 {
+            if g.chunk(cx, cy, cz).shaped_count() >= min {
+                found.push([cx, cy, cz]);
+            }
+        }
+    }
+    found
+}
+
+/// A Chunk and the 26 around it, indexed `(dz + 1) * 9 + (dy + 1) * 3 + dx + 1`.
+fn block_around(g: &Worldgen, c: [i32; 3]) -> Vec<Chunk> {
+    (-1..=1)
+        .flat_map(|dz| (-1..=1).flat_map(move |dy| (-1..=1).map(move |dx| [dx, dy, dz])))
+        .map(|d| g.chunk(c[0] + d[0], c[1] + d[1], c[2] + d[2]))
+        .collect()
+}
+
+/// The Voxel at `at` Voxels from the middle Chunk's corner, which may be up to a
+/// Chunk outside it on any axis.
+fn voxel_in(block: &[Chunk], at: [i32; 3]) -> Voxel {
+    let size = CHUNK_SIZE as i32;
+    let d = at.map(|v| v.div_euclid(size) + 1);
+    let l = at.map(|v| v.rem_euclid(size) as usize);
+    block[(d[2] * 9 + d[1] * 3 + d[0]) as usize].get(l[0], l[1], l[2])
+}
+
+fn solid_sub_cell(block: &[Chunk], sub: [i32; 3]) -> bool {
+    let v = voxel_in(block, sub.map(|s| s.div_euclid(16)));
+    if v.is_air() {
+        return false;
+    }
+    let l = sub.map(|s| s.rem_euclid(16) as u8);
+    shapes()
+        .collision(v)
+        .iter()
+        .any(|b| (0..3).all(|a| b.min[a] <= l[a] && l[a] < b.max[a]))
+}
+
+/// The exposed faces of the Voxels in a cube of `radius` round `centre`, clipped
+/// to the middle Chunk, judged against the real World across its edges.
+fn exposed_near(
+    block: &[Chunk],
+    centre: [i32; 3],
+    radius: i32,
+) -> std::collections::BTreeSet<SubFace> {
+    let size = CHUNK_SIZE as i32;
+    let mut faces = std::collections::BTreeSet::new();
+    let range = |c: i32| (c - radius).max(0)..=(c + radius).min(size - 1);
+    for z in range(centre[2]) {
+        for y in range(centre[1]) {
+            for x in range(centre[0]) {
+                let v = voxel_in(block, [x, y, z]);
+                if v.is_air() {
+                    continue;
+                }
+                let cube = v.is_full_cube();
+                for sz in 0..16 {
+                    for sy in 0..16 {
+                        for sx in 0..16 {
+                            // The interior of a cube is not exposed to anything,
+                            // and is most of the sub-cells.
+                            if cube && ![sx, sy, sz].iter().any(|&s| s == 0 || s == 15) {
+                                continue;
+                            }
+                            let s = [x * 16 + sx, y * 16 + sy, z * 16 + sz];
+                            if !solid_sub_cell(block, s) {
+                                continue;
+                            }
+                            for (f, d) in DIRS.iter().enumerate() {
+                                let n = [s[0] + d[0], s[1] + d[1], s[2] + d[2]];
+                                if !solid_sub_cell(block, n) {
+                                    faces.insert((f, s));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    faces
+}
+
+fn mesh_with_neighbours(block: &[Chunk]) -> tesserae_core::ChunkMesh {
+    let at = |dx: usize, dy: usize, dz: usize| &block[dz * 9 + dy * 3 + dx];
+    let refs = [
+        at(0, 1, 1),
+        at(2, 1, 1),
+        at(1, 0, 1),
+        at(1, 2, 1),
+        at(1, 1, 0),
+        at(1, 1, 2),
+    ]
+    .map(|c| Some(unlit(c)));
+    mesh_chunk(unlit(at(1, 1, 1)), refs, shapes())
+}
+
+/// Around the first shaped Voxel of a Chunk in the interior, one on each kind of
+/// Chunk edge, and one against the floor and ceiling: every face a player could
+/// see is drawn, once, with the neighbour Chunks' real Voxels across the seam.
+#[test]
+fn no_exposed_face_of_generated_ramps_is_missing_or_drawn_twice() {
+    let g = world();
+    let chunks = ramp_chunks(&g, 20);
+    assert!(!chunks.is_empty(), "no ramp near the origin");
+    let size = CHUNK_SIZE as i32;
+    let (mut checked, mut seams) = (0, 0);
+    for coord in chunks.into_iter().take(3) {
+        let block = block_around(&g, coord);
+        let middle = &block[13];
+        let shaped: Vec<[i32; 3]> = (0..size)
+            .flat_map(|z| (0..size).flat_map(move |y| (0..size).map(move |x| [x, y, z])))
+            .filter(|p| {
+                middle
+                    .get(p[0] as usize, p[1] as usize, p[2] as usize)
+                    .is_shaped()
+            })
+            .collect();
+        let on_edge = |p: &&[i32; 3]| [p[0], p[2]].iter().any(|&c| c == 0 || c == size - 1);
+        let picks = [
+            shaped.first(),
+            shaped.iter().find(on_edge),
+            shaped.iter().find(|p| !on_edge(p)),
+        ];
+        let drawn = drawn_faces(&mesh_with_neighbours(&block));
+        for centre in picks.into_iter().flatten() {
+            let exposed = exposed_near(&block, *centre, 2);
+            let missing: Vec<_> = exposed.iter().filter(|f| !drawn.contains_key(f)).collect();
+            assert!(
+                missing.is_empty(),
+                "{coord:?} near {centre:?}: {} of {} exposed faces are holes, e.g. {:?}",
+                missing.len(),
+                exposed.len(),
+                &missing[..missing.len().min(4)]
+            );
+            let doubled: Vec<_> = exposed.iter().filter(|f| drawn[*f] > 1).collect();
+            assert!(
+                doubled.is_empty(),
+                "{coord:?} near {centre:?}: {} faces drawn twice, e.g. {:?}",
+                doubled.len(),
+                &doubled[..doubled.len().min(4)]
+            );
+            checked += exposed.len();
+            seams += usize::from(on_edge(&centre));
+        }
+    }
+    assert!(checked > 1000, "only {checked} faces checked");
+    assert!(seams > 0, "no ramp on a Chunk seam was checked");
+}
+
+#[test]
+fn declining_never_changes_the_mesh_of_a_ramp_chunk() {
+    let g = world();
+    let coord = *ramp_chunks(&g, 20).first().expect("a ramp near the origin");
+    let block = block_around(&g, coord);
+    assert!(block[13].may_contain_shaped());
+    let fast = mesh_with_neighbours(&block);
+    let refs = [12, 14, 10, 16, 4, 22].map(|i| Some(unlit(&block[i])));
+    let slow = greedy_mesh(&Neighborhood::new(unlit(&block[13]), refs), shapes());
+    assert_eq!(fast.positions, slow.positions);
+    assert_eq!(fast.indices, slow.indices);
+    assert_eq!(fast.light, slow.light);
+    assert!(fast.shaped_voxels > 0);
+}

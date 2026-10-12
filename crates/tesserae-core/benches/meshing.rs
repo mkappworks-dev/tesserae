@@ -39,6 +39,48 @@ fn worldgen() -> (Worldgen, i32, i32, i32) {
     (g, straddling, sky, deep)
 }
 
+/// The same World as [`worldgen`] with its ground left as cubes, so a row can
+/// separate what the generator itself costs from the shaped Voxels it now makes.
+fn unsmoothed() -> Worldgen {
+    Worldgen::new(
+        0x7e55_e2ae,
+        1.0,
+        WorldgenParams {
+            caves: None,
+            smoothing: None,
+            ..WorldgenParams::default()
+        },
+    )
+}
+
+/// The Chunk, in a fixed scan at the surface layer, with the most slope-smoothing
+/// stairs and slabs: the worst a default World hands the mesher.
+fn densest_ramp(g: &Worldgen, cy: i32) -> (i32, i32, i32) {
+    let mut best = (0, (0, cy, 0));
+    for cz in -8..8 {
+        for cx in -8..8 {
+            let n = g.chunk(cx, cy, cz).shaped_count();
+            if n > best.0 {
+                best = (n, (cx, cy, cz));
+            }
+        }
+    }
+    assert!(best.0 > 0, "the default World has no ramp in the scan");
+    best.1
+}
+
+/// A Chunk's six face neighbours, in the mesher's order.
+fn chunks_around(g: &Worldgen, (cx, cy, cz): (i32, i32, i32)) -> [Chunk; 6] {
+    [
+        g.chunk(cx - 1, cy, cz),
+        g.chunk(cx + 1, cy, cz),
+        g.chunk(cx, cy - 1, cz),
+        g.chunk(cx, cy + 1, cz),
+        g.chunk(cx, cy, cz - 1),
+        g.chunk(cx, cy, cz + 1),
+    ]
+}
+
 /// Chunk coordinates of the cave cases streaming now meets, found by scanning
 /// in a fixed order so a number means the same Chunk on every run.
 struct CaveFixtures {
@@ -53,7 +95,7 @@ struct CaveFixtures {
 }
 
 fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
-    let params = WorldgenParams::default();
+    let params = cave_params();
     let caves = params.caves.expect("the default World has caves");
     let cell = CHUNK_SIZE as f32;
     // The layer just under the soil line that the cave floor reaches.
@@ -105,8 +147,17 @@ fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
     }
 }
 
+/// The cave benches measure tunnels, so they keep terrain of cubes: they read
+/// the same Chunks as when caves were added.
+fn cave_params() -> WorldgenParams {
+    WorldgenParams {
+        smoothing: None,
+        ..WorldgenParams::default()
+    }
+}
+
 fn caved() -> Worldgen {
-    Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default())
+    Worldgen::new(0x7e55_e2ae, 1.0, cave_params())
 }
 
 /// Terrain whose top `n` Voxels - the exposed ones, one per column - are stairs
@@ -180,6 +231,12 @@ fn mesher(c: &mut Criterion) {
     group.bench_function("terrain_stairs_at_cap", |b| {
         b.iter(|| black_box(greedy_mesh(black_box(&stairs_nb), shapes())))
     });
+    // What the generator may hand the mesher at most: its half of the cap.
+    let budget = terrain_with_stairs(tesserae_core::MAX_SMOOTHED_PER_CHUNK);
+    let budget_nb = Neighborhood::isolated(LitChunk::new(&budget, &sky));
+    group.bench_function("terrain_stairs_at_budget", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&budget_nb), shapes())))
+    });
     let all = Chunk::filled(Voxel::shaped(
         testgen::STONE,
         SHAPE_STAIR,
@@ -251,6 +308,26 @@ fn lighting(c: &mut Criterion) {
     let stairs = terrain_with_stairs(MAX_SHAPED_PER_CHUNK);
     group.bench_function("straddling_shaped", |b| {
         b.iter(|| black_box(light_chunk(black_box(&stairs), black_box(border), shapes())))
+    });
+
+    // The same Chunk with the ground left as cubes, and the densest ramp the
+    // default World makes, so the input change and the code change can be read
+    // apart. Both arrive against open sky above, as `straddling` does.
+    let bare = unsmoothed();
+    let bare_center = bare.chunk(0, straddling, 0);
+    group.bench_function("straddling_unsmoothed", |b| {
+        b.iter(|| {
+            black_box(light_chunk(
+                black_box(&bare_center),
+                black_box(border),
+                shapes(),
+            ))
+        })
+    });
+    let ramp_at = densest_ramp(&g, straddling);
+    let ramp = g.chunk(ramp_at.0, ramp_at.1, ramp_at.2);
+    group.bench_function("ramp_densest", |b| {
+        b.iter(|| black_box(light_chunk(black_box(&ramp), black_box(border), shapes())))
     });
 
     // What a cave costs the relight stage. A deep Chunk arrives against
@@ -346,6 +423,38 @@ fn streamed_mesher(c: &mut Criterion) {
         b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs), shapes())))
     });
 
+    // The same Chunk with the ground left as cubes, and the densest ramp.
+    let bare = unsmoothed();
+    let bare_center = bare.chunk(0, straddling, 0);
+    let bare_around = chunks_around(&bare, (0, straddling, 0));
+    let bare_refs: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&bare_around[i], &sky)));
+    let lit_bare = LitChunk::new(&bare_center, &sky);
+    group.bench_function("straddling_unsmoothed", |b| {
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_bare),
+                black_box(bare_refs),
+                shapes(),
+            ))
+        })
+    });
+    let ramp_at = densest_ramp(&g, straddling);
+    let ramp = g.chunk(ramp_at.0, ramp_at.1, ramp_at.2);
+    let ramp_around = chunks_around(&g, ramp_at);
+    let ramp_refs: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&ramp_around[i], &sky)));
+    let lit_ramp = LitChunk::new(&ramp, &sky);
+    group.bench_function("ramp_densest", |b| {
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_ramp),
+                black_box(ramp_refs),
+                shapes(),
+            ))
+        })
+    });
+
     // A tunnel through rock, lit as an enclosed one is (dark), and a mouth lit
     // by the sky. The deep Chunk was the 6 ns `declined_enclosed` case before.
     // From here on the World has its tunnels.
@@ -435,6 +544,16 @@ fn generation(c: &mut Criterion) {
 
     group.bench_function("straddling", |b| {
         b.iter(|| black_box(g.chunk(black_box(0), straddling, 0)))
+    });
+    // Without the smoothing pass and its border of surface heights: what
+    // `straddling` was before ramps, so the pass's own cost is the difference.
+    let bare = unsmoothed();
+    group.bench_function("straddling_unsmoothed", |b| {
+        b.iter(|| black_box(bare.chunk(black_box(0), straddling, 0)))
+    });
+    let (rx, ry, rz) = densest_ramp(&g, straddling);
+    group.bench_function("ramp_densest", |b| {
+        b.iter(|| black_box(g.chunk(black_box(rx), ry, rz)))
     });
     // Both early-outs: most Chunks in a streamed 3D ring are one of these.
     group.bench_function("early_out_air", |b| {

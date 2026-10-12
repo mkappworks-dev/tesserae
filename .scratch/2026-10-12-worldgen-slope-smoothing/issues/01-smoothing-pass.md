@@ -1,6 +1,6 @@
 # Place stairs and slabs where the ground steps one Voxel
 
-Status: ready-for-agent
+Status: done
 
 Spec: the rule, decisions 1 to 4 and 6.
 
@@ -43,3 +43,19 @@ Spec: the rule, decisions 1 to 4 and 6.
 - `terrain_output_is_pinned` passes; `testgen` is not edited.
 
 ## Comments
+
+Built as specified, with two corrections from review: `axis_m` computes a
+Chunk-edge position from the Chunk that owns it, exactly as that Chunk does
+(`c * size * voxel_size + l * voxel_size`), because the other spelling differs
+in the last bit at Voxel sizes that are not a power of two and a stair on an
+edge is decided about a column in the next Chunk
+(`two_chunks_agree_on_a_ramp_at_a_voxel_size_that_is_not_a_power_of_two`, at
+0.3 m); and the surface border is sampled only when smoothing runs, so
+`smoothing: None` costs nothing.
+
+- The turn mapping is checked against the built `ShapeTable`. Swapping two
+  turns in `CARDINALS` makes `smoothing_stairs_face_the_step_they_climb` fail.
+- A cave suppresses ramps (`a_ramp_is_never_cut_by_a_chunk_edge_or_floating_over_a_cave`
+  counts stairs the caved World lacks and the cave-free one has).
+- Every stair climbs exactly one one-Voxel step: a cube beside it at its level
+  with no cube above, counted over the sweep.

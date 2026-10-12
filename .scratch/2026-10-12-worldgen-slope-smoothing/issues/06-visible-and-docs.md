@@ -1,6 +1,6 @@
 # Show it, and say what it is
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02, 03
 
 ## What to build
@@ -26,3 +26,10 @@ Blocked by: 01, 02, 03
 - `npm run fmt` and `cargo fmt --all` have been run.
 
 ## Comments
+
+Captured with `TESSERAE_SCREENSHOT_OFFSCREEN=1` (the screen was in use). Same
+camera, smoothing on against `TESSERAE_SMOOTHING=0`: every terrace on the hills
+gains a half-height tread, the cave mouth is unchanged, the dev gallery is
+unchanged, and there are no dark seams along the risers or missing faces. The
+two images are in the session, not in the repo. `CONTEXT.md` gains nothing:
+the code calls the step "a rise" and the glossary does not need a term for it.

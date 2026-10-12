@@ -1,6 +1,6 @@
 # Light and occlusion are right on smoothed terrain
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec invariant 5. This is the first generated input with shaped Voxels and
@@ -29,3 +29,16 @@ caves together, so the ride-along tests are not enough to trust.
 - No existing light or meshing test is weakened.
 
 ## Comments
+
+- `a_ramp_on_open_ground_agrees_between_solvers_and_casts_no_shadow`: the ramp
+  placed Voxel by Voxel agrees with the bulk solve and with the cube terrain's
+  light exactly, and so does removing it again.
+- `a_ramp_beside_a_tunnel_mouth_agrees_between_solvers`, with sky dimming into
+  the tunnel.
+- `no_exposed_face_of_generated_ramps_is_missing_or_drawn_twice`
+  (tests/meshing.rs): sub-cell ground truth round shaped Voxels of real Chunks,
+  including ones on a Chunk seam, against the neighbours' real Voxels.
+- `declining_never_changes_the_mesh_of_a_ramp_chunk`.
+- Not mutation-tested: the hole check and the two light tests were not shown
+  failing against a deliberately broken mesher or solver. The existing random
+  scene test and the light agreement tests they extend were.

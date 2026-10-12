@@ -123,9 +123,8 @@ half).
 ### 5. The cap: structural, and a budget below it
 
 `MAX_SHAPED_PER_CHUNK` stays **1024**. Placing at most one Voxel per column
-bounds the pass at `CHUNK_SIZE^2` = 1024, which equals the cap exactly. That is
-true today and is a coincidence, so a `const` assertion ties them: retuning
-either fails the build.
+bounds the pass at `CHUNK_SIZE^2` = 1024, which happens to equal the cap
+exactly.
 
 Equal to the cap is not good enough. At the cap a player can place nothing in the
 Chunk (every Place is `TooManyShaped`), and a 45-degree ramp, which a Mod can
@@ -199,27 +198,19 @@ on one binary, as the caves branch did.
 
 ## Performance
 
-Baselines were saved before any code: `cargo bench -p tesserae-core --
---save-baseline before` on `f232c4e`, Apple M5, release, 2026-10-12. After:
-`cargo bench -p tesserae-core -- --baseline before`. Rows that change because
-their *input* is now smoothed terrain, rather than because code got slower, are
-labelled as such in the PR; to separate the two, ticket 04 adds
+The first `--save-baseline` run was taken while three sessions were
+benchmarking and compiling on one machine (load average above 50) and was
+discarded. The baseline is `main` (`f232c4e`) built in a separate worktree, and
+the numbers that go in the PR come from running both bench binaries back to back
+on a quiet machine, with the load average stated beside them. Rows that change
+because their *input* is now smoothed terrain, rather than because code got
+slower, are labelled as such; to separate the two, ticket 04 adds
 `worldgen/straddling_unsmoothed` (the generator's own cost) next to the existing
 `straddling` (now with the pass), and `mesh_chunk`/`light_chunk` rows for both
 inputs. The streaming worst tick is re-measured (ticket 05) with
 `scripts/frame-runs` against the 15.6 ms a tick has at 64 Hz.
 
-Expected, in the order they are likely to bite:
-
-- `worldgen/straddling`: +13% noise for the border, plus the pass. Everything
-  else in the column loop is unchanged.
-- `mesh_chunk/straddling`: pass 2 runs now, so the palette gate that made it
-  free on terrain no longer does. About 170 ns a stair.
-- `light_chunk/*` on a surface Chunk: the `may_contain_shaped` gates now open, so
-  the open-sky shortcut is declined for the Chunk **below** a shaped Chunk, and
-  `seed_from_border` reads neighbour Voxels. The shortcut only matters for a
-  Chunk of open sky, which does not have a stair at its floor except the one
-  Chunk above the surface.
+What was expected is in the Outcome below, next to what was measured.
 
 ## Known loose ends, declared rather than discovered
 
@@ -244,3 +235,42 @@ screenshot from the capture is taken and shown); `./scripts/cargo-ci` passes;
 before/after numbers in the PR, including `worldgen/straddling` and the
 streaming worst tick; the cap sweep is a test; `terrain_output_is_pinned`
 passes untouched.
+
+## Outcome
+
+Built as decided, with these corrections, recorded where they happened.
+
+- **A Chunk edge is computed from the Chunk that owns it** (`axis_m`), after
+  review: the other spelling differs in the last bit at Voxel sizes that are not
+  a power of two, and a stair on an edge is decided about a column in the next
+  Chunk. Pinned at 0.3 m.
+- **The surface border is sampled only when smoothing runs**, so `smoothing:
+  None` is free.
+- **The const assertion tying the cap to the column count was dropped**: the
+  enforced budget already bounds the pass below the cap.
+- **The first baseline was discarded**: three sessions were benchmarking at once.
+  The numbers are `main` built in its own worktree against this branch, run
+  alternately.
+
+What it costs (ticket 04, 05), at 1 m Voxels, per surface Chunk:
+
+| Stage    | Before   | After    | Why                                       |
+| -------- | -------- | -------- | ----------------------------------------- |
+| Generate | 112 us   | 178 us   | the pass, and palette growth              |
+| Light    | 98 us    | 176 us   | the shaped flood, which any ramp selects  |
+| Mesh     | 381 us   | 411 us   | pass 2 at ~170 ns a stair                 |
+
+The densest Chunk of a 400-Chunk sweep holds 454 shaped Voxels (budget 512, cap
+1024) and takes 457 us to mesh. The streaming budget did not move (worst tick
+1.6 to 1.8 ms at load 20; mesh upload 11 to 16 us).
+
+Loose ends, declared rather than discovered:
+
+- **The shaped light flood is the cost to attack**, not the generator: it nearly
+  doubles relight for every surface Chunk with a ramp. Only a Chunk that has
+  one pays.
+- **A World with Voxels under `min_rise_m` is not smoothed**, by design, and the
+  threshold is a placeholder for the controller's step height.
+- **The Material is always Grass**, and there are no corner stairs.
+- **Not mutation-tested**: the real-terrain hole check and the two ramp light
+  tests were not shown failing against a deliberately broken mesher or solver.

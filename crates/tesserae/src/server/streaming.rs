@@ -139,6 +139,16 @@ pub struct StageCounts {
 /// upload either way. A cost ten times higher is when these want to come down or
 /// become a worker-time window.
 ///
+/// Slope smoothing put stairs and slabs on the surface Chunks, which is the
+/// first time terrain pays for the shaped paths: about +65 us to generate
+/// (112 -> 178), +10-20% to mesh and about +80-100% to light (the shaped flood
+/// is the slower one), per surface Chunk, and 11 -> 16 us a mesh upload. Added
+/// to the worst case above that is roughly 116 ms of work or 39 ms over three
+/// workers, 1.4x the window and nowhere near 10x. Nine-run A/B with
+/// `TESSERAE_SMOOTHING=0` against the default, on a machine at load 20 (so the
+/// absolute figures are worse than the table), moved the worst tick from 1.6 to
+/// 1.8 ms and nothing else beyond noise. Defaults unchanged.
+///
 /// `wait_for_settled_light` holds a mesh back until its neighbourhood has no
 /// light solve pending. Off, a Chunk shows 0.2-0.4 s sooner but is built 2.2
 /// times as often (2427 meshes against 1111), each one a delivery and an upload.
