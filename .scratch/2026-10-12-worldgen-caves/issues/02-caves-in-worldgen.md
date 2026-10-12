@@ -1,6 +1,6 @@
 # Carve tunnels in `Worldgen::chunk`, keeping the deep early-out
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decisions 1 to 5.
@@ -41,3 +41,29 @@ Spec decisions 1 to 5.
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+**What was built.** `CaveParams` (re-exported at the crate root),
+`WorldgenParams::caves: Option<CaveParams>` defaulting on, and a private
+`CaveField`. `Worldgen::chunk` has the three layers of the spec: the floor and
+sky answers as before; a deep Chunk is `Chunk::filled(STONE)` carved in the
+8-Voxel sub-blocks the range test cannot exclude, so a Chunk that passes the
+test and carves nothing stays `uniform()`; a surface Chunk computes its 1024
+column heights first and clamps the test to the tallest, because nothing above
+it is solid.
+
+**Tests.** The terrain tests run on a `terrain()` generator with caves off and
+are otherwise unchanged. New: caves only ever remove Voxels (the structural
+reason nothing is solid above the band), the slow every-Voxel reference equals
+`chunk()` at 1.0 and 0.5 m Voxels over a 96 m square sweep, the same metre
+points are carved at 1.0 and 0.5 m, a cave takes the same share of the ground at
+1.0 and 0.25 m, nothing below the floor is carved, a deep world with sparser
+tunnels keeps more Chunks uniform than it carves, at most one Grass per column
+and it is on top, and a mouth exists with Dirt and Stone in its walls.
+
+**Decision: a mouth removes the Grass cap.** The "exactly one" test now runs on
+the caveless generator, and the caved one asserts "at most one, and highest".
+
+**Measured, and the spec corrected for it.** The first prototype numbers said
+82% of deep Chunks stayed uniform; that counted layers under the floor. Per
+layer in the band the range test keeps 27% (64 m features) to 76% (128 m)
+uniform, so the floor is the lever and the spec says so.

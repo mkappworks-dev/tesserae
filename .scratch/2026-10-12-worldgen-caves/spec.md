@@ -85,19 +85,33 @@ writing it. They are why the decisions below are what they are.
   lattice cell value noise is multilinear in three smoothstepped weights, and a
   multilinear function on a box takes its extremes at the corners of the box. So
   the exact range over a box is eight evaluations of the cell's own corners at
-  the box's weights. That bound brought the average deep Chunk that cannot
-  carve from 30 us to 1.4 us, and the answers (471 uniform-stone Chunks) were
-  identical, because the bound only decides cost.
-- **At the default, 18% of deep Chunks hold a cave** (105 of 576 below the soil
-  line) and the other 82% stay uniform stone. The carved Chunks cost about 166
-  us to generate, 49 us to light against dark neighbours and 408 us to mesh -
-  about 0.6 ms each, so a ring's worth is on the order of 100 ms of worker time
-  once, not per tick.
+  the box's weights. Averaged over every uniform-stone Chunk of the sweep
+  (mostly trivially uniform, below the floor) that took 30 us to 1.4 us, and the
+  Chunks produced were identical, because the bound only decides cost. The
+  per-layer figures below are the honest ones.
+- **The depth floor does most of the early-out's work; the range test is the
+  second line, and a thinner one than first measured.** A first run counted 105
+  of 576 "deep" Chunks as carved (18%), but three of the four layers counted
+  were below the floor and trivially uniform. The honest figure is per layer
+  inside the band: at the default (64 m features, floor -24) the one deep layer
+  that is in the band has 186 of 256 Chunks carved (73%) and 70 uniform; at 96 m
+  features 40% are carved; at 128 m, 24%. So tunnels this size are close to
+  everywhere in the band, the range test keeps 27% to 76% of it uniform
+  depending on spacing, and **a deep floor is the lever that keeps a ring
+  uniform**. A deep floor of -120 puts four layers in the band instead of one.
+- **What a Chunk costs by outcome**, release, 1 m Voxels: a carved one takes
+  200-330 us to generate; the in-band uniform ones average 6-35 us, a mix of
+  ruled out by the range test and passed it but carved nothing; over a layer the
+  sub-block culling is 390 us a Chunk against 640 us for sampling every Voxel,
+  a modest 1.65x. Carved Chunks cost about 50 us to light against dark
+  neighbours and 408 us to mesh. A second culling level over octants was tried
+  and moved nothing (under 10%): what a false positive costs is the Voxels
+  sampled in sub-blocks the bound is too loose to exclude, not the bound.
 - **Tunnels, not blobs.** Two independent fields that are both near their
   midline cross in a winding tube; one field above a threshold is a blob. A
-  tube is also rare in volume, which is what lets a bound rule most boxes out.
-  At `feature_size_m = 64`, `radius_m = 3` about 4.6% of the ground in the band
-  is carved and about 4% of surface columns have a mouth.
+  tube is thin, so little of the volume is carved even when most Chunks hold
+  some: at `feature_size_m = 64`, `radius_m = 3` about 4.6% of the ground in the
+  band is carved and about 4% of surface columns have a mouth.
 
 ## Decisions
 
@@ -144,8 +158,11 @@ Voxel; only the cost differs, and a test builds the slow reference and compares.
    fire for it.
 
 This is the "coarse per-Chunk test" the brief listed, made exact instead of
-sampled, plus a depth floor. The third option (give up the early-out and pay)
-is not needed: the numbers above say 82% of deep Chunks stay uniform.
+sampled, plus a depth floor. The third option (give up the early-out and pay) is
+paid for one layer of Chunks and not for the ring: at the default floor the
+Chunks a ring holds below the soil line are one layer in the band and the rest
+under it, and a layer in the band costs about 0.3-0.6 ms per carved Chunk across
+the three stages, a once-per-load cost on workers.
 
 ### 3. Caves breach the surface
 

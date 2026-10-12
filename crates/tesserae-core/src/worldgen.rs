@@ -10,7 +10,7 @@
 //! feeds the benches a fixed surface and makes no World.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
-use crate::noise::fbm2;
+use crate::noise::{fbm2, fbm3, fbm3_range};
 use crate::voxel::{MaterialId, Voxel};
 
 /// Placeholder Materials, until a Mod declares the table in build-order step 7.
@@ -44,6 +44,36 @@ pub struct WorldgenParams {
     /// sixteen at 0.25m, and both are four metres of dirt.
     pub soil_depth_m: f32,
     pub octaves: u32,
+    /// `None` is a World without caves.
+    pub caves: Option<CaveParams>,
+}
+
+/// Tunnels carved out of solid ground. Plain `Copy` data like the rest of
+/// [`WorldgenParams`]: a Mod chooses numbers, generation stays native.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct CaveParams {
+    /// The period of the lowest octave of the field the tunnels follow, in
+    /// metres: roughly how far apart two tunnels run.
+    pub feature_size_m: f32,
+    /// Roughly how wide a tunnel is, as a radius in metres. Approximate by
+    /// construction (see [`CaveField`]); the physical size does not change with
+    /// Voxel size.
+    pub radius_m: f32,
+    /// No cave below this height. Everything under it is the uniform rock the
+    /// deep early-out answers for without sampling anything.
+    pub floor_m: f32,
+    pub octaves: u32,
+}
+
+impl Default for CaveParams {
+    fn default() -> Self {
+        CaveParams {
+            feature_size_m: 64.0,
+            radius_m: 3.0,
+            floor_m: -24.0,
+            octaves: 2,
+        }
+    }
 }
 
 impl Default for WorldgenParams {
@@ -54,9 +84,88 @@ impl Default for WorldgenParams {
             feature_size_m: 96.0,
             soil_depth_m: 3.0,
             octaves: 5,
+            caves: Some(CaveParams::default()),
         }
     }
 }
+
+/// Converts a tunnel radius into a window on the field. Value noise changes by
+/// about this much per lattice cell, so `|field - 0.5| < GRADIENT * r / L` is a
+/// slab roughly `r` metres thick at a feature size `L`. A calibration and not a
+/// derivation: the one place a tunnel's width is approximate.
+const GRADIENT: f32 = 0.8;
+
+/// A tunnel is where two independent fields are both near their midline: each
+/// alone is a slab, and two slabs cross in a winding tube. A tube is thin, so
+/// [`CaveField::may_carve`] can often prove a box holds none of it.
+///
+/// Every position here is in metres and is the Voxel's lower corner, as the
+/// surface is sampled, so the same point gets the same answer at any Voxel size.
+#[derive(Clone, Copy, Debug)]
+struct CaveField {
+    seeds: [u32; 2],
+    inv_feature_size: f32,
+    /// Half the width of the window on the field, in field units.
+    half_width: f32,
+    octaves: u32,
+    floor_m: f32,
+}
+
+impl CaveField {
+    fn new(seed: u32, p: CaveParams) -> Self {
+        debug_assert!(p.feature_size_m > 0.0, "caves have a size");
+        CaveField {
+            // Far from the terrain octaves' `seed + 0..octaves`, so the fields
+            // are not correlated with the surface.
+            seeds: [
+                seed.wrapping_add(0x0ca5_e001),
+                seed.wrapping_add(0x0ca5_e101),
+            ],
+            inv_feature_size: 1.0 / p.feature_size_m,
+            half_width: GRADIENT * p.radius_m / p.feature_size_m,
+            octaves: p.octaves,
+            floor_m: p.floor_m,
+        }
+    }
+
+    fn carves(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
+        if y_m < self.floor_m {
+            return false;
+        }
+        let k = self.inv_feature_size;
+        self.seeds.iter().all(|&s| {
+            (fbm3(x_m * k, y_m * k, z_m * k, s, self.octaves) - 0.5).abs() < self.half_width
+        })
+    }
+
+    /// Whether anything in the box `lo..=hi` (metres) could be carved. `false`
+    /// is a proof, and the generator relies on it: it skips the box and gets
+    /// what sampling every point would have. `true` only means it was not ruled
+    /// out.
+    fn may_carve(&self, lo: [f32; 3], hi: [f32; 3]) -> bool {
+        if hi[1] < self.floor_m {
+            return false;
+        }
+        let k = self.inv_feature_size;
+        self.seeds.iter().all(|&s| {
+            let (min, max) = fbm3_range(lo.map(|v| v * k), hi.map(|v| v * k), s, self.octaves);
+            // The window is |field - 0.5| < half_width; the nearest the field
+            // gets to the midline anywhere in the box.
+            let nearest = if min <= 0.5 && 0.5 <= max {
+                0.0
+            } else {
+                (min - 0.5).abs().min((max - 0.5).abs())
+            };
+            nearest < self.half_width
+        })
+    }
+}
+
+/// Voxels per side of the sub-blocks a Chunk is culled in. An implementation
+/// detail with no physical meaning: it only decides how finely a box is ruled
+/// out, never what comes out.
+const BLOCK: usize = 8;
+const BLOCKS: usize = CHUNK_SIZE / BLOCK;
 
 /// One World's generator: a seed, a Voxel size and the parameters a Mod chose.
 #[derive(Clone, Debug)]
@@ -69,17 +178,20 @@ pub struct Worldgen {
     seed: u32,
     /// Hoisted out of the inner loop: `chunk` samples this per column.
     inv_feature_size: f32,
+    caves: Option<CaveField>,
 }
 
 impl Worldgen {
     pub fn new(seed: u64, voxel_size: f32, params: WorldgenParams) -> Self {
         debug_assert!(voxel_size > 0.0, "a Voxel has an edge length");
         debug_assert!(params.feature_size_m > 0.0, "features have a size");
+        let folded = (seed ^ (seed >> 32)) as u32;
         Worldgen {
             voxel_size,
             params,
-            seed: (seed ^ (seed >> 32)) as u32,
+            seed: folded,
             inv_feature_size: 1.0 / params.feature_size_m,
+            caves: params.caves.map(|p| CaveField::new(folded, p)),
         }
     }
 
@@ -102,6 +214,10 @@ impl Worldgen {
     /// metres. Sound because [`fbm2`] is normalised to `[0, 1)`; the two
     /// early-outs in [`Worldgen::chunk`] and the Server's vertical streaming
     /// extent are both derived from it.
+    ///
+    /// Caves do not move it: they only turn solid Voxels into air, so nothing
+    /// above the band is ever solid, which `streaming::relight`'s open-sky
+    /// boundary relies on.
     pub fn surface_bounds_m(&self) -> (f32, f32) {
         (
             self.params.sea_level_m,
@@ -117,6 +233,12 @@ impl Worldgen {
         // The metre heights of this Chunk's bottom and top Voxels.
         let floor_m = (cy * size) as f32 * self.voxel_size;
         let ceiling_m = floor_m + (CHUNK_SIZE - 1) as f32 * self.voxel_size;
+        let reach_m = (CHUNK_SIZE - 1) as f32 * self.voxel_size;
+        let origin_m = [
+            (cx * size) as f32 * self.voxel_size,
+            floor_m,
+            (cz * size) as f32 * self.voxel_size,
+        ];
 
         // Most Chunks in a streamed ring answer here without sampling noise at
         // all, which is what makes a vertical extent affordable rather than a
@@ -125,15 +247,52 @@ impl Worldgen {
             return Chunk::air();
         }
         if ceiling_m < lowest - self.params.soil_depth_m {
-            return Chunk::filled(Voxel::cube(STONE));
+            let mut chunk = Chunk::filled(Voxel::cube(STONE));
+            // A Chunk that only *might* hold a tunnel stays `filled` unless a
+            // Voxel is actually carved, so the light and mesh fast paths that
+            // key off `uniform()` still fire for it.
+            if let Some(caves) = &self.caves
+                && caves.may_carve(
+                    origin_m,
+                    [origin_m[0] + reach_m, ceiling_m, origin_m[2] + reach_m],
+                )
+            {
+                self.carve(&mut chunk, caves, origin_m, ceiling_m);
+            }
+            return chunk;
         }
+
+        let mut surface_m = [0.0f32; CHUNK_SIZE * CHUNK_SIZE];
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                surface_m[z * CHUNK_SIZE + x] = self.surface_height_m(
+                    origin_m[0] + x as f32 * self.voxel_size,
+                    origin_m[2] + z as f32 * self.voxel_size,
+                );
+            }
+        }
+        // Nothing above the highest column of this Chunk is solid, so nothing
+        // there is worth carving.
+        let top_m = surface_m.iter().copied().fold(f32::MIN, f32::max);
+        let reachable = self
+            .caves
+            .as_ref()
+            .filter(|caves| {
+                let ceiling_m = ceiling_m.min(top_m);
+                floor_m <= ceiling_m
+                    && caves.may_carve(
+                        origin_m,
+                        [origin_m[0] + reach_m, ceiling_m, origin_m[2] + reach_m],
+                    )
+            })
+            .map(|caves| (caves, self.reachable_blocks(caves, origin_m, top_m)));
 
         let mut chunk = Chunk::air();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                let x_m = (cx * size + x as i32) as f32 * self.voxel_size;
-                let z_m = (cz * size + z as i32) as f32 * self.voxel_size;
-                let surface_m = self.surface_height_m(x_m, z_m);
+                let x_m = origin_m[0] + x as f32 * self.voxel_size;
+                let z_m = origin_m[2] + z as f32 * self.voxel_size;
+                let surface_m = surface_m[z * CHUNK_SIZE + x];
 
                 for y in 0..CHUNK_SIZE {
                     let y_m = floor_m + y as f32 * self.voxel_size;
@@ -141,6 +300,14 @@ impl Worldgen {
                     if below_m < 0.0 {
                         // y_m only rises, so the rest of the column is sky.
                         break;
+                    }
+                    // A cave carves through the Grass cap like anything else,
+                    // which is what a mouth is.
+                    if let Some((caves, blocks)) = &reachable
+                        && blocks[block_of(x, y, z)]
+                        && caves.carves(x_m, y_m, z_m)
+                    {
+                        continue;
                     }
                     let material = if below_m < self.voxel_size {
                         GRASS
@@ -155,6 +322,68 @@ impl Worldgen {
         }
         chunk
     }
+
+    /// For each sub-block of the Chunk whose lowest Voxel is at `origin_m`,
+    /// whether a tunnel could be inside its solid part, which ends at `top_m`.
+    ///
+    /// One level. A second, over octants, was tried and moved the cost of a
+    /// Chunk that passes the whole-Chunk test and carves nothing by under 10%:
+    /// that cost is the Voxels sampled in sub-blocks the bound is too loose to
+    /// rule out, not the bound.
+    fn reachable_blocks(
+        &self,
+        caves: &CaveField,
+        origin_m: [f32; 3],
+        top_m: f32,
+    ) -> [bool; BLOCKS * BLOCKS * BLOCKS] {
+        let step_m = (BLOCK as f32) * self.voxel_size;
+        let reach_m = (BLOCK - 1) as f32 * self.voxel_size;
+        let mut reachable = [false; BLOCKS * BLOCKS * BLOCKS];
+        for bz in 0..BLOCKS {
+            for by in 0..BLOCKS {
+                for bx in 0..BLOCKS {
+                    let lo = [
+                        origin_m[0] + bx as f32 * step_m,
+                        origin_m[1] + by as f32 * step_m,
+                        origin_m[2] + bz as f32 * step_m,
+                    ];
+                    let hi = [
+                        lo[0] + reach_m,
+                        (lo[1] + reach_m).min(top_m),
+                        lo[2] + reach_m,
+                    ];
+                    reachable[(bz * BLOCKS + by) * BLOCKS + bx] =
+                        lo[1] <= hi[1] && caves.may_carve(lo, hi);
+                }
+            }
+        }
+        reachable
+    }
+
+    /// Carves a Chunk that is solid rock throughout, visiting only the
+    /// sub-blocks a tunnel can reach.
+    fn carve(&self, chunk: &mut Chunk, caves: &CaveField, origin_m: [f32; 3], top_m: f32) {
+        let reachable = self.reachable_blocks(caves, origin_m, top_m);
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    if reachable[block_of(x, y, z)]
+                        && caves.carves(
+                            origin_m[0] + x as f32 * self.voxel_size,
+                            origin_m[1] + y as f32 * self.voxel_size,
+                            origin_m[2] + z as f32 * self.voxel_size,
+                        )
+                    {
+                        chunk.set(x, y, z, Voxel::AIR);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn block_of(x: usize, y: usize, z: usize) -> usize {
+    ((z / BLOCK) * BLOCKS + y / BLOCK) * BLOCKS + x / BLOCK
 }
 
 #[cfg(test)]
@@ -163,7 +392,20 @@ mod tests {
 
     const SEED: u64 = 0x7e55_e2ae;
 
-    fn generator(voxel_size: f32) -> Worldgen {
+    /// The terrain tests are about the surface, so they run without caves; the
+    /// ones about caves say `caved`.
+    fn terrain(voxel_size: f32) -> Worldgen {
+        Worldgen::new(
+            SEED,
+            voxel_size,
+            WorldgenParams {
+                caves: None,
+                ..WorldgenParams::default()
+            },
+        )
+    }
+
+    fn caved(voxel_size: f32) -> Worldgen {
         Worldgen::new(SEED, voxel_size, WorldgenParams::default())
     }
 
@@ -193,8 +435,8 @@ mod tests {
     fn surface_is_the_same_metre_height_at_any_voxel_size() {
         // The test ADR-0003 exists for. If a frequency, a sea level or a relief
         // were ever retuned in Voxel units, this is what would catch it.
-        let coarse = generator(1.0);
-        let fine = generator(0.25);
+        let coarse = terrain(1.0);
+        let fine = terrain(0.25);
         for i in 0..200 {
             let (x_m, z_m) = (i as f32 * 3.7 - 300.0, i as f32 * -2.3 + 120.0);
             assert_eq!(
@@ -207,8 +449,8 @@ mod tests {
 
     #[test]
     fn the_generated_surface_lands_at_the_same_metre_height_at_any_voxel_size() {
-        let coarse = generator(1.0);
-        let fine = generator(0.5);
+        let coarse = terrain(1.0);
+        let fine = terrain(0.5);
         // Kept below half of CHUNK_SIZE so that doubling the Voxel index stays
         // inside Chunk (0, cy, 0) instead of crossing into its neighbour.
         for (x, z) in [(0, 0), (7, 3), (15, 15)] {
@@ -229,7 +471,7 @@ mod tests {
     fn soil_is_a_physical_depth_not_a_voxel_count() {
         let soil_m = WorldgenParams::default().soil_depth_m;
         for voxel_size in [1.0, 0.5, 0.25] {
-            let g = generator(voxel_size);
+            let g = terrain(voxel_size);
             let dirt = column(&g, 0, 0)
                 .iter()
                 .filter(|v| v.material() == DIRT)
@@ -246,7 +488,7 @@ mod tests {
 
     #[test]
     fn exactly_one_grass_voxel_caps_every_column() {
-        let g = generator(1.0);
+        let g = terrain(1.0);
         for (x, z) in [(0, 0), (5, 17), (31, 2), (12, 31)] {
             let c = column(&g, x, z);
             let grass: Vec<usize> = (0..c.len()).filter(|&y| c[y].material() == GRASS).collect();
@@ -261,17 +503,18 @@ mod tests {
     /// nothing downstream polices it. See `crate::shape::MAX_SHAPED_PER_CHUNK`.
     #[test]
     fn generation_places_no_shaped_voxels() {
-        let g = generator(1.0);
-        for cy in -1..5 {
-            for (cx, cz) in [(0, 0), (3, -2), (-5, 7), (11, 11)] {
-                assert_eq!(g.chunk(cx, cy, cz).shaped_count(), 0, "{cx} {cy} {cz}");
+        for g in [terrain(1.0), caved(1.0)] {
+            for cy in -1..5 {
+                for (cx, cz) in [(0, 0), (3, -2), (-5, 7), (11, 11)] {
+                    assert_eq!(g.chunk(cx, cy, cz).shaped_count(), 0, "{cx} {cy} {cz}");
+                }
             }
         }
     }
 
     #[test]
     fn generation_is_deterministic() {
-        let g = generator(1.0);
+        let g = caved(1.0);
         let (a, b) = (g.chunk(3, 0, -2), g.chunk(3, 1, -2));
         let (c, d) = (g.chunk(3, 0, -2), g.chunk(3, 1, -2));
         for y in 0..CHUNK_SIZE {
@@ -310,7 +553,7 @@ mod tests {
 
     #[test]
     fn both_early_outs_fire_and_a_straddling_chunk_takes_neither() {
-        let g = generator(1.0);
+        let g = terrain(1.0);
         let (lowest, highest) = g.surface_bounds_m();
         let cell = CHUNK_SIZE as f32;
 
@@ -334,12 +577,274 @@ mod tests {
 
     #[test]
     fn the_surface_never_leaves_the_bounds_the_early_outs_trust() {
-        let g = generator(1.0);
+        let g = terrain(1.0);
         let (lowest, highest) = g.surface_bounds_m();
         for i in 0..5000 {
             let (x_m, z_m) = (i as f32 * 13.7 - 2000.0, i as f32 * -7.1 + 900.0);
             let h = g.surface_height_m(x_m, z_m);
             assert!((lowest..highest).contains(&h), "{h}m at {x_m},{z_m}");
         }
+    }
+
+    /// Every Chunk of a sweep, as metres-anchored `(coord, with, without)`.
+    fn sweep(voxel_size: f32) -> Vec<(i32, i32, i32)> {
+        // Eight Chunks high from below the cave floor to past the surface band,
+        // over a square of columns, at any Voxel size.
+        let cell_m = CHUNK_SIZE as f32 * voxel_size;
+        let lo = (-40.0 / cell_m).floor() as i32;
+        let hi = (80.0 / cell_m).ceil() as i32;
+        let span = (96.0 / cell_m).ceil() as i32;
+        let mut coords = vec![];
+        for cx in -span / 2..span / 2 {
+            for cz in -span / 2..span / 2 {
+                for cy in lo..hi {
+                    coords.push((cx, cy, cz));
+                }
+            }
+        }
+        coords
+    }
+
+    #[test]
+    fn caves_only_ever_remove_voxels() {
+        // The structural reason nothing is solid above `surface_bounds_m().1`
+        // and the Server's open-sky boundary stays exact.
+        let (with, without) = (caved(1.0), terrain(1.0));
+        let mut carved = 0;
+        for (cx, cy, cz) in sweep(1.0) {
+            let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let (got, was) = (a.get(x, y, z), b.get(x, y, z));
+                        if got != was {
+                            assert!(
+                                got.is_air(),
+                                "{cx},{cy},{cz} {x},{y},{z}: {was:?} -> {got:?}"
+                            );
+                            carved += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(carved > 0, "no cave anywhere in the sweep");
+    }
+
+    /// The early-out rests on a bound being sound. This builds the Chunk the
+    /// slow way - every Voxel sampled, nothing ruled out - and compares, so no
+    /// layer of the culling can change an output.
+    fn slow(g: &Worldgen, cx: i32, cy: i32, cz: i32) -> Chunk {
+        let size = CHUNK_SIZE as i32;
+        let mut chunk = Chunk::air();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let x_m = (cx * size + x as i32) as f32 * g.voxel_size;
+                let z_m = (cz * size + z as i32) as f32 * g.voxel_size;
+                let surface_m = g.surface_height_m(x_m, z_m);
+                for y in 0..CHUNK_SIZE {
+                    let y_m = (cy * size + y as i32) as f32 * g.voxel_size;
+                    let below_m = surface_m - y_m;
+                    if below_m < 0.0 || g.caves.as_ref().is_some_and(|c| c.carves(x_m, y_m, z_m)) {
+                        continue;
+                    }
+                    let material = if below_m < g.voxel_size {
+                        GRASS
+                    } else if below_m < g.params.soil_depth_m {
+                        DIRT
+                    } else {
+                        STONE
+                    };
+                    chunk.set(x, y, z, Voxel::cube(material));
+                }
+            }
+        }
+        chunk
+    }
+
+    #[test]
+    fn ruling_a_box_out_never_changes_the_chunk() {
+        for voxel_size in [1.0, 0.5] {
+            let g = caved(voxel_size);
+            for (cx, cy, cz) in sweep(voxel_size) {
+                let (fast, reference) = (g.chunk(cx, cy, cz), slow(&g, cx, cy, cz));
+                for z in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            assert_eq!(
+                                fast.get(x, y, z),
+                                reference.get(x, y, z),
+                                "{voxel_size}m Voxels, {cx},{cy},{cz} at {x},{y},{z}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Which of the metre points `0..` (whole metres) are solid: the same
+    /// physical ground at any Voxel size, or the caves are tuned in Voxels.
+    fn solid_at(g: &Worldgen, x_m: i32, y_m: i32, z_m: i32) -> bool {
+        let size = CHUNK_SIZE as i32;
+        let index = |m: i32| (m as f32 / g.voxel_size) as i32;
+        let (x, y, z) = (index(x_m), index(y_m), index(z_m));
+        let chunk = g.chunk(x.div_euclid(size), y.div_euclid(size), z.div_euclid(size));
+        !chunk
+            .get(
+                x.rem_euclid(size) as usize,
+                y.rem_euclid(size) as usize,
+                z.rem_euclid(size) as usize,
+            )
+            .is_air()
+    }
+
+    #[test]
+    fn the_same_metre_point_is_carved_at_any_voxel_size() {
+        let (coarse, fine) = (caved(1.0), caved(0.5));
+        let (mut carved, mut checked) = (0, 0);
+        for i in 0..1500 {
+            let (x, z) = (i * 7 % 61 - 30, i * 13 % 67 - 33);
+            let y = -20 + (i * 5) % 70;
+            // Clear of the surface, where the Voxel size changes which Material
+            // the topmost Voxels are and so where the ground ends.
+            if (y as f32) > coarse.surface_height_m(x as f32, z as f32) - 2.0 {
+                continue;
+            }
+            checked += 1;
+            let (a, b) = (solid_at(&coarse, x, y, z), solid_at(&fine, x, y, z));
+            assert_eq!(a, b, "{x},{y},{z}");
+            carved += usize::from(!a);
+        }
+        assert!(carved > 0 && carved < checked, "{carved} of {checked}");
+    }
+
+    #[test]
+    fn a_tunnel_is_the_same_width_at_any_voxel_size() {
+        // The share of ground a cave takes is a physical quantity. Sampled on a
+        // 1 m grid it is the same set of points, so it is the same share; at
+        // 0.25 m Voxels a width tuned in Voxels would quarter it.
+        let share = |g: &Worldgen| {
+            let (mut under, mut air) = (0, 0);
+            for i in 0..3000 {
+                let (x, z) = (i * 7 % 83 - 41, i * 11 % 89 - 44);
+                let y = -20 + (i * 3) % 40;
+                under += 1;
+                air += usize::from(
+                    g.caves
+                        .as_ref()
+                        .unwrap()
+                        .carves(x as f32, y as f32, z as f32),
+                );
+            }
+            air as f32 / under as f32
+        };
+        let (a, b) = (share(&caved(1.0)), share(&caved(0.25)));
+        assert_eq!(a, b);
+        assert!((0.005..0.2).contains(&a), "{a} of the ground is cave");
+    }
+
+    #[test]
+    fn nothing_below_the_cave_floor_is_carved() {
+        let g = caved(1.0);
+        let floor = WorldgenParams::default().caves.unwrap().floor_m;
+        let cell = CHUNK_SIZE as f32;
+        let below = (floor / cell).floor() as i32 - 1;
+        for (cx, cz) in [(0, 0), (4, -3), (-7, 2)] {
+            assert_eq!(
+                g.chunk(cx, below, cz).uniform(),
+                Some(Voxel::cube(STONE)),
+                "{cx},{cz}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_range_test_keeps_deep_chunks_uniform_that_no_tunnel_crosses() {
+        // The floor does most of the early-out's work. Inside the band the
+        // whole-Chunk range test is what is left, and it must rule out Chunks
+        // the floor cannot: a bound that ruled nothing out would show here long
+        // before it showed up in a benchmark. Feature size is generous so the
+        // band is not simply full of tunnels.
+        let params = WorldgenParams {
+            caves: Some(CaveParams {
+                feature_size_m: 128.0,
+                floor_m: -120.0,
+                ..CaveParams::default()
+            }),
+            ..WorldgenParams::default()
+        };
+        let g = Worldgen::new(SEED, 1.0, params);
+        let (mut uniform, mut carved) = (0, 0);
+        for cx in -5..5 {
+            for cz in -5..5 {
+                for cy in -4..0 {
+                    match g.chunk(cx, cy, cz).uniform() {
+                        Some(v) => {
+                            assert_eq!(v, Voxel::cube(STONE));
+                            uniform += 1;
+                        }
+                        None => carved += 1,
+                    }
+                }
+            }
+        }
+        assert!(carved > 0, "no deep Chunk has a cave");
+        assert!(uniform > carved, "{uniform} uniform, {carved} carved");
+    }
+
+    #[test]
+    fn a_column_has_at_most_one_grass_voxel_and_it_is_on_top() {
+        // A cave mouth removes the cap, so "exactly one" holds only without
+        // caves (`exactly_one_grass_voxel_caps_every_column`).
+        let g = caved(1.0);
+        for i in 0..40 {
+            let (x, z) = ((i * 7) % CHUNK_SIZE, (i * 13) % CHUNK_SIZE);
+            let c = column(&g, x, z);
+            let grass: Vec<usize> = (0..c.len()).filter(|&y| c[y].material() == GRASS).collect();
+            assert!(grass.len() <= 1, "column {x},{z} has {grass:?}");
+            if let Some(&y) = grass.first() {
+                assert_eq!(Some(y), highest_solid(&c), "grass is not on top at {x},{z}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_mouth_exists_and_its_walls_show_dirt_and_stone() {
+        let (with, without) = (caved(1.0), terrain(1.0));
+        let (mut mouths, mut walls) = (0, std::collections::HashSet::new());
+        for (cx, cy, cz) in sweep(1.0) {
+            let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
+            for z in 0..CHUNK_SIZE {
+                for y in 1..CHUNK_SIZE - 1 {
+                    for x in 1..CHUNK_SIZE - 1 {
+                        if a.get(x, y, z).is_air() && !b.get(x, y, z).is_air() {
+                            mouths += usize::from(b.get(x, y, z).material() == GRASS);
+                            walls.insert(a.get(x - 1, y, z).material());
+                            walls.insert(a.get(x + 1, y, z).material());
+                            walls.insert(a.get(x, y - 1, z).material());
+                            walls.insert(a.get(x, y + 1, z).material());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(mouths > 0, "no cave breaches the surface");
+        assert!(walls.contains(&DIRT), "{walls:?}");
+        assert!(walls.contains(&STONE), "{walls:?}");
+    }
+
+    #[test]
+    fn a_world_without_caves_is_what_it_was() {
+        // `caves: None` costs one `Option` check and changes nothing else.
+        let g = terrain(1.0);
+        assert!(g.caves.is_none());
+        let cy = (g.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+        assert_eq!(g.chunk(0, cy, 0).uniform(), None);
+        assert_eq!(
+            g.chunk(0, (-24.0 / CHUNK_SIZE as f32).floor() as i32, 0)
+                .uniform(),
+            Some(Voxel::cube(STONE))
+        );
     }
 }
