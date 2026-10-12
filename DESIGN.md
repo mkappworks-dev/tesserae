@@ -330,7 +330,11 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    derived from one rotated 16³ grid per Shape: which faces a Voxel seals, the
    geometry pass 2 emits, collision, and volume. Occlusion and light are per
    face. The Server's edit path is live, with a ray as the Client's only intent,
-   and `collide.rs` has a metre-valued sweep and ray.
+   and `collide.rs` has a metre-valued sweep and ray. Glass, leaves and water
+   were added later, off the build order, as a `MaterialTable` that carries
+   emission, light dimming, occlusion and render class
+   ([ADR-0008](docs/adr/0008-materials-are-table-data.md)). See
+   `.scratch/2026-10-12-material-table-transparency/spec.md`.
 6. LOD mip chain out to 4km.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
@@ -365,8 +369,10 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   under the cap). Fence arms and collision taller than the cell need a Shape to
   look at its neighbours. Two partial Shapes that only jointly cover a face leak
   light through the seam. Material transparency (glass, water, leaves) is not a
-  Shape property. The Client's hotbar is a stopgap. The ray origin in an intent
-  is not checked against a player position, because there is no player entity.
+  Shape property, and is specified as a Material one in
+  `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is a
+  stopgap. The ray origin in an intent is not checked against a player position,
+  because there is no player entity.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

@@ -4,12 +4,17 @@ use std::sync::{Arc, OnceLock};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
-    SHAPE_STAIR, ShapeTable, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk, testgen,
+    SHAPE_STAIR, ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk,
+    testgen,
 };
 
+fn tables() -> &'static Tables {
+    static TABLES: OnceLock<Tables> = OnceLock::new();
+    TABLES.get_or_init(Tables::builtin)
+}
+
 fn shapes() -> &'static ShapeTable {
-    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
-    TABLE.get_or_init(ShapeTable::builtin)
+    &tables().shapes
 }
 
 /// Flat full sky, which is what `light_chunk` answers for open terrain and so
@@ -207,7 +212,7 @@ fn lighting(c: &mut Criterion) {
 
     let center = g.chunk(0, straddling, 0);
     group.bench_function("straddling", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&center), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&center), black_box(border), tables())))
     });
 
     // The same Chunk once its neighbours have light of their own, which is what
@@ -228,7 +233,7 @@ fn lighting(c: &mut Criterion) {
     let around: Vec<ChunkLight> = beside
         .iter()
         .map(|chunk| {
-            let mut lit = light_chunk(chunk, border, shapes());
+            let mut lit = light_chunk(chunk, border, tables());
             // A lantern's worth of block light, so the second channel floods too.
             lit.set(16, 16, 16, Light::new(MAX_LIGHT, MAX_LIGHT));
             lit
@@ -241,7 +246,7 @@ fn lighting(c: &mut Criterion) {
             black_box(light_chunk(
                 black_box(&center),
                 black_box(settled),
-                shapes(),
+                tables(),
             ))
         })
     });
@@ -250,7 +255,7 @@ fn lighting(c: &mut Criterion) {
     // terrain does not: the surface Chunk with a stair on top of every column.
     let stairs = terrain_with_stairs(MAX_SHAPED_PER_CHUNK);
     group.bench_function("straddling_shaped", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&stairs), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&stairs), black_box(border), tables())))
     });
 
     // What a cave costs the relight stage. A deep Chunk arrives against
@@ -282,24 +287,24 @@ fn lighting(c: &mut Criterion) {
             black_box(light_chunk(
                 black_box(&crossed),
                 black_box(crossed_border),
-                shapes(),
+                tables(),
             ))
         })
     });
 
     let mouth = g.chunk(cave.mouth.0, cave.mouth.1, cave.mouth.2);
     group.bench_function("cave_mouth", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&mouth), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&mouth), black_box(border), tables())))
     });
 
     let air = Chunk::air();
     group.bench_function("open_sky", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&air), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&air), black_box(border), tables())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     group.bench_function("opaque", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&solid), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&solid), black_box(border), tables())))
     });
 
     // An air Chunk beside a wall, so the sky arriving from above is no longer
@@ -316,7 +321,7 @@ fn lighting(c: &mut Criterion) {
     let mut partial = border;
     partial[tesserae_core::mesh::POS_Y] = Some(LitChunk::new(&air_above, &ragged));
     group.bench_function("flooded_air", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&air), black_box(partial), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&air), black_box(partial), tables())))
     });
 
     group.finish();
@@ -509,7 +514,7 @@ fn snapshot(c: &mut Criterion) {
     let air_above = Chunk::air();
     let mut border = [None; 6];
     border[tesserae_core::mesh::POS_Y] = Some(LitChunk::new(&air_above, &sky));
-    let light = light_chunk(&chunk, border, shapes());
+    let light = light_chunk(&chunk, border, tables());
 
     let chunks: Vec<Chunk> = vec![chunk.clone(); 7];
     let lights: Vec<ChunkLight> = vec![light.clone(); 7];

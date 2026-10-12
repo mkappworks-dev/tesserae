@@ -20,10 +20,10 @@ use bevy::prelude::*;
 use tesserae_core::collide::{VoxelVolume, raycast};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
-    MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, ShapeTable, Voxel, relight,
+    MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, ShapeTable, Tables, Voxel, relight,
 };
 
-use super::Shapes;
+use super::ContentTables;
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, LightLattice, VoxelCoord};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -148,7 +148,7 @@ fn apply_pending(
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
     mut rejected: MessageWriter<EditRejected>,
-    shapes: Res<Shapes>,
+    tables: Res<ContentTables>,
     world: Res<WorldSettings>,
 ) {
     let mut applied = 0;
@@ -157,13 +157,13 @@ fn apply_pending(
         let Some(mut p) = pending.0.pop_front() else {
             break;
         };
-        let outcome = resolve(&store, &shapes, &world, &p.intent).and_then(|(at, voxel)| {
+        let outcome = resolve(&store, &tables.shapes, &world, &p.intent).and_then(|(at, voxel)| {
             // The incremental relight and the bulk solve must not both write one
             // Chunk, so an edit waits for its Chunk's light to settle.
             if meshes.is_unlit(VoxelCoord::of(at).chunk) {
                 return Err(RejectReason::Busy);
             }
-            set_voxel(&mut store, &mut meshes, &shapes, at, voxel)
+            set_voxel(&mut store, &mut meshes, &tables, at, voxel)
         });
         match outcome {
             Ok(()) => applied += 1,
@@ -236,7 +236,7 @@ fn resolve(
 pub(in crate::server) fn set_voxel(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
-    shapes: &ShapeTable,
+    tables: &Tables,
     at: [i32; 3],
     voxel: Voxel,
 ) -> Result<(), RejectReason> {
@@ -246,7 +246,7 @@ pub(in crate::server) fn set_voxel(
     // Air is air whatever shape or orientation byte it carries.
     let voxel = if voxel.is_air() { Voxel::AIR } else { voxel };
     if !voxel.is_air() {
-        if !shapes.contains(voxel.shape()) {
+        if !tables.shapes.contains(voxel.shape()) {
             return Err(RejectReason::UnknownShape);
         }
         if Orientation::from_bits(voxel.orientation()).is_none() {
@@ -272,7 +272,7 @@ pub(in crate::server) fn set_voxel(
     let was = store.light_at(at);
     store.set_voxel(place, voxel);
     let mut lattice = LightLattice::new(store);
-    relight(&mut lattice, shapes, at, was);
+    relight(&mut lattice, tables, at, was);
     let lit = std::mem::take(&mut lattice.touched);
 
     meshes.edited(place.chunk);
@@ -338,7 +338,7 @@ mod tests {
     fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
         let mut app = App::new();
         app.insert_resource(WorldSettings::default())
-            .init_resource::<Shapes>()
+            .init_resource::<ContentTables>()
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
@@ -411,11 +411,11 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
-        let shapes = ShapeTable::builtin();
+        let tables = Tables::builtin();
         set_voxel(
             &mut store,
             &mut meshes,
-            &shapes,
+            &tables,
             [0, 0, 0],
             Voxel::new(STONE, 0, 13),
         )
@@ -426,7 +426,7 @@ mod tests {
             set_voxel(
                 &mut store,
                 &mut meshes,
-                &shapes,
+                &tables,
                 [1, 0, 0],
                 Voxel::new(STONE, 0, 99)
             ),
@@ -460,7 +460,7 @@ mod tests {
         set_voxel(
             &mut store,
             &mut meshes,
-            &ShapeTable::builtin(),
+            &Tables::builtin(),
             [last, 4, 4],
             Voxel::AIR,
         )
@@ -483,7 +483,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
             .insert_resource(WorldSettings::default())
-            .init_resource::<Shapes>()
+            .init_resource::<ContentTables>()
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
@@ -560,15 +560,16 @@ mod tests {
 
     #[test]
     fn a_place_into_an_unloaded_chunk_or_an_occupied_cell_is_rejected() {
-        let mut t = ShapeTable::builtin();
+        let mut t = Tables::builtin();
         let plate = t
+            .shapes
             .register(ShapeDef {
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
             })
             .unwrap();
         let mut app = app_with(&[(origin(), ground())]);
-        *app.world_mut().resource_mut::<Shapes>() = Shapes(t.into());
+        *app.world_mut().resource_mut::<ContentTables>() = ContentTables(t.into());
         // A plate lies in the air a ray passes through before striking the
         // ground: it has no collision, so the cell in front of the ground is
         // taken without the ray having noticed.
@@ -626,22 +627,22 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), full);
         let mut meshes = MeshState::default();
-        let shapes = ShapeTable::builtin();
+        let tables = Tables::builtin();
 
         // Free space still exists above the stairs; another stair is refused...
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 30, 0], stair()),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 30, 0], stair()),
             Err(RejectReason::TooManyShaped)
         );
         // ...a cube is not shaped and is fine...
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 31, 0], stone()),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 31, 0], stone()),
             Ok(())
         );
         // ...and replacing a stair with another is net zero.
         let swapped = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(POS_Y, 1));
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 8, 0], swapped),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 8, 0], swapped),
             Ok(())
         );
         assert_eq!(
@@ -650,11 +651,11 @@ mod tests {
         );
         // Breaking one makes room.
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [1, 8, 0], Voxel::AIR),
+            set_voxel(&mut store, &mut meshes, &tables, [1, 8, 0], Voxel::AIR),
             Ok(())
         );
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 30, 0], stair()),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 30, 0], stair()),
             Ok(())
         );
     }

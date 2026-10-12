@@ -31,11 +31,11 @@ use std::sync::Arc;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, ChunkMesh, ShapeTable};
+use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
 use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
 use super::world_state::ChunkStore;
-use super::{Shapes, WorldGenerator};
+use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// The entity the World streams around. The Client puts this on its camera and
@@ -410,7 +410,7 @@ fn stream(
     mut ready: MessageWriter<ChunkMeshReady>,
     mut unloaded: MessageWriter<ChunkUnloaded>,
     generator: Res<WorldGenerator>,
-    shapes: Res<Shapes>,
+    tables: Res<ContentTables>,
     world: Res<WorldSettings>,
     settings: Res<StreamingSettings>,
     budget: Res<StreamingBudget>,
@@ -483,7 +483,7 @@ fn stream(
         &world,
         center,
         budget.in_flight.relight,
-        &shapes.0,
+        &tables.0,
     );
     dispatch_meshes(
         &store,
@@ -494,7 +494,7 @@ fn stream(
         rings.mesh,
         budget.in_flight.mesh,
         budget.wait_for_settled_light,
-        &shapes.0,
+        &tables.0,
     );
 }
 
@@ -686,7 +686,7 @@ fn dispatch_relight(
     world: &WorldSettings,
     center: ChunkCoord,
     in_flight: usize,
-    shapes: &Arc<ShapeTable>,
+    tables: &Arc<Tables>,
 ) {
     let mut free = in_flight.saturating_sub(jobs.relight.in_flight());
     for &d in &order.descending {
@@ -711,9 +711,9 @@ fn dispatch_relight(
         meshes.unlit.remove(&coord);
         meshes.relighting.insert(coord);
         meshes.poisoned.remove(&coord);
-        let shapes = Arc::clone(shapes);
+        let tables = Arc::clone(tables);
         jobs.relight
-            .spawn(coord, move || solve(chunk, &before, &border, &shapes));
+            .spawn(coord, move || solve(chunk, &before, &border, &tables));
         free -= 1;
     }
 }
@@ -791,7 +791,7 @@ fn dispatch_meshes(
     mesh: Extent,
     in_flight: usize,
     wait_for_settled_light: bool,
-    shapes: &Arc<ShapeTable>,
+    tables: &Arc<Tables>,
 ) {
     let mut free = in_flight.saturating_sub(jobs.mesh.in_flight());
     for &d in &order.offsets {
@@ -821,9 +821,9 @@ fn dispatch_meshes(
             .try_into()
             .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
-        let shapes = Arc::clone(shapes);
+        let tables = Arc::clone(tables);
         jobs.mesh
-            .spawn(coord, move || build_mesh(&own, &around, &shapes));
+            .spawn(coord, move || build_mesh(&own, &around, &tables));
         free -= 1;
     }
 }
@@ -938,7 +938,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, mesh_chunk};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, ShapeTable, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
@@ -1118,7 +1118,7 @@ mod tests {
                 .insert_resource(settings)
                 .insert_resource(budget)
                 .insert_resource(WorldGenerator(generator))
-                .init_resource::<Shapes>()
+                .init_resource::<ContentTables>()
                 .init_resource::<ChunkStore>()
                 .init_resource::<LoadOrder>()
                 .init_resource::<MeshState>()
@@ -1350,8 +1350,8 @@ mod tests {
             .run_system_once(
                 move |mut store: ResMut<ChunkStore>,
                       mut meshes: ResMut<MeshState>,
-                      shapes: Res<Shapes>| {
-                    edit::set_voxel(&mut store, &mut meshes, &shapes, at, Voxel::AIR)
+                      tables: Res<ContentTables>| {
+                    edit::set_voxel(&mut store, &mut meshes, &tables, at, Voxel::AIR)
                         .expect("the Chunk is loaded");
                 },
             )
@@ -1661,7 +1661,7 @@ mod tests {
         generator: &WorldGenerator,
         world: &WorldSettings,
     ) -> bevy::platform::collections::HashMap<ChunkCoord, ChunkLight> {
-        let shapes = ShapeTable::builtin();
+        let tables = Tables::builtin();
         let sky_chunk = Chunk::air();
         let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut coords: Vec<ChunkCoord> = store.coords().collect();
@@ -1677,7 +1677,7 @@ mod tests {
                         _ => (n.y > coord.y && above_the_surface(generator, world, n))
                             .then_some(LitChunk::new(&sky_chunk, &open_sky)),
                     });
-                let solved = light_chunk(store.get(coord).expect("loaded"), border, &shapes);
+                let solved = light_chunk(store.get(coord).expect("loaded"), border, &tables);
                 if solved != lights[&coord] {
                     lights.insert(coord, solved);
                     changed = true;
@@ -1749,11 +1749,11 @@ mod tests {
             .run_system_once(
                 move |mut store: ResMut<ChunkStore>,
                       mut meshes: ResMut<MeshState>,
-                      shapes: Res<Shapes>| {
+                      tables: Res<ContentTables>| {
                     edit::set_voxel(
                         &mut store,
                         &mut meshes,
-                        &shapes,
+                        &tables,
                         at,
                         Voxel::cube(tesserae_core::worldgen::LANTERN),
                     )
@@ -1831,8 +1831,8 @@ mod tests {
                 .run_system_once(
                     move |mut store: ResMut<ChunkStore>,
                           mut meshes: ResMut<MeshState>,
-                          shapes: Res<Shapes>| {
-                        edit::set_voxel(&mut store, &mut meshes, &shapes, at, voxel)
+                          tables: Res<ContentTables>| {
+                        edit::set_voxel(&mut store, &mut meshes, &tables, at, voxel)
                             .expect("loaded");
                     },
                 )

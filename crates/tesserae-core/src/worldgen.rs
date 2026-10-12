@@ -11,19 +11,11 @@
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::noise::{fbm2, fbm3, fbm3_range};
-use crate::voxel::{MaterialId, Voxel};
+use crate::voxel::Voxel;
 
-/// Placeholder Materials, until a Mod declares the table in build-order step 7.
-/// They live here rather than in `testgen` because generation is what assigns
-/// them; `testgen` re-exports these so a fixture and a World agree on what
-/// stone is.
-pub const STONE: MaterialId = 1;
-pub const DIRT: MaterialId = 2;
-pub const GRASS: MaterialId = 3;
-/// Emits block light; see [`crate::light::emission`]. Generation places none of
-/// it; a player places one with an Edit. It exists so that the block-light
-/// channel has a source to be tested against.
-pub const LANTERN: MaterialId = 4;
+/// The ids generation assigns. They live in [`crate::material`] with the rest of
+/// the table and are re-exported so a caller that places terrain finds them here.
+pub use crate::material::{DIRT, GRASS, LANTERN, STONE};
 
 /// What a Mod parameterises. Plain `Copy` data with no callbacks, because
 /// crossing the WASM boundary per Voxel is the mistake

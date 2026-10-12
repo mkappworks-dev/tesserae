@@ -30,7 +30,7 @@ use tesserae_core::{MaterialId, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR
 use super::builder::{self, Progress, Step};
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, SpawnPoint};
-use super::{Shapes, WorldGenerator};
+use super::{ContentTables, WorldGenerator};
 use crate::world::WorldSettings;
 
 /// Where the gallery's near corner is, in metres from the spawn point: ahead
@@ -57,7 +57,7 @@ fn build(
     mut meshes: ResMut<MeshState>,
     mut progress: Local<Progress>,
     generator: Res<WorldGenerator>,
-    shapes: Res<Shapes>,
+    tables: Res<ContentTables>,
     world: Res<WorldSettings>,
     spawn: Option<Res<SpawnPoint>>,
 ) {
@@ -66,7 +66,7 @@ fn build(
     };
     let corner = spawn.metres() + Vec3::new(ASIDE_M, 0.0, -AHEAD_M);
     let plan = plan(&world, corner, |x, z| generator.surface_height_m(x, z));
-    if builder::step(&plan, &mut progress, &mut store, &mut meshes, &shapes) == Step::Completed {
+    if builder::step(&plan, &mut progress, &mut store, &mut meshes, &tables) == Step::Completed {
         info!("gallery: {} Voxels at {corner:?}", plan.len());
     }
 }

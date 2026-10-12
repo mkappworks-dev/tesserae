@@ -1,6 +1,6 @@
 # MaterialTable, Tables, and emission off the `match`
 
-Status: ready-for-agent
+Status: done
 
 Spec decisions 1, 5 (the sweep) and 7. Everything else stands on this, and it
 changes no behaviour: the point is that the table exists, carries every property
@@ -48,3 +48,26 @@ the later tickets read, and costs the terrain hot paths nothing.
 - `tesserae-core` still has no dependencies; `./scripts/cargo-ci` passes.
 
 ## Comments
+
+**Benchmarks, and why they are instruction counts.** The machine was shared with
+other builds (load average 25 to 120), and criterion's wall time was not usable:
+a `--baseline before` run showed untouched code (`worldgen/*`,
+`shape_table_builtin`) moving by +25% to +240%, and an interleaved old/new run
+had 80-270% spread inside one configuration. So the comparison is retired
+instructions per call (`/usr/bin/time -l`, 400 calls less the setup, three runs
+each, spread under 0.5%), on a harness built against this tree and against
+`f232c4e`:
+
+| `light_chunk` case                   | before    | after     | change |
+| ------------------------------------ | --------- | --------- | ------ |
+| `straddling` (terrain, sky above)    | 3 342 000 | 3 253 000 | -2.7%  |
+| `straddling_settled` (both channels) | 4 843 000 | 4 735 000 | -2.2%  |
+
+The sweep memoises on "same Voxel as the last", so it does fewer table reads
+than the old code did `match`es. `mesh.rs`, `chunk.rs` and `collide.rs` are
+untouched, so no `greedy_mesh/*` or `mesh_chunk/*` number can have moved.
+
+**Latent until 02:** the table says glass dims by 0, but nothing reads `dimming`
+yet, so a glass Voxel still lights and meshes as an opaque cube. Only emission is
+read. Nothing places one: the hotbar is unchanged and terrain has none.
+

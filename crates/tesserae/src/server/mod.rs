@@ -21,7 +21,7 @@ pub mod world_state;
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use tesserae_core::{ShapeTable, Worldgen, WorldgenParams};
+use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
 use world_state::SpawnPoint;
@@ -36,19 +36,20 @@ const SPAWN_CLEARANCE_M: f32 = 2.0;
 #[derive(Resource, Deref)]
 pub struct WorldGenerator(pub Worldgen);
 
-/// The World's Shape table, read by everything that has to know what a Voxel
-/// covers: the mesher, both light solvers, collision and picking. A newtype for
-/// the same reason as [`WorldGenerator`].
+/// The World's Shape and Material tables, read by everything that has to know
+/// what a Voxel covers or is made of: the mesher, both light solvers, collision
+/// and picking. A newtype for the same reason as [`WorldGenerator`].
 ///
-/// Server-only. The Client is sent finished meshes and needs no Shape to draw
-/// one, and a Mod registers its Shapes here at load. Behind an `Arc` so a
-/// streaming job can hold the table; it is not written once the World is open.
+/// Server-only. The Client is sent finished meshes and needs no table to draw
+/// one, and a Mod registers its Shapes and Materials here at load. Behind an
+/// `Arc` so a streaming job can hold the tables; they are not written once the
+/// World is open.
 #[derive(Resource, Deref, Default)]
-pub struct Shapes(pub Arc<ShapeTable>);
+pub struct ContentTables(pub Arc<Tables>);
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()
-        .init_resource::<Shapes>()
+        .init_resource::<ContentTables>()
         .add_systems(Startup, open_world)
         .add_plugins((streaming::plugin, edit::plugin));
     #[cfg(feature = "dev")]
