@@ -7,6 +7,11 @@
 //! position the Client chose would be a claim to re-check; a ray is only an
 //! intent.
 //!
+//! The ray's origin is a claim too, checked against the Server's [`Player`]
+//! when the intent arrives (`docs/adr/0008-the-server-owns-the-players-pose.md`).
+//! That bounds the origin against a pose the Client also reported, so it stops a
+//! stale or mistaken origin and not a Client that lies about both.
+//!
 //! **Intents are queued, not read on the tick.** `server/mod.rs` explains why a
 //! message the Client writes can be dropped by a frame that runs no fixed tick,
 //! which at 120 fps against a 64 Hz tick is a large fraction of clicks. So
@@ -24,6 +29,7 @@ use tesserae_core::{
 };
 
 use super::Shapes;
+use super::player::{self, Player};
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, LightLattice, VoxelCoord};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -32,6 +38,16 @@ use crate::world::{ChunkCoord, WorldSettings};
 /// Voxels would be calibrated to one Voxel size.
 /// `docs/adr/0003-voxel-size-is-per-world.md`.
 pub const EDIT_REACH_M: f32 = 8.0;
+
+/// How far an Edit's ray may start from the Player's Eye, in metres. An honest
+/// Client in the same process sends 0; over a wire it is the distance a Player
+/// moves while an intent travels, so a third of a second at a sprint. A constant
+/// until the controller has a speed to derive it from.
+///
+/// An Edit can therefore reach `EDIT_REACH_M` plus this from where the Server
+/// has the Player, and the Eye is only as true as the Client's reports
+/// (`player.rs`).
+pub const EDIT_ORIGIN_TOLERANCE_M: f32 = 2.0;
 
 /// Edits applied per tick. Each costs a relight over at most the 15 Voxels light
 /// reaches, so this bounds a tick rather than protecting the budget; the mesh
@@ -65,6 +81,8 @@ pub struct EditIntent {
 pub enum RejectReason {
     /// The ray struck nothing within [`EDIT_REACH_M`].
     OutOfReach,
+    /// The ray starts more than [`EDIT_ORIGIN_TOLERANCE_M`] from the Player.
+    OriginTooFar,
     NotLoaded,
     /// The place a Voxel would go already holds one.
     Occupied,
@@ -83,6 +101,7 @@ impl RejectReason {
     pub fn message(self) -> &'static str {
         match self {
             RejectReason::OutOfReach => "nothing in reach",
+            RejectReason::OriginTooFar => "too far from where the server has you",
             RejectReason::NotLoaded => "that part of the world is not loaded",
             RejectReason::Occupied => "something is already there",
             RejectReason::UnknownShape => "unknown shape",
@@ -117,7 +136,9 @@ pub(super) fn plugin(app: &mut App) {
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_systems(
             RunFixedMainLoop,
-            receive.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+            receive
+                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
+                .after(player::receive_pose),
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
@@ -128,8 +149,15 @@ fn receive(
     mut intents: MessageReader<EditIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
+    player: Single<&Player>,
 ) {
     for intent in intents.read() {
+        // Here and not in `apply_pending`: an intent can wait a second there, by
+        // when the Player has moved on from where the Client meant.
+        if let Err(reason) = vet_origin(intent, player.eye()) {
+            rejected.write(EditRejected { reason });
+            continue;
+        }
         if pending.0.len() >= MAX_PENDING {
             rejected.write(EditRejected {
                 reason: RejectReason::Busy,
@@ -141,6 +169,16 @@ fn receive(
             waited: 0,
         });
     }
+}
+
+fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<(), RejectReason> {
+    if !intent.origin.is_finite() || !intent.direction.is_finite() {
+        return Err(RejectReason::OutOfReach);
+    }
+    if intent.origin.distance(eye) > EDIT_ORIGIN_TOLERANCE_M {
+        return Err(RejectReason::OriginTooFar);
+    }
+    Ok(())
 }
 
 fn apply_pending(
@@ -313,6 +351,9 @@ mod tests {
     use tesserae_core::worldgen::{LANTERN, STONE};
     use tesserae_core::{CHUNK_SIZE, Chunk, NodeBox, SHAPE_STAIR, ShapeDef};
 
+    use super::super::player::{Player, PoseReport};
+    use crate::server::world_state::SpawnPoint;
+
     fn stone() -> Voxel {
         Voxel::cube(STONE)
     }
@@ -342,6 +383,7 @@ mod tests {
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
+        app.world_mut().spawn(Player::at(DOWN_EYE));
         let mut store = app.world_mut().resource_mut::<ChunkStore>();
         for (coord, chunk) in chunks {
             store.insert(*coord, chunk.clone());
@@ -353,11 +395,13 @@ mod tests {
         ChunkCoord::new(0, 0, 0)
     }
 
+    const DOWN_EYE: Vec3 = Vec3::new(5.5, 12.0, 5.5);
+
     /// A click straight down at the ground over (5, 5), from 4 m up.
     fn down(action: EditAction) -> EditIntent {
         EditIntent {
             action,
-            origin: Vec3::new(5.5, 12.0, 5.5),
+            origin: DOWN_EYE,
             direction: Vec3::NEG_Y,
         }
     }
@@ -374,10 +418,25 @@ mod tests {
             .collect()
     }
 
+    /// Delivers one intent as if the Player stood at its origin, so the tests
+    /// that exercise `resolve` with arbitrary origins are not also testing the
+    /// origin check; `send_from_afar` is the one that does.
+    fn send(app: &mut App, intent: EditIntent) {
+        if intent.origin.is_finite() {
+            set_eye(app, intent.origin);
+        }
+        send_from_afar(app, intent);
+    }
+
+    fn set_eye(app: &mut App, eye: Vec3) {
+        let mut players = app.world_mut().query::<&mut Player>();
+        players.single_mut(app.world_mut()).unwrap().set_eye(eye);
+    }
+
     /// Delivers one intent, then empties the buffer. `run_system_once` builds a
     /// fresh reader every call, so without this each delivery would read every
     /// earlier message again; the real system keeps its reader between frames.
-    fn send(app: &mut App, intent: EditIntent) {
+    fn send_from_afar(app: &mut App, intent: EditIntent) {
         app.world_mut().write_message(intent);
         app.world_mut().run_system_once(receive).unwrap();
         app.world_mut()
@@ -490,6 +549,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ChunkStore>()
             .insert(origin(), ground());
+        app.world_mut().spawn(Player::at(DOWN_EYE));
         app.update();
 
         app.world_mut().write_message(down(EditAction::Break));
@@ -556,6 +616,116 @@ mod tests {
             assert_eq!(rejections(&mut app), vec![expected], "{intent:?}");
         }
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "nothing changed");
+    }
+
+    fn from(eye: Vec3) -> EditIntent {
+        EditIntent {
+            origin: eye,
+            ..down(EditAction::Break)
+        }
+    }
+
+    #[test]
+    fn an_origin_far_from_the_players_eye_is_rejected_and_never_queued() {
+        let mut app = app_with(&[(origin(), ground())]);
+
+        // The ray would strike the ground, but it starts 40 m from the Player.
+        send_from_afar(&mut app, from(DOWN_EYE + Vec3::new(40.0, 0.0, 0.0)));
+        tick(&mut app);
+
+        assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+        assert!(app.world().resource::<PendingEdits>().0.is_empty());
+        assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "nothing changed");
+    }
+
+    #[test]
+    fn the_tolerance_is_inclusive_and_a_hair_past_it_is_not() {
+        let mut app = app_with(&[(origin(), ground())]);
+        let at = DOWN_EYE + Vec3::Z * EDIT_ORIGIN_TOLERANCE_M;
+        send_from_afar(&mut app, from(at));
+        assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
+        assert!(rejections(&mut app).is_empty());
+
+        send_from_afar(&mut app, from(at + Vec3::Z * 0.01));
+        assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+    }
+
+    #[test]
+    fn the_origin_is_judged_when_the_intent_arrives_not_when_it_is_applied() {
+        let mut app = app_with(&[(origin(), ground())]);
+        send_from_afar(&mut app, down(EditAction::Break));
+
+        // The Player moves on while the intent waits for its Chunk's light.
+        set_eye(&mut app, DOWN_EYE + Vec3::X * 100.0);
+        tick(&mut app);
+
+        assert!(voxel_at(&app, [5, 7, 5]).is_air());
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Both systems touch the `Player`, so without a constraint Bevy picks an
+    /// order, and the order it picked passed a behavioural version of this test
+    /// with the constraint deleted. So this asks the schedule whether the pair is
+    /// still ambiguous.
+    #[test]
+    fn a_pose_report_is_taken_before_the_intents_of_its_frame() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldSettings::default())
+            .insert_resource(SpawnPoint::new(Vec3::ZERO))
+            .init_resource::<Shapes>()
+            .init_resource::<ChunkStore>()
+            .init_resource::<MeshState>()
+            .add_plugins((plugin, super::super::player::plugin));
+
+        let ambiguous = app
+            .world_mut()
+            .schedule_scope(RunFixedMainLoop, |world, schedule| {
+                schedule.initialize(world).unwrap();
+                let key_of = |system: Box<dyn System<In = (), Out = ()>>| {
+                    let id = system.system_type();
+                    schedule
+                        .systems()
+                        .unwrap()
+                        .find(|(_, s)| s.system_type() == id)
+                        .map(|(key, _)| key)
+                        .expect("scheduled")
+                };
+                let pose = key_of(Box::new(IntoSystem::into_system(player::receive_pose)));
+                let edit = key_of(Box::new(IntoSystem::into_system(receive)));
+                schedule
+                    .graph()
+                    .conflicting_systems()
+                    .iter()
+                    .any(|(a, b, _)| (*a, *b) == (pose, edit) || (*a, *b) == (edit, pose))
+            });
+        assert!(!ambiguous, "nothing says which of the two runs first");
+    }
+
+    #[test]
+    fn a_report_and_an_intent_from_one_frame_are_both_taken() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldSettings::default())
+            .insert_resource(SpawnPoint::new(Vec3::new(500.0, 500.0, 500.0)))
+            .init_resource::<Shapes>()
+            .init_resource::<ChunkStore>()
+            .init_resource::<MeshState>()
+            .add_plugins((plugin, super::super::player::plugin));
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(origin(), ground());
+        app.update();
+
+        app.world_mut().write_message(down(EditAction::Break));
+        app.world_mut().write_message(PoseReport {
+            seq: 1,
+            eye: DOWN_EYE,
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
+        assert!(rejections(&mut app).is_empty());
     }
 
     #[test]

@@ -335,7 +335,7 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
 9. Look-pack API, water shading, visual polish.
-10. Network transport.
+10. Network transport. The `Player` and `PoseReport` are its first customers.
 
 ## Open items
 
@@ -365,8 +365,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   under the cap). Fence arms and collision taller than the cell need a Shape to
   look at its neighbours. Two partial Shapes that only jointly cover a face leak
   light through the seam. Material transparency (glass, water, leaves) is not a
-  Shape property. The Client's hotbar is a stopgap. The ray origin in an intent
-  is not checked against a player position, because there is no player entity.
+  Shape property. The Client's hotbar is a stopgap.
+- **The Player's pose is believed, not validated.** The Server holds a `Player`
+  and rejects an Edit whose ray starts too far from its Eye, but accepts any
+  finite, newer `PoseReport`: a modified Client can still lie about where it
+  stands. Closing that needs a controller, movement validation and a correction
+  message; lag compensation needs the transport's clock. See ADR-0008 and
+  `.scratch/2026-10-12-server-edit-origin/issues/05-*`.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

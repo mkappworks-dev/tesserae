@@ -1,6 +1,6 @@
 # Docs and ADR-0008
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03
 
 ## What to build
@@ -24,3 +24,9 @@ Blocked by: 02, 03
 ## Then
 
 `npm run fmt`, `cargo fmt --all`, `./scripts/cargo-ci`.
+
+## Comments
+
+ADR-0008, `CONTEXT.md` (Player, Eye), `DESIGN.md` (the open item and step 10),
+and the module docs of `edit.rs`, `server/mod.rs`, `streaming.rs`,
+`client/edit.rs` and `player.rs`.

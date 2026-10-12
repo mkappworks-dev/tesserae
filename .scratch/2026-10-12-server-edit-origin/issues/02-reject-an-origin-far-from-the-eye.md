@@ -1,6 +1,6 @@
 # Reject an Edit whose origin is far from the Player's Eye
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decision 3. The point of the whole task.
@@ -18,7 +18,7 @@ Spec decision 3. The point of the whole task.
   `EditRejected { OutOfReach }` and `continue`s; a finite `origin` farther than
   the tolerance from `Player::eye` writes `OriginTooFar` and `continue`s.
   `receive` takes `Single<&Player>`.
-- Order `(receive_pose, receive).chain()` in `BeforeFixedMainLoop`.
+- Order `receive` `.after(player::receive_pose)` in `BeforeFixedMainLoop`.
 - `resolve` and `apply_pending` are unchanged.
 - Delete the module-doc and `DESIGN.md` statements that the origin is not
   checked.
@@ -41,3 +41,12 @@ Spec decision 3. The point of the whole task.
 ## Then
 
 `./scripts/cargo-ci`.
+
+## Comments
+
+**The ordering constraint needed a test that asks the schedule.** A behavioural
+test (intent written first, report second, one frame) passed with
+`.after(receive_pose)` deleted, because Bevy happened to pick the right order.
+`a_pose_report_is_taken_before_the_intents_of_its_frame` asks the schedule graph
+whether the pair is still in `conflicting_systems()`, and fails with the
+constraint removed (checked by hand).

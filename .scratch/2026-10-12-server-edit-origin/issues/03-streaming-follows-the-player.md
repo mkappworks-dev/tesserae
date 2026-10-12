@@ -1,6 +1,6 @@
 # Streaming follows the Player; `StreamingAnchor` is retired
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decision 5. After this the Server reads no Client-owned pose.
@@ -31,3 +31,13 @@ Spec decision 5. After this the Server reads no Client-owned pose.
 ## Then
 
 `./scripts/cargo-ci`.
+
+## Comments
+
+`StreamingAnchor` is gone; nothing under `server/` reads a Client-owned
+`Transform`. `stream` keeps its guard for "no Player" because a streaming test
+builds an app without one.
+
+**Not done:** the capture run comparing loaded and meshed counts against `main`.
+It needs the dev build and a window; the streaming tests pass unmodified in what
+they assert, which is the evidence this ticket has.

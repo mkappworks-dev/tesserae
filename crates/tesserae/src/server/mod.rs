@@ -7,6 +7,9 @@
 //! frame. The reverse direction can be dropped by a frame that runs no fixed
 //! tick, which is a second reason the Client only ever receives.
 //!
+//! Where a Player is, is the Server's too: the Client reports a pose and the
+//! Server streams the World around, and checks Edits against, its own `Player`.
+//!
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
 #[cfg(feature = "dev")]
@@ -15,6 +18,7 @@ pub mod edit;
 #[cfg(feature = "dev")]
 mod gallery;
 mod jobs;
+pub mod player;
 pub mod streaming;
 pub mod world_state;
 
@@ -50,7 +54,7 @@ pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()
         .init_resource::<Shapes>()
         .add_systems(Startup, open_world)
-        .add_plugins((streaming::plugin, edit::plugin));
+        .add_plugins((streaming::plugin, edit::plugin, player::plugin));
     #[cfg(feature = "dev")]
     app.add_plugins(gallery::plugin);
 }

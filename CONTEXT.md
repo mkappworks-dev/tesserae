@@ -84,6 +84,13 @@ a Chunk.
 **Integrated server** — a Server running in the Client's process, for single
 player. Not a different Server.
 
+**Player** — what the Server holds for each person in the World, including where
+that person is. The Client reports a position; the Player is the Server's idea
+of it.
+
+**Eye** — the point in metres a Player sees and acts from. An Edit's ray starts
+near it. Not the feet and not a body.
+
 **Edit** — a change to one Voxel, applied by the Server. A Client sends an
 intent; it never makes an Edit.
 

@@ -204,6 +204,12 @@ impl SpawnPoint {
     pub fn metres(self) -> Vec3 {
         self.0
     }
+
+    /// For tests outside `server`, which cannot reach `new`.
+    #[cfg(test)]
+    pub(crate) fn for_tests(metres: Vec3) -> Self {
+        SpawnPoint(metres)
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
 # The Server decides where an Edit can be made from
 
-Status: ready-for-agent
+Status: done
 
 Closes the loose end `DESIGN.md` and `server/edit.rs` both declare: the ray
 origin in an `EditIntent` is trusted, "because there is no player entity". The
@@ -43,7 +43,7 @@ Two terms, to be added to `CONTEXT.md` in the same PR.
 #[derive(Component)]
 pub struct Player {
     /// Metres. The point an Edit's ray may start near.
-    pub eye: Vec3,
+    eye: Vec3,
     seq: u32,
 }
 ```
@@ -51,8 +51,9 @@ pub struct Player {
 An entity and not a resource, because step 10 has one per connection and
 retrofitting that onto a singleton is the same retrofit ADR-0002 exists to
 avoid. The Server spawns exactly one in `open_world`, at `SpawnPoint`, so the
-Server decides where a Player starts and the Client no longer does. `seq` is
-private: only `receive_pose` writes it.
+Server decides where a Player starts and the Client no longer does. Both fields are
+private and `eye()` reads it: only `receive_pose` writes either, so the Client
+cannot move a Player by any route but a report.
 
 Single player has one connection, so the systems below take
 `Single<&mut Player>`. The transport will deliver the sender's `Entity` with
@@ -117,19 +118,18 @@ the module doc so it is not mistaken for an 8 m guarantee.
 
 `EditIntent` and `PoseReport` are different message types and Bevy does not keep
 order between two types. In process that does not matter: the Client writes the
-report and then the intent in one frame, and `BeforeFixedMainLoop` runs
-`(receive_pose, receive).chain()`, so the report is always taken before the
+report and then the intent in one frame, and `receive` is ordered after
+`receive_pose` in `BeforeFixedMainLoop`, so the report is always taken before the
 intent. A transport that batches several frames' messages into one Server frame
 will reorder them, and the tolerance in decision 3 is what absorbs that. Making
 it exact is lag compensation (decision 7), which needs a pose history and a
 tick on the intent, and is out of scope.
 
-On the Client, `report_pose` must read the same camera `Transform` that
-`send_intents` does, from the same frame. Both are ordered after the camera's
-movement systems (a `CameraMovement` system set the camera plugin exposes), and
-`report_pose` is chained before `send_intents`. Unordered, the intent could
-carry a pose one frame newer than the report, which at the camera's top speed is
-metres.
+On the Client, `report_pose` reads the same `GlobalTransform` that
+`send_intents` does, and is ordered before it, so the report and the intent
+carry one point. Reading `Transform` instead would be a frame newer than the
+intent's origin, which at the camera's top speed is metres. A report is sent
+when the point has changed, so a stationary Player is silent on the wire.
 
 ### 5. Streaming follows the Player, and `StreamingAnchor` goes
 
@@ -179,11 +179,11 @@ step 10's, because it needs a clock shared with the Client.
 | --------------------------------------------------------- | ------------------------------------------------------------ |
 | No Client system writes World state or a `Player`         | `Player::eye` is written only by `receive_pose` (private)    |
 | An Edit is queued only if its origin is near the Eye      | `receive`, tested with a raw intent                          |
-| Order within a frame: pose, then intent                   | `.chain()` in `BeforeFixedMainLoop`; a test delivers both    |
+| Order within a frame: pose, then intent                   | `receive` is ordered `.after(receive_pose)`; a test delivers both    |
 | A stale or non-finite report changes nothing              | `receive_pose`; tests                                        |
 | Metres, never Voxels                                      | `eye`, `EDIT_ORIGIN_TOLERANCE_M`; no `voxel_size` is read    |
 | `PendingEdits`, `receive` every frame, drain on the tick  | unchanged; the existing no-tick-frame test still passes      |
-| The Client sends the report and the intent from one pose  | `CameraMovement` ordering; a Client test                     |
+| The Client sends the report and the intent from one pose  | both read the camera's `GlobalTransform`; a Client test      |
 
 ## Tests
 
@@ -210,9 +210,9 @@ step 10's, because it needs a clock shared with the Client.
 - **The tolerance is a constant**, not derived from speed or latency.
   Decision 3, decision 7.
 - **One Player.** `Single` in the systems. The transport makes it a lookup.
-- **The dev capture harness moves the camera.** It does so before
-  `report_pose` by the same ordering, so it is unaffected; a ticket-01 test
-  guards it.
+- **The dev capture harness moves the camera.** The report and the intent read
+  the camera's `GlobalTransform`, which changes only in `PostUpdate`, so
+  whatever moves the camera in `Update` moves both together.
 - **`direction` is not checked for unit length.** It is not an authority hole:
   the ray is normalised by `raycast` and reach is a distance along it.
 
