@@ -407,15 +407,27 @@ fn mesh_shaped(n: &Neighborhood, shapes: &ShapeTable, mesh: &mut ChunkMesh) {
                 }
                 mesh.shaped_voxels += 1;
                 let own = n.light_at(x, y, z);
+                // Read from the shell this job was handed, never the live store:
+                // the six face-neighbours of a centre Voxel are all inside it.
+                let connections = if shapes.is_connected(voxel) {
+                    shapes.connections(
+                        voxel,
+                        FACE_STEPS.map(|d| n.at(x + d[0], y + d[1], z + d[2])),
+                    )
+                } else {
+                    Connections::NONE
+                };
 
-                for q in shapes.quads(voxel, Connections::NONE) {
+                for q in shapes.quads(voxel, connections) {
                     let face = q.face as usize;
                     let lit = if q.on_boundary() {
                         let mut c = [x, y, z];
                         c[face / 2] += if face % 2 == 1 { 1 } else { -1 };
                         let across = n.at(c[0], c[1], c[2]);
+                        // Against `voxel`, so that the end of an arm meeting an arm
+                        // is hidden by it instead of drawn back to back.
                         if shapes
-                            .coverage(across, face ^ 1)
+                            .coverage_against(across, face ^ 1, voxel)
                             .contains_rect(q.u0, q.v0, q.u1, q.v1)
                         {
                             continue;

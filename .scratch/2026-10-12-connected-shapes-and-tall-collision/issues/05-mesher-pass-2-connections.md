@@ -1,6 +1,6 @@
 # Mesher: connected shapes in pass 2, and the hole-free test
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 Spec decision 6 and the hole-free section. Pass 1 is not edited.
@@ -41,3 +41,18 @@ c)`. Non-connected Voxels take today's path with `Connections::NONE`.
 `./scripts/cargo-ci` passes; `greedy_mesh/terrain`, `/solid`, `/checkerboard`,
 `terrain_stairs_at_cap` and `all_stairs` show no movement against the baseline,
 and the PR reports the numbers.
+
+## Comments
+
+Done, except the benchmark gate, which waits for the quiet-machine baseline of
+ticket 01 and is run once for the whole branch.
+
+Mutations applied to the table, each caught by the new tests: an arm toward
+every neighbour (7 fail), no arms ever (6), the wrong face asked of the
+neighbour (4), and `coverage_against` returning a full face (2).
+
+The cube's own face under a fence's rails is drawn (12 sub-faces) because pass 1
+culls only against a neighbour that seals and a fence never does. It is the
+hidden overdraw the spec accepts, and a test pins it as exactly that, with the
+arm's end cap on the same plane not drawn. The cross-check against the sweep and
+the ray is ticket 06's.
