@@ -20,8 +20,14 @@ fn open_sky() -> ChunkLight {
 
 /// A generator at the default Voxel size, and the Chunk coordinates of the
 /// three cases streaming actually asks for.
+///
+/// Caveless, so every number from before caves existed still measures the same
+/// Chunks; `caved` is the same World with its tunnels.
 fn worldgen() -> (Worldgen, i32, i32, i32) {
-    let params = WorldgenParams::default();
+    let params = WorldgenParams {
+        caves: None,
+        ..WorldgenParams::default()
+    };
     let g = Worldgen::new(0x7e55_e2ae, 1.0, params);
     let cell = tesserae_core::CHUNK_SIZE as f32;
     // The Chunk the surface actually crosses over this column, not the top of
@@ -31,6 +37,76 @@ fn worldgen() -> (Worldgen, i32, i32, i32) {
     let sky = ((params.sea_level_m + params.relief_m) / cell) as i32 + 2;
     let deep = (params.sea_level_m / cell) as i32 - 2;
     (g, straddling, sky, deep)
+}
+
+/// Chunk coordinates of the cave cases streaming now meets, found by scanning
+/// in a fixed order so a number means the same Chunk on every run.
+struct CaveFixtures {
+    /// A deep Chunk inside the cave band that a tunnel crosses, and one that no
+    /// tunnel does.
+    crossed: (i32, i32, i32),
+    empty: (i32, i32, i32),
+    /// A surface Chunk where a tunnel breaches the Grass cap.
+    mouth: (i32, i32, i32),
+    /// The layer of deep Chunks in the band, for a mean over the mix.
+    layer_cy: i32,
+}
+
+fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
+    let params = WorldgenParams::default();
+    let caves = params.caves.expect("the default World has caves");
+    let cell = CHUNK_SIZE as f32;
+    // The layer just under the soil line that the cave floor reaches.
+    let layer_cy = ((params.sea_level_m - params.soil_depth_m) / cell).floor() as i32 - 1;
+    assert!(
+        (layer_cy as f32 + 1.0) * cell > caves.floor_m,
+        "the default band has no deep layer"
+    );
+    let bare = Worldgen::new(
+        0x7e55_e2ae,
+        1.0,
+        WorldgenParams {
+            caves: None,
+            ..params
+        },
+    );
+    let at_surface = (g.surface_height_m(0.0, 0.0) / cell).floor() as i32;
+
+    let (mut crossed, mut empty, mut mouth) = (None, None, None);
+    for cz in -8..8 {
+        for cx in -8..8 {
+            let deep = g.chunk(cx, layer_cy, cz);
+            if deep.uniform().is_none() {
+                crossed.get_or_insert((cx, layer_cy, cz));
+            } else {
+                empty.get_or_insert((cx, layer_cy, cz));
+            }
+            if mouth.is_none() {
+                let (with, without) = (g.chunk(cx, at_surface, cz), bare.chunk(cx, at_surface, cz));
+                let breached = (0..CHUNK_SIZE).any(|z| {
+                    (0..CHUNK_SIZE).any(|y| {
+                        (0..CHUNK_SIZE).any(|x| {
+                            with.get(x, y, z).is_air()
+                                && without.get(x, y, z).material() == testgen::GRASS
+                        })
+                    })
+                });
+                if breached {
+                    mouth = Some((cx, at_surface, cz));
+                }
+            }
+        }
+    }
+    CaveFixtures {
+        crossed: crossed.expect("a tunnel crosses a deep Chunk in the scan"),
+        empty: empty.expect("a deep Chunk in the scan holds no tunnel"),
+        mouth: mouth.expect("a tunnel breaches the surface in the scan"),
+        layer_cy,
+    }
+}
+
+fn caved() -> Worldgen {
+    Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default())
 }
 
 /// Terrain whose top `n` Voxels - the exposed ones, one per column - are stairs
@@ -177,6 +253,45 @@ fn lighting(c: &mut Criterion) {
         b.iter(|| black_box(light_chunk(black_box(&stairs), black_box(border), shapes())))
     });
 
+    // What a cave costs the relight stage. A deep Chunk arrives against
+    // neighbours nobody has solved, so every face delivers darkness; the mouth
+    // Chunk has sky arriving from above and a tunnel to carry it down.
+    // From here on the World has its tunnels.
+    let g = caved();
+    let cave = cave_fixtures(&g);
+    let dark = ChunkLight::dark();
+    let neighbours_of = |(cx, cy, cz): (i32, i32, i32)| -> Vec<Chunk> {
+        [
+            (-1, 0, 0),
+            (1, 0, 0),
+            (0, -1, 0),
+            (0, 1, 0),
+            (0, 0, -1),
+            (0, 0, 1),
+        ]
+        .iter()
+        .map(|(dx, dy, dz)| g.chunk(cx + dx, cy + dy, cz + dz))
+        .collect()
+    };
+    let crossed = g.chunk(cave.crossed.0, cave.crossed.1, cave.crossed.2);
+    let crossed_around = neighbours_of(cave.crossed);
+    let crossed_border: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&crossed_around[i], &dark)));
+    group.bench_function("cave_dark_neighbours", |b| {
+        b.iter(|| {
+            black_box(light_chunk(
+                black_box(&crossed),
+                black_box(crossed_border),
+                shapes(),
+            ))
+        })
+    });
+
+    let mouth = g.chunk(cave.mouth.0, cave.mouth.1, cave.mouth.2);
+    group.bench_function("cave_mouth", |b| {
+        b.iter(|| black_box(light_chunk(black_box(&mouth), black_box(border), shapes())))
+    });
+
     let air = Chunk::air();
     group.bench_function("open_sky", |b| {
         b.iter(|| black_box(light_chunk(black_box(&air), black_box(border), shapes())))
@@ -231,6 +346,58 @@ fn streamed_mesher(c: &mut Criterion) {
         b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs), shapes())))
     });
 
+    // A tunnel through rock, lit as an enclosed one is (dark), and a mouth lit
+    // by the sky. The deep Chunk was the 6 ns `declined_enclosed` case before.
+    // From here on the World has its tunnels.
+    let g = caved();
+    let cave = cave_fixtures(&g);
+    let dark = ChunkLight::dark();
+    let crossed = g.chunk(cave.crossed.0, cave.crossed.1, cave.crossed.2);
+    let (cx, cy, cz) = cave.crossed;
+    let crossed_around = [
+        g.chunk(cx - 1, cy, cz),
+        g.chunk(cx + 1, cy, cz),
+        g.chunk(cx, cy - 1, cz),
+        g.chunk(cx, cy + 1, cz),
+        g.chunk(cx, cy, cz - 1),
+        g.chunk(cx, cy, cz + 1),
+    ];
+    let crossed_refs: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&crossed_around[i], &dark)));
+    let lit_crossed = LitChunk::new(&crossed, &dark);
+    group.bench_function("cave_crossed", |b| {
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_crossed),
+                black_box(crossed_refs),
+                shapes(),
+            ))
+        })
+    });
+
+    let (cx, cy, cz) = cave.mouth;
+    let mouth = g.chunk(cx, cy, cz);
+    let mouth_around = [
+        g.chunk(cx - 1, cy, cz),
+        g.chunk(cx + 1, cy, cz),
+        g.chunk(cx, cy - 1, cz),
+        g.chunk(cx, cy + 1, cz),
+        g.chunk(cx, cy, cz - 1),
+        g.chunk(cx, cy, cz + 1),
+    ];
+    let mouth_refs: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&mouth_around[i], &sky)));
+    let lit_mouth = LitChunk::new(&mouth, &sky);
+    group.bench_function("cave_mouth", |b| {
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_mouth),
+                black_box(mouth_refs),
+                shapes(),
+            ))
+        })
+    });
+
     let air = Chunk::air();
     let lit_air = LitChunk::new(&air, &sky);
     group.bench_function("declined_air", |b| {
@@ -275,6 +442,41 @@ fn generation(c: &mut Criterion) {
     });
     group.bench_function("early_out_stone", |b| {
         b.iter(|| black_box(g.chunk(black_box(0), deep, 0)))
+    });
+
+    // The Chunks a tunnel makes dearer. `cave_crossed` is the carved path.
+    // `cave_band_uniform` is the first Chunk in scan order that is inside the
+    // band and stays uniform; the range test rules it out, which is the best
+    // case. `cave_band_layer_of_64` is the mean over a layer, false positives
+    // included: what a streamed ring pays per deep Chunk in the band.
+    // From here on the World has its tunnels.
+    let g = caved();
+    let cave = cave_fixtures(&g);
+    // The same surface Chunk as `straddling`, with the Chunk-level range test.
+    group.bench_function("straddling_caved", |b| {
+        b.iter(|| black_box(g.chunk(black_box(0), straddling, 0)))
+    });
+    let (cx, cy, cz) = cave.crossed;
+    group.bench_function("cave_crossed", |b| {
+        b.iter(|| black_box(g.chunk(black_box(cx), cy, cz)))
+    });
+    let (cx, cy, cz) = cave.empty;
+    group.bench_function("cave_band_uniform", |b| {
+        b.iter(|| black_box(g.chunk(black_box(cx), cy, cz)))
+    });
+    let (cx, cy, cz) = cave.mouth;
+    group.bench_function("cave_mouth", |b| {
+        b.iter(|| black_box(g.chunk(black_box(cx), cy, cz)))
+    });
+    group.sample_size(20);
+    group.bench_function("cave_band_layer_of_64", |b| {
+        b.iter(|| {
+            for cz in 0..8 {
+                for cx in 0..8 {
+                    black_box(g.chunk(black_box(cx), cave.layer_cy, cz));
+                }
+            }
+        })
     });
 
     group.finish();

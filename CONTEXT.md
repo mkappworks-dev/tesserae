@@ -45,6 +45,10 @@ not of the engine. Default 1.0.
 
 **Air** — the absence of Material. A Voxel, not a null.
 
+**Cave** — a tunnel of Air that World generation carves through solid ground.
+Sized in metres, so it is the same Cave at any Voxel size. Where one breaks the
+surface it has a **mouth**, and sky light can enter there.
+
 **Light level** — how much light reaches a Voxel, from 0 to 15. The one quantity
 in the engine that is **dimensionless**: a count of attenuation steps, not a
 distance, so it does not scale with Voxel size the way everything physical does.

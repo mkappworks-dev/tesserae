@@ -1,9 +1,9 @@
 //! Places a plan of Voxels through the edit path, a few a tick. `dev` only.
 //!
-//! What the `dev` structures have in common: they stand near the spawn point so
-//! the default camera frames them, they wait for the Chunks they fall in to be
-//! loaded and lit, and they place through [`edit::set_voxel`] - the function a
-//! player's click ends in - rather than writing the store.
+//! What a `dev` structure does: it stands near the spawn point so the default
+//! camera frames it, waits for the Chunks it falls in to be loaded and lit, and
+//! places through [`edit::set_voxel`] - the function a player's click ends in -
+//! rather than writing the store.
 
 use bevy::prelude::*;
 use tesserae_core::{ShapeTable, Voxel};

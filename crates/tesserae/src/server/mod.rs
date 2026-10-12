@@ -15,8 +15,6 @@ pub mod edit;
 #[cfg(feature = "dev")]
 mod gallery;
 mod jobs;
-#[cfg(feature = "dev")]
-mod lightbox;
 pub mod streaming;
 pub mod world_state;
 
@@ -54,14 +52,34 @@ pub fn plugin(app: &mut App) {
         .add_systems(Startup, open_world)
         .add_plugins((streaming::plugin, edit::plugin));
     #[cfg(feature = "dev")]
-    app.add_plugins((lightbox::plugin, gallery::plugin));
+    app.add_plugins(gallery::plugin);
+}
+
+/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` turns the
+/// caves off, so a streaming change can be measured with and without them on one
+/// binary and not across two builds.
+#[cfg(feature = "dev")]
+fn worldgen_params() -> WorldgenParams {
+    let params = WorldgenParams::default();
+    if std::env::var("TESSERAE_CAVES").is_ok_and(|v| v == "0") {
+        return WorldgenParams {
+            caves: None,
+            ..params
+        };
+    }
+    params
+}
+
+#[cfg(not(feature = "dev"))]
+fn worldgen_params() -> WorldgenParams {
+    WorldgenParams::default()
 }
 
 /// Builds the generator and picks the spawn point. One system so there is no
 /// Startup ordering edge to maintain; its commands are applied before
 /// `PostStartup`, where the Client reads the spawn point.
 fn open_world(mut commands: Commands, world: Res<WorldSettings>) {
-    let generator = Worldgen::new(world.seed, world.voxel_size, WorldgenParams::default());
+    let generator = Worldgen::new(world.seed, world.voxel_size, worldgen_params());
     let surface_m = generator.surface_height_m(0.0, 0.0);
     commands.insert_resource(SpawnPoint::new(Vec3::new(
         0.0,

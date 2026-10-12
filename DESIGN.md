@@ -315,7 +315,9 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 2. `tesserae`: spawn meshed chunks as `Mesh3d` with a `MaterialExtension`, fly
    camera. First time anything is on screen.
 3. Worldgen + chunk streaming, behind the client/server split with the server
-   in-process.
+   in-process. Caves were added later, off the build order: tunnels in metres
+   below a floor height, behind an exact range test that keeps most deep Chunks
+   uniform. See `.scratch/2026-10-12-worldgen-caves/spec.md`.
 4. Light propagation (incremental flood-fill). **Done.** Two channels packed
    into a byte per Voxel, in a parallel per-Chunk array rather than in the
    palette, baked into the mesh as a vertex attribute. Two solvers: one
@@ -351,8 +353,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   sized one costs fill latency, not frame time. At 1m Voxels and a 192m view
   distance (64 / 128 / 128 in flight, 64 / 256 / 32 landed) the worst tick on
   the main thread is 0.7 ms against 22-27 ms, and the load volume fills in 1.6 s
-  against 7.2 s. The caps want revisiting when per-Chunk cost rises (caves) or
-  LOD adds rings; see `StreamingBudget`.
+  against 7.2 s. Caves raised per-Chunk cost for the Chunks a tunnel crosses (a
+  deep one from nanoseconds to about 0.7 ms across the three stages) and moved
+  none of those figures: ten runs each with and without them, interleaved, give
+  a worst tick of 0.6 ms and a fill of 1.58 s either way, because a ring holds
+  one deep layer inside the cave band. The caps want revisiting when LOD adds
+  rings, or when a Mod sets a cave floor deep enough to put several layers in
+  the band; see `StreamingBudget`.
 - **Shaped Voxels have loose ends worth a ticket each.** Terrain contains none
   (slope-smoothing stairs and slabs are the obvious worldgen use, and must stay
   under the cap). Fence arms and collision taller than the cell need a Shape to
