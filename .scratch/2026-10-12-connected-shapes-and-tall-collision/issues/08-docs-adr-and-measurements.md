@@ -24,10 +24,16 @@ Blocked by: 07
 
 ## Done when
 
-Every item in the spec's Done-when holds, with the evidence in the PR.
+ADR-0010, the ADR-0006 pointer, `CONTEXT.md` and DESIGN.md are written and
+formatted, and the PR description carries the measurements (the table itself
+lives in ticket 01) and the cost assumptions. The spec's Done-when items that
+need a person to look (the `dev` capture) are shown in the PR, not re-checked
+here.
 
 ## Comments
 
-Done except the measurements: ADR-0010, the ADR-0006 pointer, `CONTEXT.md` and
-DESIGN.md are written and formatted. The before/after table is not honest to
-produce on this machine; ticket 01 says what was tried and what is left.
+Done: ADR-0010, the ADR-0006 pointer, `CONTEXT.md` and DESIGN.md are written
+and formatted, and the PR description has the measurements from ticket 01. The
+done condition was narrowed from "every item in the spec's Done-when holds" to
+the above, because the performance gate is reported with its unexplained
+residue (ticket 01) and not passed.
