@@ -14,10 +14,13 @@ mod builder;
 pub mod edit;
 #[cfg(feature = "dev")]
 mod gallery;
+mod jobs;
 #[cfg(feature = "dev")]
 mod lightbox;
 pub mod streaming;
 pub mod world_state;
+
+use std::sync::Arc;
 
 use bevy::prelude::*;
 use tesserae_core::{ShapeTable, Worldgen, WorldgenParams};
@@ -40,9 +43,10 @@ pub struct WorldGenerator(pub Worldgen);
 /// the same reason as [`WorldGenerator`].
 ///
 /// Server-only. The Client is sent finished meshes and needs no Shape to draw
-/// one, and a Mod registers its Shapes here at load.
+/// one, and a Mod registers its Shapes here at load. Behind an `Arc` so a
+/// streaming job can hold the table; it is not written once the World is open.
 #[derive(Resource, Deref, Default)]
-pub struct Shapes(pub ShapeTable);
+pub struct Shapes(pub Arc<ShapeTable>);
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()

@@ -568,7 +568,7 @@ mod tests {
             })
             .unwrap();
         let mut app = app_with(&[(origin(), ground())]);
-        *app.world_mut().resource_mut::<Shapes>() = Shapes(t);
+        *app.world_mut().resource_mut::<Shapes>() = Shapes(t.into());
         // A plate lies in the air a ray passes through before striking the
         // ground: it has no collision, so the cell in front of the ground is
         // taken without the ray having noticed.
