@@ -22,9 +22,9 @@ use std::sync::Arc;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, ChunkMesh, LitChunk, ShapeTable, mesh_chunk};
+use tesserae_core::{CHUNK_SIZE, ChunkMesh, ShapeTable};
 
-use super::jobs::{Border, Jobs, solve};
+use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
 use super::world_state::ChunkStore;
 use super::{Shapes, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -358,6 +358,14 @@ fn stream(
         center,
         budget.landed_per_tick.relight,
     );
+    land_meshes(
+        &mut meshes,
+        &mut jobs,
+        &mut ready,
+        center,
+        rings.mesh,
+        budget.landed_per_tick.mesh,
+    );
     dispatch_generation(
         &store,
         &mut jobs,
@@ -377,15 +385,15 @@ fn stream(
         budget.in_flight.relight,
         &shapes.0,
     );
-    publish(
+    dispatch_meshes(
         &store,
         &mut meshes,
-        &mut ready,
+        &mut jobs,
         &order,
         center,
         rings.mesh,
-        budget.landed_per_tick.mesh,
-        &shapes,
+        budget.in_flight.mesh,
+        &shapes.0,
     );
 }
 
@@ -417,6 +425,7 @@ fn retire(
 
     jobs.generate.retain(|c| evict.contains(delta(center, c)));
     jobs.relight.retain(|c| evict.contains(delta(center, c)));
+    jobs.mesh.retain(|c| keep.contains(delta(center, c)));
     meshes
         .relighting
         .retain(|&c| evict.contains(delta(center, c)));
@@ -533,7 +542,7 @@ fn land_relight(
             continue;
         };
         if poisoned || !Arc::ptr_eq(&current, &solved.chunk) {
-            jobs.relight.discard();
+            jobs.relight.note_stale();
             meshes.unlit.insert(coord);
             continue;
         }
@@ -620,58 +629,100 @@ fn above_the_surface(generator: &WorldGenerator, world: &WorldSettings, coord: C
     floor_m > highest_m
 }
 
-/// Meshes up to `budget` dirty Chunks inside the mesh extent, nearest first.
+/// Applies up to `budget` finished meshes, nearest first, and tells the Client.
 ///
-/// Requiring all six neighbours before meshing is what lets `generate` get
-/// away with not re-dirtying them; see the comment there.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the last argument is the World's Shape table; bundling the rest \
-              would invent a type used once"
-)]
-fn publish(
-    store: &ChunkStore,
+/// A mesh lands only if its Chunk is still inside the `mesh` extent. That is
+/// also what keeps the module doc's eviction argument true for a job in flight:
+/// a Chunk inside `mesh` has all six neighbours inside `load`, so every
+/// neighbour the job read is still held.
+///
+/// A result is delivered even if the Chunk was dirtied again during the flight.
+/// It is no staler than the mesh the Client already holds, the dirty mark is
+/// still there so a fresh job follows, and dropping it instead would starve a
+/// Chunk that is edited faster than a mesh takes to build.
+fn land_meshes(
     meshes: &mut MeshState,
+    jobs: &mut Jobs,
     ready: &mut MessageWriter<ChunkMeshReady>,
-    order: &LoadOrder,
     center: ChunkCoord,
     mesh: Extent,
     budget: usize,
-    shapes: &ShapeTable,
 ) {
-    let mut sent = 0;
+    let mut finished: Vec<ChunkCoord> = jobs.mesh.finished().collect();
+    finished.sort_unstable_by_key(|&c| delta(center, c).length_squared());
+    for coord in finished.into_iter().take(budget) {
+        let Some(built) = jobs.mesh.take(coord) else {
+            continue;
+        };
+        if !mesh.contains(delta(center, coord)) {
+            jobs.mesh.note_stale();
+            // Dirty again so it is redrawn if the anchor comes back.
+            meshes.dirty.insert(coord);
+            continue;
+        }
+        if meshes.dirty.contains(&coord) {
+            jobs.mesh.note_stale();
+        }
+        ready.write(ChunkMeshReady { coord, mesh: built });
+        meshes.delivered.insert(coord);
+    }
+}
+
+/// Starts mesh jobs for dirty Chunks inside the mesh extent, nearest first,
+/// until `in_flight` are outstanding.
+///
+/// Requires all six neighbours' Voxels **and** light: a boundary face is lit by
+/// the Voxel across it, so a neighbour without light would bake a black seam.
+/// And requires the Chunk and its neighbours to be settled, neither stale nor
+/// being solved: a mesh built against light that is about to move is built twice.
+/// Requiring all six neighbours is also what lets generation get away with not
+/// re-dirtying them; see `land_generated`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one stage of the tick; bundling them would invent a type used once"
+)]
+fn dispatch_meshes(
+    store: &ChunkStore,
+    meshes: &mut MeshState,
+    jobs: &mut Jobs,
+    order: &LoadOrder,
+    center: ChunkCoord,
+    mesh: Extent,
+    in_flight: usize,
+    shapes: &Arc<ShapeTable>,
+) {
+    let mut free = in_flight.saturating_sub(jobs.mesh.in_flight());
     for &d in &order.offsets {
-        if sent == budget {
+        if free == 0 {
             break;
         }
         if !mesh.contains(d) {
             continue;
         }
         let coord = offset(center, d);
-        if !meshes.dirty.contains(&coord) {
+        if !meshes.dirty.contains(&coord) || jobs.mesh.contains(coord) {
             continue;
         }
-        let Some(chunk) = store.get(coord) else {
+        let Some(own) = store.shared(coord) else {
             continue;
         };
-        let Some(light) = store.light(coord) else {
+        let faces = face_neighbors(coord);
+        let around: [Option<Shared>; 6] = faces.map(|n| store.shared(n));
+        let Some(around) = around.into_iter().collect::<Option<Vec<_>>>() else {
             continue;
         };
-        // All six neighbours' Voxels *and* light: a boundary face is lit by the
-        // Voxel across it, so a neighbour without light would bake a black seam.
-        let neighbors: [Option<LitChunk>; 6] =
-            face_neighbors(coord).map(|n| Some(LitChunk::new(store.get(n)?, store.light(n)?)));
-        if neighbors.iter().any(Option::is_none) {
+        let settled = |c: &ChunkCoord| !meshes.is_unlit(*c);
+        if !settled(&coord) || !faces.iter().all(settled) {
             continue;
         }
-
-        ready.write(ChunkMeshReady {
-            coord,
-            mesh: mesh_chunk(LitChunk::new(chunk, light), neighbors, shapes),
-        });
+        let around: [Shared; 6] = around
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
-        meshes.delivered.insert(coord);
-        sent += 1;
+        let shapes = Arc::clone(shapes);
+        jobs.mesh
+            .spawn(coord, move || build_mesh(&own, &around, &shapes));
+        free -= 1;
     }
 }
 
@@ -705,6 +756,11 @@ pub mod stats {
         /// once. Earlier than `settled`, which also waits for the margin's
         /// light, and the one that matches what a player sees fill in.
         pub shown: bool,
+        /// Jobs landed, and results that were out of date when they landed, per
+        /// stage: generate, relight, mesh. A stale relight was dropped; a stale
+        /// mesh was delivered anyway and followed by a fresh one.
+        pub landed: [usize; 3],
+        pub stale: [usize; 3],
     }
 
     pub(super) fn plugin(app: &mut App) {
@@ -758,6 +814,16 @@ pub mod stats {
             anchor: center.unwrap_or_default(),
             settled,
             shown,
+            landed: [
+                jobs.generate.landed_total(),
+                jobs.relight.landed_total(),
+                jobs.mesh.landed_total(),
+            ],
+            stale: [
+                jobs.generate.stale(),
+                jobs.relight.stale(),
+                jobs.mesh.stale(),
+            ],
         };
     }
 }
@@ -770,7 +836,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-    use tesserae_core::{Chunk, ChunkLight};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
@@ -922,8 +988,10 @@ mod tests {
         },
     };
 
-    /// Ticks `settle` allows before it calls the streaming stuck.
-    const SETTLE_CEILING: usize = 5_000;
+    /// How long `settle` waits before it calls the streaming stuck. Wall time,
+    /// not ticks: the tests share one pool, and a fill that is slow because
+    /// twenty other tests are filling is not a hang.
+    const SETTLE_CEILING: std::time::Duration = std::time::Duration::from_secs(60);
 
     struct Harness {
         app: App,
@@ -935,7 +1003,7 @@ mod tests {
             // One pool for the whole test process; `get_or_init` is a no-op after
             // the first test, and the thread count is fixed so nothing a test
             // asserts depends on the machine.
-            AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(2).build());
+            AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
             let world_settings = WorldSettings::default();
             let generator = Worldgen::new(
                 world_settings.seed,
@@ -995,7 +1063,8 @@ mod tests {
         /// that a tick starts work instead of finishing it.
         fn settle(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
             let (mut ready, mut unloaded) = (Vec::new(), Vec::new());
-            for _ in 0..SETTLE_CEILING {
+            let started = std::time::Instant::now();
+            while started.elapsed() < SETTLE_CEILING {
                 let (r, u) = self.tick();
                 let quiet = r.is_empty() && u.is_empty() && self.quiet();
                 ready.extend(r);
@@ -1007,7 +1076,7 @@ mod tests {
                     std::thread::sleep(std::time::Duration::from_micros(100));
                 }
             }
-            panic!("streaming was still busy after {SETTLE_CEILING} ticks");
+            panic!("streaming was still busy after {SETTLE_CEILING:?}");
         }
 
         fn quiet(&self) -> bool {
@@ -1310,7 +1379,8 @@ mod tests {
         assert_eq!(h.jobs().generate.counts().0, 5);
         assert_eq!(h.store().coords().count(), 0);
 
-        for _ in 0..SETTLE_CEILING {
+        let started = std::time::Instant::now();
+        while started.elapsed() < SETTLE_CEILING {
             let (ready, _) = h.tick();
             let jobs = h.jobs();
             assert!(jobs.generate.in_flight() <= 5, "over the in-flight cap");
@@ -1588,18 +1658,171 @@ mod tests {
             .unwrap();
     }
 
+    /// A mesh built against light that is about to move is built twice, so a
+    /// Chunk waits until it and its six neighbours are neither stale nor being
+    /// solved.
+    #[test]
+    fn a_mesh_waits_for_its_neighbourhood_to_settle() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let (home, next) = (ChunkCoord::new(0, 0, 0), ChunkCoord::new(1, 0, 0));
+
+        h.jobs_mut().relight.hold.hold();
+        {
+            let mut meshes = h.app.world_mut().resource_mut::<MeshState>();
+            meshes.mark_unlit(next);
+            meshes.edited(home);
+        }
+        h.tick();
+        assert!(
+            h.jobs().relight.contains(next),
+            "the neighbour was not solved"
+        );
+        assert!(
+            !h.jobs().mesh.contains(home),
+            "{home} was meshed while {next} was being solved"
+        );
+
+        h.jobs_mut().relight.hold.release();
+        let (ready, _) = h.settle();
+        assert!(
+            ready.iter().any(|m| m.coord == home),
+            "{home} was never meshed once its neighbourhood settled"
+        );
+    }
+
+    /// A Chunk edited faster than a mesh takes to build must still show the
+    /// Client something: each result is already behind the next edit, and
+    /// dropping it for that would mean never delivering at all.
+    #[test]
+    fn sustained_edits_to_one_chunk_still_deliver_meshes() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        h.jobs_mut().mesh.scramble = true;
+        let ground = h
+            .app
+            .world()
+            .resource::<WorldGenerator>()
+            .surface_height_m(16.0, 16.0)
+            .floor() as i32;
+        let at = [16, ground + 1, 16];
+        let chunk = VoxelCoord::of(at).chunk;
+
+        let mut delivered = 0;
+        let started = std::time::Instant::now();
+        let mut i = 0;
+        // Until a mesh lands behind an edit, which only needs the pool to get to
+        // it; other tests share it, so how long that takes is not this test's to
+        // know.
+        while (delivered == 0 || h.jobs().mesh.stale() == 0) && started.elapsed() < SETTLE_CEILING {
+            i += 1;
+            let voxel = if i % 2 == 0 {
+                Voxel::cube(tesserae_core::worldgen::STONE)
+            } else {
+                Voxel::AIR
+            };
+            h.app
+                .world_mut()
+                .run_system_once(
+                    move |mut store: ResMut<ChunkStore>,
+                          mut meshes: ResMut<MeshState>,
+                          shapes: Res<Shapes>| {
+                        edit::set_voxel(&mut store, &mut meshes, &shapes, at, voxel)
+                            .expect("loaded");
+                    },
+                )
+                .unwrap();
+            let (ready, _) = h.tick();
+            delivered += ready.iter().filter(|m| m.coord == chunk).count();
+            std::thread::sleep(std::time::Duration::from_micros(20));
+        }
+        assert!(
+            delivered > 0,
+            "{chunk} was edited every tick and never redrawn"
+        );
+        assert!(
+            h.jobs().mesh.stale() > 0,
+            "no mesh landed behind an edit, so the test did not exercise it"
+        );
+    }
+
+    /// The anchor can fly off while meshes are being built for where it was. No
+    /// result may reach the Client for a Chunk outside the mesh extent it now
+    /// has, and what the Client ends up holding is current. Two distances: past
+    /// `keep`, where `retire` cancels the job, and between `mesh` and `keep`,
+    /// where only the check at landing stands in the way.
+    #[test]
+    fn a_fly_by_with_meshes_outstanding_delivers_nothing_outside_the_new_extent() {
+        for cells in [2.0, 10.0] {
+            let mut h = Harness::new(small(), UNLIMITED);
+            h.settle();
+
+            h.jobs_mut().mesh.hold.hold();
+            let delivered: Vec<ChunkCoord> = h.delivered().into_iter().collect();
+            {
+                let mut meshes = h.app.world_mut().resource_mut::<MeshState>();
+                for &coord in &delivered {
+                    meshes.edited(coord);
+                }
+            }
+            h.tick();
+            assert!(h.jobs().mesh.in_flight() > 0, "no mesh was in flight");
+
+            let cell = h.app.world().resource::<WorldSettings>().cell_size();
+            h.anchor_at(Vec3::new(cells * cell, 0.0, 0.0));
+            let (_, unloaded) = h.tick();
+            if cells > 5.0 {
+                assert_eq!(
+                    unloaded.len(),
+                    delivered.len(),
+                    "old meshes were not dropped"
+                );
+            }
+            h.jobs_mut().mesh.hold.release();
+            let (ready, _) = h.settle();
+
+            let mesh = h.rings().mesh;
+            let center = h.center();
+            let mut latest: bevy::platform::collections::HashMap<ChunkCoord, ChunkMesh> =
+                Default::default();
+            for message in ready {
+                assert!(
+                    mesh.contains(delta(center, message.coord)),
+                    "{} was sent from outside the mesh extent, {cells} Cells away",
+                    message.coord
+                );
+                latest.insert(message.coord, message.mesh);
+            }
+            for coord in h.delivered() {
+                assert!(
+                    mesh.contains(delta(center, coord)) || !latest.contains_key(&coord),
+                    "{coord} is held but outside the mesh extent"
+                );
+            }
+            for (coord, held) in &latest {
+                let store = h.store();
+                let neighbors: [Option<LitChunk>; 6] =
+                    face_neighbors(*coord).map(|n| Some(lit(store, n)));
+                let fresh = mesh_chunk(lit(store, *coord), neighbors, &ShapeTable::builtin());
+                assert!(
+                    same_mesh(held, &fresh),
+                    "{coord} is stale, {cells} Cells away"
+                );
+            }
+        }
+    }
+
     /// The fact spec decision 5 needs from the implementation: a neighbour's
     /// landing marks this Chunk stale while this Chunk's own solve is running,
     /// and that mark has to outlive the solve landing, or the Chunk is left
     /// solved against a plane that has since moved.
     #[test]
     fn a_mark_made_while_a_solve_runs_survives_its_landing() {
-        use std::sync::atomic::Ordering::Release;
         let mut h = Harness::new(small(), UNLIMITED);
         h.settle();
         let home = ChunkCoord::new(0, 0, 0);
 
-        h.jobs_mut().relight.hold.store(true, Release);
+        h.jobs_mut().relight.hold.hold();
         h.app
             .world_mut()
             .resource_mut::<MeshState>()
@@ -1611,10 +1834,11 @@ mod tests {
             .world_mut()
             .resource_mut::<MeshState>()
             .mark_unlit(home);
-        h.jobs_mut().relight.hold.store(false, Release);
+        h.jobs_mut().relight.hold.release();
 
         let mut solves = 0;
-        for _ in 0..SETTLE_CEILING {
+        let started = std::time::Instant::now();
+        while started.elapsed() < SETTLE_CEILING {
             h.tick();
             solves += h.jobs().relight.counts().0;
             if h.quiet() {
@@ -1639,12 +1863,7 @@ mod tests {
         let (at, next) = lantern_on_a_boundary(&mut h);
         assert!(h.store().contains(next));
 
-        h.app
-            .world_mut()
-            .resource_mut::<Jobs>()
-            .relight
-            .hold
-            .store(true, std::sync::atomic::Ordering::Release);
+        h.app.world_mut().resource_mut::<Jobs>().relight.hold.hold();
         h.app
             .world_mut()
             .resource_mut::<MeshState>()
@@ -1655,12 +1874,7 @@ mod tests {
             "the solve for {next} never started"
         );
         place_lantern(&mut h, at);
-        h.app
-            .world()
-            .resource::<Jobs>()
-            .relight
-            .hold
-            .store(false, std::sync::atomic::Ordering::Release);
+        h.app.world().resource::<Jobs>().relight.hold.release();
         h.settle();
 
         assert!(
@@ -1687,10 +1901,7 @@ mod tests {
         h.settle();
         let home = ChunkCoord::new(0, 0, 0);
 
-        h.jobs_mut()
-            .relight
-            .hold
-            .store(true, std::sync::atomic::Ordering::Release);
+        h.jobs_mut().relight.hold.hold();
         h.app
             .world_mut()
             .resource_mut::<MeshState>()
@@ -1707,10 +1918,7 @@ mod tests {
                 },
             )
             .unwrap();
-        h.jobs_mut()
-            .relight
-            .hold
-            .store(false, std::sync::atomic::Ordering::Release);
+        h.jobs_mut().relight.hold.release();
         h.settle();
 
         assert!(

@@ -224,7 +224,8 @@ fn report(
     info!(
         "capture shown_s={shown} fill_s={fill} worst_fill_ms={} worst_flight_ms={} \
          median_flight_ms={} p99_flight_ms={} flight_frames={} \
-         loaded={} meshed={} drawn={} chunk={} camera={:?}",
+         loaded={} meshed={} drawn={} relight_landed={} relight_stale={} mesh_landed={} \
+         mesh_stale={} chunk={} camera={:?}",
         ms(capture.frames.worst_fill_s),
         or_na(|s| s.worst_s),
         or_na(|s| s.median_s),
@@ -233,6 +234,10 @@ fn report(
         stats.loaded,
         stats.meshed,
         drawn.iter().count(),
+        stats.landed[1],
+        stats.stale[1],
+        stats.landed[2],
+        stats.stale[2],
         stats.anchor,
         camera.translation,
     );
