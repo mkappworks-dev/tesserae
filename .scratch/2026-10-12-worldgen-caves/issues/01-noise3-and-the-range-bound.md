@@ -1,6 +1,6 @@
 # A 3D value-noise primitive and an exact range over a box
 
-Status: ready-for-agent
+Status: done
 
 Spec decision 8 and the prototype findings. Everything else stands on this.
 
@@ -30,3 +30,8 @@ Spec decision 8 and the prototype findings. Everything else stands on this.
 - `cargo test -p tesserae-core` and `./scripts/cargo-ci` pass.
 
 ## Comments
+
+**Measured, over 500 quarter-cell boxes at two octaves:** the exact range is
+0.24 wide on average and the lattice-value bound it replaced is 0.84, which is
+why the test caps the mean at 0.4. Soundness is checked on 3000 random boxes,
+40 interior points and all eight corners each, at one to three octaves.
