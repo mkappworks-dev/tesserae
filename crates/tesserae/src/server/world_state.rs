@@ -7,6 +7,8 @@
 //! compile rather than merely being noticed in review. The Client gets finished
 //! meshes through `super::streaming`'s messages and needs no read access either.
 
+use std::sync::Arc;
+
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use tesserae_core::collide::VoxelVolume;
@@ -19,19 +21,40 @@ use crate::world::ChunkCoord;
 ///
 /// Light is World state like the Voxels are, so it lives here under the same
 /// Server-private mutators rather than on the Client that renders it.
+///
+/// Behind `Arc` so a worker can be handed a snapshot without a copy. Every write
+/// goes through `Arc::make_mut`, which clones only while a snapshot is alive: a
+/// write can never be seen by a job already running, and a held `Arc` cannot
+/// have its address reused, so `Arc::ptr_eq` against the store says whether a
+/// Chunk has changed since the snapshot was taken.
 #[derive(Resource, Default)]
 pub struct ChunkStore {
-    chunks: HashMap<ChunkCoord, Chunk>,
-    light: HashMap<ChunkCoord, ChunkLight>,
+    chunks: HashMap<ChunkCoord, Arc<Chunk>>,
+    light: HashMap<ChunkCoord, Arc<ChunkLight>>,
 }
 
 impl ChunkStore {
     pub fn get(&self, coord: ChunkCoord) -> Option<&Chunk> {
-        self.chunks.get(&coord)
+        self.chunks.get(&coord).map(Arc::as_ref)
     }
 
     pub fn light(&self, coord: ChunkCoord) -> Option<&ChunkLight> {
-        self.light.get(&coord)
+        self.light.get(&coord).map(Arc::as_ref)
+    }
+
+    /// A Chunk and its light as shared handles, for a job to hold.
+    ///
+    /// Server-private because an `Arc<Chunk>` in Client hands would be the read
+    /// access the Client is deliberately denied.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(in crate::server) fn shared(
+        &self,
+        coord: ChunkCoord,
+    ) -> Option<(Arc<Chunk>, Arc<ChunkLight>)> {
+        Some((
+            Arc::clone(self.chunks.get(&coord)?),
+            Arc::clone(self.light.get(&coord)?),
+        ))
     }
 
     /// One Voxel's light, in lattice coordinates. `Light::DARK` where the
@@ -55,19 +78,19 @@ impl ChunkStore {
     /// from its neighbours, which is also what makes a Chunk arriving next to
     /// it brighten this one.
     pub(in crate::server) fn insert(&mut self, coord: ChunkCoord, chunk: Chunk) {
-        self.chunks.insert(coord, chunk);
-        self.light.insert(coord, ChunkLight::dark());
+        self.chunks.insert(coord, Arc::new(chunk));
+        self.light.insert(coord, Arc::new(ChunkLight::dark()));
     }
 
     pub(in crate::server) fn set_light(&mut self, coord: ChunkCoord, light: ChunkLight) {
-        self.light.insert(coord, light);
+        self.light.insert(coord, Arc::new(light));
     }
 
     /// Replaces one Voxel. The caller re-floods light around it with
     /// `tesserae_core::relight`, which is what `super::edit::set_voxel` does.
     pub(in crate::server) fn set_voxel(&mut self, at: VoxelCoord, voxel: Voxel) {
         if let Some(chunk) = self.chunks.get_mut(&at.chunk) {
-            chunk.set(at.x, at.y, at.z, voxel);
+            Arc::make_mut(chunk).set(at.x, at.y, at.z, voxel);
         }
     }
 
@@ -156,7 +179,7 @@ impl LightVolume for LightLattice<'_> {
         let Some(stored) = self.store.light.get_mut(&at.chunk) else {
             return;
         };
-        stored.set(at.x, at.y, at.z, light);
+        Arc::make_mut(stored).set(at.x, at.y, at.z, light);
         if self.touched.last() != Some(&at.chunk) {
             // Last-write check rather than a set: the fill has strong locality,
             // so this collapses nearly every run, and `streaming` de-duplicates
@@ -264,6 +287,46 @@ mod tests {
         for coord in [here, next] {
             assert!(touched.contains(&coord), "{coord} not reported");
         }
+    }
+
+    #[test]
+    fn a_write_never_reaches_a_snapshot_already_taken() {
+        let mut store = ChunkStore::default();
+        let coord = ChunkCoord::new(0, 0, 0);
+        store.insert(coord, Chunk::air());
+        let (chunk, light) = store.shared(coord).expect("loaded");
+
+        let at = VoxelCoord::of([3, 4, 5]);
+        store.set_voxel(at, Voxel::cube(worldgen::LANTERN));
+        let mut lattice = LightLattice::new(&mut store);
+        lattice.set_light([3, 4, 5], Light::new(0, MAX_LIGHT));
+
+        assert!(chunk.get(3, 4, 5).is_air(), "the snapshot saw the write");
+        assert_eq!(
+            light.get(3, 4, 5),
+            Light::DARK,
+            "the snapshot saw the light"
+        );
+        assert!(!store.get(coord).unwrap().get(3, 4, 5).is_air());
+        let (now, now_light) = store.shared(coord).unwrap();
+        assert!(!Arc::ptr_eq(&chunk, &now), "the write did not reallocate");
+        assert!(
+            !Arc::ptr_eq(&light, &now_light),
+            "the write did not reallocate"
+        );
+    }
+
+    #[test]
+    fn a_write_to_an_unshared_chunk_happens_in_place() {
+        let mut store = ChunkStore::default();
+        let coord = ChunkCoord::new(0, 0, 0);
+        store.insert(coord, Chunk::air());
+        let before = store.shared(coord).map(|(c, _)| Arc::as_ptr(&c)).unwrap();
+
+        store.set_voxel(VoxelCoord::of([1, 1, 1]), Voxel::cube(worldgen::LANTERN));
+
+        let after = store.shared(coord).map(|(c, _)| Arc::as_ptr(&c)).unwrap();
+        assert_eq!(before, after, "an unshared write allocated a new Chunk");
     }
 
     #[test]

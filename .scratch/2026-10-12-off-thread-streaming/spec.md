@@ -157,11 +157,14 @@ change body, not signature.
 
 Evaluated and rejected:
 
-- **Clone seven Chunks and seven `ChunkLight`s per Job.** Roughly 300 KiB of
-  memcpy and seven to fourteen allocations on the tick per mesh Job, so 12 Jobs
-  a tick is ~4 MiB of copying on the thread this task is trying to unload.
-  Ticket 02 benchmarks it against the `Arc` version rather than this spec
-  asserting the gap.
+- **Clone seven Chunks and seven `ChunkLight`s per Job.** Measured by ticket 02
+  rather than asserted: 5.6 us per mesh Job against 43 ns for the `Arc` clones,
+  130x. That is affordable (67 us a tick at 12 Jobs, 0.6 ms at 100) and was not
+  the reason to choose `Arc`; the reasons are that it is free, that it makes
+  "unchanged since the snapshot" a pointer comparison, and that the copy grows
+  with palette size where the `Arc` does not. The first draft of this spec
+  estimated the copy at ~4 MiB a tick; terrain Chunks are small, and it is the
+  224 KiB of dense light that dominates.
 - **Copy only the six face planes** (a halo: 6 x 1024 Voxels and light). Cheaper
   to hand over, but `light_chunk` and `mesh_chunk` take whole `LitChunk`s, so it
   needs a second entry point in core or a rebuild of `Neighborhood` on the tick,
