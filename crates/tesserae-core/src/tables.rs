@@ -48,4 +48,15 @@ impl Tables {
     pub fn light_mask(&self, voxel: Voxel) -> u8 {
         self.light_params(voxel).0
     }
+
+    /// [`ShapeTable::joint_id`] for a Voxel that can seal a plane at all: an
+    /// opaque Material, whose geometry decides what light does. A clear one
+    /// seals nothing alone or in a pair, so it has no joint id.
+    #[inline]
+    pub fn joint_id(&self, voxel: Voxel) -> u16 {
+        if voxel.is_air() || self.materials.dimming(voxel) != MAX_LIGHT {
+            return 0;
+        }
+        self.shapes.joint_id(voxel)
+    }
 }

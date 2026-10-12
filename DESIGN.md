@@ -367,9 +367,9 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 - **Shaped Voxels have loose ends worth a ticket each.** Terrain contains none
   (slope-smoothing stairs and slabs are the obvious worldgen use, and must stay
   under the cap). Fence arms and collision taller than the cell need a Shape to
-  look at its neighbours. Two partial Shapes that only jointly cover a face leak
-  light through the seam. Material transparency (glass, water, leaves) is not a
-  Shape property, and is specified as a Material one in
+  look at its neighbours. Material transparency (glass, water, leaves) is a
+  Material property and not a Shape one: the table, light dimming and occlusion
+  are done, and the blended render pass is ticket 04 of
   `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is a
   stopgap. The ray origin in an intent is not checked against a player position,
   because there is no player entity.

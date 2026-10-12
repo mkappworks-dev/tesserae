@@ -345,8 +345,11 @@ are testable alone. 04 is the first time a player can see any of it.
   at 8 beside a removed 15 holds 14 and is cleared, and nothing re-seeds it.
   Latent in 01 (the only emitter is 15), and ticket 02 fixes it with a test
   before a level-8 Material can be registered by anything but a test.
-- **Joint coverage** still leaks light through a seam, as in step 5, and now so
-  can two translucent Materials that only jointly hide a face.
+- **Joint coverage of the mesh.** Two partial Shapes that jointly cover a face now
+  block light (the joint-coverage change that landed on `main`), and
+  `Tables::joint_id` leaves clear Materials out of it, so two glass halves seal
+  nothing. The mesher still tests each quad against one neighbour's coverage, so
+  a face two neighbours jointly hide is drawn: overdraw, never a hole.
 - **No intra-chunk sorting** of blended quads (decision 6).
 - **Collision and picking** treat water as solid: `collide` reads Shapes only.
   A `solid` row field when a controller exists.
