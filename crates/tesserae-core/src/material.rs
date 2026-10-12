@@ -4,7 +4,7 @@
 //! what it emits, how it dims light, what faces it hides, which pass draws it -
 //! in rows indexed by [`MaterialId`], as [`crate::ShapeTable`] does for Shapes.
 //! Geometry is the Shape's and appearance is a Look pack's; this is what is
-//! neither. `docs/adr/0008-materials-are-table-data.md`.
+//! neither. `docs/adr/0009-materials-are-table-data.md`.
 
 use crate::light::MAX_LIGHT;
 use crate::voxel::{AIR, MaterialId, Voxel};

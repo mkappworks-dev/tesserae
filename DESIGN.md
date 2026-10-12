@@ -333,13 +333,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    and `collide.rs` has a metre-valued sweep and ray. Glass, leaves and water
    were added later, off the build order, as a `MaterialTable` that carries
    emission, light dimming, occlusion and render class
-   ([ADR-0008](docs/adr/0008-materials-are-table-data.md)). See
+   ([ADR-0009](docs/adr/0009-materials-are-table-data.md)). See
    `.scratch/2026-10-12-material-table-transparency/spec.md`.
 6. LOD mip chain out to 4km.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
 9. Look-pack API, water shading, visual polish.
-10. Network transport.
+10. Network transport. The `Player` and `PoseReport` are its first customers.
 
 ## Open items
 
@@ -371,8 +371,14 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   Material property and not a Shape one: the table, light dimming and occlusion
   are done, and the blended render pass is ticket 04 of
   `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is a
-  stopgap. The ray origin in an intent is not checked against a player position,
-  because there is no player entity.
+  stopgap.
+- **The Player's pose is rate-limited, not true.** The Server clamps a pose that
+  moves faster than `PlayerLimits` and tells the Client, but flying is the only
+  way to move, so a modified Client can still fly at the cap and edit within
+  reach of where it goes. A controller (gravity, collision, a walking speed),
+  tolerances derived from it, client prediction, and lag compensation (which
+  needs the transport's clock) are the follow-up. See ADR-0008 and
+  `.scratch/2026-10-12-server-edit-origin/issues/05-*`.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

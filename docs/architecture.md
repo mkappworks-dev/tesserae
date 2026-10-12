@@ -117,7 +117,7 @@ tesserae/
 │   └── adr/                    0001 wasm · 0002 client-server · 0003 voxel size
 │                               0004 demo game · 0005 asset root
 │                               0006 shapes are table data
-│                               0008 materials are table data
+│                               0009 materials are table data
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/

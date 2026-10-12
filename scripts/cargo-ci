@@ -24,6 +24,12 @@ npm run fmt:check --silent
 step "Lint: clippy"
 cargo clippy --workspace --all-targets --all-features
 
+# CI's Build job compiles the binary without `dev` or `cfg(test)`, where code
+# only the dev builders or the tests use is dead. Clippy and the tests both
+# enable one of those, so neither sees it.
+step "Build: default features"
+cargo check --workspace --locked
+
 step "Test"
 cargo test --workspace --locked
 

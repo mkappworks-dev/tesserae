@@ -3,7 +3,8 @@
 //! It sends the ray through the crosshair, in metres, and what it holds, and
 //! nothing else. The Client has no access to World state, not even to read it,
 //! so it cannot say which Voxel is under the crosshair and does not try: the
-//! Server finds that and decides whether the Edit happens.
+//! Server finds that and decides whether the Edit happens. The ray starts where
+//! `pose::report_pose` has just said the Player's Eye is.
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 //!
 //! A stopgap: a hotbar of five and two keys for orientation are enough to
@@ -140,7 +141,14 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Startup, spawn_hud)
         .add_systems(
             Update,
-            (select_held, send_intents, show_rejections, update_hud).chain(),
+            (
+                select_held,
+                // The report and the intent read one `GlobalTransform`.
+                send_intents.after(super::pose::report_pose),
+                show_rejections,
+                update_hud,
+            )
+                .chain(),
         );
 }
 
@@ -257,6 +265,7 @@ fn update_hud(held: Res<Held>, notice: Res<Notice>, mut hud: Single<&mut Text, W
 mod tests {
     use super::*;
     use crate::server::edit::RejectReason;
+    use crate::server::player::{PoseCorrection, PoseReport};
 
     fn app(grab: CursorGrabMode) -> App {
         let mut app = App::new();
@@ -267,7 +276,18 @@ mod tests {
             .init_resource::<Notice>()
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
-            .add_systems(Update, (select_held, send_intents, show_rejections).chain());
+            .add_message::<PoseReport>()
+            .add_message::<PoseCorrection>()
+            .add_plugins(crate::client::pose::plugin)
+            .add_systems(
+                Update,
+                (
+                    select_held,
+                    send_intents.after(crate::client::pose::report_pose),
+                    show_rejections,
+                )
+                    .chain(),
+            );
         app.world_mut().spawn((
             Window::default(),
             PrimaryWindow,
@@ -310,6 +330,36 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(button);
+    }
+
+    #[test]
+    fn an_intent_starts_where_the_pose_report_sent_in_its_frame_says() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        // The first frame reported the camera where it was spawned.
+        app.world_mut()
+            .resource_mut::<Messages<PoseReport>>()
+            .clear();
+        let mut camera = app.world_mut().query::<&mut GlobalTransform>();
+        *camera.single_mut(app.world_mut()).unwrap() =
+            GlobalTransform::from(Transform::from_xyz(40.0, 9.0, -7.0));
+        press(&mut app, MouseButton::Left);
+
+        app.update();
+        let reports: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<PoseReport>>()
+            .drain()
+            .collect();
+        let intents: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<EditIntent>>()
+            .drain()
+            .collect();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].origin, reports[0].eye);
+        assert_eq!(reports[0].eye, Vec3::new(40.0, 9.0, -7.0));
     }
 
     #[test]

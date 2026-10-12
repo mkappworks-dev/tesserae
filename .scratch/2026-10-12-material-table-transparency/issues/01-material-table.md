@@ -27,7 +27,7 @@ the later tickets read, and costs the terrain hot paths nothing.
   `light.rs` stops importing `worldgen::LANTERN`.
 - The app: the `Shapes` resource becomes `Tables`, the streaming jobs clone an
   `Arc<Tables>`, and call sites in tests pass `Tables::builtin()`.
-- `docs/adr/0008-materials-are-table-data.md`; `CONTEXT.md` gains Dimming,
+- `docs/adr/0009-materials-are-table-data.md`; `CONTEXT.md` gains Dimming,
   Opaque and Translucent; `DESIGN.md` gets a pointer under step 5 and the
   "Material transparency" loose end.
 
