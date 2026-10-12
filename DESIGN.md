@@ -149,9 +149,16 @@ All four are resolved:
    mesher still does not need to know which level it is meshing. Step 6 writes
    the downsample; `ShapeTable::volume` is the datum.
 
-Terrain places none, and a Chunk may hold at most `MAX_SHAPED_PER_CHUNK` (1024),
-the largest round number that keeps a Chunk at the cap within +50% of a terrain
-mesh. The edit path enforces it and the mesher does not police it.
+A Chunk may hold at most `MAX_SHAPED_PER_CHUNK` (1024), the largest round number
+that keeps a Chunk at the cap within +50% of a terrain mesh. The edit path
+enforces it and the mesher does not police it.
+
+Terrain places stairs and slabs where the ground steps one Voxel (slope
+smoothing, see `.scratch/2026-10-12-worldgen-slope-smoothing/spec.md`): a stair
+facing a single higher neighbour, a slab where two or more rise. It is gated by
+a rise in **metres** (`SmoothingParams::min_rise_m`), so a World with Voxels
+smaller than that is not smoothed. The generator keeps to half the cap,
+`MAX_SMOOTHED_PER_CHUNK` (512), and leaves the other half to the player.
 
 ## LOD
 
@@ -330,15 +337,20 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    derived from one rotated 16³ grid per Shape: which faces a Voxel seals, the
    geometry pass 2 emits, collision, and volume. Occlusion and light are per
    face. The Server's edit path is live, with a ray as the Client's only intent,
-   and `collide.rs` has a metre-valued sweep and ray. Connected Shapes (a fence
-   growing arms) and collision up to a Voxel taller than the cell follow in the
-   same step, with connections derived from the neighbours and never stored
-   ([ADR-0008](docs/adr/0008-connections-are-derived-not-stored.md)).
+   and `collide.rs` has a metre-valued sweep and ray. Glass, leaves and water
+   were added later, off the build order, as a `MaterialTable` that carries
+   emission, light dimming, occlusion and render class
+   ([ADR-0009](docs/adr/0009-materials-are-table-data.md)). See
+   `.scratch/2026-10-12-material-table-transparency/spec.md`. Connected Shapes
+   (a fence growing arms) and collision up to a Voxel taller than the cell
+   follow in the same step, with connections derived from the neighbours and
+   never stored
+   ([ADR-0010](docs/adr/0010-connections-are-derived-not-stored.md)).
 6. LOD mip chain out to 4km.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
 9. Look-pack API, water shading, visual polish.
-10. Network transport.
+10. Network transport. The `Player` and `PoseReport` are its first customers.
 
 ## Open items
 
@@ -362,16 +374,26 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   a worst tick of 0.6 ms and a fill of 1.58 s either way, because a ring holds
   one deep layer inside the cave band. The caps want revisiting when LOD adds
   rings, or when a Mod sets a cave floor deep enough to put several layers in
-  the band; see `StreamingBudget`.
-- **Shaped Voxels have loose ends worth a ticket each.** Terrain contains none
-  (slope-smoothing stairs and slabs are the obvious worldgen use, and must stay
-  under the cap). Connection groups belong to a Shape and not a Material until
-  step 7, a connected Shape cannot be rotated, and LOD counts only its bare
-  post. A fence costs 7 stairs of the cap, so 146 fit in a Chunk. Two partial
-  Shapes that only jointly cover a face leak light through the seam. Material
-  transparency (glass, water, leaves) is not a Shape property. The Client's
-  hotbar is a stopgap. The ray origin in an intent is not checked against a
-  player position, because there is no player entity.
+  the band; see `StreamingBudget`. Slope smoothing is the first terrain to pay
+  for shaped Voxels (about +65 us to generate, +10-20% to mesh and +80-100% to
+  light a surface Chunk) and moved the worst tick from 1.6 to 1.8 ms at load 20,
+  so the caps did not change either.
+- **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
+  stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
+  Connection groups belong to a Shape and not a Material until step 7, a
+  connected Shape cannot be rotated, and LOD counts only its bare post. A fence
+  costs 7 stairs of the cap, so 146 fit in a Chunk. Material transparency
+  (glass, water, leaves) is a Material property and not a Shape one: the table,
+  light dimming and occlusion are done, and the blended render pass is ticket 04
+  of `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is
+  a stopgap.
+- **The Player's pose is rate-limited, not true.** The Server clamps a pose that
+  moves faster than `PlayerLimits` and tells the Client, but flying is the only
+  way to move, so a modified Client can still fly at the cap and edit within
+  reach of where it goes. A controller (gravity, collision, a walking speed),
+  tolerances derived from it, client prediction, and lag compensation (which
+  needs the transport's clock) are the follow-up. See ADR-0008 and
+  `.scratch/2026-10-12-server-edit-origin/issues/05-*`.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

@@ -192,11 +192,11 @@ Chunk above holds sky 15 in its cell and seals the way down. The opaque-Chunk
 shortcut is unchanged, since a uniform full cube is still the only thing that
 qualifies.
 
-Known limitation, pinned by a test so it is a decision and not a surprise: two
-partial shapes that only **jointly** cover a face (a top slab beside a bottom
-slab) do not seal it, and light leaks through the seam. Closing it needs a
-joint-coverage test on every edge of the flood, which doubles its inner loop for
-a case that does not look wrong on screen.
+Two partial shapes that only **jointly** cover a face (a top slab beside a
+bottom slab) were first left to leak, pinned by a test. They no longer do: the
+edge is also blocked when the two facing coverage masks together cover the plane,
+tested only for pairs of shaped Voxels. See
+[joint coverage in the light edge rule](../2026-10-12-joint-coverage-light/spec.md).
 
 ### 6. Pass 2: per-Voxel geometry, lit per quad
 
@@ -431,7 +431,6 @@ reworked. The streaming worst tick is re-derived from the new numbers, and
   them or in the `dev` gallery. Slope-smoothing stairs and slabs are the obvious
   worldgen use and are deferred with the cap in mind.
 - **No fence arms, no tall collision**, as in decision 1.
-- **Joint coverage** leaks light through a seam, as in decision 5.
 - **Material transparency** (glass, water, leaves) is not a Shape property and
   not in this step. `ShapeTable` answers geometry only.
 - **The Client UI is a stopgap.** A held-item selector and a crosshair are

@@ -5,13 +5,13 @@ use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::shape::examples::{FENCE_ID, fence, pipe};
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
-    SHAPE_STAIR, ShapeDef, ShapeTable, Voxel, Worldgen, WorldgenParams, greedy_mesh, mesh_chunk,
-    testgen,
+    SHAPE_STAIR, ShapeDef, ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, greedy_mesh,
+    mesh_chunk, testgen,
 };
 
-fn shapes() -> &'static ShapeTable {
-    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
-    TABLE.get_or_init(ShapeTable::builtin)
+fn tables() -> &'static Tables {
+    static TABLES: OnceLock<Tables> = OnceLock::new();
+    TABLES.get_or_init(Tables::builtin)
 }
 
 /// Flat full sky, which is what `light_chunk` answers for open terrain and so
@@ -41,6 +41,48 @@ fn worldgen() -> (Worldgen, i32, i32, i32) {
     (g, straddling, sky, deep)
 }
 
+/// The same World as [`worldgen`] with its ground left as cubes, so a row can
+/// separate what the generator itself costs from the shaped Voxels it now makes.
+fn unsmoothed() -> Worldgen {
+    Worldgen::new(
+        0x7e55_e2ae,
+        1.0,
+        WorldgenParams {
+            caves: None,
+            smoothing: None,
+            ..WorldgenParams::default()
+        },
+    )
+}
+
+/// The Chunk, in a fixed scan at the surface layer, with the most slope-smoothing
+/// stairs and slabs: the worst a default World hands the mesher.
+fn densest_ramp(g: &Worldgen, cy: i32) -> (i32, i32, i32) {
+    let mut best = (0, (0, cy, 0));
+    for cz in -8..8 {
+        for cx in -8..8 {
+            let n = g.chunk(cx, cy, cz).shaped_count();
+            if n > best.0 {
+                best = (n, (cx, cy, cz));
+            }
+        }
+    }
+    assert!(best.0 > 0, "the default World has no ramp in the scan");
+    best.1
+}
+
+/// A Chunk's six face neighbours, in the mesher's order.
+fn chunks_around(g: &Worldgen, (cx, cy, cz): (i32, i32, i32)) -> [Chunk; 6] {
+    [
+        g.chunk(cx - 1, cy, cz),
+        g.chunk(cx + 1, cy, cz),
+        g.chunk(cx, cy - 1, cz),
+        g.chunk(cx, cy + 1, cz),
+        g.chunk(cx, cy, cz - 1),
+        g.chunk(cx, cy, cz + 1),
+    ]
+}
+
 /// Chunk coordinates of the cave cases streaming now meets, found by scanning
 /// in a fixed order so a number means the same Chunk on every run.
 struct CaveFixtures {
@@ -55,7 +97,7 @@ struct CaveFixtures {
 }
 
 fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
-    let params = WorldgenParams::default();
+    let params = cave_params();
     let caves = params.caves.expect("the default World has caves");
     let cell = CHUNK_SIZE as f32;
     // The layer just under the soil line that the cave floor reaches.
@@ -107,16 +149,25 @@ fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
     }
 }
 
-fn caved() -> Worldgen {
-    Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default())
+/// The cave benches measure tunnels, so they keep terrain of cubes: they read
+/// the same Chunks as when caves were added.
+fn cave_params() -> WorldgenParams {
+    WorldgenParams {
+        smoothing: None,
+        ..WorldgenParams::default()
+    }
 }
 
-/// The builtin Shapes and a fence, which a Mod would register.
-fn fence_shapes() -> &'static ShapeTable {
-    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut t = ShapeTable::builtin();
-        assert_eq!(t.register(fence()), Ok(FENCE_ID));
+fn caved() -> Worldgen {
+    Worldgen::new(0x7e55_e2ae, 1.0, cave_params())
+}
+
+/// The builtin Tables and a fence, which a Mod would register.
+fn fence_tables() -> &'static Tables {
+    static TABLES: OnceLock<Tables> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        let mut t = Tables::builtin();
+        assert_eq!(t.shapes.register(fence()), Ok(FENCE_ID));
         t
     })
 }
@@ -141,6 +192,67 @@ fn terrain_with_stairs(n: usize) -> Chunk {
             let o = Orientation::from_bits(((x * 7 + z * 3) % 24) as u8).unwrap();
             chunk.set(x, y, z, Voxel::shaped(testgen::STONE, SHAPE_STAIR, o));
             placed += 1;
+        }
+    }
+    chunk
+}
+
+/// Terrain with `depth` Voxels of `material` over every column's surface: a
+/// flooded valley, the translucent case at its largest, since every exposed
+/// terrain face is now seen through something.
+fn terrain_under(material: u16, depth: usize) -> Chunk {
+    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            let Some(top) = (0..CHUNK_SIZE)
+                .rev()
+                .find(|&y| !chunk.get(x, y, z).is_air())
+            else {
+                continue;
+            };
+            for y in top + 1..(top + 1 + depth).min(CHUNK_SIZE) {
+                chunk.set(x, y, z, Voxel::cube(material));
+            }
+        }
+    }
+    chunk
+}
+
+/// Terrain with a canopy of leaves in 4x4 patches floating above the surface:
+/// light that is dimmed and not stopped, and faces that are never culled.
+fn terrain_with_canopy() -> Chunk {
+    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    for z in 0..CHUNK_SIZE {
+        for x in 0..CHUNK_SIZE {
+            if (x / 4 + z / 4) % 2 != 0 {
+                continue;
+            }
+            let Some(top) = (0..CHUNK_SIZE)
+                .rev()
+                .find(|&y| !chunk.get(x, y, z).is_air())
+            else {
+                continue;
+            };
+            for y in top + 4..(top + 7).min(CHUNK_SIZE) {
+                chunk.set(x, y, z, Voxel::cube(tesserae_core::material::LEAVES));
+            }
+        }
+    }
+    chunk
+}
+
+/// A hollow box of glass: nothing but skin, and a second skin inside it.
+fn glass_room() -> Chunk {
+    let mut chunk = Chunk::air();
+    let (lo, hi) = (6, 26);
+    for z in lo..hi {
+        for y in lo..hi {
+            for x in lo..hi {
+                let shell = [x, y, z].iter().any(|&c| c == lo || c == hi - 1);
+                if shell {
+                    chunk.set(x, y, z, Voxel::cube(tesserae_core::material::GLASS));
+                }
+            }
         }
     }
     chunk
@@ -193,20 +305,20 @@ fn mesher(c: &mut Criterion) {
     let terrain = testgen::terrain_chunk(0, 0, 0);
     let terrain_nb = Neighborhood::isolated(LitChunk::new(&terrain, &sky));
     group.bench_function("terrain", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&terrain_nb), shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&terrain_nb), tables())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     let solid_nb = Neighborhood::isolated(LitChunk::new(&solid, &sky));
     group.bench_function("solid", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&solid_nb), shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&solid_nb), tables())))
     });
 
     // Nothing merges here; this is the ceiling on per-chunk mesh cost.
     let checker = testgen::checkerboard_chunk();
     let checker_nb = Neighborhood::isolated(LitChunk::new(&checker, &sky));
     group.bench_function("checkerboard", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&checker_nb), shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&checker_nb), tables())))
     });
 
     // What the merge key actually costs. Light is in the key, so a gradient
@@ -222,7 +334,7 @@ fn mesher(c: &mut Criterion) {
     }
     let gradient_nb = Neighborhood::isolated(LitChunk::new(&terrain, &gradient));
     group.bench_function("terrain_light_gradient", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&gradient_nb), shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&gradient_nb), tables())))
     });
 
     // Pass 2, which terrain never reaches. The first is the most a Chunk may
@@ -230,7 +342,13 @@ fn mesher(c: &mut Criterion) {
     let stairs = terrain_with_stairs(MAX_SHAPED_PER_CHUNK);
     let stairs_nb = Neighborhood::isolated(LitChunk::new(&stairs, &sky));
     group.bench_function("terrain_stairs_at_cap", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&stairs_nb), shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&stairs_nb), tables())))
+    });
+    // What the generator may hand the mesher at most: its half of the cap.
+    let budget = terrain_with_stairs(tesserae_core::MAX_SMOOTHED_PER_CHUNK);
+    let budget_nb = Neighborhood::isolated(LitChunk::new(&budget, &sky));
+    group.bench_function("terrain_stairs_at_budget", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&budget_nb), tables())))
     });
     let all = Chunk::filled(Voxel::shaped(
         testgen::STONE,
@@ -239,7 +357,7 @@ fn mesher(c: &mut Criterion) {
     ));
     let all_nb = Neighborhood::isolated(LitChunk::new(&all, &sky));
     group.bench_function("all_stairs", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&all_nb), shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&all_nb), tables())))
     });
 
     // The same cap with a connected Shape, which emits rails as well as a post.
@@ -247,18 +365,39 @@ fn mesher(c: &mut Criterion) {
     // is every fence fully armed, the worst a Chunk at the cap can cost.
     // As many as the cap lets in, which is fewer than stairs: a fence is charged
     // for its rails in stair-sized units.
-    let units = fence_shapes().cap_units(Voxel::new(testgen::STONE, FENCE_ID, 0)) as usize;
+    let units = fence_tables()
+        .shapes
+        .cap_units(Voxel::new(testgen::STONE, FENCE_ID, 0)) as usize;
     let at_cap = MAX_SHAPED_PER_CHUNK / units;
     eprintln!("a fence costs {units} stairs of the cap: {at_cap} fit");
     let fences = terrain_with_fences(at_cap);
     let fences_nb = Neighborhood::isolated(LitChunk::new(&fences, &sky));
     group.bench_function("terrain_fences_at_cap", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&fences_nb), fence_shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&fences_nb), fence_tables())))
     });
     let flat = flat_fences(at_cap);
     let flat_nb = Neighborhood::isolated(LitChunk::new(&flat, &sky));
     group.bench_function("flat_fences_at_cap", |b| {
-        b.iter(|| black_box(greedy_mesh(black_box(&flat_nb), fence_shapes())))
+        b.iter(|| black_box(greedy_mesh(black_box(&flat_nb), fence_tables())))
+    });
+
+    // Translucent Materials, which cost the table lookups terrain skips. Water
+    // over every column is the largest of them: nothing culled against stone
+    // any more, and a stone floor split into one run per depth of light.
+    let water = terrain_under(tesserae_core::material::WATER, 3);
+    let water_nb = Neighborhood::isolated(LitChunk::new(&water, &sky));
+    group.bench_function("terrain_water", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&water_nb), tables())))
+    });
+    let canopy = terrain_with_canopy();
+    let canopy_nb = Neighborhood::isolated(LitChunk::new(&canopy, &sky));
+    group.bench_function("terrain_canopy", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&canopy_nb), tables())))
+    });
+    let room = glass_room();
+    let room_nb = Neighborhood::isolated(LitChunk::new(&room, &sky));
+    group.bench_function("glass_room", |b| {
+        b.iter(|| black_box(greedy_mesh(black_box(&room_nb), tables())))
     });
 
     group.finish();
@@ -278,7 +417,7 @@ fn lighting(c: &mut Criterion) {
 
     let center = g.chunk(0, straddling, 0);
     group.bench_function("straddling", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&center), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&center), black_box(border), tables())))
     });
 
     // The same Chunk once its neighbours have light of their own, which is what
@@ -299,7 +438,7 @@ fn lighting(c: &mut Criterion) {
     let around: Vec<ChunkLight> = beside
         .iter()
         .map(|chunk| {
-            let mut lit = light_chunk(chunk, border, shapes());
+            let mut lit = light_chunk(chunk, border, tables());
             // A lantern's worth of block light, so the second channel floods too.
             lit.set(16, 16, 16, Light::new(MAX_LIGHT, MAX_LIGHT));
             lit
@@ -312,7 +451,7 @@ fn lighting(c: &mut Criterion) {
             black_box(light_chunk(
                 black_box(&center),
                 black_box(settled),
-                shapes(),
+                tables(),
             ))
         })
     });
@@ -321,7 +460,43 @@ fn lighting(c: &mut Criterion) {
     // terrain does not: the surface Chunk with a stair on top of every column.
     let stairs = terrain_with_stairs(MAX_SHAPED_PER_CHUNK);
     group.bench_function("straddling_shaped", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&stairs), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&stairs), black_box(border), tables())))
+    });
+
+    // The flood with dimming in it: the instantiation terrain never takes.
+    let flooded = terrain_under(tesserae_core::material::WATER, 3);
+    group.bench_function("straddling_water", |b| {
+        b.iter(|| {
+            black_box(light_chunk(
+                black_box(&flooded),
+                black_box(border),
+                tables(),
+            ))
+        })
+    });
+    let canopy = terrain_with_canopy();
+    group.bench_function("leaves_canopy", |b| {
+        b.iter(|| black_box(light_chunk(black_box(&canopy), black_box(border), tables())))
+    });
+
+    // The same Chunk with the ground left as cubes, and the densest ramp the
+    // default World makes, so the input change and the code change can be read
+    // apart. Both arrive against open sky above, as `straddling` does.
+    let bare = unsmoothed();
+    let bare_center = bare.chunk(0, straddling, 0);
+    group.bench_function("straddling_unsmoothed", |b| {
+        b.iter(|| {
+            black_box(light_chunk(
+                black_box(&bare_center),
+                black_box(border),
+                tables(),
+            ))
+        })
+    });
+    let ramp_at = densest_ramp(&g, straddling);
+    let ramp = g.chunk(ramp_at.0, ramp_at.1, ramp_at.2);
+    group.bench_function("ramp_densest", |b| {
+        b.iter(|| black_box(light_chunk(black_box(&ramp), black_box(border), tables())))
     });
 
     // What a cave costs the relight stage. A deep Chunk arrives against
@@ -353,24 +528,24 @@ fn lighting(c: &mut Criterion) {
             black_box(light_chunk(
                 black_box(&crossed),
                 black_box(crossed_border),
-                shapes(),
+                tables(),
             ))
         })
     });
 
     let mouth = g.chunk(cave.mouth.0, cave.mouth.1, cave.mouth.2);
     group.bench_function("cave_mouth", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&mouth), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&mouth), black_box(border), tables())))
     });
 
     let air = Chunk::air();
     group.bench_function("open_sky", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&air), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&air), black_box(border), tables())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
     group.bench_function("opaque", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&solid), black_box(border), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&solid), black_box(border), tables())))
     });
 
     // An air Chunk beside a wall, so the sky arriving from above is no longer
@@ -387,7 +562,7 @@ fn lighting(c: &mut Criterion) {
     let mut partial = border;
     partial[tesserae_core::mesh::POS_Y] = Some(LitChunk::new(&air_above, &ragged));
     group.bench_function("flooded_air", |b| {
-        b.iter(|| black_box(light_chunk(black_box(&air), black_box(partial), shapes())))
+        b.iter(|| black_box(light_chunk(black_box(&air), black_box(partial), tables())))
     });
 
     group.finish();
@@ -414,7 +589,39 @@ fn streamed_mesher(c: &mut Criterion) {
         std::array::from_fn(|i| Some(LitChunk::new(&around[i], &sky)));
     let lit_center = LitChunk::new(&center, &sky);
     group.bench_function("straddling", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs), shapes())))
+        b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs), tables())))
+    });
+
+    // The same Chunk with the ground left as cubes, and the densest ramp.
+    let bare = unsmoothed();
+    let bare_center = bare.chunk(0, straddling, 0);
+    let bare_around = chunks_around(&bare, (0, straddling, 0));
+    let bare_refs: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&bare_around[i], &sky)));
+    let lit_bare = LitChunk::new(&bare_center, &sky);
+    group.bench_function("straddling_unsmoothed", |b| {
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_bare),
+                black_box(bare_refs),
+                tables(),
+            ))
+        })
+    });
+    let ramp_at = densest_ramp(&g, straddling);
+    let ramp = g.chunk(ramp_at.0, ramp_at.1, ramp_at.2);
+    let ramp_around = chunks_around(&g, ramp_at);
+    let ramp_refs: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&ramp_around[i], &sky)));
+    let lit_ramp = LitChunk::new(&ramp, &sky);
+    group.bench_function("ramp_densest", |b| {
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_ramp),
+                black_box(ramp_refs),
+                tables(),
+            ))
+        })
     });
 
     // A tunnel through rock, lit as an enclosed one is (dark), and a mouth lit
@@ -441,7 +648,7 @@ fn streamed_mesher(c: &mut Criterion) {
             black_box(mesh_chunk(
                 black_box(lit_crossed),
                 black_box(crossed_refs),
-                shapes(),
+                tables(),
             ))
         })
     });
@@ -464,7 +671,7 @@ fn streamed_mesher(c: &mut Criterion) {
             black_box(mesh_chunk(
                 black_box(lit_mouth),
                 black_box(mouth_refs),
-                shapes(),
+                tables(),
             ))
         })
     });
@@ -472,7 +679,7 @@ fn streamed_mesher(c: &mut Criterion) {
     let air = Chunk::air();
     let lit_air = LitChunk::new(&air, &sky);
     group.bench_function("declined_air", |b| {
-        b.iter(|| black_box(mesh_chunk(black_box(lit_air), black_box(refs), shapes())))
+        b.iter(|| black_box(mesh_chunk(black_box(lit_air), black_box(refs), tables())))
     });
 
     let solid = Chunk::filled(Voxel::cube(testgen::STONE));
@@ -483,7 +690,7 @@ fn streamed_mesher(c: &mut Criterion) {
             black_box(mesh_chunk(
                 black_box(lit_solid),
                 black_box(enclosed),
-                shapes(),
+                tables(),
             ))
         })
     });
@@ -506,6 +713,16 @@ fn generation(c: &mut Criterion) {
 
     group.bench_function("straddling", |b| {
         b.iter(|| black_box(g.chunk(black_box(0), straddling, 0)))
+    });
+    // Without the smoothing pass and its border of surface heights: what
+    // `straddling` was before ramps, so the pass's own cost is the difference.
+    let bare = unsmoothed();
+    group.bench_function("straddling_unsmoothed", |b| {
+        b.iter(|| black_box(bare.chunk(black_box(0), straddling, 0)))
+    });
+    let (rx, ry, rz) = densest_ramp(&g, straddling);
+    group.bench_function("ramp_densest", |b| {
+        b.iter(|| black_box(g.chunk(black_box(rx), ry, rz)))
     });
     // Both early-outs: most Chunks in a streamed 3D ring are one of these.
     group.bench_function("early_out_air", |b| {
@@ -595,7 +812,7 @@ fn snapshot(c: &mut Criterion) {
     let air_above = Chunk::air();
     let mut border = [None; 6];
     border[tesserae_core::mesh::POS_Y] = Some(LitChunk::new(&air_above, &sky));
-    let light = light_chunk(&chunk, border, shapes());
+    let light = light_chunk(&chunk, border, tables());
 
     let chunks: Vec<Chunk> = vec![chunk.clone(); 7];
     let lights: Vec<ChunkLight> = vec![light.clone(); 7];

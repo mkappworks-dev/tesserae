@@ -418,6 +418,6 @@ change the default now and the spec changes with it.
 connected Shapes across all of its seeds; the baseline comparison shows pass 1,
 the light solvers and terrain meshing unmoved, with the numbers in the PR; a
 `dev` screenshot shows a fence line growing arms and a corner, and the sweep
-test stands a body on the top of one at 1.5 Voxels; ADR-0008 is written and
+test stands a body on the top of one at 1.5 Voxels; ADR-0010 is written and
 ADR-0006's Consequences points at it; and `CONTEXT.md` and DESIGN.md's step 5
 loose ends are updated.

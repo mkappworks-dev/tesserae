@@ -34,7 +34,7 @@ use tesserae_core::{MaterialId, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR
 use super::builder::{self, Progress, Step};
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, SpawnPoint};
-use super::{Shapes, WorldGenerator};
+use super::{ContentTables, WorldGenerator};
 use crate::world::WorldSettings;
 
 /// Where the gallery's near corner is, in metres from the spawn point: ahead
@@ -61,7 +61,7 @@ fn build(
     mut meshes: ResMut<MeshState>,
     mut progress: Local<Progress>,
     generator: Res<WorldGenerator>,
-    shapes: Res<Shapes>,
+    tables: Res<ContentTables>,
     world: Res<WorldSettings>,
     spawn: Option<Res<SpawnPoint>>,
 ) {
@@ -70,7 +70,7 @@ fn build(
     };
     let corner = spawn.metres() + Vec3::new(ASIDE_M, 0.0, -AHEAD_M);
     let plan = plan(&world, corner, |x, z| generator.surface_height_m(x, z));
-    if builder::step(&plan, &mut progress, &mut store, &mut meshes, &shapes) == Step::Completed {
+    if builder::step(&plan, &mut progress, &mut store, &mut meshes, &tables) == Step::Completed {
         info!("gallery: {} Voxels at {corner:?}", plan.len());
     }
 }
@@ -215,7 +215,7 @@ mod tests {
     fn its_fences_meet_a_fence_a_cube_and_a_stairs_sealed_back() {
         let plan = plan(&world(1.0), corner(), hill);
         let at: HashMap<[i32; 3], Voxel> = plan.iter().copied().collect();
-        let table = Shapes::default();
+        let table = ContentTables::default();
         let fences: Vec<[i32; 3]> = at
             .iter()
             .filter(|(_, v)| v.shape() == FENCE_ID)
@@ -231,7 +231,7 @@ mod tests {
                     .copied()
                     .unwrap_or(Voxel::AIR)
             });
-            let c = table.connections(at[p], around);
+            let c = table.shapes.connections(at[p], around);
             for (_, across) in around.iter().enumerate().filter(|&(f, _)| c.has(f)) {
                 met.insert(match across.shape() {
                     FENCE_ID => "fence",
@@ -260,10 +260,10 @@ mod tests {
 
     #[test]
     fn every_voxel_in_it_is_one_the_edit_path_would_accept() {
-        let table = Shapes::default();
+        let table = ContentTables::default();
         for (at, v) in plan(&world(1.0), corner(), hill) {
             assert!(!v.is_air(), "{at:?}");
-            assert!(table.contains(v.shape()), "{at:?}");
+            assert!(table.shapes.contains(v.shape()), "{at:?}");
             assert!(Orientation::from_bits(v.orientation()).is_some(), "{at:?}");
         }
     }

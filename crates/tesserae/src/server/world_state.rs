@@ -188,6 +188,10 @@ impl LightVolume for LightLattice<'_> {
     }
 }
 
+/// Metres the spawn Eye is raised over the spawn point. In metres, as the
+/// clearance it is added to is.
+pub const SPAWN_EYE_ALTITUDE_M: f32 = 18.0;
+
 /// Where a player enters the World, in metres.
 ///
 /// Private field with a Server-only constructor, for the reason in the module
@@ -201,8 +205,22 @@ impl SpawnPoint {
         SpawnPoint(metres)
     }
 
+    /// The spawn point itself, on the ground; the Eye is [`SpawnPoint::eye`].
+    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
     pub fn metres(self) -> Vec3 {
         self.0
+    }
+
+    /// Where a Player's Eye starts, and returns to: a view over the spawn point
+    /// and not at it, which a free-fly camera wants.
+    pub fn eye(self) -> Vec3 {
+        self.0 + Vec3::Y * SPAWN_EYE_ALTITUDE_M
+    }
+
+    /// For tests outside `server`, which cannot reach `new`.
+    #[cfg(test)]
+    pub(crate) fn for_tests(metres: Vec3) -> Self {
+        SpawnPoint(metres)
     }
 }
 
@@ -210,7 +228,7 @@ impl SpawnPoint {
 mod tests {
     use super::*;
     use tesserae_core::light::MAX_LIGHT;
-    use tesserae_core::{CHUNK_SIZE, ShapeTable, relight, worldgen};
+    use tesserae_core::{CHUNK_SIZE, Tables, relight, worldgen};
 
     #[test]
     fn a_voxel_coord_floors_rather_than_truncating_below_the_origin() {
@@ -249,7 +267,7 @@ mod tests {
         lattice
             .store
             .set_voxel(VoxelCoord::of(at), Voxel::cube(worldgen::LANTERN));
-        relight(&mut lattice, &ShapeTable::builtin(), at, Light::DARK);
+        relight(&mut lattice, &Tables::builtin(), at, Light::DARK);
 
         assert_eq!(store.light_at(at).block(), MAX_LIGHT);
         assert_eq!(
@@ -278,7 +296,7 @@ mod tests {
         lattice
             .store
             .set_voxel(VoxelCoord::of(at), Voxel::cube(worldgen::LANTERN));
-        relight(&mut lattice, &ShapeTable::builtin(), at, Light::DARK);
+        relight(&mut lattice, &Tables::builtin(), at, Light::DARK);
         let touched = lattice.touched;
 
         // Both, because the caller has no other way to learn that the Chunk

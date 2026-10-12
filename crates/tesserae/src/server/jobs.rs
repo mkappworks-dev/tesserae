@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, ShapeTable, Worldgen, mesh_chunk};
+use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk};
 
 use crate::world::ChunkCoord;
 
@@ -23,7 +23,7 @@ const _: () = {
     shareable::<Chunk>();
     shareable::<ChunkLight>();
     shareable::<ChunkMesh>();
-    shareable::<ShapeTable>();
+    shareable::<Tables>();
     shareable::<Worldgen>();
 };
 
@@ -260,7 +260,7 @@ pub(in crate::server) fn solve(
     chunk: Arc<Chunk>,
     before: &ChunkLight,
     border: &[Border; 6],
-    shapes: &ShapeTable,
+    tables: &Tables,
 ) -> Solved {
     let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
     let lit: [Option<LitChunk>; 6] = std::array::from_fn(|face| match &border[face] {
@@ -268,7 +268,7 @@ pub(in crate::server) fn solve(
         Border::OpenSky => Some(LitChunk::new(&SKY_CHUNK, &open_sky)),
         Border::Loaded(chunk, light) => Some(LitChunk::new(chunk, light)),
     });
-    let light = light_chunk(&chunk, lit, shapes);
+    let light = light_chunk(&chunk, lit, tables);
     let changed = *before != light;
     let outward = std::array::from_fn(|face| before.boundary_differs(&light, face));
     Solved {
@@ -286,11 +286,11 @@ pub(in crate::server) type Shared = (Arc<Chunk>, Arc<ChunkLight>);
 pub(in crate::server) fn build_mesh(
     center: &Shared,
     around: &[Shared; 6],
-    shapes: &ShapeTable,
+    tables: &Tables,
 ) -> ChunkMesh {
     let neighbors: [Option<LitChunk>; 6] =
         std::array::from_fn(|face| Some(LitChunk::new(&around[face].0, &around[face].1)));
-    mesh_chunk(LitChunk::new(&center.0, &center.1), neighbors, shapes)
+    mesh_chunk(LitChunk::new(&center.0, &center.1), neighbors, tables)
 }
 
 /// Every job in flight, by stage.

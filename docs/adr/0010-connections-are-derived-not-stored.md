@@ -36,6 +36,10 @@ Two rules, checked at registration, keep the derivation off the hot paths:
   Voxel's orientation byte reads as the identity, so registration derives `2^k`
   variants for `k` arms instead of `24 x 2^k`.
 
+The light solvers' joint-seal test (two partial faces that together make a
+plane) reads a connected Shape's bare coverage. Arms only add solid, so it can
+only under-seal, never leak a seal that is not there.
+
 A third makes culling exact with one neighbour: an arm touches only its own
 face's boundary plane, so whether a neighbour's arm covers ours depends on us
 and nothing else.

@@ -10,20 +10,14 @@
 //! feeds the benches a fixed surface and makes no World.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
+use crate::mesh::POS_Y;
 use crate::noise::{fbm2, fbm3, fbm3_range};
-use crate::voxel::{MaterialId, Voxel};
+use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
+use crate::voxel::Voxel;
 
-/// Placeholder Materials, until a Mod declares the table in build-order step 7.
-/// They live here rather than in `testgen` because generation is what assigns
-/// them; `testgen` re-exports these so a fixture and a World agree on what
-/// stone is.
-pub const STONE: MaterialId = 1;
-pub const DIRT: MaterialId = 2;
-pub const GRASS: MaterialId = 3;
-/// Emits block light; see [`crate::light::emission`]. Generation places none of
-/// it; a player places one with an Edit. It exists so that the block-light
-/// channel has a source to be tested against.
-pub const LANTERN: MaterialId = 4;
+/// The ids generation assigns. They live in [`crate::material`] with the rest of
+/// the table and are re-exported so a caller that places terrain finds them here.
+pub use crate::material::{DIRT, GRASS, LANTERN, STONE};
 
 /// What a Mod parameterises. Plain `Copy` data with no callbacks, because
 /// crossing the WASM boundary per Voxel is the mistake
@@ -46,6 +40,27 @@ pub struct WorldgenParams {
     pub octaves: u32,
     /// `None` is a World without caves.
     pub caves: Option<CaveParams>,
+    /// `None` is a World of cubes.
+    pub smoothing: Option<SmoothingParams>,
+}
+
+/// Stairs and slabs placed where the ground steps one Voxel. Plain `Copy` data
+/// like the rest of [`WorldgenParams`].
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SmoothingParams {
+    /// The smallest step in the ground, in metres, worth easing. A stair or slab
+    /// is half a Voxel tall, so what one can ease is a rise of exactly one Voxel,
+    /// which is `voxel_size` metres; a World whose Voxel is smaller than this
+    /// is not smoothed, because a body steps over such a rise unaided.
+    ///
+    /// A placeholder for the step height a player controller will own.
+    pub min_rise_m: f32,
+}
+
+impl Default for SmoothingParams {
+    fn default() -> Self {
+        SmoothingParams { min_rise_m: 0.75 }
+    }
 }
 
 /// Tunnels carved out of solid ground. Plain `Copy` data like the rest of
@@ -85,6 +100,7 @@ impl Default for WorldgenParams {
             soil_depth_m: 3.0,
             octaves: 5,
             caves: Some(CaveParams::default()),
+            smoothing: Some(SmoothingParams::default()),
         }
     }
 }
@@ -169,6 +185,44 @@ impl CaveField {
 const BLOCK: usize = 8;
 const BLOCKS: usize = CHUNK_SIZE / BLOCK;
 
+/// Columns per side of the surface array: the Chunk's own plus one either side,
+/// so a column on an edge can ask its neighbour in the next Chunk without
+/// loading it.
+const SURFACE_W: usize = CHUNK_SIZE + 2;
+
+/// How many shaped Voxels smoothing may place in one Chunk: half of
+/// [`MAX_SHAPED_PER_CHUNK`], the other half being a player's. On ground that
+/// steps at every column (a 45-degree ramp) a stair per column would fill the
+/// cap exactly and leave nobody a Place.
+pub const MAX_SMOOTHED_PER_CHUNK: usize = MAX_SHAPED_PER_CHUNK / 2;
+
+/// The rise a half-height Shape can ease, in Voxels.
+const EASED_RISE_VOXELS: i32 = 1;
+
+/// A column's four cardinal neighbours as `(dx, dz, turn)`, where `turn` is the
+/// quarter-turns about +Y that put a stair's tall side, canonically +Z, towards
+/// it. `smoothing_stairs_face_the_step_they_climb` checks it against the table.
+const CARDINALS: [(i32, i32, u8); 4] = [(0, 1, 0), (1, 0, 1), (0, -1, 2), (-1, 0, 3)];
+
+fn surface_index(x: i32, z: i32) -> usize {
+    (z + 1) as usize * SURFACE_W + (x + 1) as usize
+}
+
+/// The highest Voxel `y` (counted from the Chunk's floor, and out of range when
+/// the surface is not in this Chunk's band) that the cube pass fills in a column
+/// whose surface is `surface_m`. Uses the cube pass's own comparison, not
+/// `floor(surface / voxel_size)`, so the two cannot disagree by an ulp.
+fn top_index(surface_m: f32, floor_m: f32, voxel_size: f32) -> i32 {
+    let mut y = ((surface_m - floor_m) / voxel_size).floor() as i32;
+    while floor_m + (y + 1) as f32 * voxel_size <= surface_m {
+        y += 1;
+    }
+    while floor_m + y as f32 * voxel_size > surface_m {
+        y -= 1;
+    }
+    y
+}
+
 /// One World's generator: a seed, a Voxel size and the parameters a Mod chose.
 #[derive(Clone, Debug)]
 pub struct Worldgen {
@@ -181,6 +235,9 @@ pub struct Worldgen {
     /// Hoisted out of the inner loop: `chunk` samples this per column.
     inv_feature_size: f32,
     caves: Option<CaveField>,
+    /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
+    /// least `min_rise_m` at this Voxel size.
+    smoothing: bool,
 }
 
 impl Worldgen {
@@ -194,6 +251,9 @@ impl Worldgen {
             seed: folded,
             inv_feature_size: 1.0 / params.feature_size_m,
             caves: params.caves.map(|p| CaveField::new(folded, p)),
+            smoothing: params
+                .smoothing
+                .is_some_and(|p| EASED_RISE_VOXELS as f32 * voxel_size >= p.min_rise_m),
         }
     }
 
@@ -219,7 +279,8 @@ impl Worldgen {
     ///
     /// Caves do not move it: they only turn solid Voxels into air, so nothing
     /// above the band is ever solid, which `streaming::relight`'s open-sky
-    /// boundary relies on.
+    /// boundary relies on. Neither does smoothing: a stair needs a cube beside it
+    /// in the same cell, so it sits no higher than the ground it eases.
     pub fn surface_bounds_m(&self) -> (f32, f32) {
         (
             self.params.sea_level_m,
@@ -264,18 +325,22 @@ impl Worldgen {
             return chunk;
         }
 
-        let mut surface_m = [0.0f32; CHUNK_SIZE * CHUNK_SIZE];
-        for z in 0..CHUNK_SIZE {
-            for x in 0..CHUNK_SIZE {
-                surface_m[z * CHUNK_SIZE + x] = self.surface_height_m(
-                    origin_m[0] + x as f32 * self.voxel_size,
-                    origin_m[2] + z as f32 * self.voxel_size,
-                );
+        // The border is only read by smoothing, so a World of cubes does not
+        // pay for it.
+        let reach = if self.smoothing { 1 } else { 0 };
+        let mut surface_m = [0.0f32; SURFACE_W * SURFACE_W];
+        for z in -reach..CHUNK_SIZE as i32 + reach {
+            for x in -reach..CHUNK_SIZE as i32 + reach {
+                surface_m[surface_index(x, z)] =
+                    self.surface_height_m(self.axis_m(cx, x), self.axis_m(cz, z));
             }
         }
         // Nothing above the highest column of this Chunk is solid, so nothing
-        // there is worth carving.
-        let top_m = surface_m.iter().copied().fold(f32::MIN, f32::max);
+        // there is worth carving. The border is another Chunk's ground.
+        let top_m = (0..CHUNK_SIZE as i32)
+            .flat_map(|z| (0..CHUNK_SIZE as i32).map(move |x| surface_index(x, z)))
+            .map(|i| surface_m[i])
+            .fold(f32::MIN, f32::max);
         let reachable = self
             .caves
             .as_ref()
@@ -294,7 +359,7 @@ impl Worldgen {
             for x in 0..CHUNK_SIZE {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
                 let z_m = origin_m[2] + z as f32 * self.voxel_size;
-                let surface_m = surface_m[z * CHUNK_SIZE + x];
+                let surface_m = surface_m[surface_index(x as i32, z as i32)];
 
                 for y in 0..CHUNK_SIZE {
                     let y_m = floor_m + y as f32 * self.voxel_size;
@@ -322,7 +387,88 @@ impl Worldgen {
                 }
             }
         }
+        if self.smoothing {
+            self.smooth(&mut chunk, &surface_m, [cx, cy, cz], floor_m);
+        }
         chunk
+    }
+
+    /// Eases every one-Voxel step in the ground with a stair or slab on top of
+    /// the lower column, in the cell beside the higher column's top cube. A
+    /// Chunk is asked only about the cells it holds: a column whose top is the
+    /// last Voxel of the Chunk below is smoothed by the Chunk above, from the
+    /// same surface heights.
+    fn smooth(
+        &self,
+        chunk: &mut Chunk,
+        surface_m: &[f32; SURFACE_W * SURFACE_W],
+        coord: [i32; 3],
+        floor_m: f32,
+    ) {
+        let size = CHUNK_SIZE as i32;
+        let tops = surface_m.map(|s| top_index(s, floor_m, self.voxel_size));
+        let mut placed = 0;
+        for z in 0..size {
+            for x in 0..size {
+                let top = tops[surface_index(x, z)];
+                let y = top + 1;
+                if !(0..size).contains(&y) || !self.still_solid(chunk, coord, [x, top, z]) {
+                    continue;
+                }
+                let (mut rising, mut turn) = (0, 0);
+                for (dx, dz, quarter) in CARDINALS {
+                    let (nx, nz) = (x + dx, z + dz);
+                    if tops[surface_index(nx, nz)] == top + EASED_RISE_VOXELS
+                        && self.still_solid(chunk, coord, [nx, y, nz])
+                    {
+                        rising += 1;
+                        turn = quarter;
+                    }
+                }
+                let voxel = match rising {
+                    0 => continue,
+                    1 => Voxel::shaped(GRASS, SHAPE_STAIR, Orientation::new(POS_Y, turn)),
+                    _ => Voxel::shaped(GRASS, SHAPE_SLAB, Orientation::IDENTITY),
+                };
+                chunk.set(x as usize, y as usize, z as usize, voxel);
+                placed += 1;
+                if placed == MAX_SMOOTHED_PER_CHUNK {
+                    return;
+                }
+            }
+        }
+    }
+
+    /// The metre position of Voxel `local` (possibly one outside) along an axis
+    /// of the Chunk at `chunk`, computed from the Chunk that owns it exactly as
+    /// that Chunk computes it. Two Chunks must ask the surface and the caves the
+    /// same question about a shared edge, and `(c * size + l) * voxel_size`
+    /// differs from `c * size * voxel_size + l * voxel_size` in the last bit
+    /// at Voxel sizes that are not a power of two.
+    fn axis_m(&self, chunk: i32, local: i32) -> f32 {
+        let size = CHUNK_SIZE as i32;
+        let owner = chunk + local.div_euclid(size);
+        (owner * size) as f32 * self.voxel_size + local.rem_euclid(size) as f32 * self.voxel_size
+    }
+
+    /// Whether the cell `at` (Voxel offsets from this Chunk's corner, possibly
+    /// one outside it) is solid ground, given that the cube pass made it so
+    /// before caves. Inside the Chunk that is a read; outside, the cell belongs
+    /// to a Chunk not held here, so it is asked of the cave field by metre
+    /// position, which is what that Chunk asks.
+    fn still_solid(&self, chunk: &Chunk, coord: [i32; 3], at: [i32; 3]) -> bool {
+        if at.iter().all(|c| (0..CHUNK_SIZE as i32).contains(c)) {
+            return !chunk
+                .get(at[0] as usize, at[1] as usize, at[2] as usize)
+                .is_air();
+        }
+        self.caves.as_ref().is_none_or(|caves| {
+            !caves.carves(
+                self.axis_m(coord[0], at[0]),
+                self.axis_m(coord[1], at[1]),
+                self.axis_m(coord[2], at[2]),
+            )
+        })
     }
 
     /// For each sub-block of the Chunk whose lowest Voxel is at `origin_m`,
@@ -394,21 +540,45 @@ mod tests {
 
     const SEED: u64 = 0x7e55_e2ae;
 
-    /// The terrain tests are about the surface, so they run without caves; the
-    /// ones about caves say `caved`.
+    /// The terrain tests are about the surface, so they run without caves or
+    /// smoothing, which would put a stair on the Grass cap; the ones about
+    /// caves say `caved` and the ones about smoothing say `smoothed`.
     fn terrain(voxel_size: f32) -> Worldgen {
         Worldgen::new(
             SEED,
             voxel_size,
             WorldgenParams {
                 caves: None,
+                smoothing: None,
                 ..WorldgenParams::default()
             },
         )
     }
 
     fn caved(voxel_size: f32) -> Worldgen {
-        Worldgen::new(SEED, voxel_size, WorldgenParams::default())
+        Worldgen::new(
+            SEED,
+            voxel_size,
+            WorldgenParams {
+                smoothing: None,
+                ..WorldgenParams::default()
+            },
+        )
+    }
+
+    /// Smoothing with no minimum rise, so it fires at any Voxel size: the tests
+    /// about where it places things, rather than whether it runs.
+    fn smoothed(voxel_size: f32, caves: bool) -> Worldgen {
+        let defaults = WorldgenParams::default();
+        Worldgen::new(
+            SEED,
+            voxel_size,
+            WorldgenParams {
+                caves: caves.then_some(CaveParams::default()),
+                smoothing: Some(SmoothingParams { min_rise_m: 0.0 }),
+                ..defaults
+            },
+        )
     }
 
     /// One column of Voxels from y=0 metres up past the top of the surface
@@ -499,12 +669,11 @@ mod tests {
         }
     }
 
-    /// The contract the shaped-Voxel cap rests on: terrain is cubes. A generator
-    /// that places stairs or slabs - slope smoothing is the obvious use - changes
-    /// this test deliberately and stays under `MAX_SHAPED_PER_CHUNK`, because
-    /// nothing downstream polices it. See `crate::shape::MAX_SHAPED_PER_CHUNK`.
+    /// `smoothing: None` is a World of cubes. Nothing downstream polices
+    /// `MAX_SHAPED_PER_CHUNK`, so a generator that places shapes must, as
+    /// smoothing does (`smoothed_generation_stays_within_the_budget`).
     #[test]
-    fn generation_places_no_shaped_voxels() {
+    fn without_smoothing_generation_places_no_shaped_voxels() {
         for g in [terrain(1.0), caved(1.0)] {
             for cy in -1..5 {
                 for (cx, cz) in [(0, 0), (3, -2), (-5, 7), (11, 11)] {
@@ -890,5 +1059,417 @@ mod tests {
                 .uniform(),
             Some(Voxel::cube(STONE))
         );
+    }
+
+    /// A World's Voxels by global index, generating each Chunk once, for tests
+    /// that look across Chunk edges.
+    struct Probe<'a> {
+        g: &'a Worldgen,
+        chunks: std::collections::HashMap<[i32; 3], Chunk>,
+    }
+
+    impl<'a> Probe<'a> {
+        fn new(g: &'a Worldgen) -> Self {
+            Probe {
+                g,
+                chunks: Default::default(),
+            }
+        }
+
+        fn at(&mut self, at: [i32; 3]) -> Voxel {
+            let size = CHUNK_SIZE as i32;
+            let coord = at.map(|c| c.div_euclid(size));
+            let g = self.g;
+            let chunk = self
+                .chunks
+                .entry(coord)
+                .or_insert_with(|| g.chunk(coord[0], coord[1], coord[2]));
+            let l = at.map(|c| c.rem_euclid(size) as usize);
+            chunk.get(l[0], l[1], l[2])
+        }
+    }
+
+    /// Every shaped Voxel a sweep of Chunks holds, as global Voxel indices.
+    fn shaped_voxels(g: &Worldgen, probe: &mut Probe) -> Vec<([i32; 3], Voxel)> {
+        let size = CHUNK_SIZE as i32;
+        let mut out = vec![];
+        for (cx, cy, cz) in sweep(g.voxel_size) {
+            let chunk = g.chunk(cx, cy, cz);
+            if !chunk.may_contain_shaped() {
+                continue;
+            }
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let v = chunk.get(x, y, z);
+                        if v.is_shaped() {
+                            let at = [
+                                cx * size + x as i32,
+                                cy * size + y as i32,
+                                cz * size + z as i32,
+                            ];
+                            assert_eq!(probe.at(at), v);
+                            out.push((at, v));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn smoothed_generation_stays_within_the_budget() {
+        let mut densest = (0, 0.0f32, (0, 0, 0));
+        for voxel_size in [1.0, 0.5, 0.25] {
+            for caves in [false, true] {
+                let g = smoothed(voxel_size, caves);
+                let mut anywhere = 0;
+                for (cx, cy, cz) in sweep(voxel_size) {
+                    let n = g.chunk(cx, cy, cz).shaped_count();
+                    assert!(
+                        n <= MAX_SMOOTHED_PER_CHUNK,
+                        "{n} shaped Voxels at {voxel_size}m in {cx},{cy},{cz}"
+                    );
+                    // At the Voxel size the default smooths, real terrain never
+                    // reaches the budget, so the budget is a valve and not a
+                    // thing that shapes the ground.
+                    if voxel_size == 1.0 {
+                        assert!(n < MAX_SMOOTHED_PER_CHUNK, "{n} at {cx},{cy},{cz}");
+                    }
+                    anywhere += n;
+                    if n > densest.0 {
+                        densest = (n, voxel_size, (cx, cy, cz));
+                    }
+                }
+                assert!(anywhere > 0, "no stair at {voxel_size}m, caves {caves}");
+            }
+        }
+        const { assert!(MAX_SMOOTHED_PER_CHUNK < MAX_SHAPED_PER_CHUNK) };
+        eprintln!("densest Chunk: {densest:?} of {MAX_SMOOTHED_PER_CHUNK}");
+    }
+
+    /// A 45-degree ramp: every column's neighbour on one side is one Voxel
+    /// higher, so every column is a candidate, which is the most a Chunk can ask
+    /// for. The budget decides exactly where it stops.
+    #[test]
+    fn a_ramp_that_steps_at_every_column_stops_at_the_budget() {
+        let g = smoothed(1.0, false);
+        let mut surface = [0.0f32; SURFACE_W * SURFACE_W];
+        for z in -1..=CHUNK_SIZE as i32 {
+            for x in -1..=CHUNK_SIZE as i32 {
+                // Rising along x only, from y = 4.
+                surface[surface_index(x, z)] = 4.0 + (x + 1) as f32;
+            }
+        }
+        let mut chunk = Chunk::air();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                for y in 0..=4 + x + 1 {
+                    if y < CHUNK_SIZE {
+                        chunk.set(x, y, z, Voxel::cube(GRASS));
+                    }
+                }
+            }
+        }
+        g.smooth(&mut chunk, &surface, [0, 0, 0], 0.0);
+        // A stair's cell has to be in the Chunk, so columns 26 and up have none
+        // to place: 26 candidates a row.
+        let per_row = CHUNK_SIZE - 6;
+        assert!(per_row * CHUNK_SIZE > MAX_SMOOTHED_PER_CHUNK);
+        assert_eq!(chunk.shaped_count(), MAX_SMOOTHED_PER_CHUNK);
+
+        // Rows are visited in order, so the budget runs out part-way along the
+        // row it reaches and every later row stays cubes.
+        let (full_rows, rest) = (
+            MAX_SMOOTHED_PER_CHUNK / per_row,
+            MAX_SMOOTHED_PER_CHUNK % per_row,
+        );
+        for z in 0..CHUNK_SIZE {
+            let stairs = (0..CHUNK_SIZE)
+                .filter(|&x| (0..CHUNK_SIZE).any(|y| chunk.get(x, y, z).is_shaped()))
+                .count();
+            let want = match z.cmp(&full_rows) {
+                std::cmp::Ordering::Less => per_row,
+                std::cmp::Ordering::Equal => rest,
+                std::cmp::Ordering::Greater => 0,
+            };
+            assert_eq!(stairs, want, "row {z}");
+        }
+    }
+
+    #[test]
+    fn smoothing_stairs_face_the_step_they_climb() {
+        use crate::mesh::{NEG_X, NEG_Z, POS_X, POS_Z};
+        use crate::shape::ShapeTable;
+        let table = ShapeTable::builtin();
+        let g = smoothed(1.0, false);
+        let mut probe = Probe::new(&g);
+        let sides = [
+            (POS_X, [1, 0, 0]),
+            (NEG_X, [-1, 0, 0]),
+            (POS_Z, [0, 0, 1]),
+            (NEG_Z, [0, 0, -1]),
+        ];
+        let (mut stairs, mut slabs, mut facings) = (0, 0, std::collections::HashSet::new());
+        for (at, v) in shaped_voxels(&g, &mut probe) {
+            // Which of the four neighbours stand at this Voxel's own level.
+            // A neighbour that rises two Voxels also has a cube at this level,
+            // but one above it; only the one-Voxel rises are what was eased.
+            let level: Vec<usize> = sides
+                .iter()
+                .filter(|(_, d)| {
+                    let beside = [0, 1, 2].map(|a| at[a] + d[a]);
+                    probe.at(beside).is_full_cube()
+                        && !probe
+                            .at([beside[0], beside[1] + 1, beside[2]])
+                            .is_full_cube()
+                })
+                .map(|&(f, _)| f)
+                .collect();
+            assert_eq!(v.material(), GRASS);
+            assert!(probe.at([at[0], at[1] - 1, at[2]]).is_full_cube(), "{at:?}");
+            match v.shape() {
+                SHAPE_STAIR => {
+                    stairs += 1;
+                    assert_eq!(level.len(), 1, "a stair climbs exactly one step: {at:?}");
+                    for (face, _) in sides {
+                        assert_eq!(table.seals(v, face), face == level[0], "{at:?} face {face}");
+                    }
+                    facings.insert(level[0]);
+                }
+                SHAPE_SLAB => {
+                    slabs += 1;
+                    assert!(level.len() >= 2, "a slab eases two or more: {at:?}");
+                    assert_eq!(v.orientation(), 0);
+                }
+                other => panic!("shape {other} at {at:?}"),
+            }
+        }
+        assert!(stairs > 0 && slabs > 0, "{stairs} stairs, {slabs} slabs");
+        assert_eq!(facings.len(), 4, "stairs face every way: {facings:?}");
+    }
+
+    /// Every shaped Voxel of a sweep rests on a cube, and every stair has a cube
+    /// beside it at its own level with open air above that cube: the one-Voxel
+    /// step it climbs. Returns how many of them sit on a Chunk's x or z edge,
+    /// which is where the Chunk that placed one asked a Chunk it does not hold.
+    fn assert_ramps_are_whole(g: &Worldgen) -> (usize, usize) {
+        let mut probe = Probe::new(g);
+        let size = CHUNK_SIZE as i32;
+        let (mut at_edge, mut total) = (0, 0);
+        for (at, v) in shaped_voxels(g, &mut probe) {
+            total += 1;
+            at_edge += usize::from(
+                [at[0], at[2]]
+                    .iter()
+                    .any(|c| matches!(c.rem_euclid(size), 0 | 31)),
+            );
+            assert!(
+                probe.at([at[0], at[1] - 1, at[2]]).is_full_cube(),
+                "{at:?} floats"
+            );
+            if v.shape() == SHAPE_STAIR {
+                let climbs = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+                    .iter()
+                    .filter(|d| {
+                        probe.at([at[0] + d[0], at[1], at[2] + d[1]]).is_full_cube()
+                            && !probe
+                                .at([at[0] + d[0], at[1] + 1, at[2] + d[1]])
+                                .is_full_cube()
+                    })
+                    .count();
+                assert_eq!(climbs, 1, "{at:?} climbs {climbs} steps");
+            }
+        }
+        (at_edge, total)
+    }
+
+    #[test]
+    fn a_ramp_is_never_cut_by_a_chunk_edge_or_floating_over_a_cave() {
+        let g = smoothed(1.0, true);
+        let (at_edge, total) = assert_ramps_are_whole(&g);
+        assert!(at_edge > 0 && total > at_edge, "{at_edge} of {total}");
+
+        // A cave is what makes one fail to stand: where the same World without
+        // tunnels has a stair or slab, this one sometimes has none.
+        let bare = smoothed(1.0, false);
+        let suppressed: usize = sweep(1.0)
+            .into_iter()
+            .map(|(x, y, z)| {
+                let (with, without) = (g.chunk(x, y, z), bare.chunk(x, y, z));
+                (0..CHUNK_SIZE)
+                    .flat_map(|k| {
+                        (0..CHUNK_SIZE).flat_map(move |j| (0..CHUNK_SIZE).map(move |i| (i, j, k)))
+                    })
+                    .filter(|&(i, j, k)| {
+                        without.get(i, j, k).is_shaped() && with.get(i, j, k).is_air()
+                    })
+                    .count()
+            })
+            .sum();
+        assert!(suppressed > 0, "no cave touches a ramp in the sweep");
+    }
+
+    #[test]
+    fn two_chunks_agree_on_a_ramp_at_a_voxel_size_that_is_not_a_power_of_two() {
+        // `c * size * voxel_size + l * voxel_size` and `(c * size + l) *
+        // voxel_size` differ in the last bit here, and a stair on a Chunk's edge
+        // is decided by that Chunk about a column in the next.
+        let (at_edge, total) = assert_ramps_are_whole(&smoothed(0.3, true));
+        assert!(at_edge > 0 && total > at_edge, "{at_edge} of {total}");
+    }
+
+    #[test]
+    fn a_stair_whose_cell_is_in_the_chunk_above_is_made_there() {
+        // The ground reaches 31 m to 63 m here, so a Chunk floor at 32 m or
+        // 64 m is crossed by ramps. A stair at y = 0 rests on the last Voxel of
+        // the Chunk below, which that Chunk neither holds a stair for nor
+        // knows about.
+        let g = smoothed(1.0, true);
+        let mut probe = Probe::new(&g);
+        let mut at_floor = 0;
+        for cx in -4..4 {
+            for cz in -4..4 {
+                for cy in 1..3 {
+                    let chunk = g.chunk(cx, cy, cz);
+                    for z in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            if !chunk.get(x, 0, z).is_shaped() {
+                                continue;
+                            }
+                            at_floor += 1;
+                            let at = [cx * 32 + x as i32, cy * 32, cz * 32 + z as i32];
+                            assert!(probe.at([at[0], at[1] - 1, at[2]]).is_full_cube(), "{at:?}");
+                            let below = g.chunk(cx, cy - 1, cz);
+                            assert!(!below.get(x, CHUNK_SIZE - 1, z).is_shaped());
+                        }
+                    }
+                }
+            }
+        }
+        assert!(at_floor > 0, "no ramp crosses a Chunk floor");
+    }
+
+    #[test]
+    fn smoothed_generation_is_deterministic() {
+        let g = smoothed(1.0, true);
+        for (cx, cy, cz) in [(0, 0, 0), (3, 1, -2), (-5, 0, 7)] {
+            let (a, b) = (g.chunk(cx, cy, cz), g.chunk(cx, cy, cz));
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        assert_eq!(a.get(x, y, z), b.get(x, y, z));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn smoothing_only_adds_shaped_voxels_above_the_ground() {
+        // Against the same World without it, every Voxel is unchanged except
+        // that air gained a shaped Voxel.
+        let (with, without) = (smoothed(1.0, true), {
+            let defaults = WorldgenParams::default();
+            Worldgen::new(
+                SEED,
+                1.0,
+                WorldgenParams {
+                    smoothing: None,
+                    ..defaults
+                },
+            )
+        });
+        let mut added = 0;
+        for (cx, cy, cz) in sweep(1.0) {
+            let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let (got, was) = (a.get(x, y, z), b.get(x, y, z));
+                        if got != was {
+                            assert!(was.is_air() && got.is_shaped(), "{was:?} -> {got:?}");
+                            added += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(added > 0);
+    }
+
+    #[test]
+    fn the_minimum_rise_is_a_height_in_metres() {
+        // A one-Voxel step is `voxel_size` metres, so the pass fires exactly
+        // when that clears the threshold, whatever the Voxel size.
+        let fires = |voxel_size: f32, min_rise_m: f32| {
+            let defaults = WorldgenParams::default();
+            let g = Worldgen::new(
+                SEED,
+                voxel_size,
+                WorldgenParams {
+                    caves: None,
+                    smoothing: Some(SmoothingParams { min_rise_m }),
+                    ..defaults
+                },
+            );
+            sweep(voxel_size)
+                .into_iter()
+                .any(|(x, y, z)| g.chunk(x, y, z).may_contain_shaped())
+        };
+        for voxel_size in [1.0, 0.5, 0.25] {
+            assert!(
+                fires(voxel_size, voxel_size),
+                "{voxel_size}m at its own height"
+            );
+            assert!(
+                fires(voxel_size, voxel_size * 0.5),
+                "{voxel_size}m under it"
+            );
+            assert!(
+                !fires(voxel_size, voxel_size * 1.5),
+                "{voxel_size}m over it"
+            );
+        }
+    }
+
+    #[test]
+    fn the_default_smooths_a_1m_world_and_not_a_half_metre_one() {
+        let defaults = WorldgenParams::default();
+        let any = |voxel_size: f32| {
+            let g = Worldgen::new(SEED, voxel_size, defaults);
+            sweep(voxel_size)
+                .into_iter()
+                .any(|(x, y, z)| g.chunk(x, y, z).may_contain_shaped())
+        };
+        assert!(any(1.0));
+        assert!(!any(0.5));
+    }
+
+    #[test]
+    fn no_shaped_voxel_is_in_a_chunk_the_early_outs_skip() {
+        // The two early-outs answer without running the pass, so they are sound
+        // only if the pass could not have placed anything there.
+        let g = smoothed(1.0, true);
+        let (lowest, highest) = g.surface_bounds_m();
+        let soil = WorldgenParams::default().soil_depth_m;
+        let cell = CHUNK_SIZE as f32;
+        let mut seen = 0;
+        for cx in -4..4 {
+            for cz in -4..4 {
+                for cy in -3..5 {
+                    if g.chunk(cx, cy, cz).shaped_count() == 0 {
+                        continue;
+                    }
+                    seen += 1;
+                    let floor_m = cy as f32 * cell;
+                    let ceiling_m = floor_m + (cell - 1.0);
+                    assert!(floor_m <= highest, "{cx},{cy},{cz} is above the band");
+                    assert!(ceiling_m >= lowest - soil, "{cx},{cy},{cz} is below it");
+                }
+            }
+        }
+        assert!(seen > 0);
     }
 }

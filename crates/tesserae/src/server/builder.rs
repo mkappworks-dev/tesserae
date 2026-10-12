@@ -6,7 +6,7 @@
 //! rather than writing the store.
 
 use bevy::prelude::*;
-use tesserae_core::{ShapeTable, Voxel};
+use tesserae_core::{Tables, Voxel};
 
 use super::edit;
 use super::streaming::MeshState;
@@ -46,7 +46,7 @@ pub(super) fn step(
     progress: &mut Progress,
     store: &mut ChunkStore,
     meshes: &mut MeshState,
-    shapes: &ShapeTable,
+    tables: &Tables,
 ) -> Step {
     if progress.placed >= plan.len() {
         return Step::Idle;
@@ -61,7 +61,7 @@ pub(super) fn step(
 
     let until = (progress.placed + EDITS_PER_TICK).min(plan.len());
     for (at, voxel) in &plan[progress.placed..until] {
-        if let Err(reason) = edit::set_voxel(store, meshes, shapes, *at, *voxel) {
+        if let Err(reason) = edit::set_voxel(store, meshes, tables, *at, *voxel) {
             warn!("{at:?}: {}", reason.message());
         }
     }

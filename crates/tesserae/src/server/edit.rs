@@ -7,6 +7,12 @@
 //! position the Client chose would be a claim to re-check; a ray is only an
 //! intent.
 //!
+//! The ray's origin is a claim too, checked against the Server's [`Player`]
+//! when the intent arrives (`docs/adr/0008-the-server-owns-the-players-pose.md`).
+//! The pose is the Client's report, clamped to a speed the Server allows, so this
+//! stops a stale or invented origin and not a Client that flies to where it wants
+//! to edit; that is the player controller's.
+//!
 //! **Intents are queued, not read on the tick.** `server/mod.rs` explains why a
 //! message the Client writes can be dropped by a frame that runs no fixed tick,
 //! which at 120 fps against a 64 Hz tick is a large fraction of clicks. So
@@ -20,18 +26,31 @@ use bevy::prelude::*;
 use tesserae_core::collide::{VoxelVolume, raycast};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
-    MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, ShapeTable, Voxel, relight,
+    MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, ShapeTable, Tables, Voxel, relight,
 };
 
-use super::Shapes;
+use super::ContentTables;
+use super::player::{self, Player};
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, LightLattice, VoxelCoord};
 use crate::world::{ChunkCoord, WorldSettings};
 
-/// How far from the ray's origin an Edit can reach, in **metres**: a reach in
+/// How far from the Player's Eye an Edit can reach, in **metres**: a reach in
 /// Voxels would be calibrated to one Voxel size.
 /// `docs/adr/0003-voxel-size-is-per-world.md`.
+///
+/// The ray is shortened by however far its claimed origin is from the Eye, so
+/// the tolerance below cannot add to this.
 pub const EDIT_REACH_M: f32 = 8.0;
+
+/// How far an Edit's ray may start from the Player's Eye, in metres. An honest
+/// Client in the same process sends 0; over a wire it is the distance a Player
+/// moves while an intent travels, so a third of a second at a sprint. A constant
+/// until the controller has a speed to derive it from.
+///
+/// It bounds how stale an origin may be and not how far an Edit reaches, which is
+/// [`EDIT_REACH_M`] from the Eye however far inside this the origin is.
+pub const EDIT_ORIGIN_TOLERANCE_M: f32 = 2.0;
 
 /// Edits applied per tick. Each costs a relight over at most the 15 Voxels light
 /// reaches, so this bounds a tick rather than protecting the budget; the mesh
@@ -65,6 +84,8 @@ pub struct EditIntent {
 pub enum RejectReason {
     /// The ray struck nothing within [`EDIT_REACH_M`].
     OutOfReach,
+    /// The ray starts more than [`EDIT_ORIGIN_TOLERANCE_M`] from the Player.
+    OriginTooFar,
     NotLoaded,
     /// The place a Voxel would go already holds one.
     Occupied,
@@ -83,6 +104,7 @@ impl RejectReason {
     pub fn message(self) -> &'static str {
         match self {
             RejectReason::OutOfReach => "nothing in reach",
+            RejectReason::OriginTooFar => "too far from where the server has you",
             RejectReason::NotLoaded => "that part of the world is not loaded",
             RejectReason::Occupied => "something is already there",
             RejectReason::UnknownShape => "unknown shape",
@@ -103,6 +125,9 @@ pub struct EditRejected {
 struct Pending {
     intent: EditIntent,
     waited: u32,
+    /// [`EDIT_REACH_M`] less how far the origin was from the Eye on arrival, so
+    /// that whatever the ray strikes is within [`EDIT_REACH_M`] of the Eye.
+    reach_m: f32,
 }
 
 /// Intents received and not yet applied. Server-private: nothing outside this
@@ -117,7 +142,9 @@ pub(super) fn plugin(app: &mut App) {
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_systems(
             RunFixedMainLoop,
-            receive.in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+            receive
+                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
+                .after(player::PlayerInput),
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
@@ -128,8 +155,18 @@ fn receive(
     mut intents: MessageReader<EditIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
+    player: Single<&Player>,
 ) {
     for intent in intents.read() {
+        // Here and not in `apply_pending`: an intent can wait a second there, by
+        // when the Player has moved on from where the Client meant.
+        let off_eye_m = match vet_origin(intent, player.eye()) {
+            Ok(distance) => distance,
+            Err(reason) => {
+                rejected.write(EditRejected { reason });
+                continue;
+            }
+        };
         if pending.0.len() >= MAX_PENDING {
             rejected.write(EditRejected {
                 reason: RejectReason::Busy,
@@ -139,8 +176,21 @@ fn receive(
         pending.0.push_back(Pending {
             intent: *intent,
             waited: 0,
+            reach_m: EDIT_REACH_M - off_eye_m,
         });
     }
+}
+
+/// How far the origin is from the Eye, if it is near enough.
+fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<f32, RejectReason> {
+    if !intent.origin.is_finite() || !intent.direction.is_finite() {
+        return Err(RejectReason::OutOfReach);
+    }
+    let distance = intent.origin.distance(eye);
+    if distance > EDIT_ORIGIN_TOLERANCE_M {
+        return Err(RejectReason::OriginTooFar);
+    }
+    Ok(distance)
 }
 
 fn apply_pending(
@@ -148,7 +198,7 @@ fn apply_pending(
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
     mut rejected: MessageWriter<EditRejected>,
-    shapes: Res<Shapes>,
+    tables: Res<ContentTables>,
     world: Res<WorldSettings>,
 ) {
     let mut applied = 0;
@@ -157,14 +207,16 @@ fn apply_pending(
         let Some(mut p) = pending.0.pop_front() else {
             break;
         };
-        let outcome = resolve(&store, &shapes, &world, &p.intent).and_then(|(at, voxel)| {
-            // The incremental relight and the bulk solve must not both write one
-            // Chunk, so an edit waits for its Chunk's light to settle.
-            if meshes.is_unlit(VoxelCoord::of(at).chunk) {
-                return Err(RejectReason::Busy);
-            }
-            set_voxel(&mut store, &mut meshes, &shapes, at, voxel)
-        });
+        let outcome = resolve(&store, &tables.shapes, &world, &p.intent, p.reach_m).and_then(
+            |(at, voxel)| {
+                // The incremental relight and the bulk solve must not both write one
+                // Chunk, so an edit waits for its Chunk's light to settle.
+                if meshes.is_unlit(VoxelCoord::of(at).chunk) {
+                    return Err(RejectReason::Busy);
+                }
+                set_voxel(&mut store, &mut meshes, &tables, at, voxel)
+            },
+        );
         match outcome {
             Ok(()) => applied += 1,
             Err(RejectReason::Busy) if p.waited < MAX_DEFERRED_TICKS => {
@@ -188,6 +240,7 @@ fn resolve(
     shapes: &ShapeTable,
     world: &WorldSettings,
     intent: &EditIntent,
+    reach_m: f32,
 ) -> Result<([i32; 3], Voxel), RejectReason> {
     if !intent.origin.is_finite() || !intent.direction.is_finite() {
         return Err(RejectReason::OutOfReach);
@@ -198,7 +251,7 @@ fn resolve(
         world.voxel_size,
         intent.origin.to_array(),
         intent.direction.to_array(),
-        EDIT_REACH_M,
+        reach_m,
     )
     .ok_or(RejectReason::OutOfReach)?;
 
@@ -236,7 +289,7 @@ fn resolve(
 pub(in crate::server) fn set_voxel(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
-    shapes: &ShapeTable,
+    tables: &Tables,
     at: [i32; 3],
     voxel: Voxel,
 ) -> Result<(), RejectReason> {
@@ -246,7 +299,7 @@ pub(in crate::server) fn set_voxel(
     // Air is air whatever shape or orientation byte it carries.
     let voxel = if voxel.is_air() { Voxel::AIR } else { voxel };
     if !voxel.is_air() {
-        if !shapes.contains(voxel.shape()) {
+        if !tables.shapes.contains(voxel.shape()) {
             return Err(RejectReason::UnknownShape);
         }
         if Orientation::from_bits(voxel.orientation()).is_none() {
@@ -256,7 +309,7 @@ pub(in crate::server) fn set_voxel(
     // A cube looks the same however it is turned, and a connected Shape ignores
     // its orientation, so the turn is dropped. Left in, two that look identical
     // would be two palette entries and unequal.
-    let voxel = if voxel.shape() == SHAPE_FULL_CUBE || shapes.is_connected(voxel) {
+    let voxel = if voxel.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(voxel) {
         Voxel::new(voxel.material(), voxel.shape(), 0)
     } else {
         voxel
@@ -264,10 +317,12 @@ pub(in crate::server) fn set_voxel(
     // Net of what it replaces: swapping one shaped Voxel for another of the same
     // cost at the cap is not adding one. Counted in stairs, a connected Shape
     // being charged for its rails.
-    let added = shapes.cap_units(voxel);
-    let removed = shapes.cap_units(chunk.get(place.x, place.y, place.z));
+    let added = tables.shapes.cap_units(voxel);
+    let removed = tables
+        .shapes
+        .cap_units(chunk.get(place.x, place.y, place.z));
     if added > removed
-        && chunk.shaped_units(|v| shapes.cap_units(v)) + (added - removed) as usize
+        && chunk.shaped_units(|v| tables.shapes.cap_units(v)) + (added - removed) as usize
             > MAX_SHAPED_PER_CHUNK
     {
         return Err(RejectReason::TooManyShaped);
@@ -276,7 +331,7 @@ pub(in crate::server) fn set_voxel(
     let was = store.light_at(at);
     store.set_voxel(place, voxel);
     let mut lattice = LightLattice::new(store);
-    relight(&mut lattice, shapes, at, was);
+    relight(&mut lattice, tables, at, was);
     let lit = std::mem::take(&mut lattice.touched);
 
     meshes.edited(place.chunk);
@@ -321,6 +376,9 @@ mod tests {
         CHUNK_SIZE, Chunk, ChunkLight, LitChunk, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
+    use super::super::player::{Player, PoseReport};
+    use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
+
     fn stone() -> Voxel {
         Voxel::cube(STONE)
     }
@@ -346,10 +404,11 @@ mod tests {
     fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
         let mut app = App::new();
         app.insert_resource(WorldSettings::default())
-            .init_resource::<Shapes>()
+            .init_resource::<ContentTables>()
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
+        app.world_mut().spawn(Player::at(DOWN_EYE));
         let mut store = app.world_mut().resource_mut::<ChunkStore>();
         for (coord, chunk) in chunks {
             store.insert(*coord, chunk.clone());
@@ -361,11 +420,13 @@ mod tests {
         ChunkCoord::new(0, 0, 0)
     }
 
+    const DOWN_EYE: Vec3 = Vec3::new(5.5, 12.0, 5.5);
+
     /// A click straight down at the ground over (5, 5), from 4 m up.
     fn down(action: EditAction) -> EditIntent {
         EditIntent {
             action,
-            origin: Vec3::new(5.5, 12.0, 5.5),
+            origin: DOWN_EYE,
             direction: Vec3::NEG_Y,
         }
     }
@@ -382,10 +443,25 @@ mod tests {
             .collect()
     }
 
+    /// Delivers one intent as if the Player stood at its origin, so the tests
+    /// that exercise `resolve` with arbitrary origins are not also testing the
+    /// origin check; `send_from_afar` is the one that does.
+    fn send(app: &mut App, intent: EditIntent) {
+        if intent.origin.is_finite() {
+            set_eye(app, intent.origin);
+        }
+        send_from_afar(app, intent);
+    }
+
+    fn set_eye(app: &mut App, eye: Vec3) {
+        let mut players = app.world_mut().query::<&mut Player>();
+        players.single_mut(app.world_mut()).unwrap().set_eye(eye);
+    }
+
     /// Delivers one intent, then empties the buffer. `run_system_once` builds a
     /// fresh reader every call, so without this each delivery would read every
     /// earlier message again; the real system keeps its reader between frames.
-    fn send(app: &mut App, intent: EditIntent) {
+    fn send_from_afar(app: &mut App, intent: EditIntent) {
         app.world_mut().write_message(intent);
         app.world_mut().run_system_once(receive).unwrap();
         app.world_mut()
@@ -419,11 +495,11 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
-        let shapes = ShapeTable::builtin();
+        let tables = Tables::builtin();
         set_voxel(
             &mut store,
             &mut meshes,
-            &shapes,
+            &tables,
             [0, 0, 0],
             Voxel::new(STONE, 0, 13),
         )
@@ -434,7 +510,7 @@ mod tests {
             set_voxel(
                 &mut store,
                 &mut meshes,
-                &shapes,
+                &tables,
                 [1, 0, 0],
                 Voxel::new(STONE, 0, 99)
             ),
@@ -468,7 +544,7 @@ mod tests {
         set_voxel(
             &mut store,
             &mut meshes,
-            &ShapeTable::builtin(),
+            &Tables::builtin(),
             [last, 4, 4],
             Voxel::AIR,
         )
@@ -485,9 +561,9 @@ mod tests {
         );
     }
 
-    fn fence_table() -> ShapeTable {
-        let mut t = ShapeTable::builtin();
-        assert_eq!(t.register(examples::fence()), Ok(examples::FENCE_ID));
+    fn fence_table() -> Tables {
+        let mut t = Tables::builtin();
+        assert_eq!(t.shapes.register(examples::fence()), Ok(examples::FENCE_ID));
         t
     }
 
@@ -497,7 +573,7 @@ mod tests {
 
     /// How many quads `coord` would mesh to, with its neighbours as the store holds
     /// them. Unlit: the count does not depend on light.
-    fn quads_of(app: &App, table: &ShapeTable, coord: ChunkCoord) -> usize {
+    fn quads_of(app: &App, table: &Tables, coord: ChunkCoord) -> usize {
         static DARK: ChunkLight = ChunkLight::dark();
         let store = app.world().resource::<ChunkStore>();
         let at = |c: ChunkCoord| store.get(c).map(|chunk| LitChunk::new(chunk, &DARK));
@@ -513,7 +589,7 @@ mod tests {
         mesh_chunk(at(coord).expect("loaded"), neighbors, table).quad_count()
     }
 
-    fn edit_at(app: &mut App, table: &ShapeTable, at: [i32; 3], voxel: Voxel) -> MeshState {
+    fn edit_at(app: &mut App, table: &Tables, at: [i32; 3], voxel: Voxel) -> MeshState {
         let mut store = app.world_mut().resource_mut::<ChunkStore>();
         let mut meshes = MeshState::default();
         set_voxel(&mut store, &mut meshes, table, at, voxel).unwrap();
@@ -556,7 +632,7 @@ mod tests {
     #[test]
     fn a_fence_counts_for_as_many_stairs_as_it_costs_to_mesh() {
         let table = fence_table();
-        let units = table.cap_units(fence()) as usize;
+        let units = table.shapes.cap_units(fence()) as usize;
         assert!(units > 1);
         let mut full = ground();
         let fences = MAX_SHAPED_PER_CHUNK / units;
@@ -598,13 +674,14 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
             .insert_resource(WorldSettings::default())
-            .init_resource::<Shapes>()
+            .init_resource::<ContentTables>()
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
         app.world_mut()
             .resource_mut::<ChunkStore>()
             .insert(origin(), ground());
+        app.world_mut().spawn(Player::at(DOWN_EYE));
         app.update();
 
         app.world_mut().write_message(down(EditAction::Break));
@@ -671,6 +748,162 @@ mod tests {
             assert_eq!(rejections(&mut app), vec![expected], "{intent:?}");
         }
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "nothing changed");
+    }
+
+    fn from(eye: Vec3) -> EditIntent {
+        EditIntent {
+            origin: eye,
+            ..down(EditAction::Break)
+        }
+    }
+
+    #[test]
+    fn an_origin_far_from_the_players_eye_is_rejected_and_never_queued() {
+        let mut app = app_with(&[(origin(), ground())]);
+
+        // The ray would strike the ground, but it starts 40 m from the Player.
+        send_from_afar(&mut app, from(DOWN_EYE + Vec3::new(40.0, 0.0, 0.0)));
+        tick(&mut app);
+
+        assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+        assert!(app.world().resource::<PendingEdits>().0.is_empty());
+        assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "nothing changed");
+    }
+
+    #[test]
+    fn the_tolerance_is_inclusive_and_a_hair_past_it_is_not() {
+        let mut app = app_with(&[(origin(), ground())]);
+        let at = DOWN_EYE + Vec3::Z * EDIT_ORIGIN_TOLERANCE_M;
+        send_from_afar(&mut app, from(at));
+        assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
+        assert!(rejections(&mut app).is_empty());
+
+        send_from_afar(&mut app, from(at + Vec3::Z * 0.01));
+        assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+    }
+
+    #[test]
+    fn the_origin_is_judged_when_the_intent_arrives_not_when_it_is_applied() {
+        let mut app = app_with(&[(origin(), ground())]);
+        send_from_afar(&mut app, down(EditAction::Break));
+
+        // The Player moves on while the intent waits for its Chunk's light.
+        set_eye(&mut app, DOWN_EYE + Vec3::X * 100.0);
+        tick(&mut app);
+
+        assert!(voxel_at(&app, [5, 7, 5]).is_air());
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Both systems touch the `Player`, so without a constraint Bevy picks an
+    /// order, and the order it picked passed a behavioural version of this test
+    /// with the constraint deleted. So this asks the schedule whether the pair is
+    /// still ambiguous.
+    #[test]
+    fn a_pose_report_is_taken_before_the_intents_of_its_frame() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldSettings::default())
+            .insert_resource(SpawnPoint::new(Vec3::ZERO))
+            .init_resource::<ContentTables>()
+            .init_resource::<ChunkStore>()
+            .init_resource::<MeshState>()
+            .add_plugins((plugin, super::super::player::plugin));
+
+        let ambiguous = app
+            .world_mut()
+            .schedule_scope(RunFixedMainLoop, |world, schedule| {
+                schedule.initialize(world).unwrap();
+                let key_of = |system: Box<dyn System<In = (), Out = ()>>| {
+                    let id = system.system_type();
+                    schedule
+                        .systems()
+                        .unwrap()
+                        .find(|(_, s)| s.system_type() == id)
+                        .map(|(key, _)| key)
+                        .expect("scheduled")
+                };
+                let pose = key_of(Box::new(IntoSystem::into_system(player::receive_pose)));
+                let edit = key_of(Box::new(IntoSystem::into_system(receive)));
+                schedule
+                    .graph()
+                    .conflicting_systems()
+                    .iter()
+                    .any(|(a, b, _)| (*a, *b) == (pose, edit) || (*a, *b) == (edit, pose))
+            });
+        assert!(!ambiguous, "nothing says which of the two runs first");
+    }
+
+    #[test]
+    fn a_report_and_an_intent_from_one_frame_are_both_taken() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldSettings::default())
+            // The Player spawns 10 m from where the intent starts: too far for the
+            // intent alone, near enough for the report to bring it in budget.
+            .insert_resource(SpawnPoint::new(
+                DOWN_EYE + Vec3::new(10.0, -SPAWN_EYE_ALTITUDE_M, 0.0),
+            ))
+            .init_resource::<ContentTables>()
+            .init_resource::<ChunkStore>()
+            .init_resource::<MeshState>()
+            .add_plugins((plugin, super::super::player::plugin));
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(origin(), ground());
+        app.update();
+
+        app.world_mut().write_message(down(EditAction::Break));
+        app.world_mut().write_message(PoseReport {
+            seq: 1,
+            eye: DOWN_EYE,
+        });
+        app.update();
+
+        assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Straight down at the ground over (5, 5), from `origin_y`, with the Player's
+    /// Eye at `eye_y`: whether the Voxel was broken.
+    fn broken_from(eye_y: f32, origin_y: f32) -> bool {
+        let mut app = app_with(&[(origin(), ground())]);
+        set_eye(&mut app, Vec3::new(5.5, eye_y, 5.5));
+        send_from_afar(
+            &mut app,
+            EditIntent {
+                origin: Vec3::new(5.5, origin_y, 5.5),
+                ..down(EditAction::Break)
+            },
+        );
+        tick(&mut app);
+        voxel_at(&app, [5, 7, 5]).is_air()
+    }
+
+    #[test]
+    fn reach_is_measured_from_the_eye_not_from_the_claimed_origin() {
+        // The ground is 7 m below the origin, in reach of it. The Eye is 2 m
+        // higher, so the Voxel is 9 m from the Player and not in reach of them.
+        assert!(!broken_from(17.0, 15.0));
+        // The same ray from an origin at the Eye is 7 m and is.
+        assert!(broken_from(15.0, 15.0));
+    }
+
+    #[test]
+    fn no_edit_lands_farther_from_the_eye_than_the_reach() {
+        let ground_top = 8.0;
+        for eye_y in [15.0, 16.0, 17.0] {
+            for step in -4..=4 {
+                let origin_y = eye_y + step as f32 * 0.5;
+                if broken_from(eye_y, origin_y) {
+                    assert!(
+                        eye_y - ground_top <= EDIT_REACH_M,
+                        "eye {eye_y}, origin {origin_y}: struck {} m from the Eye",
+                        eye_y - ground_top
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -740,22 +973,22 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), full);
         let mut meshes = MeshState::default();
-        let shapes = ShapeTable::builtin();
+        let tables = Tables::builtin();
 
         // Free space still exists above the stairs; another stair is refused...
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 30, 0], stair()),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 30, 0], stair()),
             Err(RejectReason::TooManyShaped)
         );
         // ...a cube is not shaped and is fine...
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 31, 0], stone()),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 31, 0], stone()),
             Ok(())
         );
         // ...and replacing a stair with another is net zero.
         let swapped = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(POS_Y, 1));
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 8, 0], swapped),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 8, 0], swapped),
             Ok(())
         );
         assert_eq!(
@@ -764,11 +997,11 @@ mod tests {
         );
         // Breaking one makes room.
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [1, 8, 0], Voxel::AIR),
+            set_voxel(&mut store, &mut meshes, &tables, [1, 8, 0], Voxel::AIR),
             Ok(())
         );
         assert_eq!(
-            set_voxel(&mut store, &mut meshes, &shapes, [0, 30, 0], stair()),
+            set_voxel(&mut store, &mut meshes, &tables, [0, 30, 0], stair()),
             Ok(())
         );
     }

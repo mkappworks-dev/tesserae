@@ -115,7 +115,7 @@ pub struct Arm {
 ///
 /// Derived at read time from the neighbours and never stored in a Voxel, so a
 /// Chunk holds no fact that is a function of other facts.
-/// `docs/adr/0008-connections-are-derived-not-stored.md`.
+/// `docs/adr/0010-connections-are-derived-not-stored.md`.
 #[derive(Clone, Debug)]
 pub struct ConnectDef {
     /// The connection groups this Shape belongs to, one bit each.
@@ -333,6 +333,13 @@ impl FaceMask {
         self.0.iter().zip(&other.0).all(|(a, b)| b & !a == 0)
     }
 
+    /// Whether every square is set in `self`, `other`, or both: two partial
+    /// faces that together make the plane. Stops at the first row that is not,
+    /// which for two Ls or two half-planes of one kind is the first.
+    pub fn jointly_full(&self, other: &FaceMask) -> bool {
+        self.0.iter().zip(&other.0).all(|(a, b)| a | b == u16::MAX)
+    }
+
     fn set(&mut self, u: usize, v: usize) {
         self.0[v] |= 1 << u;
     }
@@ -369,6 +376,8 @@ impl ShapeQuad {
 #[derive(Clone, Copy, Debug)]
 struct Variant {
     seals: u8,
+    /// Whether any face is covered in part: neither empty nor sealed.
+    partial: bool,
     coverage: [FaceMask; 6],
     quads: (u32, u32),
     collision: (u32, u32),
@@ -386,6 +395,7 @@ const NO_CONNECT: u16 = u16::MAX;
 /// What an unknown Shape and air both resolve to: nothing there at all.
 const NOTHING: Variant = Variant {
     seals: 0,
+    partial: false,
     coverage: [FaceMask::EMPTY; 6],
     quads: (0, 0),
     collision: (0, 0),
@@ -618,8 +628,10 @@ impl ShapeTable {
         let seals = (0..6)
             .filter(|&f| coverage[f].is_full())
             .fold(0u8, |acc, f| acc | 1 << f);
+        let partial = coverage.iter().any(|c| !c.is_full() && !c.is_empty());
         Variant {
             seals,
+            partial,
             coverage,
             quads: (quads_start, self.quads.len() as u32 - quads_start),
             collision: (boxes_start, self.boxes.len() as u32 - boxes_start),
@@ -645,10 +657,10 @@ impl ShapeTable {
     }
 
     #[inline]
-    fn variant(&self, voxel: Voxel) -> &Variant {
+    fn slot(&self, voxel: Voxel) -> Option<usize> {
         let shape = voxel.shape() as usize;
         if voxel.is_air() || shape >= self.shapes {
-            return &NOTHING;
+            return None;
         }
         // An orientation byte past 23 reads as the identity rather than
         // indexing into another Shape's variants.
@@ -656,7 +668,15 @@ impl ShapeTable {
             o if o < ORIENTATIONS => o,
             _ => 0,
         };
-        &self.variants[shape * ORIENTATIONS + orientation]
+        Some(shape * ORIENTATIONS + orientation)
+    }
+
+    #[inline]
+    fn variant(&self, voxel: Voxel) -> &Variant {
+        match self.slot(voxel) {
+            Some(slot) => &self.variants[slot],
+            None => &NOTHING,
+        }
     }
 
     /// Whether `voxel` covers its whole `face`. The question both occlusion and
@@ -821,6 +841,34 @@ impl ShapeTable {
             0 => 0,
             seals => seals | LIGHT_EXIT_CHECKED,
         }
+    }
+
+    /// A handle for [`ShapeTable::jointly_seals`]: non-zero when the Voxel
+    /// covers some face in part and no more, which is the only kind of Voxel
+    /// that can seal a plane together with a neighbour and not alone. A cube,
+    /// air, and a Shape whose faces are each sealed or untouched are zero.
+    ///
+    /// Valid for this table only, and a handle rather than the Voxel so that a
+    /// solver can hold one per cell in two bytes and not re-read the Chunk's
+    /// palette for the rare edge that needs it.
+    #[inline]
+    pub fn joint_id(&self, voxel: Voxel) -> u16 {
+        match self.slot(voxel) {
+            Some(slot) if self.variants[slot].partial => slot as u16 + 1,
+            _ => 0,
+        }
+    }
+
+    /// Whether the Voxel behind `from` and the one behind `into` together cover
+    /// the plane between them, `from` looking out through `face`. Both ids must
+    /// be non-zero.
+    #[inline]
+    pub fn jointly_seals(&self, from: u16, face: usize, into: u16) -> bool {
+        let (a, b) = (
+            &self.variants[from as usize - 1],
+            &self.variants[into as usize - 1],
+        );
+        a.coverage[face].jointly_full(&b.coverage[face ^ 1])
     }
 }
 
@@ -1673,5 +1721,101 @@ mod tests {
         let stair = t.light_mask(voxel(SHAPE_STAIR, POS_Y, 0));
         assert_eq!(stair, LIGHT_EXIT_CHECKED | 1 << NEG_Y | 1 << POS_Z);
         assert_eq!(t.light_mask(voxel(SHAPE_POST, POS_Y, 0)), 0);
+    }
+
+    fn mask(rows: impl Fn(usize) -> u16) -> FaceMask {
+        let mut m = FaceMask::EMPTY;
+        for v in 0..SUBDIV {
+            m.0[v] = rows(v);
+        }
+        m
+    }
+
+    #[test]
+    fn two_halves_make_a_plane_and_one_half_twice_does_not() {
+        let low = mask(|v| if v < 8 { u16::MAX } else { 0 });
+        let high = mask(|v| if v >= 8 { u16::MAX } else { 0 });
+        let left = mask(|_| 0x00FF);
+        assert!(low.jointly_full(&high) && high.jointly_full(&low));
+        assert!(!low.jointly_full(&low));
+        assert!(!low.jointly_full(&left));
+        assert!(!FaceMask::EMPTY.jointly_full(&FaceMask::EMPTY));
+        assert!(FaceMask::FULL.jointly_full(&FaceMask::EMPTY));
+        assert!(FaceMask::EMPTY.jointly_full(&FaceMask::FULL));
+    }
+
+    #[test]
+    fn one_missing_square_is_not_a_plane() {
+        let mut almost = FaceMask::FULL;
+        almost.0[SUBDIV - 1] &= !1;
+        assert!(!almost.jointly_full(&FaceMask::EMPTY));
+        // The last row decides it, so an early-out that stopped short would
+        // call this full.
+        let mut only_the_hole = FaceMask::EMPTY;
+        only_the_hole.0[SUBDIV - 1] = 1;
+        assert!(almost.jointly_full(&only_the_hole));
+    }
+
+    #[test]
+    fn only_a_voxel_with_a_partly_covered_face_has_a_joint_id() {
+        let t = ShapeTable::builtin();
+        for v in [
+            voxel(SHAPE_SLAB, POS_Y, 0),
+            voxel(SHAPE_STAIR, POS_Y, 0),
+            voxel(SHAPE_POST, POS_Y, 0),
+        ] {
+            assert_ne!(t.joint_id(v), 0, "{v:?}");
+        }
+        for v in [Voxel::cube(1), Voxel::AIR, Voxel::new(1, 200, 0)] {
+            assert_eq!(t.joint_id(v), 0, "{v:?}");
+        }
+    }
+
+    #[test]
+    fn every_face_is_sealed_partial_or_empty_and_never_two_of_them() {
+        let t = ShapeTable::builtin();
+        for shape in [SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
+            for o in Orientation::all() {
+                let v = Voxel::new(1, shape, o.bits());
+                let mut any_partial = false;
+                for f in 0..6 {
+                    let c = t.coverage(v, f);
+                    let partial = !c.is_full() && !c.is_empty();
+                    any_partial |= partial;
+                    assert_eq!(
+                        [t.seals(v, f), partial, c.is_empty()]
+                            .iter()
+                            .filter(|&&b| b)
+                            .count(),
+                        1,
+                        "shape {shape} orientation {} face {f}",
+                        o.bits()
+                    );
+                }
+                assert_eq!(t.joint_id(v) != 0, any_partial);
+            }
+        }
+    }
+
+    #[test]
+    fn a_bottom_slab_and_a_top_slab_seal_the_plane_between_them_and_two_bottoms_do_not() {
+        let t = ShapeTable::builtin();
+        let (bottom, top) = (voxel(SHAPE_SLAB, POS_Y, 0), voxel(SHAPE_SLAB, NEG_Y, 0));
+        let [b, u] = [bottom, top].map(|v| t.joint_id(v));
+        // Looking out through +X into the neighbour's -X face, either way round.
+        assert!(t.jointly_seals(b, POS_X, u) && t.jointly_seals(u, POS_X, b));
+        assert!(t.jointly_seals(b, NEG_Z, u) && t.jointly_seals(u, POS_Z, b));
+        assert!(!t.jointly_seals(b, POS_X, b) && !t.jointly_seals(u, POS_X, u));
+    }
+
+    #[test]
+    fn an_l_beside_its_complement_seals_and_beside_itself_does_not() {
+        let t = ShapeTable::builtin();
+        // A stair's -X and +X faces are the same L, so a stair seals nothing
+        // against a copy of itself and everything against its mirror image.
+        let id = |turn| t.joint_id(voxel(SHAPE_STAIR, POS_Y, turn));
+        assert!(!t.jointly_seals(id(0), POS_X, id(0)));
+        let upside_down = t.joint_id(voxel(SHAPE_STAIR, NEG_Y, 0));
+        assert!(t.jointly_seals(id(0), POS_X, upside_down));
     }
 }

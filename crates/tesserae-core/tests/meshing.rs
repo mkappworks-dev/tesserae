@@ -7,21 +7,25 @@ use tesserae_core::{
     greedy_mesh, mesh_chunk, testgen,
 };
 use tesserae_core::{
-    Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Worldgen, WorldgenParams,
+    Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Tables, Worldgen, WorldgenParams,
 };
 
 const FENCE: u8 = 4;
 const PIPE: u8 = 5;
 
-/// The builtin Shapes, then a fence and a six-way pipe registered as a Mod would.
-fn shapes() -> &'static ShapeTable {
-    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
-    TABLE.get_or_init(|| {
-        let mut t = ShapeTable::builtin();
-        assert_eq!(t.register(examples::fence()), Ok(FENCE));
-        assert_eq!(t.register(examples::pipe()), Ok(PIPE));
+/// The builtin Tables, then a fence and a six-way pipe registered as a Mod would.
+fn tables() -> &'static Tables {
+    static TABLES: OnceLock<Tables> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        let mut t = Tables::builtin();
+        assert_eq!(t.shapes.register(examples::fence()), Ok(FENCE));
+        assert_eq!(t.shapes.register(examples::pipe()), Ok(PIPE));
         t
     })
+}
+
+fn shapes() -> &'static ShapeTable {
+    &tables().shapes
 }
 
 /// The light the tests that are about *geometry* use. Lent from a `static`
@@ -34,7 +38,7 @@ fn unlit(chunk: &Chunk) -> LitChunk<'_> {
 }
 
 fn mesh_isolated(chunk: &Chunk) -> tesserae_core::ChunkMesh {
-    greedy_mesh(&Neighborhood::isolated(unlit(chunk)), shapes())
+    greedy_mesh(&Neighborhood::isolated(unlit(chunk)), tables())
 }
 
 #[test]
@@ -50,8 +54,8 @@ fn one_voxel_emits_six_quads() {
     c.set(16, 16, 16, Voxel::cube(1));
     let mesh = mesh_isolated(&c);
     assert_eq!(mesh.quad_count(), 6);
-    assert_eq!(mesh.positions.len(), 24);
-    assert_eq!(mesh.indices.len(), 36);
+    assert_eq!(mesh.opaque.positions.len(), 24);
+    assert_eq!(mesh.opaque.indices.len(), 36);
 }
 
 /// The whole point of greedy meshing. A naive mesher emits 6 * 32 * 32 = 6144.
@@ -88,6 +92,7 @@ fn an_interior_face_between_two_cubes_is_culled() {
     // Side faces of both cubes legitimately have vertices at x == 11; what must
     // not exist is a quad lying *on* that plane.
     let on_seam = mesh
+        .opaque
         .positions
         .chunks(4)
         .filter(|quad| quad.iter().all(|p| p[0] == 11.0))
@@ -98,13 +103,13 @@ fn an_interior_face_between_two_cubes_is_culled() {
 #[test]
 fn a_solid_neighbour_culls_the_boundary_face() {
     let solid = Chunk::filled(Voxel::cube(1));
-    let open = greedy_mesh(&Neighborhood::isolated(unlit(&solid)), shapes());
+    let open = greedy_mesh(&Neighborhood::isolated(unlit(&solid)), tables());
     let closed = greedy_mesh(
         &Neighborhood::new(
             unlit(&solid),
             [None, Some(unlit(&solid)), None, None, None, None],
         ),
-        shapes(),
+        tables(),
     );
     assert_eq!(open.quad_count(), 6);
     assert_eq!(closed.quad_count(), 5, "+X face should be occluded");
@@ -118,13 +123,13 @@ fn neighbours_are_read_from_the_correct_side() {
     let mut left = Chunk::air();
     left.set(CHUNK_SIZE - 1, 5, 5, Voxel::cube(1));
 
-    let open = greedy_mesh(&Neighborhood::isolated(unlit(&center)), shapes());
+    let open = greedy_mesh(&Neighborhood::isolated(unlit(&center)), tables());
     let closed = greedy_mesh(
         &Neighborhood::new(
             unlit(&center),
             [Some(unlit(&left)), None, None, None, None, None],
         ),
-        shapes(),
+        tables(),
     );
     assert_eq!(open.quad_count(), 6);
     assert_eq!(closed.quad_count(), 5, "-X face should be occluded");
@@ -138,8 +143,11 @@ fn triangle_winding_matches_the_declared_normal() {
     let mesh = mesh_isolated(&testgen::terrain_chunk(0, 0, 0));
     assert!(mesh.quad_count() > 0);
 
-    for tri in mesh.indices.chunks(3) {
-        let p: Vec<[f32; 3]> = tri.iter().map(|&i| mesh.positions[i as usize]).collect();
+    for tri in mesh.opaque.indices.chunks(3) {
+        let p: Vec<[f32; 3]> = tri
+            .iter()
+            .map(|&i| mesh.opaque.positions[i as usize])
+            .collect();
         let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
         let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
         let cross = [
@@ -147,7 +155,7 @@ fn triangle_winding_matches_the_declared_normal() {
             e1[2] * e2[0] - e1[0] * e2[2],
             e1[0] * e2[1] - e1[1] * e2[0],
         ];
-        let n = mesh.normals[tri[0] as usize];
+        let n = mesh.opaque.normals[tri[0] as usize];
         let dot = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2];
         assert!(
             dot > 0.0,
@@ -159,7 +167,7 @@ fn triangle_winding_matches_the_declared_normal() {
 #[test]
 fn every_quad_is_planar_and_axis_aligned() {
     let mesh = mesh_isolated(&testgen::terrain_chunk(1, 0, 1));
-    for quad in mesh.positions.chunks(4) {
+    for quad in mesh.opaque.positions.chunks(4) {
         let axes = (0..3)
             .filter(|&ax| quad.iter().all(|p| p[ax] == quad[0][ax]))
             .count();
@@ -261,13 +269,13 @@ fn a_cube_loses_a_face_only_where_the_neighbour_seals_the_matching_one() {
 #[test]
 fn vertex_attributes_stay_in_lockstep() {
     let mesh = mesh_isolated(&testgen::terrain_chunk(0, 0, 0));
-    let n = mesh.positions.len();
-    assert_eq!(mesh.normals.len(), n);
-    assert_eq!(mesh.uvs.len(), n);
-    assert_eq!(mesh.materials.len(), n);
-    assert_eq!(mesh.light.len(), n);
-    assert_eq!(mesh.indices.len(), n / 4 * 6);
-    assert!(mesh.indices.iter().all(|&i| (i as usize) < n));
+    let n = mesh.opaque.positions.len();
+    assert_eq!(mesh.opaque.normals.len(), n);
+    assert_eq!(mesh.opaque.uvs.len(), n);
+    assert_eq!(mesh.opaque.materials.len(), n);
+    assert_eq!(mesh.opaque.light.len(), n);
+    assert_eq!(mesh.opaque.indices.len(), n / 4 * 6);
+    assert!(mesh.opaque.indices.iter().all(|&i| (i as usize) < n));
 }
 
 #[test]
@@ -297,14 +305,14 @@ fn enclosed_by(n: &Chunk) -> [Option<LitChunk<'_>>; 6] {
 fn a_uniform_air_chunk_declines_whatever_its_neighbours_hold() {
     let solid = Chunk::filled(Voxel::cube(1));
     let air = Chunk::air();
-    assert!(mesh_chunk(unlit(&air), enclosed_by(&solid), shapes()).is_empty());
-    assert!(mesh_chunk(unlit(&air), [None; 6], shapes()).is_empty());
+    assert!(mesh_chunk(unlit(&air), enclosed_by(&solid), tables()).is_empty());
+    assert!(mesh_chunk(unlit(&air), [None; 6], tables()).is_empty());
 }
 
 #[test]
 fn a_fully_enclosed_solid_chunk_declines() {
     let solid = Chunk::filled(Voxel::cube(1));
-    assert!(mesh_chunk(unlit(&solid), enclosed_by(&solid), shapes()).is_empty());
+    assert!(mesh_chunk(unlit(&solid), enclosed_by(&solid), tables()).is_empty());
 }
 
 #[test]
@@ -315,7 +323,7 @@ fn an_unknown_neighbour_is_not_an_occluder() {
     // Unknown, not air: the face has to be emitted or the Chunk is open to a
     // hole once that neighbour streams in.
     assert_eq!(
-        mesh_chunk(unlit(&solid), neighbors, shapes()).quad_count(),
+        mesh_chunk(unlit(&solid), neighbors, tables()).quad_count(),
         1
     );
 }
@@ -327,7 +335,7 @@ fn an_air_neighbour_opens_exactly_one_face() {
     let mut neighbors = enclosed_by(&solid);
     neighbors[2] = Some(unlit(&air));
     assert_eq!(
-        mesh_chunk(unlit(&solid), neighbors, shapes()).quad_count(),
+        mesh_chunk(unlit(&solid), neighbors, tables()).quad_count(),
         1
     );
 }
@@ -338,8 +346,8 @@ fn a_shaped_uniform_chunk_is_not_an_occluder() {
     // enclosed case nor is hidden by it: each tread is inside its own cell.
     let stairs = Chunk::filled(shaped(SHAPE_STAIR, POS_Y, 0));
     let solid = Chunk::filled(Voxel::cube(1));
-    assert!(mesh_chunk(unlit(&stairs), enclosed_by(&solid), shapes()).quad_count() > 0);
-    assert!(mesh_chunk(unlit(&solid), enclosed_by(&stairs), shapes()).quad_count() > 0);
+    assert!(mesh_chunk(unlit(&stairs), enclosed_by(&solid), tables()).quad_count() > 0);
+    assert!(mesh_chunk(unlit(&solid), enclosed_by(&stairs), tables()).quad_count() > 0);
 }
 
 /// The fast path is an optimisation, so where it does not fire the output must
@@ -358,14 +366,14 @@ fn declining_never_changes_the_mesh_it_would_have_produced() {
     ];
     let refs: [Option<LitChunk>; 6] = std::array::from_fn(|i| Some(unlit(&neighbors[i])));
 
-    let fast = mesh_chunk(unlit(&center), refs, shapes());
-    let slow = greedy_mesh(&Neighborhood::new(unlit(&center), refs), shapes());
-    assert_eq!(fast.positions, slow.positions);
-    assert_eq!(fast.normals, slow.normals);
-    assert_eq!(fast.uvs, slow.uvs);
-    assert_eq!(fast.materials, slow.materials);
-    assert_eq!(fast.light, slow.light);
-    assert_eq!(fast.indices, slow.indices);
+    let fast = mesh_chunk(unlit(&center), refs, tables());
+    let slow = greedy_mesh(&Neighborhood::new(unlit(&center), refs), tables());
+    assert_eq!(fast.opaque.positions, slow.opaque.positions);
+    assert_eq!(fast.opaque.normals, slow.opaque.normals);
+    assert_eq!(fast.opaque.uvs, slow.opaque.uvs);
+    assert_eq!(fast.opaque.materials, slow.opaque.materials);
+    assert_eq!(fast.opaque.light, slow.opaque.light);
+    assert_eq!(fast.opaque.indices, slow.opaque.indices);
     assert_eq!(fast.shaped_voxels, slow.shaped_voxels);
 }
 
@@ -392,7 +400,7 @@ fn uniform_light_costs_the_merge_key_nothing() {
     let flat = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
     let lit = greedy_mesh(
         &Neighborhood::isolated(LitChunk::new(&chunk, &flat)),
-        shapes(),
+        tables(),
     );
     let unlit = mesh_isolated(&chunk);
     assert_eq!(
@@ -416,11 +424,11 @@ fn two_faces_differing_only_in_light_do_not_merge() {
     let flat = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
     let merged = greedy_mesh(
         &Neighborhood::isolated(LitChunk::new(&chunk, &flat)),
-        shapes(),
+        tables(),
     );
     let shredded = greedy_mesh(
         &Neighborhood::isolated(LitChunk::new(&chunk, &split)),
-        shapes(),
+        tables(),
     );
     assert!(
         shredded.quad_count() > merged.quad_count(),
@@ -444,11 +452,11 @@ fn a_face_carries_the_light_of_the_voxel_in_front_of_it() {
 
     let mesh = greedy_mesh(
         &Neighborhood::isolated(LitChunk::new(&chunk, &light)),
-        shapes(),
+        tables(),
     );
-    let top: Vec<u32> = (0..mesh.positions.len())
-        .filter(|&i| mesh.normals[i] == [0.0, 1.0, 0.0])
-        .map(|i| mesh.light[i])
+    let top: Vec<u32> = (0..mesh.opaque.positions.len())
+        .filter(|&i| mesh.opaque.normals[i] == [0.0, 1.0, 0.0])
+        .map(|i| mesh.opaque.light[i])
         .collect();
     assert!(!top.is_empty(), "the floor has a top face");
     assert!(
@@ -457,7 +465,7 @@ fn a_face_carries_the_light_of_the_voxel_in_front_of_it() {
     );
 
     // And every vertex of one quad agrees, since they share the key.
-    for quad in mesh.light.chunks(4) {
+    for quad in mesh.opaque.light.chunks(4) {
         assert!(quad.iter().all(|l| *l == quad[0]));
     }
 }
@@ -476,12 +484,12 @@ fn a_boundary_face_is_lit_from_the_neighbour_and_not_from_zero() {
     neighbors[POS_X] = Some(LitChunk::new(&above, &above_light));
     let mesh = greedy_mesh(
         &Neighborhood::new(LitChunk::new(&center, &center_light), neighbors),
-        shapes(),
+        tables(),
     );
 
-    let across: Vec<u32> = (0..mesh.positions.len())
-        .filter(|&i| mesh.normals[i] == [1.0, 0.0, 0.0])
-        .map(|i| mesh.light[i])
+    let across: Vec<u32> = (0..mesh.opaque.positions.len())
+        .filter(|&i| mesh.opaque.normals[i] == [1.0, 0.0, 0.0])
+        .map(|i| mesh.opaque.light[i])
         .collect();
     assert_eq!(
         across,
@@ -504,8 +512,8 @@ fn light_does_not_revive_either_declined_case() {
     lumpy.set(31, 31, 31, Light::new(1, 2));
 
     let neighbors: [Option<LitChunk>; 6] = [Some(LitChunk::new(&solid, &lumpy)); 6];
-    assert!(mesh_chunk(LitChunk::new(&air, &lumpy), neighbors, shapes()).is_empty());
-    assert!(mesh_chunk(LitChunk::new(&solid, &lumpy), neighbors, shapes()).is_empty());
+    assert!(mesh_chunk(LitChunk::new(&air, &lumpy), neighbors, tables()).is_empty());
+    assert!(mesh_chunk(LitChunk::new(&solid, &lumpy), neighbors, tables()).is_empty());
 }
 
 /// The mesher bakes whatever light it is handed, so it must not quietly reject
@@ -522,11 +530,11 @@ fn every_level_the_solver_can_produce_survives_to_a_vertex() {
     }
     let mesh = greedy_mesh(
         &Neighborhood::isolated(LitChunk::new(&chunk, &light)),
-        shapes(),
+        tables(),
     );
-    let seen: std::collections::BTreeSet<u8> = (0..mesh.positions.len())
-        .filter(|&i| mesh.normals[i] == [0.0, 1.0, 0.0])
-        .map(|i| (mesh.light[i] & 0x0F) as u8)
+    let seen: std::collections::BTreeSet<u8> = (0..mesh.opaque.positions.len())
+        .filter(|&i| mesh.opaque.normals[i] == [0.0, 1.0, 0.0])
+        .map(|i| (mesh.opaque.light[i] & 0x0F) as u8)
         .collect();
     assert_eq!(seen.len(), 16, "lost a block level: {seen:?}");
 }
@@ -622,19 +630,33 @@ fn covers_whole_face(boxes: &[NodeBox], face: usize) -> bool {
 /// Every face between a solid sub-cell and an empty one, from the declared
 /// boxes alone - a different route to the geometry than the table's own grid.
 fn exposed_faces(chunk: &Chunk) -> std::collections::BTreeSet<SubFace> {
-    let mut solid = std::collections::HashSet::new();
+    exposed_faces_unless(chunk, |_, _| true)
+}
+
+/// [`exposed_faces`] where a solid sub-cell of Material `across` hides the face
+/// of one of Material `here` only if `hides(across, here)`. The caller states the
+/// rule itself, so the mesher's is not what is marking its own work.
+fn exposed_faces_unless(
+    chunk: &Chunk,
+    hides: impl Fn(u16, u16) -> bool,
+) -> std::collections::BTreeSet<SubFace> {
+    let mut solid = std::collections::HashMap::new();
     for z in LO..LO + SPAN {
         for y in LO..LO + SPAN {
             for x in LO..LO + SPAN {
+                let v = chunk.get(x, y, z);
                 for b in declared(chunk, [x as i32, y as i32, z as i32], true) {
                     for sz in b.min[2]..b.max[2] {
                         for sy in b.min[1]..b.max[1] {
                             for sx in b.min[0]..b.max[0] {
-                                solid.insert([
-                                    (x * 16 + sx as usize) as i32,
-                                    (y * 16 + sy as usize) as i32,
-                                    (z * 16 + sz as usize) as i32,
-                                ]);
+                                solid.insert(
+                                    [
+                                        (x * 16 + sx as usize) as i32,
+                                        (y * 16 + sy as usize) as i32,
+                                        (z * 16 + sz as usize) as i32,
+                                    ],
+                                    v.material(),
+                                );
                             }
                         }
                     }
@@ -643,10 +665,16 @@ fn exposed_faces(chunk: &Chunk) -> std::collections::BTreeSet<SubFace> {
         }
     }
     let mut faces = std::collections::BTreeSet::new();
-    for s in &solid {
+    for (s, here) in &solid {
         for (f, d) in DIRS.iter().enumerate() {
             let n = [s[0] + d[0], s[1] + d[1], s[2] + d[2]];
-            if !solid.contains(&n) {
+            // Inside one Voxel a sub-cell always hides its neighbour; the
+            // Material's say starts at the Voxel's boundary.
+            let same_voxel = (0..3).all(|a| s[a].div_euclid(16) == n[a].div_euclid(16));
+            let hidden = solid
+                .get(&n)
+                .is_some_and(|across| same_voxel || hides(*across, *here));
+            if !hidden {
                 faces.insert((f, *s));
             }
         }
@@ -658,31 +686,33 @@ fn exposed_faces(chunk: &Chunk) -> std::collections::BTreeSet<SubFace> {
 /// rectangle, each belonging to the solid sub-cell behind it.
 fn drawn_faces(mesh: &tesserae_core::ChunkMesh) -> std::collections::BTreeMap<SubFace, u32> {
     let mut drawn = std::collections::BTreeMap::new();
-    for (q, normal) in mesh.positions.chunks(4).zip(mesh.normals.chunks(4)) {
-        let n = normal[0];
-        let f = (0..6)
-            .find(|&f| {
-                let d = DIRS[f];
-                n == [d[0] as f32, d[1] as f32, d[2] as f32]
-            })
-            .expect("axis-aligned normal");
-        let d = f / 2;
-        let lo: Vec<i32> = (0..3)
-            .map(|a| q.iter().map(|p| (p[a] * 16.0) as i32).min().unwrap())
-            .collect();
-        let hi: Vec<i32> = (0..3)
-            .map(|a| q.iter().map(|p| (p[a] * 16.0) as i32).max().unwrap())
-            .collect();
-        let (u, v) = ((d + 1) % 3, (d + 2) % 3);
-        // The solid sub-cell is on the side the quad faces away from.
-        let layer = if f % 2 == 1 { lo[d] - 1 } else { lo[d] };
-        for a in lo[u]..hi[u] {
-            for b in lo[v]..hi[v] {
-                let mut cell = [0i32; 3];
-                cell[d] = layer;
-                cell[u] = a;
-                cell[v] = b;
-                *drawn.entry((f, cell)).or_insert(0) += 1;
+    for layer in [&mesh.opaque, &mesh.blended] {
+        for (q, normal) in layer.positions.chunks(4).zip(layer.normals.chunks(4)) {
+            let n = normal[0];
+            let f = (0..6)
+                .find(|&f| {
+                    let d = DIRS[f];
+                    n == [d[0] as f32, d[1] as f32, d[2] as f32]
+                })
+                .expect("axis-aligned normal");
+            let d = f / 2;
+            let lo: Vec<i32> = (0..3)
+                .map(|a| q.iter().map(|p| (p[a] * 16.0) as i32).min().unwrap())
+                .collect();
+            let hi: Vec<i32> = (0..3)
+                .map(|a| q.iter().map(|p| (p[a] * 16.0) as i32).max().unwrap())
+                .collect();
+            let (u, v) = ((d + 1) % 3, (d + 2) % 3);
+            // The solid sub-cell is on the side the quad faces away from.
+            let layer = if f % 2 == 1 { lo[d] - 1 } else { lo[d] };
+            for a in lo[u]..hi[u] {
+                for b in lo[v]..hi[v] {
+                    let mut cell = [0i32; 3];
+                    cell[d] = layer;
+                    cell[u] = a;
+                    cell[v] = b;
+                    *drawn.entry((f, cell)).or_insert(0) += 1;
+                }
             }
         }
     }
@@ -904,11 +934,12 @@ fn an_arm_across_a_chunk_boundary_is_read_from_the_shell() {
     a.set(last, 10, 10, Voxel::new(1, FENCE, 0));
     let mesh = |b: &Chunk| {
         let neighbors = [None, Some(unlit(b)), None, None, None, None];
-        let m = mesh_chunk(unlit(&a), neighbors, shapes());
+        let m = mesh_chunk(unlit(&a), neighbors, tables());
         let cap_on_the_boundary = m
+            .opaque
             .positions
             .chunks(4)
-            .zip(m.normals.chunks(4))
+            .zip(m.opaque.normals.chunks(4))
             .any(|(q, n)| n[0] == [1.0, 0.0, 0.0] && q.iter().all(|p| p[0] == CHUNK_SIZE as f32));
         (m.quad_count(), cap_on_the_boundary)
     };
@@ -973,12 +1004,12 @@ fn a_stairs_tread_is_lit_by_its_own_voxel_and_its_back_by_the_neighbour() {
     light.set(10, 10, 11, Light::new(2, 1));
     light.set(10, 10, 9, Light::new(4, 0));
     light.set(10, 11, 10, Light::new(9, 9));
-    let mesh = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&c, &light)), shapes());
+    let mesh = greedy_mesh(&Neighborhood::isolated(LitChunk::new(&c, &light)), tables());
 
     let lit_at = |normal: [f32; 3], axis: usize, at: f32| -> Vec<u32> {
-        (0..mesh.positions.len())
-            .filter(|&i| mesh.normals[i] == normal && mesh.positions[i][axis] == at)
-            .map(|i| mesh.light[i])
+        (0..mesh.opaque.positions.len())
+            .filter(|&i| mesh.opaque.normals[i] == normal && mesh.opaque.positions[i][axis] == at)
+            .map(|i| mesh.opaque.light[i])
             .collect()
     };
     let packed = |sky, block| Light::new(sky, block).packed() as u32;
@@ -1017,8 +1048,11 @@ fn pass_2_geometry_is_wound_to_its_normal_planar_and_in_lockstep() {
     assert_eq!(mesh.shaped_voxels, 72);
     assert!(mesh.quad_count() > 72);
 
-    for tri in mesh.indices.chunks(3) {
-        let p: Vec<[f32; 3]> = tri.iter().map(|&i| mesh.positions[i as usize]).collect();
+    for tri in mesh.opaque.indices.chunks(3) {
+        let p: Vec<[f32; 3]> = tri
+            .iter()
+            .map(|&i| mesh.opaque.positions[i as usize])
+            .collect();
         let e1 = [p[1][0] - p[0][0], p[1][1] - p[0][1], p[1][2] - p[0][2]];
         let e2 = [p[2][0] - p[0][0], p[2][1] - p[0][1], p[2][2] - p[0][2]];
         let cross = [
@@ -1026,22 +1060,22 @@ fn pass_2_geometry_is_wound_to_its_normal_planar_and_in_lockstep() {
             e1[2] * e2[0] - e1[0] * e2[2],
             e1[0] * e2[1] - e1[1] * e2[0],
         ];
-        let n = mesh.normals[tri[0] as usize];
+        let n = mesh.opaque.normals[tri[0] as usize];
         let dot = cross[0] * n[0] + cross[1] * n[1] + cross[2] * n[2];
         assert!(dot > 0.0, "winding flipped: {cross:?} vs normal {n:?}");
     }
-    for quad in mesh.positions.chunks(4) {
+    for quad in mesh.opaque.positions.chunks(4) {
         let axes = (0..3)
             .filter(|&ax| quad.iter().all(|p| p[ax] == quad[0][ax]))
             .count();
         assert_eq!(axes, 1, "quad {quad:?} is not on one axis-aligned plane");
     }
-    let n = mesh.positions.len();
-    assert_eq!(mesh.normals.len(), n);
-    assert_eq!(mesh.uvs.len(), n);
-    assert_eq!(mesh.materials.len(), n);
-    assert_eq!(mesh.light.len(), n);
-    assert!(mesh.indices.iter().all(|&i| (i as usize) < n));
+    let n = mesh.opaque.positions.len();
+    assert_eq!(mesh.opaque.normals.len(), n);
+    assert_eq!(mesh.opaque.uvs.len(), n);
+    assert_eq!(mesh.opaque.materials.len(), n);
+    assert_eq!(mesh.opaque.light.len(), n);
+    assert!(mesh.opaque.indices.iter().all(|&i| (i as usize) < n));
 }
 
 /// A half-height slab side shows half the texture, not a squashed whole one.
@@ -1050,12 +1084,479 @@ fn uvs_are_the_position_inside_the_voxel() {
     let mut c = Chunk::air();
     c.set(10, 10, 10, shaped(SHAPE_SLAB, POS_Y, 0));
     let mesh = mesh_isolated(&c);
-    for i in 0..mesh.positions.len() {
-        if mesh.normals[i] == [1.0, 0.0, 0.0] {
+    for i in 0..mesh.opaque.positions.len() {
+        if mesh.opaque.normals[i] == [1.0, 0.0, 0.0] {
             // A +X face is on axes (y, z), so (u, v) = (y, z) inside the cell.
-            let p = mesh.positions[i];
-            assert_eq!(mesh.uvs[i], [p[1] - 10.0, p[2] - 10.0]);
-            assert!(mesh.uvs[i][0] <= 0.5, "the slab's side is half height");
+            let p = mesh.opaque.positions[i];
+            assert_eq!(mesh.opaque.uvs[i], [p[1] - 10.0, p[2] - 10.0]);
+            assert!(
+                mesh.opaque.uvs[i][0] <= 0.5,
+                "the slab's side is half height"
+            );
         }
     }
+}
+
+// Translucent Materials: what a face is hidden by is the Material across it.
+
+use tesserae_core::material::{GLASS, LEAVES, STONE, WATER};
+use tesserae_core::{MaterialDef, Occlusion, RenderClass};
+
+fn put(chunk: &mut Chunk, at: [usize; 3], voxel: Voxel) {
+    chunk.set(at[0], at[1], at[2], voxel);
+}
+
+/// The normals of every quad of a layer, one per quad.
+fn quad_normals(layer: &tesserae_core::MeshLayer) -> Vec<[f32; 3]> {
+    layer.normals.chunks(4).map(|n| n[0]).collect()
+}
+
+/// A second, differently coloured glass: same properties, another Material.
+fn with_tinted_glass() -> (Tables, u16) {
+    let mut t = Tables::builtin();
+    let id = t
+        .materials
+        .register(MaterialDef {
+            emission: 0,
+            dimming: 0,
+            occlusion: Occlusion::SameMaterial,
+            render: RenderClass::Blend,
+        })
+        .unwrap();
+    (t, id)
+}
+
+#[test]
+fn glass_beside_glass_is_a_skin_and_not_a_honeycomb() {
+    let mut c = Chunk::air();
+    put(&mut c, [10, 10, 10], Voxel::cube(GLASS));
+    put(&mut c, [11, 10, 10], Voxel::cube(GLASS));
+    let mesh = mesh_isolated(&c);
+    // One box: six faces, the shared one gone and the rest merged across both.
+    assert_eq!(mesh.blended.quad_count(), 6);
+    assert!(mesh.opaque.is_empty());
+    let on_seam = mesh
+        .blended
+        .positions
+        .chunks(4)
+        .filter(|quad| quad.iter().all(|p| p[0] == 11.0))
+        .count();
+    assert_eq!(on_seam, 0);
+}
+
+#[test]
+fn two_different_glasses_keep_the_face_between_them() {
+    let (tables, tinted) = with_tinted_glass();
+    let mut c = Chunk::air();
+    put(&mut c, [10, 10, 10], Voxel::cube(GLASS));
+    put(&mut c, [11, 10, 10], Voxel::cube(tinted));
+    let mesh = greedy_mesh(&Neighborhood::isolated(unlit(&c)), &tables);
+    // Each keeps all six faces, and the two coplanar outer faces cannot merge.
+    assert_eq!(mesh.blended.quad_count(), 12);
+}
+
+#[test]
+fn leaves_hide_nothing_not_even_each_other() {
+    let mut c = Chunk::air();
+    put(&mut c, [10, 10, 10], Voxel::cube(LEAVES));
+    put(&mut c, [11, 10, 10], Voxel::cube(LEAVES));
+    let mesh = mesh_isolated(&c);
+    // The two shared faces are drawn, one facing each way, on the plane x=11.
+    let facing_seam: Vec<_> = mesh
+        .opaque
+        .positions
+        .chunks(4)
+        .zip(quad_normals(&mesh.opaque))
+        .filter(|(quad, _)| quad.iter().all(|p| p[0] == 11.0))
+        .map(|(_, n)| n)
+        .collect();
+    assert_eq!(facing_seam.len(), 2);
+    assert!(facing_seam.contains(&[1.0, 0.0, 0.0]) && facing_seam.contains(&[-1.0, 0.0, 0.0]));
+    // Leaves draw in the opaque pass until there is a texture to cut out.
+    assert!(mesh.blended.is_empty());
+}
+
+#[test]
+fn stone_beside_glass_keeps_its_face_and_glass_beside_stone_loses_its_own() {
+    let mut c = Chunk::air();
+    put(&mut c, [10, 10, 10], Voxel::cube(STONE));
+    put(&mut c, [11, 10, 10], Voxel::cube(GLASS));
+    let mesh = mesh_isolated(&c);
+    assert_eq!(mesh.opaque.quad_count(), 6, "stone is seen through glass");
+    assert_eq!(
+        mesh.blended.quad_count(),
+        5,
+        "glass against stone is hidden"
+    );
+    assert!(
+        !quad_normals(&mesh.blended).contains(&[-1.0, 0.0, 0.0]),
+        "the glass face towards the stone"
+    );
+}
+
+#[test]
+fn every_quad_lands_in_the_layer_of_its_materials_render_class() {
+    let mut c = Chunk::air();
+    for (i, m) in [STONE, GLASS, LEAVES, WATER].into_iter().enumerate() {
+        put(&mut c, [10 + 2 * i, 10, 10], Voxel::cube(m));
+        put(
+            &mut c,
+            [10 + 2 * i, 14, 10],
+            Voxel::shaped(m, tesserae_core::SHAPE_SLAB, Orientation::IDENTITY),
+        );
+    }
+    let mesh = mesh_isolated(&c);
+    let class = |m: u32| tables().materials.def(m as u16).render;
+    assert!(
+        mesh.opaque
+            .materials
+            .iter()
+            .all(|&m| class(m) == RenderClass::Opaque)
+    );
+    assert!(
+        mesh.blended
+            .materials
+            .iter()
+            .all(|&m| class(m) == RenderClass::Blend)
+    );
+    for (layer, expected) in [
+        (&mesh.opaque, [STONE, LEAVES]),
+        (&mesh.blended, [GLASS, WATER]),
+    ] {
+        for m in expected {
+            assert!(layer.materials.contains(&(m as u32)), "material {m}");
+        }
+    }
+    for layer in [&mesh.opaque, &mesh.blended] {
+        assert_eq!(layer.positions.len(), layer.normals.len());
+        assert_eq!(layer.positions.len(), layer.uvs.len());
+        assert_eq!(layer.positions.len(), layer.materials.len());
+        assert_eq!(layer.positions.len(), layer.light.len());
+    }
+}
+
+#[test]
+fn a_shaped_voxel_is_hidden_only_by_a_neighbour_that_hides_it() {
+    // A slab of stone beside a cube of stone loses its sealed side; beside a cube
+    // of glass it keeps it, because glass proves nothing about stone.
+    let slab = Voxel::shaped(STONE, tesserae_core::SHAPE_SLAB, Orientation::IDENTITY);
+    let faces_towards_neighbour = |beside: Voxel| {
+        let mut c = Chunk::air();
+        put(&mut c, [10, 10, 10], slab);
+        put(&mut c, [11, 10, 10], beside);
+        let mesh = mesh_isolated(&c);
+        // Quads lying on the shared plane x=11 and facing +X are the slab's.
+        mesh.opaque
+            .positions
+            .chunks(4)
+            .zip(quad_normals(&mesh.opaque))
+            .filter(|(quad, n)| *n == [1.0, 0.0, 0.0] && quad.iter().all(|p| p[0] == 11.0))
+            .count()
+    };
+    assert_eq!(faces_towards_neighbour(Voxel::cube(STONE)), 0);
+    assert_eq!(faces_towards_neighbour(Voxel::cube(GLASS)), 1);
+    assert_eq!(faces_towards_neighbour(Voxel::cube(LEAVES)), 1);
+}
+
+#[test]
+fn terrain_meshes_to_one_layer_exactly_as_it_did() {
+    let mesh = mesh_isolated(&testgen::terrain_chunk(0, 0, 0));
+    assert!(mesh.blended.is_empty());
+    assert!(!mesh.opaque.is_empty());
+}
+
+#[test]
+fn a_uniform_chunk_declines_only_if_the_material_hides_itself_and_what_is_beside_it() {
+    let uniform = |m| Chunk::filled(Voxel::cube(m));
+    let declines = |centre: &Chunk, around: &Chunk| {
+        mesh_chunk(unlit(centre), enclosed_by(around), tables()).is_empty()
+    };
+    assert!(declines(&uniform(STONE), &uniform(STONE)));
+    assert!(
+        declines(&uniform(GLASS), &uniform(GLASS)),
+        "a block of glass is a skin"
+    );
+    assert!(
+        declines(&uniform(GLASS), &uniform(STONE)),
+        "stone hides glass"
+    );
+    assert!(declines(&uniform(WATER), &uniform(WATER)));
+    // Stone's faces are seen through the glass beside it.
+    assert!(!declines(&uniform(STONE), &uniform(GLASS)));
+    // Leaves draw every face, inside the Chunk as well as on its boundary.
+    assert!(!declines(&uniform(LEAVES), &uniform(LEAVES)));
+    assert!(!declines(&uniform(LEAVES), &uniform(STONE)));
+    // Water beside glass: neither hides the other.
+    assert!(!declines(&uniform(WATER), &uniform(GLASS)));
+}
+
+/// The occlusion rule, restated from the spec and not from the mesher.
+fn hides(across: u16, here: u16) -> bool {
+    match across {
+        GLASS | WATER => across == here,
+        LEAVES => false,
+        _ => true,
+    }
+}
+
+fn random_translucent_scene(rng: &mut Rng) -> Chunk {
+    let mut chunk = Chunk::air();
+    for z in LO..LO + SPAN {
+        for y in LO..LO + SPAN {
+            for x in LO..LO + SPAN {
+                let material = [STONE, GLASS, LEAVES, WATER][rng.below(4) as usize];
+                let voxel = match rng.below(10) {
+                    0..=3 => continue,
+                    4..=7 => Voxel::cube(material),
+                    pick => {
+                        let shape = [
+                            tesserae_core::SHAPE_SLAB,
+                            tesserae_core::SHAPE_STAIR,
+                            tesserae_core::SHAPE_POST,
+                        ][(pick as usize - 8 + rng.below(2) as usize) % 3];
+                        Voxel::new(material, shape, rng.below(24) as u8)
+                    }
+                };
+                chunk.set(x, y, z, voxel);
+            }
+        }
+    }
+    chunk
+}
+
+/// The step-5 test again with Materials that hide differently. No face that the
+/// stated rule says is visible may be missing from either layer, and none may be
+/// drawn twice; drawing a hidden one is allowed, because the failure mode of an
+/// unproven face is overdraw.
+#[test]
+fn no_exposed_face_of_a_random_translucent_scene_is_missing_or_drawn_twice() {
+    let mut rng = Rng(0x5eed_0008);
+    let mut seen_through = 0;
+    for scene in 0..200 {
+        let chunk = random_translucent_scene(&mut rng);
+        let exposed = exposed_faces_unless(&chunk, hides);
+        let all = exposed_faces(&chunk);
+        seen_through += exposed.len() - all.len();
+        let drawn = drawn_faces(&mesh_isolated(&chunk));
+
+        let missing: Vec<_> = exposed.iter().filter(|f| !drawn.contains_key(f)).collect();
+        assert!(
+            missing.is_empty(),
+            "scene {scene}: {} of {} exposed faces are holes, e.g. {:?}",
+            missing.len(),
+            exposed.len(),
+            &missing[..missing.len().min(4)]
+        );
+        let doubled: Vec<_> = exposed.iter().filter(|f| drawn[*f] > 1).collect();
+        assert!(
+            doubled.is_empty(),
+            "scene {scene}: {} faces are drawn twice, e.g. {:?}",
+            doubled.len(),
+            &doubled[..doubled.len().min(4)]
+        );
+    }
+    // The scenes must exercise the rule, or this passes for the wrong reason:
+    // faces an opaque-only mesher would have dropped and this one must keep.
+    assert!(
+        seen_through > 1000,
+        "only {seen_through} faces seen through"
+    );
+}
+
+/// The other direction: the mesher culls what it can prove, so a scene of glass
+/// has fewer drawn faces than the exposed-by-geometry count, not more.
+#[test]
+fn a_block_of_glass_draws_only_its_skin() {
+    let mut c = Chunk::air();
+    for z in LO..LO + SPAN {
+        for y in LO..LO + SPAN {
+            for x in LO..LO + SPAN {
+                c.set(x, y, z, Voxel::cube(GLASS));
+            }
+        }
+    }
+    let mesh = mesh_isolated(&c);
+    assert_eq!(mesh.blended.quad_count(), 6);
+    let mut stone = Chunk::air();
+    put(&mut stone, [20, 20, 20], Voxel::cube(STONE));
+    assert!(mesh_isolated(&stone).blended.is_empty());
+}
+
+// Generated terrain. Slope smoothing puts stairs and slabs on real ground, so
+// the checks above are repeated on the input the mesher actually meets: a Chunk
+// with real neighbours, not a hand-built scene in an isolated shell.
+
+fn world() -> Worldgen {
+    Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default())
+}
+
+/// Chunk coordinates near the origin, at the height the surface crosses it,
+/// whose Chunk holds at least `min` shaped Voxels. In a fixed scan order.
+fn ramp_chunks(g: &Worldgen, min: usize) -> Vec<[i32; 3]> {
+    let cy = (g.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+    let mut found = vec![];
+    for cz in -3..3 {
+        for cx in -3..3 {
+            if g.chunk(cx, cy, cz).shaped_count() >= min {
+                found.push([cx, cy, cz]);
+            }
+        }
+    }
+    found
+}
+
+/// A Chunk and the 26 around it, indexed `(dz + 1) * 9 + (dy + 1) * 3 + dx + 1`.
+fn block_around(g: &Worldgen, c: [i32; 3]) -> Vec<Chunk> {
+    (-1..=1)
+        .flat_map(|dz| (-1..=1).flat_map(move |dy| (-1..=1).map(move |dx| [dx, dy, dz])))
+        .map(|d| g.chunk(c[0] + d[0], c[1] + d[1], c[2] + d[2]))
+        .collect()
+}
+
+/// The Voxel at `at` Voxels from the middle Chunk's corner, which may be up to a
+/// Chunk outside it on any axis.
+fn voxel_in(block: &[Chunk], at: [i32; 3]) -> Voxel {
+    let size = CHUNK_SIZE as i32;
+    let d = at.map(|v| v.div_euclid(size) + 1);
+    let l = at.map(|v| v.rem_euclid(size) as usize);
+    block[(d[2] * 9 + d[1] * 3 + d[0]) as usize].get(l[0], l[1], l[2])
+}
+
+fn solid_sub_cell(block: &[Chunk], sub: [i32; 3]) -> bool {
+    let v = voxel_in(block, sub.map(|s| s.div_euclid(16)));
+    if v.is_air() {
+        return false;
+    }
+    let l = sub.map(|s| s.rem_euclid(16) as u8);
+    shapes()
+        .selection(v, Connections::NONE)
+        .iter()
+        .any(|b| (0..3).all(|a| b.min[a] <= l[a] && l[a] < b.max[a]))
+}
+
+/// The exposed faces of the Voxels in a cube of `radius` round `centre`, clipped
+/// to the middle Chunk, judged against the real World across its edges.
+fn exposed_near(
+    block: &[Chunk],
+    centre: [i32; 3],
+    radius: i32,
+) -> std::collections::BTreeSet<SubFace> {
+    let size = CHUNK_SIZE as i32;
+    let mut faces = std::collections::BTreeSet::new();
+    let range = |c: i32| (c - radius).max(0)..=(c + radius).min(size - 1);
+    for z in range(centre[2]) {
+        for y in range(centre[1]) {
+            for x in range(centre[0]) {
+                let v = voxel_in(block, [x, y, z]);
+                if v.is_air() {
+                    continue;
+                }
+                let cube = v.is_full_cube();
+                for sz in 0..16 {
+                    for sy in 0..16 {
+                        for sx in 0..16 {
+                            // The interior of a cube is not exposed to anything,
+                            // and is most of the sub-cells.
+                            if cube && ![sx, sy, sz].iter().any(|&s| s == 0 || s == 15) {
+                                continue;
+                            }
+                            let s = [x * 16 + sx, y * 16 + sy, z * 16 + sz];
+                            if !solid_sub_cell(block, s) {
+                                continue;
+                            }
+                            for (f, d) in DIRS.iter().enumerate() {
+                                let n = [s[0] + d[0], s[1] + d[1], s[2] + d[2]];
+                                if !solid_sub_cell(block, n) {
+                                    faces.insert((f, s));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    faces
+}
+
+fn mesh_with_neighbours(block: &[Chunk]) -> tesserae_core::ChunkMesh {
+    let at = |dx: usize, dy: usize, dz: usize| &block[dz * 9 + dy * 3 + dx];
+    let refs = [
+        at(0, 1, 1),
+        at(2, 1, 1),
+        at(1, 0, 1),
+        at(1, 2, 1),
+        at(1, 1, 0),
+        at(1, 1, 2),
+    ]
+    .map(|c| Some(unlit(c)));
+    mesh_chunk(unlit(at(1, 1, 1)), refs, tables())
+}
+
+/// Around the first shaped Voxel of a Chunk in the interior, one on each kind of
+/// Chunk edge, and one against the floor and ceiling: every face a player could
+/// see is drawn, once, with the neighbour Chunks' real Voxels across the seam.
+#[test]
+fn no_exposed_face_of_generated_ramps_is_missing_or_drawn_twice() {
+    let g = world();
+    let chunks = ramp_chunks(&g, 20);
+    assert!(!chunks.is_empty(), "no ramp near the origin");
+    let size = CHUNK_SIZE as i32;
+    let (mut checked, mut seams) = (0, 0);
+    for coord in chunks.into_iter().take(3) {
+        let block = block_around(&g, coord);
+        let middle = &block[13];
+        let shaped: Vec<[i32; 3]> = (0..size)
+            .flat_map(|z| (0..size).flat_map(move |y| (0..size).map(move |x| [x, y, z])))
+            .filter(|p| {
+                middle
+                    .get(p[0] as usize, p[1] as usize, p[2] as usize)
+                    .is_shaped()
+            })
+            .collect();
+        let on_edge = |p: &&[i32; 3]| [p[0], p[2]].iter().any(|&c| c == 0 || c == size - 1);
+        let picks = [
+            shaped.first(),
+            shaped.iter().find(on_edge),
+            shaped.iter().find(|p| !on_edge(p)),
+        ];
+        let drawn = drawn_faces(&mesh_with_neighbours(&block));
+        for centre in picks.into_iter().flatten() {
+            let exposed = exposed_near(&block, *centre, 2);
+            let missing: Vec<_> = exposed.iter().filter(|f| !drawn.contains_key(f)).collect();
+            assert!(
+                missing.is_empty(),
+                "{coord:?} near {centre:?}: {} of {} exposed faces are holes, e.g. {:?}",
+                missing.len(),
+                exposed.len(),
+                &missing[..missing.len().min(4)]
+            );
+            let doubled: Vec<_> = exposed.iter().filter(|f| drawn[*f] > 1).collect();
+            assert!(
+                doubled.is_empty(),
+                "{coord:?} near {centre:?}: {} faces drawn twice, e.g. {:?}",
+                doubled.len(),
+                &doubled[..doubled.len().min(4)]
+            );
+            checked += exposed.len();
+            seams += usize::from(on_edge(&centre));
+        }
+    }
+    assert!(checked > 1000, "only {checked} faces checked");
+    assert!(seams > 0, "no ramp on a Chunk seam was checked");
+}
+
+#[test]
+fn declining_never_changes_the_mesh_of_a_ramp_chunk() {
+    let g = world();
+    let coord = *ramp_chunks(&g, 20).first().expect("a ramp near the origin");
+    let block = block_around(&g, coord);
+    assert!(block[13].may_contain_shaped());
+    let fast = mesh_with_neighbours(&block);
+    let refs = [12, 14, 10, 16, 4, 22].map(|i| Some(unlit(&block[i])));
+    let slow = greedy_mesh(&Neighborhood::new(unlit(&block[13]), refs), tables());
+    assert_eq!(fast.opaque.positions, slow.opaque.positions);
+    assert_eq!(fast.opaque.indices, slow.opaque.indices);
+    assert_eq!(fast.opaque.light, slow.opaque.light);
+    assert!(fast.shaped_voxels > 0);
 }

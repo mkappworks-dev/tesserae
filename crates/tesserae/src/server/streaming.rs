@@ -1,5 +1,9 @@
 //! Chunk streaming: which Chunks exist, and which the Client has a mesh for.
 //!
+//! Streams around the Player's Eye, which the rest of this module calls the
+//! anchor: the Server's own idea of where the Player is, not a pose the Client
+//! owns.
+//!
 //! Four nested extents, in Cells, each with a job:
 //!
 //! | Extent  | Meaning                                                  |
@@ -31,21 +35,13 @@ use std::sync::Arc;
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, ChunkMesh, ShapeTable};
+use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
 use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
+use super::player::Player;
 use super::world_state::ChunkStore;
-use super::{Shapes, WorldGenerator};
+use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
-
-/// The entity the World streams around. The Client puts this on its camera and
-/// the Server reads that entity's `Transform`.
-///
-/// Intent, not state: the camera is a Client entity and its pose is Client
-/// data. The component is declared here because the Server is the side that
-/// decides what intent it accepts.
-#[derive(Component)]
-pub struct StreamingAnchor;
 
 /// A Chunk's finished geometry, for the Client to upload.
 ///
@@ -138,6 +134,16 @@ pub struct StageCounts {
 /// the default, give a worst tick of 0.6 ms, a fill of 1.58 s and 8 us a mesh
 /// upload either way. A cost ten times higher is when these want to come down or
 /// become a worker-time window.
+///
+/// Slope smoothing put stairs and slabs on the surface Chunks, which is the
+/// first time terrain pays for the shaped paths: about +65 us to generate
+/// (112 -> 178), +10-20% to mesh and about +80-100% to light (the shaped flood
+/// is the slower one), per surface Chunk, and 11 -> 16 us a mesh upload. Added
+/// to the worst case above that is roughly 116 ms of work or 39 ms over three
+/// workers, 1.4x the window and nowhere near 10x. Nine-run A/B with
+/// `TESSERAE_SMOOTHING=0` against the default, on a machine at load 20 (so the
+/// absolute figures are worse than the table), moved the worst tick from 1.6 to
+/// 1.8 ms and nothing else beyond noise. Defaults unchanged.
 ///
 /// `wait_for_settled_light` holds a mesh back until its neighbourhood has no
 /// light solve pending. Off, a Chunk shows 0.2-0.4 s sooner but is built 2.2
@@ -410,21 +416,20 @@ fn stream(
     mut ready: MessageWriter<ChunkMeshReady>,
     mut unloaded: MessageWriter<ChunkUnloaded>,
     generator: Res<WorldGenerator>,
-    shapes: Res<Shapes>,
+    tables: Res<ContentTables>,
     world: Res<WorldSettings>,
     settings: Res<StreamingSettings>,
     budget: Res<StreamingBudget>,
-    anchor: Query<&Transform, With<StreamingAnchor>>,
+    player: Query<&Player>,
 ) {
-    // No anchor, or more than one, is not an error: the Client has not spawned
-    // its camera yet on the first tick. Streaming around an arbitrary one of
+    // The Server spawns exactly one. Streaming around an arbitrary one of
     // several would be worse than streaming around none.
-    let Ok(pose) = anchor.single() else {
+    let Ok(player) = player.single() else {
         return;
     };
 
     let rings = Rings::new(*settings, world.cell_size());
-    let center = world.chunk_at(pose.translation);
+    let center = world.chunk_at(player.eye());
     if order.built_for != Some(rings.load) {
         order.offsets = rings.load.offsets();
         order.descending = order.offsets.clone();
@@ -483,7 +488,7 @@ fn stream(
         &world,
         center,
         budget.in_flight.relight,
-        &shapes.0,
+        &tables.0,
     );
     dispatch_meshes(
         &store,
@@ -494,7 +499,7 @@ fn stream(
         rings.mesh,
         budget.in_flight.mesh,
         budget.wait_for_settled_light,
-        &shapes.0,
+        &tables.0,
     );
 }
 
@@ -686,7 +691,7 @@ fn dispatch_relight(
     world: &WorldSettings,
     center: ChunkCoord,
     in_flight: usize,
-    shapes: &Arc<ShapeTable>,
+    tables: &Arc<Tables>,
 ) {
     let mut free = in_flight.saturating_sub(jobs.relight.in_flight());
     for &d in &order.descending {
@@ -711,9 +716,9 @@ fn dispatch_relight(
         meshes.unlit.remove(&coord);
         meshes.relighting.insert(coord);
         meshes.poisoned.remove(&coord);
-        let shapes = Arc::clone(shapes);
+        let tables = Arc::clone(tables);
         jobs.relight
-            .spawn(coord, move || solve(chunk, &before, &border, &shapes));
+            .spawn(coord, move || solve(chunk, &before, &border, &tables));
         free -= 1;
     }
 }
@@ -791,7 +796,7 @@ fn dispatch_meshes(
     mesh: Extent,
     in_flight: usize,
     wait_for_settled_light: bool,
-    shapes: &Arc<ShapeTable>,
+    tables: &Arc<Tables>,
 ) {
     let mut free = in_flight.saturating_sub(jobs.mesh.in_flight());
     for &d in &order.offsets {
@@ -821,9 +826,9 @@ fn dispatch_meshes(
             .try_into()
             .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
-        let shapes = Arc::clone(shapes);
+        let tables = Arc::clone(tables);
         jobs.mesh
-            .spawn(coord, move || build_mesh(&own, &around, &shapes));
+            .spawn(coord, move || build_mesh(&own, &around, &tables));
         free -= 1;
     }
 }
@@ -882,11 +887,11 @@ pub mod stats {
         order: Res<LoadOrder>,
         settings: Res<StreamingSettings>,
         world: Res<WorldSettings>,
-        anchor: Query<&Transform, With<StreamingAnchor>>,
+        player: Query<&Player>,
     ) {
-        let center = anchor
+        let center = player
             .single()
-            .map(|pose| world.chunk_at(pose.translation))
+            .map(|player| world.chunk_at(player.eye()))
             .ok();
         let rings = Rings::new(*settings, world.cell_size());
         let mesh = rings.mesh;
@@ -938,7 +943,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
     use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, mesh_chunk};
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, MeshLayer, mesh_chunk};
     use tesserae_core::{Voxel, Worldgen, WorldgenParams};
 
     fn rings(voxel_size: f32) -> Rings {
@@ -1118,25 +1123,23 @@ mod tests {
                 .insert_resource(settings)
                 .insert_resource(budget)
                 .insert_resource(WorldGenerator(generator))
-                .init_resource::<Shapes>()
+                .init_resource::<ContentTables>()
                 .init_resource::<ChunkStore>()
                 .init_resource::<LoadOrder>()
                 .init_resource::<MeshState>()
                 .init_resource::<Jobs>()
                 .add_message::<ChunkMeshReady>()
                 .add_message::<ChunkUnloaded>();
-            let anchor = app
-                .world_mut()
-                .spawn((Transform::default(), StreamingAnchor))
-                .id();
+            let anchor = app.world_mut().spawn(Player::at(Vec3::ZERO)).id();
             Harness { app, anchor }
         }
 
         fn anchor_at(&mut self, metres: Vec3) {
             self.app
                 .world_mut()
-                .entity_mut(self.anchor)
-                .insert(Transform::from_translation(metres));
+                .get_mut::<Player>(self.anchor)
+                .unwrap()
+                .set_eye(metres);
         }
 
         fn tick(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
@@ -1196,9 +1199,9 @@ mod tests {
         }
 
         fn center(&self) -> ChunkCoord {
-            let pose = self.app.world().get::<Transform>(self.anchor);
+            let player = self.app.world().get::<Player>(self.anchor);
             let world = self.app.world().resource::<WorldSettings>();
-            world.chunk_at(pose.expect("the anchor exists").translation)
+            world.chunk_at(player.expect("the Player exists").eye())
         }
 
         fn jobs(&self) -> &Jobs {
@@ -1227,12 +1230,15 @@ mod tests {
     }
 
     fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
-        a.positions == b.positions
-            && a.normals == b.normals
-            && a.uvs == b.uvs
-            && a.materials == b.materials
-            && a.light == b.light
-            && a.indices == b.indices
+        let layer = |a: &MeshLayer, b: &MeshLayer| {
+            a.positions == b.positions
+                && a.normals == b.normals
+                && a.uvs == b.uvs
+                && a.materials == b.materials
+                && a.light == b.light
+                && a.indices == b.indices
+        };
+        layer(&a.opaque, &b.opaque) && layer(&a.blended, &b.blended)
     }
 
     /// The light of the Chunk a mesh was built from, which `publish` requires
@@ -1321,7 +1327,7 @@ mod tests {
             let store = h.store();
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(*coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, *coord), neighbors, &ShapeTable::builtin());
+            let fresh = mesh_chunk(lit(store, *coord), neighbors, &Tables::builtin());
             assert!(
                 same_mesh(held, &fresh),
                 "{coord}: the Client holds a stale mesh ({} quads, should be {})",
@@ -1350,8 +1356,8 @@ mod tests {
             .run_system_once(
                 move |mut store: ResMut<ChunkStore>,
                       mut meshes: ResMut<MeshState>,
-                      shapes: Res<Shapes>| {
-                    edit::set_voxel(&mut store, &mut meshes, &shapes, at, Voxel::AIR)
+                      tables: Res<ContentTables>| {
+                    edit::set_voxel(&mut store, &mut meshes, &tables, at, Voxel::AIR)
                         .expect("the Chunk is loaded");
                 },
             )
@@ -1367,7 +1373,7 @@ mod tests {
             assert!(!republished.mesh.is_empty(), "{coord} has a new face");
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, coord), neighbors, &ShapeTable::builtin());
+            let fresh = mesh_chunk(lit(store, coord), neighbors, &Tables::builtin());
             assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
         }
         assert_eq!(ready.len(), 2, "nothing else was touched");
@@ -1452,7 +1458,7 @@ mod tests {
     }
 
     #[test]
-    fn a_tick_with_no_anchor_does_nothing() {
+    fn a_tick_with_no_player_does_nothing() {
         let mut h = Harness::new(small(), UNLIMITED);
         h.app.world_mut().entity_mut(h.anchor).despawn();
         let (ready, unloaded) = h.tick();
@@ -1646,7 +1652,13 @@ mod tests {
         let mut h = Harness::new(small(), UNLIMITED);
         let mut lit_faces = 0;
         for message in h.settle().0 {
-            lit_faces += message.mesh.light.iter().filter(|&&l| l != 0).count();
+            lit_faces += message
+                .mesh
+                .opaque
+                .light
+                .iter()
+                .filter(|&&l| l != 0)
+                .count();
         }
         assert!(lit_faces > 0, "every published face was baked dark");
     }
@@ -1661,7 +1673,7 @@ mod tests {
         generator: &WorldGenerator,
         world: &WorldSettings,
     ) -> bevy::platform::collections::HashMap<ChunkCoord, ChunkLight> {
-        let shapes = ShapeTable::builtin();
+        let tables = Tables::builtin();
         let sky_chunk = Chunk::air();
         let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut coords: Vec<ChunkCoord> = store.coords().collect();
@@ -1677,7 +1689,7 @@ mod tests {
                         _ => (n.y > coord.y && above_the_surface(generator, world, n))
                             .then_some(LitChunk::new(&sky_chunk, &open_sky)),
                     });
-                let solved = light_chunk(store.get(coord).expect("loaded"), border, &shapes);
+                let solved = light_chunk(store.get(coord).expect("loaded"), border, &tables);
                 if solved != lights[&coord] {
                     lights.insert(coord, solved);
                     changed = true;
@@ -1749,11 +1761,11 @@ mod tests {
             .run_system_once(
                 move |mut store: ResMut<ChunkStore>,
                       mut meshes: ResMut<MeshState>,
-                      shapes: Res<Shapes>| {
+                      tables: Res<ContentTables>| {
                     edit::set_voxel(
                         &mut store,
                         &mut meshes,
-                        &shapes,
+                        &tables,
                         at,
                         Voxel::cube(tesserae_core::worldgen::LANTERN),
                     )
@@ -1831,8 +1843,8 @@ mod tests {
                 .run_system_once(
                     move |mut store: ResMut<ChunkStore>,
                           mut meshes: ResMut<MeshState>,
-                          shapes: Res<Shapes>| {
-                        edit::set_voxel(&mut store, &mut meshes, &shapes, at, voxel)
+                          tables: Res<ContentTables>| {
+                        edit::set_voxel(&mut store, &mut meshes, &tables, at, voxel)
                             .expect("loaded");
                     },
                 )
@@ -1908,7 +1920,7 @@ mod tests {
                 let store = h.store();
                 let neighbors: [Option<LitChunk>; 6] =
                     face_neighbors(*coord).map(|n| Some(lit(store, n)));
-                let fresh = mesh_chunk(lit(store, *coord), neighbors, &ShapeTable::builtin());
+                let fresh = mesh_chunk(lit(store, *coord), neighbors, &Tables::builtin());
                 assert!(
                     same_mesh(held, &fresh),
                     "{coord} is stale, {cells} Cells away"

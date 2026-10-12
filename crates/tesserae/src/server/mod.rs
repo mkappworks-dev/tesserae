@@ -7,6 +7,9 @@
 //! frame. The reverse direction can be dropped by a frame that runs no fixed
 //! tick, which is a second reason the Client only ever receives.
 //!
+//! Where a Player is, is the Server's too: the Client reports a pose and the
+//! Server streams the World around, and checks Edits against, its own `Player`.
+//!
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
 #[cfg(feature = "dev")]
@@ -15,13 +18,14 @@ pub mod edit;
 #[cfg(feature = "dev")]
 mod gallery;
 mod jobs;
+pub mod player;
 pub mod streaming;
 pub mod world_state;
 
 use std::sync::Arc;
 
 use bevy::prelude::*;
-use tesserae_core::{ShapeTable, Worldgen, WorldgenParams};
+use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
 use world_state::SpawnPoint;
@@ -36,54 +40,65 @@ const SPAWN_CLEARANCE_M: f32 = 2.0;
 #[derive(Resource, Deref)]
 pub struct WorldGenerator(pub Worldgen);
 
-/// The World's Shape table, read by everything that has to know what a Voxel
-/// covers: the mesher, both light solvers, collision and picking. A newtype for
-/// the same reason as [`WorldGenerator`].
+/// The World's Shape and Material tables, read by everything that has to know
+/// what a Voxel covers or is made of: the mesher, both light solvers, collision
+/// and picking. A newtype for the same reason as [`WorldGenerator`].
 ///
-/// Server-only. The Client is sent finished meshes and needs no Shape to draw
-/// one, and a Mod registers its Shapes here at load. Behind an `Arc` so a
-/// streaming job can hold the table; it is not written once the World is open.
+/// Server-only. The Client is sent finished meshes and needs no table to draw
+/// one, and a Mod registers its Shapes and Materials here at load. Behind an
+/// `Arc` so a streaming job can hold the tables; they are not written once the
+/// World is open.
 #[derive(Resource, Deref)]
-pub struct Shapes(pub Arc<ShapeTable>);
+pub struct ContentTables(pub Arc<Tables>);
 
-impl Default for Shapes {
-    /// The builtin Shapes, and under `dev` a fence registered as a Mod will, so
-    /// the gallery and the hotbar have a connected Shape to show.
+impl Default for ContentTables {
+    /// The builtin Shapes and Materials, and under `dev` a fence registered as a
+    /// Mod will, so the gallery and the hotbar have a connected Shape to show.
     fn default() -> Self {
         #[cfg_attr(not(feature = "dev"), allow(unused_mut))]
-        let mut table = ShapeTable::builtin();
+        let mut tables = Tables::builtin();
         #[cfg(feature = "dev")]
         assert_eq!(
-            table.register(tesserae_core::shape::examples::fence()),
+            tables
+                .shapes
+                .register(tesserae_core::shape::examples::fence()),
             Ok(tesserae_core::shape::examples::FENCE_ID),
             "the demo fence is the first Shape after the builtins"
         );
-        Shapes(Arc::new(table))
+        ContentTables(Arc::new(tables))
     }
 }
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()
-        .init_resource::<Shapes>()
+        .init_resource::<ContentTables>()
         .add_systems(Startup, open_world)
-        .add_plugins((streaming::plugin, edit::plugin));
+        .add_plugins((streaming::plugin, edit::plugin, player::plugin));
     #[cfg(feature = "dev")]
     app.add_plugins(gallery::plugin);
 }
 
-/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` turns the
-/// caves off, so a streaming change can be measured with and without them on one
-/// binary and not across two builds.
+/// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
+/// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
+/// a streaming change can be measured with and without them on one binary and
+/// not across two builds.
 #[cfg(feature = "dev")]
 fn worldgen_params() -> WorldgenParams {
+    let off = |name: &str| std::env::var(name).is_ok_and(|v| v == "0");
     let params = WorldgenParams::default();
-    if std::env::var("TESSERAE_CAVES").is_ok_and(|v| v == "0") {
-        return WorldgenParams {
-            caves: None,
-            ..params
-        };
+    WorldgenParams {
+        caves: if off("TESSERAE_CAVES") {
+            None
+        } else {
+            params.caves
+        },
+        smoothing: if off("TESSERAE_SMOOTHING") {
+            None
+        } else {
+            params.smoothing
+        },
+        ..params
     }
-    params
 }
 
 #[cfg(not(feature = "dev"))]
