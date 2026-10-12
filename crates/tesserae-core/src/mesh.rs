@@ -502,6 +502,7 @@ fn pass1<const TRANSLUCENT: bool>(n: &Neighborhood, tables: &Tables, mesh: &mut 
 /// "cannot merge with anything" means.
 fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
     let shapes = &tables.shapes;
+    let any_connected = shapes.any_connected();
     for y in 0..CHUNK_SIZE as i32 {
         for z in 0..CHUNK_SIZE as i32 {
             for x in 0..CHUNK_SIZE as i32 {
@@ -513,7 +514,7 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
                 let own = n.light_at(x, y, z);
                 // Read from the shell this job was handed, never the live store:
                 // the six face-neighbours of a centre Voxel are all inside it.
-                let connections = if shapes.is_connected(voxel) {
+                let connections = if any_connected && shapes.is_connected(voxel) {
                     shapes.connections(
                         voxel,
                         FACE_STEPS.map(|d| n.at(x + d[0], y + d[1], z + d[2])),

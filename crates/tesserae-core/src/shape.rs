@@ -733,6 +733,13 @@ impl ShapeTable {
         }
     }
 
+    /// Whether any registered Shape is connected. False for the builtin table, so
+    /// callers can skip the per-Voxel check altogether.
+    #[inline]
+    pub fn any_connected(&self) -> bool {
+        !self.connects.is_empty()
+    }
+
     /// Whether `voxel` grows arms towards its neighbours at all.
     #[inline]
     pub fn is_connected(&self, voxel: Voxel) -> bool {
@@ -784,7 +791,8 @@ impl ShapeTable {
     pub fn coverage_against(&self, voxel: Voxel, face: usize, other: Voxel) -> &FaceMask {
         let bare = self.variant(voxel);
         if bare.connect == NO_CONNECT {
-            return self.coverage(voxel, face);
+            // The cube's variant is a full cell, so this equals `coverage`.
+            return &bare.coverage[face];
         }
         let info = &self.connects[bare.connect as usize];
         let out = info.faces >> face & 1 != 0 && self.connects_through(info, other, face);

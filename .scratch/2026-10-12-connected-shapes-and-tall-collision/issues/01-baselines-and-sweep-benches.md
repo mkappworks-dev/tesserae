@@ -76,6 +76,13 @@ variant). The wall-walk sweep is 17 ns slower over about 30 cells; the fall
 sweeps are faster and `fall_terrain` is 63% faster because `obstacles` no
 longer allocates. The light solvers did not move.
 
-Still open: whether the +2-6% on terrain is layout noise (a second machine, or
-`perf stat` instruction counts, would say) and whether `coverage_against` and
-`is_connected` should do one lookup instead of two.
+**After a follow-up** (`coverage_against` does one lookup, and a table with no
+connected Shape skips the per-Voxel check; same method, load 3-4): `terrain`
++1.0% on minimums (was +2.2%), `terrain_stairs_at_cap` +4.1% (was +5.1%),
+`all_stairs` +3.2% (was +5.7%), `mesh_chunk/straddling` +2.8% (was +3.7%),
+`light_chunk/straddling_settled` +0.1%. So the lookups were part of the cost and
+not most of it. The rest is unexplained; the `Variant` struct being larger is
+the suspect, and reordering its fields or moving the cold arrays out of it is
+the next thing to try. The wall-walk sweep is still +24% (about 17 ns) and the
+fall sweeps are still faster, which `connections_at` cannot explain now that it
+is skipped for a table with no connected Shape.

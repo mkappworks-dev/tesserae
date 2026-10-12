@@ -161,7 +161,7 @@ fn connections_at(
     voxel: Voxel,
 ) -> Connections {
     // Cubes and air are most cells; they never reach the table for this.
-    if voxel.shape() == SHAPE_FULL_CUBE || !shapes.is_connected(voxel) {
+    if !shapes.any_connected() || voxel.shape() == SHAPE_FULL_CUBE || !shapes.is_connected(voxel) {
         return Connections::NONE;
     }
     let around = FACE_STEPS.map(|d| {
