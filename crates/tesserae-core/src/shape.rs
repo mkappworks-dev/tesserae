@@ -276,6 +276,7 @@ struct Variant {
     coverage: [FaceMask; 6],
     quads: (u32, u32),
     collision: (u32, u32),
+    selection: (u32, u32),
     volume: u16,
 }
 
@@ -285,6 +286,7 @@ const NOTHING: Variant = Variant {
     coverage: [FaceMask::EMPTY; 6],
     quads: (0, 0),
     collision: (0, 0),
+    selection: (0, 0),
     volume: 0,
 };
 
@@ -299,6 +301,7 @@ pub struct ShapeTable {
     variants: Vec<Variant>,
     quads: Vec<ShapeQuad>,
     boxes: Vec<NodeBox>,
+    selection: Vec<NodeBox>,
 }
 
 impl Default for ShapeTable {
@@ -316,6 +319,7 @@ impl ShapeTable {
             variants: Vec::new(),
             quads: Vec::new(),
             boxes: Vec::new(),
+            selection: Vec::new(),
         };
         let b = NodeBox::new;
         let defs = [
@@ -364,6 +368,9 @@ impl ShapeTable {
             let boxes_start = self.boxes.len() as u32;
             self.boxes
                 .extend(collision.iter().map(|b| rotate_box(b, &m)));
+            let selection_start = self.selection.len() as u32;
+            self.selection
+                .extend(def.boxes.iter().map(|b| rotate_box(b, &m)));
 
             let coverage: [FaceMask; 6] = std::array::from_fn(|f| face_coverage(&rotated, f));
             let seals = (0..6)
@@ -374,6 +381,10 @@ impl ShapeTable {
                 coverage,
                 quads: (quads_start, self.quads.len() as u32 - quads_start),
                 collision: (boxes_start, self.boxes.len() as u32 - boxes_start),
+                selection: (
+                    selection_start,
+                    self.selection.len() as u32 - selection_start,
+                ),
                 volume: rotated.iter().filter(|&&set| set).count() as u16,
             });
         }
@@ -435,6 +446,14 @@ impl ShapeTable {
     pub fn collision(&self, voxel: Voxel) -> &[NodeBox] {
         let (start, len) = self.variant(voxel).collision;
         &self.boxes[start as usize..(start + len) as usize]
+    }
+
+    /// What a ray picks: the declared boxes, rotated. Not [`ShapeTable::collision`],
+    /// which a Shape may make larger, smaller or empty without changing what is
+    /// drawn, and a player aims at what is drawn.
+    pub fn selection(&self, voxel: Voxel) -> &[NodeBox] {
+        let (start, len) = self.variant(voxel).selection;
+        &self.selection[start as usize..(start + len) as usize]
     }
 
     /// Sub-cells occupied, out of `SUBDIV^3`. What LOD reads: a coarse Voxel is
@@ -635,6 +654,17 @@ mod tests {
 
     fn sealed_faces(t: &ShapeTable, v: Voxel) -> Vec<usize> {
         (0..6).filter(|&f| t.seals(v, f)).collect()
+    }
+
+    #[test]
+    fn for_the_builtins_what_is_drawn_and_what_is_bumped_into_are_the_same_boxes() {
+        let t = ShapeTable::builtin();
+        for shape in [SHAPE_FULL_CUBE, SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
+            for o in Orientation::all() {
+                let v = Voxel::new(1, shape, o.bits());
+                assert_eq!(t.selection(v), t.collision(v), "shape {shape} {o:?}");
+            }
+        }
     }
 
     #[test]

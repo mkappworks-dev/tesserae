@@ -311,7 +311,7 @@ mod tests {
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
     use tesserae_core::worldgen::{LANTERN, STONE};
-    use tesserae_core::{CHUNK_SIZE, Chunk, NodeBox, SHAPE_STAIR, ShapeDef};
+    use tesserae_core::{CHUNK_SIZE, Chunk, SHAPE_POST, SHAPE_STAIR};
 
     fn stone() -> Voxel {
         Voxel::cube(STONE)
@@ -560,22 +560,21 @@ mod tests {
 
     #[test]
     fn a_place_into_an_unloaded_chunk_or_an_occupied_cell_is_rejected() {
-        let mut t = ShapeTable::builtin();
-        let plate = t
-            .register(ShapeDef {
-                boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
-                collision: Some(vec![]),
-            })
-            .unwrap();
         let mut app = app_with(&[(origin(), ground())]);
-        *app.world_mut().resource_mut::<Shapes>() = Shapes(t.into());
-        // A plate lies in the air a ray passes through before striking the
-        // ground: it has no collision, so the cell in front of the ground is
-        // taken without the ray having noticed.
+        // A post stands in the air a ray passes beside before striking the
+        // ground, so the cell in front of the ground is taken without the ray
+        // having noticed.
         app.world_mut()
             .resource_mut::<ChunkStore>()
-            .set_voxel(VoxelCoord::of([5, 8, 5]), Voxel::new(STONE, plate, 0));
-        send(&mut app, down(EditAction::Place(stone())));
+            .set_voxel(VoxelCoord::of([5, 8, 5]), Voxel::new(STONE, SHAPE_POST, 0));
+        send(
+            &mut app,
+            EditIntent {
+                action: EditAction::Place(stone()),
+                origin: Vec3::new(5.1, 12.0, 5.5),
+                direction: Vec3::NEG_Y,
+            },
+        );
         tick(&mut app);
         assert_eq!(rejections(&mut app), vec![RejectReason::Occupied]);
 

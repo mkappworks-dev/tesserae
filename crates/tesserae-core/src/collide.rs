@@ -159,7 +159,7 @@ fn in_metres(b: &NodeBox, cell: [i32; 3], voxel_size: f32) -> ([f32; 3], [f32; 3
     )
 }
 
-/// The first collision box a ray strikes.
+/// The first drawn box a ray strikes.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct RayHit {
     /// The Voxel that was struck.
@@ -172,7 +172,8 @@ pub struct RayHit {
 }
 
 /// Casts a ray from `origin` along `dir` (any length) for at most `reach_m`
-/// metres and returns the first collision box it strikes.
+/// metres and returns the first box of a Shape's drawn geometry it strikes: what a
+/// player aims at, not what a body bumps into.
 ///
 /// A cell walk, testing the ray against each cell's boxes, so it enters a
 /// stair's notch and stops at the tread rather than at the cell. It stops at the
@@ -221,7 +222,7 @@ pub fn raycast(
     loop {
         let voxel = vol.voxel(cell)?;
         let nearest = shapes
-            .collision(voxel)
+            .selection(voxel)
             .iter()
             .filter_map(|b| ray_box(o, d, cell, b))
             .filter(|&(t, _)| t <= t_max)
@@ -521,6 +522,50 @@ mod tests {
         g.put([5, 1, 5], Voxel::new(STONE, plate, 0));
         let walk = sweep(&g, &t, 1.0, body(5.5, 1.0, 3.0, 1.8), [0.0, 0.0, 4.0]);
         assert!(!walk.blocked[2]);
+    }
+
+    #[test]
+    fn a_ray_strikes_a_shape_that_is_walked_through() {
+        let mut t = table();
+        let plate = t
+            .register(ShapeDef {
+                boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
+                collision: Some(vec![]),
+            })
+            .unwrap();
+        let mut g = Grid::new();
+        g.put([5, 1, 5], Voxel::new(STONE, plate, 0));
+        let hit = raycast(&g, &t, 1.0, [5.5, 4.0, 5.5], [0.0, -1.0, 0.0], 10.0).unwrap();
+        assert_eq!((hit.at, hit.face), ([5, 1, 5], POS_Y));
+        assert!(
+            close(hit.distance_m, 3.0 - 1.0 / 16.0),
+            "{}",
+            hit.distance_m
+        );
+    }
+
+    #[test]
+    fn a_ray_is_stopped_by_what_is_drawn_and_not_by_a_larger_collision_box() {
+        let mut t = table();
+        // A thin sign drawn on the cell's back wall, with a whole cell to bump into.
+        let sign = t
+            .register(ShapeDef {
+                boxes: vec![NodeBox::new([0, 0, 14], [16, 16, 16])],
+                collision: Some(vec![NodeBox::new([0; 3], [16; 3])]),
+            })
+            .unwrap();
+        let mut g = Grid::new();
+        g.put([5, 1, 5], Voxel::new(STONE, sign, 0));
+        // The ray crosses the empty front of the cell and strikes the sign itself.
+        let ray = raycast(&g, &t, 1.0, [5.5, 1.5, 3.0], [0.0, 0.0, 1.0], 10.0).unwrap();
+        assert!(
+            close(ray.distance_m, 2.0 + 14.0 / 16.0),
+            "{}",
+            ray.distance_m
+        );
+        // A body, by contrast, is stopped at the front of the cell.
+        let walk = sweep(&g, &t, 1.0, body(5.5, 1.0, 3.0, 1.8), [0.0, 0.0, 4.0]);
+        assert!(close(walk.aabb.max[2], 5.0), "{}", walk.aabb.max[2]);
     }
 
     #[test]

@@ -565,7 +565,7 @@ fn exposed_faces(chunk: &Chunk) -> std::collections::BTreeSet<SubFace> {
                 if v.is_air() {
                     continue;
                 }
-                for b in shapes().collision(v) {
+                for b in shapes().selection(v) {
                     for sz in b.min[2]..b.max[2] {
                         for sy in b.min[1]..b.max[1] {
                             for sx in b.min[0]..b.max[0] {

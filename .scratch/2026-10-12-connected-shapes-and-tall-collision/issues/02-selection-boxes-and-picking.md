@@ -1,6 +1,6 @@
 # Picking uses the drawn shape
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decision 9. Collision and the drawn shape are the same list for every
@@ -32,3 +32,13 @@ picking.
 
 `./scripts/cargo-ci` passes; `raycast` benches from 01 show no movement beyond
 noise.
+
+## Comments
+
+Done. Reverting `raycast` to `collision` fails both new tests, so they catch the
+regression. The `raycast` benches could not be compared: see ticket 01, the
+baseline is still to be retaken on a quiet machine.
+
+`server::edit`'s "occupied cell" test had used a no-collision plate as the thing
+the ray fails to notice, which is exactly the bug. It now uses a post the ray
+passes beside; the rejection it checks is unchanged.
