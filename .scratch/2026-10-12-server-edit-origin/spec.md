@@ -77,8 +77,7 @@ silently, so the report is idempotent and tolerates reordering on a channel that
 is not reliable. The Player starts at `seq` 0 and the Client's first report is
 1.
 
-**Nothing else is checked.** No speed limit, no teleport rejection, no bounds.
-That is a decision, not an omission, and decision 6 states what it costs.
+Whether the move it asks for is possible is decision 8's.
 
 ### 3. The origin is checked on arrival, not on apply
 
@@ -150,16 +149,16 @@ intents see the spawn point for one frame at most.
 ### 6. What this does and does not guarantee
 
 **Does:** every Edit origin is consistent with one Server-held, wire-shaped,
-sequence-numbered pose. The Server reads no Client-owned pose. The shape of both
-messages survives a transport unchanged.
+sequence-numbered pose; that pose cannot move faster than the Server's speed
+cap (decision 8); the Edit's reach is measured from it exactly (decision 9); and
+the Server reads no Client-owned pose. The shape of every message survives a
+transport unchanged.
 
-**Does not:** stop a modified Client that lies. It can report any pose and then
-edit from it. The lie has moved from per-Edit to per-pose, and the Edit check
-now bounds only the inconsistency between the two. Closing it needs movement
-rules (a speed limit, gravity, step height, in metres) and a way to tell the
-Client it was moved back. A clamp without those would rubber-band the free-fly
-camera on its reset key and at its sprint speed, which is its whole job; so the
-clamp belongs with the controller, as ticket 05, not here.
+**Does not:** make a pose _true_. Until there is a controller, flying is the only
+way to move and the cap is the only rule, so a modified Client can fly at the cap
+anywhere and edit within reach of where it flies. Gravity, collision and a
+walking speed are the controller's (ticket 05), and tighten the cap without
+changing any message here.
 
 The PR and the module docs say this in those words.
 
@@ -172,6 +171,63 @@ additive: a `tick` field on `EditIntent` and `PoseReport`, a ring buffer on
 `Player`. The Server's check is still "origin within tolerance of a pose it
 holds", so decision 3's shape survives; only the pose chosen changes. It is
 step 10's, because it needs a clock shared with the Client.
+
+### 8. A pose cannot move faster than the Server's cap, and the Client is told
+
+`PlayerLimits { max_speed_mps: f32 }` is a Server `Resource`, defaulting to
+`FLY_SPEED_CEILING_MPS` = 64 m/s: the camera's own stated limit, "a Cell every
+half second, past which Chunks cannot be meshed fast enough". In metres
+(ADR-0003), and a resource so the controller replaces the figure.
+
+`receive_pose` accepts a report whose `eye` is within
+`max_speed_mps * window + POSE_SLACK_M` of the Player's, where `window` is the
+Server time since the last accepted report, capped at `POSE_WINDOW_MAX_S`
+(0.5 s). Without the cap, a Client silent for a minute could jump 3.8 km.
+`POSE_SLACK_M` (1 m) absorbs jitter: over a wire the report's time is when it
+arrives, not when it was sent.
+
+A report that asks for more is not dropped. The Player moves the allowed
+distance toward it, `seq` is accepted, and the Server writes
+
+```rust
+#[derive(Message, Clone, Copy, Debug)]
+pub struct PoseCorrection {
+    pub seq: u32,
+    pub eye: Vec3,
+}
+```
+
+Server to Client, plain data. The Client moves its own camera to `eye` (the
+camera is Client state; this is not a World write) and sets its
+`GlobalTransform` too, so the `report_pose` of the same frame does not report
+the position it was just moved from. Reports the Client sent before it applied a
+correction are measured against the corrected Player and are clamped again,
+which converges.
+
+The Client's own flight is held to the same figure, so it never meets its own
+cap: the sprint product is clamped to `FLY_SPEED_CEILING_MPS`. The top of the
+speed range with sprint is therefore 64 m/s, not 320.
+
+### 9. Reach is measured from the Eye
+
+An intent whose origin is `d` metres from the Eye gets a ray of
+`EDIT_REACH_M - d`, fixed at arrival and carried in `Pending`. By the triangle
+inequality the Voxel it strikes is at most `EDIT_REACH_M` from the Eye, whatever
+the tolerance. An honest in-process Client has `d` = 0 and loses nothing. The
+tolerance stays a constant, because it now bounds only how stale an origin may
+be and no longer how far an Edit can reach.
+
+### 10. Return-to-spawn is the Server's
+
+The reset key sends `RespawnIntent` (no fields). The Server places the Player at
+the spawn eye and replies with a `PoseCorrection`; the Client's camera follows it
+and resets its own orientation locally, since orientation is not the Server's.
+A Client-side teleport would be exactly what decision 8 closes.
+
+The spawn eye is the spawn point raised by `SPAWN_EYE_ALTITUDE_M` (18 m, moved
+here from the Client's `VIEW_ALTITUDE_M`). `SpawnPoint::eye()` gives it, and the
+Server's `spawn_player` and the Client's `spawn_camera` both use it, so the first
+report is at distance 0.
 
 ## Invariants, and where each is enforced
 
@@ -196,6 +252,19 @@ step 10's, because it needs a clock shared with the Client.
   away, then the tick, still applies (it was valid when it arrived).
 - A report and an intent from one frame, in either write order, are both taken
   in the right order by the real systems.
+- **Movement**: a report within the cap is accepted; one beyond it moves the
+  Player the allowed distance only and writes a `PoseCorrection` at that point; a
+  long silence does not buy a longer jump (`POSE_WINDOW_MAX_S`); the first report
+  is at distance 0 from the spawn eye.
+- **Respawn**: a `RespawnIntent` puts the Player at the spawn eye and writes a
+  `PoseCorrection` to it, from anywhere, at any speed.
+- **Client**: a correction moves the camera and its `GlobalTransform`; the
+  same-frame report is then the corrected point; the reset key sends
+  `RespawnIntent` and does not move the camera itself; the sprint product never
+  exceeds `FLY_SPEED_CEILING_MPS`.
+- **Reach**: an origin `d` from the Eye strikes nothing farther than
+  `EDIT_REACH_M - d` along the ray, so no struck Voxel is more than
+  `EDIT_REACH_M` from the Eye; `d` = 0 behaves as before.
 - Every existing edit test is unchanged in what it asserts. Its `send` helper
   first puts the Eye at the intent's origin, so those tests keep testing
   `resolve`; the new tests use a helper that does not.
@@ -206,13 +275,16 @@ step 10's, because it needs a clock shared with the Client.
 
 ## Known loose ends, declared
 
-- **Pose is not validated beyond being finite and newer.** Decision 6.
-- **The tolerance is a constant**, not derived from speed or latency.
-  Decision 3, decision 7.
+- **A pose is rate-limited, not true.** Decision 6. Gravity, collision and
+  walking speed are ticket 05.
+- **The tolerance and the slack are constants**, not derived from latency.
+  Decisions 3 and 8, and decision 7.
+- **A correction can arrive after the Client has moved on.** In process it is
+  applied the frame it is written. Over a wire the Client will want to reconcile
+  by `seq`; the field is there and unused.
 - **One Player.** `Single` in the systems. The transport makes it a lookup.
-- **The dev capture harness moves the camera.** The report and the intent read
-  the camera's `GlobalTransform`, which changes only in `PostUpdate`, so
-  whatever moves the camera in `Update` moves both together.
+- **`TESSERAE_SCREENSHOT_SPEED_M_S` above the cap** is corrected back to it. The
+  capture harness's default is 12 m/s.
 - **`direction` is not checked for unit length.** It is not an authority hole:
   the ray is normalised by `raycast` and reach is a distance along it.
 
@@ -224,4 +296,8 @@ step 10's, because it needs a clock shared with the Client.
   Client-owned `Transform`.
 - `DESIGN.md`'s open item and the module docs of `edit.rs` and `streaming.rs` no
   longer say there is no player entity; ADR-0008 records the decision.
-- The follow-up ticket exists and is `needs-triage`.
+- A teleporting report is clamped and corrected; the reset key goes through the
+  Server; no struck Voxel is more than `EDIT_REACH_M` from the Eye.
+- Loaded and meshed counts from a capture run on this branch match `main`'s.
+- The follow-up ticket (05) exists, is `needs-triage`, and names only what is
+  left: the controller, collision, a speed derived from it, lag compensation.

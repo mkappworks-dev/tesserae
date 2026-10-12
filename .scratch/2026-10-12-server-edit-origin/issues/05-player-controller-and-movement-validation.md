@@ -1,35 +1,31 @@
-# Follow-up: movement rules, correction, and lag compensation
+# Follow-up: the player controller and lag compensation
 
 Status: needs-triage
-Blocked by: 04
+Blocked by: 06, 07
 
-Not part of this task. Written down so the gap in the spec's decision 6 has an
-owner.
+Not part of this task. What is left once the speed cap, the correction message
+and the Eye-measured reach (tickets 06 to 08) exist.
 
 ## What this is
 
-The Server accepts any finite, newer `PoseReport`. The things that make a pose
-trustworthy are all missing:
-
-- A player controller: gravity, a step height and collision, in metres
-  (ADR-0003). The free-fly camera becomes a debug mode that the Server can allow
-  or refuse.
-- Movement validation: a speed limit derived from the controller's, and
-  rejection of a teleport, in the Server. Replaces the constant
-  `EDIT_ORIGIN_TOLERANCE_M` with a figure derived from speed and a latency
-  budget.
-- A correction message (Server to Client) so a pose the Server moved or refused
-  is put right on the Client. Without it a clamp rubber-bands the camera and
-  every Edit after it is rejected.
+- A player controller on the Server: gravity, a step height and collision against
+  the `ChunkStore`, in metres (ADR-0003). The free-fly camera becomes a mode the
+  Server can allow or refuse.
+- Movement validation beyond a speed: a walking speed in `PlayerLimits`, so the
+  cap stops being the camera's ceiling, and a path check so a Player cannot fly
+  through solid ground within the cap.
+- Replace the constant `EDIT_ORIGIN_TOLERANCE_M` and `POSE_SLACK_M` with figures
+  derived from speed and a latency budget.
+- Client prediction and reconciliation by `seq`, which the correction message
+  already carries.
 - Lag compensation: a `tick` on `PoseReport` and `EditIntent`, a pose history on
   `Player`, and the check against the pose at the intent's tick. Needs a clock
   shared with the Client, so it lands with the transport (build-order step 10).
 
 ## Open questions
 
-- Does the reset-to-home key become a Server-validated teleport or stay a
-  Client-only affordance that is dev-gated?
 - Is a Player's pose a Message or replicated component state once the transport
   exists?
+- Does the Client send input instead of a pose once there is a controller?
 
 ## Comments
