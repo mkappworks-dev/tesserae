@@ -743,7 +743,7 @@ fn brighten(
 mod tests {
     use super::*;
     use crate::shape::{Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR};
-    use crate::worldgen::STONE;
+    use crate::worldgen::{GRASS, STONE, Worldgen, WorldgenParams};
     use std::sync::OnceLock;
 
     const LAST: usize = CHUNK_SIZE - 1;
@@ -1010,6 +1010,9 @@ mod tests {
     /// leaves the loaded Chunks stops there, as it does for the Server.
     struct Lattice {
         cells: std::collections::HashMap<[i32; 3], (Chunk, ChunkLight)>,
+        /// Chunks of open sky above the terrain: lit from the start, and not
+        /// solved or reset, because nothing above them would light them.
+        roof: Vec<[i32; 3]>,
     }
 
     impl Lattice {
@@ -1019,7 +1022,16 @@ mod tests {
                     .iter()
                     .map(|&c| (c, (Chunk::air(), ChunkLight::dark())))
                     .collect(),
+                roof: vec![],
             }
+        }
+
+        fn with_roof(mut self, coords: &[[i32; 3]]) -> Self {
+            for &c in coords {
+                self.cells.insert(c, (Chunk::air(), full_sky()));
+                self.roof.push(c);
+            }
+            self
         }
 
         fn locate(at: [i32; 3]) -> ([i32; 3], usize, usize, usize) {
@@ -1065,10 +1077,17 @@ mod tests {
         /// Throws the light away and solves every Chunk with `light_chunk` until
         /// nothing changes, which is what the Server's relaxation does.
         fn solve_bulk(&mut self) {
-            let mut coords: Vec<[i32; 3]> = self.cells.keys().copied().collect();
+            let mut coords: Vec<[i32; 3]> = self
+                .cells
+                .keys()
+                .copied()
+                .filter(|c| !self.roof.contains(c))
+                .collect();
             coords.sort_by_key(|c| std::cmp::Reverse(c[1]));
-            for (_, light) in self.cells.values_mut() {
-                *light = ChunkLight::dark();
+            for (c, (_, light)) in &mut self.cells {
+                if !self.roof.contains(c) {
+                    *light = ChunkLight::dark();
+                }
             }
             for _ in 0..16 {
                 let mut changed = false;
@@ -1475,5 +1494,275 @@ mod tests {
         assert_eq!(world.light([1, 0, 0]).block(), MAX_LIGHT - 1);
         // Nothing panicked stepping outside, and nothing was written there.
         assert_eq!(world.light([-1, 0, 0]), Light::DARK);
+    }
+
+    // Generated terrain. Caves are the first real input with overhangs and
+    // enclosed pockets, which the hand-built scenes above only approximate.
+
+    /// The World with its tunnels and the same World without, so a test can
+    /// carve the difference by hand, the way a player would dig it.
+    fn cave_worlds() -> (Worldgen, Worldgen) {
+        let params = WorldgenParams::default();
+        assert!(params.caves.is_some());
+        (
+            Worldgen::new(0x7e55_e2ae, 1.0, params),
+            Worldgen::new(
+                0x7e55_e2ae,
+                1.0,
+                WorldgenParams {
+                    caves: None,
+                    ..params
+                },
+            ),
+        )
+    }
+
+    /// Puts a generated Chunk's solid Voxels into a lattice, without lighting.
+    fn fill(lattice: &mut Lattice, world: &Worldgen, coord: [i32; 3]) {
+        let chunk = world.chunk(coord[0], coord[1], coord[2]);
+        let origin = coord.map(|c| c * CHUNK_SIZE as i32);
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let voxel = chunk.get(x, y, z);
+                    if !voxel.is_air() {
+                        let at = [x, y, z].map(|c| c as i32);
+                        lattice.set_voxel([0, 1, 2].map(|a| origin[a] + at[a]), voxel);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Every Voxel a tunnel removed from `coord`, in Voxel coordinates.
+    fn carved(with: &Worldgen, without: &Worldgen, coord: [i32; 3]) -> Vec<[i32; 3]> {
+        let (a, b) = (
+            with.chunk(coord[0], coord[1], coord[2]),
+            without.chunk(coord[0], coord[1], coord[2]),
+        );
+        let origin = coord.map(|c| c * CHUNK_SIZE as i32);
+        let mut out = vec![];
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    if a.get(x, y, z).is_air() && !b.get(x, y, z).is_air() {
+                        let at = [x, y, z].map(|c| c as i32);
+                        out.push([0, 1, 2].map(|k| origin[k] + at[k]));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// The first surface Chunk, scanning in a fixed order, where a tunnel
+    /// removes a Grass cap: sky has a way in.
+    fn mouth_chunk(with: &Worldgen, without: &Worldgen) -> [i32; 3] {
+        let cy = (with.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
+        for cz in -8..8 {
+            for cx in -8..8 {
+                let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
+                let breached = (0..CHUNK_SIZE).any(|z| {
+                    (0..CHUNK_SIZE).any(|y| {
+                        (0..CHUNK_SIZE)
+                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == GRASS)
+                    })
+                });
+                if breached {
+                    return [cx, cy, cz];
+                }
+            }
+        }
+        panic!("no tunnel breaches the surface in the scan");
+    }
+
+    /// The case caves exist to exercise: sky light entering a tunnel through a
+    /// mouth and dimming along it. The incremental solver digs the tunnel one
+    /// Voxel at a time into terrain already lit, the bulk solver is handed the
+    /// finished terrain, and they must agree on every Voxel of two columns of
+    /// Chunks that share a seam.
+    #[test]
+    fn the_two_solvers_agree_on_generated_terrain_with_a_tunnel_through_it() {
+        let (with, without) = cave_worlds();
+        let [cx, cy, cz] = mouth_chunk(&with, &without);
+        let solid: Vec<[i32; 3]> = [cx, cx + 1]
+            .into_iter()
+            .flat_map(|x| [[x, cy, cz], [x, cy - 1, cz]])
+            .collect();
+        let roof = [[cx, cy + 1, cz], [cx + 1, cy + 1, cz]];
+
+        let build = |world: &Worldgen| {
+            let mut lattice = Lattice::new(&solid).with_roof(&roof);
+            for &coord in &solid {
+                fill(&mut lattice, world, coord);
+            }
+            lattice
+        };
+
+        let mut dug = build(&without);
+        dug.solve_bulk();
+        let tunnel: Vec<[i32; 3]> = solid
+            .iter()
+            .flat_map(|&coord| carved(&with, &without, coord))
+            .collect();
+        assert!(tunnel.len() > 50, "only {} Voxels carved", tunnel.len());
+        for &at in &tunnel {
+            dug.place(at, Voxel::AIR);
+        }
+
+        let mut fresh = build(&with);
+        fresh.solve_bulk();
+        assert_eq!(dug.snapshot(), fresh.snapshot());
+
+        // And back again. Refilling the tunnel is the de-propagation pass on
+        // cave geometry and has to leave exactly the light the terrain began
+        // with.
+        let pristine = build(&without);
+        let original: Vec<Voxel> = tunnel
+            .iter()
+            .map(|&at| pristine.voxel(at).expect("loaded"))
+            .collect();
+        for (&at, &voxel) in tunnel.iter().zip(&original).rev() {
+            dug.place(at, voxel);
+        }
+        let mut terrain = build(&without);
+        terrain.solve_bulk();
+        assert_eq!(dug.snapshot(), terrain.snapshot());
+
+        // The test is only worth anything if sky actually got in and dimmed.
+        let dim = tunnel
+            .iter()
+            .filter(|&&at| (1..MAX_LIGHT).contains(&fresh.light(at).sky()))
+            .count();
+        assert!(
+            dim > 0,
+            "no tunnel Voxel is partly lit: the sky never got in"
+        );
+    }
+
+    /// On each face of `coord`, the first Voxel of its boundary plane that is
+    /// air with air across the face: a tunnel passing through the seam. In Voxel
+    /// coordinates, the pair `(inside, outside)` for each face that has one.
+    fn seam_voxels(world: &Worldgen, coord: [i32; 3]) -> Vec<([i32; 3], [i32; 3])> {
+        let home = world.chunk(coord[0], coord[1], coord[2]);
+        let origin = coord.map(|c| c * CHUNK_SIZE as i32);
+        let last = CHUNK_SIZE - 1;
+        let mut found = vec![];
+        for face in FACES {
+            let next = step(coord, face);
+            let next_origin = next.map(|c| c * CHUNK_SIZE as i32);
+            let across = world.chunk(next[0], next[1], next[2]);
+            found.extend((0..CHUNK_SIZE).find_map(|a| {
+                (0..CHUNK_SIZE).find_map(|b| {
+                    let (inside, outside) = match face {
+                        NEG_X => ((0, a, b), (last, a, b)),
+                        POS_X => ((last, a, b), (0, a, b)),
+                        NEG_Y => ((a, 0, b), (a, last, b)),
+                        POS_Y => ((a, last, b), (a, 0, b)),
+                        NEG_Z => ((a, b, 0), (a, b, last)),
+                        _ => ((a, b, last), (a, b, 0)),
+                    };
+                    (home.get(inside.0, inside.1, inside.2).is_air()
+                        && across.get(outside.0, outside.1, outside.2).is_air())
+                    .then(|| {
+                        let here = [inside.0, inside.1, inside.2].map(|c| c as i32);
+                        let there = [outside.0, outside.1, outside.2].map(|c| c as i32);
+                        (
+                            [0, 1, 2].map(|k| origin[k] + here[k]),
+                            [0, 1, 2].map(|k| next_origin[k] + there[k]),
+                        )
+                    })
+                })
+            }));
+        }
+        found
+    }
+
+    /// The other half: a pocket no sky reaches is dark however it was built, and
+    /// a lantern lights the tunnel it stands in, across the Chunk's faces, and
+    /// stops at the rock. One lantern on each face a tunnel crosses, once on the
+    /// home side and once on the far side, so every seam is carrying light in
+    /// both directions through the bulk solver's border.
+    #[test]
+    fn the_two_solvers_agree_on_an_enclosed_tunnel_with_lanterns_on_its_seams() {
+        let (with, _) = cave_worlds();
+        // The deep Chunk layer: below the soil line and above the cave floor.
+        // The first Chunk in the scan that a tunnel passes through three faces
+        // of, so that the seams are exercised and not just one.
+        let cy = -1;
+        let (home_coord, seams) = (-8..8)
+            .flat_map(|z| (-8..8).map(move |x| [x, cy, z]))
+            .map(|coord| (coord, seam_voxels(&with, coord)))
+            .find(|(_, seams)| seams.len() >= 3)
+            .expect("a tunnel crosses three faces of a deep Chunk in the scan");
+        let home = with.chunk(home_coord[0], home_coord[1], home_coord[2]);
+        let around: Vec<[i32; 3]> = FACES.iter().map(|&f| step(home_coord, f)).collect();
+
+        // Nothing emits and no sky arrives: the whole pocket is dark, and the
+        // bulk solver's fast path for that is exact.
+        let neighbours: Vec<Chunk> = around
+            .iter()
+            .map(|c| with.chunk(c[0], c[1], c[2]))
+            .collect();
+        let dark = ChunkLight::dark();
+        let border: [Option<LitChunk<'_>>; 6] =
+            std::array::from_fn(|i| Some(LitChunk::new(&neighbours[i], &dark)));
+        assert_eq!(light_chunk(&home, border, shapes()), ChunkLight::dark());
+
+        let mut coords = around.clone();
+        coords.push(home_coord);
+        let build = || {
+            let mut lattice = Lattice::new(&coords);
+            for &coord in &coords {
+                fill(&mut lattice, &with, coord);
+            }
+            lattice
+        };
+
+        for from_outside in [false, true] {
+            let lanterns: Vec<[i32; 3]> = seams
+                .iter()
+                .map(|&(inside, outside)| if from_outside { outside } else { inside })
+                .collect();
+            let mut placed = build();
+            for &at in &lanterns {
+                placed.place(at, Voxel::cube(LANTERN));
+            }
+
+            let mut fresh = build();
+            for &at in &lanterns {
+                fresh.set_voxel(at, Voxel::cube(LANTERN));
+            }
+            fresh.solve_bulk();
+            assert_eq!(
+                placed.snapshot(),
+                fresh.snapshot(),
+                "outside: {from_outside}"
+            );
+
+            // Light went through the seams: into Chunks that hold no lantern, or
+            // into the home Chunk, which holds none when the lanterns are
+            // outside.
+            let reached = placed
+                .cells
+                .iter()
+                .filter(|(coord, _)| (**coord == home_coord) == from_outside)
+                .map(|(_, (chunk, light))| {
+                    (0..CHUNK_SIZE)
+                        .flat_map(|y| {
+                            (0..CHUNK_SIZE)
+                                .flat_map(move |z| (0..CHUNK_SIZE).map(move |x| (x, y, z)))
+                        })
+                        .filter(|&(x, y, z)| {
+                            chunk.get(x, y, z).is_air() && light.get(x, y, z).block() > 0
+                        })
+                        .count()
+                })
+                .sum::<usize>();
+            assert!(
+                reached > 0,
+                "no light crossed a seam, outside: {from_outside}"
+            );
+        }
     }
 }
