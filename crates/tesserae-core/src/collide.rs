@@ -14,7 +14,7 @@
 //! Step height, gravity and what a body does with a blocked axis are a
 //! controller's policy, not the grid's, and are not here.
 
-use crate::mesh::{NEG_X, POS_X};
+use crate::mesh::{FACE_STEPS, NEG_X, POS_X};
 use crate::shape::{CollisionBox, Connections, NodeBox, SUBDIV, ShapeTable};
 use crate::voxel::Voxel;
 
@@ -150,6 +150,26 @@ fn clip(
     allowed
 }
 
+/// The arms the Voxel at `cell` has out, from its six neighbours through the
+/// volume. A Voxel the volume does not hold reads as air, so it never connects:
+/// the mesher's shell says the same where a Chunk is missing. Neighbours are
+/// read only for a connected Shape.
+fn connections_at(
+    vol: &impl VoxelVolume,
+    shapes: &ShapeTable,
+    cell: [i32; 3],
+    voxel: Voxel,
+) -> Connections {
+    if !shapes.is_connected(voxel) {
+        return Connections::NONE;
+    }
+    let around = FACE_STEPS.map(|d| {
+        vol.voxel([cell[0] + d[0], cell[1] + d[1], cell[2] + d[2]])
+            .unwrap_or(Voxel::AIR)
+    });
+    shapes.connections(voxel, around)
+}
+
 const WHOLE_CELL: [CollisionBox; 1] = [CollisionBox::new([0; 3], [SUBDIV as i8; 3])];
 
 /// The collision boxes of the Voxel at `cell`, or the whole cell if the volume
@@ -161,7 +181,7 @@ fn obstacles<'a>(
     cell: [i32; 3],
 ) -> &'a [CollisionBox] {
     match vol.voxel(cell) {
-        Some(voxel) => shapes.collision(voxel, Connections::NONE),
+        Some(voxel) => shapes.collision(voxel, connections_at(vol, shapes, cell, voxel)),
         None => &WHOLE_CELL,
     }
 }
@@ -239,7 +259,7 @@ pub fn raycast(
     loop {
         let voxel = vol.voxel(cell)?;
         let nearest = shapes
-            .selection(voxel, Connections::NONE)
+            .selection(voxel, connections_at(vol, shapes, cell, voxel))
             .iter()
             .filter_map(|b| ray_box(o, d, cell, b))
             .filter(|&(t, _)| t <= t_max)
@@ -320,6 +340,7 @@ fn ray_box(o: [f32; 3], d: [f32; 3], cell: [i32; 3], b: &NodeBox) -> Option<(f32
 mod tests {
     use super::*;
     use crate::mesh::{NEG_Y, NEG_Z, POS_X, POS_Y};
+    use crate::shape::examples;
     use crate::shape::{CollisionBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
     use crate::worldgen::STONE;
     use std::collections::HashMap;
@@ -679,6 +700,140 @@ mod tests {
         fence_post(&mut t);
         // Registered at all 24 Orientations, so one tall Shape widens every face.
         assert_eq!(t.overhang(), [1; 6]);
+    }
+
+    fn fences() -> (ShapeTable, Voxel, Voxel) {
+        let mut t = table();
+        let fence = Voxel::new(STONE, t.register(examples::fence()).unwrap(), 0);
+        let pipe = Voxel::new(STONE, t.register(examples::pipe()).unwrap(), 0);
+        (t, fence, pipe)
+    }
+
+    /// A body 0.4 Voxels square and 1.8 tall, in metres at `s` per Voxel.
+    fn body_at(s: f32, x: f32, y: f32, z: f32) -> Aabb {
+        Aabb::new(
+            [(x - 0.2) * s, y * s, (z - 0.2) * s],
+            [(x + 0.2) * s, (y + 1.8) * s, (z + 0.2) * s],
+        )
+    }
+
+    #[test]
+    fn a_body_is_stopped_by_an_arm_between_two_fences_and_not_between_unrelated_posts() {
+        let (t, fence, pipe) = fences();
+        for s in [1.0, 0.25] {
+            // Crossing the line at x = 6.0, in the gap between the two posts.
+            let cross = |g: &Grid| sweep(g, &t, s, body_at(s, 6.0, 1.0, 3.0), [0.0, 0.0, 4.0 * s]);
+
+            let mut joined = Grid::new();
+            joined.put([5, 1, 5], fence).put([6, 1, 5], fence);
+            let stopped = cross(&joined);
+            assert!(stopped.blocked[2], "at {s}");
+            assert!(
+                close(stopped.aabb.max[2] / s, 5.0 + 7.0 / 16.0),
+                "{} at {s}",
+                stopped.aabb.max[2] / s
+            );
+
+            // A pipe is another group, so no arm grows and the gap is open.
+            let mut unrelated = Grid::new();
+            unrelated.put([5, 1, 5], fence).put([6, 1, 5], pipe);
+            assert!(!cross(&unrelated).blocked[2], "at {s}");
+        }
+    }
+
+    #[test]
+    fn a_ray_strikes_the_arm_and_passes_between_the_rails_and_above_them() {
+        let (t, fence, _) = fences();
+        for s in [1.0, 0.25] {
+            let mut g = Grid::new();
+            g.put([5, 1, 5], fence).put([6, 1, 5], fence);
+            let along = |y: f32| {
+                raycast(
+                    &g,
+                    &t,
+                    s,
+                    [6.0 * s, y * s, 3.0 * s],
+                    [0.0, 0.0, 1.0],
+                    10.0 * s,
+                )
+            };
+
+            // The lower rail is 6/16 to 9/16 up, 7/16 across the arm's width.
+            let rail = along(1.0 + 7.0 / 16.0).expect("a rail");
+            assert_eq!((rail.at, rail.face), ([6, 1, 5], NEG_Z));
+            assert!(
+                close(rail.distance_m / s, 2.0 + 7.0 / 16.0),
+                "{}",
+                rail.distance_m
+            );
+            // Between the rails, and above the drawn fence in the part only a body
+            // feels: nothing to pick.
+            assert!(along(1.0 + 10.0 / 16.0).is_none(), "between rails at {s}");
+            assert!(along(2.2).is_none(), "above the fence at {s}");
+            // The same height does stop a body.
+            let walk = sweep(&g, &t, s, body_at(s, 6.0, 2.0, 3.0), [0.0, 0.0, 4.0 * s]);
+            assert!(walk.blocked[2], "at {s}");
+        }
+    }
+
+    #[test]
+    fn a_fence_beside_what_the_volume_does_not_hold_does_not_connect_to_it() {
+        let (t, fence, _) = fences();
+        let mut g = Grid::new();
+        g.hi = [6, 20, 20];
+        g.put([6, 1, 5], fence).put([5, 1, 5], fence);
+        // The cell at x = 7 is unknown: solid to a sweep, absent to a connection.
+        assert_eq!(
+            connections_at(&g, &t, [6, 1, 5], fence),
+            Connections::NONE.with(NEG_X)
+        );
+        let into = sweep(&g, &t, 1.0, body(5.0, 5.0, 3.0, 1.8), [3.0, 0.0, 0.0]);
+        assert!(into.blocked[0], "the unknown region stops it");
+    }
+
+    #[test]
+    fn what_a_body_bumps_into_what_a_ray_picks_and_what_is_drawn_have_the_same_arms() {
+        let (t, fence, pipe) = fences();
+        let mut g = Grid::new();
+        let mut rng = 0x5eed_0006u64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        for z in 4..8 {
+            for y in 4..8 {
+                for x in 4..8 {
+                    let v = match next() % 5 {
+                        0 | 1 => fence,
+                        2 => pipe,
+                        3 => cube(),
+                        _ => continue,
+                    };
+                    g.put([x, y, z], v);
+                }
+            }
+        }
+        for z in 4..8 {
+            for y in 4..8 {
+                for x in 4..8 {
+                    let v = g.voxel([x, y, z]).unwrap();
+                    if !t.is_connected(v) {
+                        continue;
+                    }
+                    let c = connections_at(&g, &t, [x, y, z], v);
+                    let around =
+                        FACE_STEPS.map(|d| g.voxel([x + d[0], y + d[1], z + d[2]]).unwrap());
+                    assert_eq!(c, t.connections(v, around), "at {:?}", [x, y, z]);
+                    // Every arm that is out is in both lists, and no other is.
+                    let arms = c.bits().count_ones() as usize;
+                    let drawn_per_arm = if v == fence { 2 } else { 1 };
+                    assert_eq!(t.selection(v, c).len(), 1 + drawn_per_arm * arms);
+                    assert_eq!(t.collision(v, c).len(), 1 + arms);
+                }
+            }
+        }
     }
 
     #[test]

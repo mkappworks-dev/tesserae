@@ -1,6 +1,6 @@
 # Sweep and ray see the arms
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 Spec decisions 3, 8 and 9 for the other two callers of `connections`.
@@ -31,3 +31,11 @@ Spec decisions 3, 8 and 9 for the other two callers of `connections`.
 `./scripts/cargo-ci` passes; the sweep and ray benches from 01 on cubes and
 slabs show no movement beyond noise (the connected path is a branch away from
 them), and the PR reports the numbers.
+
+## Comments
+
+Done, except the benchmark gate (see ticket 01). Making `connections_at` ignore
+its neighbours fails all four new tests. The cross-check is at table level
+(connections gathered through the volume equal `connections` over the same six
+Voxels, and each arm out is in the collision and selection lists); the mesh's
+side of it is the hole-free oracle of ticket 05.
