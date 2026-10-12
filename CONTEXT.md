@@ -40,6 +40,18 @@ Shape is a union of them.
 **Sealed face** — a face of a Voxel that its Shape covers completely. What
 occlusion and light both ask about; derived from geometry, never authored.
 
+**Dimming** — the levels of light a Material removes from light entering a Voxel
+of it, on top of the one level every step already costs. 0 for air and glass, 15
+for stone. A count of attenuation steps like every light quantity, so it does
+not scale with Voxel size.
+
+**Opaque** — a Material that hides every face of its neighbours and dims light
+by 15. Stone.
+
+**Translucent** — any Material that is not Opaque: glass, leaves, water. What a
+Translucent Material hides, how much it dims and which render pass draws it are
+properties of the Material, never of its Shape.
+
 **Voxel size** — the edge length of one Voxel in metres. A property of a World,
 not of the engine. Default 1.0.
 

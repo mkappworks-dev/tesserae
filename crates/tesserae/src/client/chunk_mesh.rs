@@ -7,7 +7,7 @@
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, MeshVertexAttribute, PrimitiveTopology, VertexFormat};
 use bevy::prelude::*;
-use tesserae_core::ChunkMesh;
+use tesserae_core::MeshLayer;
 
 /// Which Material each vertex belongs to, for the chunk [`MaterialExtension`].
 ///
@@ -37,8 +37,8 @@ pub const ATTRIBUTE_LIGHT: MeshVertexAttribute =
 
 /// Positions are scaled by `voxel_size` here, so everything downstream — the
 /// `Aabb` Bevy derives, frustum culling, shadow bounds — is already in metres.
-pub fn chunk_mesh_to_mesh(chunk_mesh: &ChunkMesh, voxel_size: f32) -> Mesh {
-    let positions: Vec<[f32; 3]> = chunk_mesh
+pub fn chunk_mesh_to_mesh(layer: &MeshLayer, voxel_size: f32) -> Mesh {
+    let positions: Vec<[f32; 3]> = layer
         .positions
         .iter()
         .map(|p| [p[0] * voxel_size, p[1] * voxel_size, p[2] * voxel_size])
@@ -49,13 +49,13 @@ pub fn chunk_mesh_to_mesh(chunk_mesh: &ChunkMesh, voxel_size: f32) -> Mesh {
         RenderAssetUsages::default(),
     )
     .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, chunk_mesh.normals.clone())
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, chunk_mesh.uvs.clone())
-    .with_inserted_attribute(ATTRIBUTE_MATERIAL, chunk_mesh.materials.clone())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, layer.normals.clone())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, layer.uvs.clone())
+    .with_inserted_attribute(ATTRIBUTE_MATERIAL, layer.materials.clone())
     // Unscaled, unlike the positions above: a light level counts attenuation
     // steps and is not a distance, so `voxel_size` has no business touching it.
-    .with_inserted_attribute(ATTRIBUTE_LIGHT, chunk_mesh.light.clone())
-    .with_inserted_indices(Indices::U32(chunk_mesh.indices.clone()))
+    .with_inserted_attribute(ATTRIBUTE_LIGHT, layer.light.clone())
+    .with_inserted_indices(Indices::U32(layer.indices.clone()))
 }
 
 #[cfg(test)]
@@ -64,7 +64,7 @@ mod tests {
     use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::{
-        Chunk, ChunkLight, LitChunk, Neighborhood, ShapeTable, Voxel, greedy_mesh, testgen,
+        Chunk, ChunkLight, ChunkMesh, LitChunk, Neighborhood, Tables, Voxel, greedy_mesh, testgen,
     };
 
     /// Full sky, which is what the solver answers for open terrain.
@@ -74,9 +74,9 @@ mod tests {
         let chunk = testgen::terrain_chunk(0, 0, 0);
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &ShapeTable::builtin(),
+            &Tables::builtin(),
         );
-        let mesh = chunk_mesh_to_mesh(&source, voxel_size);
+        let mesh = chunk_mesh_to_mesh(&source.opaque, voxel_size);
         (source, mesh)
     }
 
@@ -92,8 +92,8 @@ mod tests {
         ] {
             assert!(mesh.attribute(attribute).is_some(), "{attribute:?} missing");
         }
-        assert_eq!(mesh.count_vertices(), source.positions.len());
-        assert_eq!(mesh.indices().unwrap().len(), source.indices.len());
+        assert_eq!(mesh.count_vertices(), source.opaque.positions.len());
+        assert_eq!(mesh.indices().unwrap().len(), source.opaque.indices.len());
     }
 
     #[test]
@@ -104,7 +104,7 @@ mod tests {
         else {
             panic!("positions are Float32x3");
         };
-        for (scaled, unscaled) in positions.iter().zip(&source.positions) {
+        for (scaled, unscaled) in positions.iter().zip(&source.opaque.positions) {
             assert_eq!(scaled, &unscaled.map(|c| c * 0.25));
         }
         // A 32-Voxel Chunk at 0.25m is an 8m Cell, whatever the terrain inside.
@@ -120,7 +120,7 @@ mod tests {
         else {
             panic!("normals are Float32x3");
         };
-        assert_eq!(normals, &source.normals);
+        assert_eq!(normals, &source.opaque.normals);
         for n in normals {
             assert!((Vec3::from_array(*n).length() - 1.0).abs() < 1e-6);
         }
@@ -132,15 +132,15 @@ mod tests {
         chunk.set(0, 0, 0, Voxel::cube(testgen::GRASS));
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &ShapeTable::builtin(),
+            &Tables::builtin(),
         );
-        let mesh = chunk_mesh_to_mesh(&source, 1.0);
+        let mesh = chunk_mesh_to_mesh(&source.opaque, 1.0);
 
         let Some(VertexAttributeValues::Uint32(materials)) = mesh.attribute(ATTRIBUTE_MATERIAL)
         else {
             panic!("the material index must stay an integer, not become a float");
         };
-        assert_eq!(materials.len(), source.positions.len());
+        assert_eq!(materials.len(), source.opaque.positions.len());
         assert!(materials.iter().all(|m| *m == testgen::GRASS as u32));
     }
 
@@ -155,15 +155,15 @@ mod tests {
         chunk.set(16, 16, 16, Voxel::cube(testgen::GRASS));
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &ShapeTable::builtin(),
+            &Tables::builtin(),
         );
 
         for voxel_size in [1.0, 0.25] {
-            let mesh = chunk_mesh_to_mesh(&source, voxel_size);
+            let mesh = chunk_mesh_to_mesh(&source.opaque, voxel_size);
             let Some(VertexAttributeValues::Uint32(light)) = mesh.attribute(ATTRIBUTE_LIGHT) else {
                 panic!("a light level must stay an integer, not become a float");
             };
-            assert_eq!(light, &source.light, "at {voxel_size} m Voxels");
+            assert_eq!(light, &source.opaque.light, "at {voxel_size} m Voxels");
             assert!(
                 light
                     .iter()

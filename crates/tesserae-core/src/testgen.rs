@@ -9,7 +9,7 @@ use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::noise::fbm2;
 use crate::voxel::Voxel;
 
-pub use crate::worldgen::{DIRT, GRASS, STONE};
+pub use crate::material::{DIRT, GRASS, STONE};
 
 /// Voxel indices, not metres — the point of the fixture. A World's own
 /// generation is `crate::worldgen` and is tuned in metres.

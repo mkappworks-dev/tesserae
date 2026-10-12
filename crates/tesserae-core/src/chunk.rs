@@ -149,6 +149,16 @@ impl Chunk {
         }
     }
 
+    /// Every distinct Voxel the Chunk holds, and possibly some it no longer
+    /// does: a palette never demotes. So it can over-report and never
+    /// under-report, which is the direction a gate needs.
+    pub fn kinds(&self) -> &[Voxel] {
+        match &self.storage {
+            Storage::Uniform(v) => std::slice::from_ref(v),
+            Storage::Palette { palette, .. } => palette,
+        }
+    }
+
     /// Whether any Voxel here might be shaped, from the palette alone.
     ///
     /// A palette never demotes, so a shaped entry outlives the last Voxel that

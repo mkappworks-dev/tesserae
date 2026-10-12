@@ -15,9 +15,9 @@
 
 use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, index};
 use crate::mesh::{FACE_STEPS, LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use crate::shape::{LIGHT_EXIT_CHECKED, ShapeTable};
+use crate::shape::LIGHT_EXIT_CHECKED;
+use crate::tables::Tables;
 use crate::voxel::Voxel;
-use crate::worldgen::LANTERN;
 
 /// Full strength. Light reaches exactly this many Voxels from a source before
 /// it runs out, so a source cannot influence a Chunk more than one away.
@@ -246,37 +246,26 @@ const fn edge_open(from: u8, into: u8, face: usize) -> bool {
 }
 
 /// Whether light may cross from one Voxel to the next, for callers that have
-/// the Voxels and not their masks: [`edge_open`], and then the joint test.
+/// the Voxels and not their masks: [`edge_open`], and then the joint test. It
+/// says whether light may cross, not how much of it survives: that is the entered
+/// Voxel's dimming, in [`Tables::light_params`].
 ///
 /// Two Shapes that are each partial on the faces that meet, a bottom slab beside
 /// a top slab, may still cover the plane between them together, and then the
-/// edge is blocked though neither side seals it. Only a pair of shaped Voxels can
-/// do that: a cube is sealed or absent, and as a source it leaves freely, so
-/// neither has a joint id.
-pub fn light_passes(shapes: &ShapeTable, from: Voxel, into: Voxel, face: usize) -> bool {
-    edge_open(shapes.light_mask(from), shapes.light_mask(into), face)
-        && !jointly_sealed(shapes, from, into, face)
+/// edge is blocked though neither side seals it. Only a pair of shaped, opaque
+/// Voxels can do that: a cube is sealed or absent, and as a source it leaves
+/// freely, so neither has a joint id.
+pub fn light_passes(tables: &Tables, from: Voxel, into: Voxel, face: usize) -> bool {
+    edge_open(tables.light_mask(from), tables.light_mask(into), face)
+        && !jointly_sealed(tables, from, into, face)
 }
 
 /// The joint half of [`light_passes`], for a caller that has already asked
 /// [`edge_open`].
 #[inline]
-fn jointly_sealed(shapes: &ShapeTable, from: Voxel, into: Voxel, face: usize) -> bool {
-    let (a, b) = (shapes.joint_id(from), shapes.joint_id(into));
-    a != 0 && b != 0 && shapes.jointly_seals(a, face, b)
-}
-
-/// How much block light a Voxel emits.
-///
-/// A `match` rather than a table: a Material id is a `u16`, so a dense table is
-/// 64 KiB of zeroes. Emission is per-Material and a Mod declares it in
-/// build-order step 7; [`LANTERN`] is the placeholder until then.
-#[inline]
-pub fn emission(voxel: Voxel) -> u8 {
-    match voxel.material() {
-        LANTERN => MAX_LIGHT,
-        _ => 0,
-    }
+fn jointly_sealed(tables: &Tables, from: Voxel, into: Voxel, face: usize) -> bool {
+    let (a, b) = (tables.joint_id(from), tables.joint_id(into));
+    a != 0 && b != 0 && tables.shapes.jointly_seals(a, face, b)
 }
 
 /// What `level` becomes one Voxel away across `face`.
@@ -334,15 +323,17 @@ const fn opposite(face: usize) -> usize {
 pub fn light_chunk(
     center: &Chunk,
     border: [Option<LitChunk<'_>>; 6],
-    shapes: &ShapeTable,
+    tables: &Tables,
 ) -> ChunkLight {
+    let materials = &tables.materials;
     let uniform = center.uniform();
 
     // Nothing can enter a Chunk that is opaque throughout, so the deep rock
     // that makes up most of a 3D ring below the surface answers here.
     if let Some(v) = uniform
         && v.is_full_cube()
-        && emission(v) == 0
+        && materials.is_opaque(v)
+        && materials.emission(v) == 0
     {
         return ChunkLight::dark();
     }
@@ -360,7 +351,7 @@ pub fn light_chunk(
     // been solved yet, and a flood over 32768 Voxels to arrive at darkness is
     // the single most common piece of wasted work in a fill.
     if let Some(v) = uniform
-        && emission(v) == 0
+        && materials.emission(v) == 0
         && border.iter().all(|face| match face {
             None => true,
             Some(n) => n.light.uniform() == Some(Light::DARK),
@@ -372,6 +363,9 @@ pub fn light_chunk(
     let mut cells = vec![Light::DARK; CHUNK_VOLUME];
     let mut queue: Vec<[u8; 3]> = Vec::with_capacity(CHUNK_SIZE * CHUNK_SIZE);
 
+    // Air emits nothing and blocks nothing, so a uniform-air Chunk skips the
+    // sweep entirely rather than reading 32768 identical Voxels out of a
+    // palette to learn that.
     let shaped = center.may_contain_shaped();
     // Terrain never allocates this, and its flood never reads it.
     let mut joint = if shaped {
@@ -380,26 +374,28 @@ pub fn light_chunk(
         Vec::new()
     };
     let mut blocked = vec![0u8; CHUNK_VOLUME];
-    // Air emits nothing and blocks nothing, so a uniform-air Chunk skips the
-    // sweep entirely rather than reading 32768 identical Voxels out of a
-    // palette to learn that.
+    // Whether any Voxel here is clearer than opaque, from the palette. Terrain
+    // is not, and takes the sweep and the flood that shipped before the
+    // Material table: the dimming array is never allocated or read.
+    let translucent = center
+        .kinds()
+        .iter()
+        .any(|v| !v.is_air() && !materials.is_opaque(*v));
+    let mut dim = if translucent {
+        vec![0u8; CHUNK_VOLUME]
+    } else {
+        Vec::new()
+    };
     if !uniform.is_some_and(Voxel::is_air) {
-        for y in 0..CHUNK_SIZE {
-            for z in 0..CHUNK_SIZE {
-                for x in 0..CHUNK_SIZE {
-                    let v = center.get(x, y, z);
-                    let i = index(x, y, z);
-                    blocked[i] = shapes.light_mask(v);
-                    if shaped {
-                        joint[i] = shapes.joint_id(v);
-                    }
-                    let emitted = emission(v);
-                    if emitted > 0 {
-                        cells[i] = Light::DARK.with_block(emitted);
-                        queue.push([x as u8, y as u8, z as u8]);
-                    }
-                }
-            }
+        let mut cols = Columns {
+            blocked: &mut blocked,
+            dim: &mut dim,
+            joint: &mut joint,
+        };
+        if translucent {
+            sweep::<true>(center, tables, &mut cells, &mut cols, &mut queue);
+        } else {
+            sweep::<false>(center, tables, &mut cells, &mut cols, &mut queue);
         }
     }
 
@@ -408,8 +404,9 @@ pub fn light_chunk(
     let mut seeded = [false; CHANNELS];
     seeded[Channel::Block as usize] = !queue.is_empty();
     let walls = Walls {
-        shapes,
+        tables,
         blocked: &blocked,
+        dim: &dim,
         joint: &joint,
     };
     seed_from_border(&mut cells, &mut queue, &walls, border, &mut seeded);
@@ -418,35 +415,100 @@ pub fn light_chunk(
     // either. Skipping a channel nothing seeded is the difference between one
     // sweep and two for almost every Chunk in a World: one lantern leaves block
     // light at zero everywhere else, and rock leaves sky light at zero.
-    // Spelled out rather than looped: `flood` is specialised on both the channel
-    // and whether the Chunk is shaped, and a loop over the channels leaves the
-    // specialising to the optimiser's unrolling.
+    // Spelled out rather than looped: `flood` is specialised on the channel, on
+    // whether the Chunk is shaped and on whether it dims, and a loop over the
+    // channels leaves the specialising to the optimiser's unrolling.
     if seeded[SKY] {
-        if shaped {
-            flood::<true, SKY>(&mut cells, &walls, &queue);
-        } else {
-            flood::<false, SKY>(&mut cells, &walls, &queue);
-        }
+        flood_as::<SKY>(shaped, translucent, &mut cells, &walls, &queue);
     }
     if seeded[BLOCK] {
-        if shaped {
-            flood::<true, BLOCK>(&mut cells, &walls, &queue);
-        } else {
-            flood::<false, BLOCK>(&mut cells, &walls, &queue);
-        }
+        flood_as::<BLOCK>(shaped, translucent, &mut cells, &walls, &queue);
     }
 
     collapse(cells)
 }
 
+/// The per-cell arrays [`sweep`] fills.
+struct Columns<'a> {
+    /// [`Tables::light_mask`] per cell.
+    blocked: &'a mut [u8],
+    /// Levels removed on entry; empty unless the Chunk is translucent.
+    dim: &'a mut [u8],
+    /// [`Tables::joint_id`] per cell; empty unless the Chunk may hold a shaped
+    /// Voxel.
+    joint: &'a mut [u16],
+}
+
 /// What the bulk solver knows about each cell of the Chunk it is solving.
 struct Walls<'a> {
-    shapes: &'a ShapeTable,
-    /// [`ShapeTable::light_mask`] per cell.
+    tables: &'a Tables,
     blocked: &'a [u8],
-    /// [`ShapeTable::joint_id`] per cell; empty unless the Chunk may hold a
-    /// shaped Voxel.
+    dim: &'a [u8],
     joint: &'a [u16],
+}
+
+/// Fills the per-cell arrays from the Chunk's Voxels, and seeds its emitters.
+///
+/// Terrain is long runs of one Voxel, so the table reads happen once per run and
+/// not once per Voxel; this is the one per-Voxel path the Material table sits
+/// on. `TRANSLUCENT` is the palette gate: without it the Voxels are air and
+/// opaque, whose `Tables::light_params` is the Shape's own mask and no dimming,
+/// so the table is asked only for emission.
+fn sweep<const TRANSLUCENT: bool>(
+    center: &Chunk,
+    tables: &Tables,
+    cells: &mut [Light],
+    cols: &mut Columns<'_>,
+    queue: &mut Vec<[u8; 3]>,
+) {
+    let shaped = !cols.joint.is_empty();
+    let (mut last, mut mask, mut dimming, mut emitted, mut joint) = (Voxel::AIR, 0, 0, 0, 0);
+    for y in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let v = center.get(x, y, z);
+                let i = index(x, y, z);
+                if v != last {
+                    (last, emitted) = (v, tables.materials.emission(v));
+                    (mask, dimming) = if TRANSLUCENT {
+                        tables.light_params(v)
+                    } else {
+                        (tables.shapes.light_mask(v), 0)
+                    };
+                    if shaped {
+                        joint = tables.joint_id(v);
+                    }
+                }
+                cols.blocked[i] = mask;
+                if TRANSLUCENT && dimming > 0 {
+                    cols.dim[i] = dimming;
+                }
+                if shaped {
+                    cols.joint[i] = joint;
+                }
+                if emitted > 0 {
+                    cells[i] = Light::DARK.with_block(emitted);
+                    queue.push([x as u8, y as u8, z as u8]);
+                }
+            }
+        }
+    }
+}
+
+/// [`flood`] with its const parameters chosen from the Chunk.
+fn flood_as<const CHANNEL: usize>(
+    shaped: bool,
+    dimmed: bool,
+    cells: &mut [Light],
+    walls: &Walls<'_>,
+    seeds: &[[u8; 3]],
+) {
+    match (shaped, dimmed) {
+        (false, false) => flood::<false, CHANNEL, false>(cells, walls, seeds),
+        (true, false) => flood::<true, CHANNEL, false>(cells, walls, seeds),
+        (false, true) => flood::<false, CHANNEL, true>(cells, walls, seeds),
+        (true, true) => flood::<true, CHANNEL, true>(cells, walls, seeds),
+    }
 }
 
 /// Whether the bulk solver's open-sky fast path is exact for this boundary:
@@ -506,7 +568,7 @@ fn seed_from_border(
                 let i = index(inside.0, inside.1, inside.2);
                 let leaving = if check_exit {
                     walls
-                        .shapes
+                        .tables
                         .light_mask(outside.chunk.get(across.0, across.1, across.2))
                 } else {
                     0
@@ -524,7 +586,11 @@ fn seed_from_border(
                 let arriving = outside.light.get(across.0, across.1, across.2);
                 let mut raised = false;
                 for channel in [Channel::Sky, Channel::Block] {
-                    let t = transmitted(channel, arriving.get(channel), travel);
+                    let mut t = transmitted(channel, arriving.get(channel), travel);
+                    // `dim` is empty for a Chunk that dims nothing.
+                    if let Some(&d) = walls.dim.get(i) {
+                        t = t.saturating_sub(d);
+                    }
                     if t > cells[i].get(channel) {
                         cells[i] = cells[i].with(channel, t);
                         seeded[channel as usize] = true;
@@ -544,13 +610,15 @@ fn seed_from_border(
 ///
 /// `SHAPED` is whether the Chunk holds a shaped Voxel. When it does not, every
 /// cell is air or a cube and the whole edge rule is "the cell I am entering is
-/// not a cube" - what this loop asked before Shapes existed.
-/// When it does, the rule is [`edge_open`] and then the joint test, which only
-/// fires for a pair of cells that are both partial. `CHANNEL` is
+/// not a cube" - what this loop asked before Shapes existed. When it does, the
+/// rule is [`edge_open`] and then the joint test, which only fires for a pair of
+/// cells that are both partial. `CHANNEL` is
 /// [`SKY`] or [`BLOCK`], a const so that `transmitted`'s sky-only case folds
-/// away for block light.
+/// away for block light. `DIMMED` is whether any cell removes light on entry;
+/// with it false the loop never reads `dim` and is the one that shipped before
+/// the Material table.
 ///
-/// Both are generic because this is the hottest loop in the crate, and its
+/// All three are generic because this is the hottest loop in the crate, and its
 /// speed was found to depend on the optimiser seeing them as constants: with the
 /// general rule in it unconditionally, or with only `SHAPED` constant and the
 /// channel passed in, `light_chunk/straddling` and `/flooded_air` were 50-100%
@@ -559,12 +627,12 @@ fn seed_from_border(
 /// Terminates despite sky light not always dimming: the undimmed case only ever
 /// steps downwards, so it cannot cycle, and a cell can be raised at most
 /// [`MAX_LIGHT`] times.
-fn flood<const SHAPED: bool, const CHANNEL: usize>(
+fn flood<const SHAPED: bool, const CHANNEL: usize, const DIMMED: bool>(
     cells: &mut [Light],
     walls: &Walls<'_>,
     seeds: &[[u8; 3]],
 ) {
-    let blocked = walls.blocked;
+    let (blocked, dim) = (walls.blocked, walls.dim);
     let channel = if CHANNEL == SKY {
         Channel::Sky
     } else {
@@ -589,13 +657,16 @@ fn flood<const SHAPED: bool, const CHANNEL: usize>(
                 continue;
             };
             let ni = index(nx as usize, ny as usize, nz as usize);
+            let t = if DIMMED { t.saturating_sub(dim[ni]) } else { t };
             let open = if SHAPED {
                 edge_open(blocked[from], blocked[ni], face)
                     && !(walls.joint[from] != 0
                         && walls.joint[ni] != 0
-                        && walls
-                            .shapes
-                            .jointly_seals(walls.joint[from], face, walls.joint[ni]))
+                        && walls.tables.shapes.jointly_seals(
+                            walls.joint[from],
+                            face,
+                            walls.joint[ni],
+                        ))
             } else {
                 blocked[ni] == 0
             };
@@ -636,10 +707,14 @@ fn jointly_sealed_across(
     travel: usize,
 ) -> bool {
     let from = walls
-        .shapes
+        .tables
         .joint_id(outside.get(across.0, across.1, across.2));
     // The neighbour is the source, so it is the one looking out through `travel`.
-    from != 0 && walls.shapes.jointly_seals(from, travel, walls.joint[i])
+    from != 0
+        && walls
+            .tables
+            .shapes
+            .jointly_seals(from, travel, walls.joint[i])
 }
 
 /// Back to a [`ChunkLight`], uniform where it can be.
@@ -687,20 +762,27 @@ pub trait LightVolume {
 /// tracks provenance — clear what the old level could have lit, then
 /// re-propagate from the independent sources that uncovers. So: an edit uses
 /// this, a Chunk arriving uses `light_chunk`, and neither does the other's job.
-pub fn relight(volume: &mut impl LightVolume, shapes: &ShapeTable, edited: [i32; 3], was: Light) {
+pub fn relight(volume: &mut impl LightVolume, tables: &Tables, edited: [i32; 3], was: Light) {
     let Some(voxel) = volume.voxel(edited) else {
         return;
     };
 
     // What the Voxel holds now, before anything propagates: its own emission if
     // it emits, and nothing at all if it has become opaque.
-    let now = Light::DARK.with_block(emission(voxel));
+    let now = Light::DARK.with_block(tables.materials.emission(voxel));
     volume.set_light(edited, now);
 
     for channel in [Channel::Sky, Channel::Block] {
         let mut regrow: Vec<[i32; 3]> = Vec::new();
         if was.get(channel) > now.get(channel) {
-            darken(volume, edited, was.get(channel), channel, &mut regrow);
+            darken(
+                volume,
+                tables,
+                edited,
+                was.get(channel),
+                channel,
+                &mut regrow,
+            );
         }
         if now.get(channel) > 0 {
             regrow.push(edited);
@@ -713,7 +795,7 @@ pub fn relight(volume: &mut impl LightVolume, shapes: &ShapeTable, edited: [i32;
                 regrow.push(at);
             }
         }
-        brighten(volume, shapes, regrow, channel);
+        brighten(volume, tables, regrow, channel);
     }
 }
 
@@ -728,13 +810,19 @@ pub fn relight(volume: &mut impl LightVolume, shapes: &ShapeTable, edited: [i32;
 /// seeds the regrowth, which does follow the current seals, joint ones included.
 /// Clearing too little would be the bug.
 ///
-/// The comparison is against [`transmitted`] rather than against the level
-/// itself, and that is the whole correctness of the sky channel: full-strength
-/// sky light passes downwards undimmed, so a `neighbour < level` test never
-/// fires for the Voxel below and the column under a newly placed roof would
-/// stay lit forever.
+/// The comparison is against what the source could have *delivered* to that
+/// Voxel: [`transmitted`] less the Voxel's own dimming. Against the level
+/// itself, the full-strength sky that passes downwards undimmed would never
+/// clear the column under a newly placed roof; against `transmitted` alone, a
+/// Voxel lit more brightly than a dimming Voxel lets through would be cleared
+/// although another source lit it.
+///
+/// An emitter is its own source, so it is never cleared below its emission:
+/// without that, an emitter of level 8 beside a removed 15 holds 14, is cleared
+/// to nothing, and nothing re-seeds it.
 fn darken(
     volume: &mut impl LightVolume,
+    tables: &Tables,
     from: [i32; 3],
     had: u8,
     channel: Channel,
@@ -747,19 +835,30 @@ fn darken(
         head += 1;
         for face in FACES {
             let next = step(at, face);
-            if volume.voxel(next).is_none() {
+            let Some(voxel) = volume.voxel(next) else {
                 continue;
-            }
+            };
             let there = volume.light(next).get(channel);
             if there == 0 {
                 continue;
             }
-            if there <= transmitted(channel, level, face) {
-                volume.set_light(next, volume.light(next).with(channel, 0));
-                queue.push((next, there));
-            } else {
+            let (_, dim) = tables.light_params(voxel);
+            let delivered = transmitted(channel, level, face).saturating_sub(dim);
+            if there > delivered {
                 // Brighter than anything this source could have delivered, so
                 // it has one of its own and the cleared region refills from it.
+                regrow.push(next);
+                continue;
+            }
+            let own = match channel {
+                Channel::Block => tables.materials.emission(voxel),
+                Channel::Sky => 0,
+            };
+            if there > own {
+                volume.set_light(next, volume.light(next).with(channel, own));
+                queue.push((next, there));
+            }
+            if own > 0 {
                 regrow.push(next);
             }
         }
@@ -767,12 +866,7 @@ fn darken(
 }
 
 /// Floods light outwards from every Voxel in `from`, improving only.
-fn brighten(
-    volume: &mut impl LightVolume,
-    shapes: &ShapeTable,
-    from: Vec<[i32; 3]>,
-    channel: Channel,
-) {
+fn brighten(volume: &mut impl LightVolume, tables: &Tables, from: Vec<[i32; 3]>, channel: Channel) {
     let mut queue = from;
     let mut head = 0;
     while head < queue.len() {
@@ -794,7 +888,8 @@ fn brighten(
             let Some(voxel) = volume.voxel(next) else {
                 continue;
             };
-            if !light_passes(shapes, source, voxel, face) || volume.light(next).get(channel) >= t {
+            let t = t.saturating_sub(tables.light_params(voxel).1);
+            if !light_passes(tables, source, voxel, face) || volume.light(next).get(channel) >= t {
                 continue;
             }
             volume.set_light(next, volume.light(next).with(channel, t));
@@ -806,7 +901,9 @@ fn brighten(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::material::LANTERN;
     use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::voxel::MaterialId;
     use crate::worldgen::{GRASS, STONE, Worldgen, WorldgenParams};
     use std::sync::OnceLock;
 
@@ -817,11 +914,12 @@ mod tests {
     /// test that read the wrong one of the two would agree with the right one.
     const SHAPE_DIAGONAL: u8 = 4;
 
-    fn shapes() -> &'static ShapeTable {
-        static TABLE: OnceLock<ShapeTable> = OnceLock::new();
-        TABLE.get_or_init(|| {
-            let mut table = ShapeTable::builtin();
-            let id = table
+    fn tables() -> &'static Tables {
+        static TABLES: OnceLock<Tables> = OnceLock::new();
+        TABLES.get_or_init(|| {
+            let mut tables = Tables::builtin();
+            let id = tables
+                .shapes
                 .register(ShapeDef {
                     boxes: vec![
                         NodeBox::new([0, 0, 0], [8, 8, 16]),
@@ -831,7 +929,7 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(id, SHAPE_DIAGONAL);
-            table
+            tables
         })
     }
 
@@ -933,7 +1031,7 @@ mod tests {
     #[test]
     fn a_chunk_of_air_under_an_open_sky_is_lit_to_the_floor() {
         let above = full_sky();
-        let light = light_chunk(&Chunk::air(), sky_above(&above), shapes());
+        let light = light_chunk(&Chunk::air(), sky_above(&above), tables());
         assert_eq!(light.uniform(), Some(Light::new(MAX_LIGHT, 0)));
     }
 
@@ -945,7 +1043,7 @@ mod tests {
         let mut border = sky_above(&above);
         let dark = ChunkLight::dark();
         border[NEG_X] = beside(&dark);
-        let light = light_chunk(&Chunk::air(), border, shapes());
+        let light = light_chunk(&Chunk::air(), border, tables());
         for y in [0, LAST] {
             for x in [0, LAST] {
                 assert_eq!(light.get(x, y, 0).sky(), MAX_LIGHT, "at {x},{y},0");
@@ -962,7 +1060,7 @@ mod tests {
             }
         }
         let above = full_sky();
-        let light = light_chunk(&chunk, sky_above(&above), shapes());
+        let light = light_chunk(&chunk, sky_above(&above), tables());
         assert_eq!(light.get(4, 0, 4), Light::DARK, "the floor holds no light");
         assert_eq!(light.get(4, 1, 4).sky(), MAX_LIGHT);
     }
@@ -972,7 +1070,7 @@ mod tests {
         let mut border = [None; 6];
         let side = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         border[NEG_X] = beside(&side);
-        let light = light_chunk(&Chunk::air(), border, shapes());
+        let light = light_chunk(&Chunk::air(), border, tables());
         for x in 0..CHUNK_SIZE {
             let expected = MAX_LIGHT.saturating_sub(1 + x as u8);
             assert_eq!(light.get(x, 5, 5).sky(), expected, "at x={x}");
@@ -985,7 +1083,7 @@ mod tests {
     fn an_emitter_falls_off_by_manhattan_distance_and_stops() {
         let mut chunk = Chunk::air();
         chunk.set(16, 16, 16, Voxel::cube(LANTERN));
-        let light = light_chunk(&chunk, [None; 6], shapes());
+        let light = light_chunk(&chunk, [None; 6], tables());
         assert_eq!(light.get(16, 16, 16).block(), MAX_LIGHT);
         for d in 0..=MAX_LIGHT as usize {
             let expected = MAX_LIGHT - d as u8;
@@ -1006,14 +1104,14 @@ mod tests {
             }
         }
         chunk.set(8, 16, 16, Voxel::cube(LANTERN));
-        let light = light_chunk(&chunk, [None; 6], shapes());
+        let light = light_chunk(&chunk, [None; 6], tables());
         assert_eq!(light.get(9, 16, 16).block(), MAX_LIGHT - 1);
         assert_eq!(light.get(11, 16, 16).block(), 0, "through the wall");
     }
 
     #[test]
     fn a_dark_boundary_is_not_an_air_boundary() {
-        let light = light_chunk(&Chunk::air(), [None; 6], shapes());
+        let light = light_chunk(&Chunk::air(), [None; 6], tables());
         assert_eq!(light.uniform(), Some(Light::DARK));
         assert_eq!(light.heap_bytes(), 0);
     }
@@ -1022,7 +1120,7 @@ mod tests {
     fn an_opaque_chunk_answers_dark_without_going_dense() {
         let solid = Chunk::filled(Voxel::cube(STONE));
         let above = full_sky();
-        let light = light_chunk(&solid, sky_above(&above), shapes());
+        let light = light_chunk(&solid, sky_above(&above), tables());
         assert_eq!(light.uniform(), Some(Light::DARK));
         assert_eq!(light.heap_bytes(), 0);
     }
@@ -1033,6 +1131,7 @@ mod tests {
     struct OneChunk {
         chunk: Chunk,
         light: ChunkLight,
+        tables: &'static Tables,
     }
 
     impl OneChunk {
@@ -1040,6 +1139,7 @@ mod tests {
             OneChunk {
                 light: ChunkLight::dark(),
                 chunk,
+                tables: tables(),
             }
         }
 
@@ -1056,7 +1156,7 @@ mod tests {
             let (x, y, z) = Self::local(at).expect("inside");
             let was = self.light.get(x, y, z);
             self.chunk.set(x, y, z, voxel);
-            relight(self, shapes(), at, was);
+            relight(self, self.tables, at, was);
         }
 
         fn seed_sky(&mut self) {
@@ -1068,7 +1168,7 @@ mod tests {
             let seeds: Vec<[i32; 3]> = (0..CHUNK_SIZE)
                 .flat_map(|z| (0..CHUNK_SIZE).map(move |x| [x as i32, LAST as i32, z as i32]))
                 .collect();
-            brighten(self, shapes(), seeds, Channel::Sky);
+            brighten(self, self.tables, seeds, Channel::Sky);
         }
     }
 
@@ -1136,7 +1236,7 @@ mod tests {
         fn place(&mut self, at: [i32; 3], voxel: Voxel) {
             let was = self.light(at);
             self.set_voxel(at, voxel);
-            relight(self, shapes(), at, was);
+            relight(self, tables(), at, was);
         }
 
         /// Every Chunk's light, to compare two ways of getting there.
@@ -1178,7 +1278,7 @@ mod tests {
                         let (chunk, light) = self.cells.get(&step(coord, face))?;
                         Some(LitChunk::new(chunk, light))
                     });
-                    let solved = light_chunk(&self.cells[&coord].0, border, shapes());
+                    let solved = light_chunk(&self.cells[&coord].0, border, tables());
                     if solved != self.cells[&coord].1 {
                         self.cells.get_mut(&coord).unwrap().1 = solved;
                         changed = true;
@@ -1262,7 +1362,7 @@ mod tests {
         }
         chunk.set(24, 2, 16, Voxel::cube(LANTERN));
 
-        let bulk = light_chunk(&chunk, [None; 6], shapes());
+        let bulk = light_chunk(&chunk, [None; 6], tables());
 
         // The same scene built one edit at a time, from empty air.
         let mut world = OneChunk::new(Chunk::air());
@@ -1476,7 +1576,7 @@ mod tests {
                 world.place(*at, *voxel);
             }
             let above = full_sky();
-            let bulk = light_chunk(&chunk, sky_above(&above), shapes());
+            let bulk = light_chunk(&chunk, sky_above(&above), tables());
 
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
@@ -1546,7 +1646,7 @@ mod tests {
                 world.place(*at, *voxel);
             }
             let above = full_sky();
-            let bulk = light_chunk(&chunk, sky_above(&above), shapes());
+            let bulk = light_chunk(&chunk, sky_above(&above), tables());
             for y in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
                     for x in 0..CHUNK_SIZE {
@@ -1776,12 +1876,12 @@ mod tests {
         ];
         for (west, east, eastwards, westwards) in cases {
             assert_eq!(
-                !light_passes(shapes(), west, east, POS_X),
+                !light_passes(tables(), west, east, POS_X),
                 eastwards,
                 "{west:?} then {east:?}, eastwards"
             );
             assert_eq!(
-                !light_passes(shapes(), east, west, NEG_X),
+                !light_passes(tables(), east, west, NEG_X),
                 westwards,
                 "{west:?} then {east:?}, westwards"
             );
@@ -1834,7 +1934,7 @@ mod tests {
         let mut border = [None; 6];
         border[POS_Y] = Some(LitChunk::new(&above, &sky));
 
-        let light = light_chunk(&Chunk::air(), border, shapes());
+        let light = light_chunk(&Chunk::air(), border, tables());
         assert_eq!(
             light.get(10, LAST, 10).sky(),
             MAX_LIGHT - 1,
@@ -2244,7 +2344,7 @@ mod tests {
         let dark = ChunkLight::dark();
         let border: [Option<LitChunk<'_>>; 6] =
             std::array::from_fn(|i| Some(LitChunk::new(&neighbours[i], &dark)));
-        assert_eq!(light_chunk(&home, border, shapes()), ChunkLight::dark());
+        assert_eq!(light_chunk(&home, border, tables()), ChunkLight::dark());
 
         let mut coords = around.clone();
         coords.push(home_coord);
@@ -2299,6 +2399,350 @@ mod tests {
             assert!(
                 reached > 0,
                 "no light crossed a seam, outside: {from_outside}"
+            );
+        }
+    }
+
+    // Translucent Materials. Light enters a Voxel that dims by its dimming on
+    // top of the step, geometry blocks light only for an opaque Material, and a
+    // translucent Voxel stores the light that reaches it.
+
+    use crate::material::{GLASS, LEAVES, MaterialDef, Occlusion, RenderClass, WATER};
+
+    /// Block light from a lantern at x=10, through one Voxel of `material` at
+    /// x=11, to the Voxel behind it.
+    fn through(material: Voxel) -> [u8; 3] {
+        let mut plan: Plan = vec![
+            ([10, 16, 16], Voxel::cube(LANTERN)),
+            ([11, 16, 16], material),
+        ];
+        let mut chunk = Chunk::air();
+        let mut world = OneChunk::new(Chunk::air());
+        for (at, voxel) in plan.drain(..) {
+            chunk.set(at[0] as usize, at[1] as usize, at[2] as usize, voxel);
+            world.place(at, voxel);
+        }
+        let bulk = light_chunk(&chunk, [None; 6], tables());
+        let at = |x: usize| bulk.get(x, 16, 16).block();
+        for x in 9..14 {
+            assert_eq!(
+                world.light([x, 16, 16]).block(),
+                at(x as usize),
+                "the solvers disagree at x={x}"
+            );
+        }
+        [at(10), at(11), at(12)]
+    }
+
+    #[test]
+    fn a_lantern_behind_a_translucent_voxel_is_dimmed_by_exactly_its_dimming() {
+        assert_eq!(through(Voxel::AIR), [15, 14, 13]);
+        assert_eq!(through(Voxel::cube(GLASS)), [15, 14, 13], "glass is clear");
+        assert_eq!(through(Voxel::cube(LEAVES)), [15, 13, 12]);
+        assert_eq!(through(Voxel::cube(WATER)), [15, 12, 11]);
+        assert_eq!(through(Voxel::cube(STONE))[1], 0, "stone stops it");
+    }
+
+    #[test]
+    fn sky_light_enters_a_translucent_voxel_from_above_at_full_strength_less_its_dimming() {
+        for (material, expected) in [(GLASS, 15), (LEAVES, 14), (WATER, 13)] {
+            let mut chunk = Chunk::air();
+            chunk.set(16, 16, 16, Voxel::cube(material));
+            let above = full_sky();
+            let bulk = light_chunk(&chunk, sky_above(&above), tables());
+            assert_eq!(bulk.get(16, 16, 16).sky(), expected, "material {material}");
+
+            let mut world = OneChunk::new(Chunk::air());
+            world.seed_sky();
+            world.place([16, 16, 16], Voxel::cube(material));
+            assert_eq!(
+                world.light([16, 16, 16]).sky(),
+                expected,
+                "material {material}"
+            );
+        }
+    }
+
+    /// A stair of stone seals its underside; the same stair of glass is glass.
+    #[test]
+    fn a_roof_of_glass_stairs_lets_the_sky_through_that_a_roof_of_stone_stairs_stops() {
+        let under = |material| {
+            let mut world = OneChunk::new(Chunk::air());
+            world.seed_sky();
+            let roof = Voxel::shaped(material, SHAPE_STAIR, Orientation::new(POS_Y, 0));
+            for x in 15..=17 {
+                for z in 15..=17 {
+                    world.place([x, 20, z], roof);
+                }
+            }
+            world.light([16, 10, 16]).sky()
+        };
+        assert_eq!(under(GLASS), MAX_LIGHT);
+        assert!(under(STONE) < MAX_LIGHT);
+    }
+
+    /// Joint sealing is a fact about opaque geometry: two halves of glass cover a
+    /// plane between them and still let light through it, in both solvers.
+    #[test]
+    fn two_half_walls_of_glass_seal_nothing_jointly() {
+        let glass_slab = |up| Voxel::shaped(GLASS, SHAPE_SLAB, Orientation::new(up, 0));
+        let pair = (glass_slab(POS_Y), glass_slab(NEG_Y));
+        assert_eq!(
+            through_a_pair(pair.0, pair.1),
+            [MAX_LIGHT - 3, MAX_LIGHT - 4, MAX_LIGHT - 6]
+        );
+        assert!(light_passes(tables(), pair.0, pair.1, POS_X));
+        assert!(light_passes(tables(), pair.1, pair.0, POS_X));
+
+        let mut plan = tunnel(8, 20, 9);
+        plan.extend([([12, 5, 16], pair.0), ([13, 5, 16], pair.1)]);
+        let mut chunk = Chunk::air();
+        let mut world = OneChunk::new(Chunk::air());
+        for (at, voxel) in &plan {
+            chunk.set(at[0] as usize, at[1] as usize, at[2] as usize, *voxel);
+            world.place(*at, *voxel);
+        }
+        let bulk = light_chunk(&chunk, [None; 6], tables());
+        for x in 8..21 {
+            assert_eq!(
+                world.light([x, 5, 16]),
+                bulk.get(x as usize, 5, 16),
+                "x={x}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_opaque_stair_keeps_the_light_of_its_notch_undimmed() {
+        // Opaque: geometry decides, nothing is subtracted, so the notch holds
+        // the light that reached it (step 5's behaviour, kept).
+        let mut world = OneChunk::new(Chunk::air());
+        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([14, 16, 16], stair(0));
+        assert_eq!(world.light([14, 16, 16]).block(), MAX_LIGHT - 2);
+    }
+
+    #[test]
+    fn a_uniform_chunk_of_a_translucent_material_is_not_dark() {
+        let above = full_sky();
+        let glass = light_chunk(
+            &Chunk::filled(Voxel::cube(GLASS)),
+            sky_above(&above),
+            tables(),
+        );
+        assert_eq!(glass.uniform(), Some(Light::new(MAX_LIGHT, 0)));
+
+        let water = light_chunk(
+            &Chunk::filled(Voxel::cube(WATER)),
+            sky_above(&above),
+            tables(),
+        );
+        assert_eq!(water.get(5, LAST, 5).sky(), 13, "entering from above");
+        // Each Voxel entered costs the step and the dimming: three.
+        assert_eq!(water.get(5, LAST - 1, 5).sky(), 10, "one step down");
+        assert_eq!(water.get(5, LAST - 4, 5).sky(), 1);
+        assert_eq!(water.get(5, LAST - 5, 5).sky(), 0, "all of it gone");
+
+        let stone = light_chunk(
+            &Chunk::filled(Voxel::cube(STONE)),
+            sky_above(&above),
+            tables(),
+        );
+        assert_eq!(stone, ChunkLight::dark());
+    }
+
+    #[test]
+    fn the_two_solvers_agree_on_translucent_scenes_inside_one_chunk() {
+        let pool: Plan = (8..14)
+            .flat_map(|x| {
+                (8..14).flat_map(move |z| (4..7).map(move |y| ([x, y, z], Voxel::cube(WATER))))
+            })
+            .collect();
+        let canopy: Plan = (10..20)
+            .flat_map(|x| (10..20).map(move |z| ([x, 18, z], Voxel::cube(LEAVES))))
+            .collect();
+        let house: Plan = {
+            let mut plan = Plan::new();
+            for x in 4..=10 {
+                for z in 4..=10 {
+                    for y in 2..=6 {
+                        let wall = x == 4 || x == 10 || z == 4 || z == 10 || y == 6;
+                        if wall {
+                            plan.push(([x, y, z], Voxel::cube(GLASS)));
+                        }
+                    }
+                }
+            }
+            plan.push(([7, 3, 7], Voxel::cube(LANTERN)));
+            plan
+        };
+        let mixed: Plan = vec![
+            ([12, 5, 12], Voxel::cube(LANTERN)),
+            (
+                [13, 5, 12],
+                Voxel::shaped(GLASS, SHAPE_STAIR, Orientation::new(POS_Y, 1)),
+            ),
+            (
+                [14, 5, 12],
+                Voxel::shaped(WATER, SHAPE_SLAB, Orientation::new(POS_Y, 0)),
+            ),
+            ([15, 5, 12], Voxel::cube(LEAVES)),
+            (
+                [12, 20, 12],
+                Voxel::shaped(LEAVES, SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
+            ),
+            ([12, 21, 12], stair(0)),
+        ];
+        for (label, plan) in [
+            ("pool", pool),
+            ("canopy", canopy),
+            ("house", house),
+            ("mixed", mixed),
+        ] {
+            let mut chunk = Chunk::air();
+            let mut world = OneChunk::new(Chunk::air());
+            world.seed_sky();
+            for (at, voxel) in &plan {
+                chunk.set(at[0] as usize, at[1] as usize, at[2] as usize, *voxel);
+                world.place(*at, *voxel);
+            }
+            let above = full_sky();
+            let bulk = light_chunk(&chunk, sky_above(&above), tables());
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        assert_eq!(
+                            world.light.get(x, y, z),
+                            bulk.get(x, y, z),
+                            "{label}: at {x},{y},{z}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_two_solvers_agree_with_a_translucent_voxel_on_the_seam() {
+        for (label, voxels) in [
+            (
+                "water either side",
+                vec![
+                    ([31, 5, 16], Voxel::cube(WATER)),
+                    ([32, 5, 16], Voxel::cube(WATER)),
+                ],
+            ),
+            ("leaves west", vec![([31, 5, 16], Voxel::cube(LEAVES))]),
+            ("glass east", vec![([32, 5, 16], Voxel::cube(GLASS))]),
+            (
+                "a glass stair on the seam",
+                vec![(
+                    [31, 5, 16],
+                    Voxel::shaped(GLASS, SHAPE_STAIR, Orientation::new(POS_Y, 1)),
+                )],
+            ),
+        ] {
+            let mut lattice = Lattice::new(&[[0, 0, 0], [1, 0, 0]]);
+            let mut plan = tunnel(24, 40, 26);
+            plan.extend(voxels);
+            for (at, voxel) in &plan {
+                lattice.place(*at, *voxel);
+            }
+            let incremental = lattice.snapshot();
+
+            let mut fresh = Lattice::new(&[[0, 0, 0], [1, 0, 0]]);
+            for (at, voxel) in &plan {
+                fresh.set_voxel(*at, *voxel);
+            }
+            fresh.solve_bulk();
+            assert_eq!(incremental, fresh.snapshot(), "{label}");
+        }
+    }
+
+    #[test]
+    fn placing_and_removing_a_translucent_voxel_returns_every_voxel_to_where_it_was() {
+        for voxel in [
+            Voxel::cube(GLASS),
+            Voxel::cube(LEAVES),
+            Voxel::cube(WATER),
+            Voxel::shaped(WATER, SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
+        ] {
+            let mut world = OneChunk::new(Chunk::air());
+            world.seed_sky();
+            for (at, v) in tunnel(8, 20, 9) {
+                world.place(at, v);
+            }
+            let before = world.light.clone();
+
+            world.place([12, 5, 16], voxel);
+            world.place([16, 21, 16], voxel);
+            world.place([12, 5, 16], Voxel::AIR);
+            world.place([16, 21, 16], Voxel::AIR);
+
+            assert_eq!(world.light, before, "{voxel:?} left light behind");
+        }
+    }
+
+    /// An emitter that is not at full strength, which only a registered Material
+    /// can be. The decrease pass clears everything at or below what the removed
+    /// source delivered, and an emitter of 8 beside a removed 15 holds 14.
+    fn amber() -> (&'static Tables, Voxel) {
+        static T: OnceLock<(Tables, MaterialId)> = OnceLock::new();
+        let (t, id) = T.get_or_init(|| {
+            let mut t = Tables::builtin();
+            let id = t
+                .materials
+                .register(MaterialDef {
+                    emission: 8,
+                    dimming: MAX_LIGHT,
+                    occlusion: Occlusion::Opaque,
+                    render: RenderClass::Opaque,
+                })
+                .unwrap();
+            (t, id)
+        });
+        (t, Voxel::cube(*id))
+    }
+
+    #[test]
+    fn an_emitter_dimmer_than_the_light_beside_it_survives_that_light_being_removed() {
+        let (tables, amber) = amber();
+        let mut world = OneChunk::new(Chunk::air());
+        world.tables = tables;
+        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([17, 16, 16], amber);
+        assert_eq!(
+            world.light([17, 16, 16]).block(),
+            8,
+            "an opaque cube holds its own"
+        );
+
+        world.place([16, 16, 16], Voxel::AIR);
+
+        assert_eq!(world.light([17, 16, 16]).block(), 8, "its own emission");
+        assert_eq!(world.light([19, 16, 16]).block(), 6, "and what it lights");
+        assert_eq!(
+            world.light([12, 16, 16]).block(),
+            3,
+            "amber's falloff, not 14"
+        );
+        assert_eq!(world.light([8, 16, 16]).block(), 0, "past amber's reach");
+    }
+
+    #[test]
+    fn a_bulk_solve_of_a_dimmer_emitter_agrees_with_placing_it() {
+        let (tables, amber) = amber();
+        let mut chunk = Chunk::air();
+        chunk.set(17, 16, 16, amber);
+        let bulk = light_chunk(&chunk, [None; 6], tables);
+        let mut world = OneChunk::new(Chunk::air());
+        world.tables = tables;
+        world.place([17, 16, 16], amber);
+        for x in 10..24 {
+            assert_eq!(
+                world.light([x, 16, 16]),
+                bulk.get(x as usize, 16, 16),
+                "x={x}"
             );
         }
     }
