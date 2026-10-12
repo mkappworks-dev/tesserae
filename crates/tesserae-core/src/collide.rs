@@ -16,7 +16,7 @@
 
 use crate::mesh::{FACE_STEPS, NEG_X, POS_X};
 use crate::shape::{CollisionBox, Connections, NodeBox, SUBDIV, ShapeTable};
-use crate::voxel::Voxel;
+use crate::voxel::{SHAPE_FULL_CUBE, Voxel};
 
 /// Random access to a World's Voxels, in Voxel coordinates.
 ///
@@ -160,7 +160,8 @@ fn connections_at(
     cell: [i32; 3],
     voxel: Voxel,
 ) -> Connections {
-    if !shapes.is_connected(voxel) {
+    // Cubes and air are most cells; they never reach the table for this.
+    if voxel.shape() == SHAPE_FULL_CUBE || !shapes.is_connected(voxel) {
         return Connections::NONE;
     }
     let around = FACE_STEPS.map(|d| {

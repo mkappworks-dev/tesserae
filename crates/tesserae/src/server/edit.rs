@@ -72,7 +72,7 @@ pub enum RejectReason {
     BadOrientation,
     /// A Place of air, which is a Break by another name.
     NoMaterial,
-    /// The Chunk already holds [`MAX_SHAPED_PER_CHUNK`] shaped Voxels.
+    /// The Chunk's shaped Voxels, in stairs, would pass [`MAX_SHAPED_PER_CHUNK`].
     TooManyShaped,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,

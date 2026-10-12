@@ -48,10 +48,8 @@ pub const MAX_BOXES: usize = 16;
 /// the rule was 50%, because a tick has twelve meshes in it. A Chunk of nothing
 /// but stairs takes 5.2 ms.
 ///
-/// A connected Shape is charged for its most armed self. The reference fence
-/// costs 7 stairs, so 146 fit: 1024 of them, uncharged, meshed in 5.2 ms against
-/// 1.5 ms for 1024 stairs in the same run (a loaded machine; the ratio is the
-/// point), and at 146 a Chunk of fences takes about what a Chunk of stairs does.
+/// The reference fence costs 7 stairs, so 146 fit; 1024 of them meshed in 5.2 ms
+/// against 1.5 ms for 1024 stairs (same loaded run).
 pub const MAX_SHAPED_PER_CHUNK: usize = 1024;
 
 /// Set in [`ShapeTable::light_mask`] for a shaped Voxel, meaning light is also
@@ -174,13 +172,10 @@ pub enum ShapeError {
     /// A connected Shape with no arms, an arm on a face that does not exist or
     /// is declared twice, or an arm with no boxes.
     BadArm,
-    /// Some combination of arms seals a face. A Shape that does is a cube with
-    /// extra steps: pass 1 and both light solvers assume a connected Shape
-    /// seals nothing, so that they never have to look at a neighbour.
+    /// Some combination of arms seals a face; pass 1 and the light solvers assume
+    /// a connected Shape never does.
     ConnectedSeals,
-    /// An arm reaches a boundary plane other than its own face's. Coverage
-    /// toward a neighbour then depends on more than one connection, and exact
-    /// culling would need a second hop.
+    /// An arm reaches a boundary plane other than its own face's.
     ArmTouchesOtherFace,
 }
 
@@ -496,9 +491,8 @@ impl ShapeTable {
         Ok((self.shapes - 1) as ShapeId)
     }
 
-    /// One variant for every submask of the arms, from the one grid each time
-    /// (the base plus the arms the mask selects), and the bare one in all 24
-    /// orientation slots: a connected Shape cannot be rotated.
+    /// A variant per submask of the arms, and the bare one in all 24 orientation
+    /// slots: a connected Shape cannot be rotated.
     fn register_connected(
         &mut self,
         def: &ShapeDef,
@@ -566,10 +560,7 @@ impl ShapeTable {
                 .into_iter()
                 .map(|v| v.expect("every submask is derived")),
         );
-        // The cap was sized for stairs, and a fully armed fence emits several
-        // times a stair's quads, so a connected Shape is charged for the most it
-        // can emit: a Chunk at the cap then meshes about as fast whatever fills
-        // it.
+        // Charged for its most armed self, in stairs; the cap was sized for stairs.
         let worst = self.mask_variants[first as usize..]
             .iter()
             .map(|v| v.quads.1)
