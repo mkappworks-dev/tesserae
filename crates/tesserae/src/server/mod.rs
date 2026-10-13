@@ -18,6 +18,7 @@ pub mod edit;
 #[cfg(feature = "dev")]
 mod gallery;
 mod jobs;
+mod lod_rings;
 pub mod player;
 pub mod streaming;
 pub mod world_state;

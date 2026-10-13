@@ -1,6 +1,6 @@
 # Levels, shells and the hole
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec decision 4 and 11. Pure arithmetic in `crates/tesserae`; no streaming yet.
@@ -41,3 +41,32 @@ Spec decision 4 and 11. Pure arithmetic in `crates/tesserae`; no streaming yet.
 - No streaming behaviour changes.
 
 ## Comments
+
+- Built as `LevelRings::new(settings, cell_size_m, level)` in
+  `server/lod_rings.rs`, not `Rings::for_level(settings, voxel_size, level)`:
+  `Rings`' fields are `Extent`s that the existing streaming code and tests use
+  as such, and a shell is not one. `Rings::new` now delegates to level 0 of
+  `LevelRings`, so there is one derivation. It takes the level-0 Cell in
+  metres, as `Rings::new` did, so callers pass `world.cell_size()`. The anchor
+  is `WorldSettings::chunk_at_level(metres, level)`, with `cell_size_at(level)`;
+  `chunk_at` is level 0 of it.
+- `Shell` is `outer` plus `hole: Option<Extent>`. `level_count` is a loop, not a
+  `log2`, capped at 32 so a zero view distance cannot spin.
+- The hole is `floor(finer_outer / 2) - 1` per axis, i.e.
+  `(n - 2).div_euclid(2)`, and `None` if either comes out negative. The spec's
+  vertical 1.5 - 1 = 0.5 is floored to 0. `Extent::contains` squares its
+  radius, so a negative one must never be stored: the keep hole is `None` when
+  shrinking by the hysteresis would go below 0.
+- "Overlaps by at least one of this level's Cells" holds as the spec counts it,
+  in Cells of radius (hole + 1 Cell <= finer outer, in metres). It is not a
+  worst-case guarantee for an Eye anywhere in its Cell: the two anchors differ
+  by up to a finer Cell. Ticket 08 owns what the seam needs.
+- Two `StreamingSettings` literals in `streaming.rs` tests gained
+  `..default()` for the new field; no assertion changed.
+- Tests pin, at the defaults (1.0 m Voxels): 6 levels; mesh outer horizontal
+  6, 6, 6, 6, 6, 4 and vertical 3; keep outer +1, load +2, evict +3 on each
+  axis; mesh hole (2, 0) and keep hole (1, 0) at levels 1 to 5; level 0 has
+  none. At 0.25 m Voxels: outer 24 / 12 for levels 0 to 4 and 16 / 12 for
+  level 5, level 3's hole (11, 5). Level 0 equals the old derivation for four
+  settings at three Cell sizes. `lod_distance_m` <= 192 is one level, 192.5 is
+  two.

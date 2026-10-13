@@ -77,12 +77,24 @@ impl WorldSettings {
         [v.x as i32, v.y as i32, v.z as i32]
     }
 
+    /// A Cell's edge length at a LOD level: `2^level` level-0 Cells.
+    pub fn cell_size_at(&self, level: u32) -> f32 {
+        self.cell_size() * 2f32.powi(level as i32)
+    }
+
     /// Which Chunk holds a point. The inverse of [`WorldSettings::chunk_origin`],
     /// and a floor division rather than a truncation: `-1.0 / 32.0` truncates
     /// towards zero and would put everything in the Cell below the origin into
     /// Chunk 0 alongside everything above it.
     pub fn chunk_at(&self, metres: Vec3) -> ChunkCoord {
-        let c = (metres / self.cell_size()).floor();
+        self.chunk_at_level(metres, 0)
+    }
+
+    /// Which Chunk of a LOD level's lattice holds a point: the level's anchor
+    /// when the point is the Eye.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn chunk_at_level(&self, metres: Vec3, level: u32) -> ChunkCoord {
+        let c = (metres / self.cell_size_at(level)).floor();
         ChunkCoord::new(c.x as i32, c.y as i32, c.z as i32)
     }
 }

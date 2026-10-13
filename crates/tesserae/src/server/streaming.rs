@@ -38,6 +38,7 @@ use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
 use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
+use super::lod_rings::LevelRings;
 use super::player::Player;
 use super::world_state::ChunkStore;
 use super::{ContentTables, WorldGenerator};
@@ -70,6 +71,9 @@ pub struct StreamingSettings {
     /// an anchor sitting on a Cell boundary does not load and evict the same
     /// Chunk every tick.
     pub hysteresis_m: f32,
+    /// How far, in metres, the outermost LOD level reaches. At or below
+    /// `view_distance_m` there are no coarse levels.
+    pub lod_distance_m: f32,
 }
 
 impl Default for StreamingSettings {
@@ -78,6 +82,7 @@ impl Default for StreamingSettings {
             view_distance_m: 192.0,
             vertical_distance_m: 96.0,
             hysteresis_m: 32.0,
+            lod_distance_m: 4096.0,
         }
     }
 }
@@ -261,22 +266,12 @@ pub struct Rings {
 
 impl Rings {
     pub fn new(settings: StreamingSettings, cell_size_m: f32) -> Self {
-        // Rounded up, so the configured distance is always reached rather than
-        // approached, and at least one Cell so a view distance below one Cell
-        // still renders the Chunk the anchor is standing in.
-        let cells = |metres: f32| ((metres / cell_size_m).ceil() as i32).max(1);
-        let hysteresis = cells(settings.hysteresis_m);
-        let mesh = Extent {
-            horizontal: cells(settings.view_distance_m),
-            vertical: cells(settings.vertical_distance_m),
-        };
-        let keep = mesh.grown(hysteresis);
-        let load = keep.grown(1);
+        let level_zero = LevelRings::new(settings, cell_size_m, 0);
         Rings {
-            mesh,
-            keep,
-            load,
-            evict: load.grown(hysteresis),
+            mesh: level_zero.mesh.outer,
+            keep: level_zero.keep.outer,
+            load: level_zero.load,
+            evict: level_zero.evict,
         }
     }
 }
@@ -1062,6 +1057,7 @@ mod tests {
                 view_distance_m: 1.0,
                 vertical_distance_m: 1.0,
                 hysteresis_m: 1.0,
+                ..default()
             },
             32.0,
         );
@@ -1079,6 +1075,7 @@ mod tests {
             view_distance_m: 32.0,
             vertical_distance_m: 32.0,
             hysteresis_m: 32.0,
+            ..default()
         }
     }
 
