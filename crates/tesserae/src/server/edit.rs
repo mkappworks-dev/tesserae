@@ -839,6 +839,8 @@ mod tests {
     fn a_report_and_an_intent_from_one_frame_are_both_taken() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
+            // Real time lets a slow frame run a tick that applies the edit.
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
             .insert_resource(WorldSettings::default())
             // The Player spawns 10 m from where the intent starts: too far for the
             // intent alone, near enough for the report to bring it in budget.

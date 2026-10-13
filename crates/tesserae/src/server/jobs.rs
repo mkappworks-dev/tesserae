@@ -54,6 +54,9 @@ pub(in crate::server) struct Stage<T, K = ChunkCoord> {
     /// Finishes jobs in an order that has nothing to do with dispatch order.
     #[cfg(test)]
     pub scramble: bool,
+    /// Keeps a latency-bound test's jobs from queuing behind other tests' backlog.
+    #[cfg(test)]
+    pub pool: Option<Arc<bevy::tasks::TaskPool>>,
 }
 
 impl<T, K> Default for Stage<T, K> {
@@ -71,6 +74,8 @@ impl<T, K> Default for Stage<T, K> {
             hold: Arc::default(),
             #[cfg(test)]
             scramble: false,
+            #[cfg(test)]
+            pool: None,
         }
     }
 }
@@ -91,7 +96,11 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
     /// hide it.
     pub fn spawn(&mut self, key: K, work: impl FnOnce() -> T + Send + 'static) {
         debug_assert!(!self.contains(key), "{key:?} already has a job in flight");
+        #[cfg(not(test))]
         let pool = AsyncComputeTaskPool::get();
+        #[cfg(test)]
+        let pool: &bevy::tasks::TaskPool =
+            self.pool.as_deref().unwrap_or(AsyncComputeTaskPool::get());
         #[cfg(not(test))]
         let task = pool.spawn(async move { work() });
         // Held and scrambled by awaiting, never by blocking: a job that parked

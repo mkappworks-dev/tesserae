@@ -1022,6 +1022,13 @@ mod tests {
             (ready, unloaded)
         }
 
+        fn lod_on_private_pool(&mut self) {
+            let pool = Arc::new(bevy::tasks::TaskPoolBuilder::new().num_threads(2).build());
+            let mut jobs = self.app.world_mut().resource_mut::<LodJobs>();
+            jobs.generate.pool = Some(pool.clone());
+            jobs.mesh.pool = Some(pool);
+        }
+
         fn lod_jobs(&self) -> &LodJobs {
             self.app.world().resource::<LodJobs>()
         }
@@ -1421,6 +1428,7 @@ mod tests {
                 },
             },
         );
+        h.lod_on_private_pool();
 
         // Dispatch is synchronous, so the first tick's count does not depend on
         // how fast the workers are, and nothing has landed yet to be capped.
@@ -1550,6 +1558,7 @@ mod tests {
                 ..unlimited()
             },
         );
+        h.lod_on_private_pool();
         h.lod_tick();
         let started: Vec<LodKey> = h.lod_jobs().generate.keys();
         assert_eq!(started.len(), 8);
