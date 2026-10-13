@@ -16,7 +16,8 @@ use bevy::window::PresentMode;
 
 use crate::cost::{FrameCost, MainThreadCost};
 
-use crate::client::camera::FlyCamera;
+use crate::client::camera::{FlyCamera, MainCamera};
+use crate::server::player::FLY_SPEED_CEILING_MPS;
 use crate::server::streaming::stats::StreamingStats;
 
 /// Seconds of simulated flight before the shutter, so the picture shows Chunks
@@ -38,6 +39,11 @@ struct Capture {
     /// Metres per second, when the player's own speed is not the one wanted: a
     /// sprint asks streaming for several times what a walk does.
     speed_m_s: Option<f32>,
+    /// Degrees above the horizon the camera looks, set on the first frame. The
+    /// default view looks down at the ground, which shows nothing of the distance.
+    pitch_deg: Option<f32>,
+    /// Metres climbed over the flight, to see the rings from above.
+    lift_m: f32,
     /// Earliest time the flight may start, so two builds whose fills end at
     /// different times fly at the same time since launch.
     fly_after_s: f32,
@@ -183,6 +189,10 @@ pub(super) fn plugin(app: &mut App) {
         speed_m_s: std::env::var("TESSERAE_SCREENSHOT_SPEED_M_S")
             .ok()
             .and_then(|v| v.parse().ok()),
+        pitch_deg: std::env::var("TESSERAE_SCREENSHOT_PITCH_DEG")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        lift_m: seconds("TESSERAE_SCREENSHOT_LIFT_M", 0.0),
         offscreen: std::env::var_os("TESSERAE_SCREENSHOT_OFFSCREEN").is_some(),
         taken: false,
         pending_seen: false,
@@ -196,6 +206,7 @@ pub(super) fn plugin(app: &mut App) {
                 capture.offscreen && target.is_none()
             }),
             watch_frames,
+            aim,
             fly_forward,
             report,
             shutter,
@@ -223,7 +234,7 @@ fn uncap_frame_rate(mut windows: Query<&mut Window>) {
 #[derive(Resource)]
 struct Offscreen(Handle<Image>);
 
-/// Renders the camera into an image instead of the window, for a capture.
+/// Renders the cameras into an image instead of the window, for a capture.
 /// `TESSERAE_SCREENSHOT_OFFSCREEN` turns it on.
 ///
 /// A window that is not being presented is never drawn, and a capture of one is
@@ -235,13 +246,17 @@ struct Offscreen(Handle<Image>);
 fn render_offscreen(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    camera: Single<Entity, With<Camera3d>>,
+    cameras: Query<Entity, With<Camera3d>>,
 ) {
     let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
-    commands
-        .entity(*camera)
-        .insert(RenderTarget::Image(handle.clone().into()));
+    // Every camera: the far layer left on the window would be a second picture
+    // on the display and none of it in the image.
+    for camera in &cameras {
+        commands
+            .entity(camera)
+            .insert(RenderTarget::Image(handle.clone().into()));
+    }
     commands.insert_resource(Offscreen(handle));
 }
 
@@ -283,7 +298,7 @@ fn watch_frames(
 fn fly_forward(
     time: Res<Time>,
     capture: Res<Capture>,
-    camera: Single<(&mut Transform, &FlyCamera)>,
+    camera: Single<(&mut Transform, &FlyCamera), With<MainCamera>>,
 ) {
     if !capture
         .frames
@@ -294,7 +309,36 @@ fn fly_forward(
     let (mut transform, fly) = camera.into_inner();
     let heading = transform.forward().with_y(0.0).normalize_or_zero();
     let speed = capture.speed_m_s.unwrap_or(fly.speed);
-    transform.translation += heading * speed * time.delta_secs();
+    let climb = climb_m_s(capture.lift_m, capture.fly_for_s, speed);
+    transform.translation += (heading * speed + Vec3::Y * climb) * time.delta_secs();
+}
+
+/// The climb that adds `lift_m` over the flight, held to what the Server's speed
+/// ceiling leaves after the horizontal speed. Faster than that and the Server
+/// clamps the Player back, so the picture would not be from where it is said to
+/// be; a longer `TESSERAE_SCREENSHOT_FLY_S` is the way to climb further.
+fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
+    let wanted = lift_m / fly_for_s.max(f32::EPSILON);
+    let room = (FLY_SPEED_CEILING_MPS.powi(2) - horizontal_m_s.powi(2))
+        .max(0.0)
+        .sqrt();
+    wanted.clamp(-room, room)
+}
+
+fn aim(
+    capture: Res<Capture>,
+    camera: Single<(&mut Transform, &mut FlyCamera), With<MainCamera>>,
+    mut aimed: Local<bool>,
+) {
+    let Some(pitch_deg) = capture.pitch_deg else {
+        return;
+    };
+    if std::mem::replace(&mut *aimed, true) {
+        return;
+    }
+    let (mut transform, mut fly) = camera.into_inner();
+    fly.pitch = pitch_deg.to_radians();
+    transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }
 
 /// Logs what the picture is of, and the frame times behind it, as one line of
@@ -305,7 +349,7 @@ fn report(
     time: Res<Time>,
     capture: Res<Capture>,
     stats: Res<StreamingStats>,
-    camera: Single<&Transform, With<Camera3d>>,
+    camera: Single<&Transform, With<MainCamera>>,
     drawn: Query<(), With<Mesh3d>>,
 ) {
     if !capture.due(time.elapsed_secs()) {
@@ -440,6 +484,16 @@ mod tests {
         assert_eq!(log.flight.len(), 2);
         let flight = log.flight_summary().expect("frames were recorded");
         assert_eq!(flight.worst_s, 0.020);
+    }
+
+    #[test]
+    fn a_climb_is_held_to_what_the_speed_ceiling_leaves_after_the_horizontal() {
+        assert_eq!(climb_m_s(60.0, 6.0, 12.0), 10.0);
+        assert_eq!(climb_m_s(-60.0, 6.0, 12.0), -10.0);
+        let climb = climb_m_s(6000.0, 6.0, 12.0);
+        assert!(12.0f32.hypot(climb) <= FLY_SPEED_CEILING_MPS + 1e-3);
+        assert_eq!(climb_m_s(100.0, 6.0, FLY_SPEED_CEILING_MPS), 0.0);
+        assert_eq!(climb_m_s(0.0, 6.0, 12.0), 0.0);
     }
 
     #[test]

@@ -4,23 +4,60 @@
 //! receives a finished `ChunkMesh` and a coordinate to drop, which is what lets
 //! `ChunkStore`'s mutators stay private to `crate::server`. See
 //! `docs/adr/0002-client-server-from-day-one.md`.
+//!
+//! Terrain is drawn by two cameras that share one target: the near camera draws
+//! level 0 and everything that is not terrain, the far camera draws every coarse
+//! level underneath it. See `.scratch/2026-10-13-phase-6-lod/spec.md`, decision 8.
 
+use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
+use bevy::light::NotShadowCaster;
+use bevy::mesh::MeshTag;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use tesserae_core::ChunkMesh;
 
+use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
-use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension};
-use crate::server::streaming::{ChunkMeshReady, ChunkUnloaded};
+use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
+use crate::server::streaming::{
+    ChunkMeshReady, ChunkUnloaded, LodMeshReady, LodUnloaded, StreamingSettings,
+};
 use crate::world::{ChunkCoord, WorldSettings};
 
-/// The entity drawing each Chunk. Render entities, not World state, so the
-/// Client owns this outright.
+/// Level 0, the UI and everything that is not distant terrain.
+const NEAR_LAYER: usize = 0;
+/// Every coarse level.
+const FAR_LAYER: usize = 1;
+
+fn layer_of(level: u32) -> RenderLayers {
+    RenderLayers::layer(if level == 0 { NEAR_LAYER } else { FAR_LAYER })
+}
+
+/// The entity drawing each Chunk of each level, by the level's own lattice.
+/// Render entities, not World state, so the Client owns this outright.
 #[derive(Resource, Default)]
-struct ChunkEntities(HashMap<ChunkCoord, Entity>);
+struct ChunkEntities(HashMap<(u32, ChunkCoord), Entity>);
 
 /// One material for every Chunk, as the Material index is a vertex attribute.
 #[derive(Resource)]
 struct TerrainMaterial(Handle<ChunkMaterial>);
+
+/// Level 0 and coarse meshes arrive on different messages and are drawn the same
+/// way, so one handler walks both.
+#[derive(SystemParam)]
+struct IncomingMeshes<'w, 's> {
+    level0: MessageReader<'w, 's, ChunkMeshReady>,
+    coarse: MessageReader<'w, 's, LodMeshReady>,
+}
+
+impl IncomingMeshes<'_, '_> {
+    fn read(&mut self) -> impl Iterator<Item = (u32, ChunkCoord, &ChunkMesh)> {
+        let level0 = self.level0.read().map(|m| (0, m.coord, &m.mesh));
+        let coarse = self.coarse.read().map(|m| (m.level, m.coord, &m.mesh));
+        level0.chain(coarse)
+    }
+}
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ChunkEntities>()
@@ -29,14 +66,34 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, (upload_meshes, drop_meshes));
 }
 
-fn add_material(mut commands: Commands, mut materials: ResMut<Assets<ChunkMaterial>>) {
+fn add_material(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+    world: Res<WorldSettings>,
+) {
     commands.insert_resource(TerrainMaterial(materials.add(ChunkMaterial {
         base: StandardMaterial {
             perceptual_roughness: 0.95,
             ..default()
         },
-        extension: ChunkMaterialExtension::default(),
+        extension: ChunkMaterialExtension {
+            lod: LodParams {
+                voxel_size: world.voxel_size,
+                tint: debug_tint(),
+            },
+            ..default()
+        },
     })));
+}
+
+#[cfg(feature = "dev")]
+fn debug_tint() -> u32 {
+    std::env::var("TESSERAE_LOD_TINT").is_ok_and(|v| v != "0") as u32
+}
+
+#[cfg(not(feature = "dev"))]
+fn debug_tint() -> u32 {
+    0
 }
 
 #[cfg_attr(
@@ -48,7 +105,7 @@ fn add_material(mut commands: Commands, mut materials: ResMut<Assets<ChunkMateri
 )]
 fn upload_meshes(
     mut commands: Commands,
-    mut incoming: MessageReader<ChunkMeshReady>,
+    mut incoming: IncomingMeshes,
     mut entities: ResMut<ChunkEntities>,
     mut meshes: ResMut<Assets<Mesh>>,
     material: Res<TerrainMaterial>,
@@ -60,11 +117,12 @@ fn upload_meshes(
     let started = std::time::Instant::now();
     #[cfg(feature = "dev")]
     let mut uploaded = 0;
-    for ChunkMeshReady { coord, mesh } in incoming.read() {
+    for (level, coord, mesh) in incoming.read() {
+        let key = (level, coord);
         // The blended layer has no draw call yet (ticket 04), so a Chunk with
         // nothing opaque is nothing to show.
         if mesh.opaque.is_empty() {
-            despawn(&mut commands, &mut meshes, &mut entities, &existing, *coord);
+            despawn(&mut commands, &mut meshes, &mut entities, &existing, key);
             continue;
         }
 
@@ -72,8 +130,8 @@ fn upload_meshes(
         {
             uploaded += 1;
         }
-        let handle = meshes.add(chunk_mesh_to_mesh(&mesh.opaque, world.voxel_size));
-        match entities.0.get(coord) {
+        let handle = meshes.add(chunk_mesh_to_mesh(&mesh.opaque, world.voxel_size_at(level)));
+        match entities.0.get(&key) {
             // Replacing rather than despawning and respawning keeps the
             // entity id stable, and dropping the old handle is what stops a
             // few minutes of flying from leaking every mesh ever uploaded.
@@ -84,15 +142,19 @@ fn upload_meshes(
                 commands.entity(entity).insert(Mesh3d(handle));
             }
             None => {
-                let entity = commands
-                    .spawn((
-                        Mesh3d(handle),
-                        MeshMaterial3d(material.0.clone()),
-                        Transform::from_translation(world.chunk_origin(*coord)),
-                        *coord,
-                    ))
-                    .id();
-                entities.0.insert(*coord, entity);
+                let mut entity = commands.spawn((
+                    Mesh3d(handle),
+                    MeshMaterial3d(material.0.clone()),
+                    Transform::from_translation(world.chunk_origin_at(coord, level)),
+                    coord,
+                    MeshTag::new(level),
+                    layer_of(level),
+                ));
+                // The far camera's cascades would have nothing else to render.
+                if level > 0 {
+                    entity.insert(NotShadowCaster);
+                }
+                entities.0.insert(key, entity.id());
             }
         }
     }
@@ -104,13 +166,16 @@ fn upload_meshes(
 
 fn drop_meshes(
     mut commands: Commands,
-    mut outgoing: MessageReader<ChunkUnloaded>,
+    mut level0: MessageReader<ChunkUnloaded>,
+    mut coarse: MessageReader<LodUnloaded>,
     mut entities: ResMut<ChunkEntities>,
     mut meshes: ResMut<Assets<Mesh>>,
     existing: Query<&Mesh3d>,
 ) {
-    for ChunkUnloaded { coord } in outgoing.read() {
-        despawn(&mut commands, &mut meshes, &mut entities, &existing, *coord);
+    let level0 = level0.read().map(|m| (0, m.coord));
+    let coarse = coarse.read().map(|m| (m.level, m.coord));
+    for key in level0.chain(coarse) {
+        despawn(&mut commands, &mut meshes, &mut entities, &existing, key);
     }
 }
 
@@ -119,9 +184,9 @@ fn despawn(
     meshes: &mut Assets<Mesh>,
     entities: &mut ChunkEntities,
     existing: &Query<&Mesh3d>,
-    coord: ChunkCoord,
+    key: (u32, ChunkCoord),
 ) {
-    let Some(entity) = entities.0.remove(&coord) else {
+    let Some(entity) = entities.0.remove(&key) else {
         return;
     };
     if let Ok(mesh) = existing.get(entity) {
@@ -137,6 +202,8 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
             ..default()
         },
         Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
+        // A light only affects views whose layers intersect its own.
+        RenderLayers::from_layers(&[NEAR_LAYER, FAR_LAYER]),
     ));
 
     // The sky dome's radiance, no longer a flat fill: the chunk shader gates it
@@ -150,48 +217,188 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
 /// starts is the Server's, so the Client's camera starts where the Player does.
 const VIEW_PITCH: f32 = -0.3;
 
+/// The far camera's near plane, as a fraction of the level-0 radius. Coarse
+/// geometry closer than this is clipped, and the near layer always covers that
+/// distance, so a coarse peak cannot fill the view of an Eye hovering beside it.
+const FAR_NEAR_FRACTION: f32 = 0.25;
+
 /// In `PostStartup`, so the Server's `Startup` commands have been applied and
 /// [`SpawnPoint`] exists. Ordering through the schedule rather than through an
 /// edge between two plugins' systems, which would have to be kept in step.
 ///
 /// [`SpawnPoint`]: crate::server::world_state::SpawnPoint
-fn spawn_camera(mut commands: Commands, spawn: Res<crate::server::world_state::SpawnPoint>) {
+fn spawn_camera(
+    mut commands: Commands,
+    spawn: Res<crate::server::world_state::SpawnPoint>,
+    streaming: Res<StreamingSettings>,
+    world: Res<WorldSettings>,
+) {
     let eye = spawn.eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
 
+    let near = commands
+        .spawn((
+            Camera3d::default(),
+            Camera {
+                order: 1,
+                clear_color: ClearColorConfig::None,
+                ..default()
+            },
+            RenderLayers::layer(NEAR_LAYER),
+            MainCamera,
+            // The UI is drawn by whichever camera it targets, and it must be the
+            // one that runs last or the far layer would be drawn over it.
+            IsDefaultUiCamera,
+            pose,
+            // Propagation runs in `PostUpdate`; without this the first frame's pose
+            // report and intent would carry the origin, not the camera.
+            GlobalTransform::from(pose),
+            super::camera::FlyCamera::looking_along(direction),
+            super::camera::CameraHome(pose),
+        ))
+        .id();
+
     commands.spawn((
         Camera3d::default(),
-        pose,
-        // Propagation runs in `PostUpdate`; without this the first frame's pose
-        // report and intent would carry the origin, not the camera.
+        Camera {
+            order: 0,
+            ..default()
+        },
+        RenderLayers::layer(FAR_LAYER),
+        Projection::Perspective(PerspectiveProjection {
+            near: streaming.view_distance_m * FAR_NEAR_FRACTION,
+            far: streaming.lod_distance_m.max(streaming.view_distance_m) + world.cell_size(),
+            ..default()
+        }),
+        // Identity under the near camera, so it cannot drift from it.
+        ChildOf(near),
         GlobalTransform::from(pose),
-        super::camera::FlyCamera::looking_along(direction),
-        super::camera::CameraHome(pose),
+        FarCamera,
     ));
 }
+
+/// The camera that draws the coarse levels.
+#[derive(Component)]
+struct FarCamera;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::{Chunk, ChunkLight, LitChunk, Tables, Voxel, mesh_chunk, worldgen};
 
+    fn camera_app(eye: Vec3, streaming: StreamingSettings) -> App {
+        let mut app = App::new();
+        app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(eye))
+            .insert_resource(streaming)
+            .init_resource::<WorldSettings>();
+        app.world_mut().run_system_once(spawn_camera).unwrap();
+        app
+    }
+
     #[test]
     fn the_camera_is_where_it_is_placed_before_the_first_propagation() {
-        use bevy::ecs::system::RunSystemOnce;
-        let mut app = App::new();
-        app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(
-            Vec3::new(3.0, 4.0, 5.0),
-        ));
-        app.world_mut().run_system_once(spawn_camera).unwrap();
+        let mut app = camera_app(Vec3::new(3.0, 4.0, 5.0), StreamingSettings::default());
         let (local, global) = app
             .world_mut()
-            .query_filtered::<(&Transform, &GlobalTransform), With<Camera3d>>()
+            .query_filtered::<(&Transform, &GlobalTransform), With<MainCamera>>()
             .single(app.world())
             .unwrap();
         assert_eq!(global.translation(), local.translation);
         assert_ne!(global.translation(), Vec3::ZERO);
+    }
+
+    #[test]
+    fn the_far_camera_is_a_child_of_the_main_camera_at_its_origin() {
+        let mut app = camera_app(Vec3::new(3.0, 4.0, 5.0), StreamingSettings::default());
+        let main = app
+            .world_mut()
+            .query_filtered::<Entity, With<MainCamera>>()
+            .single(app.world())
+            .unwrap();
+        let (parent, transform, global) = app
+            .world_mut()
+            .query_filtered::<(&ChildOf, &Transform, &GlobalTransform), With<FarCamera>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(parent.parent(), main);
+        assert_eq!(*transform, Transform::IDENTITY);
+        let main_at = app.world().get::<GlobalTransform>(main).unwrap();
+        assert_eq!(global.translation(), main_at.translation());
+    }
+
+    fn projection_of<F: bevy::ecs::query::QueryFilter>(app: &mut App) -> PerspectiveProjection {
+        let projection = app
+            .world_mut()
+            .query_filtered::<&Projection, F>()
+            .single(app.world())
+            .unwrap();
+        let Projection::Perspective(p) = projection else {
+            panic!("both cameras are perspective");
+        };
+        p.clone()
+    }
+
+    #[test]
+    fn the_far_projection_reaches_the_lod_distance_and_starts_a_quarter_out() {
+        let streaming = StreamingSettings::default();
+        let mut app = camera_app(Vec3::ZERO, streaming);
+        let far = projection_of::<With<FarCamera>>(&mut app);
+        let cell = WorldSettings::default().cell_size();
+        assert!(far.far >= streaming.lod_distance_m + cell);
+        assert_eq!(far.near, streaming.view_distance_m / 4.0);
+
+        let near = projection_of::<With<MainCamera>>(&mut app);
+        assert_eq!(far.fov, near.fov, "a seam between the layers otherwise");
+    }
+
+    #[test]
+    fn a_world_with_no_coarse_levels_still_has_a_far_plane_past_its_view() {
+        let streaming = StreamingSettings {
+            lod_distance_m: 100.0,
+            ..default()
+        };
+        let mut app = camera_app(Vec3::ZERO, streaming);
+        let far = projection_of::<With<FarCamera>>(&mut app);
+        assert!(far.far > streaming.view_distance_m);
+    }
+
+    #[test]
+    fn the_near_camera_draws_over_the_far_one_and_owns_the_ui() {
+        type Row = (
+            &'static Camera,
+            Has<IsDefaultUiCamera>,
+            &'static RenderLayers,
+        );
+        let mut app = camera_app(Vec3::ZERO, StreamingSettings::default());
+        let mut near_query = app.world_mut().query_filtered::<Row, With<MainCamera>>();
+        let mut far_query = app.world_mut().query_filtered::<Row, With<FarCamera>>();
+        let world = app.world();
+        let (near, near_ui, near_layers) = near_query.single(world).unwrap();
+        let (far, far_ui, far_layers) = far_query.single(world).unwrap();
+        assert!(near.order > far.order);
+        assert!(matches!(near.clear_color, ClearColorConfig::None));
+        assert!(matches!(far.clear_color, ClearColorConfig::Default));
+        assert!(near_ui && !far_ui);
+        assert_eq!(*near_layers, RenderLayers::layer(0));
+        assert_eq!(*far_layers, RenderLayers::layer(1));
+    }
+
+    #[test]
+    fn the_sun_lights_both_layers() {
+        let mut app = App::new();
+        app.init_resource::<GlobalAmbientLight>();
+        app.world_mut().run_system_once(spawn_light).unwrap();
+        let layers = app
+            .world_mut()
+            .query_filtered::<&RenderLayers, With<DirectionalLight>>()
+            .single(app.world())
+            .unwrap();
+        assert!(layers.intersects(&RenderLayers::layer(NEAR_LAYER)));
+        assert!(layers.intersects(&RenderLayers::layer(FAR_LAYER)));
     }
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
@@ -205,6 +412,8 @@ mod tests {
             .init_resource::<ChunkEntities>()
             .add_message::<ChunkMeshReady>()
             .add_message::<ChunkUnloaded>()
+            .add_message::<LodMeshReady>()
+            .add_message::<LodUnloaded>()
             .add_systems(Startup, add_material)
             .add_systems(Update, (upload_meshes, drop_meshes));
         app.update();
@@ -229,12 +438,22 @@ mod tests {
         app.update();
     }
 
-    fn entity_for(app: &App, coord: ChunkCoord) -> Option<Entity> {
+    fn send_coarse(app: &mut App, level: u32, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
+        app.world_mut()
+            .write_message(LodMeshReady { level, coord, mesh });
+        app.update();
+    }
+
+    fn entity_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
         app.world()
             .resource::<ChunkEntities>()
             .0
-            .get(&coord)
+            .get(&(level, coord))
             .copied()
+    }
+
+    fn entity_for(app: &App, coord: ChunkCoord) -> Option<Entity> {
+        entity_at(app, 0, coord)
     }
 
     fn drawn(app: &mut App) -> usize {
@@ -242,6 +461,17 @@ mod tests {
             .query_filtered::<Entity, With<Mesh3d>>()
             .iter(app.world())
             .count()
+    }
+
+    fn positions(app: &App, entity: Entity) -> Vec<[f32; 3]> {
+        let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
+        let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions are Float32x3");
+        };
+        positions.clone()
     }
 
     #[test]
@@ -256,6 +486,64 @@ mod tests {
         let transform = app.world().get::<Transform>(entity).expect("a Transform");
         assert_eq!(transform.translation, world.chunk_origin(coord));
         assert_eq!(app.world().get::<ChunkCoord>(entity), Some(&coord));
+    }
+
+    #[test]
+    fn a_coarse_chunk_sits_at_its_levels_cell_and_is_scaled_by_its_levels_voxel() {
+        let mut app = app();
+        let coord = ChunkCoord::new(1, -1, 2);
+        send_mesh(&mut app, coord, geometry());
+        send_coarse(&mut app, 2, coord, geometry());
+
+        let coarse = entity_at(&app, 2, coord).expect("an entity for the coarse Chunk");
+        let fine = entity_for(&app, coord).expect("level 0 is a different entity");
+        assert_ne!(coarse, fine);
+
+        let world = *app.world().resource::<WorldSettings>();
+        // Level 2 is 4 m Voxels in 128 m Cells.
+        assert_eq!(
+            app.world().get::<Transform>(coarse).unwrap().translation,
+            Vec3::new(128.0, -128.0, 256.0)
+        );
+        assert_eq!(
+            app.world().get::<Transform>(coarse).unwrap().translation,
+            world.chunk_origin_at(coord, 2)
+        );
+        let fine_positions = positions(&app, fine);
+        let coarse_positions = positions(&app, coarse);
+        assert_eq!(fine_positions.len(), coarse_positions.len());
+        for (f, c) in fine_positions.iter().zip(&coarse_positions) {
+            assert_eq!(*c, f.map(|v| v * 4.0));
+        }
+    }
+
+    #[test]
+    fn level_zero_is_on_the_near_layer_and_a_coarse_level_on_the_far_one_with_its_tag() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, geometry());
+        for level in [1, 3] {
+            send_coarse(&mut app, level, coord, geometry());
+        }
+
+        let check = |app: &App, level: u32, layer: usize, casts_shadows: bool| {
+            let entity = entity_at(app, level, coord).unwrap();
+            let world = app.world();
+            assert_eq!(world.get::<MeshTag>(entity).unwrap().value, level);
+            assert_eq!(
+                world.get::<RenderLayers>(entity),
+                Some(&RenderLayers::layer(layer)),
+                "level {level}"
+            );
+            assert_eq!(
+                world.get::<NotShadowCaster>(entity).is_none(),
+                casts_shadows,
+                "level {level}"
+            );
+        };
+        check(&app, 0, NEAR_LAYER, true);
+        check(&app, 1, FAR_LAYER, false);
+        check(&app, 3, FAR_LAYER, false);
     }
 
     #[test]
@@ -282,6 +570,24 @@ mod tests {
     }
 
     #[test]
+    fn a_second_coarse_mesh_replaces_the_first_and_drops_its_asset() {
+        let mut app = app();
+        let coord = ChunkCoord::new(4, 0, 1);
+        send_coarse(&mut app, 1, coord, geometry());
+        let entity = entity_at(&app, 1, coord).unwrap();
+        let first = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+
+        send_coarse(&mut app, 1, coord, geometry());
+
+        assert_eq!(entity_at(&app, 1, coord), Some(entity));
+        assert_eq!(drawn(&mut app), 1);
+        assert!(
+            app.world().resource::<Assets<Mesh>>().get(&first).is_none(),
+            "the superseded coarse Mesh asset is still loaded"
+        );
+    }
+
+    #[test]
     fn an_empty_mesh_despawns_rather_than_drawing_nothing() {
         let mut app = app();
         let coord = ChunkCoord::new(0, 0, 0);
@@ -294,10 +600,44 @@ mod tests {
     }
 
     #[test]
+    fn an_empty_coarse_mesh_despawns_only_its_own_level() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, geometry());
+        send_coarse(&mut app, 1, coord, geometry());
+        send_coarse(&mut app, 2, coord, geometry());
+        let handle = app
+            .world()
+            .get::<Mesh3d>(entity_at(&app, 1, coord).unwrap())
+            .unwrap()
+            .0
+            .clone();
+
+        send_coarse(&mut app, 1, coord, tesserae_core::ChunkMesh::default());
+
+        assert_eq!(entity_at(&app, 1, coord), None);
+        assert!(entity_at(&app, 2, coord).is_some());
+        assert!(entity_for(&app, coord).is_some());
+        assert_eq!(drawn(&mut app), 2);
+        assert!(
+            app.world()
+                .resource::<Assets<Mesh>>()
+                .get(&handle)
+                .is_none()
+        );
+    }
+
+    #[test]
     fn an_empty_mesh_for_an_unknown_chunk_is_not_an_error() {
         let mut app = app();
         send_mesh(
             &mut app,
+            ChunkCoord::new(9, 9, 9),
+            tesserae_core::ChunkMesh::default(),
+        );
+        send_coarse(
+            &mut app,
+            3,
             ChunkCoord::new(9, 9, 9),
             tesserae_core::ChunkMesh::default(),
         );
@@ -321,6 +661,34 @@ mod tests {
 
         assert_eq!(entity_for(&app, coord), None);
         assert_eq!(drawn(&mut app), 0);
+        assert!(
+            app.world()
+                .resource::<Assets<Mesh>>()
+                .get(&handle)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unloading_a_coarse_chunk_frees_it_and_leaves_the_other_levels_alone() {
+        let mut app = app();
+        let coord = ChunkCoord::new(-3, 1, 4);
+        send_mesh(&mut app, coord, geometry());
+        send_coarse(&mut app, 1, coord, geometry());
+        let handle = app
+            .world()
+            .get::<Mesh3d>(entity_at(&app, 1, coord).unwrap())
+            .unwrap()
+            .0
+            .clone();
+
+        app.world_mut()
+            .write_message(LodUnloaded { level: 1, coord });
+        app.update();
+
+        assert_eq!(entity_at(&app, 1, coord), None);
+        assert!(entity_for(&app, coord).is_some());
+        assert_eq!(drawn(&mut app), 1);
         assert!(
             app.world()
                 .resource::<Assets<Mesh>>()

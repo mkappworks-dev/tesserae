@@ -113,6 +113,30 @@ mod tests {
     }
 
     #[test]
+    fn a_coarse_level_scales_by_its_own_voxel_size() {
+        use crate::world::WorldSettings;
+        let world = WorldSettings {
+            voxel_size: 0.25,
+            ..default()
+        };
+        // Level 3 is 2 m Voxels, so a 32-Voxel Chunk is a 64 m Cell.
+        let (source, mesh) = terrain_mesh(world.voxel_size_at(3));
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            panic!("positions are Float32x3");
+        };
+        for (scaled, unscaled) in positions.iter().zip(&source.opaque.positions) {
+            assert_eq!(scaled, &unscaled.map(|c| c * 2.0));
+        }
+        let widest = positions.iter().map(|p| p[0]).fold(0.0f32, f32::max);
+        assert!(
+            widest <= world.cell_size_at(3),
+            "{widest} m exceeds the Cell"
+        );
+    }
+
+    #[test]
     fn normals_and_uvs_pass_through_unscaled() {
         let (source, mesh) = terrain_mesh(0.25);
         let Some(VertexAttributeValues::Float32x3(normals)) =

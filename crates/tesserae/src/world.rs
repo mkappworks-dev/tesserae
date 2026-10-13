@@ -57,8 +57,19 @@ impl WorldSettings {
     }
 
     /// Where a Chunk's Voxel (0, 0, 0) sits, in metres.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn chunk_origin(&self, coord: ChunkCoord) -> Vec3 {
-        Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.cell_size()
+        self.chunk_origin_at(coord, 0)
+    }
+
+    /// [`WorldSettings::chunk_origin`] for a Chunk of a LOD level's own lattice.
+    pub fn chunk_origin_at(&self, coord: ChunkCoord, level: u32) -> Vec3 {
+        Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.cell_size_at(level)
+    }
+
+    /// A Voxel's edge length at a LOD level: `2^level` level-0 Voxels.
+    pub fn voxel_size_at(&self, level: u32) -> f32 {
+        self.voxel_size * 2f32.powi(level as i32)
     }
 
     /// Which Voxel of the lattice holds a point, in the one continuous
@@ -146,6 +157,25 @@ mod tests {
                 assert_eq!(world.chunk_at(inside), coord);
             }
         }
+    }
+
+    #[test]
+    fn a_coarse_levels_voxel_and_origin_double_per_level() {
+        let world = WorldSettings {
+            voxel_size: 0.25,
+            ..default()
+        };
+        assert_eq!(world.voxel_size_at(0), 0.25);
+        assert_eq!(world.voxel_size_at(3), 2.0);
+        // A level-2 Cell is 32 Voxels of 1 m, so lattice step 3 is 96 m.
+        assert_eq!(
+            world.chunk_origin_at(ChunkCoord::new(3, -1, 0), 2),
+            Vec3::new(96.0, -32.0, 0.0)
+        );
+        assert_eq!(
+            world.chunk_origin_at(ChunkCoord::new(3, -1, 0), 0),
+            world.chunk_origin(ChunkCoord::new(3, -1, 0))
+        );
     }
 
     #[test]
