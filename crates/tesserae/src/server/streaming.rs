@@ -61,6 +61,27 @@ pub struct ChunkUnloaded {
     pub coord: ChunkCoord,
 }
 
+/// A coarse Chunk's finished geometry, for the Client to upload.
+///
+/// `mesh` is in that level's Voxel-index space: the Client scales it by
+/// `voxel_size * 2^level` and places the Chunk at `coord * cell_size * 2^level`.
+/// Empty means despawn, as at level 0. Level 0 never appears here.
+#[derive(Message)]
+#[cfg_attr(not(test), allow(dead_code))] // The Client reads these (ticket 06).
+pub struct LodMeshReady {
+    pub level: u32,
+    pub coord: ChunkCoord,
+    pub mesh: ChunkMesh,
+}
+
+/// The Client should stop drawing this coarse Chunk.
+#[derive(Message)]
+#[cfg_attr(not(test), allow(dead_code))] // The Client reads these (ticket 06).
+pub struct LodUnloaded {
+    pub level: u32,
+    pub coord: ChunkCoord,
+}
+
 /// How far the Server streams. Not World save data — see `crate::world`.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct StreamingSettings {
@@ -380,6 +401,8 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<Jobs>()
         .add_message::<ChunkMeshReady>()
         .add_message::<ChunkUnloaded>()
+        .add_message::<LodMeshReady>()
+        .add_message::<LodUnloaded>()
         .add_plugins(lod::plugin)
         .add_systems(FixedUpdate, (stream, lod::stream_lod).chain());
     #[cfg(feature = "dev")]
@@ -855,8 +878,18 @@ fn dispatch_meshes(
 #[cfg(feature = "dev")]
 pub mod stats {
     use super::*;
+    use crate::server::lod_rings::level_count;
 
-    #[derive(Resource, Default, Clone, Copy, Debug)]
+    /// What the Server holds of one LOD level.
+    #[derive(Default, Clone, Copy, Debug)]
+    pub struct LevelStats {
+        /// Chunks held, including the margin no mesh is built for.
+        pub held: usize,
+        /// Chunks the Client holds a mesh for. Counts empty meshes.
+        pub meshed: usize,
+    }
+
+    #[derive(Resource, Default, Clone, Debug)]
     pub struct StreamingStats {
         /// Chunks the Server holds, including the margin the Client never sees.
         pub loaded: usize,
@@ -879,6 +912,8 @@ pub mod stats {
         /// mesh was delivered anyway and followed by a fresh one.
         pub landed: [usize; 3],
         pub stale: [usize; 3],
+        /// Indexed by level. Level 0 repeats `loaded` and `meshed`.
+        pub levels: Vec<LevelStats>,
     }
 
     pub(super) fn plugin(app: &mut App) {
@@ -898,6 +933,8 @@ pub mod stats {
         order: Res<LoadOrder>,
         settings: Res<StreamingSettings>,
         world: Res<WorldSettings>,
+        lod_store: Res<lod::LodStore>,
+        lod_state: Res<lod::LodState>,
         player: Query<&Player>,
     ) {
         let center = player
@@ -926,6 +963,14 @@ pub mod stats {
                     .iter()
                     .any(|&c| mesh.contains(delta(center, c)))
         });
+        let mut levels = vec![LevelStats {
+            held: store.coords().count(),
+            meshed: meshes.delivered.len(),
+        }];
+        levels.extend((1..level_count(&settings)).map(|level| LevelStats {
+            held: lod_store.len(level),
+            meshed: lod_state.delivered_len(level),
+        }));
         *stats = StreamingStats {
             loaded: store.coords().count(),
             meshed: meshes.delivered.len(),
@@ -942,6 +987,7 @@ pub mod stats {
                 jobs.relight.stale(),
                 jobs.mesh.stale(),
             ],
+            levels,
         };
     }
 }
@@ -1151,7 +1197,9 @@ pub(in crate::server) mod tests {
                 .init_resource::<MeshState>()
                 .init_resource::<Jobs>()
                 .add_message::<ChunkMeshReady>()
-                .add_message::<ChunkUnloaded>();
+                .add_message::<ChunkUnloaded>()
+                .add_message::<LodMeshReady>()
+                .add_message::<LodUnloaded>();
             let anchor = app.world_mut().spawn(Player::at(Vec3::ZERO)).id();
             Harness { app, anchor }
         }
@@ -1251,7 +1299,7 @@ pub(in crate::server) mod tests {
         }
     }
 
-    fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
+    pub(in crate::server) fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
         let layer = |a: &MeshLayer, b: &MeshLayer| {
             a.positions == b.positions
                 && a.normals == b.normals
@@ -2116,6 +2164,40 @@ pub(in crate::server) mod tests {
             !settled(&mut slow),
             "settled with the load volume barely started"
         );
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn stats_count_what_each_level_holds_and_has_meshed() {
+        let mut h = Harness::new(
+            StreamingSettings {
+                lod_distance_m: 128.0,
+                ..small()
+            },
+            UNLIMITED,
+        );
+        h.app.init_resource::<stats::StreamingStats>();
+        h.settle();
+        h.lod_settle();
+        h.app
+            .world_mut()
+            .run_system_once(stats::publish_stats)
+            .expect("the summary ran");
+
+        let stats = h.app.world().resource::<stats::StreamingStats>();
+        let lod_store = h.app.world().resource::<lod::LodStore>();
+        let lod_state = h.app.world().resource::<lod::LodState>();
+        assert_eq!(stats.levels.len(), 3);
+        assert_eq!(
+            (stats.levels[0].held, stats.levels[0].meshed),
+            (stats.loaded, stats.meshed)
+        );
+        for level in 1..3 {
+            let l = stats.levels[level as usize];
+            assert_eq!(l.held, lod_store.coords(level).count());
+            assert_eq!(l.meshed, lod_state.delivered(level).len());
+            assert!(l.meshed > 0 && l.held > l.meshed, "level {level}: {l:?}");
+        }
     }
 
     #[test]

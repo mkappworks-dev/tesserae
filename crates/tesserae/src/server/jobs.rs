@@ -130,7 +130,6 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
         }
     }
 
-    #[cfg(test)]
     pub fn keys(&self) -> Vec<K> {
         self.running
             .keys()

@@ -353,6 +353,14 @@ fn report(
         stats.anchor,
         camera.translation,
     );
+    // A line of its own, so `scripts/frame-runs` keeps aggregating the one above.
+    let per_level: Vec<String> = stats
+        .levels
+        .iter()
+        .enumerate()
+        .map(|(level, s)| format!("{level}:{}/{}", s.held, s.meshed))
+        .collect();
+    info!("capture_lod held/meshed={}", per_level.join(","));
 }
 
 fn shutter(

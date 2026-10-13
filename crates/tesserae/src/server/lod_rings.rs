@@ -8,9 +8,6 @@
 //!
 //! [`Rings`]: super::streaming::Rings
 
-// Nothing outside the tests builds a coarse level until streaming reads these.
-#![cfg_attr(not(test), allow(dead_code))]
-
 use bevy::prelude::*;
 
 use super::streaming::{Extent, StreamingSettings};

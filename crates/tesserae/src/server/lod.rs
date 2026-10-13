@@ -7,6 +7,10 @@
 //! level 1, which takes the level-0 Chunks the [`ChunkStore`] holds instead of
 //! generating them, so an Edit reaches it.
 //!
+//! A coarse Chunk is meshed by the level-0 mesher, lit as open sky because no
+//! light is stored above level 0, and delivered as `LodMeshReady`. The shell it
+//! is meshed in has a hole where the next finer level draws.
+//!
 //! The pipeline is ADR-0007's: a job holds a generator and `Arc`s and returns an
 //! owned `Chunk`, and the result is validated where it lands. The store and the
 //! bookkeeping here are Server-private for the reason `ChunkStore` is, and the
@@ -19,12 +23,18 @@ use std::sync::Arc;
 
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use tesserae_core::{Chunk, ShapeTable, Worldgen, WorldgenParams, downsample};
+use tesserae_core::light::{Light, MAX_LIGHT};
+use tesserae_core::{
+    Chunk, ChunkLight, ChunkMesh, LitChunk, ShapeTable, Tables, Worldgen, WorldgenParams,
+    downsample, mesh_chunk,
+};
 
 use super::jobs::Stage;
-use super::lod_rings::{LevelRings, level_count};
+use super::lod_rings::{LevelRings, Shell, level_count};
 use super::player::Player;
-use super::streaming::{Extent, StreamingSettings, delta, face_neighbors, offset};
+use super::streaming::{
+    LodMeshReady, LodUnloaded, StreamingSettings, delta, face_neighbors, offset,
+};
 use super::world_state::ChunkStore;
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -37,6 +47,7 @@ pub(in crate::server) type LodKey = (u32, ChunkCoord);
 #[derive(Clone, Copy, Debug)]
 pub(in crate::server) struct LodCounts {
     pub generate: usize,
+    pub mesh: usize,
 }
 
 /// How much coarse work is allowed at once, shared by every level and separate
@@ -53,8 +64,14 @@ pub(in crate::server) struct LodBudget {
 impl Default for LodBudget {
     fn default() -> Self {
         LodBudget {
-            in_flight: LodCounts { generate: 16 },
-            landed_per_tick: LodCounts { generate: 16 },
+            in_flight: LodCounts {
+                generate: 16,
+                mesh: 32,
+            },
+            landed_per_tick: LodCounts {
+                generate: 16,
+                mesh: 16,
+            },
         }
     }
 }
@@ -126,20 +143,24 @@ impl LodStore {
         self.at(level).is_some_and(|l| l.contains_key(&coord))
     }
 
-    #[cfg_attr(not(test), allow(dead_code))] // Stats and meshing read these (ticket 04).
+    #[cfg(test)]
     pub fn get(&self, level: u32, coord: ChunkCoord) -> Option<&Chunk> {
         self.at(level)?.get(&coord).map(Arc::as_ref)
     }
 
     /// A Chunk as a shared handle, for a job to hold.
-    #[cfg_attr(not(test), allow(dead_code))] // Mesh jobs hold these (ticket 04).
     pub fn shared(&self, level: u32, coord: ChunkCoord) -> Option<Arc<Chunk>> {
         self.at(level)?.get(&coord).map(Arc::clone)
     }
 
-    #[cfg_attr(not(test), allow(dead_code))] // Stats and meshing read these (ticket 04).
+    #[cfg(test)]
     pub fn coords(&self, level: u32) -> impl Iterator<Item = ChunkCoord> + '_ {
         self.at(level).into_iter().flat_map(|l| l.keys().copied())
+    }
+
+    #[cfg(feature = "dev")]
+    pub fn len(&self, level: u32) -> usize {
+        self.at(level).map_or(0, HashMap::len)
     }
 
     pub(in crate::server) fn insert(&mut self, level: u32, coord: ChunkCoord, chunk: Chunk) {
@@ -164,6 +185,9 @@ struct Level {
     /// Whether a scan could find work. Set by an anchor move, a landing, an
     /// invalidation, and by a scan that ran out of budget before it finished.
     pending: bool,
+    /// Whether a scan of the mesh shell could find work: a Chunk or a neighbour
+    /// of it landed, a mesh slot freed, or the anchor moved.
+    mesh_pending: bool,
     /// Held Chunks that need a mesh.
     dirty: HashSet<ChunkCoord>,
     /// Held Chunks that need regenerating.
@@ -181,8 +205,8 @@ struct Level {
 pub(in crate::server) struct LodState {
     /// Index `level - 1`.
     levels: Vec<Level>,
-    /// Load offsets by extent. Five of six levels share one at the defaults.
-    offsets: Vec<(Extent, Arc<Vec<IVec3>>)>,
+    /// Offsets by shell. Five of six levels share each at the defaults.
+    offsets: Vec<(Shell, Arc<Vec<IVec3>>)>,
 }
 
 impl LodState {
@@ -194,13 +218,20 @@ impl LodState {
         &mut self.levels[index]
     }
 
-    fn offsets_for(&mut self, extent: Extent) -> Arc<Vec<IVec3>> {
-        if let Some((_, offsets)) = self.offsets.iter().find(|(e, _)| *e == extent) {
+    fn offsets_for(&mut self, shell: Shell) -> Arc<Vec<IVec3>> {
+        if let Some((_, offsets)) = self.offsets.iter().find(|(s, _)| *s == shell) {
             return Arc::clone(offsets);
         }
-        let offsets = Arc::new(extent.offsets());
-        self.offsets.push((extent, Arc::clone(&offsets)));
+        let offsets = Arc::new(shell.offsets());
+        self.offsets.push((shell, Arc::clone(&offsets)));
         offsets
+    }
+
+    #[cfg(feature = "dev")]
+    pub fn delivered_len(&self, level: u32) -> usize {
+        self.levels
+            .get(level as usize - 1)
+            .map_or(0, |l| l.delivered.len())
     }
 
     /// A held Chunk's inputs changed, so it is regenerated.
@@ -225,7 +256,14 @@ impl LodState {
 
     #[cfg(test)]
     fn any_pending(&self) -> bool {
-        self.levels.iter().any(|l| l.pending)
+        self.levels.iter().any(|l| l.pending || l.mesh_pending)
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn delivered(&self, level: u32) -> HashSet<ChunkCoord> {
+        self.levels
+            .get(level as usize - 1)
+            .map_or_else(HashSet::default, |l| l.delivered.clone())
     }
 
     #[cfg(test)]
@@ -236,10 +274,11 @@ impl LodState {
     }
 }
 
-/// The coarse generate jobs in flight, keyed by level and coord.
+/// The coarse jobs in flight, keyed by level and coord.
 #[derive(Resource, Default)]
 pub(in crate::server) struct LodJobs {
     pub generate: Stage<Chunk, LodKey>,
+    pub mesh: Stage<ChunkMesh, LodKey>,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -298,11 +337,28 @@ pub(in crate::server) fn generate_coarse(
     downsample(children, shapes)
 }
 
+/// All the light a coarse Chunk has. Full sky matches the level-0 faces beside
+/// it and merges maximally; the cost is a cave mouth lit like open ground.
+static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+
+/// Meshes a coarse Chunk from itself and its six same-level neighbours.
+fn mesh_coarse(center: &Chunk, around: &[Arc<Chunk>; 6], tables: &Tables) -> ChunkMesh {
+    let neighbors: [Option<LitChunk>; 6] =
+        std::array::from_fn(|face| Some(LitChunk::new(&around[face], &OPEN_SKY)));
+    mesh_chunk(LitChunk::new(center, &OPEN_SKY), neighbors, tables)
+}
+
 /// Where one level stands this tick.
 struct Plan {
     level: u32,
     anchor: ChunkCoord,
     rings: LevelRings,
+}
+
+impl Plan {
+    fn index(level: u32) -> usize {
+        level as usize - 1
+    }
 }
 
 #[expect(
@@ -314,6 +370,8 @@ pub(in crate::server) fn stream_lod(
     mut store: ResMut<LodStore>,
     mut state: ResMut<LodState>,
     mut jobs: ResMut<LodJobs>,
+    mut ready: MessageWriter<LodMeshReady>,
+    mut unloaded: MessageWriter<LodUnloaded>,
     generators: Res<LodGenerators>,
     tables: Res<ContentTables>,
     world: Res<WorldSettings>,
@@ -331,6 +389,8 @@ pub(in crate::server) fn stream_lod(
 
     jobs.generate.reset_counts();
     jobs.generate.poll();
+    jobs.mesh.reset_counts();
+    jobs.mesh.poll();
 
     let plans: Vec<Plan> = (1..levels)
         .map(|level| Plan {
@@ -340,8 +400,9 @@ pub(in crate::server) fn stream_lod(
         })
         .collect();
 
-    retire(&plans, &mut store, &mut state, &mut jobs);
+    retire(&plans, &mut store, &mut state, &mut jobs, &mut unloaded);
     land(&plans, &mut store, &mut state, &mut jobs, &budget);
+    land_meshes(&plans, &mut state, &mut jobs, &mut ready, &budget);
     dispatch(
         &plans,
         &chunks,
@@ -352,12 +413,19 @@ pub(in crate::server) fn stream_lod(
         &tables,
         &budget,
     );
+    dispatch_meshes(&plans, &store, &mut state, &mut jobs, &tables.0, &budget);
 }
 
-/// Drops what left `evict` of a level whose anchor Chunk moved. Nothing else
-/// can put a Chunk outside it, so a level whose anchor held still is not looked
-/// at.
-fn retire(plans: &[Plan], store: &mut LodStore, state: &mut LodState, jobs: &mut LodJobs) {
+/// Releases the meshes that left `keep` and drops what left `evict`, for each
+/// level whose anchor Chunk moved. Nothing else can move a Chunk out of either,
+/// so a level whose anchor held still is not looked at.
+fn retire(
+    plans: &[Plan],
+    store: &mut LodStore,
+    state: &mut LodState,
+    jobs: &mut LodJobs,
+    unloaded: &mut MessageWriter<LodUnloaded>,
+) {
     let mut moved = false;
     for plan in plans {
         let level = state.level_mut(plan.level);
@@ -367,19 +435,53 @@ fn retire(plans: &[Plan], store: &mut LodStore, state: &mut LodState, jobs: &mut
         moved = true;
         level.anchor = Some(plan.anchor);
         level.pending = true;
+        level.mesh_pending = true;
+
+        // Before `delivered` is pruned by `evict`: a Chunk the Client holds a
+        // mesh for must be unloaded, not forgotten.
+        let released: Vec<ChunkCoord> = level
+            .delivered
+            .iter()
+            .copied()
+            .filter(|&c| !plan.rings.keep.contains(delta(plan.anchor, c)))
+            .collect();
+        for coord in released {
+            level.delivered.remove(&coord);
+            unloaded.write(LodUnloaded {
+                level: plan.level,
+                coord,
+            });
+            // Still held, and nothing else will mesh it again if the Eye comes
+            // back.
+            level.dirty.insert(coord);
+        }
+
         let inside = |c: ChunkCoord| plan.rings.evict.contains(delta(plan.anchor, c));
         level.dirty.retain(|&c| inside(c));
         level.stale.retain(|&c| inside(c));
         level.regenerating.retain(|&c| inside(c));
-        level.delivered.retain(|&c| inside(c));
+        // Everything left in `delivered` is inside `keep`, so inside `evict`.
         store.retain(plan.level, inside);
     }
     if moved {
         jobs.generate.retain(|(level, coord)| {
             plans
-                .get(level as usize - 1)
+                .get(Plan::index(level))
                 .is_some_and(|p| p.rings.evict.contains(delta(p.anchor, coord)))
         });
+        let kept = |(level, coord): LodKey| {
+            let p = &plans[Plan::index(level)];
+            p.rings.keep.contains(delta(p.anchor, coord))
+        };
+        let cancelled: Vec<LodKey> = jobs.mesh.keys().into_iter().filter(|&k| !kept(k)).collect();
+        jobs.mesh.retain(kept);
+        // Dispatch took these out of `dirty`, and the Chunk is still held.
+        for (level, coord) in cancelled {
+            let p = &plans[Plan::index(level)];
+            if p.rings.evict.contains(delta(p.anchor, coord)) {
+                state.level_mut(level).dirty.insert(coord);
+            }
+        }
     }
 }
 
@@ -396,7 +498,7 @@ fn land(
     jobs: &mut LodJobs,
     budget: &LodBudget,
 ) {
-    let anchor_of = |level: u32| plans[level as usize - 1].anchor;
+    let anchor_of = |level: u32| plans[Plan::index(level)].anchor;
     let mut finished: Vec<LodKey> = jobs.generate.finished().collect();
     finished
         .sort_unstable_by_key(|&(level, c)| (level, delta(anchor_of(level), c).length_squared()));
@@ -405,11 +507,13 @@ fn land(
             continue;
         };
         let (level, coord) = key;
-        let plan = &plans[level as usize - 1];
+        let plan = &plans[Plan::index(level)];
         let held = store.contains(level, coord);
         let lv = state.level_mut(level);
         // A slot has freed whether or not the result is used.
         lv.pending = true;
+        // Chunks and their neighbours are what a mesh waits for.
+        lv.mesh_pending = true;
         let replacing = lv.regenerating.remove(&coord);
         if !plan.rings.evict.contains(delta(plan.anchor, coord)) || (held && !replacing) {
             jobs.generate.note_stale();
@@ -426,6 +530,47 @@ fn land(
                 }
             }
         }
+    }
+}
+
+/// Delivers up to the budget of finished meshes, nearest level and then nearest
+/// Chunk first.
+///
+/// A mesh lands only if its Chunk is still inside `keep`, which also keeps the
+/// eviction argument true for a job in flight: a Chunk inside `keep` has all six
+/// neighbours inside `load`, so every neighbour the job read is still held. As
+/// at level 0 it is delivered even if the Chunk was dirtied again during the
+/// flight - no staler than the mesh the Client holds, the mark is still there,
+/// and dropping it would starve a Chunk that changes faster than a mesh builds.
+fn land_meshes(
+    plans: &[Plan],
+    state: &mut LodState,
+    jobs: &mut LodJobs,
+    ready: &mut MessageWriter<LodMeshReady>,
+    budget: &LodBudget,
+) {
+    let anchor_of = |level: u32| plans[Plan::index(level)].anchor;
+    let mut finished: Vec<LodKey> = jobs.mesh.finished().collect();
+    finished
+        .sort_unstable_by_key(|&(level, c)| (level, delta(anchor_of(level), c).length_squared()));
+    for key in finished.into_iter().take(budget.landed_per_tick.mesh) {
+        let Some(mesh) = jobs.mesh.take(key) else {
+            continue;
+        };
+        let (level, coord) = key;
+        let plan = &plans[Plan::index(level)];
+        let lv = state.level_mut(level);
+        lv.mesh_pending = true;
+        if !plan.rings.keep.contains(delta(plan.anchor, coord)) {
+            jobs.mesh.note_stale();
+            lv.dirty.insert(coord);
+            continue;
+        }
+        if lv.dirty.contains(&coord) {
+            jobs.mesh.note_stale();
+        }
+        ready.write(LodMeshReady { level, coord, mesh });
+        lv.delivered.insert(coord);
     }
 }
 
@@ -458,7 +603,11 @@ fn dispatch(
         if !state.level_mut(plan.level).pending {
             continue;
         }
-        let offsets = state.offsets_for(plan.rings.load);
+        // Generation has no hole: a mesh needs the Chunks under it too.
+        let offsets = state.offsets_for(Shell {
+            outer: plan.rings.load,
+            hole: None,
+        });
         let level = state.level_mut(plan.level);
         // Cleared first and set again if the budget runs out before the scan
         // ends, so the work it left is found next tick without a landing.
@@ -484,7 +633,7 @@ fn dispatch(
             } else {
                 Default::default()
             };
-            let source = generators.sources[plan.level as usize - 1].clone();
+            let source = generators.sources[Plan::index(plan.level)].clone();
             let tables = Arc::clone(&tables.0);
             jobs.generate.spawn((plan.level, coord), move || {
                 generate_coarse(&source, coord, &held_children, &tables.shapes)
@@ -493,12 +642,68 @@ fn dispatch(
     }
 }
 
+/// Starts mesh jobs for dirty Chunks in each level's mesh shell, nearest level
+/// first and nearest Chunk first within it, until the budget is spent.
+///
+/// Requires all six neighbours held. There is no light to settle, so unlike
+/// level 0 nothing else gates a mesh.
+fn dispatch_meshes(
+    plans: &[Plan],
+    store: &LodStore,
+    state: &mut LodState,
+    jobs: &mut LodJobs,
+    tables: &Arc<Tables>,
+    budget: &LodBudget,
+) {
+    let mut free = budget.in_flight.mesh.saturating_sub(jobs.mesh.in_flight());
+    for plan in plans {
+        if free == 0 {
+            break;
+        }
+        if !state.level_mut(plan.level).mesh_pending {
+            continue;
+        }
+        let offsets = state.offsets_for(plan.rings.mesh);
+        let level = state.level_mut(plan.level);
+        level.mesh_pending = false;
+        for &d in offsets.iter() {
+            let coord = offset(plan.anchor, d);
+            if !level.dirty.contains(&coord) || jobs.mesh.contains((plan.level, coord)) {
+                continue;
+            }
+            let Some(own) = store.shared(plan.level, coord) else {
+                continue;
+            };
+            let around: Option<Vec<Arc<Chunk>>> = face_neighbors(coord)
+                .into_iter()
+                .map(|n| store.shared(plan.level, n))
+                .collect();
+            let Some(around) = around else {
+                continue;
+            };
+            let around: [Arc<Chunk>; 6] = around
+                .try_into()
+                .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
+            if free == 0 {
+                level.mesh_pending = true;
+                break;
+            }
+            free -= 1;
+            level.dirty.remove(&coord);
+            let tables = Arc::clone(tables);
+            jobs.mesh.spawn((plan.level, coord), move || {
+                mesh_coarse(&own, &around, &tables)
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, small};
+    use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
     use bevy::ecs::system::RunSystemOnce;
-    use tesserae_core::{CHUNK_SIZE, Tables, Voxel, worldgen};
+    use tesserae_core::{CHUNK_SIZE, SHAPE_STAIR, Tables, Voxel, worldgen};
 
     /// Past this many ticks a fill is stuck, however much wall time is left: a
     /// livelock that never waits on a job would otherwise spin until the ceiling.
@@ -519,9 +724,11 @@ mod tests {
         LodBudget {
             in_flight: LodCounts {
                 generate: usize::MAX,
+                mesh: usize::MAX,
             },
             landed_per_tick: LodCounts {
                 generate: usize::MAX,
+                mesh: usize::MAX,
             },
         }
     }
@@ -537,11 +744,21 @@ mod tests {
     }
 
     impl Harness {
-        fn lod_tick(&mut self) {
+        fn lod_tick(&mut self) -> (Vec<LodMeshReady>, Vec<LodUnloaded>) {
             self.app
                 .world_mut()
                 .run_system_once(stream_lod)
                 .expect("the tick ran");
+            let world = self.app.world_mut();
+            let ready = world
+                .resource_mut::<Messages<LodMeshReady>>()
+                .drain()
+                .collect();
+            let unloaded = world
+                .resource_mut::<Messages<LodUnloaded>>()
+                .drain()
+                .collect();
+            (ready, unloaded)
         }
 
         fn lod_jobs(&self) -> &LodJobs {
@@ -556,24 +773,34 @@ mod tests {
             self.app.world().resource::<LodState>()
         }
 
+        fn lod_in_flight(&self) -> usize {
+            self.lod_jobs().generate.in_flight() + self.lod_jobs().mesh.in_flight()
+        }
+
         fn lod_quiet(&self) -> bool {
-            let (dispatched, landed) = self.lod_jobs().generate.counts();
-            self.lod_jobs().generate.in_flight() == 0
-                && (dispatched, landed) == (0, 0)
+            self.lod_in_flight() == 0
+                && self.lod_jobs().generate.counts() == (0, 0)
+                && self.lod_jobs().mesh.counts() == (0, 0)
                 && !self.lod_state().any_pending()
         }
 
-        fn lod_settle(&mut self) {
+        /// Ticks until nothing is in flight, pending or landing, and returns
+        /// every message written on the way.
+        pub(in crate::server) fn lod_settle(&mut self) -> (Vec<LodMeshReady>, Vec<LodUnloaded>) {
+            let (mut ready, mut unloaded) = (Vec::new(), Vec::new());
             let started = std::time::Instant::now();
             for _ in 0..SETTLE_TICKS {
                 if started.elapsed() > SETTLE_CEILING {
                     break;
                 }
-                self.lod_tick();
-                if self.lod_quiet() {
-                    return;
+                let (r, u) = self.lod_tick();
+                let quiet = r.is_empty() && u.is_empty() && self.lod_quiet();
+                ready.extend(r);
+                unloaded.extend(u);
+                if quiet {
+                    return (ready, unloaded);
                 }
-                if self.lod_jobs().generate.in_flight() > 0 {
+                if self.lod_in_flight() > 0 {
                     std::thread::sleep(std::time::Duration::from_micros(100));
                 }
             }
@@ -611,6 +838,45 @@ mod tests {
         fn held(&self, level: u32) -> HashSet<ChunkCoord> {
             self.lod_store().coords(level).collect()
         }
+
+        /// Every Chunk of `level` the Eye's mesh shell covers.
+        fn mesh_shell(&self, level: u32) -> HashSet<ChunkCoord> {
+            let anchor = self.anchor_of(level);
+            self.rings_of(level)
+                .mesh
+                .offsets()
+                .into_iter()
+                .map(|d| offset(anchor, d))
+                .collect()
+        }
+
+        fn has_six_neighbours(&self, level: u32, coord: ChunkCoord) -> bool {
+            face_neighbors(coord)
+                .into_iter()
+                .all(|n| self.lod_store().contains(level, n))
+        }
+
+        /// What `mesh_chunk` makes of the store's Chunks, lit the way decision 3
+        /// says, built without going through the job under test.
+        fn fresh_mesh(&self, level: u32, coord: ChunkCoord) -> ChunkMesh {
+            let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+            let store = self.lod_store();
+            let lit = |c: ChunkCoord| LitChunk::new(store.get(level, c).expect("held"), &sky);
+            let neighbors = face_neighbors(coord).map(|n| Some(lit(n)));
+            mesh_chunk(lit(coord), neighbors, &Tables::builtin())
+        }
+
+        fn delivered_at(&self, level: u32) -> HashSet<ChunkCoord> {
+            self.lod_state().delivered(level)
+        }
+    }
+
+    /// The last mesh written for each Chunk.
+    fn latest(ready: Vec<LodMeshReady>) -> HashMap<LodKey, ChunkMesh> {
+        ready
+            .into_iter()
+            .map(|m| ((m.level, m.coord), m.mesh))
+            .collect()
     }
 
     fn same_chunk(a: &Chunk, b: &Chunk) -> bool {
@@ -810,8 +1076,14 @@ mod tests {
         let mut h = harness_with(
             lod_settings(),
             LodBudget {
-                in_flight: LodCounts { generate: 5 },
-                landed_per_tick: LodCounts { generate: 2 },
+                in_flight: LodCounts {
+                    generate: 5,
+                    ..unlimited().in_flight
+                },
+                landed_per_tick: LodCounts {
+                    generate: 2,
+                    ..unlimited().landed_per_tick
+                },
             },
         );
 
@@ -936,7 +1208,10 @@ mod tests {
         let mut h = harness_with(
             lod_settings(),
             LodBudget {
-                in_flight: LodCounts { generate: 8 },
+                in_flight: LodCounts {
+                    generate: 8,
+                    ..unlimited().in_flight
+                },
                 ..unlimited()
             },
         );
@@ -988,12 +1263,11 @@ mod tests {
     }
 
     #[test]
-    fn an_invalidated_chunk_is_regenerated_and_its_neighbours_are_marked_for_a_new_mesh() {
+    fn an_invalidated_chunk_is_regenerated_and_it_and_its_neighbours_are_meshed_again() {
         let mut h = harness();
         h.lod_settle();
         let coord = ChunkCoord::new(0, 0, 0);
         let before = h.lod_store().shared(1, coord).unwrap();
-        h.app.world_mut().resource_mut::<LodState>().clear_dirty();
 
         // An Edit would have changed a child; what the cover should become.
         let lantern = Chunk::filled(Voxel::cube(worldgen::LANTERN));
@@ -1005,27 +1279,40 @@ mod tests {
             .world_mut()
             .resource_mut::<LodState>()
             .invalidate(1, coord);
-        h.lod_settle();
+        let (ready, unloaded) = h.lod_settle();
 
         let after = h.lod_store().shared(1, coord).unwrap();
         assert!(!Arc::ptr_eq(&before, &after), "never replaced");
         assert!(same_chunk(&after, &expected(1, coord, Some((7, &lantern)))));
         assert!(!h.lod_state().is_stale(1, coord));
 
-        let want: HashSet<ChunkCoord> = std::iter::once(coord)
+        // All inside level 1's mesh shell, so all meshed again, once each.
+        let mut want: Vec<LodKey> = std::iter::once(coord)
             .chain(face_neighbors(coord))
+            .map(|c| (1, c))
             .collect();
-        assert_eq!(h.lod_state().dirty(1), want);
-        assert!(h.lod_state().dirty(2).is_empty());
+        let mut got: Vec<LodKey> = ready.iter().map(|m| (m.level, m.coord)).collect();
+        want.sort_unstable_by_key(|&(l, c)| (l, c.x, c.y, c.z));
+        got.sort_unstable_by_key(|&(l, c)| (l, c.x, c.y, c.z));
+        assert_eq!(got, want);
+        assert!(unloaded.is_empty());
     }
 
     #[test]
     fn a_first_generation_marks_only_itself_for_a_mesh() {
         let mut h = harness();
         h.lod_settle();
-        assert_eq!(h.lod_state().dirty(1), h.held(1));
+        assert_eq!(
+            h.lod_state()
+                .dirty(1)
+                .union(&h.lod_state().delivered(1))
+                .copied()
+                .collect::<HashSet<_>>(),
+            h.held(1)
+        );
 
-        // A Chunk that arrives next to held ones leaves their meshes alone.
+        // A Chunk that arrives next to held ones leaves their meshes alone. It
+        // is outside the mesh shell, so nothing meshes it either.
         let edge = ChunkCoord::new(3, 0, 0);
         h.app.world_mut().resource_mut::<LodState>().clear_dirty();
         h.app
@@ -1036,7 +1323,8 @@ mod tests {
             .world_mut()
             .resource_mut::<LodState>()
             .invalidate(1, edge);
-        h.lod_settle();
+        let (ready, _) = h.lod_settle();
+        assert!(ready.is_empty(), "a margin Chunk's arrival re-meshed one");
         assert_eq!(h.lod_state().dirty(1), HashSet::from([edge]));
     }
 
@@ -1066,7 +1354,10 @@ mod tests {
             let mut h = harness_with(
                 lod_settings(),
                 LodBudget {
-                    in_flight: LodCounts { generate: cap },
+                    in_flight: LodCounts {
+                        generate: cap,
+                        ..unlimited().in_flight
+                    },
                     ..unlimited()
                 },
             );
@@ -1093,5 +1384,447 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The `mesh_shell` Chunks of every coarse level, tagged with their level.
+    fn all_shells(h: &Harness) -> HashSet<LodKey> {
+        (1..LEVELS)
+            .flat_map(|l| h.mesh_shell(l).into_iter().map(move |c| (l, c)))
+            .collect()
+    }
+
+    #[test]
+    fn at_quiescence_each_level_has_delivered_its_mesh_shell_and_every_mesh_is_fresh() {
+        let mut h = harness();
+        let (ready, unloaded) = h.lod_settle();
+        assert!(unloaded.is_empty());
+
+        // A Chunk is meshed once: nothing but a replacement re-dirties it.
+        assert_eq!(ready.len(), all_shells(&h).len());
+        let meshes = latest(ready);
+        assert_eq!(
+            meshes.keys().copied().collect::<HashSet<_>>(),
+            all_shells(&h)
+        );
+
+        for level in 1..LEVELS {
+            let shell = h.mesh_shell(level);
+            let meshable: HashSet<ChunkCoord> = shell
+                .iter()
+                .copied()
+                .filter(|&c| h.has_six_neighbours(level, c))
+                .collect();
+            assert_eq!(
+                meshable, shell,
+                "level {level} has a shell Chunk without a neighbour"
+            );
+            assert_eq!(h.delivered_at(level), meshable, "level {level}");
+
+            let mut non_empty = 0;
+            for &coord in &shell {
+                let mesh = &meshes[&(level, coord)];
+                assert!(
+                    same_mesh(mesh, &h.fresh_mesh(level, coord)),
+                    "level {level} {coord} differs from a fresh mesh"
+                );
+                non_empty += usize::from(!mesh.is_empty());
+            }
+            assert!(non_empty > 0, "level {level} had nothing to mesh");
+        }
+    }
+
+    #[test]
+    fn no_mesh_is_delivered_before_its_six_neighbours_are_held() {
+        let mut h = harness_with(
+            lod_settings(),
+            LodBudget {
+                in_flight: LodCounts {
+                    generate: 3,
+                    ..unlimited().in_flight
+                },
+                ..unlimited()
+            },
+        );
+        {
+            let mut jobs = h.app.world_mut().resource_mut::<LodJobs>();
+            jobs.generate.scramble = true;
+            jobs.mesh.scramble = true;
+        }
+        let mut delivered = 0;
+        let started = std::time::Instant::now();
+        loop {
+            assert!(started.elapsed() < SETTLE_CEILING, "never went quiet");
+            let (ready, _) = h.lod_tick();
+            for m in &ready {
+                assert!(
+                    h.has_six_neighbours(m.level, m.coord),
+                    "level {} {} was delivered with a neighbour missing",
+                    m.level,
+                    m.coord
+                );
+            }
+            delivered += ready.len();
+            if h.lod_quiet() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        assert_eq!(delivered, all_shells(&h).len());
+    }
+
+    #[test]
+    fn every_vertex_light_is_full_sky_and_no_block_light() {
+        let mut h = harness();
+        let (ready, _) = h.lod_settle();
+        let want = u32::from(Light::new(MAX_LIGHT, 0).packed());
+        let mut vertices = 0;
+        for m in &ready {
+            for layer in [&m.mesh.opaque, &m.mesh.blended] {
+                assert_eq!(layer.light.len(), layer.positions.len());
+                assert!(
+                    layer.light.iter().all(|&l| l == want),
+                    "level {} {} has a vertex not lit as open sky",
+                    m.level,
+                    m.coord
+                );
+                vertices += layer.light.len();
+            }
+        }
+        assert!(vertices > 0, "no vertex to check");
+    }
+
+    #[test]
+    fn a_coarse_mesh_has_no_shaped_voxel_geometry_though_its_children_do() {
+        let mut h = harness();
+        // A held child of stairs, which level 0 would give shaped geometry.
+        let stairs = Chunk::filled(Voxel::new(worldgen::STONE, SHAPE_STAIR, 5));
+        let tables = Tables::builtin();
+        let level_zero = mesh_chunk(
+            LitChunk::new(&stairs, &OPEN_SKY),
+            Default::default(),
+            &tables,
+        );
+        assert!(
+            level_zero.shaped_voxels > 0,
+            "level 0 would not mesh a stair"
+        );
+        h.app
+            .world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(child(ChunkCoord::new(0, 0, 0), 3), stairs);
+
+        let (ready, _) = h.lod_settle();
+        let mut level_one = 0;
+        for m in &ready {
+            assert_eq!(m.mesh.shaped_voxels, 0, "level {} {}", m.level, m.coord);
+            level_one += usize::from(m.level == 1);
+        }
+        assert!(level_one > 0);
+        for coord in h.held(1) {
+            assert_eq!(h.lod_store().get(1, coord).unwrap().shaped_count(), 0);
+        }
+    }
+
+    #[test]
+    fn a_teleport_unloads_every_delivered_mesh_before_its_chunk_is_forgotten() {
+        let mut h = harness();
+        h.lod_settle();
+        let before = all_shells(&h);
+        assert!(!before.is_empty());
+
+        h.anchor_at(Vec3::new(3000.0, 0.0, 0.0));
+        let (_, unloaded) = h.lod_tick();
+        let unloaded: HashSet<LodKey> = unloaded.iter().map(|u| (u.level, u.coord)).collect();
+        assert_eq!(unloaded, before);
+        for level in 1..LEVELS {
+            assert!(h.delivered_at(level).is_empty(), "level {level}");
+        }
+
+        // And the new neighbourhood fills in with nothing left over from the old.
+        let (ready, again) = h.lod_settle();
+        assert!(again.is_empty());
+        assert_eq!(
+            latest(ready).keys().copied().collect::<HashSet<_>>(),
+            all_shells(&h)
+        );
+        assert!(before.is_disjoint(&all_shells(&h)));
+    }
+
+    /// The module doc's argument, per level: a mesh lands only if its Chunk is
+    /// inside `keep`, so every neighbour it read is inside `load` and still held.
+    /// Two distances: past `keep`, where `retire` cancels the job, and between
+    /// `mesh` and `keep`, where the Chunk is still wanted.
+    #[test]
+    fn a_fly_by_with_meshes_outstanding_never_delivers_a_mesh_with_an_evicted_neighbour() {
+        for cells in [1, 2, 10] {
+            let mut h = harness();
+            h.app.world_mut().resource_mut::<LodJobs>().mesh.hold.hold();
+            let shells = all_shells(&h).len();
+            let started = std::time::Instant::now();
+            while h.lod_jobs().mesh.in_flight() < shells {
+                assert!(
+                    started.elapsed() < SETTLE_CEILING,
+                    "meshes never dispatched"
+                );
+                h.lod_tick();
+                std::thread::sleep(std::time::Duration::from_micros(100));
+            }
+
+            // Level 1 moves `cells` of its own Cells; the coarser levels move
+            // less, or not at all.
+            let cell = h.app.world().resource::<WorldSettings>().cell_size_at(1);
+            h.anchor_at(Vec3::new(cells as f32 * cell, 0.0, 0.0));
+            h.lod_tick();
+            if cells > 5 {
+                let keys = h.lod_jobs().mesh.keys();
+                assert!(
+                    !keys.contains(&(1, ChunkCoord::new(0, 0, 0))),
+                    "not cancelled"
+                );
+            }
+            h.app
+                .world_mut()
+                .resource_mut::<LodJobs>()
+                .mesh
+                .hold
+                .release();
+
+            let mut ready = Vec::new();
+            let started = std::time::Instant::now();
+            loop {
+                assert!(started.elapsed() < SETTLE_CEILING, "never went quiet");
+                let (r, _) = h.lod_tick();
+                for m in &r {
+                    let keep = h.rings_of(m.level).keep;
+                    assert!(
+                        keep.contains(delta(h.anchor_of(m.level), m.coord)),
+                        "level {} {} was delivered from outside keep, {cells} Cells away",
+                        m.level,
+                        m.coord
+                    );
+                    assert!(
+                        h.has_six_neighbours(m.level, m.coord),
+                        "level {} {} was delivered with an evicted neighbour",
+                        m.level,
+                        m.coord
+                    );
+                }
+                ready.extend(r);
+                if h.lod_quiet() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_micros(100));
+            }
+
+            // What the Client ends up holding is the shell, current.
+            for level in 1..LEVELS {
+                assert!(h.mesh_shell(level).is_subset(&h.delivered_at(level)));
+                let keep = h.rings_of(level).keep;
+                let anchor = h.anchor_of(level);
+                for coord in h.delivered_at(level) {
+                    assert!(keep.contains(delta(anchor, coord)), "level {level} {coord}");
+                }
+            }
+            for ((level, coord), mesh) in latest(ready) {
+                assert!(
+                    same_mesh(&mesh, &h.fresh_mesh(level, coord)),
+                    "level {level} {coord} is stale, {cells} Cells away"
+                );
+            }
+        }
+    }
+
+    /// Dispatch takes a Chunk out of `dirty`, so a job `retire` cancels would
+    /// otherwise leave a held Chunk that nothing ever meshes again.
+    #[test]
+    fn a_mesh_cancelled_by_a_move_is_built_when_the_eye_comes_back() {
+        let mut h = harness();
+        h.app.world_mut().resource_mut::<LodJobs>().mesh.hold.hold();
+        let shells = all_shells(&h).len();
+        let started = std::time::Instant::now();
+        while h.lod_jobs().mesh.in_flight() < shells {
+            assert!(
+                started.elapsed() < SETTLE_CEILING,
+                "meshes never dispatched"
+            );
+            h.lod_tick();
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        let shell = h.mesh_shell(1);
+        let behind = ChunkCoord::new(-1, 0, 0);
+        assert!(h.lod_jobs().mesh.keys().contains(&(1, behind)));
+
+        // Out of keep for the Chunks behind, but not out of evict.
+        let cell = h.app.world().resource::<WorldSettings>().cell_size_at(1);
+        h.anchor_at(Vec3::new(3.0 * cell, 0.0, 0.0));
+        h.lod_tick();
+        assert!(
+            !h.lod_jobs().mesh.keys().contains(&(1, behind)),
+            "not cancelled"
+        );
+        assert!(
+            h.lod_store().contains(1, behind),
+            "evicted, not just released"
+        );
+        h.app
+            .world_mut()
+            .resource_mut::<LodJobs>()
+            .mesh
+            .hold
+            .release();
+        h.lod_settle();
+        assert!(!h.delivered_at(1).contains(&behind));
+
+        h.anchor_at(Vec3::ZERO);
+        h.lod_settle();
+        // A superset: what was meshed on the way is still inside `keep`.
+        assert!(shell.is_subset(&h.delivered_at(1)));
+    }
+
+    #[test]
+    fn a_result_outside_keep_is_dropped_at_landing() {
+        let mut h = harness();
+        h.lod_settle();
+        let far = ChunkCoord::new(100, 0, 0);
+        h.app
+            .world_mut()
+            .resource_mut::<LodJobs>()
+            .mesh
+            .spawn((1, far), ChunkMesh::default);
+        let (ready, _) = h.lod_settle();
+        assert!(ready.is_empty(), "a mesh from outside keep was delivered");
+        assert!(!h.delivered_at(1).contains(&far));
+    }
+
+    /// The starvation argument: a mark made while the job runs must not cost the
+    /// Chunk its mesh, and must still produce the fresh one.
+    #[test]
+    fn a_chunk_dirtied_in_flight_is_delivered_and_meshed_again() {
+        let mut h = harness();
+        h.app.world_mut().resource_mut::<LodJobs>().mesh.hold.hold();
+        let shells = all_shells(&h).len();
+        let started = std::time::Instant::now();
+        while h.lod_jobs().mesh.in_flight() < shells {
+            assert!(
+                started.elapsed() < SETTLE_CEILING,
+                "meshes never dispatched"
+            );
+            h.lod_tick();
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+
+        let marked = ChunkCoord::new(0, 0, 0);
+        h.app
+            .world_mut()
+            .resource_mut::<LodState>()
+            .level_mut(1)
+            .dirty
+            .insert(marked);
+        h.app
+            .world_mut()
+            .resource_mut::<LodJobs>()
+            .mesh
+            .hold
+            .release();
+        let (ready, _) = h.lod_settle();
+
+        let count = |c: ChunkCoord| {
+            ready
+                .iter()
+                .filter(|m| (m.level, m.coord) == (1, c))
+                .count()
+        };
+        assert_eq!(count(marked), 2, "delivered once, then again");
+        assert_eq!(count(ChunkCoord::new(1, 0, 0)), 1);
+        assert!(h.delivered_at(1).contains(&marked));
+        assert!(h.lod_jobs().mesh.stale() > 0);
+    }
+
+    /// A hole with room for a hysteresis around it: level 0 is six Cells across
+    /// and two high, so level 1 has a hole of two Cells and one Cell of keep.
+    fn hole_settings() -> StreamingSettings {
+        StreamingSettings {
+            view_distance_m: 192.0,
+            vertical_distance_m: 64.0,
+            hysteresis_m: 32.0,
+            lod_distance_m: 384.0,
+        }
+    }
+
+    fn d(x: i32, y: i32, z: i32) -> IVec3 {
+        IVec3::new(x, y, z)
+    }
+
+    #[test]
+    fn the_hole_is_not_meshed_and_the_overlap_around_it_is() {
+        let mut h = harness_with(hole_settings(), unlimited());
+        let rings = h.rings_of(1);
+        assert_eq!(
+            rings.mesh.hole.map(|e| (e.horizontal, e.vertical)),
+            Some((2, 0))
+        );
+        let (ready, _) = h.lod_settle();
+        let anchor = h.anchor_of(1);
+        let coord_at = |delta: IVec3| offset(anchor, delta);
+
+        let delivered = h.delivered_at(1);
+        // Inside the hole: level 0 draws it.
+        for delta in [d(0, 0, 0), d(1, 0, 0), d(0, 0, -2), d(1, 0, 1)] {
+            assert!(
+                !delivered.contains(&coord_at(delta)),
+                "{delta} is in the hole"
+            );
+        }
+        // The Cell of overlap, inside what level 0 covers (3 Cells here) and
+        // outside the hole.
+        for delta in [d(2, 0, 1), d(3, 0, 0), d(0, 1, 0), d(0, -1, 2)] {
+            assert!(
+                delivered.contains(&coord_at(delta)),
+                "{delta} is the overlap"
+            );
+        }
+        let expected: HashSet<ChunkCoord> = h
+            .mesh_shell(1)
+            .into_iter()
+            .filter(|&c| !rings.mesh.hole.unwrap().contains(delta(anchor, c)))
+            .collect();
+        assert_eq!(delivered, expected);
+        assert_eq!(latest(ready).len(), expected.len());
+    }
+
+    #[test]
+    fn walking_onto_a_coarse_chunk_releases_it_only_past_the_hysteresis() {
+        let mut h = harness_with(hole_settings(), unlimited());
+        h.lod_settle();
+        let cell = h.app.world().resource::<WorldSettings>().cell_size_at(1);
+        let target = ChunkCoord::new(4, 0, 0);
+        assert!(h.delivered_at(1).contains(&target));
+
+        // Two Cells away: inside the mesh hole, but still inside keep's.
+        h.anchor_at(Vec3::new(2.0 * cell, 0.0, 0.0));
+        let (_, unloaded) = h.lod_tick();
+        assert!(
+            !unloaded.iter().any(|u| (u.level, u.coord) == (1, target)),
+            "released inside the hysteresis"
+        );
+        assert!(h.delivered_at(1).contains(&target));
+        h.lod_settle();
+        assert!(h.delivered_at(1).contains(&target));
+
+        // One Cell away: past it.
+        h.anchor_at(Vec3::new(3.0 * cell, 0.0, 0.0));
+        let (_, unloaded) = h.lod_tick();
+        assert!(
+            unloaded.iter().any(|u| (u.level, u.coord) == (1, target)),
+            "kept past the hysteresis"
+        );
+        h.lod_settle();
+        assert!(!h.delivered_at(1).contains(&target));
+
+        // And walking back draws it again.
+        h.anchor_at(Vec3::ZERO);
+        let (ready, _) = h.lod_settle();
+        assert!(ready.iter().any(|m| (m.level, m.coord) == (1, target)));
+        assert!(h.delivered_at(1).contains(&target));
     }
 }
