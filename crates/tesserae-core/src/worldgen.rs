@@ -71,7 +71,7 @@ pub struct CaveParams {
     /// metres: roughly how far apart two tunnels run.
     pub feature_size_m: f32,
     /// Roughly how wide a tunnel is: the radius, in metres, of the largest
-    /// sphere that fits in it. Approximate by construction (see [`GRADIENT`]);
+    /// sphere that fits in it. Approximate by construction (see `GRADIENT`);
     /// the physical size does not change with Voxel size.
     pub radius_m: f32,
     /// No cave below this height. Everything under it is the uniform rock the

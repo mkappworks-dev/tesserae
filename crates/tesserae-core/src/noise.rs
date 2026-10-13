@@ -192,7 +192,7 @@ fn noise3_range(lo: [f32; 3], hi: [f32; 3], seed: u32) -> (f32, f32) {
 
 /// An interval containing [`fbm3`] everywhere in the box `lo..=hi`.
 ///
-/// Each octave's extremes are exact ([`noise3_range`]); summing them is what
+/// Each octave's extremes are exact (`noise3_range`); summing them is what
 /// loosens the bound, since the octaves do not peak in the same place. It is
 /// **sound**, which is the property that matters: a caller may skip a box this
 /// proves empty and get exactly what sampling every point would have given.
