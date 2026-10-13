@@ -8,6 +8,7 @@
 pub mod chunk;
 pub mod collide;
 pub mod light;
+pub mod lod;
 pub mod material;
 pub mod mesh;
 pub mod noise;
@@ -19,6 +20,7 @@ pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use light::{Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_chunk, relight};
+pub use lod::downsample;
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
 pub use mesh::{ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_chunk};
 pub use shape::{
