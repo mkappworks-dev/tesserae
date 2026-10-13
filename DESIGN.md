@@ -164,13 +164,46 @@ smaller than that is not smoothed. The generator keeps to half the cap,
 
 ## LOD
 
-Geometric rings. LOD0 covers the configured full-detail radius; each level
-doubles its span, so ~8 levels reach 4km with 32m chunks and total loaded chunk
-count grows with the number of levels rather than with r². Level N+1 aggregates
-2×2×2 voxels of level N by dominant material, then greedy-meshes normally — the
-mesher does not need to know which level it is meshing.
+Geometric rings, built in step 6
+([ADR-0011](docs/adr/0011-coarse-levels-are-derived.md)). Level 0 covers
+`view_distance_m` (192 m); level k >= 1 has Voxels and Cells `2^k` times larger
+and an outer distance of `view_distance_m * 2^k`, clamped to `lod_distance_m`
+(4096 m). The level count is `1 + ceil(log2(reach / view_distance_m))`, which is
+6 at the defaults (levels 0 to 5), not the ~8 this section first assumed: that
+was a 32 m full-detail radius, and the radius is the knob. Every level holds
+about as many Chunks as level 0, so the total grows with the number of levels
+and not with r². A Chunk is 32³ at every level and a Cell is its footprint in
+metres, so everything is derived from metres and a World with smaller Voxels
+gets the same rings.
 
-Per-ring chunk budget is a number to measure, not to guess.
+- **The downsample.** A coarse Voxel is solid if its eight children's
+  `ShapeTable::volume` sum to at least half, ties solid, and is always a full
+  cube, so pass 2 never runs above level 0 and the mesher is not told the level.
+  Its Material is the one with the most volume. A tie goes to the Material whose
+  highest child is higher, then to the lower id: a grass cap over dirt is a
+  four-to-four tie at every odd surface height, and by id alone every distant
+  hill would be brown.
+- **The hole.** Level k does not mesh where level k-1 does: it is a cylinder
+  around the Eye, sized so that grown by one coarse Cell it still lies inside
+  the finer level for any Eye position. Both levels floor the Eye to their own
+  lattice, so measured from the anchor's centre the overlap is a Cell on one
+  side and nothing on the other, which showed as a straight seam. At the
+  defaults it is radius 1 and half-height 1 coarse Cell against a finer extent
+  of 6 and 3. The overlap is the whole seam strategy: a finer face culled
+  against a neighbour it did not draw has the coarse surface behind it, so there
+  are no skirts and no stitching.
+- **One camera per level.** Level k is on `RenderLayers` {k} and drawn by its
+  own camera, the coarsest first and the only one to clear, each finer level
+  over the last. A finer level's pixel wins whatever the coarse depth, which is
+  what stops the coarse level poking through in the overlap. The near camera is
+  level 0, the UI and everything that is not terrain. Two suns share a transform
+  because a light's layers are also its shadow-caster mask: the one on layer 0
+  casts shadows, the one on the coarse layers does not, and coarse terrain
+  receives none.
+- **Light.** A level above 0 stores none and is meshed as open sky. See the ADR
+  for what that costs.
+
+The per-level budget is measured, in Open items.
 
 ## What `bevy_pbr` does NOT give us
 
@@ -348,7 +381,15 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    follow in the same step, with connections derived from the neighbours and
    never stored
    ([ADR-0010](docs/adr/0010-connections-are-derived-not-stored.md)).
-6. LOD mip chain out to 4km.
+6. LOD mip chain out to 4km. **Done.** Six levels (0 to 5) around the Eye, each
+   a ring of Chunks of its own Cells with a hole where the next finer level
+   draws, generated for the purpose and never stored or edited
+   ([ADR-0011](docs/adr/0011-coarse-levels-are-derived.md)), and one camera per
+   level. At the defaults levels 0 to 4 each hold 2167 Chunks and level 5 holds
+   1243, with 127.9 MB of vertex and index memory (41.5 MB of it level 0's), the
+   median flight frame is 5.6 ms on an M5 at 1080p offscreen, and the furthest
+   drawn Chunk ends 5174 m out. Level 0 is drawn 0.3 s later while the distance
+   fills, which takes 11 s. See `.scratch/2026-10-13-phase-6-lod/spec.md`.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
 9. Look-pack API, water shading, visual polish.
@@ -490,3 +531,16 @@ degrade — we must not copy that primitive.
 The technique to copy: **render LOD levels into a separate target with their own
 depth, then composite.** Neither shares the near-field depth buffer at extreme
 range. That is how both avoid z-fighting.
+
+**Bevy 0.20 does not need it for precision.** Its projection is infinite
+reverse-Z (`perspective_infinite_reverse`; `far` only places the frustum's
+culling plane) with an f32 depth buffer, so depth at 4 km is not the problem the
+technique was invented for on GL-class depth. Cameras that share a
+`RenderTarget` share its colour and depth textures, and a later camera with
+`ClearColorConfig::None` draws over an earlier one after its own depth clear, so
+a camera per level is the technique at no extra texture. What it is for here is
+**coverage priority**: a pixel a finer level drew shows that level whatever the
+coarse depth. A single shared far camera with a depth push toward the viewer was
+tried first and cannot work, because a coarse surface up to one coarse Voxel
+above the finer one is `dh / sin(angle)` further along the ray, far more than
+any push at a grazing view.

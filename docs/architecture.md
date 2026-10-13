@@ -21,7 +21,7 @@ flowchart TB
         subgraph SRV["Server — sole world authority"]
             TICK["Tick loop"]
             STATE["World state"]
-            STREAM["Chunk streaming<br/>+ LOD rings"]
+            STREAM["Chunk streaming<br/>+ LOD rings<br/><i>coarse levels derived,<br/>never stored</i>"]
             JOBS["Jobs on the async<br/>compute pool"]
         end
         subgraph CLI["Client — never mutates state"]
@@ -117,7 +117,10 @@ tesserae/
 │   └── adr/                    0001 wasm · 0002 client-server · 0003 voxel size
 │                               0004 demo game · 0005 asset root
 │                               0006 shapes are table data
+│                               0007 streaming jobs · 0008 player pose
 │                               0009 materials are table data
+│                               0010 connections are derived
+│                               0011 coarse LOD levels are derived
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/
@@ -128,10 +131,11 @@ tesserae/
 │   │   │   ├── worldgen.rs     seed + position → Chunk, tuned in metres     ▸ 3
 │   │   │   ├── light.rs        incremental flood-fill                       ▸ 4
 │   │   │   ├── shape.rs        Shape table, Orientation; derived geometry   ▸ 5
-│   │   │   ├── lod.rs          2×2×2 dominant-material downsample           ▸ 6
+│   │   │   ├── lod.rs          downsample: 8 Chunks → 1 coarse, by volume   ▸ 6
 │   │   │   ├── fluid.rs        cellular automaton                           ▸ 8
 │   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
-│   │   └── benches/meshing.rs  criterion — the number that gates step 1     ▸ 1
+│   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
+│   │                       lod.rs: downsample, coarse Chunk, coarse mesh  ▸ 6
 │   ├── tesserae-mods/          NO Bevy — wasmtime host, WIT, command queue  ▸ 7
 │   │   └── wit/                the versioned contract
 │   └── tesserae/               the Bevy app
@@ -140,6 +144,8 @@ tesserae/
 │           ├── server/         the sole authority over World state         ▸ 3
 │           │   ├── world_state.rs  Chunk store — mutators Server-private    ▸ 3
 │           │   ├── streaming.rs    rings, dispatch and landing              ▸ 3
+│           │   ├── lod.rs          coarse levels: derived Chunks, LodStore  ▸ 6
+│           │   ├── lod_rings.rs    one level's shells, with a hole inside   ▸ 6
 │           │   ├── jobs.rs         jobs on the async compute pool           ▸ 3
 │           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2

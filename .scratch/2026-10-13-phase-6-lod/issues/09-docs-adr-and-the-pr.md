@@ -1,6 +1,6 @@
 # Docs, ADR-0011 and the PR
 
-Status: ready-for-agent
+Status: done
 Blocked by: 05, 07, 08
 
 ## What to build
@@ -27,3 +27,10 @@ Blocked by: 05, 07, 08
 - `cargo fmt --all --check`, `npm run fmt:check`, `./scripts/cargo-ci` pass.
 
 ## Comments
+
+ADR-0011, DESIGN.md (LOD section, step 6 Done, the infinite reverse-Z note; the
+per-ring open item was replaced in ticket 07's commit), architecture.md and
+CONTEXT.md are written. The benchmark comparison against `before` and the
+interleaved A/B that explains the 1.7% to 4.5% on two meshing benchmarks are in
+the spec's Outcome. The `before` baseline was in the branch worktree's target
+directory, so the run used a copy of it.

@@ -683,6 +683,49 @@ What was not measured: the fill of one level alone, which would need a way to
 switch the others off, and any load above 7, where the 60 Hz cap makes frame
 figures useless.
 
+### Ticket 09: benchmarks against main
+
+`cargo bench -p tesserae-core --bench meshing -- --baseline before`, with the
+baseline taken on unmodified `main`. The baseline was in the branch worktree's
+`target/criterion` and not in the worktree this was run from, so the run used a
+copy of it as `CRITERION_HOME`. Apple M5, load average 3.3 to 4.3, one run of 51
+benchmarks (8 min 44 s): 33 improved by up to 14%, 11 are within noise and 7
+regressed, six of them by under 2%. No existing source file in `tesserae-core`
+changed (the diff is `lod.rs`, `benches/lod.rs`, two lines in `lib.rs` and a
+`[[bench]]` entry), so the improvements are the host at a different time from
+the baseline's. The outlier, `snapshot/make_mut_shared` at +11.7%, is a 370 ns
+benchmark whose own interval is 353 to 400 ns.
+
+The small regressions are real, though, and reproduce. Interleaved against a
+build of `main` in its own worktree, three runs each (four for the second pair),
+medians:
+
+| Benchmark                  | main      | branch    | ratio |
+| -------------------------- | --------- | --------- | ----- |
+| `mesh_chunk/straddling`    | 390.3 us  | 396.9 us  | 1.017 |
+| `light_chunk/leaves_canopy` | 169.4 us  | 170.8 us  | 1.008 |
+| `greedy_mesh/terrain`      | 323.2 us  | 337.6 us  | 1.045 |
+| `snapshot/make_mut_shared` | 367 ns    | 409 ns    | 1.11  |
+
+**Why.** None of these runs code that changed. Building the branch with the one
+`pub mod lod;` line and its re-export removed gives `main`'s figures exactly
+(`greedy_mesh/terrain` 1.004, `mesh_chunk/straddling` 0.999), so the cost is the
+module's presence and not anything it does. The bench profile has 16 codegen
+units and no LTO, so a new module re-partitions the crate and moves hot
+functions between units; with `codegen-units = 1` on both sides the gap closes
+(`mesh_chunk/straddling` 1.001, `greedy_mesh/terrain` 1.02, inside that
+benchmark's 3% spread). That is the layout sensitivity step 4 already met. It is
+not fixed here: it is under 5% on a path that costs 340 us a Chunk and runs off
+the main thread, and a profile change would be a decision of its own.
+
+**The new benchmarks**, absolute, since they have no baseline:
+`lod/coarse_chunk` is 2.14 ms at the surface of level 1, 1.30 ms at 2, 1.43 ms
+at 3, 0.97 ms at 4 and 0.79 ms at 5, and 51 ns for an air Chunk and 72 ns for a
+rock one at level 1; `lod/mesh_coarse` is 0.39, 0.35, 0.34, 0.32 and 0.30 ms.
+Against the level-0 figures (`worldgen/straddling` 168 us,
+`mesh_chunk/straddling` 397 us) a coarse Chunk costs more to generate, because
+eight generator calls feed one downsample, and about the same to mesh.
+
 ## Tickets
 
 | #   | Title                                  | Blocked by |
