@@ -38,6 +38,7 @@ use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
 use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
+use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
 use super::world_state::ChunkStore;
@@ -213,6 +214,20 @@ impl StreamingBudget {
     }
 }
 
+/// Under `dev`, `TESSERAE_LOD=0` sets the reach to the view distance, which is
+/// a World with one level: coarse streaming off, for measuring what it costs.
+fn streaming_settings() -> StreamingSettings {
+    let settings = StreamingSettings::default();
+    #[cfg(feature = "dev")]
+    if std::env::var("TESSERAE_LOD").is_ok_and(|v| v == "0") {
+        return StreamingSettings {
+            lod_distance_m: settings.view_distance_m,
+            ..settings
+        };
+    }
+    settings
+}
+
 fn streaming_budget() -> StreamingBudget {
     let budget = StreamingBudget::default();
     #[cfg(feature = "dev")]
@@ -358,20 +373,21 @@ impl MeshState {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<StreamingSettings>()
+    app.insert_resource(streaming_settings())
         .insert_resource(streaming_budget())
         .init_resource::<LoadOrder>()
         .init_resource::<MeshState>()
         .init_resource::<Jobs>()
         .add_message::<ChunkMeshReady>()
         .add_message::<ChunkUnloaded>()
-        .add_systems(FixedUpdate, stream);
+        .add_plugins(lod::plugin)
+        .add_systems(FixedUpdate, (stream, lod::stream_lod).chain());
     #[cfg(feature = "dev")]
     app.add_systems(
         FixedUpdate,
         (
             crate::cost::tick_started.before(stream),
-            crate::cost::tick_ended.after(stream),
+            crate::cost::tick_ended.after(lod::stream_lod),
         ),
     );
     #[cfg(feature = "dev")]
@@ -379,7 +395,7 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 /// The six face neighbours, in the mesher's face order.
-fn face_neighbors(coord: ChunkCoord) -> [ChunkCoord; 6] {
+pub(super) fn face_neighbors(coord: ChunkCoord) -> [ChunkCoord; 6] {
     let mut n = [coord; 6];
     n[NEG_X] = ChunkCoord::new(coord.x - 1, coord.y, coord.z);
     n[POS_X] = ChunkCoord::new(coord.x + 1, coord.y, coord.z);
@@ -390,11 +406,11 @@ fn face_neighbors(coord: ChunkCoord) -> [ChunkCoord; 6] {
     n
 }
 
-fn offset(center: ChunkCoord, delta: IVec3) -> ChunkCoord {
+pub(super) fn offset(center: ChunkCoord, delta: IVec3) -> ChunkCoord {
     ChunkCoord::new(center.x + delta.x, center.y + delta.y, center.z + delta.z)
 }
 
-fn delta(from: ChunkCoord, to: ChunkCoord) -> IVec3 {
+pub(super) fn delta(from: ChunkCoord, to: ChunkCoord) -> IVec3 {
     IVec3::new(to.x - from.x, to.y - from.y, to.z - from.z)
 }
 
@@ -931,9 +947,10 @@ pub mod stats {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::server) mod tests {
     use super::*;
     use crate::server::edit;
+    use crate::server::lod_rings::level_count;
     use crate::server::world_state::VoxelCoord;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
@@ -1070,7 +1087,7 @@ mod tests {
 
     /// Small enough to fill in one tick: mesh (1, 1), keep (2, 2),
     /// load (3, 3), evict (4, 4).
-    fn small() -> StreamingSettings {
+    pub(in crate::server) fn small() -> StreamingSettings {
         StreamingSettings {
             view_distance_m: 32.0,
             vertical_distance_m: 32.0,
@@ -1079,7 +1096,7 @@ mod tests {
         }
     }
 
-    const UNLIMITED: StreamingBudget = StreamingBudget {
+    pub(in crate::server) const UNLIMITED: StreamingBudget = StreamingBudget {
         in_flight: StageCounts {
             generate: usize::MAX,
             relight: usize::MAX,
@@ -1096,15 +1113,16 @@ mod tests {
     /// How long `settle` waits before it calls the streaming stuck. Wall time,
     /// not ticks: the tests share one pool, and a fill that is slow because
     /// twenty other tests are filling is not a hang.
-    const SETTLE_CEILING: std::time::Duration = std::time::Duration::from_secs(60);
+    pub(in crate::server) const SETTLE_CEILING: std::time::Duration =
+        std::time::Duration::from_secs(60);
 
-    struct Harness {
-        app: App,
-        anchor: Entity,
+    pub(in crate::server) struct Harness {
+        pub(in crate::server) app: App,
+        pub(in crate::server) anchor: Entity,
     }
 
     impl Harness {
-        fn new(settings: StreamingSettings, budget: StreamingBudget) -> Self {
+        pub(in crate::server) fn new(settings: StreamingSettings, budget: StreamingBudget) -> Self {
             // One pool for the whole test process; `get_or_init` is a no-op after
             // the first test, and the thread count is fixed so nothing a test
             // asserts depends on the machine.
@@ -1115,11 +1133,18 @@ mod tests {
                 world_settings.voxel_size,
                 WorldgenParams::default(),
             );
+            let lod_generators =
+                lod::LodGenerators::new(&world_settings, &generator, level_count(&settings));
             let mut app = App::new();
             app.insert_resource(world_settings)
                 .insert_resource(settings)
                 .insert_resource(budget)
                 .insert_resource(WorldGenerator(generator))
+                .insert_resource(lod_generators)
+                .init_resource::<lod::LodStore>()
+                .init_resource::<lod::LodState>()
+                .init_resource::<lod::LodJobs>()
+                .init_resource::<lod::LodBudget>()
                 .init_resource::<ContentTables>()
                 .init_resource::<ChunkStore>()
                 .init_resource::<LoadOrder>()
@@ -1131,7 +1156,7 @@ mod tests {
             Harness { app, anchor }
         }
 
-        fn anchor_at(&mut self, metres: Vec3) {
+        pub(in crate::server) fn anchor_at(&mut self, metres: Vec3) {
             self.app
                 .world_mut()
                 .get_mut::<Player>(self.anchor)
@@ -1139,7 +1164,7 @@ mod tests {
                 .set_eye(metres);
         }
 
-        fn tick(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
+        pub(in crate::server) fn tick(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
             self.app
                 .world_mut()
                 .run_system_once(stream)
@@ -1164,7 +1189,7 @@ mod tests {
         /// no light is stale and no message was written, and returns every
         /// message written on the way. The honest form of "run until done" now
         /// that a tick starts work instead of finishing it.
-        fn settle(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
+        pub(in crate::server) fn settle(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
             let (mut ready, mut unloaded) = (Vec::new(), Vec::new());
             let started = std::time::Instant::now();
             while started.elapsed() < SETTLE_CEILING {
@@ -1209,7 +1234,7 @@ mod tests {
             self.app.world_mut().resource_mut::<Jobs>()
         }
 
-        fn store(&self) -> &ChunkStore {
+        pub(in crate::server) fn store(&self) -> &ChunkStore {
             self.app.world().resource::<ChunkStore>()
         }
 
