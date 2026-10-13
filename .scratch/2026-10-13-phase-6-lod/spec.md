@@ -567,6 +567,10 @@ a measurement artefact to be explained, not accepted.
 - **No distance fog or atmosphere.** A 4 km view against a flat clear colour has
   a hard horizon; fog is step 9's look-pack work and not LOD's.
 - **The `dev` gallery and builders** place at level 0 and are unaffected.
+- **The reach is not configurable at run time yet.** `lod_distance_m` (4096 m)
+  and `view_distance_m` (192 m) are the defaults of `StreamingSettings`, and the
+  only switch is the `dev` build's `TESSERAE_LOD=0`. Decision 10 has a Mod set
+  both once at load, so the mechanism arrives with the mods step.
 - **Ring widths are three of their own Cells** (`view_distance_m * 2^(k-1)`
   wide). A World that wants a sharper falloff changes the radius, not the
   structure.
