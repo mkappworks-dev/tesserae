@@ -33,8 +33,6 @@ const _: () = {
 ///
 /// Both count as in flight. A result that has finished but not landed is still a
 /// snapshot held and a decision not yet applied.
-///
-/// Keyed by Chunk, and by `(level, Chunk)` for the coarse LOD stages.
 pub(in crate::server) struct Stage<T, K = ChunkCoord> {
     running: HashMap<K, Task<T>>,
     finished: HashMap<K, T>,

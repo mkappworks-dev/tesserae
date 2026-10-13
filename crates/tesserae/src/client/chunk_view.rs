@@ -26,8 +26,7 @@ use crate::server::streaming::{
 use crate::server::{cuts, level_count};
 use crate::world::{ChunkCoord, WorldSettings};
 
-/// Level 0, the UI and everything that is not distant terrain. Level `k` is on
-/// layer `k`.
+/// Level 0, the UI and everything that is not distant terrain.
 const NEAR_LAYER: usize = 0;
 
 fn layer_of(level: u32) -> RenderLayers {
@@ -43,8 +42,6 @@ struct ChunkEntities(HashMap<(u32, ChunkCoord), Entity>);
 #[derive(Resource)]
 struct TerrainMaterial(Handle<ChunkMaterial>);
 
-/// Level 0 and coarse meshes arrive on different messages and are drawn the same
-/// way, so one handler walks both.
 #[derive(SystemParam)]
 struct IncomingMeshes<'w, 's> {
     level0: MessageReader<'w, 's, ChunkMeshReady>,
@@ -63,9 +60,8 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ChunkEntities>()
         .add_systems(Startup, (add_material, spawn_light))
         .add_systems(PostStartup, spawn_camera)
-        // Chained: the Server can send a mesh and its unload in one frame when two
-        // ticks run in it, and an unload handled first would leave the mesh
-        // spawned after it, with nothing ever to despawn it.
+        // Chained: the Server can send a mesh and its unload in one frame, and an
+        // unload handled first would leave the mesh with nothing to despawn it.
         .add_systems(Update, (upload_meshes, drop_meshes).chain());
 }
 
@@ -206,10 +202,9 @@ fn spawn_light(
     settings: Res<StreamingSettings>,
 ) {
     let sun = Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y);
-    // A light only affects views whose layers intersect its own, and its layers
-    // are also the mask of shadow casters for every one of those views. One sun
-    // on every layer would put level 0 into the coarse cameras' cascades too, a
-    // second shadow pass for nothing: so two suns, one shadowed.
+    // A light's layers are also the shadow-caster mask for every view it lights,
+    // so one sun on every layer would put level 0 into the coarse cameras'
+    // cascades for nothing: two suns, one shadowed.
     commands.spawn((
         DirectionalLight {
             shadow_maps_enabled: true,
@@ -236,9 +231,9 @@ fn spawn_light(
 /// starts is the Server's, so the Client's camera starts where the Player does.
 const VIEW_PITCH: f32 = -0.3;
 
-/// A coarse camera's near plane, as a fraction of the level-0 radius. Coarse
-/// geometry closer than this is clipped, and the finer levels always cover that
-/// distance, so a coarse peak cannot fill the view of an Eye hovering beside it.
+/// A coarse camera's near plane, as a fraction of the level-0 radius. The finer
+/// levels always cover what it clips, so a coarse peak cannot fill the view of
+/// an Eye hovering beside it.
 const COARSE_NEAR_FRACTION: f32 = 0.25;
 
 /// In `PostStartup`, so the Server's `Startup` commands have been applied and
@@ -270,8 +265,8 @@ fn spawn_camera(
             },
             RenderLayers::layer(NEAR_LAYER),
             MainCamera,
-            // The UI is drawn by whichever camera it targets, and it must be the
-            // one that runs last or the coarse layers would be drawn over it.
+            // The UI must target the camera that runs last, or the coarse layers
+            // draw over it.
             IsDefaultUiCamera,
             pose,
             // Propagation runs in `PostUpdate`; without this the first frame's pose
@@ -309,7 +304,6 @@ fn spawn_camera(
     }
 }
 
-/// The camera that draws one coarse level.
 #[derive(Component)]
 struct CoarseCamera;
 
@@ -363,7 +357,6 @@ mod tests {
             .single(app.world())
             .unwrap();
         let cameras = coarse_cameras(&mut app);
-        // Levels 1 to 5 at the defaults.
         assert_eq!(
             cameras.len() as u32,
             level_count(&StreamingSettings::default()) - 1
@@ -444,8 +437,6 @@ mod tests {
         assert!(matches!(near.clear_color, ClearColorConfig::None));
 
         let cameras = coarse_cameras(&mut app);
-        // Finest first: orders fall as the levels coarsen, the near camera's is
-        // above them all, and only the coarsest, which draws first, clears.
         let mut above = near.order;
         for (i, (entity, camera, _, _, _)) in cameras.iter().enumerate() {
             assert!(camera.order < above, "level {}", i + 1);
@@ -581,7 +572,6 @@ mod tests {
         assert_ne!(coarse, fine);
 
         let world = *app.world().resource::<WorldSettings>();
-        // Level 2 is 4 m Voxels in 128 m Cells.
         assert_eq!(
             app.world().get::<Transform>(coarse).unwrap().translation,
             Vec3::new(128.0, -128.0, 256.0)

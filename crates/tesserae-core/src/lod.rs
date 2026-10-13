@@ -6,13 +6,11 @@ use crate::voxel::{MaterialId, Voxel};
 
 const OCTANT: usize = CHUNK_SIZE / 2;
 
-/// Sub-cells in one finer Voxel; the weight of a full cube.
 const CUBE_WEIGHT: u32 = (SUBDIV * SUBDIV * SUBDIV) as u32;
 
-/// Half of eight cubes. A coarse Voxel is solid at or above it, so a tie is solid.
+/// Half of eight cubes; a tie is solid.
 const SOLID_AT: u32 = 8 * CUBE_WEIGHT / 2;
 
-/// The finer Voxels one coarse Voxel covers, as their weights and Materials.
 struct Tally {
     total: u32,
     len: usize,
@@ -63,9 +61,8 @@ impl Tally {
         if self.total < SOLID_AT {
             return Voxel::AIR;
         }
-        // The height rule is what keeps a one-Voxel grass cap over dirt grass
-        // (a four-to-four tie at every odd surface height); the id rule makes
-        // the answer independent of palette and iteration order.
+        // Height keeps a one-Voxel grass cap over dirt (a 4-4 tie at every odd surface
+        // height); id then makes the answer independent of palette and iteration order.
         let best = (0..self.len)
             .max_by_key(|&i| {
                 (
@@ -88,13 +85,9 @@ fn weight(shapes: &ShapeTable, voxel: Voxel) -> u32 {
     }
 }
 
-/// The Chunk one LOD level up from `children`.
-///
-/// Child `i` is the octant `x + 2y + 4z`, so the coarse Voxel at `(cx, cy, cz)`
-/// covers `(2cx + dx, 2cy + dy, 2cz + dz)` of the 64-Voxel lattice the eight
-/// form. A finer Voxel weighs its Shape's volume; the coarse Voxel is solid if
-/// the weights sum to at least half of eight cubes, and is then a full cube of
-/// the Material with the most volume. So the result never holds a shaped Voxel.
+/// Child `i` is the octant `x + 2y + 4z`. A finer Voxel weighs its Shape's volume; the
+/// coarse Voxel is solid at half of eight cubes and is then a full cube of the Material
+/// with the most volume, so the result never holds a shaped Voxel.
 pub fn downsample(children: [&Chunk; 8], shapes: &ShapeTable) -> Chunk {
     if let Some(v) = children[0].uniform()
         && children.iter().all(|c| c.uniform() == Some(v))
@@ -108,7 +101,6 @@ fn downsample_general(children: [&Chunk; 8], shapes: &ShapeTable) -> Chunk {
     let mut out = Chunk::air();
     for (i, child) in children.into_iter().enumerate() {
         let (ox, oy, oz) = (i % 2 * OCTANT, i / 2 % 2 * OCTANT, i / 4 * OCTANT);
-        // A uniform child needs no per-Voxel reads, only its writes.
         if let Some(v) = child.uniform() {
             let coarse = uniform_octant(v, shapes);
             if !coarse.is_air() {
@@ -197,7 +189,6 @@ mod tests {
         (z * LATTICE + y) * LATTICE + x
     }
 
-    /// The eight children of a 64^3 lattice, in octant order.
     fn split(at: impl Fn(usize, usize, usize) -> Voxel) -> [Chunk; 8] {
         std::array::from_fn(|i| {
             let (ox, oy, oz) = (
@@ -225,8 +216,7 @@ mod tests {
         downsample(refs(children), shapes)
     }
 
-    /// Brute force over the flat lattice, sharing nothing with `downsample`
-    /// but the definition: a map per coarse Voxel and a three-way comparison.
+    /// Brute force over the flat lattice, sharing nothing with `downsample` but the definition.
     fn reference(children: &[Chunk; 8], shapes: &ShapeTable) -> Vec<Voxel> {
         let mut lattice = vec![Voxel::AIR; LATTICE * LATTICE * LATTICE];
         for (i, child) in children.iter().enumerate() {
@@ -306,8 +296,7 @@ mod tests {
         }
     }
 
-    /// The one coarse Voxel at the origin of child 0, from its eight finer
-    /// Voxels in the order `dx + 2dy + 4dz`.
+    /// The coarse Voxel at the origin of child 0, from eight finer ones in order `dx + 2dy + 4dz`.
     fn coarse(voxels: [Voxel; 8], shapes: &ShapeTable) -> Voxel {
         let mut c = Chunk::air();
         for (j, v) in voxels.into_iter().enumerate() {
@@ -327,8 +316,7 @@ mod tests {
         Voxel::shaped(STONE, SHAPE_SLAB, Orientation::IDENTITY)
     }
 
-    /// A tiny deterministic generator: a test fixture has no business pulling
-    /// in a dependency, and the stream must not change between runs.
+    /// Hand-rolled to avoid a dependency; the stream must not change between runs.
     struct Rng(u64);
 
     impl Rng {
@@ -357,8 +345,7 @@ mod tests {
         pool
     }
 
-    /// Lattice voxels in 2x2x2 blocks that are either noise, two Materials in
-    /// halves, or one with a single stranger: the shapes that make ties.
+    /// 2x2x2 blocks of noise, two Materials in halves, or one with a stranger: the ties.
     fn random_children(seed: u64) -> [Chunk; 8] {
         let orientations: Vec<Orientation> = Orientation::all().collect();
         let pool = pool(&orientations);
@@ -471,7 +458,6 @@ mod tests {
         for &a in &mats {
             for &b in mats.iter().filter(|&&b| b != a) {
                 let want = cube(a.min(b));
-                // Left and right halves tie at both heights.
                 for (left, right) in [(a, b), (b, a)] {
                     let voxels =
                         std::array::from_fn(|j| cube(if j % 2 == 0 { left } else { right }));
@@ -504,9 +490,8 @@ mod tests {
         }
     }
 
-    /// The top solid coarse Voxel of the column at `(x_m, z_m)` at `level`, as
-    /// the Server builds it: eight Chunks from the level-below generator,
-    /// downsampled. Returns the Voxel and its top face in metres.
+    /// The top solid coarse Voxel of the column at `level`, built as the Server does, and its
+    /// top face in metres.
     fn top_of_column(level: u32, x_m: f32, z_m: f32) -> (Voxel, f32) {
         let params = WorldgenParams {
             caves: None,
@@ -552,9 +537,8 @@ mod tests {
         panic!("no solid Voxel in the column at {x_m}, {z_m}, level {level}");
     }
 
-    /// The bound decision 9 of the LOD spec rests on: where a level's surface is
-    /// at most one of its own Voxels from the real one, a seam is a step of at
-    /// most that, whatever the finer level draws beside it.
+    /// The bound decision 9 of the LOD spec rests on: a level's surface is within one of its
+    /// own Voxels of the real one, so a seam is a step of at most that.
     #[test]
     fn the_coarse_surface_is_within_one_coarse_voxel_of_the_terrain_at_every_level() {
         let mut rng = Rng(0x5eed);
@@ -569,8 +553,7 @@ mod tests {
                     (unit(&mut rng) * 2.0 - 1.0) * reach_m,
                 );
                 let (voxel, top_m) = top_of_column(level, x_m, z_m);
-                // The terrain at the column's centre, which is what its
-                // Voxels are an estimate of.
+                // Terrain at the column's centre, which its Voxels estimate.
                 let (cx, cz) = ((x_m / voxel_m).floor() + 0.5, (z_m / voxel_m).floor() + 0.5);
                 let surface_m = Worldgen::new(
                     SEED,
@@ -587,8 +570,7 @@ mod tests {
                     error <= 1.0,
                     "level {level} at {x_m}, {z_m}: top {top_m} m against terrain {surface_m} m"
                 );
-                // And the surface Voxel is only lost when under half of it is
-                // solid, so the top is never more than half a Voxel low.
+                // The surface Voxel is lost only when under half solid.
                 assert!(
                     signed >= -0.5,
                     "level {level} at {x_m}, {z_m}: top {top_m} m lost its surface Voxel"
@@ -596,10 +578,9 @@ mod tests {
                 capped[level as usize - 1] += (voxel.material() == GRASS) as usize;
             }
         }
-        // Not every column: where the surface pokes one finer Voxel into the
-        // next coarse Voxel up, that one is under half and the cap is lost, and
-        // dirt is what is left. A tie broken by id instead of height loses it at
-        // every odd surface height, which is half of them.
+        // Not every column: where the surface pokes one finer Voxel into the next coarse
+        // Voxel up, that one is under half and the cap is lost. A tie broken by id instead
+        // of height would lose it at half of all columns.
         for (i, &n) in capped.iter().enumerate() {
             assert!(
                 n * 10 >= COLUMNS * 7,
@@ -639,8 +620,6 @@ mod tests {
     #[test]
     fn child_i_is_octant_x_plus_2y_plus_4z() {
         let t = table();
-        // A 4x2x6 slab of lattice, one coarse Voxel wide in x and z only
-        // where it lies: coarse (16..18, 2, 16 + 3) in child 5 = x 1, y 0, z 1.
         let children = split(|x, y, z| {
             if (32..36).contains(&x) && (4..6).contains(&y) && (38..40).contains(&z) {
                 cube(STONE)
@@ -707,7 +686,6 @@ mod tests {
             assert!(run(&children, &t).uniform().is_some(), "{v:?}");
         }
 
-        // Uniform children that differ, and one that is not uniform at all.
         for a in uniform {
             for b in uniform {
                 let mut children: [Chunk; 8] =

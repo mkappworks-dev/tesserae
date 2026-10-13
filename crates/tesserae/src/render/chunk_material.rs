@@ -29,17 +29,13 @@ const LIGHT_SHADER_LOCATION: u32 = 11;
 /// count is a Mod's business and arrives with the look-pack API in step 9.
 pub const PALETTE_LEN: usize = 16;
 
-/// What the fragment stage needs to know that is not in the mesh. Mirrors
-/// `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
+/// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
 #[derive(Reflect, ShaderType, Debug, Clone, Copy)]
 pub struct LodParams {
-    /// Non-zero tints every level above 0 by its level, so a capture can show
-    /// the rings as rings. A uniform and not a shader def, so it does not
-    /// specialise a pipeline.
+    /// Non-zero tints each level above 0, to show the rings in a capture. A
+    /// uniform, not a shader def, so it does not specialise a pipeline.
     pub tint: u32,
-    /// Per level, packed four to a `Vec4`: the horizontal distance from the Eye,
-    /// in metres, inside which that level is not drawn, and the height above and
-    /// below the Eye that holds for. See `server::cuts` for why.
+    /// Per level, packed four to a `Vec4`. See `server::cuts` for why.
     pub cut_radius_m: [Vec4; CUT_VECS],
     pub cut_half_height_m: [Vec4; CUT_VECS],
 }

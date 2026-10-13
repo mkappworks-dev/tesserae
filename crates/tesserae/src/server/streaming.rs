@@ -61,11 +61,9 @@ pub struct ChunkUnloaded {
     pub coord: ChunkCoord,
 }
 
-/// A coarse Chunk's finished geometry, for the Client to upload.
-///
 /// `mesh` is in that level's Voxel-index space: the Client scales it by
 /// `voxel_size * 2^level` and places the Chunk at `coord * cell_size * 2^level`.
-/// Empty means despawn, as at level 0. Level 0 never appears here.
+/// Empty means despawn. Level 0 never appears here.
 #[derive(Message)]
 pub struct LodMeshReady {
     pub level: u32,
@@ -73,7 +71,6 @@ pub struct LodMeshReady {
     pub mesh: ChunkMesh,
 }
 
-/// The Client should stop drawing this coarse Chunk.
 #[derive(Message)]
 pub struct LodUnloaded {
     pub level: u32,
@@ -91,8 +88,7 @@ pub struct StreamingSettings {
     /// an anchor sitting on a Cell boundary does not load and evict the same
     /// Chunk every tick.
     pub hysteresis_m: f32,
-    /// How far, in metres, the outermost LOD level reaches. At or below
-    /// `view_distance_m` there are no coarse levels.
+    /// At or below `view_distance_m` there are no coarse levels.
     pub lod_distance_m: f32,
 }
 
@@ -233,8 +229,7 @@ impl StreamingBudget {
     }
 }
 
-/// Under `dev`, `TESSERAE_LOD=0` sets the reach to the view distance, which is
-/// a World with one level: coarse streaming off, for measuring what it costs.
+/// Under `dev`, `TESSERAE_LOD=0` turns coarse streaming off, to measure its cost.
 fn streaming_settings() -> StreamingSettings {
     let settings = StreamingSettings::default();
     #[cfg(feature = "dev")]
@@ -346,12 +341,10 @@ pub(in crate::server) struct MeshState {
     /// incremental path is not monotone, so a bulk result computed from the old
     /// state must not land over it.
     poisoned: HashSet<ChunkCoord>,
-    /// Chunks whose Voxels an Edit changed and that are still held. Unlike the
-    /// light an Edit touches, this is what a level-1 cover is derived from.
+    /// Held Chunks whose Voxels an Edit changed: what a level-1 cover derives
+    /// from, unlike the light an Edit touches.
     edited_chunks: HashSet<ChunkCoord>,
-    /// Chunks whose level-1 cover has to be regenerated: a Voxel changed in
-    /// them, or an edited one left the store and took its Edit with it. Drained
-    /// by `stream_lod`, which alone can see whether the cover exists.
+    /// Drained by `stream_lod`, which alone can see whether the cover exists.
     cover_changed: HashSet<ChunkCoord>,
 }
 
@@ -382,15 +375,13 @@ impl MeshState {
         }
     }
 
-    /// A Voxel in this Chunk was replaced, which the level-1 cover covering it
-    /// has to follow. Separate from `edited`, which also hears of Chunks only
-    /// the light or a face reached, whose cover reads none of that.
+    /// Separate from `edited`, which also fires for Chunks only light or a face
+    /// reached; their cover reads neither.
     pub(in crate::server) fn voxels_changed(&mut self, coord: ChunkCoord) {
         self.edited_chunks.insert(coord);
         self.cover_changed.insert(coord);
     }
 
-    /// The Chunks whose level-1 cover is out of date since the last call.
     pub(in crate::server) fn take_cover_changes(&mut self) -> Vec<ChunkCoord> {
         self.cover_changed.drain().collect()
     }
@@ -612,8 +603,8 @@ fn retire(
         store.remove(coord);
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
-        // The Edit stops existing here, and an unedited Chunk is what the
-        // generator makes again, so only an edited one leaves a ghost in its cover.
+        // An unedited Chunk is what the generator makes again; only an edited one
+        // leaves a ghost in its cover.
         if meshes.edited_chunks.remove(&coord) {
             meshes.cover_changed.insert(coord);
         }
@@ -916,10 +907,7 @@ pub mod stats {
     use super::*;
     use crate::server::lod_rings::level_count;
 
-    /// What the Server holds of one LOD level.
-    ///
-    /// The last four fields are measured for levels above 0 only, and are zero
-    /// at level 0.
+    /// `non_uniform` onward are measured for levels above 0 only; zero at level 0.
     #[derive(Default, Clone, Copy, Debug)]
     pub struct LevelStats {
         /// Chunks held, including the margin no mesh is built for.
@@ -931,11 +919,9 @@ pub mod stats {
         pub steady: usize,
         /// What `meshed` is then: the Chunks of its mesh shell.
         pub shell: usize,
-        /// Held Chunks that are not one Voxel throughout.
         pub non_uniform: usize,
-        /// The delivered meshes, summed.
         pub mesh: lod::measure::MeshSize,
-        /// Mean job time to generate and to mesh a Chunk of this level.
+        /// Mean job time to generate, and to mesh, a Chunk of this level.
         pub generate: lod::measure::JobCost,
         pub mesh_job: lod::measure::JobCost,
     }

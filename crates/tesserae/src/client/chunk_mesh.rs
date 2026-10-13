@@ -119,7 +119,6 @@ mod tests {
             voxel_size: 0.25,
             ..default()
         };
-        // Level 3 is 2 m Voxels, so a 32-Voxel Chunk is a 64 m Cell.
         let (source, mesh) = terrain_mesh(world.voxel_size_at(3));
         let Some(VertexAttributeValues::Float32x3(positions)) =
             mesh.attribute(Mesh::ATTRIBUTE_POSITION)

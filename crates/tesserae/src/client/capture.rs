@@ -42,14 +42,13 @@ struct Capture {
     /// Metres per second, when the player's own speed is not the one wanted: a
     /// sprint asks streaming for several times what a walk does.
     speed_m_s: Option<f32>,
-    /// Degrees above the horizon the camera looks, set on the first frame. The
-    /// default view looks down at the ground, which shows nothing of the distance.
+    /// Degrees above the horizon, set on the first frame. The default view looks
+    /// down at the ground and shows nothing of the distance.
     pitch_deg: Option<f32>,
-    /// Degrees of heading, set on the first frame. The camera spawns on the
-    /// lattice lines at x = z = 0 and flies along an axis, so the default stays
-    /// on one for every level; any other heading leaves it.
+    /// Degrees of heading, set on the first frame. The default flies along an
+    /// axis from x = z = 0, which stays on a lattice line of every level; any
+    /// other heading leaves it.
     yaw_deg: Option<f32>,
-    /// Metres climbed over the flight, to see the rings from above.
     lift_m: f32,
     /// Earliest time the flight may start, so two builds whose fills end at
     /// different times fly at the same time since launch.
@@ -213,8 +212,7 @@ pub(super) fn plugin(app: &mut App) {
     let Ok(path) = std::env::var("TESSERAE_SCREENSHOT") else {
         return;
     };
-    // Not the sky's own grey, so a crack that shows the clear colour can be
-    // counted in the picture.
+    // Not the sky's grey, so a crack showing the clear colour can be counted.
     if std::env::var_os("TESSERAE_SCREENSHOT_MAGENTA_SKY").is_some() {
         app.insert_resource(ClearColor(Color::srgb(1.0, 0.0, 1.0)));
     }
@@ -290,8 +288,7 @@ fn render_offscreen(
 ) {
     let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
-    // Every camera: a coarse level left on the window would be a second picture
-    // on the display and none of it in the image.
+    // Every camera: one left on the window would draw there, not in the image.
     for camera in &cameras {
         commands
             .entity(camera)
@@ -357,9 +354,8 @@ fn fly_forward(
 }
 
 /// The climb that adds `lift_m` over the flight, held to what the Server's speed
-/// ceiling leaves after the horizontal speed. Faster than that and the Server
-/// clamps the Player back, so the picture would not be from where it is said to
-/// be; a longer `TESSERAE_SCREENSHOT_FLY_S` is the way to climb further.
+/// ceiling leaves after the horizontal speed: faster and the Server clamps the
+/// Player back, so the picture is not from where it is said to be.
 fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
     let wanted = lift_m / fly_for_s.max(f32::EPSILON);
     let room = (FLY_SPEED_CEILING_MPS.powi(2) - horizontal_m_s.powi(2))
@@ -447,9 +443,7 @@ fn report(
         stats.anchor,
         camera.translation,
     );
-    // How far each level actually reaches, from what is drawn and not from what
-    // the rings say: the horizontal distance to the near and far corner of the
-    // furthest Chunk of each level.
+    // Measured from what is drawn, not from what the rings say.
     let eye = camera.translation;
     let mut reach_m: Vec<(f32, f32)> = Vec::new();
     let mut held_bytes: Vec<usize> = Vec::new();
@@ -483,13 +477,12 @@ fn report(
     log_levels(&capture.frames, &stats.levels, &held_bytes);
 }
 
-/// The vertex and index buffers of a mesh, which is what it costs to hold.
 fn mesh_bytes(mesh: &Mesh) -> usize {
     mesh.get_vertex_buffer_size() + mesh.get_index_buffer_bytes().map_or(0, <[u8]>::len)
 }
 
-/// What each LOD level holds, costs and weighs, one line per level and kind so
-/// `scripts/frame-runs` still sees only the lines it reads.
+/// One line per level and kind, so `scripts/frame-runs` still sees only the lines
+/// it reads.
 ///
 /// `held_bytes` is what the Client's own meshes add up to, level 0 included; the
 /// per-level `bytes` is what the Server delivered, for levels above 0.

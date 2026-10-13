@@ -30,10 +30,8 @@ struct LodParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(101)
 var<uniform> lod: LodParams;
 
-// How strongly the debug tint replaces a Material's colour.
 const TINT_STRENGTH: f32 = 0.55;
 
-// The debug tint of each level, 0 being untinted. Levels past the last reuse it.
 const TINT_LEVELS: u32 = 6u;
 
 // How a 0-15 light level becomes radiance. Minecraft's own curve, close enough:
@@ -133,10 +131,9 @@ fn fragment(
     vertex_output.uv = in.uv;
     vertex_output.instance_index = in.instance_index;
 
-    // A coarse level lies under the finer ones for more than the seam needs, and a
-    // coarse surface up to a Voxel above the real one would stand over the finer
-    // silhouette there. Cut it in metres from the Eye instead, but only at the
-    // heights the finer level reaches: above them nothing else covers the ground.
+    // Coarse geometry up to a Voxel above the real surface would stand over the
+    // finer silhouette, so cut it in metres from the Eye, but only at the heights
+    // the finer levels reach: above them nothing else covers the ground.
     if in.level != 0u {
         let level = min(in.level, 31u);
         let from_eye = in.world_position.xyz - view.world_position;

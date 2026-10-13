@@ -56,8 +56,7 @@ impl ChunkStore {
         ))
     }
 
-    /// A Chunk alone as a shared handle, for a coarse generate job that uses it
-    /// as a child instead of generating one.
+    /// For a coarse generate job that takes the Chunk as a child instead of generating one.
     pub(in crate::server) fn chunk_arc(&self, coord: ChunkCoord) -> Option<Arc<Chunk>> {
         self.chunks.get(&coord).map(Arc::clone)
     }

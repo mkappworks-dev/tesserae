@@ -9,8 +9,6 @@ use tesserae_core::{ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, mesh_ch
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const DEEPEST_LEVEL: u32 = 5;
 
-/// The eight Chunks of the 2x2x2 block whose lowest corner is `(cx, cy, cz)`,
-/// in octant order `x + 2y + 4z`.
 fn octants(chunk_at: impl Fn(i32, i32, i32) -> Chunk, [cx, cy, cz]: [i32; 3]) -> [Chunk; 8] {
     std::array::from_fn(|i| {
         let (x, y, z) = (i as i32 & 1, i as i32 >> 1 & 1, i as i32 >> 2);
@@ -22,8 +20,7 @@ fn refs(children: &[Chunk; 8]) -> [&Chunk; 8] {
     std::array::from_fn(|i| &children[i])
 }
 
-/// Every Voxel a stair, in all 24 Orientations over two Materials: the most
-/// the palette and the volume lookup can be asked for.
+/// Worst case for the palette and the volume lookup: all 24 Orientations over two Materials.
 fn stairs() -> Chunk {
     let orientations: Vec<Orientation> = Orientation::all().collect();
     let mut chunk = Chunk::air();
@@ -47,8 +44,6 @@ fn stairs() -> Chunk {
     chunk
 }
 
-/// Cubes under a layer of stairs under air: a ramp's worth of shaped Voxels,
-/// over uniform halves.
 fn stair_surface() -> [Chunk; 8] {
     let ramp = |cy: i32| {
         let mut chunk = Chunk::air();
@@ -73,8 +68,6 @@ fn stair_surface() -> [Chunk; 8] {
     octants(|_, y, _| ramp(y), [0, 0, 0])
 }
 
-/// What a coarse-Chunk Job downsamples at the surface: the default World's
-/// eight Chunks around the one its ground crosses, caves and stairs included.
 fn terrain(c: &mut Criterion) {
     let shapes = ShapeTable::builtin();
     let g = Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default());
@@ -110,9 +103,8 @@ fn terrain(c: &mut Criterion) {
     group.finish();
 }
 
-/// The generator whose Chunks a level-`level` Job downsamples, as the Server
-/// builds it: level 0 is the production generator, and the sources above it have
-/// no smoothing because a coarse Voxel rounds stairs back to cubes.
+/// Mirrors the Server's sources: level 0 is production, those above it skip smoothing
+/// because a coarse Voxel rounds stairs back to cubes.
 fn source(level: u32) -> Worldgen {
     let params = WorldgenParams::default();
     if level == 1 {
@@ -125,22 +117,18 @@ fn source(level: u32) -> Worldgen {
     Worldgen::new(SEED, 2f32.powi(level as i32 - 1), params)
 }
 
-/// What a coarse-Chunk Job does: eight generator calls and the downsample.
 fn coarse(source: &Worldgen, shapes: &ShapeTable, [cx, cy, cz]: [i32; 3]) -> Chunk {
     let children = octants(|x, y, z| source.chunk(x, y, z), [2 * cx, 2 * cy, 2 * cz]);
     downsample(refs(&children), shapes)
 }
 
-/// The Chunk of `level` whose column over the origin the ground crosses.
 fn surface_at(level: u32) -> [i32; 3] {
     let cell_m = (CHUNK_SIZE as f32) * 2f32.powi(level as i32);
     let ground_m = source(1).surface_height_m(0.0, 0.0);
     [0, (ground_m / cell_m).floor() as i32, 0]
 }
 
-/// `lod/coarse_chunk`: one Job's work for the Chunk at the surface of each
-/// level, and for an air and a rock Chunk of level 1, whose early-outs are what
-/// most of a level holds.
+/// Air and rock are benched too: their early-outs are what most of a level holds.
 fn coarse_chunk(c: &mut Criterion) {
     let shapes = ShapeTable::builtin();
     let mut group = c.benchmark_group("lod/coarse_chunk");
@@ -160,8 +148,7 @@ fn coarse_chunk(c: &mut Criterion) {
     group.finish();
 }
 
-/// `lod/mesh_coarse`: what a mesh Job does for a downsampled surface Chunk, lit
-/// as open sky the way the Server lights every coarse Chunk.
+/// Lit as open sky, as the Server lights every coarse Chunk.
 fn mesh_coarse(c: &mut Criterion) {
     let shapes = ShapeTable::builtin();
     let tables = Tables::builtin();
