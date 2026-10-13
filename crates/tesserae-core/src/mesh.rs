@@ -616,47 +616,93 @@ impl Pending {
 /// columns: not the optimum, the same greedy as pass 1 and enough for a floor.
 /// Chunks mesh alone, so nothing merges across a Chunk boundary, and nothing is
 /// added to what the unmerged quads covered, so a face culled stays culled.
-fn merge_shaped(pending: &mut Vec<Pending>, mesh: &mut ChunkMesh) {
-    pending.sort_unstable_by_key(|p| (p.group, (p.b0 as u32) << 16 | p.b1 as u32, p.a0));
-    let mut kept = 0;
-    for i in 0..pending.len() {
-        let p = pending[i];
-        if kept > 0 {
-            let last: &mut Pending = &mut pending[kept - 1];
-            if last.group == p.group && last.b0 == p.b0 && last.b1 == p.b1 && last.a1 == p.a0 {
-                last.a1 = p.a1;
-                continue;
-            }
-        }
-        pending[kept] = p;
-        kept += 1;
-    }
-    pending.truncate(kept);
+///
+/// Quads are first counted into one bucket per face and plane, which is O(n),
+/// so the sorts that follow are over the handful sharing a plane and not over
+/// the whole Chunk: terrain with a stair on every column spreads over hundreds
+/// of planes, and a few hundred quads are cheaper to bucket than to sort.
+#[inline(never)]
+fn merge_shaped(pending: &mut [Pending], mesh: &mut ChunkMesh) {
+    // A plane is `0..=CHUNK_SIZE * SUBDIV`, so there are this many per face.
+    const PLANES: usize = CHUNK_SIZE * SUBDIV + 1;
+    const BUCKETS: usize = 6 * PLANES;
+    let Some(&first) = pending.first() else {
+        return;
+    };
+    let bucket = |p: &Pending| (p.group >> 10 & 7) as usize * PLANES + (p.group & 0x3ff) as usize;
 
-    pending.sort_unstable_by_key(|p| (p.group, (p.a0 as u32) << 16 | p.a1 as u32, p.b0));
-    let mut kept = 0;
-    for i in 0..pending.len() {
-        let p = pending[i];
-        if kept > 0 {
-            let last: &mut Pending = &mut pending[kept - 1];
-            if last.group == p.group && last.a0 == p.a0 && last.a1 == p.a1 && last.b1 == p.b0 {
-                last.b1 = p.b1;
-                continue;
-            }
-        }
-        pending[kept] = p;
-        kept += 1;
-    }
-    pending.truncate(kept);
-
+    // `end[b]` counts up to where bucket `b` stops, then walks back to where it
+    // starts as the quads are placed from the back.
+    let mut end = [0u32; BUCKETS + 1];
     for p in pending.iter() {
-        let layer = mesh.layer(if p.group >> 13 & 1 == 1 {
-            RenderClass::Blend
-        } else {
-            RenderClass::Opaque
-        });
-        push_merged_quad(layer, p);
+        end[bucket(p)] += 1;
     }
+    let mut total = 0;
+    for e in end.iter_mut() {
+        total += *e;
+        *e = total;
+    }
+    let mut sorted = vec![first; pending.len()];
+    for p in pending.iter().rev() {
+        let slot = &mut end[bucket(p)];
+        *slot -= 1;
+        sorted[*slot as usize] = *p;
+    }
+
+    // `end[b]` is now where bucket `b` starts, and `end[b + 1]` where it stops.
+    for b in 0..BUCKETS {
+        let run = &mut sorted[end[b] as usize..end[b + 1] as usize];
+        let kept = if run.len() > 1 {
+            merge_run(run)
+        } else {
+            run.len()
+        };
+        for p in &run[..kept] {
+            let class = if p.group >> 13 & 1 == 1 {
+                RenderClass::Blend
+            } else {
+                RenderClass::Opaque
+            };
+            push_merged_quad(mesh.layer(class), p);
+        }
+    }
+}
+
+/// Merge `run`, all in one plane, in place and return how many are left.
+fn merge_run(run: &mut [Pending]) -> usize {
+    run.sort_unstable_by_key(|p| (p.group, (p.b0 as u32) << 16 | p.b1 as u32, p.a0));
+    let kept = compact(
+        run,
+        |last, p| last.group == p.group && last.b0 == p.b0 && last.b1 == p.b1 && last.a1 == p.a0,
+        |last, p| last.a1 = p.a1,
+    );
+    let run = &mut run[..kept];
+    run.sort_unstable_by_key(|p| (p.group, (p.a0 as u32) << 16 | p.a1 as u32, p.b0));
+    compact(
+        run,
+        |last, p| last.group == p.group && last.a0 == p.a0 && last.a1 == p.a1 && last.b1 == p.b0,
+        |last, p| last.b1 = p.b1,
+    )
+}
+
+/// Fold each quad into the one before it where `abuts` says so, keeping the
+/// survivors at the front.
+fn compact(
+    run: &mut [Pending],
+    abuts: impl Fn(&Pending, &Pending) -> bool,
+    grow: impl Fn(&mut Pending, &Pending),
+) -> usize {
+    let mut kept = 0;
+    for i in 0..run.len() {
+        let p = run[i];
+        if kept > 0 && abuts(&run[kept - 1], &p) {
+            grow(&mut run[kept - 1], &p);
+        } else {
+            run[kept] = p;
+            kept += 1;
+        }
+    }
+    kept
 }
 
 /// The same corner order, winding and UV axes as pass 1, so a pass-2 quad is

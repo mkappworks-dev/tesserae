@@ -90,3 +90,11 @@ the suspect, and reordering its fields or moving the cold arrays out of it is
 the next thing to try. The wall-walk sweep is still +24% (about 17 ns) and the
 fall sweeps are still faster, which `connections_at` cannot explain now that it
 is skipped for a table with no connected Shape.
+
+**Residue explained (see ticket 02 of
+`.scratch/2026-10-12-merged-rails-across-voxels/`).** The +1% to +5% on pass-1
+benches was code layout, not work: instructions retired for terrain, a full
+Chunk and an empty one are 0.02% lower on this branch than on `main`, and cycles
+are equal once `mesh_shaped` is inlined as it is on `main`. `Variant` growing
+was not the cause (terrain never reads a `Variant`; cubes and air return before
+the table).

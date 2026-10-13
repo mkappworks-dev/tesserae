@@ -127,3 +127,50 @@ that merges nothing as well as by those that do. A cheaper merge (bucketing by
 plane before sorting, or merging as quads are emitted) is the next thing to try
 and is not needed for the gate. `cap_units` and `MAX_SHAPED_PER_CHUNK` are
 unchanged, as the spec says.
+
+## Follow-up: cheaper merge, and the pass-1 residue explained
+
+Three things left over from the first pass at this ticket, closed.
+
+**The gallery capture after merging** was taken (`TESSERAE_SCREENSHOT_OFFSCREEN=1`,
+fly 0). Two captures of the final build are byte-identical, and the fence line,
+corner, stair, cubes and slabs read as before. Against the capture from before
+the merge, 107 of 242,000 pixels in the gallery region differ (mean 3.8 of 255,
+max 33), almost all on distant slope-smoothing terrain edges and none on a
+missing face: edge-pixel rasterisation where quads now join, not geometry.
+
+**The merge is cheaper.** Quads are counted into one bucket per face and plane
+(6 x 513 buckets, one array) and the two sorts run per plane, not over the whole
+Chunk. `merge_shaped` is kept out of line. Interleaved A/B, six rounds, load
+2.5, medians; `base` is the commit before the merge (`76d28a3`):
+
+| Bench                                  |    main |    base |     now | now/base | now/main |
+| -------------------------------------- | ------: | ------: | ------: | -------: | -------: |
+| `greedy_mesh/terrain_stairs_at_cap`    |  534 us |  553 us |  615 us |   +11.2% |   +15.2% |
+| `greedy_mesh/terrain_stairs_at_budget` |  435 us |  454 us |  463 us |    +2.0% |    +6.4% |
+| `greedy_mesh/all_stairs`               | 5.86 ms | 6.09 ms | 3.55 ms |   -41.7% |   -39.4% |
+| `greedy_mesh/terrain_fences_at_cap`    |       - |  549 us |  598 us |    +8.9% |        - |
+| `greedy_mesh/flat_fences_at_cap`       |       - |  489 us |  539 us |   +10.3% |        - |
+| `mesh_chunk/straddling`                |  397 us |  398 us |  395 us |    -0.8% |    -0.5% |
+| `greedy_mesh/terrain`                  |  328 us |  342 us |  326 us |    -4.7% |    -0.6% |
+| `greedy_mesh/solid`                    |  315 us |  339 us |  314 us |    -7.4% |    -0.4% |
+| `greedy_mesh/checkerboard`             | 2.72 ms | 2.65 ms | 2.74 ms |    +3.3% |    +0.6% |
+
+The gate (`terrain_stairs_at_cap` and `all_stairs` at no more than +25%) holds
+with room, and `mesh_chunk/straddling`, which holds 209 shaped Voxels and so
+runs pass 2, is back to where it was. The first version of this change made it
++8% because the bucket table had a fixed cost; the sorts were not the cost on a
+Chunk that small, the table and the emission were.
+
+**Pass 1's residue was code layout, not work.** The branch's `terrain` read +1%
+to +5% against `main` while pass 1's source is identical. A fixed-iteration
+driver, run under `/usr/bin/time -l`, counts instructions retired and cycles for
+`main` and the branch: instructions are 0.02% lower on the branch for terrain, a
+full Chunk and an empty one, and cycles are equal (terrain 5.61e9 against
+5.62e9) once `mesh_shaped` is left to be inlined as it is on `main` and only
+`merge_shaped` is kept out of line. With `mesh_shaped` marked `inline(never)`
+the same instructions took 3.8% more cycles on terrain, and with `pass1` marked
+`inline(never)` 18% more: the hot loop is sensitive to what is inlined around it
+and that, not extra work, was the residue. `checkerboard` earlier swinging
+-4.5% to +6% was the same effect between builds. This is the number to read for
+"does pass 1 move": it does not.
