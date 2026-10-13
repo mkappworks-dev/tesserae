@@ -8,6 +8,7 @@
 import bevy_pbr::render::{
     forward_io::{FragmentOutput, VertexOutput},
     mesh_functions,
+    mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
@@ -18,6 +19,20 @@ import bevy_pbr::render::{
 // by ChunkMaterialExtension::specialize.
 @group(constants::MATERIAL_BIND_GROUP) @binding(100)
 var<uniform> palette: array<vec4<f32>, constants::CHUNK_PALETTE_LEN>;
+
+// Mirrors LodParams in chunk_material.rs.
+struct LodParams {
+    tint: u32,
+    cut_radius_m: array<vec4<f32>, 8>,
+    cut_half_height_m: array<vec4<f32>, 8>,
+}
+
+@group(constants::MATERIAL_BIND_GROUP) @binding(101)
+var<uniform> lod: LodParams;
+
+const TINT_STRENGTH: f32 = 0.55;
+
+const TINT_LEVELS: u32 = 6u;
 
 // How a 0-15 light level becomes radiance. Minecraft's own curve, close enough:
 // each level down is a fixed fraction of the one above, which keeps the dim end
@@ -55,6 +70,7 @@ struct ChunkVertexOutput {
     @location(6) @interpolate(flat) instance_index: u32,
     @location(10) @interpolate(flat) material: u32,
     @location(11) @interpolate(flat) light: u32,
+    @location(12) @interpolate(flat) level: u32,
 }
 
 // Flat, like the Material index: every vertex of a greedy quad carries the same
@@ -70,9 +86,23 @@ fn light_level(packed: u32, shift: u32) -> f32 {
     return pow(LIGHT_FALLOFF, f32(constants::CHUNK_MAX_LIGHT - level));
 }
 
+fn level_tint(level: u32) -> vec3<f32> {
+    var tints = array<vec3<f32>, TINT_LEVELS>(
+        vec3<f32>(1.0, 1.0, 1.0),
+        vec3<f32>(1.0, 0.2, 0.2),
+        vec3<f32>(1.0, 0.85, 0.1),
+        vec3<f32>(0.2, 1.0, 0.2),
+        vec3<f32>(0.1, 0.9, 1.0),
+        vec3<f32>(0.6, 0.3, 1.0),
+    );
+    return tints[min(level, TINT_LEVELS - 1u)];
+}
+
 @vertex
 fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
     let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
+
+    let level = mesh_functions::get_tag(in.instance_index);
 
     var out: ChunkVertexOutput;
     out.world_position = mesh_functions::mesh_position_local_to_world(
@@ -85,6 +115,7 @@ fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
     out.instance_index = in.instance_index;
     out.material = in.material;
     out.light = in.light;
+    out.level = level;
     return out;
 }
 
@@ -100,11 +131,30 @@ fn fragment(
     vertex_output.uv = in.uv;
     vertex_output.instance_index = in.instance_index;
 
+    // Coarse geometry up to a Voxel above the real surface would stand over the
+    // finer silhouette, so cut it in metres from the Eye, but only at the heights
+    // the finer levels reach: above them nothing else covers the ground.
+    if in.level != 0u {
+        let level = min(in.level, 31u);
+        let from_eye = in.world_position.xyz - view.world_position;
+        if length(from_eye.xz) < lod.cut_radius_m[level / 4u][level % 4u]
+            && abs(from_eye.y) < lod.cut_half_height_m[level / 4u][level % 4u] {
+            discard;
+        }
+    }
+
     var pbr_input = pbr_input_from_standard_material(vertex_output, is_front);
 
     // Multiplied rather than assigned so the base material's base_color still
     // works as a whole-chunk tint.
     pbr_input.material.base_color *= palette[min(in.material, constants::CHUNK_PALETTE_LEN - 1u)];
+
+    if lod.tint != 0u && in.level != 0u {
+        pbr_input.material.base_color = vec4<f32>(
+            mix(pbr_input.material.base_color.rgb, level_tint(in.level), TINT_STRENGTH),
+            pbr_input.material.base_color.a,
+        );
+    }
 
     // Sky light is how much of the sky dome and the sun this face can see, so it
     // drives bevy_pbr's own two occlusion inputs rather than being multiplied

@@ -9,15 +9,19 @@
 //! first makes the result the same picture every time.
 
 use bevy::camera::RenderTarget;
+use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::tasks::AsyncComputeTaskPool;
 use bevy::window::PresentMode;
 
 use crate::cost::{FrameCost, MainThreadCost};
+use crate::world::WorldSettings;
 
-use crate::client::camera::FlyCamera;
-use crate::server::streaming::stats::StreamingStats;
+use crate::client::camera::{FlyCamera, MainCamera};
+use crate::server::player::FLY_SPEED_CEILING_MPS;
+use crate::server::streaming::stats::{LevelStats, StreamingStats};
 
 /// Seconds of simulated flight before the shutter, so the picture shows Chunks
 /// that streamed in around a camera that moved rather than the initial fill.
@@ -38,6 +42,14 @@ struct Capture {
     /// Metres per second, when the player's own speed is not the one wanted: a
     /// sprint asks streaming for several times what a walk does.
     speed_m_s: Option<f32>,
+    /// Degrees above the horizon, set on the first frame. The default view looks
+    /// down at the ground and shows nothing of the distance.
+    pitch_deg: Option<f32>,
+    /// Degrees of heading, set on the first frame. The default flies along an
+    /// axis from x = z = 0, which stays on a lattice line of every level; any
+    /// other heading leaves it.
+    yaw_deg: Option<f32>,
+    lift_m: f32,
     /// Earliest time the flight may start, so two builds whose fills end at
     /// different times fly at the same time since launch.
     fly_after_s: f32,
@@ -64,6 +76,10 @@ struct FrameLog {
     settled_s: Option<f32>,
     /// When every Chunk in the mesh extent had first been sent a mesh.
     shown_s: Option<f32>,
+    /// Per level, when it first held the Chunks it holds once filled, and when
+    /// every Chunk of its mesh shell had first been sent a mesh.
+    level_filled_s: Vec<Option<f32>>,
+    level_shown_s: Vec<Option<f32>>,
     /// Worst frame before that.
     worst_fill_s: f32,
     /// Every frame of the flight, in seconds.
@@ -104,6 +120,27 @@ impl FrameLog {
     fn note_shown(&mut self, elapsed_s: f32, shown: bool) {
         if self.shown_s.is_none() && shown {
             self.shown_s = Some(elapsed_s);
+        }
+    }
+
+    fn note_levels(&mut self, elapsed_s: f32, levels: &[LevelStats]) {
+        let latch = |times: &mut Vec<Option<f32>>, level: usize, reached: bool| {
+            times.resize(times.len().max(level + 1), None);
+            if reached && times[level].is_none() {
+                times[level] = Some(elapsed_s);
+            }
+        };
+        for (level, s) in levels.iter().enumerate() {
+            latch(
+                &mut self.level_filled_s,
+                level,
+                s.steady > 0 && s.held >= s.steady,
+            );
+            latch(
+                &mut self.level_shown_s,
+                level,
+                s.shell > 0 && s.meshed >= s.shell,
+            );
         }
     }
 
@@ -175,6 +212,10 @@ pub(super) fn plugin(app: &mut App) {
     let Ok(path) = std::env::var("TESSERAE_SCREENSHOT") else {
         return;
     };
+    // Not the sky's grey, so a crack showing the clear colour can be counted.
+    if std::env::var_os("TESSERAE_SCREENSHOT_MAGENTA_SKY").is_some() {
+        app.insert_resource(ClearColor(Color::srgb(1.0, 0.0, 1.0)));
+    }
     app.insert_resource(Capture {
         path,
         fly_for_s: seconds("TESSERAE_SCREENSHOT_FLY_S", FLY_FOR_S),
@@ -183,6 +224,13 @@ pub(super) fn plugin(app: &mut App) {
         speed_m_s: std::env::var("TESSERAE_SCREENSHOT_SPEED_M_S")
             .ok()
             .and_then(|v| v.parse().ok()),
+        pitch_deg: std::env::var("TESSERAE_SCREENSHOT_PITCH_DEG")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        yaw_deg: std::env::var("TESSERAE_SCREENSHOT_YAW_DEG")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        lift_m: seconds("TESSERAE_SCREENSHOT_LIFT_M", 0.0),
         offscreen: std::env::var_os("TESSERAE_SCREENSHOT_OFFSCREEN").is_some(),
         taken: false,
         pending_seen: false,
@@ -196,6 +244,7 @@ pub(super) fn plugin(app: &mut App) {
                 capture.offscreen && target.is_none()
             }),
             watch_frames,
+            aim,
             fly_forward,
             report,
             shutter,
@@ -223,7 +272,7 @@ fn uncap_frame_rate(mut windows: Query<&mut Window>) {
 #[derive(Resource)]
 struct Offscreen(Handle<Image>);
 
-/// Renders the camera into an image instead of the window, for a capture.
+/// Renders the cameras into an image instead of the window, for a capture.
 /// `TESSERAE_SCREENSHOT_OFFSCREEN` turns it on.
 ///
 /// A window that is not being presented is never drawn, and a capture of one is
@@ -235,13 +284,16 @@ struct Offscreen(Handle<Image>);
 fn render_offscreen(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    camera: Single<Entity, With<Camera3d>>,
+    cameras: Query<Entity, With<Camera3d>>,
 ) {
     let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
-    commands
-        .entity(*camera)
-        .insert(RenderTarget::Image(handle.clone().into()));
+    // Every camera: one left on the window would draw there, not in the image.
+    for camera in &cameras {
+        commands
+            .entity(camera)
+            .insert(RenderTarget::Image(handle.clone().into()));
+    }
     commands.insert_resource(Offscreen(handle));
 }
 
@@ -264,6 +316,9 @@ fn watch_frames(
     capture.frames.note_shown(time.elapsed_secs(), stats.shown);
     capture
         .frames
+        .note_levels(time.elapsed_secs(), &stats.levels);
+    capture
+        .frames
         .note_settled(time.elapsed_secs(), stats.settled);
     let may_fly = time.elapsed_secs() >= capture.fly_after_s;
     capture.frames.record(
@@ -283,7 +338,7 @@ fn watch_frames(
 fn fly_forward(
     time: Res<Time>,
     capture: Res<Capture>,
-    camera: Single<(&mut Transform, &FlyCamera)>,
+    camera: Single<(&mut Transform, &FlyCamera), With<MainCamera>>,
 ) {
     if !capture
         .frames
@@ -294,7 +349,40 @@ fn fly_forward(
     let (mut transform, fly) = camera.into_inner();
     let heading = transform.forward().with_y(0.0).normalize_or_zero();
     let speed = capture.speed_m_s.unwrap_or(fly.speed);
-    transform.translation += heading * speed * time.delta_secs();
+    let climb = climb_m_s(capture.lift_m, capture.fly_for_s, speed);
+    transform.translation += (heading * speed + Vec3::Y * climb) * time.delta_secs();
+}
+
+/// The climb that adds `lift_m` over the flight, held to what the Server's speed
+/// ceiling leaves after the horizontal speed: faster and the Server clamps the
+/// Player back, so the picture is not from where it is said to be.
+fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
+    let wanted = lift_m / fly_for_s.max(f32::EPSILON);
+    let room = (FLY_SPEED_CEILING_MPS.powi(2) - horizontal_m_s.powi(2))
+        .max(0.0)
+        .sqrt();
+    wanted.clamp(-room, room)
+}
+
+fn aim(
+    capture: Res<Capture>,
+    camera: Single<(&mut Transform, &mut FlyCamera), With<MainCamera>>,
+    mut aimed: Local<bool>,
+) {
+    if capture.pitch_deg.is_none() && capture.yaw_deg.is_none() {
+        return;
+    }
+    if std::mem::replace(&mut *aimed, true) {
+        return;
+    }
+    let (mut transform, mut fly) = camera.into_inner();
+    if let Some(pitch_deg) = capture.pitch_deg {
+        fly.pitch = pitch_deg.to_radians();
+    }
+    if let Some(yaw_deg) = capture.yaw_deg {
+        fly.yaw = yaw_deg.to_radians();
+    }
+    transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }
 
 /// Logs what the picture is of, and the frame times behind it, as one line of
@@ -305,8 +393,10 @@ fn report(
     time: Res<Time>,
     capture: Res<Capture>,
     stats: Res<StreamingStats>,
-    camera: Single<&Transform, With<Camera3d>>,
-    drawn: Query<(), With<Mesh3d>>,
+    camera: Single<&Transform, With<MainCamera>>,
+    drawn: Query<(&MeshTag, &Transform, &Mesh3d)>,
+    meshes: Res<Assets<Mesh>>,
+    world: Res<WorldSettings>,
 ) {
     if !capture.due(time.elapsed_secs()) {
         return;
@@ -352,6 +442,101 @@ fn report(
         stats.stale[2],
         stats.anchor,
         camera.translation,
+    );
+    // Measured from what is drawn, not from what the rings say.
+    let eye = camera.translation;
+    let mut reach_m: Vec<(f32, f32)> = Vec::new();
+    let mut held_bytes: Vec<usize> = Vec::new();
+    for (tag, at, mesh) in &drawn {
+        let level = tag.value as usize;
+        held_bytes.resize(held_bytes.len().max(level + 1), 0);
+        held_bytes[level] += meshes.get(&mesh.0).map_or(0, mesh_bytes);
+        let cell = world.cell_size_at(tag.value);
+        let corners = [(0.0, 0.0), (cell, 0.0), (0.0, cell), (cell, cell)].map(|(dx, dz)| {
+            Vec2::new(at.translation.x + dx - eye.x, at.translation.z + dz - eye.z).length()
+        });
+        reach_m.resize(reach_m.len().max(level + 1), (0.0, 0.0));
+        let (near, far) = &mut reach_m[level];
+        *near = near.max(corners.into_iter().fold(f32::MAX, f32::min));
+        *far = far.max(corners.into_iter().fold(0.0, f32::max));
+    }
+    let reach: Vec<String> = reach_m
+        .iter()
+        .enumerate()
+        .map(|(level, (near, far))| format!("{level}:{near:.0}-{far:.0}"))
+        .collect();
+    info!("capture_reach_m {}", reach.join(","));
+    // A line of its own, so `scripts/frame-runs` keeps aggregating the one above.
+    let per_level: Vec<String> = stats
+        .levels
+        .iter()
+        .enumerate()
+        .map(|(level, s)| format!("{level}:{}/{}", s.held, s.meshed))
+        .collect();
+    info!("capture_lod held/meshed={}", per_level.join(","));
+    log_levels(&capture.frames, &stats.levels, &held_bytes);
+}
+
+fn mesh_bytes(mesh: &Mesh) -> usize {
+    mesh.get_vertex_buffer_size() + mesh.get_index_buffer_bytes().map_or(0, <[u8]>::len)
+}
+
+/// One line per level and kind, so `scripts/frame-runs` still sees only the lines
+/// it reads.
+///
+/// `held_bytes` is what the Client's own meshes add up to, level 0 included; the
+/// per-level `bytes` is what the Server delivered, for levels above 0.
+fn log_levels(frames: &FrameLog, levels: &[LevelStats], held_bytes: &[usize]) {
+    let at = |times: &[Option<f32>], level: usize| {
+        times
+            .get(level)
+            .copied()
+            .flatten()
+            .map_or("never".to_string(), |s| format!("{s:.2}"))
+    };
+    for (level, s) in levels.iter().enumerate() {
+        info!(
+            "capture_lod_fill level={level} held={} steady={} filled_s={} meshed={} shell={} \
+             shown_s={}",
+            s.held,
+            s.steady,
+            at(&frames.level_filled_s, level),
+            s.meshed,
+            s.shell,
+            at(&frames.level_shown_s, level),
+        );
+        if level > 0 {
+            info!(
+                "capture_lod_cost level={level} non_uniform={} meshes={} non_empty={} quads={} \
+                 bytes={} gen_us={:.0} gen_max_us={:.0} gen_jobs={} mesh_us={:.0} \
+                 mesh_max_us={:.0} mesh_jobs={}",
+                s.non_uniform,
+                s.mesh.meshes,
+                s.mesh.non_empty,
+                s.mesh.quads,
+                s.mesh.bytes,
+                s.generate.mean_us,
+                s.generate.longest_us,
+                s.generate.jobs,
+                s.mesh_job.mean_us,
+                s.mesh_job.longest_us,
+                s.mesh_job.jobs,
+            );
+        }
+    }
+    info!(
+        "capture_lod_pool async_threads={}",
+        AsyncComputeTaskPool::get().thread_num()
+    );
+    let per_level: Vec<String> = held_bytes
+        .iter()
+        .enumerate()
+        .map(|(level, bytes)| format!("{level}:{bytes}"))
+        .collect();
+    info!(
+        "capture_lod_memory total_bytes={} levels={}",
+        held_bytes.iter().sum::<usize>(),
+        per_level.join(",")
     );
 }
 
@@ -435,12 +620,48 @@ mod tests {
     }
 
     #[test]
+    fn a_climb_is_held_to_what_the_speed_ceiling_leaves_after_the_horizontal() {
+        assert_eq!(climb_m_s(60.0, 6.0, 12.0), 10.0);
+        assert_eq!(climb_m_s(-60.0, 6.0, 12.0), -10.0);
+        let climb = climb_m_s(6000.0, 6.0, 12.0);
+        assert!(12.0f32.hypot(climb) <= FLY_SPEED_CEILING_MPS + 1e-3);
+        assert_eq!(climb_m_s(100.0, 6.0, FLY_SPEED_CEILING_MPS), 0.0);
+        assert_eq!(climb_m_s(0.0, 6.0, 12.0), 0.0);
+    }
+
+    #[test]
     fn shown_is_latched_at_the_first_time_it_is_true() {
         let mut log = FrameLog::default();
         log.note_shown(1.0, false);
         log.note_shown(2.0, true);
         log.note_shown(3.0, true);
         assert_eq!(log.shown_s, Some(2.0));
+    }
+
+    #[test]
+    fn a_level_is_filled_and_shown_at_the_first_time_it_holds_what_it_will_keep() {
+        let level = |held, meshed| LevelStats {
+            held,
+            meshed,
+            steady: 10,
+            shell: 4,
+            ..default()
+        };
+        let mut log = FrameLog::default();
+        log.note_levels(1.0, &[level(9, 3), level(0, 0)]);
+        log.note_levels(2.0, &[level(10, 4), level(3, 0)]);
+        // A level that drops below its count again keeps the time it first got there.
+        log.note_levels(3.0, &[level(7, 2), level(10, 4)]);
+        assert_eq!(log.level_filled_s, [Some(2.0), Some(3.0)]);
+        assert_eq!(log.level_shown_s, [Some(2.0), Some(3.0)]);
+    }
+
+    #[test]
+    fn a_level_with_nothing_to_hold_is_never_filled() {
+        let mut log = FrameLog::default();
+        log.note_levels(1.0, &[LevelStats::default()]);
+        assert_eq!(log.level_filled_s, [None]);
+        assert_eq!(log.level_shown_s, [None]);
     }
 
     #[test]

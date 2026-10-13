@@ -56,6 +56,11 @@ impl ChunkStore {
         ))
     }
 
+    /// For a coarse generate job that takes the Chunk as a child instead of generating one.
+    pub(in crate::server) fn chunk_arc(&self, coord: ChunkCoord) -> Option<Arc<Chunk>> {
+        self.chunks.get(&coord).map(Arc::clone)
+    }
+
     /// One Voxel's light, in lattice coordinates. `Light::DARK` where the
     /// volume does not extend, which is also what [`LightVolume`] reports.
     pub fn light_at(&self, at: [i32; 3]) -> Light {

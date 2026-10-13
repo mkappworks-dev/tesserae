@@ -12,7 +12,7 @@ use bevy::pbr::{
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, SpecializedMeshPipelineError,
+    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
@@ -29,12 +29,43 @@ const LIGHT_SHADER_LOCATION: u32 = 11;
 /// count is a Mod's business and arrives with the look-pack API in step 9.
 pub const PALETTE_LEN: usize = 16;
 
+/// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
+#[derive(Reflect, ShaderType, Debug, Clone, Copy)]
+pub struct LodParams {
+    /// Non-zero tints each level above 0, to show the rings in a capture. A
+    /// uniform, not a shader def, so it does not specialise a pipeline.
+    pub tint: u32,
+    /// Per level, packed four to a `Vec4`. See `server::cuts` for why.
+    pub cut_radius_m: [Vec4; CUT_VECS],
+    pub cut_half_height_m: [Vec4; CUT_VECS],
+}
+
+/// Enough for every level the Server can have (32), four to a `Vec4`.
+pub const CUT_VECS: usize = 8;
+
+impl LodParams {
+    pub fn new(tint: u32, cuts: &[(f32, f32)]) -> Self {
+        let mut params = LodParams {
+            tint,
+            cut_radius_m: [Vec4::ZERO; CUT_VECS],
+            cut_half_height_m: [Vec4::ZERO; CUT_VECS],
+        };
+        for (level, &(radius, half_height)) in cuts.iter().take(CUT_VECS * 4).enumerate() {
+            params.cut_radius_m[level / 4][level % 4] = radius;
+            params.cut_half_height_m[level / 4][level % 4] = half_height;
+        }
+        params
+    }
+}
+
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 pub struct ChunkMaterialExtension {
     /// Indexed by Material id. Bindings 0 to 99 belong to the base
     /// `StandardMaterial`, so an extension starts at 100.
     #[uniform(100)]
     pub palette: [Vec4; PALETTE_LEN],
+    #[uniform(101)]
+    pub lod: LodParams,
 }
 
 /// `base_color` is linear in the shader, so a colour picked by eye has to be
@@ -55,7 +86,10 @@ impl Default for ChunkMaterialExtension {
         // block-lit face by its own palette colour and a saturated emitter
         // would wash its own glow with its albedo twice over.
         palette[tesserae_core::worldgen::LANTERN as usize] = srgb(0.96, 0.89, 0.72);
-        ChunkMaterialExtension { palette }
+        ChunkMaterialExtension {
+            palette,
+            lod: LodParams::new(0, &[]),
+        }
     }
 }
 

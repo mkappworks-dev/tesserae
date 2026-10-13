@@ -226,7 +226,7 @@ impl ChunkLight {
 }
 
 /// Whether light may cross from one Voxel to the next, given each side's
-/// [`ShapeTable::light_mask`] and the face of `from` it leaves through.
+/// [`crate::shape::ShapeTable::light_mask`] and the face of `from` it leaves through.
 ///
 /// Blocked if the Voxel it enters seals its face towards `from`, or if `from` is
 /// shaped and seals the face it would leave by. A full cube is not asked the
@@ -246,7 +246,7 @@ const fn edge_open(from: u8, into: u8, face: usize) -> bool {
 }
 
 /// Whether light may cross from one Voxel to the next, for callers that have
-/// the Voxels and not their masks: [`edge_open`], and then the joint test. It
+/// the Voxels and not their masks: `edge_open`, and then the joint test. It
 /// says whether light may cross, not how much of it survives: that is the entered
 /// Voxel's dimming, in [`Tables::light_params`].
 ///

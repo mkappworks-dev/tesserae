@@ -38,6 +38,8 @@ use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
 use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
+use super::lod;
+use super::lod_rings::LevelRings;
 use super::player::Player;
 use super::world_state::ChunkStore;
 use super::{ContentTables, WorldGenerator};
@@ -59,6 +61,22 @@ pub struct ChunkUnloaded {
     pub coord: ChunkCoord,
 }
 
+/// `mesh` is in that level's Voxel-index space: the Client scales it by
+/// `voxel_size * 2^level` and places the Chunk at `coord * cell_size * 2^level`.
+/// Empty means despawn. Level 0 never appears here.
+#[derive(Message)]
+pub struct LodMeshReady {
+    pub level: u32,
+    pub coord: ChunkCoord,
+    pub mesh: ChunkMesh,
+}
+
+#[derive(Message)]
+pub struct LodUnloaded {
+    pub level: u32,
+    pub coord: ChunkCoord,
+}
+
 /// How far the Server streams. Not World save data — see `crate::world`.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct StreamingSettings {
@@ -70,6 +88,8 @@ pub struct StreamingSettings {
     /// an anchor sitting on a Cell boundary does not load and evict the same
     /// Chunk every tick.
     pub hysteresis_m: f32,
+    /// At or below `view_distance_m` there are no coarse levels.
+    pub lod_distance_m: f32,
 }
 
 impl Default for StreamingSettings {
@@ -78,6 +98,7 @@ impl Default for StreamingSettings {
             view_distance_m: 192.0,
             vertical_distance_m: 96.0,
             hysteresis_m: 32.0,
+            lod_distance_m: 4096.0,
         }
     }
 }
@@ -208,6 +229,19 @@ impl StreamingBudget {
     }
 }
 
+/// Under `dev`, `TESSERAE_LOD=0` turns coarse streaming off, to measure its cost.
+fn streaming_settings() -> StreamingSettings {
+    let settings = StreamingSettings::default();
+    #[cfg(feature = "dev")]
+    if std::env::var("TESSERAE_LOD").is_ok_and(|v| v == "0") {
+        return StreamingSettings {
+            lod_distance_m: settings.view_distance_m,
+            ..settings
+        };
+    }
+    settings
+}
+
 fn streaming_budget() -> StreamingBudget {
     let budget = StreamingBudget::default();
     #[cfg(feature = "dev")]
@@ -237,6 +271,14 @@ impl Extent {
         }
     }
 
+    /// How many Cells are inside, without building them.
+    #[cfg(any(test, feature = "dev"))]
+    pub fn count(self) -> usize {
+        let h = self.horizontal;
+        let columns: i32 = (-h..=h).map(|x| 2 * (h * h - x * x).isqrt() + 1).sum();
+        columns as usize * (2 * self.vertical + 1) as usize
+    }
+
     /// Every offset inside this extent, nearest first.
     pub fn offsets(self) -> Vec<IVec3> {
         let h = self.horizontal;
@@ -261,22 +303,12 @@ pub struct Rings {
 
 impl Rings {
     pub fn new(settings: StreamingSettings, cell_size_m: f32) -> Self {
-        // Rounded up, so the configured distance is always reached rather than
-        // approached, and at least one Cell so a view distance below one Cell
-        // still renders the Chunk the anchor is standing in.
-        let cells = |metres: f32| ((metres / cell_size_m).ceil() as i32).max(1);
-        let hysteresis = cells(settings.hysteresis_m);
-        let mesh = Extent {
-            horizontal: cells(settings.view_distance_m),
-            vertical: cells(settings.vertical_distance_m),
-        };
-        let keep = mesh.grown(hysteresis);
-        let load = keep.grown(1);
+        let level_zero = LevelRings::new(settings, cell_size_m, 0);
         Rings {
-            mesh,
-            keep,
-            load,
-            evict: load.grown(hysteresis),
+            mesh: level_zero.mesh.outer,
+            keep: level_zero.keep.outer,
+            load: level_zero.load,
+            evict: level_zero.evict,
         }
     }
 }
@@ -309,6 +341,11 @@ pub(in crate::server) struct MeshState {
     /// incremental path is not monotone, so a bulk result computed from the old
     /// state must not land over it.
     poisoned: HashSet<ChunkCoord>,
+    /// Held Chunks whose Voxels an Edit changed: what a level-1 cover derives
+    /// from, unlike the light an Edit touches.
+    edited_chunks: HashSet<ChunkCoord>,
+    /// Drained by `stream_lod`, which alone can see whether the cover exists.
+    cover_changed: HashSet<ChunkCoord>,
 }
 
 impl MeshState {
@@ -338,12 +375,28 @@ impl MeshState {
         }
     }
 
+    /// Separate from `edited`, which also fires for Chunks only light or a face
+    /// reached; their cover reads neither.
+    pub(in crate::server) fn voxels_changed(&mut self, coord: ChunkCoord) {
+        self.edited_chunks.insert(coord);
+        self.cover_changed.insert(coord);
+    }
+
+    pub(in crate::server) fn take_cover_changes(&mut self) -> Vec<ChunkCoord> {
+        self.cover_changed.drain().collect()
+    }
+
     /// Whether a Chunk inside `load` is waiting on a light solve. Outside it
     /// `relight` never looks, so a Chunk the anchor has drifted away from can
     /// stay in `unlit` for good without anything being left to do.
     #[cfg(any(test, feature = "dev"))]
     fn unlit_within(&self, center: ChunkCoord, load: Extent) -> bool {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
+        self.edited_chunks.contains(&coord)
     }
 
     #[cfg(test)]
@@ -363,20 +416,23 @@ impl MeshState {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<StreamingSettings>()
+    app.insert_resource(streaming_settings())
         .insert_resource(streaming_budget())
         .init_resource::<LoadOrder>()
         .init_resource::<MeshState>()
         .init_resource::<Jobs>()
         .add_message::<ChunkMeshReady>()
         .add_message::<ChunkUnloaded>()
-        .add_systems(FixedUpdate, stream);
+        .add_message::<LodMeshReady>()
+        .add_message::<LodUnloaded>()
+        .add_plugins(lod::plugin)
+        .add_systems(FixedUpdate, (stream, lod::stream_lod).chain());
     #[cfg(feature = "dev")]
     app.add_systems(
         FixedUpdate,
         (
             crate::cost::tick_started.before(stream),
-            crate::cost::tick_ended.after(stream),
+            crate::cost::tick_ended.after(lod::stream_lod),
         ),
     );
     #[cfg(feature = "dev")]
@@ -384,7 +440,7 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 /// The six face neighbours, in the mesher's face order.
-fn face_neighbors(coord: ChunkCoord) -> [ChunkCoord; 6] {
+pub(super) fn face_neighbors(coord: ChunkCoord) -> [ChunkCoord; 6] {
     let mut n = [coord; 6];
     n[NEG_X] = ChunkCoord::new(coord.x - 1, coord.y, coord.z);
     n[POS_X] = ChunkCoord::new(coord.x + 1, coord.y, coord.z);
@@ -395,11 +451,11 @@ fn face_neighbors(coord: ChunkCoord) -> [ChunkCoord; 6] {
     n
 }
 
-fn offset(center: ChunkCoord, delta: IVec3) -> ChunkCoord {
+pub(super) fn offset(center: ChunkCoord, delta: IVec3) -> ChunkCoord {
     ChunkCoord::new(center.x + delta.x, center.y + delta.y, center.z + delta.z)
 }
 
-fn delta(from: ChunkCoord, to: ChunkCoord) -> IVec3 {
+pub(super) fn delta(from: ChunkCoord, to: ChunkCoord) -> IVec3 {
     IVec3::new(to.x - from.x, to.y - from.y, to.z - from.z)
 }
 
@@ -547,6 +603,11 @@ fn retire(
         store.remove(coord);
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
+        // An unedited Chunk is what the generator makes again; only an edited one
+        // leaves a ghost in its cover.
+        if meshes.edited_chunks.remove(&coord) {
+            meshes.cover_changed.insert(coord);
+        }
     }
 }
 
@@ -844,8 +905,28 @@ fn dispatch_meshes(
 #[cfg(feature = "dev")]
 pub mod stats {
     use super::*;
+    use crate::server::lod_rings::level_count;
 
-    #[derive(Resource, Default, Clone, Copy, Debug)]
+    /// `non_uniform` onward are measured for levels above 0 only; zero at level 0.
+    #[derive(Default, Clone, Copy, Debug)]
+    pub struct LevelStats {
+        /// Chunks held, including the margin no mesh is built for.
+        pub held: usize,
+        /// Chunks the Client holds a mesh for. Counts empty meshes.
+        pub meshed: usize,
+        /// What `held` is once the level has filled around an Eye that holds
+        /// still: its load extent.
+        pub steady: usize,
+        /// What `meshed` is then: the Chunks of its mesh shell.
+        pub shell: usize,
+        pub non_uniform: usize,
+        pub mesh: lod::measure::MeshSize,
+        /// Mean job time to generate, and to mesh, a Chunk of this level.
+        pub generate: lod::measure::JobCost,
+        pub mesh_job: lod::measure::JobCost,
+    }
+
+    #[derive(Resource, Default, Clone, Debug)]
     pub struct StreamingStats {
         /// Chunks the Server holds, including the margin the Client never sees.
         pub loaded: usize,
@@ -868,6 +949,8 @@ pub mod stats {
         /// mesh was delivered anyway and followed by a fresh one.
         pub landed: [usize; 3],
         pub stale: [usize; 3],
+        /// Indexed by level. Level 0 repeats `loaded` and `meshed`.
+        pub levels: Vec<LevelStats>,
     }
 
     pub(super) fn plugin(app: &mut App) {
@@ -887,6 +970,9 @@ pub mod stats {
         order: Res<LoadOrder>,
         settings: Res<StreamingSettings>,
         world: Res<WorldSettings>,
+        lod_store: Res<lod::LodStore>,
+        lod_state: Res<lod::LodState>,
+        lod_jobs: Res<lod::LodJobs>,
         player: Query<&Player>,
     ) {
         let center = player
@@ -915,6 +1001,26 @@ pub mod stats {
                     .iter()
                     .any(|&c| mesh.contains(delta(center, c)))
         });
+        let mut levels = vec![LevelStats {
+            held: store.coords().count(),
+            meshed: meshes.delivered.len(),
+            steady: rings.load.count(),
+            shell: mesh.count(),
+            ..default()
+        }];
+        levels.extend((1..level_count(&settings)).map(|level| {
+            let rings = LevelRings::new(*settings, world.cell_size(), level);
+            LevelStats {
+                held: lod_store.len(level),
+                meshed: lod_state.delivered_len(level),
+                steady: rings.load.count(),
+                shell: rings.mesh.count(),
+                non_uniform: lod_store.non_uniform(level),
+                mesh: lod_state.mesh_sizes(level),
+                generate: lod_jobs.times.generate_cost(level),
+                mesh_job: lod_jobs.times.mesh_cost(level),
+            }
+        }));
         *stats = StreamingStats {
             loaded: store.coords().count(),
             meshed: meshes.delivered.len(),
@@ -931,14 +1037,16 @@ pub mod stats {
                 jobs.relight.stale(),
                 jobs.mesh.stale(),
             ],
+            levels,
         };
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::server) mod tests {
     use super::*;
     use crate::server::edit;
+    use crate::server::lod_rings::level_count;
     use crate::server::world_state::VoxelCoord;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
@@ -1062,6 +1170,7 @@ mod tests {
                 view_distance_m: 1.0,
                 vertical_distance_m: 1.0,
                 hysteresis_m: 1.0,
+                ..default()
             },
             32.0,
         );
@@ -1074,15 +1183,16 @@ mod tests {
 
     /// Small enough to fill in one tick: mesh (1, 1), keep (2, 2),
     /// load (3, 3), evict (4, 4).
-    fn small() -> StreamingSettings {
+    pub(in crate::server) fn small() -> StreamingSettings {
         StreamingSettings {
             view_distance_m: 32.0,
             vertical_distance_m: 32.0,
             hysteresis_m: 32.0,
+            ..default()
         }
     }
 
-    const UNLIMITED: StreamingBudget = StreamingBudget {
+    pub(in crate::server) const UNLIMITED: StreamingBudget = StreamingBudget {
         in_flight: StageCounts {
             generate: usize::MAX,
             relight: usize::MAX,
@@ -1099,15 +1209,16 @@ mod tests {
     /// How long `settle` waits before it calls the streaming stuck. Wall time,
     /// not ticks: the tests share one pool, and a fill that is slow because
     /// twenty other tests are filling is not a hang.
-    const SETTLE_CEILING: std::time::Duration = std::time::Duration::from_secs(60);
+    pub(in crate::server) const SETTLE_CEILING: std::time::Duration =
+        std::time::Duration::from_secs(60);
 
-    struct Harness {
-        app: App,
-        anchor: Entity,
+    pub(in crate::server) struct Harness {
+        pub(in crate::server) app: App,
+        pub(in crate::server) anchor: Entity,
     }
 
     impl Harness {
-        fn new(settings: StreamingSettings, budget: StreamingBudget) -> Self {
+        pub(in crate::server) fn new(settings: StreamingSettings, budget: StreamingBudget) -> Self {
             // One pool for the whole test process; `get_or_init` is a no-op after
             // the first test, and the thread count is fixed so nothing a test
             // asserts depends on the machine.
@@ -1118,23 +1229,32 @@ mod tests {
                 world_settings.voxel_size,
                 WorldgenParams::default(),
             );
+            let lod_generators =
+                lod::LodGenerators::new(&world_settings, &generator, level_count(&settings));
             let mut app = App::new();
             app.insert_resource(world_settings)
                 .insert_resource(settings)
                 .insert_resource(budget)
                 .insert_resource(WorldGenerator(generator))
+                .insert_resource(lod_generators)
+                .init_resource::<lod::LodStore>()
+                .init_resource::<lod::LodState>()
+                .init_resource::<lod::LodJobs>()
+                .init_resource::<lod::LodBudget>()
                 .init_resource::<ContentTables>()
                 .init_resource::<ChunkStore>()
                 .init_resource::<LoadOrder>()
                 .init_resource::<MeshState>()
                 .init_resource::<Jobs>()
                 .add_message::<ChunkMeshReady>()
-                .add_message::<ChunkUnloaded>();
+                .add_message::<ChunkUnloaded>()
+                .add_message::<LodMeshReady>()
+                .add_message::<LodUnloaded>();
             let anchor = app.world_mut().spawn(Player::at(Vec3::ZERO)).id();
             Harness { app, anchor }
         }
 
-        fn anchor_at(&mut self, metres: Vec3) {
+        pub(in crate::server) fn anchor_at(&mut self, metres: Vec3) {
             self.app
                 .world_mut()
                 .get_mut::<Player>(self.anchor)
@@ -1142,7 +1262,7 @@ mod tests {
                 .set_eye(metres);
         }
 
-        fn tick(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
+        pub(in crate::server) fn tick(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
             self.app
                 .world_mut()
                 .run_system_once(stream)
@@ -1167,7 +1287,7 @@ mod tests {
         /// no light is stale and no message was written, and returns every
         /// message written on the way. The honest form of "run until done" now
         /// that a tick starts work instead of finishing it.
-        fn settle(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
+        pub(in crate::server) fn settle(&mut self) -> (Vec<ChunkMeshReady>, Vec<ChunkCoord>) {
             let (mut ready, mut unloaded) = (Vec::new(), Vec::new());
             let started = std::time::Instant::now();
             while started.elapsed() < SETTLE_CEILING {
@@ -1212,7 +1332,7 @@ mod tests {
             self.app.world_mut().resource_mut::<Jobs>()
         }
 
-        fn store(&self) -> &ChunkStore {
+        pub(in crate::server) fn store(&self) -> &ChunkStore {
             self.app.world().resource::<ChunkStore>()
         }
 
@@ -1229,7 +1349,7 @@ mod tests {
         }
     }
 
-    fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
+    pub(in crate::server) fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {
         let layer = |a: &MeshLayer, b: &MeshLayer| {
             a.positions == b.positions
                 && a.normals == b.normals
@@ -2094,6 +2214,40 @@ mod tests {
             !settled(&mut slow),
             "settled with the load volume barely started"
         );
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn stats_count_what_each_level_holds_and_has_meshed() {
+        let mut h = Harness::new(
+            StreamingSettings {
+                lod_distance_m: 128.0,
+                ..small()
+            },
+            UNLIMITED,
+        );
+        h.app.init_resource::<stats::StreamingStats>();
+        h.settle();
+        h.lod_settle();
+        h.app
+            .world_mut()
+            .run_system_once(stats::publish_stats)
+            .expect("the summary ran");
+
+        let stats = h.app.world().resource::<stats::StreamingStats>();
+        let lod_store = h.app.world().resource::<lod::LodStore>();
+        let lod_state = h.app.world().resource::<lod::LodState>();
+        assert_eq!(stats.levels.len(), 3);
+        assert_eq!(
+            (stats.levels[0].held, stats.levels[0].meshed),
+            (stats.loaded, stats.meshed)
+        );
+        for level in 1..3 {
+            let l = stats.levels[level as usize];
+            assert_eq!(l.held, lod_store.coords(level).count());
+            assert_eq!(l.meshed, lod_state.delivered(level).len());
+            assert!(l.meshed > 0 && l.held > l.meshed, "level {level}: {l:?}");
+        }
     }
 
     #[test]

@@ -93,6 +93,12 @@ Use "Cell" whenever the unit is distance and "Chunk" whenever it is data.
 **LOD level** — how many Voxels of the level below one Voxel of this level
 aggregates. Level 0 is full detail.
 
+**LOD ring** — what one LOD level draws: the Cells between an inner and an outer
+distance from the Eye, in metres. The outer distance doubles with each level.
+
+**Downsample** — producing a coarse Chunk's Voxels from the eight finer Chunks
+it covers: the dominant Material by volume, solid if half the volume is.
+
 **World generation** — producing a Chunk's contents from a seed and a position.
 Never produces a mesh.
 

@@ -5,6 +5,8 @@
 //! `super::streaming` lands the result by calling the Server-private mutators on
 //! its own tick. See `docs/adr/0002-client-server-from-day-one.md`.
 
+use std::fmt::Debug;
+use std::hash::Hash;
 use std::sync::Arc;
 
 use bevy::platform::collections::HashMap;
@@ -31,9 +33,9 @@ const _: () = {
 ///
 /// Both count as in flight. A result that has finished but not landed is still a
 /// snapshot held and a decision not yet applied.
-pub(in crate::server) struct Stage<T> {
-    running: HashMap<ChunkCoord, Task<T>>,
-    finished: HashMap<ChunkCoord, T>,
+pub(in crate::server) struct Stage<T, K = ChunkCoord> {
+    running: HashMap<K, Task<T>>,
+    finished: HashMap<K, T>,
     dispatched: usize,
     landed: usize,
     /// Every job landed since the World opened, for the `dev` report.
@@ -50,9 +52,12 @@ pub(in crate::server) struct Stage<T> {
     /// Finishes jobs in an order that has nothing to do with dispatch order.
     #[cfg(test)]
     pub scramble: bool,
+    /// Keeps a latency-bound test's jobs from queuing behind other tests' backlog.
+    #[cfg(test)]
+    pub pool: Option<Arc<bevy::tasks::TaskPool>>,
 }
 
-impl<T> Default for Stage<T> {
+impl<T, K> Default for Stage<T, K> {
     fn default() -> Self {
         Stage {
             running: HashMap::default(),
@@ -67,27 +72,33 @@ impl<T> Default for Stage<T> {
             hold: Arc::default(),
             #[cfg(test)]
             scramble: false,
+            #[cfg(test)]
+            pool: None,
         }
     }
 }
 
-impl<T: Send + 'static> Stage<T> {
+impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
     pub fn in_flight(&self) -> usize {
         self.running.len() + self.finished.len()
     }
 
-    pub fn contains(&self, coord: ChunkCoord) -> bool {
-        self.running.contains_key(&coord) || self.finished.contains_key(&coord)
+    pub fn contains(&self, key: K) -> bool {
+        self.running.contains_key(&key) || self.finished.contains_key(&key)
     }
 
     /// Runs `work` on the async compute pool.
     ///
-    /// One job per coord: a second dispatch for a coord already in flight is a
+    /// One job per key: a second dispatch for a key already in flight is a
     /// bug in the caller's bookkeeping, and silently replacing the first would
     /// hide it.
-    pub fn spawn(&mut self, coord: ChunkCoord, work: impl FnOnce() -> T + Send + 'static) {
-        debug_assert!(!self.contains(coord), "{coord} already has a job in flight");
+    pub fn spawn(&mut self, key: K, work: impl FnOnce() -> T + Send + 'static) {
+        debug_assert!(!self.contains(key), "{key:?} already has a job in flight");
+        #[cfg(not(test))]
         let pool = AsyncComputeTaskPool::get();
+        #[cfg(test)]
+        let pool: &bevy::tasks::TaskPool =
+            self.pool.as_deref().unwrap_or(AsyncComputeTaskPool::get());
         #[cfg(not(test))]
         let task = pool.spawn(async move { work() });
         // Held and scrambled by awaiting, never by blocking: a job that parked
@@ -96,7 +107,7 @@ impl<T: Send + 'static> Stage<T> {
         let task = {
             let hold = Arc::clone(&self.hold);
             let yields = if self.scramble {
-                scramble_yields(coord)
+                scramble_yields(key)
             } else {
                 0
             };
@@ -108,31 +119,39 @@ impl<T: Send + 'static> Stage<T> {
                 work()
             })
         };
-        self.running.insert(coord, task);
+        self.running.insert(key, task);
         self.dispatched += 1;
     }
 
     /// Moves every job that has finished to the waiting set, without blocking.
     pub fn poll(&mut self) {
         let mut done = Vec::new();
-        for (&coord, task) in &mut self.running {
+        for (&key, task) in &mut self.running {
             if let Some(out) = check_ready(task) {
-                done.push((coord, out));
+                done.push((key, out));
             }
         }
-        for (coord, out) in done {
-            self.running.remove(&coord);
-            self.finished.insert(coord, out);
+        for (key, out) in done {
+            self.running.remove(&key);
+            self.finished.insert(key, out);
         }
     }
 
-    /// The coords whose results are waiting to land.
-    pub fn finished(&self) -> impl Iterator<Item = ChunkCoord> + '_ {
+    pub fn keys(&self) -> Vec<K> {
+        self.running
+            .keys()
+            .chain(self.finished.keys())
+            .copied()
+            .collect()
+    }
+
+    /// The keys whose results are waiting to land.
+    pub fn finished(&self) -> impl Iterator<Item = K> + '_ {
         self.finished.keys().copied()
     }
 
-    pub fn take(&mut self, coord: ChunkCoord) -> Option<T> {
-        let out = self.finished.remove(&coord)?;
+    pub fn take(&mut self, key: K) -> Option<T> {
+        let out = self.finished.remove(&key)?;
         self.landed += 1;
         #[cfg(feature = "dev")]
         {
@@ -144,7 +163,7 @@ impl<T: Send + 'static> Stage<T> {
     /// Drops every job, running or finished, for which `keep` is false. A
     /// running job is cancelled if it has not started; one that has runs to
     /// completion with nowhere to deliver.
-    pub fn retain(&mut self, mut keep: impl FnMut(ChunkCoord) -> bool) {
+    pub fn retain(&mut self, mut keep: impl FnMut(K) -> bool) {
         self.running.retain(|&c, _| keep(c));
         self.finished.retain(|&c, _| keep(c));
     }
@@ -181,13 +200,14 @@ impl<T: Send + 'static> Stage<T> {
 }
 
 /// A pseudo-random number of times a job yields before it starts, derived from
-/// the coord alone, so jobs finish in an order unrelated to dispatch order.
+/// the key alone, so jobs finish in an order unrelated to dispatch order.
 #[cfg(test)]
-fn scramble_yields(coord: ChunkCoord) -> u64 {
-    let h = (coord.x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
-        ^ (coord.y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)
-        ^ (coord.z as u64).wrapping_mul(0x1656_67B1_9E37_79F9);
-    (h >> 20) % 40
+fn scramble_yields(key: impl Hash) -> u64 {
+    use std::hash::Hasher;
+    // `DefaultHasher::new` has fixed keys, so a key yields the same every run.
+    let mut hasher = std::hash::DefaultHasher::new();
+    key.hash(&mut hasher);
+    (hasher.finish() >> 20) % 40
 }
 
 /// Keeps the jobs of a stage from starting until released.

@@ -57,8 +57,17 @@ impl WorldSettings {
     }
 
     /// Where a Chunk's Voxel (0, 0, 0) sits, in metres.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn chunk_origin(&self, coord: ChunkCoord) -> Vec3 {
-        Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.cell_size()
+        self.chunk_origin_at(coord, 0)
+    }
+
+    pub fn chunk_origin_at(&self, coord: ChunkCoord, level: u32) -> Vec3 {
+        Vec3::new(coord.x as f32, coord.y as f32, coord.z as f32) * self.cell_size_at(level)
+    }
+
+    pub fn voxel_size_at(&self, level: u32) -> f32 {
+        self.voxel_size * 2f32.powi(level as i32)
     }
 
     /// Which Voxel of the lattice holds a point, in the one continuous
@@ -77,12 +86,20 @@ impl WorldSettings {
         [v.x as i32, v.y as i32, v.z as i32]
     }
 
+    pub fn cell_size_at(&self, level: u32) -> f32 {
+        self.cell_size() * 2f32.powi(level as i32)
+    }
+
     /// Which Chunk holds a point. The inverse of [`WorldSettings::chunk_origin`],
     /// and a floor division rather than a truncation: `-1.0 / 32.0` truncates
     /// towards zero and would put everything in the Cell below the origin into
     /// Chunk 0 alongside everything above it.
     pub fn chunk_at(&self, metres: Vec3) -> ChunkCoord {
-        let c = (metres / self.cell_size()).floor();
+        self.chunk_at_level(metres, 0)
+    }
+
+    pub fn chunk_at_level(&self, metres: Vec3, level: u32) -> ChunkCoord {
+        let c = (metres / self.cell_size_at(level)).floor();
         ChunkCoord::new(c.x as i32, c.y as i32, c.z as i32)
     }
 }
@@ -134,6 +151,24 @@ mod tests {
                 assert_eq!(world.chunk_at(inside), coord);
             }
         }
+    }
+
+    #[test]
+    fn a_coarse_levels_voxel_and_origin_double_per_level() {
+        let world = WorldSettings {
+            voxel_size: 0.25,
+            ..default()
+        };
+        assert_eq!(world.voxel_size_at(0), 0.25);
+        assert_eq!(world.voxel_size_at(3), 2.0);
+        assert_eq!(
+            world.chunk_origin_at(ChunkCoord::new(3, -1, 0), 2),
+            Vec3::new(96.0, -32.0, 0.0)
+        );
+        assert_eq!(
+            world.chunk_origin_at(ChunkCoord::new(3, -1, 0), 0),
+            world.chunk_origin(ChunkCoord::new(3, -1, 0))
+        );
     }
 
     #[test]

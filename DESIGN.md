@@ -164,13 +164,50 @@ smaller than that is not smoothed. The generator keeps to half the cap,
 
 ## LOD
 
-Geometric rings. LOD0 covers the configured full-detail radius; each level
-doubles its span, so ~8 levels reach 4km with 32m chunks and total loaded chunk
-count grows with the number of levels rather than with r². Level N+1 aggregates
-2×2×2 voxels of level N by dominant material, then greedy-meshes normally — the
-mesher does not need to know which level it is meshing.
+Geometric rings, built in step 6
+([ADR-0011](docs/adr/0011-coarse-levels-are-derived.md)). Level 0 covers
+`view_distance_m` (192 m); level k >= 1 has Voxels and Cells `2^k` times larger
+and an outer distance of `view_distance_m * 2^k`, clamped to `lod_distance_m`
+(4096 m). The level count is `1 + ceil(log2(reach / view_distance_m))`, which is
+6 at the defaults (levels 0 to 5), not the ~8 this section first assumed: that
+was a 32 m full-detail radius, and the radius is the knob. Every level holds
+about as many Chunks as level 0, so the total grows with the number of levels
+and not with r². A Chunk is 32³ at every level and a Cell is its footprint in
+metres, so everything is derived from metres and a World with smaller Voxels
+gets the same rings.
 
-Per-ring chunk budget is a number to measure, not to guess.
+- **The downsample.** A coarse Voxel is solid if its eight children's
+  `ShapeTable::volume` sum to at least half, ties solid, and is always a full
+  cube, so pass 2 never runs above level 0 and the mesher is not told the level.
+  Its Material is the one with the most volume. A tie goes to the Material whose
+  highest child is higher, then to the lower id: a grass cap over dirt is a
+  four-to-four tie at every odd surface height, and by id alone every distant
+  hill would be brown.
+- **The hole.** Level k does not mesh where level k-1 does: it is a cylinder
+  around the Eye, sized so that grown by one coarse Cell it still lies inside
+  the finer level for any Eye position. Both levels floor the Eye to their own
+  lattice, so measured from the anchor's centre the overlap is a Cell on one
+  side and nothing on the other, which showed as a straight seam. At the
+  defaults it is radius 1 and half-height 1 coarse Cell against a finer extent
+  of 6 and 3. The overlap is the whole seam strategy: a finer face culled
+  against a neighbour it did not draw has the coarse surface behind it, so there
+  are no skirts and no stitching. The coarse level is still drawn under the
+  finer one out to its edge, so the shader cuts a coarse fragment inside the
+  finer level's guaranteed reach in metres, and inside its rows: without that a
+  coarse surface up to a coarse Voxel too high stands over the finer horizon at
+  ground level.
+- **One camera per level.** Level k is on `RenderLayers` {k} and drawn by its
+  own camera, the coarsest first and the only one to clear, each finer level
+  over the last. A finer level's pixel wins whatever the coarse depth, which is
+  what stops the coarse level poking through in the overlap. The near camera is
+  level 0, the UI and everything that is not terrain. Two suns share a transform
+  because a light's layers are also its shadow-caster mask: the one on layer 0
+  casts shadows, the one on the coarse layers does not, and coarse terrain
+  receives none.
+- **Light.** A level above 0 stores none and is meshed as open sky. See the ADR
+  for what that costs.
+
+The per-level budget is measured, in Open items.
 
 ## What `bevy_pbr` does NOT give us
 
@@ -348,7 +385,15 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    follow in the same step, with connections derived from the neighbours and
    never stored
    ([ADR-0010](docs/adr/0010-connections-are-derived-not-stored.md)).
-6. LOD mip chain out to 4km.
+6. LOD mip chain out to 4km. **Done.** Six levels (0 to 5) around the Eye, each
+   a ring of Chunks of its own Cells with a hole where the next finer level
+   draws, generated for the purpose and never stored or edited
+   ([ADR-0011](docs/adr/0011-coarse-levels-are-derived.md)), and one camera per
+   level. At the defaults levels 0 to 4 each hold 2167 Chunks and level 5 holds
+   1243, with 127.9 MB of vertex and index memory (41.5 MB of it level 0's), the
+   median flight frame is 5.6 ms on an M5 at 1080p offscreen, and the furthest
+   drawn Chunk ends 5174 m out. Level 0 is drawn 0.3 s later while the distance
+   fills, which takes 11 s. See `.scratch/2026-10-13-phase-6-lod/spec.md`.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
 9. Look-pack API, water shading, visual polish.
@@ -363,23 +408,55 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   itself cannot be the Licensor — it names the Licensed Work, and the Covenants
   run from a person or a company, not from a product name.
 - Chunk dimensions: 32³ assumed, not measured.
-- Per-ring LOD chunk budget: still a single Voxel size, a single view distance
-  and LOD level 0 only, so still not measured per _ring_. What changed is what
-  it bounds. Streaming runs on a task pool, so the budget is an in-flight cap
-  and a landing cap per stage rather than a count of work per tick, and a badly
-  sized one costs fill latency, not frame time. At 1m Voxels and a 192m view
-  distance (64 / 128 / 128 in flight, 64 / 256 / 32 landed) the worst tick on
-  the main thread is 0.7 ms against 22-27 ms, and the load volume fills in 1.6 s
-  against 7.2 s. Caves raised per-Chunk cost for the Chunks a tunnel crosses (a
-  deep one from nanoseconds to about 0.7 ms across the three stages) and moved
-  none of those figures: ten runs each with and without them, interleaved, give
-  a worst tick of 0.6 ms and a fill of 1.58 s either way, because a ring holds
-  one deep layer inside the cave band. The caps want revisiting when LOD adds
-  rings, or when a Mod sets a cave floor deep enough to put several layers in
-  the band; see `StreamingBudget`. Slope smoothing is the first terrain to pay
-  for shaped Voxels (about +65 us to generate, +10-20% to mesh and +80-100% to
-  light a surface Chunk) and moved the worst tick from 1.6 to 1.8 ms at load 20,
-  so the caps did not change either.
+- **Per-ring LOD chunk budget: measured at the default 4 km reach** (Apple M5,
+  `dev` build, 1 m Voxels, a 192 m view distance, each level doubling the reach,
+  so levels 0 to 5). Every level holds about as many Chunks as level 0, so the
+  total grows with the number of levels and not with r². Job costs are means
+  over 5 runs; the fill time is when the level has held its steady count while
+  every level fills together, not alone.
+
+  | Level | Held | Non-uniform | Meshed (non-empty) | Generate | Mesh   | Quads   | Vertex + index | Filled |
+  | ----- | ---- | ----------- | ------------------ | -------- | ------ | ------- | -------------- | ------ |
+  | 0     | 2167 | -           | 791 (-)            | -        | -      | -       | 41.5 MB        | 0.9 s  |
+  | 1     | 2167 | 386         | 776 (221)          | 700 us   | 610 us | 135 800 | 25.0 MB        | 3.0 s  |
+  | 2     | 2167 | 394         | 776 (216)          | 620 us   | 550 us | 125 800 | 23.2 MB        | 5.1 s  |
+  | 3     | 2167 | 394         | 776 (216)          | 520 us   | 510 us | 119 200 | 21.9 MB        | 7.2 s  |
+  | 4     | 2167 | 394         | 776 (216)          | 370 us   | 500 us | 70 900  | 13.1 MB        | 9.4 s  |
+  | 5     | 1243 | 226         | 328 (73)           | 370 us   | 490 us | 17 800  | 3.3 MB         | 10.6 s |
+
+  Vertex memory is 128 MB in all, 86 MB of it in the coarse levels. A surface
+  Chunk costs 2.1 ms to generate and downsample at level 1 and 0.8 ms at level
+  5, and 0.39 ms to 0.30 ms to mesh (`lod/coarse_chunk`, `lod/mesh_coarse`);
+  most jobs are early-outs, which is why the means are a third of that.
+
+  What the caps buy is a trade, not a free number. The pool is one FIFO of three
+  workers and level 0's fill keeps them all busy, so coarse work that runs
+  during it is level-0 work that waits. Level 0 is drawn at 1.4 s with no coarse
+  levels; at the default caps (16 / 32 in flight, 16 / 16 landed) it is drawn at
+  1.6 s and the distance is filled at 11 s; at 64 / 128 in flight it is 2.3 s
+  and 4.5 s; at 256 / 512 it is 4.0 s and 3.4 s. The worst tick on the main
+  thread stays between 0.8 and 1.2 ms in every row, so a bad cap costs fill
+  latency and not frame time, as for level 0. A second pool does not remove the
+  cost: it is CPU time on the same cores, and six threads instead of three bring
+  level 0 back to its uncontended time and raise the worst tick from 0.95 to 1.6
+  ms. There is one pool. The sweeps and their load averages are in the Outcome
+  of `.scratch/2026-10-13-phase-6-lod/spec.md`.
+
+  Level 0, from before LOD, still stands. Streaming runs on a task pool, so the
+  budget is an in-flight cap and a landing cap per stage rather than a count of
+  work per tick. At 1m Voxels and a 192m view distance (64 / 128 / 128 in
+  flight, 64 / 256 / 32 landed) the worst tick on the main thread is 0.7 ms
+  against 22-27 ms, and the load volume fills in 1.6 s against 7.2 s. Caves
+  raised per-Chunk cost for the Chunks a tunnel crosses (a deep one from
+  nanoseconds to about 0.7 ms across the three stages) and moved none of those
+  figures: ten runs each with and without them, interleaved, give a worst tick
+  of 0.6 ms and a fill of 1.58 s either way, because a ring holds one deep layer
+  inside the cave band. The caps want revisiting when a Mod sets a cave floor
+  deep enough to put several layers in the band; see `StreamingBudget`. Slope
+  smoothing is the first terrain to pay for shaped Voxels (about +65 us to
+  generate, +10-20% to mesh and +80-100% to light a surface Chunk) and moved the
+  worst tick from 1.6 to 1.8 ms at load 20, so the caps did not change either.
+
 - **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
   Connection groups belong to a Shape and not a Material until step 7, a
@@ -458,3 +535,16 @@ degrade — we must not copy that primitive.
 The technique to copy: **render LOD levels into a separate target with their own
 depth, then composite.** Neither shares the near-field depth buffer at extreme
 range. That is how both avoid z-fighting.
+
+**Bevy 0.20 does not need it for precision.** Its projection is infinite
+reverse-Z (`perspective_infinite_reverse`; `far` only places the frustum's
+culling plane) with an f32 depth buffer, so depth at 4 km is not the problem the
+technique was invented for on GL-class depth. Cameras that share a
+`RenderTarget` share its colour and depth textures, and a later camera with
+`ClearColorConfig::None` draws over an earlier one after its own depth clear, so
+a camera per level is the technique at no extra texture. What it is for here is
+**coverage priority**: a pixel a finer level drew shows that level whatever the
+coarse depth. A single shared far camera with a depth push toward the viewer was
+tried first and cannot work, because a coarse surface up to one coarse Voxel
+above the finer one is `dh / sin(angle)` further along the ray, far more than
+any push at a grazing view.

@@ -24,6 +24,11 @@ const SPEED_RANGE: std::ops::RangeInclusive<f32> = 0.5..=64.0;
 /// notches regardless of where in it you start.
 const SPEED_PER_NOTCH: f32 = 1.1;
 
+/// The Player's camera. `With<Camera3d>` also matches the coarse-level cameras,
+/// so anything that means "the camera" filters by this.
+#[derive(Component)]
+pub struct MainCamera;
+
 #[derive(Component)]
 pub struct FlyCamera {
     /// Metres per second, not Voxels per second. A speed in Voxels would be
