@@ -642,18 +642,18 @@ each. The worst tick is unchanged at about 1 ms.
 
 **Review found the near-ground case, and the cut fixes it.** A final review of
 the branch said coarse terrain drew inside the finer rings from 48 m out, and a
-capture at standing height confirmed it: Eye 5 m above the ground just short of
-a lattice corner, looking across it, showed 20 to 100 px tall blocks of levels 3
-to 5 over the level-0 horizon. Every earlier capture looked down or was taken
-from 75 m or higher, where finer ground covers every pixel. The fix is the cut
-of decision 9. Its first version was horizontal only and showed the sky straight
-down from 150 m, where no finer level has rows (372 000 magenta pixels); the
-vertical bound fixed that, and the straight-down views at 60, 150 and 300 m now
-count none. Re-captured: the same near-ground view, the horizon and the 150 m
-view, plain and tinted; the magenta probes over eight views find only silhouette
-steps. The cut costs nothing measurable: the median flight frame is 5.3 to 5.4
-ms over three clean runs of five, against 3.6 to 4.0 ms for the two-camera
-build, as before it.
+capture at standing height confirmed it: Eye just above the ground (y = 64 m)
+and 7 m short of a lattice corner, looking across it, showed 20 to 100 px tall
+blocks of levels 3 to 5 over the level-0 horizon. Every earlier capture looked
+down or was taken from 75 m or higher, where finer ground covers every pixel.
+The fix is the cut of decision 9. Its first version was horizontal only and
+showed the sky straight down from 150 m, where no finer level has rows (372 000
+magenta pixels); the vertical bound fixed that, and the straight-down views at
+60, 150 and 300 m now count none. Re-captured: the same near-ground view, the
+horizon and the 150 m view, plain and tinted; the magenta probes over eight
+views find only silhouette steps. The cut costs nothing measurable: the median
+flight frame is 5.3 to 5.4 ms over three clean runs of five, against 3.6 to 4.0
+ms for the two-camera build, as before it.
 
 **Known loose ends found by the review**, not fixed here:
 

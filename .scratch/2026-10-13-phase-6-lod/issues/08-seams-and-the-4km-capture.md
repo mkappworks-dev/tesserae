@@ -43,8 +43,8 @@ Outcome. In short:
 - `BIAS_FRACTION` is gone (it could not work with the overlap under a finer
   camera); the far cameras' `near` stays at a quarter of the level-0 radius.
 - Frame cost: 5.6 ms median against 4.0 ms for ticket 06's two cameras.
-Added after the final review: a near-ground capture (Eye 5 m up, looking across
-a lattice corner) showed coarse blocks over the finer horizon, so the shader
-cuts a coarse fragment inside the finer level's guaranteed cylinder (spec
+Added after the final review: a near-ground capture (Eye at y = 64 m, looking
+across a lattice corner) showed coarse blocks over the finer horizon, so the
+shader cuts a coarse fragment inside the finer level's guaranteed cylinder (spec
 decision 9, Outcome). The first version showed the sky from 150 m straight down;
 the magenta probe caught it and the cut is now bounded in height too.
