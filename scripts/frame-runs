@@ -5,6 +5,10 @@
 #
 #   scripts/frame-runs [N]        N defaults to 5
 #
+# lN_filled_s and lN_shown_s are when LOD level N held what it will keep and had
+# every Chunk of its mesh shell sent; TESSERAE_LOD=0 and TESSERAE_LOD_BUDGET (see
+# `LodBudget`) change what they measure.
+#
 # TESSERAE_SCREENSHOT_SPEED_M_S sets the flight speed (default: the camera's own,
 # 12 m/s); the other TESSERAE_SCREENSHOT_* variables pass through unchanged.
 #
@@ -23,7 +27,7 @@ cargo build -q -p tesserae --features dev --locked
 lines=()
 for i in $(seq "$runs"); do
   TESSERAE_SCREENSHOT="$out/run$i.png" cargo run -q -p tesserae --features dev --locked 2>&1 |
-    sed $'s/\x1b\\[[0-9;]*m//g' | grep -E ' capture(_cost)? ' | sed -E 's/.* capture(_cost)? //' | paste -sd' ' - >"$out/run$i.txt" || true
+    sed $'s/\x1b\\[[0-9;]*m//g' | grep -E ' capture(_cost|_lod_fill)? ' | sed -E 's/.* capture_lod_fill level=([0-9]+) .*filled_s=([^ ]+) .*shown_s=([^ ]+).*/l\1_filled_s=\2 l\1_shown_s=\3/; s/.* capture(_cost)? //' | paste -sd' ' - >"$out/run$i.txt" || true
   if [ ! -s "$out/run$i.txt" ]; then
     echo "run $i: no capture line" >&2
     exit 1
@@ -33,7 +37,7 @@ for i in $(seq "$runs"); do
 done
 
 printf '\n%-18s %10s %10s %10s\n' figure median min max
-for key in worst_tick_ms worst_cost_fill_ms worst_cost_flight_ms mean_upload_us shown_s fill_s worst_fill_ms worst_flight_ms median_flight_ms p99_flight_ms loaded meshed relight_landed relight_stale mesh_landed mesh_stale; do
+for key in worst_tick_ms worst_cost_fill_ms worst_cost_flight_ms mean_upload_us shown_s fill_s worst_fill_ms worst_flight_ms median_flight_ms p99_flight_ms loaded meshed relight_landed relight_stale mesh_landed mesh_stale l{0..5}_filled_s l{0..5}_shown_s; do
   values=$(printf '%s\n' "${lines[@]}" | tr ' ' '\n' | sed -n "s/^$key=//p" | grep -E '^[0-9.]+$' | sort -n || true)
   [ -n "$values" ] || { printf '%-18s %10s\n' "$key" "n/a"; continue; }
   n=$(wc -l <<<"$values" | tr -d ' ')

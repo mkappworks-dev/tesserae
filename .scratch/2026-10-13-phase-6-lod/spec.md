@@ -627,6 +627,62 @@ and 5.4 to 5.9 ms with one per level (one run of each build ran at the 60 Hz
 cap, 16.6 ms, and is left out). Four more cameras for 1.5 ms is about 0.4 ms
 each. The worst tick is unchanged at about 1 ms.
 
+### Ticket 07: the budget per level
+
+Apple M5, `dev` build, offscreen, 1080p, load average 2 to 7. The caps are swept
+with `TESSERAE_LOD_BUDGET` (the `dev` build only), interleaved, and
+`TESSERAE_LOD=0` is the no-coarse row. A run whose median flight frame is 16.6
+ms hit the 60 Hz cap and is left out, which was about half of them, so a row is
+3 to 23 runs; the rest are medians.
+
+**Per level**, over five runs with the Eye held still, the defaults. A
+level's fill time is when it has held its steady count while the others fill
+too, not alone: the six share one pool.
+
+| Level | Held | Non-uniform | Meshed (non-empty) | Generate | Mesh   | Quads   | Bytes   | Filled |
+| ----- | ---- | ----------- | ------------------ | -------- | ------ | ------- | ------- | ------ |
+| 1     | 2167 | 386         | 776 (221)          | 698 us   | 611 us | 135 813 | 25.0 MB | 3.0 s  |
+| 2     | 2167 | 394         | 776 (216)          | 615 us   | 553 us | 125 800 | 23.2 MB | 5.1 s  |
+| 3     | 2167 | 394         | 776 (216)          | 519 us   | 511 us | 119 200 | 21.9 MB | 7.2 s  |
+| 4     | 2167 | 394         | 776 (216)          | 371 us   | 496 us | 70 930  | 13.1 MB | 9.4 s  |
+| 5     | 1243 | 226         | 328 (73)           | 371 us   | 488 us | 17 760  | 3.3 MB  | 10.6 s |
+
+Total vertex and index memory is 127.9 MB at the default reach, 41.5 MB of it
+level 0's and 86.4 MB in the coarse levels. `lod/coarse_chunk` costs 2.14 ms at
+the surface of level 1 falling to 0.79 ms at level 5, and an air or rock Chunk
+costs 51 to 72 ns; `lod/mesh_coarse` costs 0.39 ms falling to 0.30 ms. Most jobs
+are early-outs, so the mean Job is about a third of a surface Chunk.
+
+**The caps**, medians:
+
+| In flight / landed (gen, mesh)   | level 0 shown | levels filled | worst tick |
+| -------------------------------- | ------------- | ------------- | ---------- |
+| no coarse levels                 | 1.33 s        | -             | 0.8 ms     |
+| 8, 16 / 8, 8                     | 1.46 s        | 20.8 s        | 1.05 ms    |
+| 16, 32 / 16, 16 (the defaults)   | 1.66 s        | 11.1 s        | 0.9 ms     |
+| 24, 48 / 24, 24                  | 1.75 s        | 8.0 s         | 0.8 ms     |
+| 32, 64 / 32, 32                  | 1.96 s        | 6.4 s         | 1.0 ms     |
+| 64, 128 / 64, 32                 | 2.45 s        | 4.6 s         | 1.2 ms     |
+| 256, 512 / 512, 128              | 3.61 s        | 3.1 s         | 1.2 ms     |
+
+There is no free row: each buys the distance with level 0's time, because the
+pool is one FIFO of three workers and level 0's fill keeps them all busy. The
+defaults are the first row where level 0 is 0.3 s late and no more. The landing
+caps do not bind (64 / 64 landed fills in the same 11.0 s), nor does a smaller
+mesh cap (16 in flight is 11.3 s). The worst tick is 0.8 to 1.2 ms in every row,
+so a bad cap costs fill latency and not frame time, as ADR-0007 says.
+
+**A second pool for coarse work: no.** Six async threads instead of three bring
+level 0's shown time back to its uncontended value (1.35 s against 1.37 s) and
+raise the worst tick from 0.95 ms to 1.6 ms, eight runs each, interleaved. The
+cost is CPU time on the same cores, which a second pool does not create. One
+pool, and the defaults stay at 16 / 32 in flight and 16 / 16 landed, with the
+reasoning now in `LodBudget`'s doc comment.
+
+What was not measured: the fill of one level alone, which would need a way to
+switch the others off, and any load above 7, where the 60 Hz cap makes frame
+figures useless.
+
 ## Tickets
 
 | #   | Title                                  | Blocked by |

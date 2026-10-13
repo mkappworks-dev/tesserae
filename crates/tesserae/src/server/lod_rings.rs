@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use super::streaming::{Extent, StreamingSettings};
 
 /// Past this the doubling would overflow a Cell count long before it was useful.
-const MAX_LEVELS: u32 = 32;
+pub(super) const MAX_LEVELS: u32 = 32;
 
 /// How many LOD levels the settings ask for: the smallest `n` with
 /// `view_distance_m * 2^(n-1) >= lod_distance_m`, and 1 when the reach is no
@@ -45,6 +45,13 @@ pub struct Shell {
 impl Shell {
     pub fn contains(self, delta: IVec3) -> bool {
         self.outer.contains(delta) && !self.hole.is_some_and(|hole| hole.contains(delta))
+    }
+
+    /// How many Cells are inside, without building them. The hole lies inside the
+    /// outer extent.
+    #[cfg(any(test, feature = "dev"))]
+    pub fn count(self) -> usize {
+        self.outer.count() - self.hole.map_or(0, Extent::count)
     }
 
     /// Every offset inside the shell, nearest first.
@@ -398,6 +405,24 @@ mod tests {
             offsets.len(),
             r.mesh.outer.offsets().len() - ext(1, 1).offsets().len()
         );
+    }
+
+    #[test]
+    fn counting_a_shell_agrees_with_building_it() {
+        for level in 0..level_count(&StreamingSettings::default()) {
+            let r = rings(1.0, level);
+            for shell in [
+                r.mesh,
+                r.keep,
+                Shell {
+                    outer: r.load,
+                    hole: None,
+                },
+            ] {
+                assert_eq!(shell.count(), shell.offsets().len(), "level {level}");
+            }
+            assert_eq!(r.evict.count(), r.evict.offsets().len(), "level {level}");
+        }
     }
 
     #[test]

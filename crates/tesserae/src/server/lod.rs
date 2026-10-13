@@ -51,14 +51,86 @@ pub(in crate::server) struct LodCounts {
 }
 
 /// How much coarse work is allowed at once, shared by every level and separate
-/// from level 0's so a burst of it cannot occupy the slots level 0 needs.
+/// from level 0's, which `StreamingBudget` sizes.
 ///
-/// Placeholders, for ticket 07 to replace with measurements. A bad number here
-/// is fill latency and never frame time, as for `StreamingBudget`.
+/// The same two numbers per stage and the same cost model: a bad number is fill
+/// latency and never frame time. What differs is whose latency. The pool is one
+/// FIFO with three workers and level 0's fill keeps all three busy, so coarse
+/// work that runs during it is level-0 work that waits. The caps trade how soon
+/// level 0 is drawn against how soon the distance is.
+///
+/// - **`in_flight`** bounds how many coarse jobs can be queued ahead of a level-0
+///   job. Dispatch happens once a tick, so it is also the rate: about one tick's
+///   worth of jobs a tick, which is why six levels take as long to fill as they do.
+/// - **`landed_per_tick`** bounds what the tick pays: a hash write per generate
+///   and, per mesh, a message and the Client's upload (about 15 us).
+///
+/// Measured 2026-10-13 on an Apple M5 (3 async compute threads), `dev` build, load
+/// average 2 to 7. `TESSERAE_LOD_BUDGET` against `TESSERAE_LOD=0`, interleaved, 10
+/// to 23 runs each, of which those at the 60 Hz cap (median flight frame 16.6 ms)
+/// are left out and the rest are medians:
+///
+/// | In flight / landed (gen, mesh)   | level 0 shown | levels filled | worst tick |
+/// | -------------------------------- | ------------- | ------------- | ---------- |
+/// | no coarse levels                 | 1.33 s        | -             | 0.8 ms     |
+/// | 8, 16 / 8, 8                     | 1.46 s        | 20.8 s        | 1.05 ms    |
+/// | 16, 32 / 16, 16 (these defaults) | 1.66 s        | 11.1 s        | 0.9 ms     |
+/// | 24, 48 / 24, 24                  | 1.75 s        | 8.0 s         | 0.8 ms     |
+/// | 32, 64 / 32, 32                  | 1.96 s        | 6.4 s         | 1.0 ms     |
+/// | 64, 128 / 64, 32                 | 2.45 s        | 4.6 s         | 1.2 ms     |
+/// | 256, 512 / 512, 128              | 3.61 s        | 3.1 s         | 1.2 ms     |
+///
+/// There is no free row: each one buys the distance with level 0's time. These
+/// defaults are the first where level 0 is 0.3 s late and no more. A second pool
+/// does not remove that cost, because it is CPU time on the same cores: six
+/// async threads instead of three bring level 0 back to its uncontended time and
+/// raise the worst tick from 0.95 to 1.6 ms, so there is one pool.
+///
+/// The landing caps are not what binds: 64 / 64 landed with these in-flight caps
+/// fills in the same 11.0 s, and `in_flight.mesh` of 16 is no faster (11.3 s).
+/// The in-flight caps are sized by the wait they impose. A generate is the
+/// expensive stage: 16 level-1 surface Chunks at 2.1 ms (`lod/coarse_chunk`) and
+/// 32 at 0.39 ms to mesh (`lod/mesh_coarse`) are 46 ms of work if every job were
+/// that Chunk, 15 ms over three workers, about one tick - the most a level-0 job
+/// waits behind a full coarse queue, on top of the window `StreamingBudget`
+/// computes for level 0. Most jobs are early-outs: across levels the mean is 370
+/// to 700 us to generate and 490 to 610 us to mesh.
 #[derive(Resource, Clone, Copy, Debug)]
 pub(in crate::server) struct LodBudget {
     pub in_flight: LodCounts,
     pub landed_per_tick: LodCounts,
+}
+
+#[cfg(feature = "dev")]
+impl LodBudget {
+    /// `TESSERAE_LOD_BUDGET` is four comma-separated counts, the in-flight caps
+    /// then the landing caps, each generate then mesh, so a sweep needs no
+    /// rebuild.
+    fn with_env_overrides(mut self) -> Self {
+        if let Ok(v) = std::env::var("TESSERAE_LOD_BUDGET") {
+            let n: Vec<usize> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            if let [a, b, c, d] = n[..] {
+                self.in_flight = LodCounts {
+                    generate: a,
+                    mesh: b,
+                };
+                self.landed_per_tick = LodCounts {
+                    generate: c,
+                    mesh: d,
+                };
+            } else {
+                warn!("TESSERAE_LOD_BUDGET needs four counts, got {v:?}");
+            }
+        }
+        self
+    }
+}
+
+fn lod_budget() -> LodBudget {
+    let budget = LodBudget::default();
+    #[cfg(feature = "dev")]
+    let budget = budget.with_env_overrides();
+    budget
 }
 
 impl Default for LodBudget {
@@ -163,6 +235,13 @@ impl LodStore {
         self.at(level).map_or(0, HashMap::len)
     }
 
+    /// Chunks the generator left with more than one kind of Voxel in them.
+    #[cfg(feature = "dev")]
+    pub fn non_uniform(&self, level: u32) -> usize {
+        self.at(level)
+            .map_or(0, |l| l.values().filter(|c| c.uniform().is_none()).count())
+    }
+
     pub(in crate::server) fn insert(&mut self, level: u32, coord: ChunkCoord, chunk: Chunk) {
         self.at_mut(level).insert(coord, Arc::new(chunk));
     }
@@ -198,6 +277,9 @@ struct Level {
     regenerating: HashSet<ChunkCoord>,
     /// Chunks the Client holds a mesh for.
     delivered: HashSet<ChunkCoord>,
+    /// What each delivered mesh weighs, for the `dev` report.
+    #[cfg(feature = "dev")]
+    sizes: HashMap<ChunkCoord, measure::MeshSize>,
 }
 
 /// Which coarse Chunks need a mesh, regenerating, or are with the Client.
@@ -232,6 +314,18 @@ impl LodState {
         self.levels
             .get(level as usize - 1)
             .map_or(0, |l| l.delivered.len())
+    }
+
+    /// The delivered meshes of a level, summed.
+    #[cfg(feature = "dev")]
+    pub fn mesh_sizes(&self, level: u32) -> measure::MeshSize {
+        self.levels
+            .get(level as usize - 1)
+            .map_or_else(measure::MeshSize::default, |l| {
+                l.sizes
+                    .values()
+                    .fold(measure::MeshSize::default(), |a, &b| a + b)
+            })
     }
 
     /// A held Chunk's inputs changed, so it is regenerated.
@@ -278,13 +372,147 @@ impl LodState {
 pub(in crate::server) struct LodJobs {
     pub generate: Stage<Chunk, LodKey>,
     pub mesh: Stage<ChunkMesh, LodKey>,
+    pub times: measure::JobTimes,
+}
+
+/// What coarse jobs cost and what their meshes weigh, for the `dev` report.
+/// Without `dev` the timer runs the work and records nothing.
+#[cfg(feature = "dev")]
+pub(in crate::server) mod measure {
+    use std::ops::Add;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+    use std::time::Instant;
+
+    use tesserae_core::{ChunkMesh, MeshLayer};
+
+    use crate::server::lod_rings::MAX_LEVELS;
+
+    /// A mesh, or a sum of them, as the Client is sent it.
+    #[derive(Default, Clone, Copy, Debug)]
+    pub struct MeshSize {
+        pub meshes: usize,
+        pub non_empty: usize,
+        pub quads: usize,
+        /// Vertex attributes and indices of both layers; the Client uploads the
+        /// opaque one.
+        pub bytes: usize,
+    }
+
+    impl MeshSize {
+        pub fn of(mesh: &ChunkMesh) -> Self {
+            MeshSize {
+                meshes: 1,
+                non_empty: usize::from(!mesh.is_empty()),
+                quads: mesh.quad_count(),
+                bytes: layer_bytes(&mesh.opaque) + layer_bytes(&mesh.blended),
+            }
+        }
+    }
+
+    impl Add for MeshSize {
+        type Output = MeshSize;
+
+        fn add(self, other: MeshSize) -> MeshSize {
+            MeshSize {
+                meshes: self.meshes + other.meshes,
+                non_empty: self.non_empty + other.non_empty,
+                quads: self.quads + other.quads,
+                bytes: self.bytes + other.bytes,
+            }
+        }
+    }
+
+    fn layer_bytes(layer: &MeshLayer) -> usize {
+        size_of_val(&layer.positions[..])
+            + size_of_val(&layer.normals[..])
+            + size_of_val(&layer.uvs[..])
+            + size_of_val(&layer.materials[..])
+            + size_of_val(&layer.light[..])
+            + size_of_val(&layer.indices[..])
+    }
+
+    #[derive(Default)]
+    struct Spent {
+        nanos: AtomicU64,
+        jobs: AtomicU64,
+        longest_nanos: AtomicU64,
+    }
+
+    /// Job time per level and stage, summed on the workers: what a Chunk costs
+    /// to produce, with the wait in the queue left out.
+    #[derive(Clone, Default)]
+    pub struct JobTimes(Arc<[[Spent; 2]; MAX_LEVELS as usize]>);
+
+    /// Job time of one stage of one level.
+    #[derive(Default, Clone, Copy, Debug)]
+    pub struct JobCost {
+        pub mean_us: f32,
+        pub longest_us: f32,
+        pub jobs: u64,
+    }
+
+    impl JobTimes {
+        pub fn generated<T>(&self, level: u32, work: impl FnOnce() -> T) -> T {
+            self.time(level, 0, work)
+        }
+
+        pub fn meshed<T>(&self, level: u32, work: impl FnOnce() -> T) -> T {
+            self.time(level, 1, work)
+        }
+
+        fn time<T>(&self, level: u32, stage: usize, work: impl FnOnce() -> T) -> T {
+            let started = Instant::now();
+            let out = work();
+            let spent = &self.0[level as usize][stage];
+            let nanos = started.elapsed().as_nanos() as u64;
+            spent.nanos.fetch_add(nanos, Relaxed);
+            spent.longest_nanos.fetch_max(nanos, Relaxed);
+            spent.jobs.fetch_add(1, Relaxed);
+            out
+        }
+
+        pub fn generate_cost(&self, level: u32) -> JobCost {
+            self.cost(level, 0)
+        }
+
+        pub fn mesh_cost(&self, level: u32) -> JobCost {
+            self.cost(level, 1)
+        }
+
+        fn cost(&self, level: u32, stage: usize) -> JobCost {
+            let spent = &self.0[level as usize][stage];
+            let jobs = spent.jobs.load(Relaxed);
+            JobCost {
+                mean_us: spent.nanos.load(Relaxed) as f32 / 1e3 / jobs.max(1) as f32,
+                longest_us: spent.longest_nanos.load(Relaxed) as f32 / 1e3,
+                jobs,
+            }
+        }
+    }
+}
+
+#[cfg(not(feature = "dev"))]
+pub(in crate::server) mod measure {
+    #[derive(Clone, Default)]
+    pub struct JobTimes;
+
+    impl JobTimes {
+        pub fn generated<T>(&self, _level: u32, work: impl FnOnce() -> T) -> T {
+            work()
+        }
+
+        pub fn meshed<T>(&self, _level: u32, work: impl FnOnce() -> T) -> T {
+            work()
+        }
+    }
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<LodStore>()
         .init_resource::<LodState>()
         .init_resource::<LodJobs>()
-        .init_resource::<LodBudget>()
+        .insert_resource(lod_budget())
         // After `open_world`, whose generator the sources are derived from.
         .add_systems(Startup, open_lod_generators.after(super::open_world));
 }
@@ -469,6 +697,8 @@ fn retire(
             .collect();
         for coord in released {
             level.delivered.remove(&coord);
+            #[cfg(feature = "dev")]
+            level.sizes.remove(&coord);
             unloaded.write(LodUnloaded {
                 level: plan.level,
                 coord,
@@ -591,6 +821,8 @@ fn land_meshes(
         if lv.dirty.contains(&coord) {
             jobs.mesh.note_stale();
         }
+        #[cfg(feature = "dev")]
+        lv.sizes.insert(coord, measure::MeshSize::of(&mesh));
         ready.write(LodMeshReady { level, coord, mesh });
         lv.delivered.insert(coord);
     }
@@ -657,8 +889,12 @@ fn dispatch(
             };
             let source = generators.sources[Plan::index(plan.level)].clone();
             let tables = Arc::clone(&tables.0);
-            jobs.generate.spawn((plan.level, coord), move || {
-                generate_coarse(&source, coord, &held_children, &tables.shapes)
+            let times = jobs.times.clone();
+            let level = plan.level;
+            jobs.generate.spawn((level, coord), move || {
+                times.generated(level, || {
+                    generate_coarse(&source, coord, &held_children, &tables.shapes)
+                })
             });
         }
     }
@@ -713,8 +949,10 @@ fn dispatch_meshes(
             free -= 1;
             level.dirty.remove(&coord);
             let tables = Arc::clone(tables);
-            jobs.mesh.spawn((plan.level, coord), move || {
-                mesh_coarse(&own, &around, &tables)
+            let times = jobs.times.clone();
+            let level = plan.level;
+            jobs.mesh.spawn((level, coord), move || {
+                times.meshed(level, || mesh_coarse(&own, &around, &tables))
             });
         }
     }
@@ -1527,6 +1765,45 @@ mod tests {
                 non_empty += usize::from(!mesh.is_empty());
             }
             assert!(non_empty > 0, "level {level} had nothing to mesh");
+        }
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_dev_report_counts_the_jobs_and_weighs_the_meshes_the_client_holds() {
+        let mut h = harness();
+        let (ready, _) = h.lod_settle();
+        let meshes = latest(ready);
+        for level in 1..LEVELS {
+            let held = h.held(level).len();
+            let times = &h.lod_jobs().times;
+            // Every held Chunk was generated at least once, and a replacement
+            // would add more.
+            assert!(
+                times.generate_cost(level).jobs >= held as u64,
+                "level {level}"
+            );
+            let longest = times.generate_cost(level).longest_us;
+            assert!(
+                longest >= times.generate_cost(level).mean_us,
+                "level {level}"
+            );
+            assert!(times.mesh_cost(level).jobs > 0, "level {level}");
+
+            let expected = meshes
+                .iter()
+                .filter(|((l, _), _)| *l == level)
+                .map(|(_, mesh)| measure::MeshSize::of(mesh))
+                .fold(measure::MeshSize::default(), |a, b| a + b);
+            let weighed = h.lod_state().mesh_sizes(level);
+            assert_eq!(weighed.meshes, expected.meshes, "level {level}");
+            assert_eq!(weighed.non_empty, expected.non_empty, "level {level}");
+            assert_eq!(weighed.quads, expected.quads, "level {level}");
+            assert_eq!(weighed.bytes, expected.bytes, "level {level}");
+            assert!(weighed.bytes > 0, "level {level} weighed nothing");
+
+            let varied = h.lod_store().non_uniform(level);
+            assert!(varied > 0 && varied < held, "level {level}");
         }
     }
 

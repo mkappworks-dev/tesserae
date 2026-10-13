@@ -13,6 +13,7 @@ use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use bevy::tasks::AsyncComputeTaskPool;
 use bevy::window::PresentMode;
 
 use crate::cost::{FrameCost, MainThreadCost};
@@ -20,7 +21,7 @@ use crate::world::WorldSettings;
 
 use crate::client::camera::{FlyCamera, MainCamera};
 use crate::server::player::FLY_SPEED_CEILING_MPS;
-use crate::server::streaming::stats::StreamingStats;
+use crate::server::streaming::stats::{LevelStats, StreamingStats};
 
 /// Seconds of simulated flight before the shutter, so the picture shows Chunks
 /// that streamed in around a camera that moved rather than the initial fill.
@@ -76,6 +77,10 @@ struct FrameLog {
     settled_s: Option<f32>,
     /// When every Chunk in the mesh extent had first been sent a mesh.
     shown_s: Option<f32>,
+    /// Per level, when it first held the Chunks it holds once filled, and when
+    /// every Chunk of its mesh shell had first been sent a mesh.
+    level_filled_s: Vec<Option<f32>>,
+    level_shown_s: Vec<Option<f32>>,
     /// Worst frame before that.
     worst_fill_s: f32,
     /// Every frame of the flight, in seconds.
@@ -116,6 +121,27 @@ impl FrameLog {
     fn note_shown(&mut self, elapsed_s: f32, shown: bool) {
         if self.shown_s.is_none() && shown {
             self.shown_s = Some(elapsed_s);
+        }
+    }
+
+    fn note_levels(&mut self, elapsed_s: f32, levels: &[LevelStats]) {
+        let latch = |times: &mut Vec<Option<f32>>, level: usize, reached: bool| {
+            times.resize(times.len().max(level + 1), None);
+            if reached && times[level].is_none() {
+                times[level] = Some(elapsed_s);
+            }
+        };
+        for (level, s) in levels.iter().enumerate() {
+            latch(
+                &mut self.level_filled_s,
+                level,
+                s.steady > 0 && s.held >= s.steady,
+            );
+            latch(
+                &mut self.level_shown_s,
+                level,
+                s.shell > 0 && s.meshed >= s.shell,
+            );
         }
     }
 
@@ -293,6 +319,9 @@ fn watch_frames(
     capture.frames.note_shown(time.elapsed_secs(), stats.shown);
     capture
         .frames
+        .note_levels(time.elapsed_secs(), &stats.levels);
+    capture
+        .frames
         .note_settled(time.elapsed_secs(), stats.settled);
     let may_fly = time.elapsed_secs() >= capture.fly_after_s;
     capture.frames.record(
@@ -369,7 +398,8 @@ fn report(
     capture: Res<Capture>,
     stats: Res<StreamingStats>,
     camera: Single<&Transform, With<MainCamera>>,
-    drawn: Query<(&MeshTag, &Transform), With<Mesh3d>>,
+    drawn: Query<(&MeshTag, &Transform, &Mesh3d)>,
+    meshes: Res<Assets<Mesh>>,
     world: Res<WorldSettings>,
 ) {
     if !capture.due(time.elapsed_secs()) {
@@ -422,8 +452,11 @@ fn report(
     // furthest Chunk of each level.
     let eye = camera.translation;
     let mut reach_m: Vec<(f32, f32)> = Vec::new();
-    for (tag, at) in &drawn {
+    let mut held_bytes: Vec<usize> = Vec::new();
+    for (tag, at, mesh) in &drawn {
         let level = tag.value as usize;
+        held_bytes.resize(held_bytes.len().max(level + 1), 0);
+        held_bytes[level] += meshes.get(&mesh.0).map_or(0, mesh_bytes);
         let cell = world.cell_size_at(tag.value);
         let corners = [(0.0, 0.0), (cell, 0.0), (0.0, cell), (cell, cell)].map(|(dx, dz)| {
             Vec2::new(at.translation.x + dx - eye.x, at.translation.z + dz - eye.z).length()
@@ -447,6 +480,71 @@ fn report(
         .map(|(level, s)| format!("{level}:{}/{}", s.held, s.meshed))
         .collect();
     info!("capture_lod held/meshed={}", per_level.join(","));
+    log_levels(&capture.frames, &stats.levels, &held_bytes);
+}
+
+/// The vertex and index buffers of a mesh, which is what it costs to hold.
+fn mesh_bytes(mesh: &Mesh) -> usize {
+    mesh.get_vertex_buffer_size() + mesh.get_index_buffer_bytes().map_or(0, <[u8]>::len)
+}
+
+/// What each LOD level holds, costs and weighs, one line per level and kind so
+/// `scripts/frame-runs` still sees only the lines it reads.
+///
+/// `held_bytes` is what the Client's own meshes add up to, level 0 included; the
+/// per-level `bytes` is what the Server delivered, for levels above 0.
+fn log_levels(frames: &FrameLog, levels: &[LevelStats], held_bytes: &[usize]) {
+    let at = |times: &[Option<f32>], level: usize| {
+        times
+            .get(level)
+            .copied()
+            .flatten()
+            .map_or("never".to_string(), |s| format!("{s:.2}"))
+    };
+    for (level, s) in levels.iter().enumerate() {
+        info!(
+            "capture_lod_fill level={level} held={} steady={} filled_s={} meshed={} shell={} \
+             shown_s={}",
+            s.held,
+            s.steady,
+            at(&frames.level_filled_s, level),
+            s.meshed,
+            s.shell,
+            at(&frames.level_shown_s, level),
+        );
+        if level > 0 {
+            info!(
+                "capture_lod_cost level={level} non_uniform={} meshes={} non_empty={} quads={} \
+                 bytes={} gen_us={:.0} gen_max_us={:.0} gen_jobs={} mesh_us={:.0} \
+                 mesh_max_us={:.0} mesh_jobs={}",
+                s.non_uniform,
+                s.mesh.meshes,
+                s.mesh.non_empty,
+                s.mesh.quads,
+                s.mesh.bytes,
+                s.generate.mean_us,
+                s.generate.longest_us,
+                s.generate.jobs,
+                s.mesh_job.mean_us,
+                s.mesh_job.longest_us,
+                s.mesh_job.jobs,
+            );
+        }
+    }
+    info!(
+        "capture_lod_pool async_threads={}",
+        AsyncComputeTaskPool::get().thread_num()
+    );
+    let per_level: Vec<String> = held_bytes
+        .iter()
+        .enumerate()
+        .map(|(level, bytes)| format!("{level}:{bytes}"))
+        .collect();
+    info!(
+        "capture_lod_memory total_bytes={} levels={}",
+        held_bytes.iter().sum::<usize>(),
+        per_level.join(",")
+    );
 }
 
 fn shutter(
@@ -545,6 +643,32 @@ mod tests {
         log.note_shown(2.0, true);
         log.note_shown(3.0, true);
         assert_eq!(log.shown_s, Some(2.0));
+    }
+
+    #[test]
+    fn a_level_is_filled_and_shown_at_the_first_time_it_holds_what_it_will_keep() {
+        let level = |held, meshed| LevelStats {
+            held,
+            meshed,
+            steady: 10,
+            shell: 4,
+            ..default()
+        };
+        let mut log = FrameLog::default();
+        log.note_levels(1.0, &[level(9, 3), level(0, 0)]);
+        log.note_levels(2.0, &[level(10, 4), level(3, 0)]);
+        // A level that drops below its count again keeps the time it first got there.
+        log.note_levels(3.0, &[level(7, 2), level(10, 4)]);
+        assert_eq!(log.level_filled_s, [Some(2.0), Some(3.0)]);
+        assert_eq!(log.level_shown_s, [Some(2.0), Some(3.0)]);
+    }
+
+    #[test]
+    fn a_level_with_nothing_to_hold_is_never_filled() {
+        let mut log = FrameLog::default();
+        log.note_levels(1.0, &[LevelStats::default()]);
+        assert_eq!(log.level_filled_s, [None]);
+        assert_eq!(log.level_shown_s, [None]);
     }
 
     #[test]

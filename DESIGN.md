@@ -363,23 +363,55 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   itself cannot be the Licensor — it names the Licensed Work, and the Covenants
   run from a person or a company, not from a product name.
 - Chunk dimensions: 32³ assumed, not measured.
-- Per-ring LOD chunk budget: still a single Voxel size, a single view distance
-  and LOD level 0 only, so still not measured per _ring_. What changed is what
-  it bounds. Streaming runs on a task pool, so the budget is an in-flight cap
-  and a landing cap per stage rather than a count of work per tick, and a badly
-  sized one costs fill latency, not frame time. At 1m Voxels and a 192m view
-  distance (64 / 128 / 128 in flight, 64 / 256 / 32 landed) the worst tick on
-  the main thread is 0.7 ms against 22-27 ms, and the load volume fills in 1.6 s
-  against 7.2 s. Caves raised per-Chunk cost for the Chunks a tunnel crosses (a
-  deep one from nanoseconds to about 0.7 ms across the three stages) and moved
-  none of those figures: ten runs each with and without them, interleaved, give
-  a worst tick of 0.6 ms and a fill of 1.58 s either way, because a ring holds
-  one deep layer inside the cave band. The caps want revisiting when LOD adds
-  rings, or when a Mod sets a cave floor deep enough to put several layers in
-  the band; see `StreamingBudget`. Slope smoothing is the first terrain to pay
-  for shaped Voxels (about +65 us to generate, +10-20% to mesh and +80-100% to
-  light a surface Chunk) and moved the worst tick from 1.6 to 1.8 ms at load 20,
-  so the caps did not change either.
+- **Per-ring LOD chunk budget: measured at the default 4 km reach** (Apple M5,
+  `dev` build, 1 m Voxels, a 192 m view distance, each level doubling the reach,
+  so levels 0 to 5). Every level holds about as many Chunks as level 0, so the
+  total grows with the number of levels and not with r². Job costs are means
+  over 5 runs; the fill time is when the level has held its steady count while
+  every level fills together, not alone.
+
+  | Level | Held | Non-uniform | Meshed (non-empty) | Generate | Mesh   | Quads   | Vertex + index | Filled |
+  | ----- | ---- | ----------- | ------------------ | -------- | ------ | ------- | -------------- | ------ |
+  | 0     | 2167 | -           | 791 (-)            | -        | -      | -       | 41.5 MB        | 0.9 s  |
+  | 1     | 2167 | 386         | 776 (221)          | 700 us   | 610 us | 135 800 | 25.0 MB        | 3.0 s  |
+  | 2     | 2167 | 394         | 776 (216)          | 620 us   | 550 us | 125 800 | 23.2 MB        | 5.1 s  |
+  | 3     | 2167 | 394         | 776 (216)          | 520 us   | 510 us | 119 200 | 21.9 MB        | 7.2 s  |
+  | 4     | 2167 | 394         | 776 (216)          | 370 us   | 500 us | 70 900  | 13.1 MB        | 9.4 s  |
+  | 5     | 1243 | 226         | 328 (73)           | 370 us   | 490 us | 17 800  | 3.3 MB         | 10.6 s |
+
+  Vertex memory is 128 MB in all, 86 MB of it in the coarse levels. A surface
+  Chunk costs 2.1 ms to generate and downsample at level 1 and 0.8 ms at level
+  5, and 0.39 ms to 0.30 ms to mesh (`lod/coarse_chunk`, `lod/mesh_coarse`);
+  most jobs are early-outs, which is why the means are a third of that.
+
+  What the caps buy is a trade, not a free number. The pool is one FIFO of three
+  workers and level 0's fill keeps them all busy, so coarse work that runs
+  during it is level-0 work that waits. Level 0 is drawn at 1.4 s with no coarse
+  levels; at the default caps (16 / 32 in flight, 16 / 16 landed) it is drawn at
+  1.6 s and the distance is filled at 11 s; at 64 / 128 in flight it is 2.3 s
+  and 4.5 s; at 256 / 512 it is 4.0 s and 3.4 s. The worst tick on the main
+  thread stays between 0.8 and 1.2 ms in every row, so a bad cap costs fill
+  latency and not frame time, as for level 0. A second pool does not remove the
+  cost: it is CPU time on the same cores, and six threads instead of three bring
+  level 0 back to its uncontended time and raise the worst tick from 0.95 to 1.6
+  ms. There is one pool. The sweeps and their load averages are in the Outcome
+  of `.scratch/2026-10-13-phase-6-lod/spec.md`.
+
+  Level 0, from before LOD, still stands. Streaming runs on a task pool, so the
+  budget is an in-flight cap and a landing cap per stage rather than a count of
+  work per tick. At 1m Voxels and a 192m view distance (64 / 128 / 128 in
+  flight, 64 / 256 / 32 landed) the worst tick on the main thread is 0.7 ms
+  against 22-27 ms, and the load volume fills in 1.6 s against 7.2 s. Caves
+  raised per-Chunk cost for the Chunks a tunnel crosses (a deep one from
+  nanoseconds to about 0.7 ms across the three stages) and moved none of those
+  figures: ten runs each with and without them, interleaved, give a worst tick
+  of 0.6 ms and a fill of 1.58 s either way, because a ring holds one deep layer
+  inside the cave band. The caps want revisiting when a Mod sets a cave floor
+  deep enough to put several layers in the band; see `StreamingBudget`. Slope
+  smoothing is the first terrain to pay for shaped Voxels (about +65 us to
+  generate, +10-20% to mesh and +80-100% to light a surface Chunk) and moved the
+  worst tick from 1.6 to 1.8 ms at load 20, so the caps did not change either.
+
 - **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
   Connection groups belong to a Shape and not a Material until step 7, a

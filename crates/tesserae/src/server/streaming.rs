@@ -276,6 +276,14 @@ impl Extent {
         }
     }
 
+    /// How many Cells are inside, without building them.
+    #[cfg(any(test, feature = "dev"))]
+    pub fn count(self) -> usize {
+        let h = self.horizontal;
+        let columns: i32 = (-h..=h).map(|x| 2 * (h * h - x * x).isqrt() + 1).sum();
+        columns as usize * (2 * self.vertical + 1) as usize
+    }
+
     /// Every offset inside this extent, nearest first.
     pub fn offsets(self) -> Vec<IVec3> {
         let h = self.horizontal;
@@ -909,12 +917,27 @@ pub mod stats {
     use crate::server::lod_rings::level_count;
 
     /// What the Server holds of one LOD level.
+    ///
+    /// The last four fields are measured for levels above 0 only, and are zero
+    /// at level 0.
     #[derive(Default, Clone, Copy, Debug)]
     pub struct LevelStats {
         /// Chunks held, including the margin no mesh is built for.
         pub held: usize,
         /// Chunks the Client holds a mesh for. Counts empty meshes.
         pub meshed: usize,
+        /// What `held` is once the level has filled around an Eye that holds
+        /// still: its load extent.
+        pub steady: usize,
+        /// What `meshed` is then: the Chunks of its mesh shell.
+        pub shell: usize,
+        /// Held Chunks that are not one Voxel throughout.
+        pub non_uniform: usize,
+        /// The delivered meshes, summed.
+        pub mesh: lod::measure::MeshSize,
+        /// Mean job time to generate and to mesh a Chunk of this level.
+        pub generate: lod::measure::JobCost,
+        pub mesh_job: lod::measure::JobCost,
     }
 
     #[derive(Resource, Default, Clone, Debug)]
@@ -963,6 +986,7 @@ pub mod stats {
         world: Res<WorldSettings>,
         lod_store: Res<lod::LodStore>,
         lod_state: Res<lod::LodState>,
+        lod_jobs: Res<lod::LodJobs>,
         player: Query<&Player>,
     ) {
         let center = player
@@ -994,10 +1018,22 @@ pub mod stats {
         let mut levels = vec![LevelStats {
             held: store.coords().count(),
             meshed: meshes.delivered.len(),
+            steady: rings.load.count(),
+            shell: mesh.count(),
+            ..default()
         }];
-        levels.extend((1..level_count(&settings)).map(|level| LevelStats {
-            held: lod_store.len(level),
-            meshed: lod_state.delivered_len(level),
+        levels.extend((1..level_count(&settings)).map(|level| {
+            let rings = LevelRings::new(*settings, world.cell_size(), level);
+            LevelStats {
+                held: lod_store.len(level),
+                meshed: lod_state.delivered_len(level),
+                steady: rings.load.count(),
+                shell: rings.mesh.count(),
+                non_uniform: lod_store.non_uniform(level),
+                mesh: lod_state.mesh_sizes(level),
+                generate: lod_jobs.times.generate_cost(level),
+                mesh_job: lod_jobs.times.mesh_cost(level),
+            }
         }));
         *stats = StreamingStats {
             loaded: store.coords().count(),

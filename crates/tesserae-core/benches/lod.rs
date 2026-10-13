@@ -1,8 +1,13 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
+use tesserae_core::light::{Light, MAX_LIGHT};
 use tesserae_core::lod::downsample;
-use tesserae_core::{CHUNK_SIZE, Chunk, Orientation, SHAPE_STAIR, ShapeTable, Voxel, Worldgen};
-use tesserae_core::{WorldgenParams, testgen};
+use tesserae_core::mesh::FACE_STEPS;
+use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Orientation, SHAPE_STAIR};
+use tesserae_core::{ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk, testgen};
+
+const SEED: u64 = 0x7e55_e2ae_0000_0001;
+const DEEPEST_LEVEL: u32 = 5;
 
 /// The eight Chunks of the 2x2x2 block whose lowest corner is `(cx, cy, cz)`,
 /// in octant order `x + 2y + 4z`.
@@ -105,5 +110,84 @@ fn terrain(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, terrain);
+/// The generator whose Chunks a level-`level` Job downsamples, as the Server
+/// builds it: level 0 is the production generator, and the sources above it have
+/// no smoothing because a coarse Voxel rounds stairs back to cubes.
+fn source(level: u32) -> Worldgen {
+    let params = WorldgenParams::default();
+    if level == 1 {
+        return Worldgen::new(SEED, 1.0, params);
+    }
+    let params = WorldgenParams {
+        smoothing: None,
+        ..params
+    };
+    Worldgen::new(SEED, 2f32.powi(level as i32 - 1), params)
+}
+
+/// What a coarse-Chunk Job does: eight generator calls and the downsample.
+fn coarse(source: &Worldgen, shapes: &ShapeTable, [cx, cy, cz]: [i32; 3]) -> Chunk {
+    let children = octants(|x, y, z| source.chunk(x, y, z), [2 * cx, 2 * cy, 2 * cz]);
+    downsample(refs(&children), shapes)
+}
+
+/// The Chunk of `level` whose column over the origin the ground crosses.
+fn surface_at(level: u32) -> [i32; 3] {
+    let cell_m = (CHUNK_SIZE as f32) * 2f32.powi(level as i32);
+    let ground_m = source(1).surface_height_m(0.0, 0.0);
+    [0, (ground_m / cell_m).floor() as i32, 0]
+}
+
+/// `lod/coarse_chunk`: one Job's work for the Chunk at the surface of each
+/// level, and for an air and a rock Chunk of level 1, whose early-outs are what
+/// most of a level holds.
+fn coarse_chunk(c: &mut Criterion) {
+    let shapes = ShapeTable::builtin();
+    let mut group = c.benchmark_group("lod/coarse_chunk");
+    for level in 1..=DEEPEST_LEVEL {
+        let (source, at) = (source(level), surface_at(level));
+        group.bench_function(format!("surface_level_{level}"), |b| {
+            b.iter(|| black_box(coarse(&source, &shapes, black_box(at))))
+        });
+    }
+    let source = source(1);
+    let top = surface_at(1)[1];
+    for (name, y) in [("air_level_1", top + 4), ("rock_level_1", top - 4)] {
+        group.bench_function(name, |b| {
+            b.iter(|| black_box(coarse(&source, &shapes, black_box([0, y, 0]))))
+        });
+    }
+    group.finish();
+}
+
+/// `lod/mesh_coarse`: what a mesh Job does for a downsampled surface Chunk, lit
+/// as open sky the way the Server lights every coarse Chunk.
+fn mesh_coarse(c: &mut Criterion) {
+    let shapes = ShapeTable::builtin();
+    let tables = Tables::builtin();
+    let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    let mut group = c.benchmark_group("lod/mesh_coarse");
+    for level in 1..=DEEPEST_LEVEL {
+        let (source, [cx, cy, cz]) = (source(level), surface_at(level));
+        let center = coarse(&source, &shapes, [cx, cy, cz]);
+        let around: [Chunk; 6] = std::array::from_fn(|face| {
+            let [dx, dy, dz] = FACE_STEPS[face];
+            coarse(&source, &shapes, [cx + dx, cy + dy, cz + dz])
+        });
+        group.bench_function(format!("surface_level_{level}"), |b| {
+            b.iter(|| {
+                let neighbors =
+                    std::array::from_fn(|face| Some(LitChunk::new(&around[face], &sky)));
+                black_box(mesh_chunk(
+                    LitChunk::new(black_box(&center), &sky),
+                    neighbors,
+                    &tables,
+                ))
+            })
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, terrain, coarse_chunk, mesh_coarse);
 criterion_main!(benches);
