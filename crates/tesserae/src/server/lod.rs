@@ -1838,7 +1838,7 @@ mod tests {
     }
 
     /// A hole with room for a hysteresis around it: level 0 is six Cells across
-    /// and two high, so level 1 has a hole of two Cells and one Cell of keep.
+    /// and two high, so level 1 has a hole of one Cell and a keep hole of none.
     fn hole_settings() -> StreamingSettings {
         StreamingSettings {
             view_distance_m: 192.0,
@@ -1858,7 +1858,7 @@ mod tests {
         let rings = h.rings_of(1);
         assert_eq!(
             rings.mesh.hole.map(|e| (e.horizontal, e.vertical)),
-            Some((2, 0))
+            Some((1, 0))
         );
         let (ready, _) = h.lod_settle();
         let anchor = h.anchor_of(1);
@@ -1866,15 +1866,15 @@ mod tests {
 
         let delivered = h.delivered_at(1);
         // Inside the hole: level 0 draws it.
-        for delta in [d(0, 0, 0), d(1, 0, 0), d(0, 0, -2), d(1, 0, 1)] {
+        for delta in [d(0, 0, 0), d(1, 0, 0), d(0, 0, -1)] {
             assert!(
                 !delivered.contains(&coord_at(delta)),
                 "{delta} is in the hole"
             );
         }
-        // The Cell of overlap, inside what level 0 covers (3 Cells here) and
-        // outside the hole.
-        for delta in [d(2, 0, 1), d(3, 0, 0), d(0, 1, 0), d(0, -1, 2)] {
+        // The overlap, inside what level 0 covers (3 Cells here, so up to 6 of
+        // level 1's Cells across) and outside the hole.
+        for delta in [d(1, 0, 1), d(2, 0, 1), d(3, 0, 0), d(0, 1, 0), d(0, -1, 2)] {
             assert!(
                 delivered.contains(&coord_at(delta)),
                 "{delta} is the overlap"
@@ -1894,11 +1894,11 @@ mod tests {
         let mut h = harness_with(hole_settings(), unlimited());
         h.lod_settle();
         let cell = h.app.world().resource::<WorldSettings>().cell_size_at(1);
-        let target = ChunkCoord::new(4, 0, 0);
+        let target = ChunkCoord::new(2, 0, 0);
         assert!(h.delivered_at(1).contains(&target));
 
-        // Two Cells away: inside the mesh hole, but still inside keep's.
-        h.anchor_at(Vec3::new(2.0 * cell, 0.0, 0.0));
+        // One Cell away: inside the mesh hole, but still inside keep's.
+        h.anchor_at(Vec3::new(cell, 0.0, 0.0));
         let (_, unloaded) = h.lod_tick();
         assert!(
             !unloaded.iter().any(|u| (u.level, u.coord) == (1, target)),
@@ -1908,8 +1908,8 @@ mod tests {
         h.lod_settle();
         assert!(h.delivered_at(1).contains(&target));
 
-        // One Cell away: past it.
-        h.anchor_at(Vec3::new(3.0 * cell, 0.0, 0.0));
+        // On top of it: past it.
+        h.anchor_at(Vec3::new(2.0 * cell, 0.0, 0.0));
         let (_, unloaded) = h.lod_tick();
         assert!(
             unloaded.iter().any(|u| (u.level, u.coord) == (1, target)),

@@ -30,6 +30,7 @@ use bevy::prelude::*;
 use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
+pub use lod_rings::level_count;
 use world_state::SpawnPoint;
 
 /// Metres of clearance above the surface. In metres, not Voxels: a clearance of

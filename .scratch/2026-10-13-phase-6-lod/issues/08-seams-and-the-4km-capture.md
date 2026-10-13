@@ -1,6 +1,6 @@
 # Seams and the 4 km capture
 
-Status: ready-for-agent
+Status: done
 Blocked by: 06
 
 Spec decision 9, and the step's "Done when".
@@ -28,3 +28,18 @@ Spec decision 9, and the step's "Done when".
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+The hole arithmetic, the camera per level and the two suns are in the spec's
+decisions 4 and 8; what the captures showed and the measurements are in its
+Outcome. In short:
+
+- Bound test: 60 columns at each of levels 1 to 5; three mutants killed (no
+  height tie-break, solid threshold 3/4, solid threshold 1/4).
+- Captures (offscreen, 1080p): horizon and 150 m, plain and tinted, straight
+  down, and five magenta-sky views counted for clear-colour pixels under
+  terrain. No crack, no flicker between two frames, no coarse bump; skirt not
+  built.
+- Reach: level 5's furthest drawn Chunk spans 4061 to 5174 m from the Eye.
+- `BIAS_FRACTION` is gone (it could not work with the overlap under a finer
+  camera); the far cameras' `near` stays at a quarter of the level-0 radius.
+- Frame cost: 5.6 ms median against 4.0 ms for ticket 06's two cameras.

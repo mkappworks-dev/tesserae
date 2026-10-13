@@ -160,7 +160,11 @@ mod tests {
     use crate::material::{DIRT, GLASS, GRASS, LEAVES, STONE, WATER};
     use crate::shape::examples::{FENCE_ID, fence};
     use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::worldgen::{Worldgen, WorldgenParams};
     use std::collections::BTreeMap;
+
+    const SEED: u64 = 0x7e55_e2ae_0000_0001;
+    const COLUMNS: usize = 60;
 
     const LATTICE: usize = 2 * CHUNK_SIZE;
 
@@ -497,6 +501,111 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// The top solid coarse Voxel of the column at `(x_m, z_m)` at `level`, as
+    /// the Server builds it: eight Chunks from the level-below generator,
+    /// downsampled. Returns the Voxel and its top face in metres.
+    fn top_of_column(level: u32, x_m: f32, z_m: f32) -> (Voxel, f32) {
+        let params = WorldgenParams {
+            caves: None,
+            ..WorldgenParams::default()
+        };
+        let below = level - 1;
+        // Level 0 keeps its stairs; the sources above it are cubes, as in the Server.
+        let source = Worldgen::new(
+            SEED,
+            2f32.powi(below as i32),
+            if below == 0 {
+                params
+            } else {
+                WorldgenParams {
+                    smoothing: None,
+                    ..params
+                }
+            },
+        );
+        let voxel_m = 2f32.powi(level as i32);
+        let cell_m = CHUNK_SIZE as f32 * voxel_m;
+        let (lowest, highest) = source.surface_bounds_m();
+        let (cx, cz) = ((x_m / cell_m).floor() as i32, (z_m / cell_m).floor() as i32);
+        let (lx, lz) = (
+            ((x_m - cx as f32 * cell_m) / voxel_m) as usize,
+            ((z_m - cz as f32 * cell_m) / voxel_m) as usize,
+        );
+        let shapes = ShapeTable::builtin();
+        let band = (lowest / cell_m).floor() as i32..=(highest / cell_m).floor() as i32;
+        for cy in band.rev() {
+            let children: Vec<Chunk> = (0..8)
+                .map(|i| source.chunk(2 * cx + i % 2, 2 * cy + i / 2 % 2, 2 * cz + i / 4))
+                .collect();
+            let chunk = downsample(std::array::from_fn(|i| &children[i]), &shapes);
+            for y in (0..CHUNK_SIZE).rev() {
+                let v = chunk.get(lx, y, lz);
+                if !v.is_air() {
+                    let top_m = (cy * CHUNK_SIZE as i32 + y as i32 + 1) as f32 * voxel_m;
+                    return (v, top_m);
+                }
+            }
+        }
+        panic!("no solid Voxel in the column at {x_m}, {z_m}, level {level}");
+    }
+
+    /// The bound decision 9 of the LOD spec rests on: where a level's surface is
+    /// at most one of its own Voxels from the real one, a seam is a step of at
+    /// most that, whatever the finer level draws beside it.
+    #[test]
+    fn the_coarse_surface_is_within_one_coarse_voxel_of_the_terrain_at_every_level() {
+        let mut rng = Rng(0x5eed);
+        let mut capped = [0usize; 5];
+        for level in 1..=5u32 {
+            let voxel_m = 2f32.powi(level as i32);
+            let reach_m = 4096.0;
+            for _ in 0..COLUMNS {
+                let unit = |rng: &mut Rng| rng.below(1 << 20) as f32 / (1 << 20) as f32;
+                let (x_m, z_m) = (
+                    (unit(&mut rng) * 2.0 - 1.0) * reach_m,
+                    (unit(&mut rng) * 2.0 - 1.0) * reach_m,
+                );
+                let (voxel, top_m) = top_of_column(level, x_m, z_m);
+                // The terrain at the column's centre, which is what its
+                // Voxels are an estimate of.
+                let (cx, cz) = ((x_m / voxel_m).floor() + 0.5, (z_m / voxel_m).floor() + 0.5);
+                let surface_m = Worldgen::new(
+                    SEED,
+                    voxel_m,
+                    WorldgenParams {
+                        caves: None,
+                        ..WorldgenParams::default()
+                    },
+                )
+                .surface_height_m(cx * voxel_m, cz * voxel_m);
+                let signed = (top_m - surface_m) / voxel_m;
+                let error = signed.abs();
+                assert!(
+                    error <= 1.0,
+                    "level {level} at {x_m}, {z_m}: top {top_m} m against terrain {surface_m} m"
+                );
+                // And the surface Voxel is only lost when under half of it is
+                // solid, so the top is never more than half a Voxel low.
+                assert!(
+                    signed >= -0.5,
+                    "level {level} at {x_m}, {z_m}: top {top_m} m lost its surface Voxel"
+                );
+                capped[level as usize - 1] += (voxel.material() == GRASS) as usize;
+            }
+        }
+        // Not every column: where the surface pokes one finer Voxel into the
+        // next coarse Voxel up, that one is under half and the cap is lost, and
+        // dirt is what is left. A tie broken by id instead of height loses it at
+        // every odd surface height, which is half of them.
+        for (i, &n) in capped.iter().enumerate() {
+            assert!(
+                n * 10 >= COLUMNS * 7,
+                "level {}: grass tops {n}/{COLUMNS}",
+                i + 1
+            );
         }
     }
 

@@ -200,13 +200,31 @@ is the first ring's outer distance.
   is what DESIGN.md's "each level doubling its span" means once written down:
   the ring is a constant number of its own Cells thick, so the screen-space size
   of a Voxel is constant from one ring to the next.
-- **The hole.** Level k does not mesh where level k-1 does. The _mesh shell_ of
-  level k is its outer extent minus a hole, and the hole is the previous level's
-  outer extent expressed in level-k Cells (half of it, since a Cell doubles),
-  **less one Cell on each axis**. At the defaults that is a hole of radius 2
-  Cells and half-height 0, against a previous extent of radius 3 and half-height
-  1.5. The one Cell of overlap is the seam strategy of decision 9: it is why a
-  crack between two levels has something behind it.
+- **The hole.** Level k does not mesh where level k-1 does. It is a cylinder
+  of radius `H` and half-height `V` of level-k Cells around the anchor, derived
+  and not rounded, because both levels floor the same Eye to their own lattice:
+  the finer anchor is the coarse anchor's first or second child on each axis,
+  so the finer disc is off-centre by up to a finer Cell, and an overlap
+  measured from the anchor's centre is a Cell on one side of the Eye and none on
+  the other. The rule is checked for every one of the four parities.
+  - _Horizontal._ The largest `H` such that the hole's Cells, grown by one Cell
+    of level k all round, lie inside the finer level's disc of `R` finer Cells.
+    A Cell at offset `i` reaches `2i + 1` finer Cells out, the overlap adds 2,
+    and the worst parity puts both axes on their far side, so
+    `(2i + 3)^2 + (2j + 3)^2 <= R^2` for every `(i, j)` on the hole's rim. At
+    the defaults `R` is 6 and `H` is 1; the first arithmetic, `(R - 2) / 2`,
+    gave 2, which has no overlap at all for half of the Eye positions.
+  - _Vertical._ `(Rv - 1) / 2` floored, so the slab lies inside the finer rows
+    for either parity. At the defaults `Rv` is 3 and `V` is 1; it was 0, which
+    left every level drawing the terrain above and below the Eye in the same
+    column as the next level. There is no vertical overlap: a column is drawn by
+    one level where the hole is, and the coarse level takes it over where the
+    finer level's rows end.
+  - Where no radius fits (`R < 5`) there is no hole.
+
+  At the defaults that is a hole of radius 1 and half-height 1 against a finer
+  extent of radius 6 and half-height 3. The overlap is the seam strategy of
+  decision 9: it is why a crack between two levels has something behind it.
 - **Generation has no hole.** `load` is the outer extent grown by one Cell (so
   every meshed Chunk has its six neighbours, as at level 0) and `evict` is
   `load` grown by the hysteresis, for every level. The hole removes a few
@@ -216,8 +234,9 @@ is the first ring's outer distance.
   is the same number of Cells (1) at every level, so a level changes state when
   the Eye has moved one of _its own_ Cells. A Chunk keeps its mesh while it is
   inside `outer.grown(hysteresis)` and outside the hole **shrunk by the
-  hysteresis in the horizontal only**, so the coarse layer under the fine one is
-  released when the Eye walks onto it and not a Cell later.
+  hysteresis in the horizontal only** (radius 0, half-height 1 at the
+  defaults), so the coarse layer under the fine one is released when the Eye
+  walks onto it and not a Cell later.
 - **Anchor.** Level k's anchor Chunk is `floor(eye / cell_k)`, from the same Eye
   the Server already streams around.
 
@@ -347,10 +366,11 @@ for the benefit of a path that does not use it.
 The Client's entity map becomes keyed by `(level, coord)` with level 0 as the
 existing case. A level-k entity is placed at `coord * cell_size * 2^k` and its
 mesh is uploaded with `voxel_size * 2^k`, so `chunk_mesh_to_mesh` takes the
-scale it already takes. The entity carries `MeshTag(level)`, which the vertex
-shader reads (decision 8), and the render layer of its camera.
+scale it already takes. The entity carries `MeshTag(level)`, which the shader
+reads for the debug tint (decision 8), and the render layer of its level's
+camera.
 
-### 8. Rendering: two layers, composited
+### 8. Rendering: a camera per level, composited
 
 DESIGN.md says to render LOD levels into a separate target with their own depth
 and composite. Read from the 0.20 sources, this is nearly free and needs no
@@ -363,43 +383,54 @@ MSAA). Every `Camera3d` clears depth at the start of its own main pass unless
 its `depth_load_op` is `Load`, and a camera with `ClearColorConfig::None` and a
 higher `order` draws over what is already there, with MSAA written back
 (`MsaaWriteback::Auto`). So a second camera **is** "its own depth, then
-composite": the near layer draws on top of the far layer wherever it has
-geometry, and wherever it does not the far layer shows through.
+composite": the later camera draws on top of the earlier one wherever it has
+geometry, and wherever it does not the earlier one shows through.
 
-**What it is for here.** Not precision, as above. The rule it gives is _coverage
-priority_: a pixel the near camera drew shows near geometry whatever the far
-geometry's depth is. Along any ray from the Eye the finer level's geometry comes
-first, so coverage priority and depth order agree except in the overlap strip of
-decision 4, where the coarse level was drawn _under_ the fine one on purpose.
-There it guarantees the coarse level cannot poke through the fine one. A single
-camera would need a depth bias per level to say the same thing and could not say
-it about a coarse bump that is nearer.
+**What it is for here.** Not precision: Bevy's projection is infinite
+reverse-Z. The rule it gives is _coverage priority_: a pixel a finer level's
+camera drew shows that level whatever the coarser geometry's depth is. A level
+is a cylinder around the Eye and the cylinders are nested, so along any ray from
+the Eye the finer level's geometry comes first and a ray leaves a cylinder once
+and never returns; coverage priority and depth order therefore agree everywhere
+except in the overlap of decision 4, where the coarse level was drawn _under_
+the fine one on purpose. There the priority is what stops the coarse level
+poking through.
+
+**What the first build did and why it changed.** The spec put every coarse
+level in one far camera and one depth, and tied a coarse vertex's depth to its
+level with a push along the view ray. Captures showed that cannot work: a coarse
+surface up to one coarse Voxel above the finer one is `dh / sin(angle)` further
+from it along the ray, which at any grazing view is far more than a push of a
+fraction of a Voxel, so coarse blocks stood out of the finer terrain across the
+whole overlap. One camera per level makes the finer level win by construction,
+and the push is gone.
 
 **The layout.**
 
-- A near camera, `order 1`, `clear_color: None`, `RenderLayers` {0}: level 0,
-  the UI and everything that is not terrain. It is the camera the rest of the
-  Client already finds (see Invariants: it gains a `MainCamera` marker).
-- A far camera, `order 0`, the default clear, `RenderLayers` {1}: every level
-  > = 1. It is a child of the near camera with an identity transform, so it
-  > cannot drift, with a perspective projection whose `far` is `lod_distance_m`
-  > plus a Cell (the frustum's culling plane, the one thing `far` does here) and
-  > whose `near` is a quarter of `view_distance_m`. That near plane clips coarse
-  > geometry closer than 48 m, which the near layer always covers, so a coarse
-  > peak cannot fill the view of an Eye hovering beside it.
-- Level 0 chunk entities are on layer 0; level >= 1 on layer 1. The directional
-  light is on both, because a light only affects views whose layers intersect
-  its own. Coarse entities are `NotShadowCaster`, so the far camera's cascades
-  have nothing to render. They still receive shadows where the cascades reach.
+- A near camera, `clear_color: None`, the highest `order`, `RenderLayers` {0}:
+  level 0, the UI and everything that is not terrain. It is the camera the rest
+  of the Client finds (`MainCamera`).
+- One camera per coarse level `k >= 1`, `RenderLayers` {k}, `order` falling as
+  `k` rises, so the coarsest runs first and is the only one that clears, and
+  each finer level draws over the last. Each is a child of the near camera with
+  an identity transform, so it cannot drift, with a perspective projection whose
+  `far` is `lod_distance_m` plus a Cell (the frustum's culling plane, the one
+  thing `far` does here) and whose `near` is a quarter of `view_distance_m`.
+  That near plane clips coarse geometry closer than 48 m, which a finer level
+  always covers, so a coarse peak cannot fill the view of an Eye hovering beside
+  it. A World with no coarse level still has one such camera, to clear.
+- A level `k` entity is on layer `k`.
+- Two suns with the same transform. A light's layers are both the views it
+  lights and the mask of shadow casters for every one of those views, so one sun
+  on every layer would put level 0 into every coarse camera's cascades too. The
+  sun on {0} casts shadows; the sun on {1 ..} does not, and coarse terrain
+  receives none.
 
-**Between the levels of the far layer.** All coarse levels share the far
-camera's depth, and level k+1 overlaps level k by one Cell (decision 4), so
-coplanar faces of two levels would fight. The vertex shader reads `MeshTag` and
-pushes the vertex away from the camera _along the view ray_ by a bias that grows
-with the level, `BIAS_FRACTION * voxel_size * 2^level` metres, before
-projecting. A shift along the ray does not move the vertex on screen, so it
-cannot open a crack; it only breaks the tie in favour of the finer level.
-Lighting uses the unshifted position.
+**What it costs.** Each camera is a pass of its own: a depth clear, an MSAA
+writeback and a resolve. On the M5 at 1080p, offscreen, the median flight frame
+is 4.0 ms with the two-camera layout the first build had and 5.6 ms with five
+coarse cameras (four more), so about 0.4 ms a camera (Outcome). The two-camera
+layout is the cheaper one and is wrong, for the reason above.
 
 **A debug tint.** The chunk material gains a uniform that tints each Material by
 its level, set from `TESSERAE_LOD_TINT` under `dev`, so a screenshot can show
@@ -417,23 +448,27 @@ one is culled against a neighbour the other level does not draw.
   neighbours, `load` being `keep` grown by a Cell.
 - **Between levels**, there are no skirts and no stitching geometry. The
   strategy is _overlap plus coverage priority_. The coarse level extends one of
-  its Cells under the fine level (decision 4), so a place where the fine level's
-  boundary face was culled against a solid neighbour it did not draw has the
-  coarse surface behind it, and the viewer, who is always on the fine side, sees
-  the coarse surface and not the sky. The fine layer wins everywhere it has
-  geometry (decision 8). What is left is a step of at most one coarse Voxel
-  where two heights disagree, which is the LOD's own resolution and is constant
-  in screen space by construction of the ring widths.
+  its Cells under the fine level for any Eye position (decision 4), so a place
+  where the fine level's boundary face was culled against a solid neighbour it
+  did not draw has the coarse surface behind it, and the viewer, who is always
+  on the fine side, sees the coarse surface and not the sky. The finer level's
+  camera wins everywhere it has geometry (decision 8). What is left is a step
+  of at most one coarse Voxel where two heights disagree, which is the LOD's own
+  resolution and is constant in screen space by construction of the ring
+  widths.
 - **Pinned by a test, not by a screenshot alone.** Over a sweep of columns, the
   coarse level's top solid Voxel, in metres, is within one coarse Voxel of
-  `Worldgen::surface_height_m`. That is the bound the "step of at most one
-  coarse Voxel" rests on, and a downsample that picked the wrong Material in a
-  tie, or lost the surface Voxel, breaks it.
+  `Worldgen::surface_height_m` and no more than half a Voxel below it, and the
+  top is the grass cap in most columns. That is the bound the "step of at most
+  one coarse Voxel" rests on. The upper bound is loose by construction (the top
+  rounds up); a downsample that lost the surface Voxel breaks the lower one, and
+  one that broke a Material tie by id breaks the grass count.
 - **Where the strategy fails**, the fallback is a skirt on the coarse level's
   hole boundary, one coarse Voxel tall, emitted by the Client from the mesh it
   already has. It is not built unless the screenshot at ticket 08 shows a crack;
   the spec names it so that the answer to a crack is not to widen the overlap
-  until it is a performance bug.
+  until it is a performance bug. Ticket 08 shows none once the overlap holds
+  for every Eye position, so it is not built.
 
 ### 10. What a Mod registers or parameterises
 
@@ -531,6 +566,66 @@ reported; the per-level budget table is in `StreamingBudget`'s doc comment and
 DESIGN.md's open item; and DESIGN.md, `docs/architecture.md` and `CONTEXT.md`
 are updated. If part of the scope is blocked, the rest is finished and the PR
 says exactly what was left out and why.
+
+## Outcome
+
+Written as the tickets finish; what changed from the text above, and why.
+
+### Ticket 08: seams
+
+Ticket 06's captures showed three defects, all in the rings and none in the
+shader, and a fourth idea that did not survive.
+
+- **The hole's half-height was 0**, so every coarse level drew the terrain above
+  and below the Eye in the same column as the next level, and the higher
+  surface won per pixel: patchwork, worst from directly above. The hole is now
+  as tall as the finer level's rows allow for either anchor parity (decision 4).
+- **The overlap was measured from the anchor Chunk's centre**, not the Eye, so
+  it was a Cell on one side and none on the other: a straight seam when the Eye
+  sat on a lattice line. The hole is now the largest cylinder that, grown by one
+  Cell, fits the finer disc for all four parities. At the defaults it is radius
+  1 and half-height 1 against 6 and 3, where the first arithmetic gave 2 and 0.
+  A test walks every Cell of both levels for every parity instead of using the
+  rule's own shortcut, and pins that no wider or taller hole also fits.
+- **Hairline cracks at ring joins** went with the overlap: with the coarse level
+  under the fine one for any Eye position, a culled boundary face has a surface
+  behind it. The skirt of decision 9 was not built.
+- **The depth push (`BIAS_FRACTION`) is gone.** It could not work (decision 8):
+  a coarse surface up to a coarse Voxel above the fine one is `dh / sin(angle)`
+  further along the ray, far more than a fraction of a Voxel at a grazing view.
+  One camera per level, coarsest first, gives coverage priority instead, so
+  there is nothing to tune. The far cameras' `near` stays at a quarter of
+  `view_distance_m`: at 48 m no coarse peak filled the view in any capture, and
+  nothing larger was needed.
+- **Two suns.** A light's layers are also its shadow-caster mask for every view
+  it lights, so one sun on every layer rendered level 0 into every coarse
+  camera's cascades. The shadowed sun is on layer 0 only and a plain one on the
+  coarse layers, so coarse terrain neither casts nor receives a shadow.
+
+**Pinned by tests.** Over 60 random columns at each of levels 1 to 5 across
+the 4 km square, the coarse top Voxel is within one coarse Voxel of
+`Worldgen::surface_height_m` and never more than half a Voxel below it, and at
+least 70% of tops are grass. Mutation-checked against the Voxel rules, all
+three killed: dropping the height tie-break fails the grass count (28 of 60 at
+level 1), a solid threshold of three quarters fails the lower bound (level 3),
+and one of a quarter fails the upper bound.
+
+**What the captures show** (Apple M5, `TESSERAE_SCREENSHOT_OFFSCREEN=1`, 1080p;
+not committed): the horizon at the default vantage and at 150 m, plain and with
+`TESSERAE_LOD_TINT=1`, and a straight-down view. Rings are bands to a flat
+horizon with no patchwork and no coarse bump through the fine layer, and a ring
+join at full resolution is a step of a Voxel and no gap. A magenta clear colour
+(`TESSERAE_SCREENSHOT_MAGENTA_SKY`) over five views, counting clear-colour
+pixels under terrain in each column, found none that were not a silhouette
+edge, with the Eye on a lattice line (the old straight seam), at 30 degrees, at
+150 m, at 300 m and straight down. Reach: the furthest drawn level-5 Chunk
+starts 4061 m out and ends 5174 m out, so terrain is drawn past 4096 m.
+
+**What the extra cameras cost.** Median flight frame over five interleaved runs
+each, offscreen, load 4.5 to 5.9: 3.9 to 4.1 ms with ticket 06's two cameras
+and 5.4 to 5.9 ms with one per level (one run of each build ran at the 60 Hz
+cap, 16.6 ms, and is left out). Four more cameras for 1.5 ms is about 0.4 ms
+each. The worst tick is unchanged at about 1 ms.
 
 ## Tickets
 

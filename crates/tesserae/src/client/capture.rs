@@ -9,12 +9,14 @@
 //! first makes the result the same picture every time.
 
 use bevy::camera::RenderTarget;
+use bevy::mesh::MeshTag;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::window::PresentMode;
 
 use crate::cost::{FrameCost, MainThreadCost};
+use crate::world::WorldSettings;
 
 use crate::client::camera::{FlyCamera, MainCamera};
 use crate::server::player::FLY_SPEED_CEILING_MPS;
@@ -42,6 +44,10 @@ struct Capture {
     /// Degrees above the horizon the camera looks, set on the first frame. The
     /// default view looks down at the ground, which shows nothing of the distance.
     pitch_deg: Option<f32>,
+    /// Degrees of heading, set on the first frame. The camera spawns on the
+    /// lattice lines at x = z = 0 and flies along an axis, so the default stays
+    /// on one for every level; any other heading leaves it.
+    yaw_deg: Option<f32>,
     /// Metres climbed over the flight, to see the rings from above.
     lift_m: f32,
     /// Earliest time the flight may start, so two builds whose fills end at
@@ -181,6 +187,11 @@ pub(super) fn plugin(app: &mut App) {
     let Ok(path) = std::env::var("TESSERAE_SCREENSHOT") else {
         return;
     };
+    // Not the sky's own grey, so a crack that shows the clear colour can be
+    // counted in the picture.
+    if std::env::var_os("TESSERAE_SCREENSHOT_MAGENTA_SKY").is_some() {
+        app.insert_resource(ClearColor(Color::srgb(1.0, 0.0, 1.0)));
+    }
     app.insert_resource(Capture {
         path,
         fly_for_s: seconds("TESSERAE_SCREENSHOT_FLY_S", FLY_FOR_S),
@@ -190,6 +201,9 @@ pub(super) fn plugin(app: &mut App) {
             .ok()
             .and_then(|v| v.parse().ok()),
         pitch_deg: std::env::var("TESSERAE_SCREENSHOT_PITCH_DEG")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        yaw_deg: std::env::var("TESSERAE_SCREENSHOT_YAW_DEG")
             .ok()
             .and_then(|v| v.parse().ok()),
         lift_m: seconds("TESSERAE_SCREENSHOT_LIFT_M", 0.0),
@@ -250,7 +264,7 @@ fn render_offscreen(
 ) {
     let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
-    // Every camera: the far layer left on the window would be a second picture
+    // Every camera: a coarse level left on the window would be a second picture
     // on the display and none of it in the image.
     for camera in &cameras {
         commands
@@ -330,14 +344,19 @@ fn aim(
     camera: Single<(&mut Transform, &mut FlyCamera), With<MainCamera>>,
     mut aimed: Local<bool>,
 ) {
-    let Some(pitch_deg) = capture.pitch_deg else {
+    if capture.pitch_deg.is_none() && capture.yaw_deg.is_none() {
         return;
-    };
+    }
     if std::mem::replace(&mut *aimed, true) {
         return;
     }
     let (mut transform, mut fly) = camera.into_inner();
-    fly.pitch = pitch_deg.to_radians();
+    if let Some(pitch_deg) = capture.pitch_deg {
+        fly.pitch = pitch_deg.to_radians();
+    }
+    if let Some(yaw_deg) = capture.yaw_deg {
+        fly.yaw = yaw_deg.to_radians();
+    }
     transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }
 
@@ -350,7 +369,8 @@ fn report(
     capture: Res<Capture>,
     stats: Res<StreamingStats>,
     camera: Single<&Transform, With<MainCamera>>,
-    drawn: Query<(), With<Mesh3d>>,
+    drawn: Query<(&MeshTag, &Transform), With<Mesh3d>>,
+    world: Res<WorldSettings>,
 ) {
     if !capture.due(time.elapsed_secs()) {
         return;
@@ -397,6 +417,28 @@ fn report(
         stats.anchor,
         camera.translation,
     );
+    // How far each level actually reaches, from what is drawn and not from what
+    // the rings say: the horizontal distance to the near and far corner of the
+    // furthest Chunk of each level.
+    let eye = camera.translation;
+    let mut reach_m: Vec<(f32, f32)> = Vec::new();
+    for (tag, at) in &drawn {
+        let level = tag.value as usize;
+        let cell = world.cell_size_at(tag.value);
+        let corners = [(0.0, 0.0), (cell, 0.0), (0.0, cell), (cell, cell)].map(|(dx, dz)| {
+            Vec2::new(at.translation.x + dx - eye.x, at.translation.z + dz - eye.z).length()
+        });
+        reach_m.resize(reach_m.len().max(level + 1), (0.0, 0.0));
+        let (near, far) = &mut reach_m[level];
+        *near = near.max(corners.into_iter().fold(f32::MAX, f32::min));
+        *far = far.max(corners.into_iter().fold(0.0, f32::max));
+    }
+    let reach: Vec<String> = reach_m
+        .iter()
+        .enumerate()
+        .map(|(level, (near, far))| format!("{level}:{near:.0}-{far:.0}"))
+        .collect();
+    info!("capture_reach_m {}", reach.join(","));
     // A line of its own, so `scripts/frame-runs` keeps aggregating the one above.
     let per_level: Vec<String> = stats
         .levels

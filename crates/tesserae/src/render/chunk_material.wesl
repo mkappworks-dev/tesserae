@@ -8,7 +8,6 @@
 import bevy_pbr::render::{
     forward_io::{FragmentOutput, VertexOutput},
     mesh_functions,
-    mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
@@ -22,18 +21,11 @@ var<uniform> palette: array<vec4<f32>, constants::CHUNK_PALETTE_LEN>;
 
 // Mirrors LodParams in chunk_material.rs.
 struct LodParams {
-    voxel_size: f32,
     tint: u32,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(101)
 var<uniform> lod: LodParams;
-
-// How far a coarse vertex is pushed away from the camera along its view ray, as
-// a fraction of its level's Voxel, so that where level k+1 overlaps level k by a
-// Cell the finer level's coplanar face wins the depth test. The push does not
-// move the vertex on screen. Ticket 08 tunes it against the captures.
-const BIAS_FRACTION: f32 = 0.2;
 
 // How strongly the debug tint replaces a Material's colour.
 const TINT_STRENGTH: f32 = 0.55;
@@ -116,11 +108,7 @@ fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
         world_from_local,
         vec4<f32>(in.position, 1.0),
     );
-    // Only the clip position is pushed back: lighting and shadows keep the
-    // vertex where it really is.
-    let ray = normalize(out.world_position.xyz - view.world_position);
-    let bias_m = BIAS_FRACTION * lod.voxel_size * exp2(f32(level));
-    out.clip_position = position_world_to_clip(out.world_position.xyz + ray * bias_m);
+    out.clip_position = position_world_to_clip(out.world_position.xyz);
     out.world_normal = mesh_functions::mesh_normal_local_to_world(in.normal, in.instance_index);
     out.uv = in.uv;
     out.instance_index = in.instance_index;

@@ -121,17 +121,45 @@ fn outer_extent(settings: StreamingSettings, cell_size_m: f32, level: u32) -> Ex
     }
 }
 
-/// The finer level's outer extent in this level's Cells, less one Cell on each
-/// axis, so the two levels overlap by a Cell for the seam to hide behind. `None`
-/// when that leaves nothing, as it does for a one-Cell view distance.
+/// The cylinder this level does not mesh, in its own Cells: what the finer level
+/// draws for any Eye position, less one Cell of overlap all round.
+///
+/// Both levels floor the same Eye to their own lattice, so the finer anchor is
+/// the coarse anchor's first or second child on each axis and the two discs
+/// differ by up to a finer Cell. `None` when no cylinder fits, as for a
+/// one-Cell view distance.
 fn hole(finer_outer: Extent) -> Option<Extent> {
-    // Half the finer extent, floored, since a Cell doubles.
-    let halved = |cells: i32| (cells - 2).div_euclid(2);
-    let hole = Extent {
-        horizontal: halved(finer_outer.horizontal),
-        vertical: halved(finer_outer.vertical),
-    };
-    (hole.horizontal >= 0 && hole.vertical >= 0).then_some(hole)
+    Some(Extent {
+        horizontal: hole_radius(finer_outer.horizontal)?,
+        vertical: hole_half_height(finer_outer.vertical)?,
+    })
+}
+
+/// The largest radius whose Cells, grown by one of this level's Cells, all lie in
+/// a finer disc of `finer` Cells for either anchor parity.
+///
+/// A Cell at offset `i` reaches `2i + 1` finer Cells out on its far side, the
+/// overlap adds two, and a finer anchor that is the near child on one axis and
+/// the far child on the other makes `(2i + 3, 2j + 3)` the worst corner of the
+/// quadrant. Only the outline of the disc is checked: every Cell inside it has a
+/// smaller corner.
+fn hole_radius(finer: i32) -> Option<i32> {
+    let corner = |cells: i32| 2 * cells + 3;
+    (0..=finer / 2).rev().find(|&radius| {
+        (0..=radius).all(|i| {
+            let j = (radius * radius - i * i).isqrt();
+            corner(i).pow(2) + corner(j).pow(2) <= finer * finer
+        })
+    })
+}
+
+/// The largest half-height whose slab lies in the finer level's rows for either
+/// anchor parity. No vertical overlap, so a column is drawn by exactly one level
+/// where the hole is, and the coarse level takes it over the moment the finer
+/// level's rows end.
+fn hole_half_height(finer: i32) -> Option<i32> {
+    let half = (finer - 1).div_euclid(2);
+    (half >= 0).then_some(half)
 }
 
 /// A negative radius would still pass `Extent::contains`, which squares it.
@@ -240,33 +268,74 @@ mod tests {
                 assert_eq!(r.mesh.hole, None);
                 assert_eq!(r.keep.hole, None);
             } else {
-                assert_eq!(r.mesh.hole, Some(ext(2, 0)), "level {level}");
-                assert_eq!(r.keep.hole, Some(ext(1, 0)), "level {level}");
+                assert_eq!(r.mesh.hole, Some(ext(1, 1)), "level {level}");
+                assert_eq!(r.keep.hole, Some(ext(0, 1)), "level {level}");
+            }
+        }
+    }
+
+    /// Whether a hole of `radius` and `half_height` Cells fits inside a finer
+    /// disc of `finer` Cells and `finer_rows` rows for every Eye position, by
+    /// walking every Cell of both. Written without the corner shortcut
+    /// `hole_radius` takes, so it checks that one.
+    fn fits(finer: i32, finer_rows: i32, radius: i32, half_height: i32) -> bool {
+        // Both anchors floor the same Eye, so the finer one is the coarse
+        // anchor's first or second child on each axis.
+        let vertical = [0, 1].into_iter().all(|py| {
+            // Rows `-2h ..= 2h + 1` against `py - rows ..= py + rows`.
+            -2 * half_height >= py - finer_rows && 2 * half_height < py + finer_rows
+        });
+        let parities = [(0, 0), (0, 1), (1, 0), (1, 1)];
+        vertical
+            && parities.into_iter().all(|(px, pz)| {
+                let in_disc = |x: i32, z: i32| (x - px).pow(2) + (z - pz).pow(2) <= finer * finer;
+                (-radius..=radius).all(|i| {
+                    (-radius..=radius)
+                        .filter(|&j| i * i + j * j <= radius * radius)
+                        .all(|j| {
+                            // The Cell's four finer Cells, grown by two on each
+                            // side: one of this level's Cells all round.
+                            (2 * i - 2..2 * i + 4)
+                                .all(|x| (2 * j - 2..2 * j + 4).all(|z| in_disc(x, z)))
+                        })
+                })
+            })
+    }
+
+    #[test]
+    fn the_hole_leaves_a_cell_of_overlap_for_any_eye_position_and_no_more() {
+        for horizontal in 1..=40 {
+            for vertical in 1..=8 {
+                let finer = ext(horizontal, vertical);
+                let Some(hole) = hole(finer) else {
+                    // Nothing fits: not even a single Cell.
+                    assert!(!fits(horizontal, vertical, 0, 0), "{finer:?}");
+                    continue;
+                };
+                assert!(
+                    fits(horizontal, vertical, hole.horizontal, hole.vertical),
+                    "{finer:?} -> {hole:?} leaves less than a Cell"
+                );
+                // Maximal on each axis, so no more of the finer level is
+                // drawn twice than the guarantee costs.
+                assert!(
+                    !fits(horizontal, vertical, hole.horizontal + 1, hole.vertical),
+                    "{finer:?} -> {hole:?} could be wider"
+                );
+                assert!(
+                    !fits(horizontal, vertical, hole.horizontal, hole.vertical + 1),
+                    "{finer:?} -> {hole:?} could be taller"
+                );
             }
         }
     }
 
     #[test]
-    fn the_hole_is_at_most_the_finer_level_in_metres_and_leaves_a_cell_of_overlap() {
-        let metres = |level: u32, extent: Extent, voxel_size: f32| {
-            let cell_m = world(voxel_size).cell_size() * scale(level);
-            (
-                extent.horizontal as f32 * cell_m,
-                extent.vertical as f32 * cell_m,
-            )
-        };
-        for voxel_size in [1.0, 0.25] {
-            let cell_m = world(voxel_size).cell_size();
-            for level in 1..level_count(&StreamingSettings::default()) {
-                let finer = rings(voxel_size, level - 1).mesh.outer;
-                let hole = rings(voxel_size, level).mesh.hole.expect("a hole");
-                let (finer_h, finer_v) = metres(level - 1, finer, voxel_size);
-                let (hole_h, hole_v) = metres(level, hole, voxel_size);
-                let own_cell_m = cell_m * scale(level);
-                assert!(hole_h + own_cell_m <= finer_h, "level {level} horizontal");
-                assert!(hole_v + own_cell_m <= finer_v, "level {level} vertical");
-            }
-        }
+    fn the_old_hole_left_no_overlap_when_the_anchors_differ() {
+        // The spec's first arithmetic, `(finer - 2) / 2` on both axes: at the
+        // defaults a radius of 2 against 6 Cells.
+        assert!(!fits(6, 3, 2, 0));
+        assert!(fits(6, 3, 1, 1));
     }
 
     #[test]
@@ -292,7 +361,7 @@ mod tests {
             let want_m = (192.0 * scale(level)).min(4096.0);
             assert_eq!(reach_m, want_m, "{voxel_size} {level}");
         }
-        assert_eq!(rings(0.25, 3).mesh.hole, Some(ext(11, 5)));
+        assert_eq!(rings(0.25, 3).mesh.hole, Some(ext(9, 5)));
     }
 
     #[test]
@@ -318,24 +387,28 @@ mod tests {
         assert!(offsets.iter().all(|&d| r.mesh.contains(d)));
         assert!(!offsets.contains(&IVec3::ZERO));
         assert!(offsets.contains(&IVec3::new(3, 0, 0)));
-        // The hole is a cylinder of radius 2 and half-height 0, so a Cell above
-        // the anchor's row is outside it.
-        assert!(offsets.contains(&IVec3::new(0, 1, 0)));
-        assert!(!offsets.contains(&IVec3::new(2, 0, 0)));
+        // The hole is a cylinder of radius 1 and half-height 1: the anchor and
+        // its four neighbours in the row above and below are inside it.
+        assert!(!offsets.contains(&IVec3::new(0, 1, 0)));
+        assert!(!offsets.contains(&IVec3::new(1, -1, 0)));
+        assert!(offsets.contains(&IVec3::new(0, 2, 0)));
+        assert!(offsets.contains(&IVec3::new(1, 0, 1)));
+        assert!(offsets.contains(&IVec3::new(2, 0, 0)));
         assert_eq!(
             offsets.len(),
-            r.mesh.outer.offsets().len() - ext(2, 0).offsets().len()
+            r.mesh.outer.offsets().len() - ext(1, 1).offsets().len()
         );
     }
 
     #[test]
     fn keep_releases_the_coarse_layer_as_the_eye_walks_onto_it() {
         let r = rings(1.0, 1);
-        // Meshed at 2 Cells out, and past the shrunk keep hole at 2, but not at 1.
-        assert!(r.mesh.contains(IVec3::new(3, 0, 0)));
-        assert!(!r.mesh.contains(IVec3::new(2, 0, 0)));
-        assert!(r.keep.contains(IVec3::new(2, 0, 0)));
-        assert!(!r.keep.contains(IVec3::new(1, 0, 0)));
+        // One Cell out is in the mesh hole and kept; the anchor's own Cell is
+        // in the keep hole too.
+        assert!(r.mesh.contains(IVec3::new(2, 0, 0)));
+        assert!(!r.mesh.contains(IVec3::new(1, 0, 0)));
+        assert!(r.keep.contains(IVec3::new(1, 0, 0)));
+        assert!(!r.keep.contains(IVec3::ZERO));
         // And vertically the keep hole is not shrunk.
         assert_eq!(
             r.keep.hole.map(|h| h.vertical),
@@ -367,8 +440,8 @@ mod tests {
             hysteresis_m: 32.0,
             lod_distance_m: 128.0,
         };
-        // Level 0 is one Cell out, so level 1's hole would have radius -1, and
-        // `Extent::contains` squares its radius.
+        // Level 0 is one Cell out and no hole fits in it; a negative radius
+        // would pass `Extent::contains`, which squares it.
         let r = LevelRings::new(settings, 32.0, 1);
         assert_eq!(r.mesh.hole, None);
         assert!(r.mesh.contains(IVec3::ZERO));

@@ -29,13 +29,10 @@ const LIGHT_SHADER_LOCATION: u32 = 11;
 /// count is a Mod's business and arrives with the look-pack API in step 9.
 pub const PALETTE_LEN: usize = 16;
 
-/// What the vertex stage needs to know that is not in the mesh. Mirrors
+/// What the fragment stage needs to know that is not in the mesh. Mirrors
 /// `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
 #[derive(Reflect, ShaderType, Debug, Clone, Copy)]
 pub struct LodParams {
-    /// The World's level-0 edge length, in metres. The per-level depth bias is a
-    /// fraction of a Voxel, and a mesh does not carry its Voxel size.
-    pub voxel_size: f32,
     /// Non-zero tints every level above 0 by its level, so a capture can show
     /// the rings as rings. A uniform and not a shader def, so it does not
     /// specialise a pipeline.
@@ -72,10 +69,7 @@ impl Default for ChunkMaterialExtension {
         palette[tesserae_core::worldgen::LANTERN as usize] = srgb(0.96, 0.89, 0.72);
         ChunkMaterialExtension {
             palette,
-            lod: LodParams {
-                voxel_size: 1.0,
-                tint: 0,
-            },
+            lod: LodParams { tint: 0 },
         }
     }
 }

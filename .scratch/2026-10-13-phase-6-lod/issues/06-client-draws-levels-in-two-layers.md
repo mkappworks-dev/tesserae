@@ -155,3 +155,8 @@ M5; the images are in the session scratchpad and are not committed):
   and the two sides get different coverage. It vanishes at yaw 30
   (`tint_yaw30.png`), so it is the rings and not the cameras. Worth a look in
   ticket 08 before it is blamed on rendering.
+
+Superseded in ticket 08: the far layer became one camera per coarse level and
+the depth push was removed, because a push cannot beat a surface that is a
+coarse Voxel higher along a grazing ray. Everything above about two layers, the
+shared sun and `BIAS_FRACTION` describes the first build.
