@@ -632,8 +632,8 @@ pub(in crate::server) fn stream_lod(
     jobs.mesh.reset_counts();
     jobs.mesh.poll();
 
-    // Level 1 only: an Edit is within EDIT_REACH_M of the Eye, level 2 starts at
-    // 256 m and level 0 is evicted at 288 m, so no higher level can hold one.
+    // Level 1 only: levels above it are generated from the generator alone and
+    // never read the ChunkStore, so an Edit cannot reach them.
     for coord in changed {
         let covering = cover(coord);
         // A job in flight read its children before the change and lands stale.

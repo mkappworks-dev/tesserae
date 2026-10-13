@@ -8,6 +8,7 @@
 import bevy_pbr::render::{
     forward_io::{FragmentOutput, VertexOutput},
     mesh_functions,
+    mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
@@ -22,6 +23,8 @@ var<uniform> palette: array<vec4<f32>, constants::CHUNK_PALETTE_LEN>;
 // Mirrors LodParams in chunk_material.rs.
 struct LodParams {
     tint: u32,
+    cut_radius_m: array<vec4<f32>, 8>,
+    cut_half_height_m: array<vec4<f32>, 8>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(101)
@@ -129,6 +132,19 @@ fn fragment(
     vertex_output.world_normal = in.world_normal;
     vertex_output.uv = in.uv;
     vertex_output.instance_index = in.instance_index;
+
+    // A coarse level lies under the finer ones for more than the seam needs, and a
+    // coarse surface up to a Voxel above the real one would stand over the finer
+    // silhouette there. Cut it in metres from the Eye instead, but only at the
+    // heights the finer level reaches: above them nothing else covers the ground.
+    if in.level != 0u {
+        let level = min(in.level, 31u);
+        let from_eye = in.world_position.xyz - view.world_position;
+        if length(from_eye.xz) < lod.cut_radius_m[level / 4u][level % 4u]
+            && abs(from_eye.y) < lod.cut_half_height_m[level / 4u][level % 4u] {
+            discard;
+        }
+    }
 
     var pbr_input = pbr_input_from_standard_material(vertex_output, is_front);
 

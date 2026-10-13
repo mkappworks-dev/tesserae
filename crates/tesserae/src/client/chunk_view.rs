@@ -20,10 +20,10 @@ use tesserae_core::ChunkMesh;
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
-use crate::server::level_count;
 use crate::server::streaming::{
     ChunkMeshReady, ChunkUnloaded, LodMeshReady, LodUnloaded, StreamingSettings,
 };
+use crate::server::{cuts, level_count};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// Level 0, the UI and everything that is not distant terrain. Level `k` is on
@@ -66,17 +66,30 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, (upload_meshes, drop_meshes));
 }
 
-fn add_material(mut commands: Commands, mut materials: ResMut<Assets<ChunkMaterial>>) {
-    commands.insert_resource(TerrainMaterial(materials.add(ChunkMaterial {
-        base: StandardMaterial {
-            perceptual_roughness: 0.95,
-            ..default()
-        },
-        extension: ChunkMaterialExtension {
-            lod: LodParams { tint: debug_tint() },
-            ..default()
-        },
-    })));
+fn add_material(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+    streaming: Res<StreamingSettings>,
+    world: Res<WorldSettings>,
+) {
+    commands.insert_resource(TerrainMaterial(
+        materials.add(ChunkMaterial {
+            base: StandardMaterial {
+                perceptual_roughness: 0.95,
+                ..default()
+            },
+            extension: ChunkMaterialExtension {
+                lod: LodParams::new(
+                    debug_tint(),
+                    &cuts(&streaming, world.cell_size())
+                        .iter()
+                        .map(|c| (c.radius_m, c.half_height_m))
+                        .collect::<Vec<_>>(),
+                ),
+                ..default()
+            },
+        }),
+    ));
 }
 
 #[cfg(feature = "dev")]
@@ -473,6 +486,7 @@ mod tests {
             .init_asset::<Mesh>()
             .init_asset::<ChunkMaterial>()
             .init_resource::<WorldSettings>()
+            .init_resource::<StreamingSettings>()
             .init_resource::<ChunkEntities>()
             .add_message::<ChunkMeshReady>()
             .add_message::<ChunkUnloaded>()
@@ -579,6 +593,28 @@ mod tests {
         for (f, c) in fine_positions.iter().zip(&coarse_positions) {
             assert_eq!(*c, f.map(|v| v * 4.0));
         }
+    }
+
+    #[test]
+    fn the_material_carries_each_levels_cut_in_its_own_slot() {
+        let lod = LodParams::new(
+            1,
+            &[
+                (0.0, 0.0),
+                (144.0, 94.0),
+                (290.0, 190.0),
+                (580.0, 380.0),
+                (1160.0, 760.0),
+            ],
+        );
+        assert_eq!(lod.tint, 1);
+        assert_eq!(lod.cut_radius_m[0], Vec4::new(0.0, 144.0, 290.0, 580.0));
+        assert_eq!(lod.cut_half_height_m[0], Vec4::new(0.0, 94.0, 190.0, 380.0));
+        assert_eq!(lod.cut_radius_m[1].x, 1160.0);
+        assert_eq!(
+            lod.cut_radius_m[1].y, 0.0,
+            "a level past the last is not cut"
+        );
     }
 
     #[test]

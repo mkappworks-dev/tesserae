@@ -37,6 +37,29 @@ pub struct LodParams {
     /// the rings as rings. A uniform and not a shader def, so it does not
     /// specialise a pipeline.
     pub tint: u32,
+    /// Per level, packed four to a `Vec4`: the horizontal distance from the Eye,
+    /// in metres, inside which that level is not drawn, and the height above and
+    /// below the Eye that holds for. See `server::cuts` for why.
+    pub cut_radius_m: [Vec4; CUT_VECS],
+    pub cut_half_height_m: [Vec4; CUT_VECS],
+}
+
+/// Enough for every level the Server can have (32), four to a `Vec4`.
+pub const CUT_VECS: usize = 8;
+
+impl LodParams {
+    pub fn new(tint: u32, cuts: &[(f32, f32)]) -> Self {
+        let mut params = LodParams {
+            tint,
+            cut_radius_m: [Vec4::ZERO; CUT_VECS],
+            cut_half_height_m: [Vec4::ZERO; CUT_VECS],
+        };
+        for (level, &(radius, half_height)) in cuts.iter().take(CUT_VECS * 4).enumerate() {
+            params.cut_radius_m[level / 4][level % 4] = radius;
+            params.cut_half_height_m[level / 4][level % 4] = half_height;
+        }
+        params
+    }
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -69,7 +92,7 @@ impl Default for ChunkMaterialExtension {
         palette[tesserae_core::worldgen::LANTERN as usize] = srgb(0.96, 0.89, 0.72);
         ChunkMaterialExtension {
             palette,
-            lod: LodParams { tint: 0 },
+            lod: LodParams::new(0, &[]),
         }
     }
 }

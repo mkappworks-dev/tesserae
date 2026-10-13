@@ -169,6 +169,44 @@ fn hole_half_height(finer: i32) -> Option<i32> {
     (half >= 0).then_some(half)
 }
 
+/// The cylinder around the Eye, in metres, inside which a level's terrain is not
+/// drawn because the next finer level covers it.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Cut {
+    pub radius_m: f32,
+    pub half_height_m: f32,
+}
+
+/// Per level, what to cut. Level 0 draws from the Eye outward, so its entry is
+/// empty.
+///
+/// Level `k`'s Chunks lie under the finer level for the whole width of the hole's
+/// parity slack and more, and a coarse surface up to one coarse Voxel above the
+/// real one would stand above the finer silhouette there. The Client cuts them
+/// in metres instead. The finer level reaches `R - sqrt(2)` of its Cells
+/// horizontally and `V` vertically from any Eye position, so nothing inside that
+/// is left uncovered, and one coarse Voxel less on each keeps the coarse surface
+/// behind the finer level's boundary faces. The height matters: above the finer
+/// level's rows nothing covers the ground, and cutting there shows the sky.
+pub fn cuts(settings: &StreamingSettings, cell_size_m: f32) -> Vec<Cut> {
+    (0..level_count(settings))
+        .map(|level| {
+            if level == 0 {
+                return Cut::default();
+            }
+            let finer = outer_extent(*settings, cell_size_m, level - 1);
+            let finer_cell_m = cell_size_m * scale(level - 1);
+            let voxel_m = cell_size_m * scale(level) / tesserae_core::CHUNK_SIZE as f32;
+            Cut {
+                radius_m: ((finer.horizontal as f32 - std::f32::consts::SQRT_2) * finer_cell_m
+                    - voxel_m)
+                    .max(0.0),
+                half_height_m: (finer.vertical as f32 * finer_cell_m - voxel_m).max(0.0),
+            }
+        })
+        .collect()
+}
+
 /// A negative radius would still pass `Extent::contains`, which squares it.
 fn shrunk_horizontally(hole: Extent, cells: i32) -> Option<Extent> {
     let horizontal = hole.horizontal - cells;
@@ -343,6 +381,62 @@ mod tests {
         // defaults a radius of 2 against 6 Cells.
         assert!(!fits(6, 3, 2, 0));
         assert!(fits(6, 3, 1, 1));
+    }
+
+    /// Every point inside a level's cut is in a Cell the finer level meshes, for
+    /// every position of the Eye in its anchor Cell: cutting a coarse level there
+    /// can never show the sky.
+    #[test]
+    fn what_a_coarse_level_leaves_out_is_always_covered_by_the_finer_one() {
+        for voxel_size in [1.0, 0.25] {
+            let cell_m = world(voxel_size).cell_size();
+            let settings = StreamingSettings::default();
+            let cuts = cuts(&settings, cell_m);
+            assert_eq!(cuts.len() as u32, level_count(&settings));
+            assert_eq!(cuts[0], Cut::default());
+            for (level, &cut) in cuts.iter().enumerate().skip(1) {
+                let finer = rings(voxel_size, level as u32 - 1).mesh.outer;
+                let c = cell_m * scale(level as u32 - 1);
+                assert!(
+                    cut.radius_m > 0.0 && cut.half_height_m > 0.0,
+                    "level {level}"
+                );
+                let fractions = [0.0, 0.3, 0.5, 0.999];
+                for (fx, fy, fz) in fractions
+                    .into_iter()
+                    .flat_map(|x| fractions.into_iter().map(move |y| (x, y)))
+                    .flat_map(|(x, y)| fractions.into_iter().map(move |z| (x, y, z)))
+                {
+                    let eye = Vec3::new(fx, fy, fz) * c;
+                    let steps = (cut.radius_m / (c / 8.0)).ceil() as i32;
+                    for step in 0..=steps {
+                        let r = (step as f32 / steps as f32) * cut.radius_m;
+                        for degrees in (0..360).step_by(6) {
+                            let (sin, cos) = (degrees as f32).to_radians().sin_cos();
+                            for dy in [-cut.half_height_m, 0.0, cut.half_height_m] {
+                                let at = eye + Vec3::new(cos * r, dy, sin * r);
+                                let offset = (at / c).floor().as_ivec3();
+                                assert!(
+                                    finer.contains(offset),
+                                    "{voxel_size} level {level}: {at} is not in level {}",
+                                    level - 1
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_cut_is_a_coarse_voxel_inside_what_the_finer_level_guarantees() {
+        // R = 6 finer Cells of 32 m across and 3 high: 6 - sqrt(2) of them, and 3,
+        // each less a Voxel of 2 m.
+        let cuts = cuts(&StreamingSettings::default(), 32.0);
+        assert!((cuts[1].radius_m - ((6.0 - 2f32.sqrt()) * 32.0 - 2.0)).abs() < 1e-3);
+        assert!((cuts[1].half_height_m - (3.0 * 32.0 - 2.0)).abs() < 1e-3);
+        assert_eq!(cuts.len(), 6);
     }
 
     #[test]

@@ -103,7 +103,6 @@ impl WorldSettings {
 
     /// Which Chunk of a LOD level's lattice holds a point: the level's anchor
     /// when the point is the Eye.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub fn chunk_at_level(&self, metres: Vec3, level: u32) -> ChunkCoord {
         let c = (metres / self.cell_size_at(level)).floor();
         ChunkCoord::new(c.x as i32, c.y as i32, c.z as i32)

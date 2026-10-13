@@ -24,9 +24,9 @@ const SPEED_RANGE: std::ops::RangeInclusive<f32> = 0.5..=64.0;
 /// notches regardless of where in it you start.
 const SPEED_PER_NOTCH: f32 = 1.1;
 
-/// The camera the Player looks through, as opposed to the far-layer camera that
-/// is its child and only draws distant terrain. Anything that means "the
-/// camera" filters by this, because `With<Camera3d>` now matches both.
+/// The camera the Player looks through, as opposed to the coarse-level cameras
+/// that are its children. Anything that means "the camera" filters by this,
+/// because `With<Camera3d>` matches them all.
 #[derive(Component)]
 pub struct MainCamera;
 

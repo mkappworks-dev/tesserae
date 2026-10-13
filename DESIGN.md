@@ -191,7 +191,11 @@ gets the same rings.
   defaults it is radius 1 and half-height 1 coarse Cell against a finer extent
   of 6 and 3. The overlap is the whole seam strategy: a finer face culled
   against a neighbour it did not draw has the coarse surface behind it, so there
-  are no skirts and no stitching.
+  are no skirts and no stitching. The coarse level is still drawn under the
+  finer one out to its edge, so the shader cuts a coarse fragment inside the
+  finer level's guaranteed reach in metres, and inside its rows: without that a
+  coarse surface up to a coarse Voxel too high stands over the finer horizon at
+  ground level.
 - **One camera per level.** Level k is on `RenderLayers` {k} and drawn by its
   own camera, the coarsest first and the only one to clear, each finer level
   over the last. A finer level's pixel wins whatever the coarse depth, which is
