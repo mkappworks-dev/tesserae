@@ -10,5 +10,9 @@ license.workspace = true
 name = "meshing"
 harness = false
 
+[[bench]]
+name = "collide"
+harness = false
+
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }

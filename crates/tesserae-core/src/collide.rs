@@ -14,9 +14,9 @@
 //! Step height, gravity and what a body does with a blocked axis are a
 //! controller's policy, not the grid's, and are not here.
 
-use crate::mesh::{NEG_X, POS_X};
-use crate::shape::{NodeBox, SUBDIV, ShapeTable};
-use crate::voxel::Voxel;
+use crate::mesh::{FACE_STEPS, NEG_X, POS_X};
+use crate::shape::{CollisionBox, Connections, NodeBox, SUBDIV, ShapeTable};
+use crate::voxel::{SHAPE_FULL_CUBE, Voxel};
 
 /// Random access to a World's Voxels, in Voxel coordinates.
 ///
@@ -113,8 +113,18 @@ fn clip(
     }
     // One cell of slack at the top: a box ending exactly on a grid line reaches
     // the cell beyond it, which costs one box test and is filtered by it.
-    let cells =
-        |a: usize| ((lo[a] / voxel_size).floor() as i32)..=((hi[a] / voxel_size).floor() as i32);
+    //
+    // And as many more as the table's Shapes overhang: a box belonging to the cell
+    // below that climbs into ours is found from the cell below, so the range
+    // reaches down by what boxes reach up. Zero, and the range unchanged, until a
+    // Shape overhangs.
+    let over = shapes.overhang();
+    let cells = |a: usize| {
+        let below = over[2 * a + 1] as i32;
+        let above = over[2 * a] as i32;
+        ((lo[a] / voxel_size).floor() as i32 - below)
+            ..=((hi[a] / voxel_size).floor() as i32 + above)
+    };
 
     let mut allowed = d;
     for z in cells(2) {
@@ -122,7 +132,7 @@ fn clip(
             for x in cells(0) {
                 let cell = [x, y, z];
                 for b in obstacles(vol, shapes, cell) {
-                    let (min, max) = in_metres(&b, cell, voxel_size);
+                    let (min, max) = in_metres(b, cell, voxel_size);
                     let overlaps =
                         |a: usize| aabb.min[a] < max[a] - EPS && aabb.max[a] > min[a] + EPS;
                     if !overlaps(o1) || !overlaps(o2) {
@@ -140,26 +150,54 @@ fn clip(
     allowed
 }
 
+/// The arms the Voxel at `cell` has out, from its six neighbours through the
+/// volume. A Voxel the volume does not hold reads as air, so it never connects:
+/// the mesher's shell says the same where a Chunk is missing. Neighbours are
+/// read only for a connected Shape.
+fn connections_at(
+    vol: &impl VoxelVolume,
+    shapes: &ShapeTable,
+    cell: [i32; 3],
+    voxel: Voxel,
+) -> Connections {
+    // Cubes and air are most cells; they never reach the table for this.
+    if !shapes.any_connected() || voxel.shape() == SHAPE_FULL_CUBE || !shapes.is_connected(voxel) {
+        return Connections::NONE;
+    }
+    let around = FACE_STEPS.map(|d| {
+        vol.voxel([cell[0] + d[0], cell[1] + d[1], cell[2] + d[2]])
+            .unwrap_or(Voxel::AIR)
+    });
+    shapes.connections(voxel, around)
+}
+
+const WHOLE_CELL: [CollisionBox; 1] = [CollisionBox::new([0; 3], [SUBDIV as i8; 3])];
+
 /// The collision boxes of the Voxel at `cell`, or the whole cell if the volume
-/// does not hold it.
-fn obstacles(vol: &impl VoxelVolume, shapes: &ShapeTable, cell: [i32; 3]) -> Vec<NodeBox> {
+/// does not hold it. Borrowed from the table, so visiting a cell allocates
+/// nothing.
+fn obstacles<'a>(
+    vol: &impl VoxelVolume,
+    shapes: &'a ShapeTable,
+    cell: [i32; 3],
+) -> &'a [CollisionBox] {
     match vol.voxel(cell) {
-        Some(voxel) => shapes.collision(voxel).to_vec(),
-        None => vec![NodeBox::new([0; 3], [SUBDIV as u8; 3])],
+        Some(voxel) => shapes.collision(voxel, connections_at(vol, shapes, cell, voxel)),
+        None => &WHOLE_CELL,
     }
 }
 
 /// A box in sixteenths of the Voxel at `cell`, as metres.
-fn in_metres(b: &NodeBox, cell: [i32; 3], voxel_size: f32) -> ([f32; 3], [f32; 3]) {
+fn in_metres(b: &CollisionBox, cell: [i32; 3], voxel_size: f32) -> ([f32; 3], [f32; 3]) {
     let unit = voxel_size / SUBDIV as f32;
-    let at = |a: usize, sixteenths: u8| (cell[a] * SUBDIV as i32 + sixteenths as i32) as f32 * unit;
+    let at = |a: usize, sixteenths: i8| (cell[a] * SUBDIV as i32 + sixteenths as i32) as f32 * unit;
     (
         std::array::from_fn(|a| at(a, b.min[a])),
         std::array::from_fn(|a| at(a, b.max[a])),
     )
 }
 
-/// The first collision box a ray strikes.
+/// The first drawn box a ray strikes.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct RayHit {
     /// The Voxel that was struck.
@@ -172,7 +210,8 @@ pub struct RayHit {
 }
 
 /// Casts a ray from `origin` along `dir` (any length) for at most `reach_m`
-/// metres and returns the first collision box it strikes.
+/// metres and returns the first box of a Shape's drawn geometry it strikes: what a
+/// player aims at, not what a body bumps into.
 ///
 /// A cell walk, testing the ray against each cell's boxes, so it enters a
 /// stair's notch and stops at the tread rather than at the cell. It stops at the
@@ -221,7 +260,7 @@ pub fn raycast(
     loop {
         let voxel = vol.voxel(cell)?;
         let nearest = shapes
-            .collision(voxel)
+            .selection(voxel, connections_at(vol, shapes, cell, voxel))
             .iter()
             .filter_map(|b| ray_box(o, d, cell, b))
             .filter(|&(t, _)| t <= t_max)
@@ -301,8 +340,9 @@ fn ray_box(o: [f32; 3], d: [f32; 3], cell: [i32; 3], b: &NodeBox) -> Option<(f32
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mesh::{NEG_Y, NEG_Z, POS_Y};
-    use crate::shape::{Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::mesh::{NEG_Y, NEG_Z, POS_X, POS_Y};
+    use crate::shape::examples;
+    use crate::shape::{CollisionBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
     use crate::worldgen::STONE;
     use std::collections::HashMap;
 
@@ -512,6 +552,7 @@ mod tests {
         let mut t = table();
         let plate = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
             })
@@ -521,6 +562,279 @@ mod tests {
         g.put([5, 1, 5], Voxel::new(STONE, plate, 0));
         let walk = sweep(&g, &t, 1.0, body(5.5, 1.0, 3.0, 1.8), [0.0, 0.0, 4.0]);
         assert!(!walk.blocked[2]);
+    }
+
+    #[test]
+    fn a_ray_strikes_a_shape_that_is_walked_through() {
+        let mut t = table();
+        let plate = t
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
+                collision: Some(vec![]),
+            })
+            .unwrap();
+        let mut g = Grid::new();
+        g.put([5, 1, 5], Voxel::new(STONE, plate, 0));
+        let hit = raycast(&g, &t, 1.0, [5.5, 4.0, 5.5], [0.0, -1.0, 0.0], 10.0).unwrap();
+        assert_eq!((hit.at, hit.face), ([5, 1, 5], POS_Y));
+        assert!(
+            close(hit.distance_m, 3.0 - 1.0 / 16.0),
+            "{}",
+            hit.distance_m
+        );
+    }
+
+    #[test]
+    fn a_ray_is_stopped_by_what_is_drawn_and_not_by_a_larger_collision_box() {
+        let mut t = table();
+        // A thin sign drawn on the cell's back wall, with a whole cell to bump into.
+        let sign = t
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([0, 0, 14], [16, 16, 16])],
+                collision: Some(vec![NodeBox::new([0; 3], [16; 3]).into()]),
+            })
+            .unwrap();
+        let mut g = Grid::new();
+        g.put([5, 1, 5], Voxel::new(STONE, sign, 0));
+        // The ray crosses the empty front of the cell and strikes the sign itself.
+        let ray = raycast(&g, &t, 1.0, [5.5, 1.5, 3.0], [0.0, 0.0, 1.0], 10.0).unwrap();
+        assert!(
+            close(ray.distance_m, 2.0 + 14.0 / 16.0),
+            "{}",
+            ray.distance_m
+        );
+        // A body, by contrast, is stopped at the front of the cell.
+        let walk = sweep(&g, &t, 1.0, body(5.5, 1.0, 3.0, 1.8), [0.0, 0.0, 4.0]);
+        assert!(close(walk.aabb.max[2], 5.0), "{}", walk.aabb.max[2]);
+    }
+
+    /// A post a Voxel and a half tall to bump into, drawn one Voxel tall.
+    fn fence_post(t: &mut ShapeTable) -> Voxel {
+        let id = t
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
+                collision: Some(vec![CollisionBox::new([6, 0, 6], [10, 24, 10])]),
+            })
+            .unwrap();
+        Voxel::new(STONE, id, 0)
+    }
+
+    #[test]
+    fn a_body_lands_on_the_overhang_of_the_voxel_below_it() {
+        let mut t = table();
+        let fence = fence_post(&mut t);
+        for voxel_size in [1.0, 0.25] {
+            let mut g = Grid::new();
+            g.put([5, 1, 5], fence);
+            // Feet in the cell above the fence: the fence is in the cell below,
+            // and only its overhang reaches this one.
+            let s = voxel_size;
+            let fall = sweep(
+                &g,
+                &t,
+                s,
+                Aabb::new(
+                    [5.5 * s - 0.2 * s, 2.6 * s, 5.5 * s - 0.2 * s],
+                    [5.5 * s + 0.2 * s, 4.4 * s, 5.5 * s + 0.2 * s],
+                ),
+                [0.0, -0.3 * s, 0.0],
+            );
+            assert!(fall.blocked[1], "at {voxel_size}");
+            assert!(
+                close(fall.aabb.min[1], 2.5 * s),
+                "rests at {} at {voxel_size}",
+                fall.aabb.min[1]
+            );
+        }
+    }
+
+    #[test]
+    fn a_fence_cannot_be_walked_into_at_the_height_of_its_overhang_and_can_above_it() {
+        let mut t = table();
+        let fence = fence_post(&mut t);
+        let mut g = Grid::new();
+        g.put([5, 1, 5], fence);
+        // Feet at 2.0 m, in the cell above the fence, whose collision is 2.5 m.
+        let low = sweep(&g, &t, 1.0, body(2.5, 2.0, 5.5, 1.8), [6.0, 0.0, 0.0]);
+        assert!(low.blocked[0]);
+        assert!(close(low.aabb.max[0], 5.375), "{}", low.aabb.max[0]);
+        let high = sweep(&g, &t, 1.0, body(2.5, 2.5, 5.5, 1.8), [6.0, 0.0, 0.0]);
+        assert!(!high.blocked[0]);
+    }
+
+    #[test]
+    fn a_box_reaching_down_into_the_cell_above_is_found_from_it() {
+        let mut t = table();
+        let id = t
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
+                collision: Some(vec![CollisionBox::new([6, -8, 6], [10, 16, 10])]),
+            })
+            .unwrap();
+        let mut g = Grid::new();
+        g.put([5, 3, 5], Voxel::new(STONE, id, 0));
+        // Head at 1.8 m, rising: the box's underside is half a Voxel below its
+        // cell, at 2.5 m, in a cell the head has not reached by its own cell.
+        let rise = sweep(&g, &t, 1.0, body(5.5, 0.0, 5.5, 1.8), [0.0, 1.0, 0.0]);
+        assert!(rise.blocked[1]);
+        assert!(close(rise.moved[1], 0.7), "{}", rise.moved[1]);
+    }
+
+    #[test]
+    fn an_overhang_rotates_with_its_shape() {
+        let mut t = table();
+        let fence = fence_post(&mut t);
+        let on_its_side = Voxel::new(STONE, fence.shape(), Orientation::new(POS_X, 0).bits());
+        let reach = t.collision(on_its_side, Connections::NONE)[0];
+        assert_eq!((reach.min[0], reach.max[0]), (0, 24));
+        assert_eq!((reach.min[1], reach.max[1]), (6, 10));
+    }
+
+    #[test]
+    fn the_builtin_table_overhangs_nothing_so_a_sweep_visits_the_cells_it_always_did() {
+        assert_eq!(table().overhang(), [0; 6]);
+        let mut t = table();
+        fence_post(&mut t);
+        // Registered at all 24 Orientations, so one tall Shape widens every face.
+        assert_eq!(t.overhang(), [1; 6]);
+    }
+
+    fn fences() -> (ShapeTable, Voxel, Voxel) {
+        let mut t = table();
+        let fence = Voxel::new(STONE, t.register(examples::fence()).unwrap(), 0);
+        let pipe = Voxel::new(STONE, t.register(examples::pipe()).unwrap(), 0);
+        (t, fence, pipe)
+    }
+
+    /// A body 0.4 Voxels square and 1.8 tall, in metres at `s` per Voxel.
+    fn body_at(s: f32, x: f32, y: f32, z: f32) -> Aabb {
+        Aabb::new(
+            [(x - 0.2) * s, y * s, (z - 0.2) * s],
+            [(x + 0.2) * s, (y + 1.8) * s, (z + 0.2) * s],
+        )
+    }
+
+    #[test]
+    fn a_body_is_stopped_by_an_arm_between_two_fences_and_not_between_unrelated_posts() {
+        let (t, fence, pipe) = fences();
+        for s in [1.0, 0.25] {
+            // Crossing the line at x = 6.0, in the gap between the two posts.
+            let cross = |g: &Grid| sweep(g, &t, s, body_at(s, 6.0, 1.0, 3.0), [0.0, 0.0, 4.0 * s]);
+
+            let mut joined = Grid::new();
+            joined.put([5, 1, 5], fence).put([6, 1, 5], fence);
+            let stopped = cross(&joined);
+            assert!(stopped.blocked[2], "at {s}");
+            assert!(
+                close(stopped.aabb.max[2] / s, 5.0 + 7.0 / 16.0),
+                "{} at {s}",
+                stopped.aabb.max[2] / s
+            );
+
+            // A pipe is another group, so no arm grows and the gap is open.
+            let mut unrelated = Grid::new();
+            unrelated.put([5, 1, 5], fence).put([6, 1, 5], pipe);
+            assert!(!cross(&unrelated).blocked[2], "at {s}");
+        }
+    }
+
+    #[test]
+    fn a_ray_strikes_the_arm_and_passes_below_and_above_its_bar() {
+        let (t, fence, _) = fences();
+        for s in [1.0, 0.25] {
+            let mut g = Grid::new();
+            g.put([5, 1, 5], fence).put([6, 1, 5], fence);
+            let along = |y: f32| {
+                raycast(
+                    &g,
+                    &t,
+                    s,
+                    [6.0 * s, y * s, 3.0 * s],
+                    [0.0, 0.0, 1.0],
+                    10.0 * s,
+                )
+            };
+
+            // The bar is 7/16 to 13/16 up, 7/16 across the arm's width.
+            let bar = along(1.0 + 10.0 / 16.0).expect("a bar");
+            assert_eq!((bar.at, bar.face), ([6, 1, 5], NEG_Z));
+            assert!(
+                close(bar.distance_m / s, 2.0 + 7.0 / 16.0),
+                "{}",
+                bar.distance_m
+            );
+            // Under and over the bar, and above the drawn fence in the part only a
+            // body feels: nothing to pick.
+            assert!(along(1.0 + 3.0 / 16.0).is_none(), "under the bar at {s}");
+            assert!(along(1.0 + 14.0 / 16.0).is_none(), "over the bar at {s}");
+            assert!(along(2.2).is_none(), "above the fence at {s}");
+            // The same height does stop a body.
+            let walk = sweep(&g, &t, s, body_at(s, 6.0, 2.0, 3.0), [0.0, 0.0, 4.0 * s]);
+            assert!(walk.blocked[2], "at {s}");
+        }
+    }
+
+    #[test]
+    fn a_fence_beside_what_the_volume_does_not_hold_does_not_connect_to_it() {
+        let (t, fence, _) = fences();
+        let mut g = Grid::new();
+        g.hi = [6, 20, 20];
+        g.put([6, 1, 5], fence).put([5, 1, 5], fence);
+        // The cell at x = 7 is unknown: solid to a sweep, absent to a connection.
+        assert_eq!(
+            connections_at(&g, &t, [6, 1, 5], fence),
+            Connections::NONE.with(NEG_X)
+        );
+        let into = sweep(&g, &t, 1.0, body(5.0, 5.0, 3.0, 1.8), [3.0, 0.0, 0.0]);
+        assert!(into.blocked[0], "the unknown region stops it");
+    }
+
+    #[test]
+    fn what_a_body_bumps_into_what_a_ray_picks_and_what_is_drawn_have_the_same_arms() {
+        let (t, fence, pipe) = fences();
+        let mut g = Grid::new();
+        let mut rng = 0x5eed_0006u64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        for z in 4..8 {
+            for y in 4..8 {
+                for x in 4..8 {
+                    let v = match next() % 5 {
+                        0 | 1 => fence,
+                        2 => pipe,
+                        3 => cube(),
+                        _ => continue,
+                    };
+                    g.put([x, y, z], v);
+                }
+            }
+        }
+        for z in 4..8 {
+            for y in 4..8 {
+                for x in 4..8 {
+                    let v = g.voxel([x, y, z]).unwrap();
+                    if !t.is_connected(v) {
+                        continue;
+                    }
+                    let c = connections_at(&g, &t, [x, y, z], v);
+                    let around =
+                        FACE_STEPS.map(|d| g.voxel([x + d[0], y + d[1], z + d[2]]).unwrap());
+                    assert_eq!(c, t.connections(v, around), "at {:?}", [x, y, z]);
+                    // Every arm that is out is in both lists, and no other is.
+                    let arms = c.bits().count_ones() as usize;
+                    assert_eq!(t.selection(v, c).len(), 1 + arms);
+                    assert_eq!(t.collision(v, c).len(), 1 + arms);
+                }
+            }
+        }
     }
 
     #[test]

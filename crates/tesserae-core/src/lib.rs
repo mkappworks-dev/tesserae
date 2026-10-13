@@ -22,8 +22,8 @@ pub use light::{Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_chunk,
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
 pub use mesh::{ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_chunk};
 pub use shape::{
-    MAX_SHAPED_PER_CHUNK, NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef,
-    ShapeError, ShapeTable,
+    Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
+    SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,
 };
 pub use tables::Tables;
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};

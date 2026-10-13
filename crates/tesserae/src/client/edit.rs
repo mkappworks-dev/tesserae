@@ -7,12 +7,14 @@
 //! `pose::report_pose` has just said the Player's Eye is.
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 //!
-//! A stopgap: a hotbar of five and two keys for orientation are enough to
+//! A stopgap: a hotbar of five (six under `dev`) and two keys for orientation are enough to
 //! exercise the edit path by hand, and a real inventory replaces them.
 
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
+#[cfg(feature = "dev")]
+use tesserae_core::shape::examples;
 use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{
     MaterialId, Orientation, SHAPE_FULL_CUBE, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeId, Voxel,
@@ -28,44 +30,62 @@ struct Slot {
     name: &'static str,
     material: MaterialId,
     shape: ShapeId,
+    /// Whether turning it changes anything. A cube looks the same however it is
+    /// turned and a connected Shape ignores its orientation.
+    turnable: bool,
 }
 
-/// Keys 1 to 5. Materials are the engine's placeholders until a Mod declares
+/// Keys 1 to 5, and 6 for the dev fence. Materials are the engine's placeholders until a Mod declares
 /// some in build-order step 7.
-const HOTBAR: [Slot; 5] = [
+const HOTBAR: &[Slot] = &[
     Slot {
         name: "stone",
         material: STONE,
         shape: SHAPE_FULL_CUBE,
+        turnable: false,
     },
     Slot {
         name: "stone slab",
         material: STONE,
         shape: SHAPE_SLAB,
+        turnable: true,
     },
     Slot {
         name: "stone stair",
         material: STONE,
         shape: SHAPE_STAIR,
+        turnable: true,
     },
     Slot {
         name: "stone post",
         material: STONE,
         shape: SHAPE_POST,
+        turnable: true,
     },
     Slot {
         name: "lantern",
         material: LANTERN,
         shape: SHAPE_FULL_CUBE,
+        turnable: false,
+    },
+    // The reference fence the dev Server registers; a release build has none.
+    #[cfg(feature = "dev")]
+    Slot {
+        name: "stone fence",
+        material: STONE,
+        shape: examples::FENCE_ID,
+        turnable: false,
     },
 ];
 
-const SLOT_KEYS: [KeyCode; 5] = [
+const SLOT_KEYS: &[KeyCode] = &[
     KeyCode::Digit1,
     KeyCode::Digit2,
     KeyCode::Digit3,
     KeyCode::Digit4,
     KeyCode::Digit5,
+    #[cfg(feature = "dev")]
+    KeyCode::Digit6,
 ];
 
 /// What the player would place.
@@ -92,7 +112,7 @@ impl Held {
 
     fn describe(self) -> String {
         let slot = &HOTBAR[self.slot];
-        if slot.shape == SHAPE_FULL_CUBE {
+        if !slot.turnable {
             return slot.name.to_string();
         }
         let up = match self.orientation.up() {

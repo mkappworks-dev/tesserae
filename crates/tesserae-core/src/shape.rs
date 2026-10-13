@@ -12,6 +12,8 @@
 //! dimensionless, and whoever turns one into a distance multiplies by the
 //! World's Voxel size. `docs/adr/0003-voxel-size-is-per-world.md`.
 
+pub mod examples;
+
 use crate::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use crate::voxel::{SHAPE_FULL_CUBE, ShapeId, Voxel};
 
@@ -31,11 +33,12 @@ pub const ORIENTATIONS: usize = 24;
 /// time or collision work.
 pub const MAX_BOXES: usize = 16;
 
-/// The most shaped Voxels a Chunk may hold.
+/// The most shaped Voxels a Chunk may hold, counted in stairs: a connected Shape
+/// is charged [`ShapeTable::cap_units`] of them.
 ///
-/// A shaped Voxel emits up to about a dozen quads that nothing merges, where a
-/// cube merges into almost nothing, so a Chunk of them is hundreds of thousands
-/// of quads. Enforced where Voxels come from - the edit path rejects a Place
+/// A shaped Voxel emits up to about a dozen quads, each found and culled on its
+/// own before any merging, where a cube merges into almost nothing, so a Chunk of
+/// them is hundreds of thousands of quads and the mesher's time. Enforced where Voxels come from - the edit path rejects a Place
 /// that would cross it, and worldgen places none - and not by the mesher,
 /// which dropping geometry silently would make a hole nobody could explain.
 ///
@@ -44,6 +47,10 @@ pub const MAX_BOXES: usize = 16;
 /// against 350 us for the terrain alone - 41% of a `mesh_chunk/straddling`, and
 /// the rule was 50%, because a tick has twelve meshes in it. A Chunk of nothing
 /// but stairs takes 5.2 ms.
+///
+/// The reference fence costs 4 stairs, so 256 fit. Terrain with 256 fences meshes
+/// in 547 us against 550 us for 1024 stairs and 337 us for the terrain alone
+/// (interleaved with the 7-stair fence's 534 us at 146, Apple M5, load 2-7).
 pub const MAX_SHAPED_PER_CHUNK: usize = 1024;
 
 /// Set in [`ShapeTable::light_mask`] for a shaped Voxel, meaning light is also
@@ -66,15 +73,94 @@ impl NodeBox {
     const CELL: NodeBox = NodeBox::new([0; 3], [SUBDIV as u8; 3]);
 }
 
+/// A box a body collides with, in sixteenths of a Voxel and signed so that it
+/// may stand outside the cell: `-16..=32` per axis, one whole Voxel of
+/// [overhang](ShapeTable::overhang) at most on each side. A fence is
+/// `[6, 0, 6]..[10, 24, 10]`, a post a Voxel and a half tall that you cannot
+/// jump. Drawn geometry stays a [`NodeBox`]: only collision acts at a distance.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct CollisionBox {
+    pub min: [i8; 3],
+    pub max: [i8; 3],
+}
+
+impl CollisionBox {
+    pub const fn new(min: [i8; 3], max: [i8; 3]) -> Self {
+        CollisionBox { min, max }
+    }
+}
+
+impl From<NodeBox> for CollisionBox {
+    fn from(b: NodeBox) -> Self {
+        CollisionBox {
+            min: b.min.map(|c| c as i8),
+            max: b.max.map(|c| c as i8),
+        }
+    }
+}
+
+/// An arm a connected Shape grows towards one face-neighbour.
+#[derive(Clone, Debug)]
+pub struct Arm {
+    /// The face constant of the neighbour it reaches for.
+    pub face: usize,
+    /// What is drawn when it is out. May touch only the boundary plane of
+    /// `face`; see [`ShapeError::ArmTouchesOtherFace`].
+    pub boxes: Vec<NodeBox>,
+    /// What a body collides with when it differs from what is drawn. `None`
+    /// means the same boxes.
+    pub collision: Option<Vec<CollisionBox>>,
+}
+
+/// How a Shape grows arms towards the Voxels around it.
+///
+/// Derived at read time from the neighbours and never stored in a Voxel, so a
+/// Chunk holds no fact that is a function of other facts.
+/// `docs/adr/0010-connections-are-derived-not-stored.md`.
+#[derive(Clone, Debug)]
+pub struct ConnectDef {
+    /// The connection groups this Shape belongs to, one bit each.
+    pub group: u32,
+    /// Grow an arm towards a neighbour in any of these groups.
+    pub connects_to: u32,
+    /// Also grow one towards a neighbour that seals the face facing us: a fence
+    /// meeting a wall.
+    pub to_sealed: bool,
+    pub arms: Vec<Arm>,
+}
+
+/// Which of a Voxel's six faces have an arm out, as bits indexed by face
+/// constant. Computed by [`ShapeTable::connections`], from the six
+/// neighbours; the same answer wherever it is asked.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub struct Connections(u8);
+
+impl Connections {
+    pub const NONE: Connections = Connections(0);
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn has(self, face: usize) -> bool {
+        self.0 >> face & 1 != 0
+    }
+
+    pub const fn with(self, face: usize) -> Self {
+        Connections(self.0 | 1 << face)
+    }
+}
+
 /// What a Mod declares for one Shape.
 #[derive(Clone, Debug)]
 pub struct ShapeDef {
+    pub connect: Option<ConnectDef>,
     /// The geometry. Boxes may overlap.
     pub boxes: Vec<NodeBox>,
     /// What a body collides with when it differs from what is drawn - a
     /// pressure plate is thin to look at and nothing to walk into. `None` means
     /// the same boxes.
-    pub collision: Option<Vec<NodeBox>>,
+    pub collision: Option<Vec<CollisionBox>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -84,6 +170,14 @@ pub enum ShapeError {
     /// Out of range, or with no volume.
     BadBox,
     TableFull,
+    /// A connected Shape with no arms, an arm on a face that does not exist or
+    /// is declared twice, or an arm with no boxes.
+    BadArm,
+    /// Some combination of arms seals a face; pass 1 and the light solvers assume
+    /// a connected Shape never does.
+    ConnectedSeals,
+    /// An arm reaches a boundary plane other than its own face's.
+    ArmTouchesOtherFace,
 }
 
 impl std::fmt::Display for ShapeError {
@@ -93,6 +187,9 @@ impl std::fmt::Display for ShapeError {
             ShapeError::TooManyBoxes => "a Shape has more than MAX_BOXES boxes",
             ShapeError::BadBox => "a box is outside the Voxel or has no volume",
             ShapeError::TableFull => "all 256 ShapeIds are taken",
+            ShapeError::BadArm => "a connected Shape's arms are missing, repeated or empty",
+            ShapeError::ConnectedSeals => "a connected Shape seals a face under some arms",
+            ShapeError::ArmTouchesOtherFace => "an arm reaches a face other than its own",
         })
     }
 }
@@ -285,8 +382,16 @@ struct Variant {
     coverage: [FaceMask; 6],
     quads: (u32, u32),
     collision: (u32, u32),
+    selection: (u32, u32),
     volume: u16,
+    /// Index into `ShapeTable::connects`, or [`NO_CONNECT`]. A connected Shape's
+    /// 24 slots are all its bare variant (no arms out), so `variant` and
+    /// everything that reads only it - `seals`, `coverage`, `volume` - need no
+    /// neighbour.
+    connect: u16,
 }
+
+const NO_CONNECT: u16 = u16::MAX;
 
 /// What an unknown Shape and air both resolve to: nothing there at all.
 const NOTHING: Variant = Variant {
@@ -295,7 +400,9 @@ const NOTHING: Variant = Variant {
     coverage: [FaceMask::EMPTY; 6],
     quads: (0, 0),
     collision: (0, 0),
+    selection: (0, 0),
     volume: 0,
+    connect: NO_CONNECT,
 };
 
 /// Every registered Shape under every Orientation.
@@ -308,7 +415,28 @@ pub struct ShapeTable {
     shapes: usize,
     variants: Vec<Variant>,
     quads: Vec<ShapeQuad>,
-    boxes: Vec<NodeBox>,
+    boxes: Vec<CollisionBox>,
+    selection: Vec<NodeBox>,
+    overhang: [u8; 6],
+    /// Per Shape id: its groups, for the neighbour's side of the predicate.
+    groups: Vec<u32>,
+    connects: Vec<ConnectInfo>,
+    /// Every connected Shape's variants, one per submask of its arm faces.
+    mask_variants: Vec<Variant>,
+}
+
+/// What `connections` needs of one connected Shape.
+#[derive(Clone, Copy, Debug)]
+struct ConnectInfo {
+    connects_to: u32,
+    to_sealed: bool,
+    /// The faces that have an arm.
+    faces: u8,
+    /// Where its variants start in `mask_variants`; indexed by the connections
+    /// squeezed onto `faces`.
+    first: u32,
+    /// What it costs against [`MAX_SHAPED_PER_CHUNK`], in units of one stair.
+    weight: u32,
 }
 
 impl Default for ShapeTable {
@@ -326,6 +454,11 @@ impl ShapeTable {
             variants: Vec::new(),
             quads: Vec::new(),
             boxes: Vec::new(),
+            selection: Vec::new(),
+            overhang: [0; 6],
+            groups: Vec::new(),
+            connects: Vec::new(),
+            mask_variants: Vec::new(),
         };
         let b = NodeBox::new;
         let defs = [
@@ -337,6 +470,7 @@ impl ShapeTable {
         for boxes in defs {
             table
                 .register(ShapeDef {
+                    connect: None,
                     boxes,
                     collision: None,
                 })
@@ -353,44 +487,162 @@ impl ShapeTable {
             return Err(ShapeError::TableFull);
         }
         validate(&def.boxes)?;
-        if let Some(collision) = &def.collision {
-            // Empty is allowed: it is how a Shape is walked through.
-            if collision.len() > MAX_BOXES {
-                return Err(ShapeError::TooManyBoxes);
-            }
-            for b in collision {
-                check_box(b)?;
-            }
+        let base_collision = resolve(def.collision.as_deref(), &def.boxes)?;
+        if let Some(connect) = &def.connect {
+            return self.register_connected(&def, &base_collision, connect);
         }
 
         let grid = rasterise(&def.boxes);
-        let collision = def.collision.as_deref().unwrap_or(&def.boxes);
         for orientation in Orientation::all() {
-            let m = orientation.matrix();
-            let rotated = rotate_grid(&grid, &m);
-
-            let quads_start = self.quads.len() as u32;
-            extract_quads(&rotated, &mut self.quads);
-            let boxes_start = self.boxes.len() as u32;
-            self.boxes
-                .extend(collision.iter().map(|b| rotate_box(b, &m)));
-
-            let coverage: [FaceMask; 6] = std::array::from_fn(|f| face_coverage(&rotated, f));
-            let seals = (0..6)
-                .filter(|&f| coverage[f].is_full())
-                .fold(0u8, |acc, f| acc | 1 << f);
-            let partial = coverage.iter().any(|c| !c.is_full() && !c.is_empty());
-            self.variants.push(Variant {
-                seals,
-                partial,
-                coverage,
-                quads: (quads_start, self.quads.len() as u32 - quads_start),
-                collision: (boxes_start, self.boxes.len() as u32 - boxes_start),
-                volume: rotated.iter().filter(|&&set| set).count() as u16,
-            });
+            let variant = self.derive(&grid, &base_collision, &def.boxes, &orientation.matrix());
+            self.variants.push(variant);
         }
+        self.groups.push(0);
         self.shapes += 1;
         Ok((self.shapes - 1) as ShapeId)
+    }
+
+    /// A variant per submask of the arms, and the bare one in all 24 orientation
+    /// slots: a connected Shape cannot be rotated.
+    fn register_connected(
+        &mut self,
+        def: &ShapeDef,
+        base_collision: &[CollisionBox],
+        connect: &ConnectDef,
+    ) -> Result<ShapeId, ShapeError> {
+        if self.connects.len() >= NO_CONNECT as usize {
+            return Err(ShapeError::TableFull);
+        }
+        let mut faces = 0u8;
+        let mut arms = Vec::new();
+        for arm in &connect.arms {
+            if arm.face >= 6 || faces >> arm.face & 1 != 0 || arm.boxes.is_empty() {
+                return Err(ShapeError::BadArm);
+            }
+            faces |= 1 << arm.face;
+            validate(&arm.boxes)?;
+            let collision = resolve(arm.collision.as_deref(), &arm.boxes)?;
+            if arm.boxes.iter().any(|b| reaches_other_plane(b, arm.face)) {
+                return Err(ShapeError::ArmTouchesOtherFace);
+            }
+            arms.push((arm.face, &arm.boxes, collision));
+        }
+        if arms.is_empty() {
+            return Err(ShapeError::BadArm);
+        }
+        let drawn: usize = def.boxes.len() + arms.iter().map(|a| a.1.len()).sum::<usize>();
+        let bumped: usize = base_collision.len() + arms.iter().map(|a| a.2.len()).sum::<usize>();
+        if drawn > MAX_BOXES || bumped > MAX_BOXES {
+            return Err(ShapeError::TooManyBoxes);
+        }
+
+        let identity = Orientation::IDENTITY.matrix();
+        let submasks: Vec<u8> = (0..1u16 << 6)
+            .map(|m| m as u8)
+            .filter(|m| m & !faces == 0)
+            .collect();
+        // Index `compact(mask)` is the mask's bits squeezed onto the arm faces,
+        // which is ascending submask order of `faces` too.
+        let mut derived = Vec::new();
+        for &mask in &submasks {
+            let mut boxes = def.boxes.clone();
+            let mut collision = base_collision.to_vec();
+            for (face, drawn, bumped) in &arms {
+                if mask >> face & 1 != 0 {
+                    boxes.extend_from_slice(drawn);
+                    collision.extend_from_slice(bumped);
+                }
+            }
+            let grid = rasterise(&boxes);
+            if (0..6).any(|f| face_coverage(&grid, f).is_full()) {
+                return Err(ShapeError::ConnectedSeals);
+            }
+            derived.push((grid, boxes, collision));
+        }
+
+        let first = self.mask_variants.len() as u32;
+        let index = self.connects.len() as u16;
+        let mut by_compact = vec![None; submasks.len()];
+        for (&mask, (grid, boxes, collision)) in submasks.iter().zip(&derived) {
+            by_compact[compact(mask, faces)] = Some(self.derive(grid, collision, boxes, &identity));
+        }
+        self.mask_variants.extend(
+            by_compact
+                .into_iter()
+                .map(|v| v.expect("every submask is derived")),
+        );
+        // Charged for its most armed self, in stairs; the cap was sized for stairs.
+        let worst = self.mask_variants[first as usize..]
+            .iter()
+            .map(|v| v.quads.1)
+            .max()
+            .unwrap_or(0);
+        let stair = self.variants[SHAPE_STAIR as usize * ORIENTATIONS]
+            .quads
+            .1
+            .max(1);
+        self.connects.push(ConnectInfo {
+            connects_to: connect.connects_to,
+            to_sealed: connect.to_sealed,
+            faces,
+            first,
+            weight: worst.div_ceil(stair),
+        });
+
+        let bare = Variant {
+            connect: index,
+            ..self.mask_variants[first as usize]
+        };
+        self.variants
+            .extend(std::iter::repeat_n(bare, ORIENTATIONS));
+        self.groups.push(connect.group);
+        self.shapes += 1;
+        Ok((self.shapes - 1) as ShapeId)
+    }
+
+    /// Everything one (Shape, Orientation) or (Shape, connections) asks of the
+    /// table, from one grid rotated by `m`, appended to the shared arrays.
+    fn derive(
+        &mut self,
+        grid: &Grid,
+        collision: &[CollisionBox],
+        drawn: &[NodeBox],
+        m: &Matrix,
+    ) -> Variant {
+        let rotated = rotate_grid(grid, m);
+
+        let quads_start = self.quads.len() as u32;
+        extract_quads(&rotated, &mut self.quads);
+        let boxes_start = self.boxes.len() as u32;
+        for b in collision {
+            let rotated = rotate_collision_box(b, m);
+            self.fold_overhang(&rotated);
+            self.boxes.push(rotated);
+        }
+        let selection_start = self.selection.len() as u32;
+        self.selection.extend(drawn.iter().map(|b| {
+            let r = rotate_collision_box(&(*b).into(), m);
+            NodeBox::new(r.min.map(|c| c as u8), r.max.map(|c| c as u8))
+        }));
+
+        let coverage: [FaceMask; 6] = std::array::from_fn(|f| face_coverage(&rotated, f));
+        let seals = (0..6)
+            .filter(|&f| coverage[f].is_full())
+            .fold(0u8, |acc, f| acc | 1 << f);
+        let partial = coverage.iter().any(|c| !c.is_full() && !c.is_empty());
+        Variant {
+            seals,
+            partial,
+            coverage,
+            quads: (quads_start, self.quads.len() as u32 - quads_start),
+            collision: (boxes_start, self.boxes.len() as u32 - boxes_start),
+            selection: (
+                selection_start,
+                self.selection.len() as u32 - selection_start,
+            ),
+            volume: rotated.iter().filter(|&&set| set).count() as u16,
+            connect: NO_CONNECT,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -445,16 +697,140 @@ impl ShapeTable {
         &self.variant(voxel).coverage[face]
     }
 
+    /// The variant for `voxel` with the arms in `c` out. A Shape that is not
+    /// connected has one variant whatever `c` says.
+    #[inline]
+    fn variant_with(&self, voxel: Voxel, c: Connections) -> &Variant {
+        let bare = self.variant(voxel);
+        if bare.connect == NO_CONNECT {
+            return bare;
+        }
+        let info = &self.connects[bare.connect as usize];
+        &self.mask_variants[info.first as usize + compact(c.0 & info.faces, info.faces)]
+    }
+
     /// The Voxel's exposed surface in sixteenths, ready to emit.
-    pub fn quads(&self, voxel: Voxel) -> &[ShapeQuad] {
-        let (start, len) = self.variant(voxel).quads;
+    pub fn quads(&self, voxel: Voxel, c: Connections) -> &[ShapeQuad] {
+        let (start, len) = self.variant_with(voxel, c).quads;
         &self.quads[start as usize..(start + len) as usize]
     }
 
     /// What a body collides with, rotated, in sixteenths.
-    pub fn collision(&self, voxel: Voxel) -> &[NodeBox] {
-        let (start, len) = self.variant(voxel).collision;
+    pub fn collision(&self, voxel: Voxel, c: Connections) -> &[CollisionBox] {
+        let (start, len) = self.variant_with(voxel, c).collision;
         &self.boxes[start as usize..(start + len) as usize]
+    }
+
+    /// What `voxel` costs against [`MAX_SHAPED_PER_CHUNK`]: nothing for air and
+    /// cubes, one for a Shape, and for a connected Shape as many as it has times
+    /// a stair's quads, at its most armed.
+    pub fn cap_units(&self, voxel: Voxel) -> u32 {
+        if !voxel.is_shaped() {
+            return 0;
+        }
+        match self.variant(voxel).connect {
+            NO_CONNECT => 1,
+            i => self.connects[i as usize].weight,
+        }
+    }
+
+    /// Whether any registered Shape is connected. False for the builtin table, so
+    /// callers can skip the per-Voxel check altogether.
+    #[inline]
+    pub fn any_connected(&self) -> bool {
+        !self.connects.is_empty()
+    }
+
+    /// Whether `voxel` grows arms towards its neighbours at all.
+    #[inline]
+    pub fn is_connected(&self, voxel: Voxel) -> bool {
+        self.variant(voxel).connect != NO_CONNECT
+    }
+
+    /// Which arms `voxel` has out, given the Voxels across its six faces in
+    /// face-constant order. The one rule the mesher, the sweep and the ray all
+    /// ask, so that a fence is never drawn with an arm you walk through.
+    ///
+    /// An arm grows towards a neighbour whose groups meet `connects_to`, or, for
+    /// a Shape that asks, one that seals the face looking back at us. Air, an
+    /// unknown Shape and a Voxel the caller does not hold (pass air) belong to
+    /// no group and seal nothing, so never connect.
+    pub fn connections(&self, voxel: Voxel, around: [Voxel; 6]) -> Connections {
+        let bare = self.variant(voxel);
+        if bare.connect == NO_CONNECT {
+            return Connections::NONE;
+        }
+        let info = &self.connects[bare.connect as usize];
+        let mut c = Connections::NONE;
+        for (face, &across) in around.iter().enumerate() {
+            if info.faces >> face & 1 != 0 && self.connects_through(info, across, face) {
+                c = c.with(face);
+            }
+        }
+        c
+    }
+
+    fn connects_through(&self, info: &ConnectInfo, across: Voxel, face: usize) -> bool {
+        self.groups_of(across) & info.connects_to != 0
+            || (info.to_sealed && self.seals(across, face ^ 1))
+    }
+
+    fn groups_of(&self, voxel: Voxel) -> u32 {
+        let shape = voxel.shape() as usize;
+        if voxel.is_air() || shape >= self.shapes {
+            return 0;
+        }
+        self.groups[shape]
+    }
+
+    /// The coverage of `voxel`'s `face` when `other` is the Voxel across it: the
+    /// bare coverage plus the arm's end if it has one out that way.
+    ///
+    /// Exact with one neighbour, not two, because an arm touches only its own
+    /// face's plane: whether it is out depends on the Voxel across that face and
+    /// nothing else, and the mesher is already holding that Voxel.
+    pub fn coverage_against(&self, voxel: Voxel, face: usize, other: Voxel) -> &FaceMask {
+        let bare = self.variant(voxel);
+        if bare.connect == NO_CONNECT {
+            // The cube's variant is a full cell, so this equals `coverage`.
+            return &bare.coverage[face];
+        }
+        let info = &self.connects[bare.connect as usize];
+        let out = info.faces >> face & 1 != 0 && self.connects_through(info, other, face);
+        let c = if out {
+            Connections::NONE.with(face)
+        } else {
+            Connections::NONE
+        };
+        &self.variant_with(voxel, c).coverage[face]
+    }
+
+    /// How far any registered collision box reaches past each face of its cell,
+    /// in whole Voxels (0 or 1), indexed by face constant. A sweep has to look
+    /// that many cells further to find a box that belongs to a neighbour; all
+    /// zero, and so free, until a Shape overhangs.
+    pub fn overhang(&self) -> [u8; 6] {
+        self.overhang
+    }
+
+    fn fold_overhang(&mut self, b: &CollisionBox) {
+        let cell = SUBDIV as i8;
+        for a in 0..3 {
+            if b.min[a] < 0 {
+                self.overhang[2 * a] = 1;
+            }
+            if b.max[a] > cell {
+                self.overhang[2 * a + 1] = 1;
+            }
+        }
+    }
+
+    /// What a ray picks: the declared boxes, rotated. Not [`ShapeTable::collision`],
+    /// which a Shape may make larger, smaller or empty without changing what is
+    /// drawn, and a player aims at what is drawn.
+    pub fn selection(&self, voxel: Voxel, c: Connections) -> &[NodeBox] {
+        let (start, len) = self.variant_with(voxel, c).selection;
+        &self.selection[start as usize..(start + len) as usize]
     }
 
     /// Sub-cells occupied, out of `SUBDIV^3`. What LOD reads: a coarse Voxel is
@@ -508,6 +884,58 @@ impl ShapeTable {
 fn check_box(b: &NodeBox) -> Result<(), ShapeError> {
     let cell = SUBDIV as u8;
     let ok = (0..3).all(|a| b.min[a] < b.max[a] && b.max[a] <= cell);
+    if ok { Ok(()) } else { Err(ShapeError::BadBox) }
+}
+
+/// A declared collision list, or the drawn boxes as collision. Empty is allowed:
+/// it is how a Shape is walked through.
+fn resolve(
+    collision: Option<&[CollisionBox]>,
+    boxes: &[NodeBox],
+) -> Result<Vec<CollisionBox>, ShapeError> {
+    match collision {
+        Some(collision) => {
+            if collision.len() > MAX_BOXES {
+                return Err(ShapeError::TooManyBoxes);
+            }
+            collision.iter().try_for_each(check_collision_box)?;
+            Ok(collision.to_vec())
+        }
+        None => Ok(boxes.iter().map(|&b| b.into()).collect()),
+    }
+}
+
+/// Whether `b` touches a boundary plane of the cell other than `face`'s own.
+fn reaches_other_plane(b: &NodeBox, face: usize) -> bool {
+    let cell = SUBDIV as u8;
+    (0..6).any(|plane| {
+        let (axis, positive) = (plane / 2, plane % 2 == 1);
+        let touches = if positive {
+            b.max[axis] == cell
+        } else {
+            b.min[axis] == 0
+        };
+        touches && plane != face
+    })
+}
+
+/// `mask`'s bits squeezed onto the set bits of `faces`, so a connected Shape with
+/// four arms keeps 16 variants and not 64.
+fn compact(mask: u8, faces: u8) -> usize {
+    let mut out = 0;
+    let mut k = 0;
+    for f in 0..6 {
+        if faces >> f & 1 != 0 {
+            out |= ((mask >> f & 1) as usize) << k;
+            k += 1;
+        }
+    }
+    out
+}
+
+fn check_collision_box(b: &CollisionBox) -> Result<(), ShapeError> {
+    let cell = SUBDIV as i8;
+    let ok = (0..3).all(|a| b.min[a] < b.max[a] && b.min[a] >= -cell && b.max[a] <= 2 * cell);
     if ok { Ok(()) } else { Err(ShapeError::BadBox) }
 }
 
@@ -574,14 +1002,15 @@ fn rotate_grid(grid: &Grid, m: &Matrix) -> Grid {
 }
 
 /// A box's corners are on grid lines rather than sub-cell centres, so the
-/// centre is 8 and the arithmetic is the same without the doubling.
-fn rotate_box(b: &NodeBox, m: &Matrix) -> NodeBox {
+/// centre is 8 and the arithmetic is the same without the doubling. Signed, so a
+/// box standing outside the cell rotates onto the right axis.
+fn rotate_collision_box(b: &CollisionBox, m: &Matrix) -> CollisionBox {
     let half = SUBDIV as i32 / 2;
     let lo = apply(m, b.min.map(|c| c as i32 - half));
     let hi = apply(m, b.max.map(|c| c as i32 - half));
-    NodeBox {
-        min: std::array::from_fn(|a| (lo[a].min(hi[a]) + half) as u8),
-        max: std::array::from_fn(|a| (lo[a].max(hi[a]) + half) as u8),
+    CollisionBox {
+        min: std::array::from_fn(|a| (lo[a].min(hi[a]) + half) as i8),
+        max: std::array::from_fn(|a| (lo[a].max(hi[a]) + half) as i8),
     }
 }
 
@@ -683,6 +1112,26 @@ mod tests {
 
     fn sealed_faces(t: &ShapeTable, v: Voxel) -> Vec<usize> {
         (0..6).filter(|&f| t.seals(v, f)).collect()
+    }
+
+    #[test]
+    fn for_the_builtins_what_is_drawn_and_what_is_bumped_into_are_the_same_boxes() {
+        let t = ShapeTable::builtin();
+        for shape in [SHAPE_FULL_CUBE, SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
+            for o in Orientation::all() {
+                let v = Voxel::new(1, shape, o.bits());
+                let collision: Vec<NodeBox> = t
+                    .collision(v, Connections::NONE)
+                    .iter()
+                    .map(|b| NodeBox::new(b.min.map(|c| c as u8), b.max.map(|c| c as u8)))
+                    .collect();
+                assert_eq!(
+                    t.selection(v, Connections::NONE),
+                    collision,
+                    "shape {shape} {o:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -819,7 +1268,11 @@ mod tests {
         ] {
             for o in Orientation::all() {
                 let v = Voxel::new(1, shape, o.bits());
-                let sum: u32 = t.quads(v).iter().map(ShapeQuad::area).sum();
+                let sum: u32 = t
+                    .quads(v, Connections::NONE)
+                    .iter()
+                    .map(ShapeQuad::area)
+                    .sum();
                 assert_eq!(sum, area, "shape {shape} orientation {o:?}");
             }
         }
@@ -830,7 +1283,7 @@ mod tests {
         let t = ShapeTable::builtin();
         for shape in 0..t.len() as ShapeId {
             for o in Orientation::all() {
-                for q in t.quads(Voxel::new(1, shape, o.bits())) {
+                for q in t.quads(Voxel::new(1, shape, o.bits()), Connections::NONE) {
                     if q.on_boundary() {
                         let positive = q.face % 2 == 1;
                         assert_eq!(q.plane == 16, positive, "{q:?}");
@@ -843,11 +1296,11 @@ mod tests {
     #[test]
     fn collision_boxes_rotate_with_the_orientation_and_stay_in_the_cell() {
         let t = ShapeTable::builtin();
-        let slab_top = t.collision(voxel(SHAPE_SLAB, NEG_Y, 0));
-        assert_eq!(slab_top, [NodeBox::new([0, 8, 0], [16, 16, 16])]);
+        let slab_top = t.collision(voxel(SHAPE_SLAB, NEG_Y, 0), Connections::NONE);
+        assert_eq!(slab_top, [CollisionBox::new([0, 8, 0], [16, 16, 16])]);
         for shape in 0..t.len() as ShapeId {
             for o in Orientation::all() {
-                for b in t.collision(Voxel::new(1, shape, o.bits())) {
+                for b in t.collision(Voxel::new(1, shape, o.bits()), Connections::NONE) {
                     assert!(
                         (0..3).all(|a| b.min[a] < b.max[a] && b.max[a] <= 16),
                         "{b:?}"
@@ -858,17 +1311,329 @@ mod tests {
     }
 
     #[test]
+    fn collision_may_stand_one_voxel_outside_the_cell_and_no_further() {
+        let mut t = ShapeTable::builtin();
+        let tall = |min, max| ShapeDef {
+            connect: None,
+            boxes: vec![NodeBox::new([6, 0, 6], [10, 16, 10])],
+            collision: Some(vec![CollisionBox::new(min, max)]),
+        };
+        assert!(t.register(tall([6, -16, 6], [10, 32, 10])).is_ok());
+        assert_eq!(
+            t.register(tall([6, -17, 6], [10, 16, 10])),
+            Err(ShapeError::BadBox)
+        );
+        assert_eq!(
+            t.register(tall([6, 0, 6], [10, 33, 10])),
+            Err(ShapeError::BadBox)
+        );
+        assert_eq!(
+            t.register(tall([6, 4, 6], [10, 4, 10])),
+            Err(ShapeError::BadBox)
+        );
+    }
+
+    use super::examples::{FENCE_GROUP, fence, pipe};
+
+    fn fence_table() -> (ShapeTable, Voxel, Voxel) {
+        let mut t = ShapeTable::builtin();
+        let f = t.register(fence()).unwrap();
+        let p = t.register(pipe()).unwrap();
+        (t, Voxel::new(1, f, 0), Voxel::new(1, p, 0))
+    }
+
+    fn bits(faces: &[usize]) -> Connections {
+        faces.iter().fold(Connections::NONE, |c, &f| c.with(f))
+    }
+
+    /// The Voxel across each face, in face order.
+    fn around(across: &[(usize, Voxel)]) -> [Voxel; 6] {
+        let mut v = [Voxel::AIR; 6];
+        for &(face, voxel) in across {
+            v[face] = voxel;
+        }
+        v
+    }
+
+    #[test]
+    fn a_fence_has_an_arm_exactly_where_its_connections_say_in_every_list() {
+        let (t, fence, _) = fence_table();
+        let arm = |face: usize| -> NodeBox {
+            match face {
+                f if f == POS_X => NodeBox::new([10, 7, 7], [16, 13, 9]),
+                f if f == NEG_X => NodeBox::new([0, 7, 7], [6, 13, 9]),
+                f if f == POS_Z => NodeBox::new([7, 7, 10], [9, 13, 16]),
+                _ => NodeBox::new([7, 7, 0], [9, 13, 6]),
+            }
+        };
+        let arms = [NEG_X, POS_X, NEG_Z, POS_Z];
+        for mask in 0..16u8 {
+            let out: Vec<usize> = arms
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| mask >> i & 1 != 0)
+                .map(|(_, &f)| f)
+                .collect();
+            let c = bits(&out);
+            let drawn = t.selection(fence, c);
+            assert_eq!(drawn.len(), 1 + out.len(), "mask {mask}");
+            for &f in &arms {
+                assert_eq!(
+                    drawn.contains(&arm(f)),
+                    out.contains(&f),
+                    "mask {mask} face {f}"
+                );
+            }
+            assert_eq!(t.collision(fence, c).len(), 1 + out.len(), "mask {mask}");
+            // More arms means more surface, and none means the bare post's.
+            let area: u32 = t.quads(fence, c).iter().map(ShapeQuad::area).sum();
+            let bare: u32 = t
+                .quads(fence, Connections::NONE)
+                .iter()
+                .map(ShapeQuad::area)
+                .sum();
+            assert_eq!(area > bare, !out.is_empty(), "mask {mask}");
+        }
+    }
+
+    #[test]
+    fn a_fence_connects_to_its_group_to_what_seals_towards_it_and_to_nothing_else() {
+        let (t, fence, pipe) = fence_table();
+        let cube = Voxel::cube(1);
+        let slab = Voxel::shaped(1, SHAPE_SLAB, Orientation::new(POS_Y, 0));
+        let unknown = Voxel::new(1, 200, 0);
+
+        // Fence beside fence.
+        assert_eq!(
+            t.connections(fence, around(&[(POS_X, fence)])),
+            bits(&[POS_X])
+        );
+        // A different group does not.
+        assert_eq!(
+            t.connections(fence, around(&[(POS_X, pipe)])),
+            Connections::NONE
+        );
+        // A cube seals every face, so a fence meets a wall.
+        assert_eq!(
+            t.connections(fence, around(&[(NEG_Z, cube)])),
+            bits(&[NEG_Z])
+        );
+        // A bottom slab seals only its underside, so a fence beside one does not
+        // meet it.
+        assert_eq!(
+            t.connections(fence, around(&[(POS_X, slab), (POS_Z, slab)])),
+            Connections::NONE
+        );
+        // Air and an unknown Shape connect to nothing.
+        assert_eq!(
+            t.connections(fence, around(&[(POS_X, Voxel::AIR), (NEG_X, unknown)])),
+            Connections::NONE
+        );
+        // All four at once; the vertical faces have no arm to grow.
+        let all = around(&[
+            (NEG_X, fence),
+            (POS_X, fence),
+            (NEG_Z, cube),
+            (POS_Z, fence),
+            (POS_Y, fence),
+            (NEG_Y, cube),
+        ]);
+        assert_eq!(
+            t.connections(fence, all),
+            bits(&[NEG_X, POS_X, NEG_Z, POS_Z])
+        );
+        // A Voxel that is not connected asks nothing of its neighbours.
+        assert_eq!(t.connections(cube, all), Connections::NONE);
+        assert!(t.is_connected(fence) && !t.is_connected(cube));
+    }
+
+    #[test]
+    fn the_rule_is_asked_of_each_side_so_it_can_be_one_way() {
+        let mut t = ShapeTable::builtin();
+        let mut def = fence();
+        // This fence reaches for pipes; pipes do not reach back.
+        def.connect.as_mut().unwrap().connects_to = super::examples::PIPE_GROUP;
+        let one_way = Voxel::new(1, t.register(def).unwrap(), 0);
+        let pipe = Voxel::new(1, t.register(pipe()).unwrap(), 0);
+        assert_eq!(
+            t.connections(one_way, around(&[(POS_X, pipe)])),
+            bits(&[POS_X])
+        );
+        assert_eq!(
+            t.connections(pipe, around(&[(NEG_X, one_way)])),
+            Connections::NONE
+        );
+        let _ = FENCE_GROUP;
+    }
+
+    #[test]
+    fn a_connected_voxel_ignores_its_orientation_byte() {
+        let (t, fence, _) = fence_table();
+        let c = bits(&[POS_X, NEG_Z]);
+        for byte in [0u8, 1, 5, 23, 24, 200, 255] {
+            let turned = Voxel::new(1, fence.shape(), byte);
+            assert_eq!(t.quads(turned, c), t.quads(fence, c), "byte {byte}");
+            assert_eq!(t.selection(turned, c), t.selection(fence, c), "byte {byte}");
+            assert_eq!(t.collision(turned, c), t.collision(fence, c), "byte {byte}");
+        }
+    }
+
+    #[test]
+    fn a_connected_shape_seals_nothing_and_blocks_no_light_whatever_its_arms() {
+        let (t, fence, pipe) = fence_table();
+        for v in [fence, pipe] {
+            assert_eq!(t.light_mask(v), 0);
+            assert!((0..6).all(|f| !t.seals(v, f)));
+        }
+    }
+
+    #[test]
+    fn coverage_against_a_neighbour_is_the_coverage_with_just_that_arm_out() {
+        let (t, fence, pipe) = fence_table();
+        let cube = Voxel::cube(1);
+        for (voxel, other_connecting, other_not) in [(fence, fence, pipe), (pipe, pipe, fence)] {
+            for face in 0..6 {
+                let bare = *t.coverage(voxel, face);
+                let with_arm = t.variant_with(voxel, bits(&[face])).coverage[face];
+                let has_arm = t.connects[t.variant(voxel).connect as usize].faces >> face & 1 != 0;
+                assert_eq!(*t.coverage_against(voxel, face, other_not), bare);
+                assert_eq!(*t.coverage_against(voxel, face, Voxel::AIR), bare);
+                let expected = if has_arm { with_arm } else { bare };
+                assert_eq!(*t.coverage_against(voxel, face, other_connecting), expected);
+                assert!(
+                    t.coverage_against(voxel, face, other_connecting)
+                        .covers(&bare)
+                );
+            }
+        }
+        // An arm's end is a small patch, not the whole face.
+        let end = t.coverage_against(fence, POS_X, fence);
+        assert!(!end.is_empty() && !end.is_full());
+        // To a wall the same.
+        assert_eq!(*t.coverage_against(fence, POS_X, cube), *end);
+    }
+
+    #[test]
+    fn volume_is_the_bare_variants_whatever_the_arms() {
+        let (t, fence, _) = fence_table();
+        // 4 x 16 x 4 sub-cells of post, and LOD is not told about arms.
+        assert_eq!(t.volume(fence), 4 * 16 * 4);
+    }
+
+    #[test]
+    fn a_connected_shape_is_charged_against_the_cap_for_its_most_armed_self() {
+        let (t, fence, pipe) = fence_table();
+        let stair = Voxel::shaped(1, SHAPE_STAIR, Orientation::IDENTITY);
+        assert_eq!(t.cap_units(Voxel::AIR), 0);
+        assert_eq!(t.cap_units(Voxel::cube(1)), 0);
+        assert_eq!(t.cap_units(stair), 1);
+        assert_eq!(t.cap_units(Voxel::new(1, SHAPE_POST, 0)), 1);
+
+        let stair_quads = t.quads(stair, Connections::NONE).len();
+        for (voxel, all) in [
+            (fence, bits(&[NEG_X, POS_X, NEG_Z, POS_Z])),
+            (pipe, bits(&[0, 1, 2, 3, 4, 5])),
+        ] {
+            let worst = t.quads(voxel, all).len();
+            let units = t.cap_units(voxel) as usize;
+            assert!(units > 1, "{units}");
+            assert!(
+                units * stair_quads >= worst,
+                "{units} stairs of {stair_quads} < {worst}"
+            );
+            assert!(
+                (units - 1) * stair_quads < worst,
+                "{units} is more than it needs"
+            );
+        }
+    }
+
+    #[test]
+    fn registration_rejects_a_connected_shape_that_cannot_be_trusted() {
+        let mut t = ShapeTable::builtin();
+        let mutate = |f: &dyn Fn(&mut ConnectDef)| {
+            let mut def = fence();
+            f(def.connect.as_mut().unwrap());
+            def
+        };
+        assert_eq!(
+            t.register(mutate(&|c| c.arms.clear())),
+            Err(ShapeError::BadArm)
+        );
+        assert_eq!(
+            t.register(mutate(&|c| c.arms[0].face = 6)),
+            Err(ShapeError::BadArm)
+        );
+        assert_eq!(
+            t.register(mutate(&|c| c.arms[1].face = c.arms[0].face)),
+            Err(ShapeError::BadArm)
+        );
+        assert_eq!(
+            t.register(mutate(&|c| c.arms[0].boxes.clear())),
+            Err(ShapeError::BadArm)
+        );
+        assert_eq!(
+            t.register(mutate(
+                &|c| c.arms[0].boxes[0] = NodeBox::new([0, 0, 0], [17, 4, 4])
+            )),
+            Err(ShapeError::BadBox)
+        );
+        // An arm that also reaches the floor, which is not its face.
+        assert_eq!(
+            t.register(mutate(
+                &|c| c.arms[0].boxes[0] = NodeBox::new([0, 0, 7], [6, 9, 9])
+            )),
+            Err(ShapeError::ArmTouchesOtherFace)
+        );
+        // Sixteen boxes is the bound for a Shape, counting every arm.
+        assert_eq!(
+            t.register(mutate(&|c| {
+                let extra = c.arms[0].boxes[0];
+                c.arms[0].boxes.extend(std::iter::repeat_n(extra, 12));
+            })),
+            Err(ShapeError::TooManyBoxes)
+        );
+        // Four arms are fine, and nothing was registered by the failures.
+        assert_eq!(t.len(), SHAPE_POST as usize + 1);
+        assert!(t.register(fence()).is_ok());
+    }
+
+    #[test]
+    fn a_connected_shape_whose_arms_would_seal_a_face_is_rejected() {
+        let mut t = ShapeTable::builtin();
+        // A frame around the +X face with a hole in the middle, and an arm that
+        // fills the hole: sealed only when the arm is out, which is the case a
+        // check of the bare Shape would miss.
+        let mut def = fence();
+        def.boxes = vec![
+            NodeBox::new([12, 0, 0], [16, 16, 6]),
+            NodeBox::new([12, 0, 10], [16, 16, 16]),
+            NodeBox::new([12, 0, 6], [16, 6, 10]),
+            NodeBox::new([12, 10, 6], [16, 16, 10]),
+        ];
+        def.collision = None;
+        def.connect.as_mut().unwrap().arms[1].boxes = vec![NodeBox::new([10, 6, 6], [16, 10, 10])];
+        assert_eq!(t.register(def), Err(ShapeError::ConnectedSeals));
+        // A base that seals is rejected the same way.
+        let mut def = pipe();
+        def.boxes = vec![NodeBox::new([0, 0, 0], [16, 16, 16])];
+        assert_eq!(t.register(def), Err(ShapeError::ConnectedSeals));
+        assert_eq!(t.len(), SHAPE_POST as usize + 1);
+    }
+
+    #[test]
     fn a_shape_can_be_declared_thin_to_look_at_and_nothing_to_walk_into() {
         let mut t = ShapeTable::builtin();
         let plate = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
                 collision: Some(vec![]),
             })
             .unwrap();
         let v = Voxel::new(1, plate, 0);
-        assert!(t.collision(v).is_empty());
-        assert!(!t.quads(v).is_empty());
+        assert!(t.collision(v, Connections::NONE).is_empty());
+        assert!(!t.quads(v, Connections::NONE).is_empty());
         assert!(
             !t.seals(v, NEG_Y),
             "a plate inset from the edges covers nothing"
@@ -881,6 +1646,7 @@ mod tests {
         let mut t = ShapeTable::builtin();
         let tee = t
             .register(ShapeDef {
+                connect: None,
                 boxes: vec![
                     NodeBox::new([0, 0, 0], [16, 8, 16]),
                     NodeBox::new([0, 4, 0], [16, 16, 16]),
@@ -889,7 +1655,7 @@ mod tests {
             })
             .unwrap();
         let sum: u32 = t
-            .quads(Voxel::new(1, tee, 0))
+            .quads(Voxel::new(1, tee, 0), Connections::NONE)
             .iter()
             .map(ShapeQuad::area)
             .sum();
@@ -905,6 +1671,7 @@ mod tests {
         let mut t = ShapeTable::builtin();
         let ok = || NodeBox::new([0, 0, 0], [4, 4, 4]);
         let def = |boxes| ShapeDef {
+            connect: None,
             boxes,
             collision: None,
         };
@@ -936,7 +1703,10 @@ mod tests {
         let air = Voxel::new(0, SHAPE_STAIR, 0);
         for v in [unknown, air, Voxel::AIR] {
             assert!((0..6).all(|f| !t.seals(v, f)), "{v:?}");
-            assert!(t.quads(v).is_empty() && t.collision(v).is_empty());
+            assert!(
+                t.quads(v, Connections::NONE).is_empty()
+                    && t.collision(v, Connections::NONE).is_empty()
+            );
             assert_eq!((t.volume(v), t.light_mask(v)), (0, 0));
         }
     }
@@ -946,7 +1716,10 @@ mod tests {
         let t = ShapeTable::builtin();
         let wild = Voxel::new(1, SHAPE_STAIR, 200);
         let upright = Voxel::new(1, SHAPE_STAIR, 0);
-        assert_eq!(t.quads(wild), t.quads(upright));
+        assert_eq!(
+            t.quads(wild, Connections::NONE),
+            t.quads(upright, Connections::NONE)
+        );
     }
 
     #[test]

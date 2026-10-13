@@ -93,7 +93,7 @@ pub enum RejectReason {
     BadOrientation,
     /// A Place of air, which is a Break by another name.
     NoMaterial,
-    /// The Chunk already holds [`MAX_SHAPED_PER_CHUNK`] shaped Voxels.
+    /// The Chunk's shaped Voxels, in stairs, would pass [`MAX_SHAPED_PER_CHUNK`].
     TooManyShaped,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,
@@ -306,18 +306,24 @@ pub(in crate::server) fn set_voxel(
             return Err(RejectReason::BadOrientation);
         }
     }
-    // A cube looks the same however it is turned, so the turn is dropped. Left in,
-    // two cubes that look identical would be two palette entries and unequal.
-    let voxel = if voxel.shape() == SHAPE_FULL_CUBE {
-        Voxel::cube(voxel.material())
+    // A cube looks the same however it is turned, and a connected Shape ignores
+    // its orientation, so the turn is dropped. Left in, two that look identical
+    // would be two palette entries and unequal.
+    let voxel = if voxel.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(voxel) {
+        Voxel::new(voxel.material(), voxel.shape(), 0)
     } else {
         voxel
     };
-    // Net of what it replaces: swapping one shaped Voxel for another at the cap
-    // is not adding one.
-    if voxel.is_shaped()
-        && !chunk.get(place.x, place.y, place.z).is_shaped()
-        && chunk.shaped_count() >= MAX_SHAPED_PER_CHUNK
+    // Net of what it replaces: swapping one shaped Voxel for another of the same
+    // cost at the cap is not adding one. Counted in stairs, a connected Shape
+    // being charged for its rails.
+    let added = tables.shapes.cap_units(voxel);
+    let removed = tables
+        .shapes
+        .cap_units(chunk.get(place.x, place.y, place.z));
+    if added > removed
+        && chunk.shaped_units(|v| tables.shapes.cap_units(v)) + (added - removed) as usize
+            > MAX_SHAPED_PER_CHUNK
     {
         return Err(RejectReason::TooManyShaped);
     }
@@ -363,8 +369,12 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::time::TimeUpdateStrategy;
     use std::time::Duration;
+    use tesserae_core::mesh::POS_X;
+    use tesserae_core::shape::examples;
     use tesserae_core::worldgen::{LANTERN, STONE};
-    use tesserae_core::{CHUNK_SIZE, Chunk, NodeBox, SHAPE_STAIR, ShapeDef};
+    use tesserae_core::{
+        CHUNK_SIZE, Chunk, ChunkLight, LitChunk, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
+    };
 
     use super::super::player::{Player, PoseReport};
     use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
@@ -549,6 +559,113 @@ mod tests {
             !meshes.is_dirty(ChunkCoord::new(0, 1, 0)),
             "a Chunk the Voxel does not touch is left alone"
         );
+    }
+
+    fn fence_table() -> Tables {
+        let mut t = Tables::builtin();
+        assert_eq!(t.shapes.register(examples::fence()), Ok(examples::FENCE_ID));
+        t
+    }
+
+    fn fence() -> Voxel {
+        Voxel::new(STONE, examples::FENCE_ID, 0)
+    }
+
+    /// How many quads `coord` would mesh to, with its neighbours as the store holds
+    /// them. Unlit: the count does not depend on light.
+    fn quads_of(app: &App, table: &Tables, coord: ChunkCoord) -> usize {
+        static DARK: ChunkLight = ChunkLight::dark();
+        let store = app.world().resource::<ChunkStore>();
+        let at = |c: ChunkCoord| store.get(c).map(|chunk| LitChunk::new(chunk, &DARK));
+        let neighbors = [
+            ChunkCoord::new(coord.x - 1, coord.y, coord.z),
+            ChunkCoord::new(coord.x + 1, coord.y, coord.z),
+            ChunkCoord::new(coord.x, coord.y - 1, coord.z),
+            ChunkCoord::new(coord.x, coord.y + 1, coord.z),
+            ChunkCoord::new(coord.x, coord.y, coord.z - 1),
+            ChunkCoord::new(coord.x, coord.y, coord.z + 1),
+        ]
+        .map(at);
+        mesh_chunk(at(coord).expect("loaded"), neighbors, table).quad_count()
+    }
+
+    fn edit_at(app: &mut App, table: &Tables, at: [i32; 3], voxel: Voxel) -> MeshState {
+        let mut store = app.world_mut().resource_mut::<ChunkStore>();
+        let mut meshes = MeshState::default();
+        set_voxel(&mut store, &mut meshes, table, at, voxel).unwrap();
+        meshes
+    }
+
+    #[test]
+    fn a_fence_placed_across_a_chunk_boundary_grows_an_arm_in_the_chunk_next_door() {
+        let table = fence_table();
+        let (a, b) = (ChunkCoord::new(0, 0, 0), ChunkCoord::new(1, 0, 0));
+        let mut app = app_with(&[(a, Chunk::air()), (b, Chunk::air())]);
+        let last = CHUNK_SIZE as i32 - 1;
+
+        edit_at(&mut app, &table, [last, 4, 4], fence());
+        let alone = quads_of(&app, &table, a);
+
+        // The new fence is in `b`, and the arm that grows is on `a`'s: `a` has to
+        // be told, though nothing in it changed.
+        let meshes = edit_at(&mut app, &table, [last + 1, 4, 4], fence());
+        assert!(meshes.is_dirty(a), "the neighbour's arm has to grow");
+        assert!(quads_of(&app, &table, a) > alone, "and it does");
+
+        // And breaking it takes the arm away again.
+        let meshes = edit_at(&mut app, &table, [last + 1, 4, 4], Voxel::AIR);
+        assert!(meshes.is_dirty(a));
+        assert_eq!(quads_of(&app, &table, a), alone);
+    }
+
+    #[test]
+    fn a_fence_grows_an_arm_towards_a_cube_placed_beside_it() {
+        let table = fence_table();
+        let mut app = app_with(&[(origin(), Chunk::air())]);
+        edit_at(&mut app, &table, [5, 4, 5], fence());
+        let alone = quads_of(&app, &table, origin());
+        edit_at(&mut app, &table, [6, 4, 5], stone());
+        // The cube's own faces, and then the arm.
+        assert!(quads_of(&app, &table, origin()) > alone + 5);
+    }
+
+    #[test]
+    fn a_fence_counts_for_as_many_stairs_as_it_costs_to_mesh() {
+        let table = fence_table();
+        let units = table.shapes.cap_units(fence()) as usize;
+        assert!(units > 1);
+        let mut full = ground();
+        let fences = MAX_SHAPED_PER_CHUNK / units;
+        for i in 0..fences {
+            full.set(i % CHUNK_SIZE, 8 + i / CHUNK_SIZE, 0, fence());
+        }
+        let mut store = ChunkStore::default();
+        store.insert(origin(), full);
+        let mut meshes = MeshState::default();
+        let mut put = |at, v| set_voxel(&mut store, &mut meshes, &table, at, v);
+
+        // No room for another fence, though far fewer than the cap's worth of
+        // Voxels are shaped.
+        assert_eq!(put([0, 20, 5], fence()), Err(RejectReason::TooManyShaped));
+        // What is left over fits stairs, which cost one each, and no more.
+        let left = MAX_SHAPED_PER_CHUNK - fences * units;
+        for i in 0..left {
+            assert_eq!(put([i as i32, 20, 6], stair()), Ok(()), "stair {i}");
+        }
+        assert_eq!(put([0, 20, 7], stair()), Err(RejectReason::TooManyShaped));
+        // A fence for a fence is net zero, and breaking one makes room for one.
+        assert_eq!(put([0, 8, 0], fence()), Ok(()));
+        assert_eq!(put([0, 8, 0], Voxel::AIR), Ok(()));
+        assert_eq!(put([0, 20, 5], fence()), Ok(()));
+    }
+
+    #[test]
+    fn a_connected_shape_is_stored_without_the_orientation_it_ignores() {
+        let table = fence_table();
+        let mut app = app_with(&[(origin(), Chunk::air())]);
+        let turned = Voxel::new(STONE, examples::FENCE_ID, Orientation::new(POS_X, 3).bits());
+        edit_at(&mut app, &table, [5, 4, 5], turned);
+        assert_eq!(voxel_at(&app, [5, 4, 5]), fence());
     }
 
     #[test]
@@ -791,23 +908,21 @@ mod tests {
 
     #[test]
     fn a_place_into_an_unloaded_chunk_or_an_occupied_cell_is_rejected() {
-        let mut t = Tables::builtin();
-        let plate = t
-            .shapes
-            .register(ShapeDef {
-                boxes: vec![NodeBox::new([1, 0, 1], [15, 1, 15])],
-                collision: Some(vec![]),
-            })
-            .unwrap();
         let mut app = app_with(&[(origin(), ground())]);
-        *app.world_mut().resource_mut::<ContentTables>() = ContentTables(t.into());
-        // A plate lies in the air a ray passes through before striking the
-        // ground: it has no collision, so the cell in front of the ground is
-        // taken without the ray having noticed.
+        // A post stands in the air a ray passes beside before striking the
+        // ground, so the cell in front of the ground is taken without the ray
+        // having noticed.
         app.world_mut()
             .resource_mut::<ChunkStore>()
-            .set_voxel(VoxelCoord::of([5, 8, 5]), Voxel::new(STONE, plate, 0));
-        send(&mut app, down(EditAction::Place(stone())));
+            .set_voxel(VoxelCoord::of([5, 8, 5]), Voxel::new(STONE, SHAPE_POST, 0));
+        send(
+            &mut app,
+            EditIntent {
+                action: EditAction::Place(stone()),
+                origin: Vec3::new(5.1, 12.0, 5.5),
+                direction: Vec3::NEG_Y,
+            },
+        );
         tick(&mut app);
         assert_eq!(rejections(&mut app), vec![RejectReason::Occupied]);
 

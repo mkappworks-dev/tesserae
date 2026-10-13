@@ -1,11 +1,11 @@
 //! Meshing in two passes. Pass 1 greedy-merges coplanar faces of identical full
 //! cubes into quads; pass 2 gives each shaped Voxel the geometry of its own
-//! Shape, which cannot merge with anything.
+//! Shape, then merges the quads that abut across Voxels.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
 use crate::material::{MaterialTable, Occlusion, RenderClass};
-use crate::shape::{SUBDIV, ShapeQuad};
+use crate::shape::{Connections, SUBDIV, ShapeQuad};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -498,10 +498,13 @@ fn pass1<const TRANSLUCENT: bool>(n: &Neighborhood, tables: &Tables, mesh: &mut 
 /// which a partly open Voxel has and a cube does not.
 ///
 /// Light is one flat level per quad, as in pass 1, so the shader and the
-/// vertex layout are untouched. Nothing merges across Voxels: that is what
-/// "cannot merge with anything" means.
+/// vertex layout are untouched. Each surviving quad is then merged with the
+/// ones it abuts (see [`merge_shaped`]): that is what makes a floor of slabs
+/// cost a handful of quads and not one per Voxel.
 fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
     let shapes = &tables.shapes;
+    let any_connected = shapes.any_connected();
+    let mut pending = Vec::new();
     for y in 0..CHUNK_SIZE as i32 {
         for z in 0..CHUNK_SIZE as i32 {
             for x in 0..CHUNK_SIZE as i32 {
@@ -511,15 +514,27 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
                 }
                 mesh.shaped_voxels += 1;
                 let own = n.light_at(x, y, z);
+                // Read from the shell this job was handed, never the live store:
+                // the six face-neighbours of a centre Voxel are all inside it.
+                let connections = if any_connected && shapes.is_connected(voxel) {
+                    shapes.connections(
+                        voxel,
+                        FACE_STEPS.map(|d| n.at(x + d[0], y + d[1], z + d[2])),
+                    )
+                } else {
+                    Connections::NONE
+                };
 
-                for q in shapes.quads(voxel) {
+                for q in shapes.quads(voxel, connections) {
                     let face = q.face as usize;
                     let lit = if q.on_boundary() {
                         let mut c = [x, y, z];
                         c[face / 2] += if face % 2 == 1 { 1 } else { -1 };
                         let across = n.at(c[0], c[1], c[2]);
+                        // Against `voxel`, so that the end of an arm meeting an arm
+                        // is hidden by it instead of drawn back to back.
                         if shapes
-                            .coverage(across, face ^ 1)
+                            .coverage_against(across, face ^ 1, voxel)
                             .contains_rect(q.u0, q.v0, q.u1, q.v1)
                             && hides(&tables.materials, across, voxel)
                         {
@@ -529,51 +544,205 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
                     } else {
                         own
                     };
-                    let layer = mesh.layer(tables.materials.render(voxel));
-                    push_shaped_quad(layer, [x, y, z], q, voxel.material(), lit);
+                    let class = tables.materials.render(voxel);
+                    let quad = Pending::new(
+                        [x, y, z],
+                        q,
+                        class == RenderClass::Blend,
+                        voxel.material(),
+                        lit,
+                    );
+                    if quad.can_merge() {
+                        pending.push(quad);
+                    } else {
+                        push_merged_quad(mesh.layer(class), &quad);
+                    }
                 }
             }
         }
     }
+    merge_shaped(&mut pending, mesh);
+}
+
+/// One pass-2 quad as a rectangle over the whole Chunk, in sixteenths of a
+/// Voxel, with everything two quads must share to merge.
+#[derive(Clone, Copy)]
+struct Pending {
+    /// Layer, face, plane, Material and light, so quads that may merge compare
+    /// equal and sort together.
+    group: u64,
+    a0: u16,
+    a1: u16,
+    b0: u16,
+    b1: u16,
+}
+
+impl Pending {
+    fn new(cell: [i32; 3], q: &ShapeQuad, blended: bool, material: MaterialId, lit: Light) -> Self {
+        let sub = SUBDIV as i32;
+        let d = q.face as usize / 2;
+        let (u, v) = ((d + 1) % 3, (d + 2) % 3);
+        let plane = cell[d] * sub + q.plane as i32;
+        Pending {
+            group: (plane as u64)
+                | (q.face as u64) << 10
+                | (blended as u64) << 13
+                | (material as u64) << 14
+                | (lit.packed() as u64) << 30,
+            a0: (cell[u] * sub + q.u0 as i32) as u16,
+            a1: (cell[u] * sub + q.u1 as i32) as u16,
+            b0: (cell[v] * sub + q.v0 as i32) as u16,
+            b1: (cell[v] * sub + q.v1 as i32) as u16,
+        }
+    }
+}
+
+impl Pending {
+    /// Whether any edge lies on a Voxel boundary. One that does not is inside a
+    /// single Voxel, where nothing abuts it with equal extents, so it skips the
+    /// sort.
+    #[inline]
+    fn can_merge(&self) -> bool {
+        const MASK: u16 = SUBDIV as u16 - 1;
+        self.a0 & MASK == 0 || self.a1 & MASK == 0 || self.b0 & MASK == 0 || self.b1 & MASK == 0
+    }
+}
+
+/// Merge the quads of pass 2 that lie in one plane, abut along a full edge and
+/// agree on Material, render layer and flat light, then write what is left.
+///
+/// Two quads of one Voxel never abut with equal extents (`extract_quads` is
+/// already greedy), so every merge is across a Voxel boundary. Rows first, then
+/// columns: not the optimum, the same greedy as pass 1 and enough for a floor.
+/// Chunks mesh alone, so nothing merges across a Chunk boundary, and nothing is
+/// added to what the unmerged quads covered, so a face culled stays culled.
+///
+/// Quads are first counted into one bucket per face and plane, which is O(n),
+/// so the sorts that follow are over the handful sharing a plane and not over
+/// the whole Chunk: terrain with a stair on every column spreads over hundreds
+/// of planes, and a few hundred quads are cheaper to bucket than to sort.
+#[inline(never)]
+fn merge_shaped(pending: &mut [Pending], mesh: &mut ChunkMesh) {
+    // A plane is `0..=CHUNK_SIZE * SUBDIV`, so there are this many per face.
+    const PLANES: usize = CHUNK_SIZE * SUBDIV + 1;
+    const BUCKETS: usize = 6 * PLANES;
+    let Some(&first) = pending.first() else {
+        return;
+    };
+    let bucket = |p: &Pending| (p.group >> 10 & 7) as usize * PLANES + (p.group & 0x3ff) as usize;
+
+    // `end[b]` counts up to where bucket `b` stops, then walks back to where it
+    // starts as the quads are placed from the back.
+    let mut end = [0u32; BUCKETS + 1];
+    for p in pending.iter() {
+        end[bucket(p)] += 1;
+    }
+    let mut total = 0;
+    for e in end.iter_mut() {
+        total += *e;
+        *e = total;
+    }
+    let mut sorted = vec![first; pending.len()];
+    for p in pending.iter().rev() {
+        let slot = &mut end[bucket(p)];
+        *slot -= 1;
+        sorted[*slot as usize] = *p;
+    }
+
+    // `end[b]` is now where bucket `b` starts, and `end[b + 1]` where it stops.
+    for b in 0..BUCKETS {
+        let run = &mut sorted[end[b] as usize..end[b + 1] as usize];
+        let kept = if run.len() > 1 {
+            merge_run(run)
+        } else {
+            run.len()
+        };
+        for p in &run[..kept] {
+            let class = if p.group >> 13 & 1 == 1 {
+                RenderClass::Blend
+            } else {
+                RenderClass::Opaque
+            };
+            push_merged_quad(mesh.layer(class), p);
+        }
+    }
+}
+
+/// Merge `run`, all in one plane, in place and return how many are left.
+fn merge_run(run: &mut [Pending]) -> usize {
+    run.sort_unstable_by_key(|p| (p.group, (p.b0 as u32) << 16 | p.b1 as u32, p.a0));
+    let kept = compact(
+        run,
+        |last, p| last.group == p.group && last.b0 == p.b0 && last.b1 == p.b1 && last.a1 == p.a0,
+        |last, p| last.a1 = p.a1,
+    );
+    let run = &mut run[..kept];
+    run.sort_unstable_by_key(|p| (p.group, (p.a0 as u32) << 16 | p.a1 as u32, p.b0));
+    compact(
+        run,
+        |last, p| last.group == p.group && last.a0 == p.a0 && last.a1 == p.a1 && last.b1 == p.b0,
+        |last, p| last.b1 = p.b1,
+    )
+}
+
+/// Fold each quad into the one before it where `abuts` says so, keeping the
+/// survivors at the front.
+fn compact(
+    run: &mut [Pending],
+    abuts: impl Fn(&Pending, &Pending) -> bool,
+    grow: impl Fn(&mut Pending, &Pending),
+) -> usize {
+    let mut kept = 0;
+    for i in 0..run.len() {
+        let p = run[i];
+        if kept > 0 && abuts(&run[kept - 1], &p) {
+            grow(&mut run[kept - 1], &p);
+        } else {
+            run[kept] = p;
+            kept += 1;
+        }
+    }
+    kept
 }
 
 /// The same corner order, winding and UV axes as pass 1, so a pass-2 quad is
 /// indistinguishable from a merged one downstream.
 ///
-/// UVs are the position inside the Voxel, so a half-height slab side shows the
-/// lower half of the texture rather than a squashed whole one, and a tiling
-/// sampler still repeats per Voxel.
-fn push_shaped_quad(
-    mesh: &mut MeshLayer,
-    cell: [i32; 3],
-    q: &ShapeQuad,
-    material: MaterialId,
-    lit: Light,
-) {
+/// UVs are the position inside the Voxel the quad starts in, running on across
+/// the next ones, so a half-height slab side shows the lower half of the
+/// texture rather than a squashed whole one, and a tiling sampler still repeats
+/// per Voxel.
+fn push_merged_quad(mesh: &mut MeshLayer, p: &Pending) {
     const UNIT: f32 = 1.0 / SUBDIV as f32;
-    let face = q.face as usize;
+    let sub = SUBDIV as u16;
+    let plane = (p.group & 0x3ff) as f32 * UNIT;
+    let face = (p.group >> 10 & 0x7) as usize;
+    let material = (p.group >> 14 & 0xffff) as u32;
+    let light = (p.group >> 30) as u32;
     let positive = face % 2 == 1;
     let (d, u, v) = (face / 2, (face / 2 + 1) % 3, (face / 2 + 2) % 3);
+    let (ubase, vbase) = (p.a0 / sub * sub, p.b0 / sub * sub);
 
     let corners = if positive {
-        [(q.u0, q.v0), (q.u1, q.v0), (q.u1, q.v1), (q.u0, q.v1)]
+        [(p.a0, p.b0), (p.a1, p.b0), (p.a1, p.b1), (p.a0, p.b1)]
     } else {
-        [(q.u0, q.v0), (q.u0, q.v1), (q.u1, q.v1), (q.u1, q.v0)]
+        [(p.a0, p.b0), (p.a0, p.b1), (p.a1, p.b1), (p.a1, p.b0)]
     };
     let mut normal = [0.0f32; 3];
     normal[d] = if positive { 1.0 } else { -1.0 };
 
     let base = mesh.positions.len() as u32;
     for (cu, cv) in corners {
-        let mut p = [cell[0] as f32, cell[1] as f32, cell[2] as f32];
-        p[d] += q.plane as f32 * UNIT;
-        p[u] += cu as f32 * UNIT;
-        p[v] += cv as f32 * UNIT;
-        mesh.positions.push(p);
+        let mut pos = [0.0f32; 3];
+        pos[d] = plane;
+        pos[u] = cu as f32 * UNIT;
+        pos[v] = cv as f32 * UNIT;
+        mesh.positions.push(pos);
         mesh.normals.push(normal);
-        mesh.uvs.push([cu as f32 * UNIT, cv as f32 * UNIT]);
-        mesh.materials.push(material as u32);
-        mesh.light.push(lit.packed() as u32);
+        mesh.uvs
+            .push([(cu - ubase) as f32 * UNIT, (cv - vbase) as f32 * UNIT]);
+        mesh.materials.push(material);
+        mesh.light.push(light);
     }
     mesh.indices
         .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);

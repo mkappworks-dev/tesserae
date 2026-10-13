@@ -1,16 +1,27 @@
 use std::sync::OnceLock;
 use tesserae_core::light::{Channel, Light, MAX_LIGHT, transmitted};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use tesserae_core::shape::{NodeBox, examples};
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Neighborhood, Voxel, greedy_mesh, mesh_chunk, testgen,
+    CHUNK_SIZE, Chunk, ChunkLight, ConnectDef, Connections, LitChunk, Neighborhood, Voxel,
+    greedy_mesh, mesh_chunk, testgen,
 };
 use tesserae_core::{
     Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Tables, Worldgen, WorldgenParams,
 };
 
+const FENCE: u8 = 4;
+const PIPE: u8 = 5;
+
+/// The builtin Tables, then a fence and a six-way pipe registered as a Mod would.
 fn tables() -> &'static Tables {
     static TABLES: OnceLock<Tables> = OnceLock::new();
-    TABLES.get_or_init(Tables::builtin)
+    TABLES.get_or_init(|| {
+        let mut t = Tables::builtin();
+        assert_eq!(t.shapes.register(examples::fence()), Ok(FENCE));
+        assert_eq!(t.shapes.register(examples::pipe()), Ok(PIPE));
+        t
+    })
 }
 
 fn shapes() -> &'static ShapeTable {
@@ -176,7 +187,8 @@ fn shaped_voxels_are_counted_and_emit_their_own_geometry() {
     assert_eq!(mesh.shaped_voxels, 2);
     assert_eq!(
         mesh.quad_count(),
-        shapes().quads(slab).len() + shapes().quads(stair).len(),
+        shapes().quads(slab, Connections::NONE).len()
+            + shapes().quads(stair, Connections::NONE).len(),
         "pass 2 emits exactly the Shapes' own quads"
     );
 }
@@ -562,6 +574,59 @@ const DIRS: [[i32; 3]; 6] = [
     [0, 0, 1],
 ];
 
+/// What a Voxel is drawn with, from the test's own copy of the definitions and
+/// **not** from `ShapeTable::connections`: the rule that grows an arm is
+/// restated here from the same declarations, so a mistake in the table's is
+/// something this can disagree with.
+fn declared(chunk: &Chunk, at: [i32; 3], arms: bool) -> Vec<NodeBox> {
+    let v = chunk.get(at[0] as usize, at[1] as usize, at[2] as usize);
+    let def = match v.shape() {
+        _ if v.is_air() => return vec![],
+        0 => return vec![NodeBox::new([0; 3], [16; 3])],
+        FENCE => examples::fence(),
+        PIPE => examples::pipe(),
+        _ => return shapes().selection(v, Connections::NONE).to_vec(),
+    };
+    let connect = def.connect.as_ref().expect("a connected example");
+    let mut boxes = def.boxes.clone();
+    for arm in connect.arms.iter().filter(|_| arms) {
+        let d = DIRS[arm.face];
+        let across = [at[0] + d[0], at[1] + d[1], at[2] + d[2]];
+        if connects(connect, chunk, across, arm.face) {
+            boxes.extend_from_slice(&arm.boxes);
+        }
+    }
+    boxes
+}
+
+fn connects(connect: &ConnectDef, chunk: &Chunk, across: [i32; 3], face: usize) -> bool {
+    let there = chunk.get(across[0] as usize, across[1] as usize, across[2] as usize);
+    let group = match there.shape() {
+        _ if there.is_air() => return false,
+        FENCE => examples::FENCE_GROUP,
+        PIPE => examples::PIPE_GROUP,
+        _ => 0,
+    };
+    // Connected Shapes seal nothing, so the neighbour's bare boxes decide.
+    group & connect.connects_to != 0
+        || (connect.to_sealed && covers_whole_face(&declared(chunk, across, false), face ^ 1))
+}
+
+fn covers_whole_face(boxes: &[NodeBox], face: usize) -> bool {
+    let (d, layer) = (face / 2, if face % 2 == 1 { 15 } else { 0 });
+    (0..16).all(|u| {
+        (0..16).all(|v| {
+            let mut c = [0u8; 3];
+            c[d] = layer;
+            c[(d + 1) % 3] = u;
+            c[(d + 2) % 3] = v;
+            boxes
+                .iter()
+                .any(|b| (0..3).all(|a| b.min[a] <= c[a] && c[a] < b.max[a]))
+        })
+    })
+}
+
 /// Every face between a solid sub-cell and an empty one, from the declared
 /// boxes alone - a different route to the geometry than the table's own grid.
 fn exposed_faces(chunk: &Chunk) -> std::collections::BTreeSet<SubFace> {
@@ -580,10 +645,7 @@ fn exposed_faces_unless(
         for y in LO..LO + SPAN {
             for x in LO..LO + SPAN {
                 let v = chunk.get(x, y, z);
-                if v.is_air() {
-                    continue;
-                }
-                for b in shapes().collision(v) {
+                for b in declared(chunk, [x as i32, y as i32, z as i32], true) {
                     for sz in b.min[2]..b.max[2] {
                         for sy in b.min[1]..b.max[1] {
                             for sx in b.min[0]..b.max[0] {
@@ -705,6 +767,212 @@ fn no_exposed_face_of_a_random_scene_is_missing_or_drawn_twice() {
             &doubled[..doubled.len().min(4)]
         );
     }
+}
+
+/// Scenes that mix connected Shapes with everything else, so that arms meet
+/// arms, cubes, slabs and stairs at every angle.
+fn random_connected_scene(rng: &mut Rng) -> Chunk {
+    let mut chunk = Chunk::air();
+    for z in LO..LO + SPAN {
+        for y in LO..LO + SPAN {
+            for x in LO..LO + SPAN {
+                let material = 1 + rng.below(2) as u16;
+                let voxel = match rng.below(10) {
+                    0..=2 => continue,
+                    3 => Voxel::cube(material),
+                    4..=5 => Voxel::new(material, FENCE, rng.below(256) as u8),
+                    6 => Voxel::new(material, PIPE, 0),
+                    pick => {
+                        let shape = [SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST][pick as usize - 7];
+                        Voxel::new(material, shape, rng.below(24) as u8)
+                    }
+                };
+                chunk.set(x, y, z, voxel);
+            }
+        }
+    }
+    chunk
+}
+
+fn assert_hole_free(chunk: &Chunk, what: &str) {
+    let exposed = exposed_faces(chunk);
+    let drawn = drawn_faces(&mesh_isolated(chunk));
+    let missing: Vec<_> = exposed.iter().filter(|f| !drawn.contains_key(f)).collect();
+    assert!(
+        missing.is_empty(),
+        "{what}: {} of {} exposed faces are holes, e.g. {:?}",
+        missing.len(),
+        exposed.len(),
+        &missing[..missing.len().min(4)]
+    );
+    let doubled: Vec<_> = exposed.iter().filter(|f| drawn[*f] > 1).collect();
+    assert!(
+        doubled.is_empty(),
+        "{what}: {} faces are drawn twice, e.g. {:?}",
+        doubled.len(),
+        &doubled[..doubled.len().min(4)]
+    );
+}
+
+/// The same property, with arms in the mix. The oracle grows its arms by its
+/// own copy of the rule, so a wrong face, a missing connection or an arm toward
+/// everything shows as a hole or as an arm that should not be there.
+#[test]
+fn no_exposed_face_of_a_random_scene_with_connected_shapes_is_missing_or_drawn_twice() {
+    let mut rng = Rng(0x5eed_0008);
+    for scene in 0..400 {
+        assert_hole_free(&random_connected_scene(&mut rng), &format!("scene {scene}"));
+    }
+}
+
+/// An arm that is drawn where the rule does not put one is not a hole, so the
+/// property above does not see it from the mesh side. The other direction is
+/// covered by the oracle: its solid sub-cells are the only ones that count, and
+/// every drawn face must have a solid sub-cell behind it.
+#[test]
+fn every_face_a_connected_scene_draws_has_a_solid_sub_cell_behind_it() {
+    let mut rng = Rng(0x5eed_0009);
+    for scene in 0..200 {
+        let chunk = random_connected_scene(&mut rng);
+        let solid_behind: std::collections::HashSet<_> = {
+            let mut set = std::collections::HashSet::new();
+            for z in LO..LO + SPAN {
+                for y in LO..LO + SPAN {
+                    for x in LO..LO + SPAN {
+                        for b in declared(&chunk, [x as i32, y as i32, z as i32], true) {
+                            for sz in b.min[2]..b.max[2] {
+                                for sy in b.min[1]..b.max[1] {
+                                    for sx in b.min[0]..b.max[0] {
+                                        set.insert([
+                                            (x * 16 + sx as usize) as i32,
+                                            (y * 16 + sy as usize) as i32,
+                                            (z * 16 + sz as usize) as i32,
+                                        ]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            set
+        };
+        for (_, cell) in drawn_faces(&mesh_isolated(&chunk)).keys() {
+            assert!(
+                solid_behind.contains(cell),
+                "scene {scene}: a face is drawn on {cell:?}, which nothing occupies"
+            );
+        }
+    }
+}
+
+fn place_fences(at: &[(usize, usize, usize)]) -> Chunk {
+    let mut chunk = Chunk::air();
+    for &(x, y, z) in at {
+        chunk.set(x, y, z, Voxel::new(1, FENCE, 0));
+    }
+    chunk
+}
+
+#[test]
+fn a_line_of_fences_draws_no_hidden_end_caps() {
+    let chunk = place_fences(&[(10, 10, 10), (11, 10, 10), (12, 10, 10), (13, 10, 10)]);
+    let exposed = exposed_faces(&chunk);
+    let drawn = drawn_faces(&mesh_isolated(&chunk));
+    let hidden: Vec<_> = drawn.keys().filter(|f| !exposed.contains(f)).collect();
+    assert!(hidden.is_empty(), "{} hidden faces drawn", hidden.len());
+    assert!(exposed.iter().all(|f| drawn.contains_key(f)));
+    // And the arms are there: four posts alone would be 4 * 6 quads.
+    assert!(mesh_isolated(&chunk).quad_count() > 4 * 6);
+}
+
+#[test]
+fn a_fence_grows_an_arm_towards_a_cube_and_the_cube_hides_its_end() {
+    let mut chunk = place_fences(&[(10, 10, 10)]);
+    let alone = mesh_isolated(&chunk).quad_count();
+    chunk.set(11, 10, 10, Voxel::cube(1));
+    assert_hole_free(&chunk, "fence beside cube");
+    // The cube's own face under the bars is drawn, because pass 1 culls only
+    // against a neighbour that seals and a fence never does: hidden overdraw,
+    // not a hole. The arm's end cap, on the same plane, is not drawn.
+    let exposed = exposed_faces(&chunk);
+    let hidden: Vec<_> = drawn_faces(&mesh_isolated(&chunk))
+        .into_keys()
+        .filter(|f| !exposed.contains(f))
+        .collect();
+    let cube_side = 11 * 16;
+    assert!(
+        hidden
+            .iter()
+            .all(|&(face, cell)| face == NEG_X && cell[0] == cube_side),
+        "{hidden:?}"
+    );
+    assert_eq!(hidden.len(), 12, "one bar of 2 x 6 sub-cells");
+    // The cube adds its own five faces, so the arm shows as the quads beyond it.
+    let with = mesh_isolated(&chunk).quad_count();
+    assert!(with > alone + 5, "{with} against {alone}");
+}
+
+#[test]
+fn a_fence_beside_a_stair_and_a_slab_is_hole_free_whichever_way_they_face() {
+    for turn in 0..4 {
+        for up in [POS_Y, NEG_Y] {
+            let mut chunk = place_fences(&[(10, 10, 10)]);
+            chunk.set(11, 10, 10, shaped(SHAPE_STAIR, up, turn));
+            chunk.set(9, 10, 10, shaped(SHAPE_SLAB, up, turn));
+            assert_hole_free(&chunk, &format!("turn {turn} up {up}"));
+        }
+    }
+}
+
+/// The shell is where an arm toward the next Chunk is read, and the neighbour's
+/// coverage is what hides its end.
+#[test]
+fn an_arm_across_a_chunk_boundary_is_read_from_the_shell() {
+    let last = CHUNK_SIZE - 1;
+    let mut a = Chunk::air();
+    a.set(last, 10, 10, Voxel::new(1, FENCE, 0));
+    let mesh = |b: &Chunk| {
+        let neighbors = [None, Some(unlit(b)), None, None, None, None];
+        let m = mesh_chunk(unlit(&a), neighbors, tables());
+        let cap_on_the_boundary = m
+            .opaque
+            .positions
+            .chunks(4)
+            .zip(m.opaque.normals.chunks(4))
+            .any(|(q, n)| n[0] == [1.0, 0.0, 0.0] && q.iter().all(|p| p[0] == CHUNK_SIZE as f32));
+        (m.quad_count(), cap_on_the_boundary)
+    };
+
+    let (bare, bare_cap) = mesh(&Chunk::air());
+    assert!(!bare_cap);
+
+    let fence = {
+        let mut b = Chunk::air();
+        b.set(0, 10, 10, Voxel::new(1, FENCE, 0));
+        b
+    };
+    let (joined, cap) = mesh(&fence);
+    assert!(joined > bare, "{joined} against {bare}: no arm was grown");
+    assert!(
+        !cap,
+        "the arm's end is drawn against the fence that meets it"
+    );
+
+    let pipe = {
+        let mut b = Chunk::air();
+        b.set(0, 10, 10, Voxel::new(1, PIPE, 0));
+        b
+    };
+    assert_eq!(mesh(&pipe).0, bare, "a pipe is another group: no arm");
+
+    let wall = {
+        let mut b = Chunk::air();
+        b.set(0, 10, 10, Voxel::cube(1));
+        b
+    };
+    let (walled, wall_cap) = mesh(&wall);
+    assert!(walled > bare && !wall_cap);
 }
 
 /// Culling by coverage rather than by seal is what keeps a floor of slabs from
@@ -1161,7 +1429,7 @@ fn solid_sub_cell(block: &[Chunk], sub: [i32; 3]) -> bool {
     }
     let l = sub.map(|s| s.rem_euclid(16) as u8);
     shapes()
-        .collision(v)
+        .selection(v, Connections::NONE)
         .iter()
         .any(|b| (0..3).all(|a| b.min[a] <= l[a] && l[a] < b.max[a]))
 }
@@ -1291,4 +1559,139 @@ fn declining_never_changes_the_mesh_of_a_ramp_chunk() {
     assert_eq!(fast.opaque.indices, slow.opaque.indices);
     assert_eq!(fast.opaque.light, slow.opaque.light);
     assert!(fast.shaped_voxels > 0);
+}
+
+fn slabs(from: [usize; 3], to: [usize; 3], material: u16) -> Chunk {
+    let mut chunk = Chunk::air();
+    fill_slabs(&mut chunk, from, to, material);
+    chunk
+}
+
+fn fill_slabs(chunk: &mut Chunk, from: [usize; 3], to: [usize; 3], material: u16) {
+    for z in from[2]..to[2] {
+        for y in from[1]..to[1] {
+            for x in from[0]..to[0] {
+                chunk.set(
+                    x,
+                    y,
+                    z,
+                    Voxel::shaped(material, SHAPE_SLAB, Orientation::IDENTITY),
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_floor_of_slabs_is_one_top_one_bottom_and_four_sides() {
+    let floor = slabs([4, 8, 4], [12, 9, 12], 1);
+    assert_eq!(mesh_isolated(&floor).quad_count(), 6);
+    assert_hole_free(&floor, "slab floor");
+    let big = slabs([0, 8, 0], [32, 9, 32], 1);
+    assert_eq!(mesh_isolated(&big).quad_count(), 6);
+}
+
+#[test]
+fn a_line_of_fences_costs_the_same_for_each_fence_added_along_either_axis() {
+    // Post: a top, a bottom, two plain sides and two sides cut around the bar
+    // (4 each), 12; the bar between two posts is 4 quads in all, not 8. Adding
+    // a fence to a line of 4 or more adds one post and one link: 16.
+    for axis in [0, 2] {
+        let line = |n: usize| {
+            let mut chunk = Chunk::air();
+            for i in 0..n {
+                let mut at = [8, 8, 8];
+                at[axis] += i;
+                chunk.set(at[0], at[1], at[2], Voxel::new(1, FENCE, 0));
+            }
+            let count = mesh_isolated(&chunk).quad_count();
+            assert_hole_free(&chunk, &format!("line of {n} along {axis}"));
+            count
+        };
+        for n in 4..8 {
+            assert_eq!(line(n + 1) - line(n), 16, "axis {axis}, {n} to {}", n + 1);
+        }
+    }
+}
+
+#[test]
+fn nothing_merges_across_a_step_in_light() {
+    let floor = slabs([2, 8, 4], [10, 9, 12], 1);
+    let light = |step: bool| {
+        let mut l = ChunkLight::dark();
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let level = if step && x >= 5 { 8 } else { MAX_LIGHT };
+                    l.set(x, y, z, Light::new(level, 0));
+                }
+            }
+        }
+        l
+    };
+    let count = |l: &ChunkLight| {
+        greedy_mesh(&Neighborhood::isolated(LitChunk::new(&floor, l)), tables()).quad_count()
+    };
+    assert_eq!(count(&light(false)), 6);
+    // The top and bottom and the two long sides each split in two; the ends
+    // look out at one level each.
+    assert_eq!(count(&light(true)), 10);
+}
+
+#[test]
+fn nothing_merges_across_a_change_of_material() {
+    let mut floor = slabs([2, 8, 4], [6, 9, 12], 1);
+    fill_slabs(&mut floor, [6, 8, 4], [10, 9, 12], 2);
+    assert_eq!(mesh_isolated(&floor).quad_count(), 10);
+    assert_hole_free(&floor, "two materials");
+}
+
+#[test]
+fn a_gap_is_not_merged_across() {
+    let mut floor = slabs([2, 8, 4], [5, 9, 12], 1);
+    fill_slabs(&mut floor, [6, 8, 4], [9, 9, 12], 1);
+    assert_eq!(mesh_isolated(&floor).quad_count(), 12);
+}
+
+#[test]
+fn a_merged_quad_keeps_the_textures_per_voxel_repeat_and_a_slabs_half_height() {
+    let floor = slabs([2, 8, 4], [10, 9, 12], 1);
+    let layer = mesh_isolated(&floor).opaque;
+    for (i, (q, uv)) in layer
+        .positions
+        .chunks(4)
+        .zip(layer.uvs.chunks(4))
+        .enumerate()
+    {
+        let n = layer.normals[i * 4];
+        let d = (0..3).find(|&a| n[a] != 0.0).unwrap();
+        for (k, a) in [(d + 1) % 3, (d + 2) % 3].into_iter().enumerate() {
+            // The UV is the position less a whole number of Voxels, the same
+            // for all four corners, so a tiling sampler still repeats once per
+            // Voxel as it did before merging.
+            let shift = q[0][a] - uv[0][k];
+            assert!((shift - shift.round()).abs() < 1e-5, "{uv:?} against {q:?}");
+            for c in 1..4 {
+                assert!((q[c][a] - uv[c][k] - shift).abs() < 1e-5, "{uv:?} {q:?}");
+            }
+            // A slab's side is half a texture tall, not a squashed whole one.
+            if a == 1 {
+                let tall = uv.iter().map(|c| c[k]).fold(0.0f32, f32::max)
+                    - uv.iter().map(|c| c[k]).fold(f32::MAX, f32::min);
+                assert!((tall - 0.5).abs() < 1e-5, "{tall}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_row_of_slabs_never_leaves_its_chunk() {
+    let row = slabs([0, 8, 8], [32, 9, 9], 1);
+    let mesh = mesh_isolated(&row);
+    assert!(
+        mesh.opaque
+            .positions
+            .iter()
+            .all(|p| (0.0..=32.0).contains(&p[0]))
+    );
 }

@@ -48,8 +48,26 @@ pub struct WorldGenerator(pub Worldgen);
 /// one, and a Mod registers its Shapes and Materials here at load. Behind an
 /// `Arc` so a streaming job can hold the tables; they are not written once the
 /// World is open.
-#[derive(Resource, Deref, Default)]
+#[derive(Resource, Deref)]
 pub struct ContentTables(pub Arc<Tables>);
+
+impl Default for ContentTables {
+    /// The builtin Shapes and Materials, and under `dev` a fence registered as a
+    /// Mod will, so the gallery and the hotbar have a connected Shape to show.
+    fn default() -> Self {
+        #[cfg_attr(not(feature = "dev"), allow(unused_mut))]
+        let mut tables = Tables::builtin();
+        #[cfg(feature = "dev")]
+        assert_eq!(
+            tables
+                .shapes
+                .register(tesserae_core::shape::examples::fence()),
+            Ok(tesserae_core::shape::examples::FENCE_ID),
+            "the demo fence is the first Shape after the builtins"
+        );
+        ContentTables(Arc::new(tables))
+    }
+}
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<world_state::ChunkStore>()

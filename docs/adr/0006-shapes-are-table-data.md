@@ -32,8 +32,9 @@ as the identity and is rejected on an Edit.
 The Mod API hands over a list of `ShapeDef`s once at load, never a call per
 Voxel, so [ADR-0001](0001-wasm-mod-boundary.md) holds by construction. Shapes
 whose geometry depends on their neighbours (a fence growing arms) and collision
-taller than the cell are not expressible, and would need a different table
-shape.
+taller than the cell were not expressible here;
+[ADR-0010](0010-connections-are-derived-not-stored.md) expresses both without
+changing the Voxel's layout.
 
 Anything physical derived from a Shape is a fraction of a Voxel and becomes a
 distance only by multiplying by the World's Voxel size

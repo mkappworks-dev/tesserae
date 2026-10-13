@@ -119,9 +119,11 @@ metres scales as 1/`voxel_size`.
 ## Shaped voxels
 
 Greedy meshing merges coplanar faces of **identical full cubes**. A stair, slab
-or fence cannot merge with anything, so each becomes its own geometry. The
-mesher is therefore two-pass: greedy-mesh the full cubes, then append per-voxel
-custom geometry for shaped voxels.
+or fence cannot merge with a cube, so each becomes its own geometry. The mesher
+is therefore two-pass: greedy-mesh the full cubes, then append per-voxel custom
+geometry for shaped voxels, merging the quads of neighbouring shaped voxels that
+lie in one plane, abut along a full edge and share Material and light (a floor
+of slabs is a handful of quads).
 
 Four consequences, all of which must be designed in from the start:
 
@@ -341,7 +343,11 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    were added later, off the build order, as a `MaterialTable` that carries
    emission, light dimming, occlusion and render class
    ([ADR-0009](docs/adr/0009-materials-are-table-data.md)). See
-   `.scratch/2026-10-12-material-table-transparency/spec.md`.
+   `.scratch/2026-10-12-material-table-transparency/spec.md`. Connected Shapes
+   (a fence growing arms) and collision up to a Voxel taller than the cell
+   follow in the same step, with connections derived from the neighbours and
+   never stored
+   ([ADR-0010](docs/adr/0010-connections-are-derived-not-stored.md)).
 6. LOD mip chain out to 4km.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
@@ -376,12 +382,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   so the caps did not change either.
 - **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
-  Fence arms and collision taller than the cell need a Shape to look at its
-  neighbours. Material transparency (glass, water, leaves) is a Material
-  property and not a Shape one: the table, light dimming and occlusion are done,
-  and the blended render pass is ticket 04 of
-  `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is a
-  stopgap.
+  Connection groups belong to a Shape and not a Material until step 7, a
+  connected Shape cannot be rotated, and LOD counts only its bare post. A fence
+  costs 4 stairs of the cap, so 256 fit in a Chunk. Material transparency
+  (glass, water, leaves) is a Material property and not a Shape one: the table,
+  light dimming and occlusion are done, and the blended render pass is ticket 04
+  of `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is
+  a stopgap.
 - **The Player's pose is rate-limited, not true.** The Server clamps a pose that
   moves faster than `PlayerLimits` and tells the Client, but flying is the only
   way to move, so a modified Client can still fly at the cap and edit within
