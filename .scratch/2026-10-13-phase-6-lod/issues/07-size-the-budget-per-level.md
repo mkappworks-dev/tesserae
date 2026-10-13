@@ -1,7 +1,7 @@
 # Size the budget per level
 
 Status: ready-for-agent
-Blocked by: 04, 06
+Blocked by: 04, 06, 08
 
 Spec "Performance". The per-ring budget has only ever been measured for level 0.
 

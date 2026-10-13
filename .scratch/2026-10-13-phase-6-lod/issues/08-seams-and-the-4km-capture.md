@@ -1,7 +1,7 @@
 # Seams and the 4 km capture
 
 Status: ready-for-agent
-Blocked by: 06, 07
+Blocked by: 06
 
 Spec decision 9, and the step's "Done when".
 

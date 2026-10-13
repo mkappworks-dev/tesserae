@@ -1,7 +1,7 @@
 # Docs, ADR-0011 and the PR
 
 Status: ready-for-agent
-Blocked by: 05, 08
+Blocked by: 05, 07, 08
 
 ## What to build
 
