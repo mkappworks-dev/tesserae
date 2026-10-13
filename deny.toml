@@ -14,6 +14,7 @@ ignore = [
   # KTX2 supercompression, and the only KTX2 in this build is Bevy's own embedded
   # tonemapping and SMAA tables, so no untrusted input reaches it. Remove this
   # when Bevy moves to ruzstd >= 0.9.1, or when a Mod can supply a texture.
+  # Tracked in .scratch/2026-10-13-ruzstd-advisory/.
   { id = "RUSTSEC-2026-0344", reason = "ruzstd only decodes Bevy's embedded KTX2 tables; fix needs a Bevy bump" },
 ]
 
