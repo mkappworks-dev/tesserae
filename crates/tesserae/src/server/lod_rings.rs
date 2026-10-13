@@ -90,9 +90,7 @@ impl LevelRings {
 
         let outer = outer_extent(settings, cell_size_m, level);
         let hole = (level > 0).then(|| hole(outer_extent(settings, cell_size_m, level - 1)));
-        let keep_hole = hole
-            .flatten()
-            .and_then(|hole| shrunk_horizontally(hole, hysteresis));
+        let keep_hole = hole.flatten().and_then(|hole| shrunk(hole, hysteresis));
         let keep = outer.grown(hysteresis);
         let load = keep.grown(1);
 
@@ -207,10 +205,20 @@ pub fn cuts(settings: &StreamingSettings, cell_size_m: f32) -> Vec<Cut> {
         .collect()
 }
 
-/// A negative radius would still pass `Extent::contains`, which squares it.
-fn shrunk_horizontally(hole: Extent, cells: i32) -> Option<Extent> {
+/// A negative radius would still pass `Extent::contains`, which squares it, so
+/// it is `None` instead.
+///
+/// Both axes, because the finer level's rows follow its own anchor: a coarse
+/// Chunk that has just fallen into the hole is held for a Cell more, while the
+/// finer level meshes what it now covers, and not released on the tick it moves.
+/// The height stops at one row: a hole of a single row still has to release the
+/// column the Eye walks onto.
+fn shrunk(hole: Extent, cells: i32) -> Option<Extent> {
     let horizontal = hole.horizontal - cells;
-    (horizontal >= 0).then_some(Extent { horizontal, ..hole })
+    (horizontal >= 0).then_some(Extent {
+        horizontal,
+        vertical: (hole.vertical - cells).max(0),
+    })
 }
 
 #[cfg(test)]
@@ -314,7 +322,7 @@ mod tests {
                 assert_eq!(r.keep.hole, None);
             } else {
                 assert_eq!(r.mesh.hole, Some(ext(1, 1)), "level {level}");
-                assert_eq!(r.keep.hole, Some(ext(0, 1)), "level {level}");
+                assert_eq!(r.keep.hole, Some(ext(0, 0)), "level {level}");
             }
         }
     }
@@ -528,11 +536,42 @@ mod tests {
         assert!(!r.mesh.contains(IVec3::new(1, 0, 0)));
         assert!(r.keep.contains(IVec3::new(1, 0, 0)));
         assert!(!r.keep.contains(IVec3::ZERO));
-        // And vertically the keep hole is not shrunk.
+        // And it is shrunk vertically too, so a row the Eye has just crossed is held.
         assert_eq!(
             r.keep.hole.map(|h| h.vertical),
-            r.mesh.hole.map(|h| h.vertical)
+            r.mesh.hole.map(|h| h.vertical - 1)
         );
+    }
+
+    /// Whatever step the anchor takes, a Chunk the level meshed that the finer
+    /// level has just taken over is still kept: the finer level has had no tick to
+    /// mesh it, so releasing it would leave a block drawn by neither.
+    #[test]
+    fn a_chunk_the_finer_level_takes_over_is_kept_for_a_step_after() {
+        for voxel_size in [1.0, 0.25] {
+            for level in 1..level_count(&StreamingSettings::default()) {
+                let r = rings(voxel_size, level);
+                // Along an axis: landing on the anchor Cell diagonally is the Eye
+                // walking onto it, which is released on purpose.
+                for step in [
+                    IVec3::X,
+                    IVec3::NEG_X,
+                    IVec3::Y,
+                    IVec3::NEG_Y,
+                    IVec3::Z,
+                    IVec3::NEG_Z,
+                ] {
+                    for offset in r.mesh.offsets() {
+                        let now = offset - step;
+                        let in_hole = r.mesh.hole.is_some_and(|hole| hole.contains(now));
+                        assert!(
+                            !in_hole || r.keep.contains(now),
+                            "{voxel_size} level {level}: {offset} released after a step of {step}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

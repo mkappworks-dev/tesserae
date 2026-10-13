@@ -63,7 +63,10 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ChunkEntities>()
         .add_systems(Startup, (add_material, spawn_light))
         .add_systems(PostStartup, spawn_camera)
-        .add_systems(Update, (upload_meshes, drop_meshes));
+        // Chained: the Server can send a mesh and its unload in one frame when two
+        // ticks run in it, and an unload handled first would leave the mesh
+        // spawned after it, with nothing ever to despawn it.
+        .add_systems(Update, (upload_meshes, drop_meshes).chain());
 }
 
 fn add_material(
@@ -493,7 +496,7 @@ mod tests {
             .add_message::<LodMeshReady>()
             .add_message::<LodUnloaded>()
             .add_systems(Startup, add_material)
-            .add_systems(Update, (upload_meshes, drop_meshes));
+            .add_systems(Update, (upload_meshes, drop_meshes).chain());
         app.update();
         app
     }
@@ -790,6 +793,29 @@ mod tests {
                 .get(&handle)
                 .is_none()
         );
+    }
+
+    #[test]
+    fn a_mesh_and_its_unload_in_one_frame_leave_nothing_drawn() {
+        let mut app = app();
+        let coord = ChunkCoord::new(2, 0, -1);
+        let world = app.world_mut();
+        world.write_message(ChunkMeshReady {
+            coord,
+            mesh: geometry(),
+        });
+        world.write_message(ChunkUnloaded { coord });
+        world.write_message(LodMeshReady {
+            level: 2,
+            coord,
+            mesh: geometry(),
+        });
+        world.write_message(LodUnloaded { level: 2, coord });
+        app.update();
+
+        assert_eq!(entity_for(&app, coord), None);
+        assert_eq!(entity_at(&app, 2, coord), None);
+        assert_eq!(drawn(&mut app), 0);
     }
 
     #[test]

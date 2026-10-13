@@ -234,9 +234,11 @@ is the first ring's outer distance.
   is the same number of Cells (1) at every level, so a level changes state when
   the Eye has moved one of _its own_ Cells. A Chunk keeps its mesh while it is
   inside `outer.grown(hysteresis)` and outside the hole **shrunk by the
-  hysteresis in the horizontal only** (radius 0, half-height 1 at the
-  defaults), so the coarse layer under the fine one is released when the Eye
-  walks onto it and not a Cell later.
+  hysteresis** (radius 0, half-height 0 at the defaults), so the coarse layer
+  under the fine one is released when the Eye walks onto it and not a Cell
+  later, and a Chunk the finer level has just taken over is held for a Cell
+  while the finer level meshes it. The height stops at one row, so a hole of a
+  single row still releases the column the Eye walks onto.
 - **Anchor.** Level k's anchor Chunk is `floor(eye / cell_k)`, from the same Eye
   the Server already streams around.
 
@@ -655,17 +657,24 @@ views find only silhouette steps. The cut costs nothing measurable: the median
 flight frame is 5.3 to 5.4 ms over three clean runs of five, against 3.6 to 4.0
 ms for the two-camera build, as before it.
 
-**Known loose ends found by the review**, not fixed here:
+**Two more findings, fixed.** Descending through a coarse row boundary, the
+coarse Chunk the finer level had just taken over was released on the tick the
+anchor moved, before the finer level had meshed what it now covered, so a block
+could be drawn by neither. The keep hole is now shrunk by the hysteresis
+vertically as well as horizontally (stopping at one row, so a hole of a single
+row still releases the column the Eye walks onto), and a test steps the anchor
+along each axis and asserts a Chunk the finer level took over is still kept;
+with the vertical shrink removed it fails on the vertical step. Separately, the
+Client's `upload_meshes` and `drop_meshes` were unordered, so two Server ticks
+in one frame could spawn a mesh after its unload and orphan it, as at level 0
+before this step. They are chained, upload first, and a test sends a mesh and
+its unload in one frame at level 0 and level 2; with the order reversed it
+fails.
 
-- Descending through a coarse row boundary, a block of level 0's mesh extent
-that was held and not yet meshed can be drawn by neither level for a tick or
-more, behind the coarse queue. The keep hole is not shrunk vertically. - The
-Client's `upload_meshes` and `drop_meshes` are unordered, so two Server ticks in
-one frame could spawn a mesh after its unload and orphan it. This was true at
-level 0 before this step. - The Client now reads `StreamingSettings` and
-`server::level_count` and `cuts` to size its cameras and the cut. It never
-mutates them, so ADR-0002 holds, but a remote Client would need those numbers
-sent to it.
+**One loose end found by the review**, not fixed here: the Client reads
+`StreamingSettings`, `server::level_count` and `cuts` to size its cameras and
+the cut. It never mutates them, so ADR-0002 holds, but a remote Client would
+need those numbers sent to it.
 
 ### Ticket 07: the budget per level
 
