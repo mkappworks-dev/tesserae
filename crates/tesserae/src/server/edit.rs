@@ -334,6 +334,7 @@ pub(in crate::server) fn set_voxel(
     relight(&mut lattice, tables, at, was);
     let lit = std::mem::take(&mut lattice.touched);
 
+    meshes.voxels_changed(place.chunk);
     meshes.edited(place.chunk);
     for coord in lit {
         meshes.edited(coord);

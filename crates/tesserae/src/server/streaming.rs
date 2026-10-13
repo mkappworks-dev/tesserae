@@ -67,7 +67,6 @@ pub struct ChunkUnloaded {
 /// `voxel_size * 2^level` and places the Chunk at `coord * cell_size * 2^level`.
 /// Empty means despawn, as at level 0. Level 0 never appears here.
 #[derive(Message)]
-#[cfg_attr(not(test), allow(dead_code))] // The Client reads these (ticket 06).
 pub struct LodMeshReady {
     pub level: u32,
     pub coord: ChunkCoord,
@@ -76,7 +75,6 @@ pub struct LodMeshReady {
 
 /// The Client should stop drawing this coarse Chunk.
 #[derive(Message)]
-#[cfg_attr(not(test), allow(dead_code))] // The Client reads these (ticket 06).
 pub struct LodUnloaded {
     pub level: u32,
     pub coord: ChunkCoord,
@@ -340,6 +338,13 @@ pub(in crate::server) struct MeshState {
     /// incremental path is not monotone, so a bulk result computed from the old
     /// state must not land over it.
     poisoned: HashSet<ChunkCoord>,
+    /// Chunks whose Voxels an Edit changed and that are still held. Unlike the
+    /// light an Edit touches, this is what a level-1 cover is derived from.
+    edited_chunks: HashSet<ChunkCoord>,
+    /// Chunks whose level-1 cover has to be regenerated: a Voxel changed in
+    /// them, or an edited one left the store and took its Edit with it. Drained
+    /// by `stream_lod`, which alone can see whether the cover exists.
+    cover_changed: HashSet<ChunkCoord>,
 }
 
 impl MeshState {
@@ -369,12 +374,30 @@ impl MeshState {
         }
     }
 
+    /// A Voxel in this Chunk was replaced, which the level-1 cover covering it
+    /// has to follow. Separate from `edited`, which also hears of Chunks only
+    /// the light or a face reached, whose cover reads none of that.
+    pub(in crate::server) fn voxels_changed(&mut self, coord: ChunkCoord) {
+        self.edited_chunks.insert(coord);
+        self.cover_changed.insert(coord);
+    }
+
+    /// The Chunks whose level-1 cover is out of date since the last call.
+    pub(in crate::server) fn take_cover_changes(&mut self) -> Vec<ChunkCoord> {
+        self.cover_changed.drain().collect()
+    }
+
     /// Whether a Chunk inside `load` is waiting on a light solve. Outside it
     /// `relight` never looks, so a Chunk the anchor has drifted away from can
     /// stay in `unlit` for good without anything being left to do.
     #[cfg(any(test, feature = "dev"))]
     fn unlit_within(&self, center: ChunkCoord, load: Extent) -> bool {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
+        self.edited_chunks.contains(&coord)
     }
 
     #[cfg(test)]
@@ -581,6 +604,11 @@ fn retire(
         store.remove(coord);
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
+        // The Edit stops existing here, and an unedited Chunk is what the
+        // generator makes again, so only an edited one leaves a ghost in its cover.
+        if meshes.edited_chunks.remove(&coord) {
+            meshes.cover_changed.insert(coord);
+        }
     }
 }
 

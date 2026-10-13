@@ -33,7 +33,7 @@ use super::jobs::Stage;
 use super::lod_rings::{LevelRings, Shell, level_count};
 use super::player::Player;
 use super::streaming::{
-    LodMeshReady, LodUnloaded, StreamingSettings, delta, face_neighbors, offset,
+    LodMeshReady, LodUnloaded, MeshState, StreamingSettings, delta, face_neighbors, offset,
 };
 use super::world_state::ChunkStore;
 use super::{ContentTables, WorldGenerator};
@@ -235,7 +235,6 @@ impl LodState {
     }
 
     /// A held Chunk's inputs changed, so it is regenerated.
-    #[cfg_attr(not(test), allow(dead_code))] // Edits call this (ticket 05).
     pub(in crate::server) fn invalidate(&mut self, level: u32, coord: ChunkCoord) {
         let level = self.level_mut(level);
         level.stale.insert(coord);
@@ -313,6 +312,15 @@ fn child(coord: ChunkCoord, i: usize) -> ChunkCoord {
     )
 }
 
+/// The level-1 Chunk that covers a level-0 one: the inverse of [`child`].
+fn cover(coord: ChunkCoord) -> ChunkCoord {
+    ChunkCoord::new(
+        coord.x.div_euclid(2),
+        coord.y.div_euclid(2),
+        coord.z.div_euclid(2),
+    )
+}
+
 /// A coarse Chunk from the level below. A `held` child is used as it is and the
 /// others are generated, which is the same Chunk for any child nothing has
 /// edited. That is the property that lets a coarse Chunk be derived data.
@@ -367,6 +375,7 @@ impl Plan {
 )]
 pub(in crate::server) fn stream_lod(
     chunks: Res<ChunkStore>,
+    mut meshes: ResMut<MeshState>,
     mut store: ResMut<LodStore>,
     mut state: ResMut<LodState>,
     mut jobs: ResMut<LodJobs>,
@@ -381,16 +390,29 @@ pub(in crate::server) fn stream_lod(
 ) {
     let levels = generators.levels();
     if levels <= 1 {
+        // Nobody will read the marks, and they would pile up.
+        meshes.take_cover_changes();
         return;
     }
     let Ok(player) = player.single() else {
         return;
     };
+    let changed = meshes.take_cover_changes();
 
     jobs.generate.reset_counts();
     jobs.generate.poll();
     jobs.mesh.reset_counts();
     jobs.mesh.poll();
+
+    // Level 1 only: an Edit is within EDIT_REACH_M of the Eye, level 2 starts at
+    // 256 m and level 0 is evicted at 288 m, so no higher level can hold one.
+    for coord in changed {
+        let covering = cover(coord);
+        // A job in flight read its children before the change and lands stale.
+        if store.contains(1, covering) || jobs.generate.contains((1, covering)) {
+            state.invalidate(1, covering);
+        }
+    }
 
     let plans: Vec<Plan> = (1..levels)
         .map(|level| Plan {
@@ -701,6 +723,7 @@ fn dispatch_meshes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::server::edit::set_voxel;
     use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::{CHUNK_SIZE, SHAPE_STAIR, Tables, Voxel, worldgen};
@@ -787,18 +810,25 @@ mod tests {
         /// Ticks until nothing is in flight, pending or landing, and returns
         /// every message written on the way.
         pub(in crate::server) fn lod_settle(&mut self) -> (Vec<LodMeshReady>, Vec<LodUnloaded>) {
-            let (mut ready, mut unloaded) = (Vec::new(), Vec::new());
+            let (ready, unloaded, _) = self.lod_settle_counting();
+            (ready, unloaded)
+        }
+
+        /// `lod_settle`, and how many generate jobs were dispatched on the way.
+        fn lod_settle_counting(&mut self) -> (Vec<LodMeshReady>, Vec<LodUnloaded>, usize) {
+            let (mut ready, mut unloaded, mut dispatched) = (Vec::new(), Vec::new(), 0);
             let started = std::time::Instant::now();
             for _ in 0..SETTLE_TICKS {
                 if started.elapsed() > SETTLE_CEILING {
                     break;
                 }
                 let (r, u) = self.lod_tick();
+                dispatched += self.lod_jobs().generate.counts().0;
                 let quiet = r.is_empty() && u.is_empty() && self.lod_quiet();
                 ready.extend(r);
                 unloaded.extend(u);
                 if quiet {
-                    return (ready, unloaded);
+                    return (ready, unloaded, dispatched);
                 }
                 if self.lod_in_flight() > 0 {
                     std::thread::sleep(std::time::Duration::from_micros(100));
@@ -869,6 +899,73 @@ mod tests {
         fn delivered_at(&self, level: u32) -> HashSet<ChunkCoord> {
             self.lod_state().delivered(level)
         }
+
+        /// An Edit, through the function a player's click ends in.
+        fn edit(&mut self, at: [i32; 3], voxel: Voxel) {
+            self.app
+                .world_mut()
+                .run_system_once(
+                    move |mut store: ResMut<ChunkStore>,
+                          mut meshes: ResMut<MeshState>,
+                          tables: Res<ContentTables>| {
+                        set_voxel(&mut store, &mut meshes, &tables, at, voxel).expect("loaded");
+                    },
+                )
+                .unwrap();
+        }
+
+        /// Fills the 2x2x2 Voxels at `local` (even in every axis) with `voxel`:
+        /// the footprint of one coarse Voxel, so the cover is sure to change.
+        fn edit_block(&mut self, chunk: ChunkCoord, local: [i32; 3], voxel: Voxel) {
+            let side = CHUNK_SIZE as i32;
+            for (dx, dy, dz) in (0..8).map(|i| (i & 1, i >> 1 & 1, i >> 2)) {
+                self.edit(
+                    [
+                        chunk.x * side + local[0] + dx,
+                        chunk.y * side + local[1] + dy,
+                        chunk.z * side + local[2] + dz,
+                    ],
+                    voxel,
+                );
+            }
+        }
+
+        /// A held, empty level-0 Chunk whose cover is meshed and which leaves
+        /// `evict` when the Eye walks 160 m along +x, while its cover stays.
+        fn quiet_chunk(&self) -> ChunkCoord {
+            let shell = self.mesh_shell(1);
+            let mut found: Vec<ChunkCoord> = self
+                .store()
+                .coords()
+                .filter(|c| (-1..=0).contains(&c.x))
+                .filter(|&c| self.store().get(c).unwrap().uniform() == Some(Voxel::AIR))
+                .filter(|&c| shell.contains(&cover(c)))
+                .collect();
+            found.sort_by_key(|c| (c.y, c.z));
+            *found.last().expect("an empty Chunk under the Eye")
+        }
+
+        fn cover_arc(&self, covering: ChunkCoord) -> Arc<Chunk> {
+            self.lod_store().shared(1, covering).expect("cover held")
+        }
+    }
+
+    fn octant(chunk: ChunkCoord) -> usize {
+        let bit = |v: i32| v.rem_euclid(2) as usize;
+        let i = bit(chunk.x) + 2 * bit(chunk.y) + 4 * bit(chunk.z);
+        assert_eq!(child(cover(chunk), i), chunk);
+        i
+    }
+
+    fn stone() -> Voxel {
+        Voxel::cube(worldgen::STONE)
+    }
+
+    /// What the cover of `chunk` is with the store's copy of it: the one
+    /// non-generated child.
+    fn expected_cover(h: &Harness, chunk: ChunkCoord) -> Chunk {
+        let held = h.store().get(chunk).expect("held");
+        expected(1, cover(chunk), Some((octant(chunk), held)))
     }
 
     /// The last mesh written for each Chunk.
@@ -1826,5 +1923,180 @@ mod tests {
         let (ready, _) = h.lod_settle();
         assert!(ready.iter().any(|m| (m.level, m.coord) == (1, target)));
         assert!(h.delivered_at(1).contains(&target));
+    }
+
+    #[test]
+    fn an_edit_under_a_held_cover_regenerates_it_and_delivers_the_new_mesh() {
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+        let before = h.cover_arc(covering);
+
+        h.edit_block(chunk, [10, 10, 10], stone());
+        let (ready, _) = h.lod_settle();
+
+        let after = h.cover_arc(covering);
+        assert!(!same_chunk(&before, &after), "the Edit changed nothing");
+        assert!(same_chunk(&after, &expected_cover(&h, chunk)));
+        let meshes = latest(ready);
+        let delivered = meshes
+            .get(&(1, covering))
+            .expect("the cover was redelivered");
+        assert!(same_mesh(delivered, &h.fresh_mesh(1, covering)));
+        assert!(!h.lod_state().is_stale(1, covering));
+    }
+
+    #[test]
+    fn an_edit_under_a_cover_that_is_not_held_dispatches_nothing_and_is_in_it_when_it_is_made() {
+        let mut h = harness();
+        h.settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+
+        h.edit_block(chunk, [10, 10, 10], stone());
+        let (_, _, dispatched) = h.lod_settle_counting();
+
+        let held: usize = (1..LEVELS).map(|level| h.held(level).len()).sum();
+        assert_eq!(dispatched, held, "something was generated twice");
+        assert!(same_chunk(
+            &h.cover_arc(covering),
+            &expected_cover(&h, chunk)
+        ));
+    }
+
+    #[test]
+    fn an_edit_while_a_cover_is_first_generated_is_not_lost_when_it_lands() {
+        let mut h = harness();
+        h.settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+
+        h.lod_tick();
+        assert!(
+            h.lod_jobs().generate.contains((1, covering)),
+            "no job to race"
+        );
+        h.edit_block(chunk, [10, 10, 10], stone());
+        h.lod_settle();
+
+        assert!(same_chunk(
+            &h.cover_arc(covering),
+            &expected_cover(&h, chunk)
+        ));
+    }
+
+    /// Dispatch takes the cover out of `stale`, so a mark made while its job
+    /// runs is the only thing that asks for the job after it.
+    #[test]
+    fn a_mark_made_while_a_cover_regenerates_survives_its_landing() {
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+
+        h.edit_block(chunk, [10, 10, 10], stone());
+        h.lod_tick();
+        assert!(
+            h.lod_jobs().generate.contains((1, covering)),
+            "no job to race"
+        );
+        let with_first = h.store().get(chunk).unwrap().clone();
+        h.edit_block(chunk, [20, 20, 20], stone());
+        h.lod_settle();
+
+        let got = h.cover_arc(covering);
+        assert!(same_chunk(&got, &expected_cover(&h, chunk)));
+        assert!(!same_chunk(
+            &got,
+            &expected(1, covering, Some((octant(chunk), &with_first)))
+        ));
+        assert!(!h.lod_state().is_stale(1, covering));
+    }
+
+    #[test]
+    fn an_edited_chunk_leaving_the_store_takes_its_edit_out_of_the_cover() {
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+        h.edit_block(chunk, [10, 10, 10], stone());
+        h.lod_settle();
+        let with_edit = h.cover_arc(covering);
+        assert!(!same_chunk(&with_edit, &expected(1, covering, None)));
+        assert!(h.app.world().resource::<MeshState>().is_edited(chunk));
+
+        h.anchor_at(Vec3::new(160.0, 0.0, 0.0));
+        h.settle();
+        assert!(!h.store().contains(chunk), "the Chunk was not evicted");
+        assert!(!h.app.world().resource::<MeshState>().is_edited(chunk));
+        h.lod_settle();
+
+        let got = h.cover_arc(covering);
+        assert!(!Arc::ptr_eq(&got, &with_edit));
+        assert!(same_chunk(&got, &expected(1, covering, None)));
+    }
+
+    #[test]
+    fn an_unedited_chunk_leaving_the_store_regenerates_nothing() {
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let before: Vec<(ChunkCoord, Arc<Chunk>)> =
+            h.held(1).into_iter().map(|c| (c, h.cover_arc(c))).collect();
+        let chunk = h.quiet_chunk();
+
+        h.anchor_at(Vec3::new(160.0, 0.0, 0.0));
+        h.settle();
+        assert!(!h.store().contains(chunk), "the Chunk was not evicted");
+        h.lod_settle();
+
+        let mut kept = 0;
+        for (coord, was) in before {
+            if h.lod_store().contains(1, coord) {
+                kept += 1;
+                assert!(
+                    Arc::ptr_eq(&h.cover_arc(coord), &was),
+                    "{coord} was rebuilt"
+                );
+            }
+        }
+        assert!(kept > 0);
+    }
+
+    /// A Chunk edited faster than its cover is rebuilt must still show the
+    /// Client a cover, as at level 0.
+    #[test]
+    fn sustained_edits_under_a_cover_still_deliver_its_mesh() {
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+
+        let mut delivered = 0;
+        let started = std::time::Instant::now();
+        let mut i = 0;
+        while delivered == 0 && started.elapsed() < SETTLE_CEILING {
+            i += 1;
+            h.edit_block(
+                chunk,
+                [10, 10, 10],
+                if i % 2 == 0 { stone() } else { Voxel::AIR },
+            );
+            let (ready, _) = h.lod_tick();
+            delivered += ready
+                .iter()
+                .filter(|m| (m.level, m.coord) == (1, covering))
+                .count();
+            std::thread::sleep(std::time::Duration::from_micros(20));
+        }
+        assert!(
+            delivered > 0,
+            "{covering} was edited every tick and never redrawn"
+        );
     }
 }
