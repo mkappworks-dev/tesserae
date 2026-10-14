@@ -1,6 +1,6 @@
 # Light the coarse LOD levels
 
-Status: ready-for-agent
+Status: done
 Blocked by: -
 
 Follow-up to `.scratch/2026-10-13-phase-6-lod/spec.md` decision 3 and the
@@ -346,3 +346,44 @@ benchmarks and the ADR-0011 amendment this ticket lists. Step 0 leaned
 `wontfix` (see above); the decision was made with that in front of them. The
 work stays in the mesh job: no change to `light.rs`, `mesh.rs` or the stage
 count unless a benchmark says otherwise.
+
+### 2026-10-14: built (branch `feat/lod-coarse-light`)
+
+Option (a), as the spec at `../spec.md` says. `coarse_light` in
+`tesserae-core/src/lod.rs`, called from the coarse mesh job in
+`server/lod.rs`; `light.rs`, `mesh.rs`, `ChunkLight` and the stage count are
+untouched.
+
+**Capture, rule in** (same vantages as Step 0, same seed): at 250 m and 128 m
+up the mouth is still a speck of about 25 px and its far wall is a slightly
+darker grey; at 254 m up the grey patch has one darker tile and a strip of the
+east wall is black. The ground around it is pixel-identical to the unchanged
+picture, which is the plain-ground control. The effect is the one the hack
+showed: a handful of pixels, not the black hole of the 45 m truth. Not
+captured: 500 m, and a second mouth.
+
+**Tests.** Core: eight new, each mutation-checked (a margin of zero, half a
+Voxel and two Voxels, one corner of the footprint, a neighbour's plane from its
+own columns, and the two fast-path bounds a Voxel early: all seven killed).
+Server: the real mouth, and the cave-free identity over 61 non-empty meshes at
+levels 1 to 5. The identity test has slack and does not kill a margin of zero,
+half a Voxel or one corner (see the spec); the core tests pin those. Three
+existing server tests pinned open sky as the only light and now say open sky or
+covered.
+
+**Benchmarks** (Apple M5, host load 20 falling to 7 over the run, absolute
+numbers): `lod/coarse_light` on a surface Chunk is 64 us at level 1 and 90 to
+110 us at levels 2 to 5; a Chunk wholly above the band takes 14 ns. A coarse
+mesh job (`lod/mesh_coarse_lit`) is 465 us at level 1 against 382 us for the
+open-sky mesh (`lod/mesh_coarse`), and 400 against 296 us at level 5; the
+mouth Chunk is 502 us. Existing benches against a build of `main`, interleaved,
+three rounds, load 5 to 8: `greedy_mesh/terrain` -2.5%, +2.2% on
+`mesh_chunk/straddling_unsmoothed`, and `leaves_canopy` -5% to +5%, mixed sign;
+nothing in `mesh.rs` or `light.rs` changed, so this is layout noise.
+
+**Cost, stated.** About 80 to 100 us more per surface Chunk of a coarse mesh
+job, on a few hundred Chunks a level, off the main thread. The fill time was
+not re-measured.
+
+`./scripts/cargo-ci` passes in full. ADR-0011, DESIGN.md and
+`docs/architecture.md` are amended.
