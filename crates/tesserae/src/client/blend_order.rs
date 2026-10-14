@@ -23,10 +23,9 @@ use super::camera::MainCamera;
 
 /// Above this many quads the pairwise order is not worth its square cost, and
 /// a mesh falls back to drawing the farthest centre first, which is right
-/// unless two long quads overlap. On a World flooded to 44 m, 23 of 398 blended
-/// meshes that are not flat are this big, all lake shores; a far one seen
-/// edge-on puts nearly every pair on screen together, about 0.6 ms a sort at 376.
-const MAX_EXACT_QUADS: usize = 256;
+/// unless two long quads overlap. The largest blended mesh of a default World
+/// is about 500 quads; with coplanar pairs skipped, its sort fits the budget.
+const MAX_EXACT_QUADS: usize = 2048;
 
 /// How long one frame may spend sorting. Meshes are sorted nearest first, and
 /// one the budget does not reach keeps its old order a frame longer. A frame
@@ -251,6 +250,12 @@ impl BlendOrder {
                 for &(lo_b, hi_b, b) in &boxes[k + 1..] {
                     if lo_b.x > hi.x {
                         break;
+                    }
+                    // Two quads in one plane never share a ray: a lake's surface
+                    // is most of a shore's quads, and most of its pairs.
+                    let (qa, qb) = (&self.quads[a], &self.quads[b]);
+                    if qa.axis == qb.axis && qa.plane == qb.plane {
+                        continue;
                     }
                     if lo_b.y <= hi.y && hi_b.y >= lo.y {
                         pairs.push((a.min(b), a.max(b)));

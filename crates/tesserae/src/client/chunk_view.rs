@@ -1168,6 +1168,62 @@ mod tests {
         }
     }
 
+    /// Glass and water in a 3D checkerboard, six Voxels a side, so every face is
+    /// its own quad and the mesh has about 1300, over the old exact-order cap;
+    /// and in the same Chunk the strip of water over a glass cube that a
+    /// nearest-centre order draws wrong.
+    fn checkerboard_and_a_strip() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{GLASS, WATER};
+        let mut c = Chunk::air();
+        for x in 0..6 {
+            for y in 0..6 {
+                for z in 0..6 {
+                    let m = if (x + y + z) % 2 == 0 { GLASS } else { WATER };
+                    c.set(10 + x, 10 + y, 10 + z, Voxel::cube(m));
+                }
+            }
+        }
+        for x in 0..30 {
+            c.set(x, 5, 25, Voxel::cube(WATER));
+        }
+        c.set(2, 3, 25, Voxel::cube(GLASS));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mesh = mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        );
+        assert!(
+            mesh.blended.quad_count() > 1000,
+            "{}",
+            mesh.blended.quad_count()
+        );
+        mesh
+    }
+
+    #[test]
+    fn a_large_blended_mesh_is_drawn_back_to_front_too() {
+        let checkerboard = Vec3::new(13.0, 13.0, 13.0);
+        let cube = Vec3::new(2.5, 4.0, 25.5);
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        let mut views: Vec<(Vec3, Vec3)> = around(checkerboard, 25.0)
+            .into_iter()
+            .step_by(5)
+            .map(|eye| (eye, checkerboard))
+            .collect();
+        views.push((Vec3::new(0.0, 20.0, 25.5), cube));
+        put_eye(&mut app, views[0].0);
+        send_mesh(&mut app, coord, checkerboard_and_a_strip());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        for (eye, target) in views {
+            put_eye(&mut app, eye);
+            let wrong = rays_drawn_out_of_order(&drawn_quads(&app, entity), eye, target);
+            assert_eq!(wrong, 0, "eye at {eye}");
+        }
+    }
+
     /// What the strip fixture is for: the nearest-centre order gets it wrong.
     #[test]
     fn a_nearest_centre_order_gets_the_strip_over_a_cube_wrong() {

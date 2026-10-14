@@ -255,7 +255,7 @@ removed every one, but centre order is not exact in general, so ticket 08
 orders by separating planes: two quads whose boxes are disjoint along an axis
 are ordered by the plane between them, whichever is on the Eye's side in front,
 and the Client re-indexes a mesh only when the Eye crosses one of its quads' box
-bounds, which is the only time that order can change. Above 256 quads a mesh
+bounds, which is the only time that order can change. Above 2048 quads a mesh
 keeps the farthest-centre order, which is cheaper. A layer whose quads all lie
 in one plane facing one way (a lake's surface) is never re-sorted, because no
 two of them can overlap on screen. OIT was not taken: it needs `Msaa`
@@ -383,17 +383,17 @@ are testable alone. 04 is the first time a player can see any of it.
   `Tables::joint_id` leaves clear Materials out of it, so two glass halves seal
   nothing. The mesher still tests each quad against one neighbour's coverage, so
   a face two neighbours jointly hide is drawn: overdraw, never a hole.
-- **Quad order is exact up to 256 quads a mesh** (ticket 08); a bigger one, a
-  long lake shore, keeps the farthest-centre order, and a mesh the frame's
-  sorting budget does not reach keeps its order a frame longer.
+- **Quad order is exact up to 2048 quads a mesh** (tickets 08 and 15), which no
+  mesh of a default World reaches; a mesh the frame's sorting budget does not
+  reach keeps its order a frame longer.
 - **Blended surfaces are outside the depth and motion prepasses**, so SSAO and
   TAA, when step 9 adds them, will not see water or glass: no ambient occlusion
   on it, and no motion vectors for TAA to resolve it with.
 - ~~**Collision and picking** treat water as solid.~~ `MaterialDef::solid`
   (ticket 11): the sweep and the edit ray pass through water, and Place fills a
   water cell.
-- **Leaf holes are a procedural pattern** (ticket 10), regular to the eye, until
-  step 9's textures replace it.
+- **Leaf holes are a procedural pattern** (tickets 10 and 12) until step 9's
+  textures replace it.
 - ~~**Worldgen places none.**~~ A default World has lakes at one water level
   (ticket 09); glass and leaves are still a player's to place.
 

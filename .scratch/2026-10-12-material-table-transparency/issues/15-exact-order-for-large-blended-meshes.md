@@ -1,6 +1,6 @@
 # Exact blended order for large meshes
 
-Status: ready-for-agent
+Status: done
 Blocked by: 08
 
 Ticket 08 keeps meshes over 256 quads on the farthest-centre order, because a
@@ -24,3 +24,16 @@ relation already refuses to order.
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+Built. Coplanar pairs are dropped while the candidates are swept, and the cap
+is 2048 quads, up from 256.
+
+- The first test of a large mesh, a 3D checkerboard of glass and water, passed
+  with the old cap: its quads are all a Voxel square, and the farthest-centre
+  order is right for those. It now holds the strip of water over a glass cube
+  too, which that order gets wrong (36 rays from above the cube's end), and it
+  fails at the old cap and passes at the new.
+- Cost, four 6 s flights over a default World with its lakes, load 4.8 to 5.9:
+  worst sorting frame 238 to 544 us, one at 1.44 ms (ticket 08's: 400 to 510,
+  one at 1.9), about 460 sorts. The largest blended mesh seen on a flooded
+  World is 505 quads, so none reaches the cap.
