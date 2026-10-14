@@ -240,8 +240,9 @@ order, so two overlapping translucent surfaces (a glass house with water behind
 it) can blend in the wrong order. A single water surface or a single pane, which
 is nearly everything, is unaffected. Options for when it is not, in cost order
 and none built here: sort a Chunk's blended quads on camera movement (what
-Minecraft does); weighted-blended order-independent transparency, which Bevy 0.20
-ships as an experimental plugin; or accept it. The ticket measures the artefact
+Minecraft does); Bevy 0.20's experimental order-independent transparency plugin
+(a per-pixel fragment linked list and a resolve pass, not weighted-blended; it
+panics on a camera with MSAA on); or accept it. The ticket measures the artefact
 on a screenshot before choosing.
 
 Leaves render in the opaque pass. They are cutout in every voxel game, which
@@ -331,6 +332,7 @@ in step 5. The streaming worst tick is re-derived if a stage's cost moves.
 | 03  | Occlusion by Material and the two-layer `ChunkMesh`           | 01         |
 | 04  | Blended pass in the app, hotbar, screenshot                   | 03         |
 | 05  | The Server's edit path rejects unregistered Materials         | 01         |
+| 06  | Blended surfaces across the LOD cameras                       | 04         |
 
 02 and 03 are independent of each other: a translucent Voxel with dimming but
 no culling rule lights correctly and draws wrongly, and the reverse, and both
