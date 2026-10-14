@@ -5,16 +5,16 @@
 //! the Eye. Level 1 takes the level-0 Chunks the [`ChunkStore`] holds instead, so an Edit
 //! reaches it.
 //!
-//! Meshed by the level-0 mesher and lit as open sky, as no light is stored above level 0.
+//! Meshed by the level-0 mesher. No light is stored above level 0: a face is lit open sky unless it
+//! looks into air under the terrain, which the mesh job works out from the generator.
 //! The job pipeline is ADR-0007's: `docs/adr/0007-streaming-jobs-run-on-bevy-task-pools.md`.
 
 use std::sync::Arc;
 
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use tesserae_core::light::{Light, MAX_LIGHT};
 use tesserae_core::{
-    Chunk, ChunkLight, ChunkMesh, LitChunk, ShapeTable, Tables, Worldgen, WorldgenParams,
+    Chunk, ChunkMesh, LitChunk, ShapeTable, Tables, Worldgen, WorldgenParams, coarse_light,
     downsample, mesh_chunk,
 };
 
@@ -490,18 +490,32 @@ pub(in crate::server) fn generate_coarse(
     downsample(children, shapes)
 }
 
-/// Full sky matches the level-0 faces beside it and merges maximally; the cost is a cave
-/// mouth lit like open ground.
-static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
-
-fn mesh_coarse(center: &Chunk, around: &[Arc<Chunk>; 6], tables: &Tables) -> ChunkMesh {
+/// Lit by the covered-column rule of [`coarse_light`]: no light is stored above level 0, so it
+/// is computed here from the generator and dropped with the job.
+fn mesh_coarse(
+    surface: &Worldgen,
+    voxel_m: f32,
+    coord: ChunkCoord,
+    center: &Chunk,
+    around: &[Arc<Chunk>; 6],
+    tables: &Tables,
+) -> ChunkMesh {
+    let lit = coarse_light(
+        surface,
+        voxel_m,
+        [coord.x, coord.y, coord.z],
+        center,
+        std::array::from_fn(|face| &*around[face]),
+    );
     let neighbors: [Option<LitChunk>; 6] =
-        std::array::from_fn(|face| Some(LitChunk::new(&around[face], &OPEN_SKY)));
-    mesh_chunk(LitChunk::new(center, &OPEN_SKY), neighbors, tables)
+        std::array::from_fn(|face| Some(LitChunk::new(&around[face], &lit.around[face])));
+    mesh_chunk(LitChunk::new(center, &lit.center), neighbors, tables)
 }
 
 struct Plan {
     level: u32,
+    /// The edge of one Voxel of this level, in metres.
+    voxel_m: f32,
     anchor: ChunkCoord,
     rings: LevelRings,
 }
@@ -560,6 +574,7 @@ pub(in crate::server) fn stream_lod(
     let plans: Vec<Plan> = (1..levels)
         .map(|level| Plan {
             level,
+            voxel_m: world.voxel_size * 2f32.powi(level as i32),
             anchor: world.chunk_at_level(player.eye(), level),
             rings: LevelRings::new(*settings, world.cell_size(), level),
         })
@@ -578,7 +593,15 @@ pub(in crate::server) fn stream_lod(
         &tables,
         &budget,
     );
-    dispatch_meshes(&plans, &store, &mut state, &mut jobs, &tables.0, &budget);
+    dispatch_meshes(
+        &plans,
+        &store,
+        &mut state,
+        &mut jobs,
+        &tables.0,
+        &budget,
+        &generators,
+    );
 }
 
 /// Nothing but an anchor move takes a Chunk out of `keep` or `evict`, so a level whose anchor
@@ -813,6 +836,7 @@ fn dispatch_meshes(
     jobs: &mut LodJobs,
     tables: &Arc<Tables>,
     budget: &LodBudget,
+    generators: &LodGenerators,
 ) {
     let mut free = budget.in_flight.mesh.saturating_sub(jobs.mesh.in_flight());
     for plan in plans {
@@ -852,8 +876,12 @@ fn dispatch_meshes(
             let tables = Arc::clone(tables);
             let times = jobs.times.clone();
             let level = plan.level;
+            let surface = generators.sources[Plan::index(level)].clone();
+            let voxel_m = plan.voxel_m;
             jobs.mesh.spawn((level, coord), move || {
-                times.meshed(level, || mesh_coarse(&own, &around, &tables))
+                times.meshed(level, || {
+                    mesh_coarse(&surface, voxel_m, coord, &own, &around, &tables)
+                })
             });
         }
     }
@@ -865,7 +893,12 @@ mod tests {
     use crate::server::edit::set_voxel;
     use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
     use bevy::ecs::system::RunSystemOnce;
-    use tesserae_core::{CHUNK_SIZE, SHAPE_STAIR, Tables, Voxel, worldgen};
+    use tesserae_core::light::{Light, MAX_LIGHT};
+    use tesserae_core::{
+        CHUNK_SIZE, COVERED_SKY, ChunkLight, SHAPE_STAIR, Tables, Voxel, worldgen,
+    };
+
+    static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
 
     /// Past this many ticks a fill is stuck however much wall time is left: a livelock that
     /// never waits on a job would otherwise spin until the ceiling.
@@ -1027,13 +1060,20 @@ mod tests {
                 .all(|n| self.lod_store().contains(level, n))
         }
 
-        /// Built without going through the job under test.
+        /// Built without going through the job under test, from the same Chunks and the level's
+        /// own generator, so a mesh that is not this one was made from stale inputs.
         fn fresh_mesh(&self, level: u32, coord: ChunkCoord) -> ChunkMesh {
-            let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
             let store = self.lod_store();
-            let lit = |c: ChunkCoord| LitChunk::new(store.get(level, c).expect("held"), &sky);
-            let neighbors = face_neighbors(coord).map(|n| Some(lit(n)));
-            mesh_chunk(lit(coord), neighbors, &Tables::builtin())
+            let world = self.app.world();
+            let surface = &world.resource::<LodGenerators>().sources[Plan::index(level)];
+            let voxel_m = world.resource::<WorldSettings>().voxel_size * 2f32.powi(level as i32);
+            let around: Vec<Arc<Chunk>> = face_neighbors(coord)
+                .into_iter()
+                .map(|n| store.shared(level, n).expect("held"))
+                .collect();
+            let around: [Arc<Chunk>; 6] = around.try_into().unwrap_or_else(|_| unreachable!());
+            let own = store.shared(level, coord).expect("held");
+            mesh_coarse(surface, voxel_m, coord, &own, &around, &Tables::builtin())
         }
 
         fn delivered_at(&self, level: u32) -> HashSet<ChunkCoord> {
@@ -1730,17 +1770,18 @@ mod tests {
     }
 
     #[test]
-    fn every_vertex_light_is_full_sky_and_no_block_light() {
+    fn every_vertex_light_is_open_sky_or_covered_and_never_block_light() {
         let mut h = harness();
         let (ready, _) = h.lod_settle();
-        let want = u32::from(Light::new(MAX_LIGHT, 0).packed());
+        let open = u32::from(Light::new(MAX_LIGHT, 0).packed());
+        let covered = u32::from(COVERED_SKY.packed());
         let mut vertices = 0;
         for m in &ready {
             for layer in [&m.mesh.opaque, &m.mesh.blended] {
                 assert_eq!(layer.light.len(), layer.positions.len());
                 assert!(
-                    layer.light.iter().all(|&l| l == want),
-                    "level {} {} has a vertex not lit as open sky",
+                    layer.light.iter().all(|&l| l == open || l == covered),
+                    "level {} {} has a vertex lit as neither",
                     m.level,
                     m.coord
                 );
@@ -2251,5 +2292,115 @@ mod tests {
             delivered > 0,
             "{covering} was edited every tick and never redrawn"
         );
+    }
+
+    /// A coarse Chunk and its six neighbours, built as the Server builds them.
+    fn chunks_around(coord: ChunkCoord, source: &Worldgen) -> (Chunk, [Arc<Chunk>; 6]) {
+        let shapes = Tables::builtin().shapes;
+        let make = |c: ChunkCoord| generate_coarse(source, c, &Default::default(), &shapes);
+        let around: Vec<Arc<Chunk>> = face_neighbors(coord)
+            .into_iter()
+            .map(|c| Arc::new(make(c)))
+            .collect();
+        let around = around.try_into().unwrap_or_else(|_| unreachable!());
+        (make(coord), around)
+    }
+
+    /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground.
+    fn coarse_mesh(level: u32, coord: ChunkCoord, source: &Worldgen) -> ChunkMesh {
+        let (center, around) = chunks_around(coord, source);
+        let voxel_m = world().voxel_size * 2f32.powi(level as i32);
+        mesh_coarse(
+            &Worldgen::new(world().seed, 1.0, source.params()),
+            voxel_m,
+            coord,
+            &center,
+            &around,
+            &Tables::builtin(),
+        )
+    }
+
+    fn darkest_sky(mesh: &ChunkMesh) -> u8 {
+        mesh.opaque
+            .light
+            .iter()
+            .map(|&l| (l >> 4 & 0xF) as u8)
+            .min()
+            .unwrap_or(MAX_LIGHT)
+    }
+
+    fn without_caves() -> Worldgen {
+        Worldgen::new(
+            world().seed,
+            1.0,
+            WorldgenParams {
+                caves: None,
+                ..WorldgenParams::default()
+            },
+        )
+    }
+
+    /// The default seed's mouth at (-26, -352) m, a hole through the surface 14 m deep at level
+    /// 1 with a tunnel off it, found by a probe over the generator. Its Chunk at level 1 is
+    /// (-1, 0, -6).
+    #[test]
+    fn a_cave_mouth_at_level_one_has_faces_lit_below_open_sky() {
+        let coord = ChunkCoord::new(-1, 0, -6);
+        assert!(
+            darkest_sky(&coarse_mesh(1, coord, &source(0))) < MAX_LIGHT,
+            "the mouth is lit like open ground"
+        );
+        assert_eq!(
+            darkest_sky(&coarse_mesh(1, coord, &without_caves())),
+            MAX_LIGHT,
+            "the same ground without caves is not"
+        );
+    }
+
+    /// Where there is no cave there is no covered Voxel: the downsample rounds the surface up,
+    /// so the air over it is never a Voxel under the terrain. Level 1 reads level 0's stairs
+    /// and the rest read cubes, as the Server builds them.
+    #[test]
+    fn ground_without_caves_is_lit_exactly_as_open_sky_at_every_level() {
+        let tables = Tables::builtin();
+        let mut state = 0x5eed_u64;
+        let mut next = |range: i32| {
+            state = state
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            ((state >> 33) as i32).rem_euclid(range)
+        };
+        let mut meshes = 0;
+        for level in 1..=5u32 {
+            let params = WorldgenParams {
+                caves: None,
+                smoothing: (level == 1)
+                    .then(|| WorldgenParams::default().smoothing)
+                    .flatten(),
+                ..WorldgenParams::default()
+            };
+            let source = Worldgen::new(world().seed, 2f32.powi(level as i32 - 1), params);
+            let cell_m = CHUNK_SIZE as f32 * 2f32.powi(level as i32);
+            let (lowest_m, highest_m) = source.surface_bounds_m();
+            let rows =
+                (lowest_m / cell_m).floor() as i32 - 1..=(highest_m / cell_m).floor() as i32 + 1;
+            let reach = (4096.0 / cell_m) as i32;
+            for _ in 0..12 {
+                let (cx, cz) = (next(2 * reach) - reach, next(2 * reach) - reach);
+                for cy in rows.clone() {
+                    let coord = ChunkCoord::new(cx, cy, cz);
+                    let (center, around) = chunks_around(coord, &source);
+                    let neighbors: [Option<LitChunk>; 6] =
+                        std::array::from_fn(|f| Some(LitChunk::new(&around[f], &OPEN_SKY)));
+                    let open = mesh_chunk(LitChunk::new(&center, &OPEN_SKY), neighbors, &tables);
+                    assert!(
+                        same_mesh(&coarse_mesh(level, coord, &source), &open),
+                        "level {level} {coord} is not lit as open sky"
+                    );
+                    meshes += usize::from(!open.is_empty());
+                }
+            }
+        }
+        assert!(meshes > 40, "only {meshes} non-empty meshes were compared");
     }
 }

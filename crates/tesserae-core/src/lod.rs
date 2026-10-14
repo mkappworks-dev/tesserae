@@ -230,12 +230,7 @@ enum Reach {
 }
 
 impl Reach {
-    fn of(
-        surface: &impl Surface,
-        voxel_m: f32,
-        coord: [i32; 3],
-        solid_throughout: bool,
-    ) -> Self {
+    fn of(surface: &impl Surface, voxel_m: f32, coord: [i32; 3], solid_throughout: bool) -> Self {
         let size = CHUNK_SIZE as i32;
         let (lowest_m, highest_m) = surface.bounds_m();
         // The shell's lowest Voxel tops out at the Chunk's floor and its highest at one Voxel
@@ -1065,7 +1060,13 @@ mod tests {
     #[test]
     fn a_chunk_wholly_above_the_band_is_open_sky_and_asks_for_no_height() {
         let surface = Flat::at(40.0);
-        let lit = coarse_light(&surface, 2.0, [0, 1, 0], &pocked([0, 1, 0]), [&AIR_CHUNK; 6]);
+        let lit = coarse_light(
+            &surface,
+            2.0,
+            [0, 1, 0],
+            &pocked([0, 1, 0]),
+            [&AIR_CHUNK; 6],
+        );
         assert_all_uniform(&lit, OPEN_SKY);
         assert_eq!(surface.samples.get(), 0);
     }
@@ -1165,7 +1166,11 @@ mod tests {
             center.set(8, y, 8, Voxel::AIR);
         }
         let lit = coarse_light(&Flat::at(40.0), 2.0, [0, 0, 0], &center, [&AIR_CHUNK; 6]);
-        assert_eq!(sky(&lit.center, 8, 10, 8), 0, "a pit's floor is lit at level 0");
+        assert_eq!(
+            sky(&lit.center, 8, 10, 8),
+            0,
+            "a pit's floor is lit at level 0"
+        );
         assert_eq!(sky(&lit.center, 8, 31, 8), MAX_LIGHT);
     }
 }

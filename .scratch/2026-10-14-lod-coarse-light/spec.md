@@ -130,7 +130,11 @@ In `crates/tesserae/src/server/lod.rs`:
 - **Cave-free identity.** With `caves: None`, over a sweep of columns at
   levels 1 to 5 across the 4 km square, every coarse Chunk the sweep meshes
   has the same mesh as with the open-sky light: no Voxel is covered where there
-  is no cave. Mutations: a margin of zero, the lower corner only.
+  is no cave. It has slack: a margin of zero, half a Voxel or the lower corner
+  alone all pass it (61 non-empty meshes), and only a rule that covers ground by
+  a whole Voxel fails. The margin and the corner are pinned by the core tests,
+  not by this one; the slack says a smaller margin would keep open ground
+  unchanged, and it is left at a Voxel until a capture asks for less.
 - **A real mouth.** The default seed's mouth at (-26, -352) m, level 1, Chunk
   (-1, 0, -6): the mesh has a face lit below sky 15 (the test fails if it has
   none), and the same Chunk with caves off has none.
