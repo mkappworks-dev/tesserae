@@ -271,6 +271,143 @@ left out and why.
 
 Written as the tickets finish; what changed from the text above, and why.
 
+### Ticket 03: tuning against captures
+
+Apple M5, `TESSERAE_SCREENSHOT_OFFSCREEN=1`, 1080p, `dev` build; the images are
+in `/tmp/tesserae-fog-review/` and not committed. Every capture below that
+wants the whole reach in sets `TESSERAE_SCREENSHOT_FLY_AFTER_S=30`.
+
+**Why the first captures looked unfogged.** Three reasons, all measured.
+
+- _The captures were early._ The flight starts when the Server reports settled
+  (3.8 s), and levels 4 and 5 fill much later (11 to 14 s and more on a loaded
+  machine). The first horizon capture logged `held/meshed` of 2038/2167 for
+  level 4 and 0/0 for level 5, so its reach was 3.6 km and not 4.1 to 5.2 km.
+  With `FLY_AFTER_S=30` all six levels are in (level 5: 1243 held, 328
+  meshed, 4096 to 5221 m).
+- _Perspective squeezes the far field into a few rows._ The Eye is 14 to 20 m
+  above the terrain at the default vantage. A linear fog from D to D + 1 m
+  turns everything past D into sky, so the rows that turn sky-coloured say how
+  many rows lie past D. Terrain fills rows 545 to 1080. Past 300 m it
+  lies above row 627, past 600 m above row 585, past 1500 m above row 551 (11
+  rows), past 3000 m above row 547. Row 545 is 100% past 1.5 km and 43% past 3
+  km. So 85% fog, which is only reached at 4 km and out, covers two or three
+  rows of 535. The curve was never going to show on a view from near the
+  ground; a 150 m view has about six times the rows (the same far field spans
+  about 25 rows at 150 m and 4 at 14 m).
+- _Fog is mixed before the tonemapper, and what survives reads bright._ With the
+  share forced the same everywhere (a linear fog from -p * 1e6 to (1 - p) *
+  1e6 m) the dark default sky (43, 44, 47) gives, for typical terrain
+  (117, 166, 96) at row 800: p 0.5 (94, 135, 79), 0.7 (80, 114, 69), 0.85 (66,
+  91, 61), 0.9 (61, 80, 57), 0.95 (53, 66, 53), 0.99 (47, 51, 50). The green
+  left above the sky is 75%, 57%, 39%, 30%, 18% and 6% of the unfogged
+  excess. At the brightest horizon row, (152, 206, 127), p 0.85 is (85, 123,
+  73) and 0.95 is (62, 84, 59). So 85% of the radiance replaced still leaves
+  about 40% of the displayed contrast, and the default row 545, (111, 161, 92),
+  is the picture of p about 0.65. I did not read the scene radiance, so "the
+  tonemapper compresses it" is the reading that fits, not a measurement.
+
+**The colour.** The dark sky made distance read as gloom: the far terrain went
+darker and greener-black against a near-black sky, not hazy. A flat clear colour
+and fog colour of a mid blue-grey, (126, 146, 168), reads as air at 150 m; a
+paler one, (172, 192, 210), reads as air too but the HUD text is near white, and
+white text on it is 1.9 to 1, against 3.2 to 1 on the mid colour (the dark one
+is about 14 to 1). The mid colour is kept. **This changes the sky's flat colour
+and the fog colour, and nothing else:** no gradient, no sun disc, no atmosphere.
+The stated scope did not literally include the clear colour.
+
+Making fog colour and sky one value no longer works for a light colour, and
+this is the surprise of the ticket. The tonemapper darkens a bright fully
+fogged fragment but the clear colour is not tonemapped. Fully fogged terrain
+against the sky, 8-bit sRGB, medians of terrain rows 600 to 930: dark (45, 46,
+49) against (43, 44, 47), +2; mid colour as both (119, 135, 154) against (126,
+146, 168), -7, -11, -14; pale (151, 165, 178) against (172, 192, 210), -21, -27,
+-32. Only the dark one is within ticket 02's bar of 3/255. So `FogSettings`
+has a second field, `sky`, and the fog colour is the one that, once tonemapped, comes
+out as the sky: fog (136, 160, 190) gives terrain (126, 145, 169) against the
+sky (126, 146, 168), within 1/255, and every fully fogged pixel is within 1
+level of its median (p5 and p95 are (125, 144, 168) and (126, 145, 169)). Two
+iterations of measure and adjust found it; the relation is a named constant
+with a test that pins the pair and that fog is brighter than sky in every
+channel. A Look pack that changes `color` must change `sky` with it. Deriving
+one from the other needs the tonemapper's LUT on the CPU and is step 9's.
+
+**The curve and the opacity.** Fog share by distance, from the formulas:
+
+| Curve, reach_opacity | 192 m | 384 m | 768 m | 1.5 km | 3 km | 4096 m | 5221 m |
+| -------------------- | ----- | ----- | ----- | ------ | ---- | ------ | ------ |
+| squared 0.75         | 0.3%  | 1.2%  | 4.8%  | 17.7%  | 54%  | 75%    | 89.5%  |
+| squared 0.85         | 0.4%  | 1.7%  | 6.5%  | 23.4%  | 66%  | 85%    | 95%    |
+| squared 0.88 (kept)  | 0.5%  | 1.8%  | 7.2%  | 25.8%  | 70%  | 88%    | 97%    |
+| squared 0.92         | 0.6%  | 2.2%  | 8.5%  | 29.9%  | 76%  | 92%    | 98%    |
+| squared 0.97         | 0.8%  | 3.0%  | 11.6% | 38.9%  | 86%  | 97%    | 99.7%  |
+| plain 0.85           | 8.5%  | 16.3% | 29.9% | 50.9%  | 76%  | 85%    | 91%    |
+| plain 0.92           | 11.2% | 21.1% | 37.7% | 61.2%  | 85%  | 92%    | 96%    |
+
+Seen at 150 m with the new colours, over the strip of rows around the horizon:
+squared 0.85 leaves a soft edge about 20 rows deep with the far terrain still
+readable; 0.92 dissolves it over about 35 rows and the terrain past 4 km is
+nearly gone; 0.97 dissolves it over about 60 rows and the clip distance is
+invisible, at the cost of the 4 km the LOD step built. Plain exponential at
+0.85 is the strongest at a low Eye, a veil over everything past 100 m, and
+puts 8.5% of fog on the ground at the edge of level 0 and 4.5% at 100 m, which
+is the haze on the Player's own ground that the ticket rules out. So the curve
+stays exponential squared. 0.75 is nearly unfogged. **Kept: squared, 0.88.** It
+is between 0.85 and 0.92 on the look and is the largest opacity that keeps the
+join of levels 1 and 2 under 2% (1.8%; 0.9 is 2.003%), which ticket 01 pinned
+as the spec's figure, so no test of ticket 01 changed except that the literal
+0.85 in the no-coarse-levels test reads the default. Level 0's edge is 0.5%.
+
+At the reach, terrain at 4.1 to 5.2 km (level 5) is visible and faint. From
+300 m up, level 5's rows are 479 to 503, and the median pixel over columns 300
+to 1700 against the sky (126, 146, 168), 8-bit sRGB: row 479 (127, 149, 167),
+rows 481 to 491 (131 to 133, 159 to 165, 164 to 160), rows 499 to 502 (134, 170
+to 171, 156 to 155). The unfogged terrain there is (150, 205, 125). So the
+difference from the sky is at most 25 in green and 13 in blue, and the very
+far edge is within 3 of the sky: a faint green on the haze, no clip edge.
+
+**What fog could break, checked.**
+
+- _The camera boundary._ The fog share is read per pixel from a fogged and an
+  unfogged capture of the same Eye (same-pixel ratio of the channel furthest
+  from the sky), as the median over columns aligned on the join, taken from a
+  tinted capture that says which pixels are which level. At the default density
+  the fog is below one 8-bit step at the first joins (0.0 at the join of levels
+  0 and 1, 1.9% flat across levels 1 and 2 at 150 m), so a second run with
+  throwaway reach opacity of 0.99999 raises the signal: 3.7% flat
+  across levels 0 and 1 (rows 984 +- 8), 5.8 to 5.9% across levels 1 and 2, and
+  smooth on the way to 90% at levels 3 and 4. No line, and the crops at 2x of
+  both joins show none. Levels 2 and 3 are noisy (19 columns, 0.1 to 0.4 swing
+  by row, no step larger than the swing) because few columns have a clean run
+  of each; I read that as the limit of the measure there, not a step.
+- _Mutation._ With the five coarse cameras unfogged (throwaway, reverted), the
+  dense run reads 0.037 on the near side of the join of levels 0 and 1 and
+  0.000 on the far side, and 0.000 everywhere past it; at the default density
+  the capture is indistinguishable from `TESSERAE_FOG=0` (a hard horizon). The
+  check sees the failure, at the first join only under the dense probe: the
+  design makes the first joins nearly fog-free on purpose.
+- _The cut and the tint._ `TESSERAE_LOD_TINT=1` at the near-ground view (Eye
+  (0, 64, -57), 7 m short of the corner at z = -64, level 0 under the Eye and
+  rings out to the horizon): no coarse block over the level-0 horizon; the
+  level-1 hill at the right edge is terrain past level 0's ground. At 150 m the
+  rings are green, salmon, yellow, light green, cyan, lilac from near to far,
+  all still told apart through the fog. Straight down from 150 m is level 0 only.
+  The magenta probe over seven views (Eye on the lattice line at 76 m, 30
+  degrees at 76 m, 64 m, 150 m, 300 m, straight down at 60 m and 150 m) counts
+  no clear-colour pixel under terrain in any column. A pixel painted into the
+  capture is counted, so the counter works.
+- _Not measured._ The effective fog share is a ratio of 8-bit display values
+  between two captures with a pose difference of up to 0.3 m in height, so it
+  is good to a few hundredths and cannot resolve joins at the level of the
+  quantisation; frame cost is ticket 04's.
+
+**What did not work.** The first idea for the join check, reading the share
+from the tinted fogged and unfogged pair, is wrong: the tint changes the base
+colour by ring and the display response differs, so shares in different rings
+do not compare. It needs the untinted pair and a tinted one only to find the
+rows. And `FogSettings::color` as the one colour for fog and sky, the spec's
+decision 3, holds for the dark colour only.
+
 ## Tickets
 
 | #   | Title                                       | Blocked by |

@@ -20,11 +20,28 @@ const MIN_REACH_M: f32 = 1.0;
 /// below 1 is the largest opacity that still gives a finite density.
 const MAX_REACH_OPACITY: f32 = 1.0 - f32::EPSILON;
 
+/// The haze a fully fogged surface shows, as sRGB bytes.
+const HAZE_SKY_SRGB: [u8; 3] = [126, 146, 168];
+
+/// What the shader fogs toward so that a fully fogged surface comes out as
+/// [`HAZE_SKY_SRGB`]: the tonemapper runs after the fog and the clear colour
+/// skips it, and it darkens this colour by (10, 15, 21). Measured offscreen
+/// to within 1/255; re-measure if the tonemapper or the exposure changes.
+const HAZE_FOG_SRGB: [u8; 3] = [136, 160, 190];
+
+fn srgb(bytes: [u8; 3]) -> [f32; 3] {
+    bytes.map(|b| f32::from(b) / 255.0)
+}
+
 /// The fog a Look pack sets, as plain data.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct FogSettings {
-    /// sRGB, the space of `ClearColor`.
+    /// sRGB, what the shader fogs toward. Not the colour the fog is seen as:
+    /// see [`HAZE_FOG_SRGB`].
     pub color: [f32; 3],
+    /// sRGB, the clear colour. A pack that changes `color` must change this
+    /// with it, or the terrain ends in a visible edge against the sky.
+    pub sky: [f32; 3],
     /// The share of a surface's colour that fog replaces at the reach. 0 is no
     /// fog. 1 is clamped to just under it, so the reach is fully fogged but the
     /// density stays finite. Outside 0 to 1, and NaN, clamp to the nearest end
@@ -35,19 +52,19 @@ pub struct FogSettings {
 impl Default for FogSettings {
     fn default() -> Self {
         FogSettings {
-            // Today's `ClearColor`, which the fog colour replaces.
-            color: [43.0 / 255.0, 44.0 / 255.0, 47.0 / 255.0],
-            reach_opacity: 0.85,
+            color: srgb(HAZE_FOG_SRGB),
+            sky: srgb(HAZE_SKY_SRGB),
+            reach_opacity: 0.88,
         }
     }
 }
 
-/// Inserts the settings and sets the sky to the fog colour, so the terrain ends
+/// Inserts the settings and sets the clear colour from them, so the terrain ends
 /// in the colour behind it. At build time, so a later plugin's `ClearColor`
 /// (the capture probe's) wins.
 pub fn plugin(app: &mut App) {
     app.init_resource::<FogSettings>();
-    let [r, g, b] = app.world().resource::<FogSettings>().color;
+    let [r, g, b] = app.world().resource::<FogSettings>().sky;
     app.insert_resource(ClearColor(Color::srgb(r, g, b)));
 }
 
@@ -193,7 +210,8 @@ mod tests {
         for lod_distance_m in [DEFAULT_VIEW_M, 100.0, 0.0] {
             let fog = distance_fog(&FogSettings::default(), DEFAULT_VIEW_M, lod_distance_m);
             let got = opacity_at(&fog, DEFAULT_VIEW_M);
-            assert!((got - 0.85).abs() < 1e-5, "lod {lod_distance_m} m: {got}");
+            let want = f64::from(FogSettings::default().reach_opacity);
+            assert!((got - want).abs() < 1e-5, "lod {lod_distance_m} m: {got}");
         }
     }
 
@@ -230,15 +248,26 @@ mod tests {
     }
 
     #[test]
-    fn the_sky_is_the_fog_colour_in_the_default_app() {
+    fn the_clear_colour_is_the_sky_and_not_the_fog_colour_in_the_default_app() {
         let mut app = App::new();
         app.add_plugins(plugin);
-        let [r, g, b] = FogSettings::default().color;
+        let [r, g, b] = FogSettings::default().sky;
         assert_eq!(app.world().resource::<ClearColor>().0, Color::srgb(r, g, b));
         assert_eq!(
             *app.world().resource::<FogSettings>(),
             FogSettings::default()
         );
+    }
+
+    #[test]
+    fn the_default_fog_colour_is_the_sky_lifted_by_the_tonemapper_darkening() {
+        let FogSettings { color, sky, .. } = FogSettings::default();
+        assert_eq!(color, srgb(HAZE_FOG_SRGB));
+        assert_eq!(sky, srgb(HAZE_SKY_SRGB));
+        // The tonemapper only darkens a colour this bright, so equal values are the mistake.
+        for (fog, sky) in HAZE_FOG_SRGB.into_iter().zip(HAZE_SKY_SRGB) {
+            assert!(fog > sky, "fog {fog} against sky {sky}");
+        }
     }
 
     #[test]

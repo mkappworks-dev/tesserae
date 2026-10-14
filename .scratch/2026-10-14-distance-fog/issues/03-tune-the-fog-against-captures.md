@@ -1,6 +1,6 @@
 # Tune the fog against captures
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec decision 2's curve and defaults, decision 4's boundary check, and
@@ -54,3 +54,36 @@ two things fog could break.
 - `Status: done` is set in the commit that finishes this ticket.
 
 ## Comments
+
+### Done
+
+Full numbers and what did not work are in the spec's Outcome. In short:
+
+- **Kept: exponential squared, `reach_opacity` 0.88, and a lighter colour pair.**
+  The pair is the flat clear colour (126, 146, 168) and the fog colour (136,
+  160, 190). **This is a change of the sky's flat colour and the fog colour
+  only** (no gradient, sun or atmosphere), which the stated scope did not
+  literally include. The dark default read as gloom against the bright terrain;
+  the mid blue-grey reads as haze at 150 m and keeps the white HUD text at
+  3.2 to 1 (the paler (172, 192, 210) gives 1.9 to 1).
+- **`FogSettings` gained `sky`.** The tonemapper darkens a bright fully fogged
+  fragment and the clear colour skips it, so one value for both left terrain
+  7 to 14 levels darker than the sky at the mid colour (-21 to -32 at the pale
+  one). The fog colour is now the one that comes out as the sky: terrain
+  (126, 145, 169) against sky (126, 146, 168). Named constants and a test.
+- **Why the first captures showed little.** They were taken before levels 4
+  and 5 had filled (level 5 absent, reach 3.6 km), and at 14 to 20 m above the
+  ground the whole 4 km far field is two or three rows of 535. A 150 m view has
+  the rows for it. Fog is also mixed before the tonemapper: 85% of the radiance
+  replaced still leaves about 40% of the displayed contrast.
+- **Boundary and mutation.** Fog share is flat across the joins; with the
+  coarse cameras unfogged it drops from 0.037 to 0.000 at the join of levels 0
+  and 1 under a dense probe, and the captures at the default density look like
+  `TESSERAE_FOG=0`. At the default density the first joins are under one 8-bit
+  step, by design.
+- **Cut and tint.** Near-ground, 150 m and straight-down views with
+  `TESSERAE_LOD_TINT=1` show no coarse block over level 0 and the rings through
+  the fog; the magenta probe over seven views found no clear-colour pixel under
+  terrain.
+- **Not measured:** scene radiance (the tonemapper reading is an inference), and
+  joins finer than one 8-bit step at the default density.
