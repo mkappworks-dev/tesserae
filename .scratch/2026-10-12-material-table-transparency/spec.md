@@ -359,6 +359,11 @@ in step 5. The streaming worst tick is re-derived if a stage's cost moves.
 | 09  | Default Worlds have lakes                                     | 06         |
 | 10  | Leaves cut out, before textures                               | 04         |
 | 11  | Water is not solid                                            | 01         |
+| 12  | Leaf holes: one definition, less regular                      | 10         |
+| 13  | A coarse lake bed is dimmed by the water over it              | 09         |
+| 14  | Coarse water above the finer rows (wontfix)                   | 07         |
+| 15  | Exact blended order for large meshes                          | 08         |
+| 16  | `mesh_chunk/straddling` against `main`                        | 09         |
 
 02 and 03 are independent of each other: a translucent Voxel with dimming but
 no culling rule lights correctly and draws wrongly, and the reverse, and both
