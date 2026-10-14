@@ -1,6 +1,6 @@
 # Leaf holes: one definition, less regular
 
-Status: ready-for-agent
+Status: done
 Blocked by: 10
 
 Ticket 10's hole pattern reads as rows and stripes, and `leaf_hole` is written
@@ -22,3 +22,12 @@ comment.
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+Built as specified. `leaf_hole` lives once, in `render/leaf_hole.wesl`, which
+both stages import (`import super::leaf_hole::leaf_hole`). The module has to be
+loaded to be found: registered with `embedded_asset!` alone, nothing held a
+handle to it and every chunk pipeline failed to compile ("no shader registered
+for this module path"), so it is loaded with `load_shader_library!`, as
+`bevy_core_pipeline` loads its OIT module. The hash is PCG's output permutation
+over the quarter-Voxel cell, in place of a sum of multiplied coordinates: the
+gallery's canopy shows no rows or stripes, and its shadow is dappled.

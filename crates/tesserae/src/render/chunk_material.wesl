@@ -17,6 +17,7 @@ import bevy_pbr::render::{
     },
     view_transformations::position_world_to_clip,
 };
+import super::leaf_hole::leaf_hole;
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN is injected
 // by ChunkMaterialExtension::specialize.
@@ -32,18 +33,6 @@ struct LodParams {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(101)
 var<uniform> lod: LodParams;
-
-// Holes in a cutout face, four by four to a Voxel, about a third of them open.
-// On the face's UV, which counts the Voxels of its own level, so a coarse leaf
-// has coarse holes and the pattern does not swim. Step 9's textures replace it.
-// chunk_prepass.wesl has the same function and the two must stay in step.
-fn leaf_hole(uv: vec2<f32>) -> bool {
-    let cell = vec2<u32>(floor(fract(uv) * 4.0));
-    let voxel = vec2<u32>(vec2<i32>(floor(uv)) + vec2<i32>(4096));
-    var h = (cell.x * 73856093u) ^ (cell.y * 19349663u) ^ (voxel.x * 83492791u) ^ (voxel.y * 2654435761u);
-    h = (h ^ (h >> 13u)) * 1274126177u;
-    return ((h >> 8u) & 1023u) < 360u;
-}
 
 // Mirrors client::drawn_mask, which documents the layout.
 @group(constants::MATERIAL_BIND_GROUP) @binding(102)

@@ -3,19 +3,11 @@
 // has them too.
 
 import bevy_pbr::prepass::io::VertexOutput;
+import super::leaf_hole::leaf_hole;
 
 // Declared only where the pass writes more than depth.
 @if(PREPASS_FRAGMENT)
 import bevy_pbr::prepass::io::FragmentOutput;
-
-// The same as chunk_material.wesl's; the two must stay in step.
-fn leaf_hole(uv: vec2<f32>) -> bool {
-    let cell = vec2<u32>(floor(fract(uv) * 4.0));
-    let voxel = vec2<u32>(vec2<i32>(floor(uv)) + vec2<i32>(4096));
-    var h = (cell.x * 73856093u) ^ (cell.y * 19349663u) ^ (voxel.x * 83492791u) ^ (voxel.y * 2654435761u);
-    h = (h ^ (h >> 13u)) * 1274126177u;
-    return ((h >> 8u) & 1023u) < 360u;
-}
 
 fn cut(in: VertexOutput) {
 @if(MAY_DISCARD) {
