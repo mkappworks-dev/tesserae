@@ -111,14 +111,14 @@ sense once these are known.
 
 ## Decisions
 
-### 1. The contract: package `tesserae:mod`, one world
+### 1. The contract: package `tesserae:mods`, one world
 
 `crates/tesserae-mods/wit/` holds the contract. It is the artifact ADR-0004's
 split is a test of: the demo and every Game outside the repo build against these
 files and nothing else.
 
 ```wit
-package tesserae:mod@0.1.0;
+package tesserae:mods@0.1.0;
 
 interface types {
     record vec3 { x: f32, y: f32, z: f32 }       // metres
@@ -180,7 +180,7 @@ decision (Known loose ends), because it needs a Snapshot to read from.
 
 ### 2. Versioning
 
-The package is `tesserae:mod@0.1.0` and every item is stable from it. Under 0.x
+The package is `tesserae:mods@0.1.0` and every item is stable from it. Under 0.x
 a minor bump is a breaking change, so:
 
 - **Additive** (no bump of the line): a new function, interface, type or world
@@ -671,6 +671,19 @@ the rest is finished and the PR says exactly what was left out and why.
 ## Outcome
 
 Written as the tickets finish; what changed from the text above, and why.
+
+### Ticket 01: the contract
+
+- The package is `tesserae:mods`, not `tesserae:mod`: wit-bindgen 0.57 and
+  0.62 do not escape a package name that is a Rust keyword, so a guest in
+  `tesserae:mod` does not compile. The world is still `mod`. Decisions 1 and 2
+  above are corrected to match.
+- Export lookup is semver-compatible like import lookup: a guest built against
+  0.1.0 instantiates on a host defining 0.1.1 and its exports are found under
+  both names. The open question of decision 2 is closed and no fallback was
+  written. A host built against a newer patch must look up `@since` functions
+  optionally, through the export index, not through the generated
+  `instantiate`.
 
 ## Tickets
 
