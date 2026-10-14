@@ -1,6 +1,6 @@
 # The Server's edit path rejects unregistered Materials
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 The edit path's validation list says "the Material is not air (a Material
@@ -20,3 +20,9 @@ registry is step 7's)". The table is that registry for native code.
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+Built as specified: `RejectReason::UnknownMaterial` ("unknown material" on
+screen), checked first among the per-Voxel validations, before the Shape. A
+test places Material 999 (rejected, nothing changes) and every built-in from 1
+(each placed). The comment deferring the registry to step 7 was already gone.
+
