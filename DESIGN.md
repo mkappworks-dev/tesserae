@@ -219,7 +219,9 @@ gets the same rings.
   the flat sky colour are a pair and not one value: the tonemapper runs in the
   shader after the fog and skips the clear colour, so the fog colour is the one
   that comes out as the sky. `apply_fog` is already the end of the chunk shader,
-  so there is no shader change.
+  so there is no shader change. `FogSettings` is live: changing the resource
+  re-derives the clear colour and every camera's fog, so a Look pack sets it
+  whenever it likes.
 
 The per-level budget is measured, in Open items.
 

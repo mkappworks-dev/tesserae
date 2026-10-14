@@ -186,14 +186,32 @@ the fog binding and the branch, so it cannot stand for "off" in a measurement.
 The same switch makes a before capture from the same binary. A build without
 `dev` has no switch and always fogs.
 
+`TESSERAE_FOG_OPACITY=<float>` overrides `reach_opacity` where the plugin
+builds the resource, also under `dev` only. Ticket 03 measured the fog and sky
+pair by hand-editing `fog.rs` to force a nearly opaque fog, and ticket 05 could
+not repeat that measurement because editing source for a measurement is not a
+change anyone keeps. The knob makes the dense-fog probe a run and not a diff.
+`FogSettings::default()` stays plain data, so the tests that pin the defaults
+are unaffected.
+
 ### 6. What a Mod or a Look pack does
 
 Nothing per Voxel. `FogSettings` is two colours and an opacity that step 9's
 Look-pack API sets once at load, in the post-process settings DESIGN.md already
 lists ("fog parameters"). The derivation from `view_distance_m` and
 `lod_distance_m` stays in the engine, so a pack gives colours and an opacity and
-not a density that is right for one reach only. Re-deriving `ClearColor` when
-the settings change is step 9's, since nothing changes them at run time yet.
+not a density that is right for one reach only.
+
+The text left re-deriving `ClearColor` to step 9, on the grounds that nothing
+changes the settings at run time yet. That is now done here instead:
+`FogSettings` is live data. `follow_settings` watches the resource and, on a
+change after startup, writes `ClearColor` from `sky` and rewrites every
+camera's `DistanceFog` through `distance_fog` with the current
+`StreamingSettings`. So a pack that sets the resource at load — or at any later
+point — needs no further engine work, and the cameras do not have to be
+respawned. The system early-outs on `is_changed()` and skips the run on which
+the resource is inserted, so it costs nothing on an ordinary frame and leaves
+the capture probe's own `ClearColor` alone.
 
 ### 7. Everything physical stays in metres
 
@@ -238,11 +256,18 @@ Fog is on the GPU: one extra uniform binding, and per fragment a distance, an
   3). Out of scope by the request.
 - **No Look-pack API.** The numbers are data with a `Default`; setting them is
   step 9's.
-- **`ClearColor` is not re-derived at run time** when `FogSettings` changes.
-  Nothing changes it yet.
+- ~~**`ClearColor` is not re-derived at run time** when `FogSettings` changes.~~
+  Closed: `follow_settings` in `render/fog.rs` re-derives `ClearColor` from
+  `sky` and rewrites every camera's `DistanceFog` whenever `FogSettings`
+  changes after startup. It early-outs on `is_changed()`, so it does not touch
+  the cameras on an ordinary frame, and skips the run on which the resource is
+  inserted (`is_added()`) so the capture probe's `ClearColor`, inserted after
+  this plugin, is not clobbered on the first frame.
 - **The pair is measured, not derived.** `HAZE_FOG_SRGB` is right for this
   tonemapper and exposure; a change to either needs a re-measure, and a pack's
-  own colour needs its partner found the same way until step 9 derives it.
+  own colour needs its partner found the same way until step 9 derives it. The
+  re-measure no longer needs a source edit: `TESSERAE_FOG_OPACITY` forces the
+  dense fog it is read at (decision 5).
 - **Fog is uniform in direction.** No height fog and no directional glow
   (`directional_light_color` is `NONE`), so there is no sun glow around the sun.
 - **A blended surface is fogged only if its shader goes through `apply_fog`.** A
@@ -555,7 +580,9 @@ view), compared with the same views from before it.
   ticket. What argues the pair still agrees: the sky colour, the fog colour and
   the tonemapper are unchanged, a fully fogged fragment is the fog colour
   whatever the light on it, and the fogged level 5 edge rows are identical to
-  before. If a later change touches the tonemapper or the exposure, re-measure.
+  before. If a later change touches the tonemapper or the exposure, re-measure
+  — with `TESSERAE_FOG_OPACITY`, added afterwards (decision 5) exactly so that
+  this needs no source edit.
 
 ## Tickets
 

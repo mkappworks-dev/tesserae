@@ -13,6 +13,8 @@
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
+use crate::server::streaming::StreamingSettings;
+
 /// Floor for the reach, so a World that draws nothing cannot divide by zero.
 const MIN_REACH_M: f32 = 1.0;
 
@@ -61,11 +63,40 @@ impl Default for FogSettings {
 
 /// Inserts the settings and sets the clear colour from them, so the terrain ends
 /// in the colour behind it. At build time, so a later plugin's `ClearColor`
-/// (the capture probe's) wins.
+/// (the capture probe's) wins; `follow_settings` keeps the two in step
+/// afterwards without taking that away.
 pub fn plugin(app: &mut App) {
-    app.init_resource::<FogSettings>();
+    app.insert_resource(built_settings());
     let [r, g, b] = app.world().resource::<FogSettings>().sky;
     app.insert_resource(ClearColor(Color::srgb(r, g, b)));
+    app.add_systems(Update, follow_settings);
+}
+
+/// Re-derives the clear colour and every camera's fog when [`FogSettings`] is
+/// changed after startup, so a Look pack that sets it at run time takes effect
+/// without respawning the cameras.
+fn follow_settings(
+    settings: Res<FogSettings>,
+    streaming: Res<StreamingSettings>,
+    mut clear: ResMut<ClearColor>,
+    mut cameras: Query<&mut DistanceFog>,
+) {
+    // A resource reads as changed on the first run after it is inserted, and the
+    // capture probe inserts its own `ClearColor` after this plugin: re-applying
+    // the sky then would overwrite the probe's magenta.
+    if !settings.is_changed() || settings.is_added() {
+        return;
+    }
+    let [r, g, b] = settings.sky;
+    clear.0 = Color::srgb(r, g, b);
+    let fog = distance_fog(
+        &settings,
+        streaming.view_distance_m,
+        streaming.lod_distance_m,
+    );
+    for mut camera in &mut cameras {
+        *camera = fog.clone();
+    }
 }
 
 /// How far the farthest drawn terrain is: `lod_distance_m`, unless the World
@@ -132,6 +163,33 @@ pub fn enabled() -> bool {
 #[cfg(not(feature = "dev"))]
 pub fn enabled() -> bool {
     true
+}
+
+/// `TESSERAE_FOG_OPACITY=<float>` overrides `reach_opacity`, so the fog and sky
+/// pair can be re-measured at a nearly opaque fog — which a change to the
+/// tonemapper, the exposure or the colours calls for — without editing this
+/// file for the measurement. [`FogSettings::default`] stays untouched data.
+#[cfg(feature = "dev")]
+fn built_settings() -> FogSettings {
+    with_opacity_override(
+        FogSettings::default(),
+        std::env::var("TESSERAE_FOG_OPACITY").ok().as_deref(),
+    )
+}
+
+/// An absent or unparsable value leaves the settings as they are; a value out of
+/// range is clamped where the density is derived, as any other is.
+#[cfg(feature = "dev")]
+fn with_opacity_override(mut settings: FogSettings, opacity: Option<&str>) -> FogSettings {
+    if let Some(reach_opacity) = opacity.and_then(|v| v.trim().parse().ok()) {
+        settings.reach_opacity = reach_opacity;
+    }
+    settings
+}
+
+#[cfg(not(feature = "dev"))]
+fn built_settings() -> FogSettings {
+    FogSettings::default()
 }
 
 #[cfg(test)]
@@ -287,6 +345,111 @@ mod tests {
         assert!(camera_fog(false, &settings, DEFAULT_VIEW_M, DEFAULT_LOD_M).is_none());
         let fog = camera_fog(true, &settings, DEFAULT_VIEW_M, DEFAULT_LOD_M).unwrap();
         assert!(density_of(&fog) > 0.0);
+    }
+
+    /// `MinimalPlugins` is not needed: `follow_settings` is in `Update`, which a
+    /// bare `App` runs.
+    fn running_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(plugin).init_resource::<StreamingSettings>();
+        app
+    }
+
+    fn default_camera_fog() -> DistanceFog {
+        let streaming = StreamingSettings::default();
+        distance_fog(
+            &FogSettings::default(),
+            streaming.view_distance_m,
+            streaming.lod_distance_m,
+        )
+    }
+
+    const CHANGED: FogSettings = FogSettings {
+        color: [0.1, 0.2, 0.3],
+        sky: [0.4, 0.5, 0.6],
+        reach_opacity: 0.5,
+    };
+
+    #[test]
+    fn changing_the_settings_at_run_time_updates_the_sky_and_every_cameras_fog() {
+        let mut app = running_app();
+        let cameras: Vec<Entity> = (0..3)
+            .map(|_| app.world_mut().spawn(default_camera_fog()).id())
+            .collect();
+        app.update();
+
+        *app.world_mut().resource_mut::<FogSettings>() = CHANGED;
+        app.update();
+
+        let [r, g, b] = CHANGED.sky;
+        assert_eq!(app.world().resource::<ClearColor>().0, Color::srgb(r, g, b));
+        let streaming = StreamingSettings::default();
+        let want = distance_fog(
+            &CHANGED,
+            streaming.view_distance_m,
+            streaming.lod_distance_m,
+        );
+        for camera in cameras {
+            let fog = app.world().get::<DistanceFog>(camera).expect("fog");
+            assert_eq!(fog.color, want.color);
+            assert_eq!(density_of(fog), density_of(&want));
+            assert_ne!(density_of(fog), density_of(&default_camera_fog()));
+        }
+    }
+
+    #[test]
+    fn a_later_clear_colour_survives_until_the_settings_actually_change() {
+        let mut app = running_app();
+        // What the capture probe does: its own `ClearColor` after this plugin.
+        let magenta = Color::srgb(1.0, 0.0, 1.0);
+        app.insert_resource(ClearColor(magenta));
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(app.world().resource::<ClearColor>().0, magenta);
+
+        *app.world_mut().resource_mut::<FogSettings>() = CHANGED;
+        app.update();
+
+        let [r, g, b] = CHANGED.sky;
+        assert_eq!(app.world().resource::<ClearColor>().0, Color::srgb(r, g, b));
+    }
+
+    #[test]
+    fn the_frame_after_startup_rewrites_neither_the_sky_nor_a_cameras_fog() {
+        let mut app = running_app();
+        let magenta = Color::srgb(1.0, 0.0, 1.0);
+        app.insert_resource(ClearColor(magenta));
+        let unrelated = DistanceFog {
+            color: Color::srgb(1.0, 0.0, 0.0),
+            falloff: FogFalloff::ExponentialSquared { density: 0.25 },
+            ..default()
+        };
+        let camera = app.world_mut().spawn(unrelated.clone()).id();
+
+        app.update();
+
+        assert_eq!(app.world().resource::<ClearColor>().0, magenta);
+        let fog = app.world().get::<DistanceFog>(camera).expect("fog");
+        assert_eq!(fog.color, unrelated.color);
+        assert_eq!(density_of(fog), 0.25);
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_opacity_override_replaces_the_reach_opacity_and_ignores_anything_else() {
+        let default = FogSettings::default();
+        assert_eq!(
+            with_opacity_override(default, Some(" 0.99999 ")).reach_opacity,
+            0.99999
+        );
+        // Only the opacity: a measurement must not move the pair it measures.
+        let overridden = with_opacity_override(default, Some("0.5"));
+        assert_eq!(overridden.color, default.color);
+        assert_eq!(overridden.sky, default.sky);
+        for ignored in [None, Some(""), Some("dense"), Some("0.5f")] {
+            assert_eq!(with_opacity_override(default, ignored), default);
+        }
     }
 
     #[test]
