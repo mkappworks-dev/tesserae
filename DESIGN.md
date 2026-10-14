@@ -204,8 +204,10 @@ gets the same rings.
   because a light's layers are also its shadow-caster mask: the one on layer 0
   casts shadows, the one on the coarse layers does not, and coarse terrain
   receives none.
-- **Light.** A level above 0 stores none and is meshed as open sky. See the ADR
-  for what that costs.
+- **Light.** A level above 0 stores none. The mesh job lights a face open sky
+  unless it looks into air more than a Voxel under the terrain, which it lights
+  dark (`coarse_light`, from the level's generator). See the ADR for what that
+  gets wrong.
 
 The per-level budget is measured, in Open items.
 

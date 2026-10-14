@@ -131,11 +131,11 @@ tesserae/
 │   │   │   ├── worldgen.rs     seed + position → Chunk, tuned in metres     ▸ 3
 │   │   │   ├── light.rs        incremental flood-fill                       ▸ 4
 │   │   │   ├── shape.rs        Shape table, Orientation; derived geometry   ▸ 5
-│   │   │   ├── lod.rs          downsample: 8 Chunks → 1 coarse, by volume   ▸ 6
+│   │   │   ├── lod.rs          downsample, and the covered-sky coarse light ▸ 6
 │   │   │   ├── fluid.rs        cellular automaton                           ▸ 8
 │   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
-│   │                       lod.rs: downsample, coarse Chunk, coarse mesh  ▸ 6
+│   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
 │   ├── tesserae-mods/          NO Bevy — wasmtime host, WIT, command queue  ▸ 7
 │   │   └── wit/                the versioned contract
 │   └── tesserae/               the Bevy app

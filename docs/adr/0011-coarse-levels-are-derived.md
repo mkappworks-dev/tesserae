@@ -38,9 +38,16 @@ the Eye and level 2 starts at 256 m.
   Chunk is held. Both are already true of level 0, which has no save.
 - **Emitters vanish at distance.** A coarse Voxel is its dominant Material and
   carries no block light. Nothing generates an emitter today.
-- **Coarse light is full sky.** A level above 0 stores no light and is meshed
-  with `Light::new(MAX_LIGHT, 0)`, so a distant cave mouth is lit like open
-  ground. It is also why `light.rs` takes no new rule.
+- **Coarse light is two-valued.** A level above 0 stores no light. The mesh job
+  lights a face open sky unless it looks into air more than one Voxel under
+  `Worldgen::surface_height_m`, which it lights dark. The rule is `coarse_light`
+  in `lod.rs`, a column rule from the generator and not a flood, which is why
+  `light.rs` takes no new rule. What it gets wrong: a pit open to the sky is
+  dark below its top Voxel where level 0 lights it, a sideways opening is dark
+  from its first covered Voxel where level 0 grades over about 15 m, and the
+  dark value does not depend on depth. A capture of the default seed's mouth at
+  250 m found the difference a few dozen pixels, so the rule is small on
+  purpose. See `.scratch/2026-10-14-lod-coarse-light/spec.md`.
 - **The save format is unchanged.** It has been LOD-aware since step 1. A later
   save step stores level 0 only and rebuilds the rest, as this does.
 - **Thin features vanish at the next level.** A one-Voxel pane is under half a
