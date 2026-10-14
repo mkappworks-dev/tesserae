@@ -562,6 +562,10 @@ mod tests {
             .add_message::<LodUnloaded>()
             .add_systems(Startup, add_material)
             .add_systems(Update, (upload_meshes, drop_meshes).chain());
+        // `upload_meshes` takes the dev-only counter as a `ResMut`, so without
+        // it the system fails parameter validation instead of running.
+        #[cfg(feature = "dev")]
+        app.init_resource::<crate::cost::MainThreadCost>();
         app.update();
         app
     }
