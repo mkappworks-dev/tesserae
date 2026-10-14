@@ -2,7 +2,10 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-/// Placeholders until ticket 04 sets them by measurement (spec decision 10).
+/// Commands in one batch (spec decision 8).
+pub const MAX_COMMANDS: usize = 1_024;
+
+/// The numbers a Mod runs under (spec decision 10); a Manifest may lower them and never raise them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModLimits {
     pub call_fuel: u64,
@@ -17,8 +20,9 @@ pub struct ModLimits {
 
 impl ModLimits {
     pub const HOST: ModLimits = ModLimits {
-        call_fuel: 5_000_000,
-        yield_fuel: 1_000_000,
+        // About 5 ms of the heavier measured mix (hashing, allocation) at ~41M fuel/ms; ticket 04.
+        call_fuel: 200_000_000,
+        yield_fuel: 10_000_000,
         max_call_wall: Duration::from_millis(250),
         memory_bytes: 64 * 1024 * 1024,
         table_elements: 10_000,

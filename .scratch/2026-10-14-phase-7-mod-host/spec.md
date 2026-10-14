@@ -729,6 +729,55 @@ Written as the tickets finish; what changed from the text above, and why.
   load provides and the save does not is left without an id there. A save step
   decides whether to append it.
 
+### Ticket 04: the sandbox
+
+- **Decision 9's claim holds.** A guest in `std::thread::sleep(1 hour)`, run
+  under `call_async` raced against a timer, comes back as `Deadline` at 256 ms
+  for a 250 ms wall, and a second Mod's `tick` completes repeatedly on another
+  thread meanwhile. Dropping the future frees the worker; no fallback was
+  needed or written.
+- **wasmtime-wasi needs a tokio reactor, so each poll enters one.** Its WASI
+  pollables (a sleep, a `poll`) are tokio's, and the first run panicked with
+  "there is no reactor running" under a plain `futures-lite` executor. Every
+  poll of a guarded call is wrapped in `wasmtime_wasi::runtime::
+  with_ambient_tokio_runtime`, which enters wasmtime-wasi's own runtime; the
+  crate takes no executor and Bevy's task pool needs none. `tokio` is a direct
+  dependency with no features, for the `AsyncWrite` trait name only.
+- **Measured, on the M5 (10 cores), load average 3.3 to 4.3 throughout.** Fuel
+  per millisecond depends on the code: a loop of loads, stores and arithmetic
+  runs at 63 to 73 million fuel/ms (51 fuel and 0.70 ns per iteration), and
+  hashing plus allocation and `format!` at 41.5 million (587 fuel and 14.2 ns
+  per iteration). `CALL_FUEL` is 200 000 000, 4.8 ms of the heavy mix and 2.7
+  ms of the light one. `YIELD_FUEL` is 10 000 000, 0.14 to 0.24 ms between
+  turns. Yielding every 1 000 000 fuel against never costs nothing measurable
+  (49.5 ms against 49.4 ms for 2 000 000 000 fuel), so the interval is chosen
+  for latency alone. `MAX_CALL_WALL` stays 250 ms, 50 full calls of CPU: it is
+  there for what fuel cannot see, and a call that yields twenty times can wait
+  on a busy pool between turns.
+- **A faulted `ModInstance` is gone.** `declare`, `start` and `tick` take
+  `self` and give it back with the result, so a fault returns no instance. The
+  log outlives it: `ModInstance::log()` is a `LogHandle` taken before the call,
+  which is how a panic's message reaches the author.
+- **Memory is told from other traps by a flag, not by text.** `StoreLimits` with
+  `trap_on_grow_failure` returns a plain error, so `Limiter` wraps it, records
+  the refusal and `classify` turns it into `Memory`.
+- **A list is lifted whole before the host sees it.** wasmtime reads the guest's
+  `list<command>` into a `Vec` before `tick` returns, so a size check there
+  bounds what is kept and not what was allocated. What bounds the allocation is
+  the guest's own memory limit: a flood that fits the 64 MiB (1 000 000 empty
+  `place`s) costs the host 32 MB and is `BadBatch` for exceeding
+  `MAX_COMMANDS`; one that does not fit (10 000 000) never leaves the guest
+  and is `Memory`, with 1.1 MB held by the host. The spec's "checked while
+  lowering" would need a hand-typed `TypedFunc` returning `WasmList`; ticket 05
+  decides whether the 2.5x expansion is worth it.
+- **Output is a log.** `host::log` and the guest's stdout and stderr land in one
+  bounded queue, by line (cut at 1 KiB), at a burst of 32 lines and 32 a
+  second, 256 pending, the rest counted in `LogDrain::suppressed`. A guest can
+  never block on a full stream.
+- **Random sources are SplitMix64 streams** keyed by SHA-256 of the World seed
+  and the Mod id, one each for the secure and insecure sources, so a Mod run
+  twice in a World repeats. A request over 64 KiB traps.
+
 ## Tickets
 
 | #   | Title                                              | Blocked by |

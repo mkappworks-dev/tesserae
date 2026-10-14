@@ -8,10 +8,12 @@ use crate::bindings::Mod;
 use crate::bindings::tesserae::mods::content::Declaration;
 use crate::host::{HostState, engine, linker};
 
+mod alloc;
 mod convert;
 mod declare;
 mod export_version;
 mod loading;
+mod sandbox;
 
 fn guest(name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

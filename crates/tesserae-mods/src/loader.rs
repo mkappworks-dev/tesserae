@@ -1,30 +1,33 @@
 use wasmtime::Engine;
-use wasmtime::component::Component;
+use wasmtime::component::{Component, Linker};
 
 use crate::error::ModError;
-use crate::host::engine;
+use crate::host::{HostState, engine, linker};
 use crate::limits::ModLimits;
 use crate::manifest::Found;
+use crate::sandbox::{ModFault, ModInstance};
 use crate::trust::{Trust, Verdict};
 
 /// A trusted Mod whose component compiled; not yet instantiated.
 pub struct Compiled {
     pub found: Found,
     pub limits: ModLimits,
-    #[allow(dead_code)] // ticket 06 instantiates it
     pub(crate) component: Component,
 }
 
 pub struct ModHost {
-    #[allow(dead_code)] // ticket 06 builds Stores from it
     pub(crate) engine: Engine,
+    linker: Linker<HostState>,
     limits: ModLimits,
 }
 
 impl ModHost {
     pub fn new() -> Result<ModHost, ModError> {
+        let engine = engine().map_err(ModError::Engine)?;
+        let linker = linker(&engine).map_err(ModError::Engine)?;
         Ok(ModHost {
-            engine: engine().map_err(ModError::Engine)?,
+            engine,
+            linker,
             limits: ModLimits::HOST,
         })
     }
@@ -59,5 +62,22 @@ impl ModHost {
                 })
             })
             .collect()
+    }
+
+    /// `world_seed` and the Mod's id seed its random sources, so a Mod run twice in one World repeats.
+    pub async fn instantiate(
+        &self,
+        compiled: &Compiled,
+        world_seed: u64,
+    ) -> Result<ModInstance, ModFault> {
+        ModInstance::new(
+            &self.engine,
+            &self.linker,
+            &compiled.component,
+            &compiled.found.manifest.id,
+            world_seed,
+            compiled.limits,
+        )
+        .await
     }
 }

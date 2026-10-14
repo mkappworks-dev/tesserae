@@ -5983,11 +5983,14 @@ dependencies = [
 name = "tesserae-mods"
 version = "0.0.0"
 dependencies = [
+ "bytes",
  "futures-lite",
+ "rand_core",
  "serde",
  "serde_json",
  "sha2",
  "tesserae-core",
+ "tokio",
  "toml",
  "wasmtime",
  "wasmtime-wasi",
