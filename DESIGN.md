@@ -410,9 +410,9 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    median flight frame is 5.6 ms on an M5 at 1080p offscreen, and the furthest
    drawn Chunk ends 5174 m out. Level 0 is drawn 0.3 s later while the distance
    fills, which takes 11 s. Distance fog on all six cameras is not measurable
-   against that frame: the arms with and without it sit inside a spread of about
-   1.5 ms, which bounds the cost under 0.3 ms. See
-   `.scratch/2026-10-13-phase-6-lod/spec.md` and
+   against that frame: interleaved runs on a quiet machine put the paired
+   difference with and without it at 0.0 ms, which bounds the cost under 0.2 ms.
+   See `.scratch/2026-10-13-phase-6-lod/spec.md` and
    `.scratch/2026-10-14-distance-fog/spec.md`.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.

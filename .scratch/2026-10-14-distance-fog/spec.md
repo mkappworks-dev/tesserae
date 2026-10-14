@@ -267,16 +267,31 @@ Fog is on the GPU: one extra uniform binding, and per fragment a distance, an
   tonemapper and exposure; a change to either needs a re-measure, and a pack's
   own colour needs its partner found the same way until step 9 derives it. The
   re-measure no longer needs a source edit: `TESSERAE_FOG_OPACITY` forces the
-  dense fog it is read at (decision 5).
+  dense fog it is read at (decision 5). ~~It has not been re-measured since #15
+  landed.~~ It has now: fully fogged terrain (126, 145, 169) against sky
+  (126, 146, 168), the same to a level as before #15, in Post-merge
+  measurements.
 - **Fog is uniform in direction.** No height fog and no directional glow
   (`directional_light_color` is `NONE`), so there is no sun glow around the sun.
-- **A blended surface is fogged only if its shader goes through `apply_fog`.** A
-  `StandardMaterial` does. The blended-pass session decides its material, and is
-  told.
+- ~~**A blended surface is fogged only if its shader goes through
+  `apply_fog`.**~~ Settled by reading `feat/blended-pass`, which is the branch
+  that adds the blended pass: its blended surfaces are the **same**
+  `ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>`
+  as the opaque ones, differing only in `alpha_mode: AlphaMode::Blend`, and its
+  `chunk_material.wesl` still ends in `main_pass_post_lighting_processing`,
+  which is where `apply_fog` runs. So blended water and glass are fogged by
+  construction, on every LOD camera, with no further work on either branch.
+  What is unverified is only a capture of the two together, because that branch
+  is not merged.
 - **The far plane still clips at `lod_distance_m` plus a Cell.** At 88% fog the
   clip edge is a step of the remaining 12%, which is the "faint" the reach is
-  allowed to show; ticket 03 measured it as within 3 of the sky at the very far
-  edge. A higher `reach_opacity` hides it and costs the visible 4 km.
+  allowed to show. ~~Ticket 03 measured it as within 3 of the sky at the very
+  far edge.~~ Re-measured after #15 from 300 m: the cut shows as two flat
+  silhouette plateaus, and the step across it is (+2, +5, -1) at the farther one
+  and (+5, +11, -4) at the nearer one, against (+24, +59, -43) unfogged. So
+  "within 3" holds only at the farthest cut; the edge is faint but can still be
+  made out. The numbers and the crops are in Post-merge measurements. A higher
+  `reach_opacity` hides it and costs the visible 4 km.
 
 ## Coordination
 
@@ -286,11 +301,16 @@ of this work:
 - `tech/lod-coarse-light-ticket` (lighting the coarse levels): a ticket only. It
   will touch `server/lod.rs` and possibly `chunk_material.wesl`. This branch
   touches neither.
-- `claude/friendly-agnesi-4851c8` (blended draw call for water and glass):
-  uncommitted tickets under `.scratch/2026-10-12-material-table-transparency/`.
-  It will change `upload_meshes` in `client/chunk_view.rs`, which this branch
-  does not, and it lists distance fog as out of scope in its ticket 06. This
-  branch edits `spawn_camera` in the same file, a different function.
+- `claude/friendly-agnesi-4851c8` (blended draw call for water and glass), since
+  committed as `feat/blended-pass`: it changes `upload_meshes` in
+  `client/chunk_view.rs`, which this branch does not, and it lists distance fog
+  as out of scope in its ticket 06. This branch edits `spawn_camera` in the same
+  file, a different function. Both branches are on `9ec5571`, and the files they
+  both touch are `client/chunk_view.rs`, `render/mod.rs`, `CONTEXT.md` and
+  `DESIGN.md` — not `chunk_material.rs` or `capture.rs`, which only that branch
+  edits. Whoever merges second resolves about three regions: the `use` block and
+  `spawn_camera` in `chunk_view.rs`, and the module list in `render/mod.rs`.
+  Nothing in its blended pass needs fog work (see the loose end above).
 - `claude/brave-babbage-b12e1c` and `origin/tech/coarse-lod-durable-edits`
   (coarse LOD edits and emitters): a ticket only, server side.
 - The tree is rebased on `main` before the PR. It was, at ticket 05: `main`
@@ -582,7 +602,140 @@ view), compared with the same views from before it.
   whatever the light on it, and the fogged level 5 edge rows are identical to
   before. If a later change touches the tonemapper or the exposure, re-measure
   — with `TESSERAE_FOG_OPACITY`, added afterwards (decision 5) exactly so that
-  this needs no source edit.
+  this needs no source edit. That re-measure has since been done, with that
+  knob, and the pair holds: Post-merge measurements below.
+
+### Post-merge measurements
+
+Four measurements taken after the rebase onto `main` at `9ec5571` (#15, coarse
+levels lit), on a machine quieter than ticket 04's. Apple M5, `dev` build,
+`TESSERAE_SCREENSHOT_OFFSCREEN=1`, 1080p; images, logs and the analysis scripts
+are in `/tmp/tesserae-fog-review2/` and not committed.
+
+**1. The fog and sky pair, re-measured after #15.** Ticket 05 left this open
+because the measurement needed a throwaway edit of `fog.rs`;
+`TESSERAE_FOG_OPACITY` (decision 5) is what turns it into a run. One view,
+captured three times: the default vantage lifted 300 m
+(`TESSERAE_SCREENSHOT_LIFT_M=300`, `FLY_AFTER_S=30`, Eye (0, 375.8, -72)), at
+the default density, at `TESSERAE_FOG_OPACITY=0.99999`, and at `TESSERAE_FOG=0`.
+All six levels were in (`capture_reach_m 1:325-415, 2:840-984, 3:1608-1906,
+4:3144-3752, 5:4168-5292`; level 0 is under the Eye and out of frame at that
+altitude) and the three poses agree to 0.01 m, so the captures are pixel for
+pixel comparable.
+
+Which terrain counts as fully fogged is read from the **default** capture and
+not from the dense one, so the selection cannot assume the answer: per pixel the
+display share is `(unfogged - fogged) / (unfogged - sky)` in the channel
+furthest from the sky, and a pixel is taken when that share is at least 0.85 and
+its unfogged channel is at least 30 levels from the sky. The display share is a
+floor for the radiance share, because the tonemapper compresses what fog leaves
+(ticket 03), and the dense density is 2.33 times the default, so a radiance
+share of 0.85 there is `1 - 0.15^5.43` = 0.99997 here: those pixels sit at the
+fog's asymptote to far under one 8-bit level. 11571 pixels qualify, in rows 238
+to 494. In the dense capture, 8-bit sRGB:
+
+| Pixels                               | n      | median          | p5              | p95             |
+| ------------------------------------ | ------ | --------------- | --------------- | --------------- |
+| fully fogged terrain (share >= 0.85) | 11571  | (126, 145, 169) | (125, 144, 168) | (126, 145, 169) |
+| sky                                  | 393041 | (126, 146, 168) | (126, 146, 168) | (126, 146, 168) |
+
+**The pair agrees to (0, -1, +1), inside the bar of 3/255**, and every fully
+fogged pixel is within one level of its median. The same terrain unfogged is
+(126, 177, 104). Loosening the cut to 0.80 (24123 px) and tightening it to 0.90
+(4400 px) give the same three medians, so the figure does not depend on where
+the cut is put. These are ticket 03's numbers to the level: it read terrain
+(126, 145, 169) against sky (126, 146, 168) before #15. The magenta probe below
+agrees independently: 21 pixels of that capture equal the plugin's sky value,
+and all of them are terrain near the horizon.
+
+**2. The capture probe after `follow_settings`.** The risk is that
+`follow_settings`, which rewrites `ClearColor` whenever `FogSettings` changes,
+clobbers the probe's magenta on the frame the resource is inserted. The unit
+tests cover it; this is the same probe in the real app, at the default density,
+over three views — the 300 m view above, the default vantage, and straight down
+from 150 m.
+
+| View                    | exact (255, 0, 255) | sky median    | under terrain |
+| ----------------------- | ------------------- | ------------- | ------------- |
+| 300 m, `FLY_AFTER_S=30` | 488827              | (255, 0, 255) | 0             |
+| default vantage         | 290892              | (255, 0, 255) | 0             |
+| straight down, 150 m    | 0                   | all terrain   | 0             |
+
+"Under terrain" counts near-magenta pixels (R > 200, G < 60, B > 200) below the
+topmost solid pixel of their own column, which is ticket 03's count; the 300 m
+view also has none inside a terrain mask taken from its own unfogged capture and
+eroded by 3 px, so silhouette edges are excluded rather than explained away. The
+counter sees a failure: one magenta pixel painted into the 300 m capture is
+counted as one. **The sky is still the probe's magenta and no clear-colour pixel
+sits under terrain**, so live `FogSettings` did not break the probe.
+
+**3. Frame cost on a quiet machine.** Same method as ticket 04 —
+`scripts/frame-runs 1` per run so the arms interleave, the default flight,
+`main` at `9ec5571` built in its own detached worktree under
+`/tmp/tesserae-fog-review2/` with its own `target/` and removed afterwards —
+repeated 13 times over three arms, 39 runs. `uptime` was read before and after
+every run. Median of each figure over the kept runs, range in brackets, in ms:
+
+| Arm             | median_flight_ms | p99_flight_ms  | worst_flight_ms | worst_tick_ms | kept | left out |
+| --------------- | ---------------- | -------------- | --------------- | ------------- | ---- | -------- |
+| main            | 5.6 (5.0-6.0)    | 7.7 (6.9-9.1)  | 10.0 (7.7-36.5) | 0.9 (0.8-1.0) | 11   | 2        |
+| branch          | 5.6 (5.0-8.5)    | 7.5 (6.9-19.5) | 8.8 (8.0-50.4)  | 0.9 (0.8-1.4) | 12   | 1        |
+| branch, `FOG=0` | 5.2 (5.0-6.0)    | 7.3 (6.9-8.3)  | 8.8 (7.2-22.0)  | 1.0 (0.8-1.4) | 10   | 3        |
+
+Sorted `median_flight_ms` of the kept runs: main 5.0 5.0 5.0 5.1 5.5 5.6 5.6 5.7
+5.8 5.8 6.0; branch 5.0 5.0 5.0 5.1 5.3 5.6 5.6 5.7 5.7 5.8 5.9 8.5; `FOG=0` 5.0
+5.0 5.0 5.0 5.0 5.5 5.6 5.6 5.8 6.0. The one 8.5 is the branch's first run,
+taken while the machine was still settling from the baseline build.
+
+_Left out._ The same rule as ticket 04: a run whose median flight frame is at or
+near the 60 Hz cap. main 16.6, 16.6; branch 16.6; `FOG=0` 16.6, 16.6, 16.5. That
+is 6 of 39 runs (ticket 04 lost 13 of 42), spread over all three arms.
+
+_Load._ The driver waited for a 1-minute load under 3 before each run, giving up
+after two minutes. 32 of the 39 runs started under 3; the load before was 2.48
+to 5.02 (median 2.83) and after 2.88 to 6.63 (median 3.56). Ticket 04 could not
+get below about 4. The last three rounds all read 5.0 ms on all three arms,
+which is what a quiet machine looks like here.
+
+_Paired within a round_, which is the comparison the interleaving is for, over
+the rounds where both arms were kept: branch - main is 0.00 ms at the median
+(n = 10, each round between -0.3 and +0.2, bootstrap 95% interval of the median
+[-0.20, +0.10]); branch - `FOG=0` is +0.05 ms (n = 10, -0.2 to +0.3, interval
+[-0.10, +0.20]); `FOG=0` - main is 0.00 ms (n = 9, interval [-0.10, +0.00]).
+
+**Fog's cost is still not measurable, and the bound is now about 0.2 ms**, down
+from ticket 04's 0.3 ms. That is a bound and not a measurement: the paired
+differences sit on either side of zero, so nothing here says fog costs anything
+at all, only that it cannot cost more than about 0.2 ms a frame at 1080p on this
+GPU. The worst tick is 0.9, 0.9 and 1.0 ms, so no main-thread or Server work was
+added, as expected. The branch also runs `follow_settings` on every frame, an
+early-out on an unchanged resource: it is inside the branch - main difference
+above and **cannot be seen** — 0.00 ms at the median, with the whole six-camera
+fog in the same figure.
+
+**4. The far edge at the reach, after #15.** The same 300 m view. Terrain ends
+at `lod_distance_m` plus a Cell, and the end is flat: the silhouette is two
+horizontal plateaus, row 235 over columns 960 to 1232 and row 256 over 1221
+columns, with almost nothing between them. Medians across each line, 8-bit sRGB,
+sky above it and terrain under it:
+
+| Plateau | sky above       | silhouette row  | 1-3 rows under  | 4-11 rows under | step, fogged  | step, `FOG=0`   |
+| ------- | --------------- | --------------- | --------------- | --------------- | ------------- | --------------- |
+| row 235 | (126, 146, 168) | (128, 150, 167) | (128, 151, 167) | (129, 153, 166) | (+2, +5, -1)  | (+24, +59, -43) |
+| row 256 | (126, 146, 168) | (128, 152, 166) | (131, 157, 164) | (131, 160, 163) | (+5, +11, -4) | (+23, +58, -44) |
+
+**Partly confirmed, and the "within 3 of the sky" reading does not hold along
+the whole edge.** At the row 235 plateau the step across the cut is within 5
+levels (the silhouette row itself, which MSAA mixes with the sky, is within 4),
+which is ticket 03's finding to a level. At row 256 it is 11 levels of
+green. I did not establish why the two differ: the view geometry puts them
+within a few tens of metres of the same distance from the Eye, so the cause is
+more likely in what is behind each edge than in the fog, and it was not chased.
+Fog takes the cut from a 59-level step to 5 and 11, and the terrain then grows
+out of the haze over 40 rows (+23 green by row 293), but at 2x the cut can
+still be made out as a faintly lighter rectangle against the sky
+(`j4-edge-crop-default.png` beside `j4-edge-crop-nofog.png`). So the edge is
+faint but not invisible, which is what the loose end now says.
 
 ## Tickets
 
