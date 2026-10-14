@@ -34,17 +34,17 @@ Voxel of a column is within one coarse Voxel above `surface_height_m` and no
 more than half a Voxel below it (ticket 08 of the LOD spec pins it). The air
 above the top Voxel is therefore never more than half a Voxel under the surface,
 so a margin of one Voxel leaves every open-ground face at sky 15, byte for byte.
-The lowest of four corners and not the lower corner alone, because on a slope the
-corner can sit a Voxel above the middle at level 5. If a sweep shows the margin
-is not enough for the cave-free case, the fix is more sample points, not a wider
-margin: a wider margin darkens real mouths.
+The lowest of four corners and not the lower corner alone, because on a slope
+the corner can sit a Voxel above the middle at level 5. If a sweep shows the
+margin is not enough for the cave-free case, the fix is more sample points, not
+a wider margin: a wider margin darkens real mouths.
 
 **Where it lives.** `tesserae-core/src/lod.rs`, beside the downsample, so the
 rule is headless and benchmarkable and the server has one call to make:
 
 - `COVERED_SKY`, a `Light`, and a `Surface` trait (a height in metres over a
-  point and the band it is confined to) that `Worldgen` implements, so a test can
-  stub the heightfield and count the samples.
+  point and the band it is confined to) that `Worldgen` implements, so a test
+  can stub the heightfield and count the samples.
 - `coarse_light(surface, voxel_m, coord, center, around)` returning a
   `CoarseLight` of a `ChunkLight` for the Chunk and one for each neighbour, in
   the mesher's face order. The mesher reads a neighbour's light only on the
@@ -105,11 +105,11 @@ without caves meshes exactly as before.
 In `tesserae-core` unless noted; each is written first, watched to fail, and
 mutation-checked.
 
-- **A hand-built tunnel under a flat heightfield** (a stub surface and a
-  Chunk with an air tube): the faces inside get `COVERED_SKY`, the faces above
-  the surface get 15, the Voxel exactly one Voxel under the surface stays lit and
-  the next one is covered. Mutations: a margin of two Voxels, a margin of half
-  a Voxel, the lattice read at one corner.
+- **A hand-built tunnel under a flat heightfield** (a stub surface and a Chunk
+  with an air tube): the faces inside get `COVERED_SKY`, the faces above the
+  surface get 15, the Voxel exactly one Voxel under the surface stays lit and
+  the next one is covered. Mutations: a margin of two Voxels, a margin of half a
+  Voxel, the lattice read at one corner.
 - **The Chunk border.** A tunnel crossing the Chunk's border on each of six
   faces: the Chunk and its neighbour agree on the covered state of the plane
   they share. Mutation: a neighbour's plane computed from the neighbour's own
