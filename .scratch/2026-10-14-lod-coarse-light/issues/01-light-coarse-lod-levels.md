@@ -1,6 +1,6 @@
 # Light the coarse LOD levels
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: -
 
 Follow-up to `.scratch/2026-10-13-phase-6-lod/spec.md` decision 3 and the
@@ -337,3 +337,12 @@ at distance.
 inside the terrain, whose faces are meshed and never seen. Skipping them would
 cut coarse quads and vertex memory, which is a different ticket from lighting
 and has no capture behind it yet.
+
+### 2026-10-14: triaged
+
+Maintainer, in chat: set `ready-for-agent` with option (a) chosen, write the
+spec before any code, and implement on a `feat/` branch test-first with the
+benchmarks and the ADR-0011 amendment this ticket lists. Step 0 leaned
+`wontfix` (see above); the decision was made with that in front of them. The
+work stays in the mesh job: no change to `light.rs`, `mesh.rs` or the stage
+count unless a benchmark says otherwise.
