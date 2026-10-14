@@ -10,14 +10,6 @@
 //! two distances and the settings alone, with no Voxel size, so the same
 //! settings over a World with 0.25 m Voxels give the same fog.
 
-// Nothing outside the tests uses this until the camera setup does. Gated on
-// `not(test)` because the tests use everything, and an unfulfilled `expect` is
-// itself a warning.
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "no camera attaches the fog yet")
-)]
-
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
@@ -48,6 +40,15 @@ impl Default for FogSettings {
             reach_opacity: 0.85,
         }
     }
+}
+
+/// Inserts the settings and sets the sky to the fog colour, so the terrain ends
+/// in the colour behind it. At build time, so a later plugin's `ClearColor`
+/// (the capture probe's) wins.
+pub fn plugin(app: &mut App) {
+    app.init_resource::<FogSettings>();
+    let [r, g, b] = app.world().resource::<FogSettings>().color;
+    app.insert_resource(ClearColor(Color::srgb(r, g, b)));
 }
 
 /// How far the farthest drawn terrain is: `lod_distance_m`, unless the World
@@ -91,6 +92,29 @@ pub fn distance_fog(
         },
         ..default()
     }
+}
+
+/// The fog every terrain camera gets, or `None` for none at all. A zero
+/// opacity is not "off": it would still pay for the fog binding and the branch.
+pub fn camera_fog(
+    enabled: bool,
+    settings: &FogSettings,
+    view_distance_m: f32,
+    lod_distance_m: f32,
+) -> Option<DistanceFog> {
+    enabled.then(|| distance_fog(settings, view_distance_m, lod_distance_m))
+}
+
+/// `TESSERAE_FOG=0` turns the fog off, to measure what it costs and to capture
+/// the same view without it.
+#[cfg(feature = "dev")]
+pub fn enabled() -> bool {
+    !std::env::var("TESSERAE_FOG").is_ok_and(|v| v == "0")
+}
+
+#[cfg(not(feature = "dev"))]
+pub fn enabled() -> bool {
+    true
 }
 
 #[cfg(test)]
@@ -203,6 +227,37 @@ mod tests {
     fn reach_opacity_of_one_is_nearly_opaque_at_the_reach() {
         let fog = distance_fog(&with_opacity(1.0), DEFAULT_VIEW_M, DEFAULT_LOD_M);
         assert!(opacity_at(&fog, DEFAULT_LOD_M) > 0.9999);
+    }
+
+    #[test]
+    fn the_sky_is_the_fog_colour_in_the_default_app() {
+        let mut app = App::new();
+        app.add_plugins(plugin);
+        let [r, g, b] = FogSettings::default().color;
+        assert_eq!(app.world().resource::<ClearColor>().0, Color::srgb(r, g, b));
+        assert_eq!(
+            *app.world().resource::<FogSettings>(),
+            FogSettings::default()
+        );
+    }
+
+    #[test]
+    fn a_later_clear_colour_wins_over_the_plugins() {
+        let mut app = App::new();
+        app.add_plugins(plugin);
+        app.insert_resource(ClearColor(Color::srgb(1.0, 0.0, 1.0)));
+        assert_eq!(
+            app.world().resource::<ClearColor>().0,
+            Color::srgb(1.0, 0.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn switching_the_fog_off_gives_no_component_and_on_gives_the_derived_one() {
+        let settings = FogSettings::default();
+        assert!(camera_fog(false, &settings, DEFAULT_VIEW_M, DEFAULT_LOD_M).is_none());
+        let fog = camera_fog(true, &settings, DEFAULT_VIEW_M, DEFAULT_LOD_M).unwrap();
+        assert!(density_of(&fog) > 0.0);
     }
 
     #[test]

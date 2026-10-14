@@ -1,6 +1,6 @@
 # Fog on every camera, matched to the sky
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decisions 1, 3, 4 and 5, and the "rests on" facts: no shader change.
@@ -47,3 +47,27 @@ Spec decisions 1, 3, 4 and 5, and the "rests on" facts: no shader change.
 - `Status: done` is set in the commit that finishes this ticket.
 
 ## Comments
+
+### Done
+
+`render::fog::plugin` inserts `FogSettings` and `ClearColor`; `spawn_camera`
+clones one `DistanceFog` onto the near camera and every coarse camera.
+`TESSERAE_FOG=0` (dev) is `fog::enabled()` feeding `camera_fog(enabled, ..)`, so
+the switch is tested without the process environment. `chunk_material.*` is not
+touched.
+
+Sky against fully fogged terrain, 8-bit sRGB, offscreen capture at 1920x1080
+with a throwaway density of 0.05 per metre (not committed): sky (43, 44, 47)
+everywhere; terrain from row 600 down is (45, 46, 49) for 46% of its pixels and
+at most (46, 47, 50), mean (45.2, 46.2, 49.3). The difference is 2 to 3 per
+channel, within the 3/255 bar, so one value stands and there is no constant. The
+tonemapper lifts the fog colour by 2.
+
+Captures, all offscreen: the default vantage and a horizon view at the default
+height and at 150 m, each with and without `TESSERAE_FOG=0`. Fog is on the
+distant terrain in the default-density captures and not at the feet (under 1% of
+colour on the bottom third). It is gentle: the terrain at the horizon is still
+bright green, because fog mixes in linear radiance before the tonemap, so 30 to
+60% of the radiance left is most of the brightness. With the magenta probe the
+sky is magenta (255, 0, 255) and no pixel below the horizon is. Whether the
+default reads as fog is ticket 03's to judge.
