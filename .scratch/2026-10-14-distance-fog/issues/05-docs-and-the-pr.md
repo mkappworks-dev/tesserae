@@ -1,6 +1,6 @@
 # Docs and the PR
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03, 04
 
 ## What to build
@@ -42,3 +42,13 @@ Blocked by: 03, 04
 - `Status: done` is set in the commit that finishes this ticket.
 
 ## Comments
+
+### Done
+
+The docs half is done: `CONTEXT.md` (**Distance fog**), `DESIGN.md` (a Fog
+bullet under LOD, `FogSettings` in the Look packs list, the frame cost in step
+6), `docs/architecture.md` (`render/fog.rs`), and the spec corrected and its
+Outcome completed (ticket 05 section: no ADR and why, the rebase onto `9ec5571`,
+and the captures after it, with the one thing not re-measured). The push and the
+PR body are the caller's, as are deleting `/tmp/tesserae-fog-review/` and the
+acceptance criteria about the PR text.

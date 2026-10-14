@@ -26,7 +26,9 @@ One term, to be added to `CONTEXT.md` in the same PR.
 
 - **Distance fog** - how much of a surface's colour is replaced by the fog
   colour, as a function of its distance from the Eye in metres. Sized from the
-  full-detail radius and the reach, so it is the same fog at any Voxel size.
+  full-detail radius and the reach, so it is the same fog at any Voxel size. The
+  fog colour and the colour of the sky behind the terrain are two values (see
+  decision 3).
 
 ## What the design rests on
 
@@ -100,15 +102,17 @@ interaction to tell the blended-pass session about.
 #[derive(Resource, Clone, Copy, Debug, PartialEq)]
 pub struct FogSettings {
     pub color: [f32; 3],
+    pub sky: [f32; 3],
     pub reach_opacity: f32,
 }
 ```
 
-`color` is sRGB, the space of `ClearColor`. `reach_opacity` is the share of a
-surface's colour that fog replaces at the reach, 0 to 1. Both have a `Default`
-and neither is a Voxel quantity, so a Look pack in step 9 overrides them as it
-would any two numbers, and nothing crosses the WASM boundary per Voxel
-(ADR-0001).
+`color` is sRGB, what the shader fogs toward. `sky` is sRGB too, the clear
+colour: a second field, because the colour the fog is seen as is not the one it
+fogs toward (decision 3). `reach_opacity` is the share of a surface's colour
+that fog replaces at the reach, 0 to 1. All three have a `Default` and none is a
+Voxel quantity, so a Look pack in step 9 overrides them as it would any plain
+values, and nothing crosses the WASM boundary per Voxel (ADR-0001).
 
 **The reach** is `max(lod_distance_m, view_distance_m)`: how far the farthest
 drawn terrain is, which is `lod_distance_m` unless the World has no coarse
@@ -126,34 +130,41 @@ that by constructing the fog from the two distances alone.
 **The falloff is exponential squared**, for the property the other two lack: `1
 - exp(-(d D)^2)` starts slowly. At the defaults (reach 4096 m, 0.85) it is 0.4%
 at the edge of level 0 (192 m), 1.7% at the join of levels 1 and 2 (384 m), 6%
-at 768 m and 66% at 3 km, so the full-detail rings are untouched and the fog
-works on the coarse ones. Plain `Exponential` is 8.5% at 192 m, which is haze on
-the ground the Player is standing on; `Linear` has a kink where it starts.
-Ticket 03 renders the first two on the same views before it keeps this, and
-records the choice. Which curve is an implementation of the same two numbers, so
-the data does not change if it changes.
+at 768 m and 66% at 3 km (0.85 was the first default; the kept 0.88 gives 0.5%,
+1.8%, 7.2% and 70%), so the full-detail rings are untouched and the fog works on
+the coarse ones. Plain `Exponential` is 8.5% at 192 m, which is haze on the
+ground the Player is standing on; `Linear` has a kink where it starts. Ticket 03
+rendered the first two on the same views and kept this; the table in its Outcome
+has the numbers. Which curve is an implementation of the same settings, so the
+data does not change if it changes.
 
-**Defaults.** `color` is the clear colour's own sRGB value, today's
-`ClearColor` default (43, 44, 47). `reach_opacity` starts at 0.85: at the reach
-terrain keeps 15% of its colour, which is the "visible but faint" the scope
-asks for. Both are tuned against captures in ticket 03 and the final numbers are
-recorded in the Outcome.
+**Defaults.** As built (ticket 03): `reach_opacity` 0.88, `sky` (126, 146, 168)
+and `color` (136, 160, 190), a blue-grey pair; `HAZE_SKY_SRGB` and
+`HAZE_FOG_SRGB` in `render/fog.rs` name them. The text planned `color` as
+today's `ClearColor` (43, 44, 47) and 0.85, which keeps 15% of the terrain's
+colour at the reach, the "visible but faint" the scope asks for. Ticket 03 found
+the dark colour reads as gloom and moved the pair; the Outcome has why.
 
-### 3. The fog colour is the clear colour, set from one value
+### 3. The fog colour and the sky colour are a pair, not one value
 
-The Client inserts `ClearColor` from `FogSettings::color`, in the plugin and so
-before any other system. The dev-only `TESSERAE_SCREENSHOT_MAGENTA_SKY` probe
-replaces `ClearColor` after that, in `capture.rs`, so it keeps working: the
-fog colour is untouched, the sky is magenta, and a fogged fragment is still not
-magenta, which is what the probe counts.
+The text planned one value: `ClearColor` from `FogSettings::color`. The build
+found that holds only for a dark colour (ticket 03's Outcome has the numbers):
+the tonemapper darkens a bright fully fogged fragment and the clear colour skips
+it. So `FogSettings` has two fields. The Client inserts `ClearColor` from `sky`,
+in the plugin and so before any other system, and the cameras fog toward
+`color`, the value that, once tonemapped, comes out as `sky` within 1/255 per
+channel (measured offscreen, terrain against sky). The pair is two named
+constants in `render/fog.rs` with a test that pins them and that the fog colour
+is brighter than the sky in every channel. The look is what is matched, and it
+had to be matched by looking.
 
-That fixes the _values_. The _pixels_ differ by the tonemap (above), and by how
-much is measured and not assumed. Ticket 02 captures a view with the fog so
-dense that the terrain is all fog colour and compares it with the sky pixels. If
-they agree within 3/255 per channel the single value stands. If they do not, the
-clear colour is set to what the tonemapper makes of the fog colour, as a named
-constant with a one-line comment that says why, and a test pins the relation to
-the constant. The look is what is matched, and it has to be matched by looking.
+The dev-only `TESSERAE_SCREENSHOT_MAGENTA_SKY` probe replaces `ClearColor` after
+that, in `capture.rs`, so it keeps working: the fog colour is untouched, the sky
+is magenta, and a fogged fragment is still not magenta, which is what the probe
+counts.
+
+A Look pack that changes `color` must change `sky` with it. Deriving one from
+the other needs the tonemapper's LUT on the CPU, which is step 9's.
 
 The sky is not otherwise touched: no gradient, no atmosphere, no clouds.
 
@@ -177,12 +188,12 @@ The same switch makes a before capture from the same binary. A build without
 
 ### 6. What a Mod or a Look pack does
 
-Nothing per Voxel. `FogSettings` is two numbers that step 9's Look-pack API sets
-once at load, in the post-process settings DESIGN.md already lists ("fog
-parameters"). The derivation from `view_distance_m` and `lod_distance_m` stays
-in the engine, so a pack gives a colour and an opacity and not a density that is
-right for one reach only. Re-deriving `ClearColor` when the settings change is
-step 9's, since nothing changes them at run time yet.
+Nothing per Voxel. `FogSettings` is two colours and an opacity that step 9's
+Look-pack API sets once at load, in the post-process settings DESIGN.md already
+lists ("fog parameters"). The derivation from `view_distance_m` and
+`lod_distance_m` stays in the engine, so a pack gives colours and an opacity and
+not a density that is right for one reach only. Re-deriving `ClearColor` when
+the settings change is step 9's, since nothing changes them at run time yet.
 
 ### 7. Everything physical stays in metres
 
@@ -223,20 +234,24 @@ Fog is on the GPU: one extra uniform binding, and per fragment a distance, an
 ## Known loose ends, declared rather than discovered
 
 - **No sky, atmosphere, sun or clouds.** The sky stays a flat colour, and a
-  fully fogged horizon is exactly that colour. Out of scope by the request.
+  fully fogged horizon matches it to 1/255. The colour itself changed (decision
+  3). Out of scope by the request.
 - **No Look-pack API.** The numbers are data with a `Default`; setting them is
   step 9's.
 - **`ClearColor` is not re-derived at run time** when `FogSettings` changes.
   Nothing changes it yet.
+- **The pair is measured, not derived.** `HAZE_FOG_SRGB` is right for this
+  tonemapper and exposure; a change to either needs a re-measure, and a pack's
+  own colour needs its partner found the same way until step 9 derives it.
 - **Fog is uniform in direction.** No height fog and no directional glow
   (`directional_light_color` is `NONE`), so there is no sun glow around the sun.
 - **A blended surface is fogged only if its shader goes through `apply_fog`.** A
   `StandardMaterial` does. The blended-pass session decides its material, and is
   told.
-- **The far plane still clips at `lod_distance_m` plus a Cell.** At 85% fog the
-  clip edge is a step of the remaining 15%, which is the "faint" the reach is
-  allowed to show. A higher `reach_opacity` hides it and costs the visible
-  4 km; ticket 03 weighs the two.
+- **The far plane still clips at `lod_distance_m` plus a Cell.** At 88% fog the
+  clip edge is a step of the remaining 12%, which is the "faint" the reach is
+  allowed to show; ticket 03 measured it as within 3 of the sky at the very far
+  edge. A higher `reach_opacity` hides it and costs the visible 4 km.
 
 ## Coordination
 
@@ -253,7 +268,12 @@ of this work:
   branch edits `spawn_camera` in the same file, a different function.
 - `claude/brave-babbage-b12e1c` and `origin/tech/coarse-lod-durable-edits`
   (coarse LOD edits and emitters): a ticket only, server side.
-- The tree is rebased on `main` before the PR.
+- The tree is rebased on `main` before the PR. It was, at ticket 05: `main`
+  moved during the work to `9ec5571`, which merged #15 (coarse levels lit by a
+  covered-column rule, editing `server/lod.rs`, `DESIGN.md`,
+  `docs/architecture.md` and ADR-0011). The rebase was clean, and the check
+  after it is in the Outcome. Tickets 03 and 04 ran before it, on unlit coarse
+  levels, and ticket 04's baseline is the `main` before #15.
 
 ## Done when
 
@@ -406,7 +426,8 @@ from the tinted fogged and unfogged pair, is wrong: the tint changes the base
 colour by ring and the display response differs, so shares in different rings
 do not compare. It needs the untinted pair and a tinted one only to find the
 rows. And `FogSettings::color` as the one colour for fog and sky, the spec's
-decision 3, holds for the dark colour only.
+original decision 3, holds for the dark colour only; decision 3 above is the
+corrected text.
 
 ### Ticket 04: frame cost against main
 
@@ -479,6 +500,62 @@ shell sent and drawn) is 1.71 s on `main` (1.52 to 2.13), 1.71 s on the branch
 the pipeline build alone, and the differences are well inside the spread, so a
 once-only build of a few milliseconds would not show; if it moved anything it is
 under what this can see.
+
+### Ticket 05: docs, the rebase, and the check after it
+
+**Docs.** `CONTEXT.md` gains **Distance fog** in the Space section, `DESIGN.md`
+a "Fog" bullet under LOD (with the frame-cost finding in step 6 and
+`FogSettings` named in the Look packs list) and `docs/architecture.md` the
+`render/fog.rs` entry. The text of this spec above was corrected where the build
+disagreed: the `FogSettings` shape (`sky`), decision 3 (a pair, not one value),
+the defaults (0.88 and the pair), the curve figures and the far-plane note.
+Decisions 4 and 5 (the same fog on every camera, the `TESSERAE_FOG=0` switch)
+held as written.
+
+**No ADR.** Nothing here is hard to reverse: the fog is plain data with a
+`Default`, the colours are two named constants with a test, the curve is one
+line in `distance_fog`, and nothing is stored or crosses the WASM boundary. The
+one decision a later reader might want a record of, that the sky's flat colour
+changed, is in decision 3 and the Outcome above.
+
+**After the rebase onto `main` at `9ec5571` (#15, coarse levels lit).** The
+rebase was clean. Tickets 03 and 04 ran before it, so the views were captured
+again with the same knobs as ticket 03 (`FLY_AFTER_S=30`, the 150 m, near-ground
+and default-vantage views, fog on and `TESSERAE_FOG=0`, and the tinted 150 m
+view), compared with the same views from before it.
+
+- _The fog is unchanged._ Fog share by row, the same-pixel ratio of the channel
+  furthest from the sky between a fogged and an unfogged capture, over the rows
+  of the 150 m view: before 0.66, 0.59, 0.47, 0.38, 0.23, 0.12, 0.06, 0.02, 0.01
+  and after 0.64, 0.58, 0.47, 0.37, 0.21, 0.11, 0.05, 0.02, 0.02 (rows 436 to
+  446, 446 to 456, 456 to 470, 470 to 490, 490 to 520, 520 to 560, 560 to 640,
+  640 to 800, 800 to 1000). The level 5 edge rows (433 to 445) have the same
+  median pixel to within 2 levels, and the clear colour is (126, 146, 168) in
+  both. The fogged captures differ pixel by pixel (10% of pixels by more than 6
+  levels, before against after), but so do two fogged captures of the same view
+  on the rebased branch (10.6%), so that is capture noise and the unfogged pair,
+  which does not show it, is the stable one.
+- _The coarse light changed almost nothing in these views._ The unfogged 150 m
+  capture differs from before in 0.17% of pixels by more than 6 levels and the
+  default-vantage one in 0.05%: open terrain is lit as it was, since the rule
+  lights a face open sky unless it looks into air well under the terrain. The
+  tinted 150 m view differs in 0.14% of pixels by more than 20, and the
+  near-ground view in 0.11%.
+- _The horizon, the tint and the near ground read as before._ At 150 m the
+  fogged horizon dissolves into the sky and the unfogged one is a hard edge; the
+  tinted rings (green, salmon, yellow, light green, cyan, lilac) are still told
+  apart through the fog; the near-ground view has no coarse block over the
+  level-0 horizon. The tinted view shows ring edges as vertical steps at the
+  centre column (x = 960), the Eye's column, because the rings' edges are
+  lattice-aligned and the view runs along one; they are in the captures from
+  before the rebase and in the unfogged ones, so they are ring joins and not the
+  fog.
+- _The pair was not re-measured at full fog._ Ticket 03's measurement needed a
+  throwaway density override in `fog.rs`, and `fog.rs` was not to change in this
+  ticket. What argues the pair still agrees: the sky colour, the fog colour and
+  the tonemapper are unchanged, a fully fogged fragment is the fog colour
+  whatever the light on it, and the fogged level 5 edge rows are identical to
+  before. If a later change touches the tonemapper or the exposure, re-measure.
 
 ## Tickets
 
