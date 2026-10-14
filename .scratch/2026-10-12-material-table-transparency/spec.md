@@ -234,7 +234,7 @@ becomes alpha: the amount is Look pack data, the class is Material data
 (decision 1).
 
 Sorting is Bevy's: transparent items sort back to front **per entity**, by the
-entity's position. That is chunk-granular, correct between Chunks laid out on
+mesh's centre. That is chunk-granular, correct between Chunks laid out on
 a grid and wrong inside one. Inside a Chunk the order is the mesher's emission
 order, so two overlapping translucent surfaces (a glass house with water behind
 it) can blend in the wrong order. A single water surface or a single pane, which
@@ -244,6 +244,14 @@ Minecraft does); Bevy 0.20's experimental order-independent transparency plugin
 (a per-pixel fragment linked list and a resolve pass, not weighted-blended; it
 panics on a camera with MSAA on); or accept it. The ticket measures the artefact
 on a screenshot before choosing.
+
+**Decided in ticket 04: accept it.** The `dev` gallery's glass house stands in
+front of a pool, which is the case that would show a wrong order, and the glass
+reads over the water with nothing drawn out of order. A blended entity casts no
+shadow (`NotShadowCaster`): `bevy_pbr` queues a `Blend` mesh into the shadow
+pass and skips it in the depth prepass, and the flood-fill already dims sky light
+under water and glass, so a full shadow on top would count it twice. What this
+leaves is below, under Known loose ends.
 
 Leaves render in the opaque pass. They are cutout in every voxel game, which
 needs an alpha test against a texture, and textures are step 9; until then a
@@ -352,7 +360,13 @@ are testable alone. 04 is the first time a player can see any of it.
   `Tables::joint_id` leaves clear Materials out of it, so two glass halves seal
   nothing. The mesher still tests each quad against one neighbour's coverage, so
   a face two neighbours jointly hide is drawn: overdraw, never a hole.
-- **No intra-chunk sorting** of blended quads (decision 6).
+- **No intra-chunk sorting** of blended quads (decision 6). Seen only on a view
+  where two translucent surfaces of one Chunk overlap, which the gallery does
+  not produce; re-sorting on camera movement or Bevy's OIT (which needs `Msaa`
+  off on every LOD camera) is the answer if one does.
+- **Blended surfaces are outside the depth and motion prepasses**, so SSAO and
+  TAA, when step 9 adds them, will not see water or glass: no ambient occlusion
+  on it, and no motion vectors for TAA to resolve it with.
 - **Collision and picking** treat water as solid: `collide` reads Shapes only.
   A `solid` row field when a controller exists.
 - **Cutout leaves** need textures (step 9).

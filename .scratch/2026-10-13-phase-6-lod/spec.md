@@ -125,9 +125,9 @@ level. Two consequences, both accepted: a pane one Voxel thick disappears at the
 next level (it holds under half a coarse Voxel), which is what a mip does to
 anything thinner than its texel; and leaves, whose occlusion is `Never`, draw
 every face between two coarse leaf cubes as they do at level 0. Fewer, larger
-Voxels make that cheaper per metre, not dearer. The client has no blended draw
-call yet (ticket 04 of `2026-10-12-material-table-transparency`), so a coarse
-water or glass layer is built and sent and not drawn, as at level 0.
+Voxels make that cheaper per metre, not dearer. The client draws the blended
+layer at every level (ticket 04 of `2026-10-12-material-table-transparency`;
+how it composites across the per-level cameras is its ticket 06).
 
 **Emitters.** Not preserved. A coarse Voxel is its dominant Material, which is
 almost never a lantern, and a coarse level carries no block light at all
@@ -558,8 +558,10 @@ a measurement artefact to be explained, not accepted.
 - **Sky light inside a cave or under an overhang is full at coarse levels.** See
   decision 3. A column rule in the generation job fixes it without touching the
   flood.
-- **No blended draw call**, so coarse water and glass are built and not drawn,
-  as at level 0.
+- ~~**No blended draw call**, so coarse water and glass are built and not drawn,
+  as at level 0.~~ Drawn at every level by ticket 04 of
+  `2026-10-12-material-table-transparency`; compositing across the per-level
+  cameras, and any coarse water at all, are its ticket 06.
 - **Thin features vanish at the next level.** A one-Voxel wall or pane is under
   half a coarse Voxel. Inherent to a mip.
 - **One FIFO pool serves every stage of every level.** Decision 5 names the

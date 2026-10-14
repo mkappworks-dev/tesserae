@@ -1,6 +1,6 @@
 # The blended pass in the app
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec decision 6. The first time a player sees any of this.
@@ -73,3 +73,49 @@ is touched (ADR-0002). Alpha and colour are app-side appearance and never a
 
 2026-10-14: widened to every level, and the sorting and shadow decisions made
 explicit, when ticket 06 was written. 06 holds what only LOD forces.
+
+Built as specified, except where listed.
+
+- `upload_meshes` and `drop_meshes` share a `Draw` helper that spawns, replaces
+  or despawns one layer's entity. `ChunkEntities` is two maps (opaque, blended)
+  keyed the same, and `TerrainMaterial` two handles that differ in alpha mode
+  only. Tests: 8 new in `chunk_view.rs` (each layer combination at level 0 and
+  level 2, placement, scale, tag and layers, replacement, unload, an upload and
+  unload in one frame, alpha mode, shadows), 1 in `chunk_material.rs` (palette
+  alpha) and 1 in `edit.rs`. Restoring the opaque-empty skip fails two of them.
+- **Shadows: `NotShadowCaster` on every blended entity.** `render/light.rs`
+  queues a `Blend` mesh into the shadow pass with the may-discard flag, and
+  `prepass/mod.rs` skips it in the depth prepass. The flood-fill already dims
+  sky under water by 2 and glass by 0, so a full shadow would count it twice.
+  Only the sun on layer 0 casts, so this changes level 0 only.
+- **SSAO and TAA:** neither is on a camera. Being outside the prepass, a blended
+  surface will have no depth, normal or motion vector for them, so step 9 gets
+  no occlusion on water and no TAA resolve on it.
+- **Sorting: accepted.** Bevy's per-entity sort by mesh centre. The capture
+  (`dev` gallery, default view: a glass house in front of a pool, a canopy and a
+  trunk, a lantern inside the house) shows the glass blended over the water and
+  over the lantern, with nothing drawn out of order. The OIT source was read:
+  it is a per-pixel linked list and panics on a camera with MSAA on, so it would
+  need `Msaa::Off` on every LOD camera; it is not built. The spec's wording is
+  corrected, and the intra-Chunk case is a declared loose end.
+- **Gallery:** a second row beside the shapes (`translucent_plan`), 11 by 12
+  Voxels on its own plinth, because the shapes' footprint was full. The plinth
+  code is shared with the shapes row.
+- **Hotbar:** keys 6 to 8 are glass, leaves and water; the `dev` fence moved to
+  9. The HUD hint reads `[1-8]`.
+- **Not built, as the ticket said:** nothing in worldgen places a translucent
+  Voxel, so no coarse level above 1 draws one yet (ticket 06, question 3).
+- **Against `main`, same capture** (`TESSERAE_SCREENSHOT_OFFSCREEN=1`, 25 s
+  settle so every LOD level has filled, Apple M5, 1080p): every pixel outside the
+  new row's footprint, and what the row shades and lights, is identical, with the
+  horizon and every ring unchanged. Not a strict "no blended Voxel" scene, since
+  the dev gallery now has one; a first pair taken before the far levels had
+  filled differed along the horizon and was discarded for that reason.
+- **Cost, five interleaved runs each, load average 21 to 26** (so only a
+  ceiling, not a measurement): worst tick 1.9 ms median on the branch against 2.8
+  on `main`, mean upload 13 us against 15, median flight frame at the 60 Hz cap
+  or below in both. Neither build is slower within that noise. Two single runs
+  of 7.4 and 12.2 ms occurred, one on each side, and one 7.2 ms run during the
+  capture, so a spike of that size is the host and not this change.
+- `./scripts/cargo-ci` passes. Also tested: 6 new tests in `gallery.rs`.
+

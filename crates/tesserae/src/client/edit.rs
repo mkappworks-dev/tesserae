@@ -7,11 +7,12 @@
 //! `pose::report_pose` has just said the Player's Eye is.
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 //!
-//! A stopgap: a hotbar of five (six under `dev`) and two keys for orientation are enough to
+//! A stopgap: a hotbar of eight (nine under `dev`) and two keys for orientation are enough to
 //! exercise the edit path by hand, and a real inventory replaces them.
 
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use tesserae_core::material::{GLASS, LEAVES, WATER};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
 #[cfg(feature = "dev")]
 use tesserae_core::shape::examples;
@@ -35,7 +36,7 @@ struct Slot {
     turnable: bool,
 }
 
-/// Keys 1 to 5, and 6 for the dev fence. Materials are the engine's placeholders until a Mod declares
+/// Keys 1 to 8, and 9 for the dev fence. Materials are the engine's placeholders until a Mod declares
 /// some in build-order step 7.
 const HOTBAR: &[Slot] = &[
     Slot {
@@ -68,6 +69,24 @@ const HOTBAR: &[Slot] = &[
         shape: SHAPE_FULL_CUBE,
         turnable: false,
     },
+    Slot {
+        name: "glass",
+        material: GLASS,
+        shape: SHAPE_FULL_CUBE,
+        turnable: false,
+    },
+    Slot {
+        name: "leaves",
+        material: LEAVES,
+        shape: SHAPE_FULL_CUBE,
+        turnable: false,
+    },
+    Slot {
+        name: "water",
+        material: WATER,
+        shape: SHAPE_FULL_CUBE,
+        turnable: false,
+    },
     // The reference fence the dev Server registers; a release build has none.
     #[cfg(feature = "dev")]
     Slot {
@@ -84,8 +103,11 @@ const SLOT_KEYS: &[KeyCode] = &[
     KeyCode::Digit3,
     KeyCode::Digit4,
     KeyCode::Digit5,
-    #[cfg(feature = "dev")]
     KeyCode::Digit6,
+    KeyCode::Digit7,
+    KeyCode::Digit8,
+    #[cfg(feature = "dev")]
+    KeyCode::Digit9,
 ];
 
 /// What the player would place.
@@ -207,7 +229,7 @@ fn spawn_hud(mut commands: Commands) {
     ));
 }
 
-/// 1 to 5 choose what is held. `Q` turns it a quarter and `E` flips which way
+/// 1 to 8 choose what is held. `Q` turns it a quarter and `E` flips which way
 /// is up; between them they reach all 24 orientations. None of these is a key
 /// the camera uses.
 fn select_held(keys: Res<ButtonInput<KeyCode>>, mut held: ResMut<Held>) {
@@ -271,7 +293,7 @@ fn show_rejections(
 
 fn update_hud(held: Res<Held>, notice: Res<Notice>, mut hud: Single<&mut Text, With<HeldHud>>) {
     let line = format!(
-        "{}\n[1-5] choose  [Q] turn  [E] flip  [LMB] break  [RMB] place\n{}",
+        "{}\n[1-8] choose  [Q] turn  [E] flip  [LMB] break  [RMB] place\n{}",
         held.describe(),
         notice.text()
     );
@@ -420,6 +442,26 @@ mod tests {
             sent[0].action,
             EditAction::Place(Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY))
         );
+    }
+
+    #[test]
+    fn keys_six_to_eight_hold_glass_leaves_and_water() {
+        use tesserae_core::material::{GLASS, LEAVES, WATER};
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        for (key, material) in [
+            (KeyCode::Digit6, GLASS),
+            (KeyCode::Digit7, LEAVES),
+            (KeyCode::Digit8, WATER),
+        ] {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            frame(&mut app);
+            press(&mut app, MouseButton::Right);
+            let sent = frame(&mut app);
+            assert_eq!(sent[0].action, EditAction::Place(Voxel::cube(material)));
+        }
     }
 
     #[test]

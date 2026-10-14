@@ -26,6 +26,7 @@
 //! once.
 
 use bevy::prelude::*;
+use tesserae_core::material::{GLASS, LEAVES, WATER};
 use tesserae_core::mesh::{NEG_Y, POS_X, POS_Y};
 use tesserae_core::shape::examples::FENCE_ID;
 use tesserae_core::worldgen::{DIRT, GRASS, LANTERN, STONE};
@@ -49,6 +50,11 @@ const ASIDE_M: f32 = 11.0;
 const WIDTH: i32 = 11;
 const DEPTH: i32 = 14;
 
+/// The translucent row's footprint, and how far left of the shapes it stands.
+const ROW_WIDTH: i32 = 11;
+const ROW_DEPTH: i32 = 12;
+const ROW_ASIDE_M: f32 = ASIDE_M - ROW_WIDTH as f32 - 3.0;
+
 type Plan = Vec<([i32; 3], Voxel)>;
 
 pub(super) fn plugin(app: &mut App) {
@@ -69,7 +75,10 @@ fn build(
         return;
     };
     let corner = spawn.metres() + Vec3::new(ASIDE_M, 0.0, -AHEAD_M);
-    let plan = plan(&world, corner, |x, z| generator.surface_height_m(x, z));
+    let surface = |x, z| generator.surface_height_m(x, z);
+    let mut plan = plan(&world, corner, surface);
+    let row = spawn.metres() + Vec3::new(ROW_ASIDE_M, 0.0, -AHEAD_M);
+    plan.extend(translucent_plan(&world, row, surface));
     if builder::step(&plan, &mut progress, &mut store, &mut meshes, &tables) == Step::Completed {
         info!("gallery: {} Voxels at {corner:?}", plan.len());
     }
@@ -79,12 +88,17 @@ fn shaped(material: MaterialId, shape: u8, up: usize, turn: u8) -> Voxel {
     Voxel::shaped(material, shape, Orientation::new(up, turn))
 }
 
-/// The Voxels to place, in lattice coordinates, given the metre position of the
-/// gallery's near corner and the height of the ground at any point.
-///
-/// It stands on a plinth of stone raised to the highest ground under it, so no
-/// part of it is buried however the terrain slopes.
-fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32) -> Plan {
+/// A plinth of stone raised to the highest ground under a `width` by `depth`
+/// footprint whose near corner is at `corner` metres, so nothing standing on it
+/// is buried however the terrain slopes. Returns the plinth's Voxels and the
+/// lattice position of the footprint's corner on top of it.
+fn plinth(
+    world: &WorldSettings,
+    corner: Vec3,
+    surface_m: impl Fn(f32, f32) -> f32,
+    width: i32,
+    depth: i32,
+) -> (Plan, [i32; 3]) {
     let size = world.voxel_size;
     let [ox, _, oz] = world.voxel_at(corner);
 
@@ -93,7 +107,7 @@ fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32
         let z = (oz + k) as f32 * size + size / 2.0;
         (surface_m(x, z) / size).floor() as i32
     };
-    let columns = (0..WIDTH).flat_map(|i| (0..DEPTH).map(move |k| (i, k)));
+    let columns = (0..width).flat_map(|i| (0..depth).map(move |k| (i, k)));
     let highest = columns.clone().map(|(i, k)| ground(i, k)).max().unwrap();
 
     let mut plan = Plan::new();
@@ -102,9 +116,16 @@ fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32
             plan.push(([ox + i, y, oz + k], Voxel::cube(STONE)));
         }
     }
+    (plan, [ox, highest + 1, oz])
+}
+
+/// The Voxels to place, in lattice coordinates, given the metre position of the
+/// gallery's near corner and the height of the ground at any point.
+fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32) -> Plan {
+    let (mut plan, [ox, top, oz]) = plinth(world, corner, surface_m, WIDTH, DEPTH);
 
     // `at(x, j, k)`: j counts up from the plinth.
-    let at = |i: i32, j: i32, k: i32| [ox + i, highest + 1 + j, oz + k];
+    let at = |i: i32, j: i32, k: i32| [ox + i, top + j, oz + k];
     let mut put = |i, j, k, voxel| plan.push((at(i, j, k), voxel));
 
     // The catalogue: front row, then the row behind it.
@@ -163,6 +184,54 @@ fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32
     for x in 4..=9 {
         for y in 0..2 {
             put(x, y, 1, Voxel::cube(STONE));
+        }
+    }
+    plan
+}
+
+/// Glass, water and leaves, the first Materials the blended pass draws: a pool
+/// with a glass house in front of it, so a wrong blend order has something to
+/// show itself on, and a canopy on a trunk beside them.
+fn translucent_plan(
+    world: &WorldSettings,
+    corner: Vec3,
+    surface_m: impl Fn(f32, f32) -> f32,
+) -> Plan {
+    let (mut plan, [ox, top, oz]) = plinth(world, corner, surface_m, ROW_WIDTH, ROW_DEPTH);
+    let at = |i: i32, j: i32, k: i32| [ox + i, top + j, oz + k];
+    let mut put = |i, j, k, voxel| plan.push((at(i, j, k), voxel));
+
+    // A basin of stone with water level with its rim, at the back.
+    for k in 0..=5 {
+        for i in 0..=8 {
+            let rim = i == 0 || i == 8 || k == 0 || k == 5;
+            put(i, 0, k, Voxel::cube(if rim { STONE } else { WATER }));
+        }
+    }
+
+    // A closed house of glass, 5 wide and 4 deep, with a lantern inside.
+    for k in 7..=10 {
+        for i in 1..=5 {
+            let wall = i == 1 || i == 5 || k == 7 || k == 10;
+            for j in 0..=2 {
+                if wall {
+                    put(i, j, k, Voxel::cube(GLASS));
+                }
+            }
+            put(i, 3, k, Voxel::cube(GLASS));
+        }
+    }
+    put(3, 0, 8, Voxel::cube(LANTERN));
+
+    // A trunk with a canopy, to the side.
+    for j in 0..=2 {
+        put(9, j, 9, Voxel::cube(DIRT));
+    }
+    for k in 8..=10 {
+        for i in 8..=10 {
+            for j in 3..=4 {
+                put(i, j, k, Voxel::cube(LEAVES));
+            }
         }
     }
     plan
@@ -293,6 +362,82 @@ mod tests {
                 assert!(at[1] > highest, "{at:?} is buried at ground {highest}");
             }
         }
+    }
+
+    fn translucent() -> Plan {
+        translucent_plan(&world(1.0), corner(), hill)
+    }
+
+    fn lattice(plan: &Plan, material: MaterialId) -> Vec<[i32; 3]> {
+        plan.iter()
+            .filter(|(_, v)| v.material() == material)
+            .map(|(at, _)| *at)
+            .collect()
+    }
+
+    #[test]
+    fn the_translucent_row_shows_glass_water_and_leaves() {
+        let plan = translucent();
+        for material in [GLASS, WATER, LEAVES] {
+            assert!(!lattice(&plan, material).is_empty(), "Material {material}");
+        }
+    }
+
+    /// The case that would show a wrong blend order: one translucent surface
+    /// seen through another, from where the camera starts.
+    #[test]
+    fn the_glass_house_stands_between_the_camera_and_the_pool() {
+        let plan = translucent();
+        let nearest_water = lattice(&plan, WATER).iter().map(|at| at[2]).max().unwrap();
+        let glass: Vec<_> = lattice(&plan, GLASS);
+        assert!(glass.iter().all(|at| at[2] > nearest_water), "{glass:?}");
+    }
+
+    #[test]
+    fn every_voxel_in_the_translucent_row_is_a_registered_material() {
+        let table = ContentTables::default();
+        for (at, v) in translucent() {
+            assert!(!v.is_air(), "{at:?}");
+            assert!(table.materials.contains(v.material()), "{at:?}");
+            assert!(table.shapes.contains(v.shape()), "{at:?}");
+        }
+    }
+
+    #[test]
+    fn the_translucent_row_stands_beside_the_shapes_and_not_on_them() {
+        let w = world(1.0);
+        let shapes = plan(&w, corner(), hill);
+        let row_corner = corner() + Vec3::new(ROW_ASIDE_M - ASIDE_M, 0.0, 0.0);
+        let row = translucent_plan(&w, row_corner, hill);
+        let x_max = |plan: &Plan| plan.iter().map(|(at, _)| at[0]).max().unwrap();
+        let x_min = |plan: &Plan| plan.iter().map(|(at, _)| at[0]).min().unwrap();
+        assert!(x_max(&row) < x_min(&shapes), "the two overlap in x");
+        let [_, _, oz] = w.voxel_at(row_corner);
+        for (at, _) in &row {
+            assert!((oz..oz + ROW_DEPTH).contains(&at[2]), "{at:?} in z");
+        }
+    }
+
+    #[test]
+    fn the_translucent_things_stand_above_the_highest_ground_under_them() {
+        let plan = translucent();
+        let highest = plan
+            .iter()
+            .filter(|(_, v)| v.material() == STONE)
+            .map(|(at, _)| at[1])
+            .max()
+            .unwrap();
+        for (at, v) in &plan {
+            if matches!(v.material(), GLASS | WATER | LEAVES) {
+                assert!(at[1] > 0 && at[1] <= highest + 6, "{at:?}");
+            }
+        }
+        let ground = plan.iter().map(|(at, _)| at[1]).min().unwrap();
+        let base = lattice(&plan, WATER).iter().map(|at| at[1]).min().unwrap();
+        assert!(
+            base > ground,
+            "the pool sits on a plinth, not in the ground"
+        );
     }
 
     /// ADR-0003: where it stands is a metre position, so halving the Voxel size

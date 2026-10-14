@@ -12,10 +12,11 @@
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
+use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
-use tesserae_core::ChunkMesh;
+use tesserae_core::{ChunkMesh, MeshLayer};
 
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
@@ -33,14 +34,24 @@ fn layer_of(level: u32) -> RenderLayers {
     RenderLayers::layer(level as usize)
 }
 
-/// The entity drawing each Chunk of each level, by the level's own lattice.
-/// Render entities, not World state, so the Client owns this outright.
-#[derive(Resource, Default)]
-struct ChunkEntities(HashMap<(u32, ChunkCoord), Entity>);
+type LayerEntities = HashMap<(u32, ChunkCoord), Entity>;
 
-/// One material for every Chunk, as the Material index is a vertex attribute.
+/// The entities drawing each Chunk of each level, by the level's own lattice, one
+/// map per mesh layer. Render entities, not World state, so the Client owns this
+/// outright.
+#[derive(Resource, Default)]
+struct ChunkEntities {
+    opaque: LayerEntities,
+    blended: LayerEntities,
+}
+
+/// Two materials for every Chunk, as the Material index is a vertex attribute:
+/// they differ in alpha mode only.
 #[derive(Resource)]
-struct TerrainMaterial(Handle<ChunkMaterial>);
+struct TerrainMaterial {
+    opaque: Handle<ChunkMaterial>,
+    blended: Handle<ChunkMaterial>,
+}
 
 #[derive(SystemParam)]
 struct IncomingMeshes<'w, 's> {
@@ -71,24 +82,33 @@ fn add_material(
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
 ) {
-    commands.insert_resource(TerrainMaterial(
-        materials.add(ChunkMaterial {
-            base: StandardMaterial {
-                perceptual_roughness: 0.95,
-                ..default()
-            },
-            extension: ChunkMaterialExtension {
-                lod: LodParams::new(
-                    debug_tint(),
-                    &cuts(&streaming, world.cell_size())
-                        .iter()
-                        .map(|c| (c.radius_m, c.half_height_m))
-                        .collect::<Vec<_>>(),
-                ),
-                ..default()
-            },
-        }),
-    ));
+    let opaque = ChunkMaterial {
+        base: StandardMaterial {
+            perceptual_roughness: 0.95,
+            ..default()
+        },
+        extension: ChunkMaterialExtension {
+            lod: LodParams::new(
+                debug_tint(),
+                &cuts(&streaming, world.cell_size())
+                    .iter()
+                    .map(|c| (c.radius_m, c.half_height_m))
+                    .collect::<Vec<_>>(),
+            ),
+            ..default()
+        },
+    };
+    let blended = ChunkMaterial {
+        base: StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            ..opaque.base.clone()
+        },
+        extension: opaque.extension.clone(),
+    };
+    commands.insert_resource(TerrainMaterial {
+        opaque: materials.add(opaque),
+        blended: materials.add(blended),
+    });
 }
 
 #[cfg(feature = "dev")]
@@ -99,6 +119,74 @@ fn debug_tint() -> u32 {
 #[cfg(not(feature = "dev"))]
 fn debug_tint() -> u32 {
     0
+}
+
+/// What `upload_meshes` and `drop_meshes` share: the pieces of a Client frame
+/// that spawn, replace and despawn a Chunk's entities.
+struct Draw<'a, 'w, 's> {
+    commands: &'a mut Commands<'w, 's>,
+    meshes: &'a mut Assets<Mesh>,
+    mesh_of: &'a dyn Fn(Entity) -> Option<Handle<Mesh>>,
+}
+
+impl Draw<'_, '_, '_> {
+    /// Brings one layer's entity for `key` in line with `layer`: spawned,
+    /// replaced or, if the layer has nothing, despawned. Whether it drew
+    /// something.
+    fn show(
+        &mut self,
+        entities: &mut LayerEntities,
+        material: &Handle<ChunkMaterial>,
+        layer: &MeshLayer,
+        key: (u32, ChunkCoord),
+        world: &WorldSettings,
+        casts_shadows: bool,
+    ) -> bool {
+        if layer.is_empty() {
+            self.hide(entities, key);
+            return false;
+        }
+        let (level, coord) = key;
+        let handle = self
+            .meshes
+            .add(chunk_mesh_to_mesh(layer, world.voxel_size_at(level)));
+        match entities.get(&key) {
+            // Replacing rather than despawning and respawning keeps the
+            // entity id stable, and dropping the old handle is what stops a
+            // few minutes of flying from leaking every mesh ever uploaded.
+            Some(&entity) => {
+                if let Some(old) = (self.mesh_of)(entity) {
+                    self.meshes.remove(&old);
+                }
+                self.commands.entity(entity).insert(Mesh3d(handle));
+            }
+            None => {
+                let mut entity = self.commands.spawn((
+                    Mesh3d(handle),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(world.chunk_origin_at(coord, level)),
+                    coord,
+                    MeshTag::new(level),
+                    layer_of(level),
+                ));
+                if !casts_shadows {
+                    entity.insert(NotShadowCaster);
+                }
+                entities.insert(key, entity.id());
+            }
+        }
+        true
+    }
+
+    fn hide(&mut self, entities: &mut LayerEntities, key: (u32, ChunkCoord)) {
+        let Some(entity) = entities.remove(&key) else {
+            return;
+        };
+        if let Some(mesh) = (self.mesh_of)(entity) {
+            self.meshes.remove(&mesh);
+        }
+        self.commands.entity(entity).despawn();
+    }
 }
 
 #[cfg_attr(
@@ -122,42 +210,38 @@ fn upload_meshes(
     let started = std::time::Instant::now();
     #[cfg(feature = "dev")]
     let mut uploaded = 0;
+    let entities = &mut *entities;
+    let mut draw = Draw {
+        commands: &mut commands,
+        meshes: &mut meshes,
+        mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
+    };
     for (level, coord, mesh) in incoming.read() {
         let key = (level, coord);
-        // The blended layer has no draw call yet (ticket 04), so a Chunk with
-        // nothing opaque is nothing to show.
-        if mesh.opaque.is_empty() {
-            despawn(&mut commands, &mut meshes, &mut entities, &existing, key);
-            continue;
-        }
-
+        let opaque = draw.show(
+            &mut entities.opaque,
+            &material.opaque,
+            &mesh.opaque,
+            key,
+            &world,
+            true,
+        );
+        let blended = draw.show(
+            &mut entities.blended,
+            &material.blended,
+            &mesh.blended,
+            key,
+            &world,
+            // The flood-fill already dims sky light under water and glass, so
+            // a shadow map treating them as solid would count it twice.
+            false,
+        );
         #[cfg(feature = "dev")]
         {
-            uploaded += 1;
+            uploaded += u32::from(opaque) + u32::from(blended);
         }
-        let handle = meshes.add(chunk_mesh_to_mesh(&mesh.opaque, world.voxel_size_at(level)));
-        match entities.0.get(&key) {
-            // Replacing rather than despawning and respawning keeps the
-            // entity id stable, and dropping the old handle is what stops a
-            // few minutes of flying from leaking every mesh ever uploaded.
-            Some(&entity) => {
-                if let Ok(old) = existing.get(entity) {
-                    meshes.remove(&old.0);
-                }
-                commands.entity(entity).insert(Mesh3d(handle));
-            }
-            None => {
-                let entity = commands.spawn((
-                    Mesh3d(handle),
-                    MeshMaterial3d(material.0.clone()),
-                    Transform::from_translation(world.chunk_origin_at(coord, level)),
-                    coord,
-                    MeshTag::new(level),
-                    layer_of(level),
-                ));
-                entities.0.insert(key, entity.id());
-            }
-        }
+        #[cfg(not(feature = "dev"))]
+        let _ = (opaque, blended);
     }
     #[cfg(feature = "dev")]
     if uploaded > 0 {
@@ -175,25 +259,16 @@ fn drop_meshes(
 ) {
     let level0 = level0.read().map(|m| (0, m.coord));
     let coarse = coarse.read().map(|m| (m.level, m.coord));
-    for key in level0.chain(coarse) {
-        despawn(&mut commands, &mut meshes, &mut entities, &existing, key);
-    }
-}
-
-fn despawn(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    entities: &mut ChunkEntities,
-    existing: &Query<&Mesh3d>,
-    key: (u32, ChunkCoord),
-) {
-    let Some(entity) = entities.0.remove(&key) else {
-        return;
+    let entities = &mut *entities;
+    let mut draw = Draw {
+        commands: &mut commands,
+        meshes: &mut meshes,
+        mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
     };
-    if let Ok(mesh) = existing.get(entity) {
-        meshes.remove(&mesh.0);
+    for key in level0.chain(coarse) {
+        draw.hide(&mut entities.opaque, key);
+        draw.hide(&mut entities.blended, key);
     }
-    commands.entity(entity).despawn();
 }
 
 fn spawn_light(
@@ -504,6 +579,28 @@ mod tests {
         mesh
     }
 
+    /// A Chunk of water beside open sky: all of its geometry is blended.
+    fn blended_geometry() -> tesserae_core::ChunkMesh {
+        let water = Chunk::filled(Voxel::cube(tesserae_core::material::WATER));
+        let air = Chunk::air();
+        let dark = ChunkLight::dark();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mut neighbors = [Some(LitChunk::new(&water, &dark)); 6];
+        neighbors[0] = Some(LitChunk::new(&air, &sky));
+        let mesh = mesh_chunk(LitChunk::new(&water, &dark), neighbors, &Tables::builtin());
+        assert!(mesh.opaque.is_empty(), "the fixture must be all blended");
+        assert!(!mesh.blended.is_empty(), "the fixture must have geometry");
+        mesh
+    }
+
+    /// Stone and water in one Chunk, so both layers have geometry.
+    fn both_layers() -> tesserae_core::ChunkMesh {
+        tesserae_core::ChunkMesh {
+            blended: blended_geometry().blended,
+            ..geometry()
+        }
+    }
+
     fn send_mesh(app: &mut App, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
         app.world_mut()
             .write_message(ChunkMeshReady { coord, mesh });
@@ -519,7 +616,15 @@ mod tests {
     fn entity_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
         app.world()
             .resource::<ChunkEntities>()
-            .0
+            .opaque
+            .get(&(level, coord))
+            .copied()
+    }
+
+    fn blended_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
+        app.world()
+            .resource::<ChunkEntities>()
+            .blended
             .get(&(level, coord))
             .copied()
     }
@@ -544,6 +649,164 @@ mod tests {
             panic!("positions are Float32x3");
         };
         positions.clone()
+    }
+
+    #[test]
+    fn a_chunk_with_only_blended_geometry_is_drawn() {
+        let mut app = app();
+        send_mesh(&mut app, ChunkCoord::new(0, 0, 0), blended_geometry());
+        assert_eq!(drawn(&mut app), 1);
+    }
+
+    #[test]
+    fn a_chunk_with_both_layers_is_two_entities_and_one_with_only_opaque_is_one() {
+        let mut app = app();
+        send_mesh(&mut app, ChunkCoord::new(0, 0, 0), both_layers());
+        assert_eq!(drawn(&mut app), 2);
+        send_mesh(&mut app, ChunkCoord::new(1, 0, 0), geometry());
+        assert_eq!(drawn(&mut app), 3, "no blended Voxel is still one entity");
+    }
+
+    #[test]
+    fn a_blended_entity_is_placed_scaled_tagged_and_layered_like_the_opaque_one() {
+        let mut app = app();
+        let coord = ChunkCoord::new(3, -1, 2);
+        send_mesh(&mut app, coord, both_layers());
+        send_coarse(&mut app, 2, coord, both_layers());
+        for level in [0, 2] {
+            let opaque = entity_at(&app, level, coord).unwrap();
+            let blended = blended_at(&app, level, coord).expect("a blended entity");
+            assert_ne!(opaque, blended);
+            let world = app.world();
+            assert_eq!(
+                world.get::<Transform>(blended),
+                world.get::<Transform>(opaque),
+                "level {level}"
+            );
+            assert_eq!(world.get::<ChunkCoord>(blended), Some(&coord));
+            assert_eq!(world.get::<MeshTag>(blended).unwrap().value, level);
+            assert_eq!(
+                world.get::<RenderLayers>(blended),
+                Some(&layer_of(level)),
+                "the level's camera draws it, or the cut and the sun miss it"
+            );
+        }
+        // A coarse Voxel is bigger, so the same layer spans more metres.
+        let extent = |app: &App, entity| {
+            let max = |p: Vec<[f32; 3]>| p.iter().map(|p| p[0]).fold(f32::MIN, f32::max);
+            max(positions(app, entity))
+        };
+        let near = extent(&app, blended_at(&app, 0, coord).unwrap());
+        let far = extent(&app, blended_at(&app, 2, coord).unwrap());
+        assert_eq!(far, near * 4.0);
+    }
+
+    #[test]
+    fn blended_surfaces_cast_no_shadow_and_opaque_ones_still_do() {
+        use bevy::light::NotShadowCaster;
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        send_mesh(&mut app, ChunkCoord::new(1, 0, 0), blended_geometry());
+        let world = app.world();
+        for blended in [
+            blended_at(&app, 0, coord).unwrap(),
+            blended_at(&app, 0, ChunkCoord::new(1, 0, 0)).unwrap(),
+        ] {
+            assert!(world.get::<NotShadowCaster>(blended).is_some());
+        }
+        assert!(
+            world
+                .get::<NotShadowCaster>(entity_for(&app, coord).unwrap())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn only_the_blended_entity_is_alpha_blended() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        let alpha_of = |app: &App, entity: Entity| {
+            let handle = &app
+                .world()
+                .get::<MeshMaterial3d<ChunkMaterial>>(entity)
+                .unwrap()
+                .0;
+            app.world()
+                .resource::<Assets<ChunkMaterial>>()
+                .get(handle)
+                .unwrap()
+                .base
+                .alpha_mode
+        };
+        assert_eq!(
+            alpha_of(&app, blended_at(&app, 0, coord).unwrap()),
+            AlphaMode::Blend
+        );
+        assert_eq!(
+            alpha_of(&app, entity_for(&app, coord).unwrap()),
+            AlphaMode::Opaque
+        );
+    }
+
+    #[test]
+    fn a_replacement_that_drops_or_adds_the_blended_layer_follows_it() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        let blended = blended_at(&app, 0, coord).unwrap();
+        let handle = app.world().get::<Mesh3d>(blended).unwrap().0.clone();
+
+        send_mesh(&mut app, coord, geometry());
+        assert_eq!(blended_at(&app, 0, coord), None);
+        assert_eq!(drawn(&mut app), 1, "only the opaque entity is left");
+        assert!(
+            app.world()
+                .resource::<Assets<Mesh>>()
+                .get(&handle)
+                .is_none(),
+            "the dropped layer's Mesh asset is still loaded"
+        );
+
+        send_mesh(&mut app, coord, both_layers());
+        assert!(blended_at(&app, 0, coord).is_some());
+        assert_eq!(drawn(&mut app), 2);
+
+        send_mesh(&mut app, coord, blended_geometry());
+        assert_eq!(entity_for(&app, coord), None, "the opaque layer is gone");
+        assert_eq!(drawn(&mut app), 1);
+    }
+
+    #[test]
+    fn unloading_removes_both_entities_and_both_assets() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        send_coarse(&mut app, 1, coord, both_layers());
+        let before = app.world().resource::<Assets<Mesh>>().len();
+        assert_eq!(before, 4);
+
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.world_mut()
+            .write_message(LodUnloaded { level: 1, coord });
+        app.update();
+
+        assert_eq!(drawn(&mut app), 0);
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
+    }
+
+    #[test]
+    fn a_mesh_with_a_blended_layer_and_its_unload_in_one_frame_leave_nothing_drawn() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        app.world_mut().write_message(ChunkMeshReady {
+            coord,
+            mesh: both_layers(),
+        });
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.update();
+        assert_eq!(drawn(&mut app), 0);
     }
 
     #[test]

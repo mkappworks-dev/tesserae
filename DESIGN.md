@@ -463,9 +463,10 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   connected Shape cannot be rotated, and LOD counts only its bare post. A fence
   costs 4 stairs of the cap, so 256 fit in a Chunk. Material transparency
   (glass, water, leaves) is a Material property and not a Shape one: the table,
-  light dimming and occlusion are done, and the blended render pass is ticket 04
-  of `.scratch/2026-10-12-material-table-transparency/`. The Client's hotbar is
-  a stopgap.
+  light dimming, occlusion and the blended render pass are done (ticket 04 of
+  `.scratch/2026-10-12-material-table-transparency/`), and how a blended surface
+  composites across the per-level LOD cameras is its ticket 06. The Client's
+  hotbar is a stopgap.
 - **The Player's pose is rate-limited, not true.** The Server clamps a pose that
   moves faster than `PlayerLimits` and tells the Client, but flying is the only
   way to move, so a modified Client can still fly at the cap and edit within
