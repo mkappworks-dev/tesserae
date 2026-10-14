@@ -350,6 +350,11 @@ in step 5. The streaming worst tick is re-derived if a stage's cost moves.
 | 04  | Blended pass in the app, hotbar, screenshot                   | 03         |
 | 05  | The Server's edit path rejects unregistered Materials         | 01         |
 | 06  | Blended surfaces across the LOD cameras                       | 04         |
+| 07  | Cut coarse water where the finer level draws                  | 06         |
+| 08  | Blended quads in an exact order                               | 04         |
+| 09  | Default Worlds have lakes                                     | 06         |
+| 10  | Leaves cut out, before textures                               | 04         |
+| 11  | Water is not solid                                            | 01         |
 
 02 and 03 are independent of each other: a translucent Voxel with dimming but
 no culling rule lights correctly and draws wrongly, and the reverse, and both
