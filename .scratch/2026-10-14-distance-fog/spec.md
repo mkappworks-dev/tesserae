@@ -408,6 +408,78 @@ do not compare. It needs the untinted pair and a tinted one only to find the
 rows. And `FogSettings::color` as the one colour for fog and sky, the spec's
 decision 3, holds for the dark colour only.
 
+### Ticket 04: frame cost against main
+
+Apple M5, `dev` build, `TESSERAE_SCREENSHOT_OFFSCREEN=1`, 1080p, the default
+flight (12 m/s, from when the Server reports settled), `scripts/frame-runs 1`
+once per run so the three arms could be interleaved. `main` was built in its own
+detached worktree (`f57f72d`, which is `14a8fae` plus one docs-only ticket file,
+so the same code the branch forked from) with its own `target/`, and removed
+afterwards. Logs are in `/tmp/tesserae-fog-review/ticket04/`, not committed.
+
+Three arms, interleaved main, branch, branch with `TESSERAE_FOG=0`, repeated 14
+times (42 runs; the first six rounds were planned and eight more were added
+because three of the first six `main` runs sat at the cap). Median of each
+figure over the kept runs, with the range in brackets, in ms:
+
+| Arm                 | median_flight_ms | p99_flight_ms | worst_flight_ms | worst_tick_ms | kept | left out |
+| ------------------- | ---------------- | ------------- | --------------- | ------------- | ---- | -------- |
+| main                | 5.3 (5.1-6.7)    | 9.2 (7.3-17.8)  | 20.7 (8.3-35.8) | 1.3 (0.8-1.9) | 9    | 5        |
+| branch              | 5.4 (5.0-6.8)    | 8.3 (7.1-23.3)  | 18.9 (7.7-69.1) | 1.1 (0.8-2.7) | 11   | 3        |
+| branch, `FOG=0`     | 5.3 (5.1-6.4)    | 8.3 (7.2-16.8)  | 10.3 (7.8-101.2) | 0.9 (0.7-2.3) | 9    | 5        |
+
+The sorted `median_flight_ms` of the kept runs: main 5.1 5.1 5.1 5.3 5.3 5.4 5.9
+6.4 6.7; branch 5.0 5.1 5.1 5.2 5.4 5.4 5.5 5.6 5.8 6.4 6.8; `FOG=0` 5.1 5.1 5.1
+5.3 5.3 5.8 6.0 6.2 6.4.
+
+**Left out.** A run is left out when its median flight frame is at the 60 Hz cap
+(16.3 to 16.7 ms; `TESSERAE_SCREENSHOT_VSYNC` is unset, yet the OS paced these
+runs to the display anyway, and I did not find out why) or is within sight of
+it. main: 5 (16.3, 16.6, 16.6, 16.6, 16.7). branch: 3 (16.6, 16.6, and one at
+14.8 whose capture ended before level 5 was shown, at a load of 7.4 after it).
+`FOG=0`: 5 (15.9, 16.6, 16.6, 16.6, 16.7). That is 13 of 42 runs, and it fell on
+all three arms alike, so it does not favour one. A run whose median is under 14
+ms is kept even when its p99 or worst frame is bad: those are the figures that
+vary, and dropping runs for them would be choosing the answer.
+
+**Load.** `uptime` was read before and after every run. The driver waited for a
+1-minute load under 5 before starting each run, and the readings before were 3.9
+to 5.0 (main 4.2 to 4.95, branch 4.4 to 4.9, `FOG=0` 3.9 to 5.0). The machine
+never got quieter than that: other sessions were building and running all the
+while, so "load under about 5" here means just under it, not a quiet machine.
+After a run the load was 3.9 to 7.4, and in 28 of the 42 runs it was over 5 (up
+to 7.4 after branch run 4, 7.2 after main run 14, 7.1 after `FOG=0` run 14). I
+could not get the load below about 4. That is why nearly a third of the runs sat
+at the cap, and why I read this as a comparison inside one noisy distribution
+and not as absolute frame times.
+
+**Conclusion: the fog cost is not measurable.** The median flight frame is 5.3
+ms on `main`, 5.4 ms on the branch with fog and 5.3 ms on the branch without it.
+The differences between arms (0.1 ms, 0.0 ms) are a fifteenth or less of the
+run-to-run range inside any one arm (5.1 to 6.7, 5.0 to 6.8, 5.1 to 6.4 ms), and
+the minimum of the medians, the least load-contaminated figure, is 5.1, 5.0 and
+5.1. Taking the 11 and 9 kept runs the two arms overlap almost completely, so
+fog is costing less than about 0.3 ms a frame at 1080p on this GPU, and I cannot
+say how much less, or whether it is zero. The p99 and worst frames are not
+evidence either way: the arm with the largest worst frame is the unfogged one
+(101 ms, one run), the p99 medians are 9.2, 8.3 and 8.3, and all three ranges
+are wide because of the load. The worst tick is 1.3, 1.1 and 0.9 ms, all inside
+a range of 0.7 to 2.7 ms: fog adds no main-thread or Server work, as expected.
+
+**Does it grow with the cameras?** Not measured. The whole six-camera fog is
+inside the spread, which bounds the per-camera cost at a sixth of that, and
+nothing here can say more. A run with `TESSERAE_LOD=0` (one camera) would
+not resolve a cost that small either, so I did not run it.
+
+**The pipeline specialisation.** `DISTANCE_FOG` builds the chunk pipeline once
+more per view layout. The time `l0_shown_s` (level 0 had every Chunk of its mesh
+shell sent and drawn) is 1.71 s on `main` (1.52 to 2.13), 1.71 s on the branch
+(1.60 to 2.30) and 1.61 s without fog (1.53 to 2.47), and `l5_shown_s` is 10.91,
+10.81 and 10.75 s. These measure when the Server's streaming had finished, not
+the pipeline build alone, and the differences are well inside the spread, so a
+once-only build of a few milliseconds would not show; if it moved anything it is
+under what this can see.
+
 ## Tickets
 
 | #   | Title                                       | Blocked by |

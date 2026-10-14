@@ -1,6 +1,6 @@
 # Frame cost against main
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec, Performance. Fog is GPU work, so the figure is the frame, not
@@ -43,3 +43,20 @@ Nothing in the product. A measurement, written into the spec's Outcome.
 - `Status: done` is set in the commit that finishes this ticket.
 
 ## Comments
+
+### Done
+
+Measured, no code changed. Full table, loads and counts are in the spec's
+Outcome, "Ticket 04: frame cost against main". In short:
+
+- **Not measurable.** 14 interleaved rounds of main, branch and branch with
+  `TESSERAE_FOG=0` (42 runs). Median flight frame 5.3 ms (main), 5.4 ms (branch),
+  5.3 ms (`FOG=0`), each with a run-to-run range of about 1.5 ms. Fog costs under
+  about 0.3 ms a frame at 1080p; I cannot say how much less.
+- **13 of 42 runs left out** as at or near the 60 Hz cap (main 5, branch 3,
+  `FOG=0` 5).
+- **The load never got quiet.** 3.9 to 5.0 before each run, up to 7.4 after, in
+  28 runs over 5. Other sessions were building and running throughout.
+- **Per-camera scaling and the pipeline build were not resolved**: both are
+  inside the spread (`l0_shown_s` 1.71 s on main and branch).
+- `main` was built in a detached worktree at `f57f72d` and removed afterwards.
