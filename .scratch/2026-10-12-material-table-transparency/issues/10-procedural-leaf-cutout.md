@@ -1,6 +1,6 @@
 # Leaves cut out, before textures
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04
 
 Leaves draw as solid cubes because cutout needs an alpha test against a
@@ -28,3 +28,32 @@ step 9's textures replace. This reverses the spec's "`RenderClass` gets a
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+Built, with the plan's routing changed.
+
+- **A third mesh layer, not the opaque one.** For the holes to show in shadows
+  the material has to discard in the depth and shadow passes too, which means
+  an alpha-mask material; putting leaves in the opaque layer would have put
+  every terrain fragment on a pass that may discard, which costs early depth
+  and, on Apple GPUs, hidden-surface removal. So `ChunkMesh` has `cutout`, the
+  merge key carries two bits of render class, and the Client spawns a third
+  entity per Chunk on an `AlphaMode::Mask` material. The merge key's unpacking
+  in `push_merged_quad` moved with it; a grep, not a test, caught that it would
+  otherwise have read the Material one bit off.
+- **The pattern.** Four by four holes a Voxel, about a third open, on the face's
+  UV, which counts Voxels of its own level, so coarse leaves have coarse holes.
+  In the main pass it sets alpha to zero and the mask's test discards; a new
+  `chunk_prepass.wesl` cuts the same holes in the depth and shadow passes.
+- **The prepass vertex layout.** `specialize` gave every pass the main pass's
+  layout (normal at 1, UV at 2), and `bevy_pbr`'s prepass vertex shader reads
+  the UV at 1 and the normal at 3. Harmless while nothing in the prepass read
+  them; the cutout's holes do, so prepass pipelines now get `bevy_pbr`'s layout.
+- Tests: leaves land in the cutout layer and nowhere else, and two leaves still
+  draw the faces between them (core); a leaf mesh spawns one masked entity that
+  casts a shadow, a replacement without leaves despawns it, and an unload
+  removes it (Client).
+- Capture: the gallery's canopy shows its inner faces through the holes, and
+  its shadow on the plinth has gaps. A scene without leaves is unchanged
+  against `origin/main` but for the overlay text, so opaque terrain and its
+  shadows did not move with the prepass layout.
+

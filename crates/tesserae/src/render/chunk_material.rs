@@ -122,12 +122,31 @@ impl MaterialExtension for ChunkMaterialExtension {
         shader()
     }
 
+    fn prepass_fragment_shader() -> ShaderRef {
+        embedded("chunk_prepass.wesl")
+    }
+
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        // The depth and shadow passes run `bevy_pbr`'s own prepass vertex
+        // shader, which reads the UV at 1 and the normal at 3, and the cutout
+        // material's holes need the right UV there.
+        if descriptor
+            .vertex
+            .shader_defs
+            .contains(&"PREPASS_PIPELINE".into())
+        {
+            descriptor.vertex.buffers = vec![layout.0.get_layout(&[
+                Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+                Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+                Mesh::ATTRIBUTE_NORMAL.at_shader_location(3),
+            ])?];
+            return Ok(());
+        }
         // The base material's layout stops at `bevy_pbr`'s attributes, so the
         // custom one has to be declared here or the vertex shader reads
         // garbage. Spelling the set out is safe because this material is only
@@ -155,9 +174,12 @@ impl MaterialExtension for ChunkMaterialExtension {
 }
 
 fn shader() -> ShaderRef {
+    embedded("chunk_material.wesl")
+}
+
+fn embedded(file: &str) -> ShaderRef {
     ShaderRef::Path(
-        AssetPath::from_path_buf(bevy::asset::embedded_path!("chunk_material.wesl"))
-            .with_source("embedded"),
+        AssetPath::from_path_buf(bevy::asset::embedded_path!(file)).with_source("embedded"),
     )
 }
 

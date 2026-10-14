@@ -11,7 +11,10 @@ import bevy_pbr::render::{
     mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
-    pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
+    pbr_types::{
+        STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK, STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
+        STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
+    },
     view_transformations::position_world_to_clip,
 };
 
@@ -29,6 +32,18 @@ struct LodParams {
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(101)
 var<uniform> lod: LodParams;
+
+// Holes in a cutout face, four by four to a Voxel, about a third of them open.
+// On the face's UV, which counts the Voxels of its own level, so a coarse leaf
+// has coarse holes and the pattern does not swim. Step 9's textures replace it.
+// chunk_prepass.wesl has the same function and the two must stay in step.
+fn leaf_hole(uv: vec2<f32>) -> bool {
+    let cell = vec2<u32>(floor(fract(uv) * 4.0));
+    let voxel = vec2<u32>(vec2<i32>(floor(uv)) + vec2<i32>(4096));
+    var h = (cell.x * 73856093u) ^ (cell.y * 19349663u) ^ (voxel.x * 83492791u) ^ (voxel.y * 2654435761u);
+    h = (h ^ (h >> 13u)) * 1274126177u;
+    return ((h >> 8u) & 1023u) < 360u;
+}
 
 // Mirrors client::drawn_mask, which documents the layout.
 @group(constants::MATERIAL_BIND_GROUP) @binding(102)
@@ -218,6 +233,11 @@ fn fragment(
             + pbr_input.material.base_color.rgb * BLOCK_LIGHT_TINT * block * BLOCK_LIGHT_STRENGTH,
         pbr_input.material.emissive.a,
     );
+
+    let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
+    if alpha_mode == STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK && leaf_hole(in.uv) {
+        pbr_input.material.base_color.a = 0.0;
+    }
 
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material.flags,

@@ -317,7 +317,7 @@ pub(in crate::server) mod measure {
         pub meshes: usize,
         pub non_empty: usize,
         pub quads: usize,
-        /// Both layers, though the Client uploads only the opaque one.
+        /// Every layer.
         pub bytes: usize,
     }
 
@@ -327,7 +327,9 @@ pub(in crate::server) mod measure {
                 meshes: 1,
                 non_empty: usize::from(!mesh.is_empty()),
                 quads: mesh.quad_count(),
-                bytes: layer_bytes(&mesh.opaque) + layer_bytes(&mesh.blended),
+                bytes: layer_bytes(&mesh.opaque)
+                    + layer_bytes(&mesh.blended)
+                    + layer_bytes(&mesh.cutout),
             }
         }
     }
@@ -1777,7 +1779,7 @@ mod tests {
         let covered = u32::from(COVERED_SKY.packed());
         let mut vertices = 0;
         for m in &ready {
-            for layer in [&m.mesh.opaque, &m.mesh.blended] {
+            for layer in [&m.mesh.opaque, &m.mesh.blended, &m.mesh.cutout] {
                 assert_eq!(layer.light.len(), layer.positions.len());
                 assert!(
                     layer.light.iter().all(|&l| l == open || l == covered),

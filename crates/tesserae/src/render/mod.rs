@@ -13,5 +13,6 @@ pub fn plugin(app: &mut App) {
     // in the binary, as `bevy_pbr`'s do. A look pack's WESL is an asset because
     // it is content, which is the opposite case.
     embedded_asset!(app, "chunk_material.wesl");
+    embedded_asset!(app, "chunk_prepass.wesl");
     app.add_plugins(MaterialPlugin::<ChunkMaterial>::default());
 }

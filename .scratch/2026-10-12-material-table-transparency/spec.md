@@ -265,10 +265,11 @@ pass and skips it in the depth prepass, and the flood-fill already dims sky ligh
 under water and glass, so a full shadow on top would count it twice. What this
 leaves is below, under Known loose ends.
 
-Leaves render in the opaque pass. They are cutout in every voxel game, which
-needs an alpha test against a texture, and textures are step 9; until then a
-leaf is a dimming Material that draws as a solid cube. `RenderClass` gets a
-`Cutout` when that arrives and not before.
+Leaves are `RenderClass::Cutout` (ticket 10), cut out in every voxel game. The
+alpha test runs against a procedural hole pattern until step 9's textures
+replace it, in a third mesh layer with an alpha-mask material of its own,
+because a pass that may discard costs every fragment on it and opaque terrain
+must not pay. The depth and shadow passes cut the same holes.
 
 Forward rendering is what this assumes and is what DESIGN.md already says a
 deferred path would need anyway ("still needs a forward transparency pass").
@@ -386,7 +387,8 @@ are testable alone. 04 is the first time a player can see any of it.
 - ~~**Collision and picking** treat water as solid.~~ `MaterialDef::solid`
   (ticket 11): the sweep and the edit ray pass through water, and Place fills a
   water cell.
-- **Cutout leaves** need textures (step 9).
+- **Leaf holes are a procedural pattern** (ticket 10), regular to the eye, until
+  step 9's textures replace it.
 - **Worldgen places none.** Terrain contains no translucent Voxel, so a player
   sees them only by placing them, as with shaped Voxels in step 5.
 

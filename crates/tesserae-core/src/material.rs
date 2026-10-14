@@ -38,6 +38,10 @@ pub enum Occlusion {
 pub enum RenderClass {
     Opaque,
     Blend,
+    /// Opaque where drawn, with holes: written to depth and casting a shadow
+    /// with its holes, but on a pass of its own, because a pass that may
+    /// discard costs every fragment on it. Leaves.
+    Cutout,
 }
 
 /// One row of the [`MaterialTable`].
@@ -92,7 +96,7 @@ impl MaterialDef {
         emission: 0,
         dimming: 1,
         occlusion: Occlusion::Never,
-        render: RenderClass::Opaque,
+        render: RenderClass::Cutout,
         solid: true,
     };
 
@@ -254,7 +258,7 @@ mod tests {
         );
         assert_eq!(
             [GLASS, LEAVES, WATER].map(|m| def(&t, m).render),
-            [RenderClass::Blend, RenderClass::Opaque, RenderClass::Blend]
+            [RenderClass::Blend, RenderClass::Cutout, RenderClass::Blend]
         );
         assert_eq!(
             [STONE, DIRT, GRASS, LANTERN, GLASS, LEAVES, WATER],

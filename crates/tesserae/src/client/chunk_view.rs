@@ -47,6 +47,7 @@ type LayerEntities = HashMap<(u32, ChunkCoord), Entity>;
 struct ChunkEntities {
     opaque: LayerEntities,
     blended: LayerEntities,
+    cutout: LayerEntities,
     /// Every `(level, coord)` sent a mesh, empty or not, and not unloaded since:
     /// the space each level has answered for. Changed since `publish_drawn`
     /// last ran when `drawn_changed`.
@@ -54,13 +55,14 @@ struct ChunkEntities {
     drawn_changed: bool,
 }
 
-/// Two materials for every Chunk, as the Material index is a vertex attribute:
-/// they differ in alpha mode and in what the blended one is told the finer
-/// levels have drawn.
+/// A material per mesh layer, for every Chunk, as the Material index is a
+/// vertex attribute: they differ in alpha mode and in what the blended one is
+/// told the finer levels have drawn.
 #[derive(Resource)]
 struct TerrainMaterial {
     opaque: Handle<ChunkMaterial>,
     blended: Handle<ChunkMaterial>,
+    cutout: Handle<ChunkMaterial>,
     drawn: Handle<ShaderBuffer>,
 }
 
@@ -151,9 +153,18 @@ fn add_material(
             ..opaque.extension.clone()
         },
     };
+    // The holes are cut by the shader's pattern, which sets alpha to zero.
+    let cutout = ChunkMaterial {
+        base: StandardMaterial {
+            alpha_mode: AlphaMode::Mask(0.5),
+            ..opaque.base.clone()
+        },
+        extension: opaque.extension.clone(),
+    };
     commands.insert_resource(TerrainMaterial {
         opaque: materials.add(opaque),
         blended: materials.add(blended),
+        cutout: materials.add(cutout),
         drawn,
     });
 }
@@ -285,6 +296,14 @@ fn upload_meshes(
             // a shadow map treating them as solid would count it twice.
             false,
         );
+        let cutout = draw.show(
+            &mut entities.cutout,
+            &material.cutout,
+            &mesh.cutout,
+            key,
+            &world,
+            true,
+        );
         if let Some(entity) = blended {
             let order = BlendOrder::new(&mesh.blended, world.voxel_size_at(level));
             match order {
@@ -294,10 +313,13 @@ fn upload_meshes(
         }
         #[cfg(feature = "dev")]
         {
-            uploaded += u32::from(opaque.is_some()) + u32::from(blended.is_some());
+            uploaded += [opaque, blended, cutout]
+                .iter()
+                .map(|e| u32::from(e.is_some()))
+                .sum::<u32>();
         }
         #[cfg(not(feature = "dev"))]
-        let _ = opaque;
+        let _ = (opaque, cutout);
     }
     #[cfg(feature = "dev")]
     if uploaded > 0 {
@@ -324,6 +346,7 @@ fn drop_meshes(
     for key in level0.chain(coarse) {
         draw.hide(&mut entities.opaque, key);
         draw.hide(&mut entities.blended, key);
+        draw.hide(&mut entities.cutout, key);
         entities.drawn_changed |= entities.delivered.remove(&key);
     }
 }
@@ -1178,6 +1201,68 @@ mod tests {
             .drain()
             .any(|e| e.is_modified(&handle));
         assert!(!modified, "a sheet's draw order cannot matter");
+    }
+
+    /// Two leaf cubes beside open sky: every face is in the cutout layer.
+    fn leaves() -> tesserae_core::ChunkMesh {
+        let mut c = Chunk::air();
+        c.set(5, 5, 5, Voxel::cube(tesserae_core::material::LEAVES));
+        c.set(6, 5, 5, Voxel::cube(tesserae_core::material::LEAVES));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mesh = mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        );
+        assert!(mesh.opaque.is_empty() && !mesh.cutout.is_empty());
+        mesh
+    }
+
+    fn cutout_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
+        app.world()
+            .resource::<ChunkEntities>()
+            .cutout
+            .get(&(level, coord))
+            .copied()
+    }
+
+    #[test]
+    fn leaves_are_drawn_masked_casting_their_shadow_and_follow_their_chunk() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, leaves());
+        let entity = cutout_at(&app, 0, coord).expect("a cutout entity");
+        assert_eq!(drawn(&mut app), 1);
+        let handle = &app
+            .world()
+            .get::<MeshMaterial3d<ChunkMaterial>>(entity)
+            .unwrap()
+            .0;
+        let material = app
+            .world()
+            .resource::<Assets<ChunkMaterial>>()
+            .get(handle)
+            .unwrap();
+        assert!(matches!(material.base.alpha_mode, AlphaMode::Mask(_)));
+        assert!(
+            app.world()
+                .get::<bevy::light::NotShadowCaster>(entity)
+                .is_none(),
+            "a canopy's shadow has its holes, not none"
+        );
+        assert_eq!(app.world().get::<MeshTag>(entity).unwrap().value, 0);
+
+        send_mesh(&mut app, coord, geometry());
+        assert_eq!(
+            cutout_at(&app, 0, coord),
+            None,
+            "a replacement without leaves"
+        );
+        send_mesh(&mut app, coord, leaves());
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.update();
+        assert_eq!(drawn(&mut app), 0);
     }
 
     #[test]

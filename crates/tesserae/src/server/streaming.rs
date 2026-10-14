@@ -1358,7 +1358,7 @@ pub(in crate::server) mod tests {
                 && a.light == b.light
                 && a.indices == b.indices
         };
-        layer(&a.opaque, &b.opaque) && layer(&a.blended, &b.blended)
+        layer(&a.opaque, &b.opaque) && layer(&a.blended, &b.blended) && layer(&a.cutout, &b.cutout)
     }
 
     /// The light of the Chunk a mesh was built from, which `publish` requires

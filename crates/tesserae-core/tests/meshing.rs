@@ -686,7 +686,7 @@ fn exposed_faces_unless(
 /// rectangle, each belonging to the solid sub-cell behind it.
 fn drawn_faces(mesh: &tesserae_core::ChunkMesh) -> std::collections::BTreeMap<SubFace, u32> {
     let mut drawn = std::collections::BTreeMap::new();
-    for layer in [&mesh.opaque, &mesh.blended] {
+    for layer in [&mesh.opaque, &mesh.blended, &mesh.cutout] {
         for (q, normal) in layer.positions.chunks(4).zip(layer.normals.chunks(4)) {
             let n = normal[0];
             let f = (0..6)
@@ -1164,17 +1164,17 @@ fn leaves_hide_nothing_not_even_each_other() {
     let mesh = mesh_isolated(&c);
     // The two shared faces are drawn, one facing each way, on the plane x=11.
     let facing_seam: Vec<_> = mesh
-        .opaque
+        .cutout
         .positions
         .chunks(4)
-        .zip(quad_normals(&mesh.opaque))
+        .zip(quad_normals(&mesh.cutout))
         .filter(|(quad, _)| quad.iter().all(|p| p[0] == 11.0))
         .map(|(_, n)| n)
         .collect();
     assert_eq!(facing_seam.len(), 2);
     assert!(facing_seam.contains(&[1.0, 0.0, 0.0]) && facing_seam.contains(&[-1.0, 0.0, 0.0]));
-    // Leaves draw in the opaque pass until there is a texture to cut out.
-    assert!(mesh.blended.is_empty());
+    // Leaves have a pass of their own, which may discard.
+    assert!(mesh.opaque.is_empty() && mesh.blended.is_empty());
 }
 
 #[test]
@@ -1220,15 +1220,22 @@ fn every_quad_lands_in_the_layer_of_its_materials_render_class() {
             .iter()
             .all(|&m| class(m) == RenderClass::Blend)
     );
+    assert!(
+        mesh.cutout
+            .materials
+            .iter()
+            .all(|&m| class(m) == RenderClass::Cutout)
+    );
     for (layer, expected) in [
-        (&mesh.opaque, [STONE, LEAVES]),
-        (&mesh.blended, [GLASS, WATER]),
+        (&mesh.opaque, vec![STONE]),
+        (&mesh.blended, vec![GLASS, WATER]),
+        (&mesh.cutout, vec![LEAVES]),
     ] {
         for m in expected {
             assert!(layer.materials.contains(&(m as u32)), "material {m}");
         }
     }
-    for layer in [&mesh.opaque, &mesh.blended] {
+    for layer in [&mesh.opaque, &mesh.blended, &mesh.cutout] {
         assert_eq!(layer.positions.len(), layer.normals.len());
         assert_eq!(layer.positions.len(), layer.uvs.len());
         assert_eq!(layer.positions.len(), layer.materials.len());

@@ -188,14 +188,14 @@ impl MeshLayer {
 /// Triangle soup for one Chunk, in Voxel-index space. The caller scales by the
 /// World's Voxel size; nothing here is in metres.
 ///
-/// Two layers because a Material is drawn in one of two passes
-/// ([`RenderClass`]): blended faces need sorting and no depth write, and
-/// opaque ones must not pay for either. A quad is one Material, so it is never
-/// split across them.
+/// A layer per [`RenderClass`]: blended faces need sorting and no depth write,
+/// cutout ones a pass that may discard, and opaque ones must pay for neither.
+/// A quad is one Material, so it is never split across them.
 #[derive(Default, Debug)]
 pub struct ChunkMesh {
     pub opaque: MeshLayer,
     pub blended: MeshLayer,
+    pub cutout: MeshLayer,
     /// Shaped Voxels pass 2 gave geometry to, including those whose every face
     /// turned out to be hidden.
     pub shaped_voxels: u32,
@@ -203,11 +203,11 @@ pub struct ChunkMesh {
 
 impl ChunkMesh {
     pub fn quad_count(&self) -> usize {
-        self.opaque.quad_count() + self.blended.quad_count()
+        self.opaque.quad_count() + self.blended.quad_count() + self.cutout.quad_count()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.opaque.is_empty() && self.blended.is_empty()
+        self.opaque.is_empty() && self.blended.is_empty() && self.cutout.is_empty()
     }
 
     #[inline]
@@ -215,6 +215,7 @@ impl ChunkMesh {
         match class {
             RenderClass::Opaque => &mut self.opaque,
             RenderClass::Blend => &mut self.blended,
+            RenderClass::Cutout => &mut self.cutout,
         }
     }
 }
@@ -545,13 +546,7 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
                         own
                     };
                     let class = tables.materials.render(voxel);
-                    let quad = Pending::new(
-                        [x, y, z],
-                        q,
-                        class == RenderClass::Blend,
-                        voxel.material(),
-                        lit,
-                    );
+                    let quad = Pending::new([x, y, z], q, class, voxel.material(), lit);
                     if quad.can_merge() {
                         pending.push(quad);
                     } else {
@@ -562,6 +557,23 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
         }
     }
     merge_shaped(&mut pending, mesh);
+}
+
+/// A [`RenderClass`] in the two bits of a pass-2 group key.
+fn class_bits(class: RenderClass) -> u8 {
+    match class {
+        RenderClass::Opaque => 0,
+        RenderClass::Blend => 1,
+        RenderClass::Cutout => 2,
+    }
+}
+
+fn class_of_bits(bits: u64) -> RenderClass {
+    match bits {
+        1 => RenderClass::Blend,
+        2 => RenderClass::Cutout,
+        _ => RenderClass::Opaque,
+    }
 }
 
 /// One pass-2 quad as a rectangle over the whole Chunk, in sixteenths of a
@@ -578,7 +590,13 @@ struct Pending {
 }
 
 impl Pending {
-    fn new(cell: [i32; 3], q: &ShapeQuad, blended: bool, material: MaterialId, lit: Light) -> Self {
+    fn new(
+        cell: [i32; 3],
+        q: &ShapeQuad,
+        class: RenderClass,
+        material: MaterialId,
+        lit: Light,
+    ) -> Self {
         let sub = SUBDIV as i32;
         let d = q.face as usize / 2;
         let (u, v) = ((d + 1) % 3, (d + 2) % 3);
@@ -586,9 +604,9 @@ impl Pending {
         Pending {
             group: (plane as u64)
                 | (q.face as u64) << 10
-                | (blended as u64) << 13
-                | (material as u64) << 14
-                | (lit.packed() as u64) << 30,
+                | (class_bits(class) as u64) << 13
+                | (material as u64) << 15
+                | (lit.packed() as u64) << 31,
             a0: (cell[u] * sub + q.u0 as i32) as u16,
             a1: (cell[u] * sub + q.u1 as i32) as u16,
             b0: (cell[v] * sub + q.v0 as i32) as u16,
@@ -658,12 +676,7 @@ fn merge_shaped(pending: &mut [Pending], mesh: &mut ChunkMesh) {
             run.len()
         };
         for p in &run[..kept] {
-            let class = if p.group >> 13 & 1 == 1 {
-                RenderClass::Blend
-            } else {
-                RenderClass::Opaque
-            };
-            push_merged_quad(mesh.layer(class), p);
+            push_merged_quad(mesh.layer(class_of_bits(p.group >> 13 & 0b11)), p);
         }
     }
 }
@@ -717,8 +730,8 @@ fn push_merged_quad(mesh: &mut MeshLayer, p: &Pending) {
     let sub = SUBDIV as u16;
     let plane = (p.group & 0x3ff) as f32 * UNIT;
     let face = (p.group >> 10 & 0x7) as usize;
-    let material = (p.group >> 14 & 0xffff) as u32;
-    let light = (p.group >> 30) as u32;
+    let material = (p.group >> 15 & 0xffff) as u32;
+    let light = (p.group >> 31) as u32;
     let positive = face % 2 == 1;
     let (d, u, v) = (face / 2, (face / 2 + 1) % 3, (face / 2 + 2) % 3);
     let (ubase, vbase) = (p.a0 / sub * sub, p.b0 / sub * sub);
