@@ -20,6 +20,7 @@ use tesserae_core::ChunkMesh;
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
+use crate::render::fog::{self, FogSettings};
 use crate::server::streaming::{
     ChunkMeshReady, ChunkUnloaded, LodMeshReady, LodUnloaded, StreamingSettings,
 };
@@ -246,6 +247,7 @@ fn spawn_camera(
     spawn: Res<crate::server::world_state::SpawnPoint>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
+    fog_settings: Res<FogSettings>,
 ) {
     let eye = spawn.eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
@@ -254,6 +256,15 @@ fn spawn_camera(
     // At least one, even with no coarse levels: the camera at the bottom of the
     // stack is the one that clears, and the Player's camera never does.
     let coarse_levels = level_count(&streaming).max(2) - 1;
+
+    // Built once and cloned onto every camera: the same fragment must fog the
+    // same whichever layer draws it.
+    let fog = fog::camera_fog(
+        fog::enabled(),
+        &fog_settings,
+        streaming.view_distance_m,
+        streaming.lod_distance_m,
+    );
 
     let near = commands
         .spawn((
@@ -276,31 +287,40 @@ fn spawn_camera(
             super::camera::CameraHome(pose),
         ))
         .id();
+    if let Some(fog) = &fog {
+        commands.entity(near).insert(fog.clone());
+    }
 
     for level in 1..=coarse_levels {
-        commands.spawn((
-            Camera3d::default(),
-            Camera {
-                // Coarsest first, so each finer level draws over the last.
-                order: (coarse_levels - level) as isize,
-                clear_color: if level == coarse_levels {
-                    ClearColorConfig::Default
-                } else {
-                    ClearColorConfig::None
+        let coarse = commands
+            .spawn((
+                Camera3d::default(),
+                Camera {
+                    // Coarsest first, so each finer level draws over the last.
+                    order: (coarse_levels - level) as isize,
+                    clear_color: if level == coarse_levels {
+                        ClearColorConfig::Default
+                    } else {
+                        ClearColorConfig::None
+                    },
+                    ..default()
                 },
-                ..default()
-            },
-            layer_of(level),
-            Projection::Perspective(PerspectiveProjection {
-                near: streaming.view_distance_m * COARSE_NEAR_FRACTION,
-                far: streaming.lod_distance_m.max(streaming.view_distance_m) + world.cell_size(),
-                ..default()
-            }),
-            // Identity under the near camera, so it cannot drift from it.
-            ChildOf(near),
-            GlobalTransform::from(pose),
-            CoarseCamera,
-        ));
+                layer_of(level),
+                Projection::Perspective(PerspectiveProjection {
+                    near: streaming.view_distance_m * COARSE_NEAR_FRACTION,
+                    far: streaming.lod_distance_m.max(streaming.view_distance_m)
+                        + world.cell_size(),
+                    ..default()
+                }),
+                // Identity under the near camera, so it cannot drift from it.
+                ChildOf(near),
+                GlobalTransform::from(pose),
+                CoarseCamera,
+            ))
+            .id();
+        if let Some(fog) = &fog {
+            commands.entity(coarse).insert(fog.clone());
+        }
     }
 }
 
@@ -319,6 +339,7 @@ mod tests {
         let mut app = App::new();
         app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(eye))
             .insert_resource(streaming)
+            .init_resource::<FogSettings>()
             .init_resource::<WorldSettings>();
         app.world_mut().run_system_once(spawn_camera).unwrap();
         app
@@ -393,6 +414,59 @@ mod tests {
                 p.clone()
             })
             .collect()
+    }
+
+    fn terrain_fogs(app: &mut App) -> Vec<Option<DistanceFog>> {
+        app.world_mut()
+            .query_filtered::<Option<&DistanceFog>, With<Camera3d>>()
+            .iter(app.world())
+            .map(|fog| fog.cloned())
+            .collect()
+    }
+
+    fn assert_same_fog(a: &DistanceFog, b: &DistanceFog) {
+        use bevy::pbr::FogFalloff::ExponentialSquared;
+        assert_eq!(a.color, b.color);
+        assert_eq!(a.directional_light_color, b.directional_light_color);
+        assert_eq!(a.directional_light_exponent, b.directional_light_exponent);
+        let (ExponentialSquared { density: da }, ExponentialSquared { density: db }) =
+            (&a.falloff, &b.falloff)
+        else {
+            panic!(
+                "{:?} and {:?} are not both exponential squared",
+                a.falloff, b.falloff
+            );
+        };
+        assert_eq!(da, db);
+    }
+
+    #[test]
+    fn every_terrain_camera_has_the_same_distance_fog() {
+        let mut app = camera_app(Vec3::ZERO, StreamingSettings::default());
+        let fogs = terrain_fogs(&mut app);
+        assert_eq!(
+            fogs.len(),
+            level_count(&StreamingSettings::default()) as usize,
+            "the near camera and one per coarse level"
+        );
+        let first = fogs[0].as_ref().expect("the near camera is fogged");
+        for fog in &fogs {
+            assert_same_fog(first, fog.as_ref().expect("a camera has no fog"));
+        }
+    }
+
+    #[test]
+    fn the_fog_is_derived_from_the_streaming_distances() {
+        let streaming = StreamingSettings::default();
+        let mut app = camera_app(Vec3::ZERO, streaming);
+        let want = fog::distance_fog(
+            &FogSettings::default(),
+            streaming.view_distance_m,
+            streaming.lod_distance_m,
+        );
+        for fog in terrain_fogs(&mut app) {
+            assert_same_fog(&want, &fog.unwrap());
+        }
     }
 
     #[test]
@@ -488,6 +562,10 @@ mod tests {
             .add_message::<LodUnloaded>()
             .add_systems(Startup, add_material)
             .add_systems(Update, (upload_meshes, drop_meshes).chain());
+        // `upload_meshes` takes the dev-only counter as a `ResMut`, so without
+        // it the system fails parameter validation instead of running.
+        #[cfg(feature = "dev")]
+        app.init_resource::<crate::cost::MainThreadCost>();
         app.update();
         app
     }
