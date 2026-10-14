@@ -287,3 +287,53 @@ For (b), in addition to or in place of the above:
   light bytes are under the figure the ticket recorded.
 
 ## Comments
+
+### 2026-10-14: Step 0 run (Apple M5, `dev` build, 1080p offscreen)
+
+Status left at `needs-triage`; the decision is the maintainer's. Screenshots are
+in `/tmp/tesserae-coarse-light-review/`, not committed, to be deleted when this
+is decided.
+
+**What a mouth is in this World.** Not a cave opening in a cliff: relief is
+gentle, so every opening is a hole carved through the surface cap. A probe over
+the default seed (960 m each way) found about 173 000 opening columns, 4.7% of
+all columns, so mouths are common, not rare. The one used is a 12 m by 22 m hole
+with a roofed tunnel running north and south from it, centred at
+(-26, -352) m, 349 m from the spawn, 14 m deep at level 1.
+
+**Count (step 3).** Coarse air Voxels more than one Voxel under the heightfield
+that touch a solid Voxel inside their Chunk, summed over the rings at the
+default vantage: level 1 107 042 (232 Chunks), level 2 54 652 (216), level 3
+21 018 (216), level 4 2 083 (215), level 5 0. Caves survive the half-volume
+downsample further than the ticket's arithmetic said (level 4, not level 3).
+These are faces the mesher emits, not faces that are seen: most are inside
+sealed tunnels.
+
+**Truth against level 1.**
+
+- 45 m out, 105 m up, looking down 38 degrees: the hole is a black interior
+  with a lit near wall, about 200 by 200 px.
+- 250 m out, 128 m up, 27 degrees down: the same hole is a speck of about 25
+  px, a brown and grey wall, with no dark interior visible. At 254 m up
+  (45 degrees) it is a grey patch of about 40 by 30 px.
+- Seen as level 1, the interior is lit like the ground around it, so the
+  discrepancy exists. At this range it covers a few dozen pixels.
+
+**The hack (step 4).** Local, uncommitted, reverted: covered air lit at sky 0,
+margin one Voxel, lowest height over the Voxel's footprint. At 250 m it darkens
+one or two faces of the mouth (a strip on the east wall goes black; the grey
+patch gets a darker tile). The shader does show sky 0 on a coarse face as
+black, so the light reaches the pixel. What it does not do is turn the speck
+into the black hole of the truth image, because the faces looking into the
+covered air are mostly hidden from this angle.
+
+**Reading.** Option (a)'s effect at 250 m is a handful of pixels, on one
+mouth, at two vantages. Not captured: a vantage at 500 m (level 2), a second
+mouth, and the plain-ground control for the tinted rings. By the ticket's own
+decision rule this leans `wontfix`; it does not show a mouth that reads wrong
+at distance.
+
+**Side finding, unmeasured.** The count above includes tunnels that are sealed
+inside the terrain, whose faces are meshed and never seen. Skipping them would
+cut coarse quads and vertex memory, which is a different ticket from lighting
+and has no capture behind it yet.
