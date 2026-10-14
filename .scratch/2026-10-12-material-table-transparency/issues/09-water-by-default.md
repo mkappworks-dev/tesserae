@@ -66,7 +66,7 @@ Built, with one finding the ticket did not foresee.
   read 4 to 6% slower and is not: with `CARGO_PROFILE_BENCH_CODEGEN_UNITS=1` on
   both sides `greedy_mesh/terrain` is 327.7 against 335.8 us, the code-layout
   effect the LOD step met. `mesh_chunk/straddling` stays 4 to 5% slower with
-  one codegen unit (417.8 against 397.8 us) and is not explained: the mesher's
+  one codegen unit (417.8 against 397.8 us) and is ticket 10's, about 4%, examined in ticket 16: the mesher's
   changes on this branch are a third layer and two more bits in the pass-2
   merge key, and `main` itself spread from 397 to 565 us over the same runs. A
   first reading of `mesh_chunk/ramp_densest` at +33% was `main`'s outlier: a

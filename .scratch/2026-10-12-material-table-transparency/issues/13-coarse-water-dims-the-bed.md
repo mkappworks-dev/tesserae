@@ -47,3 +47,9 @@ Built as specified, with the formula corrected by its own test.
 - Capture, the same ring join as ticket 07's: water luminance across the band is
   133 to 150 with no row-to-row step above 5.9, against 131.5 to 154 and 10.1
   before. A dry World's coarse light is unchanged (the existing tests).
+
+- `lod/coarse_light` against `origin/main`, one codegen unit, three
+  interleaved rounds: the five surface cases are unchanged (62.0 against 62.4
+  us at level 1 to 106.4 against 108.4 at level 5), and `above_band_level_1`,
+  a Chunk answered without walking it, is 17.8 ns against 14.1: the dry
+  wrapper and the water check, a few microseconds over a whole ring.
