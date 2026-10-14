@@ -364,6 +364,7 @@ in step 5. The streaming worst tick is re-derived if a stage's cost moves.
 | 14  | Coarse water above the finer rows (wontfix)                   | 07         |
 | 15  | Exact blended order for large meshes                          | 08         |
 | 16  | `mesh_chunk/straddling` against `main`                        | 09         |
+| 17  | A coarse water surface sits at level 0's height             | 07, 13     |
 
 02 and 03 are independent of each other: a translucent Voxel with dimming but
 no culling rule lights correctly and draws wrongly, and the reverse, and both
