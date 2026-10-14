@@ -52,6 +52,9 @@ pub struct MaterialDef {
     pub dimming: u8,
     pub occlusion: Occlusion,
     pub render: RenderClass,
+    /// Whether a body collides with it and the edit ray stops on it. Water is
+    /// not: a body sinks through it and a ray goes through it to the bed.
+    pub solid: bool,
 }
 
 impl MaterialDef {
@@ -61,6 +64,7 @@ impl MaterialDef {
         dimming: MAX_LIGHT,
         occlusion: Occlusion::Opaque,
         render: RenderClass::Opaque,
+        solid: true,
     };
 
     const AIR: MaterialDef = MaterialDef {
@@ -68,6 +72,7 @@ impl MaterialDef {
         dimming: 0,
         occlusion: Occlusion::Never,
         render: RenderClass::Opaque,
+        solid: false,
     };
 
     const LANTERN: MaterialDef = MaterialDef {
@@ -80,6 +85,7 @@ impl MaterialDef {
         dimming: 0,
         occlusion: Occlusion::SameMaterial,
         render: RenderClass::Blend,
+        solid: true,
     };
 
     const LEAVES: MaterialDef = MaterialDef {
@@ -87,6 +93,7 @@ impl MaterialDef {
         dimming: 1,
         occlusion: Occlusion::Never,
         render: RenderClass::Opaque,
+        solid: true,
     };
 
     const WATER: MaterialDef = MaterialDef {
@@ -94,6 +101,7 @@ impl MaterialDef {
         dimming: 2,
         occlusion: Occlusion::SameMaterial,
         render: RenderClass::Blend,
+        solid: false,
     };
 }
 
@@ -116,7 +124,7 @@ pub enum MaterialError {
 /// `docs/adr/0001-wasm-mod-boundary.md`.
 ///
 /// Rows are dense and sized to the registered count, not to `u16::MAX`: ids are
-/// handed out in order, so a table of N Materials is 4N bytes and not 64 KiB of
+/// handed out in order, so a table of N Materials is 5N bytes and not 64 KiB of
 /// zeroes.
 #[derive(Clone, Debug)]
 pub struct MaterialTable {
@@ -198,6 +206,12 @@ impl MaterialTable {
     #[inline]
     pub fn render(&self, voxel: Voxel) -> RenderClass {
         self.def(voxel.material()).render
+    }
+
+    /// Air is never solid, whatever Material id it carries.
+    #[inline]
+    pub fn solid(&self, voxel: Voxel) -> bool {
+        !voxel.is_air() && self.def(voxel.material()).solid
     }
 
     /// Hides every neighbouring face and stops all light, whatever the Shape.
@@ -287,6 +301,7 @@ mod tests {
             dimming: 1,
             occlusion: Occlusion::SameMaterial,
             render: RenderClass::Blend,
+            solid: true,
         };
         assert_eq!(t.register(amber), Ok(8));
         assert_eq!(t.register(MaterialDef::OPAQUE), Ok(9));
@@ -339,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_is_four_bytes() {
-        assert_eq!(size_of::<MaterialDef>(), 4);
+    fn a_row_is_five_bytes() {
+        assert_eq!(size_of::<MaterialDef>(), 5);
     }
 }

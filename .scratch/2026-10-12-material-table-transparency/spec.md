@@ -58,10 +58,11 @@ Voxel, so ADR-0001 holds by construction: the WASM side hands over a list of
 `MaterialDef`s and everything after is a native array lookup. `emission` and the
 new properties share the one table, which is the sharing the brief asks for.
 
-Storage is a dense `Vec` of four-byte rows, **sized to the registered count**.
-The `emission` comment rejected a table indexed by `u16` because that is 64 KiB
-of zeroes; ids are handed out sequentially, so a table of N Materials is 4N
-bytes and a lookup is one bounds-checked load.
+Storage is a dense `Vec` of five-byte rows (four until ticket 11 added `solid`),
+**sized to the registered count**. The `emission` comment rejected a table
+indexed by `u16` because that is 64 KiB of zeroes; ids are handed out
+sequentially, so a table of N Materials is 5N bytes and a lookup is one
+bounds-checked load.
 
 Built-ins, with ids that are **permanent** (they are save data, as Shape ids 0
 to 3 are): 0 air (reserved; air is decided by `Voxel::is_air` without the
@@ -380,8 +381,9 @@ are testable alone. 04 is the first time a player can see any of it.
 - **Blended surfaces are outside the depth and motion prepasses**, so SSAO and
   TAA, when step 9 adds them, will not see water or glass: no ambient occlusion
   on it, and no motion vectors for TAA to resolve it with.
-- **Collision and picking** treat water as solid: `collide` reads Shapes only.
-  A `solid` row field when a controller exists.
+- ~~**Collision and picking** treat water as solid.~~ `MaterialDef::solid`
+  (ticket 11): the sweep and the edit ray pass through water, and Place fills a
+  water cell.
 - **Cutout leaves** need textures (step 9).
 - **Worldgen places none.** Terrain contains no translucent Voxel, so a player
   sees them only by placing them, as with shaped Voxels in step 5.

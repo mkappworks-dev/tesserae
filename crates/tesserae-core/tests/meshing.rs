@@ -1121,6 +1121,7 @@ fn with_tinted_glass() -> (Tables, u16) {
             dimming: 0,
             occlusion: Occlusion::SameMaterial,
             render: RenderClass::Blend,
+            solid: true,
         })
         .unwrap();
     (t, id)

@@ -2698,6 +2698,7 @@ mod tests {
                     dimming: MAX_LIGHT,
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
+                    solid: true,
                 })
                 .unwrap();
             (t, id)

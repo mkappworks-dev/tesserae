@@ -3,8 +3,8 @@
 //!
 //! "Sweep an AABB against the voxel grid directly" is DESIGN.md's answer to
 //! terrain collision, and a physics engine is its rejected alternative. What a
-//! Voxel contributes is its Shape's collision boxes, which is why "is it
-//! solid?" is no longer a question this can ask.
+//! Voxel contributes is its Shape's collision boxes, and nothing at all if its
+//! Material is not solid: a body sinks through water and a ray aims past it.
 //!
 //! **Everything here is in metres**, and `voxel_size` is the only conversion to
 //! a Voxel index. A half-height slab is 0.5 m at 1 m Voxels and 0.125 m at
@@ -16,6 +16,7 @@
 
 use crate::mesh::{FACE_STEPS, NEG_X, POS_X};
 use crate::shape::{CollisionBox, Connections, NodeBox, SUBDIV, ShapeTable};
+use crate::tables::Tables;
 use crate::voxel::{SHAPE_FULL_CUBE, Voxel};
 
 /// Random access to a World's Voxels, in Voxel coordinates.
@@ -68,7 +69,7 @@ const EPS: f32 = 1e-5;
 /// by what it is already inside.
 pub fn sweep(
     vol: &impl VoxelVolume,
-    shapes: &ShapeTable,
+    tables: &Tables,
     voxel_size: f32,
     aabb: Aabb,
     delta: [f32; 3],
@@ -81,7 +82,7 @@ pub fn sweep(
         if d == 0.0 {
             continue;
         }
-        let allowed = clip(vol, shapes, voxel_size, &aabb, axis, d);
+        let allowed = clip(vol, tables, voxel_size, &aabb, axis, d);
         moved[axis] = allowed;
         blocked[axis] = allowed != d;
         aabb.min[axis] += allowed;
@@ -97,7 +98,7 @@ pub fn sweep(
 /// How far `aabb` can move along `axis` towards `d` before something stops it.
 fn clip(
     vol: &impl VoxelVolume,
-    shapes: &ShapeTable,
+    tables: &Tables,
     voxel_size: f32,
     aabb: &Aabb,
     axis: usize,
@@ -118,7 +119,7 @@ fn clip(
     // below that climbs into ours is found from the cell below, so the range
     // reaches down by what boxes reach up. Zero, and the range unchanged, until a
     // Shape overhangs.
-    let over = shapes.overhang();
+    let over = tables.shapes.overhang();
     let cells = |a: usize| {
         let below = over[2 * a + 1] as i32;
         let above = over[2 * a] as i32;
@@ -131,7 +132,7 @@ fn clip(
         for y in cells(1) {
             for x in cells(0) {
                 let cell = [x, y, z];
-                for b in obstacles(vol, shapes, cell) {
+                for b in obstacles(vol, tables, cell) {
                     let (min, max) = in_metres(b, cell, voxel_size);
                     let overlaps =
                         |a: usize| aabb.min[a] < max[a] - EPS && aabb.max[a] > min[a] + EPS;
@@ -176,13 +177,12 @@ const WHOLE_CELL: [CollisionBox; 1] = [CollisionBox::new([0; 3], [SUBDIV as i8; 
 /// The collision boxes of the Voxel at `cell`, or the whole cell if the volume
 /// does not hold it. Borrowed from the table, so visiting a cell allocates
 /// nothing.
-fn obstacles<'a>(
-    vol: &impl VoxelVolume,
-    shapes: &'a ShapeTable,
-    cell: [i32; 3],
-) -> &'a [CollisionBox] {
+fn obstacles<'a>(vol: &impl VoxelVolume, tables: &'a Tables, cell: [i32; 3]) -> &'a [CollisionBox] {
     match vol.voxel(cell) {
-        Some(voxel) => shapes.collision(voxel, connections_at(vol, shapes, cell, voxel)),
+        Some(voxel) if !tables.materials.solid(voxel) => &[],
+        Some(voxel) => tables
+            .shapes
+            .collision(voxel, connections_at(vol, &tables.shapes, cell, voxel)),
         None => &WHOLE_CELL,
     }
 }
@@ -219,7 +219,7 @@ pub struct RayHit {
 /// nothing to hit. A ray that starts inside a box strikes it at distance zero.
 pub fn raycast(
     vol: &impl VoxelVolume,
-    shapes: &ShapeTable,
+    tables: &Tables,
     voxel_size: f32,
     origin: [f32; 3],
     dir: [f32; 3],
@@ -259,12 +259,20 @@ pub fn raycast(
 
     loop {
         let voxel = vol.voxel(cell)?;
-        let nearest = shapes
-            .selection(voxel, connections_at(vol, shapes, cell, voxel))
-            .iter()
-            .filter_map(|b| ray_box(o, d, cell, b))
-            .filter(|&(t, _)| t <= t_max)
-            .min_by(|a, b| a.0.total_cmp(&b.0));
+        // Through what a body would pass through: water is aimed past, at the bed.
+        let nearest = tables
+            .materials
+            .solid(voxel)
+            .then(|| {
+                tables
+                    .shapes
+                    .selection(voxel, connections_at(vol, &tables.shapes, cell, voxel))
+                    .iter()
+                    .filter_map(|b| ray_box(o, d, cell, b))
+                    .filter(|&(t, _)| t <= t_max)
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+            })
+            .flatten();
         if let Some((t, face)) = nearest {
             return Some(RayHit {
                 at: cell,
@@ -390,6 +398,100 @@ mod tests {
 
     fn table() -> ShapeTable {
         ShapeTable::builtin()
+    }
+
+    /// The tests below are about Shapes, so they pass a `ShapeTable` and get the
+    /// builtin Materials with it.
+    fn sweep(
+        vol: &impl VoxelVolume,
+        shapes: &ShapeTable,
+        voxel_size: f32,
+        aabb: Aabb,
+        delta: [f32; 3],
+    ) -> Sweep {
+        super::sweep(vol, &with_materials(shapes), voxel_size, aabb, delta)
+    }
+
+    fn raycast(
+        vol: &impl VoxelVolume,
+        shapes: &ShapeTable,
+        voxel_size: f32,
+        origin: [f32; 3],
+        dir: [f32; 3],
+        reach_m: f32,
+    ) -> Option<RayHit> {
+        super::raycast(
+            vol,
+            &with_materials(shapes),
+            voxel_size,
+            origin,
+            dir,
+            reach_m,
+        )
+    }
+
+    fn with_materials(shapes: &ShapeTable) -> Tables {
+        Tables {
+            shapes: shapes.clone(),
+            materials: crate::material::MaterialTable::builtin(),
+        }
+    }
+
+    /// Stone at layer 0 and a pool of water on it at layer 1.
+    fn pool() -> Grid {
+        let mut g = Grid::new();
+        g.floor(0, cube())
+            .floor(1, Voxel::cube(crate::material::WATER));
+        g
+    }
+
+    #[test]
+    fn a_body_sinks_through_water_to_the_bed() {
+        let fall = super::sweep(
+            &pool(),
+            &Tables::builtin(),
+            1.0,
+            body(0.5, 3.0, 0.5, 1.8),
+            [0.0, -5.0, 0.0],
+        );
+        assert!(
+            close(fall.aabb.min[1], 1.0),
+            "rests at {}",
+            fall.aabb.min[1]
+        );
+    }
+
+    #[test]
+    fn a_ray_through_water_strikes_the_bed() {
+        let hit = super::raycast(
+            &pool(),
+            &Tables::builtin(),
+            1.0,
+            [0.5, 4.0, 0.5],
+            [0.0, -1.0, 0.0],
+            10.0,
+        )
+        .expect("the bed is in reach");
+        assert_eq!(hit.at, [0, 0, 0]);
+        assert_eq!(hit.face, POS_Y);
+    }
+
+    #[test]
+    fn a_material_the_table_does_not_know_is_still_solid() {
+        let mut g = Grid::new();
+        g.floor(0, Voxel::cube(999));
+        let fall = super::sweep(
+            &g,
+            &Tables::builtin(),
+            1.0,
+            body(0.5, 3.0, 0.5, 1.8),
+            [0.0, -5.0, 0.0],
+        );
+        assert!(
+            close(fall.aabb.min[1], 1.0),
+            "rests at {}",
+            fall.aabb.min[1]
+        );
     }
 
     fn cube() -> Voxel {

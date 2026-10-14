@@ -3,12 +3,12 @@ use std::hint::black_box;
 use std::sync::OnceLock;
 use tesserae_core::collide::{Aabb, VoxelVolume, raycast, sweep};
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, Orientation, SHAPE_SLAB, ShapeTable, Voxel, mesh::POS_Y, testgen,
+    CHUNK_SIZE, Chunk, Orientation, SHAPE_SLAB, Tables, Voxel, mesh::POS_Y, testgen,
 };
 
-fn shapes() -> &'static ShapeTable {
-    static TABLE: OnceLock<ShapeTable> = OnceLock::new();
-    TABLE.get_or_init(ShapeTable::builtin)
+fn shapes() -> &'static Tables {
+    static TABLE: OnceLock<Tables> = OnceLock::new();
+    TABLE.get_or_init(Tables::builtin)
 }
 
 /// One Chunk at the origin, unknown (`None`) outside it, which is how the Server's
