@@ -4,6 +4,10 @@ use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::shape::{SUBDIV, ShapeTable};
 use crate::voxel::{MaterialId, Voxel};
 
+use crate::light::{ChunkLight, Light, MAX_LIGHT};
+use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
+use crate::worldgen::Worldgen;
+
 const OCTANT: usize = CHUNK_SIZE / 2;
 
 const CUBE_WEIGHT: u32 = (SUBDIV * SUBDIV * SUBDIV) as u32;
@@ -143,6 +147,200 @@ fn uniform_octant(v: Voxel, shapes: &ShapeTable) -> Voxel {
         Voxel::cube(v.material())
     } else {
         Voxel::AIR
+    }
+}
+
+/// What a coarse Voxel's faces look into when it is air with open ground far above and
+/// stone around it. Level 0 shows the inside of a cave black, so does this.
+pub const COVERED_SKY: Light = Light::new(0, 0);
+
+const OPEN_SKY: Light = Light::new(MAX_LIGHT, 0);
+
+/// The terrain over a point, in metres, and the band that height never leaves.
+pub trait Surface {
+    fn height_m(&self, x_m: f32, z_m: f32) -> f32;
+    fn bounds_m(&self) -> (f32, f32);
+}
+
+impl Surface for Worldgen {
+    fn height_m(&self, x_m: f32, z_m: f32) -> f32 {
+        self.surface_height_m(x_m, z_m)
+    }
+
+    fn bounds_m(&self) -> (f32, f32) {
+        self.surface_bounds_m()
+    }
+}
+
+/// The light the mesher reads for a coarse Chunk and its six face neighbours, in
+/// [`crate::mesh`]'s face order.
+pub struct CoarseLight {
+    pub center: ChunkLight,
+    pub around: [ChunkLight; 6],
+}
+
+/// Corner heights over the Chunk's footprint and its one-Voxel shell.
+struct Lattice {
+    heights: Vec<f32>,
+}
+
+/// Corners from `-1` to `CHUNK_SIZE` inclusive: a Voxel of the shell has two.
+const CORNERS: usize = CHUNK_SIZE + 3;
+
+impl Lattice {
+    /// Positions are a whole count of Voxels times the Voxel size, so two Chunks that share a
+    /// corner ask for the same point to the last bit at any Voxel size.
+    fn sample(surface: &impl Surface, voxel_m: f32, coord: [i32; 3]) -> Self {
+        let first = |axis: usize| coord[axis] * CHUNK_SIZE as i32 - 1;
+        let mut heights = Vec::with_capacity(CORNERS * CORNERS);
+        for iz in 0..CORNERS {
+            let z_m = (first(2) + iz as i32) as f32 * voxel_m;
+            for ix in 0..CORNERS {
+                let x_m = (first(0) + ix as i32) as f32 * voxel_m;
+                heights.push(surface.height_m(x_m, z_m));
+            }
+        }
+        Lattice { heights }
+    }
+
+    /// The lowest corner of the footprint of the Voxel at column `(x, z)`, which may be `-1`
+    /// or `CHUNK_SIZE`.
+    fn lowest(&self, x: i32, z: i32) -> f32 {
+        let at = |dx: i32, dz: i32| {
+            self.heights[(z + 1 + dz) as usize * CORNERS + (x + 1 + dx) as usize]
+        };
+        at(0, 0).min(at(1, 0)).min(at(0, 1)).min(at(1, 1))
+    }
+
+    /// Whether a Voxel whose top is `y_top` Voxels up, in the column `(x, z)` of the frame the
+    /// lattice was sampled in, has open ground more than a Voxel above it.
+    fn covered(&self, voxel_m: f32, y_top: i32, x: i32, z: i32) -> bool {
+        y_top as f32 * voxel_m < self.lowest(x, z) - voxel_m
+    }
+}
+
+/// How much of the seven Chunks the surface band can reach, decided without a height.
+enum Reach {
+    /// No Voxel can be covered.
+    Nowhere,
+    /// Every Voxel is.
+    Everywhere,
+    /// Ask the lattice.
+    Sampled(Lattice),
+}
+
+impl Reach {
+    fn of(
+        surface: &impl Surface,
+        voxel_m: f32,
+        coord: [i32; 3],
+        solid_throughout: bool,
+    ) -> Self {
+        let size = CHUNK_SIZE as i32;
+        let (lowest_m, highest_m) = surface.bounds_m();
+        // The shell's lowest Voxel tops out at the Chunk's floor and its highest at one Voxel
+        // above the Chunk's ceiling.
+        let floor_m = (coord[1] * size) as f32 * voxel_m;
+        let ceiling_m = ((coord[1] + 1) * size + 1) as f32 * voxel_m;
+        if solid_throughout || floor_m >= highest_m - voxel_m {
+            Reach::Nowhere
+        } else if ceiling_m < lowest_m - voxel_m {
+            Reach::Everywhere
+        } else {
+            Reach::Sampled(Lattice::sample(surface, voxel_m, coord))
+        }
+    }
+
+    fn covered(&self, voxel_m: f32, y_top: i32, x: i32, z: i32) -> bool {
+        match self {
+            Reach::Nowhere => false,
+            Reach::Everywhere => true,
+            Reach::Sampled(lattice) => lattice.covered(voxel_m, y_top, x, z),
+        }
+    }
+}
+
+fn is_solid_throughout(chunk: &Chunk) -> bool {
+    chunk.uniform().is_some_and(|v| !v.is_air())
+}
+
+pub fn coarse_light(
+    surface: &impl Surface,
+    voxel_m: f32,
+    coord: [i32; 3],
+    center: &Chunk,
+    around: [&Chunk; 6],
+) -> CoarseLight {
+    let solid = is_solid_throughout(center) && around.iter().all(|c| is_solid_throughout(c));
+    let reach = Reach::of(surface, voxel_m, coord, solid);
+    let size = CHUNK_SIZE as i32;
+    let base_y = coord[1] * size;
+
+    // A uniform Chunk is answered whole; only a mixed one is walked.
+    let uniform = |chunk: &Chunk| match (&reach, chunk.uniform()) {
+        (Reach::Nowhere, _) => Some(OPEN_SKY),
+        (_, Some(v)) if !v.is_air() => Some(OPEN_SKY),
+        (Reach::Everywhere, Some(_)) => Some(COVERED_SKY),
+        _ => None,
+    };
+
+    let center_light = uniform(center).map_or_else(
+        || {
+            let mut light = ChunkLight::filled(OPEN_SKY);
+            for z in 0..size {
+                for x in 0..size {
+                    for y in 0..size {
+                        if center.get(x as usize, y as usize, z as usize).is_air()
+                            && reach.covered(voxel_m, base_y + y + 1, x, z)
+                        {
+                            light.set(x as usize, y as usize, z as usize, COVERED_SKY);
+                        }
+                    }
+                }
+            }
+            light
+        },
+        ChunkLight::filled,
+    );
+
+    let around = std::array::from_fn(|face| {
+        let step = FACE_STEPS[face];
+        let neighbour = around[face];
+        if let Some(whole) = uniform(neighbour) {
+            return ChunkLight::filled(whole);
+        }
+        let mut plane = ChunkLight::filled(OPEN_SKY);
+        for a in 0..size {
+            for b in 0..size {
+                // The plane of the neighbour that touches this Chunk, in its own indices.
+                let local = match face {
+                    NEG_X => [size - 1, a, b],
+                    POS_X => [0, a, b],
+                    NEG_Y => [a, size - 1, b],
+                    POS_Y => [a, 0, b],
+                    NEG_Z => [a, b, size - 1],
+                    _ => [a, b, 0],
+                };
+                let air = neighbour
+                    .get(local[0] as usize, local[1] as usize, local[2] as usize)
+                    .is_air();
+                let (x, z) = (local[0] + step[0] * size, local[2] + step[2] * size);
+                let y_top = base_y + step[1] * size + local[1] + 1;
+                if air && reach.covered(voxel_m, y_top, x, z) {
+                    plane.set(
+                        local[0] as usize,
+                        local[1] as usize,
+                        local[2] as usize,
+                        COVERED_SKY,
+                    );
+                }
+            }
+        }
+        plane
+    });
+    CoarseLight {
+        center: center_light,
+        around,
     }
 }
 
@@ -695,5 +893,279 @@ mod tests {
                 assert_matches_reference(&children, &t, &format!("{a:?}, {b:?} and a speck"));
             }
         }
+    }
+
+    /// A flat heightfield that counts how often it is asked.
+    struct Flat {
+        height_m: f32,
+        samples: std::cell::Cell<usize>,
+    }
+
+    impl Flat {
+        fn at(height_m: f32) -> Self {
+            Flat {
+                height_m,
+                samples: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    impl Surface for Flat {
+        fn height_m(&self, _x: f32, _z: f32) -> f32 {
+            self.samples.set(self.samples.get() + 1);
+            self.height_m
+        }
+
+        fn bounds_m(&self) -> (f32, f32) {
+            (self.height_m, self.height_m)
+        }
+    }
+
+    const AIR_CHUNK: Chunk = Chunk::filled(Voxel::AIR);
+
+    fn sky(light: &ChunkLight, x: usize, y: usize, z: usize) -> u8 {
+        light.get(x, y, z).sky()
+    }
+
+    /// 2 m Voxels, a flat surface at 40 m, rock under 20 m: the air Voxels from 20 m up
+    /// to 38 m are covered and the one whose top is at 38 m is the first that is not.
+    #[test]
+    fn air_more_than_a_voxel_under_the_surface_is_covered_and_the_voxel_at_it_is_not() {
+        let mut center = Chunk::filled(Voxel::AIR);
+        for y in 0..10 {
+            for x in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    center.set(x, y, z, Voxel::cube(STONE));
+                }
+            }
+        }
+        let surface = Flat::at(40.0);
+        let lit = coarse_light(&surface, 2.0, [0, 0, 0], &center, [&AIR_CHUNK; 6]);
+        for y in 10..CHUNK_SIZE {
+            let top_m = (y + 1) as f32 * 2.0;
+            let want = if top_m < 40.0 - 2.0 { 0 } else { MAX_LIGHT };
+            assert_eq!(sky(&lit.center, 5, y, 7), want, "y {y}, top {top_m} m");
+        }
+    }
+
+    /// A sloped, rippled heightfield, so the lattice differs from column to column.
+    struct Hills;
+
+    impl Surface for Hills {
+        fn height_m(&self, x: f32, z: f32) -> f32 {
+            48.0 + 0.3 * x + 4.0 * (z * 0.35).sin()
+        }
+
+        fn bounds_m(&self) -> (f32, f32) {
+            (f32::MIN, f32::MAX)
+        }
+    }
+
+    /// The same Chunk wherever it is asked for: a third of its Voxels are rock, by a hash of
+    /// where they are.
+    fn pocked(coord: [i32; 3]) -> Chunk {
+        let mut chunk = Chunk::filled(Voxel::AIR);
+        for x in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    let h = (coord[0] * 7919 + x as i32)
+                        .wrapping_mul(31)
+                        .wrapping_add(coord[1] * 104_729 + y as i32)
+                        .wrapping_mul(31)
+                        .wrapping_add(coord[2] * 15_485_863 + z as i32)
+                        .wrapping_mul(2_654_435_761u32 as i32);
+                    if (h >> 7).rem_euclid(3) == 0 {
+                        chunk.set(x, y, z, Voxel::cube(STONE));
+                    }
+                }
+            }
+        }
+        chunk
+    }
+
+    /// The mesher reads a neighbour's light on the plane it shares with the Chunk, so that
+    /// plane must say what the neighbour would say of itself.
+    #[test]
+    fn a_neighbours_shared_plane_agrees_with_the_neighbour_lit_on_its_own() {
+        use crate::mesh::FACE_STEPS;
+        let (voxel_m, coord) = (1.0, [0, 1, 0]);
+        let at = |step: [i32; 3]| [0, 1, 2].map(|a| coord[a] + step[a]);
+        let chunks: Vec<Chunk> = FACE_STEPS.iter().map(|&s| pocked(at(s))).collect();
+        let lit = coarse_light(
+            &Hills,
+            voxel_m,
+            coord,
+            &pocked(coord),
+            std::array::from_fn(|f| &chunks[f]),
+        );
+        let last = CHUNK_SIZE - 1;
+        let mut covered = 0;
+        for (face, step) in FACE_STEPS.iter().enumerate() {
+            let other = at(*step);
+            let around: Vec<Chunk> = FACE_STEPS
+                .iter()
+                .map(|s| pocked([0, 1, 2].map(|a| other[a] + s[a])))
+                .collect();
+            let alone = coarse_light(
+                &Hills,
+                voxel_m,
+                other,
+                &chunks[face],
+                std::array::from_fn(|f| &around[f]),
+            );
+            for a in 0..CHUNK_SIZE {
+                for b in 0..CHUNK_SIZE {
+                    let (x, y, z) = match face {
+                        0 => (last, a, b),
+                        1 => (0, a, b),
+                        2 => (a, last, b),
+                        3 => (a, 0, b),
+                        4 => (a, b, last),
+                        _ => (a, b, 0),
+                    };
+                    assert_eq!(
+                        lit.around[face].get(x, y, z),
+                        alone.center.get(x, y, z),
+                        "face {face} at ({x}, {y}, {z})"
+                    );
+                    covered += usize::from(alone.center.get(x, y, z) == COVERED_SKY);
+                }
+            }
+        }
+        assert!(covered > 100, "only {covered} covered on the shared planes");
+    }
+
+    /// The Voxels of a neighbour's light that the mesher reads: the plane it shares with the
+    /// Chunk across `face`.
+    fn shared_plane(light: &ChunkLight, face: usize) -> Vec<Light> {
+        let last = CHUNK_SIZE - 1;
+        (0..CHUNK_SIZE)
+            .flat_map(|a| (0..CHUNK_SIZE).map(move |b| (a, b)))
+            .map(|(a, b)| {
+                let (x, y, z) = match face {
+                    0 => (last, a, b),
+                    1 => (0, a, b),
+                    2 => (a, last, b),
+                    3 => (a, 0, b),
+                    4 => (a, b, last),
+                    _ => (a, b, 0),
+                };
+                light.get(x, y, z)
+            })
+            .collect()
+    }
+
+    fn assert_all_uniform(lit: &CoarseLight, want: Light) {
+        assert_eq!(lit.center.uniform(), Some(want));
+        for (face, plane) in lit.around.iter().enumerate() {
+            assert_eq!(plane.uniform(), Some(want), "face {face}");
+        }
+    }
+
+    #[test]
+    fn a_chunk_wholly_above_the_band_is_open_sky_and_asks_for_no_height() {
+        let surface = Flat::at(40.0);
+        let lit = coarse_light(&surface, 2.0, [0, 1, 0], &pocked([0, 1, 0]), [&AIR_CHUNK; 6]);
+        assert_all_uniform(&lit, OPEN_SKY);
+        assert_eq!(surface.samples.get(), 0);
+    }
+
+    #[test]
+    fn seven_solid_chunks_are_open_sky_and_ask_for_no_height() {
+        let rock = Chunk::filled(Voxel::cube(STONE));
+        let surface = Flat::at(40.0);
+        let lit = coarse_light(&surface, 2.0, [0, 0, 0], &rock, [&rock; 6]);
+        assert_all_uniform(&lit, OPEN_SKY);
+        assert_eq!(surface.samples.get(), 0);
+    }
+
+    #[test]
+    fn air_wholly_under_the_band_is_covered_throughout_and_asks_for_no_height() {
+        let surface = Flat::at(40.0);
+        let lit = coarse_light(&surface, 2.0, [0, -2, 0], &AIR_CHUNK, [&AIR_CHUNK; 6]);
+        assert_all_uniform(&lit, COVERED_SKY);
+        assert_eq!(surface.samples.get(), 0);
+    }
+
+    /// The fast paths decide from the band alone, so they must give what sampling gives.
+    #[test]
+    fn the_fast_paths_agree_with_sampling() {
+        // The same heights through a stub whose band is unknown, so nothing is skipped.
+        struct Unbounded(Flat);
+        impl Surface for Unbounded {
+            fn height_m(&self, x: f32, z: f32) -> f32 {
+                self.0.height_m(x, z)
+            }
+            fn bounds_m(&self) -> (f32, f32) {
+                (f32::MIN, f32::MAX)
+            }
+        }
+        let rock = Chunk::filled(Voxel::cube(STONE));
+        // The last two sit a fraction of a Voxel either side of the band's two edges, where a
+        // bound a Voxel out of place turns a plane of the shell the wrong way.
+        let cases: [(f32, i32, &Chunk, &Chunk); 5] = [
+            (2.0, 1, &AIR_CHUNK, &AIR_CHUNK),
+            (2.0, 0, &rock, &rock),
+            (2.0, -2, &AIR_CHUNK, &AIR_CHUNK),
+            (1.2, 1, &AIR_CHUNK, &AIR_CHUNK),
+            (1.2, 0, &AIR_CHUNK, &AIR_CHUNK),
+        ];
+        for (voxel_m, cy, centre, around) in cases {
+            let fast = coarse_light(&Flat::at(40.0), voxel_m, [0, cy, 0], centre, [around; 6]);
+            let slow = coarse_light(
+                &Unbounded(Flat::at(40.0)),
+                voxel_m,
+                [0, cy, 0],
+                centre,
+                [around; 6],
+            );
+            assert_eq!(fast.center, slow.center, "centre at y {cy}, {voxel_m} m");
+            for face in 0..6 {
+                assert_eq!(
+                    shared_plane(&fast.around[face], face),
+                    shared_plane(&slow.around[face], face),
+                    "face {face} at y {cy}, {voxel_m} m"
+                );
+            }
+        }
+    }
+
+    /// Falls one metre for every metre in +x, so a Voxel's two corners differ by two.
+    struct Ramp;
+
+    impl Surface for Ramp {
+        fn height_m(&self, x: f32, _z: f32) -> f32 {
+            60.0 - x
+        }
+
+        fn bounds_m(&self) -> (f32, f32) {
+            (f32::MIN, f32::MAX)
+        }
+    }
+
+    /// On a slope the footprint's lowest corner is the surface the Voxel has to be under, or a
+    /// Voxel at the foot of a slope reads as open ground it cannot see.
+    #[test]
+    fn the_lowest_corner_of_the_footprint_decides() {
+        let lit = coarse_light(&Ramp, 2.0, [0, 0, 0], &AIR_CHUNK, [&AIR_CHUNK; 6]);
+        // Column 5 spans x = 10 to 12 m, so its lowest corner is 48 m and a Voxel is covered
+        // if its top is under 46 m. The lower corner alone, at 50 m, would say 48 m.
+        assert_eq!(sky(&lit.center, 5, 21, 0), 0, "top 44 m is under 46 m");
+        assert_eq!(sky(&lit.center, 5, 22, 0), MAX_LIGHT, "top 46 m is not");
+        assert_eq!(sky(&lit.center, 5, 23, 0), MAX_LIGHT);
+    }
+
+    /// The surface is the heightfield's, before caves, so a pit that is open to the sky is dark
+    /// below its top Voxel here and lit at level 0. A column scan of the Chunks above would
+    /// fix it; when one does, this test flips.
+    #[test]
+    fn a_pit_open_to_the_sky_is_covered_below_its_top_voxel() {
+        let mut center = Chunk::filled(Voxel::cube(STONE));
+        for y in 5..CHUNK_SIZE {
+            center.set(8, y, 8, Voxel::AIR);
+        }
+        let lit = coarse_light(&Flat::at(40.0), 2.0, [0, 0, 0], &center, [&AIR_CHUNK; 6]);
+        assert_eq!(sky(&lit.center, 8, 10, 8), 0, "a pit's floor is lit at level 0");
+        assert_eq!(sky(&lit.center, 8, 31, 8), MAX_LIGHT);
     }
 }

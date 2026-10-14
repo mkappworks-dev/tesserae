@@ -49,7 +49,7 @@ rule is headless and benchmarkable and the server has one call to make:
   `CoarseLight` of a `ChunkLight` for the Chunk and one for each neighbour, in
   the mesher's face order. The mesher reads a neighbour's light only on the
   plane it shares, so a neighbour's light needs only that plane to be right.
-- The Chunk's corner heights are sampled once as a 36 by 36 lattice that
+- The Chunk's corner heights are sampled once as a 35 by 35 lattice that
   covers the Chunk and its one-Voxel shell, and every Voxel asks the lattice.
   The six neighbours do not sample again: above and below share the Chunk's
   columns, and the four side neighbours' shared plane is inside the shell.
@@ -61,10 +61,13 @@ nowhere else:
   padded range is not under `surface_bounds_m().1` less one Voxel: every light
   is the shared open-sky static, no allocation, no sample. This is nearly the
   whole upper ring.
-- A uniform Chunk of solid Material has no air to light: open sky, whatever
-  its neighbours are.
-- A uniform air Chunk wholly under `surface_bounds_m().0` less one Voxel is
-  covered throughout: a filled `COVERED_SKY`, no sample.
+- The Chunk and its six neighbours all uniform solid: no air anywhere to
+  light, so open sky and no sample. A solid centre beside an air neighbour still
+  samples, because its faces read the neighbour's light.
+- A Chunk whose highest shell Voxel top is under `surface_bounds_m().0` less
+  one Voxel is covered throughout: a uniform Chunk of air is a filled
+  `COVERED_SKY`, no sample. A uniform solid Chunk is open sky, since it has no
+  air to light.
 - Anything else samples the lattice and sets the covered Voxels, which promotes
   to a dense array only for the Chunk or neighbour that has one.
 
@@ -115,9 +118,10 @@ mutation-checked.
   they share. Mutation: a neighbour's plane computed from the neighbour's own
   columns only.
 - **Fast paths.** A Chunk wholly above the band returns the open-sky light
-  and takes no surface sample (counted through the stub); a uniform solid
-  Chunk does the same; a uniform air Chunk wholly under the band is covered
-  throughout, with no sample.
+  and takes no surface sample (counted through the stub); seven uniform solid
+  Chunks do the same; air wholly under the band is covered throughout, with no
+  sample; and each fast path agrees with sampling, including a fraction of a
+  Voxel either side of the band's two edges.
 - **The accepted pit.** A pit open to the sky is covered below its top Voxel;
   the test is named for the limitation, so a later fix flips it on purpose.
 
