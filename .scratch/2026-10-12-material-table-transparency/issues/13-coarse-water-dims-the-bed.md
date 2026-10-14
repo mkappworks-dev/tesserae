@@ -1,6 +1,6 @@
 # A coarse lake bed is dimmed by the water over it
 
-Status: ready-for-agent
+Status: done
 Blocked by: 09
 
 Coarse levels store no light, and main's covered-column rule (#15) darkens only
@@ -29,3 +29,21 @@ join, the bed shows bright through it.
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+Built as specified, with the formula corrected by its own test.
+
+- `coarse_light_in` takes an `UnderWater` (the water level, Water's dimming, and
+  the level-0 Voxel's edge); `coarse_light` is the dry form the existing tests
+  and the bench call. The Server builds it per level in `mesh_coarse`, the
+  level-0 Voxel being the coarse one over `2^level`.
+- The first formula took 2 levels per level-0 Voxel. The test asks level 0's own
+  flood for the truth, and it disagreed below the top Voxel: under full
+  strength, sky light no longer falls free, so each Voxel after the first costs
+  a step as well as the dimming (13, 10, 7, 4, 1, 0). The formula now matches it
+  at every coarse row.
+- Three Server tests asserted that every coarse vertex is open sky or covered.
+  Two are about the covered-column rule and now build a dry World; the third
+  now accepts the depth levels as well, and still no block light.
+- Capture, the same ring join as ticket 07's: water luminance across the band is
+  133 to 150 with no row-to-row step above 5.9, against 131.5 to 154 and 10.1
+  before. A dry World's coarse light is unchanged (the existing tests).
