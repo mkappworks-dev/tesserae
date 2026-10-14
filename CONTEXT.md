@@ -100,6 +100,11 @@ aggregates. Level 0 is full detail.
 **LOD ring** — what one LOD level draws: the Cells between an inner and an outer
 distance from the Eye, in metres. The outer distance doubles with each level.
 
+**Distance fog** — how much of a surface's colour is replaced by the fog colour,
+as a function of its distance from the Eye in metres. Sized from the full-detail
+radius and the reach, so it is the same fog at any Voxel size. The fog colour
+and the colour of the sky behind the terrain are two values, not one.
+
 **Downsample** — producing a coarse Chunk's Voxels from the eight finer Chunks
 it covers: the dominant Material by volume, solid if half the volume is.
 

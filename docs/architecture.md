@@ -151,7 +151,9 @@ tesserae/
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
 │           │   └── edit.rs         place/break intents, hotbar, crosshair   ▸ 5
-│           └── render/         MaterialExtension + look-pack API            ▸ 9
+│           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
+│               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
+│               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
 └── USE-GRANT.md                the most important file in the repo

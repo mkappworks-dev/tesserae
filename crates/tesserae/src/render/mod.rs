@@ -1,6 +1,7 @@
 //! Materials. Step 9 adds the look-pack API that supplies their WESL.
 
 pub mod chunk_material;
+pub mod fog;
 
 use bevy::asset::embedded_asset;
 use bevy::pbr::MaterialPlugin;
@@ -18,5 +19,5 @@ pub fn plugin(app: &mut App) {
     // A module the other two import, so it must be loaded to be found: an
     // embedded file nothing holds a handle to is never registered.
     load_shader_library!(app, "leaf_hole.wesl");
-    app.add_plugins(MaterialPlugin::<ChunkMaterial>::default());
+    app.add_plugins((MaterialPlugin::<ChunkMaterial>::default(), fog::plugin));
 }

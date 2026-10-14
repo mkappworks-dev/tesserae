@@ -208,6 +208,20 @@ gets the same rings.
   unless it looks into air more than a Voxel under the terrain, which it lights
   dark (`coarse_light`, from the level's generator). See the ADR for what that
   gets wrong.
+- **Fog.** Bevy's `DistanceFog` on all six cameras, built once from one
+  `FogSettings` (a fog colour, a sky colour and `reach_opacity`, 0.88 by
+  default), so a fragment is fogged the same whichever camera draws it. The
+  density is derived from the reach in metres,
+  `max(view_distance_m, lod_distance_m)`, so the opacity at the reach is
+  `reach_opacity` at any Voxel size. The falloff is exponential squared because
+  it starts slowly: under 2% to the join of levels 1 and 2 (384 m), where plain
+  exponential already hazes the ground the Player stands on. The fog colour and
+  the flat sky colour are a pair and not one value: the tonemapper runs in the
+  shader after the fog and skips the clear colour, so the fog colour is the one
+  that comes out as the sky. `apply_fog` is already the end of the chunk shader,
+  so there is no shader change. `FogSettings` is live: changing the resource
+  re-derives the clear colour and every camera's fog, so a Look pack sets it
+  whenever it likes.
 
 The per-level budget is measured, in Open items.
 
@@ -253,8 +267,8 @@ compiles** — WASM cannot put code on the GPU, so a pack ships WGSL as an asset
 and the WASM module registers it by handle. A look pack provides:
 
 - `MaterialExtension` WGSL for chunk / water / foliage
-- post-process settings: bloom threshold, tonemapping curve, fog parameters,
-  SSAO strength
+- post-process settings: bloom threshold, tonemapping curve, fog parameters
+  (`FogSettings`), SSAO strength
 - optionally, extra post-process passes
 
 Bevy's asset system hot-reloads shaders, so pack authors edit WGSL and see it
@@ -395,7 +409,11 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    1243, with 127.9 MB of vertex and index memory (41.5 MB of it level 0's), the
    median flight frame is 5.6 ms on an M5 at 1080p offscreen, and the furthest
    drawn Chunk ends 5174 m out. Level 0 is drawn 0.3 s later while the distance
-   fills, which takes 11 s. See `.scratch/2026-10-13-phase-6-lod/spec.md`.
+   fills, which takes 11 s. Distance fog on all six cameras is not measurable
+   against that frame: interleaved runs on a quiet machine put the paired
+   difference with and without it at 0.0 ms, which bounds the cost under 0.2 ms.
+   See `.scratch/2026-10-13-phase-6-lod/spec.md` and
+   `.scratch/2026-10-14-distance-fog/spec.md`.
 7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
 8. Fluid simulation.
 9. Look-pack API, water shading, visual polish.
