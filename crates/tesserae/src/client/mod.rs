@@ -7,6 +7,7 @@ pub mod camera;
 mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
+pub mod drawn_mask;
 pub mod edit;
 #[cfg(feature = "dev")]
 mod overlay;

@@ -484,17 +484,15 @@ computed.
   the spec names it so that the answer to a crack is not to widen the overlap
   until it is a performance bug. Ticket 08 shows none once the overlap holds
   for every Eye position, so it is not built.
-- **Blended surfaces** take the same cut and nothing more (ticket 06 of
+- **Blended surfaces** are cut where the finer level has drawn (ticket 07 of
   `2026-10-12-material-table-transparency`). Coverage priority does not hold for
   them: a finer blended pixel composites over the coarse one instead of
   replacing it, so between the finer level's guaranteed reach and where it
-  actually ends, water is drawn twice and reads a shade darker. Measured on a
-  flooded World, that band's water spans 131 to 152 in luminance against the
-  lake around it, with no row-to-row step above 6.6. A fade of the coarse layer
-  across the band was tried and was worse (123 to 153, a step of 16.6): where
-  the finer level does not reach, it thins the only water there is. The exact
-  fix needs the shader to know which finer Chunks the Client draws, and is not
-  built.
+  actually ends, water was drawn twice. The Client publishes, per level, which
+  Chunks it has been sent a mesh for (empty ones too), and the shader discards a
+  coarse blended fragment inside any of them. A fade across the band was tried
+  first and was worse: it thinned the only water there was where the finer
+  level does not reach.
 
 ### 10. What a Mod registers or parameterises
 

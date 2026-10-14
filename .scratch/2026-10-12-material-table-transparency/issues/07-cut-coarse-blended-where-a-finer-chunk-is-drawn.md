@@ -1,6 +1,6 @@
 # Cut coarse water where the finer level draws
 
-Status: ready-for-agent
+Status: done
 Blocked by: 06
 
 Ticket 06 accepted a band of doubled water at each LOD ring join: between the
@@ -33,3 +33,29 @@ water, ground or nothing.
 - `./scripts/cargo-ci` passes.
 
 ## Comments
+
+Built as specified, with the mask in a storage buffer (`ShaderBuffer`) rather
+than a uniform: its window is the bounding box of what each level has
+delivered, so it fits any Voxel size and any streaming settings. Layout in
+`client/drawn_mask.rs`, mirrored by `finer_drawn` in the shader. The opaque
+material's buffer is one zero word and cuts nothing.
+
+- Tests: the mask holds exactly the delivered Chunks, an empty mesh sets its
+  bit, a Chunk inside the window that was not sent and one outside it are not
+  cut, an unload clears the bit, level 2 asks level 1, and the opaque material
+  cuts nothing. The tests now run the app's own `Update` chain
+  (`add_view_systems`): a first version wired `publish_drawn` into the tests'
+  copy of the chain and not the app's, and the capture is what caught it.
+- Capture, World flooded to 44 m, horizon view, 30 s settle: the cut changes
+  6223 pixels, 98% of them water, all in the band along the ring join; on
+  average they get lighter (a doubled layer removed), and some darker where
+  the finer level's own surface sits lower than the coarse one's. What is left
+  in that band is the coarse lake bed seen through the finer water, lit as open
+  sky (coarse levels store no light under water), not a second layer.
+- No crack: the magenta probe finds the same 3 silhouette pixels as before.
+- Against `origin/main` at the merge (9ec5571, built in its own worktree), with
+  `TESSERAE_TRANSLUCENT_ROW=0`: the only differences are the frame-rate digits
+  and the hotbar hint in the overlay text.
+- Limit: a coarse water surface above the finer level's top row, which only
+  happens near the vertical edge of a level, is not cut.
+

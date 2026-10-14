@@ -10,17 +10,20 @@
 //! after a coarser one's, so wherever a finer level has geometry it shows over
 //! every coarser one. See `.scratch/2026-10-13-phase-6-lod/spec.md`, decision 8.
 
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
-use bevy::platform::collections::HashMap;
+use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+use bevy::render::storage::ShaderBuffer;
 use tesserae_core::{ChunkMesh, MeshLayer};
 
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
+use crate::client::drawn_mask;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
 use crate::server::streaming::{
     ChunkMeshReady, ChunkUnloaded, LodMeshReady, LodUnloaded, StreamingSettings,
@@ -44,14 +47,21 @@ type LayerEntities = HashMap<(u32, ChunkCoord), Entity>;
 struct ChunkEntities {
     opaque: LayerEntities,
     blended: LayerEntities,
+    /// Every `(level, coord)` sent a mesh, empty or not, and not unloaded since:
+    /// the space each level has answered for. Changed since `publish_drawn`
+    /// last ran when `drawn_changed`.
+    delivered: HashSet<(u32, ChunkCoord)>,
+    drawn_changed: bool,
 }
 
 /// Two materials for every Chunk, as the Material index is a vertex attribute:
-/// they differ in alpha mode only.
+/// they differ in alpha mode and in what the blended one is told the finer
+/// levels have drawn.
 #[derive(Resource)]
 struct TerrainMaterial {
     opaque: Handle<ChunkMaterial>,
     blended: Handle<ChunkMaterial>,
+    drawn: Handle<ShaderBuffer>,
 }
 
 #[derive(SystemParam)]
@@ -71,18 +81,26 @@ impl IncomingMeshes<'_, '_> {
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ChunkEntities>()
         .add_systems(Startup, (add_material, spawn_light))
-        .add_systems(PostStartup, spawn_camera)
-        // Chained: the Server can send a mesh and its unload in one frame, and an
-        // unload handled first would leave the mesh with nothing to despawn it.
-        .add_systems(
-            Update,
-            (
-                upload_meshes,
-                drop_meshes,
-                sort_blended.run_if(blend_sort_on),
-            )
-                .chain(),
-        );
+        .add_systems(PostStartup, spawn_camera);
+    add_view_systems(app);
+}
+
+/// One place for the per-frame chain, so the tests run the one the app does.
+///
+/// Chained: the Server can send a mesh and its unload in one frame, and an
+/// unload handled first would leave the mesh with nothing to despawn it; and
+/// what each level has drawn is published after both.
+fn add_view_systems(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            upload_meshes,
+            drop_meshes,
+            sort_blended.run_if(blend_sort_on),
+            publish_drawn,
+        )
+            .chain(),
+    );
 }
 
 /// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
@@ -100,9 +118,12 @@ fn blend_sort_on() -> bool {
 fn add_material(
     mut commands: Commands,
     mut materials: ResMut<Assets<ChunkMaterial>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
 ) {
+    let nothing_drawn = || ShaderBuffer::new(vec![0u32], RenderAssetUsages::default());
+    let drawn = buffers.add(nothing_drawn());
     let opaque = ChunkMaterial {
         base: StandardMaterial {
             perceptual_roughness: 0.95,
@@ -116,6 +137,7 @@ fn add_material(
                     .map(|c| (c.radius_m, c.half_height_m))
                     .collect::<Vec<_>>(),
             ),
+            drawn: buffers.add(nothing_drawn()),
             ..default()
         },
     };
@@ -124,11 +146,15 @@ fn add_material(
             alpha_mode: AlphaMode::Blend,
             ..opaque.base.clone()
         },
-        extension: opaque.extension.clone(),
+        extension: ChunkMaterialExtension {
+            drawn: drawn.clone(),
+            ..opaque.extension.clone()
+        },
     };
     commands.insert_resource(TerrainMaterial {
         opaque: materials.add(opaque),
         blended: materials.add(blended),
+        drawn,
     });
 }
 
@@ -240,6 +266,7 @@ fn upload_meshes(
     };
     for (level, coord, mesh) in incoming.read() {
         let key = (level, coord);
+        entities.drawn_changed |= entities.delivered.insert(key);
         let opaque = draw.show(
             &mut entities.opaque,
             &material.opaque,
@@ -297,7 +324,29 @@ fn drop_meshes(
     for key in level0.chain(coarse) {
         draw.hide(&mut entities.opaque, key);
         draw.hide(&mut entities.blended, key);
+        entities.drawn_changed |= entities.delivered.remove(&key);
     }
+}
+
+/// Rewrites the blended material's record of what each level has drawn, when
+/// it changed. Touching the material too is what has its bind group remade.
+fn publish_drawn(
+    mut entities: ResMut<ChunkEntities>,
+    terrain: Res<TerrainMaterial>,
+    streaming: Res<StreamingSettings>,
+    world: Res<WorldSettings>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+) {
+    if !std::mem::take(&mut entities.drawn_changed) {
+        return;
+    }
+    let words = drawn_mask::encode(level_count(&streaming), &entities.delivered, &world);
+    if let Some(mut buffer) = buffers.get_mut(&terrain.drawn) {
+        buffer.clear();
+        buffer.extend_from_slice(&words);
+    }
+    let _ = materials.get_mut(&terrain.blended);
 }
 
 fn spawn_light(
@@ -583,6 +632,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Mesh>()
             .init_asset::<ChunkMaterial>()
+            .init_asset::<ShaderBuffer>()
             .init_resource::<WorldSettings>()
             .init_resource::<StreamingSettings>()
             .init_resource::<ChunkEntities>()
@@ -590,10 +640,80 @@ mod tests {
             .add_message::<ChunkUnloaded>()
             .add_message::<LodMeshReady>()
             .add_message::<LodUnloaded>()
-            .add_systems(Startup, add_material)
-            .add_systems(Update, (upload_meshes, drop_meshes, sort_blended).chain());
+            .add_systems(Startup, add_material);
+        add_view_systems(&mut app);
         app.update();
         app
+    }
+
+    /// Whether the material cuts a level-`level` fragment at `point`, read the
+    /// way the shader reads it.
+    fn cuts_at(app: &App, blended: bool, level: u32, point: Vec3) -> bool {
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let handle = if blended {
+            &terrain.blended
+        } else {
+            &terrain.opaque
+        };
+        let material = app
+            .world()
+            .resource::<Assets<ChunkMaterial>>()
+            .get(handle)
+            .unwrap();
+        let buffer = app
+            .world()
+            .resource::<Assets<ShaderBuffer>>()
+            .get(&material.extension.drawn)
+            .unwrap();
+        crate::client::drawn_mask::contains(buffer.cast_slice::<u32>().unwrap(), level, point)
+    }
+
+    #[test]
+    fn coarse_water_is_cut_exactly_where_the_finer_level_has_delivered_its_chunk() {
+        let mut app = app();
+        let world = *app.world().resource::<WorldSettings>();
+        let inside = |coord: ChunkCoord, level: u32| {
+            world.chunk_origin_at(coord, level) + Vec3::splat(world.cell_size_at(level) / 2.0)
+        };
+        let (a, b, c) = (
+            ChunkCoord::new(0, 0, 0),
+            ChunkCoord::new(1, 0, 0),
+            ChunkCoord::new(2, 0, 0),
+        );
+        send_mesh(&mut app, a, geometry());
+        send_mesh(&mut app, c, geometry());
+        // An empty mesh is still the finer level's answer for that space.
+        send_mesh(
+            &mut app,
+            ChunkCoord::new(0, 1, 0),
+            tesserae_core::ChunkMesh::default(),
+        );
+        assert!(cuts_at(&app, true, 1, inside(a, 0)));
+        assert!(cuts_at(&app, true, 1, inside(c, 0)));
+        assert!(cuts_at(&app, true, 1, inside(ChunkCoord::new(0, 1, 0), 0)));
+        assert!(
+            !cuts_at(&app, true, 1, inside(b, 0)),
+            "inside the window, not sent"
+        );
+        assert!(
+            !cuts_at(&app, true, 1, inside(ChunkCoord::new(9, 0, 0), 0)),
+            "outside it"
+        );
+
+        app.world_mut().write_message(ChunkUnloaded { coord: a });
+        app.update();
+        assert!(!cuts_at(&app, true, 1, inside(a, 0)), "unloaded");
+
+        send_coarse(&mut app, 1, a, geometry());
+        assert!(cuts_at(&app, true, 2, inside(a, 1)), "level 2 asks level 1");
+        assert!(!cuts_at(&app, true, 1, inside(a, 1) + Vec3::splat(40.0)));
+    }
+
+    #[test]
+    fn the_opaque_material_cuts_nothing() {
+        let mut app = app();
+        send_mesh(&mut app, ChunkCoord::new(0, 0, 0), geometry());
+        assert!(!cuts_at(&app, false, 1, Vec3::splat(16.0)));
     }
 
     /// Two panes of glass one behind the other along z, in one Chunk.

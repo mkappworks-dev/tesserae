@@ -14,6 +14,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
+use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
 use crate::client::chunk_mesh::{ATTRIBUTE_LIGHT, ATTRIBUTE_MATERIAL};
@@ -66,6 +67,10 @@ pub struct ChunkMaterialExtension {
     pub palette: [Vec4; PALETTE_LEN],
     #[uniform(101)]
     pub lod: LodParams,
+    /// The Chunks each level has drawn, in `client::drawn_mask`'s layout. A
+    /// buffer of one zero word cuts nothing, which is the opaque material's.
+    #[storage(102, read_only)]
+    pub drawn: Handle<ShaderBuffer>,
 }
 
 /// `base_color` is linear in the shader, so a colour picked by eye has to be
@@ -99,6 +104,7 @@ impl Default for ChunkMaterialExtension {
         ChunkMaterialExtension {
             palette,
             lod: LodParams::new(0, &[]),
+            drawn: Handle::default(),
         }
     }
 }
