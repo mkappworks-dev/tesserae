@@ -1,6 +1,6 @@
 //! What a Mod's `Store` holds and the imports a Mod may call.
 
-// Until the loader lands (ticket 02) only the tests use these.
+// The Store, imports and Linker are used by ticket 03's instantiation; until then, tests.
 #![allow(dead_code)]
 
 use tesserae_core::WorldgenParams;
@@ -51,7 +51,12 @@ impl host::Host for HostState {
 
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = Config::new();
-    config.wasm_component_model(true);
+    // Threads stay off by omitting wasmtime's `threads` feature; `wasm_threads` does not exist without it.
+    config
+        .wasm_component_model(true)
+        .wasm_memory64(false)
+        .wasm_relaxed_simd(false)
+        .consume_fuel(true);
     Engine::new(&config)
 }
 

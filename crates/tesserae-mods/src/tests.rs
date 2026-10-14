@@ -10,6 +10,7 @@ use crate::host::{HostState, engine, linker};
 
 mod convert;
 mod export_version;
+mod loading;
 
 fn guest(name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -33,6 +34,7 @@ fn hello_declares_nothing() {
     let linker = linker(&engine).unwrap();
     let component = load(&engine, "hello");
     let mut store = Store::new(&engine, HostState::new());
+    store.set_fuel(u64::MAX).unwrap();
 
     let declaration = block_on(async {
         let instance = Mod::instantiate_async(&mut store, &component, &linker)

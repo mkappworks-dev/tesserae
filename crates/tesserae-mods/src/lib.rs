@@ -6,7 +6,18 @@
 
 mod bindings;
 mod convert;
+mod error;
 mod host;
+mod limits;
+mod loader;
+mod manifest;
+mod trust;
+
+pub use error::ModError;
+pub use limits::{ManifestLimits, ModLimits};
+pub use loader::{Compiled, ModHost};
+pub use manifest::{Found, Manifest, SUPPORTED_API, discover, plan};
+pub use trust::{Trust, Untrusted, Verdict};
 
 #[cfg(test)]
 mod tests;

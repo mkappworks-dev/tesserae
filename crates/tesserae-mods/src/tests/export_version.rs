@@ -61,6 +61,7 @@ fn zero_one_zero_guest_on_zero_one_one_host() {
             table: wasmtime::component::ResourceTable::new(),
         },
     );
+    store.set_fuel(u64::MAX).unwrap();
 
     let instance = block_on(linker.instantiate_async(&mut store, &component))
         .expect("imports are matched across patch versions");
