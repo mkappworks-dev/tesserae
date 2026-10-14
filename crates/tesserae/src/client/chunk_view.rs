@@ -10,15 +10,20 @@
 //! after a coarser one's, so wherever a finer level has geometry it shows over
 //! every coarser one. See `.scratch/2026-10-13-phase-6-lod/spec.md`, decision 8.
 
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
+use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
-use bevy::platform::collections::HashMap;
+use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use tesserae_core::ChunkMesh;
+use bevy::render::storage::ShaderBuffer;
+use tesserae_core::{ChunkMesh, MeshLayer};
 
+use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
+use crate::client::drawn_mask;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
 use crate::render::fog::{self, FogSettings};
 use crate::server::streaming::{
@@ -34,14 +39,33 @@ fn layer_of(level: u32) -> RenderLayers {
     RenderLayers::layer(level as usize)
 }
 
-/// The entity drawing each Chunk of each level, by the level's own lattice.
-/// Render entities, not World state, so the Client owns this outright.
-#[derive(Resource, Default)]
-struct ChunkEntities(HashMap<(u32, ChunkCoord), Entity>);
+type LayerEntities = HashMap<(u32, ChunkCoord), Entity>;
 
-/// One material for every Chunk, as the Material index is a vertex attribute.
+/// The entities drawing each Chunk of each level, by the level's own lattice, one
+/// map per mesh layer. Render entities, not World state, so the Client owns this
+/// outright.
+#[derive(Resource, Default)]
+struct ChunkEntities {
+    opaque: LayerEntities,
+    blended: LayerEntities,
+    cutout: LayerEntities,
+    /// Every `(level, coord)` sent a mesh, empty or not, and not unloaded since:
+    /// the space each level has answered for. Changed since `publish_drawn`
+    /// last ran when `drawn_changed`.
+    delivered: HashSet<(u32, ChunkCoord)>,
+    drawn_changed: bool,
+}
+
+/// A material per mesh layer, for every Chunk, as the Material index is a
+/// vertex attribute: they differ in alpha mode and in what the blended one is
+/// told the finer levels have drawn.
 #[derive(Resource)]
-struct TerrainMaterial(Handle<ChunkMaterial>);
+struct TerrainMaterial {
+    opaque: Handle<ChunkMaterial>,
+    blended: Handle<ChunkMaterial>,
+    cutout: Handle<ChunkMaterial>,
+    drawn: Handle<ShaderBuffer>,
+}
 
 #[derive(SystemParam)]
 struct IncomingMeshes<'w, 's> {
@@ -60,36 +84,90 @@ impl IncomingMeshes<'_, '_> {
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ChunkEntities>()
         .add_systems(Startup, (add_material, spawn_light))
-        .add_systems(PostStartup, spawn_camera)
-        // Chained: the Server can send a mesh and its unload in one frame, and an
-        // unload handled first would leave the mesh with nothing to despawn it.
-        .add_systems(Update, (upload_meshes, drop_meshes).chain());
+        .add_systems(PostStartup, spawn_camera);
+    add_view_systems(app);
+}
+
+/// One place for the per-frame chain, so the tests run the one the app does.
+///
+/// Chained: the Server can send a mesh and its unload in one frame, and an
+/// unload handled first would leave the mesh with nothing to despawn it; and
+/// what each level has drawn is published after both.
+fn add_view_systems(app: &mut App) {
+    app.add_systems(
+        Update,
+        (
+            upload_meshes,
+            drop_meshes,
+            sort_blended.run_if(blend_sort_on),
+            publish_drawn,
+        )
+            .chain(),
+    );
+}
+
+/// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
+/// order, so a capture can show what the sort fixes.
+#[cfg(feature = "dev")]
+fn blend_sort_on() -> bool {
+    !std::env::var("TESSERAE_BLEND_SORT").is_ok_and(|v| v == "0")
+}
+
+#[cfg(not(feature = "dev"))]
+fn blend_sort_on() -> bool {
+    true
 }
 
 fn add_material(
     mut commands: Commands,
     mut materials: ResMut<Assets<ChunkMaterial>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
 ) {
-    commands.insert_resource(TerrainMaterial(
-        materials.add(ChunkMaterial {
-            base: StandardMaterial {
-                perceptual_roughness: 0.95,
-                ..default()
-            },
-            extension: ChunkMaterialExtension {
-                lod: LodParams::new(
-                    debug_tint(),
-                    &cuts(&streaming, world.cell_size())
-                        .iter()
-                        .map(|c| (c.radius_m, c.half_height_m))
-                        .collect::<Vec<_>>(),
-                ),
-                ..default()
-            },
-        }),
-    ));
+    let nothing_drawn = || ShaderBuffer::new(vec![0u32], RenderAssetUsages::default());
+    let drawn = buffers.add(nothing_drawn());
+    let opaque = ChunkMaterial {
+        base: StandardMaterial {
+            perceptual_roughness: 0.95,
+            ..default()
+        },
+        extension: ChunkMaterialExtension {
+            lod: LodParams::new(
+                debug_tint(),
+                &cuts(&streaming, world.cell_size())
+                    .iter()
+                    .map(|c| (c.radius_m, c.half_height_m))
+                    .collect::<Vec<_>>(),
+            ),
+            drawn: buffers.add(nothing_drawn()),
+            ..default()
+        },
+    };
+    let blended = ChunkMaterial {
+        base: StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            ..opaque.base.clone()
+        },
+        extension: ChunkMaterialExtension {
+            drawn: drawn.clone(),
+            ..opaque.extension.clone()
+        },
+    };
+    // The holes are cut by the shader's pattern, which sets alpha to zero.
+    let cutout = ChunkMaterial {
+        base: StandardMaterial {
+            alpha_mode: AlphaMode::Mask(0.5),
+            ..opaque.base.clone()
+        },
+        extension: opaque.extension.clone(),
+    };
+    commands.insert_resource(TerrainMaterial {
+        opaque: materials.add(opaque),
+        blended: materials.add(blended),
+        cutout: materials.add(cutout),
+        drawn,
+    });
 }
 
 #[cfg(feature = "dev")]
@@ -100,6 +178,75 @@ fn debug_tint() -> u32 {
 #[cfg(not(feature = "dev"))]
 fn debug_tint() -> u32 {
     0
+}
+
+/// What `upload_meshes` and `drop_meshes` share: the pieces of a Client frame
+/// that spawn, replace and despawn a Chunk's entities.
+struct Draw<'a, 'w, 's> {
+    commands: &'a mut Commands<'w, 's>,
+    meshes: &'a mut Assets<Mesh>,
+    mesh_of: &'a dyn Fn(Entity) -> Option<Handle<Mesh>>,
+}
+
+impl Draw<'_, '_, '_> {
+    /// Brings one layer's entity for `key` in line with `layer`: spawned,
+    /// replaced or, if the layer has nothing, despawned. The entity, if it
+    /// draws something.
+    fn show(
+        &mut self,
+        entities: &mut LayerEntities,
+        material: &Handle<ChunkMaterial>,
+        layer: &MeshLayer,
+        key: (u32, ChunkCoord),
+        world: &WorldSettings,
+        casts_shadows: bool,
+    ) -> Option<Entity> {
+        if layer.is_empty() {
+            self.hide(entities, key);
+            return None;
+        }
+        let (level, coord) = key;
+        let handle = self
+            .meshes
+            .add(chunk_mesh_to_mesh(layer, world.voxel_size_at(level)));
+        match entities.get(&key) {
+            // Replacing rather than despawning and respawning keeps the
+            // entity id stable, and dropping the old handle is what stops a
+            // few minutes of flying from leaking every mesh ever uploaded.
+            Some(&entity) => {
+                if let Some(old) = (self.mesh_of)(entity) {
+                    self.meshes.remove(&old);
+                }
+                self.commands.entity(entity).insert(Mesh3d(handle));
+                Some(entity)
+            }
+            None => {
+                let mut entity = self.commands.spawn((
+                    Mesh3d(handle),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_translation(world.chunk_origin_at(coord, level)),
+                    coord,
+                    MeshTag::new(level),
+                    layer_of(level),
+                ));
+                if !casts_shadows {
+                    entity.insert(NotShadowCaster);
+                }
+                entities.insert(key, entity.id());
+                Some(entity.id())
+            }
+        }
+    }
+
+    fn hide(&mut self, entities: &mut LayerEntities, key: (u32, ChunkCoord)) {
+        let Some(entity) = entities.remove(&key) else {
+            return;
+        };
+        if let Some(mesh) = (self.mesh_of)(entity) {
+            self.meshes.remove(&mesh);
+        }
+        self.commands.entity(entity).despawn();
+    }
 }
 
 #[cfg_attr(
@@ -123,42 +270,57 @@ fn upload_meshes(
     let started = std::time::Instant::now();
     #[cfg(feature = "dev")]
     let mut uploaded = 0;
+    let entities = &mut *entities;
+    let mut draw = Draw {
+        commands: &mut commands,
+        meshes: &mut meshes,
+        mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
+    };
     for (level, coord, mesh) in incoming.read() {
         let key = (level, coord);
-        // The blended layer has no draw call yet (ticket 04), so a Chunk with
-        // nothing opaque is nothing to show.
-        if mesh.opaque.is_empty() {
-            despawn(&mut commands, &mut meshes, &mut entities, &existing, key);
-            continue;
+        entities.drawn_changed |= entities.delivered.insert(key);
+        let opaque = draw.show(
+            &mut entities.opaque,
+            &material.opaque,
+            &mesh.opaque,
+            key,
+            &world,
+            true,
+        );
+        let blended = draw.show(
+            &mut entities.blended,
+            &material.blended,
+            &mesh.blended,
+            key,
+            &world,
+            // The flood-fill already dims sky light under water and glass, so
+            // a shadow map treating them as solid would count it twice.
+            false,
+        );
+        let cutout = draw.show(
+            &mut entities.cutout,
+            &material.cutout,
+            &mesh.cutout,
+            key,
+            &world,
+            true,
+        );
+        if let Some(entity) = blended {
+            let order = BlendOrder::new(&mesh.blended, world.voxel_size_at(level));
+            match order {
+                Some(order) => draw.commands.entity(entity).insert(order),
+                None => draw.commands.entity(entity).remove::<BlendOrder>(),
+            };
         }
-
         #[cfg(feature = "dev")]
         {
-            uploaded += 1;
+            uploaded += [opaque, blended, cutout]
+                .iter()
+                .map(|e| u32::from(e.is_some()))
+                .sum::<u32>();
         }
-        let handle = meshes.add(chunk_mesh_to_mesh(&mesh.opaque, world.voxel_size_at(level)));
-        match entities.0.get(&key) {
-            // Replacing rather than despawning and respawning keeps the
-            // entity id stable, and dropping the old handle is what stops a
-            // few minutes of flying from leaking every mesh ever uploaded.
-            Some(&entity) => {
-                if let Ok(old) = existing.get(entity) {
-                    meshes.remove(&old.0);
-                }
-                commands.entity(entity).insert(Mesh3d(handle));
-            }
-            None => {
-                let entity = commands.spawn((
-                    Mesh3d(handle),
-                    MeshMaterial3d(material.0.clone()),
-                    Transform::from_translation(world.chunk_origin_at(coord, level)),
-                    coord,
-                    MeshTag::new(level),
-                    layer_of(level),
-                ));
-                entities.0.insert(key, entity.id());
-            }
-        }
+        #[cfg(not(feature = "dev"))]
+        let _ = (opaque, cutout);
     }
     #[cfg(feature = "dev")]
     if uploaded > 0 {
@@ -176,25 +338,39 @@ fn drop_meshes(
 ) {
     let level0 = level0.read().map(|m| (0, m.coord));
     let coarse = coarse.read().map(|m| (m.level, m.coord));
+    let entities = &mut *entities;
+    let mut draw = Draw {
+        commands: &mut commands,
+        meshes: &mut meshes,
+        mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
+    };
     for key in level0.chain(coarse) {
-        despawn(&mut commands, &mut meshes, &mut entities, &existing, key);
+        draw.hide(&mut entities.opaque, key);
+        draw.hide(&mut entities.blended, key);
+        draw.hide(&mut entities.cutout, key);
+        entities.drawn_changed |= entities.delivered.remove(&key);
     }
 }
 
-fn despawn(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    entities: &mut ChunkEntities,
-    existing: &Query<&Mesh3d>,
-    key: (u32, ChunkCoord),
+/// Rewrites the blended material's record of what each level has drawn, when
+/// it changed. Touching the material too is what has its bind group remade.
+fn publish_drawn(
+    mut entities: ResMut<ChunkEntities>,
+    terrain: Res<TerrainMaterial>,
+    streaming: Res<StreamingSettings>,
+    world: Res<WorldSettings>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
 ) {
-    let Some(entity) = entities.0.remove(&key) else {
+    if !std::mem::take(&mut entities.drawn_changed) {
         return;
-    };
-    if let Ok(mesh) = existing.get(entity) {
-        meshes.remove(&mesh.0);
     }
-    commands.entity(entity).despawn();
+    let words = drawn_mask::encode(level_count(&streaming), &entities.delivered, &world);
+    if let Some(mut buffer) = buffers.get_mut(&terrain.drawn) {
+        buffer.clear();
+        buffer.extend_from_slice(&words);
+    }
+    let _ = materials.get_mut(&terrain.blended);
 }
 
 fn spawn_light(
@@ -553,6 +729,7 @@ mod tests {
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Mesh>()
             .init_asset::<ChunkMaterial>()
+            .init_asset::<ShaderBuffer>()
             .init_resource::<WorldSettings>()
             .init_resource::<StreamingSettings>()
             .init_resource::<ChunkEntities>()
@@ -560,14 +737,171 @@ mod tests {
             .add_message::<ChunkUnloaded>()
             .add_message::<LodMeshReady>()
             .add_message::<LodUnloaded>()
-            .add_systems(Startup, add_material)
-            .add_systems(Update, (upload_meshes, drop_meshes).chain());
+            .add_systems(Startup, add_material);
+        add_view_systems(&mut app);
         // `upload_meshes` takes the dev-only counter as a `ResMut`, so without
         // it the system fails parameter validation instead of running.
         #[cfg(feature = "dev")]
         app.init_resource::<crate::cost::MainThreadCost>();
         app.update();
         app
+    }
+
+    /// Whether the material cuts a level-`level` upward face at `point`, read
+    /// the way the shader reads it.
+    fn cuts_at(app: &App, blended: bool, level: u32, point: Vec3) -> bool {
+        cuts_facing(app, blended, level, point, Vec3::Y)
+    }
+
+    /// `cuts_at` for a face of any orientation: the Chunk asked about is the one
+    /// behind the face, so its normal decides which side of a boundary it is on.
+    fn cuts_facing(app: &App, blended: bool, level: u32, point: Vec3, normal: Vec3) -> bool {
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let handle = if blended {
+            &terrain.blended
+        } else {
+            &terrain.opaque
+        };
+        let material = app
+            .world()
+            .resource::<Assets<ChunkMaterial>>()
+            .get(handle)
+            .unwrap();
+        let buffer = app
+            .world()
+            .resource::<Assets<ShaderBuffer>>()
+            .get(&material.extension.drawn)
+            .unwrap();
+        crate::client::drawn_mask::contains(
+            buffer.cast_slice::<u32>().unwrap(),
+            level,
+            point,
+            normal,
+        )
+    }
+
+    #[test]
+    fn coarse_water_is_cut_exactly_where_the_finer_level_has_delivered_its_chunk() {
+        let mut app = app();
+        let world = *app.world().resource::<WorldSettings>();
+        let inside = |coord: ChunkCoord, level: u32| {
+            world.chunk_origin_at(coord, level) + Vec3::splat(world.cell_size_at(level) / 2.0)
+        };
+        let (a, b, c) = (
+            ChunkCoord::new(0, 0, 0),
+            ChunkCoord::new(1, 0, 0),
+            ChunkCoord::new(2, 0, 0),
+        );
+        send_mesh(&mut app, a, geometry());
+        send_mesh(&mut app, c, geometry());
+        // An empty mesh is still the finer level's answer for that space.
+        send_mesh(
+            &mut app,
+            ChunkCoord::new(0, 1, 0),
+            tesserae_core::ChunkMesh::default(),
+        );
+        assert!(cuts_at(&app, true, 1, inside(a, 0)));
+        assert!(cuts_at(&app, true, 1, inside(c, 0)));
+        assert!(cuts_at(&app, true, 1, inside(ChunkCoord::new(0, 1, 0), 0)));
+        assert!(
+            !cuts_at(&app, true, 1, inside(b, 0)),
+            "inside the window, not sent"
+        );
+        assert!(
+            !cuts_at(&app, true, 1, inside(ChunkCoord::new(9, 0, 0), 0)),
+            "outside it"
+        );
+
+        app.world_mut().write_message(ChunkUnloaded { coord: a });
+        app.update();
+        assert!(!cuts_at(&app, true, 1, inside(a, 0)), "unloaded");
+
+        send_coarse(&mut app, 1, a, geometry());
+        assert!(cuts_at(&app, true, 2, inside(a, 1)), "level 2 asks level 1");
+        assert!(!cuts_at(&app, true, 1, inside(a, 1) + Vec3::splat(40.0)));
+    }
+
+    /// Ticket 17: `level_the_water` puts a coarse water surface at level 0's own
+    /// height, which a Mod's water level can place exactly on a Chunk boundary.
+    #[test]
+    fn a_face_on_a_chunk_boundary_asks_the_chunk_whose_mesh_holds_it() {
+        let mut app = app();
+        let world = *app.world().resource::<WorldSettings>();
+        let sent = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, sent, geometry());
+        let cell_m = world.cell_size_at(0);
+        let boundary = world.chunk_origin_at(ChunkCoord::new(0, 1, 0), 0)
+            + Vec3::new(cell_m / 2.0, 0.0, cell_m / 2.0);
+        assert!(
+            cuts_facing(&app, true, 1, boundary, Vec3::Y),
+            "an upward face there is the sent Chunk's own top"
+        );
+        assert!(
+            !cuts_facing(&app, true, 1, boundary, Vec3::NEG_Y),
+            "a downward face there belongs to the Chunk above, which was not sent"
+        );
+    }
+
+    #[test]
+    fn the_opaque_material_cuts_nothing() {
+        let mut app = app();
+        send_mesh(&mut app, ChunkCoord::new(0, 0, 0), geometry());
+        assert!(!cuts_at(&app, false, 1, Vec3::splat(16.0)));
+    }
+
+    /// Two panes of glass one behind the other along z, in one Chunk.
+    fn two_panes() -> tesserae_core::ChunkMesh {
+        let mut c = Chunk::air();
+        c.set(5, 5, 5, Voxel::cube(tesserae_core::material::GLASS));
+        c.set(5, 5, 10, Voxel::cube(tesserae_core::material::GLASS));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        )
+    }
+
+    /// Two pools side by side along x in a stone basin: two water quads in one
+    /// plane, facing up, and nothing else blended.
+    fn two_pools() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{STONE, WATER};
+        let mut c = Chunk::air();
+        for x in 0..=12 {
+            for z in 0..=6 {
+                c.set(x, 4, z, Voxel::cube(STONE));
+                let rim = x == 0 || x == 6 || x == 12 || z == 0 || z == 6;
+                c.set(x, 5, z, Voxel::cube(if rim { STONE } else { WATER }));
+            }
+        }
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mesh = mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        );
+        assert_eq!(mesh.blended.quad_count(), 2, "the fixture is two pools");
+        mesh
+    }
+
+    fn put_eye(app: &mut App, eye: Vec3) {
+        let existing = app
+            .world_mut()
+            .query_filtered::<Entity, With<MainCamera>>()
+            .iter(app.world())
+            .next();
+        let transform = GlobalTransform::from_translation(eye);
+        match existing {
+            Some(camera) => {
+                app.world_mut().entity_mut(camera).insert(transform);
+            }
+            None => {
+                app.world_mut().spawn((MainCamera, transform));
+            }
+        }
+        app.update();
     }
 
     fn geometry() -> tesserae_core::ChunkMesh {
@@ -580,6 +914,28 @@ mod tests {
         let mesh = mesh_chunk(LitChunk::new(&solid, &dark), neighbors, &Tables::builtin());
         assert!(!mesh.is_empty(), "the fixture must have geometry");
         mesh
+    }
+
+    /// A Chunk of water beside open sky: all of its geometry is blended.
+    fn blended_geometry() -> tesserae_core::ChunkMesh {
+        let water = Chunk::filled(Voxel::cube(tesserae_core::material::WATER));
+        let air = Chunk::air();
+        let dark = ChunkLight::dark();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mut neighbors = [Some(LitChunk::new(&water, &dark)); 6];
+        neighbors[0] = Some(LitChunk::new(&air, &sky));
+        let mesh = mesh_chunk(LitChunk::new(&water, &dark), neighbors, &Tables::builtin());
+        assert!(mesh.opaque.is_empty(), "the fixture must be all blended");
+        assert!(!mesh.blended.is_empty(), "the fixture must have geometry");
+        mesh
+    }
+
+    /// Stone and water in one Chunk, so both layers have geometry.
+    fn both_layers() -> tesserae_core::ChunkMesh {
+        tesserae_core::ChunkMesh {
+            blended: blended_geometry().blended,
+            ..geometry()
+        }
     }
 
     fn send_mesh(app: &mut App, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
@@ -597,7 +953,15 @@ mod tests {
     fn entity_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
         app.world()
             .resource::<ChunkEntities>()
-            .0
+            .opaque
+            .get(&(level, coord))
+            .copied()
+    }
+
+    fn blended_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
+        app.world()
+            .resource::<ChunkEntities>()
+            .blended
             .get(&(level, coord))
             .copied()
     }
@@ -622,6 +986,536 @@ mod tests {
             panic!("positions are Float32x3");
         };
         positions.clone()
+    }
+
+    #[test]
+    fn a_chunk_with_only_blended_geometry_is_drawn() {
+        let mut app = app();
+        send_mesh(&mut app, ChunkCoord::new(0, 0, 0), blended_geometry());
+        assert_eq!(drawn(&mut app), 1);
+    }
+
+    #[test]
+    fn a_chunk_with_both_layers_is_two_entities_and_one_with_only_opaque_is_one() {
+        let mut app = app();
+        send_mesh(&mut app, ChunkCoord::new(0, 0, 0), both_layers());
+        assert_eq!(drawn(&mut app), 2);
+        send_mesh(&mut app, ChunkCoord::new(1, 0, 0), geometry());
+        assert_eq!(drawn(&mut app), 3, "no blended Voxel is still one entity");
+    }
+
+    #[test]
+    fn a_blended_entity_is_placed_scaled_tagged_and_layered_like_the_opaque_one() {
+        let mut app = app();
+        let coord = ChunkCoord::new(3, -1, 2);
+        send_mesh(&mut app, coord, both_layers());
+        send_coarse(&mut app, 2, coord, both_layers());
+        for level in [0, 2] {
+            let opaque = entity_at(&app, level, coord).unwrap();
+            let blended = blended_at(&app, level, coord).expect("a blended entity");
+            assert_ne!(opaque, blended);
+            let world = app.world();
+            assert_eq!(
+                world.get::<Transform>(blended),
+                world.get::<Transform>(opaque),
+                "level {level}"
+            );
+            assert_eq!(world.get::<ChunkCoord>(blended), Some(&coord));
+            assert_eq!(world.get::<MeshTag>(blended).unwrap().value, level);
+            assert_eq!(
+                world.get::<RenderLayers>(blended),
+                Some(&layer_of(level)),
+                "the level's camera draws it, or the cut and the sun miss it"
+            );
+        }
+        // A coarse Voxel is bigger, so the same layer spans more metres.
+        let extent = |app: &App, entity| {
+            let max = |p: Vec<[f32; 3]>| p.iter().map(|p| p[0]).fold(f32::MIN, f32::max);
+            max(positions(app, entity))
+        };
+        let near = extent(&app, blended_at(&app, 0, coord).unwrap());
+        let far = extent(&app, blended_at(&app, 2, coord).unwrap());
+        assert_eq!(far, near * 4.0);
+    }
+
+    #[test]
+    fn blended_surfaces_cast_no_shadow_and_opaque_ones_still_do() {
+        use bevy::light::NotShadowCaster;
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        send_mesh(&mut app, ChunkCoord::new(1, 0, 0), blended_geometry());
+        let world = app.world();
+        for blended in [
+            blended_at(&app, 0, coord).unwrap(),
+            blended_at(&app, 0, ChunkCoord::new(1, 0, 0)).unwrap(),
+        ] {
+            assert!(world.get::<NotShadowCaster>(blended).is_some());
+        }
+        assert!(
+            world
+                .get::<NotShadowCaster>(entity_for(&app, coord).unwrap())
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn moving_inside_one_cell_of_the_meshs_planes_never_reindexes() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        put_eye(&mut app, Vec3::new(5.5, 5.5, 8.4));
+        send_mesh(&mut app, coord, two_panes());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .clear();
+        // Between the panes and inside their x and y span, where a nearest-centre
+        // order would change and the separating planes' cannot.
+        for z in [8.0, 7.2, 9.6] {
+            put_eye(&mut app, Vec3::new(5.4, 5.6, z));
+        }
+        let modified = app
+            .world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .drain()
+            .any(|e| e.is_modified(&handle));
+        assert!(!modified);
+    }
+
+    /// One drawn quad of a blended mesh, axis-aligned, in the entity's metres.
+    struct DrawnQuad {
+        axis: usize,
+        plane: f32,
+        min: Vec3,
+        max: Vec3,
+        normal: Vec3,
+    }
+
+    /// The blended mesh's quads in the order the GPU draws them.
+    fn drawn_quads(app: &App, entity: Entity) -> Vec<DrawnQuad> {
+        let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
+        let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
+        let positions = positions(app, entity);
+        let Some(VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("normals are Float32x3");
+        };
+        let Some(bevy::mesh::Indices::U32(indices)) = mesh.indices() else {
+            panic!("U32 indices");
+        };
+        indices
+            .chunks(6)
+            .map(|quad| {
+                let corners: Vec<Vec3> = quad
+                    .iter()
+                    .map(|&i| Vec3::from(positions[i as usize]))
+                    .collect();
+                let normal = Vec3::from(normals[quad[0] as usize]);
+                let axis = (0..3).find(|&a| normal[a] != 0.0).unwrap();
+                let min = corners.iter().copied().fold(Vec3::MAX, Vec3::min);
+                let max = corners.iter().copied().fold(Vec3::MIN, Vec3::max);
+                DrawnQuad {
+                    axis,
+                    plane: min[axis],
+                    min,
+                    max,
+                    normal,
+                }
+            })
+            .collect()
+    }
+
+    /// Rays from `eye` towards `target` that meet two blended quads drawn in the
+    /// wrong order: the nearer one first, so the farther one blends over it.
+    /// Back faces are culled, as `StandardMaterial` does.
+    fn rays_drawn_out_of_order(quads: &[DrawnQuad], eye: Vec3, target: Vec3) -> usize {
+        let forward = (target - eye).normalize();
+        let right = forward.cross(Vec3::Y).normalize();
+        let up = right.cross(forward);
+        let n = 96;
+        let half = 30f32.to_radians().tan();
+        let mut wrong = 0;
+        for py in 0..n {
+            for px in 0..n {
+                let sx = (px as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+                let sy = (py as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+                let d = (forward + sx * half * right + sy * half * up).normalize();
+                let hits: Vec<f32> = quads
+                    .iter()
+                    .map(|q| {
+                        if q.normal.dot(d) >= 0.0 || d[q.axis] == 0.0 {
+                            return f32::NAN;
+                        }
+                        let t = (q.plane - eye[q.axis]) / d[q.axis];
+                        let p = eye + t * d;
+                        let inside = (0..3)
+                            .filter(|&a| a != q.axis)
+                            .all(|a| p[a] > q.min[a] && p[a] < q.max[a]);
+                        if t > 0.0 && inside { t } else { f32::NAN }
+                    })
+                    .collect();
+                let drawn: Vec<f32> = hits.into_iter().filter(|t| !t.is_nan()).collect();
+                // In draw order, every later hit must be nearer.
+                let farther_later =
+                    (0..drawn.len()).any(|i| drawn[i + 1..].iter().any(|&later| later > drawn[i]));
+                wrong += usize::from(farther_later);
+            }
+        }
+        wrong
+    }
+
+    /// Eyes all around `target`, 8 headings at 10, 30 and 60 degrees up.
+    fn around(target: Vec3, distance: f32) -> Vec<Vec3> {
+        let mut eyes = vec![];
+        for elevation in [10f32, 30.0, 60.0] {
+            for step in 0..8 {
+                let (e, a) = (
+                    elevation.to_radians(),
+                    step as f32 * std::f32::consts::FRAC_PI_4,
+                );
+                eyes.push(
+                    target + distance * Vec3::new(e.cos() * a.sin(), e.sin(), e.cos() * a.cos()),
+                );
+            }
+        }
+        eyes
+    }
+
+    /// The dev gallery's glass house in front of its pool, a lantern inside.
+    fn glass_house_and_pool() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{GLASS, LANTERN, STONE, WATER};
+        let mut c = Chunk::air();
+        for x in 0..11 {
+            for z in 0..12 {
+                c.set(x, 9, z, Voxel::cube(STONE));
+            }
+        }
+        for k in 0..=5 {
+            for i in 0..=8 {
+                let rim = i == 0 || i == 8 || k == 0 || k == 5;
+                c.set(i, 10, k, Voxel::cube(if rim { STONE } else { WATER }));
+            }
+        }
+        for k in 7..=10 {
+            for i in 1..=5 {
+                let wall = i == 1 || i == 5 || k == 7 || k == 10;
+                for j in 0..=2 {
+                    if wall {
+                        c.set(i, 10 + j, k, Voxel::cube(GLASS));
+                    }
+                }
+                c.set(i, 13, k, Voxel::cube(GLASS));
+            }
+        }
+        c.set(3, 10, 8, Voxel::cube(LANTERN));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        )
+    }
+
+    /// A long strip of water over a small glass cube near one end: seen from
+    /// above that end, the strip is in front of the cube, but its centre is far
+    /// down the strip and farther from the Eye than the cube's.
+    fn strip_over_a_cube() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{GLASS, WATER};
+        let mut c = Chunk::air();
+        for x in 0..30 {
+            c.set(x, 5, 10, Voxel::cube(WATER));
+        }
+        c.set(2, 3, 10, Voxel::cube(GLASS));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        )
+    }
+
+    #[test]
+    fn blended_layers_are_drawn_back_to_front_along_every_ray_from_all_around() {
+        let house = Vec3::new(5.5, 11.5, 6.0);
+        let panes = Vec3::new(5.5, 5.5, 8.0);
+        let ends = [Vec3::new(5.5, 5.5, 60.0), Vec3::new(5.5, 5.5, -60.0)];
+        let strip = Vec3::new(15.0, 5.0, 10.5);
+        let above_the_cube = Vec3::new(0.0, 20.0, 10.5);
+        for (name, mesh, target, eyes) in [
+            (
+                "glass house and pool",
+                glass_house_and_pool(),
+                house,
+                around(house, 30.0),
+            ),
+            (
+                "two panes",
+                two_panes(),
+                panes,
+                [around(panes, 20.0), ends.to_vec()].concat(),
+            ),
+            (
+                "strip over a cube",
+                strip_over_a_cube(),
+                Vec3::new(2.5, 4.0, 10.5),
+                [around(strip, 25.0), vec![above_the_cube]].concat(),
+            ),
+        ] {
+            let mut app = app();
+            let coord = ChunkCoord::new(0, 0, 0);
+            put_eye(&mut app, eyes[0]);
+            send_mesh(&mut app, coord, mesh);
+            let entity = blended_at(&app, 0, coord).unwrap();
+            for eye in eyes {
+                put_eye(&mut app, eye);
+                let wrong = rays_drawn_out_of_order(&drawn_quads(&app, entity), eye, target);
+                assert_eq!(wrong, 0, "{name}, eye at {eye}");
+            }
+        }
+    }
+
+    /// Glass and water in a 3D checkerboard, six Voxels a side, so every face is
+    /// its own quad and the mesh has about 1300, over the old exact-order cap;
+    /// and in the same Chunk the strip of water over a glass cube that a
+    /// nearest-centre order draws wrong.
+    fn checkerboard_and_a_strip() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{GLASS, WATER};
+        let mut c = Chunk::air();
+        for x in 0..6 {
+            for y in 0..6 {
+                for z in 0..6 {
+                    let m = if (x + y + z) % 2 == 0 { GLASS } else { WATER };
+                    c.set(10 + x, 10 + y, 10 + z, Voxel::cube(m));
+                }
+            }
+        }
+        for x in 0..30 {
+            c.set(x, 5, 25, Voxel::cube(WATER));
+        }
+        c.set(2, 3, 25, Voxel::cube(GLASS));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mesh = mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        );
+        assert!(
+            mesh.blended.quad_count() > 1000,
+            "{}",
+            mesh.blended.quad_count()
+        );
+        mesh
+    }
+
+    #[test]
+    fn a_large_blended_mesh_is_drawn_back_to_front_too() {
+        let checkerboard = Vec3::new(13.0, 13.0, 13.0);
+        let cube = Vec3::new(2.5, 4.0, 25.5);
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        let mut views: Vec<(Vec3, Vec3)> = around(checkerboard, 25.0)
+            .into_iter()
+            .step_by(5)
+            .map(|eye| (eye, checkerboard))
+            .collect();
+        views.push((Vec3::new(0.0, 20.0, 25.5), cube));
+        put_eye(&mut app, views[0].0);
+        send_mesh(&mut app, coord, checkerboard_and_a_strip());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        for (eye, target) in views {
+            put_eye(&mut app, eye);
+            let wrong = rays_drawn_out_of_order(&drawn_quads(&app, entity), eye, target);
+            assert_eq!(wrong, 0, "eye at {eye}");
+        }
+    }
+
+    /// What the strip fixture is for: the nearest-centre order gets it wrong.
+    #[test]
+    fn a_nearest_centre_order_gets_the_strip_over_a_cube_wrong() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        let eye = Vec3::new(0.0, 20.0, 10.5);
+        put_eye(&mut app, eye);
+        send_mesh(&mut app, coord, strip_over_a_cube());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        let mut quads = drawn_quads(&app, entity);
+        let centre = |q: &DrawnQuad| (q.min + q.max) / 2.0;
+        quads.sort_by(|a, b| eye.distance(centre(b)).total_cmp(&eye.distance(centre(a))));
+        assert!(rays_drawn_out_of_order(&quads, eye, Vec3::new(2.5, 4.0, 10.5)) > 0);
+    }
+
+    #[test]
+    fn a_flat_sheet_of_water_is_never_reindexed() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        put_eye(&mut app, Vec3::new(60.0, 50.0, 3.0));
+        send_mesh(&mut app, coord, two_pools());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .clear();
+        put_eye(&mut app, Vec3::new(-60.0, 50.0, 3.0));
+        let modified = app
+            .world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .drain()
+            .any(|e| e.is_modified(&handle));
+        assert!(!modified, "a sheet's draw order cannot matter");
+    }
+
+    /// Two leaf cubes beside open sky: every face is in the cutout layer.
+    fn leaves() -> tesserae_core::ChunkMesh {
+        let mut c = Chunk::air();
+        c.set(5, 5, 5, Voxel::cube(tesserae_core::material::LEAVES));
+        c.set(6, 5, 5, Voxel::cube(tesserae_core::material::LEAVES));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mesh = mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        );
+        assert!(mesh.opaque.is_empty() && !mesh.cutout.is_empty());
+        mesh
+    }
+
+    fn cutout_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
+        app.world()
+            .resource::<ChunkEntities>()
+            .cutout
+            .get(&(level, coord))
+            .copied()
+    }
+
+    #[test]
+    fn leaves_are_drawn_masked_casting_their_shadow_and_follow_their_chunk() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, leaves());
+        let entity = cutout_at(&app, 0, coord).expect("a cutout entity");
+        assert_eq!(drawn(&mut app), 1);
+        let handle = &app
+            .world()
+            .get::<MeshMaterial3d<ChunkMaterial>>(entity)
+            .unwrap()
+            .0;
+        let material = app
+            .world()
+            .resource::<Assets<ChunkMaterial>>()
+            .get(handle)
+            .unwrap();
+        assert!(matches!(material.base.alpha_mode, AlphaMode::Mask(_)));
+        assert!(
+            app.world()
+                .get::<bevy::light::NotShadowCaster>(entity)
+                .is_none(),
+            "a canopy's shadow has its holes, not none"
+        );
+        assert_eq!(app.world().get::<MeshTag>(entity).unwrap().value, 0);
+
+        send_mesh(&mut app, coord, geometry());
+        assert_eq!(
+            cutout_at(&app, 0, coord),
+            None,
+            "a replacement without leaves"
+        );
+        send_mesh(&mut app, coord, leaves());
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.update();
+        assert_eq!(drawn(&mut app), 0);
+    }
+
+    #[test]
+    fn only_the_blended_entity_is_alpha_blended() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        let alpha_of = |app: &App, entity: Entity| {
+            let handle = &app
+                .world()
+                .get::<MeshMaterial3d<ChunkMaterial>>(entity)
+                .unwrap()
+                .0;
+            app.world()
+                .resource::<Assets<ChunkMaterial>>()
+                .get(handle)
+                .unwrap()
+                .base
+                .alpha_mode
+        };
+        assert_eq!(
+            alpha_of(&app, blended_at(&app, 0, coord).unwrap()),
+            AlphaMode::Blend
+        );
+        assert_eq!(
+            alpha_of(&app, entity_for(&app, coord).unwrap()),
+            AlphaMode::Opaque
+        );
+    }
+
+    #[test]
+    fn a_replacement_that_drops_or_adds_the_blended_layer_follows_it() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        let blended = blended_at(&app, 0, coord).unwrap();
+        let handle = app.world().get::<Mesh3d>(blended).unwrap().0.clone();
+
+        send_mesh(&mut app, coord, geometry());
+        assert_eq!(blended_at(&app, 0, coord), None);
+        assert_eq!(drawn(&mut app), 1, "only the opaque entity is left");
+        assert!(
+            app.world()
+                .resource::<Assets<Mesh>>()
+                .get(&handle)
+                .is_none(),
+            "the dropped layer's Mesh asset is still loaded"
+        );
+
+        send_mesh(&mut app, coord, both_layers());
+        assert!(blended_at(&app, 0, coord).is_some());
+        assert_eq!(drawn(&mut app), 2);
+
+        send_mesh(&mut app, coord, blended_geometry());
+        assert_eq!(entity_for(&app, coord), None, "the opaque layer is gone");
+        assert_eq!(drawn(&mut app), 1);
+    }
+
+    #[test]
+    fn unloading_removes_both_entities_and_both_assets() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, both_layers());
+        send_coarse(&mut app, 1, coord, both_layers());
+        let before = app.world().resource::<Assets<Mesh>>().len();
+        assert_eq!(before, 4);
+
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.world_mut()
+            .write_message(LodUnloaded { level: 1, coord });
+        app.update();
+
+        assert_eq!(drawn(&mut app), 0);
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
+    }
+
+    #[test]
+    fn a_mesh_with_a_blended_layer_and_its_unload_in_one_frame_leave_nothing_drawn() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        app.world_mut().write_message(ChunkMeshReady {
+            coord,
+            mesh: both_layers(),
+        });
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.update();
+        assert_eq!(drawn(&mut app), 0);
     }
 
     #[test]

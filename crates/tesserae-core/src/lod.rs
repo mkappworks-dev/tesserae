@@ -5,6 +5,7 @@ use crate::shape::{SUBDIV, ShapeTable};
 use crate::voxel::{MaterialId, Voxel};
 
 use crate::light::{ChunkLight, Light, MAX_LIGHT};
+use crate::material::WATER;
 use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
 use crate::worldgen::Worldgen;
 
@@ -259,12 +260,72 @@ fn is_solid_throughout(chunk: &Chunk) -> bool {
     chunk.uniform().is_some_and(|v| !v.is_air())
 }
 
+/// What a coarse Chunk needs to light its Water as level 0 does.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct UnderWater {
+    /// The water's surface, in metres.
+    pub level_m: f32,
+    /// Levels Water removes per Voxel it fills.
+    pub dimming: u8,
+    /// A level-0 Voxel's edge. A light level counts steps, not metres, so depth
+    /// is counted in these.
+    pub step_m: f32,
+}
+
+impl UnderWater {
+    /// The sky light level 0 has in its Water Voxel whose bottom is at `bottom_m`.
+    /// Full sky falls into the top Voxel and loses only the dimming; below full
+    /// strength it no longer falls free, so each Voxel after costs a step too.
+    fn light_at(&self, bottom_m: f32) -> Light {
+        let steps = ((self.level_m - bottom_m) / self.step_m).ceil().max(1.0) as u32;
+        let d = self.dimming as u32;
+        let lost = if d == 0 { 0 } else { d + (d + 1) * (steps - 1) };
+        Light::new(MAX_LIGHT - lost.min(MAX_LIGHT as u32) as u8, 0)
+    }
+
+    /// Lights the Water in `chunk`, whose lowest Voxel row is `base_y`, at the
+    /// cells `cells` yields.
+    fn light_water(
+        &self,
+        light: &mut ChunkLight,
+        chunk: &Chunk,
+        base_y: i32,
+        voxel_m: f32,
+        cells: impl Iterator<Item = [i32; 3]>,
+    ) {
+        let floor_m = base_y as f32 * voxel_m;
+        if floor_m >= self.level_m || chunk.uniform().is_some_and(|v| v.material() != WATER) {
+            return;
+        }
+        for [x, y, z] in cells {
+            let (x, y, z) = (x as usize, y as usize, z as usize);
+            if chunk.get(x, y, z).material() == WATER {
+                light.set(x, y, z, self.light_at((base_y + y as i32) as f32 * voxel_m));
+            }
+        }
+    }
+}
+
+/// [`coarse_light_in`] for a World without water.
 pub fn coarse_light(
     surface: &impl Surface,
     voxel_m: f32,
     coord: [i32; 3],
     center: &Chunk,
     around: [&Chunk; 6],
+) -> CoarseLight {
+    coarse_light_in(surface, voxel_m, coord, center, around, None)
+}
+
+/// The light a coarse Chunk is meshed with: open sky, except Air the ground
+/// covers, which is dark, and Water, which is dimmed by its depth as at level 0.
+pub fn coarse_light_in(
+    surface: &impl Surface,
+    voxel_m: f32,
+    coord: [i32; 3],
+    center: &Chunk,
+    around: [&Chunk; 6],
+    water: Option<UnderWater>,
 ) -> CoarseLight {
     let solid = is_solid_throughout(center) && around.iter().all(|c| is_solid_throughout(c));
     let reach = Reach::of(surface, voxel_m, coord, solid);
@@ -279,7 +340,7 @@ pub fn coarse_light(
         _ => None,
     };
 
-    let center_light = uniform(center).map_or_else(
+    let mut center_light = uniform(center).map_or_else(
         || {
             let mut light = ChunkLight::filled(OPEN_SKY);
             for z in 0..size {
@@ -298,44 +359,56 @@ pub fn coarse_light(
         ChunkLight::filled,
     );
 
-    let around = std::array::from_fn(|face| {
+    // The plane of the neighbour across `face` that touches this Chunk, in its own indices.
+    let plane_cells = |face: usize| {
+        (0..size).flat_map(move |a| {
+            (0..size).map(move |b| match face {
+                NEG_X => [size - 1, a, b],
+                POS_X => [0, a, b],
+                NEG_Y => [a, size - 1, b],
+                POS_Y => [a, 0, b],
+                NEG_Z => [a, b, size - 1],
+                _ => [a, b, 0],
+            })
+        })
+    };
+
+    let mut around_light: [ChunkLight; 6] = std::array::from_fn(|face| {
         let step = FACE_STEPS[face];
         let neighbour = around[face];
         if let Some(whole) = uniform(neighbour) {
             return ChunkLight::filled(whole);
         }
         let mut plane = ChunkLight::filled(OPEN_SKY);
-        for a in 0..size {
-            for b in 0..size {
-                // The plane of the neighbour that touches this Chunk, in its own indices.
-                let local = match face {
-                    NEG_X => [size - 1, a, b],
-                    POS_X => [0, a, b],
-                    NEG_Y => [a, size - 1, b],
-                    POS_Y => [a, 0, b],
-                    NEG_Z => [a, b, size - 1],
-                    _ => [a, b, 0],
-                };
-                let air = neighbour
-                    .get(local[0] as usize, local[1] as usize, local[2] as usize)
-                    .is_air();
-                let (x, z) = (local[0] + step[0] * size, local[2] + step[2] * size);
-                let y_top = base_y + step[1] * size + local[1] + 1;
-                if air && reach.covered(voxel_m, y_top, x, z) {
-                    plane.set(
-                        local[0] as usize,
-                        local[1] as usize,
-                        local[2] as usize,
-                        COVERED_SKY,
-                    );
-                }
+        for local in plane_cells(face) {
+            let air = neighbour
+                .get(local[0] as usize, local[1] as usize, local[2] as usize)
+                .is_air();
+            let (x, z) = (local[0] + step[0] * size, local[2] + step[2] * size);
+            let y_top = base_y + step[1] * size + local[1] + 1;
+            if air && reach.covered(voxel_m, y_top, x, z) {
+                plane.set(
+                    local[0] as usize,
+                    local[1] as usize,
+                    local[2] as usize,
+                    COVERED_SKY,
+                );
             }
         }
         plane
     });
+    if let Some(water) = water {
+        let all =
+            (0..size).flat_map(|z| (0..size).flat_map(move |y| (0..size).map(move |x| [x, y, z])));
+        water.light_water(&mut center_light, center, base_y, voxel_m, all);
+        for (face, light) in around_light.iter_mut().enumerate() {
+            let base = base_y + FACE_STEPS[face][1] * size;
+            water.light_water(light, around[face], base, voxel_m, plane_cells(face));
+        }
+    }
     CoarseLight {
         center: center_light,
-        around,
+        around: around_light,
     }
 }
 
@@ -686,8 +759,10 @@ mod tests {
     /// The top solid coarse Voxel of the column at `level`, built as the Server does, and its
     /// top face in metres.
     fn top_of_column(level: u32, x_m: f32, z_m: f32) -> (Voxel, f32) {
+        // The terrain's own surface, so a dry World: a lake's top is water.
         let params = WorldgenParams {
             caves: None,
+            water: None,
             ..WorldgenParams::default()
         };
         let below = level - 1;
@@ -1172,5 +1247,81 @@ mod tests {
             "a pit's floor is lit at level 0"
         );
         assert_eq!(sky(&lit.center, 8, 31, 8), MAX_LIGHT);
+    }
+
+    /// Level 0's own flood, as the truth: a column of water `depth` Voxels deep
+    /// over stone under open sky, and the sky light in each water Voxel, top
+    /// first.
+    fn level_zero_water(depth: usize) -> Vec<u8> {
+        let mut c = Chunk::air();
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for y in 0..4 {
+                    c.set(x, y, z, Voxel::cube(STONE));
+                }
+                for y in 4..4 + depth {
+                    c.set(x, y, z, Voxel::cube(WATER));
+                }
+            }
+        }
+        let sky = ChunkLight::filled(OPEN_SKY);
+        let air = Chunk::air();
+        let mut border = [None; 6];
+        border[POS_Y] = Some(crate::mesh::LitChunk::new(&air, &sky));
+        let light = crate::light::light_chunk(&c, border, &crate::Tables::builtin());
+        (4..4 + depth)
+            .rev()
+            .map(|y| light.get(16, y, 16).sky())
+            .collect()
+    }
+
+    #[test]
+    fn coarse_water_is_dimmed_by_its_depth_as_the_level_zero_flood_dims_it() {
+        let truth = level_zero_water(10);
+        // Level 1, 2 m Voxels: stone to 30 m, water from 30 m to 40 m, air above.
+        let mut c = Chunk::air();
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for y in 0..15 {
+                    c.set(x, y, z, Voxel::cube(STONE));
+                }
+                for y in 15..20 {
+                    c.set(x, y, z, Voxel::cube(WATER));
+                }
+            }
+        }
+        let water = UnderWater {
+            level_m: 40.0,
+            dimming: crate::Tables::builtin()
+                .materials
+                .dimming(Voxel::cube(WATER)),
+            step_m: 1.0,
+        };
+        let lit = coarse_light_in(
+            &Flat::at(30.0),
+            2.0,
+            [0, 0, 0],
+            &c,
+            [&AIR_CHUNK; 6],
+            Some(water),
+        );
+        // A coarse Voxel's bottom is `2 * (20 - y)` level-0 Voxels under the surface,
+        // and level 0's Voxel there is the `2 * (20 - y)`th from the top.
+        for y in 15..20 {
+            let from_top = 2 * (20 - y) - 1;
+            assert_eq!(
+                lit.center.get(16, y, 16).sky(),
+                truth[from_top],
+                "coarse row {y}"
+            );
+        }
+        assert_eq!(lit.center.get(16, 20, 16), OPEN_SKY, "air over the water");
+        assert_eq!(
+            coarse_light(&Flat::at(30.0), 2.0, [0, 0, 0], &c, [&AIR_CHUNK; 6])
+                .center
+                .get(16, 17, 16),
+            OPEN_SKY,
+            "a World without water is lit as before"
+        );
     }
 }

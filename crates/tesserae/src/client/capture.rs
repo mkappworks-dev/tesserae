@@ -92,6 +92,9 @@ struct FrameLog {
     worst_cost_flight_s: f32,
     uploads: u32,
     upload_total_s: f32,
+    /// The longest a frame spent re-sorting blended meshes, and how many it did.
+    worst_sort_s: f32,
+    sorts: u32,
 }
 
 impl FrameLog {
@@ -148,7 +151,9 @@ impl FrameLog {
         self.worst_tick_s = self.worst_tick_s.max(cost.tick_s);
         self.uploads += cost.uploads;
         self.upload_total_s += cost.upload_s;
-        let spent = cost.tick_s + cost.upload_s;
+        self.worst_sort_s = self.worst_sort_s.max(cost.sort_s);
+        self.sorts += cost.sorts;
+        let spent = cost.tick_s + cost.upload_s + cost.sort_s;
         match self.fill_ended_s {
             None => self.worst_cost_fill_s = self.worst_cost_fill_s.max(spent),
             Some(end) if elapsed_s <= end + fly_for_s => {
@@ -416,12 +421,14 @@ fn report(
     let f = &capture.frames;
     info!(
         "capture_cost worst_tick_ms={} worst_cost_fill_ms={} worst_cost_flight_ms={} \
-         mean_upload_us={:.0} uploads={}",
+         mean_upload_us={:.0} uploads={} worst_sort_us={:.0} sorts={}",
         ms(f.worst_tick_s),
         ms(f.worst_cost_fill_s),
         ms(f.worst_cost_flight_s),
         f.upload_total_s * 1e6 / f.uploads.max(1) as f32,
         f.uploads,
+        f.worst_sort_s * 1e6,
+        f.sorts,
     );
     info!(
         "capture shown_s={shown} fill_s={fill} worst_fill_ms={} worst_flight_ms={} \

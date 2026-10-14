@@ -125,9 +125,9 @@ level. Two consequences, both accepted: a pane one Voxel thick disappears at the
 next level (it holds under half a coarse Voxel), which is what a mip does to
 anything thinner than its texel; and leaves, whose occlusion is `Never`, draw
 every face between two coarse leaf cubes as they do at level 0. Fewer, larger
-Voxels make that cheaper per metre, not dearer. The client has no blended draw
-call yet (ticket 04 of `2026-10-12-material-table-transparency`), so a coarse
-water or glass layer is built and sent and not drawn, as at level 0.
+Voxels make that cheaper per metre, not dearer. The client draws the blended
+layer at every level (ticket 04 of `2026-10-12-material-table-transparency`;
+how it composites across the per-level cameras is its ticket 06).
 
 **Emitters.** Not preserved. A coarse Voxel is its dominant Material, which is
 almost never a lantern, and a coarse level carries no block light at all
@@ -484,6 +484,20 @@ computed.
   the spec names it so that the answer to a crack is not to widen the overlap
   until it is a performance bug. Ticket 08 shows none once the overlap holds
   for every Eye position, so it is not built.
+- **Blended surfaces** are cut where the finer level has drawn (ticket 07 of
+  `2026-10-12-material-table-transparency`). Coverage priority does not hold for
+  them: a finer blended pixel composites over the coarse one instead of
+  replacing it, so between the finer level's guaranteed reach and where it
+  actually ends, water was drawn twice. The Client publishes, per level, which
+  Chunks it has been sent a mesh for (empty ones too), and the shader discards a
+  coarse blended fragment inside any of them. A fade across the band was tried
+  first and was worse: it thinned the only water there was where the finer
+  level does not reach. Water also has no seam left: its surface is one height
+  the Server gives every level, level 0's own (ticket 17), so the "step of at
+  most one coarse Voxel" above is the ground's and not the lake's. The cut
+  samples a hair behind the face along its normal, because a levelled surface
+  can lie exactly on a Chunk boundary and must be asked about the Chunk whose
+  mesh holds it.
 
 ### 10. What a Mod registers or parameterises
 
@@ -558,8 +572,12 @@ a measurement artefact to be explained, not accepted.
 - **Sky light inside a cave or under an overhang is full at coarse levels.** See
   decision 3. A column rule in the generation job fixes it without touching the
   flood.
-- **No blended draw call**, so coarse water and glass are built and not drawn,
-  as at level 0.
+- ~~**No blended draw call**, so coarse water and glass are built and not drawn,
+  as at level 0.~~ Drawn at every level by ticket 04 of
+  `2026-10-12-material-table-transparency`, and composited across the per-level
+  cameras by its ticket 06, which leaves a band of doubled water at each ring
+  join (decision 9). Coarse water exists only under `dev`'s
+  `TESSERAE_WATER_LEVEL_M` until worldgen places its own.
 - **Thin features vanish at the next level.** A one-Voxel wall or pane is under
   half a coarse Voxel. Inherent to a mip.
 - **One FIFO pool serves every stage of every level.** Decision 5 names the

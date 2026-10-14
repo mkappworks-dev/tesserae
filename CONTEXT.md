@@ -71,6 +71,10 @@ not of the engine. Default 1.0.
 Sized in metres, so it is the same Cave at any Voxel size. Where one breaks the
 surface it has a **mouth**, and sky light can enter there.
 
+**Water level** — the height in metres up to which World generation fills the
+open air above the ground with water. One level for the whole World, so a valley
+below it is a lake; a Cave is never filled.
+
 **Light level** — how much light reaches a Voxel, from 0 to 15. The one quantity
 in the engine that is **dimensionless**: a count of attenuation steps, not a
 distance, so it does not scale with Voxel size the way everything physical does.

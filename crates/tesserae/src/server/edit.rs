@@ -25,9 +25,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use tesserae_core::collide::{VoxelVolume, raycast};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{
-    MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, ShapeTable, Tables, Voxel, relight,
-};
+use tesserae_core::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, Tables, Voxel, relight};
 
 use super::ContentTables;
 use super::player::{self, Player};
@@ -89,6 +87,8 @@ pub enum RejectReason {
     NotLoaded,
     /// The place a Voxel would go already holds one.
     Occupied,
+    /// A Material the table does not hold: the table is the registry.
+    UnknownMaterial,
     UnknownShape,
     BadOrientation,
     /// A Place of air, which is a Break by another name.
@@ -107,6 +107,7 @@ impl RejectReason {
             RejectReason::OriginTooFar => "too far from where the server has you",
             RejectReason::NotLoaded => "that part of the world is not loaded",
             RejectReason::Occupied => "something is already there",
+            RejectReason::UnknownMaterial => "unknown material",
             RejectReason::UnknownShape => "unknown shape",
             RejectReason::BadOrientation => "invalid orientation",
             RejectReason::NoMaterial => "nothing to place",
@@ -207,16 +208,15 @@ fn apply_pending(
         let Some(mut p) = pending.0.pop_front() else {
             break;
         };
-        let outcome = resolve(&store, &tables.shapes, &world, &p.intent, p.reach_m).and_then(
-            |(at, voxel)| {
+        let outcome =
+            resolve(&store, &tables, &world, &p.intent, p.reach_m).and_then(|(at, voxel)| {
                 // The incremental relight and the bulk solve must not both write one
                 // Chunk, so an edit waits for its Chunk's light to settle.
                 if meshes.is_unlit(VoxelCoord::of(at).chunk) {
                     return Err(RejectReason::Busy);
                 }
                 set_voxel(&mut store, &mut meshes, &tables, at, voxel)
-            },
-        );
+            });
         match outcome {
             Ok(()) => applied += 1,
             Err(RejectReason::Busy) if p.waited < MAX_DEFERRED_TICKS => {
@@ -237,7 +237,7 @@ fn apply_pending(
 /// Where an intent lands, and what goes there.
 fn resolve(
     store: &ChunkStore,
-    shapes: &ShapeTable,
+    tables: &Tables,
     world: &WorldSettings,
     intent: &EditIntent,
     reach_m: f32,
@@ -247,7 +247,7 @@ fn resolve(
     }
     let hit = raycast(
         store,
-        shapes,
+        tables,
         world.voxel_size,
         intent.origin.to_array(),
         intent.direction.to_array(),
@@ -269,7 +269,8 @@ fn resolve(
             ];
             match store.voxel(target) {
                 None => Err(RejectReason::NotLoaded),
-                Some(there) if !there.is_air() => Err(RejectReason::Occupied),
+                // Water is not solid, so a Voxel placed into it replaces it.
+                Some(there) if tables.materials.solid(there) => Err(RejectReason::Occupied),
                 Some(_) => Ok((target, voxel)),
             }
         }
@@ -299,6 +300,9 @@ pub(in crate::server) fn set_voxel(
     // Air is air whatever shape or orientation byte it carries.
     let voxel = if voxel.is_air() { Voxel::AIR } else { voxel };
     if !voxel.is_air() {
+        if !tables.materials.contains(voxel.material()) {
+            return Err(RejectReason::UnknownMaterial);
+        }
         if !tables.shapes.contains(voxel.shape()) {
             return Err(RejectReason::UnknownShape);
         }
@@ -491,6 +495,42 @@ mod tests {
         assert!(rejections(&mut app).is_empty());
     }
 
+    /// `ground` with a layer of water on it at y = 8.
+    fn pool() -> Chunk {
+        let mut chunk = ground();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                chunk.set(x, 8, z, Voxel::cube(tesserae_core::material::WATER));
+            }
+        }
+        chunk
+    }
+
+    #[test]
+    fn the_ray_goes_through_water_so_break_takes_the_bed_and_place_replaces_the_water() {
+        let mut app = app_with(&[(origin(), pool())]);
+        send(&mut app, down(EditAction::Break));
+        tick(&mut app);
+        assert!(
+            voxel_at(&app, [5, 7, 5]).is_air(),
+            "the bed under the water"
+        );
+        assert_eq!(
+            voxel_at(&app, [5, 8, 5]).material(),
+            tesserae_core::material::WATER
+        );
+
+        let mut app = app_with(&[(origin(), pool())]);
+        send(&mut app, down(EditAction::Place(stone())));
+        tick(&mut app);
+        assert_eq!(
+            voxel_at(&app, [5, 8, 5]),
+            stone(),
+            "the water cell is filled"
+        );
+        assert!(rejections(&mut app).is_empty());
+    }
+
     #[test]
     fn a_cube_is_stored_the_same_however_it_was_turned() {
         let mut store = ChunkStore::default();
@@ -517,6 +557,31 @@ mod tests {
             ),
             Err(RejectReason::BadOrientation)
         );
+    }
+
+    #[test]
+    fn a_material_the_table_does_not_hold_is_rejected_and_every_builtin_is_placed() {
+        let mut store = ChunkStore::default();
+        store.insert(origin(), Chunk::air());
+        let mut meshes = MeshState::default();
+        let tables = Tables::builtin();
+        assert_eq!(
+            set_voxel(
+                &mut store,
+                &mut meshes,
+                &tables,
+                [0, 0, 0],
+                Voxel::cube(999)
+            ),
+            Err(RejectReason::UnknownMaterial)
+        );
+        assert!(store.voxel([0, 0, 0]).unwrap().is_air(), "nothing changed");
+        for (i, material) in (1..tables.materials.len() as u16).enumerate() {
+            let at = [i as i32, 1, 0];
+            set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(material))
+                .unwrap_or_else(|r| panic!("Material {material}: {r:?}"));
+            assert_eq!(store.voxel(at), Some(Voxel::cube(material)));
+        }
     }
 
     #[test]

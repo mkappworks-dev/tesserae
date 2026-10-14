@@ -1,11 +1,13 @@
 //! The Client: rendering, input and camera. Never mutates World state, and has
 //! no access to it — see `docs/adr/0002-client-server-from-day-one.md`.
 
+mod blend_order;
 pub mod camera;
 #[cfg(feature = "dev")]
 mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
+pub mod drawn_mask;
 pub mod edit;
 #[cfg(feature = "dev")]
 mod overlay;

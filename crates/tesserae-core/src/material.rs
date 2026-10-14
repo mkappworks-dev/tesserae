@@ -38,6 +38,10 @@ pub enum Occlusion {
 pub enum RenderClass {
     Opaque,
     Blend,
+    /// Opaque where drawn, with holes: written to depth and casting a shadow
+    /// with its holes, but on a pass of its own, because a pass that may
+    /// discard costs every fragment on it. Leaves.
+    Cutout,
 }
 
 /// One row of the [`MaterialTable`].
@@ -52,6 +56,9 @@ pub struct MaterialDef {
     pub dimming: u8,
     pub occlusion: Occlusion,
     pub render: RenderClass,
+    /// Whether a body collides with it and the edit ray stops on it. Water is
+    /// not: a body sinks through it and a ray goes through it to the bed.
+    pub solid: bool,
 }
 
 impl MaterialDef {
@@ -61,6 +68,7 @@ impl MaterialDef {
         dimming: MAX_LIGHT,
         occlusion: Occlusion::Opaque,
         render: RenderClass::Opaque,
+        solid: true,
     };
 
     const AIR: MaterialDef = MaterialDef {
@@ -68,6 +76,7 @@ impl MaterialDef {
         dimming: 0,
         occlusion: Occlusion::Never,
         render: RenderClass::Opaque,
+        solid: false,
     };
 
     const LANTERN: MaterialDef = MaterialDef {
@@ -80,13 +89,15 @@ impl MaterialDef {
         dimming: 0,
         occlusion: Occlusion::SameMaterial,
         render: RenderClass::Blend,
+        solid: true,
     };
 
     const LEAVES: MaterialDef = MaterialDef {
         emission: 0,
         dimming: 1,
         occlusion: Occlusion::Never,
-        render: RenderClass::Opaque,
+        render: RenderClass::Cutout,
+        solid: true,
     };
 
     const WATER: MaterialDef = MaterialDef {
@@ -94,6 +105,7 @@ impl MaterialDef {
         dimming: 2,
         occlusion: Occlusion::SameMaterial,
         render: RenderClass::Blend,
+        solid: false,
     };
 }
 
@@ -116,7 +128,7 @@ pub enum MaterialError {
 /// `docs/adr/0001-wasm-mod-boundary.md`.
 ///
 /// Rows are dense and sized to the registered count, not to `u16::MAX`: ids are
-/// handed out in order, so a table of N Materials is 4N bytes and not 64 KiB of
+/// handed out in order, so a table of N Materials is 5N bytes and not 64 KiB of
 /// zeroes.
 #[derive(Clone, Debug)]
 pub struct MaterialTable {
@@ -200,6 +212,12 @@ impl MaterialTable {
         self.def(voxel.material()).render
     }
 
+    /// Air is never solid, whatever Material id it carries.
+    #[inline]
+    pub fn solid(&self, voxel: Voxel) -> bool {
+        !voxel.is_air() && self.def(voxel.material()).solid
+    }
+
     /// Hides every neighbouring face and stops all light, whatever the Shape.
     #[inline]
     pub fn is_opaque(&self, voxel: Voxel) -> bool {
@@ -240,7 +258,7 @@ mod tests {
         );
         assert_eq!(
             [GLASS, LEAVES, WATER].map(|m| def(&t, m).render),
-            [RenderClass::Blend, RenderClass::Opaque, RenderClass::Blend]
+            [RenderClass::Blend, RenderClass::Cutout, RenderClass::Blend]
         );
         assert_eq!(
             [STONE, DIRT, GRASS, LANTERN, GLASS, LEAVES, WATER],
@@ -287,6 +305,7 @@ mod tests {
             dimming: 1,
             occlusion: Occlusion::SameMaterial,
             render: RenderClass::Blend,
+            solid: true,
         };
         assert_eq!(t.register(amber), Ok(8));
         assert_eq!(t.register(MaterialDef::OPAQUE), Ok(9));
@@ -339,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_is_four_bytes() {
-        assert_eq!(size_of::<MaterialDef>(), 4);
+    fn a_row_is_five_bytes() {
+        assert_eq!(size_of::<MaterialDef>(), 5);
     }
 }

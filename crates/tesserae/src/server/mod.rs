@@ -84,7 +84,8 @@ pub fn plugin(app: &mut App) {
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
 /// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
 /// a streaming change can be measured with and without them on one binary and
-/// not across two builds.
+/// not across two builds. `TESSERAE_WATER_LEVEL_M` moves the water to that
+/// height, and `=off` takes it out.
 #[cfg(feature = "dev")]
 fn worldgen_params() -> WorldgenParams {
     let off = |name: &str| std::env::var(name).is_ok_and(|v| v == "0");
@@ -100,6 +101,15 @@ fn worldgen_params() -> WorldgenParams {
         } else {
             params.smoothing
         },
+        water: match std::env::var("TESSERAE_WATER_LEVEL_M").as_deref() {
+            Ok("off") => None,
+            Ok(v) => v
+                .parse()
+                .ok()
+                .map(|level_m| tesserae_core::WaterParams { level_m })
+                .or(params.water),
+            Err(_) => params.water,
+        },
         ..params
     }
 }
@@ -114,13 +124,17 @@ fn worldgen_params() -> WorldgenParams {
 /// `PostStartup`, where the Client reads the spawn point.
 fn open_world(mut commands: Commands, world: Res<WorldSettings>) {
     let generator = Worldgen::new(world.seed, world.voxel_size, worldgen_params());
-    let surface_m = generator.surface_height_m(0.0, 0.0);
-    commands.insert_resource(SpawnPoint::new(Vec3::new(
-        0.0,
-        surface_m + SPAWN_CLEARANCE_M,
-        0.0,
-    )));
+    commands.insert_resource(SpawnPoint::new(spawn_eye(&generator)));
     commands.insert_resource(WorldGenerator(generator));
+}
+
+/// Over the origin, clear of the ground and of any water standing on it.
+fn spawn_eye(generator: &Worldgen) -> Vec3 {
+    let ground_m = generator.surface_height_m(0.0, 0.0);
+    let top_m = generator
+        .water_level_m()
+        .map_or(ground_m, |w| w.max(ground_m));
+    Vec3::new(0.0, top_m + SPAWN_CLEARANCE_M, 0.0)
 }
 
 #[cfg(test)]
@@ -151,6 +165,23 @@ mod tests {
         let surface_m = generator.surface_height_m(spawn.x, spawn.z);
         assert!(spawn.y > surface_m, "{} m is inside the ground", spawn.y);
         assert_eq!(spawn.y, surface_m + SPAWN_CLEARANCE_M);
+    }
+
+    #[test]
+    fn the_spawn_point_is_above_water_that_covers_the_ground_there() {
+        let generator = Worldgen::new(
+            WorldSettings::default().seed,
+            1.0,
+            WorldgenParams {
+                water: Some(tesserae_core::WaterParams { level_m: 70.0 }),
+                ..WorldgenParams::default()
+            },
+        );
+        assert!(
+            generator.surface_height_m(0.0, 0.0) < 70.0,
+            "the fixture floods the spawn"
+        );
+        assert_eq!(spawn_eye(&generator).y, 70.0 + SPAWN_CLEARANCE_M);
     }
 
     #[test]

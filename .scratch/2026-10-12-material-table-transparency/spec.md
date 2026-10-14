@@ -58,10 +58,11 @@ Voxel, so ADR-0001 holds by construction: the WASM side hands over a list of
 `MaterialDef`s and everything after is a native array lookup. `emission` and the
 new properties share the one table, which is the sharing the brief asks for.
 
-Storage is a dense `Vec` of four-byte rows, **sized to the registered count**.
-The `emission` comment rejected a table indexed by `u16` because that is 64 KiB
-of zeroes; ids are handed out sequentially, so a table of N Materials is 4N
-bytes and a lookup is one bounds-checked load.
+Storage is a dense `Vec` of five-byte rows (four until ticket 11 added `solid`),
+**sized to the registered count**. The `emission` comment rejected a table
+indexed by `u16` because that is 64 KiB of zeroes; ids are handed out
+sequentially, so a table of N Materials is 5N bytes and a lookup is one
+bounds-checked load.
 
 Built-ins, with ids that are **permanent** (they are save data, as Shape ids 0
 to 3 are): 0 air (reserved; air is decided by `Voxel::is_air` without the
@@ -234,20 +235,41 @@ becomes alpha: the amount is Look pack data, the class is Material data
 (decision 1).
 
 Sorting is Bevy's: transparent items sort back to front **per entity**, by the
-entity's position. That is chunk-granular, correct between Chunks laid out on
+mesh's centre. That is chunk-granular, correct between Chunks laid out on
 a grid and wrong inside one. Inside a Chunk the order is the mesher's emission
 order, so two overlapping translucent surfaces (a glass house with water behind
 it) can blend in the wrong order. A single water surface or a single pane, which
 is nearly everything, is unaffected. Options for when it is not, in cost order
 and none built here: sort a Chunk's blended quads on camera movement (what
-Minecraft does); weighted-blended order-independent transparency, which Bevy 0.20
-ships as an experimental plugin; or accept it. The ticket measures the artefact
+Minecraft does); Bevy 0.20's experimental order-independent transparency plugin
+(a per-pixel fragment linked list and a resolve pass, not weighted-blended; it
+panics on a camera with MSAA on); or accept it. The ticket measures the artefact
 on a screenshot before choosing.
 
-Leaves render in the opaque pass. They are cutout in every voxel game, which
-needs an alpha test against a texture, and textures are step 9; until then a
-leaf is a dimming Material that draws as a solid cube. `RenderClass` gets a
-`Cutout` when that arrives and not before.
+**Decided in ticket 04: re-sort each Chunk's blended quads.** A ray cast over the
+`dev` gallery's glass house and pool, meshed as one Chunk and seen from 24 views
+around it, found glass and water blended in the wrong order on 5 to 17% of the
+rays crossing two blended layers from the two front diagonals, and same-Material
+faces out of order from every side. Drawing the quads farthest centre first
+removed every one, but centre order is not exact in general, so ticket 08
+orders by separating planes: two quads whose boxes are disjoint along an axis
+are ordered by the plane between them, whichever is on the Eye's side in front,
+and the Client re-indexes a mesh only when the Eye crosses one of its quads' box
+bounds, which is the only time that order can change. Above 2048 quads a mesh
+keeps the farthest-centre order, which is cheaper. A layer whose quads all lie
+in one plane facing one way (a lake's surface) is never re-sorted, because no
+two of them can overlap on screen. OIT was not taken: it needs `Msaa`
+off on every LOD camera. A blended entity casts no
+shadow (`NotShadowCaster`): `bevy_pbr` queues a `Blend` mesh into the shadow
+pass and skips it in the depth prepass, and the flood-fill already dims sky light
+under water and glass, so a full shadow on top would count it twice. What this
+leaves is below, under Known loose ends.
+
+Leaves are `RenderClass::Cutout` (ticket 10), cut out in every voxel game. The
+alpha test runs against a procedural hole pattern until step 9's textures
+replace it, in a third mesh layer with an alpha-mask material of its own,
+because a pass that may discard costs every fragment on it and opaque terrain
+must not pay. The depth and shadow passes cut the same holes.
 
 Forward rendering is what this assumes and is what DESIGN.md already says a
 deferred path would need anyway ("still needs a forward transparency pass").
@@ -331,6 +353,18 @@ in step 5. The streaming worst tick is re-derived if a stage's cost moves.
 | 03  | Occlusion by Material and the two-layer `ChunkMesh`           | 01         |
 | 04  | Blended pass in the app, hotbar, screenshot                   | 03         |
 | 05  | The Server's edit path rejects unregistered Materials         | 01         |
+| 06  | Blended surfaces across the LOD cameras                       | 04         |
+| 07  | Cut coarse water where the finer level draws                  | 06         |
+| 08  | Blended quads in an exact order                               | 04         |
+| 09  | Default Worlds have lakes                                     | 06         |
+| 10  | Leaves cut out, before textures                               | 04         |
+| 11  | Water is not solid                                            | 01         |
+| 12  | Leaf holes: one definition, less regular                      | 10         |
+| 13  | A coarse lake bed is dimmed by the water over it              | 09         |
+| 14  | Coarse water above the finer rows (fixed by 17)               | 07         |
+| 15  | Exact blended order for large meshes                          | 08         |
+| 16  | `mesh_chunk/straddling` against `main`                        | 09         |
+| 17  | A coarse water surface sits at level 0's height             | 07, 13     |
 
 02 and 03 are independent of each other: a translucent Voxel with dimming but
 no culling rule lights correctly and draws wrongly, and the reverse, and both
@@ -350,12 +384,25 @@ are testable alone. 04 is the first time a player can see any of it.
   `Tables::joint_id` leaves clear Materials out of it, so two glass halves seal
   nothing. The mesher still tests each quad against one neighbour's coverage, so
   a face two neighbours jointly hide is drawn: overdraw, never a hole.
-- **No intra-chunk sorting** of blended quads (decision 6).
-- **Collision and picking** treat water as solid: `collide` reads Shapes only.
-  A `solid` row field when a controller exists.
-- **Cutout leaves** need textures (step 9).
-- **Worldgen places none.** Terrain contains no translucent Voxel, so a player
-  sees them only by placing them, as with shaped Voxels in step 5.
+- ~~**A coarse water surface is up to half a coarse Voxel off level 0's.**~~ The
+  Server moves every coarse water mesh's top face to level 0's own surface
+  height (ticket 17), so every level draws the surface where level 0 does and
+  the cut of ticket 07 asks about the Chunk the finer surface is in. The lake
+  _bed_ is still a mip of itself, and so are glass and leaves: only water has a
+  height every level agrees on.
+- **Quad order is exact up to 2048 quads a mesh** (tickets 08 and 15), which no
+  mesh of a default World reaches; a mesh the frame's sorting budget does not
+  reach keeps its order a frame longer.
+- **Blended surfaces are outside the depth and motion prepasses**, so SSAO and
+  TAA, when step 9 adds them, will not see water or glass: no ambient occlusion
+  on it, and no motion vectors for TAA to resolve it with.
+- ~~**Collision and picking** treat water as solid.~~ `MaterialDef::solid`
+  (ticket 11): the sweep and the edit ray pass through water, and Place fills a
+  water cell.
+- **Leaf holes are a procedural pattern** (tickets 10 and 12) until step 9's
+  textures replace it.
+- ~~**Worldgen places none.**~~ A default World has lakes at one water level
+  (ticket 09); glass and leaves are still a player's to place.
 
 ## Done when
 

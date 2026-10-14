@@ -13,9 +13,11 @@ use std::sync::Arc;
 
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+use tesserae_core::lod::{UnderWater, coarse_light_in};
+use tesserae_core::material::WATER;
 use tesserae_core::{
-    Chunk, ChunkMesh, LitChunk, ShapeTable, Tables, Worldgen, WorldgenParams, coarse_light,
-    downsample, mesh_chunk,
+    CHUNK_SIZE, Chunk, ChunkMesh, LitChunk, MeshLayer, ShapeTable, Tables, Voxel, Worldgen,
+    WorldgenParams, downsample, mesh_chunk,
 };
 
 use super::jobs::Stage;
@@ -317,7 +319,7 @@ pub(in crate::server) mod measure {
         pub meshes: usize,
         pub non_empty: usize,
         pub quads: usize,
-        /// Both layers, though the Client uploads only the opaque one.
+        /// Every layer.
         pub bytes: usize,
     }
 
@@ -327,7 +329,9 @@ pub(in crate::server) mod measure {
                 meshes: 1,
                 non_empty: usize::from(!mesh.is_empty()),
                 quads: mesh.quad_count(),
-                bytes: layer_bytes(&mesh.opaque) + layer_bytes(&mesh.blended),
+                bytes: layer_bytes(&mesh.opaque)
+                    + layer_bytes(&mesh.blended)
+                    + layer_bytes(&mesh.cutout),
             }
         }
     }
@@ -490,26 +494,61 @@ pub(in crate::server) fn generate_coarse(
     downsample(children, shapes)
 }
 
-/// Lit by the covered-column rule of [`coarse_light`]: no light is stored above level 0, so it
-/// is computed here from the generator and dropped with the job.
+/// Lit by the covered-column rule of [`coarse_light_in`]: no light is stored above level 0, so
+/// it is computed here from the generator and dropped with the job. `level` is for the water,
+/// whose depth is counted in level-0 Voxels.
 fn mesh_coarse(
     surface: &Worldgen,
+    level: u32,
     voxel_m: f32,
     coord: ChunkCoord,
     center: &Chunk,
     around: &[Arc<Chunk>; 6],
     tables: &Tables,
 ) -> ChunkMesh {
-    let lit = coarse_light(
+    let water = surface.water_level_m().map(|level_m| UnderWater {
+        level_m,
+        dimming: tables.materials.dimming(Voxel::cube(WATER)),
+        step_m: voxel_m / 2f32.powi(level as i32),
+    });
+    let lit = coarse_light_in(
         surface,
         voxel_m,
         [coord.x, coord.y, coord.z],
         center,
         std::array::from_fn(|face| &*around[face]),
+        water,
     );
     let neighbors: [Option<LitChunk>; 6] =
         std::array::from_fn(|face| Some(LitChunk::new(&around[face], &lit.around[face])));
-    mesh_chunk(LitChunk::new(center, &lit.center), neighbors, tables)
+    let mut mesh = mesh_chunk(LitChunk::new(center, &lit.center), neighbors, tables);
+    if let Some(water) = water {
+        let floor_m = (coord.y * CHUNK_SIZE as i32) as f32 * voxel_m;
+        level_the_water(&mut mesh.blended, water, floor_m, voxel_m);
+    }
+    mesh
+}
+
+/// Moves a coarse mesh's water surface to where level 0 draws its own: the top of level 0's
+/// highest water Voxel. A coarse Voxel is water when water holds half of it, so its top is up
+/// to half a coarse Voxel off, either way; drawn there, a finer level's row boundary can fall
+/// between the two surfaces, and the cut of `drawn_mask` then asks about the wrong Chunk.
+fn level_the_water(layer: &mut MeshLayer, water: UnderWater, floor_m: f32, voxel_m: f32) {
+    let surface_m = (water.level_m / water.step_m).ceil() * water.step_m;
+    let at = (surface_m - floor_m) / voxel_m;
+    for (corners, (normals, materials)) in layer
+        .positions
+        .chunks_mut(4)
+        .zip(layer.normals.chunks(4).zip(layer.materials.chunks(4)))
+    {
+        let up = normals[0] == [0.0, 1.0, 0.0];
+        // Only the surface row: an upward face a coarse Voxel or more away is not this water's.
+        if up && materials[0] == u32::from(WATER) && (corners[0][1] - at).abs() < 1.0 {
+            for corner in corners {
+                corner[1] = at;
+            }
+        }
+    }
 }
 
 struct Plan {
@@ -880,7 +919,7 @@ fn dispatch_meshes(
             let voxel_m = plan.voxel_m;
             jobs.mesh.spawn((level, coord), move || {
                 times.meshed(level, || {
-                    mesh_coarse(&surface, voxel_m, coord, &own, &around, &tables)
+                    mesh_coarse(&surface, level, voxel_m, coord, &own, &around, &tables)
                 })
             });
         }
@@ -894,9 +933,7 @@ mod tests {
     use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{
-        CHUNK_SIZE, COVERED_SKY, ChunkLight, SHAPE_STAIR, Tables, Voxel, worldgen,
-    };
+    use tesserae_core::{CHUNK_SIZE, ChunkLight, SHAPE_STAIR, Tables, Voxel, worldgen};
 
     static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
 
@@ -1073,7 +1110,15 @@ mod tests {
                 .collect();
             let around: [Arc<Chunk>; 6] = around.try_into().unwrap_or_else(|_| unreachable!());
             let own = store.shared(level, coord).expect("held");
-            mesh_coarse(surface, voxel_m, coord, &own, &around, &Tables::builtin())
+            mesh_coarse(
+                surface,
+                level,
+                voxel_m,
+                coord,
+                &own,
+                &around,
+                &Tables::builtin(),
+            )
         }
 
         fn delivered_at(&self, level: u32) -> HashSet<ChunkCoord> {
@@ -1770,18 +1815,21 @@ mod tests {
     }
 
     #[test]
-    fn every_vertex_light_is_open_sky_or_covered_and_never_block_light() {
+    fn every_vertex_light_is_open_sky_covered_or_under_water_and_never_block_light() {
         let mut h = harness();
         let (ready, _) = h.lod_settle();
-        let open = u32::from(Light::new(MAX_LIGHT, 0).packed());
-        let covered = u32::from(COVERED_SKY.packed());
+        // Under water, sky light is what level 0's flood leaves at a depth: 15 less 2 for the
+        // first Voxel and 3 for each after.
+        let allowed: Vec<u32> = [MAX_LIGHT, 13, 10, 7, 4, 1, 0]
+            .map(|sky| u32::from(Light::new(sky, 0).packed()))
+            .to_vec();
         let mut vertices = 0;
         for m in &ready {
-            for layer in [&m.mesh.opaque, &m.mesh.blended] {
+            for layer in [&m.mesh.opaque, &m.mesh.blended, &m.mesh.cutout] {
                 assert_eq!(layer.light.len(), layer.positions.len());
                 assert!(
-                    layer.light.iter().all(|&l| l == open || l == covered),
-                    "level {} {} has a vertex lit as neither",
+                    layer.light.iter().all(|l| allowed.contains(l)),
+                    "level {} {} has a vertex lit as none of them",
                     m.level,
                     m.coord
                 );
@@ -2306,12 +2354,98 @@ mod tests {
         (make(coord), around)
     }
 
+    /// A Chunk of `rows` layers of water at `level`, alone in the air, meshed as the Server
+    /// meshes it, under water standing at `level_m`.
+    fn coarse_water(level: u32, rows: usize, level_m: Option<f32>) -> ChunkMesh {
+        let surface = Worldgen::new(
+            world().seed,
+            world().voxel_size,
+            WorldgenParams {
+                water: level_m.map(|level_m| tesserae_core::WaterParams { level_m }),
+                ..WorldgenParams::default()
+            },
+        );
+        let mut center = Chunk::air();
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for y in 0..rows {
+                    center.set(x, y, z, Voxel::cube(tesserae_core::material::WATER));
+                }
+            }
+        }
+        let air = Arc::new(Chunk::air());
+        mesh_coarse(
+            &surface,
+            level,
+            world().voxel_size * 2f32.powi(level as i32),
+            ChunkCoord::new(0, 0, 0),
+            &center,
+            &std::array::from_fn(|_| Arc::clone(&air)),
+            &Tables::builtin(),
+        )
+    }
+
+    /// Every quad of `layer` whose normal is `normal`, as its highest point in metres at `level`.
+    fn heights_facing(layer: &tesserae_core::MeshLayer, normal: [f32; 3], level: u32) -> Vec<f32> {
+        let voxel_m = world().voxel_size * 2f32.powi(level as i32);
+        layer
+            .positions
+            .chunks(4)
+            .zip(layer.normals.chunks(4))
+            .filter(|(_, n)| n[0] == normal)
+            .map(|(q, _)| q.iter().map(|p| p[1]).fold(f32::MIN, f32::max) * voxel_m)
+            .collect()
+    }
+
+    /// Water at 44.5 m fills level 0's Voxels to 45 m, which is where its surface is drawn.
+    /// A coarse Voxel is water if water holds half of it, so 12 rows of 4 m reach 48 m and 11
+    /// reach 44 m: one rounds up and one down, and both must be drawn at 45 m.
+    #[test]
+    fn a_coarse_water_surface_is_drawn_at_level_zeros_height_however_it_rounds() {
+        for (level, rows) in [(2, 12), (2, 11), (3, 6), (3, 5)] {
+            let mesh = coarse_water(level, rows, Some(44.5));
+            let tops = heights_facing(&mesh.blended, [0.0, 1.0, 0.0], level);
+            assert!(!tops.is_empty(), "level {level}, {rows} rows");
+            assert!(
+                tops.iter().all(|&y| (y - 45.0).abs() < 1e-4),
+                "level {level}, {rows} rows: tops at {tops:?}"
+            );
+            let voxel_m = world().voxel_size * 2f32.powi(level as i32);
+            let bottoms = heights_facing(&mesh.blended, [0.0, -1.0, 0.0], level);
+            assert!(
+                bottoms.iter().all(|&y| y == 0.0),
+                "the bottom is left where it is"
+            );
+            // A side quad is split by row, each row's underwater light being its own, so its
+            // top is its row's and not the Chunk's: the highest of them is the Chunk's top.
+            let sides = heights_facing(&mesh.blended, [1.0, 0.0, 0.0], level);
+            let highest = sides.iter().copied().fold(f32::MIN, f32::max);
+            assert_eq!(
+                highest,
+                rows as f32 * voxel_m,
+                "level {level}, {rows} rows: the sides still reach the water's own top"
+            );
+            assert!(
+                sides.iter().all(|&y| (y / voxel_m).fract() == 0.0),
+                "level {level}, {rows} rows: no side left its row boundary: {sides:?}"
+            );
+        }
+        let dry = coarse_water(2, 12, None);
+        assert!(
+            heights_facing(&dry.blended, [0.0, 1.0, 0.0], 2)
+                .iter()
+                .all(|&y| y == 48.0),
+            "without a water level there is nothing to snap to"
+        );
+    }
+
     /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground.
     fn coarse_mesh(level: u32, coord: ChunkCoord, source: &Worldgen) -> ChunkMesh {
         let (center, around) = chunks_around(coord, source);
         let voxel_m = world().voxel_size * 2f32.powi(level as i32);
         mesh_coarse(
             &Worldgen::new(world().seed, 1.0, source.params()),
+            level,
             voxel_m,
             coord,
             &center,
@@ -2335,6 +2469,7 @@ mod tests {
             1.0,
             WorldgenParams {
                 caves: None,
+                water: None,
                 ..WorldgenParams::default()
             },
         )
@@ -2374,6 +2509,8 @@ mod tests {
         for level in 1..=5u32 {
             let params = WorldgenParams {
                 caves: None,
+                // Ground, so no lake: water has light of its own (`coarse_light_in`).
+                water: None,
                 smoothing: (level == 1)
                     .then(|| WorldgenParams::default().smoothing)
                     .flatten(),

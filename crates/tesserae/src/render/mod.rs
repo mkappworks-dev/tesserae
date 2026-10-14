@@ -6,6 +6,7 @@ pub mod fog;
 use bevy::asset::embedded_asset;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
+use bevy::shader::load_shader_library;
 
 use chunk_material::ChunkMaterial;
 
@@ -14,5 +15,9 @@ pub fn plugin(app: &mut App) {
     // in the binary, as `bevy_pbr`'s do. A look pack's WESL is an asset because
     // it is content, which is the opposite case.
     embedded_asset!(app, "chunk_material.wesl");
+    embedded_asset!(app, "chunk_prepass.wesl");
+    // A module the other two import, so it must be loaded to be found: an
+    // embedded file nothing holds a handle to is never registered.
+    load_shader_library!(app, "leaf_hole.wesl");
     app.add_plugins((MaterialPlugin::<ChunkMaterial>::default(), fog::plugin));
 }

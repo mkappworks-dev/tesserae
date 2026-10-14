@@ -14,6 +14,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{
     AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
+use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
 use crate::client::chunk_mesh::{ATTRIBUTE_LIGHT, ATTRIBUTE_MATERIAL};
@@ -66,12 +67,21 @@ pub struct ChunkMaterialExtension {
     pub palette: [Vec4; PALETTE_LEN],
     #[uniform(101)]
     pub lod: LodParams,
+    /// The Chunks each level has drawn, in `client::drawn_mask`'s layout. A
+    /// buffer of one zero word cuts nothing, which is the opaque material's.
+    #[storage(102, read_only)]
+    pub drawn: Handle<ShaderBuffer>,
 }
 
 /// `base_color` is linear in the shader, so a colour picked by eye has to be
 /// converted or it renders several stops too bright.
 fn srgb(r: f32, g: f32, b: f32) -> Vec4 {
-    Color::srgb(r, g, b).to_linear().to_vec4()
+    srgba(r, g, b, 1.0)
+}
+
+/// Alpha is linear already and only matters to the blended pass.
+fn srgba(r: f32, g: f32, b: f32, a: f32) -> Vec4 {
+    Color::srgba(r, g, b, a).to_linear().to_vec4()
 }
 
 impl Default for ChunkMaterialExtension {
@@ -86,9 +96,15 @@ impl Default for ChunkMaterialExtension {
         // block-lit face by its own palette colour and a saturated emitter
         // would wash its own glow with its albedo twice over.
         palette[tesserae_core::worldgen::LANTERN as usize] = srgb(0.96, 0.89, 0.72);
+        // The class is Material data and the amount is appearance: a look pack
+        // may choose both, so this is the placeholder.
+        palette[tesserae_core::material::GLASS as usize] = srgba(0.70, 0.88, 0.92, 0.35);
+        palette[tesserae_core::material::WATER as usize] = srgba(0.10, 0.32, 0.62, 0.65);
+        palette[tesserae_core::material::LEAVES as usize] = srgb(0.16, 0.42, 0.14);
         ChunkMaterialExtension {
             palette,
             lod: LodParams::new(0, &[]),
+            drawn: Handle::default(),
         }
     }
 }
@@ -106,12 +122,31 @@ impl MaterialExtension for ChunkMaterialExtension {
         shader()
     }
 
+    fn prepass_fragment_shader() -> ShaderRef {
+        embedded("chunk_prepass.wesl")
+    }
+
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        // The depth and shadow passes run `bevy_pbr`'s own prepass vertex
+        // shader, which reads the UV at 1 and the normal at 3, and the cutout
+        // material's holes need the right UV there.
+        if descriptor
+            .vertex
+            .shader_defs
+            .contains(&"PREPASS_PIPELINE".into())
+        {
+            descriptor.vertex.buffers = vec![layout.0.get_layout(&[
+                Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+                Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
+                Mesh::ATTRIBUTE_NORMAL.at_shader_location(3),
+            ])?];
+            return Ok(());
+        }
         // The base material's layout stops at `bevy_pbr`'s attributes, so the
         // custom one has to be declared here or the vertex shader reads
         // garbage. Spelling the set out is safe because this material is only
@@ -139,9 +174,12 @@ impl MaterialExtension for ChunkMaterialExtension {
 }
 
 fn shader() -> ShaderRef {
+    embedded("chunk_material.wesl")
+}
+
+fn embedded(file: &str) -> ShaderRef {
     ShaderRef::Path(
-        AssetPath::from_path_buf(bevy::asset::embedded_path!("chunk_material.wesl"))
-            .with_source("embedded"),
+        AssetPath::from_path_buf(bevy::asset::embedded_path!(file)).with_source("embedded"),
     )
 }
 
@@ -166,6 +204,31 @@ mod tests {
             for b in &used[i + 1..] {
                 assert_ne!(palette[*a as usize], palette[*b as usize]);
             }
+        }
+    }
+
+    #[test]
+    fn glass_and_water_are_see_through_and_everything_else_is_not() {
+        use tesserae_core::material::{GLASS, LEAVES, WATER};
+        let palette = ChunkMaterialExtension::default().palette;
+        let missing = palette[0];
+        for id in [GLASS, WATER] {
+            let colour = palette[id as usize];
+            assert!(colour.w > 0.0 && colour.w < 1.0, "Material {id} alpha");
+            assert_ne!(colour.truncate(), missing.truncate(), "Material {id} unset");
+        }
+        assert_ne!(palette[GLASS as usize], palette[WATER as usize]);
+        // Leaves draw in the opaque pass until step 9 gives them a texture to
+        // cut out, so an alpha here would be ignored and mislead.
+        assert_eq!(palette[LEAVES as usize].w, 1.0);
+        assert_ne!(palette[LEAVES as usize].truncate(), missing.truncate());
+        for id in [
+            tesserae_core::testgen::STONE,
+            tesserae_core::testgen::DIRT,
+            tesserae_core::testgen::GRASS,
+            tesserae_core::worldgen::LANTERN,
+        ] {
+            assert_eq!(palette[id as usize].w, 1.0, "Material {id} alpha");
         }
     }
 
