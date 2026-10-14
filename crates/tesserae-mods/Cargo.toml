@@ -1,0 +1,22 @@
+[package]
+name = "tesserae-mods"
+description = "Loads and runs Tesserae Mods: the WIT contract, the WASM sandbox and the Command queue. Depends on no engine."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
+wasmtime = { version = "49.0.2", default-features = false, features = [
+  "runtime",
+  "cranelift",
+  "component-model",
+  "async",
+  "parallel-compilation",
+  "std",
+] }
+wasmtime-wasi = { version = "49.0.2", default-features = false, features = ["p2"] }
+
+[dev-dependencies]
+futures-lite = "2.6.1"

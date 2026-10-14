@@ -90,10 +90,9 @@ jobs:
       # headless so every expensive algorithm is testable and benchmarkable; a
       # transitive bevy or wgpu edge silently ends that.
       #
-      # tesserae-mods arrives in build-order step 7, and `cargo tree -p` exits
-      # non-zero for a package the workspace does not have. Skipping a crate that
-      # is not written yet keeps the check honest meanwhile; tesserae-core going
-      # missing means the check itself is broken, so that one is required.
+      # `cargo tree -p` exits non-zero for a package the workspace does not have,
+      # so a crate that is missing is skipped; tesserae-core going missing means
+      # the check itself is broken, so that one is required.
       - name: No engine dependency in headless crates
         run: |
           set -euo pipefail
@@ -148,6 +147,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+
+      # tesserae-mods' tests load Mods compiled to WASM components.
+      - name: Build test guests
+        run: |
+          rustup target add wasm32-wasip2
+          ./scripts/build-guests
 
       # The workspace manifest builds dependencies at opt-level 3 so a local
       # debug run of a Bevy app is not an order of magnitude too slow. CI never
