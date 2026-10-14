@@ -1,6 +1,6 @@
 # The fog numbers and their derivation
 
-Status: ready-for-agent
+Status: done
 Blocked by: -
 
 Spec decisions 2 and 7.
@@ -50,3 +50,13 @@ Unit tests, in `fog.rs`, each naming the claim:
 - `Status: done` is set in the commit that finishes this ticket.
 
 ## Comments
+
+Mutation-checked: dropping the square root fails the reach, no-coarse-levels and
+unhazed-rings tests; using `view_distance_m` as the reach fails the reach,
+unhazed-rings and monotone tests (the no-coarse-levels test passes by design,
+since the two reaches coincide there). Removing the opacity ceiling or the reach
+floor fails the finite-numbers test.
+
+The module carries `#![cfg_attr(not(test), expect(dead_code))]` because nothing
+uses the fog until ticket 02 attaches it to a camera; ticket 02 deletes that
+line.
