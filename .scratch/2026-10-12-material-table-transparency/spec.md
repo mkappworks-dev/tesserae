@@ -251,12 +251,14 @@ on a screenshot before choosing.
 around it, found glass and water blended in the wrong order on 5 to 17% of the
 rays crossing two blended layers from the two front diagonals, and same-Material
 faces out of order from every side. Drawing the quads farthest centre first
-removed every one. So the Client keeps each blended entity's quad centres and
-re-indexes its mesh, farthest first, whenever the Eye has moved a Voxel of that
-entity's level, or a sixteenth of its distance from the mesh if that is more,
-since the last sort and the order changed; a layer whose quads
-all lie in one plane facing one way (a lake's surface) is never re-sorted,
-because no two of them can overlap on screen. OIT was not taken: it needs `Msaa`
+removed every one, but centre order is not exact in general, so ticket 08
+orders by separating planes: two quads whose boxes are disjoint along an axis
+are ordered by the plane between them, whichever is on the Eye's side in front,
+and the Client re-indexes a mesh only when the Eye crosses one of its quads' box
+bounds, which is the only time that order can change. Above 256 quads a mesh
+keeps the farthest-centre order, which is cheaper. A layer whose quads all lie
+in one plane facing one way (a lake's surface) is never re-sorted, because no
+two of them can overlap on screen. OIT was not taken: it needs `Msaa`
 off on every LOD camera. A blended entity casts no
 shadow (`NotShadowCaster`): `bevy_pbr` queues a `Blend` mesh into the shadow
 pass and skips it in the depth prepass, and the flood-fill already dims sky light
@@ -375,9 +377,9 @@ are testable alone. 04 is the first time a player can see any of it.
   `Tables::joint_id` leaves clear Materials out of it, so two glass halves seal
   nothing. The mesher still tests each quad against one neighbour's coverage, so
   a face two neighbours jointly hide is drawn: overdraw, never a hole.
-- **Quad sorting is by centre distance**, which is exact for the gallery and not
-  in general: two long quads can overlap on screen with the nearer one's centre
-  farther away. And an order is up to a Voxel of Eye movement stale.
+- **Quad order is exact up to 256 quads a mesh** (ticket 08); a bigger one, a
+  long lake shore, keeps the farthest-centre order, and a mesh the frame's
+  sorting budget does not reach keeps its order a frame longer.
 - **Blended surfaces are outside the depth and motion prepasses**, so SSAO and
   TAA, when step 9 adds them, will not see water or glass: no ambient occlusion
   on it, and no motion vectors for TAA to resolve it with.

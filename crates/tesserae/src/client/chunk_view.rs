@@ -651,20 +651,6 @@ mod tests {
         app.update();
     }
 
-    /// The z of each quad in the order it is drawn.
-    fn drawn_z(app: &App, entity: Entity) -> Vec<f32> {
-        let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
-        let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
-        let positions = positions(app, entity);
-        let Some(bevy::mesh::Indices::U32(indices)) = mesh.indices() else {
-            panic!("U32 indices");
-        };
-        indices
-            .chunks(6)
-            .map(|quad| quad.iter().map(|&i| positions[i as usize][2]).sum::<f32>() / 6.0)
-            .collect()
-    }
-
     fn geometry() -> tesserae_core::ChunkMesh {
         let solid = Chunk::filled(Voxel::cube(worldgen::STONE));
         let air = Chunk::air();
@@ -821,62 +807,237 @@ mod tests {
     }
 
     #[test]
-    fn blended_quads_are_drawn_farthest_first_from_wherever_the_eye_is() {
+    fn moving_inside_one_cell_of_the_meshs_planes_never_reindexes() {
         let mut app = app();
         let coord = ChunkCoord::new(0, 0, 0);
-        put_eye(&mut app, Vec3::new(5.5, 5.5, 60.0));
-        send_mesh(&mut app, coord, two_panes());
-        let entity = blended_at(&app, 0, coord).unwrap();
-        let z = drawn_z(&app, entity);
-        assert!(z.is_sorted(), "seen from +z, the far pane first: {z:?}");
-
-        put_eye(&mut app, Vec3::new(5.5, 5.5, -60.0));
-        let z = drawn_z(&app, entity);
-        assert!(z.is_sorted_by(|a, b| a >= b), "seen from -z: {z:?}");
-    }
-
-    #[test]
-    fn a_blended_mesh_is_not_resorted_until_the_eye_moves_a_voxel() {
-        let mut app = app();
-        let coord = ChunkCoord::new(0, 0, 0);
-        put_eye(&mut app, Vec3::new(5.5, 5.5, 60.0));
-        send_mesh(&mut app, coord, two_panes());
-        let entity = blended_at(&app, 0, coord).unwrap();
-        // Between the panes, the near face of each is nearest in turn.
         put_eye(&mut app, Vec3::new(5.5, 5.5, 8.4));
-        let sorted = drawn_z(&app, entity);
-        put_eye(&mut app, Vec3::new(5.5, 5.5, 7.9));
-        assert_eq!(drawn_z(&app, entity), sorted, "half a Voxel is not enough");
-        put_eye(&mut app, Vec3::new(5.5, 5.5, 6.9));
-        assert_ne!(drawn_z(&app, entity), sorted, "a Voxel and a half is");
-    }
-
-    /// Far away, a few metres of movement turns the view by a fraction of a
-    /// degree, which cannot change which of two quads is in front.
-    #[test]
-    fn a_distant_blended_mesh_waits_for_the_eye_to_move_in_proportion() {
-        let mut app = app();
-        let coord = ChunkCoord::new(0, 0, 0);
-        put_eye(&mut app, Vec3::new(5.5, 5.5, 300.0));
         send_mesh(&mut app, coord, two_panes());
         let entity = blended_at(&app, 0, coord).unwrap();
-        let sorted = drawn_z(&app, entity);
-        // To the far side in one step resorts; a few Voxels sideways from there
-        // does not, though it would have near by.
-        put_eye(&mut app, Vec3::new(5.5, 5.5, -300.0));
-        let flipped = drawn_z(&app, entity);
-        assert_ne!(flipped, sorted);
         let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
         app.world_mut()
             .resource_mut::<Messages<AssetEvent<Mesh>>>()
             .clear();
-        put_eye(&mut app, Vec3::new(9.5, 5.5, -300.0));
+        // Between the panes and inside their x and y span, where a nearest-centre
+        // order would change and the separating planes' cannot.
+        for z in [8.0, 7.2, 9.6] {
+            put_eye(&mut app, Vec3::new(5.4, 5.6, z));
+        }
         let modified = app
             .world_mut()
             .resource_mut::<Messages<AssetEvent<Mesh>>>()
             .drain()
             .any(|e| e.is_modified(&handle));
-        assert!(!modified, "4 m at 300 m is not worth a sort");
+        assert!(!modified);
+    }
+
+    /// One drawn quad of a blended mesh, axis-aligned, in the entity's metres.
+    struct DrawnQuad {
+        axis: usize,
+        plane: f32,
+        min: Vec3,
+        max: Vec3,
+        normal: Vec3,
+    }
+
+    /// The blended mesh's quads in the order the GPU draws them.
+    fn drawn_quads(app: &App, entity: Entity) -> Vec<DrawnQuad> {
+        let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
+        let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
+        let positions = positions(app, entity);
+        let Some(VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            panic!("normals are Float32x3");
+        };
+        let Some(bevy::mesh::Indices::U32(indices)) = mesh.indices() else {
+            panic!("U32 indices");
+        };
+        indices
+            .chunks(6)
+            .map(|quad| {
+                let corners: Vec<Vec3> = quad
+                    .iter()
+                    .map(|&i| Vec3::from(positions[i as usize]))
+                    .collect();
+                let normal = Vec3::from(normals[quad[0] as usize]);
+                let axis = (0..3).find(|&a| normal[a] != 0.0).unwrap();
+                let min = corners.iter().copied().fold(Vec3::MAX, Vec3::min);
+                let max = corners.iter().copied().fold(Vec3::MIN, Vec3::max);
+                DrawnQuad {
+                    axis,
+                    plane: min[axis],
+                    min,
+                    max,
+                    normal,
+                }
+            })
+            .collect()
+    }
+
+    /// Rays from `eye` towards `target` that meet two blended quads drawn in the
+    /// wrong order: the nearer one first, so the farther one blends over it.
+    /// Back faces are culled, as `StandardMaterial` does.
+    fn rays_drawn_out_of_order(quads: &[DrawnQuad], eye: Vec3, target: Vec3) -> usize {
+        let forward = (target - eye).normalize();
+        let right = forward.cross(Vec3::Y).normalize();
+        let up = right.cross(forward);
+        let n = 96;
+        let half = 30f32.to_radians().tan();
+        let mut wrong = 0;
+        for py in 0..n {
+            for px in 0..n {
+                let sx = (px as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+                let sy = (py as f32 + 0.5) / n as f32 * 2.0 - 1.0;
+                let d = (forward + sx * half * right + sy * half * up).normalize();
+                let hits: Vec<f32> = quads
+                    .iter()
+                    .map(|q| {
+                        if q.normal.dot(d) >= 0.0 || d[q.axis] == 0.0 {
+                            return f32::NAN;
+                        }
+                        let t = (q.plane - eye[q.axis]) / d[q.axis];
+                        let p = eye + t * d;
+                        let inside = (0..3)
+                            .filter(|&a| a != q.axis)
+                            .all(|a| p[a] > q.min[a] && p[a] < q.max[a]);
+                        if t > 0.0 && inside { t } else { f32::NAN }
+                    })
+                    .collect();
+                let drawn: Vec<f32> = hits.into_iter().filter(|t| !t.is_nan()).collect();
+                // In draw order, every later hit must be nearer.
+                let farther_later =
+                    (0..drawn.len()).any(|i| drawn[i + 1..].iter().any(|&later| later > drawn[i]));
+                wrong += usize::from(farther_later);
+            }
+        }
+        wrong
+    }
+
+    /// Eyes all around `target`, 8 headings at 10, 30 and 60 degrees up.
+    fn around(target: Vec3, distance: f32) -> Vec<Vec3> {
+        let mut eyes = vec![];
+        for elevation in [10f32, 30.0, 60.0] {
+            for step in 0..8 {
+                let (e, a) = (
+                    elevation.to_radians(),
+                    step as f32 * std::f32::consts::FRAC_PI_4,
+                );
+                eyes.push(
+                    target + distance * Vec3::new(e.cos() * a.sin(), e.sin(), e.cos() * a.cos()),
+                );
+            }
+        }
+        eyes
+    }
+
+    /// The dev gallery's glass house in front of its pool, a lantern inside.
+    fn glass_house_and_pool() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{GLASS, LANTERN, STONE, WATER};
+        let mut c = Chunk::air();
+        for x in 0..11 {
+            for z in 0..12 {
+                c.set(x, 9, z, Voxel::cube(STONE));
+            }
+        }
+        for k in 0..=5 {
+            for i in 0..=8 {
+                let rim = i == 0 || i == 8 || k == 0 || k == 5;
+                c.set(i, 10, k, Voxel::cube(if rim { STONE } else { WATER }));
+            }
+        }
+        for k in 7..=10 {
+            for i in 1..=5 {
+                let wall = i == 1 || i == 5 || k == 7 || k == 10;
+                for j in 0..=2 {
+                    if wall {
+                        c.set(i, 10 + j, k, Voxel::cube(GLASS));
+                    }
+                }
+                c.set(i, 13, k, Voxel::cube(GLASS));
+            }
+        }
+        c.set(3, 10, 8, Voxel::cube(LANTERN));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        )
+    }
+
+    /// A long strip of water over a small glass cube near one end: seen from
+    /// above that end, the strip is in front of the cube, but its centre is far
+    /// down the strip and farther from the Eye than the cube's.
+    fn strip_over_a_cube() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{GLASS, WATER};
+        let mut c = Chunk::air();
+        for x in 0..30 {
+            c.set(x, 5, 10, Voxel::cube(WATER));
+        }
+        c.set(2, 3, 10, Voxel::cube(GLASS));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        )
+    }
+
+    #[test]
+    fn blended_layers_are_drawn_back_to_front_along_every_ray_from_all_around() {
+        let house = Vec3::new(5.5, 11.5, 6.0);
+        let panes = Vec3::new(5.5, 5.5, 8.0);
+        let ends = [Vec3::new(5.5, 5.5, 60.0), Vec3::new(5.5, 5.5, -60.0)];
+        let strip = Vec3::new(15.0, 5.0, 10.5);
+        let above_the_cube = Vec3::new(0.0, 20.0, 10.5);
+        for (name, mesh, target, eyes) in [
+            (
+                "glass house and pool",
+                glass_house_and_pool(),
+                house,
+                around(house, 30.0),
+            ),
+            (
+                "two panes",
+                two_panes(),
+                panes,
+                [around(panes, 20.0), ends.to_vec()].concat(),
+            ),
+            (
+                "strip over a cube",
+                strip_over_a_cube(),
+                Vec3::new(2.5, 4.0, 10.5),
+                [around(strip, 25.0), vec![above_the_cube]].concat(),
+            ),
+        ] {
+            let mut app = app();
+            let coord = ChunkCoord::new(0, 0, 0);
+            put_eye(&mut app, eyes[0]);
+            send_mesh(&mut app, coord, mesh);
+            let entity = blended_at(&app, 0, coord).unwrap();
+            for eye in eyes {
+                put_eye(&mut app, eye);
+                let wrong = rays_drawn_out_of_order(&drawn_quads(&app, entity), eye, target);
+                assert_eq!(wrong, 0, "{name}, eye at {eye}");
+            }
+        }
+    }
+
+    /// What the strip fixture is for: the nearest-centre order gets it wrong.
+    #[test]
+    fn a_nearest_centre_order_gets_the_strip_over_a_cube_wrong() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        let eye = Vec3::new(0.0, 20.0, 10.5);
+        put_eye(&mut app, eye);
+        send_mesh(&mut app, coord, strip_over_a_cube());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        let mut quads = drawn_quads(&app, entity);
+        let centre = |q: &DrawnQuad| (q.min + q.max) / 2.0;
+        quads.sort_by(|a, b| eye.distance(centre(b)).total_cmp(&eye.distance(centre(a))));
+        assert!(rays_drawn_out_of_order(&quads, eye, Vec3::new(2.5, 4.0, 10.5)) > 0);
     }
 
     #[test]
