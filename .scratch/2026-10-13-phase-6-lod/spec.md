@@ -484,6 +484,17 @@ computed.
   the spec names it so that the answer to a crack is not to widen the overlap
   until it is a performance bug. Ticket 08 shows none once the overlap holds
   for every Eye position, so it is not built.
+- **Blended surfaces** take the same cut and nothing more (ticket 06 of
+  `2026-10-12-material-table-transparency`). Coverage priority does not hold for
+  them: a finer blended pixel composites over the coarse one instead of
+  replacing it, so between the finer level's guaranteed reach and where it
+  actually ends, water is drawn twice and reads a shade darker. Measured on a
+  flooded World, that band's water spans 131 to 152 in luminance against the
+  lake around it, with no row-to-row step above 6.6. A fade of the coarse layer
+  across the band was tried and was worse (123 to 153, a step of 16.6): where
+  the finer level does not reach, it thins the only water there is. The exact
+  fix needs the shader to know which finer Chunks the Client draws, and is not
+  built.
 
 ### 10. What a Mod registers or parameterises
 
@@ -560,8 +571,10 @@ a measurement artefact to be explained, not accepted.
   flood.
 - ~~**No blended draw call**, so coarse water and glass are built and not drawn,
   as at level 0.~~ Drawn at every level by ticket 04 of
-  `2026-10-12-material-table-transparency`; compositing across the per-level
-  cameras, and any coarse water at all, are its ticket 06.
+  `2026-10-12-material-table-transparency`, and composited across the per-level
+  cameras by its ticket 06, which leaves a band of doubled water at each ring
+  join (decision 9). Coarse water exists only under `dev`'s
+  `TESSERAE_WATER_LEVEL_M` until worldgen places its own.
 - **Thin features vanish at the next level.** A one-Voxel wall or pane is under
   half a coarse Voxel. Inherent to a mip.
 - **One FIFO pool serves every stage of every level.** Decision 5 names the

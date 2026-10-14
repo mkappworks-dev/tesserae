@@ -463,10 +463,12 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   connected Shape cannot be rotated, and LOD counts only its bare post. A fence
   costs 4 stairs of the cap, so 256 fit in a Chunk. Material transparency
   (glass, water, leaves) is a Material property and not a Shape one: the table,
-  light dimming, occlusion and the blended render pass are done (ticket 04 of
-  `.scratch/2026-10-12-material-table-transparency/`), and how a blended surface
-  composites across the per-level LOD cameras is its ticket 06. The Client's
-  hotbar is a stopgap.
+  light dimming, occlusion and the blended render pass are done (tickets 04 and
+  06 of `.scratch/2026-10-12-material-table-transparency/`), with each Chunk's
+  blended quads re-sorted as the Eye moves. Water is drawn twice, a shade
+  darker, in a band at each LOD ring join, accepted (see the LOD spec's decision
+  9). Worldgen places no water: `WaterParams` floods a World to one height and
+  only `dev` sets it. The Client's hotbar is a stopgap.
 - **The Player's pose is rate-limited, not true.** The Server clamps a pose that
   moves faster than `PlayerLimits` and tells the Client, but flying is the only
   way to move, so a modified Client can still fly at the cap and edit within

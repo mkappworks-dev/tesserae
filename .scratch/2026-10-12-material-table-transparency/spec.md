@@ -245,9 +245,18 @@ Minecraft does); Bevy 0.20's experimental order-independent transparency plugin
 panics on a camera with MSAA on); or accept it. The ticket measures the artefact
 on a screenshot before choosing.
 
-**Decided in ticket 04: accept it.** The `dev` gallery's glass house stands in
-front of a pool, which is the case that would show a wrong order, and the glass
-reads over the water with nothing drawn out of order. A blended entity casts no
+**Decided in ticket 04: re-sort each Chunk's blended quads.** A ray cast over the
+`dev` gallery's glass house and pool, meshed as one Chunk and seen from 24 views
+around it, found glass and water blended in the wrong order on 5 to 17% of the
+rays crossing two blended layers from the two front diagonals, and same-Material
+faces out of order from every side. Drawing the quads farthest centre first
+removed every one. So the Client keeps each blended entity's quad centres and
+re-indexes its mesh, farthest first, whenever the Eye has moved a Voxel of that
+entity's level, or a sixteenth of its distance from the mesh if that is more,
+since the last sort and the order changed; a layer whose quads
+all lie in one plane facing one way (a lake's surface) is never re-sorted,
+because no two of them can overlap on screen. OIT was not taken: it needs `Msaa`
+off on every LOD camera. A blended entity casts no
 shadow (`NotShadowCaster`): `bevy_pbr` queues a `Blend` mesh into the shadow
 pass and skips it in the depth prepass, and the flood-fill already dims sky light
 under water and glass, so a full shadow on top would count it twice. What this
@@ -360,10 +369,9 @@ are testable alone. 04 is the first time a player can see any of it.
   `Tables::joint_id` leaves clear Materials out of it, so two glass halves seal
   nothing. The mesher still tests each quad against one neighbour's coverage, so
   a face two neighbours jointly hide is drawn: overdraw, never a hole.
-- **No intra-chunk sorting** of blended quads (decision 6). Seen only on a view
-  where two translucent surfaces of one Chunk overlap, which the gallery does
-  not produce; re-sorting on camera movement or Bevy's OIT (which needs `Msaa`
-  off on every LOD camera) is the answer if one does.
+- **Quad sorting is by centre distance**, which is exact for the gallery and not
+  in general: two long quads can overlap on screen with the nearer one's centre
+  farther away. And an order is up to a Voxel of Eye movement stale.
 - **Blended surfaces are outside the depth and motion prepasses**, so SSAO and
   TAA, when step 9 adds them, will not see water or glass: no ambient occlusion
   on it, and no motion vectors for TAA to resolve it with.

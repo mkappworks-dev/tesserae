@@ -15,6 +15,7 @@ use crate::noise::{fbm2, fbm3, fbm3_range};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::voxel::Voxel;
 
+use crate::material::WATER;
 /// The ids generation assigns. They live in [`crate::material`] with the rest of
 /// the table and are re-exported so a caller that places terrain finds them here.
 pub use crate::material::{DIRT, GRASS, LANTERN, STONE};
@@ -42,6 +43,19 @@ pub struct WorldgenParams {
     pub caves: Option<CaveParams>,
     /// `None` is a World of cubes.
     pub smoothing: Option<SmoothingParams>,
+    /// `None` is a World without standing water.
+    pub water: Option<WaterParams>,
+}
+
+/// Water filling the open air above the ground up to one height. Plain `Copy`
+/// data like the rest of [`WorldgenParams`]. A flat sheet and nothing more: it
+/// does not flow, and it fills any hollow open to the sky below its level, but
+/// never a cave, which is carved out of the ground and not above it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct WaterParams {
+    /// The height of the water's surface. Clamped to the top of the surface
+    /// band, because the Server treats everything above that as open sky.
+    pub level_m: f32,
 }
 
 /// Stairs and slabs placed where the ground steps one Voxel. Plain `Copy` data
@@ -101,6 +115,7 @@ impl Default for WorldgenParams {
             octaves: 5,
             caves: Some(CaveParams::default()),
             smoothing: Some(SmoothingParams::default()),
+            water: None,
         }
     }
 }
@@ -238,6 +253,8 @@ pub struct Worldgen {
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
     smoothing: bool,
+    /// The water's surface, already clamped to the surface band.
+    water_level_m: Option<f32>,
 }
 
 impl Worldgen {
@@ -254,6 +271,9 @@ impl Worldgen {
             smoothing: params
                 .smoothing
                 .is_some_and(|p| EASED_RISE_VOXELS as f32 * voxel_size >= p.min_rise_m),
+            water_level_m: params
+                .water
+                .map(|w| w.level_m.min(params.sea_level_m + params.relief_m)),
         }
     }
 
@@ -365,6 +385,10 @@ impl Worldgen {
                     let y_m = floor_m + y as f32 * self.voxel_size;
                     let below_m = surface_m - y_m;
                     if below_m < 0.0 {
+                        if self.water_level_m.is_some_and(|level_m| y_m < level_m) {
+                            chunk.set(x, y, z, Voxel::cube(WATER));
+                            continue;
+                        }
                         // y_m only rises, so the rest of the column is sky.
                         break;
                     }
@@ -1045,6 +1069,82 @@ mod tests {
         assert!(mouths > 0, "no cave breaches the surface");
         assert!(walls.contains(&DIRT), "{walls:?}");
         assert!(walls.contains(&STONE), "{walls:?}");
+    }
+
+    fn flooded(voxel_size: f32, level_m: f32) -> Worldgen {
+        Worldgen::new(
+            SEED,
+            voxel_size,
+            WorldgenParams {
+                water: Some(WaterParams { level_m }),
+                ..WorldgenParams::default()
+            },
+        )
+    }
+
+    /// Water only ever replaces air above the ground and below its level, and
+    /// fills all of that: a cave stays dry and the ground is unchanged.
+    #[test]
+    fn water_fills_the_open_air_between_the_ground_and_its_level_and_nothing_else() {
+        for voxel_size in [1.0f32, 0.5] {
+            let dry = Worldgen::new(SEED, voxel_size, WorldgenParams::default());
+            // Halfway up the ground the sweep covers, so it has both shores and
+            // dry land.
+            let heights: Vec<f32> = (-48..48)
+                .flat_map(|x| (-48..48).map(move |z| (x as f32, z as f32)))
+                .map(|(x, z)| dry.surface_height_m(x, z))
+                .collect();
+            let lowest = heights.iter().copied().fold(f32::MAX, f32::min);
+            let highest = heights.iter().copied().fold(f32::MIN, f32::max);
+            let level_m = (lowest + highest) / 2.0;
+            let wet = flooded(voxel_size, level_m);
+            let mut filled = 0;
+            for (cx, cy, cz) in sweep(voxel_size) {
+                let (a, b) = (dry.chunk(cx, cy, cz), wet.chunk(cx, cy, cz));
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let x_m = dry.axis_m(cx, x as i32);
+                        let z_m = dry.axis_m(cz, z as i32);
+                        let surface_m = dry.surface_height_m(x_m, z_m);
+                        for y in 0..CHUNK_SIZE {
+                            let y_m = dry.axis_m(cy, y as i32);
+                            let (before, after) = (a.get(x, y, z), b.get(x, y, z));
+                            let open = before.is_air() && y_m > surface_m && y_m < level_m;
+                            if open {
+                                assert_eq!(after, Voxel::cube(WATER), "{x_m} {y_m} {z_m}");
+                                filled += 1;
+                            } else {
+                                assert_eq!(after, before, "{x_m} {y_m} {z_m}");
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(filled > 0, "the sweep floods something at {voxel_size} m");
+        }
+    }
+
+    /// A level above the surface band would put water where the Server assumes
+    /// open sky, so it stops at the band's top.
+    #[test]
+    fn water_never_rises_above_the_highest_ground() {
+        let g = flooded(1.0, 10_000.0);
+        let (_, highest_m) = g.surface_bounds_m();
+        let cy = (highest_m / CHUNK_SIZE as f32).floor() as i32;
+        let chunk = g.chunk(0, cy, 0);
+        let mut water = 0;
+        for y in 0..CHUNK_SIZE {
+            let y_m = g.axis_m(cy, y as i32);
+            for (x, z) in (0..CHUNK_SIZE).flat_map(|x| (0..CHUNK_SIZE).map(move |z| (x, z))) {
+                let v = chunk.get(x, y, z);
+                if y_m > highest_m {
+                    assert!(v.is_air(), "{v:?} at {y_m} m");
+                } else if v == Voxel::cube(WATER) {
+                    water += 1;
+                }
+            }
+        }
+        assert!(water > 0, "the band's top Chunk is flooded below the top");
     }
 
     #[test]

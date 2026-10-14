@@ -18,6 +18,7 @@ use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use tesserae_core::{ChunkMesh, MeshLayer};
 
+use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
@@ -73,7 +74,27 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(PostStartup, spawn_camera)
         // Chained: the Server can send a mesh and its unload in one frame, and an
         // unload handled first would leave the mesh with nothing to despawn it.
-        .add_systems(Update, (upload_meshes, drop_meshes).chain());
+        .add_systems(
+            Update,
+            (
+                upload_meshes,
+                drop_meshes,
+                sort_blended.run_if(blend_sort_on),
+            )
+                .chain(),
+        );
+}
+
+/// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
+/// order, so a capture can show what the sort fixes.
+#[cfg(feature = "dev")]
+fn blend_sort_on() -> bool {
+    !std::env::var("TESSERAE_BLEND_SORT").is_ok_and(|v| v == "0")
+}
+
+#[cfg(not(feature = "dev"))]
+fn blend_sort_on() -> bool {
+    true
 }
 
 fn add_material(
@@ -131,8 +152,8 @@ struct Draw<'a, 'w, 's> {
 
 impl Draw<'_, '_, '_> {
     /// Brings one layer's entity for `key` in line with `layer`: spawned,
-    /// replaced or, if the layer has nothing, despawned. Whether it drew
-    /// something.
+    /// replaced or, if the layer has nothing, despawned. The entity, if it
+    /// draws something.
     fn show(
         &mut self,
         entities: &mut LayerEntities,
@@ -141,10 +162,10 @@ impl Draw<'_, '_, '_> {
         key: (u32, ChunkCoord),
         world: &WorldSettings,
         casts_shadows: bool,
-    ) -> bool {
+    ) -> Option<Entity> {
         if layer.is_empty() {
             self.hide(entities, key);
-            return false;
+            return None;
         }
         let (level, coord) = key;
         let handle = self
@@ -159,6 +180,7 @@ impl Draw<'_, '_, '_> {
                     self.meshes.remove(&old);
                 }
                 self.commands.entity(entity).insert(Mesh3d(handle));
+                Some(entity)
             }
             None => {
                 let mut entity = self.commands.spawn((
@@ -173,9 +195,9 @@ impl Draw<'_, '_, '_> {
                     entity.insert(NotShadowCaster);
                 }
                 entities.insert(key, entity.id());
+                Some(entity.id())
             }
         }
-        true
     }
 
     fn hide(&mut self, entities: &mut LayerEntities, key: (u32, ChunkCoord)) {
@@ -236,12 +258,19 @@ fn upload_meshes(
             // a shadow map treating them as solid would count it twice.
             false,
         );
+        if let Some(entity) = blended {
+            let order = BlendOrder::new(&mesh.blended, world.voxel_size_at(level));
+            match order {
+                Some(order) => draw.commands.entity(entity).insert(order),
+                None => draw.commands.entity(entity).remove::<BlendOrder>(),
+            };
+        }
         #[cfg(feature = "dev")]
         {
-            uploaded += u32::from(opaque) + u32::from(blended);
+            uploaded += u32::from(opaque.is_some()) + u32::from(blended.is_some());
         }
         #[cfg(not(feature = "dev"))]
-        let _ = (opaque, blended);
+        let _ = opaque;
     }
     #[cfg(feature = "dev")]
     if uploaded > 0 {
@@ -562,9 +591,78 @@ mod tests {
             .add_message::<LodMeshReady>()
             .add_message::<LodUnloaded>()
             .add_systems(Startup, add_material)
-            .add_systems(Update, (upload_meshes, drop_meshes).chain());
+            .add_systems(Update, (upload_meshes, drop_meshes, sort_blended).chain());
         app.update();
         app
+    }
+
+    /// Two panes of glass one behind the other along z, in one Chunk.
+    fn two_panes() -> tesserae_core::ChunkMesh {
+        let mut c = Chunk::air();
+        c.set(5, 5, 5, Voxel::cube(tesserae_core::material::GLASS));
+        c.set(5, 5, 10, Voxel::cube(tesserae_core::material::GLASS));
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        )
+    }
+
+    /// Two pools side by side along x in a stone basin: two water quads in one
+    /// plane, facing up, and nothing else blended.
+    fn two_pools() -> tesserae_core::ChunkMesh {
+        use tesserae_core::material::{STONE, WATER};
+        let mut c = Chunk::air();
+        for x in 0..=12 {
+            for z in 0..=6 {
+                c.set(x, 4, z, Voxel::cube(STONE));
+                let rim = x == 0 || x == 6 || x == 12 || z == 0 || z == 6;
+                c.set(x, 5, z, Voxel::cube(if rim { STONE } else { WATER }));
+            }
+        }
+        let air = Chunk::air();
+        let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+        let mesh = mesh_chunk(
+            LitChunk::new(&c, &sky),
+            [Some(LitChunk::new(&air, &sky)); 6],
+            &Tables::builtin(),
+        );
+        assert_eq!(mesh.blended.quad_count(), 2, "the fixture is two pools");
+        mesh
+    }
+
+    fn put_eye(app: &mut App, eye: Vec3) {
+        let existing = app
+            .world_mut()
+            .query_filtered::<Entity, With<MainCamera>>()
+            .iter(app.world())
+            .next();
+        let transform = GlobalTransform::from_translation(eye);
+        match existing {
+            Some(camera) => {
+                app.world_mut().entity_mut(camera).insert(transform);
+            }
+            None => {
+                app.world_mut().spawn((MainCamera, transform));
+            }
+        }
+        app.update();
+    }
+
+    /// The z of each quad in the order it is drawn.
+    fn drawn_z(app: &App, entity: Entity) -> Vec<f32> {
+        let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
+        let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
+        let positions = positions(app, entity);
+        let Some(bevy::mesh::Indices::U32(indices)) = mesh.indices() else {
+            panic!("U32 indices");
+        };
+        indices
+            .chunks(6)
+            .map(|quad| quad.iter().map(|&i| positions[i as usize][2]).sum::<f32>() / 6.0)
+            .collect()
     }
 
     fn geometry() -> tesserae_core::ChunkMesh {
@@ -720,6 +818,85 @@ mod tests {
                 .get::<NotShadowCaster>(entity_for(&app, coord).unwrap())
                 .is_none()
         );
+    }
+
+    #[test]
+    fn blended_quads_are_drawn_farthest_first_from_wherever_the_eye_is() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        put_eye(&mut app, Vec3::new(5.5, 5.5, 60.0));
+        send_mesh(&mut app, coord, two_panes());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        let z = drawn_z(&app, entity);
+        assert!(z.is_sorted(), "seen from +z, the far pane first: {z:?}");
+
+        put_eye(&mut app, Vec3::new(5.5, 5.5, -60.0));
+        let z = drawn_z(&app, entity);
+        assert!(z.is_sorted_by(|a, b| a >= b), "seen from -z: {z:?}");
+    }
+
+    #[test]
+    fn a_blended_mesh_is_not_resorted_until_the_eye_moves_a_voxel() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        put_eye(&mut app, Vec3::new(5.5, 5.5, 60.0));
+        send_mesh(&mut app, coord, two_panes());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        // Between the panes, the near face of each is nearest in turn.
+        put_eye(&mut app, Vec3::new(5.5, 5.5, 8.4));
+        let sorted = drawn_z(&app, entity);
+        put_eye(&mut app, Vec3::new(5.5, 5.5, 7.9));
+        assert_eq!(drawn_z(&app, entity), sorted, "half a Voxel is not enough");
+        put_eye(&mut app, Vec3::new(5.5, 5.5, 6.9));
+        assert_ne!(drawn_z(&app, entity), sorted, "a Voxel and a half is");
+    }
+
+    /// Far away, a few metres of movement turns the view by a fraction of a
+    /// degree, which cannot change which of two quads is in front.
+    #[test]
+    fn a_distant_blended_mesh_waits_for_the_eye_to_move_in_proportion() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        put_eye(&mut app, Vec3::new(5.5, 5.5, 300.0));
+        send_mesh(&mut app, coord, two_panes());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        let sorted = drawn_z(&app, entity);
+        // To the far side in one step resorts; a few Voxels sideways from there
+        // does not, though it would have near by.
+        put_eye(&mut app, Vec3::new(5.5, 5.5, -300.0));
+        let flipped = drawn_z(&app, entity);
+        assert_ne!(flipped, sorted);
+        let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .clear();
+        put_eye(&mut app, Vec3::new(9.5, 5.5, -300.0));
+        let modified = app
+            .world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .drain()
+            .any(|e| e.is_modified(&handle));
+        assert!(!modified, "4 m at 300 m is not worth a sort");
+    }
+
+    #[test]
+    fn a_flat_sheet_of_water_is_never_reindexed() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        put_eye(&mut app, Vec3::new(60.0, 50.0, 3.0));
+        send_mesh(&mut app, coord, two_pools());
+        let entity = blended_at(&app, 0, coord).unwrap();
+        let handle = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+        app.world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .clear();
+        put_eye(&mut app, Vec3::new(-60.0, 50.0, 3.0));
+        let modified = app
+            .world_mut()
+            .resource_mut::<Messages<AssetEvent<Mesh>>>()
+            .drain()
+            .any(|e| e.is_modified(&handle));
+        assert!(!modified, "a sheet's draw order cannot matter");
     }
 
     #[test]

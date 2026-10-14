@@ -84,7 +84,9 @@ pub fn plugin(app: &mut App) {
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
 /// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
 /// a streaming change can be measured with and without them on one binary and
-/// not across two builds.
+/// not across two builds. `TESSERAE_WATER_LEVEL_M` floods the World to that
+/// height, the only source of water at a coarse LOD level until worldgen places
+/// its own.
 #[cfg(feature = "dev")]
 fn worldgen_params() -> WorldgenParams {
     let off = |name: &str| std::env::var(name).is_ok_and(|v| v == "0");
@@ -100,6 +102,10 @@ fn worldgen_params() -> WorldgenParams {
         } else {
             params.smoothing
         },
+        water: std::env::var("TESSERAE_WATER_LEVEL_M")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map(|level_m| tesserae_core::WaterParams { level_m }),
         ..params
     }
 }

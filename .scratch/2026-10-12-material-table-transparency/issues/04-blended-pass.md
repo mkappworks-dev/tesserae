@@ -119,3 +119,40 @@ Built as specified, except where listed.
   capture, so a spike of that size is the host and not this change.
 - `./scripts/cargo-ci` passes. Also tested: 6 new tests in `gallery.rs`.
 
+2026-10-14, follow-up. Three of the points above did not hold up and are
+superseded here.
+
+- **Sorting: built, not accepted.** One view of the gallery was not evidence. A
+  ray cast over the glass house and pool meshed as one Chunk, from 24 views (8
+  headings at 10, 30 and 60 degrees up), found glass and water blended in the
+  wrong order on 5 to 17% of the rays that cross two blended layers from the two
+  front diagonals, and same-Material faces out of order from every side.
+  Drawing the quads farthest centre first removed every one of them. So
+  `client/blend_order.rs` keeps each blended entity's quad centres and
+  re-indexes its mesh when the Eye has moved a Voxel of the entity's level, or a
+  sixteenth of its distance from the mesh if that is more, and the order
+  changed; a layer whose quads all lie in one plane and face one way is never
+  touched. Four tests, two of them mutation-checked (the Voxel threshold and
+  the flat-layer skip). The distance term came from ticket 06's flooded World,
+  where a Voxel alone re-sorted every lake shore in view. In the running app, with the row moved to
+  that diagonal (`TESSERAE_TRANSLUCENT_ROW_ASIDE_M=-44`, yaw 45), turning the
+  sort off (`TESSERAE_BLEND_SORT=0`) changes 1795 pixels, all inside the glass
+  house, and two runs with it on differ in none below the horizon.
+- **The comparison with `main` is now strict.** `TESSERAE_TRANSLUCENT_ROW=0`
+  leaves the gallery's row out, so the scene holds no blended Voxel. Against
+  `main` at the same settings, the only pixels that differ are the frame-rate
+  digits and the hotbar hint in the overlay text.
+- **The HUD hint** is built from the key count, so it reads `[1-9]` under `dev`
+  and `[1-8]` without; a test pins both.
+- **The gallery test** that asserted almost nothing is replaced by one that
+  every non-stone Voxel of the row stands above the highest ground under it, and
+  that every water Voxel has stone under it and stone or water beside it.
+- **Cost.** The sort is now in the `dev` frame cost (`worst_sort_us`, `sorts`,
+  and inside `worst_cost_*`), because the first A/B could not see it. Default
+  flight over the gallery, load 7 to 12: the sort's worst frame is 25 to 104 us
+  over about 150 re-sorts. Six interleaved runs against `main` at the same load
+  put the worst tick at 2.5 ms median on `main` and 2.9 on the branch, with
+  both builds' runs spread from 0.9 to 4.2 ms, so neither is measurably slower;
+  the median flight frame sits at the 60 Hz cap in both. One branch run was
+  ended by a SIGTERM from outside the run and has no figures.
+

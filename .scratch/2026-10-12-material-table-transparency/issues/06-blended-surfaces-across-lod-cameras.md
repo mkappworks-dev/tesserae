@@ -1,6 +1,6 @@
 # Blended surfaces across the LOD cameras
 
-Status: needs-triage
+Status: done
 Blocked by: 04
 
 Spec decision 6, generalised by `.scratch/2026-10-13-phase-6-lod/spec.md`
@@ -147,3 +147,63 @@ of 50 or more wall-clock numbers are not evidence.
   is lit as open sky like every coarse face.
 
 ## Comments
+
+2026-10-14: triaged and built in one pass at the author's request. Question 3
+was decided first, because nothing else could be captured without it.
+
+- **Question 3, the source: a generator parameter, set only under `dev`.**
+  `WorldgenParams::water: Option<WaterParams { level_m }>` fills the open air
+  above the ground up to `level_m`, never a cave, clamped to the top of the
+  surface band because the Server treats everything above that as open sky.
+  `None` by default, so a default World is what it was, and the level-1 and
+  coarser source generators inherit it from the level-0 parameters. Under `dev`,
+  `TESSERAE_WATER_LEVEL_M` sets it. Two tests in `worldgen.rs`: every Voxel the
+  flood changes, over a sweep of Chunks at 1 m and 0.5 m Voxels, was open air
+  between the ground and the level and became water, and nothing else changed;
+  and nothing above the band is flooded (dropping the clamp fails it). Real
+  lakes, with a level that varies, are worldgen's own ticket when wanted.
+- **Question 1, the double-blended band: accepted.** On a World flooded to 44 m
+  (around the 25th percentile of the ground), a lake crossing the level-0 to
+  level-1 join shows the band: level 0's water over level 1's, a shade darker,
+  water luminance 131 to 152 with no row-to-row step above 6.6. A fade of the
+  coarse layer across the band (from the cut to the finer level's farthest
+  reach, `R + sqrt(2)` Cells) was built and measured worse, 123 to 153 with a
+  step of 16.6, because where the finer level does not reach it thins the only
+  water there is; it was reverted. The exact fix is to cut a coarse blended
+  fragment wherever the Client draws the finer Chunk that contains it, which
+  needs that set in a uniform; not built. Recorded in the LOD spec's decision 9.
+- **Question 2, the rest of the opaque argument:**
+  - A coarse surface too high: the cut applies to blended fragments unchanged,
+    since they use the same shader, and no capture showed coarse water standing
+    over finer ground or horizon.
+  - Cracks: the magenta-sky probe counts the same 3 clear-colour pixels under
+    terrain (one silhouette step) with the World flooded and dry, on the horizon
+    view, and none from 150 m at 35 degrees or straight down.
+  - Coarse blended under a finer camera: survives its depth clear. In the tinted
+    capture, level 0's water over level 1's shows as a blend of the two tints
+    across the band, which it could not if the coarse pass were lost.
+  - OIT: not taken (ticket 04), so its interaction with six cameras is moot.
+- **Question 4, cost.** Draw calls grow by the Chunks with water, each on one
+  layer and so one camera; no pass was added per camera. What the water did
+  cost was the sort of ticket 04: shore Chunks are not flat (water meets the
+  slope-smoothing stairs underwater), so with a one-Voxel threshold every one in
+  view re-sorted on every Voxel of movement, about 4500 sorts per 6 s flight and
+  0.8 to 2.5 ms in the worst frame. A threshold that grows with distance (a
+  sixteenth of it) cut that to about 1130 sorts and 0.22 to 0.48 ms, load 7 to
+  10, four runs. The worst tick and the median flight frame flooded are within
+  the spread of the dry runs (1.5 ms median over six runs, at the 60 Hz cap).
+- **Captures** (offscreen, 1080p, 30 s settle so every level filled, not
+  committed): the default view, a horizon view at 4 degrees down, 150 m up at 35
+  degrees and straight down, each tinted and plain, and the magenta probes. Every
+  level fills with the World flooded (level 5 at 10.7 to 14.9 s, the spread is
+  the host's load).
+- **Worldgen pays nothing for `None`.** The flood is one `Option` check where a
+  column turns to sky. `cargo bench -p tesserae-core --bench meshing --
+  ^worldgen`, interleaved with `main`, the quieter pair at load 2.8 to 3.6:
+  `straddling` 168.3 against 168.8 us, `straddling_unsmoothed` 106.3 against
+  106.7, `ramp_densest` 174.3 against 174.9, `straddling_caved` 259.0 against
+  261.7, `cave_crossed` 267.8 against 275.6 (inside its own 270 to 283 interval),
+  early-outs unchanged at 3.8 and 4.7 ns.
+- **Memory**: 132.6 MB of vertex and index data with the World flooded to 44 m,
+  against 128.0 MB dry, so lakes cost 3.6%.
+

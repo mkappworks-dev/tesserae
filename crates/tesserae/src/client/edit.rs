@@ -291,12 +291,15 @@ fn show_rejections(
     notice.tick(time.delta_secs());
 }
 
+fn hint() -> String {
+    format!(
+        "[1-{}] choose  [Q] turn  [E] flip  [LMB] break  [RMB] place",
+        SLOT_KEYS.len()
+    )
+}
+
 fn update_hud(held: Res<Held>, notice: Res<Notice>, mut hud: Single<&mut Text, With<HeldHud>>) {
-    let line = format!(
-        "{}\n[1-8] choose  [Q] turn  [E] flip  [LMB] break  [RMB] place\n{}",
-        held.describe(),
-        notice.text()
-    );
+    let line = format!("{}\n{}\n{}", held.describe(), hint(), notice.text());
     // Through the comparison, so the UI is not re-laid out every frame.
     if hud.0 != line {
         hud.0 = line;
@@ -442,6 +445,16 @@ mod tests {
             sent[0].action,
             EditAction::Place(Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY))
         );
+    }
+
+    #[test]
+    fn the_hint_names_every_slot_key() {
+        let expected = if cfg!(feature = "dev") {
+            "[1-9]"
+        } else {
+            "[1-8]"
+        };
+        assert!(hint().starts_with(expected), "{}", hint());
     }
 
     #[test]

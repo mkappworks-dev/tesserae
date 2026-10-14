@@ -77,8 +77,18 @@ fn build(
     let corner = spawn.metres() + Vec3::new(ASIDE_M, 0.0, -AHEAD_M);
     let surface = |x, z| generator.surface_height_m(x, z);
     let mut plan = plan(&world, corner, surface);
-    let row = spawn.metres() + Vec3::new(ROW_ASIDE_M, 0.0, -AHEAD_M);
-    plan.extend(translucent_plan(&world, row, surface));
+    // `TESSERAE_TRANSLUCENT_ROW=0` leaves the row out, so a capture can hold
+    // no blended Voxel and be compared with one from before the blended pass.
+    // `TESSERAE_TRANSLUCENT_ROW_ASIDE_M` moves it, so the fixed camera can see
+    // it from a diagonal.
+    if !std::env::var("TESSERAE_TRANSLUCENT_ROW").is_ok_and(|v| v == "0") {
+        let aside_m = std::env::var("TESSERAE_TRANSLUCENT_ROW_ASIDE_M")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(ROW_ASIDE_M);
+        let row = spawn.metres() + Vec3::new(aside_m, 0.0, -AHEAD_M);
+        plan.extend(translucent_plan(&world, row, surface));
+    }
     if builder::step(&plan, &mut progress, &mut store, &mut meshes, &tables) == Step::Completed {
         info!("gallery: {} Voxels at {corner:?}", plan.len());
     }
@@ -419,25 +429,33 @@ mod tests {
     }
 
     #[test]
-    fn the_translucent_things_stand_above_the_highest_ground_under_them() {
+    fn the_translucent_things_stand_on_the_plinth_and_the_pool_holds_its_water() {
+        let w = world(1.0);
         let plan = translucent();
-        let highest = plan
-            .iter()
-            .filter(|(_, v)| v.material() == STONE)
-            .map(|(at, _)| at[1])
+        let [ox, _, oz] = w.voxel_at(corner());
+        let highest = (0..ROW_WIDTH)
+            .flat_map(|i| (0..ROW_DEPTH).map(move |k| (i, k)))
+            .map(|(i, k)| hill((ox + i) as f32 + 0.5, (oz + k) as f32 + 0.5).floor() as i32)
             .max()
             .unwrap();
         for (at, v) in &plan {
-            if matches!(v.material(), GLASS | WATER | LEAVES) {
-                assert!(at[1] > 0 && at[1] <= highest + 6, "{at:?}");
+            if v.material() != STONE {
+                assert!(at[1] > highest, "{at:?} is buried at ground {highest}");
             }
         }
-        let ground = plan.iter().map(|(at, _)| at[1]).min().unwrap();
-        let base = lattice(&plan, WATER).iter().map(|at| at[1]).min().unwrap();
-        assert!(
-            base > ground,
-            "the pool sits on a plinth, not in the ground"
-        );
+        // Water with nothing under or beside it would be a sheet in the air.
+        let at: HashMap<[i32; 3], Voxel> = plan.iter().copied().collect();
+        for [x, y, z] in lattice(&plan, WATER) {
+            assert_eq!(at.get(&[x, y - 1, z]).map(|v| v.material()), Some(STONE));
+            for [dx, dz] in [[1, 0], [-1, 0], [0, 1], [0, -1]] {
+                let side = at.get(&[x + dx, y, z + dz]).map(|v| v.material());
+                assert!(
+                    matches!(side, Some(STONE | WATER)),
+                    "water at {:?} spills to {side:?}",
+                    [x, y, z]
+                );
+            }
+        }
     }
 
     /// ADR-0003: where it stands is a metre position, so halving the Voxel size
