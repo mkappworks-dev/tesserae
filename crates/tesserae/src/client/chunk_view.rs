@@ -669,9 +669,15 @@ mod tests {
         app
     }
 
-    /// Whether the material cuts a level-`level` fragment at `point`, read the
-    /// way the shader reads it.
+    /// Whether the material cuts a level-`level` upward face at `point`, read
+    /// the way the shader reads it.
     fn cuts_at(app: &App, blended: bool, level: u32, point: Vec3) -> bool {
+        cuts_facing(app, blended, level, point, Vec3::Y)
+    }
+
+    /// `cuts_at` for a face of any orientation: the Chunk asked about is the one
+    /// behind the face, so its normal decides which side of a boundary it is on.
+    fn cuts_facing(app: &App, blended: bool, level: u32, point: Vec3, normal: Vec3) -> bool {
         let terrain = app.world().resource::<TerrainMaterial>();
         let handle = if blended {
             &terrain.blended
@@ -688,7 +694,12 @@ mod tests {
             .resource::<Assets<ShaderBuffer>>()
             .get(&material.extension.drawn)
             .unwrap();
-        crate::client::drawn_mask::contains(buffer.cast_slice::<u32>().unwrap(), level, point)
+        crate::client::drawn_mask::contains(
+            buffer.cast_slice::<u32>().unwrap(),
+            level,
+            point,
+            normal,
+        )
     }
 
     #[test]
@@ -730,6 +741,27 @@ mod tests {
         send_coarse(&mut app, 1, a, geometry());
         assert!(cuts_at(&app, true, 2, inside(a, 1)), "level 2 asks level 1");
         assert!(!cuts_at(&app, true, 1, inside(a, 1) + Vec3::splat(40.0)));
+    }
+
+    /// Ticket 17: `level_the_water` puts a coarse water surface at level 0's own
+    /// height, which a Mod's water level can place exactly on a Chunk boundary.
+    #[test]
+    fn a_face_on_a_chunk_boundary_asks_the_chunk_whose_mesh_holds_it() {
+        let mut app = app();
+        let world = *app.world().resource::<WorldSettings>();
+        let sent = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, sent, geometry());
+        let cell_m = world.cell_size_at(0);
+        let boundary = world.chunk_origin_at(ChunkCoord::new(0, 1, 0), 0)
+            + Vec3::new(cell_m / 2.0, 0.0, cell_m / 2.0);
+        assert!(
+            cuts_facing(&app, true, 1, boundary, Vec3::Y),
+            "an upward face there is the sent Chunk's own top"
+        );
+        assert!(
+            !cuts_facing(&app, true, 1, boundary, Vec3::NEG_Y),
+            "a downward face there belongs to the Chunk above, which was not sent"
+        );
     }
 
     #[test]

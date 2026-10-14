@@ -57,5 +57,20 @@ material's buffer is one zero word and cuts nothing.
   `TESSERAE_TRANSLUCENT_ROW=0`: the only differences are the frame-rate digits
   and the hotbar hint in the overlay text.
 - Limit: a coarse water surface above the finer level's top row, which only
-  happens near the vertical edge of a level, is not cut.
+  happens near the vertical edge of a level, is not cut. (Ticket 14; gone with
+  ticket 17, which puts every level's water surface at level 0's height.)
+
+2026-10-14, the mirror case at a level's bottom edge, from ticket 17. The cut
+asks the finer level about a Chunk it was sent, so it stops at the finer
+level's rows in both directions. Above them ticket 14's doubling is gone,
+because a water surface is now one height for every level. Below them nothing
+levels anything: a coarse blended face in the unsent Chunk under the finer
+level's lowest row - the sides of a deep lake, or a Mod's glass down there - is
+not cut, and where the finer level draws the same surface in its lowest row the
+two composite, as in ticket 14 mirrored. It needs the Eye high enough over a
+lake for the finer slab's bottom to cut through it, and no capture has shown
+it. The fix, when one is wanted, is the same shape as ticket 17's: the cut
+would have to treat a Chunk below the finer level's rows as drawn, which only
+holds while the finer level covers the column - what ticket 14's rejected fix
+got wrong in the other direction.
 

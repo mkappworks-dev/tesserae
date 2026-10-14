@@ -64,10 +64,16 @@ fn index(local: IVec3, size: UVec3) -> usize {
     ((local.z * size.y + local.y) * size.x + local.x) as usize
 }
 
-/// Whether the level below `level` has drawn the Chunk holding `point_m`: what
-/// the shader asks, for the tests to ask the same way.
+/// How far behind a face its own Voxel is sampled, as a fraction of a Cell.
+/// `chunk_material.wesl`'s `BEHIND_A_FACE`.
 #[cfg(test)]
-pub fn contains(words: &[u32], level: u32, point_m: Vec3) -> bool {
+const BEHIND_A_FACE: f32 = 1.0 / 1024.0;
+
+/// Whether the level below `level` has drawn the Chunk holding the face at
+/// `point_m` facing `normal`: what the shader asks, for the tests to ask the
+/// same way, the sample a hair behind the face included.
+#[cfg(test)]
+pub fn contains(words: &[u32], level: u32, point_m: Vec3, normal: Vec3) -> bool {
     if level == 0 || words.first().is_none_or(|&levels| level >= levels) {
         return false;
     }
@@ -82,7 +88,8 @@ pub fn contains(words: &[u32], level: u32, point_m: Vec3) -> bool {
         words[slot + 3] as i32,
     );
     let cell_m = f32::from_bits(words[slot + 7]);
-    let local = (point_m / cell_m).floor().as_ivec3() - origin;
+    let behind = point_m - normal.normalize() * cell_m * BEHIND_A_FACE;
+    let local = (behind / cell_m).floor().as_ivec3() - origin;
     if local.min_element() < 0 || local.as_uvec3().cmpge(size).any() {
         return false;
     }

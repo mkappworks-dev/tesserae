@@ -361,7 +361,7 @@ in step 5. The streaming worst tick is re-derived if a stage's cost moves.
 | 11  | Water is not solid                                            | 01         |
 | 12  | Leaf holes: one definition, less regular                      | 10         |
 | 13  | A coarse lake bed is dimmed by the water over it              | 09         |
-| 14  | Coarse water above the finer rows (wontfix)                   | 07         |
+| 14  | Coarse water above the finer rows (fixed by 17)               | 07         |
 | 15  | Exact blended order for large meshes                          | 08         |
 | 16  | `mesh_chunk/straddling` against `main`                        | 09         |
 | 17  | A coarse water surface sits at level 0's height             | 07, 13     |
@@ -384,6 +384,12 @@ are testable alone. 04 is the first time a player can see any of it.
   `Tables::joint_id` leaves clear Materials out of it, so two glass halves seal
   nothing. The mesher still tests each quad against one neighbour's coverage, so
   a face two neighbours jointly hide is drawn: overdraw, never a hole.
+- ~~**A coarse water surface is up to half a coarse Voxel off level 0's.**~~ The
+  Server moves every coarse water mesh's top face to level 0's own surface
+  height (ticket 17), so every level draws the surface where level 0 does and
+  the cut of ticket 07 asks about the Chunk the finer surface is in. The lake
+  _bed_ is still a mip of itself, and so are glass and leaves: only water has a
+  height every level agrees on.
 - **Quad order is exact up to 2048 quads a mesh** (tickets 08 and 15), which no
   mesh of a default World reaches; a mesh the frame's sorting budget does not
   reach keeps its order a frame longer.

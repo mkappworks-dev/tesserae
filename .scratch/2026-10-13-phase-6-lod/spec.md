@@ -492,7 +492,12 @@ computed.
   Chunks it has been sent a mesh for (empty ones too), and the shader discards a
   coarse blended fragment inside any of them. A fade across the band was tried
   first and was worse: it thinned the only water there was where the finer
-  level does not reach.
+  level does not reach. Water also has no seam left: its surface is one height
+  the Server gives every level, level 0's own (ticket 17), so the "step of at
+  most one coarse Voxel" above is the ground's and not the lake's. The cut
+  samples a hair behind the face along its normal, because a levelled surface
+  can lie exactly on a Chunk boundary and must be asked about the Chunk whose
+  mesh holds it.
 
 ### 10. What a Mod registers or parameterises
 

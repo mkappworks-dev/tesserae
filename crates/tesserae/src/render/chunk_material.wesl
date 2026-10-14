@@ -38,8 +38,17 @@ var<uniform> lod: LodParams;
 @group(constants::MATERIAL_BIND_GROUP) @binding(102)
 var<storage, read> drawn: array<u32>;
 
-// Whether the level below `level` has drawn the Chunk holding `point`.
-fn finer_drawn(level: u32, point: vec3<f32>) -> bool {
+// How far behind a face its own Voxel is sampled, as a fraction of the finer
+// Cell: a thirty-second of one of its Voxels, far enough to clear the float
+// error in a world-space coordinate and far short of leaving the Voxel.
+const BEHIND_A_FACE: f32 = 1.0 / 1024.0;
+
+// Whether the level below `level` has drawn the Chunk holding the face at
+// `point` facing `normal`. The Chunk asked about is the one behind the face,
+// because a face lies on the boundary of the Voxel it is the surface of: water
+// levelled onto a Chunk boundary by `level_the_water` would otherwise ask the
+// Chunk above it, which holds no water at all.
+fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
     if level == 0u || level >= drawn[0] {
         return false;
     }
@@ -54,7 +63,8 @@ fn finer_drawn(level: u32, point: vec3<f32>) -> bool {
         bitcast<i32>(drawn[slot + 3u]),
     );
     let cell_m = bitcast<f32>(drawn[slot + 7u]);
-    let local = vec3<i32>(floor(point / cell_m)) - origin;
+    let behind = point - normalize(normal) * cell_m * BEHIND_A_FACE;
+    let local = vec3<i32>(floor(behind / cell_m)) - origin;
     if any(local < vec3<i32>(0)) || any(vec3<u32>(local) >= size) {
         return false;
     }
@@ -178,7 +188,7 @@ fn fragment(
 
     // Where the finer level has drawn its Chunk, a blended coarse fragment would
     // be a second layer of water. The opaque material's buffer cuts nothing.
-    if finer_drawn(in.level, in.world_position.xyz) {
+    if finer_drawn(in.level, in.world_position.xyz, in.world_normal) {
         discard;
     }
 
