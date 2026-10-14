@@ -1,7 +1,7 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tesserae_core::light::{Light, MAX_LIGHT};
-use tesserae_core::lod::downsample;
+use tesserae_core::lod::{coarse_light, downsample};
 use tesserae_core::mesh::FACE_STEPS;
 use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Orientation, SHAPE_STAIR};
 use tesserae_core::{ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk, testgen};
@@ -176,5 +176,88 @@ fn mesh_coarse(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, terrain, coarse_chunk, mesh_coarse);
+/// A coarse Chunk and its six face neighbours.
+fn around(source: &Worldgen, shapes: &ShapeTable, [cx, cy, cz]: [i32; 3]) -> (Chunk, [Chunk; 6]) {
+    let center = coarse(source, shapes, [cx, cy, cz]);
+    let around = std::array::from_fn(|face| {
+        let [dx, dy, dz] = FACE_STEPS[face];
+        coarse(source, shapes, [cx + dx, cy + dy, cz + dz])
+    });
+    (center, around)
+}
+
+/// The covered-column rule alone: a Chunk the surface crosses, at every level, and one wholly
+/// above the band, which answers without a height.
+fn coarse_light_rule(c: &mut Criterion) {
+    let shapes = ShapeTable::builtin();
+    let mut group = c.benchmark_group("lod/coarse_light");
+    let mut bench = |name: String, level: u32, at: [i32; 3]| {
+        let source = source(level);
+        let (center, around) = around(&source, &shapes, at);
+        let voxel_m = 2f32.powi(level as i32);
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                black_box(coarse_light(
+                    &source,
+                    voxel_m,
+                    black_box(at),
+                    black_box(&center),
+                    std::array::from_fn(|face| &around[face]),
+                ))
+            })
+        });
+    };
+    for level in 1..=DEEPEST_LEVEL {
+        bench(format!("surface_level_{level}"), level, surface_at(level));
+    }
+    let [x, y, z] = surface_at(1);
+    bench("above_band_level_1".into(), 1, [x, y + 3, z]);
+    group.finish();
+}
+
+/// What a coarse mesh job costs now: the rule, then the mesher. `mouth_level_1` is the Chunk
+/// of the default seed's cave mouth at (-26, -352) m, which has covered Voxels to light.
+fn mesh_coarse_lit(c: &mut Criterion) {
+    let shapes = ShapeTable::builtin();
+    let tables = Tables::builtin();
+    let mut group = c.benchmark_group("lod/mesh_coarse_lit");
+    let mut bench = |name: String, level: u32, at: [i32; 3]| {
+        let source = source(level);
+        let (center, around) = around(&source, &shapes, at);
+        let voxel_m = 2f32.powi(level as i32);
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                let lit = coarse_light(
+                    &source,
+                    voxel_m,
+                    black_box(at),
+                    black_box(&center),
+                    std::array::from_fn(|face| &around[face]),
+                );
+                let neighbors = std::array::from_fn(|face| {
+                    Some(LitChunk::new(&around[face], &lit.around[face]))
+                });
+                black_box(mesh_chunk(
+                    LitChunk::new(black_box(&center), &lit.center),
+                    neighbors,
+                    &tables,
+                ))
+            })
+        });
+    };
+    for level in 1..=DEEPEST_LEVEL {
+        bench(format!("surface_level_{level}"), level, surface_at(level));
+    }
+    bench("mouth_level_1".into(), 1, [-1, 0, -6]);
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    terrain,
+    coarse_chunk,
+    mesh_coarse,
+    coarse_light_rule,
+    mesh_coarse_lit
+);
 criterion_main!(benches);
