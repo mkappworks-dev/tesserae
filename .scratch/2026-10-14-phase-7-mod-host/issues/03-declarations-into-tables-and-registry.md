@@ -1,6 +1,6 @@
 # Declarations into tables, and the Registry
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec decisions 4 and 5, and the core half of 12.
@@ -49,3 +49,26 @@ Spec decisions 4 and 5, and the core half of 12.
 
 - `./scripts/cargo-ci` passes. `tesserae-core` gains no dependency.
 - Every distance in a converted record is metres and no Voxel unit appears.
+
+## Comments
+
+- The numbers that moved or were added are in the spec's Outcome, "Ticket 03".
+  `WorldgenParams::validate` is in core with `ParamError { field, rule }`,
+  `MAX_OCTAVES` (8) and `MAX_HEIGHT_M`; core gained no dependency. It also
+  gained `Display` and `Error` for `MaterialError`, which `ModError` prints.
+- `apply` returns `Applied { world, view }` instead of `()`, and `ViewParams`
+  validates itself (32..=512, then view..=8192); `tesserae` maps it into
+  `StreamingSettings` in ticket 06. `Declaration` is re-exported from the
+  generated bindings; nothing else from them is public.
+- Validation is two passes inside `apply`: counts, names and parameters for the
+  whole Declaration first, then registration, so a bad name in the last row
+  registers nothing. A `MaterialError` or `ShapeError` mid-registration can
+  still leave a partial Mod, which is fine because a failed load is abandoned.
+- Appearance rows are neither validated nor consumed here; ticket 06 resolves
+  them against the Registry.
+- `convert.rs` lost its `dead_code` allowance (nothing in it is dead now). The
+  remaining ones in `bindings.rs`, `host.rs` and `loader.rs` now point at
+  ticket 06, where instantiation lands.
+- `fbm2` adds `seed + octave` without wrapping, so a folded seed within 8 of
+  `u32::MAX` panics in a debug build; `fbm3` is covered by a test and `fbm2` is
+  not. Left alone: it is not this ticket's and release builds wrap.

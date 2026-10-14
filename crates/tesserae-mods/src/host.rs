@@ -1,6 +1,6 @@
 //! What a Mod's `Store` holds and the imports a Mod may call.
 
-// The Store, imports and Linker are used by ticket 03's instantiation; until then, tests.
+// The Store, imports and Linker are used by ticket 06's instantiation; until then, tests.
 #![allow(dead_code)]
 
 use tesserae_core::WorldgenParams;

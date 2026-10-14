@@ -685,6 +685,50 @@ Written as the tickets finish; what changed from the text above, and why.
   optionally, through the export index, not through the generated
   `instantiate`.
 
+### Ticket 03: declarations into tables
+
+- **`octaves` is `1..=8`, and now it has a reason.** The noise multiplies a
+  coordinate by `2^(octaves - 1)` in `f32` before taking its lattice cell, so
+  at 8 octaves the lattice stays exact out to 2^17 feature sizes from the
+  origin (about 12 600 km at the default 96 m). At 24 it is exact within two
+  feature sizes, and past 2^31 the cell index overflows (`noise2` panics in a
+  debug build). The generator tolerates 0 octaves (a flat World); `validate`
+  rejects it, since `relief_m: 0` says the same.
+- **Added: heights are bounded.** `sea_level_m`, `sea_level_m + relief_m` and
+  `soil_depth_m` must be within 65 536 m of zero (`MAX_HEIGHT_M`). Coarse light
+  walks the whole surface band a Chunk row at a time, generating eight Chunks
+  per row, so an unbounded relief is an unbounded loop, and a metre position
+  stops being exact at small Voxel sizes much past this. Decision 5 listed no
+  upper bound.
+- **Added: finiteness of the rest.** A Cave's `floor_m`, a Smoothing
+  `min_rise_m` (also not negative) and a Water `level_m` must be finite; the
+  generator's clamp would silently take a NaN level as the surface. A size must
+  be positive and its inverse finite, which is what the generator multiplies by.
+- **The reach: `view_distance_m` 32..=512 and `lod_distance_m` from the view
+  distance to 8192 stand.** Two corrections to the reasoning. The level count
+  is `1 + ceil(log2(lod / view))`, at most 9 (view 32, lod 8192), so
+  `MAX_LEVELS` (32) is nowhere near binding and is not what the ceiling is for;
+  the ceiling is cost. DESIGN.md's table was measured at 192 m only, and a
+  level holds Chunks in proportion to the view distance squared, so 512 m is
+  about 7 times the table's Chunks per level (roughly 0.9 GB of meshes against
+  128 MB, extrapolated and not measured). The code accepts less than 32 m
+  (it clamps to one Cell) and a `lod_distance_m` below the view distance (no
+  coarse levels), so those two floors are policy, not the generator's.
+  `lod_distance_m == view_distance_m` is how a Game says "no coarse levels".
+- **`apply` returns `Applied { world, view }`, not `()`**: the Game's
+  parameters have to come out of it, and validating them anywhere else would
+  validate them twice.
+- **The registration limits are constants in `declare.rs`** (`MAX_MATERIALS`
+  56, `MAX_SHAPES` 252, `MAX_PER_MOD` 64, `MAX_NAME_BYTES` 32), not fields of
+  `ModLimits`: that struct is what a Manifest may lower, and these are not the
+  Mod's to lower.
+- **`core` is not a Mod id.** A Mod whose id is `core` is `ReservedId`, so
+  nothing can add to the built-in namespace. A name cannot otherwise collide
+  with a built-in, since the engine prefixes it with the Mod's id.
+- `replay` returns the saved order and nothing it lacks: a name the current
+  load provides and the save does not is left without an id there. A save step
+  decides whether to append it.
+
 ## Tickets
 
 | #   | Title                                              | Blocked by |

@@ -1,7 +1,7 @@
 //! The Rust side of `wit/`, generated. Private: nothing outside this crate sees
 //! a generated type.
 
-// Until the loader lands (ticket 03) only the tests use most of the generated items.
+// Until instantiation lands (ticket 06) only the tests use most of the generated items.
 #![allow(dead_code)]
 
 wasmtime::component::bindgen!({

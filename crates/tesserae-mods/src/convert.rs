@@ -2,9 +2,6 @@
 //! the engine's own data to a Mod. Field for field, no clamping: validation is
 //! the registration's, so a bad row is reported by the table that owns the rule.
 
-// Until the loader lands (ticket 03) only the tests use these.
-#![allow(dead_code)]
-
 use tesserae_core::{
     Arm, CaveParams, CollisionBox, ConnectDef, MaterialDef, NodeBox, Occlusion, RenderClass,
     ShapeDef, SmoothingParams, WaterParams, WorldgenParams,

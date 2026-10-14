@@ -121,6 +121,20 @@ pub enum MaterialError {
     TableFull,
 }
 
+impl std::fmt::Display for MaterialError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            MaterialError::LightOutOfRange => "emission and dimming are at most 15",
+            MaterialError::OpaqueNotOpaque => {
+                "an Opaque Material needs dimming 15 and the opaque render class"
+            }
+            MaterialError::TableFull => "all 65536 MaterialIds are taken",
+        })
+    }
+}
+
+impl std::error::Error for MaterialError {}
+
 /// Every registered Material.
 ///
 /// Filled by one batched `register` per Material at load and read natively

@@ -11,12 +11,12 @@ use crate::trust::{Trust, Verdict};
 pub struct Compiled {
     pub found: Found,
     pub limits: ModLimits,
-    #[allow(dead_code)] // ticket 03 instantiates it
+    #[allow(dead_code)] // ticket 06 instantiates it
     pub(crate) component: Component,
 }
 
 pub struct ModHost {
-    #[allow(dead_code)] // ticket 03 builds Stores from it
+    #[allow(dead_code)] // ticket 06 builds Stores from it
     pub(crate) engine: Engine,
     limits: ModLimits,
 }
