@@ -9,6 +9,15 @@ use tesserae_core::{ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, mesh_ch
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const DEEPEST_LEVEL: u32 = 5;
 
+/// A default World with its lakes left out: the terrain every figure in this
+/// file measured before lakes, so a change stays comparable with `main`.
+fn dry() -> WorldgenParams {
+    WorldgenParams {
+        water: None,
+        ..WorldgenParams::default()
+    }
+}
+
 fn octants(chunk_at: impl Fn(i32, i32, i32) -> Chunk, [cx, cy, cz]: [i32; 3]) -> [Chunk; 8] {
     std::array::from_fn(|i| {
         let (x, y, z) = (i as i32 & 1, i as i32 >> 1 & 1, i as i32 >> 2);
@@ -70,7 +79,7 @@ fn stair_surface() -> [Chunk; 8] {
 
 fn terrain(c: &mut Criterion) {
     let shapes = ShapeTable::builtin();
-    let g = Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default());
+    let g = Worldgen::new(0x7e55_e2ae, 1.0, dry());
     let surface = (g.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
     let world = octants(|x, y, z| g.chunk(x, y, z), [0, surface, 0]);
     let fixture = octants(testgen::terrain_chunk, [0, 0, 0]);
@@ -106,7 +115,7 @@ fn terrain(c: &mut Criterion) {
 /// Mirrors the Server's sources: level 0 is production, those above it skip smoothing
 /// because a coarse Voxel rounds stairs back to cubes.
 fn source(level: u32) -> Worldgen {
-    let params = WorldgenParams::default();
+    let params = dry();
     if level == 1 {
         return Worldgen::new(SEED, 1.0, params);
     }

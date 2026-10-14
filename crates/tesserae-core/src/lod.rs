@@ -686,8 +686,10 @@ mod tests {
     /// The top solid coarse Voxel of the column at `level`, built as the Server does, and its
     /// top face in metres.
     fn top_of_column(level: u32, x_m: f32, z_m: f32) -> (Voxel, f32) {
+        // The terrain's own surface, so a dry World: a lake's top is water.
         let params = WorldgenParams {
             caves: None,
+            water: None,
             ..WorldgenParams::default()
         };
         let below = level - 1;

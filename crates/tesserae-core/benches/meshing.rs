@@ -9,6 +9,15 @@ use tesserae_core::{
     mesh_chunk, testgen,
 };
 
+/// A default World with its lakes left out: the terrain every figure in this
+/// file measured before lakes, so a change stays comparable with `main`.
+fn dry() -> WorldgenParams {
+    WorldgenParams {
+        water: None,
+        ..WorldgenParams::default()
+    }
+}
+
 fn tables() -> &'static Tables {
     static TABLES: OnceLock<Tables> = OnceLock::new();
     TABLES.get_or_init(Tables::builtin)
@@ -28,7 +37,7 @@ fn open_sky() -> ChunkLight {
 fn worldgen() -> (Worldgen, i32, i32, i32) {
     let params = WorldgenParams {
         caves: None,
-        ..WorldgenParams::default()
+        ..dry()
     };
     let g = Worldgen::new(0x7e55_e2ae, 1.0, params);
     let cell = tesserae_core::CHUNK_SIZE as f32;
@@ -50,7 +59,7 @@ fn unsmoothed() -> Worldgen {
         WorldgenParams {
             caves: None,
             smoothing: None,
-            ..WorldgenParams::default()
+            ..dry()
         },
     )
 }
@@ -154,7 +163,7 @@ fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
 fn cave_params() -> WorldgenParams {
     WorldgenParams {
         smoothing: None,
-        ..WorldgenParams::default()
+        ..dry()
     }
 }
 
@@ -592,6 +601,24 @@ fn streamed_mesher(c: &mut Criterion) {
         b.iter(|| black_box(mesh_chunk(black_box(lit_center), black_box(refs), tables())))
     });
 
+    // A shore, lit as open sky like the rest: water's faces in the blended
+    // layer, and the bed's under it.
+    let (wet, at) = shore();
+    let wet_center = wet.chunk(at.0, at.1, at.2);
+    let wet_around = chunks_around(&wet, at);
+    let wet_refs: [Option<LitChunk>; 6] =
+        std::array::from_fn(|i| Some(LitChunk::new(&wet_around[i], &sky)));
+    let lit_wet = LitChunk::new(&wet_center, &sky);
+    group.bench_function("shore", |b| {
+        b.iter(|| {
+            black_box(mesh_chunk(
+                black_box(lit_wet),
+                black_box(wet_refs),
+                tables(),
+            ))
+        })
+    });
+
     // The same Chunk with the ground left as cubes, and the densest ramp.
     let bare = unsmoothed();
     let bare_center = bare.chunk(0, straddling, 0);
@@ -707,9 +734,34 @@ fn neighborhood(c: &mut Criterion) {
     });
 }
 
+/// A default World as it is generated, lakes and all, without caves like
+/// [`worldgen`], and the surface Chunk of the first column along +x whose ground
+/// is under its water: what a shore costs.
+fn shore() -> (Worldgen, (i32, i32, i32)) {
+    let g = Worldgen::new(
+        0x7e55_e2ae,
+        1.0,
+        WorldgenParams {
+            caves: None,
+            ..WorldgenParams::default()
+        },
+    );
+    let level = g.water_level_m().expect("the default World has water");
+    let cell = tesserae_core::CHUNK_SIZE as f32;
+    let cx = (0..)
+        .find(|&cx| g.surface_height_m((cx as f32 + 0.5) * cell, 0.5 * cell) < level - 2.0)
+        .unwrap();
+    (g, (cx, (level / cell).floor() as i32, 0))
+}
+
 fn generation(c: &mut Criterion) {
     let mut group = c.benchmark_group("worldgen");
     let (g, straddling, sky, deep) = worldgen();
+
+    let (wet, (wx, wy, wz)) = shore();
+    group.bench_function("shore", |b| {
+        b.iter(|| black_box(wet.chunk(black_box(wx), wy, wz)))
+    });
 
     group.bench_function("straddling", |b| {
         b.iter(|| black_box(g.chunk(black_box(0), straddling, 0)))

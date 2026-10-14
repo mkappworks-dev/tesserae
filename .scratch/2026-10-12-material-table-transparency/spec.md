@@ -389,8 +389,8 @@ are testable alone. 04 is the first time a player can see any of it.
   water cell.
 - **Leaf holes are a procedural pattern** (ticket 10), regular to the eye, until
   step 9's textures replace it.
-- **Worldgen places none.** Terrain contains no translucent Voxel, so a player
-  sees them only by placing them, as with shaped Voxels in step 5.
+- ~~**Worldgen places none.**~~ A default World has lakes at one water level
+  (ticket 09); glass and leaves are still a player's to place.
 
 ## Done when
 
