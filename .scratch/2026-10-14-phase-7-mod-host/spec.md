@@ -750,7 +750,7 @@ Written as the tickets finish; what changed from the text above, and why.
   per iteration). `CALL_FUEL` is 200 000 000, 4.8 ms of the heavy mix and 2.7
   ms of the light one. `YIELD_FUEL` is 10 000 000, 0.14 to 0.24 ms between
   turns. Yielding every 1 000 000 fuel against never costs nothing measurable
-  (49.5 ms against 49.4 ms for 2 000 000 000 fuel), so the interval is chosen
+  (49.5 ms against 49.1 ms for 2 000 000 000 fuel), so the interval is chosen
   for latency alone. `MAX_CALL_WALL` stays 250 ms, 50 full calls of CPU: it is
   there for what fuel cannot see, and a call that yields twenty times can wait
   on a busy pool between turns.
@@ -778,6 +778,51 @@ Written as the tickets finish; what changed from the text above, and why.
   and the Mod id, one each for the secure and insecure sources, so a Mod run
   twice in a World repeats. A request over 64 KiB traps.
 
+### Ticket 05
+
+- Voxel validity lives in dependency-free `Tables::vet_placed` in core because
+  both player Edits and Mod Commands need precisely the same check. - Region
+  conversion and the lazy cursor live once in `tesserae-mods`; membership   uses
+  lower corners in `[min,max)`, so indices are `ceil(min / size)..ceil(max   /
+  size)`. Empty regions still validate all axes; sizes must be finite,
+  positive and have a finite inverse. - Measured on the M5 (10 cores), wasmtime
+  49.0.4, release, process CPU time, 60 interleaved   rounds with rotating
+  order; `uptime` before and after was 9.01/10.88/7.69 and   8.55/10.69/7.68.
+  The short-call calibration now times batches, avoiding zero   readings. The
+  earlier calibration run was discarded.
+
+| N | empty µs | batch µs | ns/place | validate µs | naive µs | load 1m |
+| - | - | - | - | - | - | - |
+| 16 | 34.48 | 34.24 | 2140.0 | 0.06 | 0.93 | 9.01→8.55 |
+| 256 | 34.82 | 35.88 | 140.2 | 0.48 | 11.57 | 9.01→8.55 |
+| 4096 | 35.10 | 85.16 | 20.8 | 7.27 | 178.99 | 9.01→8.55 |
+
+- N means placements in one `place` Command, not N outer Commands (capped at
+  1024). At load 9.01→8.55, batched tick plus native validation costs
+  33.76/36.20/92.40 µs at N=16/256/4096. Native validation is about 1.8
+  ns/placement at the larger sizes. - The naive harness refuels and validates
+  each Voxel but has no deadline timer;   production tick spawns a deadline
+  thread per call. Thus small-batch totals do   not establish a batching speedup
+  or flat per-placement cost. At N=4096 naive   is 2.10 times tick alone, or
+  1.94 times tick plus validation; the 34–35 µs   empty floor is about 0.2% of a
+  15.6 ms tick (load 9.01→8.55). A shared timer   is a future optimization, not
+  hidden by subtracting this floor. - The flooder measurement interleaves five
+  full-lift and `WasmList` calls,   reporting minimum process CPU and peak live
+  host allocation; `uptime`   before/after was 8.55/10.69/7.68. At 1024
+  commands: 195 µs lifted, 9 µs   counted first, 165 ns post-lift check (load
+  8.55). At 100000: 1.599 ms, 0.500   ms, 39 ns, 3 MiB lifted peak (load 8.55).
+  At 1000000: 15.611 ms, 6.519 ms, 42   ns, 30 MiB lifted peak versus under 1
+  MiB counted first (load 8.55). - Counting during lift is not worth
+  hand-maintaining the typed WIT return path   here: it saves about 9.1 ms and
+  30 MiB only for a malformed million-command   batch; guest memory is capped at
+  64 MiB and that Mod is disabled. The   post-lift check is constant-time for an
+  oversized outer list and runs   before the second conversion. Valid lists also
+  count nested placements before copying.   This explicitly replaces the
+  ticket's unattainable generated-bindings promise   to reject before the
+  initial whole-list lift. - Updated wasmtime/WASI and Cranelift to patch
+  49.0.4/0.136.4 because   cargo-deny found RUSTSEC-2026-0378 and
+  RUSTSEC-2026-0379 in locked 49.0.3;   the manifest minimum is patched too, so
+  a lock refresh cannot regress it.
 ## Tickets
 
 | #   | Title                                              | Blocked by |

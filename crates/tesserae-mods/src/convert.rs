@@ -4,10 +4,13 @@
 
 use tesserae_core::{
     Arm, CaveParams, CollisionBox, ConnectDef, MaterialDef, NodeBox, Occlusion, RenderClass,
-    ShapeDef, SmoothingParams, WaterParams, WorldgenParams,
+    ShapeDef, SmoothingParams, Voxel, WaterParams, WorldgenParams,
 };
 
-use crate::bindings::tesserae::mods::{content, types};
+use crate::bindings::exports::tesserae::mods::guest;
+use crate::bindings::tesserae::mods::{commands, content, types};
+use crate::command::{Command, Placement, Region};
+use crate::context::{EditEvent, TickContext};
 
 fn arr_u8((x, y, z): (u8, u8, u8)) -> [u8; 3] {
     [x, y, z]
@@ -158,6 +161,77 @@ impl From<WorldgenParams> for content::WorldParams {
                 min_rise_m: s.min_rise_m,
             }),
             water: p.water.map(|w| content::WaterParams { level_m: w.level_m }),
+        }
+    }
+}
+
+fn array(v: types::Vec3) -> [f32; 3] {
+    [v.x, v.y, v.z]
+}
+
+fn vec3([x, y, z]: [f32; 3]) -> types::Vec3 {
+    types::Vec3 { x, y, z }
+}
+
+impl From<types::Voxel> for Voxel {
+    fn from(v: types::Voxel) -> Self {
+        Voxel::new(v.material, v.shape, v.orientation)
+    }
+}
+
+impl From<Voxel> for types::Voxel {
+    fn from(v: Voxel) -> Self {
+        types::Voxel {
+            material: v.material(),
+            shape: v.shape(),
+            orientation: v.orientation(),
+        }
+    }
+}
+
+impl From<commands::Command> for Command {
+    fn from(c: commands::Command) -> Self {
+        match c {
+            commands::Command::Fill(fill) => Command::Fill {
+                region: Region {
+                    min: array(fill.region.min),
+                    max: array(fill.region.max),
+                },
+                voxel: fill.voxel.into(),
+            },
+            commands::Command::Place(placements) => Command::Place(
+                placements
+                    .into_iter()
+                    .map(|p| Placement {
+                        at: array(p.at),
+                        voxel: p.voxel.into(),
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
+impl From<TickContext> for guest::TickContext {
+    fn from(c: TickContext) -> Self {
+        guest::TickContext {
+            tick: c.tick,
+            dt_s: c.dt_s,
+            edits: c.edits.into_iter().map(Into::into).collect(),
+            last: guest::BatchReport {
+                applied: c.last.applied,
+                rejected: c.last.rejected,
+            },
+        }
+    }
+}
+
+impl From<EditEvent> for guest::EditEvent {
+    fn from(e: EditEvent) -> Self {
+        guest::EditEvent {
+            at: vec3(e.at),
+            before: e.before.into(),
+            after: e.after.into(),
         }
     }
 }

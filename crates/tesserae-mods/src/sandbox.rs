@@ -14,9 +14,12 @@ use wasmtime::{Engine, Store, Trap};
 use wasmtime_wasi::runtime::with_ambient_tokio_runtime;
 
 use crate::bindings::Mod;
-use crate::bindings::exports::tesserae::mods::guest::{Registered, TickContext, WorldInfo};
-use crate::bindings::tesserae::mods::commands::Command;
+use crate::bindings::exports::tesserae::mods::guest;
+use crate::bindings::exports::tesserae::mods::guest::{Registered, WorldInfo};
+use crate::bindings::tesserae::mods::commands;
 use crate::bindings::tesserae::mods::content::Declaration;
+use crate::command::{Command, MAX_VOXELS_PER_CALL};
+use crate::context::TickContext;
 use crate::host::HostState;
 use crate::limits::{MAX_COMMANDS, ModLimits};
 use crate::log::{LogDrain, LogHandle};
@@ -117,7 +120,8 @@ impl ModInstance {
         Ok(self)
     }
 
-    /// The batch is checked for size only; its contents are the next ticket's.
+    /// The batch comes back in metres and unchecked but for its size: [`crate::validate`] is the
+    /// rest, and needs the tables, which an instance does not hold.
     pub async fn tick(
         mut self,
         context: TickContext,
@@ -125,20 +129,15 @@ impl ModInstance {
         self.refuel()?;
         let denied = self.store.data().denied();
         let guest = self.guest.tesserae_mods_guest();
+        let context = guest::TickContext::from(context);
         let batch = guarded(
             self.limits.max_call_wall,
             &denied,
             guest.call_tick(&mut self.store, &context),
         )
         .await?;
-        // wasmtime lifts the whole list before the host sees it, so this bounds what is kept, and
-        // `memory_bytes` bounds what was allocated getting here.
-        if batch.len() > MAX_COMMANDS {
-            return Err(ModFault::BadBatch(format!(
-                "{} commands, at most {MAX_COMMANDS} are allowed",
-                batch.len()
-            )));
-        }
+        check_size(&batch)?;
+        let batch = batch.into_iter().map(Command::from).collect();
         Ok((self, batch))
     }
 
@@ -157,6 +156,30 @@ impl ModInstance {
             .set_fuel(self.limits.call_fuel)
             .map_err(|e| ModFault::Trap(format!("{e:#}")))
     }
+}
+
+/// wasmtime lifts the whole list before the host sees it, so this bounds what is kept and
+/// `memory_bytes` bounds what was allocated getting here; it runs before anything is converted.
+pub(crate) fn check_size(batch: &[commands::Command]) -> Result<(), ModFault> {
+    if batch.len() > MAX_COMMANDS {
+        return Err(ModFault::BadBatch(format!(
+            "{} commands, at most {MAX_COMMANDS} are allowed",
+            batch.len()
+        )));
+    }
+    let placed: usize = batch
+        .iter()
+        .map(|command| match command {
+            commands::Command::Place(placements) => placements.len(),
+            commands::Command::Fill(_) => 0,
+        })
+        .sum();
+    if placed as u64 > MAX_VOXELS_PER_CALL {
+        return Err(ModFault::BadBatch(format!(
+            "{placed} placements, at most {MAX_VOXELS_PER_CALL} Voxels are allowed"
+        )));
+    }
+    Ok(())
 }
 
 /// Drives `call` with the wall-clock timer racing it; dropping `call` is what cancels the guest.

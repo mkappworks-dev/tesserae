@@ -8,32 +8,32 @@ use wasmtime::component::Component;
 
 use super::alloc::{live, peak_during};
 use super::load;
-use crate::bindings::exports::tesserae::mods::guest::{BatchReport, TickContext};
 use crate::host::{HostState, engine, linker};
 use crate::log::LogLevel;
 use crate::sandbox::{ModFault, ModInstance};
+use crate::{BatchReport, TickContext};
 use crate::{ModLimits, Registry, apply};
 
 /// What a margin of scheduling noise on a loaded machine is worth.
 const MARGIN: Duration = Duration::from_millis(400);
 
-struct Rig {
-    engine: wasmtime::Engine,
-    linker: wasmtime::component::Linker<HostState>,
+pub(super) struct Rig {
+    pub(super) engine: wasmtime::Engine,
+    pub(super) linker: wasmtime::component::Linker<HostState>,
 }
 
 impl Rig {
-    fn new() -> Rig {
+    pub(super) fn new() -> Rig {
         let engine = engine().unwrap();
         let linker = linker(&engine).unwrap();
         Rig { engine, linker }
     }
 
-    fn component(&self, name: &str) -> Component {
+    pub(super) fn component(&self, name: &str) -> Component {
         load(&self.engine, name)
     }
 
-    fn instance(&self, name: &str, limits: ModLimits) -> Result<ModInstance, ModFault> {
+    pub(super) fn instance(&self, name: &str, limits: ModLimits) -> Result<ModInstance, ModFault> {
         block_on(ModInstance::new(
             &self.engine,
             &self.linker,
@@ -45,7 +45,7 @@ impl Rig {
     }
 }
 
-fn context(tick: u64) -> TickContext {
+pub(super) fn context(tick: u64) -> TickContext {
     TickContext {
         tick,
         dt_s: 0.0,
@@ -341,7 +341,7 @@ fn measure_fuel_per_millisecond() {
             let started = Instant::now();
             guest
                 .tesserae_mods_guest()
-                .call_tick(&mut store, &churn_context(mode, iterations))
+                .call_tick(&mut store, &churn_context(mode, iterations).into())
                 .await
                 .unwrap();
             (started.elapsed(), before - store.get_fuel().unwrap())
@@ -379,5 +379,96 @@ fn measure_yield_overhead() {
             best = best.min(started.elapsed());
         }
         println!("yield every {yield_fuel}: best of 5 {best:?} for {FUEL} fuel");
+    }
+}
+
+/// What the host pays for a flood that wasmtime lifts whole, against counting it first through a
+/// hand-typed `WasmList`: `cargo test -p tesserae-mods measure_flood -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement, not a check"]
+fn measure_flood() {
+    use crate::bindings::exports::tesserae::mods::guest;
+    use crate::bindings::tesserae::mods::commands::Command as Lifted;
+    use wasmtime::Store;
+    use wasmtime::component::WasmList;
+
+    fn cpu() -> Duration {
+        let mut time = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        };
+        // SAFETY: time is a valid out pointer.
+        assert_eq!(
+            unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut time) },
+            0
+        );
+        Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+    }
+    let rig = Rig::new();
+    let component = rig.component("flooder");
+    let fuel = ModLimits::HOST.call_fuel;
+    for n in [1_024u64, 100_000, 1_000_000] {
+        let (mut lifted, mut counted) = (Duration::MAX, Duration::MAX);
+        let (mut lifted_peak, mut counted_peak) = (0, 0);
+        let mut check = Duration::MAX;
+        for _ in 0..5 {
+            let flooder = rig.instance("flooder", ModLimits::HOST).unwrap();
+            let (outcome, peak) = peak_during(|| {
+                let started = cpu();
+                let outcome = block_on(flooder.tick(context(n)));
+                (outcome.map(|_| ()), cpu() - started)
+            });
+            lifted = lifted.min(outcome.1);
+            lifted_peak = peak;
+
+            let mut post_store = Store::new(&rig.engine, HostState::new());
+            post_store.set_fuel(fuel).unwrap();
+            let post_guest = block_on(crate::bindings::Mod::instantiate_async(
+                &mut post_store,
+                &component,
+                &rig.linker,
+            ))
+            .unwrap();
+            let batch = block_on(
+                post_guest
+                    .tesserae_mods_guest()
+                    .call_tick(&mut post_store, &context(n).into()),
+            )
+            .unwrap();
+            let started = cpu();
+            for _ in 0..1000 {
+                let _ =
+                    std::hint::black_box(crate::sandbox::check_size(std::hint::black_box(&batch)));
+            }
+            check = check.min((cpu() - started) / 1000);
+
+            let mut store = Store::new(&rig.engine, HostState::new());
+            store.set_fuel(fuel).unwrap();
+            let instance = block_on(rig.linker.instantiate_async(&mut store, &component)).unwrap();
+            let index = instance
+                .get_export_index(&mut store, None, "tesserae:mods/guest@0.1.0")
+                .unwrap();
+            let tick = instance
+                .get_export_index(&mut store, Some(&index), "tick")
+                .unwrap();
+            let func = instance
+                .get_typed_func::<(guest::TickContext,), (WasmList<Lifted>,)>(&mut store, &tick)
+                .unwrap();
+            let ctx: guest::TickContext = context(n).into();
+            let (count, peak) = peak_during(|| {
+                let started = cpu();
+                let (list,) = block_on(func.call_async(&mut store, (ctx,))).unwrap();
+                let len = list.len();
+                (len, cpu() - started)
+            });
+            assert_eq!(count.0 as u64, n);
+            counted = counted.min(count.1);
+            counted_peak = peak;
+        }
+        println!(
+            "{n} commands: lifted whole {lifted:?} (host peak {} MB), counted first {counted:?} (host peak {} MB), post-lift check {check:?}",
+            lifted_peak >> 20,
+            counted_peak >> 20
+        );
     }
 }

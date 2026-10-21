@@ -8,7 +8,7 @@ license.workspace = true
 
 [dependencies]
 tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
-wasmtime = { version = "49.0.2", default-features = false, features = [
+wasmtime = { version = "49.0.4", default-features = false, features = [
   "runtime",
   "cranelift",
   "component-model",
@@ -16,7 +16,7 @@ wasmtime = { version = "49.0.2", default-features = false, features = [
   "parallel-compilation",
   "std",
 ] }
-wasmtime-wasi = { version = "49.0.2", default-features = false, features = ["p2"] }
+wasmtime-wasi = { version = "49.0.4", default-features = false, features = ["p2"] }
 bytes = "1"
 rand_core = { version = "0.10", default-features = false }
 serde = { version = "1", features = ["derive"] }
@@ -26,5 +26,12 @@ sha2 = "0.10"
 tokio = { version = "1", default-features = false }
 toml = "1"
 
+[[bench]]
+name = "host_calls"
+harness = false
+
 [dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 futures-lite = "2.6.1"
+# Process CPU time and the load average, for the benches' interleaved comparison.
+libc = "0.2"

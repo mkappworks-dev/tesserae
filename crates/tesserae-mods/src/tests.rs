@@ -9,6 +9,7 @@ use crate::bindings::tesserae::mods::content::Declaration;
 use crate::host::{HostState, engine, linker};
 
 mod alloc;
+mod commands;
 mod convert;
 mod declare;
 mod export_version;

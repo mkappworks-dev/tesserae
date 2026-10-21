@@ -25,7 +25,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use tesserae_core::collide::{VoxelVolume, raycast};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, Tables, Voxel, relight};
+use tesserae_core::{MAX_SHAPED_PER_CHUNK, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel, relight};
 
 use super::ContentTables;
 use super::player::{self, Player};
@@ -113,6 +113,17 @@ impl RejectReason {
             RejectReason::NoMaterial => "nothing to place",
             RejectReason::TooManyShaped => "too many shaped blocks in this chunk",
             RejectReason::Busy => "the server is busy, try again",
+        }
+    }
+}
+
+impl From<PlaceFault> for RejectReason {
+    fn from(fault: PlaceFault) -> Self {
+        match fault {
+            PlaceFault::Air => RejectReason::NoMaterial,
+            PlaceFault::UnknownMaterial => RejectReason::UnknownMaterial,
+            PlaceFault::UnknownShape => RejectReason::UnknownShape,
+            PlaceFault::BadOrientation => RejectReason::BadOrientation,
         }
     }
 }
@@ -258,9 +269,7 @@ fn resolve(
     match intent.action {
         EditAction::Break => Ok((hit.at, Voxel::AIR)),
         EditAction::Place(voxel) => {
-            if voxel.is_air() {
-                return Err(RejectReason::NoMaterial);
-            }
+            tables.vet_placed(voxel)?;
             let step = FACE_STEPS[hit.face];
             let target = [
                 hit.at[0] + step[0],
@@ -300,15 +309,7 @@ pub(in crate::server) fn set_voxel(
     // Air is air whatever shape or orientation byte it carries.
     let voxel = if voxel.is_air() { Voxel::AIR } else { voxel };
     if !voxel.is_air() {
-        if !tables.materials.contains(voxel.material()) {
-            return Err(RejectReason::UnknownMaterial);
-        }
-        if !tables.shapes.contains(voxel.shape()) {
-            return Err(RejectReason::UnknownShape);
-        }
-        if Orientation::from_bits(voxel.orientation()).is_none() {
-            return Err(RejectReason::BadOrientation);
-        }
+        tables.vet_placed(voxel)?;
     }
     // A cube looks the same however it is turned, and a connected Shape ignores
     // its orientation, so the turn is dropped. Left in, two that look identical
@@ -378,7 +379,7 @@ mod tests {
     use tesserae_core::shape::examples;
     use tesserae_core::worldgen::{LANTERN, STONE};
     use tesserae_core::{
-        CHUNK_SIZE, Chunk, ChunkLight, LitChunk, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
+        CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Orientation, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
     use super::super::player::{Player, PoseReport};

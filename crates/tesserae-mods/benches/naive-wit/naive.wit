@@ -1,0 +1,28 @@
+package tesserae:naive@0.1.0;
+
+/// Bench only. The shipped contract has no Voxel import, and a test pins that: this is the design
+/// ADR-0001 refuses, kept to say how much worse it would be.
+interface edit {
+    record vec3 {
+        x: f32,
+        y: f32,
+        z: f32,
+    }
+
+    record voxel {
+        material: u16,
+        shape: u8,
+        orientation: u8,
+    }
+
+    set-voxel: func(at: vec3, voxel: voxel);
+}
+
+interface run {
+    run: func(count: u32);
+}
+
+world naive {
+    import edit;
+    export run;
+}
