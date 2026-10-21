@@ -861,3 +861,41 @@ Written as the tickets finish; what changed from the text above, and why.
 | 08  | The trust prompt and the mods directory            | 06         |
 | 09  | games/demo, built in CI                            | 07, 08     |
 | 10  | Docs, ADR-0012, measurements and the PR            | 09         |
+
+
+### Ticket 07: Mod Jobs and the Command queue
+
+- Load-order `ModJobs` slots replace `RunningMods`' idle retention. A slot
+  owns an idle instance or a worker Task, and fatal faults leave it disabled.
+  Stores remain behind a Mutex for Send-but-not-Sync ownership, accessed only
+  with exclusive `get_mut`; execution moves the instance out. The worker
+  captures owned events, a copied Voxel size and immutable Arc tables.
+- A worker returns the instance alongside either a validated batch or a
+  content-validation error. This is richer than the ticket's single
+  `Result<CommandBatch, ModFault>` because a refused content batch must retain
+  the instance for its next report. Execution/post-lift size faults still
+  consume it, disable once and retain its already queued Commands.
+- `PendingCommands` is Server-private and only runtime landing pushes to it.
+  It holds per-Mod FIFOs with the shared `BoxCursor`; draining is round-robin
+  after player `apply_pending`. Unloaded and shaped-cap refusals count through
+  the existing `set_voxel` path. Held but unlit Chunks defer their FIFO heads,
+  matching the gallery's lighting rule and allowing other Mods to progress.
+- Player history is bounded at 1024 events, with a cursor and missed-event
+  counter per Mod and a global oldest-drop count. Calls take reports/events
+  only at dispatch, so running or backpressured guests do not lose them.
+- **The measured drain budget is 2, replacing the initial 256.** The first
+  gallery sweep made 256's drain alone about 10.6 ms at load 9.52–9.92. A
+  cap-8 live comparison still raised the median worst tick, so a lower sweep
+  selected 2: a 0.296 ms median worst drain at load 10.43. A full 32768-Voxel
+  fill now takes 16384 uncontended lit ticks, about 256 seconds at 64 Hz. This
+  deliberately accepts slow fills until a bulk relight can preserve the same
+  Edit path. Tables, live comparisons and raw evidence are in Ticket07
+  Comments; the corrected full-tick figures cannot establish a hard bound.
+- Dev timing now spans the full fixed tick and separately records its longest
+  individual tick and frame sum. The old streaming-only/frame-sum metric
+  could not measure this ticket's pre-update drain. A catch-up regression test
+  pins the distinction; historical phase-5 absolute numbers are not directly
+  comparable with the corrected metric. Automated capture also disables manual
+  camera controls, which otherwise contaminated scripted flight comparisons.
+- `ModInstance::id()` exposes its original Manifest id for stable fault names.
+  The pre-App loader, Trust hook, WIT and 49.0.4 security patch are retained.

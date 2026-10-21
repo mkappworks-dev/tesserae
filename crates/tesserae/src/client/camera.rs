@@ -78,10 +78,11 @@ pub struct CameraHome(pub Transform);
 struct CursorHint;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Startup, spawn_hint).add_systems(
-        Update,
-        (grab_cursor, show_hint, reset, look, adjust_speed, fly).chain(),
-    );
+    let input = (grab_cursor, show_hint, reset, look, adjust_speed, fly).chain();
+    #[cfg(feature = "dev")]
+    let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
+    app.add_systems(Startup, spawn_hint)
+        .add_systems(Update, input);
 }
 
 fn spawn_hint(mut commands: Commands) {

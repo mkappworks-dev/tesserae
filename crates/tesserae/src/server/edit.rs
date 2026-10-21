@@ -149,6 +149,7 @@ pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PendingEdits>()
+        .init_resource::<super::mods::EditHistory>()
         .add_message::<EditIntent>()
         .add_message::<EditRejected>()
         // Every frame, so a click is never lost to a frame that runs no tick.
@@ -205,13 +206,13 @@ fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<f32, RejectReason> {
     Ok(distance)
 }
 
-fn apply_pending(
+pub(in crate::server) fn apply_pending(
     mut pending: ResMut<PendingEdits>,
+    mut history: ResMut<super::mods::EditHistory>,
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
     mut rejected: MessageWriter<EditRejected>,
-    tables: Res<ContentTables>,
-    world: Res<WorldSettings>,
+    (tables, world): (Res<ContentTables>, Res<WorldSettings>),
 ) {
     let mut applied = 0;
     let mut waiting = VecDeque::new();
@@ -226,7 +227,14 @@ fn apply_pending(
                 if meshes.is_unlit(VoxelCoord::of(at).chunk) {
                     return Err(RejectReason::Busy);
                 }
-                set_voxel(&mut store, &mut meshes, &tables, at, voxel)
+                let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
+                set_voxel(&mut store, &mut meshes, &tables, at, voxel)?;
+                history.record(tesserae_mods::EditEvent {
+                    at: at.map(|i| i as f32 * world.voxel_size),
+                    before,
+                    after: store.voxel(at).expect("the edited Chunk is held"),
+                });
+                Ok(())
             });
         match outcome {
             Ok(()) => applied += 1,

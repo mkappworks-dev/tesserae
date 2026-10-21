@@ -1,5 +1,9 @@
 //! Synchronous Mod loading, completed before the App and its World exist.
 
+pub(in crate::server) mod runtime;
+
+pub(in crate::server) use runtime::EditHistory;
+
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
@@ -82,17 +86,6 @@ impl Default for LoadedMods {
             game: false,
         }
     }
-}
-
-#[derive(Resource)]
-pub(super) struct RunningMods {
-    #[expect(dead_code, reason = "the Registry is retained for live Mod dispatch")]
-    pub registry: Registry,
-    #[expect(
-        dead_code,
-        reason = "live instances retain guest state until tick dispatch"
-    )]
-    pub mods: std::sync::Mutex<Vec<ModInstance>>,
 }
 
 #[derive(Resource)]
@@ -241,10 +234,8 @@ pub(super) fn plugin(app: &mut App) {
     ))
     .insert_resource(WorldParameters(super::worldgen_params(loaded.world)))
     .insert_resource(super::streaming::streaming_settings(loaded.view))
-    .insert_resource(RunningMods {
-        registry: loaded.registry,
-        mods: std::sync::Mutex::new(loaded.mods),
-    })
+    .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
+    .add_plugins(runtime::plugin)
     .add_message::<MaterialPalette>();
     app.world_mut()
         .write_message(MaterialPalette(loaded.appearance));

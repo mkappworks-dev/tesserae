@@ -1,0 +1,737 @@
+use super::*;
+use bevy::ecs::system::RunSystemOnce;
+use bevy::tasks::TaskPoolBuilder;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+use tesserae_core::collide::VoxelVolume;
+use tesserae_core::worldgen::{LANTERN, STONE};
+use tesserae_core::{Chunk, ChunkLight, MAX_SHAPED_PER_CHUNK, SHAPE_STAIR, Tables};
+use tesserae_mods::{Command, LogHandle, Placement, Region};
+
+use super::super::{LoadedMods, TrustMode, load};
+use crate::world::ChunkCoord;
+
+fn fixture(mode: u64) -> LoadedMods {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/phase7-runs");
+    std::fs::create_dir_all(&root).unwrap();
+    let dir = loop {
+        let path = root.join(format!(
+            "t07-fixture-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match std::fs::create_dir(&path) {
+            Ok(()) => break path,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => panic!("{e}"),
+        }
+    };
+    let mod_dir = dir.join(format!("fixture{mode}"));
+    std::fs::create_dir(&mod_dir).unwrap();
+    std::fs::write(
+        mod_dir.join("mod.toml"),
+        format!(
+            "id = \"fixture{mode}\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"queue.wasm\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::copy(
+        root.join("../guests/queue.wasm"),
+        mod_dir.join("queue.wasm"),
+    )
+    .unwrap();
+    let result = load(
+        &dir,
+        &dir.join("trust.json"),
+        TrustMode::All,
+        &WorldSettings {
+            seed: mode,
+            voxel_size: 1.0,
+        },
+    )
+    .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    result
+}
+
+struct Harness {
+    app: App,
+    logs: Vec<LogHandle>,
+}
+
+impl Harness {
+    fn new(modes: &[u64]) -> Self {
+        AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
+        let mut loaded = LoadedMods::default();
+        for mode in modes {
+            loaded.mods.extend(fixture(*mode).mods);
+        }
+        let logs = loaded.mods.iter().map(ModInstance::log).collect();
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .init_resource::<WorldSettings>()
+            .init_resource::<Time<Fixed>>()
+            .init_resource::<ChunkStore>()
+            .init_resource::<MeshState>()
+            .add_plugins(super::super::plugin);
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(home(), Chunk::air());
+        Self { app, logs }
+    }
+
+    fn dispatch(&mut self) {
+        self.app.world_mut().run_schedule(FixedPostUpdate);
+    }
+    fn land(&mut self) {
+        self.app.world_mut().run_system_once(land).unwrap();
+    }
+    fn drain(&mut self) {
+        self.app.world_mut().run_system_once(drain).unwrap();
+    }
+    fn await_landing(&mut self) {
+        let start = Instant::now();
+        loop {
+            self.land();
+            if self
+                .app
+                .world_mut()
+                .resource_mut::<ModJobs>()
+                .slots
+                .get_mut()
+                .unwrap()
+                .iter()
+                .all(|s| s.running.is_none())
+            {
+                return;
+            }
+            assert!(start.elapsed() < Duration::from_secs(10));
+            std::thread::sleep(Duration::from_micros(100));
+        }
+    }
+    fn call(&mut self) {
+        self.dispatch();
+        self.await_landing();
+    }
+    fn pending(&self) -> &PendingCommands {
+        self.app.world().resource::<PendingCommands>()
+    }
+    fn voxel(&self, at: [i32; 3]) -> Voxel {
+        self.app.world().resource::<ChunkStore>().voxel(at).unwrap()
+    }
+    fn log(&self, index: usize) -> String {
+        self.logs[index]
+            .drain()
+            .lines
+            .into_iter()
+            .map(|l| l.message)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+    fn backlog(&self, index: usize) -> u64 {
+        self.pending().queues[index].voxels
+    }
+}
+
+fn home() -> ChunkCoord {
+    ChunkCoord::new(0, 0, 0)
+}
+fn fill(side: f32) -> Command {
+    Command::Fill {
+        region: Region {
+            min: [0.0; 3],
+            max: [side; 3],
+        },
+        voxel: Voxel::cube(STONE),
+    }
+}
+fn batch(commands: &[Command]) -> CommandBatch {
+    validate(commands, &Tables::builtin(), 1.0).unwrap()
+}
+
+#[test]
+fn a_full_fill_resumes_its_cursor_and_a_second_mod_is_served_in_the_same_tick() {
+    let mut h = Harness::new(&[2, 9]);
+    h.call();
+    assert_eq!(h.backlog(0), 32768);
+    assert_eq!(h.backlog(1), 1);
+    let mut ticks = 0;
+    while h.backlog(0) + h.backlog(1) > 0 {
+        h.drain();
+        ticks += 1;
+        if ticks == 1 {
+            assert_eq!(h.backlog(1), 0);
+            assert_eq!(h.voxel([31, 31, 31]), Voxel::cube(STONE));
+            assert_eq!(h.backlog(0), 32768 - MOD_VOXELS_PER_TICK as u64 + 1);
+        }
+    }
+    assert_eq!(ticks, 32769usize.div_ceil(MOD_VOXELS_PER_TICK));
+    assert_eq!(h.pending().queues.len(), 2);
+    assert_eq!(h.pending().queues[0].report.applied, 32768);
+    for y in 0..32 {
+        for z in 0..32 {
+            for x in 0..32 {
+                assert_eq!(h.voxel([x, y, z]), Voxel::cube(STONE));
+            }
+        }
+    }
+    let mut alone = Harness::new(&[2]);
+    alone.call();
+    let mut ticks = 0;
+    while alone.backlog(0) > 0 {
+        alone.drain();
+        ticks += 1;
+    }
+    assert_eq!(ticks, 32768usize.div_ceil(MOD_VOXELS_PER_TICK));
+}
+
+#[test]
+fn unloaded_and_shaped_cap_refusals_reach_the_next_guest_report() {
+    let mut h = Harness::new(&[3, 4]);
+    let mut chunk = Chunk::air();
+    for i in 0..MAX_SHAPED_PER_CHUNK {
+        chunk.set(
+            i % 32,
+            i / 1024,
+            (i / 32) % 32,
+            Voxel::new(STONE, SHAPE_STAIR, 0),
+        );
+    }
+    h.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .insert(home(), chunk);
+    h.call();
+    h.drain();
+    assert_eq!(h.voxel([0, 30, 0]), Voxel::AIR);
+    assert!(
+        !h.app
+            .world()
+            .resource::<ChunkStore>()
+            .contains(ChunkCoord::new(128, 0, 0))
+    );
+    for queue in &h.pending().queues {
+        assert_eq!(
+            queue.report,
+            BatchReport {
+                applied: 0,
+                rejected: 1
+            }
+        );
+    }
+    h.call();
+    for i in 0..2 {
+        assert!(
+            h.log(i)
+                .contains("call=2 tick=2 dt=0.015625 applied=0 rejected=1 edits=0")
+        );
+    }
+}
+
+#[test]
+fn content_failure_refuses_the_entire_batch_and_preserves_guest_state() {
+    let mut h = Harness::new(&[6]);
+    h.call();
+    assert_eq!(h.backlog(0), 0);
+    assert_eq!(h.pending().queues[0].report, BatchReport::refused(2));
+    h.drain();
+    assert_eq!(h.voxel([0, 0, 0]), Voxel::AIR);
+    h.call();
+    assert!(
+        h.log(0)
+            .contains("call=2 tick=2 dt=0.015625 applied=0 rejected=2 edits=0")
+    );
+    assert_eq!(
+        h.app
+            .world_mut()
+            .resource_mut::<Messages<ModDisabled>>()
+            .drain()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn a_trap_disables_once_without_losing_queued_work_or_stopping_another_guest() {
+    let mut h = Harness::new(&[5, 9]);
+    h.call();
+    h.drain();
+    let queued = h.backlog(0);
+    h.call();
+    let disabled: Vec<_> = h
+        .app
+        .world_mut()
+        .resource_mut::<Messages<ModDisabled>>()
+        .drain()
+        .collect();
+    assert_eq!(disabled.len(), 1);
+    assert_eq!(disabled[0].name, "fixture5");
+    assert!(disabled[0].reason.contains("trapped"));
+    assert_eq!(h.backlog(0), queued);
+    while h.backlog(0) > 0 {
+        h.drain();
+    }
+    h.call();
+    assert!(h.log(1).contains("call=3"));
+    assert_eq!(h.voxel([0, 0, 0]), Voxel::cube(STONE));
+    assert_eq!(
+        h.app
+            .world_mut()
+            .resource_mut::<Messages<ModDisabled>>()
+            .drain()
+            .count(),
+        0
+    );
+    let mut jobs = h.app.world_mut().resource_mut::<ModJobs>();
+    let slots = jobs.slots.get_mut().unwrap();
+    assert!(slots[0].idle.is_none() && slots[0].running.is_none());
+}
+
+#[test]
+fn an_oversized_lift_is_fatal_and_does_not_erase_earlier_commands() {
+    let mut h = Harness::new(&[7]);
+    h.app
+        .world_mut()
+        .resource_mut::<PendingCommands>()
+        .queue(0)
+        .push(batch(&[fill(4.0)]));
+    h.call();
+    let disabled: Vec<_> = h
+        .app
+        .world_mut()
+        .resource_mut::<Messages<ModDisabled>>()
+        .drain()
+        .collect();
+    assert_eq!(disabled.len(), 1);
+    assert!(disabled[0].reason.contains("bad batch"));
+    assert_eq!(h.backlog(0), 64);
+    while h.backlog(0) > 0 {
+        h.drain();
+    }
+    assert_eq!(h.voxel([3, 3, 3]), Voxel::cube(STONE));
+}
+
+#[test]
+fn backlog_pauses_calls_without_consuming_events_or_reports_and_resumes_after_drain() {
+    let mut h = Harness::new(&[8]);
+    for _ in 0..5 {
+        h.call();
+    }
+    assert_eq!(h.backlog(0), 327680);
+    h.log(0);
+    h.app
+        .world_mut()
+        .resource_mut::<EditHistory>()
+        .record(EditEvent {
+            at: [1.0; 3],
+            before: Voxel::AIR,
+            after: Voxel::cube(STONE),
+        });
+    h.call();
+    assert!(h.log(0).is_empty());
+    while h.backlog(0) > MAX_BACKLOG_VOXELS {
+        h.drain();
+    }
+    h.call();
+    assert!(
+        h.log(0)
+            .contains("call=6 tick=7 dt=0.015625 applied=65536 rejected=0 edits=1")
+    );
+}
+
+#[test]
+fn history_is_bounded_and_each_mod_counts_only_the_events_it_missed() {
+    let mut history = EditHistory::default();
+    let mut fast = 0;
+    let mut slow = 0;
+    let mut fast_dropped = 0;
+    let mut slow_dropped = 0;
+    for i in 0..MAX_EDIT_EVENTS + 7 {
+        history.record(EditEvent {
+            at: [i as f32, 0.0, 0.0],
+            before: Voxel::AIR,
+            after: Voxel::cube(STONE),
+        });
+        assert_eq!(history.since(&mut fast, &mut fast_dropped).len(), 1);
+    }
+    assert_eq!(history.events.len(), MAX_EDIT_EVENTS);
+    assert_eq!(history.dropped, 7);
+    let events = history.since(&mut slow, &mut slow_dropped);
+    assert_eq!(events.len(), MAX_EDIT_EVENTS);
+    assert_eq!(events[0].at[0], 7.0);
+    assert_eq!((fast_dropped, slow_dropped), (0, 7));
+    assert!(history.since(&mut slow, &mut slow_dropped).is_empty());
+}
+
+#[test]
+fn only_successful_player_edits_enter_history_and_context_in_metres() {
+    use crate::server::edit::{EditAction, EditIntent};
+    use crate::server::player::Player;
+    let mut h = Harness::new(&[9]);
+    h.app.insert_resource(WorldSettings {
+        seed: 123,
+        voxel_size: 0.5,
+    });
+    h.app.add_plugins(edit::plugin);
+    let eye = Vec3::new(1.25, 3.0, 1.25);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .set_voxel(VoxelCoord::of([2, 2, 2]), Voxel::cube(STONE));
+    h.app.world_mut().write_message(EditIntent {
+        action: EditAction::Break,
+        origin: eye,
+        direction: Vec3::NEG_Y,
+    });
+    h.app.world_mut().write_message(EditIntent {
+        action: EditAction::Break,
+        origin: eye,
+        direction: Vec3::Y,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    assert_eq!(h.voxel([2, 2, 2]), Voxel::AIR);
+    assert_eq!(
+        h.app
+            .world_mut()
+            .resource_mut::<Messages<edit::EditRejected>>()
+            .drain()
+            .count(),
+        1
+    );
+    h.call();
+    let log = h.log(0);
+    assert!(log.contains("edits=1"), "{log}");
+    assert!(log.contains("x: 1.0, y: 1.0, z: 1.0"), "{log}");
+    assert!(log.contains("before: Voxel { material: 1"), "{log}");
+    assert!(log.contains("after: Voxel { material: 0"), "{log}");
+    h.drain();
+    h.call();
+    assert!(h.log(0).contains("edits=0"));
+    assert_eq!(h.app.world().resource::<EditHistory>().next, 1);
+}
+
+#[test]
+fn dispatch_keeps_one_call_in_flight_and_landing_waits_for_a_later_tick() {
+    let mut h = Harness::new(&[9]);
+    h.dispatch();
+    let mut jobs = h.app.world_mut().resource_mut::<ModJobs>();
+    let slots = jobs.slots.get_mut().unwrap();
+    assert!(slots[0].idle.is_none() && slots[0].running.is_some());
+    h.dispatch();
+    assert!(h.pending().queues[0].commands.is_empty());
+    h.await_landing();
+    assert_eq!(h.backlog(0), 1);
+    assert!(!h.log(0).contains("call=2"));
+    h.call();
+    assert!(h.log(0).contains("call=2"));
+}
+
+#[test]
+fn a_held_unlit_chunk_waits_without_blocking_another_mod_or_losing_its_cursor() {
+    let mut h = Harness::new(&[2, 9]);
+    h.call();
+    h.app
+        .world_mut()
+        .resource_mut::<MeshState>()
+        .mark_unlit(home());
+    h.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .insert(ChunkCoord::new(1, 0, 0), Chunk::air());
+    h.app
+        .world_mut()
+        .resource_mut::<PendingCommands>()
+        .queue(1)
+        .push(batch(&[Command::Place(vec![Placement {
+            at: [32.0, 0.0, 0.0],
+            voxel: Voxel::cube(STONE),
+        }])]));
+    h.app
+        .world_mut()
+        .resource_mut::<PendingCommands>()
+        .queue(2)
+        .push(batch(&[Command::Place(vec![Placement {
+            at: [33.0, 0.0, 0.0],
+            voxel: Voxel::cube(STONE),
+        }])]));
+    // FIFO keeps the second Mod's later placement behind its waiting first one.
+    h.drain();
+    assert_eq!(h.backlog(0), 32768);
+    assert_eq!(h.backlog(1), 2);
+    assert_eq!(h.backlog(2), 0);
+    assert_eq!(h.voxel([33, 0, 0]), Voxel::cube(STONE));
+    h.app
+        .world_mut()
+        .resource_mut::<MeshState>()
+        .mark_lit(home());
+    while h.backlog(1) > 0 {
+        h.drain();
+    }
+    assert_eq!(h.backlog(1), 0);
+    assert_eq!(h.voxel([32, 0, 0]), Voxel::cube(STONE));
+}
+
+#[test]
+fn fixture_fill_redelivers_mesh_matches_fresh_light_and_invalidates_the_cover() {
+    use crate::server::jobs::{Border, solve};
+    use crate::server::streaming::tests::{Harness as StreamingHarness, UNLIMITED, small};
+    let mut h = StreamingHarness::new(small(), UNLIMITED);
+    h.settle();
+    let loaded = fixture(1);
+    let jobs = ModJobs::new(loaded.registry, loaded.mods);
+    h.app
+        .insert_resource(jobs)
+        .init_resource::<Time<Fixed>>()
+        .add_plugins(plugin);
+    h.app.world_mut().run_system_once(dispatch).unwrap();
+    let started = Instant::now();
+    loop {
+        h.app.world_mut().run_system_once(land).unwrap();
+        if h.app
+            .world_mut()
+            .resource_mut::<ModJobs>()
+            .slots
+            .get_mut()
+            .unwrap()[0]
+            .running
+            .is_none()
+        {
+            break;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_micros(100));
+    }
+    while h.app.world().resource::<PendingCommands>().queues[0].voxels > 0 {
+        h.app.world_mut().run_system_once(drain).unwrap();
+    }
+    let changes = h
+        .app
+        .world_mut()
+        .resource_mut::<MeshState>()
+        .take_cover_changes();
+    assert!(changes.contains(&home()));
+    h.app
+        .world_mut()
+        .resource_mut::<MeshState>()
+        .voxels_changed(home());
+    let (messages, _) = h.settle();
+    assert!(
+        messages.iter().any(|m| m.coord == home()),
+        "the edited mesh was redelivered"
+    );
+    let store = h.app.world().resource::<ChunkStore>();
+    for y in 0..4 {
+        for z in 0..4 {
+            for x in 0..4 {
+                assert_eq!(
+                    store.voxel([x, y, z]),
+                    Some(if [x, y, z] == [1, 1, 1] {
+                        Voxel::cube(LANTERN)
+                    } else {
+                        Voxel::AIR
+                    })
+                );
+            }
+        }
+    }
+    assert_eq!(store.light_at([2, 1, 1]).block(), 14);
+    let tables = h.app.world().resource::<ContentTables>();
+    let border = std::array::from_fn(|face| {
+        let d = tesserae_core::mesh::FACE_STEPS[face];
+        let (chunk, light) = store.shared(ChunkCoord::new(d[0], d[1], d[2])).unwrap();
+        Border::Loaded(chunk, light)
+    });
+    let (chunk, light) = store.shared(home()).unwrap();
+    let fresh = solve(chunk, &ChunkLight::dark(), &border, tables);
+    assert!(
+        *light == fresh.light,
+        "incremental light equals a fresh solve"
+    );
+}
+
+#[test]
+fn clients_cannot_name_the_queue_or_jobs_and_mutators_remain_server_private() {
+    fn files(dir: &Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                out.extend(files(&path));
+            } else {
+                out.push(path);
+            }
+        }
+        out
+    }
+    for path in files(&Path::new(env!("CARGO_MANIFEST_DIR")).join("src/client")) {
+        let text = std::fs::read_to_string(&path).unwrap();
+        for forbidden in ["PendingCommands", "ModJobs", "server::mods"] {
+            assert!(!text.contains(forbidden), "{}: {forbidden}", path.display());
+        }
+    }
+    let text = include_str!("../runtime.rs");
+    assert!(!text.contains("pub fn"));
+    assert!(text.contains("pub(in crate::server) struct PendingCommands"));
+}
+
+pub(in crate::server) fn drain_validated(app: &mut App, commands: &[Command]) {
+    let tables = app.world().resource::<ContentTables>();
+    let size = app.world().resource::<WorldSettings>().voxel_size;
+    let checked = validate(commands, tables, size).unwrap();
+    app.init_resource::<PendingCommands>();
+    app.world_mut()
+        .resource_mut::<PendingCommands>()
+        .queue(0)
+        .push(checked);
+    while app.world().resource::<PendingCommands>().queues[0].voxels > 0 {
+        app.world_mut().run_system_once(drain).unwrap();
+    }
+}
+
+#[cfg(feature = "dev")]
+#[test]
+#[ignore = "manual interleaved measurement; run with uptime before and after"]
+fn measure_gallery_budget() {
+    use crate::server::builder::{self, Progress};
+    use crate::server::streaming::tests::{Harness as StreamingHarness, small};
+    use crate::server::{WorldGenerator, gallery};
+    AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(3).build());
+    let budget: usize = std::env::var("TESSERAE_T07_BUDGET")
+        .unwrap()
+        .parse()
+        .unwrap();
+    let mut h = StreamingHarness::new(
+        small(),
+        crate::server::streaming::StreamingBudget::default(),
+    );
+    let world = *h.app.world().resource::<WorldSettings>();
+    let generator = &h.app.world().resource::<WorldGenerator>().0;
+    let plan = gallery::measurement_plan(&world, generator);
+    let corner = plan[0].0;
+    let center = Vec3::from_array(corner.map(|i| i as f32 * world.voxel_size));
+    h.anchor_at(center);
+    h.settle();
+    let count = plan.len();
+    let mod_min = [corner[0] + 16, corner[1] + 8, corner[2]];
+    let mut loaded = fixture(10);
+    let instance = loaded.mods.pop().unwrap();
+    let task = AsyncComputeTaskPool::get().spawn(async move {
+        instance
+            .tick(TickContext {
+                tick: 1,
+                dt_s: 1.0 / 64.0,
+                edits: vec![EditEvent {
+                    at: mod_min.map(|i| i as f32),
+                    before: Voxel::AIR,
+                    after: Voxel::cube(STONE),
+                }],
+                last: BatchReport::default(),
+            })
+            .await
+            .unwrap()
+    });
+    let (instance, commands) = bevy::tasks::block_on(task);
+    let mod_batch = validate(
+        &commands,
+        h.app.world().resource::<ContentTables>(),
+        world.voxel_size,
+    )
+    .unwrap();
+    assert_eq!(mod_batch.voxels, 32768);
+    let instances = if budget > 0 { vec![instance] } else { vec![] };
+    h.app
+        .insert_resource(ModJobs::new(loaded.registry, instances))
+        .init_resource::<PendingCommands>()
+        .init_resource::<EditHistory>()
+        .init_resource::<Time<Fixed>>()
+        .add_message::<ModDisabled>()
+        .add_systems(FixedFirst, land)
+        .add_systems(FixedPostUpdate, dispatch);
+    if budget > 0 {
+        h.app
+            .world_mut()
+            .resource_mut::<PendingCommands>()
+            .queue(0)
+            .push(mod_batch);
+    }
+    let mut progress = Progress::default();
+    let mut worst_tick = 0.0f64;
+    let mut worst_drain = 0.0f64;
+    let mut sum_drain = 0.0;
+    let mut applied = 0;
+    let mut ticks = 0;
+    // A fixed tick count compares main-thread pressure, not fill throughput.
+    for _ in 0..160 {
+        let started = Instant::now();
+        h.app.world_mut().run_schedule(FixedFirst);
+        h.app
+            .world_mut()
+            .resource_scope(|world, mut store: Mut<ChunkStore>| {
+                world.resource_scope(|world, mut meshes: Mut<MeshState>| {
+                    world.resource_scope(|world, mut pending: Mut<PendingCommands>| {
+                        let tables = world.resource::<ContentTables>();
+                        builder::step(&plan, &mut progress, &mut store, &mut meshes, tables);
+                        let before = pending.queues.first().map_or(0, |q| q.voxels);
+                        let start = Instant::now();
+                        pending.drain(&mut store, &mut meshes, tables, budget);
+                        let elapsed = start.elapsed().as_secs_f64();
+                        let after = pending.queues.first().map_or(0, |q| q.voxels);
+                        if before > after {
+                            worst_drain = worst_drain.max(elapsed);
+                            sum_drain += elapsed;
+                            applied += before - after;
+                        }
+                    });
+                });
+            });
+        h.tick();
+        h.app.world_mut().run_schedule(FixedPostUpdate);
+        worst_tick = worst_tick.max(started.elapsed().as_secs_f64());
+        ticks += 1;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    println!(
+        "t07_gallery budget={budget} gallery_voxels={count} ticks={ticks} mod_voxels={applied} worst_tick_ms={:.6} worst_drain_ms={:.6} mean_voxel_us={:.6}",
+        worst_tick * 1000.0,
+        worst_drain * 1000.0,
+        sum_drain * 1e6 / applied.max(1) as f64
+    );
+}
+
+#[test]
+fn the_fixed_pre_update_drain_runs_after_player_apply_pending() {
+    use crate::server::edit::{EditAction, EditIntent};
+    use crate::server::player::Player;
+    let mut h = Harness::new(&[]);
+    h.app.add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 5.0, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .set_voxel(VoxelCoord::of([2, 2, 2]), Voxel::cube(STONE));
+    h.app
+        .world_mut()
+        .resource_mut::<PendingCommands>()
+        .queue(0)
+        .push(batch(&[Command::Place(vec![Placement {
+            at: [2.0; 3],
+            voxel: Voxel::cube(LANTERN),
+        }])]));
+    h.app.world_mut().write_message(EditIntent {
+        action: EditAction::Break,
+        origin: eye,
+        direction: Vec3::NEG_Y,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    assert_eq!(h.voxel([2, 2, 2]), Voxel::cube(LANTERN));
+    let history = h.app.world().resource::<EditHistory>();
+    assert_eq!(history.events.len(), 1);
+    assert_eq!(history.events[0].before, Voxel::cube(STONE));
+    assert_eq!(history.events[0].after, Voxel::AIR);
+}

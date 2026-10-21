@@ -257,6 +257,19 @@ fn translucent_plan(
 }
 
 #[cfg(test)]
+pub(super) fn measurement_plan(world: &WorldSettings, generator: &tesserae_core::Worldgen) -> Plan {
+    let spawn = super::spawn_eye(generator);
+    let surface = |x, z| generator.surface_height_m(x, z);
+    let mut result = plan(world, spawn + Vec3::new(ASIDE_M, 0.0, -AHEAD_M), surface);
+    result.extend(translucent_plan(
+        world,
+        spawn + Vec3::new(ROW_ASIDE_M, 0.0, -AHEAD_M),
+        surface,
+    ));
+    result
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::server::world_state::VoxelCoord;

@@ -14,6 +14,7 @@ use bevy::prelude::*;
 pub struct MainThreadCost {
     started: Option<Instant>,
     tick_s: f32,
+    longest_tick_s: f32,
     upload_s: f32,
     uploads: u32,
     sort_s: f32,
@@ -24,6 +25,7 @@ pub struct MainThreadCost {
 #[derive(Default, Clone, Copy)]
 pub struct FrameCost {
     pub tick_s: f32,
+    pub longest_tick_s: f32,
     pub upload_s: f32,
     pub uploads: u32,
     pub sort_s: f32,
@@ -31,6 +33,12 @@ pub struct FrameCost {
 }
 
 impl MainThreadCost {
+    fn ticked(&mut self, took: Duration) {
+        let seconds = took.as_secs_f32();
+        self.tick_s += seconds;
+        self.longest_tick_s = self.longest_tick_s.max(seconds);
+    }
+
     pub fn uploaded(&mut self, took: Duration, meshes: u32) {
         self.upload_s += took.as_secs_f32();
         self.uploads += meshes;
@@ -45,6 +53,7 @@ impl MainThreadCost {
     pub fn take_frame(&mut self) -> FrameCost {
         let frame = FrameCost {
             tick_s: self.tick_s,
+            longest_tick_s: self.longest_tick_s,
             upload_s: self.upload_s,
             uploads: self.uploads,
             sort_s: self.sort_s,
@@ -64,10 +73,28 @@ pub fn tick_started(mut cost: ResMut<MainThreadCost>) {
 
 pub fn tick_ended(mut cost: ResMut<MainThreadCost>) {
     if let Some(started) = cost.started.take() {
-        cost.tick_s += started.elapsed().as_secs_f32();
+        cost.ticked(started.elapsed());
     }
 }
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<MainThreadCost>();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catch_up_ticks_keep_the_frame_total_and_the_longest_tick_separate() {
+        let mut cost = MainThreadCost::default();
+        cost.ticked(Duration::from_millis(2));
+        cost.ticked(Duration::from_millis(3));
+        let frame = cost.take_frame();
+        assert!((frame.tick_s - 0.005).abs() < f32::EPSILON);
+        assert_eq!(frame.longest_tick_s, 0.003);
+        let next = cost.take_frame();
+        assert_eq!(next.tick_s, 0.0);
+        assert_eq!(next.longest_tick_s, 0.0);
+    }
 }

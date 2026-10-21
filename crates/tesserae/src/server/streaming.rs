@@ -432,13 +432,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_plugins(lod::plugin)
         .add_systems(FixedUpdate, (stream, lod::stream_lod).chain());
     #[cfg(feature = "dev")]
-    app.add_systems(
-        FixedUpdate,
-        (
-            crate::cost::tick_started.before(stream),
-            crate::cost::tick_ended.after(lod::stream_lod),
-        ),
-    );
+    app.add_systems(FixedFirst, crate::cost::tick_started)
+        .add_systems(FixedLast, crate::cost::tick_ended);
     #[cfg(feature = "dev")]
     app.add_plugins(stats::plugin);
 }

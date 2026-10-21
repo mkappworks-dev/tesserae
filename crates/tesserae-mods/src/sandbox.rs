@@ -53,6 +53,7 @@ impl fmt::Display for ModFault {
 impl std::error::Error for ModFault {}
 
 pub struct ModInstance {
+    id: String,
     store: Store<HostState>,
     guest: Mod,
     limits: ModLimits,
@@ -84,10 +85,15 @@ impl ModInstance {
         )
         .await?;
         Ok(ModInstance {
+            id: id.to_owned(),
             store,
             guest,
             limits,
         })
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     pub async fn declare(mut self) -> Result<(ModInstance, Declaration), ModFault> {
