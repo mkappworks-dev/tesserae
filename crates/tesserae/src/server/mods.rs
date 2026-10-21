@@ -5,6 +5,7 @@ pub(in crate::server) mod runtime;
 pub(in crate::server) use runtime::EditHistory;
 
 use std::ffi::OsString;
+use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
@@ -34,7 +35,7 @@ impl LoadOptions {
         args: impl IntoIterator<Item = OsString>,
         mods_env: Option<OsString>,
         trust_env: Option<OsString>,
-        data_dir: Option<PathBuf>,
+        default_directory: Option<PathBuf>,
     ) -> Result<Self, String> {
         let mut directory = mods_env.map(PathBuf::from);
         let mut trust = if trust_env.as_deref() == Some(std::ffi::OsStr::new("1")) {
@@ -53,7 +54,7 @@ impl LoadOptions {
             }
         }
         let directory = directory
-            .or_else(|| data_dir.map(|dir| dir.join("tesserae/mods")))
+            .or(default_directory)
             .ok_or("cannot resolve the user data directory; pass --mods <dir>")?;
         let trust_file = directory.with_file_name("trust.json");
         Ok(Self {
@@ -96,19 +97,75 @@ pub fn load_from_env(world: &WorldSettings) -> Result<LoadedMods, String> {
         std::env::args_os().skip(1),
         std::env::var_os("TESSERAE_MODS_DIR"),
         std::env::var_os("TESSERAE_TRUST_MODS"),
-        dirs::data_dir(),
+        tesserae_mods::default_mods_dir(),
     )?;
-    if options.trust == TrustMode::All {
-        eprintln!("Trusting all Mods (--trust-all / TESSERAE_TRUST_MODS=1)");
-    }
-    load(
+    let stdin = io::stdin();
+    load_prompted(
         &options.directory,
         &options.trust_file,
         options.trust,
         world,
+        stdin.is_terminal(),
+        &mut stdin.lock(),
+        &mut io::stderr().lock(),
     )
 }
 
+fn load_prompted(
+    directory: &Path,
+    trust_file: &Path,
+    mode: TrustMode,
+    world: &WorldSettings,
+    terminal: bool,
+    reader: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<LoadedMods, String> {
+    load_with(directory, trust_file, world, |found, trust| {
+        let id = &found.manifest.id;
+        if matches!(
+            trust.check(found).map_err(|e| e.to_string())?,
+            Verdict::Trusted(_)
+        ) {
+            return Ok(true);
+        }
+        if mode != TrustMode::All && !terminal {
+            writeln!(output, "Skipped Mod `{id}`: stdin is not a terminal; use --trust-all or TESSERAE_TRUST_MODS=1 to grant Trust")
+                .map_err(|e| e.to_string())?;
+            return Ok(false);
+        }
+        let hash = Trust::hash_of(found).map_err(|e| e.to_string())?;
+        let accepted = if mode == TrustMode::All {
+            writeln!(
+                output,
+                "Granting Trust to Mod `{id}` (--trust-all / TESSERAE_TRUST_MODS=1)"
+            )
+            .map_err(|e| e.to_string())?;
+            true
+        } else {
+            write!(
+                output,
+                "{}",
+                tesserae_mods::trust_prompt(
+                    &found.manifest,
+                    tesserae_mods::ModLimits::HOST.lowered_by(&found.manifest.limits),
+                    &hash,
+                )
+            )
+            .map_err(|e| e.to_string())?;
+            output.flush().map_err(|e| e.to_string())?;
+            tesserae_mods::confirm_trust(reader).map_err(|e| e.to_string())?
+        };
+        if accepted {
+            trust.grant_exact(found, &hash).map_err(|e| e.to_string())?;
+            writeln!(output, "Trusted Mod `{id}`").map_err(|e| e.to_string())?;
+        } else {
+            writeln!(output, "Skipped Mod `{id}`").map_err(|e| e.to_string())?;
+        }
+        Ok(accepted)
+    })
+}
+
+#[cfg(test)]
 fn load(
     directory: &Path,
     trust_file: &Path,
@@ -116,31 +173,54 @@ fn load(
     world: &WorldSettings,
 ) -> Result<LoadedMods, String> {
     load_with(directory, trust_file, world, |found, trust| {
-        if mode == TrustMode::All && matches!(trust.check(found)?, Verdict::Untrusted(_)) {
-            trust.grant(found)?;
+        if mode == TrustMode::All
+            && matches!(
+                trust.check(found).map_err(|e| e.to_string())?,
+                Verdict::Untrusted(_)
+            )
+        {
+            trust.grant(found).map_err(|e| e.to_string())?;
         }
-        Ok(())
+        Ok(true)
     })
 }
 
-// A reader-backed Trust prompt can be supplied here without another loading path.
 fn load_with(
     directory: &Path,
     trust_file: &Path,
     world: &WorldSettings,
-    mut authorize: impl FnMut(&tesserae_mods::Found, &mut Trust) -> Result<(), tesserae_mods::ModError>,
+    mut authorize: impl FnMut(&tesserae_mods::Found, &mut Trust) -> Result<bool, String>,
 ) -> Result<LoadedMods, String> {
     let plan = plan(discover(directory).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     if plan.is_empty() {
         return Ok(LoadedMods::default());
     }
     let mut trust = Trust::load(trust_file);
-    for found in &plan {
-        authorize(found, &mut trust).map_err(|e| e.to_string())?;
+    let mut accepted = Vec::new();
+    for found in plan {
+        if authorize(&found, &mut trust)? {
+            accepted.push(found);
+        }
+    }
+    for found in &accepted {
+        for dependency in &found.manifest.depends {
+            if !accepted
+                .iter()
+                .any(|other| &other.manifest.id == dependency)
+            {
+                return Err(format!(
+                    "mod `{}` depends on skipped Mod `{dependency}`",
+                    found.manifest.id
+                ));
+            }
+        }
+    }
+    if accepted.is_empty() {
+        return Ok(LoadedMods::default());
     }
     let host = ModHost::new().map_err(|e| e.to_string())?;
-    let compiled = host.load(plan, &trust).map_err(|e| e.to_string())?;
-    bevy::tasks::block_on(async {
+    let compiled = host.load(accepted, &trust).map_err(|e| e.to_string())?;
+    let loaded = bevy::tasks::block_on(async {
         let mut loaded = LoadedMods::default();
         for component in &compiled {
             let id = &component.found.manifest.id;
@@ -214,8 +294,12 @@ fn load_with(
                 .map_err(|e| format!("mod `{}`: {e}", component.found.manifest.id))?;
             loaded.mods.push(instance);
         }
-        Ok(loaded)
-    })
+        Ok::<_, String>(loaded)
+    })?;
+    for instance in &loaded.mods {
+        eprintln!("Loaded Mod `{}`", instance.id());
+    }
+    Ok(loaded)
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -487,6 +571,153 @@ mod tests {
         );
     }
 
+    fn prompted(
+        s: &Scratch,
+        mode: TrustMode,
+        tty: bool,
+        input: &str,
+    ) -> (Result<LoadedMods, String>, String) {
+        let mut output = Vec::new();
+        let result = load_prompted(
+            &s.0.join("mods"),
+            &s.0.join("trust.json"),
+            mode,
+            &WorldSettings {
+                seed: 123,
+                voxel_size: 0.5,
+            },
+            tty,
+            &mut input.as_bytes(),
+            &mut output,
+        );
+        (result, String::from_utf8(output).unwrap())
+    }
+
+    #[test]
+    fn prompt_skips_root_without_retaining_its_tables_or_creating_trust() {
+        let s = Scratch::new();
+        s.add("world", "world-loader", "root = true");
+        let (result, output) = prompted(&s, TrustMode::None, true, "n\n");
+        let loaded = result.unwrap();
+        assert!(!loaded.game);
+        assert!(loaded.world.is_none() && loaded.view.is_none());
+        assert_eq!(loaded.registry, Registry::builtin());
+        assert_eq!(loaded.tables.materials.len(), 8);
+        assert_eq!(loaded.tables.shapes.len(), 4);
+        assert!(output.contains("Game (root): yes") && output.contains("Skipped Mod `world`"));
+        assert!(!s.0.join("trust.json").exists());
+    }
+
+    #[test]
+    fn no_terminal_never_reads_or_grants_but_trust_all_logs_and_grants() {
+        let s = Scratch::new();
+        s.add("hello", "hello", "");
+        let (result, output) = prompted(&s, TrustMode::None, false, "y\n");
+        assert!(result.unwrap().mods.is_empty());
+        assert!(output.contains("stdin is not a terminal"));
+        assert!(!output.contains("Trust this exact build?"));
+        assert!(!s.0.join("trust.json").exists());
+        let (result, output) = prompted(&s, TrustMode::All, false, "");
+        assert_eq!(result.unwrap().mods.len(), 1);
+        assert!(
+            output.contains("Granting Trust to Mod `hello` (--trust-all / TESSERAE_TRUST_MODS=1)")
+        );
+        assert!(s.0.join("trust.json").exists());
+    }
+
+    #[test]
+    fn unchanged_build_does_not_prompt_and_changed_manifest_or_component_does() {
+        let s = Scratch::new();
+        s.add("hello", "hello", "");
+        let (result, output) = prompted(&s, TrustMode::None, true, "Y\n");
+        assert_eq!(result.unwrap().mods.len(), 1);
+        assert!(output.contains("Trust this exact build?"));
+        let (result, output) = prompted(&s, TrustMode::None, true, "");
+        assert_eq!(result.unwrap().mods.len(), 1);
+        assert!(output.is_empty());
+        let manifest = s.0.join("mods/hello/mod.toml");
+        fs::write(
+            &manifest,
+            fs::read_to_string(&manifest).unwrap() + "# new build\n",
+        )
+        .unwrap();
+        let (result, output) = prompted(&s, TrustMode::None, true, "\n");
+        assert!(result.unwrap().mods.is_empty());
+        assert!(output.contains("Trust this exact build?"));
+        assert_eq!(
+            prompted(&s, TrustMode::None, true, "y\n")
+                .0
+                .unwrap()
+                .mods
+                .len(),
+            1
+        );
+        fs::write(
+            s.0.join("mods/hello/mod.wasm"),
+            b"changed bytes must not compile",
+        )
+        .unwrap();
+        let (result, output) = prompted(&s, TrustMode::None, true, "");
+        assert!(result.unwrap().mods.is_empty());
+        assert!(output.contains("Trust this exact build?"));
+    }
+
+    #[test]
+    fn skipped_dependencies_error_for_accepted_and_previously_trusted_mods() {
+        for recorded in [false, true] {
+            let s = Scratch::new();
+            s.add("dependency", "hello", "");
+            s.add("consumer", "hello", "depends = [\"dependency\"]");
+            if recorded {
+                let found = discover(&s.0.join("mods"))
+                    .unwrap()
+                    .into_iter()
+                    .find(|f| f.manifest.id == "consumer")
+                    .unwrap();
+                Trust::load(s.0.join("trust.json")).grant(&found).unwrap();
+            }
+            let error = prompted(&s, TrustMode::None, true, "n\ny\n")
+                .0
+                .err()
+                .unwrap();
+            assert!(
+                error.contains("consumer") && error.contains("skipped Mod `dependency`"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn skipped_mods_preserve_dependency_first_registration_order() {
+        let s = Scratch::new();
+        s.add("aaa", "catalog", "depends = [\"zzz\"]");
+        s.add("middle", "world-loader", "root = true");
+        s.add("zzz", "catalog", "");
+        let loaded = prompted(&s, TrustMode::None, true, "n\ny\ny\n").0.unwrap();
+        assert_eq!(
+            loaded.mods.iter().map(ModInstance::id).collect::<Vec<_>>(),
+            ["zzz", "aaa"]
+        );
+        assert!(!loaded.game);
+        assert_eq!(loaded.registry.id_of(Kind::Material, "zzz:m0"), Some(8));
+        assert_eq!(loaded.registry.id_of(Kind::Material, "aaa:m0"), Some(16));
+    }
+
+    #[test]
+    fn prompted_missing_or_empty_directory_creates_nothing() {
+        let s = Scratch::new();
+        for empty in [false, true] {
+            if empty {
+                fs::create_dir(s.0.join("mods")).unwrap();
+            }
+            let (result, output) = prompted(&s, TrustMode::All, false, "");
+            assert!(result.unwrap().mods.is_empty());
+            assert!(output.is_empty());
+            assert_eq!(s.0.join("mods").exists(), empty);
+            assert!(!s.0.join("trust.json").exists());
+        }
+    }
+
     #[test]
     fn options_resolve_cli_then_environment_then_platform_default() {
         let options = |args: &[&str], env: Option<&str>, trust: Option<&str>| {
@@ -494,7 +725,7 @@ mod tests {
                 args.iter().map(OsString::from),
                 env.map(OsString::from),
                 trust.map(OsString::from),
-                Some(PathBuf::from("data")),
+                Some(PathBuf::from("data/tesserae/mods")),
             )
             .unwrap()
         };

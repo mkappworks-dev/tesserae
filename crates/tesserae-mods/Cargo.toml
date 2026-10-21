@@ -18,6 +18,7 @@ wasmtime = { version = "49.0.4", default-features = false, features = [
 ] }
 wasmtime-wasi = { version = "49.0.4", default-features = false, features = ["p2"] }
 bytes = "1"
+dirs = "6"
 rand_core = { version = "0.10", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -15,6 +15,7 @@ mod limits;
 mod loader;
 mod log;
 mod manifest;
+mod prompt;
 mod random;
 mod registry;
 mod sandbox;
@@ -35,9 +36,15 @@ pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};
 pub use loader::{Compiled, ModHost};
 pub use log::{LogDrain, LogHandle, LogLevel, LogLine};
 pub use manifest::{Found, Manifest, SUPPORTED_API, discover, plan};
+pub use prompt::{confirm_trust, trust_prompt};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
 pub use trust::{Trust, Untrusted, Verdict};
 
 #[cfg(test)]
 mod tests;
+
+/// Platform user data directory, without creating it or the Mods directory.
+pub fn default_mods_dir() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|dir| dir.join("tesserae/mods"))
+}

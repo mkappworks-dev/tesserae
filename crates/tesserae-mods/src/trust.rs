@@ -78,6 +78,21 @@ impl Trust {
 
     pub fn grant(&mut self, found: &Found) -> Result<(), ModError> {
         let sha256 = Trust::hash_of(found)?;
+        self.record(found, sha256)
+    }
+
+    /// Records only the build shown to the user, even if files change during the prompt.
+    pub fn grant_exact(&mut self, found: &Found, sha256: &str) -> Result<(), ModError> {
+        if Trust::hash_of(found)? != sha256 {
+            return Err(ModError::Manifest {
+                who: found.manifest.id.clone(),
+                reason: "changed while awaiting Trust; run again".into(),
+            });
+        }
+        self.record(found, sha256.to_string())
+    }
+
+    fn record(&mut self, found: &Found, sha256: String) -> Result<(), ModError> {
         let id = found.manifest.id.clone();
         self.records.retain(|r| !(r.kind == KIND_MOD && r.id == id));
         self.records.push(Record {

@@ -899,3 +899,22 @@ Written as the tickets finish; what changed from the text above, and why.
   camera controls, which otherwise contaminated scripted flight comparisons.
 - `ModInstance::id()` exposes its original Manifest id for stable fault names.
   The pre-App loader, Trust hook, WIT and 49.0.4 security patch are retained.
+
+
+### Ticket 08: Trust prompt and directory
+
+- `tesserae_mods::default_mods_dir()` owns the platform data-directory default;
+  CLI then environment override it. Missing/empty directories create neither
+  Mods nor Trust files.
+- The single pre-App loader now prompts only for untrusted builds, skips on
+  refusal/EOF/no terminal, and logs explicit unattended grants. It preserves
+  accepted registration order and rejects accepted Mods whose dependencies were
+  skipped, naming both. A skipped Game contributes no tables or parameters.
+- `trust_prompt(Manifest, limits, hash)` produces reusable plain text;
+  `confirm_trust(reader)` accepts only y/Y. `Trust::grant_exact` pins the record
+  to the displayed build. Existing Trust bypasses the prompt; changed Manifest
+  or component bytes require a new answer.
+- Prompt, loader and exact-build tests plus three real-binary PTY transcripts
+  are recorded in Ticket08 Comments. Runtime/WASI/WIT behavior and the measured
+  two-Voxel drain cap remain unchanged. Ticket09 can use the existing
+  `LoadedMods`/`ModJobs` path and public prompt interfaces.

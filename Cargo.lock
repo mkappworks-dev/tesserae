@@ -6006,7 +6006,6 @@ name = "tesserae"
 version = "0.0.0"
 dependencies = [
  "bevy",
- "dirs",
  "tesserae-core",
  "tesserae-mods",
 ]
@@ -6024,6 +6023,7 @@ version = "0.0.0"
 dependencies = [
  "bytes",
  "criterion",
+ "dirs",
  "futures-lite",
  "libc",
  "rand_core",

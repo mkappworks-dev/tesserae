@@ -251,6 +251,23 @@ fn trust_new_then_granted_then_changed() {
 }
 
 #[test]
+fn grant_exact_refuses_a_build_changed_during_the_prompt() {
+    let s = Scratch::new("prompt-change");
+    s.good("alpha", "");
+    let found = only(discover(&s.mods()).unwrap());
+    let hash = Trust::hash_of(&found).unwrap();
+    fs::write(found.dir.join("m.wasm"), b"changed while user reads").unwrap();
+    let mut trust = s.trust();
+    let error = trust.grant_exact(&found, &hash).unwrap_err().to_string();
+    assert!(error.contains("alpha") && error.contains("changed while awaiting Trust"));
+    assert!(!trust.path().exists());
+    assert!(matches!(
+        trust.check(&found).unwrap(),
+        Verdict::Untrusted(_)
+    ));
+}
+
+#[test]
 fn unparseable_trust_file_is_empty() {
     let s = Scratch::new("badtrust");
     s.good("alpha", "");
