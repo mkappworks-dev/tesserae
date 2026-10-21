@@ -11,6 +11,7 @@ pub mod drawn_mask;
 pub mod edit;
 #[cfg(feature = "dev")]
 mod overlay;
+mod palette;
 mod pose;
 
 use bevy::prelude::*;

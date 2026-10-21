@@ -1,6 +1,7 @@
 //! The Tesserae engine's Bevy application.
 
 mod client;
+mod content;
 #[cfg(feature = "dev")]
 mod cost;
 mod render;
@@ -10,8 +11,18 @@ mod world;
 use bevy::app::TaskPoolPlugin;
 use bevy::prelude::*;
 
-fn main() {
+fn main() -> std::process::ExitCode {
+    let settings = world::WorldSettings::default();
+    let loaded = match server::mods::load_from_env(&settings) {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            eprintln!("Cannot open World: {error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
     App::new()
+        .insert_resource(settings)
+        .insert_non_send(loaded)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
@@ -23,10 +34,10 @@ fn main() {
                 })
                 .set(task_pools()),
         )
-        .init_resource::<world::WorldSettings>()
         .add_plugins((render::plugin, server::plugin, client::plugin))
         .add_plugins(dev_plugins)
         .run();
+    std::process::ExitCode::SUCCESS
 }
 
 /// Bevy's default pool sizes, except that a `dev` run can pin the async compute

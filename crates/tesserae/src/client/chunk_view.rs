@@ -124,7 +124,12 @@ fn add_material(
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
+    mut palette: MessageReader<crate::content::MaterialPalette>,
 ) {
+    let mut extension = ChunkMaterialExtension::default();
+    for message in palette.read() {
+        extension.apply_palette(message);
+    }
     let nothing_drawn = || ShaderBuffer::new(vec![0u32], RenderAssetUsages::default());
     let drawn = buffers.add(nothing_drawn());
     let opaque = ChunkMaterial {
@@ -141,7 +146,7 @@ fn add_material(
                     .collect::<Vec<_>>(),
             ),
             drawn: buffers.add(nothing_drawn()),
-            ..default()
+            ..extension
         },
     };
     let blended = ChunkMaterial {
@@ -725,6 +730,10 @@ mod tests {
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
     /// assets and messages, and `DefaultPlugins` wants a window.
     fn app() -> App {
+        app_with_palette(None)
+    }
+
+    fn app_with_palette(palette: Option<crate::content::MaterialPalette>) -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Mesh>()
@@ -737,14 +746,36 @@ mod tests {
             .add_message::<ChunkUnloaded>()
             .add_message::<LodMeshReady>()
             .add_message::<LodUnloaded>()
+            .add_message::<crate::content::MaterialPalette>()
             .add_systems(Startup, add_material);
         add_view_systems(&mut app);
         // `upload_meshes` takes the dev-only counter as a `ResMut`, so without
         // it the system fails parameter validation instead of running.
         #[cfg(feature = "dev")]
         app.init_resource::<crate::cost::MainThreadCost>();
+        if let Some(palette) = palette {
+            app.world_mut().write_message(palette);
+        }
         app.update();
         app
+    }
+
+    #[test]
+    fn the_palette_message_reaches_all_three_terrain_material_uniforms() {
+        let app = app_with_palette(Some(crate::content::MaterialPalette(vec![(
+            8,
+            [64, 128, 192, 128],
+        )])));
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        let expected = Color::srgba(64.0 / 255.0, 128.0 / 255.0, 192.0 / 255.0, 128.0 / 255.0)
+            .to_linear()
+            .to_vec4();
+        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+            let palette = materials.get(handle).unwrap().extension.palette;
+            assert_eq!(palette[8], expected);
+            assert_eq!(palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
+        }
     }
 
     /// Whether the material cuts a level-`level` upward face at `point`, read

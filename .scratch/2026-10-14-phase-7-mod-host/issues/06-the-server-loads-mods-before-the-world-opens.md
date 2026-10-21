@@ -1,6 +1,6 @@
 # The Server loads Mods before the World opens
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03
 
 Spec decisions 3, 5 and 6, and the `tesserae` half of 12. No Mod code runs after
@@ -47,3 +47,39 @@ load yet.
 - `./scripts/cargo-ci` passes, including the default-features `cargo check`
   (code only `dev` uses must not be dead there).
 - `ContentTables` is never written after the `App` starts.
+
+## Comments
+
+- Loading completes before App construction through the existing ModHost and
+  bounded ModInstance calls. All/None Trust modes share a callback boundary
+  for the later terminal reader. CLI overrides the environment and platform
+  data-directory default; failures name the Mod and return before a window.
+- Declarations are all registered before start receives the complete Registry.
+  The fixture checks World information and content from a later Mod. Loaded
+  tables become an immutable Arc, generation uses loaded parameters with dev
+  overrides, and reach feeds StreamingSettings.
+- WASI instances are Send but not Sync. LoadedMods is a temporary non-send App
+  value consumed during plugin construction; the retained instances live in a
+  mutex for later ownership transfer to Jobs. No tick dispatch is added here.
+- MaterialPalette is plain data. All three Client terrain uniforms consume its
+  sRGBA rows, retain magenta for absent appearance, and hold 64 colours. No
+  Client file imports tesserae-mods.
+- The optional dev fence follows content Shapes rather than assuming id 4.
+  Gallery and hotbar use its registered id; a Game or a full Shape table
+  suppresses it. Wasmtime/WASI 49.0.4 and Cranelift 0.136.4 are retained.
+- Verification: cargo fmt --all, npm run fmt and full ./scripts/cargo-ci
+  passed, including default-feature compilation, benchmark compilation,
+  boundaries and cargo-deny (advisories, licenses, bans and sources). Evidence:
+  target/phase7-runs/t06-ci-2.log. Workspace tests passed: app 222, core 212,
+  mods 57, plus 68 doctests (three previously ignored).
+- The full dev app suite passed all 250 tests, including an isolated process
+  with TESSERAE_CAVES=0 and loaded parameters, and actual fence-id selection:
+  target/phase7-runs/t06-dev-tests.log. The palette Startup test verifies all
+  three terrain uniforms, including a missing appearance row.
+- The real binary returned exit 1 for incompatible API, untrusted component
+  and compilation failure, each naming the Mod before App construction:
+  target/phase7-runs/t06-prewindow.log. No windowed capture was needed.
+- Reviewed the final diff against every listed Test and Acceptance criterion.
+  ContentTables has no post-startup writer; no tickets 07-10 are implemented.
+  Interactive Trust and tick dispatch remain intentionally deferred. No
+  unresolved ticket 06 acceptance criteria remain.

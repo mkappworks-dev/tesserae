@@ -823,6 +823,30 @@ Written as the tickets finish; what changed from the text above, and why.
   49.0.4/0.136.4 because   cargo-deny found RUSTSEC-2026-0378 and
   RUSTSEC-2026-0379 in locked 49.0.3;   the manifest minimum is patched too, so
   a lock refresh cannot regress it.
+### Ticket 06: load before opening the World
+
+- `main` resolves CLI, environment and platform paths and finishes loading via
+  the existing `ModHost` and bounded async `ModInstance` API before constructing
+  the App. Trust is All or None; the authorization callback can later read a
+  terminal answer without creating another loader.
+- All Declarations are applied before any `start`, so every Mod receives the
+  complete Registry, including content registered later in load order.
+- `LoadedMods` is temporarily a non-send App value, rather than an ordinary
+  Resource: WASI makes `ModInstance` Send but not Sync. Plugin construction
+  consumes it into immutable `Arc<Tables>`, generation parameters, reach and
+  live instances behind a mutex. No Mod calls are dispatched after loading.
+- Appearance crosses a plain-data `MaterialPalette` message. The Client builds
+  all three terrain uniforms from its sRGBA rows, with 64 slots and magenta
+  for missing appearance. The WESL constant continues to come from Rust.
+- The dev fence and gallery are absent with a Game. Without a Game, the fence
+  follows content Shapes; the gallery and hotbar use its actual id instead of
+  assuming id 4. A full Shape table leaves no room for the optional dev fence,
+  so it is omitted rather than rejecting otherwise valid content.
+- The `world-loader` guest declares one Material and Shape, no caves, and a
+  reach of 160/3000 m. Its `start` checks the World information and ids from a
+  later content Mod; its tick traps to catch accidental post-load dispatch.
+  Wasmtime/WASI 49.0.4 and Cranelift 0.136.4 remain unchanged.
+
 ## Tickets
 
 | #   | Title                                              | Blocked by |

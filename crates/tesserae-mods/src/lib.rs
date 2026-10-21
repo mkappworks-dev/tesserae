@@ -20,7 +20,7 @@ mod registry;
 mod sandbox;
 mod trust;
 
-pub use bindings::exports::tesserae::mods::guest::{Registered, WorldInfo};
+pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
 pub use bindings::tesserae::mods::content::Declaration;
 pub use command::{
     BatchError, BatchReport, BoxCursor, Command, CommandBatch, MAX_FILL_VOXELS, MAX_VOXEL_INDEX,

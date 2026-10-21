@@ -230,8 +230,12 @@ impl StreamingBudget {
 }
 
 /// Under `dev`, `TESSERAE_LOD=0` turns coarse streaming off, to measure its cost.
-fn streaming_settings() -> StreamingSettings {
-    let settings = StreamingSettings::default();
+pub(super) fn streaming_settings(view: Option<tesserae_mods::ViewParams>) -> StreamingSettings {
+    let mut settings = StreamingSettings::default();
+    if let Some(view) = view {
+        settings.view_distance_m = view.view_distance_m;
+        settings.lod_distance_m = view.lod_distance_m;
+    }
     #[cfg(feature = "dev")]
     if std::env::var("TESSERAE_LOD").is_ok_and(|v| v == "0") {
         return StreamingSettings {
@@ -416,7 +420,7 @@ impl MeshState {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.insert_resource(streaming_settings())
+    app.init_resource::<StreamingSettings>()
         .insert_resource(streaming_budget())
         .init_resource::<LoadOrder>()
         .init_resource::<MeshState>()
