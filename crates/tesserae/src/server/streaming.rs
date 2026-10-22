@@ -361,6 +361,11 @@ impl MeshState {
         self.unlit.contains(&coord) || self.relighting.contains(&coord)
     }
 
+    /// Every Chunk [`MeshState::is_unlit`] is true of.
+    pub(in crate::server) fn unlit_chunks(&self) -> impl Iterator<Item = ChunkCoord> + '_ {
+        self.unlit.union(&self.relighting).copied()
+    }
+
     /// A Voxel in this Chunk changed and its light has already been re-flooded,
     /// so the mesh that bakes both is stale.
     ///

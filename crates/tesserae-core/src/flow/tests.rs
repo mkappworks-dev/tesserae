@@ -1,4 +1,5 @@
 use super::*;
+use crate::agenda::Agenda;
 use crate::fluid::FluidDef;
 use crate::material::{STONE, WATER};
 
@@ -28,7 +29,7 @@ struct Sim {
     tables: Tables,
     scale: FlowScale,
     voxel_m: f32,
-    wakeups: Wakeups,
+    agenda: Agenda,
     timers: Timers,
     step: Step,
     quota: Quota,
@@ -51,7 +52,7 @@ impl Sim {
                 min,
                 max,
             },
-            wakeups: Wakeups::default(),
+            agenda: Agenda::default(),
             timers: Timers::default(),
             step: 0,
             quota: UNLIMITED,
@@ -82,7 +83,19 @@ impl Sim {
         self.tables.vet_occupants(occupants).expect("valid");
         let stored = occupants.encode(&self.tables.fluids);
         self.grid.cells.insert(at, stored);
-        self.wakeups.wake_around(at, self.step);
+        wake_around(&mut self.agenda, at, self.step);
+    }
+
+    /// Wakes every held Voxel, as admitting the whole grid would.
+    fn wake_all(&mut self) {
+        let (min, max) = (self.grid.min, self.grid.max);
+        for x in min[0]..=max[0] {
+            for y in min[1]..=max[1] {
+                for z in min[2]..=max[2] {
+                    self.agenda.wake([x, y, z], self.step);
+                }
+            }
+        }
     }
 
     fn place_source(&mut self, at: Cell) {
@@ -119,7 +132,7 @@ impl Sim {
     }
 
     fn run_step(&mut self) -> Finished {
-        let due = self.wakeups.take_due(self.step);
+        let due = self.agenda.take_due(self.step).cells;
         let mut cont = Continuation::start(self.step, due, std::mem::take(&mut self.timers));
         let done = loop {
             match advance(&self.grid, &self.tables, &self.scale, cont, self.quota) {
@@ -136,15 +149,54 @@ impl Sim {
             let stored = p.next.encode(&self.tables.fluids);
             self.tables.vet_occupants(p.next).expect("a valid proposal");
             self.grid.cells.insert(p.at, stored);
-            self.wakeups.wake_around(p.at, self.step + 1);
+            wake_around(&mut self.agenda, p.at, self.step + 1);
         }
         for &(step, at) in &done.wakeups {
-            self.wakeups.wake(at, step);
+            self.agenda.rewake(at, step);
         }
+        self.agenda.end_step();
         self.timers = done.timers.clone();
         self.work += done.work;
         self.step += 1;
         done
+    }
+
+    /// [`Sim::run_step`] the way the Server divides a step among workers:
+    /// `slices` parts, each with its Voxels' timers, finishing last part first.
+    fn run_step_sliced(&mut self, slices: usize) {
+        let due = self.agenda.take_due(self.step).cells;
+        let size = due.len().div_ceil(slices).max(1);
+        let mut parts: Vec<Finished> = due
+            .chunks(size)
+            .map(|part| {
+                let timers = self.timers.split_off(part);
+                Continuation::start(self.step, part.to_vec(), timers)
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .map(
+                |cont| match advance(&self.grid, &self.tables, &self.scale, cont, UNLIMITED) {
+                    Advance::Complete(done) => done,
+                    Advance::Partial(_) => unreachable!("unlimited"),
+                },
+            )
+            .collect();
+        parts.reverse();
+        for done in parts {
+            for p in &done.proposals {
+                let stored = p.next.encode(&self.tables.fluids);
+                self.grid.cells.insert(p.at, stored);
+                wake_around(&mut self.agenda, p.at, self.step + 1);
+            }
+            for &(step, at) in &done.wakeups {
+                self.agenda.rewake(at, step);
+            }
+            self.timers.merge(done.timers);
+            self.work += done.work;
+        }
+        self.agenda.end_step();
+        self.step += 1;
     }
 
     fn run(&mut self, steps: Step) {
@@ -160,7 +212,7 @@ impl Sim {
     /// Steps until nothing is waiting.
     fn settle(&mut self) -> Step {
         let start = self.step;
-        while !self.wakeups.is_empty() {
+        while !self.agenda.is_empty() {
             self.run_step();
             assert!(self.step - start < 100_000, "never settled");
         }
@@ -561,7 +613,7 @@ fn dividing_steps_by_any_quota_gives_the_same_state_at_every_step() {
 fn one_call_evaluates_at_most_its_quota() {
     let mut sim = corridor(1.0, 12.0);
     sim.place_source([0, 1, 0]);
-    let due = sim.wakeups.take_due(0);
+    let due = sim.agenda.take_due(0).cells;
     assert!(due.len() > 3);
     let total = due.len();
     let cont = Continuation::start(0, due, Timers::default());
@@ -689,7 +741,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     let sources_before: usize = count_sources(&region, &tables);
 
     let scale = FlowScale::new(&tables.fluids, 1.0);
-    let mut wakeups = Wakeups::default();
+    let mut agenda = Agenda::default();
     let shaft: Vec<Cell> = (0..5).map(|d| [bed[0], bed[1] - d, bed[2]]).collect();
     for &at in &shaft {
         write(
@@ -701,12 +753,13 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
                 burning: None,
             },
         );
-        wakeups.wake_around(at, 0);
+        wake_around(&mut agenda, at, 0);
     }
     let mut timers = Timers::default();
     let mut step = 0;
-    while !wakeups.is_empty() {
-        let cont = Continuation::start(step, wakeups.take_due(step), std::mem::take(&mut timers));
+    while !agenda.is_empty() {
+        let due = agenda.take_due(step).cells;
+        let cont = Continuation::start(step, due, std::mem::take(&mut timers));
         let Advance::Complete(done) = advance(&region, &tables, &scale, cont, UNLIMITED) else {
             unreachable!("unlimited");
         };
@@ -714,11 +767,12 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
             assert!(p.next.fluid.is_none_or(|f| !f.source));
             assert!(p.at[1] <= level, "water rose to {}", p.at[1]);
             write(&mut region, p.at, p.next);
-            wakeups.wake_around(p.at, step + 1);
+            wake_around(&mut agenda, p.at, step + 1);
         }
         for &(s, at) in &done.wakeups {
-            wakeups.wake(at, s);
+            agenda.rewake(at, s);
         }
+        agenda.end_step();
         timers = done.timers;
         step += 1;
         assert!(step < 20_000, "never settled");
@@ -746,4 +800,128 @@ fn count_sources(region: &Region, tables: &Tables) -> usize {
         }
     }
     n
+}
+
+/// The cells outside a Chunk that read into it are exactly the spans
+/// `readers_outside` names, and those inside that read out lie on its faces:
+/// checked against [`READS`] Voxel by Voxel, for a Chunk at negative
+/// coordinates.
+#[test]
+fn the_voxels_reading_across_a_chunk_boundary_are_the_ones_named() {
+    let chunk = [-1, -2, 0];
+    let home = crate::agenda::Span::chunk(chunk);
+    let readers = readers_outside(chunk);
+    let faces = reading_outside(chunk);
+    let reads_into = |c: Cell| READS.iter().any(|&r| home.contains_cell(step_by(c, r)));
+    let reads_out = |c: Cell| READS.iter().any(|&r| !home.contains_cell(step_by(c, r)));
+    for x in home.min[0] - 2..=home.max[0] + 2 {
+        for y in home.min[1] - 2..=home.max[1] + 2 {
+            for z in home.min[2] - 2..=home.max[2] + 2 {
+                let c = [x, y, z];
+                if home.contains_cell(c) {
+                    if reads_out(c) {
+                        assert!(faces.iter().any(|s| s.contains_cell(c)), "{c:?}");
+                    }
+                    continue;
+                }
+                let named = readers.iter().any(|s| s.contains_cell(c));
+                assert_eq!(named, reads_into(c), "{c:?}");
+            }
+        }
+    }
+    assert!(readers.iter().all(|s| s.home() != chunk));
+}
+
+/// A Voxel waiting on a timer when what it reads goes unknown drops the timer:
+/// nothing decided from terrain that is gone lands later.
+#[test]
+fn going_unknown_cancels_a_waiting_change() {
+    let mut sim = corridor(1.0, 12.0);
+    sim.place_source([0, 1, 0]);
+    sim.run(2);
+    assert_eq!(sim.timers.len(), 2, "the neighbours are waiting");
+    sim.grid.max[0] = 1;
+    sim.grid.min[0] = -1;
+    sim.agenda.wake([1, 1, 0], sim.step);
+    sim.agenda.wake([-1, 1, 0], sim.step);
+    sim.run_step();
+    assert!(sim.timers.is_empty(), "{} timers left", sim.timers.len());
+    sim.grid.max[0] = 13;
+    sim.grid.min[0] = -13;
+    sim.wake_all();
+    sim.settle();
+    assert_eq!(wet_length_m(&sim, 1), 7.0, "admission resumes the flow");
+}
+
+/// However a step's Voxels are divided among workers, and whichever finishes
+/// first, the state after every step and the work are the same.
+#[test]
+fn dividing_a_step_among_workers_in_any_order_changes_nothing() {
+    let script = |slices: usize| {
+        let mut sim = corridor(0.5, 6.0);
+        sim.place_source([0, 1, 0]);
+        let mut states = Vec::new();
+        for step in 0..300 {
+            if step == 120 {
+                sim.put([3, 1, 0], stone());
+            }
+            if step == 200 {
+                sim.remove_fluid([0, 1, 0]);
+            }
+            if slices == 1 {
+                sim.run_step();
+            } else {
+                sim.run_step_sliced(slices);
+            }
+            states.push(sim.state());
+        }
+        (states, sim.work)
+    };
+    let (whole, work) = script(1);
+    for slices in [2, 3, 7] {
+        let (divided, divided_work) = script(slices);
+        assert!(whole == divided, "{slices} slices diverged");
+        assert_eq!(work, divided_work);
+    }
+}
+
+/// An agenda far too small for the stream slows it and changes nothing it
+/// settles to: every wake it could not hold came back through a rescan.
+#[test]
+fn a_tiny_agenda_slows_flow_but_settles_to_the_same_state() {
+    let run = |limits: Option<crate::agenda::Limits>| {
+        let mut sim = corridor(0.25, 6.0);
+        if let Some(limits) = limits {
+            sim.agenda = Agenda::new(limits);
+        }
+        sim.place_source([0, 1, 0]);
+        let mut peak = 0;
+        let mut steps = 0;
+        while !sim.agenda.is_empty() {
+            sim.run_step();
+            peak = peak.max(sim.agenda.len());
+            steps += 1;
+            assert!(steps < 100_000, "never settled");
+        }
+        sim.remove_fluid([0, 1, 0]);
+        while !sim.agenda.is_empty() {
+            sim.run_step();
+            peak = peak.max(sim.agenda.len());
+            steps += 1;
+            assert!(steps < 100_000, "never settled");
+        }
+        (sim.state(), peak, steps, sim.agenda.overflowed())
+    };
+    let (free, _, free_steps, none) = run(None);
+    let limits = crate::agenda::Limits {
+        capacity: 6,
+        reserve: 2,
+        scan_per_step: 5,
+    };
+    let (tight, peak, tight_steps, overflowed) = run(Some(limits));
+    assert_eq!(none, 0);
+    assert!(overflowed > 0, "the bound never bit");
+    assert!(peak <= 8, "held {peak}");
+    assert!(tight_steps > free_steps);
+    assert!(free == tight, "a coalesced wake was lost");
 }

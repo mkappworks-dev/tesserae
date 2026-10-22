@@ -7,6 +7,7 @@
 //! compile rather than merely being noticed in review. The Client gets finished
 //! meshes through `super::streaming`'s messages and needs no read access either.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bevy::platform::collections::HashMap;
@@ -40,6 +41,21 @@ pub struct ChunkStore {
     /// Positions whose occupants changed since `super::fluids` last looked:
     /// what it wakes the simulation around.
     changed: Vec<[i32; 3]>,
+    /// Where `changed` was full: every position in these may have changed.
+    changed_chunks: BTreeSet<ChunkCoord>,
+    /// Coordinates a Chunk arrived at or left since `super::fluids` looked.
+    lifecycle: BTreeSet<ChunkCoord>,
+}
+
+/// Positions journalled before the journal coalesces by Chunk. A tick's
+/// player Edits, Mod Commands and landed flow fit; a `dev` builder may not.
+const JOURNAL_CAP: usize = 4096;
+
+/// What changed since the last look.
+#[derive(Default, Debug)]
+pub(in crate::server) struct Changed {
+    pub cells: Vec<[i32; 3]>,
+    pub chunks: BTreeSet<ChunkCoord>,
 }
 
 /// Which Chunk at a coordinate: a Chunk evicted and generated again is a new
@@ -131,11 +147,22 @@ impl ChunkStore {
     }
 
     pub(in crate::server) fn note_changed(&mut self, at: [i32; 3]) {
-        self.changed.push(at);
+        if self.changed.len() < JOURNAL_CAP {
+            self.changed.push(at);
+        } else {
+            self.changed_chunks.insert(VoxelCoord::of(at).chunk);
+        }
     }
 
-    pub(in crate::server) fn take_changed(&mut self) -> Vec<[i32; 3]> {
-        std::mem::take(&mut self.changed)
+    pub(in crate::server) fn take_changed(&mut self) -> Changed {
+        Changed {
+            cells: std::mem::take(&mut self.changed),
+            chunks: std::mem::take(&mut self.changed_chunks),
+        }
+    }
+
+    pub(in crate::server) fn take_lifecycle(&mut self) -> BTreeSet<ChunkCoord> {
+        std::mem::take(&mut self.lifecycle)
     }
 
     /// For a coarse generate job that takes the Chunk as a child instead of generating one.
@@ -169,6 +196,7 @@ impl ChunkStore {
         self.overlays.insert(coord, Arc::new(ChunkOverlay::none()));
         self.next_lifetime += 1;
         self.lifetimes.insert(coord, Lifetime(self.next_lifetime));
+        self.lifecycle.insert(coord);
     }
 
     pub(in crate::server) fn set_light(&mut self, coord: ChunkCoord, light: ChunkLight) {
@@ -196,6 +224,7 @@ impl ChunkStore {
         self.light.remove(&coord);
         self.overlays.remove(&coord);
         self.lifetimes.remove(&coord);
+        self.lifecycle.insert(coord);
     }
 }
 

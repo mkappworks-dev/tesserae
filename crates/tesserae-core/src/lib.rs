@@ -5,6 +5,7 @@
 //! headless, unit-testable and benchmarkable. CI enforces it in the
 //! `Boundaries` job. See `docs/architecture.md`.
 
+pub mod agenda;
 pub mod chunk;
 pub mod collide;
 pub mod flow;

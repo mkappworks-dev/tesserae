@@ -140,6 +140,7 @@ tesserae/
 │   │   │   ├── fluid.rs        fluid table, in metres and metres per second ▸ 8
 │   │   │   ├── flow.rs         sources, flow and recession: the kernel      ▸ 8
 │   │   │   ├── occupants.rs    fluid and fire beside the Voxel, one reading ▸ 8
+│   │   │   ├── agenda.rs       bounded wakes; overflow rescans each Chunk  ▸ 8
 │   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6

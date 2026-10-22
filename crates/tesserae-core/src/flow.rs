@@ -26,9 +26,10 @@
 //! at its start, so dividing one step across any number of quota-bounded calls
 //! gives the same proposals.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::agenda::{Agenda, Span};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::fluid::FluidTable;
 use crate::occupants::{ChunkOverlay, Fluid, Occupants, Overlay};
@@ -134,64 +135,6 @@ impl FlowScale {
     }
 }
 
-/// Voxels waiting to be evaluated, each at the earliest step anything asked.
-#[derive(Clone, Debug, Default)]
-pub struct Wakeups {
-    queue: BTreeSet<(Step, Cell)>,
-    at: HashMap<Cell, Step>,
-}
-
-impl Wakeups {
-    pub fn wake(&mut self, cell: Cell, step: Step) {
-        match self.at.get(&cell) {
-            Some(&due) if due <= step => {}
-            Some(&due) => {
-                self.queue.remove(&(due, cell));
-                self.queue.insert((step, cell));
-                self.at.insert(cell, step);
-            }
-            None => {
-                self.queue.insert((step, cell));
-                self.at.insert(cell, step);
-            }
-        }
-    }
-
-    /// Wakes, at `step`, every Voxel whose wanted state reads `at`.
-    pub fn wake_around(&mut self, at: Cell, step: Step) {
-        for d in DEPENDENTS {
-            self.wake([at[0] + d[0], at[1] + d[1], at[2] + d[2]], step);
-        }
-    }
-
-    /// Everything due by `step`, in canonical coordinate order.
-    pub fn take_due(&mut self, step: Step) -> Vec<Cell> {
-        let mut due = Vec::new();
-        while let Some(&(when, cell)) = self.queue.first() {
-            if when > step {
-                break;
-            }
-            self.queue.pop_first();
-            self.at.remove(&cell);
-            due.push(cell);
-        }
-        due.sort_unstable();
-        due
-    }
-
-    pub fn len(&self) -> usize {
-        self.at.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.at.is_empty()
-    }
-
-    pub fn next_due(&self) -> Option<Step> {
-        self.queue.first().map(|&(step, _)| step)
-    }
-}
-
 /// What a Voxel reads to decide its state, as offsets: itself, above, the four
 /// sides, and below each side, which says whether that side spreads.
 pub const READS: [Cell; 10] = [
@@ -208,7 +151,7 @@ pub const READS: [Cell; 10] = [
 ];
 
 /// [`READS`] reversed: the Voxels that read a given one.
-const DEPENDENTS: [Cell; 10] = [
+pub const DEPENDENTS: [Cell; 10] = [
     [0, 0, 0],
     [0, -1, 0],
     [1, 0, 0],
@@ -220,6 +163,50 @@ const DEPENDENTS: [Cell; 10] = [
     [0, 1, 1],
     [0, 1, -1],
 ];
+
+/// Wakes, at `step`, every Voxel whose wanted state reads `at`.
+pub fn wake_around(agenda: &mut Agenda, at: Cell, step: Step) {
+    for d in DEPENDENTS {
+        agenda.wake(step_by(at, d), step);
+    }
+}
+
+/// The Voxels outside `chunk` that read one inside it, as spans of the Chunks
+/// they are in: what must look again when that Chunk arrives or leaves.
+pub fn readers_outside(chunk: [i32; 3]) -> Vec<Span> {
+    let home = Span::chunk(chunk);
+    let mut spans: Vec<Span> = Vec::new();
+    for d in DEPENDENTS {
+        if d == [0, 0, 0] {
+            continue;
+        }
+        let shifted = Span::split(step_by(home.min, d), step_by(home.max, d));
+        for s in shifted {
+            if s.home() == chunk || spans.iter().any(|t| t.contains(&s)) {
+                continue;
+            }
+            spans.retain(|t| !s.contains(t));
+            spans.push(s);
+        }
+    }
+    spans.sort_unstable_by_key(|s| (s.home(), s.min, s.max));
+    spans
+}
+
+/// The faces of `chunk` whose Voxels read outside it.
+pub fn reading_outside(chunk: [i32; 3]) -> Vec<Span> {
+    let home = Span::chunk(chunk);
+    let mut spans = Vec::new();
+    for axis in 0..3 {
+        for end in [home.min[axis], home.max[axis]] {
+            let mut face = home;
+            face.min[axis] = end;
+            face.max[axis] = end;
+            spans.push(face);
+        }
+    }
+    spans
+}
 
 const SIDES: [Cell; 4] = [[-1, 0, 0], [1, 0, 0], [0, 0, -1], [0, 0, 1]];
 
@@ -236,6 +223,34 @@ struct Timer {
 pub struct Timers(HashMap<Cell, Timer>);
 
 impl Timers {
+    /// Takes the timers of `cells`, for a worker evaluating just those.
+    pub fn split_off(&mut self, cells: &[Cell]) -> Timers {
+        Timers(
+            cells
+                .iter()
+                .filter_map(|c| self.0.remove_entry(c))
+                .collect(),
+        )
+    }
+
+    pub fn merge(&mut self, other: Timers) {
+        self.0.extend(other.0);
+    }
+
+    /// Makes `at` change to `want` when evaluated at `ready` or later, unless
+    /// what it reads by then wants something else.
+    pub fn hold(&mut self, at: Cell, ready: Step, want: Option<Fluid>) {
+        self.0.insert(at, Timer { ready, want });
+    }
+
+    pub fn remove(&mut self, at: Cell) {
+        self.0.remove(&at);
+    }
+
+    pub fn retain(&mut self, mut keep: impl FnMut(Cell) -> bool) {
+        self.0.retain(|&c, _| keep(c));
+    }
+
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -293,7 +308,7 @@ pub struct Continuation {
 }
 
 impl Continuation {
-    /// `due` from [`Wakeups::take_due`].
+    /// `due` from [`Agenda::take_due`].
     pub fn start(step: Step, due: Vec<Cell>, timers: Timers) -> Self {
         Continuation {
             step,
@@ -381,7 +396,10 @@ fn evaluate(
             .map(|(voxel, overlay)| Occupants::of(voxel, overlay, &tables.fluids))
     };
     let (here, want, delay) = match wanted(&read, scale, at) {
+        // Whatever it was waiting for was decided from terrain that is gone;
+        // admission rescans it.
         Wanted::Unknown => {
+            cont.timers.0.remove(&at);
             cont.work.paused += 1;
             return;
         }

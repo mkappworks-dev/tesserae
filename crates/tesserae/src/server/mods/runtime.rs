@@ -181,6 +181,21 @@ pub(in crate::server) struct PendingCommands {
 }
 
 impl PendingCommands {
+    /// Queues placements as if Mod `index` had sent them in one batch.
+    #[cfg(test)]
+    pub(in crate::server) fn push_places(&mut self, index: usize, places: Vec<([i32; 3], Voxel)>) {
+        let voxels = places.len() as u64;
+        self.queue(index).push(CommandBatch {
+            commands: vec![Resolved::Place(places)],
+            voxels,
+        });
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn applied(&self, index: usize) -> u32 {
+        self.queues.get(index).map_or(0, |q| q.report.applied)
+    }
+
     fn queue(&mut self, index: usize) -> &mut Queue {
         if self.queues.len() <= index {
             self.queues.resize_with(index + 1, Queue::default);
@@ -283,7 +298,7 @@ fn land(
     }
 }
 
-fn drain(
+pub(in crate::server) fn drain(
     mut pending: ResMut<PendingCommands>,
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,

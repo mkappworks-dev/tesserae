@@ -9,7 +9,7 @@ use tesserae_core::CHUNK_SIZE;
 
 /// A Chunk's position in the Chunk lattice. Dimensionless: multiply by
 /// [`WorldSettings::cell_size`] to get metres.
-#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ChunkCoord {
     pub x: i32,
     pub y: i32,
