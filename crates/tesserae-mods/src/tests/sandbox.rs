@@ -219,14 +219,19 @@ fn declarer_is_refused_at_apply_and_registers_nothing() {
 #[test]
 fn flooder_is_bounded_by_the_memory_limit_and_not_by_its_list() {
     let rig = Rig::new();
-    let limits = ModLimits::HOST;
+    // Isolate memory/size faults from scheduling delays in unoptimised CI hosts.
+    let limits = ModLimits {
+        max_call_wall: Duration::from_secs(10),
+        ..ModLimits::HOST
+    };
 
     // Fits the guest's memory, so it reaches the host whole and is turned away by size.
     let (outcome, peak) = peak_during(|| {
         let flooder = rig.instance("flooder", limits).unwrap();
         block_on(flooder.tick(context(1_000_000))).map(|_| ())
     });
-    assert!(matches!(fault(outcome), ModFault::BadBatch(_)));
+    let observed = fault(outcome);
+    assert!(matches!(observed, ModFault::BadBatch(_)), "{observed:?}");
     assert!(
         peak <= 2 * limits.memory_bytes,
         "the host held {peak} bytes for a {} byte limit",
