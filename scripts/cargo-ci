@@ -17,6 +17,7 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 step "Lint: rustfmt"
 cargo fmt --all --check
+cargo fmt --manifest-path games/demo/Cargo.toml --check
 
 step "Format: prettier"
 npm run fmt:check --silent
@@ -30,8 +31,12 @@ cargo clippy --workspace --all-targets --all-features
 step "Build: default features"
 cargo check --workspace --locked
 
+# tesserae-mods' tests load the guests this builds.
+step "Test: guests"
+./scripts/build-guests
+
 step "Test"
-cargo test --workspace --locked
+cargo test --workspace --locked --features tesserae/dev
 
 # CI builds the benches without measuring. A bench that no longer compiles is a
 # bench nobody runs; measuring it here would make this script take minutes.
@@ -39,6 +44,7 @@ step "Test: benches compile"
 cargo bench --workspace --no-run --locked
 
 step "Boundaries"
+./scripts/check-demo-boundary
 members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
 for crate in tesserae-core tesserae-mods; do
   if ! grep -qxF "$crate" <<<"$members"; then

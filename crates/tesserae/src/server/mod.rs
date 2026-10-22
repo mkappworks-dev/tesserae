@@ -20,6 +20,7 @@ mod gallery;
 mod jobs;
 mod lod;
 mod lod_rings;
+pub mod mods;
 pub mod player;
 pub mod streaming;
 pub mod world_state;
@@ -55,30 +56,41 @@ pub struct WorldGenerator(pub Worldgen);
 pub struct ContentTables(pub Arc<Tables>);
 
 impl Default for ContentTables {
-    /// The builtin Shapes and Materials, and under `dev` a fence registered as a
-    /// Mod will, so the gallery and the hotbar have a connected Shape to show.
     fn default() -> Self {
-        #[cfg_attr(not(feature = "dev"), allow(unused_mut))]
-        let mut tables = Tables::builtin();
+        Self::from_loaded(Tables::builtin(), false)
+    }
+}
+
+impl ContentTables {
+    fn from_loaded(mut tables: Tables, game: bool) -> Self {
         #[cfg(feature = "dev")]
-        assert_eq!(
+        if !game && tables.shapes.len() < 256 {
             tables
                 .shapes
-                .register(tesserae_core::shape::examples::fence()),
-            Ok(tesserae_core::shape::examples::FENCE_ID),
-            "the demo fence is the first Shape after the builtins"
-        );
+                .register(tesserae_core::shape::examples::fence())
+                .expect("the demo fence fits the table");
+        }
+        #[cfg(not(feature = "dev"))]
+        let _ = (&mut tables, game);
         ContentTables(Arc::new(tables))
     }
 }
 
 pub fn plugin(app: &mut App) {
-    app.init_resource::<world_state::ChunkStore>()
+    app.add_plugins(mods::plugin)
+        .init_resource::<world_state::ChunkStore>()
         .init_resource::<ContentTables>()
         .add_systems(Startup, open_world)
         .add_plugins((streaming::plugin, edit::plugin, player::plugin));
     #[cfg(feature = "dev")]
-    app.add_plugins(gallery::plugin);
+    if app
+        .world()
+        .resource::<crate::content::DevFence>()
+        .0
+        .is_some()
+    {
+        app.add_plugins(gallery::plugin);
+    }
 }
 
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
@@ -87,9 +99,16 @@ pub fn plugin(app: &mut App) {
 /// not across two builds. `TESSERAE_WATER_LEVEL_M` moves the water to that
 /// height, and `=off` takes it out.
 #[cfg(feature = "dev")]
-fn worldgen_params() -> WorldgenParams {
-    let off = |name: &str| std::env::var(name).is_ok_and(|v| v == "0");
-    let params = WorldgenParams::default();
+fn worldgen_params(params: Option<WorldgenParams>) -> WorldgenParams {
+    dev_worldgen_params(params.unwrap_or_default(), |name| std::env::var(name).ok())
+}
+
+#[cfg(feature = "dev")]
+fn dev_worldgen_params(
+    params: WorldgenParams,
+    env: impl Fn(&str) -> Option<String>,
+) -> WorldgenParams {
+    let off = |name: &str| env(name).is_some_and(|v| v == "0");
     WorldgenParams {
         caves: if off("TESSERAE_CAVES") {
             None
@@ -101,29 +120,34 @@ fn worldgen_params() -> WorldgenParams {
         } else {
             params.smoothing
         },
-        water: match std::env::var("TESSERAE_WATER_LEVEL_M").as_deref() {
-            Ok("off") => None,
-            Ok(v) => v
+        water: match env("TESSERAE_WATER_LEVEL_M").as_deref() {
+            Some("off") => None,
+            Some(v) => v
                 .parse()
                 .ok()
                 .map(|level_m| tesserae_core::WaterParams { level_m })
                 .or(params.water),
-            Err(_) => params.water,
+            None => params.water,
         },
         ..params
     }
 }
 
 #[cfg(not(feature = "dev"))]
-fn worldgen_params() -> WorldgenParams {
-    WorldgenParams::default()
+fn worldgen_params(params: Option<WorldgenParams>) -> WorldgenParams {
+    params.unwrap_or_default()
 }
 
 /// Builds the generator and picks the spawn point. One system so there is no
 /// Startup ordering edge to maintain; its commands are applied before
 /// `PostStartup`, where the Client reads the spawn point.
-fn open_world(mut commands: Commands, world: Res<WorldSettings>) {
-    let generator = Worldgen::new(world.seed, world.voxel_size, worldgen_params());
+fn open_world(
+    mut commands: Commands,
+    world: Res<WorldSettings>,
+    params: Option<Res<mods::WorldParameters>>,
+) {
+    let params = params.map_or_else(|| worldgen_params(None), |params| params.0);
+    let generator = Worldgen::new(world.seed, world.voxel_size, params);
     commands.insert_resource(SpawnPoint::new(spawn_eye(&generator)));
     commands.insert_resource(WorldGenerator(generator));
 }
@@ -140,6 +164,60 @@ fn spawn_eye(generator: &Worldgen) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn dev_overrides_apply_after_the_loaded_world_parameters() {
+        let loaded = WorldgenParams {
+            relief_m: 12.0,
+            ..WorldgenParams::default()
+        };
+        assert!(loaded.caves.is_some());
+        let params = dev_worldgen_params(loaded, |name| match name {
+            "TESSERAE_CAVES" | "TESSERAE_SMOOTHING" => Some("0".into()),
+            "TESSERAE_WATER_LEVEL_M" => Some("27".into()),
+            _ => None,
+        });
+        assert!(params.caves.is_none());
+        assert!(params.smoothing.is_none());
+        assert_eq!(params.water.unwrap().level_m, 27.0);
+        assert_eq!(params.relief_m, 12.0);
+        assert!(
+            dev_worldgen_params(loaded, |_| Some("off".into()))
+                .water
+                .is_none()
+        );
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_caves_environment_override_reaches_loaded_parameters() {
+        const CHILD: &str = "TESSERAE_TEST_CAVES_CHILD";
+        if std::env::var_os(CHILD).is_some() {
+            let loaded = WorldgenParams {
+                relief_m: 12.0,
+                ..WorldgenParams::default()
+            };
+            let params = worldgen_params(Some(loaded));
+            assert!(params.caves.is_none());
+            assert_eq!(params.relief_m, 12.0);
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "server::tests::the_caves_environment_override_reaches_loaded_parameters",
+            ])
+            .env(CHILD, "1")
+            .env("TESSERAE_CAVES", "0")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
 
     fn spawn_point_at(voxel_size: f32) -> (Vec3, Worldgen) {
         let settings = WorldSettings {

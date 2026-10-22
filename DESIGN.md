@@ -89,8 +89,9 @@ crate to own, so the middle crate is modding.
   is still a candidate, for work that is data-parallel inside one job. Headless,
   unit-testable, benchmarkable under `criterion`. This is the hot path and the
   only part worth micro-optimising.
-- **`tesserae-mods`** — WASM host, WIT interface definitions, the batched
-  command queue. Deps: `wasmtime`. No Bevy.
+- **`tesserae-mods`** — Wasmtime/WASI host, versioned WIT contract, Manifest,
+  Trust, Registry and pure Command validation. No Bevy or wgpu. The Server in
+  `tesserae` owns scheduling and the pending Command queues.
 - **`tesserae`** — the Bevy app. `MaterialExtension` materials for
   chunk/water/foliage, chunk streaming, camera, input, UI, saves, and the
   in-process server.
@@ -414,7 +415,32 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    difference with and without it at 0.0 ms, which bounds the cost under 0.2 ms.
    See `.scratch/2026-10-13-phase-6-lod/spec.md` and
    `.scratch/2026-10-14-distance-fog/spec.md`.
-7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue.
+7. `tesserae-mods`: WASM host, WIT interfaces, batched command queue. **Done.**
+   Declarations and exact-build Trust precede App creation; asynchronous Mod
+   Jobs return validated batches to the Server's fair, bounded queues
+   ([ADR-0012](docs/adr/0012-mods-declare-once-and-command-in-batches.md)). On
+   the 10-core M5, calibration measured 41.5 million fuel/ms for the heavy mix
+   and 63–73 million for the light loop (load 3.3–4.3). `CALL_FUEL` is 200
+   million, `YIELD_FUEL` 10 million, `MAX_CALL_WALL` 250 ms. With patched
+   Wasmtime/WASI 49.0.4 and Cranelift 0.136.4 (RUSTSEC-2026-0378/0379),
+   interleaved release process-CPU measurements gave empty ticks of
+   34.48/34.82/35.10 µs and batched ticks of 34.24/35.88/85.16 µs for
+   16/256/4096 placements (load 9.01→8.55). Native validation cost
+   0.06/0.48/7.27 µs at those sizes (load 9.01→8.55). The naive benchmark cost
+   0.93/11.57/178.99 µs (load 9.01→8.55), but omits the production tick's
+   deadline thread: no flat per-command cost or small-batch speedup is
+   established. At 4096 placements the naive path is 1.94 times tick plus
+   validation (load 9.01→8.55). `MOD_VOXELS_PER_TICK` is **2**, replacing the
+   initial 256: the median worst drain was 0.296 ms (load 10.43) versus 10.585
+   ms at 256 (load 9.52–9.92). A full 32³ fill takes 16384 uncontended, lit
+   ticks, about 256 s at 64 Hz. Final live filling/control worst ticks were
+   5.3/3.7 ms (respective loads 5.04→6.07/5.12→6.12) and 3.6/6.1 ms
+   (4.79→5.52/5.52→6.74). These observations support the conservative cap, not a
+   universal latency bound; presentation work differs, so live CPU totals are
+   not equal-work throughput. The full fixed-tick metric also replaces the old
+   streaming-only frame sum. Evidence and qualifications are in tickets 04, 05
+   and 07 of `.scratch/2026-10-14-phase-7-mod-host/`. The MIT demo exercises the
+   contract at 1 m and 0.5 m without a direct engine dependency.
 8. Fluid simulation.
 9. Look-pack API, water shading, visual polish.
 10. Network transport. The `Player` and `PoseReport` are its first customers.
@@ -477,9 +503,26 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   generate, +10-20% to mesh and +80-100% to light a surface Chunk) and moved the
   worst tick from 1.6 to 1.8 ms at load 20, so the caps did not change either.
 
+- **Reach is configurable at load time.** Step 7 resolves the step-6 loose end
+  through the Game's Declaration: full detail 32–512 m and LOD reach from that
+  radius to 8192 m. Runtime changes remain deferred; tables and view parameters
+  are fixed once the World opens. The demo requests 160/3000 m, below the
+  engine's 4096 m default LOD reach; its distant capture shows beyond the
+  default 192 m full-detail radius, not beyond default LOD reach.
+- **Mod host follow-ups are explicit.** No World read until a batched Snapshot
+  API; no bulk write until relight can run once per Chunk without breaking Edit
+  invariants; no save-time tombstones or missing-Mod migration; no compile
+  cache; terminal-only Trust until a pre-World window state; a 64-entry flat
+  appearance palette until step 9; disabled Mods recover only on reopen. Distant
+  Mod Materials retain dominant-volume LOD and no emission. Closed `command` and
+  `occlusion` variants require a 0.2 line to grow. The patch export-lookup
+  question is resolved by the compatibility fixture, with no fallback. The
+  per-call deadline thread is a future optimization; generated bindings still
+  lift before the bounded post-lift check. The pre-existing `fbm2` debug
+  overflow for seeds within eight of `u32::MAX` is out of scope.
 - **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
-  Connection groups belong to a Shape and not a Material until step 7, a
+  Connection groups still belong to a Shape and not a Material after step 7, a
   connected Shape cannot be rotated, and LOD counts only its bare post. A fence
   costs 4 stairs of the cap, so 256 fit in a Chunk. Material transparency
   (glass, water, leaves) is a Material property and not a Shape one: the table,

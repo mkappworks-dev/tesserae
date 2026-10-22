@@ -49,6 +49,10 @@ allow = ["BUSL-1.1"]
 name = "tesserae-core"
 allow = ["BUSL-1.1"]
 
+[[licenses.exceptions]]
+name = "tesserae-mods"
+allow = ["BUSL-1.1"]
+
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"

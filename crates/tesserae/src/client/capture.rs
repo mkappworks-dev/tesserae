@@ -148,7 +148,7 @@ impl FrameLog {
     }
 
     fn note_cost(&mut self, elapsed_s: f32, cost: FrameCost, fly_for_s: f32) {
-        self.worst_tick_s = self.worst_tick_s.max(cost.tick_s);
+        self.worst_tick_s = self.worst_tick_s.max(cost.longest_tick_s);
         self.uploads += cost.uploads;
         self.upload_total_s += cost.upload_s;
         self.worst_sort_s = self.worst_sort_s.max(cost.sort_s);

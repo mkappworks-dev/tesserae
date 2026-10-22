@@ -1,0 +1,50 @@
+//! Loads and runs Mods: the WIT contract, the WASM sandbox and the Command queue.
+//!
+//! Exposes no `wasmtime` type, so the engine can be built without learning its
+//! API and the wasmtime version stays one line in `Cargo.toml`. Depends on
+//! neither Bevy nor wgpu. `docs/adr/0001-wasm-mod-boundary.md`.
+
+mod bindings;
+mod command;
+mod context;
+mod convert;
+mod declare;
+mod error;
+mod host;
+mod limits;
+mod loader;
+mod log;
+mod manifest;
+mod prompt;
+mod random;
+mod registry;
+mod sandbox;
+mod trust;
+
+pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
+pub use bindings::tesserae::mods::content::Declaration;
+pub use command::{
+    BatchError, BatchReport, BoxCursor, Command, CommandBatch, MAX_FILL_VOXELS, MAX_VOXEL_INDEX,
+    MAX_VOXELS_PER_CALL, Placement, Region, RegionError, Resolved, VoxelBox, validate, voxel_index,
+};
+pub use context::{EditEvent, TickContext};
+pub use declare::{
+    Applied, MAX_MATERIALS, MAX_NAME_BYTES, MAX_PER_MOD, MAX_SHAPES, ViewParams, apply,
+};
+pub use error::ModError;
+pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};
+pub use loader::{Compiled, ModHost};
+pub use log::{LogDrain, LogHandle, LogLevel, LogLine};
+pub use manifest::{Found, Manifest, SUPPORTED_API, discover, plan};
+pub use prompt::{confirm_trust, trust_prompt};
+pub use registry::{Kind, Registry, RegistryMismatch};
+pub use sandbox::{ModFault, ModInstance};
+pub use trust::{Trust, Untrusted, Verdict};
+
+#[cfg(test)]
+mod tests;
+
+/// Platform user data directory, without creating it or the Mods directory.
+pub fn default_mods_dir() -> Option<std::path::PathBuf> {
+    dirs::data_dir().map(|dir| dir.join("tesserae/mods"))
+}

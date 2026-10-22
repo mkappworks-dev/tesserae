@@ -1,0 +1,16 @@
+Mod: hello
+Version: 0.1.0
+SHA-256: abc123
+Game (root): yes
+
+Can add Materials and Shapes.
+A Game can change World generation and view distance.
+Can place and remove Voxels in loaded Chunks in batches.
+Cannot access files, network or environment.
+
+Limits: 1234 fuel per call; yield every 10000000 fuel; 250 ms per call.
+Memory: 67108864 bytes per memory; 10000 table elements; 4 instances; 4 memories; 4 tables.
+Commands: at most 1024 per batch; 65536 Voxels per call; 32768 Voxels per fill.
+Content: 56 Materials and 252 Shapes total; 64 of either per Mod; 32 bytes per name.
+
+Trust this exact build? [y/N] 

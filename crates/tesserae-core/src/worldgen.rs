@@ -129,6 +129,102 @@ impl Default for WorldgenParams {
     }
 }
 
+/// The noise scales a coordinate by `2^(octaves - 1)` in `f32` before taking
+/// its lattice cell. At 8 that stays exact out to 2^17 feature sizes from the
+/// origin; at 24 it is exact only within 2 of them, and past 2^31 the cell
+/// index overflows.
+pub const MAX_OCTAVES: u32 = 8;
+
+/// How far from zero the surface band may reach, in metres. Coarse light walks
+/// the band a Chunk row at a time generating eight Chunks per row, and a metre
+/// position stops being exact at small Voxel sizes much past this.
+pub const MAX_HEIGHT_M: f32 = 65_536.0;
+
+/// A parameter [`WorldgenParams::validate`] rejected, and the rule it broke.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct ParamError {
+    pub field: &'static str,
+    pub rule: &'static str,
+}
+
+impl std::fmt::Display for ParamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {}", self.field, self.rule)
+    }
+}
+
+impl std::error::Error for ParamError {}
+
+fn require(ok: bool, field: &'static str, rule: &'static str) -> Result<(), ParamError> {
+    ok.then_some(()).ok_or(ParamError { field, rule })
+}
+
+/// A frequency is `1 / size`, so a size whose inverse overflows is as bad as zero.
+fn positive_size(field: &'static str, metres: f32) -> Result<(), ParamError> {
+    require(
+        metres.is_finite() && metres > 0.0 && (1.0 / metres).is_finite(),
+        field,
+        "must be finite and greater than zero",
+    )
+}
+
+fn octaves(field: &'static str, count: u32) -> Result<(), ParamError> {
+    require(
+        (1..=MAX_OCTAVES).contains(&count),
+        field,
+        "must be from 1 to 8",
+    )
+}
+
+impl WorldgenParams {
+    /// Whether the generator can run on these: every distance finite and in
+    /// metres, and in the ranges its arithmetic assumes. `0` octaves is
+    /// tolerated by the noise (a flat World) but rejected here, since relief of
+    /// zero says the same thing.
+    pub fn validate(&self) -> Result<(), ParamError> {
+        let within = |m: f32| (-MAX_HEIGHT_M..=MAX_HEIGHT_M).contains(&m);
+        require(
+            within(self.sea_level_m),
+            "sea_level_m",
+            "must be finite and within 65536 m of zero",
+        )?;
+        require(
+            (0.0..=MAX_HEIGHT_M).contains(&self.relief_m)
+                && within(self.sea_level_m + self.relief_m),
+            "relief_m",
+            "must be from 0 and keep sea_level_m + relief_m within 65536 m of zero",
+        )?;
+        positive_size("feature_size_m", self.feature_size_m)?;
+        require(
+            (0.0..=MAX_HEIGHT_M).contains(&self.soil_depth_m),
+            "soil_depth_m",
+            "must be from 0 to 65536 m",
+        )?;
+        octaves("octaves", self.octaves)?;
+        if let Some(caves) = self.caves {
+            positive_size("caves.feature_size_m", caves.feature_size_m)?;
+            require(
+                caves.radius_m > 0.0 && caves.radius_m.is_finite(),
+                "caves.radius_m",
+                "must be finite and greater than zero",
+            )?;
+            require(caves.floor_m.is_finite(), "caves.floor_m", "must be finite")?;
+            octaves("caves.octaves", caves.octaves)?;
+        }
+        if let Some(smoothing) = self.smoothing {
+            require(
+                smoothing.min_rise_m.is_finite() && smoothing.min_rise_m >= 0.0,
+                "smoothing.min_rise_m",
+                "must be finite and not negative",
+            )?;
+        }
+        if let Some(water) = self.water {
+            require(water.level_m.is_finite(), "water.level_m", "must be finite")?;
+        }
+        Ok(())
+    }
+}
+
 /// Converts a tunnel radius into a window on the field. Two-octave value noise
 /// changes by about this much per lattice cell (measured near the midline: 0.51),
 /// so `|field - 0.5| < GRADIENT * r / L` is a slab about `r` metres either side
@@ -1643,5 +1739,206 @@ mod tests {
             }
         }
         assert!(seen > 0);
+    }
+
+    mod validate {
+        use super::*;
+
+        fn field(params: WorldgenParams) -> &'static str {
+            params.validate().expect_err("rejected").field
+        }
+
+        #[test]
+        fn the_default_is_valid_with_and_without_its_options() {
+            let d = WorldgenParams::default();
+            assert_eq!(d.validate(), Ok(()));
+            let bare = WorldgenParams {
+                caves: None,
+                smoothing: None,
+                water: None,
+                ..d
+            };
+            assert_eq!(bare.validate(), Ok(()));
+        }
+
+        #[test]
+        fn a_value_that_is_not_a_finite_number_names_its_field() {
+            for bad in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                let d = WorldgenParams::default();
+                let cave = CaveParams::default();
+                assert_eq!(
+                    field(WorldgenParams {
+                        sea_level_m: bad,
+                        ..d
+                    }),
+                    "sea_level_m"
+                );
+                assert_eq!(field(WorldgenParams { relief_m: bad, ..d }), "relief_m");
+                assert_eq!(
+                    field(WorldgenParams {
+                        feature_size_m: bad,
+                        ..d
+                    }),
+                    "feature_size_m"
+                );
+                assert_eq!(
+                    field(WorldgenParams {
+                        soil_depth_m: bad,
+                        ..d
+                    }),
+                    "soil_depth_m"
+                );
+                let with = |caves| WorldgenParams {
+                    caves: Some(caves),
+                    ..d
+                };
+                assert_eq!(
+                    field(with(CaveParams {
+                        feature_size_m: bad,
+                        ..cave
+                    })),
+                    "caves.feature_size_m"
+                );
+                assert_eq!(
+                    field(with(CaveParams {
+                        radius_m: bad,
+                        ..cave
+                    })),
+                    "caves.radius_m"
+                );
+                assert_eq!(
+                    field(with(CaveParams {
+                        floor_m: bad,
+                        ..cave
+                    })),
+                    "caves.floor_m"
+                );
+                let smoothing = Some(SmoothingParams { min_rise_m: bad });
+                assert_eq!(
+                    field(WorldgenParams { smoothing, ..d }),
+                    "smoothing.min_rise_m"
+                );
+                let water = Some(WaterParams { level_m: bad });
+                assert_eq!(field(WorldgenParams { water, ..d }), "water.level_m");
+            }
+        }
+
+        #[test]
+        fn sizes_depths_and_relief_have_their_floors() {
+            let d = WorldgenParams::default();
+            assert_eq!(
+                field(WorldgenParams {
+                    relief_m: -1.0,
+                    ..d
+                }),
+                "relief_m"
+            );
+            assert_eq!(
+                field(WorldgenParams {
+                    soil_depth_m: -0.5,
+                    ..d
+                }),
+                "soil_depth_m"
+            );
+            assert_eq!(
+                field(WorldgenParams {
+                    feature_size_m: 0.0,
+                    ..d
+                }),
+                "feature_size_m"
+            );
+            assert_eq!(
+                field(WorldgenParams {
+                    feature_size_m: -96.0,
+                    ..d
+                }),
+                "feature_size_m"
+            );
+            assert_eq!(
+                field(WorldgenParams {
+                    feature_size_m: 1e-40,
+                    ..d
+                }),
+                "feature_size_m"
+            );
+            let cave = CaveParams {
+                radius_m: 0.0,
+                ..CaveParams::default()
+            };
+            assert_eq!(
+                field(WorldgenParams {
+                    caves: Some(cave),
+                    ..d
+                }),
+                "caves.radius_m"
+            );
+            let smoothing = Some(SmoothingParams { min_rise_m: -0.1 });
+            assert_eq!(
+                field(WorldgenParams { smoothing, ..d }),
+                "smoothing.min_rise_m"
+            );
+            assert_eq!(
+                WorldgenParams {
+                    relief_m: 0.0,
+                    soil_depth_m: 0.0,
+                    ..d
+                }
+                .validate(),
+                Ok(())
+            );
+        }
+
+        #[test]
+        fn octaves_run_from_one_to_the_lattices_reach() {
+            let d = WorldgenParams::default();
+            assert_eq!(field(WorldgenParams { octaves: 0, ..d }), "octaves");
+            assert_eq!(
+                field(WorldgenParams {
+                    octaves: MAX_OCTAVES + 1,
+                    ..d
+                }),
+                "octaves"
+            );
+            for octaves in [1, MAX_OCTAVES] {
+                assert_eq!(WorldgenParams { octaves, ..d }.validate(), Ok(()));
+            }
+            let cave = |octaves| CaveParams {
+                octaves,
+                ..CaveParams::default()
+            };
+            assert_eq!(
+                field(WorldgenParams {
+                    caves: Some(cave(0)),
+                    ..d
+                }),
+                "caves.octaves"
+            );
+            assert_eq!(
+                field(WorldgenParams {
+                    caves: Some(cave(9)),
+                    ..d
+                }),
+                "caves.octaves"
+            );
+        }
+
+        #[test]
+        fn the_surface_band_stays_within_reach_of_the_origin() {
+            let d = WorldgenParams::default();
+            assert_eq!(
+                field(WorldgenParams {
+                    sea_level_m: 1e9,
+                    ..d
+                }),
+                "sea_level_m"
+            );
+            assert_eq!(field(WorldgenParams { relief_m: 1e9, ..d }), "relief_m");
+            let high = WorldgenParams {
+                sea_level_m: MAX_HEIGHT_M,
+                relief_m: 1.0,
+                ..d
+            };
+            assert_eq!(field(high), "relief_m");
+        }
     }
 }

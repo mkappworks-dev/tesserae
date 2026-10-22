@@ -232,8 +232,16 @@ fn spawn_hud(mut commands: Commands) {
 /// 1 to 8 choose what is held. `Q` turns it a quarter and `E` flips which way
 /// is up; between them they reach all 24 orientations. None of these is a key
 /// the camera uses.
-fn select_held(keys: Res<ButtonInput<KeyCode>>, mut held: ResMut<Held>) {
+fn select_held(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut held: ResMut<Held>,
+    #[cfg(feature = "dev")] fence: Option<Res<crate::content::DevFence>>,
+) {
     for (slot, key) in SLOT_KEYS.iter().enumerate() {
+        #[cfg(feature = "dev")]
+        if slot == 8 && fence.as_ref().is_some_and(|f| f.0.is_none()) {
+            continue;
+        }
         if keys.just_pressed(*key) {
             held.slot = slot;
         }
@@ -259,6 +267,7 @@ fn send_intents(
     held: Res<Held>,
     mut intents: MessageWriter<EditIntent>,
     mut was_grabbed: Local<bool>,
+    #[cfg(feature = "dev")] fence: Option<Res<crate::content::DevFence>>,
 ) {
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
@@ -269,7 +278,18 @@ fn send_intents(
     let action = if mouse.just_pressed(MouseButton::Left) {
         EditAction::Break
     } else if mouse.just_pressed(MouseButton::Right) {
-        EditAction::Place(held.voxel())
+        #[cfg_attr(not(feature = "dev"), allow(unused_mut))]
+        let mut voxel = held.voxel();
+        #[cfg(feature = "dev")]
+        if held.slot == 8
+            && let Some(fence) = fence
+        {
+            let Some(shape) = fence.0 else {
+                return;
+            };
+            voxel = Voxel::new(voxel.material(), shape, voxel.orientation());
+        }
+        EditAction::Place(voxel)
     } else {
         return;
     };
@@ -475,6 +495,30 @@ mod tests {
             let sent = frame(&mut app);
             assert_eq!(sent[0].action, EditAction::Place(Voxel::cube(material)));
         }
+    }
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_fence_slot_uses_its_registered_id_and_is_unavailable_with_a_game() {
+        let mut app = app(CursorGrabMode::Locked);
+        app.insert_resource(crate::content::DevFence(Some(12)));
+        frame(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Digit9);
+        frame(&mut app);
+        press(&mut app, MouseButton::Right);
+        assert_eq!(
+            frame(&mut app)[0].action,
+            EditAction::Place(Voxel::new(STONE, 12, 0))
+        );
+        app.insert_resource(crate::content::DevFence(None));
+        app.world_mut().resource_mut::<Held>().slot = 0;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Digit9);
+        frame(&mut app);
+        assert_eq!(app.world().resource::<Held>().slot, 0);
     }
 
     #[test]

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Builds test guests to target/guests and the demo Game to games/demo/dist.
+#
+# Each guest is its own workspace (the root excludes the directory), so each
+# gets its own target dir inside it and only the finished component is copied
+# out.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+guests=crates/tesserae-mods/tests/guests
+out="$PWD/target/guests"
+mkdir -p "$out"
+
+for dir in "$guests"/*/; do
+  name=$(basename "$dir")
+  # RUSTFLAGS is cleared: cargo-ci's -D warnings would fail a guest on a lint
+  # of wit-bindgen's generated code.
+  RUSTFLAGS= cargo build --manifest-path "$dir/Cargo.toml" \
+    --target wasm32-wasip2 --release --locked
+  cp "$dir/target/wasm32-wasip2/release/${name//-/_}.wasm" "$out/$name.wasm"
+done
+
+RUSTFLAGS= cargo build --manifest-path games/demo/Cargo.toml \
+  --target wasm32-wasip2 --release --locked
+mkdir -p games/demo/dist/demo
+cp games/demo/target/wasm32-wasip2/release/demo.wasm games/demo/dist/demo/
+cp games/demo/mod.toml games/demo/dist/demo/

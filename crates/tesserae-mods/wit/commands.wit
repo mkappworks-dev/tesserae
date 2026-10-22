@@ -1,0 +1,28 @@
+package tesserae:mods@0.1.0;
+
+/// What a Mod asks the World to do, in batches returned from `tick`.
+interface commands {
+    use types.{vec3, box-m, voxel};
+
+    /// One Voxel to write. The engine floors `at` to the Voxel containing it and
+    /// rejects the whole batch if the voxel is air, unknown or malformed.
+    record placement {
+        at: vec3,
+        voxel: voxel,
+    }
+
+    /// Fill a region with one Voxel. The engine rejects the batch when the
+    /// region covers more Voxels than its cap at this World's Voxel size.
+    record fill {
+        region: box-m,
+        voxel: voxel,
+    }
+
+    /// Closed in 0.1: a new case is a breaking change. The engine validates the
+    /// whole batch before queueing any of it and applies it through the same
+    /// path as a player's Edit, a budget per tick.
+    variant command {
+        fill(fill),
+        place(list<placement>),
+    }
+}

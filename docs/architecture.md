@@ -14,12 +14,14 @@ flowchart TB
     subgraph MODS["tesserae-mods — ours · no Bevy"]
         WIT["WIT contract<br/><i>versioned</i>"]
         HOST["wasmtime host"]
-        QUEUE["Batched command queue"]
+        VALIDATE["Registry + Command validation"]
     end
 
     subgraph APP["tesserae — ours · the Bevy app"]
         subgraph SRV["Server — sole world authority"]
             TICK["Tick loop"]
+            MODJOBS["Owned asynchronous Mod Jobs"]
+            QUEUE["Fair pending Command queues"]
             STATE["World state"]
             STREAM["Chunk streaming<br/>+ LOD rings<br/><i>coarse levels derived,<br/>never stored</i>"]
             JOBS["Jobs on the async<br/>compute pool"]
@@ -50,7 +52,9 @@ flowchart TB
     GAME --> WIT
     MOD --> WIT
     LOOK --> WIT
-    WIT --> HOST --> QUEUE --> TICK
+    WIT --> HOST --> VALIDATE
+    HOST --> MODJOBS --> QUEUE --> TICK
+    VALIDATE --> QUEUE
 
     INTENT -- intent only --> TICK
     TICK --> STATE --> STREAM
@@ -89,7 +93,7 @@ Orange is untrusted and sandboxed. Blue is ours. Dashed grey is third party.
 | **Where is Bevy?**            | Dashed grey, bottom. Only `tesserae` touches it: ECS, app, assets, windowing, input, audio, and `bevy_pbr` for all lighting.                                    |
 | **Where is our custom code?** | Blue. `tesserae-core` holds every expensive algorithm with no edge to Bevy or wgpu — that is what makes it benchmarkable. `tesserae` is thin glue.              |
 | **Where is the renderer?**    | There isn't one. `bevy_pbr` rasterizes; we supply meshes and `MaterialExtension` WGSL. The decision that saves 12–24 months.                                    |
-| **How do Mods work?**         | WASM → WIT contract → wasmtime host → **batched** command queue → Server tick. Never a direct call into core.                                                   |
+| **How do Mods work?**         | WASM → WIT contract → asynchronous Wasmtime call → validation → Server-owned **batched** queue → Server tick. Never a direct call into core.                    |
 | **How do Look packs work?**   | WASM cannot put code on the GPU. The pack ships WGSL as an _asset_ and registers it by handle; the host compiles it into a `MaterialExtension`. Hot-reloadable. |
 
 ## The three invariants this diagram exists to protect
@@ -121,6 +125,7 @@ tesserae/
 │                               0009 materials are table data
 │                               0010 connections are derived
 │                               0011 coarse LOD levels are derived
+│                               0012 Mods declare once, command in batches
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/
@@ -136,8 +141,12 @@ tesserae/
 │   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
-│   ├── tesserae-mods/          NO Bevy — wasmtime host, WIT, command queue  ▸ 7
-│   │   └── wit/                the versioned contract
+│   ├── tesserae-mods/          NO Bevy, NO wgpu — sandbox + validation     ▸ 7
+│   │   ├── wit/                tesserae:mods@0.1.0, world mod
+│   │   ├── src/                loader, Trust, Registry, async calls, limits
+│   │   │   └── command.rs      pure batch validation, VoxelBox + BoxCursor
+│   │   ├── tests/guests/       independent WASI sandbox fixtures
+│   │   └── benches/            host crossings + native validation
 │   └── tesserae/               the Bevy app
 │       └── src/
 │           ├── world.rs        Voxel size, seed, the Chunk lattice          ▸ 2
@@ -147,6 +156,7 @@ tesserae/
 │           │   ├── lod.rs          coarse levels: derived Chunks, LodStore  ▸ 6
 │           │   ├── lod_rings.rs    one level's shells, with a hole inside   ▸ 6
 │           │   ├── jobs.rs         jobs on the async compute pool           ▸ 3
+│           │   ├── mods.rs         Mod Jobs, fair queues and tick drain      ▸ 7
 │           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
@@ -154,6 +164,7 @@ tesserae/
 │           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
+├── games/demo/                 MIT WASI guest, only the WIT contract       ▸ 7
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
 └── USE-GRANT.md                the most important file in the repo

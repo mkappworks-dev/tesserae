@@ -41,7 +41,9 @@ jobs:
           sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
       - name: Check formatting
-        run: cargo fmt --all --check
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path games/demo/Cargo.toml --check
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features
@@ -86,14 +88,16 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
+      - name: Demo uses only the WIT contract
+        run: ./scripts/check-demo-boundary
+
       # Invariant 3 in docs/architecture.md. tesserae-core and tesserae-mods stay
       # headless so every expensive algorithm is testable and benchmarkable; a
       # transitive bevy or wgpu edge silently ends that.
       #
-      # tesserae-mods arrives in build-order step 7, and `cargo tree -p` exits
-      # non-zero for a package the workspace does not have. Skipping a crate that
-      # is not written yet keeps the check honest meanwhile; tesserae-core going
-      # missing means the check itself is broken, so that one is required.
+      # `cargo tree -p` exits non-zero for a package the workspace does not have,
+      # so a crate that is missing is skipped; tesserae-core going missing means
+      # the check itself is broken, so that one is required.
       - name: No engine dependency in headless crates
         run: |
           set -euo pipefail
@@ -149,6 +153,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
+      # tesserae-mods' tests load Mods compiled to WASM components.
+      - name: Build test guests and demo Game
+        run: |
+          rustup target add wasm32-wasip2
+          ./scripts/build-guests
+
       # The workspace manifest builds dependencies at opt-level 3 so a local
       # debug run of a Bevy app is not an order of magnitude too slow. CI never
       # runs the app — it runs 37 unit tests in well under a second — so that
@@ -157,7 +167,7 @@ jobs:
       # [profile.dev]'s opt-level 1.
       - name: Run tests
         run: |
-          cargo test --workspace --locked \
+          cargo test --workspace --locked --features tesserae/dev \
             --config 'profile.dev.package."*".opt-level=0'
 
       # The mesher is the hot path; a bench that no longer compiles is a bench

@@ -2,7 +2,7 @@
 
 use crate::light::MAX_LIGHT;
 use crate::material::MaterialTable;
-use crate::shape::ShapeTable;
+use crate::shape::{Orientation, ShapeTable};
 use crate::voxel::Voxel;
 
 /// A Voxel's kind, as the pair of tables that describe it: the [`ShapeTable`]
@@ -17,7 +17,47 @@ pub struct Tables {
     pub materials: MaterialTable,
 }
 
+/// Why [`Tables::vet_placed`] refused a Voxel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PlaceFault {
+    /// Placing air is a Break by another name.
+    Air,
+    UnknownMaterial,
+    UnknownShape,
+    /// An orientation byte of 24 or more.
+    BadOrientation,
+}
+
+impl std::fmt::Display for PlaceFault {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            PlaceFault::Air => "air is not placed, it is broken",
+            PlaceFault::UnknownMaterial => "unknown material",
+            PlaceFault::UnknownShape => "unknown shape",
+            PlaceFault::BadOrientation => "invalid orientation",
+        })
+    }
+}
+
 impl Tables {
+    /// Whether `voxel` may be placed: not air, and every id it names is in the tables. The one
+    /// check a player's Place and a Mod's Command both pass.
+    pub fn vet_placed(&self, voxel: Voxel) -> Result<(), PlaceFault> {
+        if voxel.is_air() {
+            return Err(PlaceFault::Air);
+        }
+        if !self.materials.contains(voxel.material()) {
+            return Err(PlaceFault::UnknownMaterial);
+        }
+        if !self.shapes.contains(voxel.shape()) {
+            return Err(PlaceFault::UnknownShape);
+        }
+        if Orientation::from_bits(voxel.orientation()).is_none() {
+            return Err(PlaceFault::BadOrientation);
+        }
+        Ok(())
+    }
+
     pub fn builtin() -> Self {
         Self::default()
     }
@@ -58,5 +98,33 @@ impl Tables {
             return 0;
         }
         self.shapes.joint_id(voxel)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::material::STONE;
+
+    #[test]
+    fn vet_placed_names_the_first_thing_wrong() {
+        let tables = Tables::builtin();
+        let materials = tables.materials.len() as u16;
+        let shapes = tables.shapes.len() as u8;
+        assert_eq!(tables.vet_placed(Voxel::cube(STONE)), Ok(()));
+        assert_eq!(tables.vet_placed(Voxel::AIR), Err(PlaceFault::Air));
+        assert_eq!(
+            tables.vet_placed(Voxel::new(materials, 0, 0)),
+            Err(PlaceFault::UnknownMaterial)
+        );
+        assert_eq!(
+            tables.vet_placed(Voxel::new(STONE, shapes, 0)),
+            Err(PlaceFault::UnknownShape)
+        );
+        assert_eq!(
+            tables.vet_placed(Voxel::new(STONE, 0, 24)),
+            Err(PlaceFault::BadOrientation)
+        );
+        assert_eq!(tables.vet_placed(Voxel::new(STONE, 0, 23)), Ok(()));
     }
 }

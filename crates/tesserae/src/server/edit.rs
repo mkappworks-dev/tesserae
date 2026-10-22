@@ -25,7 +25,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use tesserae_core::collide::{VoxelVolume, raycast};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_FULL_CUBE, Tables, Voxel, relight};
+use tesserae_core::{MAX_SHAPED_PER_CHUNK, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel, relight};
 
 use super::ContentTables;
 use super::player::{self, Player};
@@ -117,6 +117,17 @@ impl RejectReason {
     }
 }
 
+impl From<PlaceFault> for RejectReason {
+    fn from(fault: PlaceFault) -> Self {
+        match fault {
+            PlaceFault::Air => RejectReason::NoMaterial,
+            PlaceFault::UnknownMaterial => RejectReason::UnknownMaterial,
+            PlaceFault::UnknownShape => RejectReason::UnknownShape,
+            PlaceFault::BadOrientation => RejectReason::BadOrientation,
+        }
+    }
+}
+
 /// An intent the Server declined.
 #[derive(Message, Clone, Copy, Debug)]
 pub struct EditRejected {
@@ -138,6 +149,7 @@ pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PendingEdits>()
+        .init_resource::<super::mods::EditHistory>()
         .add_message::<EditIntent>()
         .add_message::<EditRejected>()
         // Every frame, so a click is never lost to a frame that runs no tick.
@@ -194,13 +206,13 @@ fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<f32, RejectReason> {
     Ok(distance)
 }
 
-fn apply_pending(
+pub(in crate::server) fn apply_pending(
     mut pending: ResMut<PendingEdits>,
+    mut history: ResMut<super::mods::EditHistory>,
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
     mut rejected: MessageWriter<EditRejected>,
-    tables: Res<ContentTables>,
-    world: Res<WorldSettings>,
+    (tables, world): (Res<ContentTables>, Res<WorldSettings>),
 ) {
     let mut applied = 0;
     let mut waiting = VecDeque::new();
@@ -215,7 +227,14 @@ fn apply_pending(
                 if meshes.is_unlit(VoxelCoord::of(at).chunk) {
                     return Err(RejectReason::Busy);
                 }
-                set_voxel(&mut store, &mut meshes, &tables, at, voxel)
+                let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
+                set_voxel(&mut store, &mut meshes, &tables, at, voxel)?;
+                history.record(tesserae_mods::EditEvent {
+                    at: at.map(|i| i as f32 * world.voxel_size),
+                    before,
+                    after: store.voxel(at).expect("the edited Chunk is held"),
+                });
+                Ok(())
             });
         match outcome {
             Ok(()) => applied += 1,
@@ -258,9 +277,7 @@ fn resolve(
     match intent.action {
         EditAction::Break => Ok((hit.at, Voxel::AIR)),
         EditAction::Place(voxel) => {
-            if voxel.is_air() {
-                return Err(RejectReason::NoMaterial);
-            }
+            tables.vet_placed(voxel)?;
             let step = FACE_STEPS[hit.face];
             let target = [
                 hit.at[0] + step[0],
@@ -300,15 +317,7 @@ pub(in crate::server) fn set_voxel(
     // Air is air whatever shape or orientation byte it carries.
     let voxel = if voxel.is_air() { Voxel::AIR } else { voxel };
     if !voxel.is_air() {
-        if !tables.materials.contains(voxel.material()) {
-            return Err(RejectReason::UnknownMaterial);
-        }
-        if !tables.shapes.contains(voxel.shape()) {
-            return Err(RejectReason::UnknownShape);
-        }
-        if Orientation::from_bits(voxel.orientation()).is_none() {
-            return Err(RejectReason::BadOrientation);
-        }
+        tables.vet_placed(voxel)?;
     }
     // A cube looks the same however it is turned, and a connected Shape ignores
     // its orientation, so the turn is dropped. Left in, two that look identical
@@ -378,7 +387,7 @@ mod tests {
     use tesserae_core::shape::examples;
     use tesserae_core::worldgen::{LANTERN, STONE};
     use tesserae_core::{
-        CHUNK_SIZE, Chunk, ChunkLight, LitChunk, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
+        CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Orientation, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
     use super::super::player::{Player, PoseReport};

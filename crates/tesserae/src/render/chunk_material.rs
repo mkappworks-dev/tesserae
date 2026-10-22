@@ -26,9 +26,7 @@ pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtensi
 const MATERIAL_SHADER_LOCATION: u32 = 10;
 const LIGHT_SHADER_LOCATION: u32 = 11;
 
-/// Enough for `testgen`'s three Materials with room to look at them. The real
-/// count is a Mod's business and arrives with the look-pack API in step 9.
-pub const PALETTE_LEN: usize = 16;
+pub const PALETTE_LEN: usize = 64;
 
 /// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
 #[derive(Reflect, ShaderType, Debug, Clone, Copy)]
@@ -234,7 +232,7 @@ mod tests {
 
     #[test]
     fn every_material_id_the_shader_can_index_has_a_colour() {
-        assert_eq!(ChunkMaterialExtension::default().palette.len(), PALETTE_LEN);
+        assert_eq!(ChunkMaterialExtension::default().palette.len(), 64);
     }
 
     /// The shader clamps the Material index to the palette's last entry, so a

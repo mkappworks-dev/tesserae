@@ -1,0 +1,112 @@
+package tesserae:mods@0.1.1;
+
+/// What a Mod declares once, at load, from `declare`.
+interface content {
+    use types.{node-box, collision-box, connect-def, srgba};
+
+    /// Whether a full cube of the Material hides the faces around it. Closed
+    /// in 0.1: a new case is a breaking change.
+    enum occlusion {
+        /// Hides every neighbour's face. Requires `dimming` 15 and render class
+        /// `opaque`, or the engine rejects the Material.
+        opaque,
+        /// Hides the faces of the same Material only.
+        same-material,
+        /// Hides nothing, not even itself.
+        never,
+    }
+
+    /// Which mesh a Material's faces are drawn in.
+    enum render-class {
+        opaque,
+        blend,
+        cutout,
+    }
+
+    /// One Material. The engine registers it under `<mod id>:<name>` and hands
+    /// the Mod its id in `start`. Colour is not here; see `appearance`.
+    record material-def {
+        /// The Mod's local part, `[a-z][a-z0-9_]{0,31}`.
+        name: string,
+        /// Block light emitted, 0 to 15.
+        emission: u8,
+        /// Light levels removed entering the Voxel, 0 to 15; 15 is opaque.
+        dimming: u8,
+        occlusion: occlusion,
+        render: render-class,
+        /// Whether a body collides with it and the edit ray stops on it.
+        solid: bool,
+    }
+
+    /// One Shape. The engine registers it under `<mod id>:<name>`, derives its
+    /// faces, light and collision once, and registers all 24 orientations.
+    record shape-def {
+        name: string,
+        /// The geometry, at most 16 boxes; they may overlap.
+        boxes: list<node-box>,
+        /// What bodies collide with when it differs from what is drawn.
+        collision: option<list<collision-box>>,
+        connect: option<connect-def>,
+    }
+
+    /// A placeholder colour for one of this Mod's Materials, read by the
+    /// Client's flat palette until a Look pack replaces it. A Material with none
+    /// is drawn magenta.
+    record appearance {
+        /// The Material's local name.
+        material: string,
+        color: srgba,
+    }
+
+    /// Cave carving. The engine feeds it to native generation unchanged once
+    /// validated; every distance is in metres.
+    record cave-params {
+        feature-size-m: f32,
+        radius-m: f32,
+        floor-m: f32,
+        octaves: u32,
+    }
+
+    /// Smoothing of one-Voxel steps into stairs and slabs.
+    record smoothing-params {
+        min-rise-m: f32,
+    }
+
+    /// Standing water up to one height, in metres.
+    record water-params {
+        level-m: f32,
+    }
+
+    /// Terrain generation parameters, field for field the engine's own. Only the
+    /// Game may set them; the engine rejects non-finite or out-of-range values.
+    /// An absent cave, smoothing or water record means none, not the default.
+    record world-params {
+        sea-level-m: f32,
+        relief-m: f32,
+        feature-size-m: f32,
+        soil-depth-m: f32,
+        octaves: u32,
+        caves: option<cave-params>,
+        smoothing: option<smoothing-params>,
+        water: option<water-params>,
+    }
+
+    /// How far the Client streams, in metres. Only the Game may set it; the
+    /// engine rejects values outside its supported ranges.
+    record view-params {
+        view-distance-m: f32,
+        lod-distance-m: f32,
+    }
+
+    /// Everything a Mod adds, in registration order: a name's id is its index
+    /// after the engine's built-ins. A `world` or `view` from a Mod that is not
+    /// the Game is a load error, not ignored.
+    record declaration {
+        materials: list<material-def>,
+        shapes: list<shape-def>,
+        appearance: list<appearance>,
+        /// `none` keeps the engine's default; `some` replaces it whole.
+        %world: option<world-params>,
+        view: option<view-params>,
+    }
+}

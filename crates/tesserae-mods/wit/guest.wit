@@ -1,0 +1,62 @@
+package tesserae:mods@0.1.0;
+
+/// What a Mod exports. The engine calls these; a Mod never calls itself.
+interface guest {
+    use types.{vec3, voxel};
+    use content.{declaration};
+    use commands.{command};
+
+    /// What `start` tells the Mod about the World it joined.
+    record world-info {
+        /// The edge of one Voxel in metres, so a Mod can align to the lattice
+        /// and none assumes a Voxel is a metre.
+        voxel-size-m: f32,
+        seed: u64,
+    }
+
+    /// One registered name and the id the engine gave it.
+    record registered-id {
+        /// The full name, `<mod id>:<name>`, built-ins included.
+        name: string,
+        id: u32,
+    }
+
+    /// Every id registered across all Mods, built-ins included, so no Mod
+    /// hardcodes one.
+    record registered {
+        materials: list<registered-id>,
+        shapes: list<registered-id>,
+    }
+
+    /// One player Edit since the last call.
+    record edit-event {
+        at: vec3,
+        before: voxel,
+        after: voxel,
+    }
+
+    /// What became of the previous batch.
+    record batch-report {
+        applied: u32,
+        rejected: u32,
+    }
+
+    record tick-context {
+        tick: u64,
+        dt-s: f32,
+        /// The player's Edits only; a Mod's own commands are not fed back.
+        edits: list<edit-event>,
+        last: batch-report,
+    }
+
+    /// Called once at load, before anything is registered. The engine validates
+    /// the result and registers it in order.
+    declare: func() -> declaration;
+
+    /// Called once after registration, with the ids the Mod's commands carry.
+    start: func(%world: world-info, ids: registered);
+
+    /// Called at most once per Server tick and never while a call is running.
+    /// The engine validates the returned batch before queueing it.
+    tick: func(ctx: tick-context) -> list<command>;
+}

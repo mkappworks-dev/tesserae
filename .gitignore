@@ -3,3 +3,8 @@
 .worktrees/
 node_modules/
 .DS_Store
+/crates/tesserae-mods/tests/guests/*/target
+
+/games/demo/target
+/games/demo/dist
+/games/demo/trust.json

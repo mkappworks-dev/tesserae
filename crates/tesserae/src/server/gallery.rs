@@ -67,7 +67,7 @@ fn build(
     mut meshes: ResMut<MeshState>,
     mut progress: Local<Progress>,
     generator: Res<WorldGenerator>,
-    tables: Res<ContentTables>,
+    (tables, fence): (Res<ContentTables>, Res<crate::content::DevFence>),
     world: Res<WorldSettings>,
     spawn: Option<Res<SpawnPoint>>,
 ) {
@@ -77,6 +77,15 @@ fn build(
     let corner = spawn.metres() + Vec3::new(ASIDE_M, 0.0, -AHEAD_M);
     let surface = |x, z| generator.surface_height_m(x, z);
     let mut plan = plan(&world, corner, surface);
+    for (_, voxel) in &mut plan {
+        if voxel.shape() == FENCE_ID {
+            *voxel = Voxel::new(
+                voxel.material(),
+                fence.0.expect("gallery has a fence"),
+                voxel.orientation(),
+            );
+        }
+    }
     // `TESSERAE_TRANSLUCENT_ROW=0` leaves the row out, so a capture can hold
     // no blended Voxel and be compared with one from before the blended pass.
     // `TESSERAE_TRANSLUCENT_ROW_ASIDE_M` moves it, so the fixed camera can see
@@ -245,6 +254,19 @@ fn translucent_plan(
         }
     }
     plan
+}
+
+#[cfg(test)]
+pub(super) fn measurement_plan(world: &WorldSettings, generator: &tesserae_core::Worldgen) -> Plan {
+    let spawn = super::spawn_eye(generator);
+    let surface = |x, z| generator.surface_height_m(x, z);
+    let mut result = plan(world, spawn + Vec3::new(ASIDE_M, 0.0, -AHEAD_M), surface);
+    result.extend(translucent_plan(
+        world,
+        spawn + Vec3::new(ROW_ASIDE_M, 0.0, -AHEAD_M),
+        surface,
+    ));
+    result
 }
 
 #[cfg(test)]

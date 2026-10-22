@@ -215,10 +215,13 @@ the benches but does not measure them — a regression is a human judgement.
 
 ### Working on mods
 
-```bash
-cd games/demo
-cargo build --target wasm32-wasip2 --release
-```
+Install the guest target with `rustup target add wasm32-wasip2`, then run
+`./scripts/build-guests` from the repository root to build the independent test
+guests and MIT demo. The demo component and Manifest are copied to
+`games/demo/dist/demo/`; run it with
+`cargo run -p tesserae -- --mods games/demo/dist --trust-all` for an explicit
+unattended trust grant, or omit `--trust-all` to review the terminal prompt.
+Guest edits need a rebuild and World reopen; runtime Mod reload is deferred.
 
 The host API is deliberately **batched**: region operations and a command queue,
 not per-voxel calls. Crossing the WASM boundary copies, so call frequency — not

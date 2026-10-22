@@ -2168,6 +2168,44 @@ mod tests {
     }
 
     #[test]
+    fn a_mod_fill_invalidates_a_held_level_one_cover_and_redelivers_its_mesh() {
+        use tesserae_mods::{Command, Region};
+        let mut h = harness();
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+        let before = h.cover_arc(covering);
+        let side = CHUNK_SIZE as i32;
+        let min = [
+            chunk.x * side + 10,
+            chunk.y * side + 10,
+            chunk.z * side + 10,
+        ];
+        let size = h.app.world().resource::<WorldSettings>().voxel_size;
+        let command = Command::Fill {
+            region: Region {
+                min: min.map(|i| i as f32 * size),
+                max: min.map(|i| (i + 2) as f32 * size),
+            },
+            voxel: stone(),
+        };
+        crate::server::mods::runtime::tests::drain_validated(&mut h.app, &[command]);
+        let (ready, _) = h.lod_settle();
+        assert!(!same_chunk(&before, &h.cover_arc(covering)));
+        assert!(same_chunk(
+            &h.cover_arc(covering),
+            &expected_cover(&h, chunk)
+        ));
+        let delivered = latest(ready);
+        assert!(same_mesh(
+            delivered.get(&(1, covering)).expect("cover redelivered"),
+            &h.fresh_mesh(1, covering)
+        ));
+        assert!(!h.lod_state().is_stale(1, covering));
+    }
+
+    #[test]
     fn an_edit_under_a_held_cover_regenerates_it_and_delivers_the_new_mesh() {
         let mut h = harness();
         h.settle();
