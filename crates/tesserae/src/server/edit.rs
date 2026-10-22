@@ -25,7 +25,9 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use tesserae_core::collide::{VoxelVolume, raycast};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{MAX_SHAPED_PER_CHUNK, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel, relight};
+use tesserae_core::{
+    MAX_SHAPED_PER_CHUNK, Occupants, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel, relight,
+};
 
 use super::ContentTables;
 use super::player::{self, Player};
@@ -95,6 +97,15 @@ pub enum RejectReason {
     NoMaterial,
     /// The Chunk's shaped Voxels, in stairs, would pass [`MAX_SHAPED_PER_CHUNK`].
     TooManyShaped,
+    /// A fluid Material where a solid goes.
+    NotSolid,
+    /// A fluid whose Material has no fluid definition.
+    NotAFluid,
+    /// Fluid in a Voxel a full cube leaves no space in.
+    FluidExcluded,
+    BadSurface,
+    /// Burning with nothing solid to burn.
+    NoFuel,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,
 }
@@ -112,6 +123,11 @@ impl RejectReason {
             RejectReason::BadOrientation => "invalid orientation",
             RejectReason::NoMaterial => "nothing to place",
             RejectReason::TooManyShaped => "too many shaped blocks in this chunk",
+            RejectReason::NotSolid => "a fluid is not placed as a solid",
+            RejectReason::NotAFluid => "not a fluid",
+            RejectReason::FluidExcluded => "a full cube leaves no room for fluid",
+            RejectReason::BadSurface => "invalid fluid surface",
+            RejectReason::NoFuel => "nothing solid to burn",
             RejectReason::Busy => "the server is busy, try again",
         }
     }
@@ -124,6 +140,11 @@ impl From<PlaceFault> for RejectReason {
             PlaceFault::UnknownMaterial => RejectReason::UnknownMaterial,
             PlaceFault::UnknownShape => RejectReason::UnknownShape,
             PlaceFault::BadOrientation => RejectReason::BadOrientation,
+            PlaceFault::NotSolid => RejectReason::NotSolid,
+            PlaceFault::NotAFluid => RejectReason::NotAFluid,
+            PlaceFault::FluidExcluded => RejectReason::FluidExcluded,
+            PlaceFault::BadSurface => RejectReason::BadSurface,
+            PlaceFault::NoFuel => RejectReason::NoFuel,
         }
     }
 }
@@ -294,46 +315,53 @@ fn resolve(
     }
 }
 
-/// Replaces one Voxel, re-floods the light around it, and marks every Chunk
-/// whose mesh that made stale.
+/// Replaces what is at one position, re-floods the light around it, and marks
+/// every Chunk whose mesh that made stale.
 ///
-/// The one Edit, shared by the intents above and by the `dev` builders, so the
-/// builders exercise the path a player's click does.
+/// The one World change, shared by the intents above, the Mod drain and the
+/// `dev` builders: [`set_voxel`] is this with the solid-layer rule applied
+/// first. A change to the fluid or the fire alone is a change all the same,
+/// though the packed Voxel stays: the mesh, the cover and any Snapshot taken
+/// before it read what is now gone.
 ///
 /// A mesh is stale in three kinds of Chunk: the edited one; any the relight
 /// wrote to; and the neighbour across a boundary plane the Voxel sits on, whose
 /// faces next to it change whether or not any light does. Removing a stone Voxel
 /// in the dark moves no light and still leaves the next Chunk a face to grow.
-pub(in crate::server) fn set_voxel(
+pub(in crate::server) fn set_occupants(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
     tables: &Tables,
     at: [i32; 3],
-    voxel: Voxel,
+    occupants: Occupants,
 ) -> Result<(), RejectReason> {
     let place = VoxelCoord::of(at);
     let chunk = store.get(place.chunk).ok_or(RejectReason::NotLoaded)?;
 
     // Air is air whatever shape or orientation byte it carries.
-    let voxel = if voxel.is_air() { Voxel::AIR } else { voxel };
-    if !voxel.is_air() {
-        tables.vet_placed(voxel)?;
-    }
+    let solid = if occupants.solid.is_air() {
+        Voxel::AIR
+    } else {
+        occupants.solid
+    };
+    let occupants = Occupants { solid, ..occupants };
+    tables.vet_occupants(occupants)?;
     // A cube looks the same however it is turned, and a connected Shape ignores
     // its orientation, so the turn is dropped. Left in, two that look identical
     // would be two palette entries and unequal.
-    let voxel = if voxel.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(voxel) {
-        Voxel::new(voxel.material(), voxel.shape(), 0)
+    let solid = if solid.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(solid) {
+        Voxel::new(solid.material(), solid.shape(), 0)
     } else {
-        voxel
+        solid
     };
+    let (voxel, overlay) = Occupants { solid, ..occupants }.encode(&tables.fluids);
+
     // Net of what it replaces: swapping one shaped Voxel for another of the same
     // cost at the cap is not adding one. Counted in stairs, a connected Shape
     // being charged for its rails.
+    let before = chunk.get(place.x, place.y, place.z);
     let added = tables.shapes.cap_units(voxel);
-    let removed = tables
-        .shapes
-        .cap_units(chunk.get(place.x, place.y, place.z));
+    let removed = tables.shapes.cap_units(before);
     if added > removed
         && chunk.shaped_units(|v| tables.shapes.cap_units(v)) + (added - removed) as usize
             > MAX_SHAPED_PER_CHUNK
@@ -341,17 +369,22 @@ pub(in crate::server) fn set_voxel(
         return Err(RejectReason::TooManyShaped);
     }
 
-    let was = store.light_at(at);
-    store.set_voxel(place, voxel);
-    let mut lattice = LightLattice::new(store);
-    relight(&mut lattice, tables, at, was);
-    let lit = std::mem::take(&mut lattice.touched);
+    store.set_overlay(place, overlay);
+    // The overlay has no say in the light yet: dimming and emission still read
+    // the packed Voxel alone, so a change to it alone moves nothing.
+    if voxel != before {
+        let was = store.light_at(at);
+        store.set_voxel(place, voxel);
+        let mut lattice = LightLattice::new(store);
+        relight(&mut lattice, tables, at, was);
+        let lit = std::mem::take(&mut lattice.touched);
+        for coord in lit {
+            meshes.edited(coord);
+        }
+    }
 
     meshes.voxels_changed(place.chunk);
     meshes.edited(place.chunk);
-    for coord in lit {
-        meshes.edited(coord);
-    }
     let local = [place.x, place.y, place.z];
     let last = tesserae_core::CHUNK_SIZE - 1;
     for (axis, step) in [
@@ -377,6 +410,28 @@ pub(in crate::server) fn set_voxel(
     Ok(())
 }
 
+/// The whole-Voxel Edit a player's click, a Mod's Command and a `dev` builder
+/// make: `voxel` applied to the solid layer by [`Occupants::place_solid`], then
+/// [`set_occupants`].
+pub(in crate::server) fn set_voxel(
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    at: [i32; 3],
+    voxel: Voxel,
+) -> Result<(), RejectReason> {
+    let now = store
+        .occupants(at, &tables.fluids)
+        .ok_or(RejectReason::NotLoaded)?;
+    set_occupants(
+        store,
+        meshes,
+        tables,
+        at,
+        now.place_solid(voxel, &tables.fluids),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,7 +442,8 @@ mod tests {
     use tesserae_core::shape::examples;
     use tesserae_core::worldgen::{LANTERN, STONE};
     use tesserae_core::{
-        CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Orientation, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
+        Burning, CHUNK_SIZE, Chunk, ChunkLight, Fluid, LitChunk, Occupants, Orientation, Overlay,
+        SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
     use super::super::player::{Player, PoseReport};
@@ -1126,6 +1182,162 @@ mod tests {
         app.world_mut().run_system_once(receive).unwrap();
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), MAX_PENDING);
         assert_eq!(rejections(&mut app), vec![RejectReason::Busy; 10]);
+    }
+
+    fn put_occupants(
+        app: &mut App,
+        at: [i32; 3],
+        occupants: Occupants,
+    ) -> (MeshState, Result<(), RejectReason>) {
+        let tables = Tables::builtin();
+        let mut store = app.world_mut().resource_mut::<ChunkStore>();
+        let mut meshes = MeshState::default();
+        let result = set_occupants(&mut store, &mut meshes, &tables, at, occupants);
+        (meshes, result)
+    }
+
+    fn occupants_at(app: &App, at: [i32; 3]) -> Occupants {
+        app.world()
+            .resource::<ChunkStore>()
+            .occupants(at, &Tables::builtin().fluids)
+            .expect("held")
+    }
+
+    /// Setting a stone cube on fire changes no Voxel. It is still an Edit: the
+    /// mesh, the face next door and the level-1 cover all read it, and a
+    /// Snapshot taken before it is no longer current.
+    #[test]
+    fn an_overlay_only_change_invalidates_what_a_snapshot_read() {
+        let solid = Chunk::filled(stone());
+        let mut app = app_with(&[
+            (ChunkCoord::new(0, 0, 0), solid.clone()),
+            (ChunkCoord::new(1, 0, 0), solid.clone()),
+            (ChunkCoord::new(0, 1, 0), solid.clone()),
+        ]);
+        let last = CHUNK_SIZE as i32 - 1;
+        let at = [last, 4, 4];
+        let snapshot = app
+            .world()
+            .resource::<ChunkStore>()
+            .shared(origin())
+            .unwrap();
+
+        let burning = Occupants {
+            burning: Some(Burning { fuel: 9 }),
+            ..occupants_at(&app, at)
+        };
+        let (meshes, result) = put_occupants(&mut app, at, burning);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(voxel_at(&app, at), stone(), "the Voxel changed");
+        assert_eq!(occupants_at(&app, at), burning);
+        assert!(meshes.is_dirty(origin()));
+        assert!(meshes.is_edited(origin()), "the cover does not know");
+        assert!(
+            meshes.is_dirty(ChunkCoord::new(1, 0, 0)),
+            "the face next door does not know"
+        );
+        assert!(!meshes.is_dirty(ChunkCoord::new(0, 1, 0)));
+        let store = app.world().resource::<ChunkStore>();
+        assert!(!store.unchanged_since(origin(), &snapshot));
+        assert_eq!(snapshot.overlay.get(last as usize, 4, 4), Overlay::NONE);
+    }
+
+    /// A refused reading changes neither layer.
+    #[test]
+    fn what_the_tables_refuse_changes_nothing() {
+        let mut app = app_with(&[(origin(), pool())]);
+        let water = Fluid::source(tesserae_core::material::WATER);
+        let was = occupants_at(&app, [5, 8, 5]);
+        let cases = [
+            (
+                Occupants {
+                    solid: stone(),
+                    fluid: Some(water),
+                    burning: None,
+                },
+                RejectReason::FluidExcluded,
+            ),
+            (
+                Occupants {
+                    solid: Voxel::AIR,
+                    fluid: Some(water),
+                    burning: Some(Burning { fuel: 1 }),
+                },
+                RejectReason::NoFuel,
+            ),
+            (
+                Occupants {
+                    solid: Voxel::AIR,
+                    fluid: Some(Fluid::source(STONE)),
+                    burning: None,
+                },
+                RejectReason::NotAFluid,
+            ),
+            (
+                Occupants {
+                    solid: Voxel::cube(tesserae_core::material::WATER),
+                    fluid: None,
+                    burning: None,
+                },
+                RejectReason::NotSolid,
+            ),
+        ];
+        for (occupants, expected) in cases {
+            let (meshes, result) = put_occupants(&mut app, [5, 8, 5], occupants);
+            assert_eq!(result, Err(expected), "{occupants:?}");
+            assert!(!meshes.is_dirty(origin()), "{occupants:?} dirtied a mesh");
+        }
+        assert_eq!(occupants_at(&app, [5, 8, 5]), was);
+        assert_eq!(
+            voxel_at(&app, [5, 8, 5]),
+            Voxel::cube(tesserae_core::material::WATER)
+        );
+    }
+
+    /// The old whole-Voxel Edit reads through the one interpretation: water
+    /// placed the old way is a source, stone displaces it, and breaking a solid
+    /// that holds water leaves the water, stored the canonical way.
+    #[test]
+    fn set_voxel_goes_through_the_layer_rules() {
+        let mut app = app_with(&[(origin(), ground())]);
+        let water = tesserae_core::material::WATER;
+        let tables = Tables::builtin();
+        let put = |app: &mut App, at, voxel| {
+            let mut store = app.world_mut().resource_mut::<ChunkStore>();
+            set_voxel(&mut store, &mut MeshState::default(), &tables, at, voxel)
+        };
+
+        assert_eq!(put(&mut app, [5, 8, 5], Voxel::cube(water)), Ok(()));
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]).fluid,
+            Some(Fluid::source(water))
+        );
+        assert_eq!(put(&mut app, [5, 8, 5], stone()), Ok(()));
+        assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
+
+        let wet_stair = Occupants {
+            solid: stair(),
+            fluid: Some(Fluid::source(water)),
+            burning: Some(Burning { fuel: 2 }),
+        };
+        assert_eq!(put_occupants(&mut app, [6, 8, 5], wet_stair).1, Ok(()));
+        assert_eq!(put(&mut app, [6, 8, 5], Voxel::AIR), Ok(()));
+        assert_eq!(
+            occupants_at(&app, [6, 8, 5]),
+            Occupants {
+                solid: Voxel::AIR,
+                fluid: Some(Fluid::source(water)),
+                burning: None,
+            }
+        );
+        assert_eq!(
+            voxel_at(&app, [6, 8, 5]),
+            Voxel::cube(water),
+            "not canonical"
+        );
+        let store = app.world().resource::<ChunkStore>();
+        assert_eq!(store.overlay(origin()).unwrap().get(6, 8, 5), Overlay::NONE);
     }
 
     #[test]

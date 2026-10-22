@@ -150,8 +150,8 @@ intent; it never makes an Edit.
 mesh), run on a worker from a Snapshot and returning an owned result. A Job
 never touches World state.
 
-**Snapshot** — the immutable view of World state a Job is handed: the Chunks and
-light it reads, as shared references.
+**Snapshot** — the immutable view of World state a Job is handed: the Chunks,
+their light and their overlay, as shared references.
 
 **Landing** — the Server applying a finished Job's result to World state, on its
 tick. The only way a Job's work becomes part of the World.

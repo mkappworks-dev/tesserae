@@ -53,78 +53,62 @@ fn write_index(words: &mut [u64], bits: u8, i: usize, value: usize) {
     words[w] = (words[w] & !(mask << shift)) | ((value as u64 & mask) << shift);
 }
 
+/// One value per Voxel of a Chunk, palette-compressed. The Voxels themselves
+/// and the fluid overlay beside them share this, so the bit packing exists
+/// once.
 #[derive(Clone, Debug)]
-enum Storage {
+pub(crate) enum Palette<T> {
     /// Every Voxel identical. The common case for air and for solid stone, and
     /// the reason a 4km view distance is affordable at all.
-    Uniform(Voxel),
-    Palette {
-        palette: Vec<Voxel>,
+    Uniform(T),
+    Indexed {
+        palette: Vec<T>,
         bits: u8,
         words: Vec<u64>,
     },
 }
 
-#[derive(Clone, Debug)]
-pub struct Chunk {
-    storage: Storage,
-}
-
-impl Chunk {
-    /// `const` so a caller that only needs a Chunk to lend - a test, a bench, a
-    /// synthetic boundary - can hold one in a `static`.
-    pub const fn filled(voxel: Voxel) -> Self {
-        Chunk {
-            storage: Storage::Uniform(voxel),
-        }
-    }
-
-    pub const fn air() -> Self {
-        Self::filled(Voxel::AIR)
-    }
-
+impl<T: Copy + PartialEq> Palette<T> {
     #[inline]
-    pub fn get(&self, x: usize, y: usize, z: usize) -> Voxel {
-        debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
-        match &self.storage {
-            Storage::Uniform(v) => *v,
-            Storage::Palette {
+    pub fn get(&self, i: usize) -> T {
+        match self {
+            Palette::Uniform(v) => *v,
+            Palette::Indexed {
                 palette,
                 bits,
                 words,
-            } => palette[read_index(words, *bits, index(x, y, z))],
+            } => palette[read_index(words, *bits, i)],
         }
     }
 
-    pub fn set(&mut self, x: usize, y: usize, z: usize, voxel: Voxel) {
-        debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
-        if let Storage::Uniform(current) = self.storage {
-            if current == voxel {
+    pub fn set(&mut self, i: usize, value: T) {
+        if let Palette::Uniform(current) = *self {
+            if current == value {
                 return;
             }
             let bits = bits_for(1);
-            self.storage = Storage::Palette {
+            *self = Palette::Indexed {
                 palette: vec![current],
                 bits,
                 words: vec![0; words_for(bits)],
             };
         }
 
-        let Storage::Palette {
+        let Palette::Indexed {
             palette,
             bits,
             words,
-        } = &mut self.storage
+        } = self
         else {
             unreachable!("promoted above");
         };
 
         // Linear scan beats a hash map at the palette sizes a Chunk actually
         // reaches (tens). Revisit if a profile shows a Chunk above ~256 entries.
-        let slot = match palette.iter().position(|&p| p == voxel) {
+        let slot = match palette.iter().position(|&p| p == value) {
             Some(i) => i,
             None => {
-                palette.push(voxel);
+                palette.push(value);
                 let wanted = bits_for(palette.len());
                 if wanted != *bits {
                     let mut wider = vec![0u64; words_for(wanted)];
@@ -138,25 +122,92 @@ impl Chunk {
             }
         };
 
-        write_index(words, *bits, index(x, y, z), slot);
+        write_index(words, *bits, i, slot);
+    }
+
+    pub fn uniform(&self) -> Option<T> {
+        match self {
+            Palette::Uniform(v) => Some(*v),
+            Palette::Indexed { .. } => None,
+        }
+    }
+
+    /// Every distinct value held, and possibly some no longer held: see
+    /// [`Chunk::kinds`].
+    pub fn kinds(&self) -> &[T] {
+        match self {
+            Palette::Uniform(v) => std::slice::from_ref(v),
+            Palette::Indexed { palette, .. } => palette,
+        }
+    }
+
+    /// `weigh` summed over every Voxel, exactly: a full scan once indexed.
+    pub fn sum(&self, weigh: impl Fn(T) -> usize) -> usize {
+        match self {
+            Palette::Uniform(v) => CHUNK_VOLUME * weigh(*v),
+            Palette::Indexed {
+                palette,
+                bits,
+                words,
+            } => (0..CHUNK_VOLUME)
+                .map(|i| weigh(palette[read_index(words, *bits, i)]))
+                .sum(),
+        }
+    }
+
+    pub fn palette_len(&self) -> usize {
+        self.kinds().len()
+    }
+
+    pub fn heap_bytes(&self) -> usize {
+        match self {
+            Palette::Uniform(_) => 0,
+            Palette::Indexed { palette, words, .. } => {
+                palette.len() * size_of::<T>() + words.len() * size_of::<u64>()
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Chunk {
+    storage: Palette<Voxel>,
+}
+
+impl Chunk {
+    /// `const` so a caller that only needs a Chunk to lend - a test, a bench, a
+    /// synthetic boundary - can hold one in a `static`.
+    pub const fn filled(voxel: Voxel) -> Self {
+        Chunk {
+            storage: Palette::Uniform(voxel),
+        }
+    }
+
+    pub const fn air() -> Self {
+        Self::filled(Voxel::AIR)
+    }
+
+    #[inline]
+    pub fn get(&self, x: usize, y: usize, z: usize) -> Voxel {
+        debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
+        self.storage.get(index(x, y, z))
+    }
+
+    pub fn set(&mut self, x: usize, y: usize, z: usize, voxel: Voxel) {
+        debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
+        self.storage.set(index(x, y, z), voxel);
     }
 
     /// `Some` when every Voxel is identical. Lets callers skip a Chunk entirely.
     pub fn uniform(&self) -> Option<Voxel> {
-        match &self.storage {
-            Storage::Uniform(v) => Some(*v),
-            Storage::Palette { .. } => None,
-        }
+        self.storage.uniform()
     }
 
     /// Every distinct Voxel the Chunk holds, and possibly some it no longer
     /// does: a palette never demotes. So it can over-report and never
     /// under-report, which is the direction a gate needs.
     pub fn kinds(&self) -> &[Voxel] {
-        match &self.storage {
-            Storage::Uniform(v) => std::slice::from_ref(v),
-            Storage::Palette { palette, .. } => palette,
-        }
+        self.storage.kinds()
     }
 
     /// Whether any Voxel here might be shaped, from the palette alone.
@@ -166,58 +217,31 @@ impl Chunk {
     /// the direction a gate needs: terrain, which never held a shaped Voxel,
     /// skips the work, and a Chunk that did pays for an exact count.
     pub fn may_contain_shaped(&self) -> bool {
-        match &self.storage {
-            Storage::Uniform(v) => v.is_shaped(),
-            Storage::Palette { palette, .. } => palette.iter().any(|v| v.is_shaped()),
-        }
+        self.kinds().iter().any(|v| v.is_shaped())
     }
 
     /// How many shaped Voxels there are, exactly. A scan, so only call it on
     /// the edit path; the mesher's gate is [`Chunk::may_contain_shaped`].
     pub fn shaped_count(&self) -> usize {
-        match &self.storage {
-            Storage::Uniform(v) if v.is_shaped() => CHUNK_VOLUME,
-            Storage::Palette {
-                palette,
-                bits,
-                words,
-            } if palette.iter().any(|v| v.is_shaped()) => (0..CHUNK_VOLUME)
-                .filter(|&i| palette[read_index(words, *bits, i)].is_shaped())
-                .count(),
-            _ => 0,
-        }
+        self.shaped_units(|_| 1)
     }
 
     /// The shaped Voxels here weighed by `cost`, exactly. [`Chunk::shaped_count`]
     /// with a price per Voxel; the same scan, the same warning.
     pub fn shaped_units(&self, cost: impl Fn(Voxel) -> u32) -> usize {
-        match &self.storage {
-            Storage::Uniform(v) if v.is_shaped() => CHUNK_VOLUME * cost(*v) as usize,
-            Storage::Palette {
-                palette,
-                bits,
-                words,
-            } if palette.iter().any(|v| v.is_shaped()) => (0..CHUNK_VOLUME)
-                .map(|i| cost(palette[read_index(words, *bits, i)]) as usize)
-                .sum(),
-            _ => 0,
+        if !self.may_contain_shaped() {
+            return 0;
         }
+        self.storage
+            .sum(|v| if v.is_shaped() { cost(v) as usize } else { 0 })
     }
 
     pub fn palette_len(&self) -> usize {
-        match &self.storage {
-            Storage::Uniform(_) => 1,
-            Storage::Palette { palette, .. } => palette.len(),
-        }
+        self.storage.palette_len()
     }
 
     pub fn heap_bytes(&self) -> usize {
-        match &self.storage {
-            Storage::Uniform(_) => 0,
-            Storage::Palette { palette, words, .. } => {
-                palette.len() * size_of::<Voxel>() + words.len() * size_of::<u64>()
-            }
-        }
+        self.storage.heap_bytes()
     }
 }
 

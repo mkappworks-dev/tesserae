@@ -37,11 +37,11 @@ use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
-use super::jobs::{Border, Jobs, Shared, build_mesh, solve};
+use super::jobs::{Border, Jobs, build_mesh, solve};
 use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
-use super::world_state::ChunkStore;
+use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
 
@@ -704,10 +704,10 @@ fn land_relight(
         };
         meshes.relighting.remove(&coord);
         let poisoned = meshes.poisoned.remove(&coord);
-        let Some((current, _)) = store.shared(coord) else {
+        if !store.contains(coord) {
             continue;
-        };
-        if poisoned || !Arc::ptr_eq(&current, &solved.chunk) {
+        }
+        if poisoned || !store.unchanged_since(coord, &solved.snapshot) {
             jobs.relight.note_stale();
             meshes.unlit.insert(coord);
             continue;
@@ -764,12 +764,12 @@ fn dispatch_relight(
         if !meshes.unlit.contains(&coord) || jobs.relight.contains(coord) {
             continue;
         }
-        let Some((chunk, before)) = store.shared(coord) else {
+        let Some(snapshot) = store.shared(coord) else {
             meshes.unlit.remove(&coord);
             continue;
         };
         let border: [Border; 6] = face_neighbors(coord).map(|n| match store.shared(n) {
-            Some((chunk, light)) => Border::Loaded(chunk, light),
+            Some(snapshot) => Border::Loaded(snapshot),
             None if n.y > coord.y && above_the_surface(generator, world, n) => Border::OpenSky,
             None => Border::Absent,
         });
@@ -778,7 +778,7 @@ fn dispatch_relight(
         meshes.poisoned.remove(&coord);
         let tables = Arc::clone(tables);
         jobs.relight
-            .spawn(coord, move || solve(chunk, &before, &border, &tables));
+            .spawn(coord, move || solve(snapshot, &border, &tables));
         free -= 1;
     }
 }
@@ -874,7 +874,7 @@ fn dispatch_meshes(
             continue;
         };
         let faces = face_neighbors(coord);
-        let around: [Option<Shared>; 6] = faces.map(|n| store.shared(n));
+        let around: [Option<Snapshot>; 6] = faces.map(|n| store.shared(n));
         let Some(around) = around.into_iter().collect::<Option<Vec<_>>>() else {
             continue;
         };
@@ -882,7 +882,7 @@ fn dispatch_meshes(
         if wait_for_settled_light && !(settled(&coord) && faces.iter().all(settled)) {
             continue;
         }
-        let around: [Shared; 6] = around
+        let around: [Snapshot; 6] = around
             .try_into()
             .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
@@ -2160,6 +2160,49 @@ pub(in crate::server) mod tests {
         assert!(
             h.jobs().relight.stale() >= 1,
             "the old instance's solve landed"
+        );
+        let expected = fixed_point(
+            h.store(),
+            h.app.world().resource::<WorldGenerator>(),
+            h.app.world().resource::<WorldSettings>(),
+        );
+        assert_lit_like(&h, &expected);
+    }
+
+    /// A solve reads the overlay as it reads the Voxels: one that changed under
+    /// it, with no Voxel moving and nothing marked, is not a solve of what the
+    /// store now holds.
+    #[test]
+    fn a_solve_whose_overlay_changed_meanwhile_does_not_land() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.settle();
+        let home = ChunkCoord::new(0, 0, 0);
+
+        h.jobs_mut().relight.hold.hold();
+        h.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(home);
+        h.tick();
+        assert!(h.jobs().relight.contains(home), "no solve started");
+        h.app
+            .world_mut()
+            .run_system_once(move |mut store: ResMut<ChunkStore>| {
+                store.set_overlay(
+                    VoxelCoord::of([1, 1, 1]),
+                    tesserae_core::Overlay {
+                        fluid: None,
+                        burning: Some(tesserae_core::Burning { fuel: 1 }),
+                    },
+                );
+            })
+            .unwrap();
+        h.jobs_mut().relight.hold.release();
+        h.settle();
+
+        assert!(
+            h.jobs().relight.stale() >= 1,
+            "the solve of the old overlay landed"
         );
         let expected = fixed_point(
             h.store(),

@@ -542,13 +542,12 @@ fn fixture_fill_redelivers_mesh_matches_fresh_light_and_invalidates_the_cover() 
     let tables = h.app.world().resource::<ContentTables>();
     let border = std::array::from_fn(|face| {
         let d = tesserae_core::mesh::FACE_STEPS[face];
-        let (chunk, light) = store.shared(ChunkCoord::new(d[0], d[1], d[2])).unwrap();
-        Border::Loaded(chunk, light)
+        Border::Loaded(store.shared(ChunkCoord::new(d[0], d[1], d[2])).unwrap())
     });
-    let (chunk, light) = store.shared(home()).unwrap();
-    let fresh = solve(chunk, &ChunkLight::dark(), &border, tables);
+    let snapshot = store.shared(home()).unwrap();
+    let fresh = solve(snapshot.clone(), &border, tables);
     assert!(
-        *light == fresh.light,
+        *snapshot.light == fresh.light,
         "incremental light equals a fresh solve"
     );
 }

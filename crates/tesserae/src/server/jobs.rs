@@ -7,6 +7,7 @@
 
 use std::fmt::Debug;
 use std::hash::Hash;
+#[cfg(test)]
 use std::sync::Arc;
 
 use bevy::platform::collections::HashMap;
@@ -16,6 +17,7 @@ use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk};
 
+use super::world_state::Snapshot;
 use crate::world::ChunkCoord;
 
 // A job closes over these by value or by `Arc`, so a field that stops being
@@ -255,7 +257,7 @@ pub(in crate::server) enum Border {
     /// and everything sees full sky. The relaxation cannot discover this: there
     /// is no neighbour to ask.
     OpenSky,
-    Loaded(Arc<Chunk>, Arc<ChunkLight>),
+    Loaded(Snapshot),
 }
 
 /// The Voxels of the synthetic Chunk above the surface: air, which is all the
@@ -264,9 +266,9 @@ static SKY_CHUNK: Chunk = Chunk::air();
 
 /// A finished light solve.
 pub(in crate::server) struct Solved {
-    /// The instance that was solved, so landing can tell it is still the one in
-    /// the store and has not been evicted and regenerated meanwhile.
-    pub chunk: Arc<Chunk>,
+    /// What was solved, so landing can tell it is still what the store holds
+    /// and has not been evicted, regenerated or changed under it meanwhile.
+    pub snapshot: Snapshot,
     pub light: ChunkLight,
     /// Whether `light` differs from the light the Chunk had when the job began.
     pub changed: bool,
@@ -277,40 +279,41 @@ pub(in crate::server) struct Solved {
 /// Solves one Chunk's light from a snapshot. Equality and the per-face plane
 /// comparison run here, not on the tick: they are a 32768-cell compare each.
 pub(in crate::server) fn solve(
-    chunk: Arc<Chunk>,
-    before: &ChunkLight,
+    snapshot: Snapshot,
     border: &[Border; 6],
     tables: &Tables,
 ) -> Solved {
+    let before: &ChunkLight = &snapshot.light;
     let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
     let lit: [Option<LitChunk>; 6] = std::array::from_fn(|face| match &border[face] {
         Border::Absent => None,
         Border::OpenSky => Some(LitChunk::new(&SKY_CHUNK, &open_sky)),
-        Border::Loaded(chunk, light) => Some(LitChunk::new(chunk, light)),
+        Border::Loaded(s) => Some(LitChunk::new(&s.chunk, &s.light)),
     });
-    let light = light_chunk(&chunk, lit, tables);
+    let light = light_chunk(&snapshot.chunk, lit, tables);
     let changed = *before != light;
     let outward = std::array::from_fn(|face| before.boundary_differs(&light, face));
     Solved {
-        chunk,
+        snapshot,
         light,
         changed,
         outward,
     }
 }
 
-/// A Chunk and its light, shared.
-pub(in crate::server) type Shared = (Arc<Chunk>, Arc<ChunkLight>);
-
 /// Meshes one Chunk from a snapshot of it and its six face neighbours.
 pub(in crate::server) fn build_mesh(
-    center: &Shared,
-    around: &[Shared; 6],
+    center: &Snapshot,
+    around: &[Snapshot; 6],
     tables: &Tables,
 ) -> ChunkMesh {
     let neighbors: [Option<LitChunk>; 6] =
-        std::array::from_fn(|face| Some(LitChunk::new(&around[face].0, &around[face].1)));
-    mesh_chunk(LitChunk::new(&center.0, &center.1), neighbors, tables)
+        std::array::from_fn(|face| Some(LitChunk::new(&around[face].chunk, &around[face].light)));
+    mesh_chunk(
+        LitChunk::new(&center.chunk, &center.light),
+        neighbors,
+        tables,
+    )
 }
 
 /// Every job in flight, by stage.

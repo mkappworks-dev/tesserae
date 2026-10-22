@@ -434,6 +434,7 @@ mod tests {
         Tables {
             shapes: shapes.clone(),
             materials: crate::material::MaterialTable::builtin(),
+            fluids: crate::fluid::FluidTable::builtin(),
         }
     }
 
