@@ -685,6 +685,21 @@ Written as the tickets finish; what changed from the text above, and why.
   optionally, through the export index, not through the generated
   `instantiate`.
 
+### Ticket 02: Engine, Manifest and Trust
+
+- Manifest parsing, API/path validation and deterministic dependency-first
+  planning precede compilation; loading tests cover bad paths, symlink escape,
+  duplicate ids, cycles and roots, missing dependencies and listing order.
+- Trust hashes length-delimited component bytes together with Manifest bytes. A
+  new untrusted build is refused without opening its component; an existing
+  record must read it to detect changes. Compilation consumes checked bytes,
+  avoiding a check/compile swap. This qualifies the text's unconditional "before
+  reading" promise. Tests pin both paths and persisted grants.
+- serde_json was added for atomic Trust persistence; semver parsing is local.
+  Threads are disabled by the absent Wasmtime feature rather than its gated
+  setter. Limits can only be lowered; ticket 04 replaces placeholder values.
+
+
 ### Ticket 03: declarations into tables
 
 - **`octaves` is `1..=8`, and now it has a reason.** The noise multiplies a
@@ -847,22 +862,6 @@ Written as the tickets finish; what changed from the text above, and why.
   later content Mod; its tick traps to catch accidental post-load dispatch.
   Wasmtime/WASI 49.0.4 and Cranelift 0.136.4 remain unchanged.
 
-## Tickets
-
-| #   | Title                                              | Blocked by |
-| --- | -------------------------------------------------- | ---------- |
-| 01  | The crate, the WIT package and the guest toolchain | -          |
-| 02  | Engine, Manifest and Trust, headless               | 01         |
-| 03  | Declarations into tables, and the Registry         | 01         |
-| 04  | The sandbox, and the fixtures that test it         | 02         |
-| 05  | The tick, Command batches and the host-call bench  | 03, 04     |
-| 06  | The Server loads Mods before the World opens       | 02, 03     |
-| 07  | Mod Jobs, the Command queue and its drain          | 05, 06     |
-| 08  | The trust prompt and the mods directory            | 06         |
-| 09  | games/demo, built in CI                            | 07, 08     |
-| 10  | Docs, ADR-0012, measurements and the PR            | 09         |
-
-
 ### Ticket 07: Mod Jobs and the Command queue
 
 - Load-order `ModJobs` slots replace `RunningMods`' idle retention. A slot
@@ -941,3 +940,39 @@ Written as the tickets finish; what changed from the text above, and why.
   reach: the specified demo uses 3,000 m. The distant capture shows beyond the
   default 192 m full-detail radius; no claim is made of exceeding default LOD
   reach.
+
+
+### Ticket 10: documentation and handoff
+
+- ADR-0012 records the implemented boundary and its trade-offs; DESIGN step 7 is
+  Done with measured fuel, host costs and the two-Voxel drain budget. Reach is
+  configurable at load time, not while a World is open. Architecture, glossary,
+  guest build instructions and ADR-0009 now describe shipped behavior.
+- Added the missing ticket 02 Outcome from its Comments and loading tests;
+  tickets 01–10 each have one Outcome subsection. Decision 2's semver export
+  lookup and decision 9's cancellable sleep were proved, not left open.
+- The parent reviewed and showed ticket 09's content/distance captures and
+  deleted its unique temporary review folder as requested. They are not
+  recreated. The 3000 m demo cannot exceed the default 4096 m LOD reach; the
+  capture proves distance beyond the default 192 m full-detail radius.
+- PR title and complete template body are prepared under target/phase7-runs for
+  parent review. Push, compare URL and inline publication are the parent's final
+  handoff, explicitly excluded from this implementation subtask.
+- Fresh formatting and full cargo-ci evidence: target/phase7-runs/t10-format.log
+  and t10-cargo-ci.log. Ticket 10 Comments audit Done when and limitations.
+
+
+## Tickets
+
+| #   | Title                                              | Blocked by |
+| --- | -------------------------------------------------- | ---------- |
+| 01  | The crate, the WIT package and the guest toolchain | -          |
+| 02  | Engine, Manifest and Trust, headless               | 01         |
+| 03  | Declarations into tables, and the Registry         | 01         |
+| 04  | The sandbox, and the fixtures that test it         | 02         |
+| 05  | The tick, Command batches and the host-call bench  | 03, 04     |
+| 06  | The Server loads Mods before the World opens       | 02, 03     |
+| 07  | Mod Jobs, the Command queue and its drain          | 05, 06     |
+| 08  | The trust prompt and the mods directory            | 06         |
+| 09  | games/demo, built in CI                            | 07, 08     |
+| 10  | Docs, ADR-0012, measurements and the PR            | 09         |

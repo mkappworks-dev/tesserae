@@ -35,6 +35,10 @@ Appearance (colour, alpha, texture) is Look pack data and stays out of the
 table; the render class is in it because the mesher, which knows nothing of
 Bevy, decides which mesh a face goes into.
 
+Until step 9, a Mod's Declaration supplies a flat appearance palette as a
+stopgap, separate from the Material table (see
+[ADR-0012](0012-mods-declare-once-and-command-in-batches.md)).
+
 Terrain pays for none of this. Translucency is a per-Chunk gate read from the
 palette, and the light flood and the mesher's first pass are specialised on it,
 so a Chunk without a translucent Material runs the code that shipped before the

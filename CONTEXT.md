@@ -19,6 +19,17 @@ entities, recipes, worldgen parameters, assets.
 **Look pack** — a Mod that supplies rendering appearance only: materials and
 post-process settings. The equivalent of a Minecraft shaderpack.
 
+**Manifest** — a Mod's identity, version, contract line, dependencies and
+requested limits; marks whether it is a Game.
+
+**Declaration** — the content a Mod supplies when loaded: Materials, Shapes,
+appearance and, for a Game, World parameters.
+
+**Registry** — the correspondence between names and the ids of registered
+Materials and Shapes.
+
+**Trust** — a user's authorization to run a particular build of a Mod.
+
 ## World
 
 **World** — one save. Owns its Voxel size, its seed and its Chunks.
@@ -130,6 +141,10 @@ near it. Not the feet and not a body.
 
 **Edit** — a change to one Voxel, applied by the Server. A Client sends an
 intent; it never makes an Edit.
+
+**Command** — a Mod's request to fill a region or place Voxels at positions.
+
+**Command batch** — the Commands returned together by one Mod call.
 
 **Job** — one Chunk's worth of one streaming stage (generate, solve light,
 mesh), run on a worker from a Snapshot and returning an owned result. A Job
