@@ -735,3 +735,184 @@ fn the_fixed_pre_update_drain_runs_after_player_apply_pending() {
     assert_eq!(history.events[0].before, Voxel::cube(STONE));
     assert_eq!(history.events[0].after, Voxel::AIR);
 }
+
+fn demo_loaded(size: f32) -> LoadedMods {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = loop {
+        let dir = root.join(format!(
+            "target/phase7-runs/t09-trust-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => break dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => panic!("{e}"),
+        }
+    };
+    let loaded = load(
+        &root.join("games/demo/dist"),
+        &dir.join("trust.json"),
+        TrustMode::All,
+        &WorldSettings {
+            voxel_size: size,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    assert!(loaded.game, "build the demo with scripts/build-guests");
+    loaded
+}
+
+#[test]
+fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
+    for size in [1.0, 0.5] {
+        let loaded = demo_loaded(size);
+        assert_eq!(
+            loaded
+                .registry
+                .id_of(tesserae_mods::Kind::Material, "demo:lamp"),
+            Some(8)
+        );
+        assert_eq!(
+            loaded
+                .registry
+                .id_of(tesserae_mods::Kind::Shape, "demo:fence"),
+            Some(4)
+        );
+        let params = loaded.world.unwrap();
+        assert_eq!(params.relief_m, 4.0);
+        assert!(params.water.is_none() && params.caves.is_none());
+        assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
+        assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
+        assert_eq!(loaded.appearance, [(8, [255, 144, 48, 255])]);
+        assert_eq!(loaded.tables.materials.def(8).emission, 15);
+        let mut neighbors = [Voxel::AIR; 6];
+        neighbors[0] = Voxel::new(1, 4, 0);
+        assert!(
+            loaded
+                .tables
+                .shapes
+                .connections(Voxel::new(1, 4, 0), neighbors)
+                .has(0)
+        );
+        let mut h = Harness::new(&[]);
+        h.logs = loaded.mods.iter().map(ModInstance::log).collect();
+        h.app = App::new();
+        h.app
+            .insert_non_send(loaded)
+            .insert_resource(WorldSettings {
+                voxel_size: size,
+                ..Default::default()
+            })
+            .init_resource::<Time<Fixed>>()
+            .init_resource::<ChunkStore>()
+            .init_resource::<MeshState>()
+            .add_plugins(super::super::plugin);
+        assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 5);
+        #[cfg(feature = "dev")]
+        assert_eq!(h.app.world().resource::<crate::content::DevFence>().0, None);
+        h.app
+            .insert_resource(crate::server::world_state::SpawnPoint::new(Vec3::new(
+                0.0, 28.0, 0.0,
+            )));
+        h.call();
+        assert!(h.log(0).is_empty());
+        assert_eq!(h.app.world().resource::<ModJobs>().tick, 0);
+        for y in -1..3 {
+            for z in -2..2 {
+                for x in -2..2 {
+                    let coord = ChunkCoord::new(x, y, z);
+                    let mut store = h.app.world_mut().resource_mut::<ChunkStore>();
+                    store.insert(coord, Chunk::air());
+                    store.set_light(coord, ChunkLight::dark());
+                }
+            }
+        }
+        h.call();
+        let total = h.backlog(0);
+        assert_eq!(total, if size == 1.0 { 38 } else { 255 });
+        assert_eq!(h.pending().queues[0].commands.len(), 2);
+        let mut ticks = 0;
+        while h.backlog(0) > 0 {
+            h.drain();
+            ticks += 1;
+        }
+        assert_eq!(ticks, (total as usize).div_ceil(MOD_VOXELS_PER_TICK));
+        assert_eq!(
+            h.pending().queues[0].report,
+            BatchReport {
+                applied: total as u32,
+                rejected: 0
+            }
+        );
+        let index = |v: [f32; 3]| v.map(|m| (m / size).floor() as i32);
+        for x in -4..2 {
+            for y in 24..29 {
+                assert_eq!(
+                    h.voxel(index([x as f32, y as f32, -7.0])),
+                    Voxel::cube(STONE)
+                );
+            }
+        }
+        assert_eq!(h.voxel(index([3.0, 30.0, -7.0])), Voxel::new(STONE, 4, 0));
+        assert_eq!(h.voxel(index([3.0, 31.0, -7.0])), Voxel::cube(8));
+        let store = h.app.world().resource::<ChunkStore>();
+        assert_eq!(store.light_at(index([3.0, 31.0, -7.0])).block(), 15);
+        h.call();
+        assert_eq!(h.backlog(0), 0, "the demo builds only on its first call");
+        let log = h.log(0);
+        assert_eq!(log.matches("demo first tick:").count(), 1);
+        assert!(log.contains(&format!("demo build applied={total} rejected=0")));
+    }
+}
+
+#[test]
+fn first_mod_call_waits_for_held_lit_spawn_neighborhood_then_runs_once() {
+    let mut h = Harness::new(&[9]);
+    h.app
+        .insert_resource(crate::server::world_state::SpawnPoint::new(Vec3::new(
+            0.0, 2.0, 0.0,
+        )));
+    h.call();
+    assert!(
+        h.log(0).is_empty(),
+        "must not consume the first call before streaming"
+    );
+    for y in -1..=1 {
+        for z in -1..=1 {
+            for x in -1..=1 {
+                let coord = ChunkCoord::new(x, y, z);
+                h.app
+                    .world_mut()
+                    .resource_mut::<ChunkStore>()
+                    .insert(coord, Chunk::air());
+            }
+        }
+    }
+    h.app
+        .world_mut()
+        .resource_mut::<MeshState>()
+        .mark_unlit(home());
+    h.call();
+    assert!(h.log(0).is_empty(), "held but unlit is not ready");
+    h.app
+        .world_mut()
+        .resource_mut::<MeshState>()
+        .mark_lit(home());
+    h.call();
+    assert!(h.log(0).contains("call=1 tick=1"));
+    h.drain();
+    assert_eq!(h.voxel([31, 31, 31]), Voxel::cube(STONE));
+    h.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .remove(home());
+    h.call();
+    assert!(
+        h.log(0).contains("call=2 tick=2"),
+        "readiness gates startup only"
+    );
+}

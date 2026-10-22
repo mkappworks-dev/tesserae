@@ -918,3 +918,26 @@ Written as the tickets finish; what changed from the text above, and why.
   are recorded in Ticket08 Comments. Runtime/WASI/WIT behavior and the measured
   two-Voxel drain cap remain unchanged. Ticket09 can use the existing
   `LoadedMods`/`ModJobs` path and public prompt interfaces.
+
+
+### Ticket 09: demo Game and CI
+
+- Added an MIT, independent wasm32-wasip2 demo with its own lockfile and a
+  WIT-only build boundary. It resolves registered ids, declares the lamp and
+  connected fence, supplies low-relief dry terrain and 160 m / 3,000 m views,
+  and builds a wall and lantern once through Fill and Place in metres.
+- Startup Mod dispatch now waits once for the held, lit 3x3x3 neighborhood at
+  spawn. This prevents losing first-call construction during streaming without
+  changing the unloaded-target skip rule or the measured two-Voxel drain cap.
+  The real-demo integration test covers the startup wait, full drain, zero
+  rejections, emitted light and no duplicate dev fence at 1 m and 0.5 m.
+- Build-guests and CI build the demo; cargo-ci checks its formatting and
+  boundary and runs the dev-enabled suite. The WIT arm-face prose now matches
+  the existing runtime order. The Wasmtime security patch remains unchanged.
+- Normal startup and Metal offscreen captures verify visible content and the
+  distant terrain. Ticket09 Comments record validation logs and the temporary
+  review folder, which the parent must show and remove after review.
+- The screenshot wording conflicts with the current 4,096 m default LOD
+  reach: the specified demo uses 3,000 m. The distant capture shows beyond the
+  default 192 m full-detail radius; no claim is made of exceeding default LOD
+  reach.

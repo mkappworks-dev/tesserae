@@ -81,6 +81,7 @@ pub(in crate::server) struct ModJobs {
     // Stores are Send but not Sync; exclusive ECS access uses get_mut, never a lock.
     slots: Mutex<Vec<Slot>>,
     tick: u64,
+    started: bool,
 }
 
 impl ModJobs {
@@ -101,6 +102,7 @@ impl ModJobs {
                     .collect(),
             ),
             tick: 0,
+            started: false,
         }
     }
 }
@@ -290,7 +292,38 @@ fn dispatch(
     tables: Res<ContentTables>,
     world: Res<WorldSettings>,
     time: Res<Time<Fixed>>,
+    (spawn, store, meshes): (
+        Option<Res<super::super::world_state::SpawnPoint>>,
+        Res<ChunkStore>,
+        Res<MeshState>,
+    ),
 ) {
+    if !jobs.started {
+        if let Some(spawn) = spawn {
+            let center = world.chunk_at(spawn.metres());
+            // A first-call spawn build must not race generation or the bulk light solve.
+            for y in -1..=1 {
+                for z in -1..=1 {
+                    for x in -1..=1 {
+                        let coord =
+                            crate::world::ChunkCoord::new(center.x + x, center.y + y, center.z + z);
+                        if !store.contains(coord) || meshes.is_unlit(coord) {
+                            return;
+                        }
+                    }
+                }
+            }
+            if !jobs
+                .slots
+                .get_mut()
+                .expect("no locking or poisoning")
+                .is_empty()
+            {
+                info!("Mod startup ready: spawn neighborhood held and lit");
+            }
+        }
+        jobs.started = true;
+    }
     jobs.tick += 1;
     let tick = jobs.tick;
     for (index, slot) in jobs

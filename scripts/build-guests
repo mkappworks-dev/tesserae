@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds every test guest of tesserae-mods to target/guests/<name>.wasm.
+# Builds test guests to target/guests and the demo Game to games/demo/dist.
 #
 # Each guest is its own workspace (the root excludes the directory), so each
 # gets its own target dir inside it and only the finished component is copied
@@ -20,3 +20,9 @@ for dir in "$guests"/*/; do
     --target wasm32-wasip2 --release --locked
   cp "$dir/target/wasm32-wasip2/release/${name//-/_}.wasm" "$out/$name.wasm"
 done
+
+RUSTFLAGS= cargo build --manifest-path games/demo/Cargo.toml \
+  --target wasm32-wasip2 --release --locked
+mkdir -p games/demo/dist/demo
+cp games/demo/target/wasm32-wasip2/release/demo.wasm games/demo/dist/demo/
+cp games/demo/mod.toml games/demo/dist/demo/
