@@ -1,10 +1,12 @@
 //! Meshing in two passes. Pass 1 greedy-merges coplanar faces of identical full
 //! cubes into quads; pass 2 gives each shaped Voxel the geometry of its own
-//! Shape, then merges the quads that abut across Voxels.
+//! Shape, then merges the quads that abut across Voxels. Fluid standing below a
+//! full surface takes a third, only in a Chunk whose overlay holds fluid.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
 use crate::material::{MaterialTable, Occlusion, RenderClass};
+use crate::occupants::{ChunkOverlay, Fluid};
 use crate::shape::{Connections, SUBDIV, ShapeQuad};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -42,11 +44,23 @@ pub const FACE_STEPS: [[i32; 3]; 6] = [
 pub struct LitChunk<'a> {
     pub chunk: &'a Chunk,
     pub light: &'a ChunkLight,
+    /// Fluid beside the Voxels, which has geometry of its own.
+    pub overlay: &'a ChunkOverlay,
 }
+
+static DRY: ChunkOverlay = ChunkOverlay::none();
 
 impl<'a> LitChunk<'a> {
     pub fn new(chunk: &'a Chunk, light: &'a ChunkLight) -> Self {
-        LitChunk { chunk, light }
+        LitChunk {
+            chunk,
+            light,
+            overlay: &DRY,
+        }
+    }
+
+    pub fn with_overlay(self, overlay: &'a ChunkOverlay) -> Self {
+        LitChunk { overlay, ..self }
     }
 }
 
@@ -60,6 +74,10 @@ impl<'a> LitChunk<'a> {
 pub struct Neighborhood {
     voxels: Box<[Voxel]>,
     light: Box<[Light]>,
+    /// Fluid below a full surface, by cell, as its Material and surface. Empty
+    /// unless one of the seven Chunks holds fluid in its overlay; a full one is
+    /// in `voxels` as a cube of its Material, which is how pass 1 draws water.
+    surfaces: Box<[Option<(MaterialId, u8)>]>,
     shaped: bool,
     /// The palettes of all seven Chunks, so the translucency gate is a scan of
     /// tens of entries and not of the 39 thousand Voxels copied above.
@@ -107,14 +125,22 @@ impl Neighborhood {
             }
         }
 
-        let kinds = std::iter::once(center)
-            .chain(neighbors.into_iter().flatten())
+        let seven = || std::iter::once(center).chain(neighbors.into_iter().flatten());
+        let mut kinds: Vec<Voxel> = seven()
             .flat_map(|n| n.chunk.kinds().iter().copied())
             .collect();
+        let wet = seven().any(|n| n.overlay.may_contain_fluid());
+        let surfaces = if wet {
+            kinds.extend(seven().flat_map(|n| n.overlay.fluids().map(Voxel::cube)));
+            wet_cells(&mut voxels, center, neighbors)
+        } else {
+            Box::default()
+        };
 
         Neighborhood {
             voxels,
             light,
+            surfaces,
             shaped: center.chunk.may_contain_shaped(),
             kinds,
         }
@@ -151,6 +177,70 @@ impl Neighborhood {
     pub fn light_at(&self, x: i32, y: i32, z: i32) -> Light {
         self.light[pad_index(x, y, z)]
     }
+
+    /// The Material and surface of fluid that fills less than its cell.
+    #[inline]
+    pub fn surface_at(&self, x: i32, y: i32, z: i32) -> Option<(MaterialId, u8)> {
+        self.surfaces.get(pad_index(x, y, z)).copied().flatten()
+    }
+}
+
+/// Puts the overlays' fluid into a [`Neighborhood`]'s cells: a full surface as
+/// a cube of its Material, anything lower into the returned surfaces. Only fluid
+/// in empty space; fluid beside a solid has no geometry of its own yet.
+fn wet_cells(
+    voxels: &mut [Voxel],
+    center: LitChunk<'_>,
+    neighbors: [Option<LitChunk<'_>>; 6],
+) -> Box<[Option<(MaterialId, u8)>]> {
+    let mut surfaces = vec![None; PADDED_VOLUME].into_boxed_slice();
+    let mut put = |i: usize, overlay: &ChunkOverlay, at: (usize, usize, usize)| {
+        let Some(fluid) = overlay.get(at.0, at.1, at.2).fluid else {
+            return;
+        };
+        if !voxels[i].is_air() {
+            return;
+        }
+        if fluid.surface >= Fluid::FULL_SURFACE {
+            voxels[i] = Voxel::cube(fluid.material);
+        } else {
+            surfaces[i] = Some((fluid.material, fluid.surface));
+        }
+    };
+    if center.overlay.may_contain_fluid() {
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let i = pad_index(x as i32, y as i32, z as i32);
+                    put(i, center.overlay, (x, y, z));
+                }
+            }
+        }
+    }
+    let last = CHUNK_SIZE - 1;
+    let edge = CHUNK_SIZE as i32;
+    for a in 0..CHUNK_SIZE {
+        for b in 0..CHUNK_SIZE {
+            let (ai, bi) = (a as i32, b as i32);
+            let faces = [
+                (NEG_X, (-1, ai, bi), (last, a, b)),
+                (POS_X, (edge, ai, bi), (0, a, b)),
+                (NEG_Y, (ai, -1, bi), (a, last, b)),
+                (POS_Y, (ai, edge, bi), (a, 0, b)),
+                (NEG_Z, (ai, bi, -1), (a, b, last)),
+                (POS_Z, (ai, bi, edge), (a, b, 0)),
+            ];
+            for (face, shell, theirs) in faces {
+                let Some(n) = neighbors[face] else {
+                    continue;
+                };
+                if n.overlay.may_contain_fluid() {
+                    put(pad_index(shell.0, shell.1, shell.2), n.overlay, theirs);
+                }
+            }
+        }
+    }
+    surfaces
 }
 
 #[inline]
@@ -246,7 +336,9 @@ pub fn mesh_chunk(
     neighbors: [Option<LitChunk<'_>>; 6],
     tables: &Tables,
 ) -> ChunkMesh {
-    if emits_no_faces(center.chunk, neighbors, &tables.materials) {
+    if !center.overlay.may_contain_fluid()
+        && emits_no_faces(center.chunk, neighbors, &tables.materials)
+    {
         return ChunkMesh::default();
     }
     greedy_mesh(&Neighborhood::new(center, neighbors), tables)
@@ -330,7 +422,82 @@ pub fn greedy_mesh(n: &Neighborhood, tables: &Tables) -> ChunkMesh {
     if n.may_contain_shaped() {
         mesh_shaped(n, tables, &mut mesh);
     }
+    if !n.surfaces.is_empty() {
+        mesh_surfaces(n, tables, &mut mesh);
+    }
     mesh
+}
+
+/// Pass 3: fluid below a full surface, as a box from the cell's floor to its
+/// surface. A side is hidden where the cell across covers it, and where fluid
+/// of the same Material across stands as high; against lower fluid only the
+/// strip above it shows. The top looks into the cell's own space and is lit by
+/// its light, as a stair's tread is.
+fn mesh_surfaces(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
+    let full = SUBDIV as u8;
+    let mut pending = Vec::new();
+    for y in 0..CHUNK_SIZE as i32 {
+        for z in 0..CHUNK_SIZE as i32 {
+            for x in 0..CHUNK_SIZE as i32 {
+                let Some((material, surface)) = n.surface_at(x, y, z) else {
+                    continue;
+                };
+                let fluid = Voxel::cube(material);
+                let class = tables.materials.render(fluid);
+                let own = n.light_at(x, y, z);
+                let top = ShapeQuad {
+                    face: POS_Y as u8,
+                    plane: surface,
+                    u0: 0,
+                    v0: 0,
+                    u1: full,
+                    v1: full,
+                };
+                pending.push(Pending::new([x, y, z], &top, class, material, own));
+                for face in [NEG_X, POS_X, NEG_Y, NEG_Z, POS_Z] {
+                    let d = FACE_STEPS[face];
+                    let (ax, ay, az) = (x + d[0], y + d[1], z + d[2]);
+                    let across = n.at(ax, ay, az);
+                    if covers(tables, across, face ^ 1, fluid) {
+                        continue;
+                    }
+                    let lower = match n.surface_at(ax, ay, az) {
+                        Some((m, s)) if m == material && face != NEG_Y => s,
+                        _ => 0,
+                    };
+                    if lower >= surface {
+                        continue;
+                    }
+                    // The vertical extent is u for an X face and v for a Z face.
+                    let (u0, u1, v0, v1) = match face {
+                        NEG_X | POS_X => (lower, surface, 0, full),
+                        NEG_Z | POS_Z => (0, full, lower, surface),
+                        _ => (0, full, 0, full),
+                    };
+                    let quad = ShapeQuad {
+                        face: face as u8,
+                        plane: if face % 2 == 1 { full } else { 0 },
+                        u0,
+                        v0,
+                        u1,
+                        v1,
+                    };
+                    let lit = n.light_at(ax, ay, az);
+                    pending.push(Pending::new([x, y, z], &quad, class, material, lit));
+                }
+            }
+        }
+    }
+    merge_shaped(&mut pending, mesh);
+}
+
+/// Whether `across` hides the whole of its face `face` from `here`.
+fn covers(tables: &Tables, across: Voxel, face: usize, here: Voxel) -> bool {
+    if across.is_air() {
+        return false;
+    }
+    let sealed = across.is_full_cube() || tables.shapes.seals(across, face);
+    sealed && hides(&tables.materials, across, here)
 }
 
 /// Pass 1: greedy-merged full cubes.

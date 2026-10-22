@@ -2,7 +2,7 @@
 
 pub(in crate::server) mod runtime;
 
-pub(in crate::server) use runtime::EditHistory;
+pub(in crate::server) use runtime::{Drain, EditHistory};
 
 use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Write};

@@ -61,7 +61,7 @@ flowchart TB
     STREAM -- "Arc snapshots in,<br/>owned results out" --> JOBS
     JOBS --> GEN
     JOBS --> LIGHT
-    TICK --> FLUID
+    JOBS --> FLUID
     TICK --> COLL
     STATE --> STORE
     JOBS --> MESHER
@@ -137,7 +137,8 @@ tesserae/
 │   │   │   ├── light.rs        incremental flood-fill                       ▸ 4
 │   │   │   ├── shape.rs        Shape table, Orientation; derived geometry   ▸ 5
 │   │   │   ├── lod.rs          downsample, and the covered-sky coarse light ▸ 6
-│   │   │   ├── fluid.rs        fluid table; the cellular automaton          ▸ 8
+│   │   │   ├── fluid.rs        fluid table, in metres and metres per second ▸ 8
+│   │   │   ├── flow.rs         sources, flow and recession: the kernel      ▸ 8
 │   │   │   ├── occupants.rs    fluid and fire beside the Voxel, one reading ▸ 8
 │   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
@@ -158,6 +159,7 @@ tesserae/
 │           │   ├── lod_rings.rs    one level's shells, with a hole inside   ▸ 6
 │           │   ├── jobs.rs         jobs on the async compute pool           ▸ 3
 │           │   ├── mods.rs         Mod Jobs, fair queues and tick drain      ▸ 7
+│           │   ├── fluids.rs       flow on workers, one step at a time      ▸ 8
 │           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3

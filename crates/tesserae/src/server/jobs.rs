@@ -15,7 +15,9 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
-use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk};
+use tesserae_core::{
+    Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk, optical_chunk,
+};
 
 use super::world_state::Snapshot;
 use crate::world::ChunkCoord;
@@ -290,7 +292,11 @@ pub(in crate::server) fn solve(
         Border::OpenSky => Some(LitChunk::new(&SKY_CHUNK, &open_sky)),
         Border::Loaded(s) => Some(LitChunk::new(&s.chunk, &s.light)),
     });
-    let light = light_chunk(&snapshot.chunk, lit, tables);
+    let light = light_chunk(
+        &optical_chunk(&snapshot.chunk, &snapshot.overlay),
+        lit,
+        tables,
+    );
     let changed = *before != light;
     let outward = std::array::from_fn(|face| before.boundary_differs(&light, face));
     Solved {
@@ -307,13 +313,12 @@ pub(in crate::server) fn build_mesh(
     around: &[Snapshot; 6],
     tables: &Tables,
 ) -> ChunkMesh {
-    let neighbors: [Option<LitChunk>; 6] =
-        std::array::from_fn(|face| Some(LitChunk::new(&around[face].chunk, &around[face].light)));
-    mesh_chunk(
-        LitChunk::new(&center.chunk, &center.light),
-        neighbors,
-        tables,
-    )
+    let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|face| Some(lit(&around[face])));
+    mesh_chunk(lit(center), neighbors, tables)
+}
+
+fn lit(snapshot: &Snapshot) -> LitChunk<'_> {
+    LitChunk::new(&snapshot.chunk, &snapshot.light).with_overlay(&snapshot.overlay)
 }
 
 /// Every job in flight, by stage.

@@ -23,10 +23,11 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use tesserae_core::collide::{VoxelVolume, raycast};
+use tesserae_core::collide::{VoxelVolume, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
-    MAX_SHAPED_PER_CHUNK, Occupants, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel, relight,
+    Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel,
+    relight,
 };
 
 use super::ContentTables;
@@ -69,6 +70,12 @@ pub enum EditAction {
     Break,
     /// Put this Voxel in the empty space in front of the face the ray strikes.
     Place(Voxel),
+    /// Put a source of this fluid in front of the face the ray strikes. The ray
+    /// stops at sources as well as solids and goes through flowing fluid.
+    PlaceSource(MaterialId),
+    /// Take away the source the ray strikes, leaving any solid it shares the
+    /// Voxel with.
+    RemoveSource,
 }
 
 /// What the Client wants done: an action, and the ray it wants it done along, in
@@ -106,6 +113,8 @@ pub enum RejectReason {
     BadSurface,
     /// Burning with nothing solid to burn.
     NoFuel,
+    /// A source removal that struck no source.
+    NoSource,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,
 }
@@ -128,6 +137,7 @@ impl RejectReason {
             RejectReason::FluidExcluded => "a full cube leaves no room for fluid",
             RejectReason::BadSurface => "invalid fluid surface",
             RejectReason::NoFuel => "nothing solid to burn",
+            RejectReason::NoSource => "no source there",
             RejectReason::Busy => "the server is busy, try again",
         }
     }
@@ -168,6 +178,13 @@ struct Pending {
 #[derive(Resource, Default)]
 pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
 
+#[cfg(test)]
+impl PendingEdits {
+    pub(in crate::server) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PendingEdits>()
         .init_resource::<super::mods::EditHistory>()
@@ -185,7 +202,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(FixedPreUpdate, apply_pending);
 }
 
-fn receive(
+pub(in crate::server) fn receive(
     mut intents: MessageReader<EditIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
@@ -242,19 +259,29 @@ pub(in crate::server) fn apply_pending(
             break;
         };
         let outcome =
-            resolve(&store, &tables, &world, &p.intent, p.reach_m).and_then(|(at, voxel)| {
+            resolve(&store, &tables, &world, &p.intent, p.reach_m).and_then(|(at, change)| {
                 // The incremental relight and the bulk solve must not both write one
                 // Chunk, so an edit waits for its Chunk's light to settle.
                 if meshes.is_unlit(VoxelCoord::of(at).chunk) {
                     return Err(RejectReason::Busy);
                 }
                 let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
-                set_voxel(&mut store, &mut meshes, &tables, at, voxel)?;
-                history.record(tesserae_mods::EditEvent {
-                    at: at.map(|i| i as f32 * world.voxel_size),
-                    before,
-                    after: store.voxel(at).expect("the edited Chunk is held"),
-                });
+                match change {
+                    Change::Solid(voxel) => set_voxel(&mut store, &mut meshes, &tables, at, voxel)?,
+                    Change::Fluid(occupants) => {
+                        set_occupants(&mut store, &mut meshes, &tables, at, occupants)?
+                    }
+                }
+                let after = store.voxel(at).expect("the edited Chunk is held");
+                // History is the 0.1 contract's Voxel projection, in which a
+                // source change that leaves the packed Voxel alone is no event.
+                if matches!(change, Change::Solid(_)) || after != before {
+                    history.record(tesserae_mods::EditEvent {
+                        at: at.map(|i| i as f32 * world.voxel_size),
+                        before,
+                        after,
+                    });
+                }
                 Ok(())
             });
         match outcome {
@@ -274,6 +301,15 @@ pub(in crate::server) fn apply_pending(
     pending.0 = waiting;
 }
 
+/// What an intent does where it lands.
+#[derive(Clone, Copy)]
+enum Change {
+    /// A whole-Voxel placement, through the solid-layer rule.
+    Solid(Voxel),
+    /// Exactly these occupants: a source placed or taken away.
+    Fluid(Occupants),
+}
+
 /// Where an intent lands, and what goes there.
 fn resolve(
     store: &ChunkStore,
@@ -281,36 +317,85 @@ fn resolve(
     world: &WorldSettings,
     intent: &EditIntent,
     reach_m: f32,
-) -> Result<([i32; 3], Voxel), RejectReason> {
+) -> Result<([i32; 3], Change), RejectReason> {
     if !intent.origin.is_finite() || !intent.direction.is_finite() {
         return Err(RejectReason::OutOfReach);
     }
-    let hit = raycast(
+    let fluid_tool = matches!(
+        intent.action,
+        EditAction::PlaceSource(_) | EditAction::RemoveSource
+    );
+    if let EditAction::PlaceSource(material) = intent.action
+        && !tables.fluids.contains(material)
+    {
+        return Err(RejectReason::NotAFluid);
+    }
+    // A packed fluid Voxel is a source; flowing fluid is packed air.
+    let stops = |v: Voxel| {
+        tables.materials.solid(v) || (fluid_tool && tables.fluids.contains(v.material()))
+    };
+    let hit = raycast_until(
         store,
         tables,
         world.voxel_size,
         intent.origin.to_array(),
         intent.direction.to_array(),
         reach_m,
+        stops,
     )
     .ok_or(RejectReason::OutOfReach)?;
+    let step = FACE_STEPS[hit.face];
+    let in_front = [
+        hit.at[0] + step[0],
+        hit.at[1] + step[1],
+        hit.at[2] + step[2],
+    ];
 
     match intent.action {
-        EditAction::Break => Ok((hit.at, Voxel::AIR)),
+        EditAction::Break => Ok((hit.at, Change::Solid(Voxel::AIR))),
         EditAction::Place(voxel) => {
             tables.vet_placed(voxel)?;
-            let step = FACE_STEPS[hit.face];
-            let target = [
-                hit.at[0] + step[0],
-                hit.at[1] + step[1],
-                hit.at[2] + step[2],
-            ];
-            match store.voxel(target) {
+            match store.voxel(in_front) {
                 None => Err(RejectReason::NotLoaded),
                 // Water is not solid, so a Voxel placed into it replaces it.
                 Some(there) if tables.materials.solid(there) => Err(RejectReason::Occupied),
-                Some(_) => Ok((target, voxel)),
+                Some(_) => Ok((in_front, Change::Solid(voxel))),
             }
+        }
+        EditAction::RemoveSource => {
+            let here = store
+                .occupants(hit.at, &tables.fluids)
+                .ok_or(RejectReason::NotLoaded)?;
+            if !here.fluid.is_some_and(|f| f.source) {
+                return Err(RejectReason::NoSource);
+            }
+            Ok((
+                hit.at,
+                Change::Fluid(Occupants {
+                    fluid: None,
+                    ..here
+                }),
+            ))
+        }
+        EditAction::PlaceSource(material) => {
+            let there = store
+                .occupants(in_front, &tables.fluids)
+                .ok_or(RejectReason::NotLoaded)?;
+            // Flow of the same fluid becomes the source; anything else stays.
+            let taken = !there.solid.is_air()
+                || there
+                    .fluid
+                    .is_some_and(|f| f.source || f.material != material);
+            if taken {
+                return Err(RejectReason::Occupied);
+            }
+            Ok((
+                in_front,
+                Change::Fluid(Occupants {
+                    fluid: Some(Fluid::source(material)),
+                    ..there
+                }),
+            ))
         }
     }
 }
@@ -323,6 +408,9 @@ fn resolve(
 /// first. A change to the fluid or the fire alone is a change all the same,
 /// though the packed Voxel stays: the mesh, the cover and any Snapshot taken
 /// before it read what is now gone.
+///
+/// Every change is journalled in the store, which is what wakes the fluid
+/// simulation around it on the next step.
 ///
 /// A mesh is stale in three kinds of Chunk: the edited one; any the relight
 /// wrote to; and the neighbour across a boundary plane the Voxel sits on, whose
@@ -369,12 +457,16 @@ pub(in crate::server) fn set_occupants(
         return Err(RejectReason::TooManyShaped);
     }
 
+    let seen = store.optical(at);
     store.set_overlay(place, overlay);
-    // The overlay has no say in the light yet: dimming and emission still read
-    // the packed Voxel alone, so a change to it alone moves nothing.
     if voxel != before {
-        let was = store.light_at(at);
         store.set_voxel(place, voxel);
+    }
+    // Light reads fluid as it reads a cube of its Material, so water flowing in
+    // or receding relights though the packed Voxel stays air; a surface or reach
+    // change alone moves nothing.
+    if store.optical(at) != seen {
+        let was = store.light_at(at);
         let mut lattice = LightLattice::new(store);
         relight(&mut lattice, tables, at, was);
         let lit = std::mem::take(&mut lattice.touched);
@@ -382,6 +474,7 @@ pub(in crate::server) fn set_occupants(
             meshes.edited(coord);
         }
     }
+    store.note_changed(at);
 
     meshes.voxels_changed(place.chunk);
     meshes.edited(place.chunk);
@@ -1338,6 +1431,176 @@ mod tests {
         );
         let store = app.world().resource::<ChunkStore>();
         assert_eq!(store.overlay(origin()).unwrap().get(6, 8, 5), Overlay::NONE);
+    }
+
+    fn flowing() -> Fluid {
+        Fluid {
+            source: false,
+            surface: 9,
+            reach: 3,
+            ..Fluid::source(tesserae_core::material::WATER)
+        }
+    }
+
+    /// The fluid tool puts a source where a Place would put a Voxel, and takes
+    /// one away where it strikes it: off the bed and out of a stair that shares
+    /// its Voxel with one, leaving the bed and the stair.
+    #[test]
+    fn the_fluid_tool_places_a_source_in_front_and_removes_one_keeping_its_solid() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        assert_eq!(voxel_at(&app, [5, 8, 5]), Voxel::cube(water));
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]).fluid,
+            Some(Fluid::source(water))
+        );
+
+        send(&mut app, down(EditAction::RemoveSource));
+        tick(&mut app);
+        assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
+        assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "the bed went too");
+
+        let wet_stair = Occupants {
+            solid: stair(),
+            fluid: Some(Fluid::source(water)),
+            burning: None,
+        };
+        assert_eq!(put_occupants(&mut app, [5, 8, 5], wet_stair).1, Ok(()));
+        send(&mut app, down(EditAction::RemoveSource));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]),
+            Occupants {
+                fluid: None,
+                ..wet_stair
+            }
+        );
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// A source is placed on flowing water of its own kind, and the ray to do
+    /// it goes through flowing water: flow is packed air.
+    #[test]
+    fn a_source_replaces_flow_and_the_tool_aims_through_flow() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        let flow = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(flowing()),
+            burning: None,
+        };
+        put_occupants(&mut app, [5, 8, 5], flow).1.unwrap();
+        put_occupants(&mut app, [5, 9, 5], flow).1.unwrap();
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]).fluid,
+            Some(Fluid::source(water))
+        );
+        assert_eq!(occupants_at(&app, [5, 9, 5]).fluid, Some(flowing()));
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Refused fluid intents change neither layer and say why, and they pass the
+    /// origin and reach checks every intent does.
+    #[test]
+    fn the_fluid_tool_is_refused_like_any_edit_and_changes_nothing() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        let flow = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(flowing()),
+            burning: None,
+        };
+        put_occupants(&mut app, [6, 8, 5], flow).1.unwrap();
+        let before: Vec<Occupants> = (0..16).map(|y| occupants_at(&app, [5, y, 5])).collect();
+        let cases = [
+            (down(EditAction::RemoveSource), RejectReason::NoSource),
+            (
+                down(EditAction::PlaceSource(STONE)),
+                RejectReason::NotAFluid,
+            ),
+            (
+                EditIntent {
+                    direction: Vec3::Y,
+                    ..down(EditAction::PlaceSource(water))
+                },
+                RejectReason::OutOfReach,
+            ),
+            (
+                EditIntent {
+                    origin: Vec3::new(5.5, 30.0, 5.5),
+                    ..down(EditAction::RemoveSource)
+                },
+                RejectReason::OutOfReach,
+            ),
+        ];
+        for (intent, expected) in cases {
+            send(&mut app, intent);
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), vec![expected], "{intent:?}");
+        }
+        // Flowing water is not a source to remove: the ray finds the bed.
+        send(
+            &mut app,
+            EditIntent {
+                origin: Vec3::new(6.5, 12.0, 5.5),
+                ..down(EditAction::RemoveSource)
+            },
+        );
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), vec![RejectReason::NoSource]);
+        assert_eq!(occupants_at(&app, [6, 8, 5]), flow);
+
+        send_from_afar(
+            &mut app,
+            EditIntent {
+                origin: DOWN_EYE + Vec3::X * 40.0,
+                ..down(EditAction::PlaceSource(water))
+            },
+        );
+        assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+        let after: Vec<Occupants> = (0..16).map(|y| occupants_at(&app, [5, y, 5])).collect();
+        assert_eq!(before, after);
+    }
+
+    /// The ordinary Edit's ray goes through flowing water as it goes through a
+    /// source: a Break takes the bed and a Place fills the wet Voxel.
+    #[test]
+    fn the_solid_ray_aims_through_flowing_water() {
+        let mut app = app_with(&[(origin(), ground())]);
+        let flow = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(flowing()),
+            burning: None,
+        };
+        put_occupants(&mut app, [5, 8, 5], flow).1.unwrap();
+        send(&mut app, down(EditAction::Break));
+        tick(&mut app);
+        assert!(voxel_at(&app, [5, 7, 5]).is_air(), "the bed under the flow");
+        assert_eq!(occupants_at(&app, [5, 8, 5]), flow);
+
+        send(&mut app, down(EditAction::Place(stone())));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 7, 5]).solid,
+            stone(),
+            "the hole is filled"
+        );
+        send(&mut app, down(EditAction::Place(stone())));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]),
+            Occupants {
+                solid: stone(),
+                fluid: None,
+                burning: None,
+            },
+            "the stone displaced the flow"
+        );
+        assert!(rejections(&mut app).is_empty());
     }
 
     #[test]

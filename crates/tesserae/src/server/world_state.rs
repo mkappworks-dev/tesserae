@@ -37,6 +37,9 @@ pub struct ChunkStore {
     overlays: HashMap<ChunkCoord, Arc<ChunkOverlay>>,
     lifetimes: HashMap<ChunkCoord, Lifetime>,
     next_lifetime: u64,
+    /// Positions whose occupants changed since `super::fluids` last looked:
+    /// what it wakes the simulation around.
+    changed: Vec<[i32; 3]>,
 }
 
 /// Which Chunk at a coordinate: a Chunk evicted and generated again is a new
@@ -98,7 +101,6 @@ impl ChunkStore {
                 .is_some_and(|o| Arc::ptr_eq(o, &snapshot.overlay))
     }
 
-    #[cfg(test)]
     pub(in crate::server) fn lifetime(&self, coord: ChunkCoord) -> Option<Lifetime> {
         self.lifetimes.get(&coord).copied()
     }
@@ -113,6 +115,27 @@ impl ChunkStore {
         let voxel = self.get(at.chunk)?.get(at.x, at.y, at.z);
         let overlay = self.overlay(at.chunk)?.get(at.x, at.y, at.z);
         Some(Occupants::of(voxel, overlay, fluids))
+    }
+
+    /// The Voxel light treats a position as: [`tesserae_core::optical`].
+    pub fn optical(&self, at: [i32; 3]) -> Option<Voxel> {
+        let at = VoxelCoord::of(at);
+        let voxel = self.get(at.chunk)?.get(at.x, at.y, at.z);
+        // Only empty space reads differently, so a solid skips the second lookup
+        // on the relight's hot path.
+        if !voxel.is_air() {
+            return Some(voxel);
+        }
+        let overlay = self.overlay(at.chunk)?.get(at.x, at.y, at.z);
+        Some(tesserae_core::optical(voxel, overlay))
+    }
+
+    pub(in crate::server) fn note_changed(&mut self, at: [i32; 3]) {
+        self.changed.push(at);
+    }
+
+    pub(in crate::server) fn take_changed(&mut self) -> Vec<[i32; 3]> {
+        std::mem::take(&mut self.changed)
     }
 
     /// For a coarse generate job that takes the Chunk as a child instead of generating one.
@@ -240,7 +263,7 @@ impl VoxelVolume for ChunkStore {
 
 impl LightVolume for LightLattice<'_> {
     fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
-        self.store.voxel(at)
+        self.store.optical(at)
     }
 
     fn light(&self, at: [i32; 3]) -> Light {

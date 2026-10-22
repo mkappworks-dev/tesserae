@@ -254,14 +254,16 @@ fn select_held(
     }
 }
 
-/// Left breaks and right places, along the camera's centre ray.
+/// Left breaks and right places, along the camera's centre ray. With Alt held
+/// the two are the fluid tool's instead: right places a water source and left
+/// takes one away, and the ray aims at sources rather than through them.
 ///
 /// The click that grabs the cursor is not also an Edit. That click is also the
 /// one that makes the cursor grabbed, so "grabbed now" is not enough: it has to
 /// have been grabbed on the frame before as well, and that holds whichever of
 /// this and `camera::grab_cursor` runs first within a frame.
 fn send_intents(
-    mouse: Res<ButtonInput<MouseButton>>,
+    (mouse, keys): (Res<ButtonInput<MouseButton>>, Res<ButtonInput<KeyCode>>),
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     held: Res<Held>,
@@ -275,7 +277,12 @@ fn send_intents(
     if !ready {
         return;
     }
-    let action = if mouse.just_pressed(MouseButton::Left) {
+    let fluid_tool = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+    let action = if fluid_tool && mouse.just_pressed(MouseButton::Left) {
+        EditAction::RemoveSource
+    } else if fluid_tool && mouse.just_pressed(MouseButton::Right) {
+        EditAction::PlaceSource(WATER)
+    } else if mouse.just_pressed(MouseButton::Left) {
         EditAction::Break
     } else if mouse.just_pressed(MouseButton::Right) {
         #[cfg_attr(not(feature = "dev"), allow(unused_mut))]
@@ -313,7 +320,8 @@ fn show_rejections(
 
 fn hint() -> String {
     format!(
-        "[1-{}] choose  [Q] turn  [E] flip  [LMB] break  [RMB] place",
+        "[1-{}] choose  [Q] turn  [E] flip  [LMB] break  [RMB] place  \
+         [Alt+RMB] water source  [Alt+LMB] remove source",
         SLOT_KEYS.len()
     )
 }
@@ -464,6 +472,36 @@ mod tests {
         assert_eq!(
             sent[0].action,
             EditAction::Place(Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY))
+        );
+    }
+
+    /// Alt turns the two buttons into the fluid tool, whatever is held, and the
+    /// buttons alone keep their solid meaning.
+    #[test]
+    fn alt_makes_the_buttons_place_and_remove_a_source() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        let with_alt = |app: &mut App, button| {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::AltLeft);
+            press(app, button);
+            frame(app)
+        };
+        assert_eq!(
+            with_alt(&mut app, MouseButton::Right)[0].action,
+            EditAction::PlaceSource(WATER)
+        );
+        assert_eq!(
+            with_alt(&mut app, MouseButton::Left)[0].action,
+            EditAction::RemoveSource
+        );
+        press(&mut app, MouseButton::Left);
+        assert_eq!(frame(&mut app)[0].action, EditAction::Break);
+        press(&mut app, MouseButton::Right);
+        assert_eq!(
+            frame(&mut app)[0].action,
+            EditAction::Place(Voxel::cube(STONE))
         );
     }
 

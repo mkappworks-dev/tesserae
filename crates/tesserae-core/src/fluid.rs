@@ -116,6 +116,14 @@ impl FluidTable {
     pub fn get(&self, material: MaterialId) -> Option<&FluidDef> {
         self.defs.get(material as usize).and_then(Option::as_ref)
     }
+
+    /// Every fluid, in Material id order.
+    pub fn iter(&self) -> impl Iterator<Item = (MaterialId, &FluidDef)> {
+        self.defs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, def)| Some((i as MaterialId, def.as_ref()?)))
+    }
 }
 
 #[cfg(test)]

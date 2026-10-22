@@ -7,6 +7,7 @@
 
 pub mod chunk;
 pub mod collide;
+pub mod flow;
 pub mod fluid;
 pub mod light;
 pub mod lod;
@@ -26,7 +27,7 @@ pub use light::{Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_chunk,
 pub use lod::{COVERED_SKY, CoarseLight, Surface, coarse_light, downsample};
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
 pub use mesh::{ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_chunk};
-pub use occupants::{Burning, ChunkOverlay, Fluid, Occupants, Overlay};
+pub use occupants::{Burning, ChunkOverlay, Fluid, Occupants, Overlay, optical, optical_chunk};
 pub use shape::{
     Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
     SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,

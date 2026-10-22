@@ -217,6 +217,9 @@ pub struct RayHit {
 /// stair's notch and stops at the tread rather than at the cell. It stops at the
 /// first Voxel the volume does not hold: past the edge of what is known there is
 /// nothing to hit. A ray that starts inside a box strikes it at distance zero.
+///
+/// It goes through what a body would pass through: water is aimed past, at the
+/// bed.
 pub fn raycast(
     vol: &impl VoxelVolume,
     tables: &Tables,
@@ -224,6 +227,22 @@ pub fn raycast(
     origin: [f32; 3],
     dir: [f32; 3],
     reach_m: f32,
+) -> Option<RayHit> {
+    raycast_until(vol, tables, voxel_size, origin, dir, reach_m, |v| {
+        tables.materials.solid(v)
+    })
+}
+
+/// [`raycast`], stopping at the Voxels `stops` accepts rather than at solid
+/// ones: a fluid tool aims at a source a body would sink through.
+pub fn raycast_until(
+    vol: &impl VoxelVolume,
+    tables: &Tables,
+    voxel_size: f32,
+    origin: [f32; 3],
+    dir: [f32; 3],
+    reach_m: f32,
+    stops: impl Fn(Voxel) -> bool,
 ) -> Option<RayHit> {
     let len = dir.iter().map(|c| c * c).sum::<f32>().sqrt();
     if len == 0.0 || !len.is_finite() {
@@ -259,10 +278,7 @@ pub fn raycast(
 
     loop {
         let voxel = vol.voxel(cell)?;
-        // Through what a body would pass through: water is aimed past, at the bed.
-        let nearest = tables
-            .materials
-            .solid(voxel)
+        let nearest = stops(voxel)
             .then(|| {
                 tables
                     .shapes

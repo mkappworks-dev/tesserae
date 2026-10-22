@@ -1245,6 +1245,7 @@ pub(in crate::server) mod tests {
                 .init_resource::<LoadOrder>()
                 .init_resource::<MeshState>()
                 .init_resource::<Jobs>()
+                .init_resource::<crate::server::fluids::FluidSim>()
                 .add_message::<ChunkMeshReady>()
                 .add_message::<ChunkUnloaded>()
                 .add_message::<LodMeshReady>()
@@ -1362,11 +1363,12 @@ pub(in crate::server) mod tests {
 
     /// The light of the Chunk a mesh was built from, which `publish` requires
     /// to be present before it meshes at all.
-    fn lit<'a>(store: &'a ChunkStore, coord: ChunkCoord) -> LitChunk<'a> {
+    pub(in crate::server) fn lit<'a>(store: &'a ChunkStore, coord: ChunkCoord) -> LitChunk<'a> {
         LitChunk::new(
             store.get(coord).expect("loaded"),
             store.light(coord).expect("lit"),
         )
+        .with_overlay(store.overlay(coord).expect("held"))
     }
 
     #[test]

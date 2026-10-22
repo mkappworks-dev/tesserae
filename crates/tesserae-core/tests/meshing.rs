@@ -1703,3 +1703,92 @@ fn a_row_of_slabs_never_leaves_its_chunk() {
             .all(|p| (0.0..=32.0).contains(&p[0]))
     );
 }
+
+fn flowing(surface: u8) -> tesserae_core::Overlay {
+    tesserae_core::Overlay {
+        fluid: Some(tesserae_core::Fluid {
+            source: false,
+            surface,
+            reach: 1,
+            ..tesserae_core::Fluid::source(tesserae_core::material::WATER)
+        }),
+        burning: None,
+    }
+}
+
+/// Every vertex height of the blended layer's quads facing `normal`.
+fn blended_heights(mesh: &tesserae_core::ChunkMesh, normal: [f32; 3]) -> Vec<f32> {
+    let layer = &mesh.blended;
+    let mut ys: Vec<f32> = (0..layer.positions.len())
+        .filter(|&i| layer.normals[i] == normal)
+        .map(|i| layer.positions[i][1])
+        .collect();
+    ys.sort_by(f32::total_cmp);
+    ys.dedup();
+    ys
+}
+
+/// Flowing water in the overlay has geometry though its packed Voxel is air:
+/// a box up to its surface, top face at the surface, on the blended pass.
+#[test]
+fn flowing_water_meshes_to_its_surface() {
+    let chunk = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(4, 4, 4, flowing(8));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert_eq!(mesh.blended.quad_count(), 6, "a box of six faces");
+    assert!(mesh.opaque.is_empty());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![4.5]);
+    assert_eq!(blended_heights(&mesh, [1.0, 0.0, 0.0]), vec![4.0, 4.5]);
+
+    // Full, it is a water cube and meshes as one.
+    overlay.set(4, 4, 4, flowing(16));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![5.0]);
+}
+
+/// Between two flowing Voxels only the step between their surfaces shows, and a
+/// solid floor hides the bottom.
+#[test]
+fn neighbouring_flow_shows_only_the_step_between_surfaces() {
+    let mut chunk = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    for x in 4..=5 {
+        chunk.set(x, 3, 4, Voxel::cube(1));
+    }
+    overlay.set(4, 4, 4, flowing(12));
+    overlay.set(5, 4, 4, flowing(8));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    // Facing +x out of the higher one: just 8/16 to 12/16 of the shared face,
+    // then the lower one's full side further out.
+    let layer = &mesh.blended;
+    let mut plus_x: Vec<(f32, f32)> = (0..layer.positions.len())
+        .filter(|&i| layer.normals[i] == [1.0, 0.0, 0.0])
+        .map(|i| (layer.positions[i][0], layer.positions[i][1]))
+        .collect();
+    plus_x.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    plus_x.dedup();
+    assert_eq!(
+        plus_x,
+        vec![(5.0, 4.5), (5.0, 4.75), (6.0, 4.0), (6.0, 4.5)]
+    );
+    assert!(
+        blended_heights(&mesh, [0.0, -1.0, 0.0]).is_empty(),
+        "the stone floor hides the bottom"
+    );
+}
+
+/// A dry overlay changes nothing about a mesh.
+#[test]
+fn a_dry_overlay_meshes_exactly_as_none() {
+    let chunk = testgen::terrain_chunk(1, 0, 0);
+    let overlay = tesserae_core::ChunkOverlay::none();
+    let a = mesh_chunk(unlit(&chunk), [None; 6], tables());
+    let b = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    assert_eq!(a.blended.positions, b.blended.positions);
+    assert_eq!(a.opaque.positions, b.opaque.positions);
+    assert_eq!(a.quad_count(), b.quad_count());
+}

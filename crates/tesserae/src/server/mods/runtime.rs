@@ -28,6 +28,10 @@ pub(in crate::server) struct ModDisabled {
     pub reason: String,
 }
 
+/// Where queued Mod Commands change the World, for systems that must see them.
+#[derive(SystemSet, Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(in crate::server) struct Drain;
+
 #[derive(Resource, Default)]
 pub(in crate::server) struct EditHistory {
     events: VecDeque<EditEvent>,
@@ -230,7 +234,10 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<PendingCommands>()
         .add_message::<ModDisabled>()
         .add_systems(FixedPreUpdate, land.before(edit::apply_pending))
-        .add_systems(FixedPreUpdate, drain.after(edit::apply_pending).after(land))
+        .add_systems(
+            FixedPreUpdate,
+            drain.after(edit::apply_pending).after(land).in_set(Drain),
+        )
         .add_systems(FixedPostUpdate, dispatch);
 }
 

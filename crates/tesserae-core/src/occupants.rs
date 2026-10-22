@@ -4,7 +4,9 @@
 //! is an [`Overlay`] stored beside it, and [`Occupants`] is the one reading of
 //! the pair that generation, Edits, light, meshing and LOD share.
 
-use crate::chunk::{CHUNK_SIZE, Palette, index};
+use std::borrow::Cow;
+
+use crate::chunk::{CHUNK_SIZE, Chunk, Palette, index};
 use crate::fluid::FluidTable;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -19,6 +21,13 @@ pub struct Fluid {
     /// fraction of the Voxel and not a distance, so it does not scale with
     /// Voxel size.
     pub surface: u8,
+    /// Sideways steps left before flowing fluid stops spreading: its
+    /// definition's metres of reach, quantized to this World's Voxels by
+    /// [`crate::flow::FlowScale`]. Zero for a source, whose reach is its
+    /// definition's.
+    pub reach: u16,
+    /// Gravity descent since reach was last renewed, in sixteenths of a Voxel.
+    pub descent: u16,
 }
 
 impl Fluid {
@@ -29,6 +38,8 @@ impl Fluid {
             material,
             source: true,
             surface: Self::FULL_SURFACE,
+            reach: 0,
+            descent: 0,
         }
     }
 }
@@ -104,6 +115,45 @@ impl ChunkOverlay {
     pub fn heap_bytes(&self) -> usize {
         self.storage.heap_bytes()
     }
+
+    /// Every fluid Material the palette holds, possibly with repeats.
+    pub fn fluids(&self) -> impl Iterator<Item = MaterialId> + '_ {
+        self.storage
+            .kinds()
+            .iter()
+            .filter_map(|o| o.fluid.map(|f| f.material))
+    }
+}
+
+/// The Voxel light treats a stored pair as: fluid in empty space dims and
+/// emits as a cube of its Material, whatever its surface height, since a Voxel
+/// holds one light value.
+#[inline]
+pub fn optical(voxel: Voxel, overlay: Overlay) -> Voxel {
+    match overlay.fluid {
+        Some(fluid) if voxel.is_air() => Voxel::cube(fluid.material),
+        _ => voxel,
+    }
+}
+
+/// [`optical`] for a whole Chunk, copied only when its overlay holds fluid.
+pub fn optical_chunk<'a>(chunk: &'a Chunk, overlay: &ChunkOverlay) -> Cow<'a, Chunk> {
+    if !overlay.may_contain_fluid() {
+        return Cow::Borrowed(chunk);
+    }
+    let mut seen = chunk.clone();
+    for y in 0..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let voxel = chunk.get(x, y, z);
+                let lit = optical(voxel, overlay.get(x, y, z));
+                if lit != voxel {
+                    seen.set(x, y, z, lit);
+                }
+            }
+        }
+    }
+    Cow::Owned(seen)
 }
 
 /// The canonical reading of one position: its solid, its fluid and its fire.
@@ -226,9 +276,11 @@ mod tests {
     fn the_encoding_is_canonical_and_round_trips() {
         let fluids = FluidTable::builtin();
         let flowing = Fluid {
-            material: WATER,
             source: false,
             surface: 9,
+            reach: 3,
+            descent: 8,
+            ..Fluid::source(WATER)
         };
         let cases = [
             (
@@ -390,9 +442,10 @@ mod tests {
         let mut wet = ChunkOverlay::none();
         let flowing = Overlay {
             fluid: Some(Fluid {
-                material: WATER,
                 source: false,
                 surface: 4,
+                reach: 2,
+                ..Fluid::source(WATER)
             }),
             burning: None,
         };
@@ -405,7 +458,7 @@ mod tests {
             wet.heap_bytes(),
             crate::CHUNK_VOLUME / 8 + 2 * size_of::<Overlay>()
         );
-        assert_eq!(size_of::<Overlay>(), 8);
+        assert_eq!(size_of::<Overlay>(), 12);
     }
 
     #[test]

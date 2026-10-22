@@ -35,7 +35,8 @@ pub enum PlaceFault {
     NotAFluid,
     /// Fluid in a Voxel a full cube leaves no space in.
     FluidExcluded,
-    /// A surface of 0 or above [`Fluid::FULL_SURFACE`].
+    /// A surface of 0 or above [`Fluid::FULL_SURFACE`], or a source that is not
+    /// full or carries flow state.
     BadSurface,
     /// Burning with nothing solid to burn.
     NoFuel,
@@ -93,7 +94,9 @@ impl Tables {
             if occupants.solid.is_full_cube() {
                 return Err(PlaceFault::FluidExcluded);
             }
-            if !(1..=Fluid::FULL_SURFACE).contains(&fluid.surface) {
+            if !(1..=Fluid::FULL_SURFACE).contains(&fluid.surface)
+                || (fluid.source && fluid != Fluid::source(fluid.material))
+            {
                 return Err(PlaceFault::BadSurface);
             }
         }
@@ -235,6 +238,18 @@ mod tests {
                 tables.vet_occupants(ok(Voxel::AIR, Some(Fluid { surface, ..water }), None)),
                 Err(PlaceFault::BadSurface),
                 "{surface}"
+            );
+        }
+        let shallow_source = Fluid {
+            surface: 3,
+            ..water
+        };
+        let reaching_source = Fluid { reach: 2, ..water };
+        for source in [shallow_source, reaching_source] {
+            assert_eq!(
+                tables.vet_occupants(ok(Voxel::AIR, Some(source), None)),
+                Err(PlaceFault::BadSurface),
+                "{source:?}"
             );
         }
         assert_eq!(

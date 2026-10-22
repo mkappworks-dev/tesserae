@@ -1,0 +1,749 @@
+use super::*;
+use crate::fluid::FluidDef;
+use crate::material::{STONE, WATER};
+
+/// A box of held cells, air unless built otherwise; outside it is unknown.
+struct Grid {
+    cells: HashMap<Cell, (Voxel, Overlay)>,
+    min: Cell,
+    max: Cell,
+}
+
+impl CellView for Grid {
+    fn stored(&self, at: Cell) -> Option<(Voxel, Overlay)> {
+        let inside = (0..3).all(|a| self.min[a] <= at[a] && at[a] <= self.max[a]);
+        inside.then(|| {
+            self.cells
+                .get(&at)
+                .copied()
+                .unwrap_or((Voxel::AIR, Overlay::NONE))
+        })
+    }
+}
+
+/// The kernel driven the way the Server drives it, with landing reduced to
+/// writing the proposal.
+struct Sim {
+    grid: Grid,
+    tables: Tables,
+    scale: FlowScale,
+    voxel_m: f32,
+    wakeups: Wakeups,
+    timers: Timers,
+    step: Step,
+    quota: Quota,
+    work: Work,
+}
+
+const UNLIMITED: Quota = Quota {
+    evaluations: usize::MAX,
+};
+
+impl Sim {
+    fn new(voxel_m: f32, min: Cell, max: Cell) -> Self {
+        let tables = Tables::builtin();
+        Sim {
+            scale: FlowScale::new(&tables.fluids, voxel_m),
+            tables,
+            voxel_m,
+            grid: Grid {
+                cells: HashMap::new(),
+                min,
+                max,
+            },
+            wakeups: Wakeups::default(),
+            timers: Timers::default(),
+            step: 0,
+            quota: UNLIMITED,
+            work: Work::default(),
+        }
+    }
+
+    /// Cells per metre, for fixtures written in metres.
+    fn cells(&self, metres: f32) -> i32 {
+        (metres / self.voxel_m).round() as i32
+    }
+
+    fn build(&mut self, at: Cell, voxel: Voxel) {
+        self.grid.cells.insert(at, (voxel, Overlay::NONE));
+    }
+
+    fn occupants(&self, at: Cell) -> Occupants {
+        let (voxel, overlay) = self.grid.stored(at).expect("held");
+        Occupants::of(voxel, overlay, &self.tables.fluids)
+    }
+
+    fn fluid(&self, at: Cell) -> Option<Fluid> {
+        self.occupants(at).fluid
+    }
+
+    /// An Edit between steps, read from the next step on.
+    fn edit(&mut self, at: Cell, occupants: Occupants) {
+        self.tables.vet_occupants(occupants).expect("valid");
+        let stored = occupants.encode(&self.tables.fluids);
+        self.grid.cells.insert(at, stored);
+        self.wakeups.wake_around(at, self.step);
+    }
+
+    fn place_source(&mut self, at: Cell) {
+        let here = self.occupants(at);
+        self.edit(
+            at,
+            Occupants {
+                fluid: Some(Fluid::source(WATER)),
+                ..here
+            },
+        );
+    }
+
+    fn remove_fluid(&mut self, at: Cell) {
+        let here = self.occupants(at);
+        self.edit(
+            at,
+            Occupants {
+                fluid: None,
+                ..here
+            },
+        );
+    }
+
+    fn put(&mut self, at: Cell, solid: Voxel) {
+        self.edit(
+            at,
+            Occupants {
+                solid,
+                fluid: None,
+                burning: None,
+            },
+        );
+    }
+
+    fn run_step(&mut self) -> Finished {
+        let due = self.wakeups.take_due(self.step);
+        let mut cont = Continuation::start(self.step, due, std::mem::take(&mut self.timers));
+        let done = loop {
+            match advance(&self.grid, &self.tables, &self.scale, cont, self.quota) {
+                Advance::Partial(next) => cont = next,
+                Advance::Complete(done) => break done,
+            }
+        };
+        for p in &done.proposals {
+            assert!(
+                !p.next.fluid.is_some_and(|f| f.source),
+                "flow made a source"
+            );
+            assert_eq!(self.occupants(p.at), p.read, "proposal read stale state");
+            let stored = p.next.encode(&self.tables.fluids);
+            self.tables.vet_occupants(p.next).expect("a valid proposal");
+            self.grid.cells.insert(p.at, stored);
+            self.wakeups.wake_around(p.at, self.step + 1);
+        }
+        for &(step, at) in &done.wakeups {
+            self.wakeups.wake(at, step);
+        }
+        self.timers = done.timers.clone();
+        self.work += done.work;
+        self.step += 1;
+        done
+    }
+
+    fn run(&mut self, steps: Step) {
+        for _ in 0..steps {
+            self.run_step();
+        }
+    }
+
+    fn run_seconds(&mut self, seconds: f64) {
+        self.run((seconds / STEP_S).round() as Step);
+    }
+
+    /// Steps until nothing is waiting.
+    fn settle(&mut self) -> Step {
+        let start = self.step;
+        while !self.wakeups.is_empty() {
+            self.run_step();
+            assert!(self.step - start < 100_000, "never settled");
+        }
+        self.step - start
+    }
+
+    fn wet(&self) -> Vec<Cell> {
+        let mut wet: Vec<Cell> = self
+            .grid
+            .cells
+            .iter()
+            .filter(|(at, _)| self.fluid(**at).is_some())
+            .map(|(at, _)| *at)
+            .collect();
+        wet.sort_unstable();
+        wet
+    }
+
+    fn sources(&self) -> usize {
+        self.wet()
+            .iter()
+            .filter(|at| self.fluid(**at).unwrap().source)
+            .count()
+    }
+
+    fn state(&self) -> Vec<(Cell, Occupants)> {
+        let mut all: Vec<_> = self
+            .grid
+            .cells
+            .keys()
+            .map(|at| (*at, self.occupants(*at)))
+            .collect();
+        all.sort_unstable_by_key(|(at, _)| *at);
+        all
+    }
+}
+
+fn stone() -> Voxel {
+    Voxel::cube(STONE)
+}
+
+const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
+
+/// A one-Voxel-wide corridor along +x and -x at floor level y = 1, `half_m`
+/// long each way, with a stone floor at y = 0 and stone walls at z = +-1.
+fn corridor(voxel_m: f32, half_m: f32) -> Sim {
+    let n = (half_m / voxel_m).round() as i32;
+    let mut sim = Sim::new(voxel_m, [-n - 1, 0, -1], [n + 1, 3, 1]);
+    for x in -n - 1..=n + 1 {
+        sim.build([x, 0, 0], stone());
+        for y in 0..=3 {
+            sim.build([x, y, -1], stone());
+            sim.build([x, y, 1], stone());
+        }
+    }
+    for y in 1..=3 {
+        sim.build([-n - 1, y, 0], stone());
+        sim.build([n + 1, y, 0], stone());
+    }
+    sim
+}
+
+/// How far flowing water reaches along +x from the source at x = 0, metres.
+fn wet_length_m(sim: &Sim, y: i32) -> f32 {
+    let mut x = 1;
+    while sim.grid.stored([x, y, 0]).is_some() && sim.fluid([x, y, 0]).is_some() {
+        x += 1;
+    }
+    (x - 1) as f32 * sim.voxel_m
+}
+
+#[test]
+fn the_scale_turns_metres_and_metres_per_second_into_voxels_and_steps() {
+    let tables = Tables::builtin();
+    for (v, reach, reset, sideways, downward) in [
+        (1.0, 7, 8, 16, 8),
+        (0.5, 14, 16, 8, 4),
+        (0.25, 28, 32, 4, 2),
+    ] {
+        let s = *FlowScale::new(&tables.fluids, v).get(WATER).unwrap();
+        assert_eq!(
+            s,
+            Scaled {
+                reach,
+                reset,
+                sideways,
+                downward,
+                recession: sideways,
+            },
+            "{v} m"
+        );
+        assert_eq!(reach as f32 * v, 7.0, "reach is metres at {v} m");
+    }
+    assert!(FlowScale::new(&tables.fluids, 1.0).get(STONE).is_none());
+}
+
+/// Reach is metres of path, surfaces fall away from the source, and the
+/// spread stops there however much open floor is left: a lower surface on flat
+/// ground does not renew reach.
+#[test]
+fn a_source_spreads_its_reach_in_metres_at_every_voxel_size() {
+    for v in SIZES {
+        let mut sim = corridor(v, 12.0);
+        sim.place_source([0, 1, 0]);
+        sim.settle();
+        assert_eq!(wet_length_m(&sim, 1), 7.0, "{v} m");
+        let surfaces: Vec<u8> = (1..=sim.cells(7.0))
+            .map(|x| sim.fluid([x, 1, 0]).unwrap().surface)
+            .collect();
+        assert!(
+            surfaces.windows(2).all(|w| w[0] >= w[1]),
+            "{v} m: {surfaces:?}"
+        );
+        assert!(
+            surfaces[0] > *surfaces.last().unwrap(),
+            "{v} m: {surfaces:?}"
+        );
+        assert!(surfaces.iter().all(|s| *s < Fluid::FULL_SURFACE));
+        assert_eq!(sim.sources(), 1, "flow became a source at {v} m");
+        // Symmetric: the same the other way.
+        assert!(sim.fluid([-sim.cells(7.0), 1, 0]).is_some());
+        assert!(sim.fluid([-sim.cells(7.0) - 1, 1, 0]).is_none());
+    }
+}
+
+/// The front moves at the declared sideways rate in metres per second: after
+/// `t` seconds it is `4 t` metres out, within one Voxel, at every size.
+#[test]
+fn the_front_advances_at_the_declared_rate_at_every_voxel_size() {
+    for v in SIZES {
+        let mut sim = corridor(v, 12.0);
+        sim.place_source([0, 1, 0]);
+        let mut elapsed = 0.0;
+        for seconds in [0.25, 0.5, 1.0, 1.5] {
+            sim.run_seconds(seconds - elapsed);
+            elapsed = seconds;
+            let expected = (FluidDef::WATER.sideways_m_per_s as f64 * seconds) as f32;
+            let got = wet_length_m(&sim, 1);
+            assert!(
+                (got - expected).abs() <= v + 1e-4,
+                "{v} m at {seconds} s: {got} m, expected {expected} m"
+            );
+        }
+    }
+}
+
+/// Removing the source recedes everything, at the recession rate, and leaves
+/// nothing behind.
+#[test]
+fn removing_the_source_recedes_every_flowing_voxel_at_the_recession_rate() {
+    for v in SIZES {
+        let mut sim = corridor(v, 12.0);
+        sim.place_source([0, 1, 0]);
+        sim.settle();
+        sim.remove_fluid([0, 1, 0]);
+        // Halfway through the time 7 m takes at the rate, some is still left.
+        let rate = FluidDef::WATER.recession_m_per_s as f64;
+        sim.run_seconds(3.5 / rate);
+        let left = wet_length_m(&sim, 1);
+        assert!(left > 0.0, "{v} m: receded too fast");
+        let steps = sim.settle();
+        assert!(sim.wet().is_empty(), "{v} m: {:?}", sim.wet());
+        let total_s = (3.5 / rate) + steps as f64 * STEP_S;
+        assert!(
+            (total_s - 7.0 / rate).abs() <= sim.scale.get(WATER).unwrap().recession as f64 * STEP_S,
+            "{v} m: receded in {total_s} s"
+        );
+    }
+}
+
+/// A source over a cliff feeds a waterfall that falls first, then spreads its
+/// full reach again where it lands, at every Voxel size.
+#[test]
+fn a_waterfall_falls_then_spreads_its_reach_again_where_it_lands() {
+    for v in SIZES {
+        let cliff = (4.0 / v) as i32;
+        let n = (12.0 / v) as i32;
+        let mut sim = Sim::new(v, [-3, -1, -1], [n + 1, cliff + 2, 1]);
+        for x in -3..=n + 1 {
+            for y in -1..=cliff + 2 {
+                sim.build([x, y, -1], stone());
+                sim.build([x, y, 1], stone());
+            }
+            // The cliff top is x <= -1, its face at x = 0.
+            let top = if x < 0 { cliff } else { 0 };
+            for y in -1..top {
+                sim.build([x, y, 0], stone());
+            }
+        }
+        sim.place_source([-1, cliff, 0]);
+        sim.settle();
+
+        // Out over the edge and straight down: every Voxel of the column wet,
+        // falling ones full.
+        for y in 0..cliff {
+            let f = sim
+                .fluid([0, y, 0])
+                .unwrap_or_else(|| panic!("{v} m: dry at {y}"));
+            assert_eq!(f.surface, Fluid::FULL_SURFACE, "{v} m at {y}");
+        }
+        // Landed and spread 7 m again from the foot of the fall.
+        let mut x = 1;
+        while sim.fluid([x, 0, 0]).is_some() {
+            x += 1;
+        }
+        assert_eq!((x - 1) as f32 * v, 7.0, "{v} m");
+        // Nothing climbed: no water above the floor beyond the fall.
+        for x in 1..=n {
+            assert!(sim.fluid([x, 1, 0]).is_none(), "{v} m: water rose at {x}");
+        }
+        assert_eq!(sim.sources(), 1);
+    }
+}
+
+/// Terraces 4 m long and 1 m apart carry a stream further than any one reach:
+/// each drop renews it, and there is no bound on the total.
+#[test]
+fn successive_drops_renew_reach_with_no_bound_on_the_total() {
+    for v in SIZES {
+        let run = (4.0 / v) as i32;
+        let drop = (1.0 / v) as i32;
+        let terraces = 4;
+        let width = run * terraces + run;
+        let top = drop * terraces + 2;
+        let mut sim = Sim::new(v, [-1, -1, -1], [width + 1, top + 1, 1]);
+        let floor = |x: i32| drop * (terraces - (x / run).min(terraces));
+        for x in -1..=width + 1 {
+            for y in -1..=top + 1 {
+                sim.build([x, y, -1], stone());
+                sim.build([x, y, 1], stone());
+            }
+            let f = if x < 0 { top + 1 } else { floor(x) };
+            for y in -1..f {
+                sim.build([x, y, 0], stone());
+            }
+        }
+        sim.place_source([0, floor(0), 0]);
+        sim.settle();
+        let reached = (0..=width)
+            .filter(|&x| sim.fluid([x, floor(x), 0]).is_some())
+            .max();
+        assert!(
+            reached.unwrap() as f32 * v >= 4.0 * terraces as f32 + 3.0,
+            "{v} m: stopped at {reached:?}"
+        );
+    }
+}
+
+/// A drop renews reach once gravity descent reaches the reset drop, 0.5 m: a
+/// single quarter-metre step does not, and a half-metre one does.
+#[test]
+fn reach_renews_after_half_a_metre_of_descent_and_not_at_a_voxel_boundary() {
+    // Floor at y = 0 up to `step_at_m`, then `drop_m` lower.
+    let spread = |v: f32, step_at_m: f32, drop_m: f32| {
+        let n = (20.0 / v) as i32;
+        let at = (step_at_m / v) as i32;
+        let drop = (drop_m / v).round() as i32;
+        let mut sim = Sim::new(v, [-1, -drop - 1, -1], [n + 1, 3, 1]);
+        for x in -1..=n + 1 {
+            for y in -drop - 1..=3 {
+                sim.build([x, y, -1], stone());
+                sim.build([x, y, 1], stone());
+            }
+            let floor = if x <= at { 0 } else { -drop };
+            for y in -drop - 1..floor {
+                sim.build([x, y, 0], stone());
+            }
+        }
+        sim.build([-1, 0, 0], stone());
+        sim.place_source([0, 0, 0]);
+        sim.settle();
+        let mut x = at + 1;
+        while sim.fluid([x, -drop, 0]).is_some() {
+            x += 1;
+        }
+        // Metres of floor wet beyond the foot of the step.
+        (x - at - 2) as f32 * v
+    };
+    // At 0.25 m: one quarter-metre step keeps what was left of 7 m...
+    assert_eq!(spread(0.25, 3.0, 0.25), 7.0 - 3.0 - 0.25);
+    // ...and a half-metre one renews it, as it does at 0.5 m.
+    assert_eq!(spread(0.25, 3.0, 0.5), 7.0);
+    assert_eq!(spread(0.5, 3.0, 0.5), 7.0);
+    // A metre renews at every size.
+    for v in SIZES {
+        assert_eq!(spread(v, 3.0, 1.0), 7.0, "{v} m");
+    }
+}
+
+/// Flow fills down and along but never up: the far arm of a U stays dry, and
+/// so does the Cave above the stream's floor.
+#[test]
+fn flow_never_climbs_to_fill_a_u_or_a_cave_towards_the_source() {
+    let mut sim = Sim::new(1.0, [-1, -1, -1], [8, 8, 1]);
+    for x in -1..=8 {
+        for y in -1..=8 {
+            sim.build([x, y, -1], stone());
+            sim.build([x, y, 1], stone());
+        }
+    }
+    // Columns x = 0 and x = 6 open from y = 1 to 7, joined along y = 1.
+    for x in -1..=8 {
+        for y in -1..=8 {
+            let open = (y >= 1 && (x == 0 || x == 6)) || (y == 1 && (0..=6).contains(&x));
+            if !open {
+                sim.build([x, y, 0], stone());
+            }
+        }
+    }
+    sim.place_source([0, 7, 0]);
+    sim.settle();
+    for y in 1..7 {
+        assert!(sim.fluid([0, y, 0]).is_some(), "the drop at {y}");
+    }
+    assert!(sim.fluid([6, 1, 0]).is_some(), "along the bottom");
+    for y in 2..=7 {
+        assert!(sim.fluid([6, y, 0]).is_none(), "climbed to {y}");
+    }
+}
+
+/// A ring of flow around a pillar is the cycle a naive recession leaves
+/// standing: every Voxel in it has a wet neighbour. Taking the source away
+/// clears all of it.
+#[test]
+fn removing_the_source_clears_a_ring_that_could_support_itself() {
+    let mut sim = Sim::new(1.0, [-4, 0, -4], [4, 3, 4]);
+    for x in -4..=4 {
+        for z in -4..=4 {
+            sim.build([x, 0, z], stone());
+            let ring = x.abs().max(z.abs()) == 1;
+            if !ring {
+                for y in 1..=3 {
+                    sim.build([x, y, z], stone());
+                }
+            }
+        }
+    }
+    sim.place_source([0, 1, 1]);
+    sim.settle();
+    let ring = sim.wet().len();
+    assert_eq!(ring, 8, "the whole ring is wet");
+    sim.remove_fluid([0, 1, 1]);
+    sim.settle();
+    assert!(sim.wet().is_empty(), "{:?}", sim.wet());
+}
+
+/// Blocking the stream next to its source dries what is downstream and keeps
+/// the source and what it still feeds.
+#[test]
+fn blocking_a_stream_dries_downstream_and_keeps_the_source() {
+    let mut sim = corridor(1.0, 12.0);
+    sim.place_source([0, 1, 0]);
+    sim.settle();
+    sim.put([2, 1, 0], stone());
+    sim.settle();
+    assert_eq!(sim.fluid([0, 1, 0]), Some(Fluid::source(WATER)));
+    assert!(sim.fluid([1, 1, 0]).is_some(), "still fed");
+    for x in 3..=8 {
+        assert!(sim.fluid([x, 1, 0]).is_none(), "{x} still wet");
+    }
+    assert!(
+        sim.fluid([-7, 1, 0]).is_some(),
+        "the other way is untouched"
+    );
+}
+
+/// The quota bounds one call and changes nothing else: the state after every
+/// step is the same however the step's evaluations are divided.
+#[test]
+fn dividing_steps_by_any_quota_gives_the_same_state_at_every_step() {
+    let script = |quota: usize| {
+        let mut sim = corridor(0.5, 6.0);
+        sim.quota = Quota { evaluations: quota };
+        sim.place_source([0, 1, 0]);
+        let mut states = Vec::new();
+        for step in 0..400 {
+            if step == 150 {
+                sim.put([3, 1, 0], stone());
+            }
+            if step == 250 {
+                sim.remove_fluid([0, 1, 0]);
+            }
+            sim.run_step();
+            states.push(sim.state());
+        }
+        (states, sim.work)
+    };
+    let (whole, work) = script(usize::MAX);
+    for quota in [1, 3, 17] {
+        let (divided, divided_work) = script(quota);
+        assert!(whole == divided, "quota {quota} diverged");
+        assert_eq!(work, divided_work, "quota {quota}");
+    }
+}
+
+/// A call never evaluates more than its quota, and hands back the rest.
+#[test]
+fn one_call_evaluates_at_most_its_quota() {
+    let mut sim = corridor(1.0, 12.0);
+    sim.place_source([0, 1, 0]);
+    let due = sim.wakeups.take_due(0);
+    assert!(due.len() > 3);
+    let total = due.len();
+    let cont = Continuation::start(0, due, Timers::default());
+    let quota = Quota { evaluations: 3 };
+    let Advance::Partial(cont) = advance(&sim.grid, &sim.tables, &sim.scale, cont, quota) else {
+        panic!("finished past its quota");
+    };
+    assert_eq!(cont.remaining(), total - 3);
+    assert_eq!(cont.work.evaluated, 3);
+}
+
+/// Unknown terrain is never air: flow stops at the edge of what is held and the
+/// Voxel beside it decides nothing.
+#[test]
+fn flow_pauses_at_terrain_nobody_holds() {
+    // The region ends at x = 3; the corridor would carry on.
+    let mut sim = corridor(1.0, 12.0);
+    sim.grid.max[0] = 3;
+    sim.place_source([0, 1, 0]);
+    sim.settle();
+    assert!(sim.fluid([2, 1, 0]).is_some());
+    assert!(sim.fluid([3, 1, 0]).is_none(), "decided against unknown");
+    assert!(sim.work.paused > 0);
+}
+
+/// Quiet water costs nothing: once settled, nothing is waiting and no step
+/// evaluates anything, however long it runs.
+#[test]
+fn settled_flow_does_no_further_work() {
+    let mut sim = corridor(1.0, 12.0);
+    sim.place_source([0, 1, 0]);
+    sim.settle();
+    let before = sim.work;
+    sim.run(500);
+    assert_eq!(sim.work, before);
+    assert!(sim.timers.is_empty());
+}
+
+/// Flow goes around a solid and not through it, and placing a source on
+/// flowing water makes that Voxel a source and nothing else.
+#[test]
+fn solids_block_flow_and_a_source_placed_on_flow_is_the_only_new_source() {
+    let mut sim = corridor(1.0, 12.0);
+    sim.put([3, 1, 0], stone());
+    sim.place_source([0, 1, 0]);
+    sim.settle();
+    assert!(sim.fluid([4, 1, 0]).is_none(), "through the stone");
+    assert!(sim.fluid([2, 1, 0]).is_some_and(|f| !f.source));
+    sim.place_source([-3, 1, 0]);
+    sim.settle();
+    assert_eq!(sim.sources(), 2);
+    // Fed from both, it reaches further left than one source alone did.
+    assert!(sim.fluid([-10, 1, 0]).is_some());
+}
+
+/// Generated terrain, as a worker sees it: generated lake water is the packed
+/// cube generation writes, and it is a source. A shaft dug through a lake's bed
+/// fills with falling water and nothing else changes: no flow becomes a source
+/// and nothing rises above the waterline.
+#[test]
+fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
+    use crate::worldgen::{Worldgen, WorldgenParams};
+    let generator = Worldgen::new(7, 1.0, WorldgenParams::default());
+    let level = generator
+        .water_level_m()
+        .expect("the default World has water") as i32;
+    let tables = Tables::builtin();
+    let size = CHUNK_SIZE as i32;
+    // A lake Voxel over a bed at least five Voxels deep, in the generator's own
+    // output near the origin.
+    let cy = level.div_euclid(size);
+    let (bed, chunk) = (-8..8)
+        .flat_map(|cx| (-8..8).flat_map(move |cz| [[cx, cy - 1, cz], [cx, cy, cz]]))
+        .find_map(|c| {
+            let voxels = generator.chunk(c[0], c[1], c[2]);
+            let solid = |y: usize, x: usize, z: usize| {
+                let v = voxels.get(x, y, z);
+                v.is_full_cube() && tables.materials.solid(v)
+            };
+            for x in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    for y in 5..CHUNK_SIZE - 1 {
+                        let wet = voxels.get(x, y + 1, z) == Voxel::cube(WATER);
+                        if wet && (y - 5..=y).all(|y| solid(y, x, z)) {
+                            let at = [
+                                c[0] * size + x as i32,
+                                c[1] * size + y as i32,
+                                c[2] * size + z as i32,
+                            ];
+                            return Some((at, c));
+                        }
+                    }
+                }
+            }
+            None
+        })
+        .expect("a lake near the origin");
+    let mut region = Region::default();
+    for dx in -1..=1 {
+        for dy in -1..=1 {
+            for dz in -1..=1 {
+                let c = [chunk[0] + dx, chunk[1] + dy, chunk[2] + dz];
+                let voxels = generator.chunk(c[0], c[1], c[2]);
+                region.insert(c, Arc::new(voxels), Arc::new(ChunkOverlay::none()));
+            }
+        }
+    }
+    let read = |region: &Region, at: Cell| {
+        let (v, o) = region.stored(at).unwrap();
+        Occupants::of(v, o, &tables.fluids)
+    };
+    let above_bed = [bed[0], bed[1] + 1, bed[2]];
+    assert_eq!(
+        read(&region, above_bed).fluid,
+        Some(Fluid::source(WATER)),
+        "generated water reads as a source"
+    );
+    let write = |region: &mut Region, at: Cell, occupants: Occupants| {
+        let (c, [x, y, z]) = chunk_of(at);
+        let (voxel, overlay) = occupants.encode(&tables.fluids);
+        let (voxels, overlays) = region.chunks.get_mut(&c).unwrap();
+        Arc::make_mut(voxels).set(x, y, z, voxel);
+        Arc::make_mut(overlays).set(x, y, z, overlay);
+    };
+    let sources_before: usize = count_sources(&region, &tables);
+
+    let scale = FlowScale::new(&tables.fluids, 1.0);
+    let mut wakeups = Wakeups::default();
+    let shaft: Vec<Cell> = (0..5).map(|d| [bed[0], bed[1] - d, bed[2]]).collect();
+    for &at in &shaft {
+        write(
+            &mut region,
+            at,
+            Occupants {
+                solid: Voxel::AIR,
+                fluid: None,
+                burning: None,
+            },
+        );
+        wakeups.wake_around(at, 0);
+    }
+    let mut timers = Timers::default();
+    let mut step = 0;
+    while !wakeups.is_empty() {
+        let cont = Continuation::start(step, wakeups.take_due(step), std::mem::take(&mut timers));
+        let Advance::Complete(done) = advance(&region, &tables, &scale, cont, UNLIMITED) else {
+            unreachable!("unlimited");
+        };
+        for p in &done.proposals {
+            assert!(p.next.fluid.is_none_or(|f| !f.source));
+            assert!(p.at[1] <= level, "water rose to {}", p.at[1]);
+            write(&mut region, p.at, p.next);
+            wakeups.wake_around(p.at, step + 1);
+        }
+        for &(s, at) in &done.wakeups {
+            wakeups.wake(at, s);
+        }
+        timers = done.timers;
+        step += 1;
+        assert!(step < 20_000, "never settled");
+    }
+    for &at in &shaft {
+        assert!(
+            read(&region, at).fluid.is_some(),
+            "the shaft is dry at {at:?}"
+        );
+    }
+    assert_eq!(count_sources(&region, &tables), sources_before);
+}
+
+fn count_sources(region: &Region, tables: &Tables) -> usize {
+    let mut n = 0;
+    for (voxels, overlay) in region.chunks.values() {
+        for y in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let o =
+                        Occupants::of(voxels.get(x, y, z), overlay.get(x, y, z), &tables.fluids);
+                    n += usize::from(o.fluid.is_some_and(|f| f.source));
+                }
+            }
+        }
+    }
+    n
+}
