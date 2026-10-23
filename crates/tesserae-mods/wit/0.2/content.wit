@@ -152,19 +152,26 @@ interface content {
         second,
     }
 
-    /// What two fluids do where they touch through open space. Declared
-    /// either way round, a pair is one rule; two rules that could match one
-    /// contact are a load error.
+    /// What two fluids do where they touch: a wet void of each meeting the
+    /// other's across a face, the passage flow takes, so a sealed face or a
+    /// solid partition is no contact. Declared either way round, a pair is one
+    /// rule; two rules that could match one contact are a load error, and
+    /// receiving sides never keep two rules apart (a level contact receives
+    /// both ways). A result lands whole or not at all.
     record reaction-def {
         first: reactant,
         second: reactant,
         /// The participant whose fluid the contact removes.
         consumed: reaction-side,
-        /// A solid Material placed as a cube where the consumed fluid was, if
-        /// that space is free of solids.
+        /// A solid Material placed as a cube where the consumed fluid was. Only
+        /// where no solid stands: fluid waterlogging a Shape is not consumed
+        /// into a product, and the contact waits until that changes.
         product: option<string>,
-        /// When set, the rule matches only a contact made by the other
-        /// participant arriving at this one; `none` matches either way.
+        /// When set, the rule matches only a contact where the other
+        /// participant arrives at this one: it lies above it, or beside it on a
+        /// floor no lower, where flow into it would come from; never below.
+        /// Gravity alone decides, not the horizontal direction or which
+        /// participant the rule names first. `none` matches any contact.
         receiving: option<reaction-side>,
     }
 

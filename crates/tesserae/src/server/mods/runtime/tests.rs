@@ -864,6 +864,20 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         assert!(flow.sideways_m_per_s < water.sideways_m_per_s);
         assert!(flow.downward_m_per_s < water.downward_m_per_s);
         assert!(flow.reach_m < water.reach_m);
+        // Its one reaction, resolved by name: lava touching water, either
+        // state, becomes core:stone and the water stays.
+        let rules = loaded.tables.reactions.rules();
+        assert_eq!(rules.len(), 1);
+        let rule = rules[0];
+        assert_eq!((rule.first.fluid, rule.second.fluid), (7, lava));
+        assert_eq!(rule.consumed, tesserae_core::Side::Second);
+        assert_eq!(rule.product, Some(tesserae_core::worldgen::STONE));
+        assert_eq!(rule.receiving, None);
+        assert!(
+            [rule.first.phase, rule.second.phase]
+                .iter()
+                .all(|p| *p == tesserae_core::Phase::Any)
+        );
         let mut neighbors = [Voxel::AIR; 6];
         neighbors[0] = Voxel::new(1, 4, 0);
         assert!(

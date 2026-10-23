@@ -6,7 +6,8 @@ use exports::tesserae::mods::guest::{
 use std::cell::RefCell;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
-    Appearance, FluidDef, HeatDef, MaterialDef, Occlusion, RenderClass, ShapeDef, ViewParams,
+    Appearance, FluidDef, FluidState, HeatDef, MaterialDef, Occlusion, Reactant, ReactionDef,
+    ReactionSide, RenderClass, ShapeDef, ViewParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -132,7 +133,20 @@ impl Guest for Demo {
                     reach_m: 2.0,
                 }),
             }],
-            reactions: vec![],
+            // Lava that touches water cools to stone; the water is kept.
+            reactions: vec![ReactionDef {
+                first: Reactant {
+                    fluid: "demo:lava".into(),
+                    state: FluidState::Any,
+                },
+                second: Reactant {
+                    fluid: "core:water".into(),
+                    state: FluidState::Any,
+                },
+                consumed: ReactionSide::First,
+                product: Some("core:stone".into()),
+                receiving: None,
+            }],
             combustion: vec![],
         }
     }

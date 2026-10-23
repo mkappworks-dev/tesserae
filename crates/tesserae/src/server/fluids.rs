@@ -37,6 +37,13 @@
 //! turn round the Chunks, from a cursor in each; stale and parked attempts
 //! count towards it. Evaluations per call and workers in flight are how a step
 //! is divided, and change nothing it computes.
+//!
+//! **Reactions.** A reaction is one [`Proposal`]: its consumed Voxel's whole
+//! result, depending on the participant it keeps. It is chosen, bounded and
+//! landed as one change, and lands only if its contact still gives it after
+//! the step's earlier landings, so a participant one reaction consumed is
+//! never consumed or kept by a second. A result the World change refuses
+//! consumes neither and sleeps until something it reads changes.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
@@ -45,11 +52,12 @@ use bevy::prelude::*;
 use tesserae_core::agenda::{Agenda, Limits, Span};
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::flow::{
-    Advance, Cell, Continuation, Finished, FlowScale, Proposal, Quota, Region, Step, Timers, Work,
-    advance, chunk_of, dependents, readers_outside, reading_outside, reads,
+    Advance, Cell, CellView, Continuation, Finished, FlowScale, Proposal, Quota, Reach, Region,
+    Step, Timers, Work, advance, chunk_of, dependents, readers_outside, reading_outside, reads,
+    still_applies,
 };
 use tesserae_core::mesh::FACE_STEPS;
-use tesserae_core::{FluidTable, Tables};
+use tesserae_core::{FluidTable, Overlay, Tables, Voxel};
 
 use super::ContentTables;
 use super::edit::{self, set_occupants};
@@ -100,9 +108,9 @@ pub(in crate::server) struct FluidSim {
     turn: Option<[i32; 3]>,
     cursors: BTreeMap<[i32; 3], Cell>,
     scale: Option<Arc<FlowScale>>,
-    /// Whether any registered Shape grows arms, which widens what an
-    /// evaluation reads to the solids that decide them.
-    connected: bool,
+    /// What an evaluation reads: wider with connected Shapes registered, and
+    /// with reactions, which touch the Voxel below too.
+    reach: Reach,
     quota: Quota,
     jobs_in_flight: usize,
     landed_per_step: usize,
@@ -114,6 +122,9 @@ pub(in crate::server) struct FluidSim {
     pub deferred: usize,
     /// Changes put to sleep because their Chunk's light was being solved.
     pub parked: usize,
+    /// Reactions the World change refused, left asleep until what they read
+    /// changes.
+    pub blocked: usize,
     /// Voxels a rescan supplied.
     pub scanned: usize,
     /// Ticks the running step's results are left uncollected, as if its
@@ -153,7 +164,7 @@ impl Default for FluidSim {
             turn: None,
             cursors: BTreeMap::new(),
             scale: None,
-            connected: false,
+            reach: Reach::default(),
             quota: Quota {
                 evaluations: EVALUATIONS_PER_JOB,
             },
@@ -164,6 +175,7 @@ impl Default for FluidSim {
             stale: 0,
             deferred: 0,
             parked: 0,
+            blocked: 0,
             scanned: 0,
             #[cfg(test)]
             stall: 0,
@@ -241,7 +253,7 @@ impl FluidSim {
     /// Wakes, at `step`, every simulated Voxel whose state reads `at`'s
     /// fluid or solid.
     fn wake_around(&mut self, at: Cell, step: Step) {
-        for &d in dependents(false) {
+        for &d in dependents(self.reach.fluid()) {
             let c = offset(at, d);
             if self.simulates(c) {
                 self.agenda.wake(c, step);
@@ -253,7 +265,7 @@ impl FluidSim {
     /// Shape beside it whose arms, and so whose voids, it decides.
     fn wake_around_solid(&mut self, store: &ChunkStore, tables: &Tables, at: Cell, step: Step) {
         self.wake_around(at, step);
-        if !self.connected {
+        if !self.reach.connected {
             return;
         }
         for d in FACE_STEPS {
@@ -277,7 +289,7 @@ impl FluidSim {
 
     /// Rescans the simulated Voxels outside `chunk` that read into it.
     fn rescan_readers(&mut self, chunk: ChunkCoord) {
-        for span in readers_outside(key(chunk), self.connected) {
+        for span in readers_outside(key(chunk), self.reach) {
             if self.simulated.contains_key(&coord(span.home())) {
                 self.agenda.rescan(span);
             }
@@ -311,7 +323,7 @@ pub(in crate::server) fn simulate(
     world: Res<WorldSettings>,
 ) {
     let sim = &mut *sim;
-    sim.connected = tables.shapes.any_connected();
+    sim.reach = Reach::of(&tables);
     let scale = Arc::clone(
         sim.scale
             .get_or_insert_with(|| Arc::new(FlowScale::new(&tables.fluids, world.voxel_size))),
@@ -411,7 +423,7 @@ fn admit(sim: &mut FluidSim, store: &ChunkStore, coord: ChunkCoord, fluids: &Flu
     if wet(store, coord, fluids) && !uniform {
         sim.agenda.rescan(Span::chunk(key(coord)));
     } else {
-        for span in reading_outside(key(coord), sim.connected) {
+        for span in reading_outside(key(coord), sim.reach) {
             sim.agenda.rescan(span);
         }
     }
@@ -521,7 +533,7 @@ fn start_step(
     let mut read = HashMap::new();
     let mut seen = HashSet::new();
     for &at in &due {
-        for &d in reads(sim.connected) {
+        for &d in reads(sim.reach) {
             let (chunk, _) = chunk_of(offset(at, d));
             if !seen.insert(chunk) {
                 continue;
@@ -582,7 +594,10 @@ fn land_step(sim: &mut FluidSim, store: &mut ChunkStore, meshes: &mut MeshState,
     for p in deferred {
         sim.deferred += 1;
         if sim.simulates(p.at) {
-            sim.timers.hold(p.at, next, p.next.fluid);
+            // A reaction is decided again from its contact, not from a timer.
+            if p.contact.is_none() {
+                sim.timers.hold(p.at, next, p.next.fluid);
+            }
             sim.agenda.rewake(p.at, next);
         }
     }
@@ -606,6 +621,10 @@ fn land_step(sim: &mut FluidSim, store: &mut ChunkStore, meshes: &mut MeshState,
         }
         if set_occupants(store, meshes, tables, p.at, p.next).is_ok() {
             sim.landed += 1;
+        } else if p.contact.is_some() {
+            // Neither participant changed: retrying before an input does
+            // would refuse the same result every step.
+            sim.blocked += 1;
         } else {
             sim.stale += 1;
             sim.agenda.rewake(p.at, next);
@@ -613,16 +632,38 @@ fn land_step(sim: &mut FluidSim, store: &mut ChunkStore, meshes: &mut MeshState,
     }
     let changed = store.take_changed();
     debug_assert!(changed.chunks.is_empty(), "a step outgrew the journal");
-    debug_assert!(changed.solids.is_empty(), "flow changed a solid");
     for at in changed.cells {
         sim.wake_around(at, next);
+    }
+    for at in changed.solids {
+        sim.wake_around_solid(store, tables, at, next);
     }
     sim.agenda.end_step();
     sim.next_step();
 }
 
+/// The store as the simulation reads it: Chunks it has not admitted are
+/// unknown, as they were to the step.
+struct Held<'a> {
+    store: &'a ChunkStore,
+    simulated: &'a BTreeMap<ChunkCoord, Lifetime>,
+}
+
+impl CellView for Held<'_> {
+    fn stored(&self, at: Cell) -> Option<(Voxel, Overlay)> {
+        let v = VoxelCoord::of(at);
+        if !self.simulated.contains_key(&v.chunk) {
+            return None;
+        }
+        let voxel = self.store.get(v.chunk)?.get(v.x, v.y, v.z);
+        Some((voxel, self.store.overlay(v.chunk)?.get(v.x, v.y, v.z)))
+    }
+}
+
 /// Whether nothing `p` read has changed since its Snapshot: no event touched
-/// it, and every Chunk it read is the one it read, or still absent.
+/// it, and every Chunk it read is the one it read, or still absent; and
+/// whether it still follows from the store after the step's earlier changes,
+/// which for a reaction asks its contact again.
 fn still_valid(
     sim: &FluidSim,
     read: &HashMap<[i32; 3], Lifetime>,
@@ -630,7 +671,7 @@ fn still_valid(
     tables: &Tables,
     p: &Proposal,
 ) -> bool {
-    reads(sim.connected).iter().all(|&d| {
+    reads(sim.reach).iter().all(|&d| {
         let at = offset(p.at, d);
         let (chunk, _) = chunk_of(at);
         let c = coord(chunk);
@@ -642,7 +683,14 @@ fn still_valid(
                 .get(&c)
                 .is_none_or(|life| store.lifetime(c) == Some(*life));
         same && !sim.edited.contains(&at) && !sim.edited_chunks.contains(&c)
-    }) && store.occupants(p.at, &tables.fluids) == Some(p.read)
+    }) && still_applies(
+        &Held {
+            store,
+            simulated: &sim.simulated,
+        },
+        tables,
+        p,
+    )
 }
 
 /// Picks the changes a step lands: all of them within the bound; past it, one

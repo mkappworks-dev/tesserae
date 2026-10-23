@@ -34,6 +34,8 @@ struct Sim {
     step: Step,
     quota: Quota,
     work: Work,
+    /// Reactions an earlier landing of their step undid.
+    stale: usize,
 }
 
 const UNLIMITED: Quota = Quota {
@@ -60,6 +62,7 @@ impl Sim {
             step: 0,
             quota: UNLIMITED,
             work: Work::default(),
+            stale: 0,
         }
     }
 
@@ -87,13 +90,43 @@ impl Sim {
         let before = self.occupants(at).solid;
         let stored = occupants.encode(&self.tables.fluids);
         self.grid.cells.insert(at, stored);
-        wake_around(&mut self.agenda, at, self.step);
-        if before != occupants.solid {
+        self.woken(at, before != occupants.solid, self.step);
+    }
+
+    /// Wakes what reads a changed position, as the Server's landing does.
+    fn woken(&mut self, at: Cell, solid: bool, step: Step) {
+        let reach = Reach::of(&self.tables);
+        wake_around(&mut self.agenda, at, step, reach);
+        if solid {
             let grid = &self.grid;
             let shapes = &self.tables.shapes;
-            wake_solid_around(&mut self.agenda, at, self.step, |c| {
+            wake_solid_around(&mut self.agenda, at, step, reach, |c| {
                 grid.stored(c).is_some_and(|(v, _)| shapes.is_connected(v))
             });
+        }
+    }
+
+    /// Lands a step's proposals in coordinate order, each only if it still
+    /// applies after those before it; the rest are evaluated again next step.
+    fn land(&mut self, mut proposals: Vec<Proposal>) {
+        proposals.sort_unstable_by_key(|p| p.at);
+        for p in proposals {
+            assert!(
+                !p.next.fluid.is_some_and(|f| f.source),
+                "flow made a source"
+            );
+            if !still_applies(&self.grid, &self.tables, &p) {
+                assert!(p.contact.is_some(), "flow proposal read stale state");
+                self.stale += 1;
+                self.agenda.rewake(p.at, self.step + 1);
+                continue;
+            }
+            self.tables.vet_occupants(p.next).expect("a valid proposal");
+            let solid = p.next.solid != p.read.solid;
+            self.grid
+                .cells
+                .insert(p.at, p.next.encode(&self.tables.fluids));
+            self.woken(p.at, solid, self.step + 1);
         }
     }
 
@@ -151,17 +184,7 @@ impl Sim {
                 Advance::Complete(done) => break done,
             }
         };
-        for p in &done.proposals {
-            assert!(
-                !p.next.fluid.is_some_and(|f| f.source),
-                "flow made a source"
-            );
-            assert_eq!(self.occupants(p.at), p.read, "proposal read stale state");
-            let stored = p.next.encode(&self.tables.fluids);
-            self.tables.vet_occupants(p.next).expect("a valid proposal");
-            self.grid.cells.insert(p.at, stored);
-            wake_around(&mut self.agenda, p.at, self.step + 1);
-        }
+        self.land(done.proposals.clone());
         for &(step, at) in &done.wakeups {
             self.agenda.rewake(at, step);
         }
@@ -194,12 +217,9 @@ impl Sim {
             )
             .collect();
         parts.reverse();
+        let proposals: Vec<Proposal> = parts.iter().flat_map(|d| d.proposals.clone()).collect();
+        self.land(proposals);
         for done in parts {
-            for p in &done.proposals {
-                let stored = p.next.encode(&self.tables.fluids);
-                self.grid.cells.insert(p.at, stored);
-                wake_around(&mut self.agenda, p.at, self.step + 1);
-            }
             for &(step, at) in &done.wakeups {
                 self.agenda.rewake(at, step);
             }
@@ -763,7 +783,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
                 burning: None,
             },
         );
-        wake_around(&mut agenda, at, 0);
+        wake_around(&mut agenda, at, 0, Reach::default());
     }
     let mut timers = Timers::default();
     let mut step = 0;
@@ -777,7 +797,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
             assert!(p.next.fluid.is_none_or(|f| !f.source));
             assert!(p.at[1] <= level, "water rose to {}", p.at[1]);
             write(&mut region, p.at, p.next);
-            wake_around(&mut agenda, p.at, step + 1);
+            wake_around(&mut agenda, p.at, step + 1, Reach::default());
         }
         for &(s, at) in &done.wakeups {
             agenda.rewake(at, s);
@@ -820,10 +840,14 @@ fn count_sources(region: &Region, tables: &Tables) -> usize {
 fn the_voxels_reading_across_a_chunk_boundary_are_the_ones_named() {
     let chunk = [-1, -2, 0];
     let home = crate::agenda::Span::chunk(chunk);
-    for connected in [false, true] {
-        let read = reads(connected);
-        let readers = readers_outside(chunk, connected);
-        let faces = reading_outside(chunk, connected);
+    for (connected, contacts) in [(false, false), (false, true), (true, false), (true, true)] {
+        let reach = Reach {
+            connected,
+            contacts,
+        };
+        let read = reads(reach);
+        let readers = readers_outside(chunk, reach);
+        let faces = reading_outside(chunk, reach);
         let reads_into = |c: Cell| read.iter().any(|&r| home.contains_cell(step_by(c, r)));
         let reads_out = |c: Cell| read.iter().any(|&r| !home.contains_cell(step_by(c, r)));
         for x in home.min[0] - 3..=home.max[0] + 3 {
@@ -837,14 +861,27 @@ fn the_voxels_reading_across_a_chunk_boundary_are_the_ones_named() {
                         continue;
                     }
                     let named = readers.iter().any(|s| s.contains_cell(c));
-                    assert_eq!(named, reads_into(c), "{connected} {c:?}");
+                    assert_eq!(named, reads_into(c), "{reach:?} {c:?}");
                 }
             }
         }
         assert!(readers.iter().all(|s| s.home() != chunk));
     }
-    assert!(READS.iter().all(|r| reads(true).contains(r)));
-    assert!(reads(true).len() > READS.len());
+    let wide = Reach {
+        connected: true,
+        contacts: false,
+    };
+    let touching = Reach {
+        connected: false,
+        contacts: true,
+    };
+    assert!(READS.iter().all(|r| reads(wide).contains(r)));
+    assert!(reads(wide).len() > READS.len());
+    assert_eq!(reads(Reach::default()), READS);
+    assert!(reads(touching).contains(&[0, -1, 0]) && !READS.contains(&[0, -1, 0]));
+    for d in FACE_STEPS {
+        assert!(reads(touching).contains(&d), "a face it can touch: {d:?}");
+    }
 }
 
 /// A Voxel waiting on a timer when what it reads goes unknown drops the timer:
@@ -1287,7 +1324,7 @@ mod declared {
 
     /// The spec's proposed demo lava: 0.75 m/s does not divide a step at any
     /// of the three sizes.
-    const LAVA: FluidDef = FluidDef {
+    pub(super) const LAVA: FluidDef = FluidDef {
         reach_m: 3.0,
         sideways_m_per_s: 0.75,
         downward_m_per_s: 1.5,
@@ -1302,7 +1339,7 @@ mod declared {
     };
 
     /// Neither water nor lava: shorter reach, its own rates and reset drop.
-    const SLIME: FluidDef = FluidDef {
+    pub(super) const SLIME: FluidDef = FluidDef {
         reach_m: 2.0,
         sideways_m_per_s: 2.0,
         downward_m_per_s: 3.0,
@@ -1313,7 +1350,7 @@ mod declared {
         heat: None,
     };
 
-    fn liquid(tables: &mut Tables, emission: u8) -> MaterialId {
+    pub(super) fn liquid(tables: &mut Tables, emission: u8) -> MaterialId {
         tables
             .materials
             .register(MaterialDef {
@@ -1327,7 +1364,7 @@ mod declared {
     }
 
     /// Water's built-in table plus `defs`, registered in order.
-    fn with(defs: &[FluidDef]) -> (Tables, Vec<MaterialId>) {
+    pub(super) fn with(defs: &[FluidDef]) -> (Tables, Vec<MaterialId>) {
         let mut tables = Tables::builtin();
         let ids = defs
             .iter()
@@ -1340,14 +1377,14 @@ mod declared {
         (tables, ids)
     }
 
-    fn corridor_of(tables: Tables, voxel_m: f32, half_m: f32) -> Sim {
+    pub(super) fn corridor_of(tables: Tables, voxel_m: f32, half_m: f32) -> Sim {
         let mut sim = corridor(voxel_m, half_m);
         sim.scale = FlowScale::new(&tables.fluids, voxel_m);
         sim.tables = tables;
         sim
     }
 
-    fn source(sim: &mut Sim, at: Cell, material: MaterialId) {
+    pub(super) fn source(sim: &mut Sim, at: Cell, material: MaterialId) {
         let here = sim.occupants(at);
         sim.edit(
             at,
@@ -1524,5 +1561,444 @@ mod declared {
             }),
             Err(crate::PlaceFault::FluidExcluded)
         );
+    }
+}
+
+/// Declared contact reactions, through the same kernel and landing as flow.
+mod reactions {
+    use super::declared::{LAVA, SLIME, corridor_of, liquid, source, with};
+    use super::*;
+    use crate::material::{MaterialDef, Occlusion, RenderClass};
+    use crate::mesh::{NEG_X, POS_X, POS_Y};
+    use crate::reaction::{Phase, Reactant, ReactionDef, Side};
+    use crate::shape::{NodeBox, Orientation, ShapeDef};
+    use crate::{SHAPE_STAIR, Voxel};
+
+    fn solid(tables: &mut Tables) -> MaterialId {
+        tables
+            .materials
+            .register(MaterialDef {
+                emission: 0,
+                dimming: 15,
+                occlusion: Occlusion::Opaque,
+                render: RenderClass::Opaque,
+                solid: true,
+            })
+            .unwrap()
+    }
+
+    fn any(fluid: MaterialId) -> Reactant {
+        Reactant {
+            fluid,
+            phase: Phase::Any,
+        }
+    }
+
+    /// `consumed` goes on touching `kept`, leaving `product`.
+    fn rule(consumed: MaterialId, kept: MaterialId, product: Option<MaterialId>) -> ReactionDef {
+        ReactionDef {
+            first: any(consumed),
+            second: any(kept),
+            consumed: Side::First,
+            product,
+            receiving: None,
+        }
+    }
+
+    /// The demo's rule: lava touching water becomes stone, water stays.
+    fn cooling() -> (Tables, MaterialId) {
+        let (mut tables, ids) = with(&[LAVA]);
+        tables
+            .register_reaction(rule(ids[0], WATER, Some(STONE)))
+            .unwrap();
+        (tables, ids[0])
+    }
+
+    fn material(sim: &Sim, at: Cell) -> Option<MaterialId> {
+        sim.fluid(at).map(|f| f.material)
+    }
+
+    /// Whether any two face neighbours hold `a` and `b`.
+    fn touching(sim: &Sim, a: MaterialId, b: MaterialId) -> bool {
+        sim.wet().iter().any(|&at| {
+            material(sim, at) == Some(a)
+                && FACE_STEPS.iter().any(|&d| {
+                    sim.grid.stored(step_by(at, d)).is_some()
+                        && material(sim, step_by(at, d)) == Some(b)
+                })
+        })
+    }
+
+    /// Lava and water flowing towards each other along a corridor meet; the
+    /// lava they touch turns to stone, the water is untouched, and the stone
+    /// closes the corridor between them. Both sources stay. The same at
+    /// every size, and mirrored when the two change ends.
+    #[test]
+    fn lava_meeting_water_becomes_stone_and_the_water_stays() {
+        for v in SIZES {
+            for flip in [1, -1] {
+                let (tables, lava) = cooling();
+                let mut sim = corridor_of(tables, v, 6.0);
+                let end = sim.cells(4.0);
+                source(&mut sim, [-flip * end, 1, 0], lava);
+                source(&mut sim, [flip * end, 1, 0], WATER);
+                sim.settle();
+                let stones: Vec<i32> = (-end..=end)
+                    .filter(|&x| sim.occupants([x, 1, 0]).solid == stone())
+                    .collect();
+                assert!(!stones.is_empty(), "{v} m {flip}: nothing reacted");
+                assert!(
+                    !touching(&sim, lava, WATER),
+                    "{v} m {flip}: they still touch"
+                );
+                assert!(sim.fluid([-flip * end, 1, 0]).unwrap().source);
+                assert!(sim.fluid([flip * end, 1, 0]).unwrap().source);
+                assert_eq!(sim.sources(), 2);
+                // Water reaches the stone; lava stays its own side of it.
+                let wall = stones[0];
+                for x in -end..=end {
+                    let m = material(&sim, [x, 1, 0]);
+                    if m.is_some() {
+                        assert_eq!(
+                            m == Some(WATER),
+                            (x - wall) * flip > 0,
+                            "{v} m {flip}: {m:?} at {x}"
+                        );
+                    }
+                }
+                assert!(sim.work.reacted > 0 && sim.work.reacted == stones.len());
+            }
+        }
+    }
+
+    /// A rule between two Mod fluids, named either way round, works the same
+    /// way: the kernel reads the table, not a water/lava case.
+    #[test]
+    fn a_custom_pair_reacts_by_its_own_row() {
+        for written_backwards in [false, true] {
+            let (mut tables, ids) = with(&[SLIME, LAVA]);
+            let (slime, other) = (ids[0], ids[1]);
+            let ash = solid(&mut tables);
+            let mut def = rule(other, slime, Some(ash));
+            if written_backwards {
+                def = ReactionDef {
+                    first: def.second,
+                    second: def.first,
+                    consumed: Side::Second,
+                    ..def
+                };
+            }
+            tables.register_reaction(def).unwrap();
+            let mut sim = corridor_of(tables, 1.0, 6.0);
+            source(&mut sim, [-2, 1, 0], slime);
+            source(&mut sim, [2, 1, 0], other);
+            sim.settle();
+            let solids: Vec<i32> = (-3..=3)
+                .filter(|&x| sim.occupants([x, 1, 0]).solid == Voxel::cube(ash))
+                .collect();
+            assert!(!solids.is_empty(), "{written_backwards}");
+            assert!(!touching(&sim, slime, other));
+            assert!(sim.fluid([-2, 1, 0]).unwrap().source, "slime is kept");
+            assert!(
+                (-3..=3).all(|x| sim.occupants([x, 1, 0]).solid != stone()),
+                "no stone: this pair leaves its own product"
+            );
+        }
+    }
+
+    /// A receiving side is gravity's: a rule that needs `a` to arrive at
+    /// `b` matches `a` falling onto `b` and `a` beside it on a level floor,
+    /// and never `a` below `b`. Source and flowing states are matched as
+    /// declared.
+    #[test]
+    fn receiving_and_states_are_matched_as_declared() {
+        let shaft = |tables: Tables, top: MaterialId, bottom: MaterialId| {
+            let mut sim = Sim::with_tables(1.0, [-1, 0, -1], [1, 4, 1], tables);
+            for y in 0..=4 {
+                for x in -1..=1 {
+                    for z in -1..=1 {
+                        if (x, z) != (0, 0) || y == 0 {
+                            sim.build([x, y, z], stone());
+                        }
+                    }
+                }
+            }
+            source(&mut sim, [0, 1, 0], bottom);
+            source(&mut sim, [0, 2, 0], top);
+            sim.settle();
+            (sim.fluid([0, 1, 0]), sim.fluid([0, 2, 0]))
+        };
+        let (base, ids) = with(&[SLIME, LAVA]);
+        let (a, b) = (ids[0], ids[1]);
+        let directed = |consumed_phase: Phase| {
+            let mut tables = base.clone();
+            tables
+                .register_reaction(ReactionDef {
+                    first: Reactant {
+                        fluid: b,
+                        phase: consumed_phase,
+                    },
+                    second: any(a),
+                    consumed: Side::First,
+                    product: None,
+                    receiving: Some(Side::First),
+                })
+                .unwrap();
+            tables
+        };
+        let (bottom, _) = shaft(directed(Phase::Any), a, b);
+        let bottom = bottom.expect("a falls into where b was");
+        assert_eq!(
+            (bottom.material, bottom.source),
+            (a, false),
+            "a fell onto b: b goes"
+        );
+        let (bottom, top) = shaft(directed(Phase::Any), b, a);
+        assert_eq!(
+            bottom.map(|f| f.material),
+            Some(a),
+            "a below b arrives at nothing"
+        );
+        assert_eq!(top.map(|f| f.material), Some(b));
+        let (bottom, _) = shaft(directed(Phase::Flowing), a, b);
+        assert!(
+            bottom.is_some_and(|f| f.source),
+            "b is a source, the rule wants flow"
+        );
+
+        let mut sim = corridor_of(directed(Phase::Any), 1.0, 4.0);
+        source(&mut sim, [0, 1, 0], b);
+        source(&mut sim, [1, 1, 0], a);
+        sim.settle();
+        assert_eq!(material(&sim, [0, 1, 0]), Some(a), "level: a arrives at b");
+    }
+
+    /// A rule consuming slime touching water, with no product.
+    fn dissolving() -> (Tables, MaterialId) {
+        let (mut tables, ids) = with(&[SLIME]);
+        tables.register_reaction(rule(ids[0], WATER, None)).unwrap();
+        (tables, ids[0])
+    }
+
+    /// Water standing in one void of a walled Voxel never touches slime
+    /// across the wall, and slime never enters the dry void beside it; with
+    /// no wall the same water takes the slime source away.
+    #[test]
+    fn a_solid_partition_keeps_two_fluids_from_reacting_or_mixing() {
+        for walled in [true, false] {
+            let (mut tables, slime) = dissolving();
+            let wall = tables
+                .shapes
+                .register(ShapeDef {
+                    connect: None,
+                    boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
+                    collision: None,
+                })
+                .unwrap();
+            let mut sim = corridor_of(tables, 1.0, 5.0);
+            if walled {
+                sim.build([1, 1, 0], Voxel::new(STONE, wall, 0));
+            }
+            // Water reaches the walled Voxel before slime can.
+            sim.place_source([0, 1, 0]);
+            source(&mut sim, [2, 1, 0], slime);
+            sim.settle();
+            let here = sim.occupants([1, 1, 0]);
+            assert_eq!(here.fluid.map(|f| f.material), Some(WATER), "{walled}");
+            if walled {
+                assert!(
+                    !here.fluid.unwrap().level(1).is_wet(),
+                    "the far void stays dry"
+                );
+                assert!(
+                    sim.fluid([2, 1, 0])
+                        .is_some_and(|f| f.source && f.material == slime)
+                );
+                assert_eq!(sim.work.reacted, 0);
+            } else {
+                assert_eq!(material(&sim, [2, 1, 0]), Some(WATER), "the slime went");
+                assert!(
+                    sim.wet()
+                        .iter()
+                        .all(|&at| material(&sim, at) == Some(WATER))
+                );
+            }
+        }
+    }
+
+    /// A stair's sealed back between them is no contact either; turned
+    /// side on, the same two touch through its notch.
+    #[test]
+    fn a_sealed_face_is_no_contact() {
+        let (tables, slime) = dissolving();
+        let stair = |turn| Voxel::new(STONE, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits());
+        let sealed = (0..4)
+            .map(stair)
+            .find(|&v| tables.shapes.seals(v, POS_X))
+            .unwrap();
+        let open = (0..4)
+            .map(stair)
+            .find(|&v| !tables.shapes.seals(v, NEG_X) && !tables.shapes.seals(v, POS_X))
+            .unwrap();
+        for (shape, reacts) in [(sealed, false), (open, true)] {
+            let mut sim = corridor_of(tables.clone(), 1.0, 4.0);
+            sim.build([0, 1, 0], shape);
+            sim.place_source([0, 1, 0]);
+            source(&mut sim, [1, 1, 0], slime);
+            sim.settle();
+            assert_eq!(sim.occupants([0, 1, 0]).solid, shape, "the stair stays");
+            assert_eq!(
+                material(&sim, [1, 1, 0]) != Some(slime),
+                reacts,
+                "{shape:?}"
+            );
+        }
+    }
+
+    /// A product needs empty solid space: water in a stair whose rule would
+    /// turn it to ash is blocked, and the stair, the water and the slime all
+    /// stay. Blocked, it sleeps. Breaking the stair is an input change: the
+    /// water reacts and its Voxel becomes the product, slime untouched.
+    #[test]
+    fn a_product_never_replaces_a_waterlogged_shape_and_a_blocked_contact_sleeps() {
+        let (mut tables, ids) = with(&[SLIME]);
+        let slime = ids[0];
+        let ash = solid(&mut tables);
+        tables
+            .register_reaction(rule(WATER, slime, Some(ash)))
+            .unwrap();
+        let stair = (0..4)
+            .map(|turn| Voxel::new(STONE, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits()))
+            .find(|&v| !tables.shapes.seals(v, POS_X))
+            .unwrap();
+        let mut sim = corridor_of(tables, 1.0, 4.0);
+        for x in [-4, -3, -2, -1, 2, 3, 4] {
+            sim.build([x, 1, 0], stone());
+        }
+        sim.build([0, 1, 0], stair);
+        sim.place_source([0, 1, 0]);
+        source(&mut sim, [1, 1, 0], slime);
+        sim.settle();
+        let wet_stair = sim.occupants([0, 1, 0]);
+        assert_eq!(wet_stair.solid, stair);
+        assert_eq!(wet_stair.fluid, Some(Fluid::source(WATER)));
+        assert_eq!(sim.fluid([1, 1, 0]), Some(Fluid::source(slime)));
+        assert!(sim.work.blocked > 0);
+        let work = sim.work;
+        sim.run(200);
+        assert_eq!(sim.work, work, "a blocked contact kept working");
+        assert!(sim.agenda.is_empty() && sim.timers.is_empty());
+
+        sim.edit(
+            [0, 1, 0],
+            Occupants {
+                solid: Voxel::AIR,
+                ..wet_stair
+            },
+        );
+        sim.settle();
+        assert_eq!(sim.occupants([0, 1, 0]).solid, Voxel::cube(ash));
+        assert_eq!(sim.fluid([0, 1, 0]), None);
+        assert_eq!(sim.fluid([1, 1, 0]), Some(Fluid::source(slime)));
+    }
+
+    /// Two reactions of one step that share a participant: in a row of A, B
+    /// and C, B goes touching C and A goes touching B, keeping it. Landing
+    /// goes in coordinate order and asks again: where B lands first, A's
+    /// reaction no longer follows and A stays; where A lands first both do.
+    #[test]
+    fn simultaneous_contacts_land_in_coordinate_order_and_revalidate() {
+        let (mut tables, ids) = with(&[SLIME, LAVA, SLIME]);
+        let (a, b, c) = (ids[0], ids[1], ids[2]);
+        let (p, q) = (solid(&mut tables), solid(&mut tables));
+        tables.register_reaction(rule(b, c, Some(p))).unwrap();
+        tables.register_reaction(rule(a, b, Some(q))).unwrap();
+        for (order, a_survives) in [([a, b, c], false), ([c, b, a], true)] {
+            let mut sim = corridor_of(tables.clone(), 1.0, 4.0);
+            for (x, &m) in order.iter().enumerate() {
+                source(&mut sim, [x as i32 - 1, 1, 0], m);
+            }
+            sim.run_step();
+            let a_at = [order.iter().position(|&m| m == a).unwrap() as i32 - 1, 1, 0];
+            assert_eq!(sim.occupants([0, 1, 0]).solid, Voxel::cube(p), "B went");
+            assert_eq!(sim.stale, usize::from(a_survives));
+            assert_eq!(material(&sim, a_at) == Some(a), a_survives, "{order:?}");
+            sim.settle();
+            assert_eq!(material(&sim, a_at) == Some(a), a_survives, "{order:?}");
+        }
+    }
+
+    /// Unknown terrain beside a Voxel pauses its reactions: no result decided
+    /// from what nobody holds. Admission lets the contact go.
+    #[test]
+    fn a_voxel_beside_unknown_terrain_does_not_react() {
+        let (tables, lava) = cooling();
+        let mut sim = Sim::with_tables(1.0, [-1, 0, 0], [0, 0, 0], tables);
+        source(&mut sim, [-1, 0, 0], WATER);
+        source(&mut sim, [0, 0, 0], lava);
+        sim.settle();
+        assert_eq!(
+            material(&sim, [0, 0, 0]),
+            Some(lava),
+            "it reacted beside unknown"
+        );
+        sim.grid.min = [-2, -1, -1];
+        sim.grid.max = [1, 1, 1];
+        for x in -2..=1 {
+            for z in -1..=1 {
+                sim.build([x, -1, z], stone());
+            }
+        }
+        for (x, z) in [(-2, 0), (1, 0), (-1, -1), (-1, 1), (0, -1), (0, 1)] {
+            sim.build([x, 0, z], stone());
+        }
+        for x in -2..=1 {
+            for z in -1..=1 {
+                sim.build([x, 1, z], stone());
+            }
+        }
+        sim.wake_all();
+        sim.settle();
+        assert_eq!(sim.occupants([0, 0, 0]).solid, stone());
+        assert_eq!(sim.fluid([-1, 0, 0]), Some(Fluid::source(WATER)));
+    }
+
+    /// Reactions and flow divided among workers, in any order, change
+    /// nothing: the same state at every step and the same work.
+    #[test]
+    fn reactions_are_the_same_under_any_division() {
+        let script = |slices: usize| {
+            let (tables, lava) = cooling();
+            let mut sim = corridor_of(tables, 0.5, 6.0);
+            source(&mut sim, [-8, 1, 0], lava);
+            let mut states = Vec::new();
+            for step in 0..400 {
+                if step == 40 {
+                    sim.place_source([8, 1, 0]);
+                }
+                if slices == 1 {
+                    sim.run_step();
+                } else {
+                    sim.run_step_sliced(slices);
+                }
+                states.push(sim.state());
+            }
+            (states, sim.work)
+        };
+        let (whole, work) = script(1);
+        assert!(work.reacted > 0);
+        for slices in [2, 3, 7] {
+            let (divided, divided_work) = script(slices);
+            assert!(whole == divided, "{slices} slices diverged");
+            assert_eq!(work, divided_work);
+        }
+    }
+
+    /// With no rule naming a fluid, nothing reads past what flow reads.
+    #[test]
+    fn without_reactions_the_read_set_is_flows_own() {
+        assert_eq!(Reach::of(&Tables::builtin()), Reach::default());
+        assert!(Reach::of(&cooling().0).contacts);
+        let _ = liquid;
     }
 }

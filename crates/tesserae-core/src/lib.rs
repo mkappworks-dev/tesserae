@@ -36,7 +36,9 @@ pub use mesh::{ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_c
 pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,
 };
-pub use reaction::{Phase, Reactant, ReactionDef, ReactionError, ReactionTable, Side};
+pub use reaction::{
+    Outcome, Participant, Phase, Reactant, ReactionDef, ReactionError, ReactionTable, Side,
+};
 pub use shape::{
     Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
     SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,

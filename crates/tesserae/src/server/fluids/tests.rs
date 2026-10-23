@@ -8,7 +8,7 @@ use tesserae_core::light::light_cells;
 use tesserae_core::material::WATER;
 use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{
-    Chunk, Fluid, LitChunk, Occupants, Orientation, SHAPE_STAIR, Voxel, mesh_chunk,
+    Chunk, Fluid, LitChunk, MaterialId, Occupants, Orientation, SHAPE_STAIR, Voxel, mesh_chunk,
 };
 
 use super::super::edit::{EditAction, EditIntent, EditRejected, PendingEdits, RejectReason};
@@ -1585,6 +1585,7 @@ fn landing_past_its_bound_takes_turns_round_chunks_and_voxels() {
                 at: [-64 + c * 32 + i, 0, 0],
                 read: dry,
                 next: wet,
+                contact: None,
             })
         })
         .collect();
@@ -1782,4 +1783,350 @@ fn a_source_from_a_player_or_either_contract_line_flows_the_same() {
         })
         .collect();
     assert!(states[0] == states[1] && states[1] == states[2]);
+}
+
+/// The demo Game's and the `fluids` guest's content, from their real WASI
+/// components, and a Material by full name.
+fn declared(v: f32) -> (Tables, impl Fn(&str) -> u16) {
+    let loaded = mod_runtime::tests::demo_and_fluids(v);
+    let registry = loaded.registry;
+    let id = move |name: &str| registry.id_of(tesserae_mods::Kind::Material, name).unwrap() as u16;
+    (loaded.tables, id)
+}
+
+/// Whether two face neighbours along the corridor hold `a` and `b`.
+fn touching(f: &Fixture, a: MaterialId, b: MaterialId) -> bool {
+    let at = |x| f.fluid(x).map(|w| w.material);
+    (-f.half..f.half).any(|x| {
+        let pair = (at(x), at(x + 1));
+        pair == (Some(a), Some(b)) || pair == (Some(b), Some(a))
+    })
+}
+
+/// A lava source and a water source placed on one tick either side of the
+/// face between Chunks -1 and 0: the demo's declared rule turns the lava to
+/// stone on the next step and keeps the water, at every Voxel size, and the
+/// change reaches the level-1 cover of the Chunk it landed in.
+#[test]
+fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
+    for v in [1.0, 0.5, 0.25] {
+        let (tables, id) = declared(v);
+        let (lava, stone_id) = (id("demo:lava"), id("core:stone"));
+        assert_eq!(stone_id, STONE);
+        let mut f = Fixture::with_tables(v, 4.0, 0, tables);
+        f.send(-1, EditAction::PlaceSource(lava));
+        f.send(0, EditAction::PlaceSource(WATER));
+        f.apply_intents();
+        assert_eq!(f.fluid(-1), Some(Fluid::source(lava)));
+        assert_eq!(f.fluid(0), Some(Fluid::source(WATER)));
+        let west = VoxelCoord::of([-1, Y, Z]).chunk;
+        assert_ne!(
+            west,
+            VoxelCoord::of([0, Y, Z]).chunk,
+            "the contact crosses a face"
+        );
+        f.app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .take_cover_changes();
+        f.settle();
+        assert_eq!(f.occupants(-1).solid, stone(), "{v} m");
+        assert_eq!(f.fluid(-1), None);
+        assert_eq!(f.fluid(0), Some(Fluid::source(WATER)), "the water is kept");
+        assert!(!touching(&f, lava, WATER));
+        let cover = f
+            .app
+            .world_mut()
+            .resource_mut::<MeshState>()
+            .take_cover_changes();
+        assert!(
+            cover.contains(&west),
+            "{v} m: the level-1 cover was not told"
+        );
+        assert!(f.app.world().resource::<MeshState>().is_dirty(west));
+        assert!(f.sim().work.reacted >= 1 && f.rejections().is_empty());
+    }
+}
+
+/// Lava and water flowing at each other meet; lava they touch becomes stone,
+/// lava and water never end up beside each other, both sources stay, and the
+/// lava's light goes where it cooled, equal to a fresh solve of the cells.
+#[test]
+fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() {
+    let (tables, id) = declared(1.0);
+    let lava = id("demo:lava");
+    let mut f = Fixture::with_tables(1.0, 10.0, 16, tables.clone());
+    let home = ChunkCoord::new(0, 0, 0);
+    let fresh = |f: &Fixture| {
+        light_cells(
+            f.store().get(home).unwrap(),
+            f.store().overlay(home).unwrap(),
+            [None; 6],
+            &tables,
+        )
+    };
+    let solved = fresh(&f);
+    f.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .set_light(home, solved);
+    let block = |f: &Fixture, x: i32| f.store().light_at([16 + x, Y, Z]).block();
+    f.send(-6, EditAction::PlaceSource(lava));
+    f.settle();
+    let lit = block(&f, -2);
+    assert!(lit > 0, "lava lights the corridor");
+    f.send(4, EditAction::PlaceSource(WATER));
+    f.settle();
+    let stones: Vec<i32> = (-f.half..=f.half)
+        .filter(|&x| f.occupants(x).solid == stone())
+        .collect();
+    assert!(!stones.is_empty(), "nothing cooled");
+    assert!(!touching(&f, lava, WATER));
+    assert_eq!(f.fluid(-6), Some(Fluid::source(lava)));
+    assert_eq!(f.fluid(4), Some(Fluid::source(WATER)));
+    assert!(block(&f, stones[0]) < lit, "cooled lava still glows");
+    assert!(
+        f.store().light(home) == Some(&fresh(&f)),
+        "light disagrees with a fresh solve"
+    );
+}
+
+/// The `fluids` Mod's own rule, slime that is flowing and touches water
+/// becomes its ash: a second pair through the same native path, with its
+/// state matching (the slime source beside nothing is never consumed).
+#[test]
+fn a_mods_own_pair_reacts_through_the_server() {
+    let (tables, id) = declared(1.0);
+    let (slime, ash) = (id("fluids:slime"), id("fluids:ash"));
+    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables);
+    f.send(0, EditAction::PlaceSource(slime));
+    f.settle();
+    assert_eq!(f.wet_length_m(), 2.0);
+    f.send(3, EditAction::PlaceSource(WATER));
+    f.settle();
+    let ashes: Vec<i32> = (-f.half..=f.half)
+        .filter(|&x| f.occupants(x).solid == Voxel::cube(ash))
+        .collect();
+    assert_eq!(ashes, vec![2], "the flowing slime beside the water");
+    assert_eq!(f.fluid(0), Some(Fluid::source(slime)));
+    assert_eq!(f.fluid(3), Some(Fluid::source(WATER)));
+    assert!(!touching(&f, slime, WATER));
+    assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != stone()));
+}
+
+/// A held step read water beside the lava and would cool it; the player
+/// takes the water away before it lands. The reaction is dropped whole and
+/// the lava, re-evaluated without the water, stays lava.
+#[test]
+fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
+    let (tables, id) = declared(1.0);
+    let lava = id("demo:lava");
+    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables);
+    f.send(0, EditAction::PlaceSource(lava));
+    f.settle();
+    assert!(f.fluid(3).is_some_and(|l| l.material == lava) && f.fluid(4).is_none());
+    let hold = Arc::clone(&f.sim_mut().job().hold);
+    hold.hold();
+    f.send(4, EditAction::PlaceSource(WATER));
+    let started = Instant::now();
+    while f.sim().job.in_flight() == 0 {
+        f.tick();
+        assert!(started.elapsed() < CEILING);
+    }
+    assert_eq!(
+        f.fluid(4),
+        Some(Fluid::source(WATER)),
+        "the step read the water"
+    );
+    f.send(4, EditAction::RemoveSource);
+    f.apply_intents();
+    let stale = f.sim().stale;
+    hold.release();
+    while !f.sim().is_idle() {
+        f.tick();
+        assert_ne!(
+            f.occupants(3).solid,
+            stone(),
+            "an old step's reaction landed"
+        );
+        assert!(started.elapsed() < CEILING);
+        f.wait_if_running();
+    }
+    assert!(f.sim().stale > stale, "nothing was dropped");
+    assert!(f.fluid(3).is_some_and(|l| l.material == lava));
+    assert!(f.sim().work.reacted >= 1, "the held step did propose it");
+}
+
+/// Water beside lava from the player's fluid tool, from a 0.1 Mod placing a
+/// water Voxel and from a 0.2 Mod's source Command: one World-change path,
+/// so the same contact and the same stone.
+#[test]
+fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
+    use tesserae_mods::{Command, Line, Placement, Region};
+    let states: Vec<Vec<Occupants>> = (0..3)
+        .map(|way| {
+            let (tables, id) = declared(0.5);
+            let mut f = Fixture::with_tables(0.5, 4.0, 0, tables);
+            f.send(-2, EditAction::PlaceSource(id("demo:lava")));
+            f.apply_intents();
+            let at = [0.0, Y as f32 * 0.5, Z as f32 * 0.5];
+            match way {
+                0 => f.send(0, EditAction::PlaceSource(WATER)),
+                1 => mod_runtime::tests::drain_validated(
+                    &mut f.app,
+                    Line::V01,
+                    &[Command::Place(vec![Placement {
+                        at,
+                        voxel: Voxel::cube(WATER),
+                    }])],
+                ),
+                _ => mod_runtime::tests::drain_validated(
+                    &mut f.app,
+                    Line::V02,
+                    &[Command::PlaceSources {
+                        region: Region {
+                            min: at,
+                            max: at.map(|m| m + 0.5),
+                        },
+                        material: WATER,
+                    }],
+                ),
+            }
+            f.settle();
+            assert!(
+                (-f.half..=f.half).any(|x| f.occupants(x).solid == stone()),
+                "way {way}: nothing cooled"
+            );
+            f.state()
+        })
+        .collect();
+    assert!(states[0] == states[1] && states[1] == states[2]);
+}
+
+/// Nine lava sources each under a water source: nine reactions due in one
+/// step. Bounded to one landing a step they land one at a time, each whole,
+/// and settle where the unbounded run does.
+#[test]
+fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
+    let run = |bound: Option<usize>| {
+        let (tables, id) = declared(1.0);
+        let lava = id("demo:lava");
+        let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
+        if let Some(bound) = bound {
+            f.sim_mut().set_bounds(AGENDA, bound);
+        }
+        for x in -4..=4 {
+            f.send(x, EditAction::PlaceSource(lava));
+        }
+        f.apply_intents();
+        for x in -4..=4 {
+            f.send(x, EditAction::PlaceSource(WATER));
+        }
+        f.apply_intents();
+        let above = |f: &Fixture, x: i32| {
+            let tables = f.app.world().resource::<ContentTables>();
+            f.store()
+                .occupants([x, Y + 1, Z], &tables.fluids)
+                .unwrap()
+                .fluid
+        };
+        assert!((-4..=4).all(|x| above(&f, x) == Some(Fluid::source(WATER))));
+        let started = Instant::now();
+        let mut cooled = 0;
+        loop {
+            f.tick();
+            let now = (-4..=4)
+                .filter(|&x| f.occupants(x).solid == stone())
+                .count();
+            if bound.is_some() {
+                assert!(now <= cooled + 1, "{now} landed in one step");
+            }
+            cooled = now;
+            if f.sim().is_idle() {
+                break;
+            }
+            assert!(started.elapsed() < CEILING);
+            f.wait_if_running();
+        }
+        assert_eq!(cooled, 9);
+        assert!((-4..=4).all(|x| above(&f, x) == Some(Fluid::source(WATER))));
+        (f.state(), f.sim().deferred)
+    };
+    let (free, none) = run(None);
+    let (bounded, deferred) = run(Some(1));
+    assert_eq!(none, 0);
+    assert!(deferred > 0, "the bound never bit");
+    assert!(free == bounded);
+}
+
+/// Through the streaming loop: lava and water meeting in a corridor cut in
+/// deep rock leave stone, and what the Client holds is what a fresh mesh of
+/// the store makes, the new stone and both fluids included.
+#[test]
+fn meshes_are_redelivered_after_a_reaction() {
+    let mut h = Harness::new(small(), UNLIMITED);
+    let (tables, id) = declared(WorldSettings::default().voxel_size);
+    let lava = id("demo:lava");
+    let tables = Arc::new(tables);
+    h.app.insert_resource(ContentTables(Arc::clone(&tables)));
+    h.settle();
+    let rock = ChunkCoord::new(0, -1, 0);
+    let (y, z) = (-16, 16);
+    let mut held: HashMap<ChunkCoord, tesserae_core::ChunkMesh> = HashMap::default();
+    let mut run = |h: &mut Harness, change: &dyn Fn(&mut ChunkStore, &mut MeshState, &Tables)| {
+        h.app
+            .world_mut()
+            .resource_scope(|world, mut store: Mut<ChunkStore>| {
+                let mut meshes = world.resource_mut::<MeshState>();
+                change(&mut store, &mut meshes, &tables);
+            });
+        let started = Instant::now();
+        loop {
+            h.app.world_mut().run_system_once(simulate).unwrap();
+            let (ready, _) = h.tick();
+            for m in ready {
+                held.insert(m.coord, m.mesh);
+            }
+            if h.app.world().resource::<FluidSim>().is_idle() {
+                for m in h.settle().0 {
+                    held.insert(m.coord, m.mesh);
+                }
+                break;
+            }
+            assert!(started.elapsed() < CEILING);
+            std::thread::sleep(Duration::from_micros(50));
+        }
+        let store = h.store();
+        let neighbors: [Option<LitChunk>; 6] = face_neighbors(rock).map(|n| Some(lit(store, n)));
+        let fresh = mesh_chunk(lit(store, rock), neighbors, &tables);
+        assert!(
+            held.get(&rock).is_some_and(|m| same_mesh(m, &fresh)),
+            "the Client holds a stale mesh"
+        );
+    };
+    run(&mut h, &|store, meshes, tables| {
+        for x in 1..=31 {
+            for (dy, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                edit::set_voxel(store, meshes, tables, [x, y + dy, z + dz], stone()).unwrap();
+            }
+            let open = (2..=30).contains(&x);
+            let voxel = if open { Voxel::AIR } else { stone() };
+            edit::set_voxel(store, meshes, tables, [x, y, z], voxel).unwrap();
+        }
+    });
+    run(&mut h, &|store, meshes, tables| {
+        for (x, material) in [(10, lava), (20, WATER)] {
+            let source = Occupants {
+                solid: Voxel::AIR,
+                fluid: Some(Fluid::source(material)),
+                burning: None,
+            };
+            set_occupants(store, meshes, tables, [x, y, z], source).unwrap();
+        }
+    });
+    let store = h.store();
+    let cooled = (11..20)
+        .filter(|&x| store.voxel([x, y, z]) == Some(stone()))
+        .count();
+    assert!(cooled > 0, "nothing cooled");
 }

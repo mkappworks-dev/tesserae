@@ -23,6 +23,20 @@
 //! descent. A Voxel holds one fluid Material, which the best offer into any
 //! of its voids decides when it is dry.
 //!
+//! **Contacts.** Two different fluids touch where a wet void of each meets
+//! the other's across a face: the passage flow takes, so a sealed face, a
+//! joint seal or a partition keeps them apart. Surface heights do not enter.
+//! A Voxel whose fluid a declared rule consumes at a contact proposes the
+//! whole result, its fluid gone and any product placed, in one [`Proposal`]
+//! that also depends on the participant it keeps; the first contact in face
+//! order, and in void order within a face, whose result can apply decides.
+//! A result needs empty solid space for a product and must pass the tables'
+//! vetting, else the contact is blocked: nothing is proposed and nothing is
+//! scheduled, so it sleeps until something it reads changes. A Voxel beside
+//! unknown terrain does not react. Landing revalidates a reaction against the
+//! state then held ([`still_applies`]), so one that an earlier landing of its
+//! step undid is dropped whole.
+//!
 //! Every offer goes down a level or loses reach, so flow that no source
 //! supports, a ring of it included, always has a highest member that nothing
 //! offers its state to. That member recedes when next evaluated, and the
@@ -45,6 +59,7 @@ use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::fluid::FluidTable;
 use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use crate::occupants::{ChunkOverlay, Fluid, Level, Occupants, Overlay};
+use crate::reaction::Participant;
 use crate::shape::{Connections, MAX_VOIDS, SUBDIV, Void};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -183,7 +198,7 @@ impl FlowScale {
     }
 }
 
-/// What a Voxel reads to decide its state, as offsets: itself, above, the four
+/// What a Voxel reads to decide its flow, as offsets: itself, above, the four
 /// sides, and below each side, which says whether that side spreads.
 pub const READS: [Cell; 10] = [
     [0, 0, 0],
@@ -212,40 +227,78 @@ pub const DEPENDENTS: [Cell; 10] = [
     [0, 1, -1],
 ];
 
-/// [`READS`] and the face neighbours of each: a connected Shape's arms, and
-/// so its voids, depend on the solids across its faces.
-static WIDE_READS: LazyLock<Vec<Cell>> = LazyLock::new(|| {
-    let mut cells: Vec<Cell> = READS
-        .iter()
-        .flat_map(|&r| std::iter::once(r).chain(FACE_STEPS.iter().map(move |&d| step_by(r, d))))
-        .collect();
-    cells.sort_unstable();
-    cells.dedup();
-    cells
-});
-
-static WIDE_DEPENDENTS: LazyLock<Vec<Cell>> =
-    LazyLock::new(|| WIDE_READS.iter().map(|c| c.map(|i| -i)).collect());
-
-/// Every position an evaluation may read: [`READS`], and with connected Shapes
-/// registered also the solids that decide their arms. Fluid state is read at
-/// [`READS`] only.
-pub fn reads(connected: bool) -> &'static [Cell] {
-    if connected { &WIDE_READS } else { &READS }
+/// Which positions an evaluation reads, as the registered content decides.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
+pub struct Reach {
+    /// A connected Shape is registered: its arms, and so its voids, depend on
+    /// the solids across its faces.
+    pub connected: bool,
+    /// A reaction is registered: a Voxel touches all six neighbours, the one
+    /// below included.
+    pub contacts: bool,
 }
 
-/// [`reads`] reversed: the Voxels a change of solid at a position can affect.
-pub fn dependents(connected: bool) -> &'static [Cell] {
-    if connected {
-        &WIDE_DEPENDENTS
-    } else {
-        &DEPENDENTS
+impl Reach {
+    pub fn of(tables: &Tables) -> Reach {
+        Reach {
+            connected: tables.shapes.any_connected(),
+            contacts: !tables.reactions.is_empty(),
+        }
+    }
+
+    fn index(self) -> usize {
+        usize::from(self.connected) * 2 + usize::from(self.contacts)
+    }
+
+    /// Where fluid state is read: the same without connected Shapes, whose
+    /// wider reads are of solids only.
+    pub fn fluid(self) -> Reach {
+        Reach {
+            connected: false,
+            ..self
+        }
     }
 }
 
-/// Wakes, at `step`, every Voxel whose wanted state reads `at`'s fluid.
-pub fn wake_around(agenda: &mut Agenda, at: Cell, step: Step) {
-    for d in DEPENDENTS {
+/// [`reads`] for each [`Reach::index`].
+static READ_SETS: LazyLock<[Vec<Cell>; 4]> = LazyLock::new(|| {
+    let narrow = READS.to_vec();
+    let mut touching = narrow.clone();
+    touching.push([0, -1, 0]);
+    let widen = |base: &[Cell]| {
+        let mut cells: Vec<Cell> = base
+            .iter()
+            .flat_map(|&r| std::iter::once(r).chain(FACE_STEPS.iter().map(move |&d| step_by(r, d))))
+            .collect();
+        cells.sort_unstable();
+        cells.dedup();
+        cells
+    };
+    let (wide, wide_touching) = (widen(&narrow), widen(&touching));
+    [narrow, touching, wide, wide_touching]
+});
+
+static DEPENDENT_SETS: LazyLock<[Vec<Cell>; 4]> = LazyLock::new(|| {
+    READ_SETS
+        .clone()
+        .map(|set| set.iter().map(|c| c.map(|i| -i)).collect())
+});
+
+/// Every position an evaluation may read: [`READS`]; with reactions also the
+/// Voxel below, the one face flow does not read; with connected Shapes also
+/// the solids across the faces of each, which decide their arms.
+pub fn reads(reach: Reach) -> &'static [Cell] {
+    &READ_SETS[reach.index()]
+}
+
+/// [`reads`] reversed: the Voxels a change at a position can affect.
+pub fn dependents(reach: Reach) -> &'static [Cell] {
+    &DEPENDENT_SETS[reach.index()]
+}
+
+/// Wakes, at `step`, every Voxel whose evaluation reads `at`'s fluid.
+pub fn wake_around(agenda: &mut Agenda, at: Cell, step: Step, reach: Reach) {
+    for &d in dependents(reach.fluid()) {
         agenda.wake(step_by(at, d), step);
     }
 }
@@ -257,23 +310,24 @@ pub fn wake_solid_around(
     agenda: &mut Agenda,
     at: Cell,
     step: Step,
+    reach: Reach,
     connected_at: impl Fn(Cell) -> bool,
 ) {
-    wake_around(agenda, at, step);
+    wake_around(agenda, at, step, reach);
     for d in FACE_STEPS {
         let beside = step_by(at, d);
         if connected_at(beside) {
-            wake_around(agenda, beside, step);
+            wake_around(agenda, beside, step, reach);
         }
     }
 }
 
 /// The Voxels outside `chunk` that read one inside it, as spans of the Chunks
 /// they are in: what must look again when that Chunk arrives or leaves.
-pub fn readers_outside(chunk: [i32; 3], connected: bool) -> Vec<Span> {
+pub fn readers_outside(chunk: [i32; 3], reach: Reach) -> Vec<Span> {
     let home = Span::chunk(chunk);
     let mut spans: Vec<Span> = Vec::new();
-    for &d in dependents(connected) {
+    for &d in dependents(reach) {
         if d == [0, 0, 0] {
             continue;
         }
@@ -292,10 +346,10 @@ pub fn readers_outside(chunk: [i32; 3], connected: bool) -> Vec<Span> {
 
 /// The faces of `chunk` whose Voxels read outside it, as deep as [`reads`]
 /// reaches.
-pub fn reading_outside(chunk: [i32; 3], connected: bool) -> Vec<Span> {
+pub fn reading_outside(chunk: [i32; 3], reach: Reach) -> Vec<Span> {
     let home = Span::chunk(chunk);
     let deep = |axis: usize, sign: i32| {
-        reads(connected)
+        reads(reach)
             .iter()
             .map(|r| (r[axis] * sign).max(0))
             .max()
@@ -365,12 +419,15 @@ impl Timers {
 }
 
 /// One Voxel's next state, and the state it was computed from: landing applies
-/// it only where the Voxel still reads `read`.
+/// it only where the Voxel still reads `read`, and only whole.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Proposal {
     pub at: Cell,
     pub read: Occupants,
     pub next: Occupants,
+    /// For a reaction, the participant it keeps: the result lands only while
+    /// a contact still gives it ([`still_applies`]). `None` for flow.
+    pub contact: Option<Cell>,
 }
 
 /// Operations spent, counted whether or not they changed anything.
@@ -382,6 +439,10 @@ pub struct Work {
     pub paused: usize,
     /// Wanted changes that started or kept waiting on a timer.
     pub waiting: usize,
+    /// Of `proposed`, reactions.
+    pub reacted: usize,
+    /// Evaluations that met a contact whose result could not apply.
+    pub blocked: usize,
 }
 
 impl std::ops::AddAssign for Work {
@@ -390,6 +451,8 @@ impl std::ops::AddAssign for Work {
         self.proposed += other.proposed;
         self.paused += other.paused;
         self.waiting += other.waiting;
+        self.reacted += other.reacted;
+        self.blocked += other.blocked;
     }
 }
 
@@ -427,11 +490,11 @@ impl Continuation {
 
     /// The Voxels the next call of up to `quota` evaluations reads, for a caller
     /// deciding which Chunks to hand it.
-    pub fn upcoming(&self, quota: Quota, connected: bool) -> impl Iterator<Item = Cell> + '_ {
+    pub fn upcoming(&self, quota: Quota, reach: Reach) -> impl Iterator<Item = Cell> + '_ {
         let end = (self.next + quota.evaluations).min(self.due.len());
         self.due[self.next..end]
             .iter()
-            .flat_map(move |&c| reads(connected).iter().map(move |&d| step_by(c, d)))
+            .flat_map(move |&c| reads(reach).iter().map(move |&d| step_by(c, d)))
     }
 
     pub fn remaining(&self) -> usize {
@@ -493,6 +556,22 @@ fn evaluate(
     cont: &mut Continuation,
 ) {
     cont.work.evaluated += 1;
+    match contact(view, tables, at) {
+        Contact::React(r) => {
+            cont.timers.0.remove(&at);
+            cont.proposals.push(Proposal {
+                at,
+                read: r.read,
+                next: r.next,
+                contact: Some(r.with),
+            });
+            cont.work.proposed += 1;
+            cont.work.reacted += 1;
+            return;
+        }
+        Contact::Blocked => cont.work.blocked += 1,
+        Contact::None | Contact::Unknown => {}
+    }
     let (here, want, delay) = match wanted(view, tables, scale, at) {
         // Whatever it was waiting for was decided from terrain that is gone;
         // admission rescans it.
@@ -530,8 +609,152 @@ fn evaluate(
             fluid: want,
             ..here
         },
+        contact: None,
     });
     cont.work.proposed += 1;
+}
+
+/// Whether `p` still follows from what `view` holds: its Voxel reads what it
+/// was computed from and, for a reaction, a contact still gives the same
+/// result. What landing asks after each earlier change of the step.
+pub fn still_applies(view: &impl CellView, tables: &Tables, p: &Proposal) -> bool {
+    let Some((voxel, overlay)) = view.stored(p.at) else {
+        return false;
+    };
+    if Occupants::of(voxel, overlay, &tables.fluids) != p.read {
+        return false;
+    }
+    p.contact.is_none()
+        || matches!(contact(view, tables, p.at), Contact::React(r) if r.next == p.next)
+}
+
+/// A reaction consuming a Voxel's fluid.
+#[derive(Clone, Copy)]
+struct Reacted {
+    read: Occupants,
+    next: Occupants,
+    with: Cell,
+}
+
+enum Contact {
+    None,
+    /// A neighbour is not held.
+    Unknown,
+    /// A matching contact whose result cannot apply here.
+    Blocked,
+    React(Reacted),
+}
+
+/// Whether fluid in void `from` arrives at void `into`, `from` lying across
+/// `into`'s face `face`: from above, or beside on a floor no lower.
+fn arrives(face: usize, from: &Void, into: &Void) -> bool {
+    match face {
+        POS_Y => true,
+        NEG_Y => false,
+        _ => from.floor >= into.floor,
+    }
+}
+
+/// What a consumed fluid leaves: nothing, or a cube of the product where no
+/// solid stands, so a waterlogged Shape is never replaced to make room.
+fn reaction_result(
+    here: Occupants,
+    product: Option<MaterialId>,
+    tables: &Tables,
+) -> Option<Occupants> {
+    let next = match product {
+        None => Occupants {
+            fluid: None,
+            ..here
+        },
+        Some(p) if here.solid.is_air() => Occupants {
+            solid: Voxel::cube(p),
+            fluid: None,
+            burning: None,
+        },
+        Some(_) => return None,
+    };
+    tables.vet_occupants(next).is_ok().then_some(next)
+}
+
+fn contact(view: &impl CellView, tables: &Tables, at: Cell) -> Contact {
+    let reactions = &tables.reactions;
+    if reactions.is_empty() {
+        return Contact::None;
+    }
+    let Some(here) = look(view, tables, at) else {
+        return Contact::Unknown;
+    };
+    let Some(fluid) = here.occupants.fluid else {
+        return Contact::None;
+    };
+    if !reactions.involves(fluid.material) {
+        return Contact::None;
+    }
+    let mut around: [Option<Seen>; 6] = [None; 6];
+    for (face, seen) in around.iter_mut().enumerate() {
+        let Some(s) = look(view, tables, step_by(at, FACE_STEPS[face])) else {
+            return Contact::Unknown;
+        };
+        *seen = Some(s);
+    }
+    let mut blocked = false;
+    for (face, seen) in around.into_iter().enumerate() {
+        let there = seen.expect("read above");
+        let Some(other) = there
+            .occupants
+            .fluid
+            .filter(|o| o.material != fluid.material)
+        else {
+            continue;
+        };
+        let outcome = here
+            .voids
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| fluid.level(*i).is_wet())
+            .find_map(|(_, mine)| {
+                there
+                    .voids
+                    .iter()
+                    .enumerate()
+                    .filter(|(j, theirs)| {
+                        other.level(*j).is_wet()
+                            && mine.open[face].intersects(&theirs.open[face ^ 1])
+                    })
+                    .find_map(|(_, theirs)| {
+                        let me = Participant {
+                            fluid: fluid.material,
+                            source: fluid.source,
+                            receives: arrives(face, theirs, mine),
+                        };
+                        let them = Participant {
+                            fluid: other.material,
+                            source: other.source,
+                            receives: arrives(face ^ 1, mine, theirs),
+                        };
+                        reactions.matching(me, them).filter(|o| o.consumes_first)
+                    })
+            });
+        let Some(outcome) = outcome else {
+            continue;
+        };
+        match reaction_result(here.occupants, outcome.product, tables) {
+            Some(next) => {
+                return Contact::React(Reacted {
+                    read: here.occupants,
+                    next,
+                    with: step_by(at, FACE_STEPS[face]),
+                });
+            }
+            None => blocked = true,
+        }
+    }
+    if blocked {
+        Contact::Blocked
+    } else {
+        Contact::None
+    }
 }
 
 enum Wanted {
@@ -617,27 +840,30 @@ impl Seen<'_> {
 /// The faces of [`SIDES`], in order.
 const SIDE_FACES: [usize; 4] = [NEG_X, POS_X, NEG_Z, POS_Z];
 
-fn wanted(view: &impl CellView, tables: &Tables, scale: &FlowScale, at: Cell) -> Wanted {
+/// A position's occupants and voids, or `None` where it, or a solid deciding
+/// its arms, is not held.
+fn look<'t>(view: &impl CellView, tables: &'t Tables, c: Cell) -> Option<Seen<'t>> {
     let shapes = &tables.shapes;
-    let connected = shapes.any_connected();
-    let look = |c: Cell| -> Option<Seen<'_>> {
-        let (voxel, overlay) = view.stored(c)?;
-        let occupants = Occupants::of(voxel, overlay, &tables.fluids);
-        let solid = occupants.solid;
-        let arms = if connected && shapes.is_connected(solid) {
-            let mut around = [Voxel::AIR; 6];
-            for (face, across) in around.iter_mut().enumerate() {
-                *across = view.stored(step_by(c, FACE_STEPS[face]))?.0;
-            }
-            shapes.connections(solid, around)
-        } else {
-            Connections::NONE
-        };
-        Some(Seen {
-            occupants,
-            voids: shapes.voids(solid, arms),
-        })
+    let (voxel, overlay) = view.stored(c)?;
+    let occupants = Occupants::of(voxel, overlay, &tables.fluids);
+    let solid = occupants.solid;
+    let arms = if shapes.any_connected() && shapes.is_connected(solid) {
+        let mut around = [Voxel::AIR; 6];
+        for (face, across) in around.iter_mut().enumerate() {
+            *across = view.stored(step_by(c, FACE_STEPS[face]))?.0;
+        }
+        shapes.connections(solid, around)
+    } else {
+        Connections::NONE
     };
+    Some(Seen {
+        occupants,
+        voids: shapes.voids(solid, arms),
+    })
+}
+
+fn wanted(view: &impl CellView, tables: &Tables, scale: &FlowScale, at: Cell) -> Wanted {
+    let look = |c: Cell| look(view, tables, c);
     let Some(here) = look(at) else {
         return Wanted::Unknown;
     };
