@@ -2,7 +2,7 @@
 //! cubes into quads; pass 2 gives each shaped Voxel the geometry of its own
 //! Shape, then merges the quads that abut across Voxels. Fluid standing below a
 //! full surface takes a third and fluid in a Shape's voids a fourth, only in a
-//! Chunk whose overlay holds fluid.
+//! Chunk whose overlay holds fluid. A burning solid's flames take a fifth.
 
 use std::collections::HashMap;
 
@@ -27,6 +27,14 @@ pub const NEG_Y: usize = 2;
 pub const POS_Y: usize = 3;
 pub const NEG_Z: usize = 4;
 pub const POS_Z: usize = 5;
+
+/// The Material index a flame quad carries: past every [`MaterialId`], so a
+/// renderer tells flames from any Material without a Look pack.
+pub const FLAME: u32 = MaterialId::MAX as u32 + 1;
+
+/// How far outside a burning Voxel's face its flame is drawn, in Voxels: off
+/// the face, so the two never fight for depth.
+const FLAME_OFFSET: f32 = 1.0 / SUBDIV as f32;
 
 /// Which way each face looks, as the offset to the neighbour across it.
 pub const FACE_STEPS: [[i32; 3]; 6] = [
@@ -84,6 +92,8 @@ pub struct Neighborhood {
     /// Fluid in the voids of a solid, by cell: drawn clipped to those voids,
     /// and what hides fluid faces beside them.
     logged: HashMap<usize, Fluid>,
+    /// Burning solids of the centre, in coordinate order.
+    burning: Vec<[i32; 3]>,
     shaped: bool,
     /// The palettes of all seven Chunks, so the translucency gate is a scan of
     /// tens of entries and not of the 39 thousand Voxels copied above.
@@ -143,11 +153,25 @@ impl Neighborhood {
             (Box::default(), HashMap::new())
         };
 
+        let mut burning = Vec::new();
+        if center.overlay.may_contain_burning() {
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        if center.overlay.get(x, y, z).burning.is_some() {
+                            burning.push([x as i32, y as i32, z as i32]);
+                        }
+                    }
+                }
+            }
+        }
+
         Neighborhood {
             voxels,
             light,
             surfaces,
             logged,
+            burning,
             shaped: center.chunk.may_contain_shaped(),
             kinds,
         }
@@ -495,7 +519,62 @@ pub fn greedy_mesh(n: &Neighborhood, tables: &Tables) -> ChunkMesh {
     if !n.logged.is_empty() {
         mesh_logged(n, tables, &mut mesh);
     }
+    if !n.burning.is_empty() {
+        mesh_flames(n, tables, &mut mesh);
+    }
     mesh
+}
+
+/// Pass 5: a flame over every face of a burning solid that the Voxel across
+/// does not cover, a sixteenth outside it, in the cutout layer with the
+/// [`FLAME`] index and the light of the space it stands in. Drawn, not
+/// solid: collision and selection read the Voxel alone and never see it.
+fn mesh_flames(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
+    let layer = &mut mesh.cutout;
+    for &[x, y, z] in &n.burning {
+        let here = n.at(x, y, z);
+        for (face, d) in FACE_STEPS.into_iter().enumerate() {
+            let (ax, ay, az) = (x + d[0], y + d[1], z + d[2]);
+            if covers(tables, n.at(ax, ay, az), face ^ 1, here) {
+                continue;
+            }
+            push_flame(layer, [x, y, z], face, n.light_at(ax, ay, az));
+        }
+    }
+}
+
+/// One whole-face flame quad, in pass 1's corner order and winding.
+fn push_flame(layer: &mut MeshLayer, cell: [i32; 3], face: usize, light: Light) {
+    let positive = face % 2 == 1;
+    let (d, u, v) = (face / 2, (face / 2 + 1) % 3, (face / 2 + 2) % 3);
+    let plane = cell[d] as f32
+        + if positive {
+            1.0 + FLAME_OFFSET
+        } else {
+            -FLAME_OFFSET
+        };
+    let corners: [(f32, f32); 4] = if positive {
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+    } else {
+        [(0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0)]
+    };
+    let mut normal = [0.0f32; 3];
+    normal[d] = if positive { 1.0 } else { -1.0 };
+    let base = layer.positions.len() as u32;
+    for (cu, cv) in corners {
+        let mut pos = [0.0f32; 3];
+        pos[d] = plane;
+        pos[u] = cell[u] as f32 + cu;
+        pos[v] = cell[v] as f32 + cv;
+        layer.positions.push(pos);
+        layer.normals.push(normal);
+        layer.uvs.push([cu, cv]);
+        layer.materials.push(FLAME);
+        layer.light.push(light.packed() as u32);
+    }
+    layer
+        .indices
+        .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
 }
 
 /// Pass 4: fluid in the voids of a solid, clipped to them by

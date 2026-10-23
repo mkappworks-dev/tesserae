@@ -46,6 +46,8 @@ pub enum PlaceFault {
     BadSurface,
     /// Burning with nothing solid to burn.
     NoFuel,
+    /// Burning of a solid no combustion row declares fuel.
+    NotFuel,
 }
 
 impl std::fmt::Display for PlaceFault {
@@ -60,6 +62,7 @@ impl std::fmt::Display for PlaceFault {
             PlaceFault::FluidExcluded => "the solid leaves no room for fluid",
             PlaceFault::BadSurface => "invalid fluid surface",
             PlaceFault::NoFuel => "nothing solid to burn",
+            PlaceFault::NotFuel => "that Material does not burn",
         })
     }
 }
@@ -119,8 +122,13 @@ impl Tables {
                 return Err(PlaceFault::BadSurface);
             }
         }
-        if occupants.burning.is_some() && occupants.solid.is_air() {
-            return Err(PlaceFault::NoFuel);
+        if occupants.burning.is_some() {
+            if occupants.solid.is_air() {
+                return Err(PlaceFault::NoFuel);
+            }
+            if !self.combustion.contains(occupants.solid.material()) {
+                return Err(PlaceFault::NotFuel);
+            }
         }
         Ok(())
     }
@@ -244,6 +252,19 @@ impl Tables {
         fluid.map_or(own, |f| own.max(self.materials.emission(Voxel::cube(f))))
     }
 
+    /// The block light a solid gives off while it burns, 0 for one that does
+    /// not burn. Combined with [`Tables::wet_emission`] by the larger, as two
+    /// independent emitters in one Voxel are.
+    #[inline]
+    pub fn burning_emission(&self, voxel: Voxel) -> u8 {
+        if voxel.is_air() {
+            return 0;
+        }
+        self.combustion
+            .get(voxel.material())
+            .map_or(0, |def| def.emission)
+    }
+
     /// The first half of [`Tables::light_params`], for a caller that holds a
     /// neighbour's Voxel only to ask whether light may leave it.
     #[inline]
@@ -267,7 +288,7 @@ impl Tables {
 mod tests {
     use super::*;
     use crate::fluid::{FluidDef, FluidError};
-    use crate::material::{MaterialDef, Occlusion, RenderClass, STONE, WATER};
+    use crate::material::{LEAVES, MaterialDef, Occlusion, RenderClass, STONE, WATER};
     use crate::occupants::{Burning, Fluid, Occupants};
 
     #[test]
@@ -312,6 +333,16 @@ mod tests {
         );
         assert_eq!(
             tables.vet_occupants(ok(stair, Some(water), Some(Burning { fuel: 1 }))),
+            Err(PlaceFault::NotFuel),
+            "stone is not declared fuel"
+        );
+        let mut burns = Tables::builtin();
+        burns
+            .register_combustion(LEAVES, crate::combustion::tests::WOOD)
+            .unwrap();
+        let leafy = Voxel::new(LEAVES, crate::SHAPE_STAIR, 0);
+        assert_eq!(
+            burns.vet_occupants(ok(leafy, Some(water), Some(Burning { fuel: 1 }))),
             Ok(())
         );
         assert_eq!(tables.vet_occupants(ok(Voxel::AIR, None, None)), Ok(()));

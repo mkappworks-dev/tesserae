@@ -44,6 +44,9 @@ pub struct ChunkStore {
     /// Those of `changed` whose solid changed, which can change passage
     /// further away than a fluid change does.
     solids: Vec<[i32; 3]>,
+    /// Those of `changed` that can change a fuel's exposure, which reaches
+    /// further still: a solid, a fire or a hot fluid.
+    heated: Vec<[i32; 3]>,
     /// Where `changed` was full: every position in these may have changed.
     changed_chunks: BTreeSet<ChunkCoord>,
     /// Coordinates a Chunk arrived at or left since `super::fluids` looked.
@@ -59,6 +62,7 @@ const JOURNAL_CAP: usize = 4096;
 pub(in crate::server) struct Changed {
     pub cells: Vec<[i32; 3]>,
     pub solids: Vec<[i32; 3]>,
+    pub heated: Vec<[i32; 3]>,
     pub chunks: BTreeSet<ChunkCoord>,
 }
 
@@ -161,11 +165,21 @@ impl ChunkStore {
             .map(|f| f.material)
     }
 
-    pub(in crate::server) fn note_changed(&mut self, at: [i32; 3], solid: bool) {
+    /// Whether the solid at `at` is burning.
+    pub fn burning(&self, at: [i32; 3]) -> bool {
+        let at = VoxelCoord::of(at);
+        self.overlay(at.chunk)
+            .is_some_and(|o| o.get(at.x, at.y, at.z).burning.is_some())
+    }
+
+    pub(in crate::server) fn note_changed(&mut self, at: [i32; 3], solid: bool, heated: bool) {
         if self.changed.len() < JOURNAL_CAP {
             self.changed.push(at);
             if solid {
                 self.solids.push(at);
+            }
+            if heated {
+                self.heated.push(at);
             }
         } else {
             self.changed_chunks.insert(VoxelCoord::of(at).chunk);
@@ -176,6 +190,7 @@ impl ChunkStore {
         Changed {
             cells: std::mem::take(&mut self.changed),
             solids: std::mem::take(&mut self.solids),
+            heated: std::mem::take(&mut self.heated),
             chunks: std::mem::take(&mut self.changed_chunks),
         }
     }
@@ -316,6 +331,10 @@ impl LightVolume for LightLattice<'_> {
 
     fn wet(&self, at: [i32; 3]) -> Option<MaterialId> {
         self.store.wet(at)
+    }
+
+    fn burning(&self, at: [i32; 3]) -> bool {
+        self.store.burning(at)
     }
 
     fn light(&self, at: [i32; 3]) -> Light {

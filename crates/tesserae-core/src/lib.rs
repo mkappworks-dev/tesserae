@@ -9,6 +9,7 @@ pub mod agenda;
 pub mod chunk;
 pub mod collide;
 pub mod combustion;
+pub mod fire;
 pub mod flow;
 pub mod fluid;
 pub mod light;

@@ -37,6 +37,10 @@
 //! state then held ([`still_applies`]), so one that an earlier landing of its
 //! step undid is dropped whole.
 //!
+//! **Fire.** Each evaluation also asks [`crate::fire`] what heat and fire do
+//! at the Voxel, against the same timers, wakeups and quota; a Voxel whose
+//! fluid and fire both change in a step proposes both in one [`Proposal`].
+//!
 //! Every offer goes down a level or loses reach, so flow that no source
 //! supports, a ring of it included, always has a highest member that nothing
 //! offers its state to. That member recedes when next evaluated, and the
@@ -56,7 +60,7 @@ use std::sync::{Arc, LazyLock};
 
 use crate::agenda::{Agenda, Span};
 use crate::chunk::{CHUNK_SIZE, Chunk};
-use crate::fluid::FluidTable;
+use crate::fire::{self, HeatScale};
 use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use crate::occupants::{ChunkOverlay, Fluid, Level, Occupants, Overlay};
 use crate::reaction::Participant;
@@ -159,7 +163,7 @@ pub struct Scaled {
     pub sideways: Pace,
     pub downward: Pace,
     pub recession: Pace,
-    /// [`FluidTable::rank`], which settles an otherwise equal claim.
+    /// [`crate::FluidTable::rank`], which settles an otherwise equal claim.
     pub rank: u16,
 }
 
@@ -167,10 +171,13 @@ pub struct Scaled {
 #[derive(Clone, Debug, Default)]
 pub struct FlowScale {
     by_material: Vec<Option<Scaled>>,
+    /// Heat and fire at the same Voxel size.
+    pub heat: HeatScale,
 }
 
 impl FlowScale {
-    pub fn new(fluids: &FluidTable, voxel_size_m: f32) -> Self {
+    pub fn new(tables: &Tables, voxel_size_m: f32) -> Self {
+        let fluids = &tables.fluids;
         let v = voxel_size_m as f64;
         let mut by_material = Vec::new();
         for (material, def) in fluids.iter() {
@@ -190,7 +197,10 @@ impl FlowScale {
                 rank: fluids.rank(material).expect("a registered fluid"),
             });
         }
-        FlowScale { by_material }
+        FlowScale {
+            by_material,
+            heat: HeatScale::new(tables, voxel_size_m),
+        }
     }
 
     pub fn get(&self, material: MaterialId) -> Option<&Scaled> {
@@ -378,43 +388,60 @@ struct Timer {
 
 /// Every running timer. Owned by whoever holds the simulation between steps.
 #[derive(Clone, Debug, Default)]
-pub struct Timers(HashMap<Cell, Timer>);
+pub struct Timers {
+    flow: HashMap<Cell, Timer>,
+    /// Ignitions and fires running down, which wait apart from a change of
+    /// fluid in the same Voxel.
+    pub(crate) fire: HashMap<Cell, crate::fire::FireTimer>,
+}
 
 impl Timers {
     /// Takes the timers of `cells`, for a worker evaluating just those.
     pub fn split_off(&mut self, cells: &[Cell]) -> Timers {
-        Timers(
-            cells
+        Timers {
+            flow: cells
                 .iter()
-                .filter_map(|c| self.0.remove_entry(c))
+                .filter_map(|c| self.flow.remove_entry(c))
                 .collect(),
-        )
+            fire: cells
+                .iter()
+                .filter_map(|c| self.fire.remove_entry(c))
+                .collect(),
+        }
     }
 
     pub fn merge(&mut self, other: Timers) {
-        self.0.extend(other.0);
+        self.flow.extend(other.flow);
+        self.fire.extend(other.fire);
     }
 
     /// Makes `at` change to `want` when evaluated at `ready` or later, unless
     /// what it reads by then wants something else.
     pub fn hold(&mut self, at: Cell, ready: Step, want: Option<Fluid>) {
-        self.0.insert(at, Timer { ready, want });
+        self.flow.insert(at, Timer { ready, want });
     }
 
     pub fn remove(&mut self, at: Cell) {
-        self.0.remove(&at);
+        self.flow.remove(&at);
+        self.fire.remove(&at);
     }
 
     pub fn retain(&mut self, mut keep: impl FnMut(Cell) -> bool) {
-        self.0.retain(|&c, _| keep(c));
+        self.flow.retain(|&c, _| keep(c));
+        self.fire.retain(|&c, _| keep(c));
     }
 
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.flow.len() + self.fire.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.flow.is_empty() && self.fire.is_empty()
+    }
+
+    /// Fire timers alone: ignition progress and fires running down.
+    pub fn fires(&self) -> usize {
+        self.fire.len()
     }
 }
 
@@ -428,6 +455,9 @@ pub struct Proposal {
     /// For a reaction, the participant it keeps: the result lands only while
     /// a contact still gives it ([`still_applies`]). `None` for flow.
     pub contact: Option<Cell>,
+    /// An ignition, decided from the exposure read as far as
+    /// [`HeatScale::radius`] around it, not from [`reads`] alone.
+    pub heated: bool,
 }
 
 /// Operations spent, counted whether or not they changed anything.
@@ -443,6 +473,10 @@ pub struct Work {
     pub reacted: usize,
     /// Evaluations that met a contact whose result could not apply.
     pub blocked: usize,
+    /// Evaluations of declared fuel, burning or not.
+    pub fuel: usize,
+    /// Open-space nodes exposure searches visited.
+    pub searched: usize,
 }
 
 impl std::ops::AddAssign for Work {
@@ -453,6 +487,8 @@ impl std::ops::AddAssign for Work {
         self.waiting += other.waiting;
         self.reacted += other.reacted;
         self.blocked += other.blocked;
+        self.fuel += other.fuel;
+        self.searched += other.searched;
     }
 }
 
@@ -468,10 +504,10 @@ pub struct Continuation {
     pub step: Step,
     due: Vec<Cell>,
     next: usize,
-    timers: Timers,
+    pub(crate) timers: Timers,
     proposals: Vec<Proposal>,
-    wakeups: Vec<(Step, Cell)>,
-    work: Work,
+    pub(crate) wakeups: Vec<(Step, Cell)>,
+    pub(crate) work: Work,
 }
 
 impl Continuation {
@@ -558,12 +594,13 @@ fn evaluate(
     cont.work.evaluated += 1;
     match contact(view, tables, at) {
         Contact::React(r) => {
-            cont.timers.0.remove(&at);
+            cont.timers.flow.remove(&at);
             cont.proposals.push(Proposal {
                 at,
                 read: r.read,
                 next: r.next,
                 contact: Some(r.with),
+                heated: false,
             });
             cont.work.proposed += 1;
             cont.work.reacted += 1;
@@ -572,46 +609,70 @@ fn evaluate(
         Contact::Blocked => cont.work.blocked += 1,
         Contact::None | Contact::Unknown => {}
     }
+    let flowed = flow_change(view, tables, scale, at, cont);
+    let burnt = fire::evaluate(view, tables, &scale.heat, at, cont);
+    let Some(here) = flowed.map(|(here, _)| here).or(burnt.map(|b| b.here)) else {
+        return;
+    };
+    let mut next = here;
+    if let Some((_, want)) = flowed {
+        next.fluid = want;
+    }
+    let mut heated = false;
+    if let Some(b) = burnt {
+        heated = b.heated;
+        next = b.change.apply(next, tables);
+    }
+    cont.proposals.push(Proposal {
+        at,
+        read: here,
+        next,
+        contact: None,
+        heated,
+    });
+    cont.work.proposed += 1;
+}
+
+/// The fluid `at` changes to this step, once its timer has run out, and the
+/// state that was decided from.
+fn flow_change(
+    view: &impl CellView,
+    tables: &Tables,
+    scale: &FlowScale,
+    at: Cell,
+    cont: &mut Continuation,
+) -> Option<(Occupants, Option<Fluid>)> {
     let (here, want, delay) = match wanted(view, tables, scale, at) {
         // Whatever it was waiting for was decided from terrain that is gone;
         // admission rescans it.
         Wanted::Unknown => {
-            cont.timers.0.remove(&at);
+            cont.timers.flow.remove(&at);
             cont.work.paused += 1;
-            return;
+            return None;
         }
         Wanted::Fixed => {
-            cont.timers.0.remove(&at);
-            return;
+            cont.timers.flow.remove(&at);
+            return None;
         }
         Wanted::State { here, want, delay } => (here, want, delay),
     };
     if want == here.fluid {
-        cont.timers.0.remove(&at);
-        return;
+        cont.timers.flow.remove(&at);
+        return None;
     }
     let step = cont.step;
-    let ready = match cont.timers.0.get(&at) {
+    let ready = match cont.timers.flow.get(&at) {
         Some(timer) if timer.want == want => timer.ready,
         _ => step + delay - 1,
     };
     if ready > step {
-        cont.timers.0.insert(at, Timer { ready, want });
+        cont.timers.flow.insert(at, Timer { ready, want });
         cont.wakeups.push((ready, at));
         cont.work.waiting += 1;
-        return;
+        return None;
     }
-    cont.timers.0.remove(&at);
-    cont.proposals.push(Proposal {
-        at,
-        read: here,
-        next: Occupants {
-            fluid: want,
-            ..here
-        },
-        contact: None,
-    });
-    cont.work.proposed += 1;
+    cont.timers.flow.remove(&at);
+    Some((here, want))
 }
 
 /// Whether `p` still follows from what `view` holds: its Voxel reads what it
@@ -800,7 +861,7 @@ fn rank(level: Level) -> Option<(u16, u16, u8)> {
         .then_some((level.reach, level.descent, level.surface))
 }
 
-fn step_by(at: Cell, d: Cell) -> Cell {
+pub(crate) fn step_by(at: Cell, d: Cell) -> Cell {
     [at[0] + d[0], at[1] + d[1], at[2] + d[2]]
 }
 
@@ -818,9 +879,9 @@ fn descend(reach: u16, descent: u16, drop: u32, s: &Scaled) -> (u16, u16) {
 /// One read position: its occupants and the voids its solid leaves under its
 /// actual arms.
 #[derive(Clone, Copy)]
-struct Seen<'a> {
-    occupants: Occupants,
-    voids: &'a [Void],
+pub(crate) struct Seen<'a> {
+    pub occupants: Occupants,
+    pub voids: &'a [Void],
 }
 
 impl Seen<'_> {
@@ -842,7 +903,7 @@ const SIDE_FACES: [usize; 4] = [NEG_X, POS_X, NEG_Z, POS_Z];
 
 /// A position's occupants and voids, or `None` where it, or a solid deciding
 /// its arms, is not held.
-fn look<'t>(view: &impl CellView, tables: &'t Tables, c: Cell) -> Option<Seen<'t>> {
+pub(crate) fn look<'t>(view: &impl CellView, tables: &'t Tables, c: Cell) -> Option<Seen<'t>> {
     let shapes = &tables.shapes;
     let (voxel, overlay) = view.stored(c)?;
     let occupants = Occupants::of(voxel, overlay, &tables.fluids);

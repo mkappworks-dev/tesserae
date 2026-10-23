@@ -167,6 +167,7 @@ impl From<PlaceFault> for RejectReason {
             PlaceFault::FluidExcluded => RejectReason::FluidExcluded,
             PlaceFault::BadSurface => RejectReason::BadSurface,
             PlaceFault::NoFuel => RejectReason::NoFuel,
+            PlaceFault::NotFuel => RejectReason::NotFlammable,
         }
     }
 }
@@ -466,8 +467,8 @@ pub(in crate::server) fn without_source(here: Occupants) -> Result<Occupants, Re
 }
 
 /// Declared fuel set alight with its whole fuel, unless an extinguishing
-/// fluid in its voids protects it. Only the state lands here; nothing yet
-/// spends the fuel or lights or spreads from it.
+/// fluid in its voids protects it. From there it burns as fire caught from
+/// heat does (`tesserae_core::fire`).
 fn ignite(here: Occupants, tables: &Tables) -> Result<Occupants, RejectReason> {
     if here.solid.is_air() {
         return Err(RejectReason::NoFuel);
@@ -479,11 +480,7 @@ fn ignite(here: Occupants, tables: &Tables) -> Result<Occupants, RejectReason> {
     if here.burning.is_some() {
         return Err(RejectReason::AlreadyBurning);
     }
-    let wet = here
-        .fluid
-        .and_then(|f| tables.fluids.get(f.material))
-        .is_some_and(|f| f.extinguishes);
-    if wet {
+    if tesserae_core::fire::is_wet(tables, &here) {
         return Err(RejectReason::Wet);
     }
     Ok(Occupants {
@@ -577,6 +574,9 @@ pub(in crate::server) fn set_occupants(
     // cost at the cap is not adding one. Counted in stairs, a connected Shape
     // being charged for its rails.
     let before = chunk.get(place.x, place.y, place.z);
+    let was = store
+        .occupants(at, &tables.fluids)
+        .expect("the Chunk is held");
     let added = tables.shapes.cap_units(voxel);
     let removed = tables.shapes.cap_units(before);
     if added > removed
@@ -586,15 +586,16 @@ pub(in crate::server) fn set_occupants(
         return Err(RejectReason::TooManyShaped);
     }
 
-    let seen = (store.optical(at), store.wet(at));
+    let seen = (store.optical(at), store.wet(at), store.burning(at));
     store.set_overlay(place, overlay);
     if voxel != before {
         store.set_voxel(place, voxel);
     }
     // Light reads fluid as it reads a cube of its Material, or combined with
-    // the solid it stands in, so water flowing in or receding relights though
-    // the packed Voxel stays; a surface or reach change alone moves nothing.
-    if (store.optical(at), store.wet(at)) != seen {
+    // the solid it stands in, and a fire by its emission, so water flowing in
+    // or receding and a fire catching or going out relight though the packed
+    // Voxel stays; a surface or reach change alone moves nothing.
+    if (store.optical(at), store.wet(at), store.burning(at)) != seen {
         let was = store.light_at(at);
         let mut lattice = LightLattice::new(store);
         relight(&mut lattice, tables, at, was);
@@ -603,7 +604,12 @@ pub(in crate::server) fn set_occupants(
             meshes.edited(coord);
         }
     }
-    store.note_changed(at, voxel != before);
+    let now = Occupants { solid, ..occupants };
+    store.note_changed(
+        at,
+        voxel != before,
+        tesserae_core::fire::alters_exposure(tables, &was, &now),
+    );
 
     meshes.voxels_changed(place.chunk);
     meshes.edited(place.chunk);
@@ -1400,12 +1406,31 @@ mod tests {
         assert_eq!(rejections(&mut app), vec![RejectReason::Busy; 10]);
     }
 
+    /// The built-in tables with stone declared fuel, so a stone Voxel may hold
+    /// a fire: only declared fuel does.
+    fn stone_burns() -> Tables {
+        let mut tables = Tables::builtin();
+        tables
+            .register_combustion(
+                STONE,
+                tesserae_core::CombustionDef {
+                    threshold: 6,
+                    ignition_delay_s: 2.0,
+                    emission: 0,
+                    heat: None,
+                    burn: tesserae_core::Burn::Permanent,
+                },
+            )
+            .unwrap();
+        tables
+    }
+
     fn put_occupants(
         app: &mut App,
         at: [i32; 3],
         occupants: Occupants,
     ) -> (MeshState, Result<(), RejectReason>) {
-        let tables = Tables::builtin();
+        let tables = stone_burns();
         let mut store = app.world_mut().resource_mut::<ChunkStore>();
         let mut meshes = MeshState::default();
         let result = set_occupants(&mut store, &mut meshes, &tables, at, occupants);
@@ -1419,7 +1444,8 @@ mod tests {
             .expect("held")
     }
 
-    /// Setting a stone cube on fire changes no Voxel. It is still an Edit: the
+    /// Setting a stone cube on fire, stone declared fuel here, changes no
+    /// Voxel. It is still an Edit: the
     /// mesh, the face next door and the level-1 cover all read it, and a
     /// Snapshot taken before it is no longer current.
     #[test]

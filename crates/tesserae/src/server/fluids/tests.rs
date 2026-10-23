@@ -314,7 +314,7 @@ fn an_older_job_cannot_bring_back_a_removed_source_or_its_flow() {
     f.tick();
     // Placed on `placed_at`'s tick, first read on the step after, and its
     // neighbours' timers run the sideways delay from there.
-    let scale = FlowScale::new(&Tables::builtin().fluids, 1.0);
+    let scale = FlowScale::new(&Tables::builtin(), 1.0);
     let proposing = placed_at + scale.get(WATER).unwrap().sideways.steps();
     let started = Instant::now();
     while f.sim().now() + 1 < proposing || f.sim().job.in_flight() > 0 {
@@ -1586,6 +1586,7 @@ fn landing_past_its_bound_takes_turns_round_chunks_and_voxels() {
                 read: dry,
                 next: wet,
                 contact: None,
+                heated: false,
             })
         })
         .collect();
@@ -2130,3 +2131,5 @@ fn meshes_are_redelivered_after_a_reaction() {
         .count();
     assert!(cooled > 0, "nothing cooled");
 }
+
+mod fire;

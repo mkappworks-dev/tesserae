@@ -1880,3 +1880,46 @@ fn a_waterlogged_stair_in_a_lake_draws_no_faces_inside_the_water() {
     }
     assert_eq!(mesh.blended.quad_count(), 6, "the lake's six sides");
 }
+
+/// A burning cube draws a flame over each face open to air, a sixteenth
+/// outside it, in the cutout layer with the flame index; a face against a
+/// stone neighbour gets none. Its own geometry is the unburnt cube's, so
+/// collision and selection, which read the Voxel, are untouched.
+#[test]
+fn a_burning_solid_draws_flames_over_its_open_faces_and_keeps_its_geometry() {
+    use tesserae_core::mesh::FLAME;
+    use tesserae_core::{Burning, ChunkOverlay, Overlay};
+    let mut chunk = Chunk::air();
+    chunk.set(16, 16, 16, Voxel::cube(1));
+    chunk.set(17, 16, 16, Voxel::cube(1));
+    let mut overlay = ChunkOverlay::none();
+    overlay.set(
+        16,
+        16,
+        16,
+        Overlay {
+            fluid: None,
+            burning: Some(Burning { fuel: 9 }),
+        },
+    );
+    let dry = mesh_isolated(&chunk);
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let burning = greedy_mesh(&Neighborhood::isolated(lit), tables());
+    assert_eq!(burning.opaque.positions, dry.opaque.positions);
+    assert_eq!(burning.opaque.materials, dry.opaque.materials);
+    assert!(dry.cutout.is_empty());
+    assert_eq!(
+        burning.cutout.quad_count(),
+        5,
+        "every face but the shared one"
+    );
+    assert!(burning.cutout.materials.iter().all(|&m| m == FLAME));
+    for p in &burning.cutout.positions {
+        let outside = (0..3).any(|a| p[a] < 16.0 || p[a] > 17.0);
+        assert!(outside, "a flame vertex inside its Voxel: {p:?}");
+    }
+    assert!(
+        !burning.cutout.normals.contains(&[1.0, 0.0, 0.0]),
+        "a flame on the face against stone"
+    );
+}

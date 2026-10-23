@@ -843,7 +843,12 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
         assert_eq!(
             loaded.appearance,
-            [(8, [255, 144, 48, 255]), (9, [230, 72, 16, 255])]
+            [
+                (8, [255, 144, 48, 255]),
+                (9, [230, 72, 16, 255]),
+                (10, [150, 104, 60, 255]),
+                (11, [70, 66, 62, 255])
+            ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
         // Lava is the demo's own Material after its lamp; no built-in moved.

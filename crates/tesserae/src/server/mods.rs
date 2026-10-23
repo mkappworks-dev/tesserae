@@ -480,7 +480,11 @@ mod tests {
             .to_vec4();
         assert_eq!(uniform.palette[8], expected);
         assert_eq!(uniform.palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
-        assert_eq!(uniform.palette.len(), 64);
+        assert_eq!(
+            uniform.palette.len(),
+            64 + 1,
+            "the Materials' and the flames'"
+        );
         app.update();
         let generator = app.world().resource::<super::super::WorldGenerator>();
         assert!(generator.params().caves.is_none());

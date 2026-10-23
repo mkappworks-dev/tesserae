@@ -204,6 +204,10 @@ impl CombustionTable {
         self.get(material).is_some()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.defs.iter().all(Option::is_none)
+    }
+
     pub fn get(&self, material: MaterialId) -> Option<&CombustionDef> {
         self.defs.get(material as usize).and_then(Option::as_ref)
     }
@@ -218,10 +222,10 @@ impl CombustionTable {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    const WOOD: CombustionDef = CombustionDef {
+    pub(crate) const WOOD: CombustionDef = CombustionDef {
         threshold: 6,
         ignition_delay_s: 2.0,
         emission: 12,

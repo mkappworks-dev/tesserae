@@ -330,12 +330,13 @@ pub fn light_chunk(
 }
 
 /// [`light_chunk`] of a Chunk with its overlay: the fresh solve of whatever
-/// fluid it holds.
+/// fluid and fire it holds.
 ///
 /// Fluid in empty space is lit as a cube of its Material, and fluid in a
 /// Shape's voids combines with the solid by [`Tables::wet_light_params`]: the
 /// solid's seals, the larger dimming and the brighter emission, one value for
-/// the whole Voxel however many voids it has. [`relight`] makes the same
+/// the whole Voxel however many voids it has. A burning solid adds its
+/// [`Tables::burning_emission`] by the larger too. [`relight`] makes the same
 /// approximation, which is what lets the two be compared.
 pub fn light_cells(
     center: &Chunk,
@@ -343,7 +344,8 @@ pub fn light_cells(
     border: [Option<LitChunk<'_>>; 6],
     tables: &Tables,
 ) -> ChunkLight {
-    if !overlay.may_contain_fluid() {
+    let fluid = overlay.may_contain_fluid();
+    if !fluid && !overlay.may_contain_burning() {
         return light_chunk(center, border, tables);
     }
     solve(
@@ -362,7 +364,9 @@ fn solve(
 ) -> ChunkLight {
     let materials = &tables.materials;
     let uniform = center.uniform();
-    let wet_emits = wet.is_some_and(|o| o.fluids().any(|m| materials.emission(Voxel::cube(m)) > 0));
+    let wet_emits = wet.is_some_and(|o| {
+        o.fluids().any(|m| materials.emission(Voxel::cube(m)) > 0) || o.may_contain_burning()
+    });
 
     // Nothing can enter a Chunk that is opaque throughout, so the deep rock
     // that makes up most of a 3D ring below the surface answers here.
@@ -370,6 +374,7 @@ fn solve(
         && v.is_full_cube()
         && materials.is_opaque(v)
         && materials.emission(v) == 0
+        && !wet_emits
     {
         return ChunkLight::dark();
     }
@@ -414,7 +419,7 @@ fn solve(
     // Whether any Voxel here is clearer than opaque, from the palette. Terrain
     // is not, and takes the sweep and the flood that shipped before the
     // Material table: the dimming array is never allocated or read.
-    let translucent = wet.is_some()
+    let translucent = wet.is_some_and(ChunkOverlay::may_contain_fluid)
         || center
             .kinds()
             .iter()
@@ -502,7 +507,8 @@ fn sweep<const TRANSLUCENT: bool>(
 ) {
     let shaped = !cols.joint.is_empty();
     let (mut last, mut mask, mut dimming, mut emitted, mut joint) = (Voxel::AIR, 0, 0, 0, 0);
-    let mut last_fluid = None;
+    let (mut last_fluid, mut last_burning) = (None, false);
+    let burns = wet.is_some_and(ChunkOverlay::may_contain_burning);
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -512,9 +518,18 @@ fn sweep<const TRANSLUCENT: bool>(
                     Some(o) if v.is_shaped() => o.get(x, y, z).fluid.map(|f| f.material),
                     _ => None,
                 };
-                if v != last || fluid != last_fluid {
-                    (last, last_fluid) = (v, fluid);
+                let burning = match wet {
+                    Some(o) if burns && tables.combustion.contains(v.material()) => {
+                        o.get(x, y, z).burning.is_some()
+                    }
+                    _ => false,
+                };
+                if v != last || fluid != last_fluid || burning != last_burning {
+                    (last, last_fluid, last_burning) = (v, fluid, burning);
                     emitted = tables.wet_emission(v, fluid);
+                    if burning {
+                        emitted = emitted.max(tables.burning_emission(v));
+                    }
                     (mask, dimming) = if TRANSLUCENT {
                         tables.wet_light_params(v, fluid)
                     } else {
@@ -791,6 +806,12 @@ pub trait LightVolume {
         None
     }
 
+    /// Whether the solid at `at` is burning, which adds its declared emission.
+    /// Only asked of a Voxel whose Material is declared fuel.
+    fn burning(&self, _at: [i32; 3]) -> bool {
+        false
+    }
+
     fn light(&self, at: [i32; 3]) -> Light;
 
     fn set_light(&mut self, at: [i32; 3], light: Light);
@@ -862,10 +883,11 @@ fn optic(volume: &impl LightVolume, tables: &Tables, at: [i32; 3], voxel: Voxel)
     } else {
         None
     };
-    (
-        tables.wet_light_params(voxel, wet).1,
-        tables.wet_emission(voxel, wet),
-    )
+    let mut emission = tables.wet_emission(voxel, wet);
+    if !voxel.is_air() && tables.combustion.contains(voxel.material()) && volume.burning(at) {
+        emission = emission.max(tables.burning_emission(voxel));
+    }
+    (tables.wet_light_params(voxel, wet).1, emission)
 }
 
 /// Clears the light `from` used to cast, collecting the independent sources it

@@ -38,6 +38,14 @@
 //! count towards it. Evaluations per call and workers in flight are how a step
 //! is divided, and change nothing it computes.
 //!
+//! **Fire** is evaluated with flow, for the same due Voxels, under the same
+//! agenda, quota and landing bound. A fuel's exposure reads every Chunk
+//! within [`HeatScale::radius`], so its step snapshots them, a change of
+//! solid, fire or hot fluid wakes the fuel within that radius (only in
+//! Chunks whose palette holds fuel), and an ignition is stale if an event
+//! touched anything in it. A Chunk arriving, leaving or changing past the
+//! journal rescans the fuel within reach of it.
+//!
 //! **Reactions.** A reaction is one [`Proposal`]: its consumed Voxel's whole
 //! result, depending on the participant it keeps. It is chosen, bounded and
 //! landed as one change, and lands only if its contact still gives it after
@@ -51,6 +59,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 use tesserae_core::agenda::{Agenda, Limits, Span};
 use tesserae_core::collide::VoxelVolume;
+use tesserae_core::fire::{HeatScale, fuel_spans_around, wake_fuel_around};
 use tesserae_core::flow::{
     Advance, Cell, CellView, Continuation, Finished, FlowScale, Proposal, Quota, Reach, Region,
     Step, Timers, Work, advance, chunk_of, dependents, readers_outside, reading_outside, reads,
@@ -296,6 +305,44 @@ impl FluidSim {
         }
     }
 
+    /// Wakes, at `step`, the fuel whose exposure a change at `at` can alter.
+    fn wake_fuel_around(
+        &mut self,
+        store: &ChunkStore,
+        tables: &Tables,
+        heat: &HeatScale,
+        at: Cell,
+        step: Step,
+    ) {
+        let simulated = &self.simulated;
+        wake_fuel_around(
+            &mut self.agenda,
+            at,
+            step,
+            heat,
+            |chunk| simulated.contains_key(&coord(chunk)) && holds_fuel(store, tables, chunk),
+            |c| is_fuel(store, tables, c),
+        );
+    }
+
+    /// Rescans the fuel near `chunk` whose exposure its arrival, departure or
+    /// wholesale change can alter: its own and its neighbours' within reach.
+    fn rescan_fuel_around(
+        &mut self,
+        store: &ChunkStore,
+        tables: &Tables,
+        heat: &HeatScale,
+        chunk: ChunkCoord,
+    ) {
+        let home = Span::chunk(key(chunk));
+        let simulated = &self.simulated;
+        for span in fuel_spans_around(home.min, home.max, heat, |c| {
+            simulated.contains_key(&coord(c)) && holds_fuel(store, tables, c)
+        }) {
+            self.agenda.rescan(span);
+        }
+    }
+
     fn next_step(&mut self) {
         self.now += 1;
         self.edited.clear();
@@ -326,10 +373,10 @@ pub(in crate::server) fn simulate(
     sim.reach = Reach::of(&tables);
     let scale = Arc::clone(
         sim.scale
-            .get_or_insert_with(|| Arc::new(FlowScale::new(&tables.fluids, world.voxel_size))),
+            .get_or_insert_with(|| Arc::new(FlowScale::new(&tables, world.voxel_size))),
     );
-    absorb_chunks(sim, &mut store, &meshes, &tables.fluids);
-    absorb_changes(sim, &mut store, &tables.0);
+    absorb_chunks(sim, &mut store, &meshes, &tables, &scale.heat);
+    absorb_changes(sim, &mut store, &tables.0, &scale.heat);
     #[cfg(test)]
     if sim.running.is_some() && sim.stall > 0 {
         sim.stall -= 1;
@@ -339,7 +386,7 @@ pub(in crate::server) fn simulate(
         if !collect(sim, &tables.0, &scale) {
             return;
         }
-        land_step(sim, &mut store, &mut meshes, &tables.0);
+        land_step(sim, &mut store, &mut meshes, &tables.0, &scale.heat);
     } else {
         sim.next_step();
     }
@@ -352,13 +399,16 @@ fn absorb_chunks(
     sim: &mut FluidSim,
     store: &mut ChunkStore,
     meshes: &MeshState,
-    fluids: &FluidTable,
+    tables: &Tables,
+    heat: &HeatScale,
 ) {
+    let fluids = &tables.fluids;
     for coord in store.take_lifecycle() {
         if let Some(&life) = sim.simulated.get(&coord)
             && store.lifetime(coord) != Some(life)
         {
             evict(sim, store, coord, fluids);
+            sim.rescan_fuel_around(store, tables, heat, coord);
         }
         if store.contains(coord) && !sim.simulated.contains_key(&coord) {
             sim.awaiting.insert(coord);
@@ -374,6 +424,7 @@ fn absorb_chunks(
         sim.awaiting.remove(&coord);
         if store.contains(coord) {
             admit(sim, store, coord, fluids);
+            sim.rescan_fuel_around(store, tables, heat, coord);
         }
     }
     let unlit: BTreeSet<ChunkCoord> = meshes
@@ -385,6 +436,21 @@ fn absorb_chunks(
         sim.agenda.unpark(key(coord));
     }
     sim.suspended = unlit;
+}
+
+/// Whether a Chunk's palette names declared fuel.
+fn holds_fuel(store: &ChunkStore, tables: &Tables, chunk: [i32; 3]) -> bool {
+    store.get(coord(chunk)).is_some_and(|c| {
+        c.kinds()
+            .iter()
+            .any(|v| !v.is_air() && tables.combustion.contains(v.material()))
+    })
+}
+
+fn is_fuel(store: &ChunkStore, tables: &Tables, at: Cell) -> bool {
+    store
+        .voxel(at)
+        .is_some_and(|v| !v.is_air() && tables.combustion.contains(v.material()))
 }
 
 fn wet(store: &ChunkStore, coord: ChunkCoord, fluids: &FluidTable) -> bool {
@@ -447,7 +513,7 @@ fn evict(sim: &mut FluidSim, store: &ChunkStore, coord: ChunkCoord, fluids: &Flu
 
 /// Wakes the Voxels around every World change since the last look, which the
 /// running step's proposals must also not overwrite.
-fn absorb_changes(sim: &mut FluidSim, store: &mut ChunkStore, tables: &Tables) {
+fn absorb_changes(sim: &mut FluidSim, store: &mut ChunkStore, tables: &Tables, heat: &HeatScale) {
     let next = sim.now + 1;
     let changed = store.take_changed();
     for at in changed.cells {
@@ -461,9 +527,13 @@ fn absorb_changes(sim: &mut FluidSim, store: &mut ChunkStore, tables: &Tables) {
     for at in changed.solids {
         sim.wake_around_solid(store, tables, at, next);
     }
+    for at in changed.heated {
+        sim.wake_fuel_around(store, tables, heat, at, next);
+    }
     for chunk in changed.chunks {
         sim.edited_chunks.insert(chunk);
         sim.rescan_around(chunk);
+        sim.rescan_fuel_around(store, tables, heat, chunk);
     }
 }
 
@@ -532,9 +602,14 @@ fn start_step(
     let mut region = Region::default();
     let mut read = HashMap::new();
     let mut seen = HashSet::new();
+    let radius = scale.heat.radius();
     for &at in &due {
-        for &d in reads(sim.reach) {
-            let (chunk, _) = chunk_of(offset(at, d));
+        let fuel = is_fuel(store, tables, at).then(|| {
+            let (min, max) = (at.map(|c| c - radius), at.map(|c| c + radius));
+            Span::split(min, max).into_iter().map(|s| s.home())
+        });
+        let flow = reads(sim.reach).iter().map(|&d| chunk_of(offset(at, d)).0);
+        for chunk in flow.chain(fuel.into_iter().flatten()) {
             if !seen.insert(chunk) {
                 continue;
             }
@@ -566,7 +641,13 @@ fn start_step(
 }
 
 /// Lands the finished step within its bound and ends it.
-fn land_step(sim: &mut FluidSim, store: &mut ChunkStore, meshes: &mut MeshState, tables: &Tables) {
+fn land_step(
+    sim: &mut FluidSim,
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    heat: &HeatScale,
+) {
     let Running {
         step, read, slices, ..
     } = sim.running.take().expect("a step is running");
@@ -603,11 +684,11 @@ fn land_step(sim: &mut FluidSim, store: &mut ChunkStore, meshes: &mut MeshState,
     }
     for p in chosen {
         debug_assert!(
-            !p.next.fluid.is_some_and(|f| f.source),
+            !p.next.fluid.is_some_and(|f| f.source) || p.next.fluid == p.read.fluid,
             "flow proposed a source"
         );
         let chunk = VoxelCoord::of(p.at).chunk;
-        if !still_valid(sim, &read, store, tables, &p) {
+        if !still_valid(sim, &read, store, tables, heat, &p) {
             sim.stale += 1;
             if sim.simulates(p.at) {
                 sim.agenda.rewake(p.at, next);
@@ -637,6 +718,9 @@ fn land_step(sim: &mut FluidSim, store: &mut ChunkStore, meshes: &mut MeshState,
     }
     for at in changed.solids {
         sim.wake_around_solid(store, tables, at, next);
+    }
+    for at in changed.heated {
+        sim.wake_fuel_around(store, tables, heat, at, next);
     }
     sim.agenda.end_step();
     sim.next_step();
@@ -669,28 +753,43 @@ fn still_valid(
     read: &HashMap<[i32; 3], Lifetime>,
     store: &ChunkStore,
     tables: &Tables,
+    heat: &HeatScale,
     p: &Proposal,
 ) -> bool {
-    reads(sim.reach).iter().all(|&d| {
-        let at = offset(p.at, d);
-        let (chunk, _) = chunk_of(at);
+    // Absent then and now is the same terrain: the kernel reads lazily, so
+    // a Voxel beside a missing Chunk may still have decided.
+    let same = |chunk: [i32; 3]| {
         let c = coord(chunk);
-        // Absent then and now is the same terrain: the kernel reads lazily, so
-        // a Voxel beside a missing Chunk may still have decided.
-        let same = read.get(&chunk) == sim.simulated.get(&c)
+        read.get(&chunk) == sim.simulated.get(&c)
             && sim
                 .simulated
                 .get(&c)
-                .is_none_or(|life| store.lifetime(c) == Some(*life));
-        same && !sim.edited.contains(&at) && !sim.edited_chunks.contains(&c)
-    }) && still_applies(
-        &Held {
-            store,
-            simulated: &sim.simulated,
-        },
-        tables,
-        p,
-    )
+                .is_none_or(|life| store.lifetime(c) == Some(*life))
+            && !sim.edited_chunks.contains(&c)
+    };
+    let flow = reads(sim.reach).iter().all(|&d| {
+        let at = offset(p.at, d);
+        same(chunk_of(at).0) && !sim.edited.contains(&at)
+    });
+    // An ignition read exposure across the whole box around it.
+    let heated = !p.heated || {
+        let r = heat.radius();
+        let (min, max) = (p.at.map(|c| c - r), p.at.map(|c| c + r));
+        Span::split(min, max).iter().all(|s| same(s.home()))
+            && !sim
+                .edited
+                .iter()
+                .any(|e| (0..3).all(|a| (e[a] - p.at[a]).abs() <= r))
+    };
+    flow && heated
+        && still_applies(
+            &Held {
+                store,
+                simulated: &sim.simulated,
+            },
+            tables,
+            p,
+        )
 }
 
 /// Picks the changes a step lands: all of them within the bound; past it, one

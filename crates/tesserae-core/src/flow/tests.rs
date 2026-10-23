@@ -49,7 +49,7 @@ impl Sim {
 
     fn with_tables(voxel_m: f32, min: Cell, max: Cell, tables: Tables) -> Self {
         Sim {
-            scale: FlowScale::new(&tables.fluids, voxel_m),
+            scale: FlowScale::new(&tables, voxel_m),
             tables,
             voxel_m,
             grid: Grid {
@@ -87,22 +87,37 @@ impl Sim {
     /// An Edit between steps, read from the next step on.
     fn edit(&mut self, at: Cell, occupants: Occupants) {
         self.tables.vet_occupants(occupants).expect("valid");
-        let before = self.occupants(at).solid;
+        let before = self.occupants(at);
         let stored = occupants.encode(&self.tables.fluids);
         self.grid.cells.insert(at, stored);
-        self.woken(at, before != occupants.solid, self.step);
+        self.woken(at, before, occupants, self.step);
     }
 
-    /// Wakes what reads a changed position, as the Server's landing does.
-    fn woken(&mut self, at: Cell, solid: bool, step: Step) {
+    /// Wakes what reads a changed position, as the Server's landing does: the
+    /// flow around it, and the fuel within heat's reach of it.
+    fn woken(&mut self, at: Cell, before: Occupants, after: Occupants, step: Step) {
         let reach = Reach::of(&self.tables);
         wake_around(&mut self.agenda, at, step, reach);
-        if solid {
-            let grid = &self.grid;
+        let grid = &self.grid;
+        if before.solid != after.solid {
             let shapes = &self.tables.shapes;
             wake_solid_around(&mut self.agenda, at, step, reach, |c| {
                 grid.stored(c).is_some_and(|(v, _)| shapes.is_connected(v))
             });
+        }
+        if crate::fire::alters_exposure(&self.tables, &before, &after) {
+            let combustion = &self.tables.combustion;
+            crate::fire::wake_fuel_around(
+                &mut self.agenda,
+                at,
+                step,
+                &self.scale.heat,
+                |_| true,
+                |c| {
+                    grid.stored(c)
+                        .is_some_and(|(v, _)| !v.is_air() && combustion.contains(v.material()))
+                },
+            );
         }
     }
 
@@ -112,7 +127,7 @@ impl Sim {
         proposals.sort_unstable_by_key(|p| p.at);
         for p in proposals {
             assert!(
-                !p.next.fluid.is_some_and(|f| f.source),
+                !p.next.fluid.is_some_and(|f| f.source) || p.next.fluid == p.read.fluid,
                 "flow made a source"
             );
             if !still_applies(&self.grid, &self.tables, &p) {
@@ -122,11 +137,10 @@ impl Sim {
                 continue;
             }
             self.tables.vet_occupants(p.next).expect("a valid proposal");
-            let solid = p.next.solid != p.read.solid;
             self.grid
                 .cells
                 .insert(p.at, p.next.encode(&self.tables.fluids));
-            self.woken(p.at, solid, self.step + 1);
+            self.woken(p.at, p.read, p.next, self.step + 1);
         }
     }
 
@@ -323,7 +337,7 @@ fn the_scale_turns_metres_and_metres_per_second_into_voxels_and_steps() {
         (0.5, 14, 16, 8, 4),
         (0.25, 28, 32, 4, 2),
     ] {
-        let s = *FlowScale::new(&tables.fluids, v).get(WATER).unwrap();
+        let s = *FlowScale::new(&tables, v).get(WATER).unwrap();
         assert_eq!((s.reach, s.reset, s.rank), (reach, reset, 0), "{v} m");
         assert_eq!(
             [s.sideways, s.downward, s.recession].map(Pace::steps),
@@ -335,7 +349,7 @@ fn the_scale_turns_metres_and_metres_per_second_into_voxels_and_steps() {
         }
         assert_eq!(reach as f32 * v, 7.0, "reach is metres at {v} m");
     }
-    assert!(FlowScale::new(&tables.fluids, 1.0).get(STONE).is_none());
+    assert!(FlowScale::new(&tables, 1.0).get(STONE).is_none());
 }
 
 /// Reach is metres of path, surfaces fall away from the source, and the
@@ -770,7 +784,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     };
     let sources_before: usize = count_sources(&region, &tables);
 
-    let scale = FlowScale::new(&tables.fluids, 1.0);
+    let scale = FlowScale::new(&tables, 1.0);
     let mut agenda = Agenda::default();
     let shaft: Vec<Cell> = (0..5).map(|d| [bed[0], bed[1] - d, bed[2]]).collect();
     for &at in &shaft {
@@ -1379,7 +1393,7 @@ mod declared {
 
     pub(super) fn corridor_of(tables: Tables, voxel_m: f32, half_m: f32) -> Sim {
         let mut sim = corridor(voxel_m, half_m);
-        sim.scale = FlowScale::new(&tables.fluids, voxel_m);
+        sim.scale = FlowScale::new(&tables, voxel_m);
         sim.tables = tables;
         sim
     }
@@ -2002,3 +2016,5 @@ mod reactions {
         let _ = liquid;
     }
 }
+
+mod fire;

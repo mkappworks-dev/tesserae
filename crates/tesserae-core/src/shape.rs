@@ -356,6 +356,11 @@ impl FaceMask {
         self.0.iter().zip(&other.0).any(|(a, b)| a & b != 0)
     }
 
+    /// Every square not set.
+    pub fn complement(&self) -> FaceMask {
+        FaceMask(self.0.map(|row| !row))
+    }
+
     fn set(&mut self, u: usize, v: usize) {
         self.0[v] |= 1 << u;
     }

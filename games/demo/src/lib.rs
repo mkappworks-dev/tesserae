@@ -6,8 +6,8 @@ use exports::tesserae::mods::guest::{
 use std::cell::RefCell;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
-    Appearance, FluidDef, FluidState, HeatDef, MaterialDef, Occlusion, Reactant, ReactionDef,
-    ReactionSide, RenderClass, ShapeDef, ViewParams,
+    Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, HeatDef, MaterialDef,
+    Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ViewParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -29,6 +29,17 @@ thread_local! {
 }
 
 struct Demo;
+
+fn solid(name: &str) -> MaterialDef {
+    MaterialDef {
+        name: name.into(),
+        emission: 0,
+        dimming: 15,
+        occlusion: Occlusion::Opaque,
+        render: RenderClass::Opaque,
+        solid: true,
+    }
+}
 
 fn point(x: f32, y: f32, z: f32) -> Vec3 {
     Vec3 { x, y, z }
@@ -91,6 +102,8 @@ impl Guest for Demo {
                     render: RenderClass::Opaque,
                     solid: false,
                 },
+                solid("wood"),
+                solid("ash"),
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -109,6 +122,24 @@ impl Guest for Demo {
                         r: 230,
                         g: 72,
                         b: 16,
+                        a: 255,
+                    },
+                },
+                Appearance {
+                    material: "wood".into(),
+                    color: Srgba {
+                        r: 150,
+                        g: 104,
+                        b: 60,
+                        a: 255,
+                    },
+                },
+                Appearance {
+                    material: "ash".into(),
+                    color: Srgba {
+                        r: 70,
+                        g: 66,
+                        b: 62,
                         a: 255,
                     },
                 },
@@ -147,7 +178,22 @@ impl Guest for Demo {
                 product: Some("core:stone".into()),
                 receiving: None,
             }],
-            combustion: vec![],
+            // Wood catches 2 s after heat reaches it, burns for 8 s, lighting
+            // and heating 2 m round it, and leaves ash, which does not burn.
+            combustion: vec![CombustionDef {
+                fuel: "demo:wood".into(),
+                ignition_threshold: 6,
+                ignition_delay_s: 2.0,
+                emission: 12,
+                heat: Some(HeatDef {
+                    strength: 12,
+                    reach_m: 2.0,
+                }),
+                end: BurnEnd::After(BurnAfter {
+                    seconds: 8.0,
+                    residue: Some("demo:ash".into()),
+                }),
+            }],
         }
     }
 
