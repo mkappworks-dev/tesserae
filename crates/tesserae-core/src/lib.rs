@@ -8,6 +8,7 @@
 pub mod agenda;
 pub mod chunk;
 pub mod collide;
+pub mod combustion;
 pub mod flow;
 pub mod fluid;
 pub mod light;
@@ -16,6 +17,7 @@ pub mod material;
 pub mod mesh;
 pub mod noise;
 pub mod occupants;
+pub mod reaction;
 pub mod shape;
 pub mod tables;
 pub mod testgen;
@@ -23,6 +25,7 @@ pub mod voxel;
 pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
+pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};
 pub use light::{
     Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_cells, light_chunk, relight,
@@ -33,6 +36,7 @@ pub use mesh::{ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_c
 pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,
 };
+pub use reaction::{Phase, Reactant, ReactionDef, ReactionError, ReactionTable, Side};
 pub use shape::{
     Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
     SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,

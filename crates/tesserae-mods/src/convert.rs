@@ -10,7 +10,7 @@ use tesserae_core::{
 use crate::bindings::exports::tesserae::mods::guest;
 use crate::bindings::tesserae::mods::{commands, content, types};
 use crate::command::{Command, Placement, Region};
-use crate::context::{EditEvent, TickContext};
+use crate::context::{EditEvent, EditKind, TickContext};
 
 fn arr_u8((x, y, z): (u8, u8, u8)) -> [u8; 3] {
     [x, y, z]
@@ -173,6 +173,13 @@ fn vec3([x, y, z]: [f32; 3]) -> types::Vec3 {
     types::Vec3 { x, y, z }
 }
 
+fn region(b: types::BoxM) -> Region {
+    Region {
+        min: array(b.min),
+        max: array(b.max),
+    }
+}
+
 impl From<types::Voxel> for Voxel {
     fn from(v: types::Voxel) -> Self {
         Voxel::new(v.material, v.shape, v.orientation)
@@ -193,12 +200,16 @@ impl From<commands::Command> for Command {
     fn from(c: commands::Command) -> Self {
         match c {
             commands::Command::Fill(fill) => Command::Fill {
-                region: Region {
-                    min: array(fill.region.min),
-                    max: array(fill.region.max),
-                },
+                region: region(fill.region),
                 voxel: fill.voxel.into(),
             },
+            commands::Command::PlaceSources(fill) => Command::PlaceSources {
+                region: region(fill.region),
+                material: fill.material,
+            },
+            commands::Command::RemoveSources(b) => Command::RemoveSources(region(b)),
+            commands::Command::Ignite(b) => Command::Ignite(region(b)),
+            commands::Command::Extinguish(b) => Command::Extinguish(region(b)),
             commands::Command::Place(placements) => Command::Place(
                 placements
                     .into_iter()
@@ -230,8 +241,14 @@ impl From<EditEvent> for guest::EditEvent {
     fn from(e: EditEvent) -> Self {
         guest::EditEvent {
             at: vec3(e.at),
-            before: e.before.into(),
-            after: e.after.into(),
+            kind: match e.kind {
+                EditKind::Solid { before, after } => guest::EditKind::Solid(guest::SolidEdit {
+                    before: before.into(),
+                    after: after.into(),
+                }),
+                EditKind::SourcePlaced(material) => guest::EditKind::SourcePlaced(material),
+                EditKind::SourceRemoved(material) => guest::EditKind::SourceRemoved(material),
+            },
         }
     }
 }

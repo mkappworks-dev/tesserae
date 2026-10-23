@@ -1,9 +1,11 @@
 //! Everything a native consumer asks about what a Voxel is.
 
+use crate::combustion::{Burn, CombustionDef, CombustionError, CombustionTable};
 use crate::fluid::{FluidDef, FluidError, FluidTable};
 use crate::light::MAX_LIGHT;
 use crate::material::MaterialTable;
 use crate::occupants::{Fluid, Level, Occupants};
+use crate::reaction::{ReactionDef, ReactionError, ReactionTable};
 use crate::shape::{Orientation, ShapeTable};
 use crate::voxel::{MaterialId, Voxel};
 
@@ -18,6 +20,8 @@ pub struct Tables {
     pub shapes: ShapeTable,
     pub materials: MaterialTable,
     pub fluids: FluidTable,
+    pub reactions: ReactionTable,
+    pub combustion: CombustionTable,
 }
 
 /// Why [`Tables::vet_placed`] refused a Voxel.
@@ -94,7 +98,7 @@ impl Tables {
                 return Err(PlaceFault::NotAFluid);
             }
             let slots = self.shapes.void_slots(occupants.solid);
-            if slots == 0 {
+            if slots == 0 || !self.holds(occupants.solid, fluid.material) {
                 return Err(PlaceFault::FluidExcluded);
             }
             let canonical = if fluid.source {
@@ -135,6 +139,58 @@ impl Tables {
             return Err(FluidError::Solid);
         }
         self.fluids.register(material, def)
+    }
+
+    /// Registers what two fluids do on contact. Both must be fluids already
+    /// and the product a solid Material; the rule is stored canonical.
+    pub fn register_reaction(&mut self, def: ReactionDef) -> Result<(), ReactionError> {
+        if !self.fluids.contains(def.first.fluid) || !self.fluids.contains(def.second.fluid) {
+            return Err(ReactionError::NotAFluid);
+        }
+        if let Some(product) = def.product
+            && !self.is_solid_material(product)
+        {
+            return Err(ReactionError::ProductNotSolid);
+        }
+        self.reactions.insert(def)
+    }
+
+    /// Registers how a solid Material burns. Its residue is air or a solid.
+    pub fn register_combustion(
+        &mut self,
+        fuel: MaterialId,
+        def: CombustionDef,
+    ) -> Result<(), CombustionError> {
+        let known = |m| self.materials.contains(m);
+        if !known(fuel) {
+            return Err(CombustionError::NotAMaterial);
+        }
+        if !self.is_solid_material(fuel) {
+            return Err(CombustionError::NotSolid);
+        }
+        if let Burn::For { residue, .. } = def.burn
+            && residue != crate::voxel::AIR
+        {
+            if !known(residue) {
+                return Err(CombustionError::NotAMaterial);
+            }
+            if !self.is_solid_material(residue) {
+                return Err(CombustionError::NotSolid);
+            }
+        }
+        self.combustion.insert(fuel, def)
+    }
+
+    fn is_solid_material(&self, material: MaterialId) -> bool {
+        self.materials.contains(material)
+            && !self.fluids.contains(material)
+            && self.materials.solid(Voxel::cube(material))
+    }
+
+    /// Whether fluid of `material` may stand beside `solid`: anywhere in
+    /// empty space, and in a partial Shape's voids only if it waterlogs.
+    pub fn holds(&self, solid: Voxel, material: MaterialId) -> bool {
+        solid.is_air() || self.fluids.get(material).is_some_and(|f| f.waterlogs)
     }
 
     pub fn builtin() -> Self {
@@ -389,5 +445,107 @@ mod tests {
             Err(PlaceFault::BadOrientation)
         );
         assert_eq!(tables.vet_placed(Voxel::new(STONE, 0, 23)), Ok(()));
+    }
+
+    /// Reactions and fires name Materials the tables hold, of the right kind.
+    #[test]
+    fn reactions_and_fires_refuse_materials_of_the_wrong_kind() {
+        use crate::combustion::{Burn, CombustionDef, CombustionError};
+        use crate::material::{GLASS, LEAVES};
+        use crate::reaction::{Phase, Reactant, ReactionDef, ReactionError, Side};
+        let mut tables = Tables::builtin();
+        let oil = tables
+            .materials
+            .register(MaterialDef {
+                solid: false,
+                emission: 0,
+                dimming: 4,
+                occlusion: Occlusion::SameMaterial,
+                render: RenderClass::Blend,
+            })
+            .unwrap();
+        let fluid = |fluid| Reactant {
+            fluid,
+            phase: Phase::Any,
+        };
+        let rule = |first, second, product| ReactionDef {
+            first: fluid(first),
+            second: fluid(second),
+            consumed: Side::First,
+            product,
+            receiving: None,
+        };
+        assert_eq!(
+            tables.register_reaction(rule(oil, WATER, None)),
+            Err(ReactionError::NotAFluid)
+        );
+        tables.register_fluid(oil, FluidDef::WATER).unwrap();
+        for product in [WATER, oil, 999, 0] {
+            assert_eq!(
+                tables.register_reaction(rule(oil, WATER, Some(product))),
+                Err(ReactionError::ProductNotSolid),
+                "{product}"
+            );
+        }
+        assert_eq!(
+            tables.register_reaction(rule(oil, WATER, Some(STONE))),
+            Ok(())
+        );
+        assert_eq!(tables.reactions.rules().len(), 1);
+
+        let burns = |residue| CombustionDef {
+            threshold: 6,
+            ignition_delay_s: 2.0,
+            emission: 12,
+            heat: None,
+            burn: Burn::For {
+                seconds: 8.0,
+                residue,
+            },
+        };
+        for (fuel, residue, error) in [
+            (999, 0, CombustionError::NotAMaterial),
+            (WATER, 0, CombustionError::NotSolid),
+            (0, 0, CombustionError::NotSolid),
+            (LEAVES, 999, CombustionError::NotAMaterial),
+            (LEAVES, oil, CombustionError::NotSolid),
+        ] {
+            assert_eq!(
+                tables.register_combustion(fuel, burns(residue)),
+                Err(error),
+                "{fuel} to {residue}"
+            );
+        }
+        assert_eq!(tables.register_combustion(LEAVES, burns(0)), Ok(()));
+        assert_eq!(tables.register_combustion(GLASS, burns(STONE)), Ok(()));
+        assert!(tables.combustion.contains(LEAVES));
+    }
+
+    #[test]
+    fn a_fluid_that_does_not_waterlog_is_held_by_empty_space_only() {
+        let mut tables = Tables::builtin();
+        let tar = tables
+            .materials
+            .register(MaterialDef {
+                solid: false,
+                emission: 0,
+                dimming: 15,
+                occlusion: Occlusion::Opaque,
+                render: RenderClass::Opaque,
+            })
+            .unwrap();
+        tables
+            .register_fluid(
+                tar,
+                FluidDef {
+                    waterlogs: false,
+                    ..FluidDef::WATER
+                },
+            )
+            .unwrap();
+        let stair = Voxel::new(STONE, crate::SHAPE_STAIR, 0);
+        assert!(tables.holds(Voxel::AIR, tar));
+        assert!(!tables.holds(stair, tar));
+        assert!(tables.holds(stair, WATER));
     }
 }

@@ -255,8 +255,8 @@ impl Occupants {
     ///
     /// A fluid Material placed this way is a source. Air breaks the solid and
     /// keeps the fluid; where there was no solid it empties the Voxel, as it
-    /// always did. A solid that leaves voids keeps the fluid in them and one
-    /// that leaves none displaces it. A source stays a source and flow stays
+    /// always did. A solid that leaves voids keeps a fluid that waterlogs in
+    /// them; one that leaves none, or a fluid that does not, is displaced. A source stays a source and flow stays
     /// flow, each void taking the best level of the old voids it overlaps and
     /// staying dry where the new solid now fills what was wet. Any change to
     /// the solid ends its fire.
@@ -316,7 +316,7 @@ impl Occupants {
 /// Shape's flow is derived again from its actual arms once it is evaluated.
 fn carry(fluid: Fluid, from: Voxel, to: Voxel, tables: &Tables) -> Option<Fluid> {
     let shapes = &tables.shapes;
-    if shapes.void_slots(to) == 0 {
+    if shapes.void_slots(to) == 0 || !tables.holds(to, fluid.material) {
         return None;
     }
     if fluid.source {

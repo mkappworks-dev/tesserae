@@ -40,6 +40,9 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         appearance: Vec::new(),
         world: None,
         view: None,
+        fluids: Vec::new(),
+        reactions: Vec::new(),
+        combustion: Vec::new(),
     }
 }
 
@@ -413,7 +416,7 @@ fn a_game_that_sets_nothing_keeps_the_engines_defaults() {
         true,
     )
     .unwrap();
-    assert_eq!(applied, Applied::default());
+    assert_eq!((applied.world, applied.view), (None, None));
 }
 
 #[test]

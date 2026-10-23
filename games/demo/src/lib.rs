@@ -1,12 +1,12 @@
-wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit", world: "mod" });
+wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.2", world: "mod" });
 
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 use std::cell::RefCell;
-use tesserae::mods::commands::{Fill, Placement};
+use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
-    Appearance, MaterialDef, Occlusion, RenderClass, ShapeDef, ViewParams,
+    Appearance, FluidDef, HeatDef, MaterialDef, Occlusion, RenderClass, ShapeDef, ViewParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -17,6 +17,7 @@ struct State {
     size_m: f32,
     stone: u16,
     lamp: u16,
+    lava: u16,
     cube: u8,
     fence: u8,
     built: bool,
@@ -72,29 +73,67 @@ impl Guest for Demo {
         world.water = None;
         world.caves = None;
         Declaration {
-            materials: vec![MaterialDef {
-                name: "lamp".into(),
-                emission: 15,
-                dimming: 15,
-                occlusion: Occlusion::Opaque,
-                render: RenderClass::Opaque,
-                solid: true,
-            }],
-            shapes: vec![fence()],
-            appearance: vec![Appearance {
-                material: "lamp".into(),
-                color: Srgba {
-                    r: 255,
-                    g: 144,
-                    b: 48,
-                    a: 255,
+            materials: vec![
+                MaterialDef {
+                    name: "lamp".into(),
+                    emission: 15,
+                    dimming: 15,
+                    occlusion: Occlusion::Opaque,
+                    render: RenderClass::Opaque,
+                    solid: true,
                 },
-            }],
+                MaterialDef {
+                    name: "lava".into(),
+                    emission: 15,
+                    dimming: 15,
+                    occlusion: Occlusion::Opaque,
+                    render: RenderClass::Opaque,
+                    solid: false,
+                },
+            ],
+            shapes: vec![fence()],
+            appearance: vec![
+                Appearance {
+                    material: "lamp".into(),
+                    color: Srgba {
+                        r: 255,
+                        g: 144,
+                        b: 48,
+                        a: 255,
+                    },
+                },
+                Appearance {
+                    material: "lava".into(),
+                    color: Srgba {
+                        r: 230,
+                        g: 72,
+                        b: 16,
+                        a: 255,
+                    },
+                },
+            ],
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
                 lod_distance_m: 3000.0,
             }),
+            // Slower and shorter than water, and hot; it stays out of Shapes.
+            fluids: vec![FluidDef {
+                material: "demo:lava".into(),
+                reach_m: 3.0,
+                sideways_m_per_s: 0.75,
+                downward_m_per_s: 1.5,
+                recession_m_per_s: 0.75,
+                reset_drop_m: 0.5,
+                waterlogs: false,
+                extinguishes: false,
+                heat: Some(HeatDef {
+                    strength: 12,
+                    reach_m: 2.0,
+                }),
+            }],
+            reactions: vec![],
+            combustion: vec![],
         }
     }
 
@@ -111,6 +150,7 @@ impl Guest for Demo {
             size_m: world.voxel_size_m,
             stone: material("core:stone"),
             lamp: material("demo:lamp"),
+            lava: material("demo:lava"),
             cube: shape("core:cube"),
             fence: shape("demo:fence"),
             built: false,
@@ -133,7 +173,7 @@ impl Guest for Demo {
             }
             tesserae::mods::host::log(
                 LogLevel::Info,
-                "demo first tick: wall and lantern post in metres",
+                "demo first tick: wall, lantern post and lava in metres",
             );
             let voxel = |material, shape| Voxel {
                 material,
@@ -154,6 +194,7 @@ impl Guest for Demo {
                 at: point(3.0, 31.0, -7.0),
                 voxel: voxel(state.lamp, state.cube),
             });
+            let size = state.size_m;
             vec![
                 Command::Fill(Fill {
                     region: BoxM {
@@ -163,6 +204,14 @@ impl Guest for Demo {
                     voxel: voxel(state.stone, state.cube),
                 }),
                 Command::Place(post),
+                // A lava source on the wall top, which spills over its sides.
+                Command::PlaceSources(SourceFill {
+                    region: BoxM {
+                        min: point(-1.0, 29.0, -7.0),
+                        max: point(-1.0 + size, 29.0 + size, -7.0 + size),
+                    },
+                    material: state.lava,
+                }),
             ]
         })
     }

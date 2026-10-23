@@ -26,9 +26,10 @@ use bevy::prelude::*;
 use tesserae_core::collide::{VoxelVolume, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
-    Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel,
-    relight,
+    Burning, Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE,
+    Tables, Voxel, relight,
 };
+use tesserae_mods::{EditKind, Intent};
 
 use super::ContentTables;
 use super::player::{self, Player};
@@ -115,6 +116,13 @@ pub enum RejectReason {
     NoFuel,
     /// A source removal that struck no source.
     NoSource,
+    /// Ignition of a Material with no combustion declaration.
+    NotFlammable,
+    AlreadyBurning,
+    /// Ignition of fuel an extinguishing fluid stands beside.
+    Wet,
+    /// Extinguishing where nothing burns.
+    NotBurning,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,
 }
@@ -138,6 +146,10 @@ impl RejectReason {
             RejectReason::BadSurface => "invalid fluid surface",
             RejectReason::NoFuel => "nothing solid to burn",
             RejectReason::NoSource => "no source there",
+            RejectReason::NotFlammable => "that does not burn",
+            RejectReason::AlreadyBurning => "it is already burning",
+            RejectReason::Wet => "it is too wet to burn",
+            RejectReason::NotBurning => "nothing is burning there",
             RejectReason::Busy => "the server is busy, try again",
         }
     }
@@ -266,6 +278,9 @@ pub(in crate::server) fn apply_pending(
                     return Err(RejectReason::Busy);
                 }
                 let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
+                let was = store
+                    .occupants(at, &tables.fluids)
+                    .ok_or(RejectReason::NotLoaded)?;
                 match change {
                     Change::Solid(voxel) => set_voxel(&mut store, &mut meshes, &tables, at, voxel)?,
                     Change::Fluid(occupants) => {
@@ -273,15 +288,22 @@ pub(in crate::server) fn apply_pending(
                     }
                 }
                 let after = store.voxel(at).expect("the edited Chunk is held");
-                // History is the 0.1 contract's Voxel projection, in which a
-                // source change that leaves the packed Voxel alone is no event.
-                if matches!(change, Change::Solid(_)) || after != before {
-                    history.record(tesserae_mods::EditEvent {
-                        at: at.map(|i| i as f32 * world.voxel_size),
-                        before,
-                        after,
-                    });
-                }
+                let now = store
+                    .occupants(at, &tables.fluids)
+                    .expect("the edited Chunk is held");
+                let kind = match (change, intent_fluid(&was, &now)) {
+                    (Change::Fluid(_), Some(kind)) => kind,
+                    _ => EditKind::Solid {
+                        before: was.solid,
+                        after: now.solid,
+                    },
+                };
+                history.record(tesserae_mods::EditEvent {
+                    at: at.map(|i| i as f32 * world.voxel_size),
+                    kind,
+                    before,
+                    after,
+                });
                 Ok(())
             });
         match outcome {
@@ -299,6 +321,17 @@ pub(in crate::server) fn apply_pending(
     // What waited goes ahead of what was not looked at, so order is kept.
     waiting.extend(pending.0.drain(..));
     pending.0 = waiting;
+}
+
+/// What a fluid-tool Edit meant, read from what it changed.
+fn intent_fluid(was: &Occupants, now: &Occupants) -> Option<EditKind> {
+    match (was.fluid, now.fluid) {
+        (_, Some(f)) if f.source && was.fluid != now.fluid => {
+            Some(EditKind::SourcePlaced(f.material))
+        }
+        (Some(f), None) if f.source => Some(EditKind::SourceRemoved(f.material)),
+        _ => None,
+    }
 }
 
 /// What an intent does where it lands.
@@ -366,16 +399,7 @@ fn resolve(
             let here = store
                 .occupants(hit.at, &tables.fluids)
                 .ok_or(RejectReason::NotLoaded)?;
-            if !here.fluid.is_some_and(|f| f.source) {
-                return Err(RejectReason::NoSource);
-            }
-            Ok((
-                hit.at,
-                Change::Fluid(Occupants {
-                    fluid: None,
-                    ..here
-                }),
-            ))
+            Ok((hit.at, Change::Fluid(without_source(here)?)))
         }
         EditAction::PlaceSource(material) => {
             // A Shape with room for fluid takes the source itself, keeping its
@@ -383,7 +407,10 @@ fn resolve(
             let struck = store
                 .occupants(hit.at, &tables.fluids)
                 .ok_or(RejectReason::NotLoaded)?;
-            let into = if !struck.solid.is_air() && tables.shapes.void_slots(struck.solid) > 0 {
+            let into = if !struck.solid.is_air()
+                && tables.shapes.void_slots(struck.solid) > 0
+                && tables.holds(struck.solid, material)
+            {
                 hit.at
             } else {
                 in_front
@@ -391,23 +418,115 @@ fn resolve(
             let there = store
                 .occupants(into, &tables.fluids)
                 .ok_or(RejectReason::NotLoaded)?;
-            // Flow of the same fluid becomes the source; anything else stays.
-            let taken = (into == in_front && !there.solid.is_air())
-                || there
-                    .fluid
-                    .is_some_and(|f| f.source || f.material != material);
-            if taken {
+            if into == in_front && !there.solid.is_air() {
                 return Err(RejectReason::Occupied);
             }
-            Ok((
-                into,
-                Change::Fluid(Occupants {
-                    fluid: Some(Fluid::source(material)),
-                    ..there
-                }),
-            ))
+            Ok((into, Change::Fluid(with_source(there, material, tables)?)))
         }
     }
+}
+
+/// What a source of `material` placed here leaves, or why there is no room:
+/// the rule the fluid tool and a Mod's source Commands share. Flow of the same
+/// fluid becomes the source; another fluid, or any source, stays.
+pub(in crate::server) fn with_source(
+    here: Occupants,
+    material: MaterialId,
+    tables: &Tables,
+) -> Result<Occupants, RejectReason> {
+    if !tables.fluids.contains(material) {
+        return Err(RejectReason::NotAFluid);
+    }
+    let room = here.solid.is_air()
+        || (tables.shapes.void_slots(here.solid) > 0 && tables.holds(here.solid, material));
+    if !room {
+        return Err(RejectReason::FluidExcluded);
+    }
+    if here
+        .fluid
+        .is_some_and(|f| f.source || f.material != material)
+    {
+        return Err(RejectReason::Occupied);
+    }
+    Ok(Occupants {
+        fluid: Some(Fluid::source(material)),
+        ..here
+    })
+}
+
+/// A source taken away, keeping the solid it shares the Voxel with.
+pub(in crate::server) fn without_source(here: Occupants) -> Result<Occupants, RejectReason> {
+    if !here.fluid.is_some_and(|f| f.source) {
+        return Err(RejectReason::NoSource);
+    }
+    Ok(Occupants {
+        fluid: None,
+        ..here
+    })
+}
+
+/// Declared fuel set alight with its whole fuel, unless an extinguishing
+/// fluid in its voids protects it. Only the state lands here; nothing yet
+/// spends the fuel or lights or spreads from it.
+fn ignite(here: Occupants, tables: &Tables) -> Result<Occupants, RejectReason> {
+    if here.solid.is_air() {
+        return Err(RejectReason::NoFuel);
+    }
+    let fuel = tables
+        .combustion
+        .get(here.solid.material())
+        .ok_or(RejectReason::NotFlammable)?;
+    if here.burning.is_some() {
+        return Err(RejectReason::AlreadyBurning);
+    }
+    let wet = here
+        .fluid
+        .and_then(|f| tables.fluids.get(f.material))
+        .is_some_and(|f| f.extinguishes);
+    if wet {
+        return Err(RejectReason::Wet);
+    }
+    Ok(Occupants {
+        burning: Some(Burning {
+            fuel: fuel.fuel_steps(),
+        }),
+        ..here
+    })
+}
+
+fn extinguish(here: Occupants) -> Result<Occupants, RejectReason> {
+    if here.burning.is_none() {
+        return Err(RejectReason::NotBurning);
+    }
+    Ok(Occupants {
+        burning: None,
+        ..here
+    })
+}
+
+/// One Voxel of a Mod's Command, through the same rules and the same World
+/// change as a player's Edit.
+pub(in crate::server) fn apply_intent(
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    at: [i32; 3],
+    intent: Intent,
+) -> Result<(), RejectReason> {
+    if let Intent::Voxel(voxel) = intent {
+        return set_voxel(store, meshes, tables, at, voxel);
+    }
+    let here = store
+        .occupants(at, &tables.fluids)
+        .ok_or(RejectReason::NotLoaded)?;
+    let next = match intent {
+        Intent::Voxel(_) => unreachable!("placed above"),
+        Intent::Source(material) => with_source(here, material, tables)?,
+        Intent::RemoveSource => without_source(here)?,
+        Intent::Ignite => ignite(here, tables)?,
+        Intent::Extinguish => extinguish(here)?,
+    };
+    set_occupants(store, meshes, tables, at, next)
 }
 
 /// Replaces what is at one position, re-floods the light around it, and marks
@@ -1708,5 +1827,128 @@ mod tests {
         }
         tick(&mut app);
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), 5);
+    }
+
+    /// The per-Voxel rules a source or fire Command meets, shared with the
+    /// fluid tool: room for the fluid, no other fluid or source, declared and
+    /// dry fuel to light, and fire to put out.
+    #[test]
+    fn source_and_fire_rules_say_why_they_refuse() {
+        use tesserae_core::{Burn, CombustionDef, FluidDef, MaterialDef, Occlusion, RenderClass};
+        let mut tables = Tables::builtin();
+        let lava = tables
+            .materials
+            .register(MaterialDef {
+                emission: 15,
+                dimming: 15,
+                occlusion: Occlusion::Opaque,
+                render: RenderClass::Opaque,
+                solid: false,
+            })
+            .unwrap();
+        tables
+            .register_fluid(
+                lava,
+                FluidDef {
+                    waterlogs: false,
+                    extinguishes: false,
+                    ..FluidDef::WATER
+                },
+            )
+            .unwrap();
+        let oil = tables
+            .materials
+            .register(MaterialDef {
+                emission: 0,
+                dimming: 4,
+                occlusion: Occlusion::SameMaterial,
+                render: RenderClass::Blend,
+                solid: false,
+            })
+            .unwrap();
+        tables
+            .register_fluid(
+                oil,
+                FluidDef {
+                    extinguishes: false,
+                    ..FluidDef::WATER
+                },
+            )
+            .unwrap();
+        tables
+            .register_combustion(
+                STONE,
+                CombustionDef {
+                    threshold: 6,
+                    ignition_delay_s: 2.0,
+                    emission: 12,
+                    heat: None,
+                    burn: Burn::For {
+                        seconds: 1.0,
+                        residue: 0,
+                    },
+                },
+            )
+            .unwrap();
+        let water = tesserae_core::material::WATER;
+        let at = |solid, fluid| Occupants {
+            solid,
+            fluid,
+            burning: None,
+        };
+        let flowing = Fluid {
+            source: false,
+            surface: 8,
+            reach: 3,
+            ..Fluid::source(water)
+        };
+        let flow = Some(flowing);
+        let air = Voxel::AIR;
+        assert_eq!(
+            with_source(at(air, flow), water, &tables).unwrap().fluid,
+            Some(Fluid::source(water)),
+            "flow of the same fluid becomes the source"
+        );
+        for (here, material, reason) in [
+            (at(air, flow), lava, RejectReason::Occupied),
+            (
+                at(air, Some(Fluid::source(lava))),
+                lava,
+                RejectReason::Occupied,
+            ),
+            (at(stone(), None), water, RejectReason::FluidExcluded),
+            (at(stair(), None), lava, RejectReason::FluidExcluded),
+            (at(air, None), LANTERN, RejectReason::NotAFluid),
+        ] {
+            assert_eq!(
+                with_source(here, material, &tables),
+                Err(reason),
+                "{here:?}"
+            );
+        }
+        assert!(with_source(at(stair(), None), water, &tables).is_ok());
+        assert_eq!(without_source(at(air, flow)), Err(RejectReason::NoSource));
+
+        let lit = ignite(at(stair(), None), &tables).unwrap();
+        assert_eq!(lit.burning, Some(Burning { fuel: 64 }));
+        assert_eq!(lit.solid, stair());
+        for (here, reason) in [
+            (at(air, None), RejectReason::NoFuel),
+            (at(Voxel::cube(LANTERN), None), RejectReason::NotFlammable),
+            (lit, RejectReason::AlreadyBurning),
+            (at(stair(), flow), RejectReason::Wet),
+        ] {
+            assert_eq!(ignite(here, &tables), Err(reason), "{here:?}");
+        }
+        let oily = Some(Fluid {
+            material: oil,
+            ..flowing
+        });
+        assert!(
+            ignite(at(stair(), oily), &tables).is_ok(),
+            "a fluid that does not extinguish does not protect"
+        );
+        assert_eq!(extinguish(lit).unwrap().burning, None);
+        assert_eq!(extinguish(at(stair(), None)), Err(RejectReason::NotBurning));
     }
 }

@@ -7,12 +7,24 @@ use std::time::{Duration, Instant};
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{Chunk, ChunkLight, MAX_SHAPED_PER_CHUNK, SHAPE_STAIR, Tables};
-use tesserae_mods::{Command, LogHandle, Placement, Region};
+use tesserae_mods::{Command, EditKind, Line, LogHandle, Placement, Region};
 
 use super::super::{LoadedMods, TrustMode, load};
 use crate::world::ChunkCoord;
 
 fn fixture(mode: u64) -> LoadedMods {
+    guest_fixture(&format!("fixture{mode}"), "queue", "0.1", mode, 1.0)
+}
+
+/// `guest` built against contract line `api`, loaded alone as Mod `id` with
+/// `mode` as the World seed.
+pub(in crate::server) fn guest_fixture(
+    id: &str,
+    guest: &str,
+    api: &str,
+    mode: u64,
+    voxel_size: f32,
+) -> LoadedMods {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/phase7-runs");
     std::fs::create_dir_all(&root).unwrap();
@@ -28,18 +40,16 @@ fn fixture(mode: u64) -> LoadedMods {
             Err(e) => panic!("{e}"),
         }
     };
-    let mod_dir = dir.join(format!("fixture{mode}"));
+    let mod_dir = dir.join(id);
     std::fs::create_dir(&mod_dir).unwrap();
     std::fs::write(
         mod_dir.join("mod.toml"),
-        format!(
-            "id = \"fixture{mode}\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"queue.wasm\"\n"
-        ),
+        format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"{guest}.wasm\"\n"),
     )
     .unwrap();
     std::fs::copy(
-        root.join("../guests/queue.wasm"),
-        mod_dir.join("queue.wasm"),
+        root.join(format!("../guests/{guest}.wasm")),
+        mod_dir.join(format!("{guest}.wasm")),
     )
     .unwrap();
     let result = load(
@@ -48,7 +58,7 @@ fn fixture(mode: u64) -> LoadedMods {
         TrustMode::All,
         &WorldSettings {
             seed: mode,
-            voxel_size: 1.0,
+            voxel_size,
         },
     )
     .unwrap();
@@ -59,15 +69,21 @@ fn fixture(mode: u64) -> LoadedMods {
 struct Harness {
     app: App,
     logs: Vec<LogHandle>,
+    registry: Registry,
 }
 
 impl Harness {
     fn new(modes: &[u64]) -> Self {
-        AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
         let mut loaded = LoadedMods::default();
         for mode in modes {
             loaded.mods.extend(fixture(*mode).mods);
         }
+        Self::with(loaded)
+    }
+
+    fn with(loaded: LoadedMods) -> Self {
+        AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
+        let registry = loaded.registry.clone();
         let logs = loaded.mods.iter().map(ModInstance::log).collect();
         let mut app = App::new();
         app.insert_non_send(loaded)
@@ -79,7 +95,11 @@ impl Harness {
         app.world_mut()
             .resource_mut::<ChunkStore>()
             .insert(home(), Chunk::air());
-        Self { app, logs }
+        Self {
+            app,
+            logs,
+            registry,
+        }
     }
 
     fn dispatch(&mut self) {
@@ -133,6 +153,33 @@ impl Harness {
     fn backlog(&self, index: usize) -> u64 {
         self.pending().queues[index].voxels
     }
+    fn occupants(&self, at: [i32; 3]) -> tesserae_core::Occupants {
+        let tables = self.app.world().resource::<ContentTables>();
+        self.app
+            .world()
+            .resource::<ChunkStore>()
+            .occupants(at, &tables.fluids)
+            .unwrap()
+    }
+    fn put(&mut self, at: [i32; 3], voxel: Voxel) {
+        self.app
+            .world_mut()
+            .resource_mut::<ChunkStore>()
+            .set_voxel(VoxelCoord::of(at), voxel);
+    }
+    fn material(&self, name: &str) -> u16 {
+        self.registry
+            .id_of(tesserae_mods::Kind::Material, name)
+            .unwrap() as u16
+    }
+}
+
+/// Stone placed into air, as a player's Place.
+fn solid_edit() -> EditKind {
+    EditKind::Solid {
+        before: Voxel::AIR,
+        after: Voxel::cube(STONE),
+    }
 }
 
 fn home() -> ChunkCoord {
@@ -148,7 +195,7 @@ fn fill(side: f32) -> Command {
     }
 }
 fn batch(commands: &[Command]) -> CommandBatch {
-    validate(commands, &Tables::builtin(), 1.0).unwrap()
+    validate(commands, Line::V02, &Tables::builtin(), 1.0).unwrap()
 }
 
 #[test]
@@ -326,6 +373,7 @@ fn backlog_pauses_calls_without_consuming_events_or_reports_and_resumes_after_dr
         .resource_mut::<EditHistory>()
         .record(EditEvent {
             at: [1.0; 3],
+            kind: solid_edit(),
             before: Voxel::AIR,
             after: Voxel::cube(STONE),
         });
@@ -351,6 +399,7 @@ fn history_is_bounded_and_each_mod_counts_only_the_events_it_missed() {
     for i in 0..MAX_EDIT_EVENTS + 7 {
         history.record(EditEvent {
             at: [i as f32, 0.0, 0.0],
+            kind: solid_edit(),
             before: Voxel::AIR,
             after: Voxel::cube(STONE),
         });
@@ -577,10 +626,10 @@ fn clients_cannot_name_the_queue_or_jobs_and_mutators_remain_server_private() {
     assert!(text.contains("pub(in crate::server) struct PendingCommands"));
 }
 
-pub(in crate::server) fn drain_validated(app: &mut App, commands: &[Command]) {
+pub(in crate::server) fn drain_validated(app: &mut App, line: Line, commands: &[Command]) {
     let tables = app.world().resource::<ContentTables>();
     let size = app.world().resource::<WorldSettings>().voxel_size;
-    let checked = validate(commands, tables, size).unwrap();
+    let checked = validate(commands, line, tables, size).unwrap();
     app.init_resource::<PendingCommands>();
     app.world_mut()
         .resource_mut::<PendingCommands>()
@@ -625,6 +674,7 @@ fn measure_gallery_budget() {
                 dt_s: 1.0 / 64.0,
                 edits: vec![EditEvent {
                     at: mod_min.map(|i| i as f32),
+                    kind: solid_edit(),
                     before: Voxel::AIR,
                     after: Voxel::cube(STONE),
                 }],
@@ -636,6 +686,7 @@ fn measure_gallery_budget() {
     let (instance, commands) = bevy::tasks::block_on(task);
     let mod_batch = validate(
         &commands,
+        Line::V01,
         h.app.world().resource::<ContentTables>(),
         world.voxel_size,
     )
@@ -735,7 +786,11 @@ fn the_fixed_pre_update_drain_runs_after_player_apply_pending() {
     assert_eq!(history.events[0].after, Voxel::AIR);
 }
 
-fn demo_loaded(size: f32) -> LoadedMods {
+fn tables_of(h: &Harness) -> std::sync::Arc<Tables> {
+    std::sync::Arc::clone(&h.app.world().resource::<ContentTables>().0)
+}
+
+pub(in crate::server) fn demo_loaded(size: f32) -> LoadedMods {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let dir = loop {
@@ -786,8 +841,29 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         assert!(params.water.is_none() && params.caves.is_none());
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
         assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
-        assert_eq!(loaded.appearance, [(8, [255, 144, 48, 255])]);
+        assert_eq!(
+            loaded.appearance,
+            [(8, [255, 144, 48, 255]), (9, [230, 72, 16, 255])]
+        );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
+        // Lava is the demo's own Material after its lamp; no built-in moved.
+        let lava = loaded
+            .registry
+            .id_of(tesserae_mods::Kind::Material, "demo:lava")
+            .unwrap() as u16;
+        assert_eq!(lava, 9);
+        assert_eq!(
+            loaded
+                .registry
+                .id_of(tesserae_mods::Kind::Material, "core:water"),
+            Some(7)
+        );
+        assert_eq!(loaded.tables.materials.def(lava).emission, 15);
+        let flow = loaded.tables.fluids.get(lava).unwrap();
+        let water = loaded.tables.fluids.get(7).unwrap();
+        assert!(flow.sideways_m_per_s < water.sideways_m_per_s);
+        assert!(flow.downward_m_per_s < water.downward_m_per_s);
+        assert!(flow.reach_m < water.reach_m);
         let mut neighbors = [Voxel::AIR; 6];
         neighbors[0] = Voxel::new(1, 4, 0);
         assert!(
@@ -832,8 +908,8 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         }
         h.call();
         let total = h.backlog(0);
-        assert_eq!(total, if size == 1.0 { 38 } else { 255 });
-        assert_eq!(h.pending().queues[0].commands.len(), 2);
+        assert_eq!(total, if size == 1.0 { 39 } else { 256 });
+        assert_eq!(h.pending().queues[0].commands.len(), 3);
         let mut ticks = 0;
         while h.backlog(0) > 0 {
             h.drain();
@@ -860,6 +936,10 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         assert_eq!(h.voxel(index([3.0, 31.0, -7.0])), Voxel::cube(8));
         let store = h.app.world().resource::<ChunkStore>();
         assert_eq!(store.light_at(index([3.0, 31.0, -7.0])).block(), 15);
+        let [x, y, z] = index([-1.0, 29.0, -7.0]);
+        let source = store.occupants([x, y, z], &tables_of(&h).fluids).unwrap();
+        assert_eq!(source.fluid, Some(tesserae_core::Fluid::source(lava)));
+        assert_eq!(store.light_at([x, y + 1, z]).block(), 14, "lava lights");
         h.call();
         assert_eq!(h.backlog(0), 0, "the demo builds only on its first call");
         let log = h.log(0);
@@ -914,4 +994,219 @@ fn first_mod_call_waits_for_held_lit_spawn_neighborhood_then_runs_once() {
         h.log(0).contains("call=2 tick=2"),
         "readiness gates startup only"
     );
+}
+
+fn fluids_fixture(mode: u64) -> Harness {
+    Harness::with(guest_fixture("fluids", "fluids", "0.2", mode, 1.0))
+}
+
+/// A 0.2 Mod places two sources in one region, one onto stone that cannot
+/// take it, then takes the other away: each Voxel goes through the shared
+/// Edit path, and the next report counts what applied and what did not.
+#[test]
+fn a_0_2_mod_places_and_removes_sources_through_the_edit_path() {
+    let mut h = fluids_fixture(1);
+    let slime = h.material("fluids:slime");
+    h.put([0, 0, 0], Voxel::cube(STONE));
+    h.put([1, 1, 0], Voxel::cube(STONE));
+    h.call();
+    assert_eq!(h.backlog(0), 2);
+    h.drain();
+    assert_eq!(h.backlog(0), 0);
+    assert_eq!(
+        h.occupants([0, 1, 0]).fluid,
+        Some(tesserae_core::Fluid::source(slime))
+    );
+    assert_eq!(h.occupants([1, 1, 0]).fluid, None);
+    assert_eq!(h.occupants([1, 1, 0]).solid, Voxel::cube(STONE));
+    h.call();
+    assert!(h.log(0).contains("call=2 applied=1 rejected=1"));
+    h.drain();
+    assert_eq!(h.occupants([0, 1, 0]).fluid, None);
+    assert_eq!(h.voxel([0, 0, 0]), Voxel::cube(STONE), "the bed stays");
+    h.call();
+    assert!(h.log(0).contains("call=3 applied=1 rejected=0"));
+}
+
+/// Ignition lands as burning state on declared fuel only, and extinguishing
+/// clears it. Nothing yet spends the fuel, lights or spreads it.
+#[test]
+fn a_0_2_mod_sets_declared_fuel_alight_and_puts_it_out() {
+    let mut h = fluids_fixture(2);
+    let wood = h.material("fluids:wood");
+    h.call();
+    assert_eq!(h.backlog(0), 3);
+    while h.backlog(0) > 0 {
+        h.drain();
+    }
+    let lit = h.occupants([0, 1, 0]);
+    assert_eq!(lit.solid, Voxel::cube(wood));
+    assert_eq!(lit.burning, Some(tesserae_core::Burning { fuel: 512 }));
+    assert_eq!(h.occupants([1, 1, 0]).burning, None, "air has no fuel");
+    h.call();
+    assert!(h.log(0).contains("call=2 applied=2 rejected=1"));
+    h.drain();
+    assert_eq!(h.occupants([0, 1, 0]).burning, None);
+    assert_eq!(h.occupants([0, 1, 0]).solid, Voxel::cube(wood));
+    h.call();
+    assert!(h.log(0).contains("call=3 applied=1 rejected=0"));
+}
+
+/// On 0.2 a fluid is no solid: the whole batch is refused and nothing queued.
+#[test]
+fn a_0_2_mod_placing_a_fluid_as_a_solid_is_refused_whole() {
+    let mut h = fluids_fixture(3);
+    h.call();
+    assert_eq!(h.backlog(0), 0);
+    assert_eq!(h.occupants([0, 1, 0]).fluid, None);
+    h.call();
+    assert!(h.log(0).contains("call=2 applied=0 rejected=1"));
+}
+
+/// One player's fluid-tool and solid Edits, seen by a 0.1 and a 0.2 Mod at
+/// once: the 0.2 one is told what each meant, the 0.1 one only the Edits
+/// that changed a packed Voxel. Neither hears of the simulation.
+#[test]
+fn each_line_sees_player_edits_in_its_own_projection() {
+    use crate::server::edit::{EditAction, EditIntent};
+    use crate::server::player::Player;
+    let mut loaded = guest_fixture("fluids", "fluids", "0.2", 0, 1.0);
+    loaded.mods.extend(fixture(9).mods);
+    let mut h = Harness::with(loaded);
+    h.app.insert_resource(WorldSettings {
+        seed: 0,
+        voxel_size: 1.0,
+    });
+    h.app.add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 4.5, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    let stair = Voxel::new(STONE, SHAPE_STAIR, 0);
+    h.put([2, 1, 2], stair);
+    for action in [
+        EditAction::PlaceSource(tesserae_core::material::WATER),
+        EditAction::RemoveSource,
+        EditAction::Break,
+    ] {
+        h.app.world_mut().write_message(EditIntent {
+            action,
+            origin: eye,
+            direction: Vec3::NEG_Y,
+        });
+        h.app.world_mut().run_schedule(RunFixedMainLoop);
+        h.app.world_mut().run_schedule(FixedPreUpdate);
+    }
+    assert_eq!(h.voxel([2, 1, 2]), Voxel::AIR);
+    assert_eq!(h.app.world().resource::<EditHistory>().next, 3);
+    h.call();
+    let typed = h.log(0);
+    assert_eq!(typed.matches("SourcePlaced(7)").count(), 1, "{typed}");
+    assert_eq!(typed.matches("SourceRemoved(7)").count(), 1, "{typed}");
+    assert_eq!(typed.matches("::Solid(").count(), 1, "{typed}");
+    let projected = h.log(1);
+    assert!(projected.contains("edits=1"), "{projected}");
+    assert!(
+        projected.contains("before: Voxel { material: 1, shape: 2"),
+        "{projected}"
+    );
+}
+
+/// A Manifest that names one line for a component of another is refused at
+/// load, and so is a Declaration whose names do not resolve, before any Mod
+/// starts.
+#[test]
+fn a_mismatched_line_or_an_unknown_name_fails_the_load() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../../target/phase7-runs/t05-refused-{}",
+        std::process::id()
+    ));
+    for (guest, api, expected) in [
+        (
+            "fluids",
+            "0.1",
+            "its Manifest says api 0.1, but its component is built against 0.2",
+        ),
+        (
+            "hello",
+            "0.2",
+            "its Manifest says api 0.2, but its component is built against 0.1",
+        ),
+        (
+            "bad-fluid",
+            "0.2",
+            "fluid 0 names Material `nobody:quicksilver`",
+        ),
+    ] {
+        let _ = std::fs::remove_dir_all(&dir);
+        let mod_dir = dir.join("refused");
+        std::fs::create_dir_all(&mod_dir).unwrap();
+        std::fs::write(
+            mod_dir.join("mod.toml"),
+            format!("id = \"refused\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"m.wasm\"\n"),
+        )
+        .unwrap();
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../target/guests/{guest}.wasm")),
+            mod_dir.join("m.wasm"),
+        )
+        .unwrap();
+        let error = load(
+            &dir,
+            &dir.join("trust.json"),
+            TrustMode::All,
+            &WorldSettings::default(),
+        )
+        .err()
+        .unwrap();
+        assert!(
+            error.contains("mod `refused`") && error.contains(expected),
+            "{error}"
+        );
+    }
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// The demo Game and the `fluids` guest loaded together, so lava, slime and
+/// water share one set of tables.
+pub(in crate::server) fn demo_and_fluids(size: f32) -> LoadedMods {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let dir = root.join(format!(
+        "target/phase7-runs/t05-declared-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
+    let demo = dir.join("demo");
+    let fluids = dir.join("fluids");
+    std::fs::create_dir_all(&demo).unwrap();
+    std::fs::create_dir_all(&fluids).unwrap();
+    for file in ["mod.toml", "demo.wasm"] {
+        std::fs::copy(
+            root.join("games/demo/dist/demo").join(file),
+            demo.join(file),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        fluids.join("mod.toml"),
+        "id = \"fluids\"\nversion = \"0.1.0\"\napi = \"0.2\"\nwasm = \"fluids.wasm\"\n",
+    )
+    .unwrap();
+    std::fs::copy(
+        root.join("target/guests/fluids.wasm"),
+        fluids.join("fluids.wasm"),
+    )
+    .unwrap();
+    let loaded = load(
+        &dir,
+        &dir.join("trust.json"),
+        TrustMode::All,
+        &WorldSettings {
+            voxel_size: size,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+    loaded
 }

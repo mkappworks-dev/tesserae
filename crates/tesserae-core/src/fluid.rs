@@ -5,7 +5,14 @@
 //! simulation second, so a World of any Voxel size runs the same water:
 //! `docs/adr/0003-voxel-size-is-per-world.md`.
 
+use crate::combustion::Heat;
 use crate::voxel::MaterialId;
+
+/// The farthest a fluid spreads from where it last fell.
+pub const MAX_REACH_M: f32 = 64.0;
+/// The fastest a fluid moves, which no Server tick could show anyway.
+pub const MAX_RATE_M_PER_S: f32 = 256.0;
+pub const MAX_RESET_DROP_M: f32 = 16.0;
 
 /// How a fluid Material flows.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -18,6 +25,14 @@ pub struct FluidDef {
     /// Gravity descent that renews `reach_m`, in metres. Crossing a Voxel
     /// boundary alone renews nothing.
     pub reset_drop_m: f32,
+    /// Whether it stands in the voids of a partial Shape. A fluid that does
+    /// not is displaced by any solid and flows around them.
+    pub waterlogs: bool,
+    /// Whether it puts out burning fuel it stands beside in a Voxel and keeps
+    /// that fuel from igniting.
+    pub extinguishes: bool,
+    /// Exposure it gives off; `None` for a cold fluid.
+    pub heat: Option<Heat>,
 }
 
 impl FluidDef {
@@ -29,6 +44,9 @@ impl FluidDef {
         downward_m_per_s: 8.0,
         recession_m_per_s: 4.0,
         reset_drop_m: 0.5,
+        waterlogs: true,
+        extinguishes: true,
+        heat: None,
     };
 }
 
@@ -36,6 +54,12 @@ impl FluidDef {
 pub enum FluidError {
     /// A reach, rate or drop that is not a finite positive number.
     NotPositive,
+    /// Past [`MAX_REACH_M`], [`MAX_RATE_M_PER_S`] or [`MAX_RESET_DROP_M`].
+    OutOfRange,
+    /// Heat outside [`Heat`]'s ranges.
+    BadHeat,
+    /// Hot and extinguishing at once: it would light what it puts out.
+    HotExtinguisher,
     /// Two definitions for one Material contradict each other by existing.
     AlreadyAFluid,
     /// No Material is registered under the id.
@@ -50,6 +74,13 @@ impl std::fmt::Display for FluidError {
             FluidError::NotPositive => {
                 "a fluid's reach, rates and reset drop are finite and positive"
             }
+            FluidError::OutOfRange => {
+                "a fluid's reach is at most 64 m, its rates 256 m/s and its reset drop 16 m"
+            }
+            FluidError::BadHeat => {
+                "heat strength is from 1 to 15 and its reach finite, positive and at most 16 m"
+            }
+            FluidError::HotExtinguisher => "a hot fluid cannot also extinguish",
             FluidError::AlreadyAFluid => "the Material already has a fluid definition",
             FluidError::NotAMaterial => "no Material is registered under that id",
             FluidError::Solid => "a solid Material cannot flow",
@@ -59,10 +90,11 @@ impl std::fmt::Display for FluidError {
 
 impl std::error::Error for FluidError {}
 
-/// Every Material that flows, by id.
+/// Every Material that flows, by id, with the order it was registered in.
 #[derive(Clone, Debug)]
 pub struct FluidTable {
-    defs: Vec<Option<FluidDef>>,
+    defs: Vec<Option<(FluidDef, u16)>>,
+    registered: u16,
 }
 
 impl Default for FluidTable {
@@ -73,7 +105,10 @@ impl Default for FluidTable {
 
 impl FluidTable {
     pub fn builtin() -> Self {
-        let mut table = FluidTable { defs: Vec::new() };
+        let mut table = FluidTable {
+            defs: Vec::new(),
+            registered: 0,
+        };
         table.set(crate::material::WATER, FluidDef::WATER);
         table
     }
@@ -94,6 +129,25 @@ impl FluidTable {
         {
             return Err(FluidError::NotPositive);
         }
+        let rates = [
+            def.sideways_m_per_s,
+            def.downward_m_per_s,
+            def.recession_m_per_s,
+        ];
+        if def.reach_m > MAX_REACH_M
+            || def.reset_drop_m > MAX_RESET_DROP_M
+            || rates.into_iter().any(|r| r > MAX_RATE_M_PER_S)
+        {
+            return Err(FluidError::OutOfRange);
+        }
+        if let Some(heat) = def.heat {
+            if !heat.is_valid() {
+                return Err(FluidError::BadHeat);
+            }
+            if def.extinguishes {
+                return Err(FluidError::HotExtinguisher);
+            }
+        }
         if self.contains(material) {
             return Err(FluidError::AlreadyAFluid);
         }
@@ -106,7 +160,8 @@ impl FluidTable {
         if self.defs.len() <= i {
             self.defs.resize(i + 1, None);
         }
-        self.defs[i] = Some(def);
+        self.defs[i] = Some((def, self.registered));
+        self.registered += 1;
     }
 
     pub fn contains(&self, material: MaterialId) -> bool {
@@ -114,7 +169,19 @@ impl FluidTable {
     }
 
     pub fn get(&self, material: MaterialId) -> Option<&FluidDef> {
-        self.defs.get(material as usize).and_then(Option::as_ref)
+        self.defs
+            .get(material as usize)
+            .and_then(Option::as_ref)
+            .map(|(def, _)| def)
+    }
+
+    /// Where `material` came in the registration order, water first: what
+    /// decides an otherwise equal claim between two fluids.
+    pub fn rank(&self, material: MaterialId) -> Option<u16> {
+        self.defs
+            .get(material as usize)
+            .and_then(Option::as_ref)
+            .map(|&(_, rank)| rank)
     }
 
     /// Every fluid, in Material id order.
@@ -122,7 +189,7 @@ impl FluidTable {
         self.defs
             .iter()
             .enumerate()
-            .filter_map(|(i, def)| Some((i as MaterialId, def.as_ref()?)))
+            .filter_map(|(i, def)| Some((i as MaterialId, &def.as_ref()?.0)))
     }
 }
 
@@ -199,6 +266,86 @@ mod tests {
         assert_eq!(
             table.register(WATER, FluidDef::WATER),
             Err(FluidError::AlreadyAFluid)
+        );
+    }
+
+    #[test]
+    fn bounds_heat_and_contradictions_are_refused() {
+        use crate::combustion::Heat;
+        let mut table = FluidTable::builtin();
+        let hot = Some(Heat {
+            strength: 12,
+            reach_m: 2.0,
+        });
+        for (name, def, error) in [
+            (
+                "reach past the bound",
+                FluidDef {
+                    reach_m: 65.0,
+                    ..FluidDef::WATER
+                },
+                FluidError::OutOfRange,
+            ),
+            (
+                "rate past the bound",
+                FluidDef {
+                    downward_m_per_s: 300.0,
+                    ..FluidDef::WATER
+                },
+                FluidError::OutOfRange,
+            ),
+            (
+                "drop past the bound",
+                FluidDef {
+                    reset_drop_m: 17.0,
+                    ..FluidDef::WATER
+                },
+                FluidError::OutOfRange,
+            ),
+            (
+                "heat strength zero",
+                FluidDef {
+                    heat: Some(Heat {
+                        strength: 0,
+                        reach_m: 2.0,
+                    }),
+                    extinguishes: false,
+                    ..FluidDef::WATER
+                },
+                FluidError::BadHeat,
+            ),
+            (
+                "hot and extinguishing",
+                FluidDef {
+                    heat: hot,
+                    ..FluidDef::WATER
+                },
+                FluidError::HotExtinguisher,
+            ),
+        ] {
+            assert_eq!(table.register(9, def), Err(error), "{name}");
+        }
+        let lava = FluidDef {
+            heat: hot,
+            extinguishes: false,
+            ..FluidDef::WATER
+        };
+        assert_eq!(table.register(9, lava), Ok(()));
+    }
+
+    /// Registration order, not Material id, ranks fluids.
+    #[test]
+    fn rank_is_the_registration_order() {
+        let mut table = FluidTable::builtin();
+        table.register(12, FluidDef::WATER).unwrap();
+        table.register(9, FluidDef::WATER).unwrap();
+        assert_eq!(table.rank(WATER), Some(0));
+        assert_eq!(table.rank(12), Some(1));
+        assert_eq!(table.rank(9), Some(2));
+        assert_eq!(table.rank(10), None);
+        assert_eq!(
+            table.iter().map(|(m, _)| m).collect::<Vec<_>>(),
+            [WATER, 9, 12]
         );
     }
 }

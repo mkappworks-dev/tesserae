@@ -5,8 +5,9 @@
 
 use std::fmt;
 
-use tesserae_core::{PlaceFault, Tables, Voxel};
+use tesserae_core::{MaterialId, PlaceFault, Tables, Voxel};
 
+use crate::adapt::Line;
 use crate::limits::MAX_COMMANDS;
 
 /// Voxels in one `fill`: a cost cap and not a size, so a region of the same metres is 64 times
@@ -33,8 +34,18 @@ pub struct Placement {
 /// One thing a Mod asked for, exactly as it asked.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Command {
-    Fill { region: Region, voxel: Voxel },
+    Fill {
+        region: Region,
+        voxel: Voxel,
+    },
     Place(Vec<Placement>),
+    PlaceSources {
+        region: Region,
+        material: MaterialId,
+    },
+    RemoveSources(Region),
+    Ignite(Region),
+    Extinguish(Region),
 }
 
 /// An inclusive box of Voxel indices.
@@ -180,10 +191,23 @@ impl Iterator for BoxCursor {
     }
 }
 
+/// What a Command asks of one Voxel.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Intent {
+    /// A whole-Voxel placement through the solid-layer rule; air breaks. A 0.1
+    /// placement of a fluid Material takes this path too, and becomes a source
+    /// in place of whatever was there, as it did before fluids flowed.
+    Voxel(Voxel),
+    Source(MaterialId),
+    RemoveSource,
+    Ignite,
+    Extinguish,
+}
+
 /// A [`Command`] the host has checked and put in Voxels.
 #[derive(Clone, PartialEq, Debug)]
 pub enum Resolved {
-    Fill { region: VoxelBox, voxel: Voxel },
+    Fill { region: VoxelBox, intent: Intent },
     Place(Vec<([i32; 3], Voxel)>),
 }
 
@@ -231,7 +255,7 @@ impl fmt::Display for BatchError {
             BatchError::Region { command, error } => write!(f, "command {command}: {error}"),
             BatchError::FillTooLarge { command, voxels } => write!(
                 f,
-                "command {command}: a fill of {voxels} Voxels, at most {MAX_FILL_VOXELS} are allowed"
+                "command {command}: a region of {voxels} Voxels, at most {MAX_FILL_VOXELS} are allowed"
             ),
             BatchError::TooManyVoxels => {
                 write!(f, "more than {MAX_VOXELS_PER_CALL} Voxels in one batch")
@@ -244,9 +268,11 @@ impl fmt::Display for BatchError {
 impl std::error::Error for BatchError {}
 
 /// Checks a whole batch and returns it in Voxels, or refuses all of it. `voxel_size` is the
-/// World's, in metres.
+/// World's, in metres. A 0.2 solid placement of a fluid Material is refused: that line places
+/// fluid as sources.
 pub fn validate(
     commands: &[Command],
+    line: Line,
     tables: &Tables,
     voxel_size: f32,
 ) -> Result<CommandBatch, BatchError> {
@@ -255,34 +281,20 @@ pub fn validate(
             count: commands.len(),
         });
     }
+    let solid = |voxel: Voxel, command| -> Result<(), BatchError> {
+        vet(tables, voxel, command)?;
+        if line != Line::V01 && tables.fluids.contains(voxel.material()) {
+            return Err(BatchError::Voxel {
+                command,
+                fault: PlaceFault::NotSolid,
+            });
+        }
+        Ok(())
+    };
     let mut voxels = 0u64;
     let mut resolved = Vec::with_capacity(commands.len());
     for (command, item) in commands.iter().enumerate() {
-        match item {
-            Command::Fill { region, voxel } => {
-                // Filling with air clears, and a Voxel that is air carries no ids to check.
-                if !voxel.is_air() {
-                    vet(tables, *voxel, command)?;
-                }
-                let region = VoxelBox::of(region, voxel_size)
-                    .map_err(|error| BatchError::Region { command, error })?;
-                let Some(region) = region else { continue };
-                let count = region.count();
-                if count > MAX_FILL_VOXELS {
-                    return Err(BatchError::FillTooLarge {
-                        command,
-                        voxels: count,
-                    });
-                }
-                voxels += count;
-                if voxels > MAX_VOXELS_PER_CALL {
-                    return Err(BatchError::TooManyVoxels);
-                }
-                resolved.push(Resolved::Fill {
-                    region,
-                    voxel: *voxel,
-                });
-            }
+        let (region, intent) = match item {
             Command::Place(placements) => {
                 voxels += placements.len() as u64;
                 if voxels > MAX_VOXELS_PER_CALL {
@@ -290,14 +302,51 @@ pub fn validate(
                 }
                 let mut placed = Vec::with_capacity(placements.len());
                 for placement in placements {
-                    vet(tables, placement.voxel, command)?;
+                    solid(placement.voxel, command)?;
                     let at = voxel_index(placement.at, voxel_size)
                         .map_err(|error| BatchError::Region { command, error })?;
                     placed.push((at, placement.voxel));
                 }
                 resolved.push(Resolved::Place(placed));
+                continue;
             }
+            Command::Fill { region, voxel } => {
+                // Filling with air clears, and a Voxel that is air carries no ids to check.
+                if !voxel.is_air() {
+                    solid(*voxel, command)?;
+                }
+                (region, Intent::Voxel(*voxel))
+            }
+            Command::PlaceSources { region, material } => {
+                if !tables.fluids.contains(*material) {
+                    let fault = if tables.materials.contains(*material) {
+                        PlaceFault::NotAFluid
+                    } else {
+                        PlaceFault::UnknownMaterial
+                    };
+                    return Err(BatchError::Voxel { command, fault });
+                }
+                (region, Intent::Source(*material))
+            }
+            Command::RemoveSources(region) => (region, Intent::RemoveSource),
+            Command::Ignite(region) => (region, Intent::Ignite),
+            Command::Extinguish(region) => (region, Intent::Extinguish),
+        };
+        let region = VoxelBox::of(region, voxel_size)
+            .map_err(|error| BatchError::Region { command, error })?;
+        let Some(region) = region else { continue };
+        let count = region.count();
+        if count > MAX_FILL_VOXELS {
+            return Err(BatchError::FillTooLarge {
+                command,
+                voxels: count,
+            });
         }
+        voxels += count;
+        if voxels > MAX_VOXELS_PER_CALL {
+            return Err(BatchError::TooManyVoxels);
+        }
+        resolved.push(Resolved::Fill { region, intent });
     }
     Ok(CommandBatch {
         commands: resolved,

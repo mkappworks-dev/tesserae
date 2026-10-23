@@ -31,7 +31,8 @@
 //! **Time.** Logical, in [`Step`]s of [`STEP_S`]. A change wakes the Voxels
 //! that read it for the next step; one whose wanted state differs starts a
 //! timer of the delay for that edge (its distance, one Voxel, over the
-//! definition's rate in metres per second) and changes when it runs out; a
+//! definition's rate in metres per second, as [`Pace`] rounds it) and changes
+//! when it runs out; a
 //! different wanted state restarts it. A step's evaluations all read the state
 //! at its start, so dividing one step across any number of quota-bounded calls
 //! gives the same proposals.
@@ -97,18 +98,54 @@ impl CellView for Region {
     }
 }
 
+/// A rate at one Voxel size: steps per Voxel, to a 65536th of a step.
+///
+/// An edge's delay is not this rounded, which would drift by up to half a
+/// step every Voxel when the rate does not divide a step (0.75 m/s at 1 m is
+/// 85.33 steps). It is the difference of the rounded times the front would
+/// reach the edge's two Voxels from the World origin, so any straight path
+/// takes its exact time to within one step, at every Voxel size.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Pace(u64);
+
+impl Pace {
+    const ONE: u64 = 1 << 16;
+
+    fn new(voxel_m: f64, rate_m_per_s: f32) -> Pace {
+        let steps = voxel_m / rate_m_per_s as f64 / STEP_S;
+        Pace((steps * Self::ONE as f64).round() as u64)
+    }
+
+    /// The steps to cross from Voxel `low` to `low + 1` along one axis, or
+    /// back. Never below one: a change is first read the step after it lands.
+    pub fn across(self, low: i32) -> Step {
+        (self.arrival(low + 1) - self.arrival(low)).max(1) as Step
+    }
+
+    /// `round(c * steps)`, floored for negative `c` alike.
+    fn arrival(self, c: i32) -> i64 {
+        ((c as i128 * self.0 as i128 + (Self::ONE / 2) as i128) >> 16) as i64
+    }
+
+    /// The delay of one Voxel rounded on its own, for a change with no edge.
+    pub fn steps(self) -> Step {
+        ((self.0 + Self::ONE / 2) >> 16).max(1)
+    }
+}
+
 /// A fluid's definition at one World's Voxel size: whole Voxel steps of reach
-/// and whole steps of time. Rounding is to the nearest step and never below
-/// one, so an equal physical fixture at any Voxel size agrees within one Voxel
-/// of reach and one step of time per Voxel travelled.
+/// and the [`Pace`] of each rate. An equal physical fixture at any Voxel size
+/// agrees within one Voxel of reach, and a straight path within one step.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Scaled {
     pub reach: u16,
     /// [`crate::FluidDef::reset_drop_m`] in sixteenths of a Voxel.
     pub reset: u16,
-    pub sideways: Step,
-    pub downward: Step,
-    pub recession: Step,
+    pub sideways: Pace,
+    pub downward: Pace,
+    pub recession: Pace,
+    /// [`FluidTable::rank`], which settles an otherwise equal claim.
+    pub rank: u16,
 }
 
 /// Every fluid's [`Scaled`] definition, by Material.
@@ -120,7 +157,6 @@ pub struct FlowScale {
 impl FlowScale {
     pub fn new(fluids: &FluidTable, voxel_size_m: f32) -> Self {
         let v = voxel_size_m as f64;
-        let steps = |rate: f32| ((v / rate as f64) / STEP_S).round().max(1.0) as Step;
         let mut by_material = Vec::new();
         for (material, def) in fluids.iter() {
             let i = material as usize;
@@ -133,9 +169,10 @@ impl FlowScale {
             by_material[i] = Some(Scaled {
                 reach: reach.clamp(0.0, u16::MAX as f64) as u16,
                 reset: reset.clamp(1.0, u16::MAX as f64) as u16,
-                sideways: steps(def.sideways_m_per_s),
-                downward: steps(def.downward_m_per_s),
-                recession: steps(def.recession_m_per_s),
+                sideways: Pace::new(v, def.sideways_m_per_s),
+                downward: Pace::new(v, def.downward_m_per_s),
+                recession: Pace::new(v, def.recession_m_per_s),
+                rank: fluids.rank(material).expect("a registered fluid"),
             });
         }
         FlowScale { by_material }
@@ -513,20 +550,23 @@ enum Wanted {
 #[derive(Clone, Copy)]
 struct Offer {
     material: MaterialId,
+    rank: u16,
     reach: u16,
     descent: u16,
     from_above: bool,
+    /// The lower coordinate of the edge it crosses, on that edge's axis.
+    low: i32,
 }
 
 impl Offer {
     /// Larger reach wins, then nearer renewal, then falling, then the earlier
     /// registered fluid.
-    fn key(&self) -> (u16, u16, bool, std::cmp::Reverse<MaterialId>) {
+    fn key(&self) -> (u16, u16, bool, std::cmp::Reverse<u16>) {
         (
             self.reach,
             self.descent,
             self.from_above,
-            std::cmp::Reverse(self.material),
+            std::cmp::Reverse(self.rank),
         )
     }
 }
@@ -626,7 +666,8 @@ fn wanted(view: &impl CellView, tables: &Tables, scale: &FlowScale, at: Cell) ->
     // The best offer into void `r`, of `only` if given, and whether fluid of
     // the winning Material falls into it.
     let best_for = |r: &Void, only: Option<MaterialId>| -> (Option<Offer>, bool) {
-        let admits = |m: MaterialId| only.is_none_or(|o| o == m);
+        let admits =
+            |m: MaterialId| only.is_none_or(|o| o == m) && tables.holds(here.occupants.solid, m);
         let mut best: Option<Offer> = None;
         let mut fed_from_above: Option<MaterialId> = None;
         let mut offer = |o: Offer| {
@@ -653,9 +694,11 @@ fn wanted(view: &impl CellView, tables: &Tables, scale: &FlowScale, at: Cell) ->
                 fed_from_above = Some(f.material);
                 offer(Offer {
                     material: f.material,
+                    rank: s.rank,
                     reach,
                     descent,
                     from_above: true,
+                    low: at[1],
                 });
             }
         }
@@ -702,11 +745,14 @@ fn wanted(view: &impl CellView, tables: &Tables, scale: &FlowScale, at: Cell) ->
                     0 => (reach - 1, descent),
                     _ => descend(reach - 1, descent, drop, s),
                 };
+                let axis = if SIDES[k][0] != 0 { 0 } else { 2 };
                 offer(Offer {
                     material: f.material,
+                    rank: s.rank,
                     reach,
                     descent,
                     from_above: false,
+                    low: at[axis].min(at[axis] + SIDES[k][axis]),
                 });
             }
         }
@@ -764,13 +810,15 @@ fn wanted(view: &impl CellView, tables: &Tables, scale: &FlowScale, at: Cell) ->
         let edge = match (best, rank(want) > rank(had)) {
             (Some(o), true) => {
                 let s = scale.get(o.material).expect("scaled");
-                if o.from_above { s.downward } else { s.sideways }
+                if o.from_above { s.downward } else { s.sideways }.across(o.low)
             }
-            _ => here
+            (worse, _) => here
                 .occupants
                 .fluid
                 .and_then(|f| scale.get(f.material))
-                .map_or(1, |s| s.recession),
+                .map_or(1, |s| {
+                    worse.map_or(s.recession.steps(), |o| s.recession.across(o.low))
+                }),
         };
         delay = Some(delay.map_or(edge, |d| d.min(edge)));
     }

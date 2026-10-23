@@ -1,0 +1,364 @@
+//! Fluid, reaction and fire rows resolve by full name once every Mod has
+//! declared, and anything unknown, out of range or contradictory fails the
+//! load before a World could open.
+
+use futures_lite::future::block_on;
+use tesserae_core::material::{STONE, WATER};
+use tesserae_core::{
+    Burn, CombustionError, FluidDef, FluidError, Heat, Phase, ReactionError, Side, Tables,
+};
+
+use super::sandbox::Rig;
+use crate::bindings::tesserae::mods::content::{
+    self, BurnAfter, BurnEnd, CombustionDef, Declaration, FluidState, HeatDef, MaterialDef,
+    Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass,
+};
+use crate::{
+    Behaviour, Kind, MAX_BEHAVIOURS_PER_MOD, ModError, ModLimits, Registry, apply, resolve,
+};
+
+fn material(name: &str, solid: bool) -> MaterialDef {
+    MaterialDef {
+        name: name.into(),
+        emission: 0,
+        dimming: 2,
+        occlusion: Occlusion::Never,
+        render: RenderClass::Blend,
+        solid,
+    }
+}
+
+fn fluid(material: &str) -> content::FluidDef {
+    content::FluidDef {
+        material: material.into(),
+        reach_m: 3.0,
+        sideways_m_per_s: 0.75,
+        downward_m_per_s: 1.5,
+        recession_m_per_s: 0.75,
+        reset_drop_m: 0.5,
+        waterlogs: false,
+        extinguishes: false,
+        heat: Some(HeatDef {
+            strength: 12,
+            reach_m: 2.0,
+        }),
+    }
+}
+
+fn reaction(first: &str, second: &str, product: Option<&str>) -> ReactionDef {
+    let any = |fluid: &str| Reactant {
+        fluid: fluid.into(),
+        state: FluidState::Any,
+    };
+    ReactionDef {
+        first: any(first),
+        second: any(second),
+        consumed: ReactionSide::First,
+        product: product.map(Into::into),
+        receiving: None,
+    }
+}
+
+fn fire(fuel: &str, residue: Option<&str>) -> CombustionDef {
+    CombustionDef {
+        fuel: fuel.into(),
+        ignition_threshold: 6,
+        ignition_delay_s: 2.0,
+        emission: 12,
+        heat: Some(HeatDef {
+            strength: 10,
+            reach_m: 2.0,
+        }),
+        end: BurnEnd::After(BurnAfter {
+            seconds: 8.0,
+            residue: residue.map(Into::into),
+        }),
+    }
+}
+
+fn empty() -> Declaration {
+    Declaration {
+        materials: vec![],
+        shapes: vec![],
+        appearance: vec![],
+        world: None,
+        view: None,
+        fluids: vec![],
+        reactions: vec![],
+        combustion: vec![],
+    }
+}
+
+/// Declares each `(mod id, declaration)` in order, then resolves them all.
+fn load(mods: Vec<(&str, Declaration)>) -> Result<(Tables, Registry), ModError> {
+    let mut tables = Tables::builtin();
+    let mut registry = Registry::builtin();
+    let mut behaviours: Vec<Behaviour> = Vec::new();
+    for (id, declaration) in mods {
+        let applied = apply(declaration, id, &mut tables, &mut registry, false)?;
+        behaviours.push(applied.behaviour);
+    }
+    resolve(behaviours, &mut tables, &registry)?;
+    Ok((tables, registry))
+}
+
+fn lava_mod() -> Declaration {
+    Declaration {
+        materials: vec![material("lava", false), material("basalt", true)],
+        fluids: vec![fluid("lava:lava")],
+        ..empty()
+    }
+}
+
+#[test]
+fn a_fluid_declared_by_name_runs_its_row_at_the_registered_id() {
+    let (tables, registry) = load(vec![("lava", lava_mod())]).unwrap();
+    let id = registry.id_of(Kind::Material, "lava:lava").unwrap() as u16;
+    assert_eq!(id, 8, "after the built-ins, nothing renumbered");
+    assert_eq!(registry.id_of(Kind::Material, "core:water"), Some(7));
+    assert_eq!(
+        tables.fluids.get(id),
+        Some(&FluidDef {
+            reach_m: 3.0,
+            sideways_m_per_s: 0.75,
+            downward_m_per_s: 1.5,
+            recession_m_per_s: 0.75,
+            reset_drop_m: 0.5,
+            waterlogs: false,
+            extinguishes: false,
+            heat: Some(Heat {
+                strength: 12,
+                reach_m: 2.0
+            }),
+        })
+    );
+    assert_eq!(tables.fluids.rank(id), Some(1));
+    assert_eq!(tables.fluids.get(WATER), Some(&FluidDef::WATER));
+}
+
+/// Names resolve after every Declaration: a row may name a Material of a
+/// Mod that loads after it, and fluids are in before reactions need them.
+#[test]
+fn rows_name_any_loaded_mods_materials_whatever_the_load_order() {
+    let early = Declaration {
+        reactions: vec![reaction("lava:lava", "core:water", Some("lava:basalt"))],
+        combustion: vec![fire("late:wood", Some("lava:basalt"))],
+        ..empty()
+    };
+    let late = Declaration {
+        materials: vec![material("wood", true)],
+        ..empty()
+    };
+    let (tables, registry) =
+        load(vec![("early", early), ("lava", lava_mod()), ("late", late)]).unwrap();
+    let id = |name| registry.id_of(Kind::Material, name).unwrap() as u16;
+    let rule = tables.reactions.rules()[0];
+    assert_eq!(
+        (rule.first.fluid, rule.second.fluid),
+        (WATER, id("lava:lava"))
+    );
+    assert_eq!(rule.consumed, Side::Second, "the lava, canonical");
+    assert_eq!(rule.product, Some(id("lava:basalt")));
+    assert_eq!(rule.first.phase, Phase::Any);
+    let wood = tables.combustion.get(id("late:wood")).unwrap();
+    assert_eq!(
+        wood.burn,
+        Burn::For {
+            seconds: 8.0,
+            residue: id("lava:basalt")
+        }
+    );
+    assert_eq!(wood.threshold, 6);
+}
+
+/// Every refusal names the Mod and the row, and happens at resolution, which
+/// the loader runs before any Mod starts and the World opens.
+#[test]
+fn unknown_names_bad_values_and_contradictions_fail_the_load() {
+    type Change = fn(&mut Declaration);
+    let with = |change: Change| {
+        let mut d = lava_mod();
+        change(&mut d);
+        load(vec![("lava", d)]).expect_err("refused").to_string()
+    };
+    let cases: [(Change, &str); 12] = [
+        (
+            |d| d.fluids[0].material = "lava:missing".into(),
+            "fluid 0 names Material `lava:missing`",
+        ),
+        (
+            |d| d.fluids[0].material = "lava".into(),
+            "fluid 0 names Material `lava`",
+        ),
+        (
+            |d| d.fluids[0].reach_m = f32::NAN,
+            "fluid 0 `lava:lava`: a fluid's reach",
+        ),
+        (
+            |d| d.fluids[0].reset_drop_m = -0.5,
+            "fluid 0 `lava:lava`: a fluid's reach",
+        ),
+        (|d| d.fluids[0].sideways_m_per_s = 1e6, "its rates 256 m/s"),
+        (
+            |d| d.fluids[0].material = "lava:basalt".into(),
+            "a solid Material cannot flow",
+        ),
+        (
+            |d| d.fluids.push(fluid("lava:lava")),
+            "fluid 1 `lava:lava`: the Material already",
+        ),
+        (
+            |d| d.fluids.push(fluid("core:water")),
+            "fluid 1 `core:water`: the Material already",
+        ),
+        (
+            |d| d.fluids[0].extinguishes = true,
+            "a hot fluid cannot also extinguish",
+        ),
+        (
+            |d| {
+                d.reactions = vec![
+                    reaction("lava:lava", "core:water", None),
+                    reaction("core:water", "lava:lava", Some("core:stone")),
+                ]
+            },
+            "reaction 1: another reaction",
+        ),
+        (
+            |d| d.reactions = vec![reaction("lava:lava", "core:water", Some("core:water"))],
+            "reaction 0: the product must be",
+        ),
+        (
+            |d| d.combustion = vec![fire("lava:basalt", Some("lava:basalt"))],
+            "combustion 0 `lava:basalt`: residues lead back",
+        ),
+    ];
+    for (change, expected) in cases {
+        let message = with(change);
+        assert!(message.contains("mod `lava`"), "{message}");
+        assert!(message.contains(expected), "{expected}: {message}");
+    }
+}
+
+#[test]
+fn errors_carry_the_core_reason() {
+    let mirrored = Declaration {
+        reactions: vec![
+            reaction("lava:lava", "core:water", None),
+            ReactionDef {
+                consumed: ReactionSide::Second,
+                ..reaction("core:water", "lava:lava", None)
+            },
+        ],
+        ..lava_mod()
+    };
+    assert!(matches!(
+        load(vec![("lava", mirrored)]),
+        Err(ModError::Reaction {
+            row: 1,
+            source: ReactionError::Duplicate,
+            ..
+        })
+    ));
+    let hot_fuel = Declaration {
+        combustion: vec![CombustionDef {
+            ignition_threshold: 0,
+            ..fire("lava:basalt", None)
+        }],
+        ..lava_mod()
+    };
+    assert!(matches!(
+        load(vec![("lava", hot_fuel)]),
+        Err(ModError::Combustion {
+            source: CombustionError::ThresholdOutOfRange,
+            ..
+        })
+    ));
+    let gushing = Declaration {
+        fluids: vec![content::FluidDef {
+            reach_m: 100.0,
+            ..fluid("lava:lava")
+        }],
+        ..lava_mod()
+    };
+    assert!(matches!(
+        load(vec![("lava", gushing)]),
+        Err(ModError::Fluid {
+            source: FluidError::OutOfRange,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn a_mod_declares_a_bounded_number_of_rows() {
+    let d = Declaration {
+        combustion: (0..=MAX_BEHAVIOURS_PER_MOD)
+            .map(|_| fire("core:leaves", None))
+            .collect(),
+        ..empty()
+    };
+    let error = load(vec![("many", d)]).err().unwrap();
+    assert!(matches!(error, ModError::TooManyRows { count: 65, .. }));
+    let mut tables = Tables::builtin();
+    let d = Declaration {
+        combustion: (0..=MAX_BEHAVIOURS_PER_MOD)
+            .map(|_| fire("core:leaves", None))
+            .collect(),
+        materials: vec![material("x", true)],
+        ..empty()
+    };
+    let _ = apply(d, "many", &mut tables, &mut Registry::builtin(), false);
+    assert_eq!(tables.materials.len(), 8, "refused before any row");
+}
+
+/// The real 0.2 guest: its Declaration crosses the WASI boundary and resolves
+/// as a native one does.
+#[test]
+fn the_fluids_guest_declares_a_fluid_a_reaction_and_a_fire() {
+    let rig = Rig::new();
+    let instance = rig.instance("fluids", ModLimits::HOST).unwrap();
+    assert_eq!(instance.line(), crate::Line::V02);
+    let (_, declaration) = block_on(instance.declare()).unwrap();
+    let (tables, registry) = load(vec![("fluids", declaration)]).unwrap();
+    let id = |name| registry.id_of(Kind::Material, name).unwrap() as u16;
+    let slime = tables.fluids.get(id("fluids:slime")).unwrap();
+    assert_eq!(
+        (slime.reach_m, slime.sideways_m_per_s, slime.reset_drop_m),
+        (2.0, 2.0, 1.0)
+    );
+    assert!(slime.waterlogs && slime.extinguishes && slime.heat.is_none());
+    let rule = tables.reactions.rules()[0];
+    assert_eq!(rule.first.fluid, WATER);
+    assert_eq!(rule.second.phase, Phase::Flowing);
+    assert_eq!(rule.product, Some(id("fluids:ash")));
+    assert!(tables.combustion.contains(id("fluids:wood")));
+    assert!(!tables.combustion.contains(STONE));
+}
+
+#[test]
+fn the_bad_fluid_guest_is_refused_at_resolution() {
+    let rig = Rig::new();
+    let instance = rig.instance("bad-fluid", ModLimits::HOST).unwrap();
+    let (_, declaration) = block_on(instance.declare()).unwrap();
+    let message = load(vec![("bad", declaration)]).err().unwrap().to_string();
+    assert!(
+        message.contains("mod `bad`: fluid 0 names Material `nobody:quicksilver`"),
+        "{message}"
+    );
+}
+
+/// A 0.1 guest's Declaration is the 0.2 one it means: no fluid, reaction or
+/// fire, and its Materials and Shapes as they were.
+#[test]
+fn a_0_1_declaration_comes_through_the_adapter_unchanged() {
+    let rig = Rig::new();
+    let instance = rig.instance("catalog", ModLimits::HOST).unwrap();
+    assert_eq!(instance.line(), crate::Line::V01);
+    let (_, declaration) = block_on(instance.declare()).unwrap();
+    assert!(declaration.fluids.is_empty());
+    assert!(declaration.reactions.is_empty() && declaration.combustion.is_empty());
+    assert_eq!(declaration.materials.len(), 8);
+    let (tables, _) = load(vec![("catalog", declaration)]).unwrap();
+    assert_eq!(tables.fluids.iter().count(), 1, "water alone");
+}

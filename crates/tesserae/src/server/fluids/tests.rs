@@ -38,6 +38,10 @@ struct Fixture {
 
 impl Fixture {
     fn new(voxel_m: f32, half_m: f32, cx: i32) -> Self {
+        Self::with_tables(voxel_m, half_m, cx, Tables::builtin())
+    }
+
+    fn with_tables(voxel_m: f32, half_m: f32, cx: i32, tables: Tables) -> Self {
         AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
         let half = (half_m / voxel_m).round() as i32;
         let mut chunks: HashMap<ChunkCoord, Chunk> = HashMap::default();
@@ -65,7 +69,7 @@ impl Fixture {
         };
         let mut app = App::new();
         app.insert_resource(world)
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(tables)))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .init_resource::<FluidSim>()
@@ -311,7 +315,7 @@ fn an_older_job_cannot_bring_back_a_removed_source_or_its_flow() {
     // Placed on `placed_at`'s tick, first read on the step after, and its
     // neighbours' timers run the sideways delay from there.
     let scale = FlowScale::new(&Tables::builtin().fluids, 1.0);
-    let proposing = placed_at + scale.get(WATER).unwrap().sideways;
+    let proposing = placed_at + scale.get(WATER).unwrap().sideways.steps();
     let started = Instant::now();
     while f.sim().now() + 1 < proposing || f.sim().job.in_flight() > 0 {
         f.tick();
@@ -1645,4 +1649,137 @@ fn a_journal_overflow_coalesces_by_chunk_and_drops_no_change() {
     s.settle();
     assert_eq!(wet_cells(&s.state()), 0, "the source's removal was lost");
     assert_eq!(s.store().voxel(fill[4000]), Some(stone()));
+}
+
+/// Ticks until `seconds` of logical time have passed.
+fn run_seconds(f: &mut Fixture, seconds: f64) {
+    let until = f.sim().now() + (seconds / STEP_S).round() as Step;
+    let started = Instant::now();
+    while f.sim().now() < until {
+        f.tick();
+        assert!(started.elapsed() < CEILING);
+        f.wait_if_running();
+    }
+}
+
+/// Lava from the demo Game and slime from an independent Mod, placed with the
+/// fluid tool, flow by their own declared metres through the same Server tick
+/// as water: after a second each front is where its rate puts it, each settles
+/// at its own reach, and each recedes. Lava is the slowest of the three.
+#[test]
+fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
+    for v in [1.0, 0.5, 0.25] {
+        let loaded = mod_runtime::tests::demo_and_fluids(v);
+        let id = |name| {
+            loaded
+                .registry
+                .id_of(tesserae_mods::Kind::Material, name)
+                .unwrap() as u16
+        };
+        let (lava, slime) = (id("demo:lava"), id("fluids:slime"));
+        for (material, after_1_s, reach) in
+            [(WATER, 4.0, 7.0), (lava, 0.75, 3.0), (slime, 2.0, 2.0)]
+        {
+            let mut f = Fixture::with_tables(v, 8.0, 0, loaded.tables.clone());
+            f.send(0, EditAction::PlaceSource(material));
+            f.tick();
+            assert_eq!(f.fluid(0), Some(Fluid::source(material)), "{v} m");
+            run_seconds(&mut f, 1.0);
+            let front = f.wet_length_m();
+            assert!(
+                (front - after_1_s).abs() <= v + 1e-4,
+                "{v} m, {material}: {front} m after 1 s"
+            );
+            f.settle();
+            assert_eq!(f.wet_length_m(), reach, "{v} m, {material}");
+            assert!(
+                f.wet()
+                    .iter()
+                    .all(|&x| f.fluid(x).unwrap().material == material
+                        && (x == 0) == f.fluid(x).unwrap().source)
+            );
+            f.send(0, EditAction::RemoveSource);
+            f.settle();
+            assert!(f.wet().is_empty(), "{v} m, {material}: {:?}", f.wet());
+            assert!(f.rejections().is_empty());
+        }
+    }
+}
+
+/// Lava lights a dark corridor as it flows in and the light goes as it
+/// recedes, each time what a fresh solve of the final cells gives.
+#[test]
+fn lava_lights_the_dark_as_it_flows_and_the_light_goes_with_it() {
+    let loaded = mod_runtime::tests::demo_and_fluids(1.0);
+    let lava = loaded
+        .registry
+        .id_of(tesserae_mods::Kind::Material, "demo:lava")
+        .unwrap() as u16;
+    let tables = loaded.tables;
+    let mut f = Fixture::with_tables(1.0, 10.0, 16, tables.clone());
+    let home = ChunkCoord::new(0, 0, 0);
+    let fresh = |f: &Fixture| {
+        light_cells(
+            f.store().get(home).unwrap(),
+            f.store().overlay(home).unwrap(),
+            [None; 6],
+            &tables,
+        )
+    };
+    let solved = fresh(&f);
+    f.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .set_light(home, solved);
+    let block = |f: &Fixture, x: i32| f.store().light_at([16 + x, Y, Z]).block();
+    assert_eq!(block(&f, 5), 0, "the corridor starts dark");
+    f.send(0, EditAction::PlaceSource(lava));
+    f.settle();
+    assert!(block(&f, 5) > 0, "lava 3 m away did not light x = 5");
+    assert!(f.store().light(home) == Some(&fresh(&f)));
+    f.send(0, EditAction::RemoveSource);
+    f.settle();
+    assert_eq!(block(&f, 5), 0);
+    assert!(f.store().light(home) == Some(&fresh(&f)));
+}
+
+/// A source from the player's fluid tool, from a 0.1 Mod placing a water
+/// Voxel and from a 0.2 Mod's source Command lands the same and flows the
+/// same: all three reach the one World-change path.
+#[test]
+fn a_source_from_a_player_or_either_contract_line_flows_the_same() {
+    use tesserae_mods::{Command, Line, Placement, Region};
+    let states: Vec<Vec<Occupants>> = (0..3)
+        .map(|way| {
+            let mut f = Fixture::new(0.5, 6.0, 0);
+            let at = [0.0, Y as f32 * 0.5, Z as f32 * 0.5];
+            match way {
+                0 => f.send(0, EditAction::PlaceSource(WATER)),
+                1 => mod_runtime::tests::drain_validated(
+                    &mut f.app,
+                    Line::V01,
+                    &[Command::Place(vec![Placement {
+                        at,
+                        voxel: Voxel::cube(WATER),
+                    }])],
+                ),
+                _ => mod_runtime::tests::drain_validated(
+                    &mut f.app,
+                    Line::V02,
+                    &[Command::PlaceSources {
+                        region: Region {
+                            min: at,
+                            max: at.map(|m| m + 0.5),
+                        },
+                        material: WATER,
+                    }],
+                ),
+            }
+            f.tick();
+            assert_eq!(f.fluid(0), Some(Fluid::source(WATER)), "way {way}");
+            f.settle();
+            f.state()
+        })
+        .collect();
+    assert!(states[0] == states[1] && states[1] == states[2]);
 }

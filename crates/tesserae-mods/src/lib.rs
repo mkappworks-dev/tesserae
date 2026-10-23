@@ -4,6 +4,7 @@
 //! API and the wasmtime version stays one line in `Cargo.toml`. Depends on
 //! neither Bevy nor wgpu. `docs/adr/0001-wasm-mod-boundary.md`.
 
+mod adapt;
 mod bindings;
 mod command;
 mod context;
@@ -21,15 +22,18 @@ mod registry;
 mod sandbox;
 mod trust;
 
+pub use adapt::Line;
 pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
 pub use bindings::tesserae::mods::content::Declaration;
 pub use command::{
-    BatchError, BatchReport, BoxCursor, Command, CommandBatch, MAX_FILL_VOXELS, MAX_VOXEL_INDEX,
-    MAX_VOXELS_PER_CALL, Placement, Region, RegionError, Resolved, VoxelBox, validate, voxel_index,
+    BatchError, BatchReport, BoxCursor, Command, CommandBatch, Intent, MAX_FILL_VOXELS,
+    MAX_VOXEL_INDEX, MAX_VOXELS_PER_CALL, Placement, Region, RegionError, Resolved, VoxelBox,
+    validate, voxel_index,
 };
-pub use context::{EditEvent, TickContext};
+pub use context::{EditEvent, EditKind, TickContext};
 pub use declare::{
-    Applied, MAX_MATERIALS, MAX_NAME_BYTES, MAX_PER_MOD, MAX_SHAPES, ViewParams, apply,
+    Applied, Behaviour, MAX_BEHAVIOURS_PER_MOD, MAX_MATERIALS, MAX_NAME_BYTES, MAX_PER_MOD,
+    MAX_SHAPES, ViewParams, apply, resolve,
 };
 pub use error::ModError;
 pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};

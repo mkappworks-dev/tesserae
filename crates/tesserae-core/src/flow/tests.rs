@@ -304,17 +304,15 @@ fn the_scale_turns_metres_and_metres_per_second_into_voxels_and_steps() {
         (0.25, 28, 32, 4, 2),
     ] {
         let s = *FlowScale::new(&tables.fluids, v).get(WATER).unwrap();
+        assert_eq!((s.reach, s.reset, s.rank), (reach, reset, 0), "{v} m");
         assert_eq!(
-            s,
-            Scaled {
-                reach,
-                reset,
-                sideways,
-                downward,
-                recession: sideways,
-            },
+            [s.sideways, s.downward, s.recession].map(Pace::steps),
+            [sideways, downward, sideways],
             "{v} m"
         );
+        for low in [-3, 0, 5] {
+            assert_eq!(s.sideways.across(low), sideways, "water divides a step");
+        }
         assert_eq!(reach as f32 * v, 7.0, "reach is metres at {v} m");
     }
     assert!(FlowScale::new(&tables.fluids, 1.0).get(STONE).is_none());
@@ -388,7 +386,8 @@ fn removing_the_source_recedes_every_flowing_voxel_at_the_recession_rate() {
         assert!(sim.wet().is_empty(), "{v} m: {:?}", sim.wet());
         let total_s = (3.5 / rate) + steps as f64 * STEP_S;
         assert!(
-            (total_s - 7.0 / rate).abs() <= sim.scale.get(WATER).unwrap().recession as f64 * STEP_S,
+            (total_s - 7.0 / rate).abs()
+                <= sim.scale.get(WATER).unwrap().recession.steps() as f64 * STEP_S,
             "{v} m: receded in {total_s} s"
         );
     }
@@ -1276,5 +1275,254 @@ mod waterlogging {
         }
         assert!(a.fluid([5, 1, 0]).is_some());
         let _ = NEG_Y;
+    }
+}
+
+/// Fluids other than water, run from their declared rows alone.
+mod declared {
+    use super::*;
+    use crate::combustion::Heat;
+    use crate::material::{MaterialDef, Occlusion, RenderClass};
+    use crate::{Orientation, SHAPE_STAIR};
+
+    /// The spec's proposed demo lava: 0.75 m/s does not divide a step at any
+    /// of the three sizes.
+    const LAVA: FluidDef = FluidDef {
+        reach_m: 3.0,
+        sideways_m_per_s: 0.75,
+        downward_m_per_s: 1.5,
+        recession_m_per_s: 0.75,
+        reset_drop_m: 0.5,
+        waterlogs: false,
+        extinguishes: false,
+        heat: Some(Heat {
+            strength: 12,
+            reach_m: 2.0,
+        }),
+    };
+
+    /// Neither water nor lava: shorter reach, its own rates and reset drop.
+    const SLIME: FluidDef = FluidDef {
+        reach_m: 2.0,
+        sideways_m_per_s: 2.0,
+        downward_m_per_s: 3.0,
+        recession_m_per_s: 1.0,
+        reset_drop_m: 1.0,
+        waterlogs: true,
+        extinguishes: false,
+        heat: None,
+    };
+
+    fn liquid(tables: &mut Tables, emission: u8) -> MaterialId {
+        tables
+            .materials
+            .register(MaterialDef {
+                emission,
+                dimming: 2,
+                occlusion: Occlusion::SameMaterial,
+                render: RenderClass::Blend,
+                solid: false,
+            })
+            .unwrap()
+    }
+
+    /// Water's built-in table plus `defs`, registered in order.
+    fn with(defs: &[FluidDef]) -> (Tables, Vec<MaterialId>) {
+        let mut tables = Tables::builtin();
+        let ids = defs
+            .iter()
+            .map(|def| {
+                let id = liquid(&mut tables, 0);
+                tables.register_fluid(id, *def).unwrap();
+                id
+            })
+            .collect();
+        (tables, ids)
+    }
+
+    fn corridor_of(tables: Tables, voxel_m: f32, half_m: f32) -> Sim {
+        let mut sim = corridor(voxel_m, half_m);
+        sim.scale = FlowScale::new(&tables.fluids, voxel_m);
+        sim.tables = tables;
+        sim
+    }
+
+    fn source(sim: &mut Sim, at: Cell, material: MaterialId) {
+        let here = sim.occupants(at);
+        sim.edit(
+            at,
+            Occupants {
+                fluid: Some(Fluid::source(material)),
+                ..here
+            },
+        );
+    }
+
+    /// The step count after which each Voxel along `x_of` first held fluid.
+    fn arrivals(sim: &mut Sim, cells: &[Cell], steps: Step) -> Vec<Option<Step>> {
+        let mut first = vec![None; cells.len()];
+        for _ in 0..steps {
+            sim.run_step();
+            for (i, at) in cells.iter().enumerate() {
+                if first[i].is_none() && sim.fluid(*at).is_some() {
+                    first[i] = Some(sim.step);
+                }
+            }
+        }
+        first
+    }
+
+    /// Every Voxel of a lava stream arrives within one step of its exact
+    /// physical time, both ways along the corridor and at every size. Rounding
+    /// each Voxel's delay alone would be four steps early at 3 m on 0.25 m.
+    #[test]
+    fn a_rate_that_does_not_divide_a_step_keeps_its_time_over_the_whole_path() {
+        for v in SIZES {
+            let (tables, ids) = with(&[LAVA]);
+            let mut sim = corridor_of(tables, v, 5.0);
+            source(&mut sim, [0, 1, 0], ids[0]);
+            let n = sim.cells(LAVA.reach_m);
+            let cells: Vec<Cell> = (1..=n).flat_map(|x| [[x, 1, 0], [-x, 1, 0]]).collect();
+            let seconds = 2.0 * LAVA.reach_m as f64 / LAVA.sideways_m_per_s as f64;
+            let first = arrivals(&mut sim, &cells, (seconds / STEP_S) as Step);
+            for (at, step) in cells.iter().zip(first) {
+                let metres = at[0].abs() as f64 * v as f64;
+                let exact = metres / LAVA.sideways_m_per_s as f64 / STEP_S;
+                let step = step.unwrap_or_else(|| panic!("{v} m: {at:?} never wet"));
+                assert!(
+                    (step as f64 - exact).abs() <= 1.0,
+                    "{v} m: {at:?} at step {step}, exact {exact:.2}"
+                );
+            }
+            sim.settle();
+            assert_eq!(wet_length_m(&sim, 1), LAVA.reach_m, "{v} m");
+        }
+    }
+
+    /// The same for a fall: down an open shaft at the downward rate.
+    #[test]
+    fn a_fall_keeps_its_time_to_within_one_step_at_every_size() {
+        for v in SIZES {
+            let (tables, ids) = with(&[LAVA]);
+            let depth = (4.0 / v).round() as i32;
+            let mut sim = Sim::with_tables(v, [-1, 0, -1], [1, depth + 1, 1], tables);
+            for y in 0..=depth + 1 {
+                for x in -1..=1 {
+                    for z in -1..=1 {
+                        if (x, z) != (0, 0) || y == 0 {
+                            sim.build([x, y, z], stone());
+                        }
+                    }
+                }
+            }
+            source(&mut sim, [0, depth, 0], ids[0]);
+            let cells: Vec<Cell> = (1..depth).map(|y| [0, y, 0]).collect();
+            let seconds = 4.0 / LAVA.downward_m_per_s as f64 + 1.0;
+            let first = arrivals(&mut sim, &cells, (seconds / STEP_S) as Step);
+            for (at, step) in cells.iter().zip(first) {
+                let metres = (depth - at[1]) as f64 * v as f64;
+                let exact = metres / LAVA.downward_m_per_s as f64 / STEP_S;
+                let step = step.unwrap_or_else(|| panic!("{v} m: {at:?} never wet"));
+                assert!(
+                    (step as f64 - exact).abs() <= 1.0,
+                    "{v} m: {at:?} at step {step}, exact {exact:.2}"
+                );
+            }
+        }
+    }
+
+    /// Water, lava and a third fluid in the same corridor each spread their
+    /// own metres at their own rate: the kernel reads rows, not a switch.
+    #[test]
+    fn each_declared_fluid_spreads_its_own_metres_at_its_own_rate() {
+        for v in SIZES {
+            for (def, material) in [(FluidDef::WATER, None), (LAVA, Some(0)), (SLIME, Some(1))] {
+                let (tables, ids) = with(&[LAVA, SLIME]);
+                let material = material.map_or(WATER, |i| ids[i]);
+                let mut sim = corridor_of(tables, v, 8.0);
+                source(&mut sim, [0, 1, 0], material);
+                sim.run_seconds(1.0);
+                let front = wet_length_m(&sim, 1);
+                let expected = def.sideways_m_per_s.min(def.reach_m / 1.0);
+                assert!(
+                    (front - expected).abs() <= v + 1e-4,
+                    "{v} m, {material}: {front} m after 1 s, expected {expected}"
+                );
+                sim.settle();
+                assert_eq!(wet_length_m(&sim, 1), def.reach_m, "{v} m, {material}");
+                assert_eq!(sim.sources(), 1);
+                assert!(
+                    sim.wet()
+                        .iter()
+                        .all(|at| sim.fluid(*at).unwrap().material == material)
+                );
+            }
+        }
+    }
+
+    /// Two fluids reaching one empty Voxel together: the one registered first
+    /// takes it whatever their Material ids, neither enters the other, and
+    /// neither displaces the other's source.
+    #[test]
+    fn an_equal_claim_goes_to_the_earlier_registered_fluid_and_nothing_mixes() {
+        let mut tables = Tables::builtin();
+        let later = liquid(&mut tables, 0);
+        let earlier = liquid(&mut tables, 0);
+        assert!(later < earlier);
+        tables.register_fluid(earlier, SLIME).unwrap();
+        tables.register_fluid(later, SLIME).unwrap();
+        let mut sim = corridor_of(tables, 1.0, 6.0);
+        source(&mut sim, [-2, 1, 0], earlier);
+        source(&mut sim, [2, 1, 0], later);
+        sim.settle();
+        let material = |sim: &Sim, x| sim.fluid([x, 1, 0]).map(|f| f.material);
+        assert_eq!(material(&sim, 0), Some(earlier));
+        assert_eq!(material(&sim, -1), Some(earlier));
+        assert_eq!(material(&sim, 1), Some(later));
+        assert_eq!(material(&sim, 3), Some(later));
+        assert_eq!(material(&sim, -3), Some(earlier));
+        for x in [-2, 2] {
+            assert!(sim.fluid([x, 1, 0]).unwrap().source, "{x} displaced");
+        }
+        assert_eq!(sim.sources(), 2);
+    }
+
+    /// A fluid that does not waterlog flows past a stair's open notch that
+    /// water would fill, and a stair placed into its source displaces it.
+    #[test]
+    fn a_fluid_that_does_not_waterlog_stays_out_of_shapes() {
+        let (tables, ids) = with(&[LAVA]);
+        let lava = ids[0];
+        let stair = Voxel::new(
+            STONE,
+            SHAPE_STAIR,
+            Orientation::new(crate::mesh::POS_Y, 1).bits(),
+        );
+        for (material, fills) in [(WATER, true), (lava, false)] {
+            let mut sim = corridor_of(tables.clone(), 1.0, 6.0);
+            sim.build([2, 1, 0], stair);
+            source(&mut sim, [2, 2, 0], material);
+            sim.settle();
+            assert_eq!(sim.fluid([2, 1, 0]).is_some(), fills, "{material}");
+            assert_eq!(sim.occupants([2, 1, 0]).solid, stair);
+        }
+        let pool = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(Fluid::source(lava)),
+            burning: None,
+        };
+        assert_eq!(pool.place_solid(stair, &tables).fluid, None);
+        let water = Occupants {
+            fluid: Some(Fluid::source(WATER)),
+            ..pool
+        };
+        assert!(water.place_solid(stair, &tables).fluid.is_some());
+        assert_eq!(
+            tables.vet_occupants(Occupants {
+                solid: stair,
+                ..pool
+            }),
+            Err(crate::PlaceFault::FluidExcluded)
+        );
     }
 }

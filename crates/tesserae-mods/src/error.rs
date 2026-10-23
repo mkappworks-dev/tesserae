@@ -1,7 +1,9 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use tesserae_core::{MaterialError, ParamError, ShapeError};
+use tesserae_core::{
+    CombustionError, FluidError, MaterialError, ParamError, ReactionError, ShapeError,
+};
 
 use crate::registry::Kind;
 use crate::trust::Untrusted;
@@ -95,6 +97,42 @@ pub enum ModError {
         row: usize,
         name: String,
         source: ShapeError,
+    },
+    /// A component whose exported contract line is not its Manifest's `api`.
+    LineMismatch {
+        id: String,
+        api: String,
+        exported: &'static str,
+    },
+    TooManyRows {
+        id: String,
+        what: &'static str,
+        count: usize,
+        max: usize,
+    },
+    /// A fluid, reaction or fire row names a Material no loaded Mod registered.
+    UnknownName {
+        id: String,
+        what: &'static str,
+        row: usize,
+        name: String,
+    },
+    Fluid {
+        id: String,
+        row: usize,
+        name: String,
+        source: FluidError,
+    },
+    Reaction {
+        id: String,
+        row: usize,
+        source: ReactionError,
+    },
+    Combustion {
+        id: String,
+        row: usize,
+        name: String,
+        source: CombustionError,
     },
 }
 
@@ -194,6 +232,43 @@ impl fmt::Display for ModError {
                 name,
                 source,
             } => write!(f, "mod `{id}`: Shape {row} `{name}`: {source}"),
+            ModError::LineMismatch { id, api, exported } => write!(
+                f,
+                "mod `{id}`: its Manifest says api {api}, but its component is built against {exported}"
+            ),
+            ModError::TooManyRows {
+                id,
+                what,
+                count,
+                max,
+            } => write!(
+                f,
+                "mod `{id}` declares {count} {what} rows, but at most {max} are allowed"
+            ),
+            ModError::UnknownName {
+                id,
+                what,
+                row,
+                name,
+            } => write!(
+                f,
+                "mod `{id}`: {what} {row} names Material `{name}`, which no loaded Mod registers"
+            ),
+            ModError::Fluid {
+                id,
+                row,
+                name,
+                source,
+            } => write!(f, "mod `{id}`: fluid {row} `{name}`: {source}"),
+            ModError::Reaction { id, row, source } => {
+                write!(f, "mod `{id}`: reaction {row}: {source}")
+            }
+            ModError::Combustion {
+                id,
+                row,
+                name,
+                source,
+            } => write!(f, "mod `{id}`: combustion {row} `{name}`: {source}"),
         }
     }
 }

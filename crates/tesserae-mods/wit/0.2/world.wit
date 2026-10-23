@@ -1,0 +1,7 @@
+package tesserae:mods@0.2.0;
+
+/// The one world a Mod is built against.
+world mod {
+    import host;
+    export guest;
+}

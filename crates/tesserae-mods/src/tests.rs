@@ -4,15 +4,17 @@ use futures_lite::future::block_on;
 use wasmtime::component::{Component, types::ComponentItem};
 use wasmtime::{Engine, Store};
 
-use crate::bindings::Mod;
-use crate::bindings::tesserae::mods::content::Declaration;
+use crate::bindings::v01::Mod;
+use crate::bindings::v01::tesserae::mods::content::Declaration;
 use crate::host::{HostState, engine, linker};
 
 mod alloc;
+mod behaviour;
 mod commands;
 mod convert;
 mod declare;
 mod export_version;
+mod lines;
 mod loading;
 mod sandbox;
 
@@ -68,9 +70,27 @@ fn hello_declares_nothing() {
 #[test]
 fn imports_are_host_and_wasi_only() {
     let engine = engine().unwrap();
-    let component = load(&engine, "hello");
-    let violations = import_violations(&engine, &component);
-    assert!(violations.is_empty(), "{violations:?}");
+    for guest in ["hello", "fluids"] {
+        let component = load(&engine, guest);
+        let violations = import_violations(&engine, &component);
+        assert!(violations.is_empty(), "{guest}: {violations:?}");
+    }
+}
+
+/// Each guest is told apart by the line it exports, whatever it is called.
+#[test]
+fn a_component_exports_the_line_it_was_built_against() {
+    use crate::Line;
+    let engine = engine().unwrap();
+    for (guest, line) in [
+        ("hello", Some(Line::V01)),
+        ("queue", Some(Line::V01)),
+        ("fluids", Some(Line::V02)),
+        ("bad-fluid", Some(Line::V02)),
+        ("naive", None),
+    ] {
+        assert_eq!(Line::of(&engine, &load(&engine, guest)), line, "{guest}");
+    }
 }
 
 fn import_violations(engine: &Engine, component: &Component) -> Vec<String> {
@@ -79,8 +99,11 @@ fn import_violations(engine: &Engine, component: &Component) -> Vec<String> {
         if name.starts_with("wasi:") {
             continue;
         }
-        let Some(prefix) = name.strip_suffix("@0.1.0") else {
-            violations.push(format!("{name}: not a 0.1.0 import"));
+        let Some(prefix) = name
+            .strip_suffix("@0.1.0")
+            .or_else(|| name.strip_suffix("@0.2.0"))
+        else {
+            violations.push(format!("{name}: not a 0.1.0 or 0.2.0 import"));
             continue;
         };
         let ComponentItem::ComponentInstance(instance) = item.ty else {

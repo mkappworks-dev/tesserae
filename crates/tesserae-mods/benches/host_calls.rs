@@ -17,7 +17,7 @@ use futures_lite::future::block_on;
 use tesserae_core::worldgen::STONE;
 use tesserae_core::{Tables, Voxel};
 use tesserae_mods::{
-    BatchReport, Command, Compiled, Declaration, ModHost, ModInstance, ModLimits, Placement,
+    BatchReport, Command, Compiled, Declaration, Line, ModHost, ModInstance, ModLimits, Placement,
     Registry, TickContext, Trust, apply, discover, plan, validate, voxel_index,
 };
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
@@ -229,11 +229,16 @@ impl Rig {
 
     fn tick_validated(&mut self, count: u32) -> usize {
         let batch = self.tick_commands(count);
-        validate(&batch, &self.tables, 1.0).unwrap().commands.len()
+        validate(&batch, Line::V01, &self.tables, 1.0)
+            .unwrap()
+            .commands
+            .len()
     }
 
     fn validate(&self, commands: &[Command]) -> u64 {
-        validate(commands, &self.tables, 1.0).unwrap().voxels
+        validate(commands, Line::V01, &self.tables, 1.0)
+            .unwrap()
+            .voxels
     }
 
     fn declare(&mut self) -> Declaration {

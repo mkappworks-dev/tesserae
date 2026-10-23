@@ -8,8 +8,8 @@ use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::Voxel;
 use tesserae_mods::{
-    BatchError, BatchReport, BoxCursor, CommandBatch, EditEvent, ModFault, ModInstance, Registry,
-    Resolved, TickContext, validate,
+    BatchError, BatchReport, BoxCursor, CommandBatch, EditEvent, Intent, ModFault, ModInstance,
+    Registry, Resolved, TickContext, validate,
 };
 
 use super::super::ContentTables;
@@ -32,6 +32,8 @@ pub(in crate::server) struct ModDisabled {
 #[derive(SystemSet, Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(in crate::server) struct Drain;
 
+/// Player Edits only, each with what it meant and its packed-Voxel
+/// projection; every Mod sees them through its own contract line.
 #[derive(Resource, Default)]
 pub(in crate::server) struct EditHistory {
     events: VecDeque<EditEvent>,
@@ -112,18 +114,21 @@ impl ModJobs {
 }
 
 enum Queued {
-    Fill(BoxCursor, Voxel),
+    Fill(BoxCursor, Intent),
     Place(std::vec::IntoIter<([i32; 3], Voxel)>),
 }
 
 impl Queued {
-    fn peek(&self) -> Option<([i32; 3], Voxel)> {
+    fn peek(&self) -> Option<([i32; 3], Intent)> {
         match self {
-            Self::Fill(cursor, voxel) => {
+            Self::Fill(cursor, intent) => {
                 let mut cursor = *cursor;
-                cursor.next().map(|at| (at, *voxel))
+                cursor.next().map(|at| (at, *intent))
             }
-            Self::Place(placements) => placements.as_slice().first().copied(),
+            Self::Place(placements) => placements
+                .as_slice()
+                .first()
+                .map(|&(at, voxel)| (at, Intent::Voxel(voxel))),
         }
     }
 
@@ -151,9 +156,9 @@ impl Queue {
         self.voxels += batch.voxels;
         for command in batch.commands {
             match command {
-                Resolved::Fill { region, voxel } => {
+                Resolved::Fill { region, intent } => {
                     self.commands
-                        .push_back(Queued::Fill(region.cursor(), voxel));
+                        .push_back(Queued::Fill(region.cursor(), intent));
                 }
                 Resolved::Place(placements) if !placements.is_empty() => {
                     self.commands
@@ -220,7 +225,7 @@ impl PendingCommands {
             let index = self.next;
             self.next = (index + 1) % count;
             let queue = &mut self.queues[index];
-            let Some((at, voxel)) = queue.commands.front().and_then(Queued::peek) else {
+            let Some((at, intent)) = queue.commands.front().and_then(Queued::peek) else {
                 skipped += 1;
                 continue;
             };
@@ -230,7 +235,7 @@ impl PendingCommands {
                 skipped += 1;
                 continue;
             }
-            let result = edit::set_voxel(store, meshes, tables, at, voxel);
+            let result = edit::apply_intent(store, meshes, tables, at, intent);
             let counter = if result.is_ok() {
                 &mut queue.report.applied
             } else {
@@ -379,9 +384,10 @@ fn dispatch(
         };
         let tables = Arc::clone(&tables.0);
         let size = world.voxel_size;
+        let line = instance.line();
         slot.running = Some(AsyncComputeTaskPool::get().spawn(async move {
             let (instance, commands) = instance.tick(context).await?;
-            let batch = validate(&commands, &tables, size);
+            let batch = validate(&commands, line, &tables, size);
             Ok(Landed {
                 instance,
                 batch,

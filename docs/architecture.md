@@ -141,12 +141,16 @@ tesserae/
 │   │   │   ├── flow.rs         sources, flow and recession: the kernel      ▸ 8
 │   │   │   ├── occupants.rs    fluid and fire beside the Voxel, one reading ▸ 8
 │   │   │   ├── agenda.rs       bounded wakes; overflow rescans each Chunk  ▸ 8
+│   │   │   ├── reaction.rs     fluid contact rules, canonical, as data      ▸ 8
+│   │   │   ├── combustion.rs   heat, fuel and residue, as data              ▸ 8
 │   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
 │   ├── tesserae-mods/          NO Bevy, NO wgpu — sandbox + validation     ▸ 7
-│   │   ├── wit/                tesserae:mods@0.1.0, world mod
+│   │   ├── wit/0.1/            tesserae:mods@0.1.0, closed, world mod
+│   │   ├── wit/0.2/            tesserae:mods@0.2.0: fluids, sources, fire  ▸ 8
 │   │   ├── src/                loader, Trust, Registry, async calls, limits
+│   │   │   ├── adapt.rs        the 0.1 line carried to 0.2 and back        ▸ 8
 │   │   │   └── command.rs      pure batch validation, VoxelBox + BoxCursor
 │   │   ├── tests/guests/       independent WASI sandbox fixtures
 │   │   └── benches/            host crossings + native validation

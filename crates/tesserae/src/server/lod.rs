@@ -2190,7 +2190,11 @@ mod tests {
             },
             voxel: stone(),
         };
-        crate::server::mods::runtime::tests::drain_validated(&mut h.app, &[command]);
+        crate::server::mods::runtime::tests::drain_validated(
+            &mut h.app,
+            tesserae_mods::Line::V02,
+            &[command],
+        );
         let (ready, _) = h.lod_settle();
         assert!(!same_chunk(&before, &h.cover_arc(covering)));
         assert!(same_chunk(

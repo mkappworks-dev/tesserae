@@ -449,8 +449,7 @@ mod tests {
     fn with_materials(shapes: &ShapeTable) -> Tables {
         Tables {
             shapes: shapes.clone(),
-            materials: crate::material::MaterialTable::builtin(),
-            fluids: crate::fluid::FluidTable::builtin(),
+            ..Tables::builtin()
         }
     }
 
