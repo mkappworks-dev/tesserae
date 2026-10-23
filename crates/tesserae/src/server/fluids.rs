@@ -44,7 +44,10 @@
 //! solid, fire or hot fluid wakes the fuel within that radius (only in
 //! Chunks whose palette holds fuel), and an ignition is stale if an event
 //! touched anything in it. A Chunk arriving, leaving or changing past the
-//! journal rescans the fuel within reach of it.
+//! journal rescans the fuel within reach of it. Whether fuel is wet is read
+//! from its six faces, which flow's reads already cover once fuel is
+//! registered, so a change of fluid beside fuel wakes it and stales what it
+//! proposed like any other change of what it reads.
 //!
 //! **Reactions.** A reaction is one [`Proposal`]: its consumed Voxel's whole
 //! result, depending on the participant it keeps. It is chosen, bounded and
@@ -118,7 +121,7 @@ pub(in crate::server) struct FluidSim {
     cursors: BTreeMap<[i32; 3], Cell>,
     scale: Option<Arc<FlowScale>>,
     /// What an evaluation reads: wider with connected Shapes registered, and
-    /// with reactions, which touch the Voxel below too.
+    /// with reactions or fuel, which touch the Voxel below too.
     reach: Reach,
     quota: Quota,
     jobs_in_flight: usize,

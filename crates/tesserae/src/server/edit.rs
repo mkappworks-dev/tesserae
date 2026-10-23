@@ -119,7 +119,7 @@ pub enum RejectReason {
     /// Ignition of a Material with no combustion declaration.
     NotFlammable,
     AlreadyBurning,
-    /// Ignition of fuel an extinguishing fluid stands beside.
+    /// Ignition of fuel an extinguishing fluid touches.
     Wet,
     /// Extinguishing where nothing burns.
     NotBurning,
@@ -466,10 +466,10 @@ pub(in crate::server) fn without_source(here: Occupants) -> Result<Occupants, Re
     })
 }
 
-/// Declared fuel set alight with its whole fuel, unless an extinguishing
-/// fluid in its voids protects it. From there it burns as fire caught from
-/// heat does (`tesserae_core::fire`).
-fn ignite(here: Occupants, tables: &Tables) -> Result<Occupants, RejectReason> {
+/// Declared fuel set alight with its whole fuel, unless it is `wet`: an
+/// extinguishing fluid touches it (`tesserae_core::fire::is_wet`). From there
+/// it burns as fire caught from heat does.
+fn ignite(here: Occupants, wet: bool, tables: &Tables) -> Result<Occupants, RejectReason> {
     if here.solid.is_air() {
         return Err(RejectReason::NoFuel);
     }
@@ -480,7 +480,7 @@ fn ignite(here: Occupants, tables: &Tables) -> Result<Occupants, RejectReason> {
     if here.burning.is_some() {
         return Err(RejectReason::AlreadyBurning);
     }
-    if tesserae_core::fire::is_wet(tables, &here) {
+    if wet {
         return Err(RejectReason::Wet);
     }
     Ok(Occupants {
@@ -520,7 +520,7 @@ pub(in crate::server) fn apply_intent(
         Intent::Voxel(_) => unreachable!("placed above"),
         Intent::Source(material) => with_source(here, material, tables)?,
         Intent::RemoveSource => without_source(here)?,
-        Intent::Ignite => ignite(here, tables)?,
+        Intent::Ignite => ignite(here, tesserae_core::fire::is_wet(store, tables, at), tables)?,
         Intent::Extinguish => extinguish(here)?,
     };
     set_occupants(store, meshes, tables, at, next)
@@ -1963,7 +1963,26 @@ mod tests {
         assert!(with_source(at(stair(), None), water, &tables).is_ok());
         assert_eq!(without_source(at(air, flow)), Err(RejectReason::NoSource));
 
-        let lit = ignite(at(stair(), None), &tables).unwrap();
+        // Alone in air, so only its own voids can wet it.
+        struct Alone((Voxel, Overlay));
+        impl tesserae_core::flow::CellView for Alone {
+            fn stored(&self, at: [i32; 3]) -> Option<(Voxel, Overlay)> {
+                Some(if at == [0; 3] {
+                    self.0
+                } else {
+                    (Voxel::AIR, Overlay::NONE)
+                })
+            }
+        }
+        let ignite_alone = |here: Occupants| {
+            let alone = Alone(here.encode(&tables.fluids));
+            ignite(
+                here,
+                tesserae_core::fire::is_wet(&alone, &tables, [0; 3]),
+                &tables,
+            )
+        };
+        let lit = ignite_alone(at(stair(), None)).unwrap();
         assert_eq!(lit.burning, Some(Burning { fuel: 64 }));
         assert_eq!(lit.solid, stair());
         for (here, reason) in [
@@ -1972,14 +1991,14 @@ mod tests {
             (lit, RejectReason::AlreadyBurning),
             (at(stair(), flow), RejectReason::Wet),
         ] {
-            assert_eq!(ignite(here, &tables), Err(reason), "{here:?}");
+            assert_eq!(ignite_alone(here), Err(reason), "{here:?}");
         }
         let oily = Some(Fluid {
             material: oil,
             ..flowing
         });
         assert!(
-            ignite(at(stair(), oily), &tables).is_ok(),
+            ignite_alone(at(stair(), oily)).is_ok(),
             "a fluid that does not extinguish does not protect"
         );
         assert_eq!(extinguish(lit).unwrap().burning, None);

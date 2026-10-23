@@ -243,8 +243,8 @@ pub struct Reach {
     /// A connected Shape is registered: its arms, and so its voids, depend on
     /// the solids across its faces.
     pub connected: bool,
-    /// A reaction is registered: a Voxel touches all six neighbours, the one
-    /// below included.
+    /// A reaction or a fuel is registered: a Voxel touches all six
+    /// neighbours, the one below included, and fluid against fuel wets it.
     pub contacts: bool,
 }
 
@@ -252,7 +252,7 @@ impl Reach {
     pub fn of(tables: &Tables) -> Reach {
         Reach {
             connected: tables.shapes.any_connected(),
-            contacts: !tables.reactions.is_empty(),
+            contacts: !tables.reactions.is_empty() || !tables.combustion.is_empty(),
         }
     }
 
@@ -609,8 +609,11 @@ fn evaluate(
         Contact::Blocked => cont.work.blocked += 1,
         Contact::None | Contact::Unknown => {}
     }
+    let paused = cont.work.paused;
     let flowed = flow_change(view, tables, scale, at, cont);
     let burnt = fire::evaluate(view, tables, &scale.heat, at, cont);
+    // Flow and fire may both meet the same unknown terrain.
+    cont.work.paused = cont.work.paused.min(paused + 1);
     let Some(here) = flowed.map(|(here, _)| here).or(burnt.map(|b| b.here)) else {
         return;
     };

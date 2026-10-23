@@ -369,15 +369,22 @@ declaration allows it.
 Replacing or removing fuel ends its fire. A deliberately permanent source
 requires explicit declaration rather than an accidental fire cycle.
 
-Extinguishing fluid anywhere in a Voxel's accessible voids protects its whole
-solid fuel from ignition and extinguishes existing burning, resetting ignition
-progress. This deliberately follows a whole-Voxel wet-fuel rule: a wet part
-protects a dry part of the same Shape, and fuel consumption never requires
-partial destruction of that Shape. Fluid must actually reach a void; it
-cannot suppress fuel in a neighboring Voxel through a solid partition.
-Displacing the fluid permits later reignition after the normal delay. Other
-fluids' extinguishing behavior is declarative. Heat and extinguishing obey
-loaded-boundary and geometry rules.
+Extinguishing fluid touching a Voxel's solid fuel protects the whole fuel from
+ignition and extinguishes existing burning, resetting ignition progress. It
+touches from anywhere in the Voxel's own accessible voids, or from an accessible
+void of a face-adjacent neighboring cell that reaches the shared face where the
+fuel's solid covers it: water pooled against a cube's side, standing on its top,
+or running past it. A neighboring full cell of fluid reaches the whole shared
+face. This deliberately follows a whole-Voxel wet-fuel rule: contact on any one
+face, or a wet part, protects a dry part of the same fuel, and fuel consumption
+never requires partial destruction of its Shape. Fluid must actually reach the
+fuel: fluid behind a neighbor's sealed face or partition, or in a void of the
+neighbor that does not reach the shared face, does not count, and nothing
+suppresses fuel through a solid partition. Flowing and source fluid both count.
+A neighbor in terrain that is not loaded never counts as wet, and fuel beside
+one decides nothing until it is loaded. Displacing the fluid permits later
+reignition after the normal delay. Other fluids' extinguishing behavior is
+declarative. Heat and extinguishing obey loaded-boundary and geometry rules.
 
 Proposed demo settings use 2 m heat reach, a 2 s ignition delay, an 8 s burn
 duration, and a declared residue. These are demonstration tuning, not a new
@@ -564,3 +571,10 @@ is the behavior explicitly selected for Tesserae.
   These are engineering recommendations awaiting document approval.
 - 2026-10-22: reviewed as written; no ticket was merged or split. Every ticket
   is ready-for-agent and 01 is the only unblocked one.
+- 2026-10-23: the user approved an amendment to decision 10. Fuel was wet only
+  when an extinguishing fluid stood in its own voids, and a full cube has none,
+  so water could never put out or protect the most common fuel, defeating user
+  story 17. In Minecraft and Luanti fire lives in the open cell beside its fuel,
+  so water flowing into that cell puts it out. Fluid in a neighboring void that
+  reaches the fuel's face now wets it too; the rest of the whole-Voxel rule and
+  its geometry are unchanged.

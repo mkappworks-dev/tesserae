@@ -324,6 +324,15 @@ impl VoxelVolume for ChunkStore {
     }
 }
 
+/// Every held Chunk, as a Command reads the cells around its target.
+impl tesserae_core::flow::CellView for ChunkStore {
+    fn stored(&self, at: [i32; 3]) -> Option<(Voxel, Overlay)> {
+        let at = VoxelCoord::of(at);
+        let voxel = self.get(at.chunk)?.get(at.x, at.y, at.z);
+        Some((voxel, self.overlay(at.chunk)?.get(at.x, at.y, at.z)))
+    }
+}
+
 impl LightVolume for LightLattice<'_> {
     fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
         self.store.optical(at)

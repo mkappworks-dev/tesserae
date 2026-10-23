@@ -208,3 +208,75 @@ and evidence under Comments. Use the required Conventional Commit and trailer.
   wet fuel are new nouns for CONTEXT.md; the durable inventory should count
   fire timers (ignition progress, fuel left) with flow's. No live capture of
   a burning fixture yet.
+
+### 2026-10-23: amendment, water against a face wets fuel
+
+- The user approved amending spec decision 10 on 2026-10-23 (spec Comments): a
+  full cube has no void, so the rule above never let water put out or protect
+  one. Fuel is now also wet when an extinguishing fluid stands in a void across
+  one of its faces that reaches the face where its solid covers it. The commit
+  is the one this comment lands in. Criteria and Status are unchanged; "no
+  suppression through neighboring walls" still holds.
+- Implementation:
+  - `fire::is_wet(view, tables, at)` (was `is_wet(tables, &Occupants)`) and the
+    evaluation's own check: the fuel's voids, else each face neighbour's wet
+    voids that `against` gives, the open-square test exposure seeds from (now
+    shared). Source and flowing count; `extinguishes` per fluid decides as
+    before.
+  - A face neighbour nobody holds never wets; fuel beside one pauses (timer
+    dropped, `Work.paused`), so nothing ignites, burns out or goes out from
+    absent state. `flow::evaluate` counts one pause when flow and fire both meet
+    it.
+  - Reads: `Reach::of` sets `contacts` once fuel is registered, so flow's reads,
+    Snapshot, wakes (a change now wakes the Voxel above), `still_valid`
+    staleness and `readers_outside`/`reading_outside` cover all six faces; those
+    functions and their tests are unchanged. `HeatScale::radius` is 2 (faces and
+    their arms) when fuel is declared but no source reaches a threshold (was 0),
+    so admission and eviction rescans reach paused fuel. Water is not
+    heat-relevant: `alters_exposure`, `wake_fuel_around` and `fuel_spans_around`
+    are otherwise unchanged.
+  - `edit::ignite` takes `wet`; `apply_intent` asks `fire::is_wet` over the
+    store (`impl CellView for ChunkStore`), so the ignite Command (0.2 too)
+    refuses fuel water touches as `Wet`.
+  - Docs kept true: `fire.rs` and `fluids.rs` module docs,
+    `FluidDef::extinguishes`, the WIT 0.2 `extinguishes` doc,
+    `RejectReason::Wet`.
+- Verification: test functions core lib 316 (314), meshing 66, Mods 89 (three
+  ignored), `tesserae` binary 343 (341, one ignored); workspace 814 (810). Full
+  `scripts/cargo-ci` passed on the tree this commit records.
+  - Kernel: water beside, on top of and under a wood cube, at 1.0, 0.5 and 0.25
+    m, protects it under the brazier's heat (no progress kept), removing it
+    gives exactly a fresh 128-step delay, and water arriving puts the burning
+    cube out within 20 steps, still wood; a stair's sealed back, a partition
+    (water in the far void only) and a bottom slab's sealed floor do not wet the
+    cube, which catches, while a top slab's water does; beside unknown terrain
+    the cube never catches and keeps no progress, held again it catches a fresh
+    delay later, burning beside unknown water it neither burns out (past 512 +
+    128 steps) nor goes out, and held again the water puts it out.
+  - Server: a player-placed source three Voxels off runs against a burning cube
+    and puts it out long before burn-out, the wood stays wood, the light falls
+    and equals a fresh `light_cells`, and ignite is then refused `Wet`; a held
+    step due to burn wood out is dropped (stale rises) when water is put under
+    it during the hold, and the wood is put out instead of becoming ash.
+  - Changed: `water_next_door_does_not_protect_fuel` pinned the old rule and is
+    replaced. The Server stair test's water spread to the permanent brazier and
+    now puts it out, so the stair turns its back to the fire with its notch
+    walled in, as the kernel's reset test does. The edit unit test asks `is_wet`
+    over a lone cell.
+  - Mutation checks, each failing the tests named: neighbours never wet (cube,
+    sealed-face, unknown kernel tests; both Server tests); any wet neighbour
+    void counting without the face test (sealed-face test); unknown neighbours
+    counted as dry (unknown test); `contacts` not widened by fuel (cube test's
+    water-under case; Server held-step test); the stale check alone not widened
+    (Server held-step test); ignite not asking `is_wet` (Server stream test).
+- Limits and risks:
+  - Surface heights do not enter, as for reactions: a thin flowing film beside a
+    cube wets all of it.
+  - Burning fuel beside unloaded terrain burns on until it is held, and then
+    runs a whole burn again: its timer is dropped like flow's.
+  - For ticket 09, unmeasured: in any World that declares fuel (the demo does)
+    every flow evaluation reads, snapshots and stale-checks the Voxel below as
+    well, each fluid change wakes one Voxel more, and each fuel evaluation looks
+    at its six neighbours outside the exposure search's cache.
+  - For ticket 10: CONTEXT.md's wet fuel should say touching, own voids or
+    across a face.

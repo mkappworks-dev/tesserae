@@ -127,8 +127,10 @@ interface content {
         reset-drop-m: f32,
         /// Whether it stands in the empty space of partial Shapes.
         waterlogs: bool,
-        /// Whether it puts out burning fuel whose Voxel it stands in, and keeps
-        /// that fuel from igniting. A hot fluid cannot extinguish.
+        /// Whether it puts out burning fuel it touches, and keeps that fuel
+        /// from igniting: standing in the fuel's Voxel, or across one of its
+        /// faces against the solid, never through a sealed face or a
+        /// partition. A hot fluid cannot extinguish.
         extinguishes: bool,
         heat: option<heat-def>,
     }

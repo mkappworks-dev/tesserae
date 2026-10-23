@@ -28,8 +28,8 @@ pub struct FluidDef {
     /// Whether it stands in the voids of a partial Shape. A fluid that does
     /// not is displaced by any solid and flows around them.
     pub waterlogs: bool,
-    /// Whether it puts out burning fuel it stands beside in a Voxel and keeps
-    /// that fuel from igniting.
+    /// Whether it puts out burning fuel it touches, in the fuel's voids or
+    /// across a face against the solid, and keeps that fuel from igniting.
     pub extinguishes: bool,
     /// Exposure it gives off; `None` for a cold fluid.
     pub heat: Option<Heat>,

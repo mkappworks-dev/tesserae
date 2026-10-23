@@ -526,20 +526,154 @@ fn a_wet_part_of_a_shape_protects_its_dry_part_and_puts_it_out() {
     assert_eq!(material(&sim, [1, 1, 0]), ids.wood, "put out, not burnt");
 }
 
-/// Water in the next Voxel touches a wood cube's face but stands in no void
-/// of its own: the cube is not protected and catches as if dry.
-#[test]
-fn water_next_door_does_not_protect_fuel() {
+/// A wood cube two Voxels from a burning brazier, water in a void across one
+/// of its faces: `water` beside it, on top of it or under it, in a pocket of
+/// its own so it stays.
+fn cube_against_water(v: f32, water: Cell) -> (Sim, Ids) {
     let (tables, ids) = hearth_tables(BRAZIER, false);
-    let mut sim = tunnel(tables, 1.0, 4);
+    let mut sim = tunnel(tables, v, 4);
     sim.build([4, 1, 0], stone());
     sim.build([0, 1, 0], cube(ids.brazier));
     light(&mut sim, [0, 1, 0]);
+    sim.build(water, Voxel::AIR);
+    sim.place_source(water);
     sim.build([2, 1, 0], cube(ids.wood));
-    sim.place_source([3, 1, 0]);
     sim.wake_all();
-    let caught = until(&mut sim, 1000, |s| burning(s, [2, 1, 0]));
-    assert_eq!(caught, Some(DELAY), "a neighbour's water protected it");
+    (sim, ids)
+}
+
+/// Water against a cube wets the whole of it, though a cube has no void of
+/// its own: beside it, on top of it or under it, the cube never catches under
+/// the heat, keeps no ignition progress, and catches a whole fresh delay
+/// after the water goes. Water arriving against a burning cube puts it out
+/// within steps and leaves the wood.
+#[test]
+fn water_against_a_cube_protects_it_and_puts_it_out() {
+    let wood = [2, 1, 0];
+    for v in SIZES {
+        for water in [[3, 1, 0], [2, 2, 0], [2, 0, 0]] {
+            let (mut sim, ids) = cube_against_water(v, water);
+            assert!(exposure(&sim, wood) >= 6, "{v} m {water:?}: no heat");
+            assert!(crate::fire::is_wet(&sim.grid, &sim.tables, wood));
+            sim.run(DELAY * 3);
+            assert!(!burning(&sim, wood), "{v} m {water:?}: wet fuel caught");
+            assert_eq!(sim.timers.fires(), 0, "{v} m {water:?}: progress kept");
+
+            sim.remove_fluid(water);
+            let caught = until(&mut sim, 1000, |s| burning(s, wood));
+            assert_eq!(caught, Some(DELAY), "{v} m {water:?}: not a fresh delay");
+            sim.place_source(water);
+            let out = until(&mut sim, 20, |s| !burning(s, wood));
+            assert!(out.is_some(), "{v} m {water:?}: water did not put it out");
+            assert_eq!(material(&sim, wood), ids.wood, "put out, not burnt");
+        }
+    }
+}
+
+/// Water reaching a neighbour's void that does not meet the cube's face does
+/// not wet it: behind a stair's sealed back, behind a partition in a void
+/// cut off from the face, or above a bottom slab's sealed floor. The same
+/// slab the other way up holds its water against the cube and wets it.
+#[test]
+fn water_behind_a_sealed_face_or_a_partition_does_not_wet_the_cube() {
+    let slab = |up| Voxel::new(STONE, SHAPE_SLAB, Orientation::new(up, 0).bits());
+    for (case, wets) in [
+        ("stair back", false),
+        ("partition", false),
+        ("bottom slab above", false),
+        ("top slab above", true),
+    ] {
+        let (mut tables, ids) = hearth_tables(BRAZIER, false);
+        let wall = tables
+            .shapes
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
+                collision: None,
+            })
+            .unwrap();
+        let mut sim = tunnel(tables, 1.0, 4);
+        sim.build([0, 1, 0], cube(ids.brazier));
+        light(&mut sim, [0, 1, 0]);
+        let wood = [2, 1, 0];
+        sim.build(wood, cube(ids.wood));
+        let water = match case {
+            "stair back" => {
+                let back = (0..4)
+                    .map(|t| Voxel::new(STONE, SHAPE_STAIR, Orientation::new(POS_Y, t).bits()))
+                    .find(|&v| sim.tables.shapes.seals(v, crate::mesh::NEG_X))
+                    .unwrap();
+                sim.build([3, 1, 0], back);
+                [3, 1, 0]
+            }
+            "partition" => {
+                sim.build([3, 1, 0], Voxel::new(STONE, wall, 0));
+                [4, 1, 0]
+            }
+            "bottom slab above" => {
+                sim.build([2, 2, 0], slab(POS_Y));
+                [2, 2, 0]
+            }
+            _ => {
+                sim.build([2, 2, 0], slab(crate::mesh::NEG_Y));
+                [2, 2, 0]
+            }
+        };
+        sim.place_source(water);
+        sim.wake_all();
+        sim.run(DELAY / 2);
+        assert_eq!(
+            crate::fire::is_wet(&sim.grid, &sim.tables, wood),
+            wets,
+            "{case}"
+        );
+        if case == "partition" {
+            let f = sim.fluid([3, 1, 0]).expect("the far void fills");
+            assert!(f.level(1).is_wet() && !f.level(0).is_wet(), "{f:?}");
+        }
+        sim.run(2 * DELAY);
+        assert_eq!(burning(&sim, wood), !wets, "{case}");
+    }
+}
+
+/// Water in terrain nobody holds never wets fuel, and fuel beside unknown
+/// terrain decides nothing: unburning, it keeps no ignition progress and
+/// never catches; burning, it neither burns out nor goes out. Once the
+/// terrain is held again the water puts the fire out, and dry fuel catches a
+/// whole fresh delay later.
+#[test]
+fn unknown_terrain_never_wets_fuel_and_fuel_beside_it_waits() {
+    let wood = [2, 1, 0];
+    let (mut sim, ids) = cube_against_water(1.0, [3, 1, 0]);
+    sim.remove_fluid([3, 1, 0]);
+    sim.grid.max[0] = 2;
+    sim.wake_all();
+    sim.run(3 * DELAY);
+    assert!(!burning(&sim, wood), "caught beside unknown terrain");
+    assert_eq!(
+        sim.timers.fires(),
+        0,
+        "progress kept beside unknown terrain"
+    );
+    assert!(sim.work.paused > 0);
+    sim.grid.max[0] = 5;
+    sim.wake_all();
+    let caught = until(&mut sim, 1000, |s| burning(s, wood));
+    assert_eq!(caught, Some(DELAY), "not a fresh delay once held");
+
+    sim.place_source([3, 1, 0]);
+    sim.grid.max[0] = 2;
+    assert!(!crate::fire::is_wet(&sim.grid, &sim.tables, wood));
+    sim.wake_all();
+    sim.run(BURN + DELAY);
+    assert!(burning(&sim, wood), "decided from unknown terrain");
+    assert_eq!(material(&sim, wood), ids.wood, "burnt out beside unknown");
+    assert_eq!(sim.timers.fires(), 0);
+    sim.grid.max[0] = 5;
+    sim.wake_all();
+    let out = until(&mut sim, 20, |s| !burning(s, wood));
+    assert!(out.is_some(), "the water, held again, did not put it out");
+    assert_eq!(material(&sim, wood), ids.wood);
 }
 
 /// Waterlogging a wood stair halfway through its delay resets its progress;

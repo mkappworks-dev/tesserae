@@ -34,10 +34,14 @@
 //! Orientation, or the solid goes if the residue is air. A permanent fire
 //! never runs out. Burning emits its declared block light and heat.
 //!
-//! **Wet.** An extinguishing fluid in any of the Voxel's own voids protects
-//! the whole fuel and puts out its fire at once, with no residue: a wet part
-//! of a Shape protects its dry part. Fluid next door, across a face, does not:
-//! it is not in the fuel's Voxel. A full cube has no void and is never wet.
+//! **Wet.** An extinguishing fluid touching the fuel protects the whole of it
+//! and puts out its fire at once, with no residue: a wet part of a Shape
+//! protects its dry part. It touches from any of the Voxel's own voids, or
+//! from a void across one of its faces that meets the solid there, so water
+//! against a cube's side, on its top or under it wets it, while water behind
+//! a neighbour's sealed face or partition does not. Fire lives in the open
+//! space beside fuel, and a full cube has no void of its own. A fuel beside
+//! terrain nobody holds decides nothing, as flow beside it does.
 //!
 //! **Reads.** An exposure search reads as far as [`HeatScale::radius`], wider
 //! than flow's [`crate::flow::reads`]: a change of solid, fire or hot fluid
@@ -50,7 +54,7 @@ use crate::agenda::{Agenda, Span};
 use crate::combustion::{Burn, Heat};
 use crate::flow::{Cell, CellView, Continuation, STEP_S, Seen, Step, Work, look, step_by};
 use crate::mesh::FACE_STEPS;
-use crate::occupants::{Burning, Occupants};
+use crate::occupants::{Burning, Fluid, Occupants};
 use crate::shape::FaceMask;
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -143,10 +147,14 @@ impl HeatScale {
 
     /// How far, in Voxels along any axis, a fuel's evaluation reads: the
     /// deepest search, one more for the fuel's own surface and the burning
-    /// solids beside a void, and one more for a connected Shape's arms. A
-    /// change within this of a fuel can change its exposure.
+    /// solids beside a void, and one more for a connected Shape's arms; with
+    /// no search at all, still its faces and their arms, which say whether it
+    /// is wet. A change within this of a fuel can change its exposure.
     pub fn radius(&self) -> i32 {
-        self.steps.map_or(0, |k| k as i32 + 3)
+        if !self.fuel {
+            return 0;
+        }
+        self.steps.map_or(2, |k| k as i32 + 3)
     }
 
     /// Exposure `k` steps from `source` while it gives off heat.
@@ -220,12 +228,41 @@ pub(crate) struct Burnt {
     pub heated: bool,
 }
 
-/// Whether an extinguishing fluid stands in any of the Voxel's own voids.
-pub fn is_wet(tables: &Tables, occupants: &Occupants) -> bool {
-    occupants
-        .fluid
-        .and_then(|f| tables.fluids.get(f.material))
-        .is_some_and(|f| f.extinguishes)
+fn extinguishes(tables: &Tables, fluid: Option<Fluid>) -> Option<Fluid> {
+    fluid.filter(|f| {
+        tables
+            .fluids
+            .get(f.material)
+            .is_some_and(|d| d.extinguishes)
+    })
+}
+
+/// Whether an extinguishing fluid touches the solid at `at`, `fuel` as seen
+/// there: in its own voids, or across a face where it meets the solid. `None`
+/// when it is dry where held and a neighbour is not held.
+fn wetness(view: &impl CellView, tables: &Tables, at: Cell, fuel: &Seen) -> Option<bool> {
+    if extinguishes(tables, fuel.occupants.fluid).is_some() {
+        return Some(true);
+    }
+    let mut unknown = false;
+    for (face, d) in FACE_STEPS.into_iter().enumerate() {
+        let Some(other) = look(view, tables, step_by(at, d)) else {
+            unknown = true;
+            continue;
+        };
+        if let Some(f) = extinguishes(tables, other.occupants.fluid)
+            && against(fuel, face, &other).any(|j| f.level(j).is_wet())
+        {
+            return Some(true);
+        }
+    }
+    (!unknown).then_some(false)
+}
+
+/// Whether an extinguishing fluid touches the solid at `at`, as [`evaluate`]
+/// decides it: terrain nobody holds never counts.
+pub fn is_wet(view: &impl CellView, tables: &Tables, at: Cell) -> bool {
+    look(view, tables, at).is_some_and(|seen| wetness(view, tables, at, &seen) == Some(true))
 }
 
 /// Thermal evaluation of `at`, sharing the step's timers, wakeups and work.
@@ -254,7 +291,10 @@ pub(crate) fn evaluate(
         return idle(cont);
     };
     cont.work.fuel += 1;
-    let wet = is_wet(tables, &here);
+    let Some(wet) = wetness(view, tables, at, &seen) else {
+        cont.work.paused += 1;
+        return idle(cont);
+    };
     let (want, delay, heated) = match here.burning {
         Some(_) if wet => (Fire::Extinguish, 1, false),
         Some(burning) => match def.burn {
@@ -312,6 +352,14 @@ fn surface(seen: &Seen, face: usize) -> FaceMask {
         .complement()
 }
 
+/// The voids of `other`, across face `face` of `solid`, that meet its surface
+/// there: the space touching it from that side.
+fn against<'a>(solid: &Seen, face: usize, other: &Seen<'a>) -> impl Iterator<Item = usize> + 'a {
+    let covered = surface(solid, face);
+    let voids = other.voids;
+    (0..voids.len()).filter(move |&j| voids[j].open[face ^ 1].intersects(&covered))
+}
+
 /// The strongest exposure reaching the space the fuel at `at` touches, by a
 /// breadth-first search of open space that stops as soon as nothing farther
 /// could be stronger.
@@ -341,9 +389,8 @@ fn exposure(
         let Some(other) = lookup(beside) else {
             continue;
         };
-        let covered = surface(fuel, face);
-        for (j, void) in other.voids.iter().enumerate() {
-            if void.open[face ^ 1].intersects(&covered) && visited.insert((beside, j)) {
+        for j in against(fuel, face, &other) {
+            if visited.insert((beside, j)) {
                 frontier.push((beside, j));
             }
         }

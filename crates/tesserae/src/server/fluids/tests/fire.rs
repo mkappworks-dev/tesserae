@@ -2,6 +2,8 @@
 //! landing as flow, the one World change, and light and Chunk lifetimes.
 
 use super::*;
+use tesserae_core::mesh::{NEG_X, POS_Y};
+use tesserae_core::shape::Orientation;
 use tesserae_core::{Burn, CombustionDef, Heat, MaterialDef, Occlusion, RenderClass};
 use tesserae_mods::Intent;
 
@@ -79,8 +81,12 @@ fn tables_of(f: &Fixture) -> Arc<Tables> {
 
 /// A solid at `x` along the corridor through the one World change.
 fn put(f: &mut Fixture, x: i32, voxel: Voxel) {
-    let tables = tables_of(f);
     let at = [f.cx + x, Y, Z];
+    put_at(f, at, voxel);
+}
+
+fn put_at(f: &mut Fixture, at: Cell, voxel: Voxel) {
+    let tables = tables_of(f);
     f.app
         .world_mut()
         .resource_scope(|world, mut store: Mut<ChunkStore>| {
@@ -91,8 +97,12 @@ fn put(f: &mut Fixture, x: i32, voxel: Voxel) {
 
 /// A Mod's ignite or extinguish of `x`, through the same rules and change.
 fn command(f: &mut Fixture, x: i32, intent: Intent) -> Result<(), RejectReason> {
-    let tables = tables_of(f);
     let at = [f.cx + x, Y, Z];
+    command_at(f, at, intent)
+}
+
+fn command_at(f: &mut Fixture, at: Cell, intent: Intent) -> Result<(), RejectReason> {
+    let tables = tables_of(f);
     f.app
         .world_mut()
         .resource_scope(|world, mut store: Mut<ChunkStore>| {
@@ -186,15 +196,20 @@ fn fire_spreads_burns_out_and_its_light_comes_and_goes_as_a_fresh_solve_would() 
 /// Burning wood in a stair beside a brazier, waterlogged with the player's
 /// fluid tool, goes out and its light with it, as a fresh solve gives it; the
 /// stair stays wood. Taking the water out lets it catch again a whole fresh
-/// delay later.
+/// delay later. Its back is to the fire and its notch walled in, so the water
+/// stays in it and never reaches the brazier, which it would put out.
 #[test]
 fn water_puts_a_burning_stair_out_and_drying_it_relights_after_a_fresh_delay() {
     let (tables, fuel) = fire_tables(0);
     let mut f = Fixture::with_tables(1.0, 6.0, 16, tables.clone());
     let home = ChunkCoord::new(0, 0, 0);
-    let stair = Voxel::new(fuel.wood, SHAPE_STAIR, 0);
+    let stair = (0..4)
+        .map(|t| Voxel::new(fuel.wood, SHAPE_STAIR, Orientation::new(POS_Y, t).bits()))
+        .find(|&v| tables.shapes.seals(v, NEG_X))
+        .unwrap();
     put(&mut f, -2, Voxel::cube(fuel.brazier));
     put(&mut f, 0, stair);
+    put(&mut f, 1, stone());
     settle_light(&mut f, home, &tables);
     assert_eq!(command(&mut f, -2, Intent::Ignite), Ok(()));
     let caught = steps_until(&mut f, |f| burning(f, 0));
@@ -221,6 +236,25 @@ fn water_puts_a_burning_stair_out_and_drying_it_relights_after_a_fresh_delay() {
     assert!(f.rejections().is_empty());
 }
 
+/// Ticks until step `step` is under way and holds its workers there, for the
+/// caller to release.
+fn hold_at(f: &mut Fixture, step: Step) -> Arc<crate::server::jobs::Gate> {
+    let started = Instant::now();
+    let hold = Arc::clone(&f.sim_mut().job().hold);
+    while f.sim().now() + 1 < step || f.sim().job.in_flight() > 0 {
+        f.tick();
+        assert!(started.elapsed() < CEILING);
+        f.wait_if_running();
+    }
+    hold.hold();
+    while f.sim().job.in_flight() == 0 {
+        f.tick();
+        assert!(started.elapsed() < CEILING);
+    }
+    assert_eq!(f.sim().now(), step, "the held step is the due one");
+    hold
+}
+
 /// A held step that read the brazier and is due to set the wood alight lands
 /// nothing after the player breaks the brazier, and the wood never catches.
 /// A held step due to burn wood out lands no ash after the player has put
@@ -234,22 +268,7 @@ fn an_older_job_cannot_light_fuel_whose_heat_is_gone_or_burn_out_replaced_fuel()
     let lit_at = f.sim().now();
     assert_eq!(command(&mut f, -2, Intent::Ignite), Ok(()));
     let proposing = lit_at + DELAY;
-    let started = Instant::now();
-    let hold = Arc::clone(&f.sim_mut().job().hold);
-    let hold_at = |f: &mut Fixture, step: Step| {
-        while f.sim().now() + 1 < step || f.sim().job.in_flight() > 0 {
-            f.tick();
-            assert!(started.elapsed() < CEILING);
-            f.wait_if_running();
-        }
-        hold.hold();
-        while f.sim().job.in_flight() == 0 {
-            f.tick();
-            assert!(started.elapsed() < CEILING);
-        }
-        assert_eq!(f.sim().now(), step, "the held step is the due one");
-    };
-    hold_at(&mut f, proposing);
+    let hold = hold_at(&mut f, proposing);
     assert!(!burning(&f, 0), "caught early");
     f.send(-2, EditAction::Break);
     f.apply_intents();
@@ -266,7 +285,7 @@ fn an_older_job_cannot_light_fuel_whose_heat_is_gone_or_burn_out_replaced_fuel()
     assert_eq!(command(&mut f, -2, Intent::Ignite), Ok(()));
     steps_until(&mut f, |f| burning(f, 0));
     let burnt_at = f.sim().now() + BURN - 1;
-    hold_at(&mut f, burnt_at);
+    let hold = hold_at(&mut f, burnt_at);
     put(&mut f, 0, stone());
     let stale = f.sim().stale;
     hold.release();
@@ -274,6 +293,66 @@ fn an_older_job_cannot_light_fuel_whose_heat_is_gone_or_burn_out_replaced_fuel()
     assert!(f.sim().stale > stale, "the burn-out was not dropped");
     assert_eq!(f.occupants(0).solid, stone(), "an old step left ash");
     assert!(!burning(&f, 0));
+}
+
+/// Burning wood, a cube, with water placed by the player's fluid tool a few
+/// Voxels off: the stream runs up against its face and puts it out long
+/// before it could burn out, the wood stays wood, the light goes as a fresh
+/// solve gives it, and the ignite Command then refuses it as wet.
+#[test]
+fn a_player_placed_stream_running_against_a_burning_cube_puts_it_out() {
+    let (tables, fuel) = fire_tables(15);
+    let mut f = Fixture::with_tables(1.0, 6.0, 16, tables.clone());
+    let home = ChunkCoord::new(0, 0, 0);
+    put(&mut f, 0, Voxel::cube(fuel.wood));
+    settle_light(&mut f, home, &tables);
+    assert_eq!(command(&mut f, 0, Intent::Ignite), Ok(()));
+    let block = |f: &Fixture| f.store().light_at([16 - 1, Y, Z]).block();
+    let lit = block(&f);
+    assert!(lit > 0, "the burning cube lit nothing");
+
+    f.send(3, EditAction::PlaceSource(WATER));
+    let out = steps_until(&mut f, |f| !burning(f, 0));
+    assert!(out < BURN / 2, "put out only after {out} steps");
+    assert!(f.fluid(1).is_some(), "the stream is not against the cube");
+    assert_eq!(f.occupants(0).solid, Voxel::cube(fuel.wood), "burnt out");
+    assert!(block(&f) < lit, "the light outlived the fire");
+    assert!(agrees_with_a_fresh_solve(&f, home, &tables));
+    assert_eq!(
+        command(&mut f, 0, Intent::Ignite),
+        Err(RejectReason::Wet),
+        "lit beside its water"
+    );
+    run_seconds(&mut f, 4.0);
+    assert!(!burning(&f, 0));
+    assert!(f.rejections().is_empty());
+}
+
+/// A held step due to burn wood out lands no ash once water has been put
+/// under the wood: what it read below has changed, so it is dropped, and the
+/// wood, woken by the water, is put out instead.
+#[test]
+fn an_older_job_cannot_burn_out_fuel_that_water_under_it_now_wets() {
+    let (tables, fuel) = fire_tables(15);
+    let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
+    let wood = [f.cx, Y + 1, Z];
+    put_at(&mut f, wood, Voxel::cube(fuel.wood));
+    f.settle();
+    let lit_at = f.sim().now();
+    assert_eq!(command_at(&mut f, wood, Intent::Ignite), Ok(()));
+    let hold = hold_at(&mut f, lit_at + BURN);
+    let below = [f.cx, Y, Z];
+    assert_eq!(command_at(&mut f, below, Intent::Source(WATER)), Ok(()));
+    let stale = f.sim().stale;
+    hold.release();
+    run_seconds(&mut f, 1.0);
+    assert!(f.sim().stale > stale, "the burn-out was not dropped");
+    let here = f
+        .store()
+        .occupants(wood, &tables_of(&f).fluids)
+        .expect("held");
+    assert_eq!(here.solid, Voxel::cube(fuel.wood), "an old step left ash");
+    assert!(here.burning.is_none(), "water under it did not put it out");
 }
 
 /// How finely a step is cut and how many workers share it change neither
