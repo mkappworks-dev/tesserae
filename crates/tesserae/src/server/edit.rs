@@ -378,11 +378,21 @@ fn resolve(
             ))
         }
         EditAction::PlaceSource(material) => {
+            // A Shape with room for fluid takes the source itself, keeping its
+            // solid; anything else gets it in front of the face struck.
+            let struck = store
+                .occupants(hit.at, &tables.fluids)
+                .ok_or(RejectReason::NotLoaded)?;
+            let into = if !struck.solid.is_air() && tables.shapes.void_slots(struck.solid) > 0 {
+                hit.at
+            } else {
+                in_front
+            };
             let there = store
-                .occupants(in_front, &tables.fluids)
+                .occupants(into, &tables.fluids)
                 .ok_or(RejectReason::NotLoaded)?;
             // Flow of the same fluid becomes the source; anything else stays.
-            let taken = !there.solid.is_air()
+            let taken = (into == in_front && !there.solid.is_air())
                 || there
                     .fluid
                     .is_some_and(|f| f.source || f.material != material);
@@ -390,7 +400,7 @@ fn resolve(
                 return Err(RejectReason::Occupied);
             }
             Ok((
-                in_front,
+                into,
                 Change::Fluid(Occupants {
                     fluid: Some(Fluid::source(material)),
                     ..there
@@ -457,15 +467,15 @@ pub(in crate::server) fn set_occupants(
         return Err(RejectReason::TooManyShaped);
     }
 
-    let seen = store.optical(at);
+    let seen = (store.optical(at), store.wet(at));
     store.set_overlay(place, overlay);
     if voxel != before {
         store.set_voxel(place, voxel);
     }
-    // Light reads fluid as it reads a cube of its Material, so water flowing in
-    // or receding relights though the packed Voxel stays air; a surface or reach
-    // change alone moves nothing.
-    if store.optical(at) != seen {
+    // Light reads fluid as it reads a cube of its Material, or combined with
+    // the solid it stands in, so water flowing in or receding relights though
+    // the packed Voxel stays; a surface or reach change alone moves nothing.
+    if (store.optical(at), store.wet(at)) != seen {
         let was = store.light_at(at);
         let mut lattice = LightLattice::new(store);
         relight(&mut lattice, tables, at, was);
@@ -474,7 +484,7 @@ pub(in crate::server) fn set_occupants(
             meshes.edited(coord);
         }
     }
-    store.note_changed(at);
+    store.note_changed(at, voxel != before);
 
     meshes.voxels_changed(place.chunk);
     meshes.edited(place.chunk);
@@ -516,13 +526,7 @@ pub(in crate::server) fn set_voxel(
     let now = store
         .occupants(at, &tables.fluids)
         .ok_or(RejectReason::NotLoaded)?;
-    set_occupants(
-        store,
-        meshes,
-        tables,
-        at,
-        now.place_solid(voxel, &tables.fluids),
-    )
+    set_occupants(store, meshes, tables, at, now.place_solid(voxel, tables))
 }
 
 #[cfg(test)]
@@ -1478,6 +1482,93 @@ mod tests {
             }
         );
         assert!(rejections(&mut app).is_empty());
+    }
+
+    /// The fluid tool waterlogs a Shape it strikes and takes the source back
+    /// out of it, the stair staying put each time; a stair that already holds
+    /// a source is occupied. Collision and picking read the packed Voxel, which
+    /// is the stair throughout.
+    #[test]
+    fn the_fluid_tool_waterlogs_a_struck_shape_and_drains_it() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        put_occupants(
+            &mut app,
+            [5, 8, 5],
+            Occupants {
+                solid: stair(),
+                fluid: None,
+                burning: None,
+            },
+        )
+        .1
+        .unwrap();
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        let wet = occupants_at(&app, [5, 8, 5]);
+        assert_eq!(
+            (wet.solid, wet.fluid),
+            (stair(), Some(Fluid::source(water)))
+        );
+        assert_eq!(voxel_at(&app, [5, 8, 5]), stair(), "what collision reads");
+        assert_eq!(occupants_at(&app, [5, 9, 5]).fluid, None);
+
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), vec![RejectReason::Occupied]);
+        assert_eq!(occupants_at(&app, [5, 8, 5]), wet);
+
+        send(&mut app, down(EditAction::RemoveSource));
+        tick(&mut app);
+        assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
+        assert_eq!(voxel_at(&app, [5, 8, 5]), stair());
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Placing a stair into a source keeps the source in its notch, breaking
+    /// the stair leaves the source standing, and a cube displaces it. A stair
+    /// refused at the shaped cap leaves the water exactly as it was.
+    #[test]
+    fn solid_edits_keep_or_displace_fluid_by_the_space_they_leave() {
+        let water = tesserae_core::material::WATER;
+        let mut store = ChunkStore::default();
+        store.insert(origin(), ground());
+        let mut meshes = MeshState::default();
+        let tables = Tables::builtin();
+        let at = [5, 8, 5];
+        set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(water)).unwrap();
+        set_voxel(&mut store, &mut meshes, &tables, at, stair()).unwrap();
+        let read = |store: &ChunkStore| store.occupants(at, &tables.fluids).unwrap();
+        assert_eq!(read(&store).fluid, Some(Fluid::source(water)));
+        assert_eq!(read(&store).solid, stair());
+        set_voxel(&mut store, &mut meshes, &tables, at, Voxel::AIR).unwrap();
+        assert_eq!(store.voxel(at), Some(Voxel::cube(water)), "a source again");
+        set_voxel(&mut store, &mut meshes, &tables, at, stair()).unwrap();
+        set_voxel(&mut store, &mut meshes, &tables, at, stone()).unwrap();
+        assert_eq!(read(&store).fluid, None);
+
+        let mut full = ground();
+        let mut placed = 0;
+        'fill: for y in 9..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    if placed == MAX_SHAPED_PER_CHUNK {
+                        break 'fill;
+                    }
+                    full.set(x, y, z, stair());
+                    placed += 1;
+                }
+            }
+        }
+        let mut store = ChunkStore::default();
+        store.insert(origin(), full);
+        set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(water)).unwrap();
+        let before = read(&store);
+        assert_eq!(
+            set_voxel(&mut store, &mut meshes, &tables, at, stair()),
+            Err(RejectReason::TooManyShaped)
+        );
+        assert_eq!(read(&store), before);
     }
 
     /// A source is placed on flowing water of its own kind, and the ray to do

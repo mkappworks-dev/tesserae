@@ -43,10 +43,12 @@ use std::sync::Arc;
 
 use bevy::prelude::*;
 use tesserae_core::agenda::{Agenda, Limits, Span};
+use tesserae_core::collide::VoxelVolume;
 use tesserae_core::flow::{
-    Advance, Cell, Continuation, DEPENDENTS, Finished, FlowScale, Proposal, Quota, READS, Region,
-    Step, Timers, Work, advance, chunk_of, readers_outside, reading_outside,
+    Advance, Cell, Continuation, Finished, FlowScale, Proposal, Quota, Region, Step, Timers, Work,
+    advance, chunk_of, dependents, readers_outside, reading_outside, reads,
 };
+use tesserae_core::mesh::FACE_STEPS;
 use tesserae_core::{FluidTable, Tables};
 
 use super::ContentTables;
@@ -98,6 +100,9 @@ pub(in crate::server) struct FluidSim {
     turn: Option<[i32; 3]>,
     cursors: BTreeMap<[i32; 3], Cell>,
     scale: Option<Arc<FlowScale>>,
+    /// Whether any registered Shape grows arms, which widens what an
+    /// evaluation reads to the solids that decide them.
+    connected: bool,
     quota: Quota,
     jobs_in_flight: usize,
     landed_per_step: usize,
@@ -148,6 +153,7 @@ impl Default for FluidSim {
             turn: None,
             cursors: BTreeMap::new(),
             scale: None,
+            connected: false,
             quota: Quota {
                 evaluations: EVALUATIONS_PER_JOB,
             },
@@ -232,12 +238,31 @@ impl FluidSim {
         self.simulated.contains_key(&VoxelCoord::of(at).chunk)
     }
 
-    /// Wakes, at `step`, every simulated Voxel whose state reads `at`.
+    /// Wakes, at `step`, every simulated Voxel whose state reads `at`'s
+    /// fluid or solid.
     fn wake_around(&mut self, at: Cell, step: Step) {
-        for d in DEPENDENTS {
+        for &d in dependents(false) {
             let c = offset(at, d);
             if self.simulates(c) {
                 self.agenda.wake(c, step);
+            }
+        }
+    }
+
+    /// [`FluidSim::wake_around`] a changed solid, and around each connected
+    /// Shape beside it whose arms, and so whose voids, it decides.
+    fn wake_around_solid(&mut self, store: &ChunkStore, tables: &Tables, at: Cell, step: Step) {
+        self.wake_around(at, step);
+        if !self.connected {
+            return;
+        }
+        for d in FACE_STEPS {
+            let beside = offset(at, d);
+            if store
+                .voxel(beside)
+                .is_some_and(|v| tables.shapes.is_connected(v))
+            {
+                self.wake_around(beside, step);
             }
         }
     }
@@ -252,7 +277,7 @@ impl FluidSim {
 
     /// Rescans the simulated Voxels outside `chunk` that read into it.
     fn rescan_readers(&mut self, chunk: ChunkCoord) {
-        for span in readers_outside(key(chunk)) {
+        for span in readers_outside(key(chunk), self.connected) {
             if self.simulated.contains_key(&coord(span.home())) {
                 self.agenda.rescan(span);
             }
@@ -286,12 +311,13 @@ pub(in crate::server) fn simulate(
     world: Res<WorldSettings>,
 ) {
     let sim = &mut *sim;
+    sim.connected = tables.shapes.any_connected();
     let scale = Arc::clone(
         sim.scale
             .get_or_insert_with(|| Arc::new(FlowScale::new(&tables.fluids, world.voxel_size))),
     );
     absorb_chunks(sim, &mut store, &meshes, &tables.fluids);
-    absorb_changes(sim, &mut store);
+    absorb_changes(sim, &mut store, &tables.0);
     #[cfg(test)]
     if sim.running.is_some() && sim.stall > 0 {
         sim.stall -= 1;
@@ -385,7 +411,7 @@ fn admit(sim: &mut FluidSim, store: &ChunkStore, coord: ChunkCoord, fluids: &Flu
     if wet(store, coord, fluids) && !uniform {
         sim.agenda.rescan(Span::chunk(key(coord)));
     } else {
-        for span in reading_outside(key(coord)) {
+        for span in reading_outside(key(coord), sim.connected) {
             sim.agenda.rescan(span);
         }
     }
@@ -409,7 +435,7 @@ fn evict(sim: &mut FluidSim, store: &ChunkStore, coord: ChunkCoord, fluids: &Flu
 
 /// Wakes the Voxels around every World change since the last look, which the
 /// running step's proposals must also not overwrite.
-fn absorb_changes(sim: &mut FluidSim, store: &mut ChunkStore) {
+fn absorb_changes(sim: &mut FluidSim, store: &mut ChunkStore, tables: &Tables) {
     let next = sim.now + 1;
     let changed = store.take_changed();
     for at in changed.cells {
@@ -419,6 +445,9 @@ fn absorb_changes(sim: &mut FluidSim, store: &mut ChunkStore) {
             sim.edited_chunks.insert(VoxelCoord::of(at).chunk);
         }
         sim.wake_around(at, next);
+    }
+    for at in changed.solids {
+        sim.wake_around_solid(store, tables, at, next);
     }
     for chunk in changed.chunks {
         sim.edited_chunks.insert(chunk);
@@ -492,7 +521,7 @@ fn start_step(
     let mut read = HashMap::new();
     let mut seen = HashSet::new();
     for &at in &due {
-        for d in READS {
+        for &d in reads(sim.connected) {
             let (chunk, _) = chunk_of(offset(at, d));
             if !seen.insert(chunk) {
                 continue;
@@ -584,6 +613,7 @@ fn land_step(sim: &mut FluidSim, store: &mut ChunkStore, meshes: &mut MeshState,
     }
     let changed = store.take_changed();
     debug_assert!(changed.chunks.is_empty(), "a step outgrew the journal");
+    debug_assert!(changed.solids.is_empty(), "flow changed a solid");
     for at in changed.cells {
         sim.wake_around(at, next);
     }
@@ -600,7 +630,7 @@ fn still_valid(
     tables: &Tables,
     p: &Proposal,
 ) -> bool {
-    READS.iter().all(|&d| {
+    reads(sim.connected).iter().all(|&d| {
         let at = offset(p.at, d);
         let (chunk, _) = chunk_of(at);
         let c = coord(chunk);

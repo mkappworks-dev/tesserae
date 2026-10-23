@@ -8,26 +8,54 @@ use std::borrow::Cow;
 
 use crate::chunk::{CHUNK_SIZE, Chunk, Palette, index};
 use crate::fluid::FluidTable;
+use crate::shape::{Connections, MAX_VOIDS};
+use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
-/// Fluid occupying a Voxel's empty space.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Fluid {
-    pub material: MaterialId,
-    /// A source persists until an Edit or a reaction removes it; flowing fluid
-    /// depends on one and recedes without it.
-    pub source: bool,
-    /// Surface height as sixteenths of the Voxel edge, `1..=FULL_SURFACE`. A
-    /// fraction of the Voxel and not a distance, so it does not scale with
-    /// Voxel size.
+/// Flowing fluid's state in one void of a Voxel.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default, Debug)]
+pub struct Level {
+    /// Surface height as sixteenths of the Voxel edge, `1..=FULL_SURFACE`, and
+    /// 0 for a dry void. A fraction of the Voxel and not a distance, so it does
+    /// not scale with Voxel size.
     pub surface: u8,
-    /// Sideways steps left before flowing fluid stops spreading: its
-    /// definition's metres of reach, quantized to this World's Voxels by
-    /// [`crate::flow::FlowScale`]. Zero for a source, whose reach is its
-    /// definition's.
+    /// Sideways steps left before the fluid stops spreading: its definition's
+    /// metres of reach, quantized to this World's Voxels by
+    /// [`crate::flow::FlowScale`].
     pub reach: u16,
     /// Gravity descent since reach was last renewed, in sixteenths of a Voxel.
     pub descent: u16,
+}
+
+impl Level {
+    pub const DRY: Level = Level {
+        surface: 0,
+        reach: 0,
+        descent: 0,
+    };
+
+    pub const fn is_wet(self) -> bool {
+        self.surface > 0
+    }
+}
+
+/// Fluid occupying a Voxel's empty space: the whole of it in air, or the
+/// voids ([`crate::shape::Void`]) a partial Shape leaves.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Fluid {
+    pub material: MaterialId,
+    /// A source persists until an Edit or a reaction removes it, and fills
+    /// every void; flowing fluid depends on one and recedes without it.
+    pub source: bool,
+    /// The first void's [`Level`], flattened: in air the only one. Full and
+    /// carrying no flow state for a source.
+    pub surface: u8,
+    pub reach: u16,
+    pub descent: u16,
+    /// The [`Level`] in each further void, dry where a Shape has fewer. Kept
+    /// apart because a Shape's separate voids fill separately: one shared
+    /// state would let a wet void lend its reach to water across a partition.
+    pub others: [Level; MAX_VOIDS - 1],
 }
 
 impl Fluid {
@@ -40,7 +68,40 @@ impl Fluid {
             surface: Self::FULL_SURFACE,
             reach: 0,
             descent: 0,
+            others: [Level::DRY; MAX_VOIDS - 1],
         }
+    }
+
+    /// Flowing fluid with `levels` by void, or `None` if every one is dry.
+    pub fn flowing(material: MaterialId, levels: [Level; MAX_VOIDS]) -> Option<Self> {
+        levels.iter().any(|l| l.is_wet()).then(|| Fluid {
+            material,
+            source: false,
+            surface: levels[0].surface,
+            reach: levels[0].reach,
+            descent: levels[0].descent,
+            others: [levels[1], levels[2], levels[3]],
+        })
+    }
+
+    /// What stands in `void`: full for a source, which fills them all.
+    pub fn level(&self, void: usize) -> Level {
+        match void {
+            0 => Level {
+                surface: self.surface,
+                reach: self.reach,
+                descent: self.descent,
+            },
+            _ if self.source => Level {
+                surface: Self::FULL_SURFACE,
+                ..Level::DRY
+            },
+            i => self.others.get(i - 1).copied().unwrap_or(Level::DRY),
+        }
+    }
+
+    pub fn levels(&self) -> [Level; MAX_VOIDS] {
+        std::array::from_fn(|i| self.level(i))
     }
 }
 
@@ -127,7 +188,8 @@ impl ChunkOverlay {
 
 /// The Voxel light treats a stored pair as: fluid in empty space dims and
 /// emits as a cube of its Material, whatever its surface height, since a Voxel
-/// holds one light value.
+/// holds one light value. Fluid beside a solid keeps the solid here; light
+/// combines the two through [`Tables::wet_light_params`].
 #[inline]
 pub fn optical(voxel: Voxel, overlay: Overlay) -> Voxel {
     match overlay.fluid {
@@ -193,27 +255,34 @@ impl Occupants {
     ///
     /// A fluid Material placed this way is a source. Air breaks the solid and
     /// keeps the fluid; where there was no solid it empties the Voxel, as it
-    /// always did. A solid displaces the fluid: a partial Shape will keep it
-    /// once its geometry says which space stays open, and until then nothing
-    /// is waterlogged by accident. Any change to the solid ends its fire.
-    pub fn place_solid(self, voxel: Voxel, fluids: &FluidTable) -> Self {
-        if fluids.contains(voxel.material()) {
+    /// always did. A solid that leaves voids keeps the fluid in them and one
+    /// that leaves none displaces it. A source stays a source and flow stays
+    /// flow, each void taking the best level of the old voids it overlaps and
+    /// staying dry where the new solid now fills what was wet. Any change to
+    /// the solid ends its fire.
+    pub fn place_solid(self, voxel: Voxel, tables: &Tables) -> Self {
+        if tables.fluids.contains(voxel.material()) {
             return Occupants {
                 solid: Voxel::AIR,
                 fluid: Some(Fluid::source(voxel.material())),
                 burning: None,
             };
         }
-        let fluid = if voxel.is_air() && !self.solid.is_air() {
-            self.fluid
-        } else {
-            None
+        let fluid = match self.fluid {
+            Some(_) if voxel.is_air() && self.solid.is_air() => None,
+            Some(fluid) => carry(fluid, self.solid, voxel, tables),
+            None => None,
         };
         Occupants {
             solid: voxel,
             fluid,
             burning: None,
         }
+    }
+
+    /// The fluid Material here, wherever it stands.
+    pub fn fluid_material(&self) -> Option<MaterialId> {
+        self.fluid.map(|f| f.material)
     }
 
     /// The stored form of this reading, the inverse of [`Occupants::of`].
@@ -241,6 +310,34 @@ impl Occupants {
             ),
         }
     }
+}
+
+/// `fluid` in `from`'s voids moved into `to`'s. Read without arms: a connected
+/// Shape's flow is derived again from its actual arms once it is evaluated.
+fn carry(fluid: Fluid, from: Voxel, to: Voxel, tables: &Tables) -> Option<Fluid> {
+    let shapes = &tables.shapes;
+    if shapes.void_slots(to) == 0 {
+        return None;
+    }
+    if fluid.source {
+        return Some(fluid);
+    }
+    let old = shapes.voids(from, Connections::NONE);
+    let new = shapes.voids(to, Connections::NONE);
+    let mut levels = [Level::DRY; MAX_VOIDS];
+    for (j, void) in new.iter().enumerate() {
+        let best = old
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.overlaps(void))
+            .map(|(i, _)| fluid.level(i))
+            .filter(|l| l.surface > void.floor)
+            .max_by_key(|l| (l.reach, l.descent, l.surface));
+        if let Some(level) = best {
+            levels[j] = level;
+        }
+    }
+    Fluid::flowing(fluid.material, levels)
 }
 
 #[cfg(test)]
@@ -343,14 +440,22 @@ mod tests {
         }
     }
 
-    /// A solid displaces fluid, breaking only the solid keeps it, a fluid
-    /// Material placed the old way is a source, and a solid change ends whatever
-    /// was burning. A placement over a Voxel with no solid keeps its whole-Voxel
-    /// meaning, so air over water still empties it.
+    /// A full solid displaces fluid, a partial one keeps it in the space it
+    /// leaves open, breaking only the solid keeps it, a fluid Material placed
+    /// the old way is a source, and a solid change ends whatever was burning. A
+    /// placement over a Voxel with no solid keeps its whole-Voxel meaning, so
+    /// air over water still empties it. Source and flow keep their identity.
     #[test]
     fn placing_a_solid_follows_the_layer_rules() {
-        let fluids = FluidTable::builtin();
+        let tables = Tables::builtin();
         let water = Fluid::source(WATER);
+        let deep = Fluid {
+            source: false,
+            surface: 12,
+            reach: 3,
+            ..water
+        };
+        let slab = Voxel::new(STONE, crate::SHAPE_SLAB, 0);
         let flowing = Fluid {
             source: false,
             surface: 4,
@@ -413,17 +518,44 @@ mod tests {
                 },
             ),
             (
-                "stair into water",
+                "stair into a source",
                 wet(Voxel::AIR, water, None),
                 stair(),
+                wet(stair(), water, None),
+            ),
+            (
+                "stair into deep flow",
+                wet(Voxel::AIR, deep, None),
+                stair(),
+                wet(stair(), deep, None),
+            ),
+            (
+                "slab into flow shallower than the slab",
+                wet(Voxel::AIR, flowing, None),
+                slab,
                 Occupants {
-                    solid: stair(),
+                    solid: slab,
+                    ..empty
+                },
+            ),
+            (
+                "slab for a waterlogged stair",
+                wet(stair(), water, Some(4)),
+                slab,
+                wet(slab, water, None),
+            ),
+            (
+                "stone into a waterlogged stair",
+                wet(stair(), water, None),
+                Voxel::cube(STONE),
+                Occupants {
+                    solid: Voxel::cube(STONE),
                     ..empty
                 },
             ),
         ];
         for (name, before, voxel, after) in cases {
-            assert_eq!(before.place_solid(voxel, &fluids), after, "{name}");
+            assert_eq!(before.place_solid(voxel, &tables), after, "{name}");
         }
     }
 
@@ -458,7 +590,7 @@ mod tests {
             wet.heap_bytes(),
             crate::CHUNK_VOLUME / 8 + 2 * size_of::<Overlay>()
         );
-        assert_eq!(size_of::<Overlay>(), 12);
+        assert_eq!(size_of::<Overlay>(), 30);
     }
 
     #[test]

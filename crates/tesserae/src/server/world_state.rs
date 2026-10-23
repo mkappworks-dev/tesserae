@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::light::{Light, LightVolume};
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, FluidTable, Occupants, Overlay, Voxel,
+    CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, FluidTable, MaterialId, Occupants, Overlay, Voxel,
 };
 
 use crate::world::ChunkCoord;
@@ -41,6 +41,9 @@ pub struct ChunkStore {
     /// Positions whose occupants changed since `super::fluids` last looked:
     /// what it wakes the simulation around.
     changed: Vec<[i32; 3]>,
+    /// Those of `changed` whose solid changed, which can change passage
+    /// further away than a fluid change does.
+    solids: Vec<[i32; 3]>,
     /// Where `changed` was full: every position in these may have changed.
     changed_chunks: BTreeSet<ChunkCoord>,
     /// Coordinates a Chunk arrived at or left since `super::fluids` looked.
@@ -55,6 +58,7 @@ const JOURNAL_CAP: usize = 4096;
 #[derive(Default, Debug)]
 pub(in crate::server) struct Changed {
     pub cells: Vec<[i32; 3]>,
+    pub solids: Vec<[i32; 3]>,
     pub chunks: BTreeSet<ChunkCoord>,
 }
 
@@ -146,9 +150,23 @@ impl ChunkStore {
         Some(tesserae_core::optical(voxel, overlay))
     }
 
-    pub(in crate::server) fn note_changed(&mut self, at: [i32; 3]) {
+    /// The fluid standing in the voids of the shaped solid at `at`, which light
+    /// combines with it. Asked of shaped Voxels only, so cubes and empty space
+    /// on the relight's hot path never pay for the overlay lookup.
+    pub fn wet(&self, at: [i32; 3]) -> Option<MaterialId> {
+        let at = VoxelCoord::of(at);
+        self.overlay(at.chunk)?
+            .get(at.x, at.y, at.z)
+            .fluid
+            .map(|f| f.material)
+    }
+
+    pub(in crate::server) fn note_changed(&mut self, at: [i32; 3], solid: bool) {
         if self.changed.len() < JOURNAL_CAP {
             self.changed.push(at);
+            if solid {
+                self.solids.push(at);
+            }
         } else {
             self.changed_chunks.insert(VoxelCoord::of(at).chunk);
         }
@@ -157,6 +175,7 @@ impl ChunkStore {
     pub(in crate::server) fn take_changed(&mut self) -> Changed {
         Changed {
             cells: std::mem::take(&mut self.changed),
+            solids: std::mem::take(&mut self.solids),
             chunks: std::mem::take(&mut self.changed_chunks),
         }
     }
@@ -293,6 +312,10 @@ impl VoxelVolume for ChunkStore {
 impl LightVolume for LightLattice<'_> {
     fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
         self.store.optical(at)
+    }
+
+    fn wet(&self, at: [i32; 3]) -> Option<MaterialId> {
+        self.store.wet(at)
     }
 
     fn light(&self, at: [i32; 3]) -> Light {

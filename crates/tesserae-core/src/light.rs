@@ -15,9 +15,10 @@
 
 use crate::chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, index};
 use crate::mesh::{FACE_STEPS, LitChunk, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use crate::occupants::{ChunkOverlay, optical_chunk};
 use crate::shape::LIGHT_EXIT_CHECKED;
 use crate::tables::Tables;
-use crate::voxel::Voxel;
+use crate::voxel::{MaterialId, Voxel};
 
 /// Full strength. Light reaches exactly this many Voxels from a source before
 /// it runs out, so a source cannot influence a Chunk more than one away.
@@ -325,8 +326,43 @@ pub fn light_chunk(
     border: [Option<LitChunk<'_>>; 6],
     tables: &Tables,
 ) -> ChunkLight {
+    solve(center, None, border, tables)
+}
+
+/// [`light_chunk`] of a Chunk with its overlay: the fresh solve of whatever
+/// fluid it holds.
+///
+/// Fluid in empty space is lit as a cube of its Material, and fluid in a
+/// Shape's voids combines with the solid by [`Tables::wet_light_params`]: the
+/// solid's seals, the larger dimming and the brighter emission, one value for
+/// the whole Voxel however many voids it has. [`relight`] makes the same
+/// approximation, which is what lets the two be compared.
+pub fn light_cells(
+    center: &Chunk,
+    overlay: &ChunkOverlay,
+    border: [Option<LitChunk<'_>>; 6],
+    tables: &Tables,
+) -> ChunkLight {
+    if !overlay.may_contain_fluid() {
+        return light_chunk(center, border, tables);
+    }
+    solve(
+        &optical_chunk(center, overlay),
+        Some(overlay),
+        border,
+        tables,
+    )
+}
+
+fn solve(
+    center: &Chunk,
+    wet: Option<&ChunkOverlay>,
+    border: [Option<LitChunk<'_>>; 6],
+    tables: &Tables,
+) -> ChunkLight {
     let materials = &tables.materials;
     let uniform = center.uniform();
+    let wet_emits = wet.is_some_and(|o| o.fluids().any(|m| materials.emission(Voxel::cube(m)) > 0));
 
     // Nothing can enter a Chunk that is opaque throughout, so the deep rock
     // that makes up most of a 3D ring below the surface answers here.
@@ -352,6 +388,7 @@ pub fn light_chunk(
     // the single most common piece of wasted work in a fill.
     if let Some(v) = uniform
         && materials.emission(v) == 0
+        && !wet_emits
         && border.iter().all(|face| match face {
             None => true,
             Some(n) => n.light.uniform() == Some(Light::DARK),
@@ -377,10 +414,11 @@ pub fn light_chunk(
     // Whether any Voxel here is clearer than opaque, from the palette. Terrain
     // is not, and takes the sweep and the flood that shipped before the
     // Material table: the dimming array is never allocated or read.
-    let translucent = center
-        .kinds()
-        .iter()
-        .any(|v| !v.is_air() && !materials.is_opaque(*v));
+    let translucent = wet.is_some()
+        || center
+            .kinds()
+            .iter()
+            .any(|v| !v.is_air() && !materials.is_opaque(*v));
     let mut dim = if translucent {
         vec![0u8; CHUNK_VOLUME]
     } else {
@@ -393,9 +431,9 @@ pub fn light_chunk(
             joint: &mut joint,
         };
         if translucent {
-            sweep::<true>(center, tables, &mut cells, &mut cols, &mut queue);
+            sweep::<true>(center, wet, tables, &mut cells, &mut cols, &mut queue);
         } else {
-            sweep::<false>(center, tables, &mut cells, &mut cols, &mut queue);
+            sweep::<false>(center, wet, tables, &mut cells, &mut cols, &mut queue);
         }
     }
 
@@ -456,6 +494,7 @@ struct Walls<'a> {
 /// so the table is asked only for emission.
 fn sweep<const TRANSLUCENT: bool>(
     center: &Chunk,
+    wet: Option<&ChunkOverlay>,
     tables: &Tables,
     cells: &mut [Light],
     cols: &mut Columns<'_>,
@@ -463,15 +502,21 @@ fn sweep<const TRANSLUCENT: bool>(
 ) {
     let shaped = !cols.joint.is_empty();
     let (mut last, mut mask, mut dimming, mut emitted, mut joint) = (Voxel::AIR, 0, 0, 0, 0);
+    let mut last_fluid = None;
     for y in 0..CHUNK_SIZE {
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let v = center.get(x, y, z);
                 let i = index(x, y, z);
-                if v != last {
-                    (last, emitted) = (v, tables.materials.emission(v));
+                let fluid = match wet {
+                    Some(o) if v.is_shaped() => o.get(x, y, z).fluid.map(|f| f.material),
+                    _ => None,
+                };
+                if v != last || fluid != last_fluid {
+                    (last, last_fluid) = (v, fluid);
+                    emitted = tables.wet_emission(v, fluid);
                     (mask, dimming) = if TRANSLUCENT {
-                        tables.light_params(v)
+                        tables.wet_light_params(v, fluid)
                     } else {
                         (tables.shapes.light_mask(v), 0)
                     };
@@ -738,6 +783,14 @@ pub trait LightVolume {
     /// stops there rather than flooding into a Chunk nobody has loaded.
     fn voxel(&self, at: [i32; 3]) -> Option<Voxel>;
 
+    /// The fluid standing in the voids of the shaped Voxel at `at`, which
+    /// light combines with the solid through [`Tables::wet_light_params`].
+    /// Only asked of shaped Voxels; fluid in empty space is the volume's to
+    /// report as a cube of its Material.
+    fn wet(&self, _at: [i32; 3]) -> Option<MaterialId> {
+        None
+    }
+
     fn light(&self, at: [i32; 3]) -> Light;
 
     fn set_light(&mut self, at: [i32; 3], light: Light);
@@ -769,7 +822,7 @@ pub fn relight(volume: &mut impl LightVolume, tables: &Tables, edited: [i32; 3],
 
     // What the Voxel holds now, before anything propagates: its own emission if
     // it emits, and nothing at all if it has become opaque.
-    let now = Light::DARK.with_block(tables.materials.emission(voxel));
+    let now = Light::DARK.with_block(optic(volume, tables, edited, voxel).1);
     volume.set_light(edited, now);
 
     for channel in [Channel::Sky, Channel::Block] {
@@ -797,6 +850,22 @@ pub fn relight(volume: &mut impl LightVolume, tables: &Tables, edited: [i32; 3],
         }
         brighten(volume, tables, regrow, channel);
     }
+}
+
+/// The dimming and emission of the Voxel at `at` with whatever fluid stands in
+/// it: the shared per-Voxel approximation of [`Tables::wet_light_params`],
+/// the same one [`light_cells`] solves with.
+#[inline]
+fn optic(volume: &impl LightVolume, tables: &Tables, at: [i32; 3], voxel: Voxel) -> (u8, u8) {
+    let wet = if voxel.is_shaped() {
+        volume.wet(at)
+    } else {
+        None
+    };
+    (
+        tables.wet_light_params(voxel, wet).1,
+        tables.wet_emission(voxel, wet),
+    )
 }
 
 /// Clears the light `from` used to cast, collecting the independent sources it
@@ -842,7 +911,7 @@ fn darken(
             if there == 0 {
                 continue;
             }
-            let (_, dim) = tables.light_params(voxel);
+            let (dim, emission) = optic(volume, tables, next, voxel);
             let delivered = transmitted(channel, level, face).saturating_sub(dim);
             if there > delivered {
                 // Brighter than anything this source could have delivered, so
@@ -851,7 +920,7 @@ fn darken(
                 continue;
             }
             let own = match channel {
-                Channel::Block => tables.materials.emission(voxel),
+                Channel::Block => emission,
                 Channel::Sky => 0,
             };
             if there > own {
@@ -888,7 +957,7 @@ fn brighten(volume: &mut impl LightVolume, tables: &Tables, from: Vec<[i32; 3]>,
             let Some(voxel) = volume.voxel(next) else {
                 continue;
             };
-            let t = t.saturating_sub(tables.light_params(voxel).1);
+            let t = t.saturating_sub(optic(volume, tables, next, voxel).0);
             if !light_passes(tables, source, voxel, face) || volume.light(next).get(channel) >= t {
                 continue;
             }
@@ -1132,6 +1201,7 @@ mod tests {
     struct OneChunk {
         chunk: Chunk,
         light: ChunkLight,
+        overlay: ChunkOverlay,
         tables: &'static Tables,
     }
 
@@ -1140,8 +1210,26 @@ mod tests {
             OneChunk {
                 light: ChunkLight::dark(),
                 chunk,
+                overlay: ChunkOverlay::none(),
                 tables: tables(),
             }
+        }
+
+        /// Puts fluid into the voids of the solid at `at`, or takes it away,
+        /// and re-floods the way the Server does.
+        fn soak(&mut self, at: [i32; 3], fluid: Option<crate::occupants::Fluid>) {
+            let (x, y, z) = Self::local(at).expect("inside");
+            let was = self.light.get(x, y, z);
+            self.overlay.set(
+                x,
+                y,
+                z,
+                crate::occupants::Overlay {
+                    fluid,
+                    burning: None,
+                },
+            );
+            relight(self, self.tables, at, was);
         }
 
         fn local(at: [i32; 3]) -> Option<(usize, usize, usize)> {
@@ -1176,6 +1264,11 @@ mod tests {
     impl LightVolume for OneChunk {
         fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
             Self::local(at).map(|(x, y, z)| self.chunk.get(x, y, z))
+        }
+
+        fn wet(&self, at: [i32; 3]) -> Option<MaterialId> {
+            let (x, y, z) = Self::local(at)?;
+            self.overlay.get(x, y, z).fluid.map(|f| f.material)
         }
 
         fn light(&self, at: [i32; 3]) -> Light {
@@ -2747,5 +2840,47 @@ mod tests {
                 "x={x}"
             );
         }
+    }
+
+    /// Waterlogging a row of stone stairs between a lantern and the room past
+    /// them dims what reaches through, by the water's dimming once per Voxel
+    /// and not on top of the stair's; draining them restores it. Each time the
+    /// incremental path equals a fresh solve of the same cells, which makes the
+    /// same one-value-per-Voxel approximation.
+    #[test]
+    fn waterlogged_stairs_dim_and_drain_the_same_in_both_solvers() {
+        let water = Some(crate::occupants::Fluid::source(WATER));
+        let mut world = OneChunk::new(Chunk::air());
+        for x in 4..=26 {
+            for y in 3..=5 {
+                for z in 11..=13 {
+                    let shell = y == 3 || y == 5 || z == 11 || z == 13 || x == 4 || x == 26;
+                    if shell {
+                        world.place([x, y, z], Voxel::cube(STONE));
+                    }
+                }
+            }
+        }
+        world.place([5, 4, 12], Voxel::cube(LANTERN));
+        let stairs: Vec<[i32; 3]> = (8..14).map(|x| [x, 4, 12]).collect();
+        for &at in &stairs {
+            world.place(at, stair(0));
+        }
+        let fresh = |w: &OneChunk| light_cells(&w.chunk, &w.overlay, [None; 6], tables());
+        let dry = world.light.clone();
+        assert_eq!(dry, fresh(&world));
+
+        for &at in &stairs {
+            world.soak(at, water);
+        }
+        assert_eq!(world.light, fresh(&world));
+        let past = |l: &ChunkLight| l.get(15, 4, 12).block();
+        assert!(past(&world.light) < past(&dry), "water dims the row");
+
+        for &at in &stairs {
+            world.soak(at, None);
+        }
+        assert_eq!(world.light, dry);
+        assert_eq!(world.light, fresh(&world));
     }
 }

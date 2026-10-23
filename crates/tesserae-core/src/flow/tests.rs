@@ -42,7 +42,10 @@ const UNLIMITED: Quota = Quota {
 
 impl Sim {
     fn new(voxel_m: f32, min: Cell, max: Cell) -> Self {
-        let tables = Tables::builtin();
+        Self::with_tables(voxel_m, min, max, Tables::builtin())
+    }
+
+    fn with_tables(voxel_m: f32, min: Cell, max: Cell, tables: Tables) -> Self {
         Sim {
             scale: FlowScale::new(&tables.fluids, voxel_m),
             tables,
@@ -81,9 +84,17 @@ impl Sim {
     /// An Edit between steps, read from the next step on.
     fn edit(&mut self, at: Cell, occupants: Occupants) {
         self.tables.vet_occupants(occupants).expect("valid");
+        let before = self.occupants(at).solid;
         let stored = occupants.encode(&self.tables.fluids);
         self.grid.cells.insert(at, stored);
         wake_around(&mut self.agenda, at, self.step);
+        if before != occupants.solid {
+            let grid = &self.grid;
+            let shapes = &self.tables.shapes;
+            wake_solid_around(&mut self.agenda, at, self.step, |c| {
+                grid.stored(c).is_some_and(|(v, _)| shapes.is_connected(v))
+            });
+        }
     }
 
     /// Wakes every held Voxel, as admitting the whole grid would.
@@ -804,32 +815,37 @@ fn count_sources(region: &Region, tables: &Tables) -> usize {
 
 /// The cells outside a Chunk that read into it are exactly the spans
 /// `readers_outside` names, and those inside that read out lie on its faces:
-/// checked against [`READS`] Voxel by Voxel, for a Chunk at negative
-/// coordinates.
+/// checked against [`reads`] Voxel by Voxel, for a Chunk at negative
+/// coordinates, with and without connected Shapes widening what is read.
 #[test]
 fn the_voxels_reading_across_a_chunk_boundary_are_the_ones_named() {
     let chunk = [-1, -2, 0];
     let home = crate::agenda::Span::chunk(chunk);
-    let readers = readers_outside(chunk);
-    let faces = reading_outside(chunk);
-    let reads_into = |c: Cell| READS.iter().any(|&r| home.contains_cell(step_by(c, r)));
-    let reads_out = |c: Cell| READS.iter().any(|&r| !home.contains_cell(step_by(c, r)));
-    for x in home.min[0] - 2..=home.max[0] + 2 {
-        for y in home.min[1] - 2..=home.max[1] + 2 {
-            for z in home.min[2] - 2..=home.max[2] + 2 {
-                let c = [x, y, z];
-                if home.contains_cell(c) {
-                    if reads_out(c) {
-                        assert!(faces.iter().any(|s| s.contains_cell(c)), "{c:?}");
+    for connected in [false, true] {
+        let read = reads(connected);
+        let readers = readers_outside(chunk, connected);
+        let faces = reading_outside(chunk, connected);
+        let reads_into = |c: Cell| read.iter().any(|&r| home.contains_cell(step_by(c, r)));
+        let reads_out = |c: Cell| read.iter().any(|&r| !home.contains_cell(step_by(c, r)));
+        for x in home.min[0] - 3..=home.max[0] + 3 {
+            for y in home.min[1] - 3..=home.max[1] + 3 {
+                for z in home.min[2] - 3..=home.max[2] + 3 {
+                    let c = [x, y, z];
+                    if home.contains_cell(c) {
+                        if reads_out(c) {
+                            assert!(faces.iter().any(|s| s.contains_cell(c)), "{c:?}");
+                        }
+                        continue;
                     }
-                    continue;
+                    let named = readers.iter().any(|s| s.contains_cell(c));
+                    assert_eq!(named, reads_into(c), "{connected} {c:?}");
                 }
-                let named = readers.iter().any(|s| s.contains_cell(c));
-                assert_eq!(named, reads_into(c), "{c:?}");
             }
         }
+        assert!(readers.iter().all(|s| s.home() != chunk));
     }
-    assert!(readers.iter().all(|s| s.home() != chunk));
+    assert!(READS.iter().all(|r| reads(true).contains(r)));
+    assert!(reads(true).len() > READS.len());
 }
 
 /// A Voxel waiting on a timer when what it reads goes unknown drops the timer:
@@ -924,4 +940,341 @@ fn a_tiny_agenda_slows_flow_but_settles_to_the_same_state() {
     assert!(peak <= 8, "held {peak}");
     assert!(tight_steps > free_steps);
     assert!(free == tight, "a coalesced wake was lost");
+}
+
+mod waterlogging {
+    use super::*;
+    use crate::mesh::{NEG_X, NEG_Y, POS_X};
+    use crate::shape::{Arm, ConnectDef, NodeBox, Orientation, ShapeDef};
+    use crate::{SHAPE_SLAB, SHAPE_STAIR};
+
+    fn slab(up: usize) -> Voxel {
+        Voxel::new(STONE, SHAPE_SLAB, Orientation::new(up, 0).bits())
+    }
+
+    fn stair(turn: u8) -> Voxel {
+        Voxel::new(
+            STONE,
+            SHAPE_STAIR,
+            Orientation::new(crate::mesh::POS_Y, turn).bits(),
+        )
+    }
+
+    /// Every void's level here, wet or not.
+    fn levels(sim: &Sim, at: Cell) -> Vec<bool> {
+        let here = sim.occupants(at);
+        let voids = sim.tables.shapes.voids(here.solid, Connections::NONE).len();
+        (0..voids)
+            .map(|r| here.fluid.is_some_and(|f| f.level(r).is_wet()))
+            .collect()
+    }
+
+    /// A walled corridor along x at y = 1 over a stone floor, `n` each way,
+    /// with `tables`.
+    fn lane(tables: Tables, n: i32) -> Sim {
+        let mut sim = Sim::with_tables(1.0, [-n - 1, 0, -1], [n + 1, 3, 1], tables);
+        for x in -n - 1..=n + 1 {
+            sim.build([x, 0, 0], stone());
+            for y in 0..=3 {
+                sim.build([x, y, -1], stone());
+                sim.build([x, y, 1], stone());
+            }
+        }
+        sim
+    }
+
+    /// Water falls into a stair's void and the stair stays the solid it was;
+    /// flow along the floor never climbs into it; the void recedes with its
+    /// supply.
+    #[test]
+    fn a_stair_fills_from_above_keeps_its_solid_and_recedes() {
+        let mut sim = lane(Tables::builtin(), 6);
+        sim.build([2, 1, 0], stair(1));
+        sim.place_source([-2, 1, 0]);
+        sim.settle();
+        assert!(sim.fluid([1, 1, 0]).is_some());
+        assert_eq!(sim.fluid([2, 1, 0]), None, "flow climbed into the stair");
+
+        sim.place_source([2, 2, 0]);
+        sim.settle();
+        let wet = sim.occupants([2, 1, 0]);
+        assert_eq!(wet.solid, stair(1));
+        let f = wet.fluid.expect("the stair is waterlogged");
+        assert!(!f.source);
+        assert_eq!(f.surface, Fluid::FULL_SURFACE);
+        assert!(
+            sim.fluid([3, 1, 0]).is_some(),
+            "it spreads out of the stair"
+        );
+
+        sim.remove_fluid([2, 2, 0]);
+        sim.remove_fluid([-2, 1, 0]);
+        sim.settle();
+        assert!(sim.wet().is_empty(), "{:?}", sim.wet());
+        assert_eq!(sim.occupants([2, 1, 0]).solid, stair(1));
+    }
+
+    /// A stair's sealed back and a bottom slab beside a top slab pass nothing,
+    /// though each face is open somewhere; the same pairs turned to share an
+    /// opening do pass.
+    #[test]
+    fn sealed_and_jointly_sealed_faces_pass_nothing() {
+        let tables = Tables::builtin();
+        let back_to_west = (0..4)
+            .map(stair)
+            .find(|&v| tables.shapes.seals(v, NEG_X))
+            .expect("a stair turned with its back west");
+        let open_to_west = (0..4)
+            .map(stair)
+            .find(|&v| !tables.shapes.seals(v, NEG_X) && !tables.shapes.seals(v, POS_X))
+            .expect("a stair turned side on");
+        for (neighbour, passes) in [
+            (slab(crate::mesh::NEG_Y), false),
+            (slab(crate::mesh::POS_Y), true),
+            (back_to_west, false),
+            (open_to_west, true),
+        ] {
+            let mut sim = lane(Tables::builtin(), 4);
+            sim.build([0, 1, 0], slab(crate::mesh::POS_Y));
+            sim.build([1, 1, 0], neighbour);
+            sim.build([-1, 1, 0], stone());
+            for x in -4..=4 {
+                if x != 0 {
+                    sim.build([x, 2, 0], stone());
+                }
+            }
+            sim.place_source([0, 2, 0]);
+            sim.settle();
+            assert!(sim.fluid([0, 1, 0]).is_some(), "the slab fills");
+            assert_eq!(
+                sim.fluid([1, 1, 0]).is_some(),
+                passes,
+                "{neighbour:?} beside a bottom slab"
+            );
+        }
+    }
+
+    /// A wall through the middle of a Voxel: water on one side stays there,
+    /// and the void across the partition stays dry though its Voxel is wet.
+    #[test]
+    fn a_partition_keeps_the_far_void_and_beyond_dry() {
+        let mut tables = Tables::builtin();
+        let wall = tables
+            .shapes
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([7, 0, 0], [9, 16, 16])],
+                collision: None,
+            })
+            .unwrap();
+        let mut sim = lane(tables, 5);
+        sim.build([1, 1, 0], Voxel::new(STONE, wall, 0));
+        sim.place_source([-2, 1, 0]);
+        sim.settle();
+        assert_eq!(levels(&sim, [1, 1, 0]), vec![true, false]);
+        assert_eq!(sim.fluid([2, 1, 0]), None, "flow crossed the partition");
+        assert!(sim.fluid([0, 1, 0]).is_some());
+    }
+
+    /// A shelf splits a Voxel into a void above and one below, fed separately
+    /// at different reach. Each keeps its own state, so neither can lend reach
+    /// to the other and, with the source gone, a loop through them dries.
+    #[test]
+    fn separate_voids_keep_separate_state_and_dry_without_supply() {
+        let mut tables = Tables::builtin();
+        let shelf = tables
+            .shapes
+            .register(ShapeDef {
+                connect: None,
+                boxes: vec![NodeBox::new([0, 6, 0], [16, 8, 16])],
+                collision: None,
+            })
+            .unwrap();
+        let shelf = Voxel::new(STONE, shelf, 0);
+        let mut sim = lane(tables, 8);
+        for x in 1..=3 {
+            sim.build([x, 1, 0], shelf);
+        }
+        for x in -8..=8 {
+            if x != 1 {
+                sim.build([x, 2, 0], stone());
+            }
+        }
+        sim.place_source([1, 2, 0]);
+        sim.settle();
+        // Above: 7 m renewed by the fall in at x = 1, one less a step. Below:
+        // renewed by the half Voxel off the end at x = 4, and back one step.
+        let f = sim.fluid([3, 1, 0]).expect("wet");
+        // Voids are numbered from their lowest sub-cell, so the one below is 0.
+        let (bottom, top) = (f.level(0), f.level(1));
+        assert_eq!((top.reach, bottom.reach), (5, 6), "{f:?}");
+
+        sim.remove_fluid([1, 2, 0]);
+        sim.settle();
+        assert!(sim.wet().is_empty(), "{:?}", sim.wet());
+    }
+
+    /// A floor `h_m` up, as stone and a bottom slab where it falls half a Voxel
+    /// short; returns the layer water stands in.
+    fn floor(sim: &mut Sim, x: i32, h_m: f32) -> i32 {
+        let half = (h_m / sim.voxel_m * 2.0).round() as i32;
+        for y in 0..half / 2 {
+            sim.build([x, y, 0], stone());
+        }
+        if half % 2 == 1 {
+            sim.build([x, half / 2, 0], slab(crate::mesh::POS_Y));
+        }
+        half / 2
+    }
+
+    /// A drop of `drop_m` from a floor at `top_m` within slabs: metres of the
+    /// lower floor wet beyond the foot of the step.
+    fn spread_below(v: f32, top_m: f32, drop_m: f32) -> f32 {
+        let n = (20.0 / v) as i32;
+        let at = (3.0 / v) as i32;
+        let mut sim = Sim::new(v, [-1, -1, -1], [n + 1, 6, 1]);
+        for x in -1..=n + 1 {
+            for y in -1..=6 {
+                sim.build([x, y, -1], stone());
+                sim.build([x, y, 1], stone());
+            }
+            sim.build([x, -1, 0], stone());
+        }
+        for y in 0..=6 {
+            sim.build([-1, y, 0], stone());
+        }
+        let mut layer = 0;
+        let mut low = 0;
+        for x in 0..=n {
+            let l = floor(&mut sim, x, if x <= at { top_m } else { top_m - drop_m });
+            if x == 0 {
+                layer = l;
+            }
+            if x > at {
+                low = l;
+            }
+        }
+        sim.place_source([0, layer, 0]);
+        sim.settle();
+        let mut x = at + 1;
+        while sim.fluid([x, low, 0]).is_some() {
+            x += 1;
+        }
+        (x - at - 2) as f32 * v
+    }
+
+    /// Half a metre of descent renews reach though part of it, or all, is
+    /// inside a slab's Voxel: at 1 m the half-Voxel fall into a slab, at 0.5 m
+    /// a step off a slab and a fall into one, at 0.25 m two of those around a
+    /// whole Voxel. A quarter metre does not.
+    #[test]
+    fn half_a_metre_of_descent_inside_shapes_renews_reach_at_every_size() {
+        for v in SIZES {
+            assert_eq!(spread_below(v, 0.5 + v / 2.0, 0.5), 7.0, "{v} m");
+        }
+        assert!(spread_below(0.5, 0.5, 0.25) < 7.0 - 3.0);
+    }
+
+    /// A wall with a window that a connected arm plugs: whether the far void
+    /// is reachable follows the arm, and taking away what the arm reaches for
+    /// opens the passage.
+    #[test]
+    fn a_connected_arm_closes_and_opens_passage() {
+        let mut tables = Tables::builtin();
+        let b = NodeBox::new;
+        let window = tables
+            .shapes
+            .register(ShapeDef {
+                connect: Some(ConnectDef {
+                    group: 1 << 5,
+                    connects_to: 1 << 5,
+                    to_sealed: true,
+                    arms: vec![Arm {
+                        face: POS_X,
+                        boxes: vec![b([6, 6, 7], [16, 10, 9])],
+                        collision: None,
+                    }],
+                }),
+                boxes: vec![
+                    b([0, 0, 7], [16, 6, 9]),
+                    b([0, 10, 7], [16, 16, 9]),
+                    b([0, 6, 7], [6, 10, 9]),
+                    b([10, 6, 7], [16, 10, 9]),
+                ],
+                collision: None,
+            })
+            .unwrap();
+        let window = Voxel::new(STONE, window, 0);
+        let arm = Connections::NONE.with(POS_X);
+        assert_eq!(tables.shapes.voids(window, Connections::NONE).len(), 1);
+        assert_eq!(tables.shapes.voids(window, arm).len(), 2);
+
+        let mut sim = Sim::with_tables(1.0, [-2, 0, -2], [2, 2, 2], tables);
+        for x in -2..=2 {
+            for z in -2..=2 {
+                sim.build([x, 0, z], stone());
+                sim.build([x, 2, z], stone());
+                for y in 0..=2 {
+                    if x.abs() == 2 || z.abs() == 2 {
+                        sim.build([x, y, z], stone());
+                    }
+                }
+            }
+        }
+        for (x, z) in [(-1, 0), (-1, 1), (1, 1), (-1, -1), (1, -1)] {
+            sim.build([x, 1, z], stone());
+        }
+        sim.build([0, 1, 0], window);
+        sim.build([1, 1, 0], stone());
+        sim.place_source([0, 1, -1]);
+        sim.wake_all();
+        sim.settle();
+        let wet = |sim: &Sim| {
+            let f = sim.fluid([0, 1, 0]);
+            (0..2)
+                .map(|r| f.is_some_and(|f| f.level(r).is_wet()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            wet(&sim),
+            vec![true, false],
+            "the arm keeps the far void dry"
+        );
+        assert_eq!(sim.fluid([0, 1, 1]), None, "and what lies past it");
+
+        sim.put([1, 1, 0], Voxel::AIR);
+        sim.settle();
+        assert_eq!(wet(&sim), vec![true, false], "one void, wet");
+        assert!(sim.fluid([0, 1, 1]).is_some(), "on through the window");
+
+        sim.put([1, 1, 0], stone());
+        sim.settle();
+        assert_eq!(wet(&sim), vec![true, false]);
+        assert_eq!(sim.fluid([0, 1, 1]), None, "the arm closes it again");
+    }
+
+    /// The kernel's state with waterlogged Shapes is the same however a step
+    /// is divided.
+    #[test]
+    fn waterlogged_flow_is_the_same_under_any_division() {
+        let build = || {
+            let mut sim = lane(Tables::builtin(), 8);
+            for x in 1..=5 {
+                sim.build([x, 1, 0], slab(crate::mesh::POS_Y));
+            }
+            sim.build([6, 1, 0], stair(0));
+            sim.place_source([1, 2, 0]);
+            sim
+        };
+        let mut a = build();
+        let mut b = build();
+        b.quota = Quota { evaluations: 3 };
+        for _ in 0..300 {
+            a.run_step();
+            b.run_step();
+            assert_eq!(a.state(), b.state());
+        }
+        assert!(a.fluid([5, 1, 0]).is_some());
+        let _ = NEG_Y;
+    }
 }

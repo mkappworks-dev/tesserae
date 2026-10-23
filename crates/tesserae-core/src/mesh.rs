@@ -1,13 +1,16 @@
 //! Meshing in two passes. Pass 1 greedy-merges coplanar faces of identical full
 //! cubes into quads; pass 2 gives each shaped Voxel the geometry of its own
 //! Shape, then merges the quads that abut across Voxels. Fluid standing below a
-//! full surface takes a third, only in a Chunk whose overlay holds fluid.
+//! full surface takes a third and fluid in a Shape's voids a fourth, only in a
+//! Chunk whose overlay holds fluid.
+
+use std::collections::HashMap;
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
 use crate::material::{MaterialTable, Occlusion, RenderClass};
 use crate::occupants::{ChunkOverlay, Fluid};
-use crate::shape::{Connections, SUBDIV, ShapeQuad};
+use crate::shape::{Connections, FaceMask, SUBDIV, ShapeQuad};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -78,6 +81,9 @@ pub struct Neighborhood {
     /// unless one of the seven Chunks holds fluid in its overlay; a full one is
     /// in `voxels` as a cube of its Material, which is how pass 1 draws water.
     surfaces: Box<[Option<(MaterialId, u8)>]>,
+    /// Fluid in the voids of a solid, by cell: drawn clipped to those voids,
+    /// and what hides fluid faces beside them.
+    logged: HashMap<usize, Fluid>,
     shaped: bool,
     /// The palettes of all seven Chunks, so the translucency gate is a scan of
     /// tens of entries and not of the 39 thousand Voxels copied above.
@@ -130,17 +136,18 @@ impl Neighborhood {
             .flat_map(|n| n.chunk.kinds().iter().copied())
             .collect();
         let wet = seven().any(|n| n.overlay.may_contain_fluid());
-        let surfaces = if wet {
+        let (surfaces, logged) = if wet {
             kinds.extend(seven().flat_map(|n| n.overlay.fluids().map(Voxel::cube)));
             wet_cells(&mut voxels, center, neighbors)
         } else {
-            Box::default()
+            (Box::default(), HashMap::new())
         };
 
         Neighborhood {
             voxels,
             light,
             surfaces,
+            logged,
             shaped: center.chunk.may_contain_shaped(),
             kinds,
         }
@@ -183,22 +190,82 @@ impl Neighborhood {
     pub fn surface_at(&self, x: i32, y: i32, z: i32) -> Option<(MaterialId, u8)> {
         self.surfaces.get(pad_index(x, y, z)).copied().flatten()
     }
+
+    /// The fluid in the voids of the solid at a cell.
+    #[inline]
+    pub fn logged_at(&self, x: i32, y: i32, z: i32) -> Option<Fluid> {
+        if self.logged.is_empty() {
+            return None;
+        }
+        self.logged.get(&pad_index(x, y, z)).copied()
+    }
+
+    /// The arms of the shaped Voxel at a centre cell, read from the shell.
+    fn connections_at(&self, tables: &Tables, x: i32, y: i32, z: i32) -> Connections {
+        let voxel = self.at(x, y, z);
+        let inside = [x, y, z]
+            .iter()
+            .all(|&c| (0..CHUNK_SIZE as i32).contains(&c));
+        if inside && tables.shapes.any_connected() && tables.shapes.is_connected(voxel) {
+            tables.shapes.connections(
+                voxel,
+                FACE_STEPS.map(|d| self.at(x + d[0], y + d[1], z + d[2])),
+            )
+        } else {
+            Connections::NONE
+        }
+    }
+
+    /// What of `face` of the waterlogged Voxel at a cell hides fluid `here`
+    /// looking at it: its solid where its Material hides that fluid, and the
+    /// voids its own fluid of the same Material fills to the top. A shell
+    /// Voxel's voids are read without arms, whose neighbours this does not hold.
+    fn fluid_cover(
+        &self,
+        tables: &Tables,
+        at: [i32; 3],
+        face: usize,
+        here: Voxel,
+        toward: Voxel,
+    ) -> FaceMask {
+        let [x, y, z] = at;
+        let solid = self.at(x, y, z);
+        let mut cover = if hides(&tables.materials, solid, here) {
+            *tables.shapes.coverage_against(solid, face, toward)
+        } else {
+            FaceMask::EMPTY
+        };
+        if let Some(fluid) = self.logged_at(x, y, z)
+            && fluid.material == here.material()
+        {
+            let arms = self.connections_at(tables, x, y, z);
+            for (r, void) in tables.shapes.voids(solid, arms).iter().enumerate() {
+                if fluid.level(r).surface >= Fluid::FULL_SURFACE {
+                    cover = cover.union(&void.open[face]);
+                }
+            }
+        }
+        cover
+    }
 }
 
-/// Puts the overlays' fluid into a [`Neighborhood`]'s cells: a full surface as
-/// a cube of its Material, anything lower into the returned surfaces. Only fluid
-/// in empty space; fluid beside a solid has no geometry of its own yet.
+/// Puts the overlays' fluid into a [`Neighborhood`]'s cells: in empty space a
+/// full surface as a cube of its Material and anything lower into the returned
+/// surfaces, and fluid beside a solid into the returned waterlogged cells.
+#[allow(clippy::type_complexity)]
 fn wet_cells(
     voxels: &mut [Voxel],
     center: LitChunk<'_>,
     neighbors: [Option<LitChunk<'_>>; 6],
-) -> Box<[Option<(MaterialId, u8)>]> {
+) -> (Box<[Option<(MaterialId, u8)>]>, HashMap<usize, Fluid>) {
     let mut surfaces = vec![None; PADDED_VOLUME].into_boxed_slice();
+    let mut logged = HashMap::new();
     let mut put = |i: usize, overlay: &ChunkOverlay, at: (usize, usize, usize)| {
         let Some(fluid) = overlay.get(at.0, at.1, at.2).fluid else {
             return;
         };
         if !voxels[i].is_air() {
+            logged.insert(i, fluid);
             return;
         }
         if fluid.surface >= Fluid::FULL_SURFACE {
@@ -240,7 +307,7 @@ fn wet_cells(
             }
         }
     }
-    surfaces
+    (surfaces, logged)
 }
 
 #[inline]
@@ -425,7 +492,76 @@ pub fn greedy_mesh(n: &Neighborhood, tables: &Tables) -> ChunkMesh {
     if !n.surfaces.is_empty() {
         mesh_surfaces(n, tables, &mut mesh);
     }
+    if !n.logged.is_empty() {
+        mesh_logged(n, tables, &mut mesh);
+    }
     mesh
+}
+
+/// Pass 4: fluid in the voids of a solid, clipped to them by
+/// [`crate::shape::Void::quads`]. The solid keeps its own geometry from pass 2,
+/// and its collision and selection are untouched: only what is drawn of the
+/// fluid is shaped by the voids. A quad on the boundary is hidden where the
+/// Voxel across covers it, by its solid or by the same fluid filling its voids,
+/// and lit by that Voxel's light; the surface inside is lit by the cell's own.
+fn mesh_logged(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
+    let mut cells: Vec<(usize, Fluid)> = n.logged.iter().map(|(&i, &f)| (i, f)).collect();
+    cells.sort_unstable_by_key(|&(i, _)| i);
+    let mut pending = Vec::new();
+    let mut quads = Vec::new();
+    for (i, fluid) in cells {
+        let (x, z, y) = (
+            (i % PADDED) as i32 - 1,
+            (i / PADDED % PADDED) as i32 - 1,
+            (i / (PADDED * PADDED)) as i32 - 1,
+        );
+        let inside = [x, y, z]
+            .iter()
+            .all(|&c| (0..CHUNK_SIZE as i32).contains(&c));
+        if !inside {
+            continue;
+        }
+        let solid = n.at(x, y, z);
+        let here = Voxel::cube(fluid.material);
+        let class = tables.materials.render(here);
+        let own = n.light_at(x, y, z);
+        let arms = n.connections_at(tables, x, y, z);
+        quads.clear();
+        for (r, void) in tables.shapes.voids(solid, arms).iter().enumerate() {
+            let level = fluid.level(r);
+            if level.is_wet() {
+                void.quads(level.surface, &mut quads);
+            }
+        }
+        for q in &quads {
+            let face = q.face as usize;
+            let lit = if q.on_boundary() {
+                let d = FACE_STEPS[face];
+                let across = [x + d[0], y + d[1], z + d[2]];
+                let cover = n.fluid_cover(tables, across, face ^ 1, here, solid);
+                if cover.contains_rect(q.u0, q.v0, q.u1, q.v1) {
+                    continue;
+                }
+                let top = match face / 2 {
+                    0 => q.u1,
+                    2 => q.v1,
+                    _ => SUBDIV as u8,
+                };
+                if face != NEG_Y
+                    && face != POS_Y
+                    && n.surface_at(across[0], across[1], across[2])
+                        .is_some_and(|(m, s)| m == fluid.material && s >= top)
+                {
+                    continue;
+                }
+                n.light_at(across[0], across[1], across[2])
+            } else {
+                own
+            };
+            pending.push(Pending::new([x, y, z], q, class, fluid.material, lit));
+        }
+    }
+    merge_shaped(&mut pending, mesh);
 }
 
 /// Pass 3: fluid below a full surface, as a box from the cell's floor to its
@@ -458,7 +594,11 @@ fn mesh_surfaces(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
                     let d = FACE_STEPS[face];
                     let (ax, ay, az) = (x + d[0], y + d[1], z + d[2]);
                     let across = n.at(ax, ay, az);
-                    if covers(tables, across, face ^ 1, fluid) {
+                    if covers(tables, across, face ^ 1, fluid)
+                        || (n.logged_at(ax, ay, az).is_some()
+                            && n.fluid_cover(tables, [ax, ay, az], face ^ 1, fluid, fluid)
+                                .is_full())
+                    {
                         continue;
                     }
                     let lower = match n.surface_at(ax, ay, az) {
@@ -550,8 +690,12 @@ fn pass1<const TRANSLUCENT: bool>(n: &Neighborhood, tables: &Tables, mesh: &mut 
                             !TRANSLUCENT || hides(materials, across, here)
                         } else {
                             across.shape() != 0
-                                && shapes.seals(across, face ^ 1)
-                                && (!TRANSLUCENT || hides(materials, across, here))
+                                && (shapes.seals(across, face ^ 1)
+                                    && (!TRANSLUCENT || hides(materials, across, here))
+                                    || TRANSLUCENT
+                                        && n.logged_at(c[0], c[1], c[2])
+                                            .is_some_and(|f| f.material == here.material())
+                                        && n.fluid_cover(tables, c, face ^ 1, here, here).is_full())
                         };
                         if hidden {
                             continue;

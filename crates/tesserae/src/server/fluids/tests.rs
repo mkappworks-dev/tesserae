@@ -4,10 +4,12 @@ use bevy::tasks::{AsyncComputeTaskPool, TaskPoolBuilder};
 use std::time::{Duration, Instant};
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::flow::STEP_S;
-use tesserae_core::light::light_chunk;
+use tesserae_core::light::light_cells;
 use tesserae_core::material::WATER;
 use tesserae_core::worldgen::{LANTERN, STONE};
-use tesserae_core::{Chunk, Fluid, LitChunk, Occupants, Voxel, mesh_chunk, optical_chunk};
+use tesserae_core::{
+    Chunk, Fluid, LitChunk, Occupants, Orientation, SHAPE_STAIR, Voxel, mesh_chunk,
+};
 
 use super::super::edit::{EditAction, EditIntent, EditRejected, PendingEdits, RejectReason};
 use super::super::mods::runtime::{self as mod_runtime, PendingCommands};
@@ -392,8 +394,12 @@ fn the_fluid_tool_refuses_what_it_cannot_do_and_changes_nothing() {
 
 fn fresh_light(store: &ChunkStore, coord: ChunkCoord) -> tesserae_core::ChunkLight {
     let chunk = store.get(coord).unwrap();
-    let seen = optical_chunk(chunk, store.overlay(coord).unwrap());
-    light_chunk(&seen, [None; 6], &Tables::builtin())
+    light_cells(
+        chunk,
+        store.overlay(coord).unwrap(),
+        [None; 6],
+        &Tables::builtin(),
+    )
 }
 
 /// A lantern lights the corridor, all of it in one Chunk with nothing held
@@ -445,6 +451,153 @@ fn water_flowing_in_darkens_and_receding_brightens_as_a_fresh_solve_would() {
         f.store().light(home) == Some(&fresh_light(f.store(), home)),
         "brightening disagrees with a fresh solve"
     );
+}
+
+/// The fluid tool aimed at a stair in the lantern's corridor waterlogs it, and
+/// water runs out of its notch along the floor towards the lantern and not
+/// through its sealed back the other way; taking the source
+/// out of the stair dries it all again and keeps the stair. Light dims and
+/// comes back, each time equal to a fresh solve under the shared per-Voxel
+/// approximation, which reads the stair's seals and the water's dimming.
+#[test]
+fn a_waterlogged_stair_feeds_flow_and_light_follows_as_a_fresh_solve_would() {
+    let mut f = Fixture::new(1.0, 10.0, 16);
+    let home = ChunkCoord::new(0, 0, 0);
+    let lantern = [16 - 9, Y, Z];
+    let stair = Voxel::shaped(
+        STONE,
+        SHAPE_STAIR,
+        Orientation::new(tesserae_core::mesh::POS_Y, 1),
+    );
+    let solved = fresh_light(f.store(), home);
+    f.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .set_light(home, solved);
+    f.app
+        .world_mut()
+        .resource_scope(|world, mut store: Mut<ChunkStore>| {
+            let mut meshes = world.resource_mut::<MeshState>();
+            let tables = Tables::builtin();
+            edit::set_voxel(
+                &mut store,
+                &mut meshes,
+                &tables,
+                lantern,
+                Voxel::cube(LANTERN),
+            )
+            .unwrap();
+            edit::set_voxel(&mut store, &mut meshes, &tables, [16, Y, Z], stair).unwrap();
+        });
+    let block = |f: &Fixture, x: i32| f.store().light_at([16 + x, Y, Z]).block();
+    let dry = block(&f, -2);
+    assert!(f.store().light(home) == Some(&fresh_light(f.store(), home)));
+
+    f.send(0, EditAction::PlaceSource(WATER));
+    f.settle();
+    assert!(f.rejections().is_empty());
+    let soaked = f.occupants(0);
+    assert_eq!(
+        (soaked.solid, soaked.fluid),
+        (stair, Some(Fluid::source(WATER)))
+    );
+    assert!(f.fluid(-3).is_some(), "{:?}", f.wet());
+    assert_eq!(f.fluid(1), None, "through the stair's back");
+    assert!(block(&f, -2) < dry, "the water did not dim it");
+    assert!(
+        f.store().light(home) == Some(&fresh_light(f.store(), home)),
+        "darkening disagrees with a fresh solve"
+    );
+
+    f.send(0, EditAction::RemoveSource);
+    f.settle();
+    assert!(f.wet().is_empty(), "{:?}", f.wet());
+    assert_eq!(f.occupants(0).solid, stair);
+    assert_eq!(block(&f, -2), dry, "the light did not come back");
+    assert!(
+        f.store().light(home) == Some(&fresh_light(f.store(), home)),
+        "brightening disagrees with a fresh solve"
+    );
+}
+
+/// Through the streaming loop: water stands in a fence's voids beside a
+/// stream; building beside the fence grows it an arm, which changes its voids,
+/// and both the flow and the mesh the Client holds follow, each time equal to
+/// a fresh mesh of the store. The fence's collision and picking read only its
+/// packed Voxel, which waterlogging never changes.
+#[test]
+fn a_connection_change_wakes_passage_and_remeshes_the_water_in_it() {
+    let mut h = Harness::new(small(), UNLIMITED);
+    h.settle();
+    let rock = ChunkCoord::new(0, -1, 0);
+    let (y, z) = (-16, 16);
+    let fence = Voxel::new(STONE, tesserae_core::shape::examples::FENCE_ID, 0);
+    let run = |h: &mut Harness, change: &dyn Fn(&mut ChunkStore, &mut MeshState, &Tables)| {
+        h.app
+            .world_mut()
+            .resource_scope(|world, mut store: Mut<ChunkStore>| {
+                let tables = world.resource::<ContentTables>().0.clone();
+                let mut meshes = world.resource_mut::<MeshState>();
+                change(&mut store, &mut meshes, &tables);
+            });
+        let mut held: HashMap<ChunkCoord, tesserae_core::ChunkMesh> = HashMap::default();
+        let started = Instant::now();
+        loop {
+            h.app.world_mut().run_system_once(simulate).unwrap();
+            let (ready, _) = h.tick();
+            for m in ready {
+                held.insert(m.coord, m.mesh);
+            }
+            if h.app.world().resource::<FluidSim>().is_idle() {
+                for m in h.settle().0 {
+                    held.insert(m.coord, m.mesh);
+                }
+                break;
+            }
+            assert!(started.elapsed() < CEILING);
+            std::thread::sleep(Duration::from_micros(50));
+        }
+        let store = h.store();
+        let tables = h.app.world().resource::<ContentTables>().0.clone();
+        let neighbors: [Option<LitChunk>; 6] = face_neighbors(rock).map(|n| Some(lit(store, n)));
+        let fresh = mesh_chunk(lit(store, rock), neighbors, &tables);
+        assert!(
+            held.get(&rock).is_some_and(|m| same_mesh(m, &fresh)),
+            "the Client holds a stale mesh"
+        );
+        store
+            .occupants([20, y, z], &tables.fluids)
+            .unwrap()
+            .fluid
+            .map(|f| f.levels())
+    };
+    run(&mut h, &|store, meshes, tables| {
+        for x in 1..=31 {
+            for (dy, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                edit::set_voxel(store, meshes, tables, [x, y + dy, z + dz], stone()).unwrap();
+            }
+            let open = (2..=30).contains(&x);
+            let voxel = if open { Voxel::AIR } else { stone() };
+            edit::set_voxel(store, meshes, tables, [x, y, z], voxel).unwrap();
+        }
+        edit::set_voxel(store, meshes, tables, [20, y, z], fence).unwrap();
+    });
+    let source = |store: &mut ChunkStore, meshes: &mut MeshState, tables: &Tables| {
+        let occupants = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(Fluid::source(WATER)),
+            burning: None,
+        };
+        set_occupants(store, meshes, tables, [17, y, z], occupants).unwrap();
+    };
+    run(&mut h, &source).expect("the fence is waterlogged");
+    assert_eq!(h.store().voxel([20, y, z]), Some(fence));
+    // An arm towards the stone at x = 21 changes the fence's geometry.
+    let after = run(&mut h, &|store, meshes, tables| {
+        edit::set_voxel(store, meshes, tables, [21, y, z], stone()).unwrap();
+    });
+    assert!(after.is_some(), "the fence is still waterlogged");
+    assert_eq!(h.store().voxel([20, y, z]), Some(fence));
 }
 
 /// Through the streaming loop: a stream in a corridor cut in deep rock is

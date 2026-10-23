@@ -13,6 +13,16 @@
 //! descent of the definition's reset drop renews reach, keeping the remainder;
 //! sideways steps add none, so a lower surface on flat ground never renews it.
 //!
+//! **Voids.** Fluid stands in a Voxel's [`Void`]s: the whole cell in empty
+//! space, the open regions a partial Shape leaves under its Orientation and
+//! actual arms, none in a cube. Each void is evaluated on its own and offers
+//! pass only where two voids' open squares meet across a face, so sealed and
+//! jointly sealed faces and partitions pass nothing. Nothing enters a void
+//! sideways from one with a lower floor, and descent counts the sixteenths
+//! fallen between floors, so half a Voxel inside a slab is half a Voxel of
+//! descent. A Voxel holds one fluid Material, which the best offer into any
+//! of its voids decides when it is dry.
+//!
 //! Every offer goes down a level or loses reach, so flow that no source
 //! supports, a ring of it included, always has a highest member that nothing
 //! offers its state to. That member recedes when next evaluated, and the
@@ -27,13 +37,14 @@
 //! gives the same proposals.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::agenda::{Agenda, Span};
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::fluid::FluidTable;
-use crate::occupants::{ChunkOverlay, Fluid, Occupants, Overlay};
-use crate::shape::SUBDIV;
+use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use crate::occupants::{ChunkOverlay, Fluid, Level, Occupants, Overlay};
+use crate::shape::{Connections, MAX_VOIDS, SUBDIV, Void};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
@@ -164,19 +175,68 @@ pub const DEPENDENTS: [Cell; 10] = [
     [0, 1, -1],
 ];
 
-/// Wakes, at `step`, every Voxel whose wanted state reads `at`.
+/// [`READS`] and the face neighbours of each: a connected Shape's arms, and
+/// so its voids, depend on the solids across its faces.
+static WIDE_READS: LazyLock<Vec<Cell>> = LazyLock::new(|| {
+    let mut cells: Vec<Cell> = READS
+        .iter()
+        .flat_map(|&r| std::iter::once(r).chain(FACE_STEPS.iter().map(move |&d| step_by(r, d))))
+        .collect();
+    cells.sort_unstable();
+    cells.dedup();
+    cells
+});
+
+static WIDE_DEPENDENTS: LazyLock<Vec<Cell>> =
+    LazyLock::new(|| WIDE_READS.iter().map(|c| c.map(|i| -i)).collect());
+
+/// Every position an evaluation may read: [`READS`], and with connected Shapes
+/// registered also the solids that decide their arms. Fluid state is read at
+/// [`READS`] only.
+pub fn reads(connected: bool) -> &'static [Cell] {
+    if connected { &WIDE_READS } else { &READS }
+}
+
+/// [`reads`] reversed: the Voxels a change of solid at a position can affect.
+pub fn dependents(connected: bool) -> &'static [Cell] {
+    if connected {
+        &WIDE_DEPENDENTS
+    } else {
+        &DEPENDENTS
+    }
+}
+
+/// Wakes, at `step`, every Voxel whose wanted state reads `at`'s fluid.
 pub fn wake_around(agenda: &mut Agenda, at: Cell, step: Step) {
     for d in DEPENDENTS {
         agenda.wake(step_by(at, d), step);
     }
 }
 
+/// Wakes, at `step`, every Voxel a change of solid at `at` can affect: what
+/// reads its voids, and what reads the voids of each connected Shape beside
+/// it, whose arms it decides. `connected_at` says where those stand.
+pub fn wake_solid_around(
+    agenda: &mut Agenda,
+    at: Cell,
+    step: Step,
+    connected_at: impl Fn(Cell) -> bool,
+) {
+    wake_around(agenda, at, step);
+    for d in FACE_STEPS {
+        let beside = step_by(at, d);
+        if connected_at(beside) {
+            wake_around(agenda, beside, step);
+        }
+    }
+}
+
 /// The Voxels outside `chunk` that read one inside it, as spans of the Chunks
 /// they are in: what must look again when that Chunk arrives or leaves.
-pub fn readers_outside(chunk: [i32; 3]) -> Vec<Span> {
+pub fn readers_outside(chunk: [i32; 3], connected: bool) -> Vec<Span> {
     let home = Span::chunk(chunk);
     let mut spans: Vec<Span> = Vec::new();
-    for d in DEPENDENTS {
+    for &d in dependents(connected) {
         if d == [0, 0, 0] {
             continue;
         }
@@ -193,17 +253,24 @@ pub fn readers_outside(chunk: [i32; 3]) -> Vec<Span> {
     spans
 }
 
-/// The faces of `chunk` whose Voxels read outside it.
-pub fn reading_outside(chunk: [i32; 3]) -> Vec<Span> {
+/// The faces of `chunk` whose Voxels read outside it, as deep as [`reads`]
+/// reaches.
+pub fn reading_outside(chunk: [i32; 3], connected: bool) -> Vec<Span> {
     let home = Span::chunk(chunk);
+    let deep = |axis: usize, sign: i32| {
+        reads(connected)
+            .iter()
+            .map(|r| (r[axis] * sign).max(0))
+            .max()
+            .unwrap_or(0)
+    };
     let mut spans = Vec::new();
     for axis in 0..3 {
-        for end in [home.min[axis], home.max[axis]] {
-            let mut face = home;
-            face.min[axis] = end;
-            face.max[axis] = end;
-            spans.push(face);
-        }
+        let mut low = home;
+        low.max[axis] = home.min[axis] + deep(axis, -1) - 1;
+        let mut high = home;
+        high.min[axis] = home.max[axis] - deep(axis, 1) + 1;
+        spans.extend([low, high]);
     }
     spans
 }
@@ -323,13 +390,11 @@ impl Continuation {
 
     /// The Voxels the next call of up to `quota` evaluations reads, for a caller
     /// deciding which Chunks to hand it.
-    pub fn upcoming(&self, quota: Quota) -> impl Iterator<Item = Cell> + '_ {
+    pub fn upcoming(&self, quota: Quota, connected: bool) -> impl Iterator<Item = Cell> + '_ {
         let end = (self.next + quota.evaluations).min(self.due.len());
-        self.due[self.next..end].iter().flat_map(|&c| {
-            READS
-                .iter()
-                .map(move |d| [c[0] + d[0], c[1] + d[1], c[2] + d[2]])
-        })
+        self.due[self.next..end]
+            .iter()
+            .flat_map(move |&c| reads(connected).iter().map(move |&d| step_by(c, d)))
     }
 
     pub fn remaining(&self) -> usize {
@@ -391,11 +456,7 @@ fn evaluate(
     cont: &mut Continuation,
 ) {
     cont.work.evaluated += 1;
-    let read = |c: Cell| {
-        view.stored(c)
-            .map(|(voxel, overlay)| Occupants::of(voxel, overlay, &tables.fluids))
-    };
-    let (here, want, delay) = match wanted(&read, scale, at) {
+    let (here, want, delay) = match wanted(view, tables, scale, at) {
         // Whatever it was waiting for was decided from terrain that is gone;
         // admission rescans it.
         Wanted::Unknown => {
@@ -439,8 +500,7 @@ fn evaluate(
 enum Wanted {
     /// Something it reads is not held.
     Unknown,
-    /// Not derived: a source, or a solid whose geometry decides what fluid it
-    /// may hold.
+    /// Not derived: a source, or a solid that leaves no void for fluid.
     Fixed,
     State {
         here: Occupants,
@@ -449,7 +509,7 @@ enum Wanted {
     },
 }
 
-/// An offer of fluid into a Voxel, from above or from a side.
+/// An offer of fluid into a void, from above or from a side.
 #[derive(Clone, Copy)]
 struct Offer {
     material: MaterialId,
@@ -471,135 +531,255 @@ impl Offer {
     }
 }
 
-fn rank(fluid: Option<Fluid>) -> Option<(u16, u16, u8)> {
-    fluid.map(|f| (f.reach, f.descent, f.surface))
+fn rank(level: Level) -> Option<(u16, u16, u8)> {
+    level
+        .is_wet()
+        .then_some((level.reach, level.descent, level.surface))
 }
 
 fn step_by(at: Cell, d: Cell) -> Cell {
     [at[0] + d[0], at[1] + d[1], at[2] + d[2]]
 }
 
-/// Whether fluid of `material` above may fall into this Voxel.
-fn takes_from_above(below: Occupants, material: MaterialId) -> bool {
-    below.solid.is_air()
-        && below
-            .fluid
-            .is_none_or(|f| !f.source && f.material == material)
+/// `drop` sixteenths more descent, renewing reach each time it reaches the
+/// reset drop and keeping the remainder.
+fn descend(reach: u16, descent: u16, drop: u32, s: &Scaled) -> (u16, u16) {
+    let fallen = descent as u32 + drop;
+    if fallen >= s.reset as u32 {
+        (s.reach, (fallen % s.reset as u32) as u16)
+    } else {
+        (reach, fallen as u16)
+    }
 }
 
-fn wanted(read: &impl Fn(Cell) -> Option<Occupants>, scale: &FlowScale, at: Cell) -> Wanted {
-    let Some(here) = read(at) else {
+/// One read position: its occupants and the voids its solid leaves under its
+/// actual arms.
+#[derive(Clone, Copy)]
+struct Seen<'a> {
+    occupants: Occupants,
+    voids: &'a [Void],
+}
+
+impl Seen<'_> {
+    /// Whether fluid of `material` falling out of `void` (open at its bottom)
+    /// has somewhere to go here.
+    fn takes_from_above(&self, void: &Void, material: MaterialId) -> bool {
+        self.voids
+            .iter()
+            .any(|b| b.open[POS_Y].intersects(&void.open[NEG_Y]))
+            && self
+                .occupants
+                .fluid
+                .is_none_or(|f| !f.source && f.material == material)
+    }
+}
+
+/// The faces of [`SIDES`], in order.
+const SIDE_FACES: [usize; 4] = [NEG_X, POS_X, NEG_Z, POS_Z];
+
+fn wanted(view: &impl CellView, tables: &Tables, scale: &FlowScale, at: Cell) -> Wanted {
+    let shapes = &tables.shapes;
+    let connected = shapes.any_connected();
+    let look = |c: Cell| -> Option<Seen<'_>> {
+        let (voxel, overlay) = view.stored(c)?;
+        let occupants = Occupants::of(voxel, overlay, &tables.fluids);
+        let solid = occupants.solid;
+        let arms = if connected && shapes.is_connected(solid) {
+            let mut around = [Voxel::AIR; 6];
+            for (face, across) in around.iter_mut().enumerate() {
+                *across = view.stored(step_by(c, FACE_STEPS[face]))?.0;
+            }
+            shapes.connections(solid, around)
+        } else {
+            Connections::NONE
+        };
+        Some(Seen {
+            occupants,
+            voids: shapes.voids(solid, arms),
+        })
+    };
+    let Some(here) = look(at) else {
         return Wanted::Unknown;
     };
-    if !here.solid.is_air() || here.fluid.is_some_and(|f| f.source) {
+    if here.occupants.fluid.is_some_and(|f| f.source) || here.voids.is_empty() {
         return Wanted::Fixed;
     }
-    // An existing fluid keeps out every other one until it has receded.
-    let only = here.fluid.map(|f| f.material);
-    let admits = |m: MaterialId| only.is_none_or(|o| o == m);
-
-    let mut best: Option<Offer> = None;
-    let mut fed_from_above: Option<MaterialId> = None;
-    let mut offer = |o: Offer| {
-        if best.is_none_or(|b| o.key() > b.key()) {
-            best = Some(o);
-        }
-    };
-
-    let Some(above) = read(step_by(at, [0, 1, 0])) else {
+    let Some(above) = look(step_by(at, [0, 1, 0])) else {
         return Wanted::Unknown;
     };
-    if above.solid.is_air()
-        && let Some(f) = above.fluid
-        && admits(f.material)
-        && let Some(s) = scale.get(f.material)
-    {
-        let (reach, descent) = if f.source {
-            (s.reach, 0)
-        } else {
-            (f.reach, f.descent)
-        };
-        let fallen = descent as u32 + SUBDIV as u32;
-        let (reach, descent) = if fallen >= s.reset as u32 {
-            (s.reach, (fallen % s.reset as u32) as u16)
-        } else {
-            (reach, fallen as u16)
-        };
-        fed_from_above = Some(f.material);
-        offer(Offer {
-            material: f.material,
-            reach,
-            descent,
-            from_above: true,
-        });
-    }
-
-    for d in SIDES {
+    // A flowing side's below says whether it falls instead of spreading. Read
+    // here, but unknown only matters where an offer would ask it.
+    let mut sides: [Option<(Seen, Option<Seen>)>; 4] = [None; 4];
+    for (k, d) in SIDES.into_iter().enumerate() {
         let side_at = step_by(at, d);
-        let Some(side) = read(side_at) else {
+        let Some(side) = look(side_at) else {
             return Wanted::Unknown;
         };
-        let Some(f) = side.fluid else {
-            continue;
+        let below = match side.occupants.fluid {
+            Some(f) if !f.source => look(step_by(side_at, [0, -1, 0])),
+            _ => None,
         };
-        if !side.solid.is_air() || !admits(f.material) {
-            continue;
-        }
-        let Some(s) = scale.get(f.material) else {
-            continue;
+        sides[k] = Some((side, below));
+    }
+    let unknown = std::cell::Cell::new(false);
+
+    // The best offer into void `r`, of `only` if given, and whether fluid of
+    // the winning Material falls into it.
+    let best_for = |r: &Void, only: Option<MaterialId>| -> (Option<Offer>, bool) {
+        let admits = |m: MaterialId| only.is_none_or(|o| o == m);
+        let mut best: Option<Offer> = None;
+        let mut fed_from_above: Option<MaterialId> = None;
+        let mut offer = |o: Offer| {
+            if best.is_none_or(|b| o.key() > b.key()) {
+                best = Some(o);
+            }
         };
-        if !f.source {
-            let Some(below) = read(step_by(side_at, [0, -1, 0])) else {
-                return Wanted::Unknown;
-            };
-            if takes_from_above(below, f.material) {
-                continue;
+        if let Some(f) = above.occupants.fluid
+            && admits(f.material)
+            && let Some(s) = scale.get(f.material)
+        {
+            for (a, void) in above.voids.iter().enumerate() {
+                let level = f.level(a);
+                if !level.is_wet() || !void.open[NEG_Y].intersects(&r.open[POS_Y]) {
+                    continue;
+                }
+                let (reach, descent) = if f.source {
+                    (s.reach, 0)
+                } else {
+                    (level.reach, level.descent)
+                };
+                let drop = SUBDIV as u32 + void.floor as u32 - r.floor as u32;
+                let (reach, descent) = descend(reach, descent, drop, s);
+                fed_from_above = Some(f.material);
+                offer(Offer {
+                    material: f.material,
+                    reach,
+                    descent,
+                    from_above: true,
+                });
             }
         }
-        let (reach, descent) = if f.source {
-            (s.reach, 0)
-        } else {
-            (f.reach, f.descent)
-        };
-        if reach == 0 {
-            continue;
+        for (k, face) in SIDE_FACES.into_iter().enumerate() {
+            let (side, below) = sides[k].expect("read above");
+            let Some(f) = side.occupants.fluid else {
+                continue;
+            };
+            if !admits(f.material) {
+                continue;
+            }
+            let Some(s) = scale.get(f.material) else {
+                continue;
+            };
+            for (j, void) in side.voids.iter().enumerate() {
+                let level = f.level(j);
+                // Flow never climbs, inside a Shape or out of one.
+                if !level.is_wet()
+                    || void.floor < r.floor
+                    || !void.open[face ^ 1].intersects(&r.open[face])
+                {
+                    continue;
+                }
+                if !f.source {
+                    match below {
+                        None => {
+                            unknown.set(true);
+                            continue;
+                        }
+                        Some(b) if b.takes_from_above(void, f.material) => continue,
+                        Some(_) => {}
+                    }
+                }
+                let (reach, descent) = if f.source {
+                    (s.reach, 0)
+                } else {
+                    (level.reach, level.descent)
+                };
+                if reach == 0 {
+                    continue;
+                }
+                let drop = (void.floor - r.floor) as u32;
+                let (reach, descent) = match drop {
+                    0 => (reach - 1, descent),
+                    _ => descend(reach - 1, descent, drop, s),
+                };
+                offer(Offer {
+                    material: f.material,
+                    reach,
+                    descent,
+                    from_above: false,
+                });
+            }
         }
-        offer(Offer {
-            material: f.material,
-            reach: reach - 1,
-            descent,
-            from_above: false,
-        });
+        let fed = best.is_some_and(|b| fed_from_above == Some(b.material));
+        (best, fed)
+    };
+
+    // An existing fluid keeps out every other one until it has receded; into a
+    // dry Voxel the best offer anywhere decides its one Material.
+    let only = here.occupants.fluid_material();
+    let mut bests = [(None, false); MAX_VOIDS];
+    for (r, void) in here.voids.iter().enumerate() {
+        bests[r] = best_for(void, only);
+    }
+    let winner = bests
+        .iter()
+        .filter_map(|(o, _)| *o)
+        .max_by_key(|o| o.key())
+        .map(|o| o.material);
+    if only.is_none() && winner.is_some() {
+        for (r, void) in here.voids.iter().enumerate() {
+            if bests[r].0.is_some_and(|o| Some(o.material) != winner) {
+                bests[r] = best_for(void, winner);
+            }
+        }
     }
 
-    let want = best.map(|o| {
-        let s = scale
-            .get(o.material)
-            .expect("offered by a fluid with a scale");
-        let surface = if fed_from_above == Some(o.material) {
-            Fluid::FULL_SURFACE
-        } else {
-            1 + (15 * o.reach as u32 / s.reach.max(1) as u32) as u8
+    if unknown.get() {
+        return Wanted::Unknown;
+    }
+    let mut levels = [Level::DRY; MAX_VOIDS];
+    let mut delay: Option<Step> = None;
+    for (r, void) in here.voids.iter().enumerate() {
+        let (best, fed) = bests[r];
+        let want = best.map_or(Level::DRY, |o| {
+            let s = scale
+                .get(o.material)
+                .expect("offered by a fluid with a scale");
+            let surface = if fed {
+                Fluid::FULL_SURFACE
+            } else {
+                1 + (15 * o.reach as u32 / s.reach.max(1) as u32) as u8
+            };
+            Level {
+                surface: surface.max(void.floor + 1),
+                reach: o.reach,
+                descent: o.descent,
+            }
+        });
+        levels[r] = want;
+        let had = here.occupants.fluid.map_or(Level::DRY, |f| f.level(r));
+        if want == had {
+            continue;
+        }
+        let edge = match (best, rank(want) > rank(had)) {
+            (Some(o), true) => {
+                let s = scale.get(o.material).expect("scaled");
+                if o.from_above { s.downward } else { s.sideways }
+            }
+            _ => here
+                .occupants
+                .fluid
+                .and_then(|f| scale.get(f.material))
+                .map_or(1, |s| s.recession),
         };
-        Fluid {
-            material: o.material,
-            source: false,
-            surface,
-            reach: o.reach,
-            descent: o.descent,
-        }
-    });
-    let delay = match (best, rank(want) > rank(here.fluid)) {
-        (Some(o), true) => {
-            let s = scale.get(o.material).expect("scaled");
-            if o.from_above { s.downward } else { s.sideways }
-        }
-        _ => here
-            .fluid
-            .and_then(|f| scale.get(f.material))
-            .map_or(1, |s| s.recession),
-    };
-    Wanted::State { here, want, delay }
+        delay = Some(delay.map_or(edge, |d| d.min(edge)));
+    }
+    let want = winner.or(only).and_then(|m| Fluid::flowing(m, levels));
+    Wanted::State {
+        here: here.occupants,
+        want,
+        delay: delay.unwrap_or(1),
+    }
 }
 
 #[cfg(test)]

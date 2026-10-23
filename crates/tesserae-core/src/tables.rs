@@ -3,7 +3,7 @@
 use crate::fluid::{FluidDef, FluidError, FluidTable};
 use crate::light::MAX_LIGHT;
 use crate::material::MaterialTable;
-use crate::occupants::{Fluid, Occupants};
+use crate::occupants::{Fluid, Level, Occupants};
 use crate::shape::{Orientation, ShapeTable};
 use crate::voxel::{MaterialId, Voxel};
 
@@ -33,10 +33,12 @@ pub enum PlaceFault {
     NotSolid,
     /// A fluid whose Material has no fluid definition.
     NotAFluid,
-    /// Fluid in a Voxel a full cube leaves no space in.
+    /// Fluid in a solid that leaves no void for it: a cube, or a Shape whose
+    /// empty space splits into more voids than fluid state can tell apart.
     FluidExcluded,
-    /// A surface of 0 or above [`Fluid::FULL_SURFACE`], or a source that is not
-    /// full or carries flow state.
+    /// A surface above [`Fluid::FULL_SURFACE`], flow that is dry everywhere or
+    /// wet in a void the solid does not have, or a source that is not full or
+    /// carries flow state.
     BadSurface,
     /// Burning with nothing solid to burn.
     NoFuel,
@@ -51,7 +53,7 @@ impl std::fmt::Display for PlaceFault {
             PlaceFault::BadOrientation => "invalid orientation",
             PlaceFault::NotSolid => "a fluid is not placed as a solid",
             PlaceFault::NotAFluid => "not a fluid",
-            PlaceFault::FluidExcluded => "a full cube leaves no room for fluid",
+            PlaceFault::FluidExcluded => "the solid leaves no room for fluid",
             PlaceFault::BadSurface => "invalid fluid surface",
             PlaceFault::NoFuel => "nothing solid to burn",
         })
@@ -91,12 +93,25 @@ impl Tables {
             if !self.fluids.contains(fluid.material) {
                 return Err(PlaceFault::NotAFluid);
             }
-            if occupants.solid.is_full_cube() {
+            let slots = self.shapes.void_slots(occupants.solid);
+            if slots == 0 {
                 return Err(PlaceFault::FluidExcluded);
             }
-            if !(1..=Fluid::FULL_SURFACE).contains(&fluid.surface)
-                || (fluid.source && fluid != Fluid::source(fluid.material))
-            {
+            let canonical = if fluid.source {
+                fluid == Fluid::source(fluid.material)
+            } else {
+                let levels = fluid.levels();
+                levels.iter().enumerate().all(|(i, l)| {
+                    if l.is_wet() {
+                        i < slots && l.surface <= Fluid::FULL_SURFACE
+                    } else {
+                        *l == Level::DRY
+                    }
+                }) && levels.iter().any(|l| l.is_wet())
+                    // Empty space has one void, which flow fills.
+                    && (!occupants.solid.is_air() || levels[0].is_wet())
+            };
+            if !canonical {
                 return Err(PlaceFault::BadSurface);
             }
         }
@@ -144,6 +159,33 @@ impl Tables {
             MAX_LIGHT => (self.shapes.light_mask(voxel), 0),
             dimming => (0, dimming),
         }
+    }
+
+    /// [`Tables::light_params`] of `voxel` with `fluid` standing in its voids.
+    ///
+    /// A Voxel holds one light value, so this is an approximation both solvers
+    /// share: the solid's seals stay, and the dimming is the larger of the
+    /// solid's and the fluid's rather than charged twice, whichever void the
+    /// fluid is in. Separate voids of one Voxel share its brightness. Fluid
+    /// and heat passage never read this as geometry; they read voids.
+    #[inline]
+    pub fn wet_light_params(&self, voxel: Voxel, fluid: Option<MaterialId>) -> (u8, u8) {
+        let Some(fluid) = fluid else {
+            return self.light_params(voxel);
+        };
+        let cube = Voxel::cube(fluid);
+        if voxel.is_air() {
+            return self.light_params(cube);
+        }
+        let (mask, dim) = self.light_params(voxel);
+        (mask, dim.max(self.materials.dimming(cube)))
+    }
+
+    /// Emission under the same approximation: the brighter of solid and fluid.
+    #[inline]
+    pub fn wet_emission(&self, voxel: Voxel, fluid: Option<MaterialId>) -> u8 {
+        let own = self.materials.emission(voxel);
+        fluid.map_or(own, |f| own.max(self.materials.emission(Voxel::cube(f))))
     }
 
     /// The first half of [`Tables::light_params`], for a caller that holds a
@@ -255,6 +297,75 @@ mod tests {
         assert_eq!(
             tables.vet_occupants(ok(Voxel::AIR, Some(water), Some(Burning { fuel: 1 }))),
             Err(PlaceFault::NoFuel)
+        );
+    }
+
+    /// Flow in a Shape is stored per void: wet only where the solid has a
+    /// void, dry levels carrying nothing, and never dry everywhere.
+    #[test]
+    fn vet_occupants_holds_flow_to_the_solids_voids() {
+        let tables = Tables::builtin();
+        let stair = Voxel::new(STONE, crate::SHAPE_STAIR, 0);
+        let level = Level {
+            surface: 12,
+            reach: 3,
+            descent: 0,
+        };
+        let flow = |levels| Fluid::flowing(WATER, levels).unwrap();
+        let ok = |solid, fluid: Fluid| {
+            tables.vet_occupants(Occupants {
+                solid,
+                fluid: Some(fluid),
+                burning: None,
+            })
+        };
+        let dry = Level::DRY;
+        assert_eq!(ok(stair, flow([level, dry, dry, dry])), Ok(()));
+        assert_eq!(ok(stair, Fluid::source(WATER)), Ok(()));
+        assert_eq!(
+            ok(stair, flow([level, level, dry, dry])),
+            Err(PlaceFault::BadSurface),
+            "a stair has one void"
+        );
+        assert_eq!(
+            ok(Voxel::AIR, flow([dry, level, dry, dry])),
+            Err(PlaceFault::BadSurface),
+            "empty space's one void is the first"
+        );
+        let stale_dry = Level { reach: 1, ..dry };
+        assert_eq!(
+            ok(stair, flow([level, stale_dry, dry, dry])),
+            Err(PlaceFault::BadSurface)
+        );
+        let all_dry = Fluid {
+            source: false,
+            surface: 0,
+            ..Fluid::source(WATER)
+        };
+        assert_eq!(ok(stair, all_dry), Err(PlaceFault::BadSurface));
+    }
+
+    /// One light value per Voxel: the solid's seals, the larger dimming and
+    /// the brighter emission.
+    #[test]
+    fn a_wet_solid_keeps_its_seals_and_takes_the_larger_dimming() {
+        let tables = Tables::builtin();
+        let stair = Voxel::new(STONE, crate::SHAPE_STAIR, 0);
+        let (mask, dim) = tables.light_params(stair);
+        assert_eq!(dim, 0);
+        assert_eq!(
+            tables.wet_light_params(stair, Some(WATER)),
+            (mask, tables.materials.dimming(Voxel::cube(WATER)))
+        );
+        assert_eq!(
+            tables.wet_light_params(Voxel::AIR, Some(WATER)),
+            tables.light_params(Voxel::cube(WATER))
+        );
+        assert_eq!(tables.wet_light_params(stair, None), (mask, 0));
+        let lantern = Voxel::new(crate::material::LANTERN, crate::SHAPE_STAIR, 0);
+        assert_eq!(
+            tables.wet_emission(lantern, Some(WATER)),
+            tables.materials.emission(lantern)
         );
     }
 

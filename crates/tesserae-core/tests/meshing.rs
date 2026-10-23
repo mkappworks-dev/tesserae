@@ -1792,3 +1792,91 @@ fn a_dry_overlay_meshes_exactly_as_none() {
     assert_eq!(a.opaque.positions, b.opaque.positions);
     assert_eq!(a.quad_count(), b.quad_count());
 }
+
+fn soaked(fluid: tesserae_core::Fluid) -> tesserae_core::Overlay {
+    tesserae_core::Overlay {
+        fluid: Some(fluid),
+        burning: None,
+    }
+}
+
+fn blended_positions(mesh: &tesserae_core::ChunkMesh) -> Vec<[f32; 3]> {
+    mesh.blended.positions.clone()
+}
+
+/// Water in a stair is drawn in the stair's notch and nowhere else, and the
+/// stair itself meshes exactly as it does dry.
+#[test]
+fn a_waterlogged_stair_draws_its_water_in_the_notch_alone() {
+    let stair = Voxel::shaped(1, SHAPE_STAIR, Orientation::new(POS_Y, 0));
+    let mut chunk = Chunk::air();
+    chunk.set(4, 4, 4, stair);
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(
+        4,
+        4,
+        4,
+        soaked(tesserae_core::Fluid::source(tesserae_core::material::WATER)),
+    );
+    let dry = mesh_chunk(unlit(&chunk), [None; 6], tables());
+    let wet = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    assert_eq!(wet.opaque.positions, dry.opaque.positions);
+    assert_eq!(wet.shaped_voxels, dry.shaped_voxels);
+    // The notch is the upper front quarter: top, front and its two sides.
+    assert_eq!(wet.blended.quad_count(), 4);
+    for p in blended_positions(&wet) {
+        assert!(
+            (4.5..=5.0).contains(&p[1]) && (4.0..=4.5).contains(&p[2]),
+            "{p:?}"
+        );
+    }
+}
+
+/// Fluid below a full surface in a slab's void stands from the slab's top to
+/// its own surface.
+#[test]
+fn a_waterlogged_slab_draws_water_from_its_top_to_the_surface() {
+    let slab = Voxel::shaped(1, SHAPE_SLAB, Orientation::new(POS_Y, 0));
+    let mut chunk = Chunk::air();
+    chunk.set(4, 4, 4, slab);
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    let level = tesserae_core::Level {
+        surface: 12,
+        reach: 2,
+        descent: 0,
+    };
+    let none = tesserae_core::Level::DRY;
+    let fluid =
+        tesserae_core::Fluid::flowing(tesserae_core::material::WATER, [level, none, none, none])
+            .unwrap();
+    overlay.set(4, 4, 4, soaked(fluid));
+    let mesh = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![4.75]);
+    assert_eq!(blended_heights(&mesh, [1.0, 0.0, 0.0]), vec![4.5, 4.75]);
+    assert!(blended_heights(&mesh, [0.0, -1.0, 0.0]).is_empty());
+}
+
+/// A waterlogged stair inside a lake shows no water face between the two:
+/// the lake's faces against it are covered by its solid and its full void,
+/// and its void's faces by the lake. Only the lake's outside is drawn.
+#[test]
+fn a_waterlogged_stair_in_a_lake_draws_no_faces_inside_the_water() {
+    let water = tesserae_core::material::WATER;
+    let stair = Voxel::shaped(1, SHAPE_STAIR, Orientation::new(POS_Y, 0));
+    let mut chunk = Chunk::air();
+    for x in 3..6 {
+        for y in 3..6 {
+            for z in 3..6 {
+                chunk.set(x, y, z, Voxel::cube(water));
+            }
+        }
+    }
+    chunk.set(4, 4, 4, stair);
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(4, 4, 4, soaked(tesserae_core::Fluid::source(water)));
+    let mesh = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    for p in blended_positions(&mesh) {
+        assert!(p.iter().any(|&c| c == 3.0 || c == 6.0), "{p:?}");
+    }
+    assert_eq!(mesh.blended.quad_count(), 6, "the lake's six sides");
+}
