@@ -538,10 +538,12 @@ pub(in crate::server) fn apply_intent(
 /// Every change is journalled in the store, which is what wakes the fluid
 /// simulation around it on the next step.
 ///
-/// A mesh is stale in three kinds of Chunk: the edited one; any the relight
-/// wrote to; and the neighbour across a boundary plane the Voxel sits on, whose
-/// faces next to it change whether or not any light does. Removing a stone Voxel
-/// in the dark moves no light and still leaves the next Chunk a face to grow.
+/// A mesh is stale in four kinds of Chunk: the edited one; any the relight
+/// wrote to; any across a plane of light the relight wrote to, whose faces
+/// against it that light shades; and the neighbour across a boundary plane the
+/// Voxel sits on, whose faces next to it change whether or not any light does.
+/// Removing a stone Voxel in the dark moves no light and still leaves the next
+/// Chunk a face to grow.
 pub(in crate::server) fn set_occupants(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
@@ -600,8 +602,14 @@ pub(in crate::server) fn set_occupants(
         let mut lattice = LightLattice::new(store);
         relight(&mut lattice, tables, at, was);
         let lit = std::mem::take(&mut lattice.touched);
+        let across = std::mem::take(&mut lattice.across);
         for coord in lit {
             meshes.edited(coord);
+        }
+        for coord in across {
+            if store.contains(coord) {
+                meshes.edited(coord);
+            }
         }
     }
     let now = Occupants { solid, ..occupants };

@@ -4,7 +4,7 @@
 //! full surface takes a third and fluid in a Shape's voids a fourth, only in a
 //! Chunk whose overlay holds fluid. A burning solid's flames take a fifth.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::light::{ChunkLight, Light};
@@ -92,6 +92,9 @@ pub struct Neighborhood {
     /// Fluid in the voids of a solid, by cell: drawn clipped to those voids,
     /// and what hides fluid faces beside them.
     logged: HashMap<usize, Fluid>,
+    /// Cells `voxels` holds full-surface flow in as a cube, whose packed Voxel
+    /// is air: what a connected Shape's arms are read from.
+    flowed: HashSet<usize>,
     /// Burning solids of the centre, in coordinate order.
     burning: Vec<[i32; 3]>,
     shaped: bool,
@@ -146,11 +149,11 @@ impl Neighborhood {
             .flat_map(|n| n.chunk.kinds().iter().copied())
             .collect();
         let wet = seven().any(|n| n.overlay.may_contain_fluid());
-        let (surfaces, logged) = if wet {
+        let (surfaces, logged, flowed) = if wet {
             kinds.extend(seven().flat_map(|n| n.overlay.fluids().map(Voxel::cube)));
             wet_cells(&mut voxels, center, neighbors)
         } else {
-            (Box::default(), HashMap::new())
+            (Box::default(), HashMap::new(), HashSet::new())
         };
 
         let mut burning = Vec::new();
@@ -171,6 +174,7 @@ impl Neighborhood {
             light,
             surfaces,
             logged,
+            flowed,
             burning,
             shaped: center.chunk.may_contain_shaped(),
             kinds,
@@ -224,6 +228,19 @@ impl Neighborhood {
         self.logged.get(&pad_index(x, y, z)).copied()
     }
 
+    /// The packed Voxel at a cell, which collision and the simulation read a
+    /// connected Shape's arms from: air where [`Neighborhood::at`] has a cube of
+    /// full flowing water.
+    #[inline]
+    fn packed_at(&self, x: i32, y: i32, z: i32) -> Voxel {
+        let i = pad_index(x, y, z);
+        if !self.flowed.is_empty() && self.flowed.contains(&i) {
+            Voxel::AIR
+        } else {
+            self.voxels[i]
+        }
+    }
+
     /// The arms of the shaped Voxel at a centre cell, read from the shell.
     fn connections_at(&self, tables: &Tables, x: i32, y: i32, z: i32) -> Connections {
         let voxel = self.at(x, y, z);
@@ -233,7 +250,7 @@ impl Neighborhood {
         if inside && tables.shapes.any_connected() && tables.shapes.is_connected(voxel) {
             tables.shapes.connections(
                 voxel,
-                FACE_STEPS.map(|d| self.at(x + d[0], y + d[1], z + d[2])),
+                FACE_STEPS.map(|d| self.packed_at(x + d[0], y + d[1], z + d[2])),
             )
         } else {
             Connections::NONE
@@ -281,9 +298,14 @@ fn wet_cells(
     voxels: &mut [Voxel],
     center: LitChunk<'_>,
     neighbors: [Option<LitChunk<'_>>; 6],
-) -> (Box<[Option<(MaterialId, u8)>]>, HashMap<usize, Fluid>) {
+) -> (
+    Box<[Option<(MaterialId, u8)>]>,
+    HashMap<usize, Fluid>,
+    HashSet<usize>,
+) {
     let mut surfaces = vec![None; PADDED_VOLUME].into_boxed_slice();
     let mut logged = HashMap::new();
+    let mut flowed = HashSet::new();
     let mut put = |i: usize, overlay: &ChunkOverlay, at: (usize, usize, usize)| {
         let Some(fluid) = overlay.get(at.0, at.1, at.2).fluid else {
             return;
@@ -294,6 +316,7 @@ fn wet_cells(
         }
         if fluid.surface >= Fluid::FULL_SURFACE {
             voxels[i] = Voxel::cube(fluid.material);
+            flowed.insert(i);
         } else {
             surfaces[i] = Some((fluid.material, fluid.surface));
         }
@@ -331,7 +354,7 @@ fn wet_cells(
             }
         }
     }
-    (surfaces, logged)
+    (surfaces, logged, flowed)
 }
 
 #[inline]
@@ -503,10 +526,14 @@ pub fn greedy_mesh(n: &Neighborhood, tables: &Tables) -> ChunkMesh {
     // Only a Chunk with something clear in or beside it can need a Material's
     // answer, so terrain runs the pass that shipped before the Material table
     // and never reads one.
-    if n.is_translucent(&tables.materials) {
-        pass1::<true>(n, tables, &mut mesh);
+    // Partial surfaces get their own instance too: the one extra test of
+    // pass 1 measured 4-7% on translucent Chunks that hold none.
+    if !n.surfaces.is_empty() {
+        pass1::<true, true>(n, tables, &mut mesh);
+    } else if n.is_translucent(&tables.materials) {
+        pass1::<true, false>(n, tables, &mut mesh);
     } else {
-        pass1::<false>(n, tables, &mut mesh);
+        pass1::<false, false>(n, tables, &mut mesh);
     }
 
     // Terrain has no shaped entry in its palette and so never pays for the scan.
@@ -724,8 +751,13 @@ fn covers(tables: &Tables, across: Voxel, face: usize, here: Voxel) -> bool {
 /// `TRANSLUCENT` is [`Neighborhood::is_translucent`]. When it is false every
 /// Voxel in sight is air or opaque, so "the Voxel across hides this face" is
 /// exactly "it is a full cube, or a Shape that seals the face" - the rule before
-/// Materials had a say - and the Material table is not consulted.
-fn pass1<const TRANSLUCENT: bool>(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
+/// Materials had a say - and the Material table is not consulted. `SURFACES`
+/// is whether any cell holds fluid below a full surface, which is translucent.
+fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
+    n: &Neighborhood,
+    tables: &Tables,
+    mesh: &mut ChunkMesh,
+) {
     let shapes = &tables.shapes;
     let materials = &tables.materials;
     let mut mask = vec![None::<FaceKey>; CHUNK_SIZE * CHUNK_SIZE];
@@ -741,6 +773,7 @@ fn pass1<const TRANSLUCENT: bool>(n: &Neighborhood, tables: &Tables, mesh: &mut 
             // Faces come in negative/positive pairs, so flipping the low bit is
             // the face of the neighbour that looks back at this one.
             let face = d * 2 + usize::from(positive);
+            let under_surface = SURFACES && face == POS_Y;
 
             for s in 0..CHUNK_SIZE {
                 mask.fill(None);
@@ -775,6 +808,11 @@ fn pass1<const TRANSLUCENT: bool>(n: &Neighborhood, tables: &Tables, mesh: &mut 
                                         && n.logged_at(c[0], c[1], c[2])
                                             .is_some_and(|f| f.material == here.material())
                                         && n.fluid_cover(tables, c, face ^ 1, here, here).is_full())
+                                // Lower fluid of the same Material standing on
+                                // this one covers all of its top.
+                                || under_surface
+                                    && n.surface_at(c[0], c[1], c[2])
+                                        .is_some_and(|(m, _)| m == here.material())
                         };
                         if hidden {
                             continue;
@@ -910,7 +948,7 @@ fn mesh_shaped(n: &Neighborhood, tables: &Tables, mesh: &mut ChunkMesh) {
                 let connections = if any_connected && shapes.is_connected(voxel) {
                     shapes.connections(
                         voxel,
-                        FACE_STEPS.map(|d| n.at(x + d[0], y + d[1], z + d[2])),
+                        FACE_STEPS.map(|d| n.packed_at(x + d[0], y + d[1], z + d[2])),
                     )
                 } else {
                     Connections::NONE

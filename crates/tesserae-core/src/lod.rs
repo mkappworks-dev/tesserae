@@ -1,7 +1,9 @@
 //! Level of detail: producing a coarse Chunk from the eight finer ones it covers.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
-use crate::shape::{SUBDIV, ShapeTable};
+use crate::occupants::{Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay};
+use crate::shape::{Connections, SUBDIV, ShapeTable};
+use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
 use crate::light::{ChunkLight, Light, MAX_LIGHT};
@@ -16,34 +18,35 @@ const CUBE_WEIGHT: u32 = (SUBDIV * SUBDIV * SUBDIV) as u32;
 /// Half of eight cubes; a tie is solid.
 const SOLID_AT: u32 = 8 * CUBE_WEIGHT / 2;
 
-struct Tally {
+/// Up to `N` Materials by weight: eight for packed children, sixteen where a
+/// Voxel can add a fluid beside its solid.
+struct Tally<const N: usize> {
     total: u32,
     len: usize,
-    materials: [MaterialId; 8],
-    weights: [u32; 8],
+    materials: [MaterialId; N],
+    weights: [u32; N],
     /// The largest `dy` of any child of this Material that has weight.
-    tops: [u8; 8],
+    tops: [u8; N],
 }
 
-impl Tally {
+impl<const N: usize> Tally<N> {
     #[inline]
     fn new() -> Self {
         Tally {
             total: 0,
             len: 0,
-            materials: [0; 8],
-            weights: [0; 8],
-            tops: [0; 8],
+            materials: [0; N],
+            weights: [0; N],
+            tops: [0; N],
         }
     }
 
     #[inline]
-    fn add(&mut self, voxel: Voxel, weight: u32, dy: u8) {
+    fn add(&mut self, material: MaterialId, weight: u32, dy: u8) {
         if weight == 0 {
             return;
         }
         self.total += weight;
-        let material = voxel.material();
         match self.materials[..self.len]
             .iter()
             .position(|&m| m == material)
@@ -61,14 +64,13 @@ impl Tally {
         }
     }
 
+    /// The Material with the most volume of those `keep` accepts.
     #[inline]
-    fn finish(&self) -> Voxel {
-        if self.total < SOLID_AT {
-            return Voxel::AIR;
-        }
+    fn best(&self, keep: impl Fn(MaterialId) -> bool) -> Option<usize> {
         // Height keeps a one-Voxel grass cap over dirt (a 4-4 tie at every odd surface
         // height); id then makes the answer independent of palette and iteration order.
-        let best = (0..self.len)
+        (0..self.len)
+            .filter(|&i| keep(self.materials[i]))
             .max_by_key(|&i| {
                 (
                     self.weights[i],
@@ -76,6 +78,23 @@ impl Tally {
                     std::cmp::Reverse(self.materials[i]),
                 )
             })
+    }
+
+    #[inline]
+    fn weight_of(&self, material: MaterialId) -> u32 {
+        self.materials[..self.len]
+            .iter()
+            .position(|&m| m == material)
+            .map_or(0, |i| self.weights[i])
+    }
+
+    #[inline]
+    fn finish(&self) -> Voxel {
+        if self.total < SOLID_AT {
+            return Voxel::AIR;
+        }
+        let best = self
+            .best(|_| true)
             .expect("a solid total has at least one Material");
         Voxel::cube(self.materials[best])
     }
@@ -105,42 +124,271 @@ pub fn downsample(children: [&Chunk; 8], shapes: &ShapeTable) -> Chunk {
 fn downsample_general(children: [&Chunk; 8], shapes: &ShapeTable) -> Chunk {
     let mut out = Chunk::air();
     for (i, child) in children.into_iter().enumerate() {
-        let (ox, oy, oz) = (i % 2 * OCTANT, i / 2 % 2 * OCTANT, i / 4 * OCTANT);
-        if let Some(v) = child.uniform() {
-            let coarse = uniform_octant(v, shapes);
-            if !coarse.is_air() {
-                for z in 0..OCTANT {
-                    for y in 0..OCTANT {
-                        for x in 0..OCTANT {
-                            out.set(ox + x, oy + y, oz + z, coarse);
-                        }
+        packed_octant(child, i, shapes, &mut out);
+    }
+    out
+}
+
+/// Where child `i`'s octant starts in its coarse Chunk.
+fn octant_origin(i: usize) -> (usize, usize, usize) {
+    (i % 2 * OCTANT, i / 2 % 2 * OCTANT, i / 4 * OCTANT)
+}
+
+fn packed_octant(child: &Chunk, i: usize, shapes: &ShapeTable, out: &mut Chunk) {
+    let (ox, oy, oz) = octant_origin(i);
+    if let Some(v) = child.uniform() {
+        let coarse = uniform_octant(v, shapes);
+        if !coarse.is_air() {
+            for z in 0..OCTANT {
+                for y in 0..OCTANT {
+                    for x in 0..OCTANT {
+                        out.set(ox + x, oy + y, oz + z, coarse);
                     }
                 }
             }
-            continue;
         }
+        return;
+    }
+    for z in 0..OCTANT {
+        for y in 0..OCTANT {
+            for x in 0..OCTANT {
+                let (lx, ly, lz) = (2 * x, 2 * y, 2 * z);
+                let mut tally = Tally::<8>::new();
+                for dz in 0..2 {
+                    for dy in 0..2 {
+                        for dx in 0..2 {
+                            let v = child.get(lx + dx, ly + dy, lz + dz);
+                            tally.add(v.material(), weight(shapes, v), dy as u8);
+                        }
+                    }
+                }
+                let v = tally.finish();
+                if !v.is_air() {
+                    out.set(ox + x, oy + y, oz + z, v);
+                }
+            }
+        }
+    }
+}
+
+/// Where generation puts water, so level 1 can tell the lake it made from
+/// water that flowed or was placed: a level-0 Voxel whose bottom is below
+/// `level_m`, computed as [`Worldgen::chunk`] computes it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Waterline {
+    pub level_m: f32,
+    /// A level-0 Voxel's edge.
+    pub voxel_m: f32,
+}
+
+impl Waterline {
+    fn generates(&self, child_y: i32, y: usize) -> bool {
+        let floor_m = (child_y * CHUNK_SIZE as i32) as f32 * self.voxel_m;
+        floor_m + y as f32 * self.voxel_m < self.level_m
+    }
+}
+
+/// A level-0 child of a level-1 Chunk.
+#[derive(Clone, Copy)]
+pub enum Child<'a> {
+    /// Generated, or held and never changed: its packed Voxels are all of it.
+    Packed(&'a Chunk),
+    /// Held and changed: read with the fluid and fire beside its Voxels.
+    Changed(&'a Chunk, &'a ChunkOverlay),
+}
+
+/// A coarse Chunk with the fluid and fire level 1 shows of what the Server
+/// holds. Above level 1, and wherever nothing held changed, the overlay is
+/// empty.
+pub struct Coarse {
+    pub chunk: Chunk,
+    pub overlay: ChunkOverlay,
+}
+
+/// Level 1 from eight level-0 Chunks, the changed ones read through
+/// [`Occupants`]. A picture of held state, never a simulation of it.
+///
+/// The approximation is by volume, as [`downsample`]'s is. A Voxel's fluid
+/// weighs what it fills: its surface's share of the cube in empty space, the
+/// sub-cells below each void's surface in a Shape. It competes with solids by
+/// volume exactly as generated water does, so a coarse Voxel is still the
+/// Material with the most volume once half of it is occupied. Water the
+/// generator could have made, a packed source below the [`Waterline`], stays
+/// packed lake water. Any other fluid is dynamic: a coarse Voxel whose fluid is
+/// mostly dynamic is left air with that fluid in the overlay, standing at the
+/// share of the coarse Voxel its contents fill, and at least a sixteenth. So
+/// fluid under half a coarse Voxel still shows where nothing solid wins it, a
+/// coarse surface lies in the coarse Voxel whose water it draws, and nothing
+/// moves it to the generated waterline. A coarse solid burns when at least half
+/// of its Material's volume is burning.
+pub fn downsample_changed(
+    children: [Child<'_>; 8],
+    coord_y: i32,
+    tables: &Tables,
+    waterline: Option<Waterline>,
+) -> Coarse {
+    let packed = children.map(|c| match c {
+        Child::Packed(chunk) => Some(chunk),
+        Child::Changed(..) => None,
+    });
+    if let Some(all) = packed.iter().copied().collect::<Option<Vec<&Chunk>>>() {
+        let all: [&Chunk; 8] = std::array::from_fn(|i| all[i]);
+        return Coarse {
+            chunk: downsample(all, &tables.shapes),
+            overlay: ChunkOverlay::none(),
+        };
+    }
+    let mut chunk = Chunk::air();
+    let mut overlay = ChunkOverlay::none();
+    for (i, child) in children.into_iter().enumerate() {
+        match child {
+            Child::Packed(c) => packed_octant(c, i, &tables.shapes, &mut chunk),
+            Child::Changed(c, o) => {
+                let child_y = 2 * coord_y + (i / 2 % 2) as i32;
+                let read = Changed {
+                    chunk: c,
+                    overlay: o,
+                    child_y,
+                    tables,
+                    waterline,
+                };
+                read.octant(octant_origin(i), &mut chunk, &mut overlay);
+            }
+        }
+    }
+    Coarse { chunk, overlay }
+}
+
+struct Changed<'a> {
+    chunk: &'a Chunk,
+    overlay: &'a ChunkOverlay,
+    child_y: i32,
+    tables: &'a Tables,
+    waterline: Option<Waterline>,
+}
+
+impl Changed<'_> {
+    fn octant(&self, (ox, oy, oz): (usize, usize, usize), out: &mut Chunk, wet: &mut ChunkOverlay) {
         for z in 0..OCTANT {
             for y in 0..OCTANT {
                 for x in 0..OCTANT {
-                    let (lx, ly, lz) = (2 * x, 2 * y, 2 * z);
-                    let mut tally = Tally::new();
-                    for dz in 0..2 {
-                        for dy in 0..2 {
-                            for dx in 0..2 {
-                                let v = child.get(lx + dx, ly + dy, lz + dz);
-                                tally.add(v, weight(shapes, v), dy as u8);
-                            }
-                        }
+                    let (voxel, overlay) = self.cell([2 * x, 2 * y, 2 * z]);
+                    if !voxel.is_air() {
+                        out.set(ox + x, oy + y, oz + z, voxel);
                     }
-                    let v = tally.finish();
-                    if !v.is_air() {
-                        out.set(ox + x, oy + y, oz + z, v);
+                    if overlay != Overlay::NONE {
+                        wet.set(ox + x, oy + y, oz + z, overlay);
                     }
                 }
             }
         }
     }
-    out
+
+    /// One coarse Voxel from the eight at `[lx, ly, lz]` and above.
+    fn cell(&self, [lx, ly, lz]: [usize; 3]) -> (Voxel, Overlay) {
+        let shapes = &self.tables.shapes;
+        let fluids = &self.tables.fluids;
+        // Solids and every fluid, as `downsample` weighs Materials.
+        let mut all = Tally::<16>::new();
+        let mut lake = Tally::<1>::new();
+        let mut dynamic = Tally::<8>::new();
+        let mut burning = Tally::<8>::new();
+        let mut fuel = 0;
+        for dz in 0..2 {
+            for dy in 0..2 {
+                for dx in 0..2 {
+                    let (x, y, z) = (lx + dx, ly + dy, lz + dz);
+                    let voxel = self.chunk.get(x, y, z);
+                    let here = Occupants::of(voxel, self.overlay.get(x, y, z), fluids);
+                    let dy = dy as u8;
+                    if !here.solid.is_air() {
+                        let w = weight(shapes, here.solid);
+                        all.add(here.solid.material(), w, dy);
+                        if let Some(b) = here.burning {
+                            burning.add(here.solid.material(), w, dy);
+                            fuel = fuel.max(b.fuel);
+                        }
+                    }
+                    let Some(fluid) = here.fluid else {
+                        continue;
+                    };
+                    let generated = voxel.material() == WATER
+                        && self.waterline.is_some_and(|w| w.generates(self.child_y, y));
+                    let w = if generated {
+                        let w = weight(shapes, voxel);
+                        lake.add(WATER, w, dy);
+                        w
+                    } else {
+                        let w = fluid_volume(here.solid, fluid, shapes);
+                        dynamic.add(fluid.material, w, dy);
+                        w
+                    };
+                    all.add(fluid.material, w, dy);
+                }
+            }
+        }
+        if dynamic.total == 0 {
+            let voxel = all.finish();
+            return (voxel, burns(&all, &burning, voxel, fuel));
+        }
+        let level = |total: u32| -> u8 {
+            let full = u32::from(Fluid::FULL_SURFACE);
+            (total * full).div_ceil(8 * CUBE_WEIGHT).clamp(1, full) as u8
+        };
+        let flowing = |material: MaterialId| {
+            let surface = Level {
+                surface: level(all.total),
+                ..Level::DRY
+            };
+            Overlay {
+                fluid: Fluid::flowing(material, [surface, Level::DRY, Level::DRY, Level::DRY]),
+                burning: None,
+            }
+        };
+        if all.total >= SOLID_AT {
+            let best = all
+                .best(|_| true)
+                .expect("an occupied total has a Material");
+            let material = all.materials[best];
+            if !fluids.contains(material) {
+                let voxel = Voxel::cube(material);
+                return (voxel, burns(&all, &burning, voxel, fuel));
+            }
+            if lake.weight_of(material) >= dynamic.weight_of(material) {
+                return (Voxel::cube(material), Overlay::NONE);
+            }
+            return (Voxel::AIR, flowing(material));
+        }
+        let best = all
+            .best(|m| fluids.contains(m))
+            .expect("dynamic fluid is weighed");
+        (Voxel::AIR, flowing(all.materials[best]))
+    }
+}
+
+/// The fire a coarse solid shows: its Material's own, if half of it burns.
+fn burns<const N: usize>(all: &Tally<N>, burning: &Tally<8>, voxel: Voxel, fuel: u16) -> Overlay {
+    let material = voxel.material();
+    let burnt = burning.weight_of(material);
+    if voxel.is_air() || burnt == 0 || 2 * burnt < all.weight_of(material) {
+        return Overlay::NONE;
+    }
+    Overlay {
+        fluid: None,
+        burning: Some(Burning { fuel }),
+    }
+}
+
+/// The volume `fluid` fills where `solid` stands, in [`ShapeTable::volume`]'s
+/// units. Read without arms: a connected Shape's arms are its neighbours' to
+/// decide, and a sixteenth of a Voxel either way is below what level 1 draws.
+fn fluid_volume(solid: Voxel, fluid: Fluid, shapes: &ShapeTable) -> u32 {
+    shapes
+        .voids(solid, Connections::NONE)
+        .iter()
+        .enumerate()
+        .map(|(r, void)| void.volume_below(fluid.level(r).surface))
+        .sum()
 }
 
 fn uniform_octant(v: Voxel, shapes: &ShapeTable) -> Voxel {
@@ -963,6 +1211,263 @@ mod tests {
                 assert_matches_reference(&children, &t, &format!("{a:?}, {b:?} and a speck"));
             }
         }
+    }
+
+    fn tables() -> Tables {
+        Tables {
+            shapes: table(),
+            ..Tables::builtin()
+        }
+    }
+
+    /// Every packed Voxel counts as generated, so nothing is dynamic.
+    const DROWNED: Option<Waterline> = Some(Waterline {
+        level_m: f32::MAX,
+        voxel_m: 1.0,
+    });
+
+    fn changed<'a>(children: &'a [Chunk; 8], overlays: &'a [ChunkOverlay; 8]) -> [Child<'a>; 8] {
+        std::array::from_fn(|i| Child::Changed(&children[i], &overlays[i]))
+    }
+
+    fn assert_same(a: &Chunk, b: &Chunk, what: &str) {
+        for z in 0..CHUNK_SIZE {
+            for y in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    assert_eq!(a.get(x, y, z), b.get(x, y, z), "{what} at {x} {y} {z}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_changed_child_with_nothing_beside_its_voxels_downsamples_as_a_packed_one() {
+        let t = tables();
+        let dry: [ChunkOverlay; 8] = Default::default();
+        for seed in 0..6u64 {
+            let children = random_children(seed.wrapping_mul(0x51_7cc1_b727_220a) | 1);
+            let got = downsample_changed(changed(&children, &dry), 0, &t, DROWNED);
+            assert_same(
+                &got.chunk,
+                &run(&children, &t.shapes),
+                &format!("seed {seed}"),
+            );
+            assert_eq!(got.overlay.uniform(), Some(Overlay::NONE));
+        }
+
+        // Generated lake water at its own waterline is lake water, read either way.
+        let generator = Worldgen::new(SEED, 1.0, WorldgenParams::default());
+        let level_m = generator
+            .water_level_m()
+            .expect("the default World has water");
+        let waterline = Some(Waterline {
+            level_m,
+            voxel_m: 1.0,
+        });
+        let mut lakes = 0;
+        for (cx, cz) in [(0, 0), (3, -2), (-4, 5), (7, 7), (-6, -3), (2, 9)] {
+            let cy = (level_m / 64.0).floor() as i32;
+            let children: [Chunk; 8] = std::array::from_fn(|i| {
+                let (x, y, z) = (i as i32 % 2, i as i32 / 2 % 2, i as i32 / 4);
+                generator.chunk(2 * cx + x, 2 * cy + y, 2 * cz + z)
+            });
+            lakes +=
+                usize::from(children.iter().any(|c| {
+                    c.kinds().iter().any(|v| v.material() == WATER) && c.uniform().is_none()
+                }));
+            let got = downsample_changed(changed(&children, &dry), cy, &t, waterline);
+            assert_same(&got.chunk, &run(&children, &t.shapes), "lake");
+            assert_eq!(got.overlay.uniform(), Some(Overlay::NONE), "lake");
+        }
+        assert!(lakes > 0, "no lake shore was compared");
+    }
+
+    /// The coarse Voxel at the origin of a level-1 Chunk whose child 0 holds
+    /// `fine[j]` at octant `j` of its first eight Voxels, under `waterline`.
+    fn one_cell(fine: [(Voxel, Overlay); 8], waterline: Option<Waterline>) -> (Voxel, Overlay) {
+        let mut chunk = Chunk::air();
+        let mut overlay = ChunkOverlay::none();
+        for (j, (v, o)) in fine.into_iter().enumerate() {
+            chunk.set(j % 2, j / 2 % 2, j / 4, v);
+            overlay.set(j % 2, j / 2 % 2, j / 4, o);
+        }
+        let air = Chunk::air();
+        let mut children = [Child::Packed(&air); 8];
+        children[0] = Child::Changed(&chunk, &overlay);
+        let got = downsample_changed(children, 0, &tables(), waterline);
+        (got.chunk.get(0, 0, 0), got.overlay.get(0, 0, 0))
+    }
+
+    fn flowing(surface: u8) -> Overlay {
+        Overlay {
+            fluid: Fluid::flowing(
+                WATER,
+                [
+                    Level {
+                        surface,
+                        reach: 3,
+                        descent: 0,
+                    },
+                    Level::DRY,
+                    Level::DRY,
+                    Level::DRY,
+                ],
+            ),
+            burning: None,
+        }
+    }
+
+    fn standing(surface: u8) -> Overlay {
+        Overlay {
+            fluid: Fluid::flowing(
+                WATER,
+                [
+                    Level {
+                        surface,
+                        ..Level::DRY
+                    },
+                    Level::DRY,
+                    Level::DRY,
+                    Level::DRY,
+                ],
+            ),
+            burning: None,
+        }
+    }
+
+    const DRY: (Voxel, Overlay) = (Voxel::AIR, Overlay::NONE);
+
+    #[test]
+    fn dynamic_fluid_stands_at_the_share_of_the_coarse_voxel_it_fills() {
+        let full = (Voxel::AIR, flowing(16));
+        assert_eq!(one_cell([full; 8], None), (Voxel::AIR, standing(16)));
+        assert_eq!(
+            one_cell([full, full, DRY, DRY, full, full, DRY, DRY], None),
+            (Voxel::AIR, standing(8)),
+            "the bottom half"
+        );
+        let film = (Voxel::AIR, flowing(4));
+        assert_eq!(
+            one_cell([film, DRY, DRY, DRY, DRY, DRY, DRY, DRY], None),
+            (Voxel::AIR, standing(1)),
+            "a sixteenth of a coarse Voxel still shows"
+        );
+        // Stone wins a coarse Voxel that is more stone than water, as it does
+        // against a lake.
+        let rock = (cube(STONE), Overlay::NONE);
+        assert_eq!(
+            one_cell([rock, rock, rock, full, DRY, DRY, DRY, DRY], None),
+            (cube(STONE), Overlay::NONE)
+        );
+        // Stone under half is dropped and the water stands over what it filled.
+        assert_eq!(
+            one_cell([rock, rock, film, film, DRY, DRY, DRY, DRY], None),
+            (Voxel::AIR, standing(5)),
+        );
+    }
+
+    #[test]
+    fn only_water_the_generator_could_have_made_stays_packed() {
+        let lake = (cube(WATER), Overlay::NONE);
+        let at = |level_m| {
+            Some(Waterline {
+                level_m,
+                voxel_m: 0.5,
+            })
+        };
+        assert_eq!(one_cell([lake; 8], at(1.0)), lake, "every bottom under 1 m");
+        assert_eq!(
+            one_cell([lake; 8], at(0.0)),
+            (Voxel::AIR, standing(16)),
+            "a bottom at the waterline is above it"
+        );
+        assert_eq!(one_cell([lake; 8], None), (Voxel::AIR, standing(16)));
+        // Mostly lake: the lake's, and the correction for it still applies.
+        let full = (Voxel::AIR, flowing(16));
+        let mut mixed = [lake; 8];
+        mixed[7] = full;
+        mixed[6] = full;
+        mixed[5] = full;
+        assert_eq!(one_cell(mixed, at(1.0)), lake);
+        mixed[4] = full;
+        assert_eq!(one_cell(mixed, at(1.0)), lake, "a tie is the lake's");
+        mixed[3] = full;
+        assert_eq!(one_cell(mixed, at(1.0)), (Voxel::AIR, standing(16)));
+    }
+
+    #[test]
+    fn waterlogged_water_weighs_what_it_fills_of_the_voids() {
+        let slab = Voxel::shaped(STONE, SHAPE_SLAB, Orientation::IDENTITY);
+        let logged = (slab, standing(16));
+        let film = (Voxel::AIR, flowing(4));
+        // Four half-full slabs: stone 4 x 2048, water 4 x 2048 + 4 x 1024 above.
+        assert_eq!(
+            one_cell(
+                [logged, logged, film, film, logged, logged, film, film],
+                None
+            ),
+            (Voxel::AIR, standing(10))
+        );
+        // A stair's notch holds a quarter of the cube: stone wins.
+        let stair = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY);
+        let notch = Overlay {
+            fluid: Some(Fluid::source(WATER)),
+            burning: None,
+        };
+        assert_eq!(
+            one_cell([(stair, notch); 8], None),
+            (cube(STONE), Overlay::NONE)
+        );
+    }
+
+    #[test]
+    fn a_coarse_solid_burns_when_half_its_material_does() {
+        let fire = |fuel| Overlay {
+            fluid: None,
+            burning: Some(Burning { fuel }),
+        };
+        let burning = |fuel| (cube(STONE), fire(fuel));
+        let cold = (cube(STONE), Overlay::NONE);
+        assert_eq!(
+            one_cell(
+                [
+                    burning(3),
+                    burning(9),
+                    burning(1),
+                    burning(2),
+                    cold,
+                    cold,
+                    cold,
+                    cold
+                ],
+                None
+            ),
+            (cube(STONE), fire(9))
+        );
+        assert_eq!(
+            one_cell(
+                [
+                    burning(3),
+                    burning(9),
+                    burning(1),
+                    cold,
+                    cold,
+                    cold,
+                    cold,
+                    cold
+                ],
+                None
+            ),
+            (cube(STONE), Overlay::NONE)
+        );
+        // A fire too small to keep its Voxel solid is gone with it.
+        assert_eq!(
+            one_cell(
+                [burning(3), burning(9), burning(1), DRY, DRY, DRY, DRY, DRY],
+                None
+            ),
+            DRY
+        );
     }
 
     /// A flat heightfield that counts how often it is asked.

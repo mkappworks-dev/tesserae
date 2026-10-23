@@ -1,9 +1,10 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tesserae_core::light::{Light, MAX_LIGHT};
-use tesserae_core::lod::{coarse_light, downsample};
+use tesserae_core::lod::{Child, coarse_light, downsample, downsample_changed};
 use tesserae_core::mesh::FACE_STEPS;
-use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Orientation, SHAPE_STAIR};
+use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, LitChunk, Orientation};
+use tesserae_core::{Fluid, Level, Overlay, SHAPE_STAIR};
 use tesserae_core::{ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk, testgen};
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
@@ -107,6 +108,56 @@ fn terrain(c: &mut Criterion) {
     ] {
         group.bench_function(name, |b| {
             b.iter(|| black_box(downsample(black_box(refs(children)), &shapes)))
+        });
+    }
+
+    // Level 1 over held Chunks something changed: read with their overlays, dry
+    // and with every open Voxel of the lower four flooded by flowing water.
+    let tables = Tables::builtin();
+    let dry: [ChunkOverlay; 8] = Default::default();
+    let flowing = Overlay {
+        fluid: Fluid::flowing(
+            tesserae_core::material::WATER,
+            [
+                Level {
+                    surface: 8,
+                    reach: 3,
+                    descent: 0,
+                },
+                Level::DRY,
+                Level::DRY,
+                Level::DRY,
+            ],
+        ),
+        burning: None,
+    };
+    let flooded: [ChunkOverlay; 8] = std::array::from_fn(|i| {
+        let mut overlay = ChunkOverlay::none();
+        if i >> 1 & 1 == 0 {
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        if world[i].get(x, y, z).is_air() {
+                            overlay.set(x, y, z, flowing);
+                        }
+                    }
+                }
+            }
+        }
+        overlay
+    });
+    for (name, overlays) in [("changed_dry", &dry), ("changed_flooded", &flooded)] {
+        group.bench_function(name, |b| {
+            b.iter(|| {
+                let children: [Child; 8] =
+                    std::array::from_fn(|i| Child::Changed(&world[i], &overlays[i]));
+                black_box(downsample_changed(
+                    black_box(children),
+                    surface,
+                    &tables,
+                    None,
+                ))
+            })
         });
     }
     group.finish();

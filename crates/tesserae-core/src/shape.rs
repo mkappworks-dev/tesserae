@@ -461,6 +461,13 @@ impl Void {
         self.rows[y * SUBDIV + z] >> x & 1 != 0
     }
 
+    /// Its sub-cells below `surface` sixteenths: the volume fluid standing
+    /// that high in it fills, in the units of [`ShapeTable::volume`].
+    pub fn volume_below(&self, surface: u8) -> u32 {
+        let s = (surface as usize).min(SUBDIV);
+        self.rows[..s * SUBDIV].iter().map(|r| r.count_ones()).sum()
+    }
+
     /// Whether the two share a sub-cell: how fluid follows a Voxel's change of
     /// Shape into the space that stays open.
     pub fn overlaps(&self, other: &Void) -> bool {

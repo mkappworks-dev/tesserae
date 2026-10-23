@@ -117,7 +117,8 @@ radius and the reach, so it is the same fog at any Voxel size. The fog colour
 and the colour of the sky behind the terrain are two values, not one.
 
 **Downsample** — producing a coarse Chunk's Voxels from the eight finer Chunks
-it covers: the dominant Material by volume, solid if half the volume is.
+it covers: the dominant Material by volume, solid if half the volume is. At
+level 1 fluid weighs the volume it fills.
 
 **World generation** — producing a Chunk's contents from a seed and a position.
 Never produces a mesh.

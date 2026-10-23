@@ -199,11 +199,6 @@ impl ChunkStore {
         std::mem::take(&mut self.lifecycle)
     }
 
-    /// For a coarse generate job that takes the Chunk as a child instead of generating one.
-    pub(in crate::server) fn chunk_arc(&self, coord: ChunkCoord) -> Option<Arc<Chunk>> {
-        self.chunks.get(&coord).map(Arc::clone)
-    }
-
     /// One Voxel's light, in lattice coordinates. `Light::DARK` where the
     /// volume does not extend, which is also what [`LightVolume`] reports.
     pub fn light_at(&self, at: [i32; 3]) -> Light {
@@ -304,6 +299,10 @@ impl VoxelCoord {
 pub(in crate::server) struct LightLattice<'a> {
     pub store: &'a mut ChunkStore,
     pub touched: Vec<ChunkCoord>,
+    /// The Chunks across a face whose plane of light it wrote to: they read that
+    /// plane, to mesh the faces it lights and to solve their own light, though
+    /// none of their own light may have moved.
+    pub across: Vec<ChunkCoord>,
 }
 
 impl<'a> LightLattice<'a> {
@@ -311,6 +310,7 @@ impl<'a> LightLattice<'a> {
         LightLattice {
             store,
             touched: Vec::new(),
+            across: Vec::new(),
         }
     }
 }
@@ -355,6 +355,20 @@ impl LightVolume for LightLattice<'_> {
             // so this collapses nearly every run, and `streaming` de-duplicates
             // what is left when it marks Chunks dirty.
             self.touched.push(at.chunk);
+        }
+        let last = CHUNK_SIZE - 1;
+        for (axis, local) in [at.x, at.y, at.z].into_iter().enumerate() {
+            let step = match local {
+                0 => -1,
+                l if l == last => 1,
+                _ => continue,
+            };
+            let mut n = [at.chunk.x, at.chunk.y, at.chunk.z];
+            n[axis] += step;
+            let n = ChunkCoord::new(n[0], n[1], n[2]);
+            if self.across.last() != Some(&n) {
+                self.across.push(n);
+            }
         }
     }
 }

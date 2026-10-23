@@ -373,14 +373,17 @@ impl MeshState {
     /// the sound one in both directions; `relight`'s bulk solve converges
     /// upwards only, so routing an edit through it is the mistake
     /// `tesserae_core::relight`'s doc comment describes.
+    ///
+    /// A running solve of this Chunk is spoilt too. A solve reads its own
+    /// Chunk and only the plane of each neighbour that faces it, so a change
+    /// elsewhere in a neighbour leaves it standing: the caller marks the
+    /// neighbour whose plane it changed as edited itself. Spoiling all seven
+    /// would let water that never stops changing next door keep a solve, and
+    /// every mesh that waits on it, from ever landing.
     pub(in crate::server) fn edited(&mut self, coord: ChunkCoord) {
         self.dirty.insert(coord);
-        // A solve reads its Chunk and its six face neighbours, so the Edit
-        // invalidates the solve of any of the seven.
-        for c in std::iter::once(coord).chain(face_neighbors(coord)) {
-            if self.relighting.contains(&c) {
-                self.poisoned.insert(c);
-            }
+        if self.relighting.contains(&coord) {
+            self.poisoned.insert(coord);
         }
     }
 
@@ -403,7 +406,6 @@ impl MeshState {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
     }
 
-    #[cfg(test)]
     pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
         self.edited_chunks.contains(&coord)
     }
@@ -2298,6 +2300,8 @@ pub(in crate::server) mod tests {
             assert!(l.meshed > 0 && l.held > l.meshed, "level {level}: {l:?}");
         }
     }
+
+    mod progress;
 
     #[test]
     fn face_neighbours_sit_on_the_faces_the_mesher_expects() {

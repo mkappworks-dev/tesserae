@@ -1781,6 +1781,61 @@ fn neighbouring_flow_shows_only_the_step_between_surfaces() {
     );
 }
 
+/// Full water under a lower surface of the same water is one body: the face
+/// between them is inside it and not drawn, from either side, and the surface
+/// on top is.
+#[test]
+fn full_water_under_a_lower_surface_draws_no_face_between_them() {
+    let chunk = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(4, 4, 4, flowing(16));
+    overlay.set(4, 5, 4, flowing(6));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![5.375]);
+    assert_eq!(blended_heights(&mesh, [0.0, -1.0, 0.0]), vec![4.0]);
+
+    // Against a different fluid the face stays.
+    let mut glass = Chunk::air();
+    glass.set(4, 4, 4, Voxel::cube(tesserae_core::material::GLASS));
+    let lit = unlit(&glass).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert!(
+        mesh.blended
+            .positions
+            .chunks(4)
+            .zip(mesh.blended.normals.chunks(4))
+            .any(|(q, n)| n[0] == [0.0, 1.0, 0.0] && q[0][1] == 5.0),
+        "glass under water keeps its top"
+    );
+}
+
+/// A fence beside full flowing water grows no arm towards it: the water's
+/// packed Voxel is air, which is what collision and the simulation read its
+/// arms from, though the water is drawn as a cube. A packed source is a cube
+/// to all three, and the arm grows.
+#[test]
+fn a_fence_grows_no_arm_towards_flowing_water() {
+    let opaque = |chunk: &Chunk, overlay: &tesserae_core::ChunkOverlay| {
+        mesh_chunk(unlit(chunk).with_overlay(overlay), [None; 6], tables())
+            .opaque
+            .positions
+    };
+    let fence = place_fences(&[(10, 10, 10)]);
+    let bare = opaque(&fence, &tesserae_core::ChunkOverlay::none());
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(11, 10, 10, flowing(16));
+    assert_eq!(opaque(&fence, &overlay), bare, "an arm towards flow");
+
+    let mut sourced = fence.clone();
+    sourced.set(11, 10, 10, Voxel::cube(tesserae_core::material::WATER));
+    assert_ne!(
+        opaque(&sourced, &tesserae_core::ChunkOverlay::none()),
+        bare,
+        "no arm towards a source"
+    );
+}
+
 /// A dry overlay changes nothing about a mesh.
 #[test]
 fn a_dry_overlay_meshes_exactly_as_none() {
