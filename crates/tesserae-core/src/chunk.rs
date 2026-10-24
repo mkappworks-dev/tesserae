@@ -81,6 +81,29 @@ impl<T: Copy + PartialEq> Palette<T> {
         }
     }
 
+    /// The `out.len()` values from index `start`, with the storage matched once
+    /// for the run.
+    #[inline]
+    pub fn read_run(&self, start: usize, out: &mut [T]) {
+        match self {
+            Palette::Uniform(v) => out.fill(*v),
+            Palette::Indexed {
+                palette,
+                bits,
+                words,
+            } => {
+                // `bits` divides 64, so a word and shift need no division:
+                // `read_index`'s per value cost the light sweep 10-20%.
+                let bits = *bits as usize;
+                let mask = (1u64 << bits) - 1;
+                for (i, o) in (start..).zip(out) {
+                    let bit = i * bits;
+                    *o = palette[(words[bit / 64] >> (bit % 64) & mask) as usize];
+                }
+            }
+        }
+    }
+
     pub fn set(&mut self, i: usize, value: T) {
         if let Palette::Uniform(current) = *self {
             if current == value {
@@ -193,6 +216,14 @@ impl Chunk {
         self.storage.get(index(x, y, z))
     }
 
+    /// The row of Voxels along x at (`y`, `z`), into the first [`CHUNK_SIZE`]
+    /// of `out`.
+    #[inline]
+    pub fn read_row(&self, y: usize, z: usize, out: &mut [Voxel]) {
+        self.storage
+            .read_run(index(0, y, z), &mut out[..CHUNK_SIZE]);
+    }
+
     pub fn set(&mut self, x: usize, y: usize, z: usize, voxel: Voxel) {
         debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
         self.storage.set(index(x, y, z), voxel);
@@ -248,6 +279,32 @@ impl Chunk {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A row read equals its Voxels read one at a time at every index width.
+    #[test]
+    fn a_row_read_matches_reading_each_voxel() {
+        for kinds in [1u16, 2, 3, 5, 17, 300] {
+            let mut chunk = Chunk::air();
+            for i in 0..CHUNK_VOLUME {
+                let (x, z, y) = (
+                    i % CHUNK_SIZE,
+                    i / CHUNK_SIZE % CHUNK_SIZE,
+                    i / (CHUNK_SIZE * CHUNK_SIZE),
+                );
+                chunk.set(x, y, z, Voxel::cube((i * 7919 % kinds as usize) as u16));
+            }
+            let mut row = [Voxel::AIR; CHUNK_SIZE + 2];
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    chunk.read_row(y, z, &mut row[1..]);
+                    for x in 0..CHUNK_SIZE {
+                        assert_eq!(row[x + 1], chunk.get(x, y, z), "{kinds} kinds");
+                    }
+                }
+            }
+            assert_eq!((row[0], row[CHUNK_SIZE + 1]), (Voxel::AIR, Voxel::AIR));
+        }
+    }
 
     #[test]
     fn a_filled_chunk_stays_uniform() {

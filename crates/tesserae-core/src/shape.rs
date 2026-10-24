@@ -536,58 +536,73 @@ fn emit_rects(
 
 /// The accessible voids of a rotated grid in the order of their first
 /// sub-cell, or `None` when there are more than [`MAX_VOIDS`].
+///
+/// Flooded a row of sub-cells at a time: registration derives this for every
+/// variant, and flooding one sub-cell at a time was most of its cost. Kept out
+/// of [`ShapeTable::derive`], whose other loops measured 10-20% slower with
+/// this inlined among them.
+#[inline(never)]
 fn find_voids(grid: &Grid) -> Option<Vec<Void>> {
-    const UNSEEN: u8 = u8::MAX;
-    let mut label = [UNSEEN; SUBDIV * SUBDIV * SUBDIV];
+    let last = SUBDIV - 1;
+    let free: [u16; SUBDIV * SUBDIV] = std::array::from_fn(|r| {
+        (0..SUBDIV).fold(0, |row, x| row | u16::from(!grid[r * SUBDIV + x]) << x)
+    });
+    let mut unseen = free;
     let mut voids = Vec::new();
     let mut stack = Vec::new();
-    for start in 0..grid.len() {
-        if grid[start] || label[start] != UNSEEN {
-            continue;
-        }
-        let mut rows = [0u16; SUBDIV * SUBDIV];
-        let mut reaches_face = false;
-        label[start] = 0;
-        stack.push(start);
-        while let Some(i) = stack.pop() {
-            let (x, z, y) = (i % SUBDIV, i / SUBDIV % SUBDIV, i / (SUBDIV * SUBDIV));
-            rows[y * SUBDIV + z] |= 1 << x;
-            let last = SUBDIV - 1;
-            reaches_face |= [x, y, z].iter().any(|&c| c == 0 || c == last);
-            let mut visit = |c: [usize; 3]| {
-                let j = at(c[0], c[1], c[2]);
-                if !grid[j] && label[j] == UNSEEN {
-                    label[j] = 0;
-                    stack.push(j);
+    for start in 0..unseen.len() {
+        while unseen[start] != 0 {
+            let seed = unseen[start] & unseen[start].wrapping_neg();
+            let mut rows = [0u16; SUBDIV * SUBDIV];
+            rows[start] = runs_from(free[start], seed);
+            stack.push(start);
+            while let Some(r) = stack.pop() {
+                let (y, z) = (r / SUBDIV, r % SUBDIV);
+                let mut spread = |q: usize| {
+                    let entering = rows[r] & free[q] & !rows[q];
+                    if entering != 0 {
+                        rows[q] |= runs_from(free[q], entering);
+                        stack.push(q);
+                    }
+                };
+                if y > 0 {
+                    spread(r - SUBDIV);
                 }
-            };
-            if x > 0 {
-                visit([x - 1, y, z]);
+                if y < last {
+                    spread(r + SUBDIV);
+                }
+                if z > 0 {
+                    spread(r - 1);
+                }
+                if z < last {
+                    spread(r + 1);
+                }
             }
-            if x < last {
-                visit([x + 1, y, z]);
+            for (u, row) in unseen.iter_mut().zip(&rows) {
+                *u &= !row;
             }
-            if y > 0 {
-                visit([x, y - 1, z]);
+            let reaches_face = rows.iter().enumerate().any(|(r, &row)| {
+                let (y, z) = (r / SUBDIV, r % SUBDIV);
+                row != 0
+                    && ([y, z].iter().any(|&c| c == 0 || c == last) || row & (1 | 1 << last) != 0)
+            });
+            if reaches_face {
+                if voids.len() == MAX_VOIDS {
+                    return None;
+                }
+                voids.push(Void::from_rows(rows));
             }
-            if y < last {
-                visit([x, y + 1, z]);
-            }
-            if z > 0 {
-                visit([x, y, z - 1]);
-            }
-            if z < last {
-                visit([x, y, z + 1]);
-            }
-        }
-        if reaches_face {
-            if voids.len() == MAX_VOIDS {
-                return None;
-            }
-            voids.push(Void::from_rows(rows));
         }
     }
     Some(voids)
+}
+
+/// The runs of set bits in `free` that hold a bit of `seeds`, a subset of it.
+fn runs_from(free: u16, seeds: u16) -> u16 {
+    // The carry from a run's lowest seed clears the run above it; the seeds
+    // above that one are put back by the `| seeds`.
+    let up = |f: u16, s: u16| (f.wrapping_add(s) ^ f) & f | s;
+    up(free, seeds) | up(free.reverse_bits(), seeds.reverse_bits()).reverse_bits()
 }
 
 /// Everything derived for one (Shape, Orientation).
@@ -2210,6 +2225,117 @@ mod tests {
             assert!(!voids[0].open[face].intersects(&voids[1].open[face]));
         }
         assert!(voids[0].open[POS_X].is_empty() && voids[1].open[NEG_X].is_empty());
+    }
+
+    /// The flood one sub-cell at a time that the row flood replaced.
+    fn voids_by_cell(grid: &Grid) -> Option<Vec<Void>> {
+        let last = SUBDIV - 1;
+        let mut seen = [false; SUBDIV * SUBDIV * SUBDIV];
+        let mut voids = Vec::new();
+        for start in 0..grid.len() {
+            if grid[start] || seen[start] {
+                continue;
+            }
+            let mut rows = [0u16; SUBDIV * SUBDIV];
+            let mut reaches_face = false;
+            seen[start] = true;
+            let mut stack = vec![start];
+            while let Some(i) = stack.pop() {
+                let (x, z, y) = (i % SUBDIV, i / SUBDIV % SUBDIV, i / (SUBDIV * SUBDIV));
+                rows[y * SUBDIV + z] |= 1 << x;
+                reaches_face |= [x, y, z].iter().any(|&c| c == 0 || c == last);
+                let steps = [
+                    [-1, 0, 0],
+                    [1, 0, 0],
+                    [0, -1, 0],
+                    [0, 1, 0],
+                    [0, 0, -1],
+                    [0, 0, 1],
+                ];
+                for d in steps {
+                    let c = [x as i32 + d[0], y as i32 + d[1], z as i32 + d[2]];
+                    if c.iter().any(|&c| !(0..SUBDIV as i32).contains(&c)) {
+                        continue;
+                    }
+                    let j = at(c[0] as usize, c[1] as usize, c[2] as usize);
+                    if !grid[j] && !seen[j] {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+            if reaches_face {
+                if voids.len() == MAX_VOIDS {
+                    return None;
+                }
+                voids.push(Void::from_rows(rows));
+            }
+        }
+        Some(voids)
+    }
+
+    /// The row flood finds the same voids in the same order as a flood one
+    /// sub-cell at a time: every builtin under every Orientation, the example
+    /// connected Shapes under every arm, partitions past [`MAX_VOIDS`], sealed
+    /// cavities, and random boxes.
+    #[test]
+    fn the_row_flood_finds_the_voids_a_cell_flood_does() {
+        let b = NodeBox::new;
+        let mut grids = Vec::new();
+        let builtin = [
+            vec![b([0, 0, 0], [16, 8, 16])],
+            vec![b([0, 0, 0], [16, 8, 16]), b([0, 8, 8], [16, 16, 16])],
+            vec![b([6, 0, 6], [10, 16, 10])],
+        ];
+        for boxes in &builtin {
+            let grid = rasterise(boxes);
+            grids.extend(Orientation::all().map(|o| rotate_grid(&grid, &o.matrix())));
+        }
+        for def in [fence(), pipe()] {
+            let arms = def.connect.expect("connected").arms;
+            for mask in 0..1u32 << arms.len() {
+                let mut boxes = def.boxes.clone();
+                for (k, arm) in arms.iter().enumerate() {
+                    if mask >> k & 1 != 0 {
+                        boxes.extend_from_slice(&arm.boxes);
+                    }
+                }
+                grids.push(rasterise(&boxes));
+            }
+        }
+        let wall = |x: u8| b([x, 0, 0], [x + 1, 16, 16]);
+        grids.push(rasterise(&[wall(3), wall(7), wall(11)]));
+        grids.push(rasterise(&[wall(2), wall(5), wall(8), wall(11)]));
+        grids.push(rasterise(&[
+            b([2, 2, 2], [14, 4, 14]),
+            b([2, 12, 2], [14, 14, 14]),
+            b([2, 4, 2], [4, 12, 14]),
+            b([12, 4, 2], [14, 12, 14]),
+            b([4, 4, 2], [12, 12, 4]),
+            b([4, 4, 12], [12, 12, 14]),
+        ]));
+        grids.push([false; SUBDIV * SUBDIV * SUBDIV]);
+        grids.push([true; SUBDIV * SUBDIV * SUBDIV]);
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n) as u8
+        };
+        for _ in 0..500 {
+            let boxes: Vec<NodeBox> = (0..1 + next(12))
+                .map(|_| {
+                    let min = [next(16), next(16), next(16)];
+                    let max = min.map(|c| c + 1 + next(16 - c as u64));
+                    b(min, max)
+                })
+                .collect();
+            grids.push(rasterise(&boxes));
+        }
+        for grid in &grids {
+            assert_eq!(find_voids(grid), voids_by_cell(grid));
+        }
     }
 
     /// Past [`MAX_VOIDS`] a Shape holds no fluid at all, rather than merging

@@ -1978,3 +1978,127 @@ fn a_burning_solid_draws_flames_over_its_open_faces_and_keeps_its_geometry() {
         "a flame on the face against stone"
     );
 }
+
+/// An overlay whose palette still lists water and fire though every cell is
+/// dry, as one is after its last wet Voxel drains: it takes the wet path.
+fn drained() -> tesserae_core::ChunkOverlay {
+    use tesserae_core::{Burning, ChunkOverlay, Fluid, Overlay, material::WATER};
+    let mut overlay = ChunkOverlay::none();
+    let wet = Overlay {
+        fluid: Some(Fluid::source(WATER)),
+        burning: Some(Burning { fuel: 1 }),
+    };
+    overlay.set(0, 0, 0, wet);
+    overlay.set(0, 0, 0, Overlay::NONE);
+    assert!(overlay.may_contain_fluid() && overlay.may_contain_burning());
+    overlay
+}
+
+/// A dry neighbourhood meshes the same through the path that reads no overlay
+/// and the general one, whichever of its seven overlays sends it there:
+/// generated ramps, caves and shores lit by the sky, and connected Shapes,
+/// stairs and clear Materials by hand.
+#[test]
+fn a_dry_neighbourhood_meshes_the_same_whichever_path_it_takes() {
+    use tesserae_core::material::{GLASS, LEAVES, WATER};
+    let g = world();
+    let mut scenes: Vec<(Chunk, [Chunk; 6])> = ramp_chunks(&g, 1)
+        .into_iter()
+        .take(3)
+        .chain([[0, -1, 0], [2, 0, -3]])
+        .map(|[x, y, z]| {
+            let around = [
+                [-1, 0, 0],
+                [1, 0, 0],
+                [0, -1, 0],
+                [0, 1, 0],
+                [0, 0, -1],
+                [0, 0, 1],
+            ];
+            let around = around.map(|d| g.chunk(x + d[0], y + d[1], z + d[2]));
+            (g.chunk(x, y, z), around)
+        })
+        .collect();
+    let mut built = place_fences(&[(10, 10, 10), (11, 10, 10), (11, 10, 11), (31, 10, 10)]);
+    let stair = Voxel::shaped(GLASS, SHAPE_STAIR, Orientation::new(POS_Y, 1));
+    for (x, voxel) in [
+        (2, Voxel::cube(GLASS)),
+        (3, Voxel::cube(LEAVES)),
+        (4, Voxel::cube(WATER)),
+        (5, stair),
+    ] {
+        for z in 0..CHUNK_SIZE {
+            built.set(x, 4, z, voxel);
+        }
+    }
+    let mut east = Chunk::air();
+    east.set(0, 10, 10, Voxel::cube(1));
+    scenes.push((
+        built,
+        std::array::from_fn(|i| {
+            if i == POS_X {
+                east.clone()
+            } else {
+                Chunk::air()
+            }
+        }),
+    ));
+
+    let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    let open = Chunk::air();
+    let lit = |chunk: &Chunk| {
+        let mut border = [None; 6];
+        border[POS_Y] = Some(LitChunk::new(&open, &sky));
+        tesserae_core::light_chunk(chunk, border, tables())
+    };
+    let drained = drained();
+    for (center, around) in &scenes {
+        let light = lit(center);
+        let lights: Vec<ChunkLight> = around.iter().map(lit).collect();
+        let mesh = |wet: &dyn Fn(usize) -> bool| {
+            let own = LitChunk::new(center, &light);
+            let own = if wet(6) {
+                own.with_overlay(&drained)
+            } else {
+                own
+            };
+            let neighbors = std::array::from_fn(|i| {
+                let n = LitChunk::new(&around[i], &lights[i]);
+                Some(if wet(i) { n.with_overlay(&drained) } else { n })
+            });
+            format!("{:?}", mesh_chunk(own, neighbors, tables()))
+        };
+        let dry = mesh(&|_| false);
+        assert_eq!(dry, mesh(&|i| i == 6), "the centre's overlay");
+        for k in 0..6 {
+            assert_eq!(dry, mesh(&|i| i == k), "neighbour {k}'s overlay");
+        }
+        assert_eq!(dry, mesh(&|_| true), "every overlay");
+    }
+}
+
+/// A dry Chunk still meshes against its neighbours' fluid: lake water at its
+/// edge shows its face to a dry neighbour and hides it against full flowing
+/// water across the boundary.
+#[test]
+fn a_dry_chunk_beside_a_wet_one_meshes_against_the_neighbours_fluid() {
+    use tesserae_core::material::WATER;
+    let mut center = Chunk::air();
+    center.set(31, 4, 4, Voxel::cube(WATER));
+    let east = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(0, 4, 4, flowing(16));
+    let east_faces = |n: LitChunk| {
+        let mut neighbors = [None; 6];
+        neighbors[POS_X] = Some(n);
+        let mesh = mesh_chunk(unlit(&center), neighbors, tables());
+        mesh.blended
+            .normals
+            .iter()
+            .filter(|&&n| n == [1.0, 0.0, 0.0])
+            .count()
+            / 4
+    };
+    assert_eq!(east_faces(unlit(&east)), 1);
+    assert_eq!(east_faces(unlit(&east).with_overlay(&overlay)), 0);
+}

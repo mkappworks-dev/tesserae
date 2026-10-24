@@ -19,6 +19,8 @@ use crate::voxel::{MaterialId, Voxel};
 pub const PADDED: usize = CHUNK_SIZE + 2;
 
 const PADDED_VOLUME: usize = PADDED * PADDED * PADDED;
+/// How far [`pad_index`] moves for one step along x, y and z.
+const STRIDES: [usize; 3] = [1, PADDED * PADDED, PADDED];
 
 /// Face index into [`Neighborhood::new`]'s neighbour array.
 pub const NEG_X: usize = 0;
@@ -109,13 +111,13 @@ impl Neighborhood {
         let mut light = vec![Light::DARK; PADDED_VOLUME].into_boxed_slice();
         let last = CHUNK_SIZE - 1;
 
+        // By rows: read a Voxel at a time, the optimiser stopped hoisting the
+        // palette's match out of this loop and it cost a third of the build.
         for y in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
-                for x in 0..CHUNK_SIZE {
-                    let i = pad_index(x as i32, y as i32, z as i32);
-                    voxels[i] = center.chunk.get(x, y, z);
-                    light[i] = center.light.get(x, y, z);
-                }
+                let i = pad_index(0, y as i32, z as i32);
+                center.chunk.read_row(y, z, &mut voxels[i..]);
+                center.light.read_row(y, z, &mut light[i..]);
             }
         }
 
@@ -778,16 +780,26 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
             for s in 0..CHUNK_SIZE {
                 mask.fill(None);
                 for a in 0..CHUNK_SIZE {
+                    // Indexed by strides: with the cell's coordinates in an
+                    // array indexed by axis, they lived on the stack and the
+                    // loop's speed came down to how the optimiser laid out the
+                    // function around it.
+                    let row = pad_index(0, 0, 0) + s * STRIDES[d] + a * STRIDES[u];
                     for b in 0..CHUNK_SIZE {
-                        let mut c = [0i32; 3];
-                        c[d] = s as i32;
-                        c[u] = a as i32;
-                        c[v] = b as i32;
-                        let here = n.at(c[0], c[1], c[2]);
+                        let i = row + b * STRIDES[v];
+                        let here = n.voxels[i];
                         if !here.is_full_cube() {
                             continue;
                         }
+                        let j = if positive {
+                            i + STRIDES[d]
+                        } else {
+                            i - STRIDES[d]
+                        };
+                        let mut c = [0i32; 3];
                         c[d] = s as i32 + step;
+                        c[u] = a as i32;
+                        c[v] = b as i32;
                         // Hidden only if the Voxel across covers this whole
                         // face. A slab beside a cube hides the cube's face on
                         // the slab's sealed side and nowhere else.
@@ -797,7 +809,7 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
                         // measured 2-6% slower on `greedy_mesh/solid` and
                         // `/terrain`. `seals` is the same question, asked of
                         // the table only for a shaped Voxel.
-                        let across = n.at(c[0], c[1], c[2]);
+                        let across = n.voxels[j];
                         let hidden = if across.is_full_cube() {
                             !TRANSLUCENT || hides(materials, across, here)
                         } else {
@@ -823,7 +835,7 @@ fn pass1<const TRANSLUCENT: bool, const SURFACES: bool>(
                         // work, so lighting a face by its own Voxel would make
                         // every face black. Read from the cell this loop has
                         // already fetched to test occlusion.
-                        let lit = n.light_at(c[0], c[1], c[2]);
+                        let lit = n.light[j];
                         mask[a * CHUNK_SIZE + b] = Some((here.material(), lit));
                     }
                 }

@@ -1,7 +1,7 @@
 # 10: Demonstrate and document the completed simulation
 
 Status: ready-for-agent
-Blocked by: 09
+Blocked by: 09, 11
 
 Spec: [acceptance and Further Notes](../spec.md).
 
