@@ -147,6 +147,7 @@ tesserae/
 │   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
+│   │                       fluids.rs: flow, waterlogging, fire, rescans  ▸ 8
 │   ├── tesserae-mods/          NO Bevy, NO wgpu — sandbox + validation     ▸ 7
 │   │   ├── wit/0.1/            tesserae:mods@0.1.0, closed, world mod
 │   │   ├── wit/0.2/            tesserae:mods@0.2.0: fluids, sources, fire  ▸ 8

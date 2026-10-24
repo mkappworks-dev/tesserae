@@ -1592,7 +1592,7 @@ fn landing_past_its_bound_takes_turns_round_chunks_and_voxels() {
         .collect();
     let mut served: BTreeMap<[i32; 3], Vec<Cell>> = BTreeMap::new();
     for call in 0..7 {
-        let (chosen, deferred) = choose(&mut sim, all.clone());
+        let (chosen, deferred) = choose(&mut sim, &BUILTIN, all.clone());
         assert_eq!((chosen.len(), deferred.len()), (3, 17));
         let chunks: BTreeSet<[i32; 3]> = chosen.iter().map(|p| chunk_of(p.at).0).collect();
         assert_eq!(chunks.len(), 3, "a Chunk landed twice before all had once");
@@ -1614,6 +1614,60 @@ fn landing_past_its_bound_takes_turns_round_chunks_and_voxels() {
         let distinct: BTreeSet<Cell> = cells.iter().copied().collect();
         assert_eq!(distinct.len(), 4, "a Voxel was passed over: {cells:?}");
     }
+}
+
+/// Changes that start or stop block light have a bound of their own: past
+/// it the rest wait their turn while changes that move no light, in the same
+/// Chunk or another, keep landing, and every one lands in a later step.
+#[test]
+fn emitters_past_their_bound_wait_while_other_changes_land() {
+    let mut sim = FluidSim::default();
+    sim.set_emitter_bound(2);
+    let dry = Occupants {
+        solid: Voxel::AIR,
+        fluid: None,
+        burning: None,
+    };
+    let wet = Occupants {
+        fluid: Some(Fluid {
+            source: false,
+            ..Fluid::source(WATER)
+        }),
+        ..dry
+    };
+    let lamp = Occupants {
+        solid: Voxel::cube(LANTERN),
+        ..dry
+    };
+    let change = |at: Cell, next: Occupants| Proposal {
+        at,
+        read: dry,
+        next,
+        contact: None,
+        heated: false,
+    };
+    let mut pending: Vec<Proposal> = (0..5)
+        .map(|i| change([i, 0, 0], lamp))
+        .chain((5..8).map(|i| change([i, 0, 0], wet)))
+        .chain((0..3).map(|i| change([40 + i, 0, 0], wet)))
+        .collect();
+    let mut lamps_per_step = Vec::new();
+    for step in 0.. {
+        let (chosen, deferred) = choose(&mut sim, &BUILTIN, pending);
+        if step == 0 {
+            assert_eq!(
+                chosen.iter().filter(|p| p.next == wet).count(),
+                6,
+                "water waited behind a lamp"
+            );
+        }
+        lamps_per_step.push(chosen.iter().filter(|p| p.next == lamp).count());
+        pending = deferred;
+        if pending.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(lamps_per_step, vec![2, 2, 1]);
 }
 
 /// A tick that changes more positions than the journal holds, as a `dev`
@@ -2013,8 +2067,10 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
         let (tables, id) = declared(1.0);
         let lava = id("demo:lava");
         let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
-        if let Some(bound) = bound {
-            f.sim_mut().set_bounds(AGENDA, bound);
+        match bound {
+            Some(bound) => f.sim_mut().set_bounds(AGENDA, bound),
+            // Each cooling puts out lava's light, so the emitter bound counts too.
+            None => f.sim_mut().set_emitter_bound(usize::MAX),
         }
         for x in -4..=4 {
             f.send(x, EditAction::PlaceSource(lava));
@@ -2133,3 +2189,5 @@ fn meshes_are_redelivered_after_a_reaction() {
 }
 
 mod fire;
+#[cfg(feature = "dev")]
+mod measure;

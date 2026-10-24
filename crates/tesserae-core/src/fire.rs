@@ -196,6 +196,18 @@ pub(crate) enum Fire {
 }
 
 impl Fire {
+    /// The change of fire `p` makes, read back from the state it proposes.
+    pub(crate) fn of(p: &crate::flow::Proposal) -> Option<Fire> {
+        match (p.read.burning, p.next.burning) {
+            (None, Some(b)) => Some(Fire::Ignite { fuel: b.fuel }),
+            (Some(_), None) if p.next.solid == p.read.solid => Some(Fire::Extinguish),
+            (Some(_), None) => Some(Fire::Burnout {
+                residue: p.next.solid,
+            }),
+            _ => None,
+        }
+    }
+
     /// `next` with this change made: what flow wants of the fluid is kept,
     /// moved into the residue's voids as a placement moves it.
     pub(crate) fn apply(self, next: Occupants, tables: &Tables) -> Occupants {
@@ -217,6 +229,12 @@ impl Fire {
 pub(crate) struct FireTimer {
     ready: Step,
     want: Fire,
+}
+
+impl FireTimer {
+    pub(crate) fn new(ready: Step, want: Fire) -> Self {
+        FireTimer { ready, want }
+    }
 }
 
 /// A change of fire due this step, and the state it was decided from.

@@ -415,10 +415,31 @@ impl Timers {
         self.fire.extend(other.fire);
     }
 
-    /// Makes `at` change to `want` when evaluated at `ready` or later, unless
-    /// what it reads by then wants something else.
-    pub fn hold(&mut self, at: Cell, ready: Step, want: Option<Fluid>) {
-        self.flow.insert(at, Timer { ready, want });
+    /// Makes the change `p` proposed when evaluated at `ready` or later, unless
+    /// what it reads by then wants something else: for a change the landing
+    /// bound put off, whose delay had already run out. A reaction is decided
+    /// again from its contact and holds nothing.
+    pub fn defer(&mut self, p: &Proposal, ready: Step) {
+        if p.contact.is_some() {
+            return;
+        }
+        let fire = crate::fire::Fire::of(p);
+        if let Some(want) = fire {
+            self.fire
+                .insert(p.at, crate::fire::FireTimer::new(ready, want));
+        }
+        // A burn-out moves the fluid into its residue's voids, so what flow
+        // wanted is not in `next`; flow decides again from the residue.
+        let burnt_out = matches!(fire, Some(crate::fire::Fire::Burnout { .. }));
+        if !burnt_out && p.next.fluid != p.read.fluid {
+            self.flow.insert(
+                p.at,
+                Timer {
+                    ready,
+                    want: p.next.fluid,
+                },
+            );
+        }
     }
 
     pub fn remove(&mut self, at: Cell) {

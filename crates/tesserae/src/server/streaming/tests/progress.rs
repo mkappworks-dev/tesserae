@@ -365,3 +365,88 @@ fn water_changing_on_a_boundary_every_tick_is_meshed_on_both_sides_and_settles()
         );
     }
 }
+
+/// A writer that changes the plane a neighbour's solve reads on every tick
+/// for ever, as a Mod toggling water at a lantern-lit boundary would, spoils
+/// each solve of that neighbour as it lands. After a few in a row it is
+/// solved on the tick, where nothing can change under it: its light lands,
+/// its mesh follows, and the light is what a fresh solve gives.
+#[test]
+fn a_solve_spoilt_every_tick_by_its_neighbours_plane_still_lands() {
+    let mut h = Harness::new(small(), UNLIMITED);
+    h.settle();
+    let edge = CHUNK_SIZE as i32 - 1;
+    tunnel(&mut h, edge - 4, edge);
+    place(&mut h, [edge + 1, Y, Z], stone());
+    place(&mut h, [edge - 4, Y, Z], Voxel::cube(LANTERN));
+    h.settle();
+    assert!(
+        h.store().light_at([edge, Y, Z]).block() > 0,
+        "the tunnel is dark"
+    );
+
+    h.app
+        .world_mut()
+        .resource_mut::<MeshState>()
+        .mark_unlit(EAST);
+    let dry = Occupants {
+        solid: Voxel::AIR,
+        fluid: None,
+        burning: None,
+    };
+    let (mut lit_at, mut meshed) = (None, false);
+    let stale_before = h.jobs().relight.stale();
+    for i in 0..200 {
+        let before = h.store().light_at([edge, Y, Z]);
+        occupy(
+            &mut h,
+            [edge, Y, Z],
+            if i % 2 == 0 { water(true) } else { dry },
+        );
+        assert_ne!(
+            h.store().light_at([edge, Y, Z]),
+            before,
+            "the plane did not move"
+        );
+        let (ready, _) = h.tick();
+        if lit_at.is_none() && !h.app.world().resource::<MeshState>().is_unlit(EAST) {
+            lit_at = Some(i);
+        }
+        meshed |= lit_at.is_some() && ready.iter().any(|m| m.coord == EAST);
+        if meshed {
+            break;
+        }
+        // Long enough for the solves and meshes started this tick to finish
+        // before the next change, so each solve is spoilt as it lands rather
+        // than while it runs.
+        let started = std::time::Instant::now();
+        loop {
+            h.jobs_mut().relight.poll();
+            h.jobs_mut().mesh.poll();
+            let jobs = h.jobs();
+            let running = jobs.relight.in_flight() - jobs.relight.finished().count()
+                + jobs.mesh.in_flight()
+                - jobs.mesh.finished().count();
+            if running == 0 || started.elapsed() > SETTLE_CEILING {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+    }
+    assert!(
+        h.jobs().relight.stale() > stale_before,
+        "no solve was spoilt, so this tests nothing"
+    );
+    assert!(lit_at.is_some(), "{EAST}'s light never landed");
+    assert!(meshed, "{EAST} was never meshed");
+    occupy(&mut h, [edge, Y, Z], dry);
+    h.settle();
+    let expected = fixed_point_cells(&h);
+    for coord in h.store().coords() {
+        assert_eq!(
+            h.store().light(coord).unwrap(),
+            &expected[&coord],
+            "{coord} disagrees with a fresh solve"
+        );
+    }
+}

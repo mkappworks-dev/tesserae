@@ -304,7 +304,7 @@ impl LodState {
     }
 
     #[cfg(test)]
-    fn any_pending(&self) -> bool {
+    pub(in crate::server) fn any_pending(&self) -> bool {
         self.levels.iter().any(|l| l.pending || l.mesh_pending)
     }
 

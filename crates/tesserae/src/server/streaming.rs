@@ -32,12 +32,12 @@
 
 use std::sync::Arc;
 
-use bevy::platform::collections::HashSet;
+use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
-use super::jobs::{Border, Jobs, build_mesh, solve};
+use super::jobs::{Border, Jobs, Solved, build_mesh, solve};
 use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
@@ -345,6 +345,8 @@ pub(in crate::server) struct MeshState {
     /// incremental path is not monotone, so a bulk result computed from the old
     /// state must not land over it.
     poisoned: HashSet<ChunkCoord>,
+    /// Solves of each Chunk dropped in a row for reading what changed.
+    spoilt: HashMap<ChunkCoord, u8>,
     /// Held Chunks whose Voxels an Edit changed: what a level-1 cover derives
     /// from, unlike the light an Edit touches.
     edited_chunks: HashSet<ChunkCoord>,
@@ -541,7 +543,7 @@ fn stream(
         center,
         budget.in_flight.generate,
     );
-    dispatch_relight(
+    if let Some((coord, snapshot, border)) = dispatch_relight(
         &store,
         &mut meshes,
         &mut jobs,
@@ -551,7 +553,10 @@ fn stream(
         center,
         budget.in_flight.relight,
         &tables.0,
-    );
+    ) {
+        let solved = solve(snapshot, &border, &tables.0);
+        apply_solve(&mut store, &mut meshes, coord, solved);
+    }
     dispatch_meshes(
         &store,
         &mut meshes,
@@ -564,6 +569,12 @@ fn stream(
         &tables.0,
     );
 }
+
+/// Solves of one Chunk spoilt in a row before the next is made on the tick,
+/// where nothing can change under it: a writer changing the plane it reads on
+/// every tick would otherwise keep its light, and the meshes waiting on that
+/// light, from ever landing. One such solve a tick, at a bulk solve's cost.
+const SPOILT_BEFORE_ON_TICK: u8 = 4;
 
 /// Drops meshes that left `keep` and Chunks that left `evict`.
 fn retire(
@@ -600,6 +611,9 @@ fn retire(
     meshes
         .poisoned
         .retain(|&c| evict.contains(delta(center, c)));
+    meshes
+        .spoilt
+        .retain(|&c, _| evict.contains(delta(center, c)));
 
     let stale: Vec<ChunkCoord> = store
         .coords()
@@ -716,26 +730,33 @@ fn land_relight(
         }
         if poisoned || !store.unchanged_since(coord, &solved.snapshot) {
             jobs.relight.note_stale();
+            *meshes.spoilt.entry(coord).or_default() += 1;
             meshes.unlit.insert(coord);
             continue;
         }
-        if !solved.changed {
-            continue;
-        }
-        store.set_light(coord, solved.light);
-        // This Chunk's own mesh bakes its own light, so it is stale either way.
-        meshes.dirty.insert(coord);
-        // Per face, not once for the Chunk. A neighbour reads only the plane
-        // across the face it shares, so re-solving it because something changed
-        // deep inside this Chunk is work for nothing — and during a fill it is
-        // every Chunk about seven times over, which is enough to stop the
-        // relight queue ever draining.
-        for (face, neighbor) in face_neighbors(coord).into_iter().enumerate() {
-            if solved.outward[face] && store.contains(neighbor) {
-                meshes.unlit.insert(neighbor);
-                // Its boundary faces are lit by the plane that just moved.
-                meshes.dirty.insert(neighbor);
-            }
+        apply_solve(store, meshes, coord, solved);
+    }
+}
+
+/// Lands a solve that read what the store still holds.
+fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord, solved: Solved) {
+    meshes.spoilt.remove(&coord);
+    if !solved.changed {
+        return;
+    }
+    store.set_light(coord, solved.light);
+    // This Chunk's own mesh bakes its own light, so it is stale either way.
+    meshes.dirty.insert(coord);
+    // Per face, not once for the Chunk. A neighbour reads only the plane
+    // across the face it shares, so re-solving it because something changed
+    // deep inside this Chunk is work for nothing — and during a fill it is
+    // every Chunk about seven times over, which is enough to stop the
+    // relight queue ever draining.
+    for (face, neighbor) in face_neighbors(coord).into_iter().enumerate() {
+        if solved.outward[face] && store.contains(neighbor) {
+            meshes.unlit.insert(neighbor);
+            // Its boundary faces are lit by the plane that just moved.
+            meshes.dirty.insert(neighbor);
         }
     }
 }
@@ -759,7 +780,8 @@ fn dispatch_relight(
     center: ChunkCoord,
     in_flight: usize,
     tables: &Arc<Tables>,
-) {
+) -> Option<(ChunkCoord, Snapshot, [Border; 6])> {
+    let mut on_tick = None;
     let mut free = in_flight.saturating_sub(jobs.relight.in_flight());
     for &d in &order.descending {
         if free == 0 {
@@ -780,6 +802,17 @@ fn dispatch_relight(
             None if n.y > coord.y && above_the_surface(generator, world, n) => Border::OpenSky,
             None => Border::Absent,
         });
+        let starved = meshes
+            .spoilt
+            .get(&coord)
+            .is_some_and(|&n| n >= SPOILT_BEFORE_ON_TICK);
+        if starved {
+            if on_tick.is_none() {
+                meshes.unlit.remove(&coord);
+                on_tick = Some((coord, snapshot, border));
+            }
+            continue;
+        }
         meshes.unlit.remove(&coord);
         meshes.relighting.insert(coord);
         meshes.poisoned.remove(&coord);
@@ -788,6 +821,7 @@ fn dispatch_relight(
             .spawn(coord, move || solve(snapshot, &border, &tables));
         free -= 1;
     }
+    on_tick
 }
 
 /// Whether a Chunk is entirely above the band the surface can reach, so the
@@ -1225,16 +1259,25 @@ pub(in crate::server) mod tests {
 
     impl Harness {
         pub(in crate::server) fn new(settings: StreamingSettings, budget: StreamingBudget) -> Self {
+            Self::with_world(
+                settings,
+                budget,
+                WorldSettings::default(),
+                WorldgenParams::default(),
+            )
+        }
+
+        pub(in crate::server) fn with_world(
+            settings: StreamingSettings,
+            budget: StreamingBudget,
+            world_settings: WorldSettings,
+            params: WorldgenParams,
+        ) -> Self {
             // One pool for the whole test process; `get_or_init` is a no-op after
             // the first test, and the thread count is fixed so nothing a test
             // asserts depends on the machine.
             AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
-            let world_settings = WorldSettings::default();
-            let generator = Worldgen::new(
-                world_settings.seed,
-                world_settings.voxel_size,
-                WorldgenParams::default(),
-            );
+            let generator = Worldgen::new(world_settings.seed, world_settings.voxel_size, params);
             let lod_generators =
                 lod::LodGenerators::new(&world_settings, &generator, level_count(&settings));
             let mut app = App::new();
@@ -1354,6 +1397,16 @@ pub(in crate::server) mod tests {
                 world.cell_size(),
             )
         }
+    }
+
+    /// The Server tick's streaming half, level 0 then the coarse levels, on a
+    /// schedule a measurement runs by itself.
+    #[cfg(feature = "dev")]
+    pub(in crate::server) fn add_stream_systems(
+        app: &mut App,
+        schedule: impl bevy::ecs::schedule::ScheduleLabel,
+    ) {
+        app.add_systems(schedule, (stream, lod::stream_lod).chain());
     }
 
     pub(in crate::server) fn same_mesh(a: &ChunkMesh, b: &ChunkMesh) -> bool {

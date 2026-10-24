@@ -193,6 +193,37 @@ fn fire_spreads_burns_out_and_its_light_comes_and_goes_as_a_fresh_solve_would() 
     }
 }
 
+/// Two woods either side of a brazier catch in the same step and burn out in
+/// the same step. Under a landing bound of one, the change put off lands the
+/// step after, as flow's does: it does not wait out its delay or its fuel
+/// again.
+#[test]
+fn a_fire_change_past_the_landing_bound_lands_the_next_step() {
+    let (tables, fuel) = fire_tables(0);
+    let mut f = Fixture::with_tables(1.0, 4.0, 16, tables);
+    f.sim_mut().set_bounds(AGENDA, 1);
+    put(&mut f, -2, Voxel::cube(fuel.wood));
+    put(&mut f, 0, Voxel::cube(fuel.brazier));
+    put(&mut f, 2, Voxel::cube(fuel.wood));
+    assert_eq!(command(&mut f, 0, Intent::Ignite), Ok(()));
+    let first = steps_until(&mut f, |f| burning(f, -2) || burning(f, 2));
+    let second = first + steps_until(&mut f, |f| burning(f, -2) && burning(f, 2));
+    assert!((DELAY..=DELAY + 2).contains(&first), "caught after {first}");
+    assert!(
+        second - first <= 2,
+        "the second caught {} later",
+        second - first
+    );
+    let ash = |f: &Fixture, x| f.occupants(x).solid == Voxel::cube(fuel.ash);
+    let burnt = second + steps_until(&mut f, |f| ash(f, -2) && ash(f, 2));
+    assert!(
+        burnt - first <= BURN + 4,
+        "burnt out {} steps after catching",
+        burnt - first
+    );
+    assert!(f.sim().deferred >= 1, "the bound never bit");
+}
+
 /// Burning wood in a stair beside a brazier, waterlogged with the player's
 /// fluid tool, goes out and its light with it, as a fresh solve gives it; the
 /// stair stays wood. Taking the water out lets it catch again a whole fresh

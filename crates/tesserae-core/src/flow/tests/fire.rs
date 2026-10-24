@@ -937,3 +937,93 @@ fn a_fuels_reads_reach_as_far_as_its_lowest_threshold() {
     assert!(!heat.has_fuel());
     assert_eq!(heat.radius(), 0);
 }
+
+/// A step landed as a landing bound of one lands it: the first proposal in
+/// coordinate order, every other one held with [`Timers::defer`] and woken
+/// for the next step. Returns how many were put off.
+fn step_landing_one(sim: &mut Sim) -> usize {
+    let due = sim.agenda.take_due(sim.step).cells;
+    let cont = Continuation::start(sim.step, due, std::mem::take(&mut sim.timers));
+    let Advance::Complete(done) = advance(&sim.grid, &sim.tables, &sim.scale, cont, UNLIMITED)
+    else {
+        unreachable!("unlimited");
+    };
+    sim.timers = done.timers;
+    for (ready, at) in done.wakeups {
+        sim.agenda.rewake(at, ready);
+    }
+    let mut proposals = done.proposals;
+    proposals.sort_unstable_by_key(|p| p.at);
+    let put_off = proposals.split_off(proposals.len().min(1));
+    sim.land(proposals);
+    for p in &put_off {
+        sim.timers.defer(p, sim.step + 1);
+        sim.agenda.rewake(p.at, sim.step + 1);
+    }
+    sim.agenda.end_step();
+    sim.step += 1;
+    put_off.len()
+}
+
+/// Steps landed one change at a time until `done` holds, and the changes put
+/// off on the way.
+fn until_landing_one(sim: &mut Sim, done: impl Fn(&Sim) -> bool) -> (Step, usize) {
+    let (mut taken, mut put_off) = (0, 0);
+    while !done(sim) {
+        put_off += step_landing_one(sim);
+        taken += 1;
+        assert!(taken < 5000, "never happened");
+    }
+    (taken, put_off)
+}
+
+/// What a landing bound puts off has already waited out its delay: an
+/// ignition, a burn-out and a change of flow each land the step after, not a
+/// whole delay or burn later.
+#[test]
+fn a_change_put_off_by_the_landing_bound_lands_the_step_after() {
+    let (tables, ids) = hearth_tables(BRAZIER, false);
+    let mut sim = tunnel(tables, 1.0, 6);
+    for x in [-2, 2] {
+        sim.build([x, 1, 0], cube(ids.wood));
+    }
+    sim.build([0, 1, 0], cube(ids.brazier));
+    light(&mut sim, [0, 1, 0]);
+    let (first, a) = until_landing_one(&mut sim, |s| {
+        burning(s, [-2, 1, 0]) || burning(s, [2, 1, 0])
+    });
+    let (later, b) = until_landing_one(&mut sim, |s| {
+        burning(s, [-2, 1, 0]) && burning(s, [2, 1, 0])
+    });
+    assert_eq!(first, DELAY);
+    assert_eq!((later, a + b), (1, 1), "the second ignition waited");
+
+    let (tables, ids) = hearth_tables(BRAZIER, false);
+    let mut sim = tunnel(tables, 1.0, 6);
+    for x in [-2, 2] {
+        sim.build([x, 1, 0], cube(ids.wood));
+        light(&mut sim, [x, 1, 0]);
+    }
+    let ash = |s: &Sim, x| material(s, [x, 1, 0]) == ids.ash;
+    let (first, a) = until_landing_one(&mut sim, |s| ash(s, -2) || ash(s, 2));
+    let (later, b) = until_landing_one(&mut sim, |s| ash(s, -2) && ash(s, 2));
+    assert_eq!(first, BURN);
+    assert_eq!((later, a + b), (1, 1), "the second burn-out burnt again");
+
+    let mut sim = corridor(1.0, 4.0);
+    sim.place_source([0, 1, 0]);
+    sim.run_step();
+    let (_, put_off) = until_landing_one(&mut sim, |s| {
+        s.fluid([-1, 1, 0]).is_some() && s.fluid([1, 1, 0]).is_some()
+    });
+    assert_eq!(put_off, 1, "both sides were not due together");
+    let (spread, _) = until_landing_one(&mut sim, |s| s.fluid([-2, 1, 0]).is_some());
+    let mut free = corridor(1.0, 4.0);
+    free.place_source([0, 1, 0]);
+    free.run_step();
+    let reference = until(&mut free, 1000, |s| s.fluid([-2, 1, 0]).is_some()).unwrap();
+    assert!(
+        spread <= reference,
+        "a put-off flow waited out its delay again"
+    );
+}

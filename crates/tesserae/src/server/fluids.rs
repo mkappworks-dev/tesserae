@@ -30,13 +30,14 @@
 //! a later solve runs nothing lands in it (its Voxels are parked until the
 //! solve lands), because a bulk solve must not race an incremental relight.
 //!
-//! **Bounds.** The agenda's [`AGENDA`] limits, [`LANDED_PER_STEP`] and the
-//! store's journal are rules of the simulation, like its step length: under
-//! load they decide when a Voxel changes, deterministically, and never whether
-//! it does. A step's changes past the landing bound wait for the next step in
-//! turn round the Chunks, from a cursor in each; stale and parked attempts
-//! count towards it. Evaluations per call and workers in flight are how a step
-//! is divided, and change nothing it computes.
+//! **Bounds.** The agenda's [`AGENDA`] limits, [`LANDED_PER_STEP`],
+//! [`EMITTERS_PER_STEP`] and the store's journal are rules of the simulation,
+//! like its step length: under load they decide when a Voxel changes,
+//! deterministically, and never whether it does. A step's changes past the
+//! landing bounds wait for the next step in turn round the Chunks, from a
+//! cursor in each, holding the timers they had run out; stale and parked
+//! attempts count towards it. Evaluations per call and workers in flight are
+//! how a step is divided, and change nothing it computes.
 //!
 //! **Fire** is evaluated with flow, for the same due Voxels, under the same
 //! agenda, quota and landing bound. A fuel's exposure reads every Chunk
@@ -69,7 +70,7 @@ use tesserae_core::flow::{
     still_applies,
 };
 use tesserae_core::mesh::FACE_STEPS;
-use tesserae_core::{FluidTable, Overlay, Tables, Voxel};
+use tesserae_core::{FluidTable, Occupants, Overlay, Tables, Voxel};
 
 use super::ContentTables;
 use super::edit::{self, set_occupants};
@@ -90,9 +91,14 @@ const AGENDA: Limits = Limits {
     scan_per_step: 4_096,
 };
 
-/// Changes one step lands. Each relights where water appears or goes, so this
-/// bounds the tick a step lands in.
-const LANDED_PER_STEP: usize = 64;
+/// Changes one step lands, on the tick. A receding stream at 0.25 m changes
+/// about 900 Voxels in one step, so far fewer slows recession severalfold.
+const LANDED_PER_STEP: usize = 256;
+
+/// Of those, changes that start or stop block light: lava arriving or going,
+/// fire catching or going out. Each relights as far as its light reaches, a
+/// hundred times an ordinary change, so they have a bound of their own.
+const EMITTERS_PER_STEP: usize = 4;
 
 /// Edited positions a step's landing checks one by one before it treats their
 /// whole Chunks as edited.
@@ -126,6 +132,7 @@ pub(in crate::server) struct FluidSim {
     quota: Quota,
     jobs_in_flight: usize,
     landed_per_step: usize,
+    emitters_per_step: usize,
     pub work: Work,
     pub landed: usize,
     /// Changes dropped because what they read had changed.
@@ -182,6 +189,7 @@ impl Default for FluidSim {
             },
             jobs_in_flight: JOBS_IN_FLIGHT,
             landed_per_step: LANDED_PER_STEP,
+            emitters_per_step: EMITTERS_PER_STEP,
             work: Work::default(),
             landed: 0,
             stale: 0,
@@ -254,6 +262,11 @@ impl FluidSim {
     }
 
     #[cfg(test)]
+    pub fn set_emitter_bound(&mut self, emitters_per_step: usize) {
+        self.emitters_per_step = emitters_per_step;
+    }
+
+    #[cfg(test)]
     pub fn job(&mut self) -> &mut Stage<Advance, usize> {
         &mut self.job
     }
@@ -318,13 +331,29 @@ impl FluidSim {
         step: Step,
     ) {
         let simulated = &self.simulated;
+        // The box is walked a Chunk at a time, so one lookup serves its span.
+        let held = std::cell::Cell::new(None);
         wake_fuel_around(
             &mut self.agenda,
             at,
             step,
             heat,
             |chunk| simulated.contains_key(&coord(chunk)) && holds_fuel(store, tables, chunk),
-            |c| is_fuel(store, tables, c),
+            |c| {
+                let (home, [x, y, z]) = chunk_of(c);
+                let chunk = match held.get() {
+                    Some((h, chunk)) if h == home => chunk,
+                    _ => {
+                        let chunk = store.get(coord(home));
+                        held.set(Some((home, chunk)));
+                        chunk
+                    }
+                };
+                chunk.is_some_and(|chunk| {
+                    let v = chunk.get(x, y, z);
+                    !v.is_air() && tables.combustion.contains(v.material())
+                })
+            },
         );
     }
 
@@ -448,12 +477,6 @@ fn holds_fuel(store: &ChunkStore, tables: &Tables, chunk: [i32; 3]) -> bool {
             .iter()
             .any(|v| !v.is_air() && tables.combustion.contains(v.material()))
     })
-}
-
-fn is_fuel(store: &ChunkStore, tables: &Tables, at: Cell) -> bool {
-    store
-        .voxel(at)
-        .is_some_and(|v| !v.is_air() && tables.combustion.contains(v.material()))
 }
 
 fn wet(store: &ChunkStore, coord: ChunkCoord, fluids: &FluidTable) -> bool {
@@ -602,29 +625,47 @@ fn start_step(
         sim.agenda.end_step();
         return;
     }
+    // Every Chunk within `around` of a due Voxel's own, which covers all its
+    // reads and a fuel's search: found per Chunk, not per Voxel, as this runs
+    // on the tick. Chunks no evaluation reads change nothing it computes.
+    let deepest = reads(sim.reach)
+        .iter()
+        .flatten()
+        .map(|d| d.abs())
+        .max()
+        .unwrap_or(0)
+        .max(scale.heat.radius());
+    let around = (deepest as usize).div_ceil(tesserae_core::CHUNK_SIZE) as i32;
+    let mut homes = BTreeSet::new();
+    let mut last = None;
+    for &at in &due {
+        let home = chunk_of(at).0;
+        if last != Some(home) {
+            homes.insert(home);
+            last = Some(home);
+        }
+    }
     let mut region = Region::default();
     let mut read = HashMap::new();
-    let mut seen = HashSet::new();
-    let radius = scale.heat.radius();
-    for &at in &due {
-        let fuel = is_fuel(store, tables, at).then(|| {
-            let (min, max) = (at.map(|c| c - radius), at.map(|c| c + radius));
-            Span::split(min, max).into_iter().map(|s| s.home())
-        });
-        let flow = reads(sim.reach).iter().map(|&d| chunk_of(offset(at, d)).0);
-        for chunk in flow.chain(fuel.into_iter().flatten()) {
-            if !seen.insert(chunk) {
-                continue;
+    for home in homes {
+        for dx in -around..=around {
+            for dy in -around..=around {
+                for dz in -around..=around {
+                    let chunk = [home[0] + dx, home[1] + dy, home[2] + dz];
+                    if read.contains_key(&chunk) {
+                        continue;
+                    }
+                    let c = coord(chunk);
+                    let Some(&life) = sim.simulated.get(&c) else {
+                        continue;
+                    };
+                    let Some(snapshot) = store.shared(c).filter(|s| s.lifetime == life) else {
+                        continue;
+                    };
+                    read.insert(chunk, life);
+                    region.insert(chunk, snapshot.chunk, snapshot.overlay);
+                }
             }
-            let c = coord(chunk);
-            let Some(&life) = sim.simulated.get(&c) else {
-                continue;
-            };
-            let Some(snapshot) = store.shared(c).filter(|s| s.lifetime == life) else {
-                continue;
-            };
-            read.insert(chunk, life);
-            region.insert(chunk, snapshot.chunk, snapshot.overlay);
         }
     }
     let slices = due
@@ -674,14 +715,11 @@ fn land_step(
     sim.timers
         .retain(|c| simulated.contains_key(&VoxelCoord::of(c).chunk));
 
-    let (chosen, deferred) = choose(sim, proposals);
+    let (chosen, deferred) = choose(sim, tables, proposals);
     for p in deferred {
         sim.deferred += 1;
         if sim.simulates(p.at) {
-            // A reaction is decided again from its contact, not from a timer.
-            if p.contact.is_none() {
-                sim.timers.hold(p.at, next, p.next.fluid);
-            }
+            sim.timers.defer(&p, next);
             sim.agenda.rewake(p.at, next);
         }
     }
@@ -795,27 +833,52 @@ fn still_valid(
         )
 }
 
-/// Picks the changes a step lands: all of them within the bound; past it, one
-/// per Chunk in turn, starting after the Chunk served last and, in each, from
-/// where its last turn stopped, so every Chunk with work keeps landing it.
-fn choose(sim: &mut FluidSim, proposals: Vec<Proposal>) -> (Vec<Proposal>, Vec<Proposal>) {
+/// A Chunk's changes waiting their turn, each marked if it moves light.
+type Queue = VecDeque<(bool, Proposal)>;
+
+/// The block light a Voxel gives off: its solid's and fluid's emission, or a
+/// fire's, by the larger.
+fn emission(tables: &Tables, o: &Occupants) -> u8 {
+    let lit = tables.wet_emission(o.solid, o.fluid.map(|f| f.material));
+    if o.burning.is_some() {
+        lit.max(tables.burning_emission(o.solid))
+    } else {
+        lit
+    }
+}
+
+/// Picks the changes a step lands: all of them within the bounds; past them,
+/// one per Chunk in turn, starting after the Chunk served last and, in each,
+/// from where its last turn stopped, so every Chunk with work keeps landing
+/// it. Once the step has landed its emitters, a Chunk's turn takes its next
+/// change that moves no light.
+fn choose(
+    sim: &mut FluidSim,
+    tables: &Tables,
+    proposals: Vec<Proposal>,
+) -> (Vec<Proposal>, Vec<Proposal>) {
     let bound = sim.landed_per_step;
-    if proposals.len() <= bound {
+    let emits = |p: &Proposal| emission(tables, &p.read) != emission(tables, &p.next);
+    let emitters = proposals.iter().filter(|p| emits(p)).count();
+    if proposals.len() <= bound && emitters <= sim.emitters_per_step {
         sim.turn = None;
         sim.cursors.clear();
         return (proposals, Vec::new());
     }
-    let mut by_chunk: BTreeMap<[i32; 3], Vec<Proposal>> = BTreeMap::new();
+    let mut by_chunk: BTreeMap<[i32; 3], Vec<(bool, Proposal)>> = BTreeMap::new();
     for p in proposals {
-        by_chunk.entry(chunk_of(p.at).0).or_default().push(p);
+        by_chunk
+            .entry(chunk_of(p.at).0)
+            .or_default()
+            .push((emits(&p), p));
     }
-    let mut queues: Vec<([i32; 3], VecDeque<Proposal>)> = by_chunk
+    let mut queues: Vec<([i32; 3], Queue)> = by_chunk
         .into_iter()
         .map(|(c, mut ps)| {
             let from = sim
                 .cursors
                 .get(&c)
-                .map_or(0, |cursor| ps.partition_point(|p| p.at < *cursor));
+                .map_or(0, |cursor| ps.partition_point(|(_, p)| p.at < *cursor));
             ps.rotate_left(from);
             (c, ps.into())
         })
@@ -825,13 +888,20 @@ fn choose(sim: &mut FluidSim, proposals: Vec<Proposal>) -> (Vec<Proposal>, Vec<P
         .map_or(0, |t| queues.partition_point(|(c, _)| *c <= t));
     queues.rotate_left(from);
     let mut chosen = Vec::with_capacity(bound);
+    let mut emitters_left = sim.emitters_per_step;
     'rounds: loop {
         let mut any = false;
         for (c, queue) in &mut queues {
             if chosen.len() == bound {
                 break 'rounds;
             }
-            if let Some(p) = queue.pop_front() {
+            let next = if emitters_left > 0 {
+                (!queue.is_empty()).then_some(0)
+            } else {
+                queue.iter().position(|(e, _)| !e)
+            };
+            if let Some((emitter, p)) = next.and_then(|i| queue.remove(i)) {
+                emitters_left -= usize::from(emitter);
                 chosen.push(p);
                 sim.turn = Some(*c);
                 any = true;
@@ -844,10 +914,10 @@ fn choose(sim: &mut FluidSim, proposals: Vec<Proposal>) -> (Vec<Proposal>, Vec<P
     sim.cursors.clear();
     let mut deferred = Vec::new();
     for (c, queue) in queues {
-        if let Some(first) = queue.front() {
+        if let Some((_, first)) = queue.front() {
             sim.cursors.insert(c, first.at);
         }
-        deferred.extend(queue);
+        deferred.extend(queue.into_iter().map(|(_, p)| p));
     }
     chosen.sort_unstable_by_key(|p| p.at);
     (chosen, deferred)
