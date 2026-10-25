@@ -2,7 +2,10 @@
 
 use std::collections::HashSet;
 
-use tesserae_core::{ParamError, Tables, WorldgenParams};
+use tesserae_core::{
+    AIR, Burn, CombustionDef, FluidDef, Heat, MaterialId, ParamError, Phase, Reactant, ReactionDef,
+    Side, Tables, WorldgenParams,
+};
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::error::ModError;
@@ -13,6 +16,8 @@ pub const MAX_MATERIALS: usize = 56;
 /// A `ShapeId` is a `u8` and 4 are built in.
 pub const MAX_SHAPES: usize = 252;
 pub const MAX_PER_MOD: usize = 64;
+/// Fluid, reaction and fire rows one Mod may declare, each.
+pub const MAX_BEHAVIOURS_PER_MOD: usize = 64;
 pub const MAX_NAME_BYTES: usize = 32;
 
 /// The Game's view distance and level-of-detail reach, in metres.
@@ -54,11 +59,22 @@ impl From<content::ViewParams> for ViewParams {
     }
 }
 
-/// What the Game chose that is not a table row.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+/// What the Game chose that is not a table row, and the rows that wait for
+/// every Mod's names before [`resolve`] registers them.
+#[derive(Clone, PartialEq, Debug, Default)]
 pub struct Applied {
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
+    pub behaviour: Behaviour,
+}
+
+/// One Mod's fluid, reaction and fire rows, by full Material name.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct Behaviour {
+    mod_id: String,
+    fluids: Vec<content::FluidDef>,
+    reactions: Vec<content::ReactionDef>,
+    combustion: Vec<content::CombustionDef>,
 }
 
 /// Validates `declaration` and registers it after whatever `tables` and
@@ -89,6 +105,20 @@ pub fn apply(
         }
     }
 
+    for (what, count) in [
+        ("fluid", declaration.fluids.len()),
+        ("reaction", declaration.reactions.len()),
+        ("combustion", declaration.combustion.len()),
+    ] {
+        if count > MAX_BEHAVIOURS_PER_MOD {
+            return Err(ModError::TooManyRows {
+                id: id(),
+                what,
+                count,
+                max: MAX_BEHAVIOURS_PER_MOD,
+            });
+        }
+    }
     check_count(
         mod_id,
         Kind::Material,
@@ -145,7 +175,148 @@ pub fn apply(
             })?;
         registry.shapes.push(name);
     }
-    Ok(Applied { world, view })
+    Ok(Applied {
+        world,
+        view,
+        behaviour: Behaviour {
+            mod_id: id(),
+            fluids: declaration.fluids,
+            reactions: declaration.reactions,
+            combustion: declaration.combustion,
+        },
+    })
+}
+
+/// Registers every Mod's fluids, then reactions, then fires, in load order,
+/// once every Declaration is in: a row may name any Mod's Material. Fluids
+/// come first because a reaction is between fluids. The tables are complete
+/// and immutable when this returns; the World opens after it.
+pub fn resolve(
+    behaviours: Vec<Behaviour>,
+    tables: &mut Tables,
+    registry: &Registry,
+) -> Result<(), ModError> {
+    for b in &behaviours {
+        for (row, fluid) in b.fluids.iter().enumerate() {
+            let material = lookup(b, registry, "fluid", row, &fluid.material)?;
+            let heat = fluid.heat.map(heat);
+            let def = FluidDef {
+                reach_m: fluid.reach_m,
+                sideways_m_per_s: fluid.sideways_m_per_s,
+                downward_m_per_s: fluid.downward_m_per_s,
+                recession_m_per_s: fluid.recession_m_per_s,
+                reset_drop_m: fluid.reset_drop_m,
+                waterlogs: fluid.waterlogs,
+                extinguishes: fluid.extinguishes,
+                heat,
+            };
+            tables
+                .register_fluid(material, def)
+                .map_err(|source| ModError::Fluid {
+                    id: b.mod_id.clone(),
+                    row,
+                    name: fluid.material.clone(),
+                    source,
+                })?;
+        }
+    }
+    for b in &behaviours {
+        for (row, reaction) in b.reactions.iter().enumerate() {
+            let reactant = |r: &content::Reactant| -> Result<Reactant, ModError> {
+                Ok(Reactant {
+                    fluid: lookup(b, registry, "reaction", row, &r.fluid)?,
+                    phase: match r.state {
+                        content::FluidState::Any => Phase::Any,
+                        content::FluidState::Source => Phase::Source,
+                        content::FluidState::Flowing => Phase::Flowing,
+                    },
+                })
+            };
+            let def = ReactionDef {
+                first: reactant(&reaction.first)?,
+                second: reactant(&reaction.second)?,
+                consumed: side(reaction.consumed),
+                product: reaction
+                    .product
+                    .as_deref()
+                    .map(|p| lookup(b, registry, "reaction", row, p))
+                    .transpose()?,
+                receiving: reaction.receiving.map(side),
+            };
+            tables
+                .register_reaction(def)
+                .map_err(|source| ModError::Reaction {
+                    id: b.mod_id.clone(),
+                    row,
+                    source,
+                })?;
+        }
+    }
+    for b in &behaviours {
+        for (row, fire) in b.combustion.iter().enumerate() {
+            let fuel = lookup(b, registry, "combustion", row, &fire.fuel)?;
+            let burn = match &fire.end {
+                content::BurnEnd::After(after) => Burn::For {
+                    seconds: after.seconds,
+                    residue: match &after.residue {
+                        Some(name) => lookup(b, registry, "combustion", row, name)?,
+                        None => AIR,
+                    },
+                },
+                content::BurnEnd::Permanent => Burn::Permanent,
+            };
+            let def = CombustionDef {
+                threshold: fire.ignition_threshold,
+                ignition_delay_s: fire.ignition_delay_s,
+                emission: fire.emission,
+                heat: fire.heat.map(heat),
+                burn,
+            };
+            tables
+                .register_combustion(fuel, def)
+                .map_err(|source| ModError::Combustion {
+                    id: b.mod_id.clone(),
+                    row,
+                    name: fire.fuel.clone(),
+                    source,
+                })?;
+        }
+    }
+    Ok(())
+}
+
+fn heat(h: content::HeatDef) -> Heat {
+    Heat {
+        strength: h.strength,
+        reach_m: h.reach_m,
+    }
+}
+
+fn side(s: content::ReactionSide) -> Side {
+    match s {
+        content::ReactionSide::First => Side::First,
+        content::ReactionSide::Second => Side::Second,
+    }
+}
+
+/// A full Material name's id. Ids are positions in a Registry the palette
+/// bounds, so one fits a `MaterialId`.
+fn lookup(
+    b: &Behaviour,
+    registry: &Registry,
+    what: &'static str,
+    row: usize,
+    name: &str,
+) -> Result<MaterialId, ModError> {
+    registry
+        .id_of(Kind::Material, name)
+        .map(|id| id as MaterialId)
+        .ok_or_else(|| ModError::UnknownName {
+            id: b.mod_id.clone(),
+            what,
+            row,
+            name: name.to_owned(),
+        })
 }
 
 const CORE: &str = "core";

@@ -58,6 +58,11 @@ pub const MAX_SHAPED_PER_CHUNK: usize = 1024;
 /// only ever holds its own emission, which leaves freely.
 pub const LIGHT_EXIT_CHECKED: u8 = 0x40;
 
+/// Separate voids one Voxel's fluid can tell apart. A Shape whose empty space
+/// splits into more holds no fluid at all: passage it could not represent is
+/// closed, never merged into a leak.
+pub const MAX_VOIDS: usize = 4;
+
 /// A box inside one Voxel, `0..=16` sixteenths on each axis.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct NodeBox {
@@ -341,8 +346,27 @@ impl FaceMask {
         self.0.iter().zip(&other.0).all(|(a, b)| a | b == u16::MAX)
     }
 
+    /// Every square set in either.
+    pub fn union(&self, other: &FaceMask) -> FaceMask {
+        FaceMask(std::array::from_fn(|i| self.0[i] | other.0[i]))
+    }
+
+    /// Whether any square is set in both: an opening two faces share.
+    pub fn intersects(&self, other: &FaceMask) -> bool {
+        self.0.iter().zip(&other.0).any(|(a, b)| a & b != 0)
+    }
+
+    /// Every square not set.
+    pub fn complement(&self) -> FaceMask {
+        FaceMask(self.0.map(|row| !row))
+    }
+
     fn set(&mut self, u: usize, v: usize) {
         self.0[v] |= 1 << u;
+    }
+
+    fn get(&self, u: usize, v: usize) -> bool {
+        self.0[v] >> u & 1 != 0
     }
 }
 
@@ -373,6 +397,214 @@ impl ShapeQuad {
     }
 }
 
+/// One connected region of a Shape's empty space that reaches the Voxel's
+/// boundary: where fluid can stand beside the solid, derived at registration
+/// from the same rotated sixteenth grid as everything else. A cavity that
+/// reaches no face is not a void, so it never holds fluid.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct Void {
+    /// The squares it opens on each face: fluid passes between two Voxels'
+    /// voids exactly where these meet across the plane, so a sealed face, a
+    /// jointly sealed pair and a partition all pass nothing.
+    pub open: [FaceMask; 6],
+    /// Its lowest sub-cell layer, in sixteenths of the edge: where fluid in it
+    /// stands.
+    pub floor: u8,
+    /// Its sub-cells: bit `x` of `rows[y * SUBDIV + z]`.
+    rows: [u16; SUBDIV * SUBDIV],
+    /// What [`Void::quads`] gives for a full surface, which standing water
+    /// asks for most.
+    full: Vec<ShapeQuad>,
+}
+
+impl Void {
+    /// The whole cell: the one void of empty space.
+    fn whole() -> Self {
+        Self::from_rows([u16::MAX; SUBDIV * SUBDIV])
+    }
+
+    fn from_rows(rows: [u16; SUBDIV * SUBDIV]) -> Self {
+        let has = |x: usize, y: usize, z: usize| rows[y * SUBDIV + z] >> x & 1 != 0;
+        let open = std::array::from_fn(|face| {
+            let (d, positive) = (face / 2, face % 2 == 1);
+            let layer = if positive { SUBDIV - 1 } else { 0 };
+            let mut mask = FaceMask::EMPTY;
+            for v in 0..SUBDIV {
+                for u in 0..SUBDIV {
+                    let mut c = [0usize; 3];
+                    c[d] = layer;
+                    c[(d + 1) % 3] = u;
+                    c[(d + 2) % 3] = v;
+                    if has(c[0], c[1], c[2]) {
+                        mask.set(u, v);
+                    }
+                }
+            }
+            mask
+        });
+        let floor = (0..SUBDIV)
+            .find(|&y| rows[y * SUBDIV..(y + 1) * SUBDIV].iter().any(|&r| r != 0))
+            .unwrap_or(SUBDIV) as u8;
+        let mut void = Void {
+            open,
+            floor,
+            rows,
+            full: Vec::new(),
+        };
+        let mut full = Vec::new();
+        void.quads(SUBDIV as u8, &mut full);
+        void.full = full;
+        void
+    }
+
+    pub fn contains(&self, x: usize, y: usize, z: usize) -> bool {
+        self.rows[y * SUBDIV + z] >> x & 1 != 0
+    }
+
+    /// Its sub-cells below `surface` sixteenths: the volume fluid standing
+    /// that high in it fills, in the units of [`ShapeTable::volume`].
+    pub fn volume_below(&self, surface: u8) -> u32 {
+        let s = (surface as usize).min(SUBDIV);
+        self.rows[..s * SUBDIV].iter().map(|r| r.count_ones()).sum()
+    }
+
+    /// Whether the two share a sub-cell: how fluid follows a Voxel's change of
+    /// Shape into the space that stays open.
+    pub fn overlaps(&self, other: &Void) -> bool {
+        self.rows.iter().zip(&other.rows).any(|(a, b)| a & b != 0)
+    }
+
+    /// The outside of fluid standing in this void up to `surface` sixteenths:
+    /// its squares on the Voxel's faces below the surface, and the surface
+    /// itself wherever the void goes on above it. Faces against the Shape's
+    /// own solid are left out, since nothing can see them.
+    pub fn quads(&self, surface: u8, out: &mut Vec<ShapeQuad>) {
+        let s = (surface as usize).min(SUBDIV);
+        if s <= self.floor as usize {
+            return;
+        }
+        if s == SUBDIV && !self.full.is_empty() {
+            out.extend_from_slice(&self.full);
+            return;
+        }
+        for face in 0..6 {
+            let below = |u: usize, v: usize| match face / 2 {
+                // An x face's u is y, a z face's v is y, and a y face has none.
+                0 => u < s,
+                2 => v < s,
+                _ => face == NEG_Y || s == SUBDIV,
+            };
+            let mut mask = [false; SUBDIV * SUBDIV];
+            for v in 0..SUBDIV {
+                for u in 0..SUBDIV {
+                    mask[v * SUBDIV + u] = self.open[face].get(u, v) && below(u, v);
+                }
+            }
+            let plane = if face % 2 == 1 { SUBDIV as u8 } else { 0 };
+            emit_rects(&mut mask, face, plane, out);
+        }
+        if s < SUBDIV {
+            // A y face's u is z and its v is x.
+            let mut mask = [false; SUBDIV * SUBDIV];
+            for x in 0..SUBDIV {
+                for z in 0..SUBDIV {
+                    mask[x * SUBDIV + z] = self.contains(x, s - 1, z) && self.contains(x, s, z);
+                }
+            }
+            emit_rects(&mut mask, POS_Y, s as u8, out);
+        }
+    }
+}
+
+fn emit_rects(
+    mask: &mut [bool; SUBDIV * SUBDIV],
+    face: usize,
+    plane: u8,
+    out: &mut Vec<ShapeQuad>,
+) {
+    merge_rects(mask, |u0, v0, u1, v1| {
+        out.push(ShapeQuad {
+            face: face as u8,
+            plane,
+            u0,
+            v0,
+            u1,
+            v1,
+        });
+    });
+}
+
+/// The accessible voids of a rotated grid in the order of their first
+/// sub-cell, or `None` when there are more than [`MAX_VOIDS`].
+///
+/// Flooded a row of sub-cells at a time: registration derives this for every
+/// variant, and flooding one sub-cell at a time was most of its cost. Kept out
+/// of [`ShapeTable::derive`], whose other loops measured 10-20% slower with
+/// this inlined among them.
+#[inline(never)]
+fn find_voids(grid: &Grid) -> Option<Vec<Void>> {
+    let last = SUBDIV - 1;
+    let free: [u16; SUBDIV * SUBDIV] = std::array::from_fn(|r| {
+        (0..SUBDIV).fold(0, |row, x| row | u16::from(!grid[r * SUBDIV + x]) << x)
+    });
+    let mut unseen = free;
+    let mut voids = Vec::new();
+    let mut stack = Vec::new();
+    for start in 0..unseen.len() {
+        while unseen[start] != 0 {
+            let seed = unseen[start] & unseen[start].wrapping_neg();
+            let mut rows = [0u16; SUBDIV * SUBDIV];
+            rows[start] = runs_from(free[start], seed);
+            stack.push(start);
+            while let Some(r) = stack.pop() {
+                let (y, z) = (r / SUBDIV, r % SUBDIV);
+                let mut spread = |q: usize| {
+                    let entering = rows[r] & free[q] & !rows[q];
+                    if entering != 0 {
+                        rows[q] |= runs_from(free[q], entering);
+                        stack.push(q);
+                    }
+                };
+                if y > 0 {
+                    spread(r - SUBDIV);
+                }
+                if y < last {
+                    spread(r + SUBDIV);
+                }
+                if z > 0 {
+                    spread(r - 1);
+                }
+                if z < last {
+                    spread(r + 1);
+                }
+            }
+            for (u, row) in unseen.iter_mut().zip(&rows) {
+                *u &= !row;
+            }
+            let reaches_face = rows.iter().enumerate().any(|(r, &row)| {
+                let (y, z) = (r / SUBDIV, r % SUBDIV);
+                row != 0
+                    && ([y, z].iter().any(|&c| c == 0 || c == last) || row & (1 | 1 << last) != 0)
+            });
+            if reaches_face {
+                if voids.len() == MAX_VOIDS {
+                    return None;
+                }
+                voids.push(Void::from_rows(rows));
+            }
+        }
+    }
+    Some(voids)
+}
+
+/// The runs of set bits in `free` that hold a bit of `seeds`, a subset of it.
+fn runs_from(free: u16, seeds: u16) -> u16 {
+    // The carry from a run's lowest seed clears the run above it; the seeds
+    // above that one are put back by the `| seeds`.
+    let up = |f: u16, s: u16| (f.wrapping_add(s) ^ f) & f | s;
+    up(free, seeds) | up(free.reverse_bits(), seeds.reverse_bits()).reverse_bits()
+}
+
 /// Everything derived for one (Shape, Orientation).
 #[derive(Clone, Copy, Debug)]
 struct Variant {
@@ -384,6 +616,12 @@ struct Variant {
     collision: (u32, u32),
     selection: (u32, u32),
     volume: u16,
+    /// Its accessible voids in `ShapeTable::voids`.
+    voids: (u32, u32),
+    /// How many voids fluid state needs room for: this variant's count, or for
+    /// a connected Shape's bare variant the most of any arms. Zero when the
+    /// Shape holds no fluid, a cube or one with more than [`MAX_VOIDS`].
+    slots: u8,
     /// Index into `ShapeTable::connects`, or [`NO_CONNECT`]. A connected Shape's
     /// 24 slots are all its bare variant (no arms out), so `variant` and
     /// everything that reads only it - `seals`, `coverage`, `volume` - need no
@@ -392,6 +630,10 @@ struct Variant {
 }
 
 const NO_CONNECT: u16 = u16::MAX;
+
+/// [`Variant::slots`] between `derive` and registration, for a variant whose
+/// voids outnumber [`MAX_VOIDS`].
+const CROWDED: u8 = u8::MAX;
 
 /// What an unknown Shape and air both resolve to: nothing there at all.
 const NOTHING: Variant = Variant {
@@ -402,6 +644,8 @@ const NOTHING: Variant = Variant {
     collision: (0, 0),
     selection: (0, 0),
     volume: 0,
+    voids: (0, 0),
+    slots: 0,
     connect: NO_CONNECT,
 };
 
@@ -417,6 +661,8 @@ pub struct ShapeTable {
     quads: Vec<ShapeQuad>,
     boxes: Vec<CollisionBox>,
     selection: Vec<NodeBox>,
+    /// Every variant's voids; the first is empty space's one.
+    voids: Vec<Void>,
     overhang: [u8; 6],
     /// Per Shape id: its groups, for the neighbour's side of the predicate.
     groups: Vec<u32>,
@@ -455,6 +701,7 @@ impl ShapeTable {
             quads: Vec::new(),
             boxes: Vec::new(),
             selection: Vec::new(),
+            voids: vec![Void::whole()],
             overhang: [0; 6],
             groups: Vec::new(),
             connects: Vec::new(),
@@ -494,7 +741,12 @@ impl ShapeTable {
 
         let grid = rasterise(&def.boxes);
         for orientation in Orientation::all() {
-            let variant = self.derive(&grid, &base_collision, &def.boxes, &orientation.matrix());
+            let mut variant =
+                self.derive(&grid, &base_collision, &def.boxes, &orientation.matrix());
+            variant.slots = match variant.slots {
+                CROWDED => 0,
+                _ => variant.voids.1 as u8,
+            };
             self.variants.push(variant);
         }
         self.groups.push(0);
@@ -566,6 +818,17 @@ impl ShapeTable {
         for (&mask, (grid, boxes, collision)) in submasks.iter().zip(&derived) {
             by_compact[compact(mask, faces)] = Some(self.derive(grid, collision, boxes, &identity));
         }
+        // Arms that crowd the voids under any connection make the Shape hold no
+        // fluid under all of them: stored fluid outlives a change of arms.
+        let derived = by_compact.iter().flatten();
+        let slots = if derived.clone().any(|v| v.slots == CROWDED) {
+            0
+        } else {
+            derived.map(|v| v.voids.1).max().unwrap_or(0) as u8
+        };
+        for v in by_compact.iter_mut().flatten() {
+            v.slots = slots;
+        }
         self.mask_variants.extend(
             by_compact
                 .into_iter()
@@ -630,6 +893,14 @@ impl ShapeTable {
             .filter(|&f| coverage[f].is_full())
             .fold(0u8, |acc, f| acc | 1 << f);
         let partial = coverage.iter().any(|c| !c.is_full() && !c.is_empty());
+        let voids_start = self.voids.len() as u32;
+        let crowded = match find_voids(&rotated) {
+            Some(voids) => {
+                self.voids.extend(voids);
+                false
+            }
+            None => true,
+        };
         Variant {
             seals,
             partial,
@@ -641,6 +912,8 @@ impl ShapeTable {
                 self.selection.len() as u32 - selection_start,
             ),
             volume: rotated.iter().filter(|&&set| set).count() as u16,
+            voids: (voids_start, self.voids.len() as u32 - voids_start),
+            slots: if crowded { CROWDED } else { 0 },
             connect: NO_CONNECT,
         }
     }
@@ -837,6 +1110,29 @@ impl ShapeTable {
     /// solid if its eight children's volumes sum to at least half.
     pub fn volume(&self, voxel: Voxel) -> u16 {
         self.variant(voxel).volume
+    }
+
+    /// Where fluid can stand in `voxel` with the arms in `c` out: the whole cell
+    /// for air, nothing for a cube or a Shape that holds no fluid.
+    #[inline]
+    pub fn voids(&self, voxel: Voxel, c: Connections) -> &[Void] {
+        if voxel.is_air() {
+            return &self.voids[..1];
+        }
+        if self.variant(voxel).slots == 0 {
+            return &[];
+        }
+        let (start, len) = self.variant_with(voxel, c).voids;
+        &self.voids[start as usize..(start + len) as usize]
+    }
+
+    /// How many voids fluid state in `voxel` needs room for, whatever its arms:
+    /// one for air, none where it may hold no fluid.
+    pub fn void_slots(&self, voxel: Voxel) -> usize {
+        if voxel.is_air() {
+            return 1;
+        }
+        self.variant(voxel).slots as usize
     }
 
     /// The bits the light solvers test: faces light may not enter through, and
@@ -1826,5 +2122,266 @@ mod tests {
         assert!(!t.jointly_seals(id(0), POS_X, id(0)));
         let upside_down = t.joint_id(voxel(SHAPE_STAIR, NEG_Y, 0));
         assert!(t.jointly_seals(id(0), POS_X, upside_down));
+    }
+
+    fn register(t: &mut ShapeTable, boxes: Vec<NodeBox>) -> Voxel {
+        let id = t
+            .register(ShapeDef {
+                connect: None,
+                boxes,
+                collision: None,
+            })
+            .unwrap();
+        Voxel::new(1, id, 0)
+    }
+
+    /// For every builtin under every Orientation the voids are disjoint and
+    /// together exactly the empty sub-cells of the rotated grid, since none of
+    /// them has a cavity, and a void's open squares are its cells on the faces.
+    #[test]
+    fn voids_are_exactly_the_empty_space_under_every_orientation() {
+        let t = ShapeTable::builtin();
+        let b = NodeBox::new;
+        let defs = [
+            (SHAPE_SLAB, vec![b([0, 0, 0], [16, 8, 16])]),
+            (
+                SHAPE_STAIR,
+                vec![b([0, 0, 0], [16, 8, 16]), b([0, 8, 8], [16, 16, 16])],
+            ),
+            (SHAPE_POST, vec![b([6, 0, 6], [10, 16, 10])]),
+        ];
+        for (shape, boxes) in defs {
+            let grid = rasterise(&boxes);
+            for o in Orientation::all() {
+                let v = Voxel::new(1, shape, o.bits());
+                let voids = t.voids(v, Connections::NONE);
+                assert_eq!(voids.len(), 1, "shape {shape} {o:?}");
+                assert_eq!(t.void_slots(v), 1);
+                let rotated = rotate_grid(&grid, &o.matrix());
+                for y in 0..SUBDIV {
+                    for z in 0..SUBDIV {
+                        for x in 0..SUBDIV {
+                            assert_eq!(voids[0].contains(x, y, z), !rotated[at(x, y, z)]);
+                        }
+                    }
+                }
+                for face in 0..6 {
+                    let open = voids[0].open[face];
+                    let cover = t.coverage(v, face);
+                    assert!(!open.intersects(cover), "{shape} {o:?} {face}");
+                    assert!(open.union(cover).is_full(), "{shape} {o:?} {face}");
+                }
+            }
+        }
+        let air = t.voids(Voxel::AIR, Connections::NONE);
+        assert_eq!((air.len(), air[0].floor), (1, 0));
+        assert!(air[0].open.iter().all(FaceMask::is_full));
+        assert!(t.voids(Voxel::cube(1), Connections::NONE).is_empty());
+        assert_eq!(t.void_slots(Voxel::cube(1)), 0);
+        let bottom = t.voids(voxel(SHAPE_SLAB, POS_Y, 0), Connections::NONE);
+        assert_eq!(bottom[0].floor, 8);
+        assert!(bottom[0].open[NEG_Y].is_empty());
+    }
+
+    /// A hollow box's cavity reaches no face, so it is no void and nothing
+    /// drawn for fluid enters it; a wall through a Voxel makes two voids that
+    /// share no square of any face.
+    #[test]
+    fn a_sealed_cavity_is_no_void_and_a_partition_makes_two() {
+        let mut t = ShapeTable::builtin();
+        let b = NodeBox::new;
+        let hollow = register(
+            &mut t,
+            vec![
+                b([2, 2, 2], [14, 4, 14]),
+                b([2, 12, 2], [14, 14, 14]),
+                b([2, 4, 2], [4, 12, 14]),
+                b([12, 4, 2], [14, 12, 14]),
+                b([4, 4, 2], [12, 12, 4]),
+                b([4, 4, 12], [12, 12, 14]),
+            ],
+        );
+        let voids = t.voids(hollow, Connections::NONE);
+        assert_eq!(voids.len(), 1);
+        assert!(!voids[0].contains(8, 8, 8) && voids[0].contains(0, 8, 8));
+        let mut quads = Vec::new();
+        for s in 1..=16 {
+            quads.clear();
+            voids[0].quads(s, &mut quads);
+            for q in &quads {
+                // A quad inside the shell's cavity would be off the boundary
+                // and between 4 and 12 on every axis.
+                let inner = !q.on_boundary() && (4..=12).contains(&q.plane);
+                let spans = (4..=12).contains(&q.u0) && (4..=12).contains(&q.u1);
+                assert!(!(inner && spans && (4..=12).contains(&q.v0)), "{q:?}");
+            }
+        }
+
+        let wall = register(&mut t, vec![b([7, 0, 0], [9, 16, 16])]);
+        let voids = t.voids(wall, Connections::NONE);
+        assert_eq!(voids.len(), 2);
+        assert!(!voids[0].overlaps(&voids[1]));
+        for face in 0..6 {
+            assert!(!voids[0].open[face].intersects(&voids[1].open[face]));
+        }
+        assert!(voids[0].open[POS_X].is_empty() && voids[1].open[NEG_X].is_empty());
+    }
+
+    /// The flood one sub-cell at a time that the row flood replaced.
+    fn voids_by_cell(grid: &Grid) -> Option<Vec<Void>> {
+        let last = SUBDIV - 1;
+        let mut seen = [false; SUBDIV * SUBDIV * SUBDIV];
+        let mut voids = Vec::new();
+        for start in 0..grid.len() {
+            if grid[start] || seen[start] {
+                continue;
+            }
+            let mut rows = [0u16; SUBDIV * SUBDIV];
+            let mut reaches_face = false;
+            seen[start] = true;
+            let mut stack = vec![start];
+            while let Some(i) = stack.pop() {
+                let (x, z, y) = (i % SUBDIV, i / SUBDIV % SUBDIV, i / (SUBDIV * SUBDIV));
+                rows[y * SUBDIV + z] |= 1 << x;
+                reaches_face |= [x, y, z].iter().any(|&c| c == 0 || c == last);
+                let steps = [
+                    [-1, 0, 0],
+                    [1, 0, 0],
+                    [0, -1, 0],
+                    [0, 1, 0],
+                    [0, 0, -1],
+                    [0, 0, 1],
+                ];
+                for d in steps {
+                    let c = [x as i32 + d[0], y as i32 + d[1], z as i32 + d[2]];
+                    if c.iter().any(|&c| !(0..SUBDIV as i32).contains(&c)) {
+                        continue;
+                    }
+                    let j = at(c[0] as usize, c[1] as usize, c[2] as usize);
+                    if !grid[j] && !seen[j] {
+                        seen[j] = true;
+                        stack.push(j);
+                    }
+                }
+            }
+            if reaches_face {
+                if voids.len() == MAX_VOIDS {
+                    return None;
+                }
+                voids.push(Void::from_rows(rows));
+            }
+        }
+        Some(voids)
+    }
+
+    /// The row flood finds the same voids in the same order as a flood one
+    /// sub-cell at a time: every builtin under every Orientation, the example
+    /// connected Shapes under every arm, partitions past [`MAX_VOIDS`], sealed
+    /// cavities, and random boxes.
+    #[test]
+    fn the_row_flood_finds_the_voids_a_cell_flood_does() {
+        let b = NodeBox::new;
+        let mut grids = Vec::new();
+        let builtin = [
+            vec![b([0, 0, 0], [16, 8, 16])],
+            vec![b([0, 0, 0], [16, 8, 16]), b([0, 8, 8], [16, 16, 16])],
+            vec![b([6, 0, 6], [10, 16, 10])],
+        ];
+        for boxes in &builtin {
+            let grid = rasterise(boxes);
+            grids.extend(Orientation::all().map(|o| rotate_grid(&grid, &o.matrix())));
+        }
+        for def in [fence(), pipe()] {
+            let arms = def.connect.expect("connected").arms;
+            for mask in 0..1u32 << arms.len() {
+                let mut boxes = def.boxes.clone();
+                for (k, arm) in arms.iter().enumerate() {
+                    if mask >> k & 1 != 0 {
+                        boxes.extend_from_slice(&arm.boxes);
+                    }
+                }
+                grids.push(rasterise(&boxes));
+            }
+        }
+        let wall = |x: u8| b([x, 0, 0], [x + 1, 16, 16]);
+        grids.push(rasterise(&[wall(3), wall(7), wall(11)]));
+        grids.push(rasterise(&[wall(2), wall(5), wall(8), wall(11)]));
+        grids.push(rasterise(&[
+            b([2, 2, 2], [14, 4, 14]),
+            b([2, 12, 2], [14, 14, 14]),
+            b([2, 4, 2], [4, 12, 14]),
+            b([12, 4, 2], [14, 12, 14]),
+            b([4, 4, 2], [12, 12, 4]),
+            b([4, 4, 12], [12, 12, 14]),
+        ]));
+        grids.push([false; SUBDIV * SUBDIV * SUBDIV]);
+        grids.push([true; SUBDIV * SUBDIV * SUBDIV]);
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed % n) as u8
+        };
+        for _ in 0..500 {
+            let boxes: Vec<NodeBox> = (0..1 + next(12))
+                .map(|_| {
+                    let min = [next(16), next(16), next(16)];
+                    let max = min.map(|c| c + 1 + next(16 - c as u64));
+                    b(min, max)
+                })
+                .collect();
+            grids.push(rasterise(&boxes));
+        }
+        for grid in &grids {
+            assert_eq!(find_voids(grid), voids_by_cell(grid));
+        }
+    }
+
+    /// Past [`MAX_VOIDS`] a Shape holds no fluid at all, rather than merging
+    /// voids into a leak.
+    #[test]
+    fn a_shape_with_too_many_voids_holds_no_fluid() {
+        let mut t = ShapeTable::builtin();
+        let wall = |x: u8| NodeBox::new([x, 0, 0], [x + 1, 16, 16]);
+        let four = register(&mut t, vec![wall(3), wall(7), wall(11)]);
+        assert_eq!(t.voids(four, Connections::NONE).len(), MAX_VOIDS);
+        let five = register(&mut t, vec![wall(2), wall(5), wall(8), wall(11)]);
+        assert!(t.voids(five, Connections::NONE).is_empty());
+        assert_eq!(t.void_slots(five), 0);
+    }
+
+    /// A full surface draws every open square; a lower one clips the sides
+    /// below it and adds the surface where the void goes on above it.
+    #[test]
+    fn a_void_draws_its_fluid_clipped_to_the_surface() {
+        let t = ShapeTable::builtin();
+        let stair = voxel(SHAPE_STAIR, POS_Y, 0);
+        let void = &t.voids(stair, Connections::NONE)[0];
+        let mut full = Vec::new();
+        void.quads(16, &mut full);
+        assert!(full.iter().all(ShapeQuad::on_boundary));
+        let area = |face: usize, qs: &[ShapeQuad]| -> u32 {
+            qs.iter()
+                .filter(|q| q.face as usize == face)
+                .map(ShapeQuad::area)
+                .sum()
+        };
+        // Its notch is the front upper quarter: half of the top, a quarter of
+        // the front, an eighth of each side.
+        assert_eq!(area(POS_Y, &full), 128);
+        assert_eq!(area(NEG_Z, &full), 128);
+        assert_eq!(area(POS_X, &full), 64);
+        assert_eq!(area(NEG_Y, &full), 0);
+        let mut low = Vec::new();
+        void.quads(12, &mut low);
+        assert_eq!(area(NEG_Z, &low), 64);
+        assert_eq!(area(POS_X, &low), 32);
+        let surface: Vec<_> = low.iter().filter(|q| q.face as usize == POS_Y).collect();
+        assert_eq!(surface.len(), 1);
+        assert_eq!((surface[0].plane, surface[0].area()), (12, 128));
+        let mut none = Vec::new();
+        void.quads(8, &mut none);
+        assert!(none.is_empty(), "below its floor nothing stands");
     }
 }

@@ -1703,3 +1703,402 @@ fn a_row_of_slabs_never_leaves_its_chunk() {
             .all(|p| (0.0..=32.0).contains(&p[0]))
     );
 }
+
+fn flowing(surface: u8) -> tesserae_core::Overlay {
+    tesserae_core::Overlay {
+        fluid: Some(tesserae_core::Fluid {
+            source: false,
+            surface,
+            reach: 1,
+            ..tesserae_core::Fluid::source(tesserae_core::material::WATER)
+        }),
+        burning: None,
+    }
+}
+
+/// Every vertex height of the blended layer's quads facing `normal`.
+fn blended_heights(mesh: &tesserae_core::ChunkMesh, normal: [f32; 3]) -> Vec<f32> {
+    let layer = &mesh.blended;
+    let mut ys: Vec<f32> = (0..layer.positions.len())
+        .filter(|&i| layer.normals[i] == normal)
+        .map(|i| layer.positions[i][1])
+        .collect();
+    ys.sort_by(f32::total_cmp);
+    ys.dedup();
+    ys
+}
+
+/// Flowing water in the overlay has geometry though its packed Voxel is air:
+/// a box up to its surface, top face at the surface, on the blended pass.
+#[test]
+fn flowing_water_meshes_to_its_surface() {
+    let chunk = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(4, 4, 4, flowing(8));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert_eq!(mesh.blended.quad_count(), 6, "a box of six faces");
+    assert!(mesh.opaque.is_empty());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![4.5]);
+    assert_eq!(blended_heights(&mesh, [1.0, 0.0, 0.0]), vec![4.0, 4.5]);
+
+    // Full, it is a water cube and meshes as one.
+    overlay.set(4, 4, 4, flowing(16));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![5.0]);
+}
+
+/// Between two flowing Voxels only the step between their surfaces shows, and a
+/// solid floor hides the bottom.
+#[test]
+fn neighbouring_flow_shows_only_the_step_between_surfaces() {
+    let mut chunk = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    for x in 4..=5 {
+        chunk.set(x, 3, 4, Voxel::cube(1));
+    }
+    overlay.set(4, 4, 4, flowing(12));
+    overlay.set(5, 4, 4, flowing(8));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    // Facing +x out of the higher one: just 8/16 to 12/16 of the shared face,
+    // then the lower one's full side further out.
+    let layer = &mesh.blended;
+    let mut plus_x: Vec<(f32, f32)> = (0..layer.positions.len())
+        .filter(|&i| layer.normals[i] == [1.0, 0.0, 0.0])
+        .map(|i| (layer.positions[i][0], layer.positions[i][1]))
+        .collect();
+    plus_x.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    plus_x.dedup();
+    assert_eq!(
+        plus_x,
+        vec![(5.0, 4.5), (5.0, 4.75), (6.0, 4.0), (6.0, 4.5)]
+    );
+    assert!(
+        blended_heights(&mesh, [0.0, -1.0, 0.0]).is_empty(),
+        "the stone floor hides the bottom"
+    );
+}
+
+/// Full water under a lower surface of the same water is one body: the face
+/// between them is inside it and not drawn, from either side, and the surface
+/// on top is.
+#[test]
+fn full_water_under_a_lower_surface_draws_no_face_between_them() {
+    let chunk = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(4, 4, 4, flowing(16));
+    overlay.set(4, 5, 4, flowing(6));
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![5.375]);
+    assert_eq!(blended_heights(&mesh, [0.0, -1.0, 0.0]), vec![4.0]);
+
+    // Against a different fluid the face stays.
+    let mut glass = Chunk::air();
+    glass.set(4, 4, 4, Voxel::cube(tesserae_core::material::GLASS));
+    let lit = unlit(&glass).with_overlay(&overlay);
+    let mesh = mesh_chunk(lit, [None; 6], tables());
+    assert!(
+        mesh.blended
+            .positions
+            .chunks(4)
+            .zip(mesh.blended.normals.chunks(4))
+            .any(|(q, n)| n[0] == [0.0, 1.0, 0.0] && q[0][1] == 5.0),
+        "glass under water keeps its top"
+    );
+}
+
+/// A fence beside full flowing water grows no arm towards it: the water's
+/// packed Voxel is air, which is what collision and the simulation read its
+/// arms from, though the water is drawn as a cube. A packed source is a cube
+/// to all three, and the arm grows.
+#[test]
+fn a_fence_grows_no_arm_towards_flowing_water() {
+    let opaque = |chunk: &Chunk, overlay: &tesserae_core::ChunkOverlay| {
+        mesh_chunk(unlit(chunk).with_overlay(overlay), [None; 6], tables())
+            .opaque
+            .positions
+    };
+    let fence = place_fences(&[(10, 10, 10)]);
+    let bare = opaque(&fence, &tesserae_core::ChunkOverlay::none());
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(11, 10, 10, flowing(16));
+    assert_eq!(opaque(&fence, &overlay), bare, "an arm towards flow");
+
+    let mut sourced = fence.clone();
+    sourced.set(11, 10, 10, Voxel::cube(tesserae_core::material::WATER));
+    assert_ne!(
+        opaque(&sourced, &tesserae_core::ChunkOverlay::none()),
+        bare,
+        "no arm towards a source"
+    );
+}
+
+/// A dry overlay changes nothing about a mesh.
+#[test]
+fn a_dry_overlay_meshes_exactly_as_none() {
+    let chunk = testgen::terrain_chunk(1, 0, 0);
+    let overlay = tesserae_core::ChunkOverlay::none();
+    let a = mesh_chunk(unlit(&chunk), [None; 6], tables());
+    let b = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    assert_eq!(a.blended.positions, b.blended.positions);
+    assert_eq!(a.opaque.positions, b.opaque.positions);
+    assert_eq!(a.quad_count(), b.quad_count());
+}
+
+fn soaked(fluid: tesserae_core::Fluid) -> tesserae_core::Overlay {
+    tesserae_core::Overlay {
+        fluid: Some(fluid),
+        burning: None,
+    }
+}
+
+fn blended_positions(mesh: &tesserae_core::ChunkMesh) -> Vec<[f32; 3]> {
+    mesh.blended.positions.clone()
+}
+
+/// Water in a stair is drawn in the stair's notch and nowhere else, and the
+/// stair itself meshes exactly as it does dry.
+#[test]
+fn a_waterlogged_stair_draws_its_water_in_the_notch_alone() {
+    let stair = Voxel::shaped(1, SHAPE_STAIR, Orientation::new(POS_Y, 0));
+    let mut chunk = Chunk::air();
+    chunk.set(4, 4, 4, stair);
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(
+        4,
+        4,
+        4,
+        soaked(tesserae_core::Fluid::source(tesserae_core::material::WATER)),
+    );
+    let dry = mesh_chunk(unlit(&chunk), [None; 6], tables());
+    let wet = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    assert_eq!(wet.opaque.positions, dry.opaque.positions);
+    assert_eq!(wet.shaped_voxels, dry.shaped_voxels);
+    // The notch is the upper front quarter: top, front and its two sides.
+    assert_eq!(wet.blended.quad_count(), 4);
+    for p in blended_positions(&wet) {
+        assert!(
+            (4.5..=5.0).contains(&p[1]) && (4.0..=4.5).contains(&p[2]),
+            "{p:?}"
+        );
+    }
+}
+
+/// Fluid below a full surface in a slab's void stands from the slab's top to
+/// its own surface.
+#[test]
+fn a_waterlogged_slab_draws_water_from_its_top_to_the_surface() {
+    let slab = Voxel::shaped(1, SHAPE_SLAB, Orientation::new(POS_Y, 0));
+    let mut chunk = Chunk::air();
+    chunk.set(4, 4, 4, slab);
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    let level = tesserae_core::Level {
+        surface: 12,
+        reach: 2,
+        descent: 0,
+    };
+    let none = tesserae_core::Level::DRY;
+    let fluid =
+        tesserae_core::Fluid::flowing(tesserae_core::material::WATER, [level, none, none, none])
+            .unwrap();
+    overlay.set(4, 4, 4, soaked(fluid));
+    let mesh = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![4.75]);
+    assert_eq!(blended_heights(&mesh, [1.0, 0.0, 0.0]), vec![4.5, 4.75]);
+    assert!(blended_heights(&mesh, [0.0, -1.0, 0.0]).is_empty());
+}
+
+/// A waterlogged stair inside a lake shows no water face between the two:
+/// the lake's faces against it are covered by its solid and its full void,
+/// and its void's faces by the lake. Only the lake's outside is drawn.
+#[test]
+fn a_waterlogged_stair_in_a_lake_draws_no_faces_inside_the_water() {
+    let water = tesserae_core::material::WATER;
+    let stair = Voxel::shaped(1, SHAPE_STAIR, Orientation::new(POS_Y, 0));
+    let mut chunk = Chunk::air();
+    for x in 3..6 {
+        for y in 3..6 {
+            for z in 3..6 {
+                chunk.set(x, y, z, Voxel::cube(water));
+            }
+        }
+    }
+    chunk.set(4, 4, 4, stair);
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(4, 4, 4, soaked(tesserae_core::Fluid::source(water)));
+    let mesh = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
+    for p in blended_positions(&mesh) {
+        assert!(p.iter().any(|&c| c == 3.0 || c == 6.0), "{p:?}");
+    }
+    assert_eq!(mesh.blended.quad_count(), 6, "the lake's six sides");
+}
+
+/// A burning cube draws a flame over each face open to air, a sixteenth
+/// outside it, in the cutout layer with the flame index; a face against a
+/// stone neighbour gets none. Its own geometry is the unburnt cube's, so
+/// collision and selection, which read the Voxel, are untouched.
+#[test]
+fn a_burning_solid_draws_flames_over_its_open_faces_and_keeps_its_geometry() {
+    use tesserae_core::mesh::FLAME;
+    use tesserae_core::{Burning, ChunkOverlay, Overlay};
+    let mut chunk = Chunk::air();
+    chunk.set(16, 16, 16, Voxel::cube(1));
+    chunk.set(17, 16, 16, Voxel::cube(1));
+    let mut overlay = ChunkOverlay::none();
+    overlay.set(
+        16,
+        16,
+        16,
+        Overlay {
+            fluid: None,
+            burning: Some(Burning { fuel: 9 }),
+        },
+    );
+    let dry = mesh_isolated(&chunk);
+    let lit = unlit(&chunk).with_overlay(&overlay);
+    let burning = greedy_mesh(&Neighborhood::isolated(lit), tables());
+    assert_eq!(burning.opaque.positions, dry.opaque.positions);
+    assert_eq!(burning.opaque.materials, dry.opaque.materials);
+    assert!(dry.cutout.is_empty());
+    assert_eq!(
+        burning.cutout.quad_count(),
+        5,
+        "every face but the shared one"
+    );
+    assert!(burning.cutout.materials.iter().all(|&m| m == FLAME));
+    for p in &burning.cutout.positions {
+        let outside = (0..3).any(|a| p[a] < 16.0 || p[a] > 17.0);
+        assert!(outside, "a flame vertex inside its Voxel: {p:?}");
+    }
+    assert!(
+        !burning.cutout.normals.contains(&[1.0, 0.0, 0.0]),
+        "a flame on the face against stone"
+    );
+}
+
+/// An overlay whose palette still lists water and fire though every cell is
+/// dry, as one is after its last wet Voxel drains: it takes the wet path.
+fn drained() -> tesserae_core::ChunkOverlay {
+    use tesserae_core::{Burning, ChunkOverlay, Fluid, Overlay, material::WATER};
+    let mut overlay = ChunkOverlay::none();
+    let wet = Overlay {
+        fluid: Some(Fluid::source(WATER)),
+        burning: Some(Burning { fuel: 1 }),
+    };
+    overlay.set(0, 0, 0, wet);
+    overlay.set(0, 0, 0, Overlay::NONE);
+    assert!(overlay.may_contain_fluid() && overlay.may_contain_burning());
+    overlay
+}
+
+/// A dry neighbourhood meshes the same through the path that reads no overlay
+/// and the general one, whichever of its seven overlays sends it there:
+/// generated ramps, caves and shores lit by the sky, and connected Shapes,
+/// stairs and clear Materials by hand.
+#[test]
+fn a_dry_neighbourhood_meshes_the_same_whichever_path_it_takes() {
+    use tesserae_core::material::{GLASS, LEAVES, WATER};
+    let g = world();
+    let mut scenes: Vec<(Chunk, [Chunk; 6])> = ramp_chunks(&g, 1)
+        .into_iter()
+        .take(3)
+        .chain([[0, -1, 0], [2, 0, -3]])
+        .map(|[x, y, z]| {
+            let around = [
+                [-1, 0, 0],
+                [1, 0, 0],
+                [0, -1, 0],
+                [0, 1, 0],
+                [0, 0, -1],
+                [0, 0, 1],
+            ];
+            let around = around.map(|d| g.chunk(x + d[0], y + d[1], z + d[2]));
+            (g.chunk(x, y, z), around)
+        })
+        .collect();
+    let mut built = place_fences(&[(10, 10, 10), (11, 10, 10), (11, 10, 11), (31, 10, 10)]);
+    let stair = Voxel::shaped(GLASS, SHAPE_STAIR, Orientation::new(POS_Y, 1));
+    for (x, voxel) in [
+        (2, Voxel::cube(GLASS)),
+        (3, Voxel::cube(LEAVES)),
+        (4, Voxel::cube(WATER)),
+        (5, stair),
+    ] {
+        for z in 0..CHUNK_SIZE {
+            built.set(x, 4, z, voxel);
+        }
+    }
+    let mut east = Chunk::air();
+    east.set(0, 10, 10, Voxel::cube(1));
+    scenes.push((
+        built,
+        std::array::from_fn(|i| {
+            if i == POS_X {
+                east.clone()
+            } else {
+                Chunk::air()
+            }
+        }),
+    ));
+
+    let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    let open = Chunk::air();
+    let lit = |chunk: &Chunk| {
+        let mut border = [None; 6];
+        border[POS_Y] = Some(LitChunk::new(&open, &sky));
+        tesserae_core::light_chunk(chunk, border, tables())
+    };
+    let drained = drained();
+    for (center, around) in &scenes {
+        let light = lit(center);
+        let lights: Vec<ChunkLight> = around.iter().map(lit).collect();
+        let mesh = |wet: &dyn Fn(usize) -> bool| {
+            let own = LitChunk::new(center, &light);
+            let own = if wet(6) {
+                own.with_overlay(&drained)
+            } else {
+                own
+            };
+            let neighbors = std::array::from_fn(|i| {
+                let n = LitChunk::new(&around[i], &lights[i]);
+                Some(if wet(i) { n.with_overlay(&drained) } else { n })
+            });
+            format!("{:?}", mesh_chunk(own, neighbors, tables()))
+        };
+        let dry = mesh(&|_| false);
+        assert_eq!(dry, mesh(&|i| i == 6), "the centre's overlay");
+        for k in 0..6 {
+            assert_eq!(dry, mesh(&|i| i == k), "neighbour {k}'s overlay");
+        }
+        assert_eq!(dry, mesh(&|_| true), "every overlay");
+    }
+}
+
+/// A dry Chunk still meshes against its neighbours' fluid: lake water at its
+/// edge shows its face to a dry neighbour and hides it against full flowing
+/// water across the boundary.
+#[test]
+fn a_dry_chunk_beside_a_wet_one_meshes_against_the_neighbours_fluid() {
+    use tesserae_core::material::WATER;
+    let mut center = Chunk::air();
+    center.set(31, 4, 4, Voxel::cube(WATER));
+    let east = Chunk::air();
+    let mut overlay = tesserae_core::ChunkOverlay::none();
+    overlay.set(0, 4, 4, flowing(16));
+    let east_faces = |n: LitChunk| {
+        let mut neighbors = [None; 6];
+        neighbors[POS_X] = Some(n);
+        let mesh = mesh_chunk(unlit(&center), neighbors, tables());
+        mesh.blended
+            .normals
+            .iter()
+            .filter(|&&n| n == [1.0, 0.0, 0.0])
+            .count()
+            / 4
+    };
+    assert_eq!(east_faces(unlit(&east)), 1);
+    assert_eq!(east_faces(unlit(&east).with_overlay(&overlay)), 0);
+}

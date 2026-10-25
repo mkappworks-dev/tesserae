@@ -18,5 +18,9 @@ harness = false
 name = "lod"
 harness = false
 
+[[bench]]
+name = "fluids"
+harness = false
+
 [dev-dependencies]
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }

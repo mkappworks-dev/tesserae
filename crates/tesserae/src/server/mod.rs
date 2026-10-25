@@ -15,6 +15,7 @@
 #[cfg(feature = "dev")]
 mod builder;
 pub mod edit;
+mod fluids;
 #[cfg(feature = "dev")]
 mod gallery;
 mod jobs;
@@ -81,7 +82,12 @@ pub fn plugin(app: &mut App) {
         .init_resource::<world_state::ChunkStore>()
         .init_resource::<ContentTables>()
         .add_systems(Startup, open_world)
-        .add_plugins((streaming::plugin, edit::plugin, player::plugin));
+        .add_plugins((
+            streaming::plugin,
+            edit::plugin,
+            fluids::plugin,
+            player::plugin,
+        ));
     #[cfg(feature = "dev")]
     if app
         .world()

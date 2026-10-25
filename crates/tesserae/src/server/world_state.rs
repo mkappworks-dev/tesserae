@@ -7,13 +7,16 @@
 //! compile rather than merely being noticed in review. The Client gets finished
 //! meshes through `super::streaming`'s messages and needs no read access either.
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::light::{Light, LightVolume};
-use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, Voxel};
+use tesserae_core::{
+    CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, FluidTable, MaterialId, Occupants, Overlay, Voxel,
+};
 
 use crate::world::ChunkCoord;
 
@@ -31,6 +34,54 @@ use crate::world::ChunkCoord;
 pub struct ChunkStore {
     chunks: HashMap<ChunkCoord, Arc<Chunk>>,
     light: HashMap<ChunkCoord, Arc<ChunkLight>>,
+    /// Fluid and fire beside the Voxels, World state like the light is.
+    overlays: HashMap<ChunkCoord, Arc<ChunkOverlay>>,
+    lifetimes: HashMap<ChunkCoord, Lifetime>,
+    next_lifetime: u64,
+    /// Positions whose occupants changed since `super::fluids` last looked:
+    /// what it wakes the simulation around.
+    changed: Vec<[i32; 3]>,
+    /// Those of `changed` whose solid changed, which can change passage
+    /// further away than a fluid change does.
+    solids: Vec<[i32; 3]>,
+    /// Those of `changed` that can change a fuel's exposure, which reaches
+    /// further still: a solid, a fire or a hot fluid.
+    heated: Vec<[i32; 3]>,
+    /// Where `changed` was full: every position in these may have changed.
+    changed_chunks: BTreeSet<ChunkCoord>,
+    /// Coordinates a Chunk arrived at or left since `super::fluids` looked.
+    lifecycle: BTreeSet<ChunkCoord>,
+}
+
+/// Positions journalled before the journal coalesces by Chunk. A tick's
+/// player Edits, Mod Commands and landed flow fit; a `dev` builder may not.
+const JOURNAL_CAP: usize = 4096;
+
+/// What changed since the last look.
+#[derive(Default, Debug)]
+pub(in crate::server) struct Changed {
+    pub cells: Vec<[i32; 3]>,
+    pub solids: Vec<[i32; 3]>,
+    pub heated: Vec<[i32; 3]>,
+    pub chunks: BTreeSet<ChunkCoord>,
+}
+
+/// Which Chunk at a coordinate: a Chunk evicted and generated again is a new
+/// one, and a result computed for the old one must not land in it. `Arc`
+/// identity says the same while a job holds the Arc; this says it for a
+/// simulation proposal, which names the Voxels it would change and holds no
+/// Arc to the Chunks it read.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(in crate::server) struct Lifetime(u64);
+
+/// Everything a job reads of one Chunk, as shared handles, and which Chunk
+/// it was. What a result is validated against when it lands.
+#[derive(Clone)]
+pub(in crate::server) struct Snapshot {
+    pub lifetime: Lifetime,
+    pub chunk: Arc<Chunk>,
+    pub light: Arc<ChunkLight>,
+    pub overlay: Arc<ChunkOverlay>,
 }
 
 impl ChunkStore {
@@ -42,23 +93,110 @@ impl ChunkStore {
         self.light.get(&coord).map(Arc::as_ref)
     }
 
-    /// A Chunk and its light as shared handles, for a job to hold.
+    /// A Chunk, its light and its overlay as shared handles, for a job to hold.
     ///
     /// Server-private because an `Arc<Chunk>` in Client hands would be the read
     /// access the Client is deliberately denied.
-    pub(in crate::server) fn shared(
-        &self,
-        coord: ChunkCoord,
-    ) -> Option<(Arc<Chunk>, Arc<ChunkLight>)> {
-        Some((
-            Arc::clone(self.chunks.get(&coord)?),
-            Arc::clone(self.light.get(&coord)?),
-        ))
+    pub(in crate::server) fn shared(&self, coord: ChunkCoord) -> Option<Snapshot> {
+        Some(Snapshot {
+            lifetime: *self.lifetimes.get(&coord)?,
+            chunk: Arc::clone(self.chunks.get(&coord)?),
+            light: Arc::clone(self.light.get(&coord)?),
+            overlay: Arc::clone(self.overlays.get(&coord)?),
+        })
     }
 
-    /// For a coarse generate job that takes the Chunk as a child instead of generating one.
-    pub(in crate::server) fn chunk_arc(&self, coord: ChunkCoord) -> Option<Arc<Chunk>> {
-        self.chunks.get(&coord).map(Arc::clone)
+    /// Whether what `snapshot` read is what the store holds now: the same
+    /// Chunk lifetime, Voxels and overlay. Light is left out, because the
+    /// result that asks is usually the one about to replace it.
+    pub(in crate::server) fn unchanged_since(
+        &self,
+        coord: ChunkCoord,
+        snapshot: &Snapshot,
+    ) -> bool {
+        self.lifetimes.get(&coord) == Some(&snapshot.lifetime)
+            && self
+                .chunks
+                .get(&coord)
+                .is_some_and(|c| Arc::ptr_eq(c, &snapshot.chunk))
+            && self
+                .overlays
+                .get(&coord)
+                .is_some_and(|o| Arc::ptr_eq(o, &snapshot.overlay))
+    }
+
+    pub(in crate::server) fn lifetime(&self, coord: ChunkCoord) -> Option<Lifetime> {
+        self.lifetimes.get(&coord).copied()
+    }
+
+    pub fn overlay(&self, coord: ChunkCoord) -> Option<&ChunkOverlay> {
+        self.overlays.get(&coord).map(Arc::as_ref)
+    }
+
+    /// What is at a position, read the one way everything reads it.
+    pub fn occupants(&self, at: [i32; 3], fluids: &FluidTable) -> Option<Occupants> {
+        let at = VoxelCoord::of(at);
+        let voxel = self.get(at.chunk)?.get(at.x, at.y, at.z);
+        let overlay = self.overlay(at.chunk)?.get(at.x, at.y, at.z);
+        Some(Occupants::of(voxel, overlay, fluids))
+    }
+
+    /// The Voxel light treats a position as: [`tesserae_core::optical`].
+    pub fn optical(&self, at: [i32; 3]) -> Option<Voxel> {
+        let at = VoxelCoord::of(at);
+        let voxel = self.get(at.chunk)?.get(at.x, at.y, at.z);
+        // Only empty space reads differently, so a solid skips the second lookup
+        // on the relight's hot path.
+        if !voxel.is_air() {
+            return Some(voxel);
+        }
+        let overlay = self.overlay(at.chunk)?.get(at.x, at.y, at.z);
+        Some(tesserae_core::optical(voxel, overlay))
+    }
+
+    /// The fluid standing in the voids of the shaped solid at `at`, which light
+    /// combines with it. Asked of shaped Voxels only, so cubes and empty space
+    /// on the relight's hot path never pay for the overlay lookup.
+    pub fn wet(&self, at: [i32; 3]) -> Option<MaterialId> {
+        let at = VoxelCoord::of(at);
+        self.overlay(at.chunk)?
+            .get(at.x, at.y, at.z)
+            .fluid
+            .map(|f| f.material)
+    }
+
+    /// Whether the solid at `at` is burning.
+    pub fn burning(&self, at: [i32; 3]) -> bool {
+        let at = VoxelCoord::of(at);
+        self.overlay(at.chunk)
+            .is_some_and(|o| o.get(at.x, at.y, at.z).burning.is_some())
+    }
+
+    pub(in crate::server) fn note_changed(&mut self, at: [i32; 3], solid: bool, heated: bool) {
+        if self.changed.len() < JOURNAL_CAP {
+            self.changed.push(at);
+            if solid {
+                self.solids.push(at);
+            }
+            if heated {
+                self.heated.push(at);
+            }
+        } else {
+            self.changed_chunks.insert(VoxelCoord::of(at).chunk);
+        }
+    }
+
+    pub(in crate::server) fn take_changed(&mut self) -> Changed {
+        Changed {
+            cells: std::mem::take(&mut self.changed),
+            solids: std::mem::take(&mut self.solids),
+            heated: std::mem::take(&mut self.heated),
+            chunks: std::mem::take(&mut self.changed_chunks),
+        }
+    }
+
+    pub(in crate::server) fn take_lifecycle(&mut self) -> BTreeSet<ChunkCoord> {
+        std::mem::take(&mut self.lifecycle)
     }
 
     /// One Voxel's light, in lattice coordinates. `Light::DARK` where the
@@ -84,6 +222,10 @@ impl ChunkStore {
     pub(in crate::server) fn insert(&mut self, coord: ChunkCoord, chunk: Chunk) {
         self.chunks.insert(coord, Arc::new(chunk));
         self.light.insert(coord, Arc::new(ChunkLight::dark()));
+        self.overlays.insert(coord, Arc::new(ChunkOverlay::none()));
+        self.next_lifetime += 1;
+        self.lifetimes.insert(coord, Lifetime(self.next_lifetime));
+        self.lifecycle.insert(coord);
     }
 
     pub(in crate::server) fn set_light(&mut self, coord: ChunkCoord, light: ChunkLight) {
@@ -98,9 +240,20 @@ impl ChunkStore {
         }
     }
 
+    /// Replaces one Voxel's overlay. The caller keeps the pair canonical, which
+    /// is what `super::edit::set_occupants` does.
+    pub(in crate::server) fn set_overlay(&mut self, at: VoxelCoord, overlay: Overlay) {
+        if let Some(held) = self.overlays.get_mut(&at.chunk) {
+            Arc::make_mut(held).set(at.x, at.y, at.z, overlay);
+        }
+    }
+
     pub(in crate::server) fn remove(&mut self, coord: ChunkCoord) {
         self.chunks.remove(&coord);
         self.light.remove(&coord);
+        self.overlays.remove(&coord);
+        self.lifetimes.remove(&coord);
+        self.lifecycle.insert(coord);
     }
 }
 
@@ -146,6 +299,10 @@ impl VoxelCoord {
 pub(in crate::server) struct LightLattice<'a> {
     pub store: &'a mut ChunkStore,
     pub touched: Vec<ChunkCoord>,
+    /// The Chunks across a face whose plane of light it wrote to: they read that
+    /// plane, to mesh the faces it lights and to solve their own light, though
+    /// none of their own light may have moved.
+    pub across: Vec<ChunkCoord>,
 }
 
 impl<'a> LightLattice<'a> {
@@ -153,6 +310,7 @@ impl<'a> LightLattice<'a> {
         LightLattice {
             store,
             touched: Vec::new(),
+            across: Vec::new(),
         }
     }
 }
@@ -166,9 +324,26 @@ impl VoxelVolume for ChunkStore {
     }
 }
 
+/// Every held Chunk, as a Command reads the cells around its target.
+impl tesserae_core::flow::CellView for ChunkStore {
+    fn stored(&self, at: [i32; 3]) -> Option<(Voxel, Overlay)> {
+        let at = VoxelCoord::of(at);
+        let voxel = self.get(at.chunk)?.get(at.x, at.y, at.z);
+        Some((voxel, self.overlay(at.chunk)?.get(at.x, at.y, at.z)))
+    }
+}
+
 impl LightVolume for LightLattice<'_> {
     fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
-        self.store.voxel(at)
+        self.store.optical(at)
+    }
+
+    fn wet(&self, at: [i32; 3]) -> Option<MaterialId> {
+        self.store.wet(at)
+    }
+
+    fn burning(&self, at: [i32; 3]) -> bool {
+        self.store.burning(at)
     }
 
     fn light(&self, at: [i32; 3]) -> Light {
@@ -189,6 +364,20 @@ impl LightVolume for LightLattice<'_> {
             // so this collapses nearly every run, and `streaming` de-duplicates
             // what is left when it marks Chunks dirty.
             self.touched.push(at.chunk);
+        }
+        let last = CHUNK_SIZE - 1;
+        for (axis, local) in [at.x, at.y, at.z].into_iter().enumerate() {
+            let step = match local {
+                0 => -1,
+                l if l == last => 1,
+                _ => continue,
+            };
+            let mut n = [at.chunk.x, at.chunk.y, at.chunk.z];
+            n[axis] += step;
+            let n = ChunkCoord::new(n[0], n[1], n[2]);
+            if self.across.last() != Some(&n) {
+                self.across.push(n);
+            }
         }
     }
 }
@@ -233,7 +422,8 @@ impl SpawnPoint {
 mod tests {
     use super::*;
     use tesserae_core::light::MAX_LIGHT;
-    use tesserae_core::{CHUNK_SIZE, Tables, relight, worldgen};
+    use tesserae_core::material::WATER;
+    use tesserae_core::{Burning, CHUNK_SIZE, Fluid, Tables, relight, worldgen};
 
     #[test]
     fn a_voxel_coord_floors_rather_than_truncating_below_the_origin() {
@@ -316,7 +506,7 @@ mod tests {
         let mut store = ChunkStore::default();
         let coord = ChunkCoord::new(0, 0, 0);
         store.insert(coord, Chunk::air());
-        let (chunk, light) = store.shared(coord).expect("loaded");
+        let Snapshot { chunk, light, .. } = store.shared(coord).expect("loaded");
 
         let at = VoxelCoord::of([3, 4, 5]);
         store.set_voxel(at, Voxel::cube(worldgen::LANTERN));
@@ -330,10 +520,13 @@ mod tests {
             "the snapshot saw the light"
         );
         assert!(!store.get(coord).unwrap().get(3, 4, 5).is_air());
-        let (now, now_light) = store.shared(coord).unwrap();
-        assert!(!Arc::ptr_eq(&chunk, &now), "the write did not reallocate");
+        let now = store.shared(coord).unwrap();
         assert!(
-            !Arc::ptr_eq(&light, &now_light),
+            !Arc::ptr_eq(&chunk, &now.chunk),
+            "the write did not reallocate"
+        );
+        assert!(
+            !Arc::ptr_eq(&light, &now.light),
             "the write did not reallocate"
         );
     }
@@ -343,12 +536,99 @@ mod tests {
         let mut store = ChunkStore::default();
         let coord = ChunkCoord::new(0, 0, 0);
         store.insert(coord, Chunk::air());
-        let before = store.shared(coord).map(|(c, _)| Arc::as_ptr(&c)).unwrap();
+        let before = store.shared(coord).map(|s| Arc::as_ptr(&s.chunk)).unwrap();
 
         store.set_voxel(VoxelCoord::of([1, 1, 1]), Voxel::cube(worldgen::LANTERN));
 
-        let after = store.shared(coord).map(|(c, _)| Arc::as_ptr(&c)).unwrap();
+        let after = store.shared(coord).map(|s| Arc::as_ptr(&s.chunk)).unwrap();
         assert_eq!(before, after, "an unshared write allocated a new Chunk");
+    }
+
+    #[test]
+    fn a_chunk_arrives_with_no_overlay_and_a_lifetime_of_its_own() {
+        let mut store = ChunkStore::default();
+        let coord = ChunkCoord::new(0, 0, 0);
+        store.insert(coord, Chunk::air());
+        assert_eq!(
+            store.overlay(coord).and_then(ChunkOverlay::uniform),
+            Some(Overlay::NONE)
+        );
+        let first = store.lifetime(coord).expect("held");
+
+        // Evicted and generated again: the same coordinate, another Chunk.
+        store.remove(coord);
+        assert!(
+            store.lifetime(coord).is_none(),
+            "the lifetime outlived its Chunk"
+        );
+        assert!(
+            store.overlay(coord).is_none(),
+            "the overlay outlived its Chunk"
+        );
+        store.insert(coord, Chunk::air());
+        assert_ne!(store.lifetime(coord), Some(first));
+    }
+
+    #[test]
+    fn an_overlay_write_never_reaches_a_snapshot_already_taken() {
+        let mut store = ChunkStore::default();
+        let coord = ChunkCoord::new(0, 0, 0);
+        store.insert(coord, Chunk::air());
+        let snapshot = store.shared(coord).expect("loaded");
+        assert!(store.unchanged_since(coord, &snapshot));
+
+        let burning = Overlay {
+            fluid: None,
+            burning: Some(Burning { fuel: 7 }),
+        };
+        store.set_overlay(VoxelCoord::of([3, 4, 5]), burning);
+
+        assert_eq!(
+            snapshot.overlay.get(3, 4, 5),
+            Overlay::NONE,
+            "the snapshot saw the write"
+        );
+        assert_eq!(store.overlay(coord).unwrap().get(3, 4, 5), burning);
+        assert!(
+            !store.unchanged_since(coord, &snapshot),
+            "an overlay change went unnoticed"
+        );
+        let now = store.shared(coord).unwrap();
+        assert!(!Arc::ptr_eq(&snapshot.overlay, &now.overlay));
+        assert!(
+            Arc::ptr_eq(&snapshot.chunk, &now.chunk),
+            "the Voxels did not change"
+        );
+    }
+
+    /// A snapshot of an evicted Chunk is not a snapshot of the one generated
+    /// in its place, even though both are empty and at one coordinate.
+    #[test]
+    fn a_snapshot_of_an_old_lifetime_is_stale_in_the_new_one() {
+        let mut store = ChunkStore::default();
+        let coord = ChunkCoord::new(1, 2, 3);
+        store.insert(coord, Chunk::air());
+        let old = store.shared(coord).unwrap();
+        store.remove(coord);
+        store.insert(coord, Chunk::air());
+        assert!(!store.unchanged_since(coord, &old));
+        assert!(store.unchanged_since(coord, &store.shared(coord).unwrap()));
+        store.remove(coord);
+        assert!(
+            !store.unchanged_since(coord, &old),
+            "nothing held is nothing unchanged"
+        );
+    }
+
+    #[test]
+    fn the_store_reads_a_position_through_the_one_interpretation() {
+        let mut store = ChunkStore::default();
+        store.insert(ChunkCoord::new(0, 0, 0), Chunk::filled(Voxel::cube(WATER)));
+        let tables = Tables::builtin();
+        let read = store.occupants([5, 5, 5], &tables.fluids).expect("held");
+        assert_eq!(read.solid, Voxel::AIR);
+        assert_eq!(read.fluid, Some(Fluid::source(WATER)));
+        assert_eq!(store.occupants([99, 0, 0], &tables.fluids), None);
     }
 
     #[test]

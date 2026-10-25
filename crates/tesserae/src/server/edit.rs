@@ -23,9 +23,13 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use tesserae_core::collide::{VoxelVolume, raycast};
+use tesserae_core::collide::{VoxelVolume, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{MAX_SHAPED_PER_CHUNK, PlaceFault, SHAPE_FULL_CUBE, Tables, Voxel, relight};
+use tesserae_core::{
+    Burning, Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE,
+    Tables, Voxel, relight,
+};
+use tesserae_mods::{EditKind, Intent};
 
 use super::ContentTables;
 use super::player::{self, Player};
@@ -67,6 +71,12 @@ pub enum EditAction {
     Break,
     /// Put this Voxel in the empty space in front of the face the ray strikes.
     Place(Voxel),
+    /// Put a source of this fluid in front of the face the ray strikes. The ray
+    /// stops at sources as well as solids and goes through flowing fluid.
+    PlaceSource(MaterialId),
+    /// Take away the source the ray strikes, leaving any solid it shares the
+    /// Voxel with.
+    RemoveSource,
 }
 
 /// What the Client wants done: an action, and the ray it wants it done along, in
@@ -95,6 +105,24 @@ pub enum RejectReason {
     NoMaterial,
     /// The Chunk's shaped Voxels, in stairs, would pass [`MAX_SHAPED_PER_CHUNK`].
     TooManyShaped,
+    /// A fluid Material where a solid goes.
+    NotSolid,
+    /// A fluid whose Material has no fluid definition.
+    NotAFluid,
+    /// Fluid in a Voxel a full cube leaves no space in.
+    FluidExcluded,
+    BadSurface,
+    /// Burning with nothing solid to burn.
+    NoFuel,
+    /// A source removal that struck no source.
+    NoSource,
+    /// Ignition of a Material with no combustion declaration.
+    NotFlammable,
+    AlreadyBurning,
+    /// Ignition of fuel an extinguishing fluid touches.
+    Wet,
+    /// Extinguishing where nothing burns.
+    NotBurning,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,
 }
@@ -112,6 +140,16 @@ impl RejectReason {
             RejectReason::BadOrientation => "invalid orientation",
             RejectReason::NoMaterial => "nothing to place",
             RejectReason::TooManyShaped => "too many shaped blocks in this chunk",
+            RejectReason::NotSolid => "a fluid is not placed as a solid",
+            RejectReason::NotAFluid => "not a fluid",
+            RejectReason::FluidExcluded => "a full cube leaves no room for fluid",
+            RejectReason::BadSurface => "invalid fluid surface",
+            RejectReason::NoFuel => "nothing solid to burn",
+            RejectReason::NoSource => "no source there",
+            RejectReason::NotFlammable => "that does not burn",
+            RejectReason::AlreadyBurning => "it is already burning",
+            RejectReason::Wet => "it is too wet to burn",
+            RejectReason::NotBurning => "nothing is burning there",
             RejectReason::Busy => "the server is busy, try again",
         }
     }
@@ -124,6 +162,12 @@ impl From<PlaceFault> for RejectReason {
             PlaceFault::UnknownMaterial => RejectReason::UnknownMaterial,
             PlaceFault::UnknownShape => RejectReason::UnknownShape,
             PlaceFault::BadOrientation => RejectReason::BadOrientation,
+            PlaceFault::NotSolid => RejectReason::NotSolid,
+            PlaceFault::NotAFluid => RejectReason::NotAFluid,
+            PlaceFault::FluidExcluded => RejectReason::FluidExcluded,
+            PlaceFault::BadSurface => RejectReason::BadSurface,
+            PlaceFault::NoFuel => RejectReason::NoFuel,
+            PlaceFault::NotFuel => RejectReason::NotFlammable,
         }
     }
 }
@@ -147,6 +191,13 @@ struct Pending {
 #[derive(Resource, Default)]
 pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
 
+#[cfg(test)]
+impl PendingEdits {
+    pub(in crate::server) fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<PendingEdits>()
         .init_resource::<super::mods::EditHistory>()
@@ -164,7 +215,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(FixedPreUpdate, apply_pending);
 }
 
-fn receive(
+pub(in crate::server) fn receive(
     mut intents: MessageReader<EditIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
@@ -221,18 +272,38 @@ pub(in crate::server) fn apply_pending(
             break;
         };
         let outcome =
-            resolve(&store, &tables, &world, &p.intent, p.reach_m).and_then(|(at, voxel)| {
+            resolve(&store, &tables, &world, &p.intent, p.reach_m).and_then(|(at, change)| {
                 // The incremental relight and the bulk solve must not both write one
                 // Chunk, so an edit waits for its Chunk's light to settle.
                 if meshes.is_unlit(VoxelCoord::of(at).chunk) {
                     return Err(RejectReason::Busy);
                 }
                 let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
-                set_voxel(&mut store, &mut meshes, &tables, at, voxel)?;
+                let was = store
+                    .occupants(at, &tables.fluids)
+                    .ok_or(RejectReason::NotLoaded)?;
+                match change {
+                    Change::Solid(voxel) => set_voxel(&mut store, &mut meshes, &tables, at, voxel)?,
+                    Change::Fluid(occupants) => {
+                        set_occupants(&mut store, &mut meshes, &tables, at, occupants)?
+                    }
+                }
+                let after = store.voxel(at).expect("the edited Chunk is held");
+                let now = store
+                    .occupants(at, &tables.fluids)
+                    .expect("the edited Chunk is held");
+                let kind = match (change, intent_fluid(&was, &now)) {
+                    (Change::Fluid(_), Some(kind)) => kind,
+                    _ => EditKind::Solid {
+                        before: was.solid,
+                        after: now.solid,
+                    },
+                };
                 history.record(tesserae_mods::EditEvent {
                     at: at.map(|i| i as f32 * world.voxel_size),
+                    kind,
                     before,
-                    after: store.voxel(at).expect("the edited Chunk is held"),
+                    after,
                 });
                 Ok(())
             });
@@ -253,6 +324,26 @@ pub(in crate::server) fn apply_pending(
     pending.0 = waiting;
 }
 
+/// What a fluid-tool Edit meant, read from what it changed.
+fn intent_fluid(was: &Occupants, now: &Occupants) -> Option<EditKind> {
+    match (was.fluid, now.fluid) {
+        (_, Some(f)) if f.source && was.fluid != now.fluid => {
+            Some(EditKind::SourcePlaced(f.material))
+        }
+        (Some(f), None) if f.source => Some(EditKind::SourceRemoved(f.material)),
+        _ => None,
+    }
+}
+
+/// What an intent does where it lands.
+#[derive(Clone, Copy)]
+enum Change {
+    /// A whole-Voxel placement, through the solid-layer rule.
+    Solid(Voxel),
+    /// Exactly these occupants: a source placed or taken away.
+    Fluid(Occupants),
+}
+
 /// Where an intent lands, and what goes there.
 fn resolve(
     store: &ChunkStore,
@@ -260,80 +351,236 @@ fn resolve(
     world: &WorldSettings,
     intent: &EditIntent,
     reach_m: f32,
-) -> Result<([i32; 3], Voxel), RejectReason> {
+) -> Result<([i32; 3], Change), RejectReason> {
     if !intent.origin.is_finite() || !intent.direction.is_finite() {
         return Err(RejectReason::OutOfReach);
     }
-    let hit = raycast(
+    let fluid_tool = matches!(
+        intent.action,
+        EditAction::PlaceSource(_) | EditAction::RemoveSource
+    );
+    if let EditAction::PlaceSource(material) = intent.action
+        && !tables.fluids.contains(material)
+    {
+        return Err(RejectReason::NotAFluid);
+    }
+    // A packed fluid Voxel is a source; flowing fluid is packed air.
+    let stops = |v: Voxel| {
+        tables.materials.solid(v) || (fluid_tool && tables.fluids.contains(v.material()))
+    };
+    let hit = raycast_until(
         store,
         tables,
         world.voxel_size,
         intent.origin.to_array(),
         intent.direction.to_array(),
         reach_m,
+        stops,
     )
     .ok_or(RejectReason::OutOfReach)?;
+    let step = FACE_STEPS[hit.face];
+    let in_front = [
+        hit.at[0] + step[0],
+        hit.at[1] + step[1],
+        hit.at[2] + step[2],
+    ];
 
     match intent.action {
-        EditAction::Break => Ok((hit.at, Voxel::AIR)),
+        EditAction::Break => Ok((hit.at, Change::Solid(Voxel::AIR))),
         EditAction::Place(voxel) => {
             tables.vet_placed(voxel)?;
-            let step = FACE_STEPS[hit.face];
-            let target = [
-                hit.at[0] + step[0],
-                hit.at[1] + step[1],
-                hit.at[2] + step[2],
-            ];
-            match store.voxel(target) {
+            match store.voxel(in_front) {
                 None => Err(RejectReason::NotLoaded),
                 // Water is not solid, so a Voxel placed into it replaces it.
                 Some(there) if tables.materials.solid(there) => Err(RejectReason::Occupied),
-                Some(_) => Ok((target, voxel)),
+                Some(_) => Ok((in_front, Change::Solid(voxel))),
             }
+        }
+        EditAction::RemoveSource => {
+            let here = store
+                .occupants(hit.at, &tables.fluids)
+                .ok_or(RejectReason::NotLoaded)?;
+            Ok((hit.at, Change::Fluid(without_source(here)?)))
+        }
+        EditAction::PlaceSource(material) => {
+            // A Shape with room for fluid takes the source itself, keeping its
+            // solid; anything else gets it in front of the face struck.
+            let struck = store
+                .occupants(hit.at, &tables.fluids)
+                .ok_or(RejectReason::NotLoaded)?;
+            let into = if !struck.solid.is_air()
+                && tables.shapes.void_slots(struck.solid) > 0
+                && tables.holds(struck.solid, material)
+            {
+                hit.at
+            } else {
+                in_front
+            };
+            let there = store
+                .occupants(into, &tables.fluids)
+                .ok_or(RejectReason::NotLoaded)?;
+            if into == in_front && !there.solid.is_air() {
+                return Err(RejectReason::Occupied);
+            }
+            Ok((into, Change::Fluid(with_source(there, material, tables)?)))
         }
     }
 }
 
-/// Replaces one Voxel, re-floods the light around it, and marks every Chunk
-/// whose mesh that made stale.
-///
-/// The one Edit, shared by the intents above and by the `dev` builders, so the
-/// builders exercise the path a player's click does.
-///
-/// A mesh is stale in three kinds of Chunk: the edited one; any the relight
-/// wrote to; and the neighbour across a boundary plane the Voxel sits on, whose
-/// faces next to it change whether or not any light does. Removing a stone Voxel
-/// in the dark moves no light and still leaves the next Chunk a face to grow.
-pub(in crate::server) fn set_voxel(
+/// What a source of `material` placed here leaves, or why there is no room:
+/// the rule the fluid tool and a Mod's source Commands share. Flow of the same
+/// fluid becomes the source; another fluid, or any source, stays.
+pub(in crate::server) fn with_source(
+    here: Occupants,
+    material: MaterialId,
+    tables: &Tables,
+) -> Result<Occupants, RejectReason> {
+    if !tables.fluids.contains(material) {
+        return Err(RejectReason::NotAFluid);
+    }
+    let room = here.solid.is_air()
+        || (tables.shapes.void_slots(here.solid) > 0 && tables.holds(here.solid, material));
+    if !room {
+        return Err(RejectReason::FluidExcluded);
+    }
+    if here
+        .fluid
+        .is_some_and(|f| f.source || f.material != material)
+    {
+        return Err(RejectReason::Occupied);
+    }
+    Ok(Occupants {
+        fluid: Some(Fluid::source(material)),
+        ..here
+    })
+}
+
+/// A source taken away, keeping the solid it shares the Voxel with.
+pub(in crate::server) fn without_source(here: Occupants) -> Result<Occupants, RejectReason> {
+    if !here.fluid.is_some_and(|f| f.source) {
+        return Err(RejectReason::NoSource);
+    }
+    Ok(Occupants {
+        fluid: None,
+        ..here
+    })
+}
+
+/// Declared fuel set alight with its whole fuel, unless it is `wet`: an
+/// extinguishing fluid touches it (`tesserae_core::fire::is_wet`). From there
+/// it burns as fire caught from heat does.
+fn ignite(here: Occupants, wet: bool, tables: &Tables) -> Result<Occupants, RejectReason> {
+    if here.solid.is_air() {
+        return Err(RejectReason::NoFuel);
+    }
+    let fuel = tables
+        .combustion
+        .get(here.solid.material())
+        .ok_or(RejectReason::NotFlammable)?;
+    if here.burning.is_some() {
+        return Err(RejectReason::AlreadyBurning);
+    }
+    if wet {
+        return Err(RejectReason::Wet);
+    }
+    Ok(Occupants {
+        burning: Some(Burning {
+            fuel: fuel.fuel_steps(),
+        }),
+        ..here
+    })
+}
+
+fn extinguish(here: Occupants) -> Result<Occupants, RejectReason> {
+    if here.burning.is_none() {
+        return Err(RejectReason::NotBurning);
+    }
+    Ok(Occupants {
+        burning: None,
+        ..here
+    })
+}
+
+/// One Voxel of a Mod's Command, through the same rules and the same World
+/// change as a player's Edit.
+pub(in crate::server) fn apply_intent(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
     tables: &Tables,
     at: [i32; 3],
-    voxel: Voxel,
+    intent: Intent,
+) -> Result<(), RejectReason> {
+    if let Intent::Voxel(voxel) = intent {
+        return set_voxel(store, meshes, tables, at, voxel);
+    }
+    let here = store
+        .occupants(at, &tables.fluids)
+        .ok_or(RejectReason::NotLoaded)?;
+    let next = match intent {
+        Intent::Voxel(_) => unreachable!("placed above"),
+        Intent::Source(material) => with_source(here, material, tables)?,
+        Intent::RemoveSource => without_source(here)?,
+        Intent::Ignite => ignite(here, tesserae_core::fire::is_wet(store, tables, at), tables)?,
+        Intent::Extinguish => extinguish(here)?,
+    };
+    set_occupants(store, meshes, tables, at, next)
+}
+
+/// Replaces what is at one position, re-floods the light around it, and marks
+/// every Chunk whose mesh that made stale.
+///
+/// The one World change, shared by the intents above, the Mod drain and the
+/// `dev` builders: [`set_voxel`] is this with the solid-layer rule applied
+/// first. A change to the fluid or the fire alone is a change all the same,
+/// though the packed Voxel stays: the mesh, the cover and any Snapshot taken
+/// before it read what is now gone.
+///
+/// Every change is journalled in the store, which is what wakes the fluid
+/// simulation around it on the next step.
+///
+/// A mesh is stale in four kinds of Chunk: the edited one; any the relight
+/// wrote to; any across a plane of light the relight wrote to, whose faces
+/// against it that light shades; and the neighbour across a boundary plane the
+/// Voxel sits on, whose faces next to it change whether or not any light does.
+/// Removing a stone Voxel in the dark moves no light and still leaves the next
+/// Chunk a face to grow.
+pub(in crate::server) fn set_occupants(
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    at: [i32; 3],
+    occupants: Occupants,
 ) -> Result<(), RejectReason> {
     let place = VoxelCoord::of(at);
     let chunk = store.get(place.chunk).ok_or(RejectReason::NotLoaded)?;
 
     // Air is air whatever shape or orientation byte it carries.
-    let voxel = if voxel.is_air() { Voxel::AIR } else { voxel };
-    if !voxel.is_air() {
-        tables.vet_placed(voxel)?;
-    }
+    let solid = if occupants.solid.is_air() {
+        Voxel::AIR
+    } else {
+        occupants.solid
+    };
+    let occupants = Occupants { solid, ..occupants };
+    tables.vet_occupants(occupants)?;
     // A cube looks the same however it is turned, and a connected Shape ignores
     // its orientation, so the turn is dropped. Left in, two that look identical
     // would be two palette entries and unequal.
-    let voxel = if voxel.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(voxel) {
-        Voxel::new(voxel.material(), voxel.shape(), 0)
+    let solid = if solid.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(solid) {
+        Voxel::new(solid.material(), solid.shape(), 0)
     } else {
-        voxel
+        solid
     };
+    let (voxel, overlay) = Occupants { solid, ..occupants }.encode(&tables.fluids);
+
     // Net of what it replaces: swapping one shaped Voxel for another of the same
     // cost at the cap is not adding one. Counted in stairs, a connected Shape
     // being charged for its rails.
+    let before = chunk.get(place.x, place.y, place.z);
+    let was = store
+        .occupants(at, &tables.fluids)
+        .expect("the Chunk is held");
     let added = tables.shapes.cap_units(voxel);
-    let removed = tables
-        .shapes
-        .cap_units(chunk.get(place.x, place.y, place.z));
+    let removed = tables.shapes.cap_units(before);
     if added > removed
         && chunk.shaped_units(|v| tables.shapes.cap_units(v)) + (added - removed) as usize
             > MAX_SHAPED_PER_CHUNK
@@ -341,17 +588,39 @@ pub(in crate::server) fn set_voxel(
         return Err(RejectReason::TooManyShaped);
     }
 
-    let was = store.light_at(at);
-    store.set_voxel(place, voxel);
-    let mut lattice = LightLattice::new(store);
-    relight(&mut lattice, tables, at, was);
-    let lit = std::mem::take(&mut lattice.touched);
+    let seen = (store.optical(at), store.wet(at), store.burning(at));
+    store.set_overlay(place, overlay);
+    if voxel != before {
+        store.set_voxel(place, voxel);
+    }
+    // Light reads fluid as it reads a cube of its Material, or combined with
+    // the solid it stands in, and a fire by its emission, so water flowing in
+    // or receding and a fire catching or going out relight though the packed
+    // Voxel stays; a surface or reach change alone moves nothing.
+    if (store.optical(at), store.wet(at), store.burning(at)) != seen {
+        let was = store.light_at(at);
+        let mut lattice = LightLattice::new(store);
+        relight(&mut lattice, tables, at, was);
+        let lit = std::mem::take(&mut lattice.touched);
+        let across = std::mem::take(&mut lattice.across);
+        for coord in lit {
+            meshes.edited(coord);
+        }
+        for coord in across {
+            if store.contains(coord) {
+                meshes.edited(coord);
+            }
+        }
+    }
+    let now = Occupants { solid, ..occupants };
+    store.note_changed(
+        at,
+        voxel != before,
+        tesserae_core::fire::alters_exposure(tables, &was, &now),
+    );
 
     meshes.voxels_changed(place.chunk);
     meshes.edited(place.chunk);
-    for coord in lit {
-        meshes.edited(coord);
-    }
     let local = [place.x, place.y, place.z];
     let last = tesserae_core::CHUNK_SIZE - 1;
     for (axis, step) in [
@@ -377,6 +646,22 @@ pub(in crate::server) fn set_voxel(
     Ok(())
 }
 
+/// The whole-Voxel Edit a player's click, a Mod's Command and a `dev` builder
+/// make: `voxel` applied to the solid layer by [`Occupants::place_solid`], then
+/// [`set_occupants`].
+pub(in crate::server) fn set_voxel(
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    at: [i32; 3],
+    voxel: Voxel,
+) -> Result<(), RejectReason> {
+    let now = store
+        .occupants(at, &tables.fluids)
+        .ok_or(RejectReason::NotLoaded)?;
+    set_occupants(store, meshes, tables, at, now.place_solid(voxel, tables))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,7 +672,8 @@ mod tests {
     use tesserae_core::shape::examples;
     use tesserae_core::worldgen::{LANTERN, STONE};
     use tesserae_core::{
-        CHUNK_SIZE, Chunk, ChunkLight, LitChunk, Orientation, SHAPE_POST, SHAPE_STAIR, mesh_chunk,
+        Burning, CHUNK_SIZE, Chunk, ChunkLight, Fluid, LitChunk, Occupants, Orientation, Overlay,
+        SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
     use super::super::player::{Player, PoseReport};
@@ -1128,6 +1414,439 @@ mod tests {
         assert_eq!(rejections(&mut app), vec![RejectReason::Busy; 10]);
     }
 
+    /// The built-in tables with stone declared fuel, so a stone Voxel may hold
+    /// a fire: only declared fuel does.
+    fn stone_burns() -> Tables {
+        let mut tables = Tables::builtin();
+        tables
+            .register_combustion(
+                STONE,
+                tesserae_core::CombustionDef {
+                    threshold: 6,
+                    ignition_delay_s: 2.0,
+                    emission: 0,
+                    heat: None,
+                    burn: tesserae_core::Burn::Permanent,
+                },
+            )
+            .unwrap();
+        tables
+    }
+
+    fn put_occupants(
+        app: &mut App,
+        at: [i32; 3],
+        occupants: Occupants,
+    ) -> (MeshState, Result<(), RejectReason>) {
+        let tables = stone_burns();
+        let mut store = app.world_mut().resource_mut::<ChunkStore>();
+        let mut meshes = MeshState::default();
+        let result = set_occupants(&mut store, &mut meshes, &tables, at, occupants);
+        (meshes, result)
+    }
+
+    fn occupants_at(app: &App, at: [i32; 3]) -> Occupants {
+        app.world()
+            .resource::<ChunkStore>()
+            .occupants(at, &Tables::builtin().fluids)
+            .expect("held")
+    }
+
+    /// Setting a stone cube on fire, stone declared fuel here, changes no
+    /// Voxel. It is still an Edit: the
+    /// mesh, the face next door and the level-1 cover all read it, and a
+    /// Snapshot taken before it is no longer current.
+    #[test]
+    fn an_overlay_only_change_invalidates_what_a_snapshot_read() {
+        let solid = Chunk::filled(stone());
+        let mut app = app_with(&[
+            (ChunkCoord::new(0, 0, 0), solid.clone()),
+            (ChunkCoord::new(1, 0, 0), solid.clone()),
+            (ChunkCoord::new(0, 1, 0), solid.clone()),
+        ]);
+        let last = CHUNK_SIZE as i32 - 1;
+        let at = [last, 4, 4];
+        let snapshot = app
+            .world()
+            .resource::<ChunkStore>()
+            .shared(origin())
+            .unwrap();
+
+        let burning = Occupants {
+            burning: Some(Burning { fuel: 9 }),
+            ..occupants_at(&app, at)
+        };
+        let (meshes, result) = put_occupants(&mut app, at, burning);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(voxel_at(&app, at), stone(), "the Voxel changed");
+        assert_eq!(occupants_at(&app, at), burning);
+        assert!(meshes.is_dirty(origin()));
+        assert!(meshes.is_edited(origin()), "the cover does not know");
+        assert!(
+            meshes.is_dirty(ChunkCoord::new(1, 0, 0)),
+            "the face next door does not know"
+        );
+        assert!(!meshes.is_dirty(ChunkCoord::new(0, 1, 0)));
+        let store = app.world().resource::<ChunkStore>();
+        assert!(!store.unchanged_since(origin(), &snapshot));
+        assert_eq!(snapshot.overlay.get(last as usize, 4, 4), Overlay::NONE);
+    }
+
+    /// A refused reading changes neither layer.
+    #[test]
+    fn what_the_tables_refuse_changes_nothing() {
+        let mut app = app_with(&[(origin(), pool())]);
+        let water = Fluid::source(tesserae_core::material::WATER);
+        let was = occupants_at(&app, [5, 8, 5]);
+        let cases = [
+            (
+                Occupants {
+                    solid: stone(),
+                    fluid: Some(water),
+                    burning: None,
+                },
+                RejectReason::FluidExcluded,
+            ),
+            (
+                Occupants {
+                    solid: Voxel::AIR,
+                    fluid: Some(water),
+                    burning: Some(Burning { fuel: 1 }),
+                },
+                RejectReason::NoFuel,
+            ),
+            (
+                Occupants {
+                    solid: Voxel::AIR,
+                    fluid: Some(Fluid::source(STONE)),
+                    burning: None,
+                },
+                RejectReason::NotAFluid,
+            ),
+            (
+                Occupants {
+                    solid: Voxel::cube(tesserae_core::material::WATER),
+                    fluid: None,
+                    burning: None,
+                },
+                RejectReason::NotSolid,
+            ),
+        ];
+        for (occupants, expected) in cases {
+            let (meshes, result) = put_occupants(&mut app, [5, 8, 5], occupants);
+            assert_eq!(result, Err(expected), "{occupants:?}");
+            assert!(!meshes.is_dirty(origin()), "{occupants:?} dirtied a mesh");
+        }
+        assert_eq!(occupants_at(&app, [5, 8, 5]), was);
+        assert_eq!(
+            voxel_at(&app, [5, 8, 5]),
+            Voxel::cube(tesserae_core::material::WATER)
+        );
+    }
+
+    /// The old whole-Voxel Edit reads through the one interpretation: water
+    /// placed the old way is a source, stone displaces it, and breaking a solid
+    /// that holds water leaves the water, stored the canonical way.
+    #[test]
+    fn set_voxel_goes_through_the_layer_rules() {
+        let mut app = app_with(&[(origin(), ground())]);
+        let water = tesserae_core::material::WATER;
+        let tables = Tables::builtin();
+        let put = |app: &mut App, at, voxel| {
+            let mut store = app.world_mut().resource_mut::<ChunkStore>();
+            set_voxel(&mut store, &mut MeshState::default(), &tables, at, voxel)
+        };
+
+        assert_eq!(put(&mut app, [5, 8, 5], Voxel::cube(water)), Ok(()));
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]).fluid,
+            Some(Fluid::source(water))
+        );
+        assert_eq!(put(&mut app, [5, 8, 5], stone()), Ok(()));
+        assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
+
+        let wet_stair = Occupants {
+            solid: stair(),
+            fluid: Some(Fluid::source(water)),
+            burning: Some(Burning { fuel: 2 }),
+        };
+        assert_eq!(put_occupants(&mut app, [6, 8, 5], wet_stair).1, Ok(()));
+        assert_eq!(put(&mut app, [6, 8, 5], Voxel::AIR), Ok(()));
+        assert_eq!(
+            occupants_at(&app, [6, 8, 5]),
+            Occupants {
+                solid: Voxel::AIR,
+                fluid: Some(Fluid::source(water)),
+                burning: None,
+            }
+        );
+        assert_eq!(
+            voxel_at(&app, [6, 8, 5]),
+            Voxel::cube(water),
+            "not canonical"
+        );
+        let store = app.world().resource::<ChunkStore>();
+        assert_eq!(store.overlay(origin()).unwrap().get(6, 8, 5), Overlay::NONE);
+    }
+
+    fn flowing() -> Fluid {
+        Fluid {
+            source: false,
+            surface: 9,
+            reach: 3,
+            ..Fluid::source(tesserae_core::material::WATER)
+        }
+    }
+
+    /// The fluid tool puts a source where a Place would put a Voxel, and takes
+    /// one away where it strikes it: off the bed and out of a stair that shares
+    /// its Voxel with one, leaving the bed and the stair.
+    #[test]
+    fn the_fluid_tool_places_a_source_in_front_and_removes_one_keeping_its_solid() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        assert_eq!(voxel_at(&app, [5, 8, 5]), Voxel::cube(water));
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]).fluid,
+            Some(Fluid::source(water))
+        );
+
+        send(&mut app, down(EditAction::RemoveSource));
+        tick(&mut app);
+        assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
+        assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "the bed went too");
+
+        let wet_stair = Occupants {
+            solid: stair(),
+            fluid: Some(Fluid::source(water)),
+            burning: None,
+        };
+        assert_eq!(put_occupants(&mut app, [5, 8, 5], wet_stair).1, Ok(()));
+        send(&mut app, down(EditAction::RemoveSource));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]),
+            Occupants {
+                fluid: None,
+                ..wet_stair
+            }
+        );
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// The fluid tool waterlogs a Shape it strikes and takes the source back
+    /// out of it, the stair staying put each time; a stair that already holds
+    /// a source is occupied. Collision and picking read the packed Voxel, which
+    /// is the stair throughout.
+    #[test]
+    fn the_fluid_tool_waterlogs_a_struck_shape_and_drains_it() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        put_occupants(
+            &mut app,
+            [5, 8, 5],
+            Occupants {
+                solid: stair(),
+                fluid: None,
+                burning: None,
+            },
+        )
+        .1
+        .unwrap();
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        let wet = occupants_at(&app, [5, 8, 5]);
+        assert_eq!(
+            (wet.solid, wet.fluid),
+            (stair(), Some(Fluid::source(water)))
+        );
+        assert_eq!(voxel_at(&app, [5, 8, 5]), stair(), "what collision reads");
+        assert_eq!(occupants_at(&app, [5, 9, 5]).fluid, None);
+
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), vec![RejectReason::Occupied]);
+        assert_eq!(occupants_at(&app, [5, 8, 5]), wet);
+
+        send(&mut app, down(EditAction::RemoveSource));
+        tick(&mut app);
+        assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
+        assert_eq!(voxel_at(&app, [5, 8, 5]), stair());
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Placing a stair into a source keeps the source in its notch, breaking
+    /// the stair leaves the source standing, and a cube displaces it. A stair
+    /// refused at the shaped cap leaves the water exactly as it was.
+    #[test]
+    fn solid_edits_keep_or_displace_fluid_by_the_space_they_leave() {
+        let water = tesserae_core::material::WATER;
+        let mut store = ChunkStore::default();
+        store.insert(origin(), ground());
+        let mut meshes = MeshState::default();
+        let tables = Tables::builtin();
+        let at = [5, 8, 5];
+        set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(water)).unwrap();
+        set_voxel(&mut store, &mut meshes, &tables, at, stair()).unwrap();
+        let read = |store: &ChunkStore| store.occupants(at, &tables.fluids).unwrap();
+        assert_eq!(read(&store).fluid, Some(Fluid::source(water)));
+        assert_eq!(read(&store).solid, stair());
+        set_voxel(&mut store, &mut meshes, &tables, at, Voxel::AIR).unwrap();
+        assert_eq!(store.voxel(at), Some(Voxel::cube(water)), "a source again");
+        set_voxel(&mut store, &mut meshes, &tables, at, stair()).unwrap();
+        set_voxel(&mut store, &mut meshes, &tables, at, stone()).unwrap();
+        assert_eq!(read(&store).fluid, None);
+
+        let mut full = ground();
+        let mut placed = 0;
+        'fill: for y in 9..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    if placed == MAX_SHAPED_PER_CHUNK {
+                        break 'fill;
+                    }
+                    full.set(x, y, z, stair());
+                    placed += 1;
+                }
+            }
+        }
+        let mut store = ChunkStore::default();
+        store.insert(origin(), full);
+        set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(water)).unwrap();
+        let before = read(&store);
+        assert_eq!(
+            set_voxel(&mut store, &mut meshes, &tables, at, stair()),
+            Err(RejectReason::TooManyShaped)
+        );
+        assert_eq!(read(&store), before);
+    }
+
+    /// A source is placed on flowing water of its own kind, and the ray to do
+    /// it goes through flowing water: flow is packed air.
+    #[test]
+    fn a_source_replaces_flow_and_the_tool_aims_through_flow() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        let flow = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(flowing()),
+            burning: None,
+        };
+        put_occupants(&mut app, [5, 8, 5], flow).1.unwrap();
+        put_occupants(&mut app, [5, 9, 5], flow).1.unwrap();
+        send(&mut app, down(EditAction::PlaceSource(water)));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]).fluid,
+            Some(Fluid::source(water))
+        );
+        assert_eq!(occupants_at(&app, [5, 9, 5]).fluid, Some(flowing()));
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Refused fluid intents change neither layer and say why, and they pass the
+    /// origin and reach checks every intent does.
+    #[test]
+    fn the_fluid_tool_is_refused_like_any_edit_and_changes_nothing() {
+        let water = tesserae_core::material::WATER;
+        let mut app = app_with(&[(origin(), ground())]);
+        let flow = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(flowing()),
+            burning: None,
+        };
+        put_occupants(&mut app, [6, 8, 5], flow).1.unwrap();
+        let before: Vec<Occupants> = (0..16).map(|y| occupants_at(&app, [5, y, 5])).collect();
+        let cases = [
+            (down(EditAction::RemoveSource), RejectReason::NoSource),
+            (
+                down(EditAction::PlaceSource(STONE)),
+                RejectReason::NotAFluid,
+            ),
+            (
+                EditIntent {
+                    direction: Vec3::Y,
+                    ..down(EditAction::PlaceSource(water))
+                },
+                RejectReason::OutOfReach,
+            ),
+            (
+                EditIntent {
+                    origin: Vec3::new(5.5, 30.0, 5.5),
+                    ..down(EditAction::RemoveSource)
+                },
+                RejectReason::OutOfReach,
+            ),
+        ];
+        for (intent, expected) in cases {
+            send(&mut app, intent);
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), vec![expected], "{intent:?}");
+        }
+        // Flowing water is not a source to remove: the ray finds the bed.
+        send(
+            &mut app,
+            EditIntent {
+                origin: Vec3::new(6.5, 12.0, 5.5),
+                ..down(EditAction::RemoveSource)
+            },
+        );
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), vec![RejectReason::NoSource]);
+        assert_eq!(occupants_at(&app, [6, 8, 5]), flow);
+
+        send_from_afar(
+            &mut app,
+            EditIntent {
+                origin: DOWN_EYE + Vec3::X * 40.0,
+                ..down(EditAction::PlaceSource(water))
+            },
+        );
+        assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+        let after: Vec<Occupants> = (0..16).map(|y| occupants_at(&app, [5, y, 5])).collect();
+        assert_eq!(before, after);
+    }
+
+    /// The ordinary Edit's ray goes through flowing water as it goes through a
+    /// source: a Break takes the bed and a Place fills the wet Voxel.
+    #[test]
+    fn the_solid_ray_aims_through_flowing_water() {
+        let mut app = app_with(&[(origin(), ground())]);
+        let flow = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(flowing()),
+            burning: None,
+        };
+        put_occupants(&mut app, [5, 8, 5], flow).1.unwrap();
+        send(&mut app, down(EditAction::Break));
+        tick(&mut app);
+        assert!(voxel_at(&app, [5, 7, 5]).is_air(), "the bed under the flow");
+        assert_eq!(occupants_at(&app, [5, 8, 5]), flow);
+
+        send(&mut app, down(EditAction::Place(stone())));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 7, 5]).solid,
+            stone(),
+            "the hole is filled"
+        );
+        send(&mut app, down(EditAction::Place(stone())));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]),
+            Occupants {
+                solid: stone(),
+                fluid: None,
+                burning: None,
+            },
+            "the stone displaced the flow"
+        );
+        assert!(rejections(&mut app).is_empty());
+    }
+
     #[test]
     fn each_tick_applies_a_bounded_number() {
         let mut app = app_with(&[(origin(), ground())]);
@@ -1142,5 +1861,147 @@ mod tests {
         }
         tick(&mut app);
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), 5);
+    }
+
+    /// The per-Voxel rules a source or fire Command meets, shared with the
+    /// fluid tool: room for the fluid, no other fluid or source, declared and
+    /// dry fuel to light, and fire to put out.
+    #[test]
+    fn source_and_fire_rules_say_why_they_refuse() {
+        use tesserae_core::{Burn, CombustionDef, FluidDef, MaterialDef, Occlusion, RenderClass};
+        let mut tables = Tables::builtin();
+        let lava = tables
+            .materials
+            .register(MaterialDef {
+                emission: 15,
+                dimming: 15,
+                occlusion: Occlusion::Opaque,
+                render: RenderClass::Opaque,
+                solid: false,
+            })
+            .unwrap();
+        tables
+            .register_fluid(
+                lava,
+                FluidDef {
+                    waterlogs: false,
+                    extinguishes: false,
+                    ..FluidDef::WATER
+                },
+            )
+            .unwrap();
+        let oil = tables
+            .materials
+            .register(MaterialDef {
+                emission: 0,
+                dimming: 4,
+                occlusion: Occlusion::SameMaterial,
+                render: RenderClass::Blend,
+                solid: false,
+            })
+            .unwrap();
+        tables
+            .register_fluid(
+                oil,
+                FluidDef {
+                    extinguishes: false,
+                    ..FluidDef::WATER
+                },
+            )
+            .unwrap();
+        tables
+            .register_combustion(
+                STONE,
+                CombustionDef {
+                    threshold: 6,
+                    ignition_delay_s: 2.0,
+                    emission: 12,
+                    heat: None,
+                    burn: Burn::For {
+                        seconds: 1.0,
+                        residue: 0,
+                    },
+                },
+            )
+            .unwrap();
+        let water = tesserae_core::material::WATER;
+        let at = |solid, fluid| Occupants {
+            solid,
+            fluid,
+            burning: None,
+        };
+        let flowing = Fluid {
+            source: false,
+            surface: 8,
+            reach: 3,
+            ..Fluid::source(water)
+        };
+        let flow = Some(flowing);
+        let air = Voxel::AIR;
+        assert_eq!(
+            with_source(at(air, flow), water, &tables).unwrap().fluid,
+            Some(Fluid::source(water)),
+            "flow of the same fluid becomes the source"
+        );
+        for (here, material, reason) in [
+            (at(air, flow), lava, RejectReason::Occupied),
+            (
+                at(air, Some(Fluid::source(lava))),
+                lava,
+                RejectReason::Occupied,
+            ),
+            (at(stone(), None), water, RejectReason::FluidExcluded),
+            (at(stair(), None), lava, RejectReason::FluidExcluded),
+            (at(air, None), LANTERN, RejectReason::NotAFluid),
+        ] {
+            assert_eq!(
+                with_source(here, material, &tables),
+                Err(reason),
+                "{here:?}"
+            );
+        }
+        assert!(with_source(at(stair(), None), water, &tables).is_ok());
+        assert_eq!(without_source(at(air, flow)), Err(RejectReason::NoSource));
+
+        // Alone in air, so only its own voids can wet it.
+        struct Alone((Voxel, Overlay));
+        impl tesserae_core::flow::CellView for Alone {
+            fn stored(&self, at: [i32; 3]) -> Option<(Voxel, Overlay)> {
+                Some(if at == [0; 3] {
+                    self.0
+                } else {
+                    (Voxel::AIR, Overlay::NONE)
+                })
+            }
+        }
+        let ignite_alone = |here: Occupants| {
+            let alone = Alone(here.encode(&tables.fluids));
+            ignite(
+                here,
+                tesserae_core::fire::is_wet(&alone, &tables, [0; 3]),
+                &tables,
+            )
+        };
+        let lit = ignite_alone(at(stair(), None)).unwrap();
+        assert_eq!(lit.burning, Some(Burning { fuel: 64 }));
+        assert_eq!(lit.solid, stair());
+        for (here, reason) in [
+            (at(air, None), RejectReason::NoFuel),
+            (at(Voxel::cube(LANTERN), None), RejectReason::NotFlammable),
+            (lit, RejectReason::AlreadyBurning),
+            (at(stair(), flow), RejectReason::Wet),
+        ] {
+            assert_eq!(ignite_alone(here), Err(reason), "{here:?}");
+        }
+        let oily = Some(Fluid {
+            material: oil,
+            ..flowing
+        });
+        assert!(
+            ignite_alone(at(stair(), oily)).is_ok(),
+            "a fluid that does not extinguish does not protect"
+        );
+        assert_eq!(extinguish(lit).unwrap().burning, None);
+        assert_eq!(extinguish(at(stair(), None)), Err(RejectReason::NotBurning));
     }
 }

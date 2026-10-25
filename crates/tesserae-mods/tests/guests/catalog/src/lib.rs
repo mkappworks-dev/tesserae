@@ -1,4 +1,4 @@
-wit_bindgen::generate!({ path: "../../../wit", world: "mod" });
+wit_bindgen::generate!({ path: "../../../wit/0.1", world: "mod" });
 
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,

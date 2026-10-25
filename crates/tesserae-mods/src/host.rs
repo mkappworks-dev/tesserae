@@ -8,8 +8,8 @@ use wasmtime::component::{Linker, ResourceTable};
 use wasmtime::{Config, Engine, ResourceLimiter, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
-use crate::bindings::Mod;
 use crate::bindings::tesserae::mods::{commands, content, host, types};
+use crate::bindings::{Mod, v01};
 use crate::limits::ModLimits;
 use crate::log::{Capture, LogBuffer, LogHandle, LogLevel};
 use crate::random::SeededRng;
@@ -152,6 +152,20 @@ impl host::Host for HostState {
     }
 }
 
+impl v01::tesserae::mods::types::Host for HostState {}
+impl v01::tesserae::mods::content::Host for HostState {}
+impl v01::tesserae::mods::commands::Host for HostState {}
+
+impl v01::tesserae::mods::host::Host for HostState {
+    async fn log(&mut self, level: v01::tesserae::mods::types::LogLevel, message: String) {
+        self.log.push(level.into(), &message);
+    }
+
+    async fn default_world_params(&mut self) -> v01::tesserae::mods::content::WorldParams {
+        WorldgenParams::default().into()
+    }
+}
+
 pub(crate) fn engine() -> wasmtime::Result<Engine> {
     let mut config = Config::new();
     // Threads stay off by omitting wasmtime's `threads` feature; `wasm_threads` does not exist without it.
@@ -166,6 +180,8 @@ pub(crate) fn engine() -> wasmtime::Result<Engine> {
 pub(crate) fn linker(engine: &Engine) -> wasmtime::Result<Linker<HostState>> {
     let mut linker = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
+    // Each line's imports carry its own version, so both coexist in one Linker.
+    v01::Mod::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |state| state)?;
     Mod::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |state| state)?;
     Ok(linker)
 }

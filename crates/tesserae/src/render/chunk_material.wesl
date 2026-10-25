@@ -19,10 +19,12 @@ import bevy_pbr::render::{
 };
 import super::leaf_hole::leaf_hole;
 
-// Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN is injected
-// by ChunkMaterialExtension::specialize.
+// Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
+// CHUNK_PALETTE_SLOTS and CHUNK_FLAME are injected by
+// ChunkMaterialExtension::specialize. The slot after the Materials' is the
+// flames'.
 @group(constants::MATERIAL_BIND_GROUP) @binding(100)
-var<uniform> palette: array<vec4<f32>, constants::CHUNK_PALETTE_LEN>;
+var<uniform> palette: array<vec4<f32>, constants::CHUNK_PALETTE_SLOTS>;
 
 // Mirrors LodParams in chunk_material.rs.
 struct LodParams {
@@ -196,7 +198,12 @@ fn fragment(
 
     // Multiplied rather than assigned so the base material's base_color still
     // works as a whole-chunk tint.
-    pbr_input.material.base_color *= palette[min(in.material, constants::CHUNK_PALETTE_LEN - 1u)];
+    let slot = select(
+        min(in.material, constants::CHUNK_PALETTE_LEN - 1u),
+        constants::CHUNK_PALETTE_LEN,
+        in.material == constants::CHUNK_FLAME,
+    );
+    pbr_input.material.base_color *= palette[slot];
 
     if lod.tint != 0u && in.level != 0u {
         pbr_input.material.base_color = vec4<f32>(

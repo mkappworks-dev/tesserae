@@ -386,6 +386,11 @@ impl Worldgen {
         self.params
     }
 
+    /// The edge of the Voxels this generator makes, in metres.
+    pub fn voxel_size(&self) -> f32 {
+        self.voxel_size
+    }
+
     /// The water's surface in metres, clamped as generation clamps it.
     pub fn water_level_m(&self) -> Option<f32> {
         self.water_level_m

@@ -9,7 +9,7 @@ use tesserae_core::CHUNK_SIZE;
 
 /// A Chunk's position in the Chunk lattice. Dimensionless: multiply by
 /// [`WorldSettings::cell_size`] to get metres.
-#[derive(Component, Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct ChunkCoord {
     pub x: i32,
     pub y: i32,
@@ -49,7 +49,35 @@ impl Default for WorldSettings {
     }
 }
 
+/// The Voxel sizes every physical fixture is tested at.
+#[cfg(feature = "dev")]
+const DEV_VOXEL_SIZES: [f32; 3] = [1.0, 0.5, 0.25];
+
 impl WorldSettings {
+    /// The defaults, except that under `dev` `TESSERAE_VOXEL_SIZE_M` picks one
+    /// of [`DEV_VOXEL_SIZES`], so one binary opens a World at each of them.
+    /// Save data does not exist yet, so nothing else chooses it.
+    #[cfg(feature = "dev")]
+    pub fn from_env(env: impl Fn(&str) -> Option<String>) -> Self {
+        let defaults = WorldSettings::default();
+        let Some(asked) = env("TESSERAE_VOXEL_SIZE_M") else {
+            return defaults;
+        };
+        match asked.parse::<f32>() {
+            Ok(size) if DEV_VOXEL_SIZES.contains(&size) => WorldSettings {
+                voxel_size: size,
+                ..defaults
+            },
+            _ => {
+                eprintln!(
+                    "TESSERAE_VOXEL_SIZE_M={asked} is not one of {DEV_VOXEL_SIZES:?}; using {}",
+                    defaults.voxel_size
+                );
+                defaults
+            }
+        }
+    }
+
     /// A Cell's edge length in metres — a Chunk's footprint, which grows with
     /// LOD level while the Chunk's Voxel count does not.
     pub fn cell_size(&self) -> f32 {
@@ -107,6 +135,24 @@ impl WorldSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn the_dev_voxel_size_is_one_of_the_tested_sizes_or_the_default() {
+        let with = |v: Option<&str>| {
+            WorldSettings::from_env(|name| {
+                assert_eq!(name, "TESSERAE_VOXEL_SIZE_M");
+                v.map(String::from)
+            })
+            .voxel_size
+        };
+        assert_eq!(with(None), 1.0);
+        assert_eq!(with(Some("0.5")), 0.5);
+        assert_eq!(with(Some("0.25")), 0.25);
+        for refused in ["0.3", "0", "-1", "nan", "two"] {
+            assert_eq!(with(Some(refused)), 1.0, "{refused}");
+        }
+    }
 
     #[test]
     fn cell_size_scales_with_voxel_size() {

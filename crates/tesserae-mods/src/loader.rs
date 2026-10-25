@@ -1,6 +1,7 @@
 use wasmtime::Engine;
 use wasmtime::component::{Component, Linker};
 
+use crate::adapt::Line;
 use crate::error::ModError;
 use crate::host::{HostState, engine, linker};
 use crate::limits::ModLimits;
@@ -54,6 +55,14 @@ impl ModHost {
                         id: found.manifest.id.clone(),
                         source,
                     })?;
+                let exported = Line::of(&self.engine, &component);
+                if exported.map(Line::api) != Some(found.manifest.api.as_str()) {
+                    return Err(ModError::LineMismatch {
+                        id: found.manifest.id.clone(),
+                        api: found.manifest.api.clone(),
+                        exported: exported.map_or("no contract line", Line::api),
+                    });
+                }
                 let limits = self.limits.lowered_by(&found.manifest.limits);
                 Ok(Compiled {
                     found,

@@ -26,7 +26,12 @@ pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtensi
 const MATERIAL_SHADER_LOCATION: u32 = 10;
 const LIGHT_SHADER_LOCATION: u32 = 11;
 
+/// Material ids with a colour of their own.
 pub const PALETTE_LEN: usize = 64;
+
+/// The palette slot after the Materials': what a [`tesserae_core::mesh::FLAME`]
+/// quad is drawn in, so no Material's appearance row can recolour flames.
+pub const FLAME_SLOT: usize = PALETTE_LEN;
 
 /// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
 #[derive(Reflect, ShaderType, Debug, Clone, Copy)]
@@ -62,7 +67,7 @@ pub struct ChunkMaterialExtension {
     /// Indexed by Material id. Bindings 0 to 99 belong to the base
     /// `StandardMaterial`, so an extension starts at 100.
     #[uniform(100)]
-    pub palette: [Vec4; PALETTE_LEN],
+    pub palette: [Vec4; PALETTE_LEN + 1],
     #[uniform(101)]
     pub lod: LodParams,
     /// The Chunks each level has drawn, in `client::drawn_mask`'s layout. A
@@ -86,7 +91,7 @@ impl Default for ChunkMaterialExtension {
     fn default() -> Self {
         // Air never emits a face, so magenta at index 0 means the mesher or the
         // vertex attribute is wrong rather than that the palette is short.
-        let mut palette = [srgb(1.0, 0.0, 1.0); PALETTE_LEN];
+        let mut palette = [srgb(1.0, 0.0, 1.0); PALETTE_LEN + 1];
         palette[tesserae_core::testgen::STONE as usize] = srgb(0.52, 0.52, 0.55);
         palette[tesserae_core::testgen::DIRT as usize] = srgb(0.42, 0.29, 0.18);
         palette[tesserae_core::testgen::GRASS as usize] = srgb(0.33, 0.56, 0.24);
@@ -99,6 +104,9 @@ impl Default for ChunkMaterialExtension {
         palette[tesserae_core::material::GLASS as usize] = srgba(0.70, 0.88, 0.92, 0.35);
         palette[tesserae_core::material::WATER as usize] = srgba(0.10, 0.32, 0.62, 0.65);
         palette[tesserae_core::material::LEAVES as usize] = srgb(0.16, 0.42, 0.14);
+        // Near-white like the lantern, for the same reason: a flame stands in
+        // its own burning light and is tinted by it.
+        palette[FLAME_SLOT] = srgb(1.0, 0.86, 0.55);
         ChunkMaterialExtension {
             palette,
             lod: LodParams::new(0, &[]),
@@ -161,6 +169,8 @@ impl MaterialExtension for ChunkMaterialExtension {
         // nor the light scale can drift from the Rust side.
         let defs = [
             ShaderDefVal::UInt("CHUNK_PALETTE_LEN".into(), PALETTE_LEN as u32),
+            ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
+            ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
         ];
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
@@ -232,7 +242,10 @@ mod tests {
 
     #[test]
     fn every_material_id_the_shader_can_index_has_a_colour() {
-        assert_eq!(ChunkMaterialExtension::default().palette.len(), 64);
+        let palette = ChunkMaterialExtension::default().palette;
+        assert_eq!(palette.len(), 64 + 1, "the Materials' and the flames'");
+        assert_ne!(palette[FLAME_SLOT], palette[0], "flames unset");
+        assert!((tesserae_core::mesh::FLAME as usize) >= PALETTE_LEN);
     }
 
     /// The shader clamps the Material index to the palette's last entry, so a

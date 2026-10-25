@@ -1,13 +1,27 @@
-//! The Rust side of `wit/`, generated. Private: nothing outside this crate sees
-//! a generated type.
+//! The Rust side of `wit/`, generated once per contract line. Private: nothing
+//! outside this crate sees a generated type.
+//!
+//! The host speaks the newest line; [`crate::adapt`] carries every older one
+//! to it and back, so a closed line's records never change in place.
 
-// Until instantiation lands (ticket 06) only the tests use most of the generated items.
-#![allow(dead_code)]
+pub(crate) mod v01 {
+    wasmtime::component::bindgen!({
+        path: "wit/0.1",
+        world: "mod",
+        imports: { default: async },
+        exports: { default: async },
+        additional_derives: [PartialEq, Clone],
+    });
+}
 
-wasmtime::component::bindgen!({
-    path: "wit",
-    world: "mod",
-    imports: { default: async },
-    exports: { default: async },
-    additional_derives: [PartialEq, Clone],
-});
+pub(crate) mod v02 {
+    wasmtime::component::bindgen!({
+        path: "wit/0.2",
+        world: "mod",
+        imports: { default: async },
+        exports: { default: async },
+        additional_derives: [PartialEq, Clone],
+    });
+}
+
+pub(crate) use v02::*;

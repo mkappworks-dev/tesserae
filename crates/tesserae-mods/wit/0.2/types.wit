@@ -1,0 +1,82 @@
+package tesserae:mods@0.2.0;
+
+/// Plain value types shared by every other interface. Nothing here has behaviour.
+interface types {
+    /// A point or an extent in metres. The engine converts it to Voxels with the
+    /// World's own Voxel size, so the same value means the same place at any size.
+    record vec3 {
+        x: f32,
+        y: f32,
+        z: f32,
+    }
+
+    /// A region in metres, `[min, max)`: a Voxel belongs to it when its lower
+    /// corner is inside. The engine rejects a box with a non-finite coordinate,
+    /// with `min` above `max` on any axis, or covering too many Voxels.
+    record box-m {
+        min: vec3,
+        max: vec3,
+    }
+
+    /// One Voxel's contents, by the ids `start` was told. The engine rejects a
+    /// Material or Shape it does not know and an orientation of 24 or more.
+    record voxel {
+        material: u16,
+        shape: u8,
+        orientation: u8,
+    }
+
+    /// A box inside one Voxel, in sixteenths of it on each axis, `0..=16`. The
+    /// engine derives the Shape's faces, light blocking and default collision
+    /// from these, and rejects a box with no volume or out of range.
+    record node-box {
+        min: tuple<u8, u8, u8>,
+        max: tuple<u8, u8, u8>,
+    }
+
+    /// A box a body collides with, in sixteenths of a Voxel and signed so it may
+    /// stand outside the cell: `-16..=32` per axis. The engine rejects a value
+    /// outside that range.
+    record collision-box {
+        min: tuple<s8, s8, s8>,
+        max: tuple<s8, s8, s8>,
+    }
+
+    /// An arm a connected Shape grows towards one neighbour. The engine draws
+    /// `boxes` and collides with `collision` (or `boxes` when it is `none`)
+    /// while a neighbour is connected on `face`.
+    record arm {
+        /// 0 to 5: -x, +x, -y, +y, -z, +z.
+        face: u8,
+        boxes: list<node-box>,
+        collision: option<list<collision-box>>,
+    }
+
+    /// How a Shape grows arms towards the Voxels around it. The engine derives
+    /// the connections at read time from the neighbours and stores none.
+    record connect-def {
+        /// The connection groups this Shape belongs to, one bit each.
+        group: u32,
+        /// Grow an arm towards a neighbour in any of these groups.
+        connects-to: u32,
+        /// Also grow one towards a neighbour that seals the face facing us.
+        to-sealed: bool,
+        arms: list<arm>,
+    }
+
+    /// An sRGB colour with straight alpha, for the placeholder palette.
+    record srgba {
+        r: u8,
+        g: u8,
+        b: u8,
+        a: u8,
+    }
+
+    enum log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+}

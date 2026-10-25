@@ -22,8 +22,15 @@ post-process settings. The equivalent of a Minecraft shaderpack.
 **Manifest** — a Mod's identity, version, contract line, dependencies and
 requested limits; marks whether it is a Game.
 
+**Contract line** — one incompatible version of the WIT contract a Mod is built
+against, `0.1` or `0.2`. Patches within a line stay compatible; a closed record
+or variant that grows needs a new line.
+
+**Adapter** — the host's translation of a component built against an older
+contract line to and from the current one, so it keeps loading unchanged.
+
 **Declaration** — the content a Mod supplies when loaded: Materials, Shapes,
-appearance and, for a Game, World parameters.
+appearance, fluids, reactions, combustion and, for a Game, World parameters.
 
 **Registry** — the correspondence between names and the ids of registered
 Materials and Shapes.
@@ -36,7 +43,11 @@ Materials and Shapes.
 
 **Voxel** — the atomic unit of world volume. Not "block", not "node".
 
-**Material** — what a Voxel is made of. Stone, water, oak.
+**Material** — what a Voxel is made of. Stone, water, oak. A row of game data:
+the light it emits and the light it dims, which faces it hides, which mesh it is
+drawn in, and whether it is solid. Not its appearance: a Material's colour is a
+placeholder until a Look pack supplies one, and Bevy's `Material` and
+`MaterialExtension`, which shade a surface, are a different thing.
 
 **Shape** — a Voxel's geometry. A full cube, a stair, a slab, a fence. "A stone
 voxel" and "a stone stair" share a Material and differ in Shape, so neither word
@@ -117,7 +128,8 @@ radius and the reach, so it is the same fog at any Voxel size. The fog colour
 and the colour of the sky behind the terrain are two values, not one.
 
 **Downsample** — producing a coarse Chunk's Voxels from the eight finer Chunks
-it covers: the dominant Material by volume, solid if half the volume is.
+it covers: the dominant Material by volume, solid if half the volume is. At
+level 1 fluid weighs the volume it fills.
 
 **World generation** — producing a Chunk's contents from a seed and a position.
 Never produces a mesh.
@@ -139,10 +151,11 @@ of it.
 **Eye** — the point in metres a Player sees and acts from. An Edit's ray starts
 near it. Not the feet and not a body.
 
-**Edit** — a change to one Voxel, applied by the Server. A Client sends an
-intent; it never makes an Edit.
+**Edit** — a change to one Voxel, its solid or its source, applied by the
+Server. A Client sends an intent; it never makes an Edit.
 
-**Command** — a Mod's request to fill a region or place Voxels at positions.
+**Command** — a Mod's request to fill a region or place Voxels at positions, to
+place or remove sources in a region, or to ignite or extinguish what is in one.
 
 **Command batch** — the Commands returned together by one Mod call.
 
@@ -150,8 +163,105 @@ intent; it never makes an Edit.
 mesh), run on a worker from a Snapshot and returning an owned result. A Job
 never touches World state.
 
-**Snapshot** — the immutable view of World state a Job is handed: the Chunks and
-light it reads, as shared references.
+**Snapshot** — the immutable view of World state a Job is handed: the Chunks,
+their light and their overlay, as shared references.
 
 **Landing** — the Server applying a finished Job's result to World state, on its
 tick. The only way a Job's work becomes part of the World.
+
+## Simulation
+
+**Overlay** — the fluid and fire a Voxel holds beside its packed Material, Shape
+and Orientation: a second, palette-compressed layer of each Chunk. A dry,
+unburning Chunk's is uniformly empty.
+
+**Occupants** — the one reading of a position: its solid, its fluid and whether
+it burns, decoded from the Voxel and its Overlay together. Nothing interprets
+either layer alone.
+
+**Fluid** — a Material that flows, with a row of behaviour in metres and
+seconds: reach, sideways, downward and recession rates, reset drop, whether it
+waterlogs or extinguishes, and its heat. Water is built in; a Mod declares the
+rest. A Voxel holds at most one fluid Material.
+
+**Source** — fluid that stays: generated water, and fluid a player or a Mod
+places. It feeds flow without losing volume, and only an Edit, a Command or a
+reaction removes it. Flow never becomes one.
+
+**Flowing** — fluid a source supports, carrying its remaining reach and its
+descent since the reach was last renewed. It recedes when nothing supports it.
+
+**Logical step** — one step of simulation time, 1/64 s. Equal state and equal
+events at equal steps give equal state, whatever the workers or the wall clock
+do.
+
+**Lifetime** — which arrival of a Chunk at its coordinate a piece of work read.
+An evicted and regenerated Chunk has a new one, so work that read the old one
+cannot land in it.
+
+**Agenda** — the Voxels due for evaluation and the step each is due, one entry
+per Voxel, with a fixed capacity.
+
+**Rescan** — a box of a Chunk evaluated a budget of Voxels a step from a cursor:
+what a wake becomes when the Agenda is full, and how admission and the first
+scan of a wet Chunk are served.
+
+**Parked** — work held back for a Chunk whose light solve is pending, released
+as one Rescan when the solve lands.
+
+**Admission** — a Chunk joining the simulation, when its first light solve
+lands. Until then its terrain is unknown, never Air.
+
+**Void** — a connected region of empty sixteenths in a Shape that reaches one of
+its faces, derived when the Shape is registered. Fluid stands in, flows through
+and passes heat through Voids; a sealed cavity is not one.
+
+**Waterlogging** — fluid standing in a Shape's Voids. The Shape keeps its
+Material, collision and selection.
+
+**Contact** — two different fluids whose wet Voids meet across a face, where
+flow could pass between them.
+
+**Reaction** — what a Contact between two fluids does, declared as data: which
+side is consumed and the solid, if any, it leaves.
+
+**Receiving** — of two fluids in Contact, the one the other arrives at: from
+above, or from beside on a floor no lower, never from below. A Reaction may name
+it.
+
+**Blocked contact** — a Contact whose Reaction cannot apply as a whole, because
+its product would need a Voxel a solid holds. It waits until something it reads
+changes.
+
+**Exposure** — heat reaching fuel through open space, from 0 to 15:
+dimensionless, from the strongest hot fluid or fire within its reach in metres.
+Solids block it, and nothing stores it.
+
+**Ignition progress** — how long fuel has been exposed at or above its
+threshold, towards its ignition delay.
+
+**Burning** — a solid on fire, with the fuel it has left. A whole Voxel burns,
+whatever its Shape.
+
+**Burn-out** — a fire running out of fuel: the solid becomes its declared
+residue in the same Shape and Orientation, or goes if the residue is Air.
+
+**Flame indicator** — the placeholder flame drawn just outside each uncovered
+face of a Burning solid. It is not a Voxel and changes no collision.
+
+**Wet fuel** — fuel an extinguishing fluid touches, in one of its own Voids or
+from a neighbour's Void across a face its solid covers. It does not ignite, and
+it stops burning. A wet part makes the whole Voxel wet.
+
+**Coarse** — a level-1 Chunk with its Overlay, derived from the held level-0
+Chunks below it.
+
+**Child** — one of the eight finer Chunks a Coarse Chunk is derived from:
+generated, or held and changed and read with its Overlay.
+
+**Waterline** — the height below which packed water at level 1 is lake water
+generation could have made; any other fluid there is dynamic.
+
+**Emitter bound** — how many changes that start or stop block light, such as
+lava arriving or fuel catching, one Logical step may land (`EMITTERS_PER_STEP`).
+Each relights the whole reach of its light.

@@ -25,6 +25,10 @@ npm run fmt:check --silent
 step "Lint: clippy"
 cargo clippy --workspace --all-targets --all-features
 
+# RUSTFLAGS does not reach rustdoc, so a broken intra-doc link needs its own.
+step "Lint: docs"
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items --all-features
+
 # CI's Build job compiles the binary without `dev` or `cfg(test)`, where code
 # only the dev builders or the tests use is dead. Clippy and the tests both
 # enable one of those, so neither sees it.

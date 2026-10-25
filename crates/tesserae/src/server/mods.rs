@@ -2,7 +2,7 @@
 
 pub(in crate::server) mod runtime;
 
-pub(in crate::server) use runtime::EditHistory;
+pub(in crate::server) use runtime::{Drain, EditHistory};
 
 use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Write};
@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use tesserae_core::{MaterialId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
-    discover, plan,
+    discover, plan, resolve,
 };
 
 use crate::content::MaterialPalette;
@@ -222,6 +222,7 @@ fn load_with(
     let compiled = host.load(accepted, &trust).map_err(|e| e.to_string())?;
     let loaded = bevy::tasks::block_on(async {
         let mut loaded = LoadedMods::default();
+        let mut behaviours = Vec::new();
         for component in &compiled {
             let id = &component.found.manifest.id;
             let fault = |e| format!("mod `{id}`: {e}");
@@ -240,6 +241,7 @@ fn load_with(
                 root,
             )
             .map_err(|e| e.to_string())?;
+            behaviours.push(applied.behaviour);
             for row in appearance {
                 if let Some(index) = loaded
                     .registry
@@ -258,6 +260,9 @@ fn load_with(
             }
             loaded.mods.push(instance);
         }
+        // Every name is registered now; what flows, reacts and burns is fixed
+        // before any Mod starts and the World opens.
+        resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
         let ids = Registered {
             materials: loaded
                 .registry
@@ -475,7 +480,11 @@ mod tests {
             .to_vec4();
         assert_eq!(uniform.palette[8], expected);
         assert_eq!(uniform.palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
-        assert_eq!(uniform.palette.len(), 64);
+        assert_eq!(
+            uniform.palette.len(),
+            64 + 1,
+            "the Materials' and the flames'"
+        );
         app.update();
         let generator = app.world().resource::<super::super::WorldGenerator>();
         assert!(generator.params().caves.is_none());

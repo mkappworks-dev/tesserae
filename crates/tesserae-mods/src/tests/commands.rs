@@ -6,9 +6,9 @@ use tesserae_core::{PlaceFault, Tables, Voxel};
 
 use super::sandbox::{Rig, context};
 use crate::{
-    BatchError, BatchReport, Command, EditEvent, MAX_COMMANDS, MAX_FILL_VOXELS, MAX_VOXEL_INDEX,
-    MAX_VOXELS_PER_CALL, ModFault, ModLimits, Placement, Region, RegionError, Resolved, VoxelBox,
-    validate, voxel_index,
+    BatchError, BatchReport, Command, EditEvent, EditKind, Line, MAX_COMMANDS, MAX_FILL_VOXELS,
+    MAX_VOXEL_INDEX, MAX_VOXELS_PER_CALL, ModFault, ModLimits, Placement, Region, RegionError,
+    Resolved, VoxelBox, validate, voxel_index,
 };
 
 fn stone() -> Voxel {
@@ -27,7 +27,7 @@ fn place(at: [f32; 3], voxel: Voxel) -> Command {
 }
 
 fn check(commands: &[Command]) -> Result<crate::CommandBatch, BatchError> {
-    validate(commands, &Tables::builtin(), 1.0)
+    validate(commands, Line::V02, &Tables::builtin(), 1.0)
 }
 
 fn only_fill(batch: &crate::CommandBatch) -> VoxelBox {
@@ -42,8 +42,8 @@ fn a_fill_covers_the_same_metres_at_any_voxel_size_and_64_times_the_voxels_at_a_
     let tables = Tables::builtin();
     let command = [fill([0.0, 0.0, 0.0], [4.0, 4.0, 4.0], stone())];
 
-    let coarse = only_fill(&validate(&command, &tables, 1.0).unwrap());
-    let fine = only_fill(&validate(&command, &tables, 0.25).unwrap());
+    let coarse = only_fill(&validate(&command, Line::V02, &tables, 1.0).unwrap());
+    let fine = only_fill(&validate(&command, Line::V02, &tables, 0.25).unwrap());
 
     assert_eq!(coarse.min, [0, 0, 0]);
     assert_eq!(coarse.max, [3, 3, 3]);
@@ -138,7 +138,7 @@ fn every_rejection_is_named_and_the_batch_is_counted() {
     let shapes = tables.shapes.len() as u8;
     let ok = || fill([0.0; 3], [1.0; 3], stone());
     let rejected = |commands: Vec<Command>| {
-        let error = validate(&commands, &tables, 1.0).unwrap_err();
+        let error = validate(&commands, Line::V02, &tables, 1.0).unwrap_err();
         // A refused batch is counted whole.
         let report = BatchReport::refused(commands.len());
         assert_eq!(
@@ -190,7 +190,15 @@ fn every_rejection_is_named_and_the_batch_is_counted() {
         }
     );
     // Exactly the cap is fine.
-    assert!(validate(&[fill([0.0; 3], [32.0; 3], stone())], &tables, 1.0).is_ok());
+    assert!(
+        validate(
+            &[fill([0.0; 3], [32.0; 3], stone())],
+            Line::V02,
+            &tables,
+            1.0
+        )
+        .is_ok()
+    );
     assert_eq!(MAX_FILL_VOXELS, 32 * 32 * 32);
     assert_eq!(
         rejected(vec![
@@ -278,8 +286,9 @@ fn builder_returns_exactly_the_commands_it_was_asked_for_after_validation() {
     let tables = Tables::builtin();
     for n in [16u64, 256, 4096] {
         let builder = rig.instance("builder", ModLimits::HOST).unwrap();
+        let line = builder.line();
         let (_, commands) = block_on(builder.tick(context(n))).unwrap();
-        let batch = validate(&commands, &tables, 1.0).unwrap();
+        let batch = validate(&commands, line, &tables, 1.0).unwrap();
         let expected: Vec<_> = (0..n as i32).map(|x| ([x, 0, 0], stone())).collect();
         assert_eq!(batch.commands, [Resolved::Place(expected)], "N = {n}");
         assert_eq!(batch.voxels, n);
@@ -292,6 +301,10 @@ fn a_tick_context_with_three_edits_is_seen_by_the_guest() {
     let echo = rig.instance("echo", ModLimits::HOST).unwrap();
     let edit = EditEvent {
         at: [1.5, 2.0, 3.0],
+        kind: EditKind::Solid {
+            before: Voxel::AIR,
+            after: stone(),
+        },
         before: Voxel::AIR,
         after: stone(),
     };
@@ -317,14 +330,19 @@ fn an_oversized_list_is_a_fault_before_anything_is_converted() {
 
 #[test]
 fn the_shipped_contract_has_no_voxel_import() {
-    let wit = format!("{}/wit", env!("CARGO_MANIFEST_DIR"));
-    for entry in fs::read_dir(wit).unwrap() {
-        let text = fs::read_to_string(entry.unwrap().path()).unwrap();
-        assert!(
-            !text.contains("set-voxel"),
-            "a per-Voxel import is in the contract"
-        );
-        assert!(!text.contains("tesserae:naive"));
+    for line in ["0.1", "0.2"] {
+        let wit = format!("{}/wit/{line}", env!("CARGO_MANIFEST_DIR"));
+        let mut files = 0;
+        for entry in fs::read_dir(wit).unwrap() {
+            let text = fs::read_to_string(entry.unwrap().path()).unwrap();
+            assert!(
+                !text.contains("set-voxel"),
+                "a per-Voxel import is in the {line} contract"
+            );
+            assert!(!text.contains("tesserae:naive"));
+            files += 1;
+        }
+        assert_eq!(files, 6, "{line}");
     }
 }
 

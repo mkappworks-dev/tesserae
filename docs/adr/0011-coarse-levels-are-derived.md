@@ -19,13 +19,24 @@ because worldgen is tuned in metres. A level-k Chunk is the downsample of eight
 level-(k-1) Chunks generated for the purpose; level 1 takes the held level-0
 Chunks instead of generating them.
 
+**Fluid and fire at level 1.** A held Chunk something changed is read with its
+fluid and fire (`downsample_changed` in `lod.rs`), a picture of that state and
+never a simulation of it. Fluid weighs the volume it fills and competes with
+solids by volume as generated water does. Water the generator could have made, a
+packed source below its waterline, stays packed lake water; a coarse Voxel whose
+fluid is mostly any other is air with that fluid beside it, standing at the
+share of the coarse Voxel its contents fill and at least a sixteenth. A coarse
+solid burns when half its Material's volume does, and is drawn with flames.
+
 The `ChunkStore`, light, relight and `MeshState` stay level 0 only. Coarse
 Chunks live in a Server-private `LodStore`, so
 [ADR-0002](0002-client-server-from-day-one.md) holds as it did for `ChunkStore`:
 the Server is the only writer and the Client receives meshes and nothing else.
 Jobs follow [ADR-0007](0007-streaming-jobs-run-on-bevy-task-pools.md).
 
-**Invalidation.** An Edit marks its level-1 cover stale, if it is held. A held
+**Invalidation.** An Edit marks its level-1 cover stale, if it is held. So does
+every other change through the one World change, a Mod Command or landed flow,
+fire or reaction, including one that leaves the packed Voxel as it was. A held
 level-0 Chunk that has been edited marks its cover stale when it leaves the
 store, because the Edit is about to stop existing. An unedited Chunk leaves with
 no mark: the generator reproduces it exactly, and a test pins that. Levels 2 and
@@ -35,9 +46,23 @@ the Eye and level 2 starts at 256 m.
 ## Consequences
 
 - **An Edit is visible at levels 0 and 1 only**, and only while its level-0
-  Chunk is held. Both are already true of level 0, which has no save.
+  Chunk is held. Both are already true of level 0, which has no save. Fluid and
+  fire are the same: from level 2 out, and at level 1 once their level-0 Chunk
+  is evicted, the water is where the generator put it, so a breached lake is
+  whole again, a waterfall and a placed pool are gone and nothing burns. The
+  step is at level 2's inner edge, 256 m at the defaults, inside the 288 m that
+  level 0 is held to.
 - **Emitters vanish at distance.** A coarse Voxel is its dominant Material and
-  carries no block light. Nothing generates an emitter today.
+  carries no block light. Nothing generates an emitter today. Lava and fire at
+  level 1 are drawn and emit nothing; there is no coarse emitter flood, and
+  fluid beside a coarse Voxel is lit as the air it stands in.
+- **Only the lake meets level 0's waterline.** The mesh job moves a coarse lake
+  surface to the top of level 0's highest water Voxel, so a Chunk boundary
+  cannot fall between the two. Fluid that moved is never moved: its level-0
+  surface is wherever it flowed, and its coarse surface stays in the coarse
+  Voxel holding it, which lies in the level-0 Chunk holding that water. Where
+  four level-0 columns of one coarse column end on both sides of a level-0
+  Chunk's floor, one coarse surface cannot sit on both.
 - **Coarse light is two-valued.** A level above 0 stores no light. The mesh job
   lights a face open sky unless it looks into air more than one Voxel under
   `Worldgen::surface_height_m`, which it lights dark. The rule is `coarse_light`
