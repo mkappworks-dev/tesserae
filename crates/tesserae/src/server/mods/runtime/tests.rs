@@ -821,7 +821,7 @@ pub(in crate::server) fn demo_loaded(size: f32) -> LoadedMods {
 }
 
 #[test]
-fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
+fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
     for size in [1.0, 0.5] {
         let loaded = demo_loaded(size);
         assert_eq!(
@@ -847,7 +847,9 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
                 (8, [255, 144, 48, 255]),
                 (9, [230, 72, 16, 255]),
                 (10, [150, 104, 60, 255]),
-                (11, [70, 66, 62, 255])
+                (11, [70, 66, 62, 255]),
+                (12, [92, 70, 44, 224]),
+                (13, [168, 74, 52, 255])
             ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
@@ -869,20 +871,52 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         assert!(flow.sideways_m_per_s < water.sideways_m_per_s);
         assert!(flow.downward_m_per_s < water.downward_m_per_s);
         assert!(flow.reach_m < water.reach_m);
-        // Its one reaction, resolved by name: lava touching water, either
-        // state, becomes core:stone and the water stays.
-        let rules = loaded.tables.reactions.rules();
-        assert_eq!(rules.len(), 1);
-        let rule = rules[0];
-        assert_eq!((rule.first.fluid, rule.second.fluid), (7, lava));
-        assert_eq!(rule.consumed, tesserae_core::Side::Second);
-        assert_eq!(rule.product, Some(tesserae_core::worldgen::STONE));
-        assert_eq!(rule.receiving, None);
-        assert!(
-            [rule.first.phase, rule.second.phase]
-                .iter()
-                .all(|p| *p == tesserae_core::Phase::Any)
+        // A second fluid of its own, faster than lava and slower than water,
+        // that soaks into Shapes and smothers fire and goes only 2 m.
+        let material = |name| {
+            loaded
+                .registry
+                .id_of(tesserae_mods::Kind::Material, name)
+                .unwrap() as u16
+        };
+        let (mud, wood, brick) = (
+            material("demo:mud"),
+            material("demo:wood"),
+            material("demo:brick"),
         );
+        let core_water = material("core:water");
+        assert_eq!((mud, brick), (12, 13));
+        let mud_flow = loaded.tables.fluids.get(mud).unwrap();
+        assert!(mud_flow.waterlogs && mud_flow.extinguishes && mud_flow.heat.is_none());
+        assert!(
+            flow.sideways_m_per_s < mud_flow.sideways_m_per_s
+                && mud_flow.sideways_m_per_s < water.sideways_m_per_s
+        );
+        assert_eq!(mud_flow.reach_m, 2.0);
+        // Its two reactions, resolved by name, either state of each fluid:
+        // lava touching water becomes core:stone and the water stays; mud
+        // touching lava becomes demo:brick and the lava stays.
+        let rules = loaded.tables.reactions.rules();
+        assert_eq!(rules.len(), 2);
+        for (rule, pair, consumed, product) in [
+            (
+                rules[0],
+                (7, lava),
+                tesserae_core::Side::Second,
+                tesserae_core::worldgen::STONE,
+            ),
+            (rules[1], (lava, mud), tesserae_core::Side::Second, brick),
+        ] {
+            assert_eq!((rule.first.fluid, rule.second.fluid), pair);
+            assert_eq!(rule.consumed, consumed);
+            assert_eq!(rule.product, Some(product));
+            assert_eq!(rule.receiving, None);
+            assert!(
+                [rule.first.phase, rule.second.phase]
+                    .iter()
+                    .all(|p| *p == tesserae_core::Phase::Any)
+            );
+        }
         let mut neighbors = [Voxel::AIR; 6];
         neighbors[0] = Voxel::new(1, 4, 0);
         assert!(
@@ -927,8 +961,8 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         }
         h.call();
         let total = h.backlog(0);
-        assert_eq!(total, if size == 1.0 { 39 } else { 256 });
-        assert_eq!(h.pending().queues[0].commands.len(), 3);
+        assert_eq!(total, if size == 1.0 { 94 } else { 684 });
+        assert_eq!(h.pending().queues[0].commands.len(), 16);
         let mut ticks = 0;
         while h.backlog(0) > 0 {
             h.drain();
@@ -953,17 +987,74 @@ fn demo_contract_content_and_first_batch_reach_real_voxels_and_light() {
         }
         assert_eq!(h.voxel(index([3.0, 30.0, -7.0])), Voxel::new(STONE, 4, 0));
         assert_eq!(h.voxel(index([3.0, 31.0, -7.0])), Voxel::cube(8));
+        assert_eq!(h.voxel(index([15.0, 29.0, -7.0])), Voxel::new(STONE, 1, 4));
+        assert_eq!(h.voxel(index([-13.0, 30.0, -5.0])), Voxel::cube(STONE));
+        assert_eq!(h.voxel(index([-12.0, 29.0, -7.0])), Voxel::cube(wood));
         let store = h.app.world().resource::<ChunkStore>();
         assert_eq!(store.light_at(index([3.0, 31.0, -7.0])).block(), 15);
         let [x, y, z] = index([-1.0, 29.0, -7.0]);
         let source = store.occupants([x, y, z], &tables_of(&h).fluids).unwrap();
         assert_eq!(source.fluid, Some(tesserae_core::Fluid::source(lava)));
         assert_eq!(store.light_at([x, y + 1, z]).block(), 14, "lava lights");
-        h.call();
-        assert_eq!(h.backlog(0), 0, "the demo builds only on its first call");
         let log = h.log(0);
         assert_eq!(log.matches("demo first tick:").count(), 1);
+        assert!(!log.contains("demo scenario"), "started before the build");
+
+        // The scenarios start on the finished build, then keep their time.
+        h.call();
+        let log = h.log(0);
         assert!(log.contains(&format!("demo build applied={total} rejected=0")));
+        assert!(log.contains("demo scenario: sources placed, fuel lit"));
+        let started = h.backlog(0);
+        assert_eq!(started, if size == 1.0 { 6 } else { 12 });
+        while h.backlog(0) > 0 {
+            h.drain();
+        }
+        assert_eq!(h.pending().queues[0].report.rejected, 0);
+        for (at, fluid) in [
+            ([6.0, 29.0, -7.0], mud),
+            ([9.0, 29.0, -7.0], lava),
+            ([19.0, 29.0, -7.0], core_water),
+            ([22.0, 35.0, -7.0], core_water),
+        ] {
+            let here = h.occupants(index(at));
+            assert_eq!(
+                here.fluid,
+                Some(tesserae_core::Fluid::source(fluid)),
+                "{at:?}"
+            );
+        }
+        for at in [[-14.0, 30.0 - size, -7.0], [-23.0, 30.0 - size, -7.0]] {
+            assert!(h.occupants(index(at)).burning.is_some(), "{at:?} unlit");
+        }
+        let mut calls = 0;
+        while !h.log(0).contains("water poured on the burning post") {
+            h.call();
+            calls += 1;
+            assert!(calls <= 300, "never doused");
+        }
+        assert!((255..=257).contains(&calls), "doused after {calls} ticks");
+        while h.backlog(0) > 0 {
+            h.drain();
+        }
+        assert_eq!(
+            h.occupants(index([-23.0, 30.0, -7.0])).fluid,
+            Some(tesserae_core::Fluid::source(core_water))
+        );
+        while !h.log(0).contains("source taken away") {
+            h.call();
+            calls += 1;
+            assert!(calls <= 1600, "the waterfall never dried");
+        }
+        while h.backlog(0) > 0 {
+            h.drain();
+        }
+        assert_eq!(h.occupants(index([22.0, 35.0, -7.0])).fluid, None);
+        assert_eq!(h.pending().queues[0].report.rejected, 0);
+        for _ in 0..8 {
+            h.call();
+        }
+        assert_eq!(h.backlog(0), 0, "the demo runs its scenarios once");
     }
 }
 

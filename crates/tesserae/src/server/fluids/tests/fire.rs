@@ -428,12 +428,12 @@ fn dividing_a_step_changes_nothing_a_fire_does() {
 }
 
 /// Wood in Chunk 0 is exposed only through Chunk -1, where the brazier is.
-/// Evicting Chunk -1 halfway through the delay takes the exposure and the
-/// progress with it: nothing waits on terrain that is gone, and the wood
-/// never catches while it is. The Chunk generated again holds no fire; lit
+/// Evicting Chunk -1 halfway through the delay pauses the wood, its progress
+/// frozen, and it never catches while the terrain is gone. The Chunk generated
+/// again holds no fire, so the exposure decided anew drops that progress; lit
 /// again, the wood catches a whole fresh delay later.
 #[test]
-fn eviction_takes_exposure_and_progress_and_readmission_gives_a_fresh_delay() {
+fn eviction_pauses_progress_and_readmission_without_the_fire_drops_it() {
     let (tables, fuel) = fire_tables(15);
     let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
     let west = ChunkCoord::new(-1, 0, 0);
@@ -452,10 +452,10 @@ fn eviction_takes_exposure_and_progress_and_readmission_gives_a_fresh_delay() {
         f.wait_if_running();
     }
     assert!(!f.sim().is_simulated(west));
-    assert_eq!(f.sim().timers(), 0, "progress outlived its exposure");
     f.settle();
     run_seconds(&mut f, 4.0);
     assert!(!burning(&f, 0), "it caught from terrain that is gone");
+    assert_eq!(f.sim().timers(), 1, "the paused progress was dropped");
 
     f.app
         .world_mut()
@@ -465,6 +465,7 @@ fn eviction_takes_exposure_and_progress_and_readmission_gives_a_fresh_delay() {
     assert!(f.sim().is_simulated(west));
     assert!(!burning(&f, -2), "fire survived eviction");
     assert!(!burning(&f, 0));
+    assert_eq!(f.sim().timers(), 0, "progress outlived its exposure");
     command(&mut f, -2, Intent::Ignite).unwrap();
     let caught = steps_until(&mut f, |f| burning(f, 0));
     assert!((DELAY..=DELAY + 2).contains(&caught), "{caught}");

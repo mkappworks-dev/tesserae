@@ -12,6 +12,9 @@ use bevy::app::TaskPoolPlugin;
 use bevy::prelude::*;
 
 fn main() -> std::process::ExitCode {
+    #[cfg(feature = "dev")]
+    let settings = world::WorldSettings::from_env(|name| std::env::var(name).ok());
+    #[cfg(not(feature = "dev"))]
     let settings = world::WorldSettings::default();
     let loaded = match server::mods::load_from_env(&settings) {
         Ok(loaded) => loaded,

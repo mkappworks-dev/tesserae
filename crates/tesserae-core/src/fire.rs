@@ -40,8 +40,13 @@
 //! from a void across one of its faces that meets the solid there, so water
 //! against a cube's side, on its top or under it wets it, while water behind
 //! a neighbour's sealed face or partition does not. Fire lives in the open
-//! space beside fuel, and a full cube has no void of its own. A fuel beside
-//! terrain nobody holds decides nothing, as flow beside it does.
+//! space beside fuel, and a full cube has no void of its own.
+//!
+//! **Paused.** A fuel beside terrain nobody holds decides nothing, as flow
+//! beside it does, but its ignition progress or fuel left is frozen rather
+//! than dropped and goes on, to within a step, once that terrain is held, so
+//! a fire at the edge of the held World neither starts its burn again nor
+//! stalls its spread. Replacing the solid meanwhile drops it.
 //!
 //! **Reads.** An exposure search reads as far as [`HeatScale::radius`], wider
 //! than flow's [`crate::flow::reads`]: a change of solid, fire or hot fluid
@@ -227,13 +232,56 @@ impl Fire {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct FireTimer {
-    ready: Step,
+    clock: Clock,
     want: Fire,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Clock {
+    Runs {
+        ready: Step,
+    },
+    /// Stopped beside terrain nobody holds with `left` steps to go, for the
+    /// solid it was running for.
+    Frozen {
+        left: Step,
+        solid: Voxel,
+    },
 }
 
 impl FireTimer {
     pub(crate) fn new(ready: Step, want: Fire) -> Self {
-        FireTimer { ready, want }
+        FireTimer {
+            clock: Clock::Runs { ready },
+            want,
+        }
+    }
+
+    /// The step the change is due, evaluated at `step` for `solid`: a frozen
+    /// timer goes on from where it stopped, unless the solid was replaced.
+    fn ready(&self, step: Step, solid: Voxel) -> Option<Step> {
+        match self.clock {
+            Clock::Runs { ready } => Some(ready),
+            Clock::Frozen { left, solid: was } => (was == solid).then_some(step + left),
+        }
+    }
+
+    /// Whether this timer still describes `here`: an ignition of unburning
+    /// fuel, or a fire that still burns.
+    fn fits(&self, here: &Occupants) -> bool {
+        match self.want {
+            Fire::Ignite { .. } => here.burning.is_none(),
+            Fire::Burnout { .. } | Fire::Extinguish => here.burning.is_some(),
+        }
+    }
+
+    fn freeze(&mut self, step: Step, solid: Voxel) {
+        if let Clock::Runs { ready } = self.clock {
+            self.clock = Clock::Frozen {
+                left: ready.saturating_sub(step),
+                solid,
+            };
+        }
     }
 }
 
@@ -311,7 +359,15 @@ pub(crate) fn evaluate(
     cont.work.fuel += 1;
     let Some(wet) = wetness(view, tables, at, &seen) else {
         cont.work.paused += 1;
-        return idle(cont);
+        let step = cont.step;
+        match cont.timers.fire.get_mut(&at) {
+            Some(timer) if timer.fits(&here) => timer.freeze(step, here.solid),
+            Some(_) => {
+                cont.timers.fire.remove(&at);
+            }
+            None => {}
+        }
+        return None;
     };
     let (want, delay, heated) = match here.burning {
         Some(_) if wet => (Fire::Extinguish, 1, false),
@@ -340,12 +396,15 @@ pub(crate) fn evaluate(
         }
     };
     let step = cont.step;
-    let ready = match cont.timers.fire.get(&at) {
-        Some(timer) if timer.want == want => timer.ready,
-        _ => step + delay.max(1) - 1,
-    };
+    let ready = cont
+        .timers
+        .fire
+        .get(&at)
+        .filter(|timer| timer.want == want)
+        .and_then(|timer| timer.ready(step, here.solid))
+        .unwrap_or(step + delay.max(1) - 1);
     if ready > step {
-        cont.timers.fire.insert(at, FireTimer { ready, want });
+        cont.timers.fire.insert(at, FireTimer::new(ready, want));
         cont.wakeups.push((ready, at));
         cont.work.waiting += 1;
         return None;

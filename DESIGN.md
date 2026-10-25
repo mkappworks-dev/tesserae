@@ -441,7 +441,39 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    streaming-only frame sum. Evidence and qualifications are in tickets 04, 05
    and 07 of `.scratch/2026-10-14-phase-7-mod-host/`. The MIT demo exercises the
    contract at 1 m and 0.5 m without a direct engine dependency.
-8. Fluid simulation.
+8. Fluid simulation. **Done.** Sources feed flowing fluid that falls first and
+   spreads a declared reach in metres, renewing it after each declared drop and
+   receding without supply; water waterlogs Shapes through Voids derived from
+   their geometry; Mods declare fluids, contact reactions and fuel in a 0.2
+   contract line that 0.1 components reach through an adapter; local heat
+   exposure through open space ignites fuel, which burns for a declared time to
+   a residue and is put out by water touching it. Fluid and fire live in an
+   Overlay beside the packed Voxel with one reading of both
+   ([ADR-0013](docs/adr/0013-fluid-and-fire-live-beside-the-voxel.md)), and the
+   simulation advances in logical steps under count bounds
+   ([ADR-0014](docs/adr/0014-simulation-advances-in-bounded-logical-steps.md)).
+   Only held level-0 Chunks simulate; level 1 shows their fluid and fire, and
+   levels 2 and up stay generator-only
+   ([ADR-0011](docs/adr/0011-coarse-levels-are-derived.md)). Defaults, measured
+   at equal physical fixtures at 1.0, 0.5 and 0.25 m: `LANDED_PER_STEP` 256,
+   `EMITTERS_PER_STEP` 4, an Agenda of 16384 entries plus a reserve of 4096,
+   4096 Voxels rescanned a step, 1024 evaluations a Job and 4 Jobs in flight,
+   and a light solve made on the tick after `SPOILT_BEFORE_ON_TICK` (4) spoilt
+   solves. Water reaches 7 m at 4 m/s sideways and 8 m/s down; the demo's lava 3
+   m at 0.75 and 1.5 m/s. **These Server figures are at the `dev` profile**
+   (opt-level 1, what `cargo dev` runs), which overstates a release build, and
+   were taken on a shared host at one-minute loads of 1.5 to 7.6: the worst
+   main-thread tick was 11.2 ms of thread CPU (lava draining at 0.25 m) against
+   the 15.625 ms of a 64 Hz tick, with no tick over it in any scenario and every
+   player Edit landing on its tick. At 8 emitters a lava step reached 13.75 ms,
+   which is why the bound is 4. In release a flow evaluation costs 0.3 to 0.5
+   us, a fuel evaluation up to 8.9 us at 0.25 m, and a Chunk-sized rescan about
+   9 ms of worker CPU. A dry, unburning Chunk's meshing is 15 to 45% faster than
+   before the phase and its bulk light within noise of it, in release thread
+   CPU; registering the built-in Shapes costs 8 to 15% more (4.8 ms), which is
+   the Void derivation itself. A quota bounds work, not time. Evidence: tickets
+   09 and 11 of `.scratch/2026-10-22-phase-8-fluid-simulation/`, which the MIT
+   demo exercises at all three sizes.
 9. Look-pack API, water shading, visual polish.
 10. Network transport. The `Player` and `PoseReport` are its first customers.
 
@@ -520,6 +552,23 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   per-call deadline thread is a future optimization; generated bindings still
   lift before the bounded post-lift check. The pre-existing `fbm2` debug
   overflow for seeds within eight of `u32::MAX` is out of scope.
+- **Fluid and fire have known limits, each a later decision.** A fluid that is
+  opaque and emits nothing draws its partial surfaces, and the Shapes it fills,
+  unlit, because light is one value per Voxel; lava emits, and water and the
+  demo's mud are translucent. Nothing climbs inside Shape geometry: water on a
+  floor does not run up into a slab's or a stair's Void beside it, and a lip is
+  not modelled. Level 1 is a mip-like volume vote, so a one-Voxel stream that
+  shares a coarse Voxel with its floor is lost to the stone, waterlogged water
+  mostly loses to its Shape, and coarse fluid is lit as air with no emission;
+  levels 2 and up are generator-only, so from level 2's inner edge, 256 m at the
+  defaults, held fluid and fire disappear and generated water returns. A writer
+  changing the plane of light a neighbour's solve reads every tick can hold that
+  neighbour's mesh back by up to four spoilt solves. The player's fluid tool
+  places water only. Fuel beside terrain that is not held keeps its progress
+  until it is, but flow beside it drops the change it was waiting for and starts
+  its delay again. Reactions have no delay of their own, and a thin film against
+  a cube wets all of it. Lava draining outdoors at 0.25 m is the costliest step
+  measured; a bulk relight is the named follow-up.
 - **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
   Connection groups still belong to a Shape and not a Material after step 7, a

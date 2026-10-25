@@ -126,6 +126,8 @@ tesserae/
 │                               0010 connections are derived
 │                               0011 coarse LOD levels are derived
 │                               0012 Mods declare once, command in batches
+│                               0013 fluid and fire beside the Voxel
+│                               0014 bounded logical steps
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/
