@@ -7,6 +7,8 @@
 //! Nothing here simulates: level 1 is a picture of what level 0 holds, and levels above
 //! it show what the generator made.
 //!
+//! [`downsample`]: tesserae_core::downsample
+//!
 //! Meshed by the level-0 mesher. No light is stored above level 0: a face is lit open sky unless it
 //! looks into air under the terrain, which the mesh job works out from the generator.
 //! The job pipeline is ADR-0007's: `docs/adr/0007-streaming-jobs-run-on-bevy-task-pools.md`.

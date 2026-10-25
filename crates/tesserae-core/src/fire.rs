@@ -9,6 +9,8 @@
 //! holds is a wall too. There is no temperature: nothing is stored in the
 //! space between, and solids conduct nothing.
 //!
+//! [`Void`]: crate::shape::Void
+//!
 //! **Path length** is counted in face steps between voids, each one Voxel
 //! edge, so in metres it is steps times the World's Voxel size. It starts in
 //! the space a source touches (a hot fluid's own voids; a burning solid's
@@ -325,7 +327,7 @@ fn wetness(view: &impl CellView, tables: &Tables, at: Cell, fuel: &Seen) -> Opti
     (!unknown).then_some(false)
 }
 
-/// Whether an extinguishing fluid touches the solid at `at`, as [`evaluate`]
+/// Whether an extinguishing fluid touches the solid at `at`, as fuel evaluation
 /// decides it: terrain nobody holds never counts.
 pub fn is_wet(view: &impl CellView, tables: &Tables, at: Cell) -> bool {
     look(view, tables, at).is_some_and(|seen| wetness(view, tables, at, &seen) == Some(true))
