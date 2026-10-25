@@ -96,6 +96,25 @@ Orange is untrusted and sandboxed. Blue is ours. Dashed grey is third party.
 | **How do Mods work?**         | WASM → WIT contract → asynchronous Wasmtime call → validation → Server-owned **batched** queue → Server tick. Never a direct call into core.                    |
 | **How do Look packs work?**   | WASM cannot put code on the GPU. The pack ships WGSL as an _asset_ and registers it by handle; the host compiles it into a `MaterialExtension`. Hot-reloadable. |
 
+## Mechanics are the engine's, content is the Game's
+
+The engine owns how things behave; a Mod's Declaration says which Materials
+behave that way, and with what numbers. The engine has no lava, wood or mud;
+those are the demo Game's. Water is the one exception: it is a built-in Material
+with a built-in fluid row, because generated lakes and a World with no Game need
+it.
+
+| Behaviour             | The engine decides                                                      | Data that switches it on, and who declares it                    |
+| --------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| A fluid flows         | Spreading, falling, receding and waterlogging, in metres and seconds    | A fluid row: water's is built in, a Mod declares any other       |
+| Water puts out fire   | How touching fuel wets it, puts its fire out and keeps it from igniting | `extinguishes` on the fluid row; water's is built in and set     |
+| Two fluids react      | How a Contact is found and applied whole or not at all                  | A reaction row, from a Mod: the demo's lava and water make stone |
+| Heat sets fuel alight | Exposure through open space, ignition delay, burning and its residue    | A fluid's or a fuel's heat and a combustion row, from a Mod      |
+
+So without a Game, water flows and puts out fire, and nothing else burns or
+reacts. See [ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
+[ADR-0012](adr/0012-mods-declare-once-and-command-in-batches.md).
+
 ## The three invariants this diagram exists to protect
 
 Each of these is a mistake that will not look wrong in review.

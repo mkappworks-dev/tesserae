@@ -43,7 +43,11 @@ Materials and Shapes.
 
 **Voxel** — the atomic unit of world volume. Not "block", not "node".
 
-**Material** — what a Voxel is made of. Stone, water, oak.
+**Material** — what a Voxel is made of. Stone, water, oak. A row of game data:
+the light it emits and the light it dims, which faces it hides, which mesh it is
+drawn in, and whether it is solid. Not its appearance: a Material's colour is a
+placeholder until a Look pack supplies one, and Bevy's `Material` and
+`MaterialExtension`, which shade a surface, are a different thing.
 
 **Shape** — a Voxel's geometry. A full cube, a stair, a slab, a fence. "A stone
 voxel" and "a stone stair" share a Material and differ in Shape, so neither word

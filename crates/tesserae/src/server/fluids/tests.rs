@@ -17,7 +17,9 @@ use super::super::player::Player;
 use super::super::streaming::face_neighbors;
 use super::super::streaming::tests::{Harness, UNLIMITED, lit, same_mesh, small};
 
-const CEILING: Duration = Duration::from_secs(60);
+// A hang detector, not a budget: the slowest test using it takes 14 s on a laptop
+// and ran past 60 s on CI, whose runner is slower and builds dependencies unoptimised.
+const CEILING: Duration = Duration::from_secs(300);
 
 fn stone() -> Voxel {
     Voxel::cube(STONE)
