@@ -19,11 +19,18 @@ each holding a solid, a fluid source, fire or nothing.
 - **Defaults:** stone cube, slab, stair and post, lantern, glass and leaves.
   Then the Game's lake fluid, or else its first declared fluid. Then fire when
   anything burns.
-- **Clicks follow the held slot:**
-  - solid: left breaks, right places;
-  - fluid: left removes a source, right places one;
-  - fire: left puts out, right ignites;
-  - empty: left breaks, right does nothing.
+- **Scrolling** the wheel, or a two-finger swipe on a trackpad, moves the
+  selection one slot at a time and wraps. A trackpad's pixel deltas accumulate
+  to a notch, so one swipe does not skip several slots.
+- **A click places and a right click removes** (spec decision 13, amended on
+  2026-10-25):
+  - solid: click places, right click breaks;
+  - fluid: click places a source, right click removes one;
+  - fire: click ignites, right click puts out;
+  - empty: click does nothing, right click breaks.
+
+  The right click is the secondary button macOS reports, a two-finger tap by
+  default. Nothing waits to tell a double click from a single one.
 - **The Alt modifier goes.** The dev fence is no longer a fixed slot.
 - **The HUD** names the held slot and what each button does with it.
 
@@ -35,6 +42,10 @@ The Client still never reads a Chunk.
       `demo:water` and fire. Given a catalogue with no fluid and no fuel, it
       holds the seven solids and two empty slots. Until ticket 09, a World with
       no Game still has the built-in water.
+- [ ] A click sends the held slot's place intent and a right click its remove
+      intent, each on the press, for every slot kind.
+- [ ] Scrolling one notch either way selects the next or previous slot,
+      wrapping at both ends.
 - [ ] Holding a fluid sends place-source and remove-source intents for that
       fluid. With the demo, water, lava and mud each reach the World as sources
       when placed this way, which is verified at the Server seam.

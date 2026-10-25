@@ -11,6 +11,9 @@ retired and a Mod's Materials still start at 8; a World with no Game is dry
 and `cargo dev` loads the in-repo demo by default; the contract gets a new 0.3
 line. Placing a Mod's solid Materials and a selection menu were added to the
 scope on the same day. Data-only Mods are a later session once this lands.
+After approval, also on 2026-10-25, the user swapped the buttons: a click
+places what the slot holds and a right click removes it. The scroll wheel picks
+a slot too, and the bar can be clicked while the menu is open.
 
 ## Problem Statement
 
@@ -51,8 +54,10 @@ The player places anything the Game declared. The hotbar's slots hold one of
 three things: a solid (a Material in a Shape), a source of a declared fluid, or
 fire. An engine menu lists every declared solid Material, every Shape, every
 declared fluid and fire, and picking an entry puts it in the selected slot.
-Fire ignites declared fuel and puts burning out. Every action goes to the
-Server as intent and is decided by the Server's existing rules. A Mod on the
+A click places what the selected slot holds, and a right click removes. Fire
+ignites declared fuel on a click and puts burning out on a right click. Every
+action goes to the Server as intent and is decided by the Server's existing
+rules. A Mod on the
 new 0.3 contract line sees a player's ignitions and put-outs as it already sees
 their solid and source Edits.
 
@@ -102,16 +107,18 @@ their solid and source Edits.
     entry's name and placeholder colour, so that I can find it without knowing
     ids.
 20. As a player, I want picking an entry in the menu to put it in the hotbar
-    slot I have selected, so that keys 1 to 9 stay a fast way to switch.
+    slot I have selected, so that keys 1 to 9 and the scroll wheel stay fast
+    ways to switch.
 21. As a player, I want the menu to free the cursor while it is open and grab it
     back when it closes, so that I can click entries and then return to
     building.
 22. As a player, I want the hotbar to start with useful defaults: the built-in
     solids, the Game's lake fluid or first declared fluid, and fire when
     anything burns, so that a new World is playable without opening the menu.
-23. As a player, I want left and right click to mean what the held slot is,
-    break and place for a solid, remove and place for a fluid, put out and
-    ignite for fire, so that one modifier key is not needed for every tool.
+23. As a player, I want a single click to place what I hold, a solid, a fluid
+    source or fire, and a right click (a two-finger tap on a trackpad) to
+    break, remove the source or put the fire out, so that building takes one
+    click and no modifier key.
 24. As a player, I want the HUD to name what each slot holds and what the
     buttons do with it, so that I always know what a click will do.
 25. As a player in a World with no Game, I want the menu to offer only the
@@ -231,9 +238,10 @@ their solid and source Edits.
     and whether turning it changes anything (not a full cube, not connected).
     The catalogue is read-only content, not World state: the Client still never
     reads a Chunk (ADR-0002).
-12. **The hotbar is data.** It has nine slots on keys 1 to 9 in every build. A
-    slot holds a solid (Material, Shape, Orientation), a fluid source (a
-    Material), fire, or nothing.
+12. **The hotbar is data.** It has nine slots on keys 1 to 9 in every build.
+    The scroll wheel, or a two-finger swipe on a trackpad, moves the selection
+    one slot at a time and wraps. A slot holds a solid (Material, Shape,
+    Orientation), a fluid source (a Material), fire, or nothing.
     - **Defaults:** stone cube, stone slab, stone stair, stone post, lantern,
       glass and leaves. Then the Game's lake fluid, or else its first declared
       fluid. Then fire when any combustion row exists. Any slot left over is
@@ -241,14 +249,17 @@ their solid and source Edits.
     - The dev Server's reference fence is no longer a slot of its own: it is a
       registered Shape like any other, picked from the menu.
     - Q and E still turn and flip a held solid.
-13. **Clicks follow the held slot, and the Alt modifier goes.**
+13. **A click places, a right click removes, and the Alt modifier goes.** A
+    right click is whatever macOS reports as the secondary button, a
+    two-finger tap by default. Neither action waits to tell a double click
+    from a single one.
 
-    | Held slot  | Left click         | Right click       |
-    | ---------- | ------------------ | ----------------- |
-    | Solid      | break              | place             |
-    | Fluid      | remove a source    | place a source    |
-    | Fire       | put out            | ignite            |
-    | Empty      | break              | nothing           |
+    | Held slot  | Click             | Right click        |
+    | ---------- | ----------------- | ------------------ |
+    | Solid      | place             | break              |
+    | Fluid      | place a source    | remove a source    |
+    | Fire       | ignite            | put out            |
+    | Empty      | nothing           | break              |
 
     The HUD names the held slot and these two actions.
 14. **The picker menu.** It is engine Client UI, opened and closed with Tab. While
@@ -259,7 +270,8 @@ their solid and source Edits.
     - fire, when anything burns.
 
     Each entry shows its full name and its placeholder colour. Choosing one puts
-    it in the selected slot. Escape closes the menu too. The Game decides
+    it in the selected slot. While the menu is open, clicking a hotbar slot
+    selects it. Escape closes the menu too. The Game decides
     nothing about the menu.
 15. **Ignite and put out on the wire.** The edit intent gains two actions,
     ignite and put out. Both carry the same ray in metres as every other intent
@@ -320,9 +332,9 @@ These are the seams, highest first. No new seam is introduced.
    the waterline and coarse under-water light reading the lake fluid.
 5. **The Client's input:** key and button input with a catalogue in, then the
    sent edit intents and the HUD text out. These are the existing hotbar tests
-   that run the Client systems headlessly. They cover the defaults, picking from
-   the menu into a slot, clicks per slot kind and the menu holding back edits
-   while it is open.
+   that run the Client systems headlessly. They cover the defaults, scrolling
+   between slots, picking from the menu into a slot, clicks per slot kind and
+   the menu holding back edits while it is open.
 6. **Loader options:** arguments, environment and paths in, then the chosen
    directory and Trust mode out, as the existing option resolution tests do.
    They cover the dev demo default, an explicit directory winning and release

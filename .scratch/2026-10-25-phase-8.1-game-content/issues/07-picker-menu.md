@@ -15,7 +15,8 @@ closing it grabs the cursor again. It lists, from the content catalogue:
 - fire, when anything burns.
 
 Each entry shows its full name and its placeholder colour. Choosing one puts it
-in the selected hotbar slot, which then behaves as ticket 06 describes. The
+in the selected hotbar slot, which then behaves as ticket 06 describes. While
+the menu is open, clicking a slot in the hotbar selects it. The
 Game has no say over the menu. It is engine UI drawn with Bevy's UI.
 
 ## Acceptance criteria
@@ -28,6 +29,8 @@ Game has no say over the menu. It is engine UI drawn with Bevy's UI.
       and Shapes only, with no fluid section and no fire.
 - [ ] Choosing an entry fills the selected slot. The next click sends that
       slot's intent once the menu is closed.
+- [ ] Clicking a hotbar slot while the menu is open selects it, so the next
+      entry chosen fills that slot.
 - [ ] No edit intent is sent and the camera does not turn while the menu is
       open.
 - [ ] Placing a declared solid chosen from the menu is accepted by the Server
