@@ -1,3 +1,5 @@
+Superseded by [spec.md](./spec.md); kept as the record of how phase 8 was planned.
+
 # Step 8: fluid simulation investigation
 
 Planning in progress. These notes distinguish agreed scope from open choices;
