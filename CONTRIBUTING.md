@@ -130,25 +130,27 @@ cargo run -p tesserae --features dev
 ```
 
 `--features dev` adds shader hot-reloading; without it the command still runs,
-and a shader edit then needs a restart. A window opens on nine Chunks of terrain
-you can fly around.
+and a shader edit then needs a restart. A window opens on a generated World you
+can fly around and edit. No Game is loaded unless you pass one; see
+[Running the demo Game](#running-the-demo-game).
 
 **Controls:**
 
-| key                   | does                                                   |
-| --------------------- | ------------------------------------------------------ |
-| click                 | grab the cursor — mouse look does nothing until you do |
-| `Esc`                 | release the cursor                                     |
-| mouse                 | look                                                   |
-| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away  |
-| `Space` / `Left Ctrl` | up and down                                            |
-| `Shift`               | sprint, 5x                                             |
-| scroll                | movement speed, 0.5 to 64 m/s                          |
-| `R`                   | back to the spawn point                                |
-| left click            | break the block under the crosshair (cursor grabbed)   |
-| right click           | place the held block against the face you are aimed at |
-| `1` to `5`            | hold stone, slab, stair, post or lantern               |
-| `Q` / `E`             | turn the held shape a quarter / flip which way is up   |
+| key                   | does                                                           |
+| --------------------- | -------------------------------------------------------------- |
+| click                 | grab the cursor — mouse look does nothing until you do         |
+| `Esc`                 | release the cursor                                             |
+| mouse                 | look                                                           |
+| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away          |
+| `Space` / `Left Ctrl` | up and down                                                    |
+| `Shift`               | sprint, 5x                                                     |
+| scroll                | movement speed, 0.5 to 64 m/s                                  |
+| `R`                   | back to the spawn point                                        |
+| left click            | break the block under the crosshair (cursor grabbed)           |
+| right click           | place the held block against the face you are aimed at         |
+| `1` to `8`            | hold stone, slab, stair, post, lantern, glass, leaves or water |
+| `9`                   | hold a stone fence (`dev` builds only)                         |
+| `Q` / `E`             | turn the held shape a quarter / flip which way is up           |
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.
@@ -218,15 +220,45 @@ the benches but does not measure them — a regression is a human judgement.
 Install the guest target with `rustup target add wasm32-wasip2`, then run
 `./scripts/build-guests` from the repository root to build the independent test
 guests and MIT demo. The demo component and Manifest are copied to
-`games/demo/dist/demo/`; run it with
-`cargo run -p tesserae -- --mods games/demo/dist --trust-all` for an explicit
-unattended trust grant, or omit `--trust-all` to review the terminal prompt.
-Guest edits need a rebuild and World reopen; runtime Mod reload is deferred.
+`games/demo/dist/demo/`; [run it](#running-the-demo-game) with `--trust-all` for
+an explicit unattended trust grant, or omit `--trust-all` to review the terminal
+prompt. Guest edits need a rebuild and World reopen; runtime Mod reload is
+deferred.
 
 The host API is deliberately **batched**: region operations and a command queue,
 not per-voxel calls. Crossing the WASM boundary copies, so call frequency — not
 throughput — is what costs. See [ADR-0001](docs/adr/0001-wasm-mod-boundary.md)
 before adding a host function.
+
+### Running the demo Game
+
+```bash
+rustup target add wasm32-wasip2   # once
+./scripts/build-guests            # after every change under games/
+cargo dev -- --mods games/demo/dist --trust-all
+```
+
+`cargo dev` keeps the `dev` tools; `cargo run -p tesserae -- …` runs the same
+Game without them. In a `dev` build, `TESSERAE_VOXEL_SIZE_M` opens the World at
+1.0 (the default), 0.5 or 0.25 m, and the demo builds the same scenes in metres
+at each:
+
+```bash
+TESSERAE_VOXEL_SIZE_M=0.25 cargo dev -- --mods games/demo/dist --trust-all
+```
+
+On its first tick the demo builds its scenes in a row along x, 7 m from spawn
+toward −z and below the Eye; look down to find them. Once the build has landed:
+
+| where (x, in metres) | what plays out                                                                                                                     |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| −4 to 3              | a wall with lava spilling over its sides, beside a lantern post                                                                    |
+| 6 to 20              | a beam: mud meets lava and fires to brick, water meets it and cools it to stone; water runs through a fence, a top slab and a post |
+| 22                   | a waterfall down a pillar, whose source is taken away after 24 s and which then drains                                             |
+| −17 to −10           | lit wood that ignites the wood a metre away and its stair, while a stone wall keeps the fire from the wood behind it               |
+| −25 to −20           | a burning post that water is poured on after 4 s                                                                                   |
+
+To start again, restart the app: the World is regenerated, and nothing is saved.
 
 ## Planning Workflow (Claude Code)
 

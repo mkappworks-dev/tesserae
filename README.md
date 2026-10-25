@@ -3,22 +3,25 @@
 A high-performance, moddable voxel engine. Rust, Bevy 0.20, macOS first.
 
 Tesserae ships no gameplay. A **Game** is a Mod with a root manifest, built on
-the engine and living outside this repository.
+the engine and living outside this repository. The one exception is the MIT demo
+Game in `games/demo/`, the starting point for writing your own.
 
 ## Status: early, and not usable for anything yet
 
-Step **2 of 10** in [DESIGN.md](DESIGN.md)'s build order. `cargo run` opens a
-window on nine Chunks of test terrain you can fly around. That is all it does.
+Step **8 of 10** in [DESIGN.md](DESIGN.md)'s build order. `cargo run` opens a
+streamed, generated World you can fly around and edit; the demo Game adds
+flowing water, lava and fire to it.
 
-| works today                                 | not written yet                                  |
-| ------------------------------------------- | ------------------------------------------------ |
-| Palette-compressed 32³ Chunk storage        | World generation — the terrain is a test fixture |
-| Greedy mesher, ~360 µs per terrain Chunk    | Chunk streaming, and the client/server split     |
-| PBR shading, directional light, shadow maps | Per-voxel light propagation                      |
-| Fly camera                                  | Non-cube Shapes: stairs, slabs, fences           |
-|                                             | LOD, and the 4km view distance it is for         |
-| &nbsp;                                      | WASM mods, the WIT contract, look packs          |
-|                                             | Fluids, collision, network play                  |
+| works today                                           | not written yet              |
+| ----------------------------------------------------- | ---------------------------- |
+| Palette-compressed 32³ Chunks, greedy mesher          | Look packs and water shading |
+| Worldgen with caves, Chunk streaming                  | Network play                 |
+| Client/server split, the Server in-process            | Saves                        |
+| Per-Voxel light, PBR shading, shadow maps             |                              |
+| Shapes: stairs, slabs, fences, with collision         |                              |
+| LOD out to 4 km                                       |                              |
+| Sandboxed WASM Mods through a WIT contract            |                              |
+| Fluids that flow and waterlog Shapes, fuel that burns |                              |
 
 The right-hand column is the roadmap, not a feature list. Nothing in it works.
 
@@ -42,6 +45,18 @@ assets; note that `cargo run -p tesserae dev` is **not** the same thing — that
 passes `dev` to the binary as an argument and leaves the feature off. Controls,
 and what each kind of edit costs to rebuild, are in
 [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
+
+On its own that loads no Game. To run the demo, which plays out water, lava, a
+second fluid and fire beside spawn:
+
+```bash
+rustup target add wasm32-wasip2   # once
+./scripts/build-guests            # after every change under games/
+cargo dev -- --mods games/demo/dist --trust-all
+```
+
+What the demo shows, and how to run it at another Voxel size, is in
+[CONTRIBUTING.md](CONTRIBUTING.md#running-the-demo-game).
 
 ```bash
 cargo fmt --all && npm run fmt
