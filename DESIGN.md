@@ -477,6 +477,26 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    itself. A quota bounds work, not time. Evidence: tickets 09 and 11 of
    `.scratch/2026-10-22-phase-8-fluid-simulation/`, which the MIT demo exercises
    at all three sizes.
+
+   **Step 8.1: water is Game content, and the player places anything declared.
+   Done.** The engine builds in no fluid: the built-in Materials are ids 0 to 6,
+   id 7 is retired and never reused, a Mod's Materials still start at 8, and a
+   World with no Game is dry
+   ([ADR-0015](docs/adr/0015-water-is-game-content.md)). A Game's lakes name
+   their fluid in contract line 0.3, which 0.2 and 0.1 components reach through
+   adapters; a 0.2 Game that asks for standing water opens dry with a warning.
+   The demo declares `demo:water` and lakes at 25.5 m, clear of its stage. A
+   player ignites fuel and puts fire out through the Edit path, under the same
+   rules and messages as a Mod's Commands, and a 0.3 Mod sees both as Edits. The
+   hotbar is built from a content catalogue the Server publishes, and a Tab menu
+   puts any declared solid in any of its Shapes, any fluid or fire into a slot.
+   `cargo dev` loads the in-repo demo once it is built, trusted for that run
+   only. Against main, interleaved thread-CPU-time runs put the meshing,
+   collide, LOD and fluids benches within noise; the one steady outlier,
+   `greedy_mesh/terrain_water` at +7%, is code layout, since its mesher is
+   unchanged and the same water at id 7 and id 8 costs the same in one binary.
+   Evidence: `.scratch/2026-10-25-phase-8.1-game-content/`.
+
 9. Look-pack API, water shading, visual polish.
 10. Network transport. The `Player` and `PoseReport` are its first customers.
 
@@ -588,6 +608,19 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   none. A fluid is not solid to a body or the edit ray (`MaterialDef::solid`),
   and leaves are cut out on a pass of their own. The Client's hotbar is a
   stopgap.
+- **Data-only Mods are the agreed next session.** A Declaration read from a data
+  file beside `mod.toml`, with no component, through the same validation path.
+  Most of a Game's `declare` is data, and since step 8.1 the demo carries more
+  of it. A guest SDK crate was the alternative, and would amend
+  [ADR-0004](docs/adr/0004-demo-game-in-repo-real-game-out.md)'s boundary for
+  the demo.
+- **Step 8.1 left these untested or unmeasured.** A trackpad's scroll adds up to
+  one hotbar slot per 100 px (`PIXELS_PER_NOTCH`), a guess never tried on
+  hardware. With its lakes the demo's burning row at 1 m shows at 13 s what a
+  World without them shows at 12 s, and the two agree by 40 s; the gallery makes
+  no difference. Generated lakes are rescanned once as their Chunks arrive,
+  under the same Agenda quota as everything else, which is the likely reason the
+  first fuel evaluations wait. No rule changes; a quota bounds work, not time.
 - **The Player's pose is rate-limited, not true.** The Server clamps a pose that
   moves faster than `PlayerLimits` and tells the Client, but flying is the only
   way to move, so a modified Client can still fly at the cap and edit within
