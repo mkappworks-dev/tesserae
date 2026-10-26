@@ -256,7 +256,7 @@ pub(super) fn plugin(app: &mut App) {
             capture_holding,
             menu_view
                 .after(super::menu::rebuild_bar)
-                .before(super::menu::highlight_tiles),
+                .before(super::menu::drag_preview),
             watch_frames,
             aim,
             fly_forward,

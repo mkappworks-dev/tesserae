@@ -5,7 +5,8 @@
 //! nothing: both already wait on a grabbed cursor.
 
 use bevy::picking::events::{
-    PointerDragDrop, PointerDragEnd, PointerDragStart, PointerOut, PointerOver, PointerPress,
+    PointerDrag, PointerDragDrop, PointerDragEnd, PointerDragStart, PointerOut, PointerOver,
+    PointerPress,
 };
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
@@ -116,11 +117,15 @@ struct ShapePanel;
 pub(super) struct PlayBarRoot;
 #[derive(Component)]
 struct HeldName;
+#[derive(Component)]
+pub(super) struct DragPreview;
 
 #[derive(Resource, Default)]
 pub(super) struct PointerState {
     pub(super) hovered: Option<Entry>,
     drag: Option<Entry>,
+    dragged: Option<Holding>,
+    cursor: Vec2,
     suppress_click: bool,
 }
 
@@ -128,11 +133,13 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Menu>()
         .init_resource::<Swatches>()
         .init_resource::<PointerState>()
+        .init_resource::<UiScale>()
         .add_observer(choose)
         .add_observer(hover)
         .add_observer(unhover)
         .add_observer(press)
         .add_observer(drag_start)
+        .add_observer(drag_move)
         .add_observer(drag_end)
         .add_observer(drop_on_slot)
         .add_systems(
@@ -145,6 +152,7 @@ pub(super) fn plugin(app: &mut App) {
                 rebuild.after(super::edit::send_intents),
                 rebuild_shapes,
                 rebuild_bar,
+                drag_preview,
                 highlight_tiles,
             )
                 .chain(),
@@ -158,12 +166,15 @@ fn toggle(
     keys: Res<ButtonInput<KeyCode>>,
     mut menu: ResMut<Menu>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+    mut pointer: ResMut<PointerState>,
 ) {
     let tab = keys.just_pressed(KeyCode::Tab);
     let escape = keys.just_pressed(KeyCode::Escape) && menu.open;
     if !tab && !escape {
         return;
     }
+    pointer.drag = None;
+    pointer.dragged = None;
     let open = tab && !menu.open;
     let grab = tab && menu.open;
     *menu = Menu {
@@ -255,6 +266,7 @@ fn drag_start(
     event: On<PointerDragStart>,
     entries: Query<&Entry>,
     menu: Res<Menu>,
+    hotbar: Res<Hotbar>,
     mut state: ResMut<PointerState>,
 ) {
     if menu.open
@@ -262,12 +274,26 @@ fn drag_start(
         && let Ok(&entry) = entries.get(event.entity)
     {
         state.drag = Some(entry);
+        state.dragged = match entry {
+            Entry::Slot(slot) => Some(hotbar.slots[slot]),
+            item => item.holding(),
+        };
+        state.cursor = event.pointer.position;
         state.suppress_click = true;
     }
 }
-fn drag_end(_event: On<PointerDragEnd>, mut state: ResMut<PointerState>) {
-    state.drag = None;
+fn drag_move(event: On<PointerDrag>, mut state: ResMut<PointerState>) {
+    if event.button == PointerButton::Primary && state.drag.is_some() {
+        state.cursor = event.pointer.position;
+    }
 }
+fn drag_end(event: On<PointerDragEnd>, mut state: ResMut<PointerState>) {
+    if event.button == PointerButton::Primary {
+        state.drag = None;
+        state.dragged = None;
+    }
+}
+
 fn drop_on_slot(
     event: On<PointerDragDrop>,
     entries: Query<&Entry>,
@@ -293,6 +319,8 @@ fn drop_on_slot(
                 }
             }
         }
+        state.drag = None;
+        state.dragged = None;
         state.suppress_click = true;
     }
 }
@@ -640,6 +668,54 @@ fn menu_choices(
     }
 }
 
+pub(super) fn drag_preview(
+    mut commands: Commands,
+    menu: Res<Menu>,
+    pointer: Res<PointerState>,
+    scale: Res<UiScale>,
+    mut previews: Query<(Entity, &mut Node, &super::tile_preview::TilePreview), With<DragPreview>>,
+) {
+    let held = menu
+        .open
+        .then_some(pointer.dragged)
+        .flatten()
+        .filter(|held| *held != Holding::Empty);
+    let position = pointer.cursor / scale.0 - Vec2::splat(32.0);
+    for (entity, mut node, item) in &mut previews {
+        if held == Some(item.0) {
+            if node.left != Val::Px(position.x) {
+                node.left = Val::Px(position.x);
+            }
+            if node.top != Val::Px(position.y) {
+                node.top = Val::Px(position.y);
+            }
+            return;
+        }
+        commands.entity(entity).despawn();
+    }
+    if let Some(held) = held {
+        commands.spawn((
+            DragPreview,
+            super::tile_preview::TilePreview(held),
+            ImageNode {
+                color: Color::srgba(1.0, 1.0, 1.0, 0.9),
+                ..default()
+            },
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(position.x),
+                top: Val::Px(position.y),
+                width: Val::Px(64.0),
+                height: Val::Px(64.0),
+                ..default()
+            },
+            GlobalZIndex(100),
+            Visibility::Hidden,
+            Pickable::IGNORE,
+        ));
+    }
+}
+
 pub(super) fn highlight_tiles(
     menu: Res<Menu>,
     pointer: Res<PointerState>,
@@ -652,7 +728,10 @@ pub(super) fn highlight_tiles(
         } else {
             Color::srgb(0.06, 0.07, 0.08)
         };
-        let edge = if tile.selected {
+        let drop_target = hovered && pointer.drag.is_some() && matches!(entry, Entry::Slot(_));
+        let edge = if drop_target {
+            Color::srgb(0.35, 1.0, 0.65)
+        } else if tile.selected {
             Color::WHITE
         } else if hovered {
             Color::srgb(1.0, 0.8, 0.35)
@@ -862,6 +941,7 @@ mod tests {
         .init_resource::<Hotbar>()
         .init_resource::<PointerState>()
         .init_resource::<Catalogue>()
+        .init_resource::<UiScale>()
         .init_resource::<ButtonInput<KeyCode>>()
         .add_message::<MouseWheel>()
         .add_observer(choose)
@@ -869,6 +949,7 @@ mod tests {
         .add_observer(unhover)
         .add_observer(press)
         .add_observer(drag_start)
+        .add_observer(drag_move)
         .add_observer(drag_end)
         .add_observer(drop_on_slot);
         app.world_mut()
@@ -960,6 +1041,166 @@ mod tests {
             Holding::solid(23, 0)
         );
     }
+    #[test]
+    fn dragging_carries_the_actual_model_with_the_cursor_and_updates_the_slot_on_drop() {
+        use crate::content::CatalogueMaterial;
+        use tesserae_core::{Orientation, SHAPE_STAIR};
+        let turned = Holding::Solid {
+            material: 23,
+            shape: SHAPE_STAIR,
+            orientation: Orientation::IDENTITY.turned(),
+        };
+        for (source, expected, scale, first, moved) in [
+            (
+                Entry::Material(23),
+                Holding::solid(23, 0),
+                1.0,
+                Vec2::new(88.0, 148.0),
+                Vec2::new(388.0, 328.0),
+            ),
+            (
+                Entry::Slot(0),
+                turned,
+                1.5,
+                Vec2::new(48.0, 88.0),
+                Vec2::new(248.0, 208.0),
+            ),
+        ] {
+            let mut app = app();
+            app.world_mut().resource_mut::<UiScale>().0 = scale;
+            app.world_mut().resource_mut::<Hotbar>().slots[0] = turned;
+            app.world_mut()
+                .resource_mut::<Catalogue>()
+                .0
+                .materials
+                .push(CatalogueMaterial {
+                    id: 23,
+                    name: "test:block".into(),
+                    solid: true,
+                    fluid: None,
+                    burns: false,
+                });
+            app.add_systems(Update, (rebuild, drag_preview, highlight_tiles).chain());
+            app.update();
+            let find = |app: &mut App, wanted| {
+                app.world_mut()
+                    .query::<(Entity, &Entry)>()
+                    .iter(app.world())
+                    .find(|(_, entry)| **entry == wanted)
+                    .unwrap()
+                    .0
+            };
+            let source = find(&mut app, source);
+            let mut cursor = pointer();
+            cursor.position = Vec2::new(120.0, 180.0);
+            app.world_mut().trigger(PointerDragStart {
+                entity: source,
+                pointer: cursor.clone(),
+                button: PointerButton::Primary,
+                hit: hit(),
+            });
+            app.update();
+            let preview = app
+                .world_mut()
+                .query_filtered::<Entity, With<DragPreview>>()
+                .single(app.world())
+                .unwrap();
+            let node = app.world().get::<Node>(preview).unwrap();
+            assert_eq!((node.left, node.top), (Val::Px(first.x), Val::Px(first.y)));
+            assert_eq!(
+                app.world()
+                    .get::<super::super::tile_preview::TilePreview>(preview)
+                    .unwrap()
+                    .0,
+                expected
+            );
+            assert_eq!(
+                *app.world().get::<Pickable>(preview).unwrap(),
+                Pickable::IGNORE
+            );
+            cursor.position = Vec2::new(420.0, 360.0);
+            app.world_mut().trigger(PointerDrag {
+                entity: source,
+                pointer: cursor.clone(),
+                button: PointerButton::Primary,
+                distance: Vec2::new(300.0, 180.0),
+                delta: Vec2::new(300.0, 180.0),
+            });
+            app.update();
+            let node = app.world().get::<Node>(preview).unwrap();
+            assert_eq!((node.left, node.top), (Val::Px(moved.x), Val::Px(moved.y)));
+            let target = find(&mut app, Entry::Slot(4));
+            app.world_mut().trigger(PointerOver {
+                entity: target,
+                pointer: cursor.clone(),
+                hit: hit(),
+            });
+            app.update();
+            assert_eq!(
+                *app.world().get::<BorderColor>(target).unwrap(),
+                BorderColor::all(Color::srgb(0.35, 1.0, 0.65))
+            );
+            app.world_mut().trigger(PointerDragDrop {
+                entity: target,
+                dropped: source,
+                pointer: cursor,
+                button: PointerButton::Primary,
+                hit: hit(),
+            });
+            app.update();
+            assert!(app.world().resource::<Menu>().open);
+            assert_eq!(app.world().resource::<Hotbar>().slots[4], expected);
+            assert_eq!(
+                app.world_mut()
+                    .query::<&DragPreview>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+            let target = find(&mut app, Entry::Slot(4));
+            assert!(
+                app.world_mut()
+                    .query::<(&ChildOf, &super::super::tile_preview::TilePreview)>()
+                    .iter(app.world())
+                    .any(|(parent, item)| parent.parent() == target && item.0 == expected)
+            );
+        }
+    }
+
+    #[test]
+    fn closing_the_menu_cancels_the_drag_model() {
+        let mut app = app();
+        app.add_systems(Update, drag_preview);
+        let item = app.world_mut().spawn(Entry::Material(23)).id();
+        app.world_mut().trigger(PointerDragStart {
+            entity: item,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            hit: hit(),
+        });
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&DragPreview>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        app.world_mut().run_system_once(toggle).unwrap();
+        app.update();
+        assert!(app.world().resource::<PointerState>().drag.is_none());
+        assert_eq!(
+            app.world_mut()
+                .query::<&DragPreview>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+    }
+
     #[test]
     fn hover_highlights_items_and_restores_the_selected_slot_on_exit() {
         let mut app = app();

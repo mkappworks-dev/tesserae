@@ -31,7 +31,7 @@ struct Atlas {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Atlas>()
-        .add_systems(Update, update.after(super::menu::rebuild_bar));
+        .add_systems(Update, update.after(super::menu::drag_preview));
 }
 
 fn key(holding: Holding) -> (u8, u16, u8, u8) {
