@@ -1,9 +1,9 @@
-use tesserae_core::testgen::fixtures;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::{Arc, OnceLock};
 use tesserae_core::light::{Light, MAX_LIGHT, light_chunk};
 use tesserae_core::shape::examples::{FENCE_ID, fence, pipe};
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, LitChunk, MAX_SHAPED_PER_CHUNK, Neighborhood, Orientation,
     SHAPE_STAIR, ShapeDef, ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, greedy_mesh,
@@ -150,7 +150,8 @@ fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
                     (0..CHUNK_SIZE).any(|y| {
                         (0..CHUNK_SIZE).any(|x| {
                             with.get(x, y, z).is_air()
-                                && without.get(x, y, z).material() == tesserae_core::testgen::fixtures().ground.surface
+                                && without.get(x, y, z).material()
+                                    == tesserae_core::testgen::fixtures().ground.surface
                         })
                     })
                 });
@@ -196,7 +197,6 @@ fn fence_tables() -> &'static Tables {
 /// than a Chunk is allowed to hold once `n` passes `MAX_SHAPED_PER_CHUNK`.
 fn terrain_with_stairs(n: usize) -> Chunk {
     let fixture_ground = fixtures().ground;
-    let fixture_rock = fixtures().ground.rock;
     let mut chunk = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     let mut placed = 0;
     'columns: for z in 0..CHUNK_SIZE {
@@ -287,7 +287,6 @@ fn glass_room() -> Chunk {
 /// would be, where neighbours at the same height grow arms towards each other.
 fn terrain_with_fences(n: usize) -> Chunk {
     let fixture_ground = fixtures().ground;
-    let fixture_rock = fixtures().ground.rock;
     let mut chunk = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     let mut placed = 0;
     'columns: for z in 0..CHUNK_SIZE {
@@ -328,7 +327,6 @@ fn flat_fences(n: usize) -> Chunk {
 
 fn mesher(c: &mut Criterion) {
     let fixture_ground = fixtures().ground;
-    let fixture_rock = fixtures().ground.rock;
     let mut group = c.benchmark_group("greedy_mesh");
 
     let sky = open_sky();

@@ -29,18 +29,18 @@ did.
 
 ## Acceptance criteria
 
-- [ ] Each fixture registers like any Mod Material, at the next free id, with
+- [x] Each fixture registers like any Mod Material, at the next free id, with
       the row the built-in has today. No fixture has a fixed id, and nothing
       outside tests and benches calls them.
-- [ ] A test pins each fixture's row against the numbers in the spec, not
+- [x] A test pins each fixture's row against the numbers in the spec, not
       against the built-in row.
-- [ ] No `tesserae-core` test or bench names a built-in solid constant, except
+- [x] No `tesserae-core` test or bench names a built-in solid constant, except
       the sites listed in the Comments with the ticket that moves each.
-- [ ] Every assertion that depended on a built-in id asserts on the fixture's
+- [x] Every assertion that depended on a built-in id asserts on the fixture's
       id, never on a literal.
-- [ ] The meshing, light, LOD, collide and fluids benches register the
+- [x] The meshing, light, LOD, collide and fluids benches register the
       fixtures and build the same Chunks as before.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -63,3 +63,9 @@ The testgen solid re-exports remain for production callers until migration.
 
 Formatting, review and full CI are deferred to the end of the phase at the
 user's request on 2026-10-26. Acceptance checks will be recorded there.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

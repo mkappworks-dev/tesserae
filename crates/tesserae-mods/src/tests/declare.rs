@@ -141,9 +141,7 @@ fn the_built_ins_are_ids_0_to_6_and_7_is_never_listed() {
     let builtin = Registry::builtin();
     assert_eq!(
         builtin.names(Kind::Material).collect::<Vec<_>>(),
-        [
-            (0, "core:air"),
-        ]
+        [(0, "core:air"),]
     );
     assert_eq!(builtin.len(Kind::Material), 8);
     assert_eq!(builtin.id_of(Kind::Material, ""), None);
@@ -357,7 +355,7 @@ fn a_bad_row_after_a_good_one_registers_nothing_of_its_names() {
     let mut load = Load::new();
     load.apply("a", declaring(&["ok", "Bad"], &[])).unwrap_err();
     assert_eq!(load.tables.materials.len(), 8);
-    assert_eq!(names(&load.registry, Kind::Material).len(), 7);
+    assert_eq!(names(&load.registry, Kind::Material).len(), 1);
 }
 
 #[test]
@@ -527,7 +525,16 @@ fn the_reach_is_checked_in_metres() {
 #[test]
 fn the_engines_default_world_converts_and_validates() {
     let (back, lake) = crate::convert::world_params(crate::convert::engine_world_params());
-    assert_eq!((back, lake), (WorldgenParams { ground: None, ..WorldgenParams::default() }, None));
+    assert_eq!(
+        (back, lake),
+        (
+            WorldgenParams {
+                ground: None,
+                ..WorldgenParams::default()
+            },
+            None
+        )
+    );
     assert_eq!(back.validate(), Ok(()));
 }
 

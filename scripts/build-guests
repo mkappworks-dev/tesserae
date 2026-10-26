@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Builds test guests to target/guests and the demo Game to games/demo/dist.
 #
-# Each guest is its own workspace (the root excludes the directory), so each
-# gets its own target dir inside it and only the finished component is copied
-# out.
+# Cargo may use a shared target directory; metadata locates the artifact
+# under either layout before the finished component is copied out.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -18,11 +17,15 @@ for dir in "$guests"/*/; do
   # of wit-bindgen's generated code.
   RUSTFLAGS= cargo build --manifest-path "$dir/Cargo.toml" \
     --target wasm32-wasip2 --release --locked
-  cp "$dir/target/wasm32-wasip2/release/${name//-/_}.wasm" "$out/$name.wasm"
+  guest_target=$(cargo metadata --manifest-path "$dir/Cargo.toml" --no-deps \
+    --format-version 1 | jq -r .target_directory)
+  cp "$guest_target/wasm32-wasip2/release/${name//-/_}.wasm" "$out/$name.wasm"
 done
 
 RUSTFLAGS= cargo build --manifest-path games/demo/Cargo.toml \
   --target wasm32-wasip2 --release --locked
 mkdir -p games/demo/dist/demo
-cp games/demo/target/wasm32-wasip2/release/demo.wasm games/demo/dist/demo/
+demo_target=$(cargo metadata --manifest-path games/demo/Cargo.toml --no-deps \
+  --format-version 1 | jq -r .target_directory)
+cp "$demo_target/wasm32-wasip2/release/demo.wasm" games/demo/dist/demo/
 cp games/demo/mod.toml games/demo/dist/demo/

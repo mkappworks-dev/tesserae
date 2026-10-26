@@ -1,8 +1,8 @@
-use crate::testgen::fixtures;
 use super::*;
 use crate::agenda::Agenda;
 use crate::fluid::FluidDef;
-use crate::testgen::{WATER_FLUID};
+use crate::testgen::WATER_FLUID;
+use crate::testgen::fixtures;
 use std::sync::OnceLock;
 
 fn fixture() -> &'static (Tables, MaterialId) {
@@ -369,7 +369,11 @@ fn the_scale_turns_metres_and_metres_per_second_into_voxels_and_steps() {
         }
         assert_eq!(reach as f32 * v, 7.0, "reach is metres at {v} m");
     }
-    assert!(FlowScale::new(&tables, 1.0).get(fixtures().ground.rock).is_none());
+    assert!(
+        FlowScale::new(&tables, 1.0)
+            .get(fixtures().ground.rock)
+            .is_none()
+    );
 }
 
 /// Reach is metres of path, surfaces fall away from the source, and the
@@ -739,8 +743,12 @@ fn solids_block_flow_and_a_source_placed_on_flow_is_the_only_new_source() {
 /// and nothing rises above the waterline.
 #[test]
 fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
-    use crate::worldgen::{Worldgen, WorldgenParams};
-    let generator = Worldgen::new(7, 1.0, WorldgenParams::default().with_default_lake(water()));
+    use crate::worldgen::Worldgen;
+    let generator = Worldgen::new(
+        7,
+        1.0,
+        crate::testgen::world_params().with_default_lake(water()),
+    );
     let level = generator.water().expect("the World has a lake").level_m as i32;
     let tables = tables();
     let size = CHUNK_SIZE as i32;
@@ -1017,7 +1025,11 @@ mod waterlogging {
     use crate::{SHAPE_SLAB, SHAPE_STAIR};
 
     fn slab(up: usize) -> Voxel {
-        Voxel::new(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(up, 0).bits())
+        Voxel::new(
+            fixtures().ground.rock,
+            SHAPE_SLAB,
+            Orientation::new(up, 0).bits(),
+        )
     }
 
     fn stair(turn: u8) -> Voxel {
@@ -1865,7 +1877,13 @@ mod reactions {
     #[test]
     fn a_sealed_face_is_no_contact() {
         let (tables, slime) = dissolving();
-        let stair = |turn| Voxel::new(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits());
+        let stair = |turn| {
+            Voxel::new(
+                fixtures().ground.rock,
+                SHAPE_STAIR,
+                Orientation::new(POS_Y, turn).bits(),
+            )
+        };
         let sealed = (0..4)
             .map(stair)
             .find(|&v| tables.shapes.seals(v, POS_X))
@@ -1902,7 +1920,13 @@ mod reactions {
             .register_reaction(rule(water(), slime, Some(ash)))
             .unwrap();
         let stair = (0..4)
-            .map(|turn| Voxel::new(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits()))
+            .map(|turn| {
+                Voxel::new(
+                    fixtures().ground.rock,
+                    SHAPE_STAIR,
+                    Orientation::new(POS_Y, turn).bits(),
+                )
+            })
             .find(|&v| !tables.shapes.seals(v, POS_X))
             .unwrap();
         let mut sim = corridor_of(tables, 1.0, 4.0);

@@ -219,7 +219,16 @@ fn world_params_field_for_field_with_the_lake_apart() {
 fn the_engines_world_params_convert_both_ways() {
     let wit = engine_world_params();
     assert!(wit.water.is_none());
-    assert_eq!(world_params(wit), (WorldgenParams { ground: None, ..WorldgenParams::default() }, None));
+    assert_eq!(
+        world_params(wit),
+        (
+            WorldgenParams {
+                ground: None,
+                ..WorldgenParams::default()
+            },
+            None
+        )
+    );
 }
 
 #[test]

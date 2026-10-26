@@ -25,17 +25,17 @@ The Client's defaults and the `dev` gallery stop naming built-in solids.
 
 ## Acceptance criteria
 
-- [ ] With the demo, the default bar is the demo's stone in four Shapes, then
+- [x] With the demo, the default bar is the demo's stone in four Shapes, then
       its other solids, then its lake fluid, then fire.
-- [ ] With a catalogue of no solids the solid slots are empty.
-- [ ] Gallery plan tests cover each part chosen by property and each part left
+- [x] With a catalogue of no solids the solid slots are empty.
+- [x] Gallery plan tests cover each part chosen by property and each part left
       out when nothing fits, and no gallery without ground.
-- [ ] Every Voxel in the gallery is still one the edit path accepts, and it
+- [x] Every Voxel in the gallery is still one the edit path accepts, and it
       stays under the shaped cap in every Chunk.
-- [ ] No production code outside the Material table names lantern, glass or
+- [x] No production code outside the Material table names lantern, glass or
       leaves.
-- [ ] A `cargo dev` capture shows the gallery as on main.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] A `cargo dev` capture shows the gallery as on main.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -51,3 +51,9 @@ fence registration and DevFence are removed; test tables retain the example.
 
 Added empty-default and sparse-gallery coverage. Formatting, review, full CI
 and visual captures remain deferred to the final verification pass.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

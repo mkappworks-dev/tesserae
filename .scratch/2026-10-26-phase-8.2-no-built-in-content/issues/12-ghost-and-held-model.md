@@ -17,16 +17,16 @@ the held item, its Shape or its orientation change.
 
 ## Acceptance criteria
 
-- [ ] The ghost appears at the ghost cell in the held Shape and orientation,
+- [x] The ghost appears at the ghost cell in the held Shape and orientation,
       and not when the target has no ghost cell.
-- [ ] Turning, flipping or cycling the Shape updates both the ghost and the
+- [x] Turning, flipping or cycling the Shape updates both the ghost and the
       corner model.
-- [ ] Both are hidden while the menu is open.
-- [ ] The catalogue's Shape geometry is content only: no Voxel, Chunk or
+- [x] Both are hidden while the menu is open.
+- [x] The catalogue's Shape geometry is content only: no Voxel, Chunk or
       Occupants.
-- [ ] Captures of a stair ghost in two orientations and of the corner model
+- [x] Captures of a stair ghost in two orientations and of the corner model
       are in the `/tmp` review folder.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -43,3 +43,16 @@ released when replacing a model.
 
 Added headless model/position/orientation/menu visibility coverage. Final
 formatting, review, CI, captures and benchmarks are ticket 13.
+
+### 2026-10-26: user amendment during final capture review
+
+The user requested model previews in the menu and hotbar quick slots,
+superseding the original flat-colour tile decision. Ticket 13 implements a
+shared content-only model atlas for the tiles. The corner model was also
+reduced to scale 0.06 after two rounds of visual feedback.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

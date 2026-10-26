@@ -286,12 +286,12 @@ impl Tables {
 
 #[cfg(test)]
 mod tests {
-    use crate::testgen::fixtures;
     use super::*;
     use crate::fluid::{FluidDef, FluidError};
     use crate::material::{MaterialDef, Occlusion, RenderClass};
     use crate::occupants::{Burning, Fluid, Occupants};
-    use crate::testgen::{WATER_FLUID};
+    use crate::testgen::WATER_FLUID;
+    use crate::testgen::fixtures;
 
     #[test]
     fn a_fluid_is_registered_over_a_non_solid_material_only() {
@@ -321,7 +321,7 @@ mod tests {
     /// What the shared Edit path refuses of a reading before it is stored.
     #[test]
     fn vet_occupants_names_the_first_thing_wrong() {
-        let mut tables = fixtures().tables.clone();
+        let tables = fixtures().tables.clone();
         let water_id = fixtures().water;
         let water = Fluid::source(water_id);
         let ok = |solid, fluid, burning| Occupants {
@@ -358,7 +358,11 @@ mod tests {
             Err(PlaceFault::NotSolid)
         );
         assert_eq!(
-            tables.vet_occupants(ok(Voxel::AIR, Some(Fluid::source(fixtures().ground.rock)), None)),
+            tables.vet_occupants(ok(
+                Voxel::AIR,
+                Some(Fluid::source(fixtures().ground.rock)),
+                None
+            )),
             Err(PlaceFault::NotAFluid)
         );
         assert_eq!(
@@ -394,7 +398,7 @@ mod tests {
     /// void, dry levels carrying nothing, and never dry everywhere.
     #[test]
     fn vet_occupants_holds_flow_to_the_solids_voids() {
-        let mut tables = fixtures().tables.clone();
+        let tables = fixtures().tables.clone();
         let water = fixtures().water;
         let stair = Voxel::new(fixtures().ground.rock, crate::SHAPE_STAIR, 0);
         let level = Level {
@@ -440,7 +444,7 @@ mod tests {
     /// the brighter emission.
     #[test]
     fn a_wet_solid_keeps_its_seals_and_takes_the_larger_dimming() {
-        let mut tables = fixtures().tables.clone();
+        let tables = fixtures().tables.clone();
         let water = fixtures().water;
         let stair = Voxel::new(fixtures().ground.rock, crate::SHAPE_STAIR, 0);
         let (mask, dim) = tables.light_params(stair);
@@ -466,7 +470,10 @@ mod tests {
         let tables = fixtures().tables.clone();
         let materials = tables.materials.len() as u16;
         let shapes = tables.shapes.len() as u8;
-        assert_eq!(tables.vet_placed(Voxel::cube(fixtures().ground.rock)), Ok(()));
+        assert_eq!(
+            tables.vet_placed(Voxel::cube(fixtures().ground.rock)),
+            Ok(())
+        );
         assert_eq!(tables.vet_placed(Voxel::AIR), Err(PlaceFault::Air));
         assert_eq!(
             tables.vet_placed(Voxel::new(materials, 0, 0)),
@@ -480,7 +487,10 @@ mod tests {
             tables.vet_placed(Voxel::new(fixtures().ground.rock, 0, 24)),
             Err(PlaceFault::BadOrientation)
         );
-        assert_eq!(tables.vet_placed(Voxel::new(fixtures().ground.rock, 0, 23)), Ok(()));
+        assert_eq!(
+            tables.vet_placed(Voxel::new(fixtures().ground.rock, 0, 23)),
+            Ok(())
+        );
     }
 
     /// Reactions and fires name Materials the tables hold, of the right kind.
@@ -553,8 +563,14 @@ mod tests {
                 "{fuel} to {residue}"
             );
         }
-        assert_eq!(tables.register_combustion(fixtures().leaves, burns(0)), Ok(()));
-        assert_eq!(tables.register_combustion(fixtures().glass, burns(fixtures().ground.rock)), Ok(()));
+        assert_eq!(
+            tables.register_combustion(fixtures().leaves, burns(0)),
+            Ok(())
+        );
+        assert_eq!(
+            tables.register_combustion(fixtures().glass, burns(fixtures().ground.rock)),
+            Ok(())
+        );
         assert!(tables.combustion.contains(fixtures().leaves));
     }
 

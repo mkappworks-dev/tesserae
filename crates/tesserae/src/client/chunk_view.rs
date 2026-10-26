@@ -514,9 +514,7 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{
-        Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk, testgen, worldgen,
-    };
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk};
 
     fn watered() -> (Tables, MaterialId) {
         let tables = crate::server::fixture_tables();
@@ -891,8 +889,18 @@ mod tests {
     /// Two panes of glass one behind the other along z, in one Chunk.
     fn two_panes() -> tesserae_core::ChunkMesh {
         let mut c = Chunk::air();
-        c.set(5, 5, 5, Voxel::cube(tesserae_core::testgen::fixtures().glass));
-        c.set(5, 5, 10, Voxel::cube(tesserae_core::testgen::fixtures().glass));
+        c.set(
+            5,
+            5,
+            5,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
+        c.set(
+            5,
+            5,
+            10,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         mesh_chunk(
@@ -909,9 +917,23 @@ mod tests {
         let mut c = Chunk::air();
         for x in 0..=12 {
             for z in 0..=6 {
-                c.set(x, 4, z, Voxel::cube(tesserae_core::testgen::fixtures().ground.rock));
+                c.set(
+                    x,
+                    4,
+                    z,
+                    Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
+                );
                 let rim = x == 0 || x == 6 || x == 12 || z == 0 || z == 6;
-                c.set(x, 5, z, Voxel::cube(if rim { tesserae_core::testgen::fixtures().ground.rock } else { water }));
+                c.set(
+                    x,
+                    5,
+                    z,
+                    Voxel::cube(if rim {
+                        tesserae_core::testgen::fixtures().ground.rock
+                    } else {
+                        water
+                    }),
+                );
             }
         }
         let air = Chunk::air();
@@ -950,7 +972,11 @@ mod tests {
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut neighbors = [Some(LitChunk::new(&solid, &dark)); 6];
         neighbors[0] = Some(LitChunk::new(&air, &sky));
-        let mesh = mesh_chunk(LitChunk::new(&solid, &dark), neighbors, &crate::server::fixture_tables());
+        let mesh = mesh_chunk(
+            LitChunk::new(&solid, &dark),
+            neighbors,
+            &crate::server::fixture_tables(),
+        );
         assert!(!mesh.is_empty(), "the fixture must have geometry");
         mesh
     }
@@ -1229,13 +1255,27 @@ mod tests {
         let mut c = Chunk::air();
         for x in 0..11 {
             for z in 0..12 {
-                c.set(x, 9, z, Voxel::cube(tesserae_core::testgen::fixtures().ground.rock));
+                c.set(
+                    x,
+                    9,
+                    z,
+                    Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
+                );
             }
         }
         for k in 0..=5 {
             for i in 0..=8 {
                 let rim = i == 0 || i == 8 || k == 0 || k == 5;
-                c.set(i, 10, k, Voxel::cube(if rim { tesserae_core::testgen::fixtures().ground.rock } else { water }));
+                c.set(
+                    i,
+                    10,
+                    k,
+                    Voxel::cube(if rim {
+                        tesserae_core::testgen::fixtures().ground.rock
+                    } else {
+                        water
+                    }),
+                );
             }
         }
         for k in 7..=10 {
@@ -1243,13 +1283,28 @@ mod tests {
                 let wall = i == 1 || i == 5 || k == 7 || k == 10;
                 for j in 0..=2 {
                     if wall {
-                        c.set(i, 10 + j, k, Voxel::cube(tesserae_core::testgen::fixtures().glass));
+                        c.set(
+                            i,
+                            10 + j,
+                            k,
+                            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+                        );
                     }
                 }
-                c.set(i, 13, k, Voxel::cube(tesserae_core::testgen::fixtures().glass));
+                c.set(
+                    i,
+                    13,
+                    k,
+                    Voxel::cube(tesserae_core::testgen::fixtures().glass),
+                );
             }
         }
-        c.set(3, 10, 8, Voxel::cube(tesserae_core::testgen::fixtures().lantern));
+        c.set(
+            3,
+            10,
+            8,
+            Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         mesh_chunk(
@@ -1268,7 +1323,12 @@ mod tests {
         for x in 0..30 {
             c.set(x, 5, 10, Voxel::cube(water));
         }
-        c.set(2, 3, 10, Voxel::cube(tesserae_core::testgen::fixtures().glass));
+        c.set(
+            2,
+            3,
+            10,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         mesh_chunk(
@@ -1328,7 +1388,11 @@ mod tests {
         for x in 0..6 {
             for y in 0..6 {
                 for z in 0..6 {
-                    let m = if (x + y + z) % 2 == 0 { tesserae_core::testgen::fixtures().glass } else { water };
+                    let m = if (x + y + z) % 2 == 0 {
+                        tesserae_core::testgen::fixtures().glass
+                    } else {
+                        water
+                    };
                     c.set(10 + x, 10 + y, 10 + z, Voxel::cube(m));
                 }
             }
@@ -1336,7 +1400,12 @@ mod tests {
         for x in 0..30 {
             c.set(x, 5, 25, Voxel::cube(water));
         }
-        c.set(2, 3, 25, Voxel::cube(tesserae_core::testgen::fixtures().glass));
+        c.set(
+            2,
+            3,
+            25,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mesh = mesh_chunk(
@@ -1412,8 +1481,18 @@ mod tests {
     /// Two leaf cubes beside open sky: every face is in the cutout layer.
     fn leaves() -> tesserae_core::ChunkMesh {
         let mut c = Chunk::air();
-        c.set(5, 5, 5, Voxel::cube(tesserae_core::testgen::fixtures().leaves));
-        c.set(6, 5, 5, Voxel::cube(tesserae_core::testgen::fixtures().leaves));
+        c.set(
+            5,
+            5,
+            5,
+            Voxel::cube(tesserae_core::testgen::fixtures().leaves),
+        );
+        c.set(
+            6,
+            5,
+            5,
+            Voxel::cube(tesserae_core::testgen::fixtures().leaves),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mesh = mesh_chunk(

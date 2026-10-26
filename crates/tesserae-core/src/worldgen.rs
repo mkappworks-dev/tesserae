@@ -250,9 +250,21 @@ impl WorldgenParams {
 
     pub fn validate_ground(&self, tables: &Tables) -> Result<(), ParamError> {
         if let Some(ground) = self.ground {
-            for (field, material) in [("ground.rock", ground.rock), ("ground.soil", ground.soil), ("ground.surface", ground.surface)] {
-                require(tables.materials.contains(material), field, "names no registered Material")?;
-                require(tables.materials.solid(Voxel::cube(material)), field, "is not solid")?;
+            for (field, material) in [
+                ("ground.rock", ground.rock),
+                ("ground.soil", ground.soil),
+                ("ground.surface", ground.surface),
+            ] {
+                require(
+                    tables.materials.contains(material),
+                    field,
+                    "names no registered Material",
+                )?;
+                require(
+                    tables.materials.solid(Voxel::cube(material)),
+                    field,
+                    "is not solid",
+                )?;
                 require(!tables.fluids.contains(material), field, "is a fluid")?;
             }
         }
@@ -488,7 +500,9 @@ impl Worldgen {
 
     /// A Chunk of terrain at Chunk coordinates `(cx, cy, cz)`.
     pub fn chunk(&self, cx: i32, cy: i32, cz: i32) -> Chunk {
-        let Some(ground) = self.params.ground else { return Chunk::air(); };
+        let Some(ground) = self.params.ground else {
+            return Chunk::air();
+        };
         let size = CHUNK_SIZE as i32;
         let (lowest, highest) = self.surface_bounds_m();
 
@@ -610,7 +624,9 @@ impl Worldgen {
         coord: [i32; 3],
         floor_m: f32,
     ) {
-        let Some(ground) = self.params.ground else { return; };
+        let Some(ground) = self.params.ground else {
+            return;
+        };
         let size = CHUNK_SIZE as i32;
         let tops = surface_m.map(|s| top_index(s, floor_m, self.voxel_size));
         let mut placed = 0;
@@ -822,9 +838,21 @@ mod tests {
         let params = crate::testgen::world_params();
         for size in [1.0, 0.5, 0.25] {
             let solid = Worldgen::new(7, size, params);
-            let empty = Worldgen::new(7, size, WorldgenParams { ground: None, ..params });
-            assert_eq!(solid.surface_height_m(0.0, 0.0), empty.surface_height_m(0.0, 0.0));
-            for y in [-100, -1, 0, 1, 100] { assert_eq!(empty.chunk(0, y, 0).uniform(), Some(Voxel::AIR)); }
+            let empty = Worldgen::new(
+                7,
+                size,
+                WorldgenParams {
+                    ground: None,
+                    ..params
+                },
+            );
+            assert_eq!(
+                solid.surface_height_m(0.0, 0.0),
+                empty.surface_height_m(0.0, 0.0)
+            );
+            for y in [-100, -1, 0, 1, 100] {
+                assert_eq!(empty.chunk(0, y, 0).uniform(), Some(Voxel::AIR));
+            }
         }
     }
 
@@ -888,7 +916,9 @@ mod tests {
         let g = terrain(1.0);
         for (x, z) in [(0, 0), (5, 17), (31, 2), (12, 31)] {
             let c = column(&g, x, z);
-            let grass: Vec<usize> = (0..c.len()).filter(|&y| c[y].material() == crate::testgen::fixtures().ground.surface).collect();
+            let grass: Vec<usize> = (0..c.len())
+                .filter(|&y| c[y].material() == crate::testgen::fixtures().ground.surface)
+                .collect();
             assert_eq!(grass.len(), 1, "column {x},{z} has {grass:?}");
             assert_eq!(Some(grass[0]), highest_solid(&c), "grass is not on top");
         }
@@ -1239,7 +1269,9 @@ mod tests {
         for i in 0..40 {
             let (x, z) = ((i * 7) % CHUNK_SIZE, (i * 13) % CHUNK_SIZE);
             let c = column(&g, x, z);
-            let grass: Vec<usize> = (0..c.len()).filter(|&y| c[y].material() == crate::testgen::fixtures().ground.surface).collect();
+            let grass: Vec<usize> = (0..c.len())
+                .filter(|&y| c[y].material() == crate::testgen::fixtures().ground.surface)
+                .collect();
             assert!(grass.len() <= 1, "column {x},{z} has {grass:?}");
             if let Some(&y) = grass.first() {
                 assert_eq!(Some(y), highest_solid(&c), "grass is not on top at {x},{z}");
@@ -1257,7 +1289,10 @@ mod tests {
                 for y in 1..CHUNK_SIZE - 1 {
                     for x in 1..CHUNK_SIZE - 1 {
                         if a.get(x, y, z).is_air() && !b.get(x, y, z).is_air() {
-                            mouths += usize::from(b.get(x, y, z).material() == crate::testgen::fixtures().ground.surface);
+                            mouths += usize::from(
+                                b.get(x, y, z).material()
+                                    == crate::testgen::fixtures().ground.surface,
+                            );
                             walls.insert(a.get(x - 1, y, z).material());
                             walls.insert(a.get(x + 1, y, z).material());
                             walls.insert(a.get(x, y - 1, z).material());
@@ -1268,15 +1303,21 @@ mod tests {
             }
         }
         assert!(mouths > 0, "no cave breaches the surface");
-        assert!(walls.contains(&crate::testgen::fixtures().ground.soil), "{walls:?}");
-        assert!(walls.contains(&crate::testgen::fixtures().ground.rock), "{walls:?}");
+        assert!(
+            walls.contains(&crate::testgen::fixtures().ground.soil),
+            "{walls:?}"
+        );
+        assert!(
+            walls.contains(&crate::testgen::fixtures().ground.rock),
+            "{walls:?}"
+        );
     }
 
     /// The fixture water and a lava that is hot, opaque and keeps out of
     /// Shapes: a lake of either is made the same way.
     fn lake_tables() -> (Tables, [MaterialId; 2]) {
-        let mut tables = Tables::builtin();
-        let water = crate::testgen::register_water(&mut tables);
+        let mut tables = crate::testgen::fixtures().tables.clone();
+        let water = crate::testgen::fixtures().water;
         let lava = tables
             .materials
             .register(crate::MaterialDef {
@@ -1376,7 +1417,13 @@ mod tests {
         for (cx, cy, cz) in sweep(1.0) {
             for v in g.chunk(cx, cy, cz).kinds() {
                 assert!(
-                    [crate::voxel::AIR, crate::testgen::fixtures().ground.rock, crate::testgen::fixtures().ground.soil, crate::testgen::fixtures().ground.surface].contains(&v.material()),
+                    [
+                        crate::voxel::AIR,
+                        crate::testgen::fixtures().ground.rock,
+                        crate::testgen::fixtures().ground.soil,
+                        crate::testgen::fixtures().ground.surface
+                    ]
+                    .contains(&v.material()),
                     "{v:?}"
                 );
             }
@@ -1598,7 +1645,12 @@ mod tests {
             for x in 0..CHUNK_SIZE {
                 for y in 0..=4 + x + 1 {
                     if y < CHUNK_SIZE {
-                        chunk.set(x, y, z, Voxel::cube(crate::testgen::fixtures().ground.surface));
+                        chunk.set(
+                            x,
+                            y,
+                            z,
+                            Voxel::cube(crate::testgen::fixtures().ground.surface),
+                        );
                     }
                 }
             }
@@ -1919,10 +1971,16 @@ mod tests {
             for material in fluids {
                 assert_eq!(lake(material).validate_lake(&tables), Ok(()));
             }
-            assert_eq!(crate::testgen::world_params().validate_lake(&tables), Ok(()));
+            assert_eq!(
+                crate::testgen::world_params().validate_lake(&tables),
+                Ok(())
+            );
             for (material, rule) in [
                 (999, "names no registered Material"),
-                (crate::testgen::fixtures().ground.rock, "is solid, not a fluid"),
+                (
+                    crate::testgen::fixtures().ground.rock,
+                    "is solid, not a fluid",
+                ),
                 (dry, "has no fluid row"),
             ] {
                 assert_eq!(

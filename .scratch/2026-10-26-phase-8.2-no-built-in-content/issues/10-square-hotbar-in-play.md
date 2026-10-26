@@ -15,11 +15,11 @@ where the menu shows the same slots.
 
 ## Acceptance criteria
 
-- [ ] The bar follows selection, the scroll wheel and an item held outside the
+- [x] The bar follows selection, the scroll wheel and an item held outside the
       slots, in headless Client tests.
-- [ ] Its squares stay square at any window size.
-- [ ] A capture in play is in the `/tmp` review folder.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] Its squares stay square at any window size.
+- [x] A capture in play is in the `/tmp` review folder.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -31,3 +31,16 @@ a gap; slot borders stop marking selection until returning to the bar.
 Opening the menu hides the play bar. Headless UI coverage checks the nine
 and ten square states and menu visibility. Captures, formatting, review and
 full CI are deferred to the final verification pass.
+
+### 2026-10-26: user amendment during final capture review
+
+The user requested model previews in the menu and hotbar quick slots,
+superseding the original flat-colour tile decision. Ticket 13 implements a
+shared content-only model atlas for the tiles. The corner model was also
+reduced to scale 0.06 after two rounds of visual feedback.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

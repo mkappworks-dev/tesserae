@@ -2,8 +2,8 @@
 //! 0.1 through the adapters, each guest shown the Edit history of its own line.
 
 use futures_lite::future::block_on;
+use tesserae_core::testgen::WATER_FLUID;
 use tesserae_core::testgen::fixtures;
-use tesserae_core::testgen::{WATER_FLUID};
 use tesserae_core::{MaterialDef, MaterialId, Occlusion, PlaceFault, RenderClass, Tables, Voxel};
 
 use super::sandbox::{Rig, context};
@@ -249,7 +249,11 @@ fn a_0_2_guest_sees_solid_and_fluid_intents_apart() {
     assert_eq!(line.matches(&placed).count(), 2, "{line}");
     assert_eq!(line.matches(&removed).count(), 1, "{line}");
     assert!(
-        line.contains("before: Voxel { material: 0") && line.contains("after: Voxel { material: 1"),
+        line.contains("before: Voxel { material: 0")
+            && line.contains(&format!(
+                "after: Voxel {{ material: {}",
+                fixtures().ground.rock
+            )),
         "the solid layer, not the packed water: {line}"
     );
     assert!(

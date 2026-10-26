@@ -45,7 +45,7 @@ fn place(h: &mut Harness, at: [i32; 3], voxel: Voxel) {
     );
 }
 
-fn with_water(mut tables: Tables) -> (Harness, MaterialId) {
+fn with_water(tables: Tables) -> (Harness, MaterialId) {
     let water = tesserae_core::testgen::fixtures().water;
     let mut h = Harness::new(small(), UNLIMITED);
     h.app.insert_resource(ContentTables(Arc::new(tables)));
@@ -293,7 +293,11 @@ fn light_moving_on_a_boundary_plane_redraws_the_chunk_it_shades() {
         held.insert(m.coord, m.mesh);
     }
 
-    place(&mut h, [edge - 3, Y, Z], Voxel::cube(tesserae_core::testgen::fixtures().lantern));
+    place(
+        &mut h,
+        [edge - 3, Y, Z],
+        Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+    );
     let east_light = |h: &Harness| h.store().light(EAST).unwrap().clone();
     let before = east_light(&h);
     for m in h.settle().0 {
@@ -382,7 +386,11 @@ fn a_solve_spoilt_every_tick_by_its_neighbours_plane_still_lands() {
     let edge = CHUNK_SIZE as i32 - 1;
     tunnel(&mut h, edge - 4, edge);
     place(&mut h, [edge + 1, Y, Z], stone());
-    place(&mut h, [edge - 4, Y, Z], Voxel::cube(tesserae_core::testgen::fixtures().lantern));
+    place(
+        &mut h,
+        [edge - 4, Y, Z],
+        Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+    );
     h.settle();
     assert!(
         h.store().light_at([edge, Y, Z]).block() > 0,

@@ -1,4 +1,3 @@
-use tesserae_core::testgen::fixtures;
 use criterion::{BatchSize, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashMap;
 use std::hint::black_box;
@@ -10,11 +9,11 @@ use tesserae_core::flow::{
     advance, chunk_of, reading_outside, still_applies, wake_around, wake_solid_around,
 };
 use tesserae_core::mesh::POS_Y;
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     Burn, Burning, CHUNK_SIZE, Chunk, ChunkOverlay, CombustionDef, Fluid, FluidDef, Heat,
     MaterialDef, MaterialId, Occlusion, Occupants, Orientation, Overlay, Phase, Reactant,
     ReactionDef, RenderClass, SHAPE_POST, SHAPE_SLAB, Side, Tables, Voxel, Worldgen,
-    WorldgenParams, testgen,
 };
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;

@@ -392,10 +392,19 @@ impl MeshLayer {
 }
 
 /// Mesh one isolated Shape from read-only geometry, in unit Voxel space.
-pub fn mesh_shape(quads:&[ShapeQuad], material:MaterialId)->MeshLayer {
-    let mut layer=MeshLayer::default();
+pub fn mesh_shape(quads: &[ShapeQuad], material: MaterialId) -> MeshLayer {
+    let mut layer = MeshLayer::default();
     for quad in quads {
-        push_merged_quad(&mut layer,&Pending::new([0;3],quad,RenderClass::Opaque,material,Light::new(15,0)));
+        push_merged_quad(
+            &mut layer,
+            &Pending::new(
+                [0; 3],
+                quad,
+                RenderClass::Opaque,
+                material,
+                Light::new(15, 0),
+            ),
+        );
     }
     layer
 }

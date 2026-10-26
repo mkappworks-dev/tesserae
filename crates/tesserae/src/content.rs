@@ -63,4 +63,3 @@ impl ContentCatalogue {
         self.materials.iter().any(|m| m.burns)
     }
 }
-

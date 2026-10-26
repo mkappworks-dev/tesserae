@@ -1,12 +1,12 @@
-use tesserae_core::testgen::fixtures;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tesserae_core::light::{Light, MAX_LIGHT};
 use tesserae_core::lod::{Child, coarse_light, downsample, downsample_changed};
 use tesserae_core::mesh::FACE_STEPS;
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, LitChunk, Orientation};
 use tesserae_core::{Fluid, Level, Overlay, SHAPE_STAIR};
-use tesserae_core::{ShapeTable, Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk, testgen};
+use tesserae_core::{ShapeTable, Voxel, Worldgen, WorldgenParams, mesh_chunk, testgen};
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const DEEPEST_LEVEL: u32 = 5;
@@ -85,13 +85,15 @@ fn stair_surface() -> [Chunk; 8] {
 
 fn terrain(c: &mut Criterion) {
     let fixture_ground = fixtures().ground;
-    let fixture_rock = fixtures().ground.rock;
     let fixture_water = fixtures().water;
     let shapes = ShapeTable::builtin();
     let g = Worldgen::new(0x7e55_e2ae, 1.0, dry());
     let surface = (g.surface_height_m(0.0, 0.0) / CHUNK_SIZE as f32).floor() as i32;
     let world = octants(|x, y, z| g.chunk(x, y, z), [0, surface, 0]);
-    let fixture = octants(|x, y, z| testgen::terrain_chunk(x, y, z, fixture_ground), [0, 0, 0]);
+    let fixture = octants(
+        |x, y, z| testgen::terrain_chunk(x, y, z, fixture_ground),
+        [0, 0, 0],
+    );
     let stair_surface = stair_surface();
     let stairs = std::array::from_fn::<_, 8, _>(|_| stairs());
     let stone = std::array::from_fn::<_, 8, _>(|_| Chunk::filled(Voxel::cube(fixture_ground.rock)));
@@ -121,7 +123,7 @@ fn terrain(c: &mut Criterion) {
 
     // Level 1 over held Chunks something changed: read with their overlays, dry
     // and with every open Voxel of the lower four flooded by flowing water.
-    let mut tables = fixtures().tables.clone();
+    let tables = fixtures().tables.clone();
     let water = fixture_water;
     let dry: [ChunkOverlay; 8] = Default::default();
     let flowing = Overlay {

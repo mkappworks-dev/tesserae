@@ -148,7 +148,9 @@ fn open_world(
     params: Option<Res<mods::WorldParameters>>,
 ) {
     let params = params.map_or_else(|| worldgen_params(None), |params| params.0);
-    if params.ground.is_none() { info!("World has no ground: no Game named rock, soil and surface"); }
+    if params.ground.is_none() {
+        info!("World has no ground: no Game named rock, soil and surface");
+    }
     let generator = Worldgen::new(world.seed, world.voxel_size, params);
     commands.insert_resource(SpawnPoint::new(spawn_eye(&generator)));
     commands.insert_resource(WorldGenerator(generator));
@@ -161,6 +163,16 @@ fn spawn_eye(generator: &Worldgen) -> Vec3 {
         .water()
         .map_or(ground_m, |w| w.level_m.max(ground_m));
     Vec3::new(0.0, top_m + SPAWN_CLEARANCE_M, 0.0)
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_tables() -> Tables {
+    let mut tables = tesserae_core::testgen::fixtures().tables.clone();
+    tables
+        .shapes
+        .register(tesserae_core::shape::examples::fence())
+        .unwrap();
+    tables
 }
 
 #[cfg(test)]
@@ -299,11 +311,4 @@ mod tests {
         let (fine, _) = spawn_point_at(0.25);
         assert_eq!(coarse, fine);
     }
-}
-
-#[cfg(test)]
-pub(crate) fn fixture_tables() -> Tables {
-    let mut tables = tesserae_core::testgen::fixtures().tables.clone();
-    tables.shapes.register(tesserae_core::shape::examples::fence()).unwrap();
-    tables
 }

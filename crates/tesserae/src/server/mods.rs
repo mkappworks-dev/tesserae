@@ -9,7 +9,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, Voxel, WorldgenParams};
+use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
     discover, plan, resolve,
@@ -390,10 +390,10 @@ pub(in crate::server) fn catalogue(
                 name: registry
                     .names(Kind::Shape)
                     .find(|&(named, _)| named == id as usize)
-                    .map(|(_, name)| name.to_owned()).expect("registered Shape name"),
+                    .map(|(_, name)| name.to_owned())
+                    .expect("registered Shape name"),
                 geometry: tables.shapes.preview_geometry(id),
-                turnable: id != SHAPE_FULL_CUBE
-                    && !tables.shapes.is_connected_shape(id),
+                turnable: id != SHAPE_FULL_CUBE && !tables.shapes.is_connected_shape(id),
             }
         })
         .collect();

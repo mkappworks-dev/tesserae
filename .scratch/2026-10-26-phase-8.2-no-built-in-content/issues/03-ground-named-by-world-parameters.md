@@ -26,19 +26,19 @@ it names its lake fluid, and generation uses them.
 
 ## Acceptance criteria
 
-- [ ] Generation with a named ground places those Materials where stone, dirt
+- [x] Generation with a named ground places those Materials where stone, dirt
       and grass went, at 1.0, 0.5 and 0.25 m, and smoothing uses the surface
       Material.
-- [ ] Generation with no ground yields air in every Chunk, and the spawn point
+- [x] Generation with no ground yields air in every Chunk, and the spawn point
       is unchanged.
-- [ ] A 0.3 Declaration naming its ground loads, and the generated World uses
+- [x] A 0.3 Declaration naming its ground loads, and the generated World uses
       it.
-- [ ] Unknown, fluid and non-solid ground names fail the load with a message
+- [x] Unknown, fluid and non-solid ground names fail the load with a message
       naming the field. Lakes with no ground fail the load.
-- [ ] Ticket 01's deferred World generation tests move to fixture ground.
-- [ ] The guests and the demo are rebuilt against the amended 0.3 WIT, and
+- [x] Ticket 01's deferred World generation tests move to fixture ground.
+- [x] The guests and the demo are rebuilt against the amended 0.3 WIT, and
       every 0.1, 0.2 and 0.3 fixture passes.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -59,3 +59,9 @@ Guest rebuild uses `env -u CARGO_TARGET_DIR caffeinate -i
 ./scripts/build-guests`: this session's shared target override otherwise
 puts guest artifacts somewhere the script does not copy from. Full
 formatting, review and CI remain deferred to ticket 13 per user instruction.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

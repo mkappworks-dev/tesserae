@@ -23,15 +23,15 @@ menu is open. The answer holds no Voxel or Chunk (ADR-0002).
 
 ## Acceptance criteria
 
-- [ ] Server tests cover outline bounds for a cube, slab and stair; the ghost
+- [x] Server tests cover outline bounds for a cube, slab and stair; the ghost
       cell present and absent; fire with no ghost; stale and far reports
       dropped.
-- [ ] For a set of rays, the aim target agrees with what the matching edit
+- [x] For a set of rays, the aim target agrees with what the matching edit
       intent then does.
-- [ ] The Client draws one outline at the target and none with no target or
+- [x] The Client draws one outline at the target and none with no target or
       with the menu open.
-- [ ] A capture showing the outline is in the `/tmp` review folder.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] A capture showing the outline is in the `/tmp` review folder.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -46,3 +46,9 @@ one wire box and hides it for the menu or an outdated response.
 
 Added Shape-bound/placement agreement and stale/far/non-finite report tests.
 Final review, formatting, full CI and captures remain deferred to ticket 13.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

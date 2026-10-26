@@ -17,15 +17,15 @@ stone. `cargo dev` looks as it does today.
 
 ## Acceptance criteria
 
-- [ ] The demo names no `core:` Material but air, by name or by id.
-- [ ] Its generated ground is its own stone, dirt and grass.
-- [ ] Lava touching its water cools to `demo:stone`.
-- [ ] Every scenario plays out as before at 1.0, 0.5 and 0.25 m in the demo
+- [x] The demo names no `core:` Material but air, by name or by id.
+- [x] Its generated ground is its own stone, dirt and grass.
+- [x] Lava touching its water cools to `demo:stone`.
+- [x] Every scenario plays out as before at 1.0, 0.5 and 0.25 m in the demo
       runtime tests.
-- [ ] A `cargo dev` capture shows the same terrain, glass, leaves and lamp
+- [x] A `cargo dev` capture shows the same terrain, glass, leaves and lamp
       light as on main. Screenshots go in one `/tmp` folder for the user and
       are not committed.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -41,3 +41,9 @@ reaction product by its demo name.
 Guest rebuilding is underway. Scenario execution, formatting, full CI and
 the visual comparison are deferred to the final verification pass per the
 user's instruction. No screenshot has been reviewed yet.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

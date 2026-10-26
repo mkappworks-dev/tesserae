@@ -6,7 +6,9 @@ wit_bindgen::generate!({ path: "../../../wit/0.3", world: "mod" });
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
-use tesserae::mods::content::{GroundParams, FluidDef, MaterialDef, Occlusion, RenderClass, WaterParams};
+use tesserae::mods::content::{
+    FluidDef, GroundParams, MaterialDef, Occlusion, RenderClass, WaterParams,
+};
 use tesserae::mods::types::LogLevel;
 
 struct Lake;
@@ -15,20 +17,34 @@ impl Guest for Lake {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
         assert!(world.water.is_none(), "the engine's default is dry");
-        world.ground = Some(GroundParams { rock: "lake:rock".into(), soil: "lake:rock".into(), surface: "lake:rock".into() });
+        world.ground = Some(GroundParams {
+            rock: "lake:rock".into(),
+            soil: "lake:rock".into(),
+            surface: "lake:rock".into(),
+        });
         world.water = Some(WaterParams {
             level_m: world.sea_level_m + world.relief_m / 2.0,
             material: "lake:brine".into(),
         });
         Declaration {
-            materials: vec![MaterialDef {
-                name: "brine".into(),
-                emission: 0,
-                dimming: 2,
-                occlusion: Occlusion::SameMaterial,
-                render: RenderClass::Blend,
-                solid: false,
-            }, MaterialDef { name: "rock".into(), emission: 0, dimming: 15, occlusion: Occlusion::Opaque, render: RenderClass::Opaque, solid: true }],
+            materials: vec![
+                MaterialDef {
+                    name: "brine".into(),
+                    emission: 0,
+                    dimming: 2,
+                    occlusion: Occlusion::SameMaterial,
+                    render: RenderClass::Blend,
+                    solid: false,
+                },
+                MaterialDef {
+                    name: "rock".into(),
+                    emission: 0,
+                    dimming: 15,
+                    occlusion: Occlusion::Opaque,
+                    render: RenderClass::Opaque,
+                    solid: true,
+                },
+            ],
             shapes: vec![],
             appearance: vec![],
             world: Some(world),

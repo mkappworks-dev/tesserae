@@ -26,8 +26,8 @@
 //! once.
 
 use bevy::prelude::*;
-use tesserae_core::{GroundParams, RenderClass, ShapeId, Tables, WorldgenParams};
 use tesserae_core::mesh::{NEG_Y, POS_X, POS_Y};
+use tesserae_core::{GroundParams, RenderClass, ShapeId, Tables, WorldgenParams};
 use tesserae_core::{MaterialId, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, Voxel};
 
 use super::builder::{self, Progress, Step};
@@ -70,16 +70,23 @@ impl Parts {
     fn select(tables: &Tables, params: WorldgenParams) -> Option<Self> {
         let ground = params.ground?;
         let first = |predicate: fn(&tesserae_core::MaterialDef) -> bool| {
-            (0..tables.materials.len()).map(|id| id as MaterialId).find(|&id| {
-                tables.materials.contains(id) && tables.materials.def(id).solid && predicate(tables.materials.def(id))
-            })
+            (0..tables.materials.len())
+                .map(|id| id as MaterialId)
+                .find(|&id| {
+                    tables.materials.contains(id)
+                        && tables.materials.def(id).solid
+                        && predicate(tables.materials.def(id))
+                })
         };
         Some(Self {
-            ground, lamp: first(|m| m.emission > 0),
+            ground,
+            lamp: first(|m| m.emission > 0),
             glass: first(|m| m.render == RenderClass::Blend),
             leaves: first(|m| m.render == RenderClass::Cutout),
-            fence: (0..tables.shapes.len()).map(|id|id as ShapeId).find(|&id|tables.shapes.is_connected_shape(id)),
-            lake: params.water.map(|water|water.material),
+            fence: (0..tables.shapes.len())
+                .map(|id| id as ShapeId)
+                .find(|&id| tables.shapes.is_connected_shape(id)),
+            lake: params.water.map(|water| water.material),
         })
     }
 }
@@ -103,7 +110,9 @@ fn build(
     };
     let corner = spawn.metres() + Vec3::new(ASIDE_M, 0.0, -AHEAD_M);
     let surface = |x, z| generator.surface_height_m(x, z);
-    let Some(parts) = Parts::select(&tables, params.0) else { return; };
+    let Some(parts) = Parts::select(&tables, params.0) else {
+        return;
+    };
     let mut plan = plan(&world, corner, surface, &parts);
     // `TESSERAE_TRANSLUCENT_ROW=0` leaves the row out, so a capture can hold
     // no blended Voxel and be compared with one from before the blended pass.
@@ -160,8 +169,17 @@ fn plinth(
 
 /// The Voxels to place, in lattice coordinates, given the metre position of the
 /// gallery's near corner and the height of the ground at any point.
-fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32, parts: &Parts) -> Plan {
-    let GroundParams { rock, soil, surface } = parts.ground;
+fn plan(
+    world: &WorldSettings,
+    corner: Vec3,
+    surface_m: impl Fn(f32, f32) -> f32,
+    parts: &Parts,
+) -> Plan {
+    let GroundParams {
+        rock,
+        soil,
+        surface,
+    } = parts.ground;
     let (mut plan, [ox, top, oz]) = plinth(world, corner, surface_m, WIDTH, DEPTH, rock);
 
     // `at(x, j, k)`: j counts up from the plinth.
@@ -179,7 +197,9 @@ fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32
     put(4, 0, 9, shaped(soil, SHAPE_STAIR, NEG_Y, 0));
     put(6, 0, 9, shaped(rock, SHAPE_SLAB, POS_X, 0));
     put(8, 0, 9, shaped(soil, SHAPE_POST, POS_Y, 0));
-    if let Some(lamp) = parts.lamp { put(10, 0, 10, Voxel::cube(lamp)); }
+    if let Some(lamp) = parts.lamp {
+        put(10, 0, 10, Voxel::cube(lamp));
+    }
 
     // A flight rising away from the camera: each step's tall back faces -Z, over
     // cubes up to its own height.
@@ -200,21 +220,23 @@ fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32
             put(x, 5, z, shaped(rock, SHAPE_SLAB, POS_Y, 0));
         }
     }
-    if let Some(lamp) = parts.lamp { put(1, 6, 0, Voxel::cube(lamp)); }
+    if let Some(lamp) = parts.lamp {
+        put(1, 6, 0, Voxel::cube(lamp));
+    }
 
     // A fence from a stair's back along x to a wall of cubes, with a corner
     // turning towards the camera. Arms are not placed: each is grown by the
     // fence's own neighbours, which is the thing on show.
     if let Some(shape) = parts.fence {
-    let fence = Voxel::new(rock, shape, 0);
-    put(4, 0, 5, shaped(rock, SHAPE_STAIR, POS_Y, 0));
-    for x in 4..=9 {
-        put(x, 0, 6, fence);
-    }
-    put(9, 0, 7, fence);
-    put(9, 0, 8, fence);
-    put(10, 0, 6, Voxel::cube(rock));
-    put(10, 1, 6, Voxel::cube(rock));
+        let fence = Voxel::new(rock, shape, 0);
+        put(4, 0, 5, shaped(rock, SHAPE_STAIR, POS_Y, 0));
+        for x in 4..=9 {
+            put(x, 0, 6, fence);
+        }
+        put(9, 0, 7, fence);
+        put(9, 0, 8, fence);
+        put(10, 0, 6, Voxel::cube(rock));
+        put(10, 1, 6, Voxel::cube(rock));
     }
 
     // A slab floor, and a wall standing behind it.
@@ -258,42 +280,55 @@ fn translucent_plan(
 
     // A closed house of glass, 5 wide and 4 deep, with a lantern inside.
     if let Some(glass) = parts.glass {
-    for k in 7..=10 {
-        for i in 1..=5 {
-            let wall = i == 1 || i == 5 || k == 7 || k == 10;
-            for j in 0..=2 {
-                if wall {
-                    put(i, j, k, Voxel::cube(glass));
+        for k in 7..=10 {
+            for i in 1..=5 {
+                let wall = i == 1 || i == 5 || k == 7 || k == 10;
+                for j in 0..=2 {
+                    if wall {
+                        put(i, j, k, Voxel::cube(glass));
+                    }
                 }
+                put(i, 3, k, Voxel::cube(glass));
             }
-            put(i, 3, k, Voxel::cube(glass));
         }
-    }
-    if let Some(lamp) = parts.lamp { put(3, 0, 8, Voxel::cube(lamp)); }
+        if let Some(lamp) = parts.lamp {
+            put(3, 0, 8, Voxel::cube(lamp));
+        }
     }
 
     // A trunk with a canopy, to the side.
     if let Some(leaves) = parts.leaves {
-    for j in 0..=2 {
-        put(9, j, 9, Voxel::cube(soil));
-    }
-    for k in 8..=10 {
-        for i in 8..=10 {
-            for j in 3..=4 {
-                put(i, j, k, Voxel::cube(leaves));
+        for j in 0..=2 {
+            put(9, j, 9, Voxel::cube(soil));
+        }
+        for k in 8..=10 {
+            for i in 8..=10 {
+                for j in 3..=4 {
+                    put(i, j, k, Voxel::cube(leaves));
+                }
             }
         }
-    }
     }
     plan
 }
 
 #[cfg(test)]
-pub(super) fn measurement_plan(world: &WorldSettings, generator: &tesserae_core::Worldgen, tables: &Tables) -> Plan {
-    let Some(parts) = Parts::select(tables, generator.params()) else { return Vec::new(); };
+pub(super) fn measurement_plan(
+    world: &WorldSettings,
+    generator: &tesserae_core::Worldgen,
+    tables: &Tables,
+) -> Plan {
+    let Some(parts) = Parts::select(tables, generator.params()) else {
+        return Vec::new();
+    };
     let spawn = super::spawn_eye(generator);
     let surface = |x, z| generator.surface_height_m(x, z);
-    let mut result = plan(world, spawn + Vec3::new(ASIDE_M, 0.0, -AHEAD_M), surface, &parts);
+    let mut result = plan(
+        world,
+        spawn + Vec3::new(ASIDE_M, 0.0, -AHEAD_M),
+        surface,
+        &parts,
+    );
     result.extend(translucent_plan(
         world,
         spawn + Vec3::new(ROW_ASIDE_M, 0.0, -AHEAD_M),
@@ -310,10 +345,21 @@ mod tests {
     use tesserae_core::testgen::fixtures;
 
     fn parts() -> Parts {
-        Parts::select(&crate::server::fixture_tables(), tesserae_core::testgen::world_params()).unwrap()
+        Parts::select(
+            &crate::server::fixture_tables(),
+            tesserae_core::testgen::world_params(),
+        )
+        .unwrap()
     }
-    fn plan(world: &WorldSettings, corner: Vec3, surface: impl Fn(f32,f32)->f32) -> Plan { super::plan(world, corner, surface, &parts()) }
-    fn translucent_plan(world: &WorldSettings, corner: Vec3, surface: impl Fn(f32,f32)->f32, lake: Option<MaterialId>) -> Plan {
+    fn plan(world: &WorldSettings, corner: Vec3, surface: impl Fn(f32, f32) -> f32) -> Plan {
+        super::plan(world, corner, surface, &parts())
+    }
+    fn translucent_plan(
+        world: &WorldSettings,
+        corner: Vec3,
+        surface: impl Fn(f32, f32) -> f32,
+        lake: Option<MaterialId>,
+    ) -> Plan {
         super::translucent_plan(world, corner, surface, &Parts { lake, ..parts() })
     }
 
@@ -539,7 +585,10 @@ mod tests {
         let at: HashMap<[i32; 3], Voxel> = plan.iter().copied().collect();
         let water = watered().1;
         for [x, y, z] in lattice(&plan, water) {
-            assert_eq!(at.get(&[x, y - 1, z]).map(|v| v.material()), Some(fixtures().ground.rock));
+            assert_eq!(
+                at.get(&[x, y - 1, z]).map(|v| v.material()),
+                Some(fixtures().ground.rock)
+            );
             for [dx, dz] in [[1, 0], [-1, 0], [0, 1], [0, -1]] {
                 let side = at.get(&[x + dx, y, z + dz]).map(|v| v.material());
                 assert!(
@@ -568,18 +617,54 @@ mod tests {
     fn parts_follow_properties_and_missing_kinds_are_omitted() {
         let f = fixtures();
         let all = parts();
-        assert_eq!((all.lamp, all.glass, all.leaves, all.fence), (Some(f.lantern), Some(f.glass), Some(f.leaves), Some(FENCE_ID)));
+        assert_eq!(
+            (all.lamp, all.glass, all.leaves, all.fence),
+            (
+                Some(f.lantern),
+                Some(f.glass),
+                Some(f.leaves),
+                Some(FENCE_ID)
+            )
+        );
         let mut tables = Tables::builtin();
         let ground = tesserae_core::testgen::register_ground(&mut tables);
-        let params = WorldgenParams { ground: Some(ground), ..tesserae_core::testgen::world_params() };
+        let params = WorldgenParams {
+            ground: Some(ground),
+            ..tesserae_core::testgen::world_params()
+        };
         let sparse = Parts::select(&tables, params).unwrap();
-        assert_eq!((sparse.lamp, sparse.glass, sparse.leaves, sparse.fence, sparse.lake), (None, None, None, None, None));
-        for (_, voxel) in super::plan(&world(1.0), corner(), hill, &sparse).into_iter().chain(super::translucent_plan(&world(1.0), corner(), hill, &sparse)) {
+        assert_eq!(
+            (
+                sparse.lamp,
+                sparse.glass,
+                sparse.leaves,
+                sparse.fence,
+                sparse.lake
+            ),
+            (None, None, None, None, None)
+        );
+        for (_, voxel) in super::plan(&world(1.0), corner(), hill, &sparse)
+            .into_iter()
+            .chain(super::translucent_plan(
+                &world(1.0),
+                corner(),
+                hill,
+                &sparse,
+            ))
+        {
             assert!([ground.rock, ground.soil, ground.surface].contains(&voxel.material()));
             assert_ne!(voxel.shape(), FENCE_ID);
             assert_eq!(tables.vet_placed(voxel), Ok(()));
         }
-        assert!(Parts::select(&tables, WorldgenParams { ground: None, ..params }).is_none());
+        assert!(
+            Parts::select(
+                &tables,
+                WorldgenParams {
+                    ground: None,
+                    ..params
+                }
+            )
+            .is_none()
+        );
     }
 }
-

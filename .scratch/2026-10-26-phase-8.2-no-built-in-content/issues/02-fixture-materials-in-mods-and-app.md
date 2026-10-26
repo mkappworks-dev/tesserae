@@ -18,14 +18,14 @@ the path, listed in the Comments.
 
 ## Acceptance criteria
 
-- [ ] No test or bench in `tesserae-mods` or `tesserae` names a built-in solid
+- [x] No test or bench in `tesserae-mods` or `tesserae` names a built-in solid
       constant, except the listed sites, each with its ticket.
-- [ ] No test asserts a built-in id as a literal where a fixture or Mod id is
+- [x] No test asserts a built-in id as a literal where a fixture or Mod id is
       meant.
-- [ ] A test that loads a Mod never uses a fixture id that equals one of the
+- [x] A test that loads a Mod never uses a fixture id that equals one of the
       Mod's ids.
-- [ ] The host-calls bench is unchanged in workload.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] The host-calls bench is unchanged in workload.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -44,3 +44,9 @@ catalogue Shape checks (ticket 05); built-in Registry and palette tests
 (ticket 06). The frozen echo/builder guests keep their literal return values
 and gain refusal assertions in ticket 06. Formatting, review and full CI are
 deferred to the phase's final pass per the user's 2026-10-26 instruction.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

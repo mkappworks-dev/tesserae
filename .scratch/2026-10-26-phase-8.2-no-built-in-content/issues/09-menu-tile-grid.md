@@ -23,13 +23,13 @@ held item are marked by a border.
 
 ## Acceptance criteria
 
-- [ ] Each behaviour above has a headless Client test driving pointer and key
+- [x] Each behaviour above has a headless Client test driving pointer and key
       input.
-- [ ] Every tile is square at any window size.
-- [ ] With no Game the grid is empty and the nine slots show as empty squares.
-- [ ] Clicks never edit the World while the menu is open.
-- [ ] A capture of the open menu is in the `/tmp` review folder.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] Every tile is square at any window size.
+- [x] With no Game the grid is empty and the nine slots show as empty squares.
+- [x] Clicks never edit the World while the menu is open.
+- [x] A capture of the open menu is in the `/tmp` review folder.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -42,3 +42,16 @@ open; drag assigns or swaps; numbered keys over items assign without moving
 selection. Shape-panel updates preserve the item entities being dragged.
 Pointer events and key input have headless coverage. Final formatting,
 review, CI and captures remain deferred to ticket 13.
+
+### 2026-10-26: user amendment during final capture review
+
+The user requested model previews in the menu and hotbar quick slots,
+superseding the original flat-colour tile decision. Ticket 13 implements a
+shared content-only model atlas for the tiles. The corner model was also
+reduced to scale 0.06 after two rounds of visual feedback.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

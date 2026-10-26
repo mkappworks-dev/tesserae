@@ -1008,9 +1008,9 @@ fn brighten(volume: &mut impl LightVolume, tables: &Tables, from: Vec<[i32; 3]>,
 
 #[cfg(test)]
 mod tests {
-    use crate::testgen::fixtures;
     use super::*;
     use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::testgen::fixtures;
     use crate::voxel::MaterialId;
     use crate::worldgen::{Worldgen, WorldgenParams};
     use std::sync::OnceLock;
@@ -1539,7 +1539,11 @@ mod tests {
     type Plan = Vec<([i32; 3], Voxel)>;
 
     fn stair(turn: u8) -> Voxel {
-        Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, turn))
+        Voxel::shaped(
+            fixtures().ground.rock,
+            SHAPE_STAIR,
+            Orientation::new(POS_Y, turn),
+        )
     }
 
     fn slab(up: usize) -> Voxel {
@@ -1894,11 +1898,19 @@ mod tests {
     }
 
     fn diagonal() -> Voxel {
-        Voxel::shaped(fixtures().ground.rock, SHAPE_DIAGONAL, Orientation::IDENTITY)
+        Voxel::shaped(
+            fixtures().ground.rock,
+            SHAPE_DIAGONAL,
+            Orientation::IDENTITY,
+        )
     }
 
     fn upside_down_stair() -> Voxel {
-        Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(NEG_Y, 0))
+        Voxel::shaped(
+            fixtures().ground.rock,
+            SHAPE_STAIR,
+            Orientation::new(NEG_Y, 0),
+        )
     }
 
     /// Block light at the three cells of the tunnel that matter for a pair of
@@ -2167,8 +2179,11 @@ mod tests {
                 let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
                 let breached = (0..CHUNK_SIZE).any(|z| {
                     (0..CHUNK_SIZE).any(|y| {
-                        (0..CHUNK_SIZE)
-                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == crate::testgen::fixtures().ground.surface)
+                        (0..CHUNK_SIZE).any(|x| {
+                            a.get(x, y, z).is_air()
+                                && b.get(x, y, z).material()
+                                    == crate::testgen::fixtures().ground.surface
+                        })
                     })
                 });
                 if breached {
@@ -2358,8 +2373,11 @@ mod tests {
                 let b = bare.chunk(cx, cy, cz);
                 let breached = (0..CHUNK_SIZE).any(|z| {
                     (0..CHUNK_SIZE).any(|y| {
-                        (0..CHUNK_SIZE)
-                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == crate::testgen::fixtures().ground.surface)
+                        (0..CHUNK_SIZE).any(|x| {
+                            a.get(x, y, z).is_air()
+                                && b.get(x, y, z).material()
+                                    == crate::testgen::fixtures().ground.surface
+                        })
                     })
                 });
                 if breached == mouth {
@@ -2579,15 +2597,27 @@ mod tests {
     #[test]
     fn a_lantern_behind_a_translucent_voxel_is_dimmed_by_exactly_its_dimming() {
         assert_eq!(through(Voxel::AIR), [15, 14, 13]);
-        assert_eq!(through(Voxel::cube(fixtures().glass)), [15, 14, 13], "glass is clear");
+        assert_eq!(
+            through(Voxel::cube(fixtures().glass)),
+            [15, 14, 13],
+            "glass is clear"
+        );
         assert_eq!(through(Voxel::cube(fixtures().leaves)), [15, 13, 12]);
         assert_eq!(through(Voxel::cube(water())), [15, 12, 11]);
-        assert_eq!(through(Voxel::cube(fixtures().ground.rock))[1], 0, "stone stops it");
+        assert_eq!(
+            through(Voxel::cube(fixtures().ground.rock))[1],
+            0,
+            "stone stops it"
+        );
     }
 
     #[test]
     fn sky_light_enters_a_translucent_voxel_from_above_at_full_strength_less_its_dimming() {
-        for (material, expected) in [(fixtures().glass, 15), (fixtures().leaves, 14), (water(), 13)] {
+        for (material, expected) in [
+            (fixtures().glass, 15),
+            (fixtures().leaves, 14),
+            (water(), 13),
+        ] {
             let mut chunk = Chunk::air();
             chunk.set(16, 16, 16, Voxel::cube(material));
             let above = full_sky();
@@ -2774,8 +2804,14 @@ mod tests {
                     ([32, 5, 16], Voxel::cube(water())),
                 ],
             ),
-            ("leaves west", vec![([31, 5, 16], Voxel::cube(fixtures().leaves))]),
-            ("glass east", vec![([32, 5, 16], Voxel::cube(fixtures().glass))]),
+            (
+                "leaves west",
+                vec![([31, 5, 16], Voxel::cube(fixtures().leaves))],
+            ),
+            (
+                "glass east",
+                vec![([32, 5, 16], Voxel::cube(fixtures().glass))],
+            ),
             (
                 "a glass stair on the seam",
                 vec![(
@@ -2953,7 +2989,6 @@ mod tests {
     /// stairs and slabs and hand-built clear, emitting and shaped rooms alike.
     #[test]
     fn a_dry_chunk_lights_the_same_by_the_dry_sweep_and_the_wet_one() {
-
         let world = Worldgen::new(0x7e55_e2ae, 1.0, crate::testgen::world_params());
         let mut chunks: Vec<Chunk> = (-1..=2)
             .flat_map(|y| [[0, y, 0], [3, y, -2]])
@@ -2965,10 +3000,22 @@ mod tests {
             Voxel::cube(fixtures().leaves),
             Voxel::cube(fixtures().lantern),
             stair(1),
-            Voxel::shaped(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
+            Voxel::shaped(
+                fixtures().ground.rock,
+                SHAPE_SLAB,
+                Orientation::new(NEG_Y, 0),
+            ),
             Voxel::shaped(fixtures().glass, SHAPE_STAIR, Orientation::new(POS_Y, 2)),
-            Voxel::shaped(fixtures().ground.rock, SHAPE_DIAGONAL, Orientation::new(POS_Y, 0)),
-            Voxel::shaped(fixtures().ground.rock, SHAPE_POST, Orientation::new(POS_Y, 0)),
+            Voxel::shaped(
+                fixtures().ground.rock,
+                SHAPE_DIAGONAL,
+                Orientation::new(POS_Y, 0),
+            ),
+            Voxel::shaped(
+                fixtures().ground.rock,
+                SHAPE_POST,
+                Orientation::new(POS_Y, 0),
+            ),
         ]
         .into_iter()
         .enumerate()

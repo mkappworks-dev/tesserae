@@ -422,8 +422,8 @@ impl SpawnPoint {
 mod tests {
     use super::*;
     use tesserae_core::light::MAX_LIGHT;
-    
-    use tesserae_core::{Burning, CHUNK_SIZE, Fluid, Tables, relight, worldgen};
+
+    use tesserae_core::{Burning, CHUNK_SIZE, Fluid, relight};
 
     #[test]
     fn a_voxel_coord_floors_rather_than_truncating_below_the_origin() {
@@ -459,10 +459,16 @@ mod tests {
         let last = CHUNK_SIZE as i32 - 1;
         let at = [last, 5, 5];
         let mut lattice = LightLattice::new(&mut store);
-        lattice
-            .store
-            .set_voxel(VoxelCoord::of(at), Voxel::cube(tesserae_core::testgen::fixtures().lantern));
-        relight(&mut lattice, &crate::server::fixture_tables(), at, Light::DARK);
+        lattice.store.set_voxel(
+            VoxelCoord::of(at),
+            Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+        );
+        relight(
+            &mut lattice,
+            &crate::server::fixture_tables(),
+            at,
+            Light::DARK,
+        );
 
         assert_eq!(store.light_at(at).block(), MAX_LIGHT);
         assert_eq!(
@@ -488,10 +494,16 @@ mod tests {
 
         let at = [CHUNK_SIZE as i32 - 1, 5, 5];
         let mut lattice = LightLattice::new(&mut store);
-        lattice
-            .store
-            .set_voxel(VoxelCoord::of(at), Voxel::cube(tesserae_core::testgen::fixtures().lantern));
-        relight(&mut lattice, &crate::server::fixture_tables(), at, Light::DARK);
+        lattice.store.set_voxel(
+            VoxelCoord::of(at),
+            Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+        );
+        relight(
+            &mut lattice,
+            &crate::server::fixture_tables(),
+            at,
+            Light::DARK,
+        );
         let touched = lattice.touched;
 
         // Both, because the caller has no other way to learn that the Chunk
@@ -538,7 +550,10 @@ mod tests {
         store.insert(coord, Chunk::air());
         let before = store.shared(coord).map(|s| Arc::as_ptr(&s.chunk)).unwrap();
 
-        store.set_voxel(VoxelCoord::of([1, 1, 1]), Voxel::cube(tesserae_core::testgen::fixtures().lantern));
+        store.set_voxel(
+            VoxelCoord::of([1, 1, 1]),
+            Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+        );
 
         let after = store.shared(coord).map(|s| Arc::as_ptr(&s.chunk)).unwrap();
         assert_eq!(before, after, "an unshared write allocated a new Chunk");
@@ -622,7 +637,7 @@ mod tests {
 
     #[test]
     fn the_store_reads_a_position_through_the_one_interpretation() {
-        let mut tables = crate::server::fixture_tables();
+        let tables = crate::server::fixture_tables();
         let water = tesserae_core::testgen::fixtures().water;
         let mut store = ChunkStore::default();
         store.insert(ChunkCoord::new(0, 0, 0), Chunk::filled(Voxel::cube(water)));

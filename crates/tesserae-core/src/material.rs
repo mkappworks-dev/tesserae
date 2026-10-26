@@ -70,8 +70,6 @@ impl MaterialDef {
         render: RenderClass::Opaque,
         solid: false,
     };
-
-
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -214,10 +212,10 @@ mod tests {
         let t = MaterialTable::builtin();
         assert_eq!(t.len(), FIRST_MOD_ID as usize);
         assert!(t.contains(AIR));
-        assert_eq!(def(&t,AIR), MaterialDef::AIR);
+        assert_eq!(def(&t, AIR), MaterialDef::AIR);
         for id in RETIRED_IDS {
             assert!(!t.contains(id));
-            assert_eq!(def(&t,id), MaterialDef::OPAQUE);
+            assert_eq!(def(&t, id), MaterialDef::OPAQUE);
             assert!(t.solid(Voxel::cube(id)));
             assert!(t.is_opaque(Voxel::cube(id)));
         }
@@ -234,7 +232,9 @@ mod tests {
     #[test]
     fn no_builtin_emits() {
         let t = MaterialTable::builtin();
-        for id in 0..FIRST_MOD_ID { assert_eq!(t.emission(Voxel::cube(id)), 0); }
+        for id in 0..FIRST_MOD_ID {
+            assert_eq!(t.emission(Voxel::cube(id)), 0);
+        }
     }
 
     #[test]
@@ -251,10 +251,13 @@ mod tests {
 
     #[test]
     fn only_a_dimming_of_fifteen_is_opaque_whatever_the_shape() {
-        let t = &crate::testgen::fixtures().tables;
+        let t = &crate::testgen::fixtures().tables.materials;
         assert!(t.is_opaque(Voxel::cube(crate::testgen::fixtures().ground.rock)));
         assert!(t.is_opaque(Voxel::new(crate::testgen::fixtures().ground.rock, 2, 5)));
-        for id in [crate::testgen::fixtures().glass, crate::testgen::fixtures().leaves] {
+        for id in [
+            crate::testgen::fixtures().glass,
+            crate::testgen::fixtures().leaves,
+        ] {
             assert!(!t.is_opaque(Voxel::cube(id)), "material {id}");
         }
     }

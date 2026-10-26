@@ -1,14 +1,14 @@
-use tesserae_core::testgen::fixtures;
 use std::sync::OnceLock;
 use tesserae_core::light::{Channel, Light, MAX_LIGHT, transmitted};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::shape::{NodeBox, examples};
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, ConnectDef, Connections, LitChunk, Neighborhood, Voxel,
     greedy_mesh, mesh_chunk, testgen,
 };
 use tesserae_core::{
-    Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Tables, Worldgen, WorldgenParams,
+    Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Tables, Worldgen,
 };
 
 const FENCE: u8 = 4;
@@ -735,7 +735,8 @@ fn random_scene(rng: &mut Rng) -> Chunk {
     for z in LO..LO + SPAN {
         for y in LO..LO + SPAN {
             for x in LO..LO + SPAN {
-                let material = [fixtures().ground.rock, fixtures().ground.soil][rng.below(2) as usize];
+                let material =
+                    [fixtures().ground.rock, fixtures().ground.soil][rng.below(2) as usize];
                 let voxel = match rng.below(10) {
                     0..=3 => continue,
                     4..=5 => Voxel::cube(material),
@@ -787,7 +788,8 @@ fn random_connected_scene(rng: &mut Rng) -> Chunk {
     for z in LO..LO + SPAN {
         for y in LO..LO + SPAN {
             for x in LO..LO + SPAN {
-                let material = [fixtures().ground.rock, fixtures().ground.soil][rng.below(2) as usize];
+                let material =
+                    [fixtures().ground.rock, fixtures().ground.soil][rng.below(2) as usize];
                 let voxel = match rng.below(10) {
                     0..=2 => continue,
                     3 => Voxel::cube(material),
@@ -1110,7 +1112,6 @@ fn uvs_are_the_position_inside_the_voxel() {
 
 // Translucent Materials: what a face is hidden by is the Material across it.
 
-
 use tesserae_core::{MaterialDef, Occlusion, RenderClass};
 
 fn put(chunk: &mut Chunk, at: [usize; 3], voxel: Voxel) {
@@ -1209,7 +1210,15 @@ fn stone_beside_glass_keeps_its_face_and_glass_beside_stone_loses_its_own() {
 #[test]
 fn every_quad_lands_in_the_layer_of_its_materials_render_class() {
     let mut c = Chunk::air();
-    for (i, m) in [fixtures().ground.rock, fixtures().glass, fixtures().leaves, water()].into_iter().enumerate() {
+    for (i, m) in [
+        fixtures().ground.rock,
+        fixtures().glass,
+        fixtures().leaves,
+        water(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
         put(&mut c, [10 + 2 * i, 10, 10], Voxel::cube(m));
         put(
             &mut c,
@@ -1258,7 +1267,11 @@ fn every_quad_lands_in_the_layer_of_its_materials_render_class() {
 fn a_shaped_voxel_is_hidden_only_by_a_neighbour_that_hides_it() {
     // A slab of stone beside a cube of stone loses its sealed side; beside a cube
     // of glass it keeps it, because glass proves nothing about stone.
-    let slab = Voxel::shaped(fixtures().ground.rock, tesserae_core::SHAPE_SLAB, Orientation::IDENTITY);
+    let slab = Voxel::shaped(
+        fixtures().ground.rock,
+        tesserae_core::SHAPE_SLAB,
+        Orientation::IDENTITY,
+    );
     let faces_towards_neighbour = |beside: Voxel| {
         let mut c = Chunk::air();
         put(&mut c, [10, 10, 10], slab);
@@ -1272,7 +1285,10 @@ fn a_shaped_voxel_is_hidden_only_by_a_neighbour_that_hides_it() {
             .filter(|(quad, n)| *n == [1.0, 0.0, 0.0] && quad.iter().all(|p| p[0] == 11.0))
             .count()
     };
-    assert_eq!(faces_towards_neighbour(Voxel::cube(fixtures().ground.rock)), 0);
+    assert_eq!(
+        faces_towards_neighbour(Voxel::cube(fixtures().ground.rock)),
+        0
+    );
     assert_eq!(faces_towards_neighbour(Voxel::cube(fixtures().glass)), 1);
     assert_eq!(faces_towards_neighbour(Voxel::cube(fixtures().leaves)), 1);
 }
@@ -1290,7 +1306,10 @@ fn a_uniform_chunk_declines_only_if_the_material_hides_itself_and_what_is_beside
     let declines = |centre: &Chunk, around: &Chunk| {
         mesh_chunk(unlit(centre), enclosed_by(around), tables()).is_empty()
     };
-    assert!(declines(&uniform(fixtures().ground.rock), &uniform(fixtures().ground.rock)));
+    assert!(declines(
+        &uniform(fixtures().ground.rock),
+        &uniform(fixtures().ground.rock)
+    ));
     assert!(
         declines(&uniform(fixtures().glass), &uniform(fixtures().glass)),
         "a block of glass is a skin"
@@ -1301,10 +1320,19 @@ fn a_uniform_chunk_declines_only_if_the_material_hides_itself_and_what_is_beside
     );
     assert!(declines(&uniform(water()), &uniform(water())));
     // Stone's faces are seen through the glass beside it.
-    assert!(!declines(&uniform(fixtures().ground.rock), &uniform(fixtures().glass)));
+    assert!(!declines(
+        &uniform(fixtures().ground.rock),
+        &uniform(fixtures().glass)
+    ));
     // Leaves draw every face, inside the Chunk as well as on its boundary.
-    assert!(!declines(&uniform(fixtures().leaves), &uniform(fixtures().leaves)));
-    assert!(!declines(&uniform(fixtures().leaves), &uniform(fixtures().ground.rock)));
+    assert!(!declines(
+        &uniform(fixtures().leaves),
+        &uniform(fixtures().leaves)
+    ));
+    assert!(!declines(
+        &uniform(fixtures().leaves),
+        &uniform(fixtures().ground.rock)
+    ));
     // Water beside glass: neither hides the other.
     assert!(!declines(&uniform(water()), &uniform(fixtures().glass)));
 }
@@ -1323,7 +1351,12 @@ fn random_translucent_scene(rng: &mut Rng) -> Chunk {
     for z in LO..LO + SPAN {
         for y in LO..LO + SPAN {
             for x in LO..LO + SPAN {
-                let material = [fixtures().ground.rock, fixtures().glass, fixtures().leaves, water()][rng.below(4) as usize];
+                let material = [
+                    fixtures().ground.rock,
+                    fixtures().glass,
+                    fixtures().leaves,
+                    water(),
+                ][rng.below(4) as usize];
                 let voxel = match rng.below(10) {
                     0..=3 => continue,
                     4..=7 => Voxel::cube(material),
@@ -1397,7 +1430,11 @@ fn a_block_of_glass_draws_only_its_skin() {
     let mesh = mesh_isolated(&c);
     assert_eq!(mesh.blended.quad_count(), 6);
     let mut stone = Chunk::air();
-    put(&mut stone, [20, 20, 20], Voxel::cube(fixtures().ground.rock));
+    put(
+        &mut stone,
+        [20, 20, 20],
+        Voxel::cube(fixtures().ground.rock),
+    );
     assert!(mesh_isolated(&stone).blended.is_empty());
 }
 
@@ -1621,7 +1658,12 @@ fn a_line_of_fences_costs_the_same_for_each_fence_added_along_either_axis() {
             for i in 0..n {
                 let mut at = [8, 8, 8];
                 at[axis] += i;
-                chunk.set(at[0], at[1], at[2], Voxel::new(fixtures().ground.rock, FENCE, 0));
+                chunk.set(
+                    at[0],
+                    at[1],
+                    at[2],
+                    Voxel::new(fixtures().ground.rock, FENCE, 0),
+                );
             }
             let count = mesh_isolated(&chunk).quad_count();
             assert_hole_free(&chunk, &format!("line of {n} along {axis}"));
@@ -1874,7 +1916,11 @@ fn blended_positions(mesh: &tesserae_core::ChunkMesh) -> Vec<[f32; 3]> {
 /// stair itself meshes exactly as it does dry.
 #[test]
 fn a_waterlogged_stair_draws_its_water_in_the_notch_alone() {
-    let stair = Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, 0));
+    let stair = Voxel::shaped(
+        fixtures().ground.rock,
+        SHAPE_STAIR,
+        Orientation::new(POS_Y, 0),
+    );
     let mut chunk = Chunk::air();
     chunk.set(4, 4, 4, stair);
     let mut overlay = tesserae_core::ChunkOverlay::none();
@@ -1897,7 +1943,11 @@ fn a_waterlogged_stair_draws_its_water_in_the_notch_alone() {
 /// its own surface.
 #[test]
 fn a_waterlogged_slab_draws_water_from_its_top_to_the_surface() {
-    let slab = Voxel::shaped(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(POS_Y, 0));
+    let slab = Voxel::shaped(
+        fixtures().ground.rock,
+        SHAPE_SLAB,
+        Orientation::new(POS_Y, 0),
+    );
     let mut chunk = Chunk::air();
     chunk.set(4, 4, 4, slab);
     let mut overlay = tesserae_core::ChunkOverlay::none();
@@ -1921,7 +1971,11 @@ fn a_waterlogged_slab_draws_water_from_its_top_to_the_surface() {
 #[test]
 fn a_waterlogged_stair_in_a_lake_draws_no_faces_inside_the_water() {
     let water = water();
-    let stair = Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, 0));
+    let stair = Voxel::shaped(
+        fixtures().ground.rock,
+        SHAPE_STAIR,
+        Orientation::new(POS_Y, 0),
+    );
     let mut chunk = Chunk::air();
     for x in 3..6 {
         for y in 3..6 {
@@ -2004,7 +2058,6 @@ fn drained() -> tesserae_core::ChunkOverlay {
 /// stairs and clear Materials by hand.
 #[test]
 fn a_dry_neighbourhood_meshes_the_same_whichever_path_it_takes() {
-
     let g = world();
     let mut scenes: Vec<(Chunk, [Chunk; 6])> = ramp_chunks(&g, 1)
         .into_iter()
@@ -2118,7 +2171,12 @@ fn the_retired_id_draws_the_opaque_stand_in_and_is_never_a_fluid() {
     let mesh = mesh_isolated(&c);
     assert_eq!(mesh.quad_count(), 6);
     assert!(mesh.blended.positions.is_empty() && mesh.cutout.positions.is_empty());
-    assert!(mesh.opaque.materials.iter().all(|&m| m == FIRST_MOD_ID.saturating_sub(1) as u32));
+    assert!(
+        mesh.opaque
+            .materials
+            .iter()
+            .all(|&m| m == FIRST_MOD_ID.saturating_sub(1) as u32)
+    );
 
     c.set(17, 16, 16, Voxel::cube(fixtures().ground.rock));
     assert_eq!(
@@ -2127,9 +2185,20 @@ fn the_retired_id_draws_the_opaque_stand_in_and_is_never_a_fluid() {
         "the shared face is hidden"
     );
 
-    let read = Occupants::of(Voxel::cube(FIRST_MOD_ID.saturating_sub(1)), Overlay::NONE, &tables().fluids);
+    let read = Occupants::of(
+        Voxel::cube(FIRST_MOD_ID.saturating_sub(1)),
+        Overlay::NONE,
+        &tables().fluids,
+    );
     assert_eq!(read.solid, Voxel::cube(FIRST_MOD_ID.saturating_sub(1)));
     assert_eq!(read.fluid, None);
-    assert!(tables().fluids.contains(water()) && !tables().fluids.contains(FIRST_MOD_ID.saturating_sub(1)));
-    assert!(tables().materials.solid(Voxel::cube(FIRST_MOD_ID.saturating_sub(1))));
+    assert!(
+        tables().fluids.contains(water())
+            && !tables().fluids.contains(FIRST_MOD_ID.saturating_sub(1))
+    );
+    assert!(
+        tables()
+            .materials
+            .solid(Voxel::cube(FIRST_MOD_ID.saturating_sub(1)))
+    );
 }

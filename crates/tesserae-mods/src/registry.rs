@@ -28,7 +28,8 @@ pub struct Registry {
 }
 
 /// Retired ids retain unnamed slots so Mod ids keep starting at 8.
-const BUILTIN_MATERIALS: [Option<&str>; 8] = [Some("core:air"), None, None, None, None, None, None, None];
+const BUILTIN_MATERIALS: [Option<&str>; 8] =
+    [Some("core:air"), None, None, None, None, None, None, None];
 const BUILTIN_SHAPES: [Option<&str>; 4] = [
     Some("core:cube"),
     Some("core:slab"),

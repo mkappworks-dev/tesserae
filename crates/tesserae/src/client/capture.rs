@@ -248,9 +248,12 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(Startup, uncap_frame_rate).add_systems(
         Update,
         (
-            render_offscreen.after(super::preview::camera).run_if(|capture: Res<Capture>, target: Option<Res<Offscreen>>| {
-                capture.offscreen && target.is_none()
-            }),
+            render_offscreen.after(super::preview::camera).run_if(
+                |capture: Res<Capture>, target: Option<Res<Offscreen>>| {
+                    capture.offscreen && target.is_none()
+                },
+            ),
+            capture_holding,
             watch_frames,
             aim,
             fly_forward,
@@ -292,13 +295,13 @@ struct Offscreen(Handle<Image>);
 fn render_offscreen(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    cameras: Query<Entity, With<Camera3d>>,
+    cameras: Query<Entity, (With<Camera3d>, Without<super::tile_preview::AtlasCamera>)>,
     main: Single<Entity, With<MainCamera>>,
     menu: Res<super::menu::Menu>,
 ) {
     let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
-    // Every camera: one left on the window would draw there, not in the image.
+    // Every window camera must draw into the capture; the icon atlas stays separate.
     for camera in &cameras {
         commands
             .entity(camera)
@@ -376,6 +379,48 @@ fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
         .max(0.0)
         .sqrt();
     wanted.clamp(-room, room)
+}
+
+fn capture_holding(
+    catalogue: Res<super::edit::Catalogue>,
+    mut hotbar: ResMut<super::edit::Hotbar>,
+    mut configured: Local<bool>,
+) {
+    if *configured {
+        return;
+    }
+    let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MATERIAL") else {
+        return;
+    };
+    let Some(material) = catalogue
+        .0
+        .materials
+        .iter()
+        .find(|material| material.name == name)
+    else {
+        return;
+    };
+    let shape_name =
+        std::env::var("TESSERAE_SCREENSHOT_SHAPE").unwrap_or_else(|_| "core:cube".into());
+    let Some(shape) = catalogue
+        .0
+        .shapes
+        .iter()
+        .find(|shape| shape.name == shape_name)
+    else {
+        return;
+    };
+    let orientation = std::env::var("TESSERAE_SCREENSHOT_ORIENTATION")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .and_then(tesserae_core::Orientation::from_bits)
+        .unwrap_or(tesserae_core::Orientation::IDENTITY);
+    hotbar.outside = Some(super::edit::Holding::Solid {
+        material: material.id,
+        shape: shape.id,
+        orientation,
+    });
+    *configured = true;
 }
 
 fn aim(

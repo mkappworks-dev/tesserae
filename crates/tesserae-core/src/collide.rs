@@ -363,11 +363,11 @@ fn ray_box(o: [f32; 3], d: [f32; 3], cell: [i32; 3], b: &NodeBox) -> Option<(f32
 
 #[cfg(test)]
 mod tests {
-    use crate::testgen::fixtures;
     use super::*;
     use crate::mesh::{NEG_Y, NEG_Z, POS_X, POS_Y};
     use crate::shape::examples;
     use crate::shape::{CollisionBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::testgen::fixtures;
     use std::collections::HashMap;
 
     /// A volume of what a test places, loaded over `lo..=hi` and unknown outside.
@@ -455,7 +455,7 @@ mod tests {
 
     /// Stone at layer 0 and a pool of water on it at layer 1.
     fn pool() -> (Grid, Tables) {
-        let mut tables = fixtures().tables.clone();
+        let tables = fixtures().tables.clone();
         let water = fixtures().water;
         let mut g = Grid::new();
         g.floor(0, cube()).floor(1, Voxel::cube(water));
@@ -515,7 +515,11 @@ mod tests {
     }
 
     fn stair(turn: u8) -> Voxel {
-        Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, turn))
+        Voxel::shaped(
+            fixtures().ground.rock,
+            SHAPE_STAIR,
+            Orientation::new(POS_Y, turn),
+        )
     }
 
     /// A body 0.4 m square and `height` tall standing with its feet at `(x, y, z)`.
@@ -802,7 +806,11 @@ mod tests {
     fn an_overhang_rotates_with_its_shape() {
         let mut t = table();
         let fence = fence_post(&mut t);
-        let on_its_side = Voxel::new(fixtures().ground.rock, fence.shape(), Orientation::new(POS_X, 0).bits());
+        let on_its_side = Voxel::new(
+            fixtures().ground.rock,
+            fence.shape(),
+            Orientation::new(POS_X, 0).bits(),
+        );
         let reach = t.collision(on_its_side, Connections::NONE)[0];
         assert_eq!((reach.min[0], reach.max[0]), (0, 24));
         assert_eq!((reach.min[1], reach.max[1]), (6, 10));
@@ -819,8 +827,16 @@ mod tests {
 
     fn fences() -> (ShapeTable, Voxel, Voxel) {
         let mut t = table();
-        let fence = Voxel::new(fixtures().ground.rock, t.register(examples::fence()).unwrap(), 0);
-        let pipe = Voxel::new(fixtures().ground.rock, t.register(examples::pipe()).unwrap(), 0);
+        let fence = Voxel::new(
+            fixtures().ground.rock,
+            t.register(examples::fence()).unwrap(),
+            0,
+        );
+        let pipe = Voxel::new(
+            fixtures().ground.rock,
+            t.register(examples::pipe()).unwrap(),
+            0,
+        );
         (t, fence, pipe)
     }
 

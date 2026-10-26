@@ -23,7 +23,7 @@ fn burning_stone() -> Tables {
     tables
 }
 
-fn harness_with_water(mut tables: Tables) -> (Harness, MaterialId) {
+fn harness_with_water(tables: Tables) -> (Harness, MaterialId) {
     let water = tesserae_core::testgen::fixtures().water;
     let mut h = harness();
     h.app.insert_resource(ContentTables(Arc::new(tables)));
@@ -415,7 +415,7 @@ fn water_changing_under_a_cover_every_tick_is_still_redrawn_and_settles() {
 fn lake_tables() -> &'static (Tables, MaterialId) {
     static TABLES: std::sync::OnceLock<(Tables, MaterialId)> = std::sync::OnceLock::new();
     TABLES.get_or_init(|| {
-        let mut tables = crate::server::fixture_tables();
+        let tables = crate::server::fixture_tables();
         let water = tesserae_core::testgen::fixtures().water;
         (tables, water)
     })

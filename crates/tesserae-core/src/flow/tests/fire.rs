@@ -1,4 +1,3 @@
-use crate::testgen::fixtures;
 //! Heat, ignition and burning, through the same `advance` and the same
 //! harness as flow: exposure through open space, delays in logical seconds,
 //! finite fuel and residue, and the whole-Voxel wet rule.
@@ -11,6 +10,7 @@ use crate::material::{MaterialDef, Occlusion, RenderClass};
 use crate::mesh::POS_Y;
 use crate::occupants::Burning;
 use crate::shape::{NodeBox, Orientation, ShapeDef};
+use crate::testgen::fixtures;
 use crate::{SHAPE_SLAB, SHAPE_STAIR};
 
 /// The spec's demo tuning: 2 m of heat, a 2 s delay and an 8 s burn.
@@ -413,7 +413,13 @@ fn walls_partitions_and_joint_seals_block_heat_and_an_open_route_admits_it() {
     assert!(!burning(&sim, [2, 1, 0]));
     assert_eq!(material(&sim, [2, 1, 0]), ids.wood);
 
-    let slab = |up| Voxel::new(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(up, 0).bits());
+    let slab = |up| {
+        Voxel::new(
+            fixtures().ground.rock,
+            SHAPE_SLAB,
+            Orientation::new(up, 0).bits(),
+        )
+    };
     let (bottom, top) = (slab(POS_Y), slab(crate::mesh::NEG_Y));
     for (case, passes) in [
         ("partition", false),
@@ -577,7 +583,13 @@ fn water_against_a_cube_protects_it_and_puts_it_out() {
 /// slab the other way up holds its water against the cube and wets it.
 #[test]
 fn water_behind_a_sealed_face_or_a_partition_does_not_wet_the_cube() {
-    let slab = |up| Voxel::new(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(up, 0).bits());
+    let slab = |up| {
+        Voxel::new(
+            fixtures().ground.rock,
+            SHAPE_SLAB,
+            Orientation::new(up, 0).bits(),
+        )
+    };
     for (case, wets) in [
         ("stair back", false),
         ("partition", false),
@@ -601,7 +613,13 @@ fn water_behind_a_sealed_face_or_a_partition_does_not_wet_the_cube() {
         let water = match case {
             "stair back" => {
                 let back = (0..4)
-                    .map(|t| Voxel::new(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, t).bits()))
+                    .map(|t| {
+                        Voxel::new(
+                            fixtures().ground.rock,
+                            SHAPE_STAIR,
+                            Orientation::new(POS_Y, t).bits(),
+                        )
+                    })
                     .find(|&v| sim.tables.shapes.seals(v, crate::mesh::NEG_X))
                     .unwrap();
                 sim.build([3, 1, 0], back);

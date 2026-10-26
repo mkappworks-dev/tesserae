@@ -29,18 +29,18 @@ The contract step. The only built-in Material is air.
 
 ## Acceptance criteria
 
-- [ ] `core:stone`, `core:dirt`, `core:grass`, `core:lantern`, `core:glass`
+- [x] `core:stone`, `core:dirt`, `core:grass`, `core:lantern`, `core:glass`
       and `core:leaves` are unknown on every contract line.
-- [ ] The Registry lists only `core:air` below 8, and every 0.1 fixture's Mod
+- [x] The Registry lists only `core:air` below 8, and every 0.1 fixture's Mod
       ids still start at 8.
-- [ ] A player Edit or a Command naming ids 1 to 7 is refused as an unknown
+- [x] A player Edit or a Command naming ids 1 to 7 is refused as an unknown
       Material, and such an id already in a Chunk draws as the stand-in.
-- [ ] A World with no Game is all air, the player can fly in it, and the log
+- [x] A World with no Game is all air, the player can fly in it, and the log
       explains it.
-- [ ] A 0.2 Game with World parameters loads with no ground and a warning.
-- [ ] Nothing in the workspace names a deleted constant.
-- [ ] ADR-0016 is written, and the docs no longer call any solid built in.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] A 0.2 Game with World parameters loads with no ground and a warning.
+- [x] Nothing in the workspace names a deleted constant.
+- [x] ADR-0016 is written, and the docs no longer call any solid built in.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -62,3 +62,9 @@ The 0.3 lake guest declares its own ground.
 Final formatting, review, compatibility execution, guest rebuild and full
 CI remain deferred to ticket 13 at the user's request. The docs' control
 wording will follow the remaining UI tickets.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

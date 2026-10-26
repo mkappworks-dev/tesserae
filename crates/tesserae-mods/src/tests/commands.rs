@@ -226,7 +226,10 @@ fn every_rejection_is_named_and_the_batch_is_counted() {
         }
     );
     assert_eq!(
-        rejected(vec![place([0.0; 3], Voxel::new(fixtures().ground.rock, shapes, 0))]),
+        rejected(vec![place(
+            [0.0; 3],
+            Voxel::new(fixtures().ground.rock, shapes, 0)
+        )]),
         BatchError::Voxel {
             command: 0,
             fault: PlaceFault::UnknownShape
@@ -235,7 +238,11 @@ fn every_rejection_is_named_and_the_batch_is_counted() {
     assert_eq!(
         rejected(vec![
             ok(),
-            fill([0.0; 3], [1.0; 3], Voxel::new(fixtures().ground.rock, 0, 24))
+            fill(
+                [0.0; 3],
+                [1.0; 3],
+                Voxel::new(fixtures().ground.rock, 0, 24)
+            )
         ]),
         BatchError::Voxel {
             command: 1,
@@ -287,9 +294,20 @@ fn builder_returns_its_original_ids_and_retired_placements_are_refused() {
         let builder = rig.instance("builder", ModLimits::HOST).unwrap();
         let line = builder.line();
         let (_, commands) = block_on(builder.tick(context(n))).unwrap();
-        let expected = (0..n).map(|x| Placement { at: [x as f32,0.0,0.0], voxel: Voxel::cube(1) }).collect();
+        let expected = (0..n)
+            .map(|x| Placement {
+                at: [x as f32, 0.0, 0.0],
+                voxel: Voxel::cube(1),
+            })
+            .collect();
         assert_eq!(commands, [Command::Place(expected)]);
-        assert!(matches!(validate(&commands,line,&fixtures().tables,1.0),Err(BatchError::Voxel { fault: PlaceFault::UnknownMaterial, .. })));
+        assert!(matches!(
+            validate(&commands, line, &fixtures().tables, 1.0),
+            Err(BatchError::Voxel {
+                fault: PlaceFault::UnknownMaterial,
+                ..
+            })
+        ));
     }
 }
 
@@ -310,9 +328,20 @@ fn a_tick_context_with_three_edits_is_seen_by_the_guest() {
     ctx.edits = vec![edit; 3];
 
     let (_, commands) = block_on(echo.tick(ctx)).unwrap();
-    assert_eq!(commands, [Command::Place(vec![Placement { at: [3.0,0.0,0.0], voxel: Voxel::cube(1) }])]);
-    assert!(matches!(check(&commands),Err(BatchError::Voxel { fault: PlaceFault::UnknownMaterial, .. })));
-
+    assert_eq!(
+        commands,
+        [Command::Place(vec![Placement {
+            at: [3.0, 0.0, 0.0],
+            voxel: Voxel::cube(1)
+        }])]
+    );
+    assert!(matches!(
+        check(&commands),
+        Err(BatchError::Voxel {
+            fault: PlaceFault::UnknownMaterial,
+            ..
+        })
+    ));
 }
 
 #[test]

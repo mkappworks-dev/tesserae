@@ -14,11 +14,11 @@ use std::time::Duration;
 
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use futures_lite::future::block_on;
-use tesserae_core::testgen::fixtures;
 use tesserae_core::{Tables, Voxel};
 use tesserae_mods::{
     BatchReport, Command, Compiled, Declaration, Line, ModHost, ModInstance, ModLimits, Placement,
-    Registry, TickContext, Trust, apply, discover, plan, validate, voxel_index,
+    Registered, RegisteredId, Registry, TickContext, Trust, WorldInfo, apply, discover, plan,
+    validate, voxel_index,
 };
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
@@ -118,10 +118,11 @@ impl tesserae::naive::edit::Host for NaiveState {
 struct NaiveRig {
     store: Store<NaiveState>,
     guest: Naive,
+    rock: u16,
 }
 
 impl NaiveRig {
-    fn new(tables: Arc<Tables>) -> NaiveRig {
+    fn new(tables: Arc<Tables>, rock: u16) -> NaiveRig {
         let limits = ModLimits::HOST;
         let mut config = Config::new();
         config
@@ -147,7 +148,7 @@ impl NaiveRig {
             .unwrap();
         store.set_fuel(limits.call_fuel).unwrap();
         let guest = block_on(Naive::instantiate_async(&mut store, &component, &linker)).unwrap();
-        NaiveRig { store, guest }
+        NaiveRig { store, guest, rock }
     }
 
     fn run(&mut self, count: u32) -> Vec<([i32; 3], Voxel)> {
@@ -155,7 +156,7 @@ impl NaiveRig {
         block_on(
             self.guest
                 .tesserae_naive_run()
-                .call_run(&mut self.store, count),
+                .call_run(&mut self.store, count, self.rock),
         )
         .unwrap();
         std::mem::take(&mut self.store.data_mut().placed)
@@ -171,8 +172,8 @@ fn context(tick: u64) -> TickContext {
     }
 }
 
-fn natives(count: u32) -> Vec<Command> {
-    let voxel = Voxel::cube(fixtures().ground.rock);
+fn natives(count: u32, rock: u16) -> Vec<Command> {
+    let voxel = Voxel::cube(rock);
     let at = |i: u32| Placement {
         at: [i as f32, 0.0, 0.0],
         voxel,
@@ -188,6 +189,7 @@ struct Rig {
     builder: Option<ModInstance>,
     catalog: Option<ModInstance>,
     naive: NaiveRig,
+    rock: u16,
     _scratch: Scratch,
 }
 
@@ -195,15 +197,53 @@ impl Rig {
     fn new() -> Rig {
         let host = ModHost::new().unwrap();
         let scratch = Scratch::new();
-        let compiled = scratch.load(&host, &["builder", "catalog", "hello"]);
-        let tables = Arc::new(fixtures().tables.clone());
+        let compiled = scratch.load(&host, &["bench-builder", "catalog", "hello"]);
+
         let spawn = |id: &str| {
             let one = compiled.iter().find(|c| c.found.manifest.id == id).unwrap();
             Some(block_on(host.instantiate(one, 7)).unwrap())
         };
-        let (builder, catalog, hello) = (spawn("builder"), spawn("catalog"), spawn("hello"));
+        let (builder, catalog, hello) = (spawn("bench-builder"), spawn("catalog"), spawn("hello"));
+        let (builder, declaration) = block_on(builder.unwrap().declare()).unwrap();
+        let mut tables = Tables::builtin();
+        let mut registry = Registry::builtin();
+        apply(
+            declaration,
+            "bench-builder",
+            &mut tables,
+            &mut registry,
+            false,
+        )
+        .unwrap();
+        let rock = registry
+            .id_of(tesserae_mods::Kind::Material, "bench-builder:stone")
+            .unwrap() as u16;
+        let listed = |kind| {
+            registry
+                .names(kind)
+                .map(|(id, name)| RegisteredId {
+                    id: id as u32,
+                    name: name.into(),
+                })
+                .collect()
+        };
+        let builder = Some(
+            block_on(builder.start(
+                WorldInfo {
+                    seed: 7,
+                    voxel_size_m: 1.0,
+                },
+                Registered {
+                    materials: listed(tesserae_mods::Kind::Material),
+                    shapes: listed(tesserae_mods::Kind::Shape),
+                },
+            ))
+            .unwrap(),
+        );
+        let tables = Arc::new(tables);
         Rig {
-            naive: NaiveRig::new(tables.clone()),
+            naive: NaiveRig::new(tables.clone(), rock),
+            rock,
             host,
             compiled,
             tables,
@@ -276,7 +316,7 @@ fn host_calls(c: &mut Criterion) {
         });
     }
     for n in SIZES {
-        let commands = natives(n);
+        let commands = natives(n, rig.rock);
         group.bench_with_input(BenchmarkId::new("validate", n), &n, |b, _| {
             b.iter(|| black_box(rig.validate(black_box(&commands))))
         });
@@ -331,7 +371,7 @@ fn interleaved() {
     println!("load average before: {}", load_average());
 
     for n in SIZES {
-        let commands = natives(n);
+        let commands = natives(n, rig.borrow().rock);
         let rig = &rig;
         let variants: Vec<(&str, Box<dyn FnMut() + '_>)> = vec![
             (

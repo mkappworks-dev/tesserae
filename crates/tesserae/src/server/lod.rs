@@ -1151,7 +1151,7 @@ mod tests {
     use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{CHUNK_SIZE, ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample, worldgen};
+    use tesserae_core::{CHUNK_SIZE, ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample};
 
     static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
 
@@ -1583,7 +1583,9 @@ mod tests {
         });
         assert!(same_chunk(&run(&held_even), &all));
 
-        let lantern = Arc::new(Chunk::filled(Voxel::cube(tesserae_core::testgen::fixtures().lantern)));
+        let lantern = Arc::new(Chunk::filled(Voxel::cube(
+            tesserae_core::testgen::fixtures().lantern,
+        )));
         let mut edited = held_even;
         edited[2] = Some(Held {
             chunk: Arc::clone(&lantern),
@@ -1772,7 +1774,9 @@ mod tests {
             .resource_mut::<LodJobs>()
             .generate
             .spawn((1, far), || {
-                packed(Chunk::filled(Voxel::cube(tesserae_core::testgen::fixtures().lantern)))
+                packed(Chunk::filled(Voxel::cube(
+                    tesserae_core::testgen::fixtures().lantern,
+                )))
             });
         h.lod_settle();
         assert!(!h.lod_store().contains(1, far), "the far Chunk landed");
@@ -1789,7 +1793,9 @@ mod tests {
             .resource_mut::<LodJobs>()
             .generate
             .spawn((1, coord), || {
-                packed(Chunk::filled(Voxel::cube(tesserae_core::testgen::fixtures().lantern)))
+                packed(Chunk::filled(Voxel::cube(
+                    tesserae_core::testgen::fixtures().lantern,
+                )))
             });
         h.lod_settle();
         let after = h.lod_store().shared(1, coord).unwrap();
@@ -2072,7 +2078,11 @@ mod tests {
     fn a_coarse_mesh_has_no_shaped_voxel_geometry_though_its_children_do() {
         let mut h = harness();
         // A held child of stairs, which level 0 would give shaped geometry.
-        let stairs = Chunk::filled(Voxel::new(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR, 5));
+        let stairs = Chunk::filled(Voxel::new(
+            tesserae_core::testgen::fixtures().ground.rock,
+            SHAPE_STAIR,
+            5,
+        ));
         let tables = crate::server::fixture_tables();
         let level_zero = mesh_chunk(
             LitChunk::new(&stairs, &OPEN_SKY),
@@ -2647,8 +2657,8 @@ mod tests {
     /// A Chunk of `rows` layers of water at `level`, alone in the air, meshed as the Server
     /// meshes it, under water standing at `level_m`.
     fn coarse_water(level: u32, rows: usize, level_m: Option<f32>) -> ChunkMesh {
-        let mut tables = crate::server::fixture_tables();
-        let water = tesserae_core::tesserae_core::testgen::fixtures().water;
+        let tables = crate::server::fixture_tables();
+        let water = tesserae_core::testgen::fixtures().water;
         let surface = Worldgen::new(
             world().seed,
             world().voxel_size,

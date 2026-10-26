@@ -100,9 +100,9 @@ Orange is untrusted and sandboxed. Blue is ours. Dashed grey is third party.
 
 The engine owns how things behave; a Mod's Declaration says which Materials
 behave that way, and with what numbers. The engine has no water, lava, wood or
-mud; those are the demo Game's. Its only built-in Material is air. The Game names the rock, soil and surface
-of its ground and the fluid filling its lakes
-([ADR-0015](adr/0015-water-is-game-content.md)).
+mud; those are the demo Game's. Its only built-in Material is air. The Game
+names the rock, soil and surface of its ground and the fluid filling its lakes
+([ADR-0016](adr/0016-only-air-is-built-in.md)).
 
 | Behaviour              | The engine decides                                                      | Data that switches it on, and who declares it                    |
 | ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -112,8 +112,15 @@ of its ground and the fluid filling its lakes
 | Two fluids react       | How a Contact is found and applied whole or not at all                  | A reaction row, from a Mod: the demo's lava and water make stone |
 | Heat sets fuel alight  | Exposure through open space, ignition delay, burning and its residue    | A fluid's or a fuel's heat and a combustion row, from a Mod      |
 
-A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See [ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
+A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See
+[ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
 [ADR-0012](adr/0012-mods-declare-once-and-command-in-batches.md).
+
+The Client sends aim reports beside edit intents. The Server answers with metre
+outline bounds and an acceptable ghost cell through the edit resolver. The
+Client meshes held Shapes from catalogue geometry and draws the outline, ghost
+and corner model. The menu and hotbar share a cached model atlas from the same
+geometry. No preview reads World storage.
 
 ## The three invariants this diagram exists to protect
 
@@ -193,8 +200,8 @@ tesserae/
 │           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
-│           │   ├── edit.rs         place/break intents, hotbar, crosshair   ▸ 5
-│           │   └── menu.rs         the picker that fills a hotbar slot      ▸ 8
+│           │   ├── edit.rs         place/remove intents, hotbar, crosshair   ▸ 5
+│           │   └── menu.rs         tile menu and square play bar      ▸ 8
 │           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9

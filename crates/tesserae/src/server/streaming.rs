@@ -1508,7 +1508,11 @@ pub(in crate::server) mod tests {
             let store = h.store();
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(*coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, *coord), neighbors, &crate::server::fixture_tables());
+            let fresh = mesh_chunk(
+                lit(store, *coord),
+                neighbors,
+                &crate::server::fixture_tables(),
+            );
             assert!(
                 same_mesh(held, &fresh),
                 "{coord}: the Client holds a stale mesh ({} quads, should be {})",
@@ -1554,7 +1558,11 @@ pub(in crate::server) mod tests {
             assert!(!republished.mesh.is_empty(), "{coord} has a new face");
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, coord), neighbors, &crate::server::fixture_tables());
+            let fresh = mesh_chunk(
+                lit(store, coord),
+                neighbors,
+                &crate::server::fixture_tables(),
+            );
             assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
         }
         assert_eq!(ready.len(), 2, "nothing else was touched");
@@ -2101,7 +2109,11 @@ pub(in crate::server) mod tests {
                 let store = h.store();
                 let neighbors: [Option<LitChunk>; 6] =
                     face_neighbors(*coord).map(|n| Some(lit(store, n)));
-                let fresh = mesh_chunk(lit(store, *coord), neighbors, &crate::server::fixture_tables());
+                let fresh = mesh_chunk(
+                    lit(store, *coord),
+                    neighbors,
+                    &crate::server::fixture_tables(),
+                );
                 assert!(
                     same_mesh(held, &fresh),
                     "{coord} is stale, {cells} Cells away"

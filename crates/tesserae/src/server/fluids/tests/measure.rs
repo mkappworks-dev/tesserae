@@ -762,7 +762,10 @@ fn player_edits(run: &mut Run) {
         let n = (run.tick / 64) as i32;
         let at = run.at(20.0, 0.0, -20.0);
         let at = [at[0] + n % 16, at[1], at[2] + n / 16];
-        run.put(at, Voxel::cube(tesserae_core::testgen::fixtures().ground.rock));
+        run.put(
+            at,
+            Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
+        );
         assert_eq!(
             run.occupants(at).solid,
             Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
@@ -930,7 +933,10 @@ fn fire_chain(run: &mut Run, edits: &mut dyn FnMut(&mut Run)) -> bool {
             for x in 0..n {
                 for y in 0..run.cells(3.0) {
                     for z in -run.cells(2.0)..run.cells(3.0) {
-                        run.put([x, run.floor + y, z0 + z], Voxel::cube(tesserae_core::testgen::fixtures().ground.rock));
+                        run.put(
+                            [x, run.floor + y, z0 + z],
+                            Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
+                        );
                     }
                 }
             }

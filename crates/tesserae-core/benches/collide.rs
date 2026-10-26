@@ -1,8 +1,8 @@
-use tesserae_core::testgen::fixtures;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::OnceLock;
 use tesserae_core::collide::{Aabb, VoxelVolume, raycast, sweep};
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, Orientation, SHAPE_SLAB, Tables, Voxel, mesh::POS_Y, testgen,
 };

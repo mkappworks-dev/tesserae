@@ -184,7 +184,11 @@ mod tests {
     #[test]
     fn only_flames_have_a_builtin_colour() {
         let palette = ChunkMaterialExtension::default().palette;
-        assert!(palette[..PALETTE_LEN].iter().all(|colour|*colour == palette[0]));
+        assert!(
+            palette[..PALETTE_LEN]
+                .iter()
+                .all(|colour| *colour == palette[0])
+        );
         assert_ne!(palette[FLAME_SLOT], palette[0]);
     }
 
@@ -195,5 +199,4 @@ mod tests {
         assert_ne!(palette[FLAME_SLOT], palette[0], "flames unset");
         assert!((tesserae_core::mesh::FLAME as usize) >= PALETTE_LEN);
     }
-
 }

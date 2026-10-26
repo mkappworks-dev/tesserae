@@ -1,6 +1,6 @@
 # Step 8.2: the engine ships no named content but air
 
-Status: ready-for-agent
+Status: done
 
 Drafted 2026-10-26 on `feat/phase-8.1-game-content` at 3f41695 as a second
 part of step 8.1, and moved to `feat/phase-8.2-no-built-in-content` at 212d900
@@ -32,6 +32,11 @@ Decided with the user on 2026-10-26:
 - The menu's slots and items are square tiles, and the same nine squares form
   a hotbar at the bottom of the screen during play.
 - The on-screen controls are listed one per line.
+
+Amended by the user during capture review on 2026-10-26: the menu and
+hotbar tiles show miniature block previews instead of flat colours. This
+supersedes decision 19's original flat-colour rendering and the matching
+out-of-scope item. The corner held-item model is smaller (scale 0.06).
 
 ## Problem Statement
 
@@ -376,9 +381,10 @@ marked, and the controls are listed one per line.
     - fire, when anything burns;
     - the nine slots, numbered in a corner.
 
-    Each tile is square, filled with the item's placeholder colour, with its
-    name under it. The selected slot and the held item are marked by a border.
-    Tiles are flat colour, not rendered models. The menu acts on its tiles as
+    Each tile is square and shows an item model in its placeholder colour,
+    with its name under it. The selected slot and the held item are marked by a border.
+    Tiles show rendered item models, following the capture-review amendment.
+    The menu acts on its tiles as
     follows:
     - **A click on an item tile** holds that item outside the slots, closes the
       menu and grabs the cursor again.
@@ -486,8 +492,7 @@ step 8.1's ticket 10.
 - **Client-side raycasting or any Client copy of the World.** The preview is
   the Server's answer.
 - **A hand animation or swing**, and an inventory or item counts.
-- **Tiles drawn as rendered models** of their items, and dragging a slot off
-  the bar to empty it.
+- Dragging a slot off the bar to empty it.
 - **Save data, tombstones beyond ids 1 to 7, and migration.**
 - **Network transport.** Messages stay in-process.
 

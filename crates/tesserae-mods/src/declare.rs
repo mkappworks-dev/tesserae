@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use tesserae_core::{
-    AIR, Burn, CombustionDef, FluidDef, Heat, MaterialId, ParamError, Phase, Reactant, ReactionDef,
-    GroundParams, Side, Tables, WaterParams, WorldgenParams,
+    AIR, Burn, CombustionDef, FluidDef, GroundParams, Heat, MaterialId, ParamError, Phase,
+    Reactant, ReactionDef, Side, Tables, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -303,15 +303,33 @@ pub fn resolve(
     for b in &behaviours {
         if let Some(names) = &b.ground {
             let material = |field, name: &str| {
-                registry.id_of(Kind::Material, name).map(|id| id as MaterialId).ok_or_else(|| ModError::Params {
-                    id: b.mod_id.clone(), what: "world", source: ParamError { field, rule: "names no registered Material" },
-                })
+                registry
+                    .id_of(Kind::Material, name)
+                    .map(|id| id as MaterialId)
+                    .ok_or_else(|| ModError::Params {
+                        id: b.mod_id.clone(),
+                        what: "world",
+                        source: ParamError {
+                            field,
+                            rule: "names no registered Material",
+                        },
+                    })
             };
             let resolved = GroundParams {
-                rock: material("ground.rock", &names.rock)?, soil: material("ground.soil", &names.soil)?, surface: material("ground.surface", &names.surface)?,
+                rock: material("ground.rock", &names.rock)?,
+                soil: material("ground.soil", &names.soil)?,
+                surface: material("ground.surface", &names.surface)?,
             };
-            WorldgenParams { ground: Some(resolved), ..WorldgenParams::default() }.validate_ground(tables)
-                .map_err(|source| ModError::Params { id: b.mod_id.clone(), what: "world", source })?;
+            WorldgenParams {
+                ground: Some(resolved),
+                ..WorldgenParams::default()
+            }
+            .validate_ground(tables)
+            .map_err(|source| ModError::Params {
+                id: b.mod_id.clone(),
+                what: "world",
+                source,
+            })?;
             ground = Some(resolved);
         }
     }

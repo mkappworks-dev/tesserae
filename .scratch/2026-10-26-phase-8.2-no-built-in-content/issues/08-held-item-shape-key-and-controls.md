@@ -18,15 +18,15 @@ Text stays ASCII.
 
 ## Acceptance criteria
 
-- [ ] With an item held outside the slots, a click places it and the slots are
+- [x] With an item held outside the slots, a click places it and the slots are
       unchanged.
-- [ ] 1 to 9 and the scroll wheel clear it and select a slot.
-- [ ] F cycles a held solid's Shape and wraps; Q and E still turn and flip it.
-- [ ] F does nothing to a fluid or fire.
-- [ ] The HUD text is one control per line and covers click, right click, 1 to
+- [x] 1 to 9 and the scroll wheel clear it and select a slot.
+- [x] F cycles a held solid's Shape and wraps; Q and E still turn and flip it.
+- [x] F does nothing to a fluid or fire.
+- [x] The HUD text is one control per line and covers click, right click, 1 to
       9 and scroll, Q, E, F, Tab, movement, sprint, speed, return to spawn and
       Esc.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -38,3 +38,9 @@ held solid, and F cycles catalogue Shape ids in order while preserving its
 orientation. Controls and the camera prompt use one ASCII control per line;
 notices remain a separate line. Menu quick pick follows in ticket 09.
 Formatting, input-suite review and full CI remain deferred to ticket 13.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.

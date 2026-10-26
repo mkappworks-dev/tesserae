@@ -82,16 +82,18 @@ interface content {
         material: string,
     }
 
-    /// Terrain generation parameters, field for field the engine's own. Only the
-    /// Game may set them; the engine rejects non-finite or out-of-range values.
-    /// An absent cave, smoothing or water record means none, not the default;
-    /// the engine's default has no water.
+    /// Ground Materials by full name, resolved after every Mod has declared.
+    /// Each must be a registered solid without a fluid row.
     record ground-params {
         rock: string,
         soil: string,
         surface: string,
     }
 
+    /// Terrain generation parameters, field for field the engine's own. Only the
+    /// Game may set them; the engine rejects non-finite or out-of-range values.
+    /// Absent cave, smoothing, water and ground records mean none, not defaults.
+    /// The engine's default has neither ground nor water; water requires ground.
     record world-params {
         sea-level-m: f32,
         relief-m: f32,

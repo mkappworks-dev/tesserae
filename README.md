@@ -47,10 +47,10 @@ and what each kind of edit costs to rebuild, are in
 [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
 Once the guests are built, `cargo dev` runs the demo Game, which declares its
-own water as it does its lava, fills its lakes with it, and plays out water,
-lava, a second fluid and fire beside spawn. Until then it opens a World with no
-Game, which is empty air because the engine declares no ground, and says to
-run the build:
+own ground and solids, fills lakes with its water, and plays out water, lava, a
+second fluid and fire beside spawn. Until then it opens a World with no Game,
+which is empty air because the engine declares no ground, and says to run the
+build:
 
 ```bash
 rustup target add wasm32-wasip2   # once

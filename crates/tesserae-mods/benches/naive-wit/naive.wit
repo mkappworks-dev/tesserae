@@ -19,7 +19,7 @@ interface edit {
 }
 
 interface run {
-    run: func(count: u32);
+    run: func(count: u32, material: u16);
 }
 
 world naive {

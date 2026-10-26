@@ -132,8 +132,8 @@ cargo run -p tesserae --features dev
 `--features dev` adds shader hot-reloading; without it the command still runs,
 and a shader edit then needs a restart. A window opens on a generated World you
 can fly around and edit. Once the guests are built that World is the demo
-Game's; without a Game it is empty air, with no ground, lakes or fuel.
-See [Running the demo Game](#running-the-demo-game).
+Game's; without a Game it is empty air, with no ground, lakes or fuel. See
+[Running the demo Game](#running-the-demo-game).
 
 **Controls:**
 
@@ -148,22 +148,32 @@ See [Running the demo Game](#running-the-demo-game).
 | `-` / `=`             | movement speed down / up, 0.5 to 64 m/s                                     |
 | `R`                   | back to the spawn point                                                     |
 | `1` to `9`, scroll    | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps |
-| click                 | place what the slot holds: a block, a fluid source, or fire on fuel         |
-| right click           | break the block, remove the source, or put the fire out                     |
+| click                 | place the held solid, fluid source, or fire on fuel                         |
+| right click           | remove fire first, then solid, then source                                  |
+| `F`                   | cycle the held solid through its Shapes                                     |
 | `Q` / `E`             | turn the held shape a quarter / flip which way is up                        |
-| `Tab`                 | open or close the menu that fills the slot; closing grabs the cursor        |
+| `Tab`                 | open or close the tile menu; closing grabs the cursor                       |
 
-The hotbar starts with stone, a stone slab, stair and post, lantern, glass and
-leaves, then the Game's lake fluid (or its first declared fluid) and fire when
-anything burns. A slot left over is empty: a click does nothing and a right
-click breaks. A right click is the secondary button, a two-finger tap on a Mac
-trackpad. The corner of the screen names the held slot and what each button does
-with it.
+The hotbar starts with the Game's ground rock as a cube, slab, stair and post,
+then other declared solids until seven slots are filled, then its lake fluid (or
+first declared fluid), and fire when anything burns. Remaining slots are empty.
+Without a Game all nine squares are empty. A click with nothing held does
+nothing; a right click still removes what is aimed at. Breaking a waterlogged
+solid leaves its fluid. A right click is the secondary button, a two-finger tap
+on a Mac trackpad.
 
-The menu lists every solid Material, then the Shapes of the one chosen, every
-fluid, and fire when anything burns, each by its full name beside its colour.
-While it is open the cursor is free: the mouse does not look around and a click
-edits nothing. Clicking a slot in the menu's bar selects it.
+The menu shows square model tiles for solids, the Shapes of the last hovered
+solid, fluids and fire, then the nine slots. Clicking an item holds it outside
+the slots and closes the menu. Drag an item onto a slot to assign it, or drag
+one slot onto another to swap. Press 1 to 9 over an item to assign that slot
+without moving selection. Clicking a slot selects it and keeps the menu open.
+Selecting a slot by key, scroll or click returns from an outside item.
+
+An outline marks the Server's remove target, a translucent ghost shows an
+accepted placement, and a small corner model shows the held Shape and its
+orientation. Fire has no ghost. Previews hide in the menu. The Client draws
+these from content and Server answers and never reads a Chunk. The held name
+sits above the square play bar, with one control per line at bottom right.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.

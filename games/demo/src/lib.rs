@@ -6,8 +6,9 @@ use exports::tesserae::mods::guest::{
 use std::cell::RefCell;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
-    Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, HeatDef, MaterialDef,
-    GroundParams, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ViewParams, WaterParams,
+    Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, GroundParams, HeatDef,
+    MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ViewParams,
+    WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -144,7 +145,9 @@ impl Guest for Demo {
         });
         world.caves = None;
         world.ground = Some(GroundParams {
-            rock: "demo:stone".into(), soil: "demo:dirt".into(), surface: "demo:grass".into(),
+            rock: "demo:stone".into(),
+            soil: "demo:dirt".into(),
+            surface: "demo:grass".into(),
         });
         Declaration {
             materials: vec![
@@ -186,9 +189,21 @@ impl Guest for Demo {
                     render: RenderClass::Blend,
                     solid: false,
                 },
-                solid("stone"), solid("dirt"), solid("grass"),
-                MaterialDef { dimming: 0, occlusion: Occlusion::SameMaterial, render: RenderClass::Blend, ..solid("glass") },
-                MaterialDef { dimming: 1, occlusion: Occlusion::Never, render: RenderClass::Cutout, ..solid("leaves") },
+                solid("stone"),
+                solid("dirt"),
+                solid("grass"),
+                MaterialDef {
+                    dimming: 0,
+                    occlusion: Occlusion::SameMaterial,
+                    render: RenderClass::Blend,
+                    ..solid("glass")
+                },
+                MaterialDef {
+                    dimming: 1,
+                    occlusion: Occlusion::Never,
+                    render: RenderClass::Cutout,
+                    ..solid("leaves")
+                },
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -255,11 +270,51 @@ impl Guest for Demo {
                         a: 166,
                     },
                 },
-                Appearance { material: "stone".into(), color: Srgba { r: 133, g: 133, b: 140, a: 255 } },
-                Appearance { material: "dirt".into(), color: Srgba { r: 107, g: 74, b: 46, a: 255 } },
-                Appearance { material: "grass".into(), color: Srgba { r: 84, g: 143, b: 61, a: 255 } },
-                Appearance { material: "glass".into(), color: Srgba { r: 179, g: 224, b: 235, a: 89 } },
-                Appearance { material: "leaves".into(), color: Srgba { r: 41, g: 107, b: 36, a: 255 } },
+                Appearance {
+                    material: "stone".into(),
+                    color: Srgba {
+                        r: 133,
+                        g: 133,
+                        b: 140,
+                        a: 255,
+                    },
+                },
+                Appearance {
+                    material: "dirt".into(),
+                    color: Srgba {
+                        r: 107,
+                        g: 74,
+                        b: 46,
+                        a: 255,
+                    },
+                },
+                Appearance {
+                    material: "grass".into(),
+                    color: Srgba {
+                        r: 84,
+                        g: 143,
+                        b: 61,
+                        a: 255,
+                    },
+                },
+                Appearance {
+                    material: "glass".into(),
+                    color: Srgba {
+                        r: 179,
+                        g: 224,
+                        b: 235,
+                        a: 89,
+                    },
+                },
+                Appearance {
+                    material: "leaves".into(),
+                    color: Srgba {
+                        r: 41,
+                        g: 107,
+                        b: 36,
+                        a: 255,
+                    },
+                },
             ],
             world: Some(world),
             view: Some(ViewParams {

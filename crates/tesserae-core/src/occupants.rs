@@ -342,9 +342,8 @@ fn carry(fluid: Fluid, from: Voxel, to: Voxel, tables: &Tables) -> Option<Fluid>
 
 #[cfg(test)]
 mod tests {
-    use crate::testgen::fixtures;
     use super::*;
-
+    use crate::testgen::fixtures;
 
     #[test]
     fn a_packed_fluid_voxel_is_a_full_source_with_no_solid() {

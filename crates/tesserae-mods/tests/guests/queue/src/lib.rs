@@ -4,8 +4,8 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 use std::cell::Cell;
-use tesserae::mods::content::{MaterialDef, Occlusion, RenderClass};
 use tesserae::mods::commands::{Fill, Placement};
+use tesserae::mods::content::{MaterialDef, Occlusion, RenderClass};
 use tesserae::mods::types::{BoxM, LogLevel, Vec3, Voxel};
 
 thread_local! {
@@ -40,7 +40,24 @@ fn fill(side: f32, material: u16) -> Command {
 impl Guest for Queue {
     fn declare() -> Declaration {
         Declaration {
-            materials: vec![MaterialDef { name: "stone".into(), emission: 0, dimming: 15, occlusion: Occlusion::Opaque, render: RenderClass::Opaque, solid: true }, MaterialDef { name: "lamp".into(), emission: 15, dimming: 15, occlusion: Occlusion::Opaque, render: RenderClass::Opaque, solid: true }],
+            materials: vec![
+                MaterialDef {
+                    name: "stone".into(),
+                    emission: 0,
+                    dimming: 15,
+                    occlusion: Occlusion::Opaque,
+                    render: RenderClass::Opaque,
+                    solid: true,
+                },
+                MaterialDef {
+                    name: "lamp".into(),
+                    emission: 15,
+                    dimming: 15,
+                    occlusion: Occlusion::Opaque,
+                    render: RenderClass::Opaque,
+                    solid: true,
+                },
+            ],
             shapes: vec![],
             appearance: vec![],
             world: None,
@@ -48,8 +65,20 @@ impl Guest for Queue {
         }
     }
     fn start(world: WorldInfo, ids: Registered) {
-        ROCK.set(ids.materials.iter().find(|m| m.name.ends_with(":stone")).unwrap().id);
-        LAMP.set(ids.materials.iter().find(|m| m.name.ends_with(":lamp")).unwrap().id);
+        ROCK.set(
+            ids.materials
+                .iter()
+                .find(|m| m.name.ends_with(":stone"))
+                .unwrap()
+                .id as u16,
+        );
+        LAMP.set(
+            ids.materials
+                .iter()
+                .find(|m| m.name.ends_with(":lamp"))
+                .unwrap()
+                .id as u16,
+        );
         MODE.set(world.seed);
     }
     fn tick(ctx: TickContext) -> Vec<Command> {

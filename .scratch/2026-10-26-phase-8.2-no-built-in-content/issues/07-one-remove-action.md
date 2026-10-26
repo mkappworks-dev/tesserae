@@ -18,16 +18,16 @@ right click.
 
 ## Acceptance criteria
 
-- [ ] On a burning solid, the first remove puts the fire out and the second
+- [x] On a burning solid, the first remove puts the fire out and the second
       breaks the solid.
-- [ ] On a solid with a source in its Voxel, remove breaks the solid and keeps
+- [x] On a solid with a source in its Voxel, remove breaks the solid and keeps
       the source.
-- [ ] On a source alone, remove takes the source.
-- [ ] Aiming through flowing fluid reaches the solid behind it.
-- [ ] A right click sends remove whatever the slot holds; a click with an
+- [x] On a source alone, remove takes the source.
+- [x] Aiming through flowing fluid reaches the solid behind it.
+- [x] A right click sends remove whatever the slot holds; a click with an
       empty slot sends nothing.
-- [ ] 0.3 Mods see put-outs, solid Edits and fluid Edits as before.
-- [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+- [x] 0.3 Mods see put-outs, solid Edits and fluid Edits as before.
+- [x] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
 
 ## Comments
 
@@ -40,3 +40,9 @@ still records put-outs, solid Edits and source removals by the layer changed.
 Every right click sends Remove, including an empty hand; empty left clicks
 send nothing. Existing action-path tests use the unified intent. Changed
 layer-order expectations are part of the deferred final review and CI pass.
+
+### 2026-10-26: final verification
+
+Checked on the completed phase tree in ticket 13. Formatting and full CI
+pass; the final captures were reviewed and accepted by the user. See
+13-final-verification.md for benchmark results and validation exceptions.
