@@ -1014,6 +1014,10 @@ impl ShapeTable {
         !self.connects.is_empty()
     }
 
+    pub fn is_connected_shape(&self, shape: ShapeId) -> bool {
+        self.variants.get(shape as usize * ORIENTATIONS).is_some_and(|variant| variant.connect != NO_CONNECT)
+    }
+
     /// Whether `voxel` grows arms towards its neighbours at all.
     #[inline]
     pub fn is_connected(&self, voxel: Voxel) -> bool {

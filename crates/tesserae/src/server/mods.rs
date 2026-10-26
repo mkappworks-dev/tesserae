@@ -9,7 +9,6 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use tesserae_core::worldgen::STONE;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, Voxel, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
@@ -344,17 +343,13 @@ pub(super) fn plugin(app: &mut App) {
         .world_mut()
         .remove_non_send::<LoadedMods>()
         .unwrap_or_default();
-    #[cfg(feature = "dev")]
-    app.insert_resource(crate::content::DevFence(
-        (!loaded.game && loaded.tables.shapes.len() < 256)
-            .then_some(loaded.tables.shapes.len() as u8),
-    ));
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let params = super::worldgen_params(loaded.world);
     let catalogue = catalogue(
         &loaded.registry,
         &tables.0,
         params.water.map(|lake| lake.material),
+        params.ground.map(|ground| ground.rock),
     );
     app.insert_resource(tables)
         .insert_resource(WorldParameters(params))
@@ -372,6 +367,7 @@ pub(in crate::server) fn catalogue(
     registry: &Registry,
     tables: &Tables,
     lake: Option<MaterialId>,
+    rock: Option<MaterialId>,
 ) -> ContentCatalogue {
     let materials = registry
         .names(Kind::Material)
@@ -391,13 +387,12 @@ pub(in crate::server) fn catalogue(
             let id = id as ShapeId;
             CatalogueShape {
                 id,
-                // The dev Server's reference fence is the one Shape no Registry names.
                 name: registry
                     .names(Kind::Shape)
                     .find(|&(named, _)| named == id as usize)
-                    .map_or_else(|| "dev:fence".to_owned(), |(_, name)| name.to_owned()),
+                    .map(|(_, name)| name.to_owned()).expect("registered Shape name"),
                 turnable: id != SHAPE_FULL_CUBE
-                    && !tables.shapes.is_connected(Voxel::new(STONE, id, 0)),
+                    && !tables.shapes.is_connected_shape(id),
             }
         })
         .collect();
@@ -405,6 +400,7 @@ pub(in crate::server) fn catalogue(
         materials,
         shapes,
         lake,
+        rock,
     }
 }
 
@@ -721,43 +717,7 @@ mod tests {
             .shapes
             .get(4)
             .map(|s| (s.name.as_str(), s.turnable));
-        if cfg!(feature = "dev") {
-            assert_eq!(fence, Some(("dev:fence", false)));
-        } else {
-            assert_eq!(fence, None);
-        }
-    }
-
-    #[cfg(feature = "dev")]
-    #[test]
-    fn dev_fence_follows_content_shapes_and_is_absent_with_a_game() {
-        let s = Scratch::new();
-        s.add("catalog", "catalog", "");
-        let mut app = App::new();
-        app.insert_non_send(s.load(TrustMode::All).unwrap())
-            .add_plugins(plugin);
-        let fence = app.world().resource::<crate::content::DevFence>().0;
-        assert_eq!(fence, Some(12));
-        assert_eq!(
-            app.world()
-                .resource::<super::super::ContentTables>()
-                .shapes
-                .len(),
-            13
-        );
-        let s = Scratch::new();
-        s.game();
-        let mut app = App::new();
-        app.insert_non_send(s.load(TrustMode::All).unwrap())
-            .add_plugins(plugin);
-        assert_eq!(app.world().resource::<crate::content::DevFence>().0, None);
-        assert_eq!(
-            app.world()
-                .resource::<super::super::ContentTables>()
-                .shapes
-                .len(),
-            13
-        );
+        assert_eq!(fence, None);
     }
 
     #[test]

@@ -705,7 +705,7 @@ fn measure_gallery_budget() {
     );
     let world = *h.app.world().resource::<WorldSettings>();
     let generator = &h.app.world().resource::<WorldGenerator>().0;
-    let plan = gallery::measurement_plan(&world, generator);
+    let plan = gallery::measurement_plan(&world, generator, &h.app.world().resource::<ContentTables>());
     let corner = plan[0].0;
     let center = Vec3::from_array(corner.map(|i| i as f32 * world.voxel_size));
     h.anchor_at(center);
@@ -1080,7 +1080,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .add_plugins(super::super::plugin);
         assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 5);
         #[cfg(feature = "dev")]
-        assert_eq!(h.app.world().resource::<crate::content::DevFence>().0, None);
+
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::new(Vec3::new(
                 0.0, 28.0, 0.0,

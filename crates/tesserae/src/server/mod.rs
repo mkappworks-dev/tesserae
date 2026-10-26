@@ -63,16 +63,7 @@ impl Default for ContentTables {
 }
 
 impl ContentTables {
-    fn from_loaded(mut tables: Tables, game: bool) -> Self {
-        #[cfg(feature = "dev")]
-        if !game && tables.shapes.len() < 256 {
-            tables
-                .shapes
-                .register(tesserae_core::shape::examples::fence())
-                .expect("the demo fence fits the table");
-        }
-        #[cfg(not(feature = "dev"))]
-        let _ = (&mut tables, game);
+    fn from_loaded(tables: Tables, _game: bool) -> Self {
         ContentTables(Arc::new(tables))
     }
 }

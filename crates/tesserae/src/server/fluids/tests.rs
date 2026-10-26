@@ -1782,7 +1782,7 @@ fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
 fn every_fluid_the_demo_catalogues_reaches_the_world_as_a_source() {
     for v in [1.0, 0.25] {
         let loaded = mod_runtime::tests::demo_loaded(v);
-        let catalogue = super::super::mods::catalogue(&loaded.registry, &loaded.tables, None);
+        let catalogue = super::super::mods::catalogue(&loaded.registry, &loaded.tables, None, loaded.world.and_then(|p|p.ground.map(|g|g.rock)));
         let fluids: Vec<_> = catalogue
             .materials
             .iter()

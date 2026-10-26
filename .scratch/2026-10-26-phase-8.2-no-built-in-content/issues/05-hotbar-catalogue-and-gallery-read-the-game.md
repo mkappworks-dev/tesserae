@@ -1,6 +1,6 @@
 # 05: The hotbar, catalogue and gallery read the Game
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 03
 
 Spec: [decisions 10, 11 and 12](../spec.md).
@@ -36,3 +36,18 @@ The Client's defaults and the `dev` gallery stop naming built-in solids.
       leaves.
 - [ ] A `cargo dev` capture shows the gallery as on main.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+The catalogue carries the ground rock. Hotbar defaults read declared solids
+in registration order after the rock's four Shapes, then lake/first fluid
+and fire. The gallery selects ground layers, the first emitting, Blend and
+Cutout solids, and the first connected Shape by property. Missing parts are
+omitted and no ground produces no gallery. ShapeTable exposes a Shape-only
+connection query; the catalogue needs no dummy Material. Production dev
+fence registration and DevFence are removed; test tables retain the example.
+
+Added empty-default and sparse-gallery coverage. Formatting, review, full CI
+and visual captures remain deferred to the final verification pass.

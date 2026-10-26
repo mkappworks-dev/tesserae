@@ -17,6 +17,7 @@ pub struct ContentCatalogue {
     pub shapes: Vec<CatalogueShape>,
     /// The fluid the Game's lakes are made of.
     pub lake: Option<MaterialId>,
+    pub rock: Option<MaterialId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -62,6 +63,3 @@ impl ContentCatalogue {
     }
 }
 
-#[cfg(feature = "dev")]
-#[derive(Resource)]
-pub struct DevFence(pub Option<tesserae_core::ShapeId>);

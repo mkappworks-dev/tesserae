@@ -15,9 +15,7 @@ use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::touch::TouchPhase;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use tesserae_core::material::{GLASS, LEAVES};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
-use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{
     MaterialId, Orientation, SHAPE_FULL_CUBE, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeId, Voxel,
 };
@@ -161,18 +159,20 @@ impl Default for Hotbar {
 }
 
 impl Hotbar {
-    /// The built-in solids, then the Game's lake fluid or else its first
-    /// declared one, then fire if anything burns.
     fn defaults(catalogue: &ContentCatalogue) -> [Holding; SLOT_KEYS.len()] {
-        let mut slots = vec![
-            Holding::solid(STONE, SHAPE_FULL_CUBE),
-            Holding::solid(STONE, SHAPE_SLAB),
-            Holding::solid(STONE, SHAPE_STAIR),
-            Holding::solid(STONE, SHAPE_POST),
-            Holding::solid(LANTERN, SHAPE_FULL_CUBE),
-            Holding::solid(GLASS, SHAPE_FULL_CUBE),
-            Holding::solid(LEAVES, SHAPE_FULL_CUBE),
-        ];
+        let mut slots = Vec::new();
+        if let Some(rock) = catalogue.rock {
+            for shape in [SHAPE_FULL_CUBE, SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
+                slots.push(Holding::solid(rock, shape));
+            }
+        }
+        for material in &catalogue.materials {
+            if slots.len() == 7 { break; }
+            if material.solid && material.fluid.is_none() && Some(material.id) != catalogue.rock {
+                slots.push(Holding::solid(material.id, SHAPE_FULL_CUBE));
+            }
+        }
+        slots.resize(7, Holding::Empty);
         slots.extend(
             catalogue
                 .lake
@@ -445,19 +445,9 @@ mod tests {
 
     /// The built-in solids and Shapes, a connected fence, and no fluid or fuel.
     fn dry() -> ContentCatalogue {
-        let materials = [
-            "core:air",
-            "core:stone",
-            "core:dirt",
-            "core:grass",
-            "core:lantern",
-            "core:glass",
-            "core:leaves",
-        ]
-        .iter()
-        .zip(0..)
-        .map(|(name, id)| material(id, name, id != 0))
-        .collect();
+        let f = tesserae_core::testgen::fixtures();
+        let materials = [(0,"core:air"), (f.ground.rock,"test:stone"), (f.lantern,"test:lantern"), (f.glass,"test:glass"), (f.leaves,"test:leaves")]
+            .into_iter().map(|(id,name)| material(id,name,id != 0)).collect();
         let shapes = [
             ("core:cube", false),
             ("core:slab", true),
@@ -477,6 +467,7 @@ mod tests {
             materials,
             shapes,
             lake: None,
+            rock: Some(tesserae_core::testgen::fixtures().ground.rock),
         }
     }
 
@@ -672,13 +663,13 @@ mod tests {
     #[test]
     fn the_default_hotbar_is_the_builtin_solids_then_the_lake_fluid_then_fire() {
         let solids = [
-            Holding::solid(STONE, SHAPE_FULL_CUBE),
-            Holding::solid(STONE, SHAPE_SLAB),
-            Holding::solid(STONE, SHAPE_STAIR),
-            Holding::solid(STONE, SHAPE_POST),
-            Holding::solid(LANTERN, SHAPE_FULL_CUBE),
-            Holding::solid(GLASS, SHAPE_FULL_CUBE),
-            Holding::solid(LEAVES, SHAPE_FULL_CUBE),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_FULL_CUBE),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_SLAB),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_POST),
+            Holding::solid(tesserae_core::testgen::fixtures().lantern, SHAPE_FULL_CUBE),
+            Holding::solid(tesserae_core::testgen::fixtures().glass, SHAPE_FULL_CUBE),
+            Holding::solid(tesserae_core::testgen::fixtures().leaves, SHAPE_FULL_CUBE),
         ];
         let with = |last: [Holding; 2]| {
             let mut slots = solids.to_vec();
@@ -733,7 +724,7 @@ mod tests {
             both_buttons(&mut app, KeyCode::Digit3),
             [
                 Some(EditAction::Place(Voxel::shaped(
-                    STONE,
+                    tesserae_core::testgen::fixtures().ground.rock,
                     SHAPE_STAIR,
                     Orientation::IDENTITY
                 ))),
@@ -789,7 +780,7 @@ mod tests {
     fn keys_six_and_seven_hold_glass_and_leaves() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
-        for (slot_key, material) in [(KeyCode::Digit6, GLASS), (KeyCode::Digit7, LEAVES)] {
+        for (slot_key, material) in [(KeyCode::Digit6, tesserae_core::testgen::fixtures().glass), (KeyCode::Digit7, tesserae_core::testgen::fixtures().leaves)] {
             assert_eq!(
                 both_buttons(&mut app, slot_key)[0],
                 Some(EditAction::Place(Voxel::cube(material)))
@@ -822,7 +813,7 @@ mod tests {
         assert_eq!(scroll(&mut app, line, &[-1.0, -1.0]), 2, "a notch each");
         assert_eq!(
             app.world().resource::<Hotbar>().held(),
-            Holding::solid(STONE, SHAPE_STAIR)
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR)
         );
     }
 
@@ -868,10 +859,10 @@ mod tests {
         key(&mut app, KeyCode::KeyE);
         assert_eq!(
             app.world().resource::<Hotbar>().held(),
-            Holding::solid(STONE, SHAPE_FULL_CUBE),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_FULL_CUBE),
             "a cube is not turned"
         );
-        let fence = Holding::solid(STONE, 4);
+        let fence = Holding::solid(tesserae_core::testgen::fixtures().ground.rock, 4);
         app.world_mut().resource_mut::<Hotbar>().slots[0] = fence;
         key(&mut app, KeyCode::KeyQ);
         assert_eq!(
@@ -1069,7 +1060,7 @@ mod tests {
         let solids: Vec<_> = (1..=6).map(Entry::Material).collect();
         let shapes: Vec<_> = (0..5)
             .map(|shape| Entry::Solid {
-                material: STONE,
+                material: tesserae_core::testgen::fixtures().ground.rock,
                 shape,
             })
             .collect();
@@ -1176,5 +1167,14 @@ mod tests {
             0.0,
             "it turns once closed"
         );
+    }
+    #[test]
+    fn defaults_are_empty_without_declared_solids_or_ground() {
+        assert_eq!(Hotbar::defaults(&ContentCatalogue::default()), [Holding::Empty; 9]);
+        let f = tesserae_core::testgen::fixtures();
+        let catalogue = ContentCatalogue { materials: vec![material(f.glass,"test:glass",true)], ..default() };
+        let slots = Hotbar::defaults(&catalogue);
+        assert_eq!(slots[0], Holding::solid(f.glass, SHAPE_FULL_CUBE));
+        assert!(slots[1..].iter().all(|slot|*slot == Holding::Empty));
     }
 }
