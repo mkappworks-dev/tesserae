@@ -37,6 +37,15 @@ chooses Materials and connected Shapes from declared properties. It registers no
 content, omits parts without matching content, and is absent without ground.
 Built-in Shapes remain engine kinds.
 
+The user extended preview appearance during review. The unreleased 0.3
+appearance record also carries optional preview pixels: a 48 by 16 RGBA atlas
+with top, side and bottom tiles, exactly 3072 bytes. The host accepts at most 64
+appearance rows per Mod and validates byte lengths before publishing them to the
+Client. Adapters for 0.1 and 0.2 supply no texture, preserving colour fallback.
+The demo owns its pixel patterns; the engine draws generic supplied textures in
+tiles, drag feedback, held models and ghosts. Fire's preview is engine drawing.
+Terrain retains its placeholder palette; the Look-pack API remains separate.
+
 ## Consequences
 
 A Game controls every named Material in its World. A World without a Game opens

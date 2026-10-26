@@ -225,3 +225,24 @@ Formatting and full CI pass: 878 tests passed, five existing measurement
 tests remain ignored. The user reviewed and accepted the hover, scrolled
 and full-size menu captures on 2026-10-26; the /tmp review folder was then
 deleted.
+
+### 2026-10-26: textured previews and drag feedback
+
+Tickets 14 and 15 extend the reviewed picker with a model that follows a
+slot drag and distinct Game-supplied preview textures. Final formatting,
+review and ./scripts/cargo-ci pass: 885 tests, zero failures, five existing
+manual measurements ignored. Guest/demo rebuild, Clippy, rustdoc, default
+build, benchmark compilation, boundary checks and cargo-deny pass. The
+Client still reads content and Server answers only; core algorithms and
+benchmark inputs did not change. The prior interleaved measurements stand.
+
+Native captures now drive the UI's actual drag/drop observers. Review
+fixed missing visibility state on the atlas root and ineffective camera
+dithering; those rendering warnings are gone. Bevy/winit still reports a
+skipped Destroyed event while the capture app exits, after saving the PNG.
+Physical OS pointer input is not automated by this capture driver.
+
+The user accepted the drag feedback and the other textures, requesting
+smoother water, clearer glass and flowing lava. Those three were revised;
+review remains tracked in ticket 15. The current /tmp folder is retained
+until that review. No new validation exceptions besides those above.

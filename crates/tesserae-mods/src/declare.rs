@@ -12,14 +12,16 @@ use crate::convert::world_params;
 use crate::error::ModError;
 use crate::registry::{Kind, Registry};
 
-/// The palette holds 64 colours and 8 are built in (`PALETTE_LEN`).
+/// The palette has 64 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
 pub const MAX_MATERIALS: usize = 56;
 /// A `ShapeId` is a `u8` and 4 are built in.
 pub const MAX_SHAPES: usize = 252;
 pub const MAX_PER_MOD: usize = 64;
-/// Fluid, reaction and fire rows one Mod may declare, each.
+/// Appearance, fluid, reaction and fire rows one Mod may declare, each.
 pub const MAX_BEHAVIOURS_PER_MOD: usize = 64;
 pub const MAX_NAME_BYTES: usize = 32;
+pub const PREVIEW_TEXTURE_EDGE: usize = 16;
+pub const PREVIEW_TEXTURE_BYTES: usize = PREVIEW_TEXTURE_EDGE * PREVIEW_TEXTURE_EDGE * 3 * 4;
 
 /// The Game's view distance and level-of-detail reach, in metres.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -64,6 +66,8 @@ impl From<content::ViewParams> for ViewParams {
 /// every Mod's names before [`resolve`] registers them.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Applied {
+    /// Validated appearance data, transferred without copying texture pixels.
+    pub appearance: Vec<content::Appearance>,
     /// With no lake: [`resolve`] returns the one it names.
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
@@ -111,6 +115,7 @@ pub fn apply(
     }
 
     for (what, count) in [
+        ("appearance", declaration.appearance.len()),
         ("fluid", declaration.fluids.len()),
         ("reaction", declaration.reactions.len()),
         ("combustion", declaration.combustion.len()),
@@ -121,6 +126,18 @@ pub fn apply(
                 what,
                 count,
                 max: MAX_BEHAVIOURS_PER_MOD,
+            });
+        }
+    }
+    for (row, appearance) in declaration.appearance.iter().enumerate() {
+        if let Some(pixels) = &appearance.preview
+            && pixels.len() != PREVIEW_TEXTURE_BYTES
+        {
+            return Err(ModError::PreviewTexture {
+                id: id(),
+                row,
+                name: appearance.material.clone(),
+                bytes: pixels.len(),
             });
         }
     }
@@ -190,6 +207,7 @@ pub fn apply(
         registry.push(Kind::Shape, name);
     }
     Ok(Applied {
+        appearance: declaration.appearance,
         world,
         view,
         behaviour: Behaviour {

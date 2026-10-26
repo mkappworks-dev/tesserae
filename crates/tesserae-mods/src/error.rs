@@ -104,6 +104,12 @@ pub enum ModError {
         api: String,
         exported: &'static str,
     },
+    PreviewTexture {
+        id: String,
+        row: usize,
+        name: String,
+        bytes: usize,
+    },
     TooManyRows {
         id: String,
         what: &'static str,
@@ -241,6 +247,16 @@ impl fmt::Display for ModError {
             ModError::LineMismatch { id, api, exported } => write!(
                 f,
                 "mod `{id}`: its Manifest says api {api}, but its component is built against {exported}"
+            ),
+            ModError::PreviewTexture {
+                id,
+                row,
+                name,
+                bytes,
+            } => write!(
+                f,
+                "mod `{id}`: appearance {row} `{name}`: preview has {bytes} bytes; expected {} RGBA bytes (top, side, bottom)",
+                crate::declare::PREVIEW_TEXTURE_BYTES,
             ),
             ModError::TooManyRows {
                 id,

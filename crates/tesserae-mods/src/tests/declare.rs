@@ -633,3 +633,46 @@ fn the_demo_fence_and_pipe_declared_as_data_register_as_the_core_examples_do() {
         );
     }
 }
+
+#[test]
+fn preview_texture_payloads_are_bounded_and_name_the_invalid_appearance_row() {
+    let row = |preview| content::Appearance {
+        material: "rock".into(),
+        color: types::Srgba {
+            r: 120,
+            g: 100,
+            b: 80,
+            a: 255,
+        },
+        preview,
+    };
+    for len in [
+        0,
+        1024,
+        crate::PREVIEW_TEXTURE_BYTES - 1,
+        crate::PREVIEW_TEXTURE_BYTES + 1,
+    ] {
+        let mut d = declaring(&["rock"], &[]);
+        d.appearance.push(row(Some(vec![0; len])));
+        let error = Load::new().apply("skin", d).unwrap_err();
+        assert!(matches!(error,ModError::PreviewTexture { row:0,bytes,.. } if bytes==len));
+        let message = error.to_string();
+        assert!(message.contains("appearance 0 `rock`"), "{message}");
+        assert!(message.contains("3072"), "{message}");
+    }
+    for preview in [None, Some(vec![255; crate::PREVIEW_TEXTURE_BYTES])] {
+        let mut d = declaring(&["rock"], &[]);
+        d.appearance.push(row(preview));
+        assert!(Load::new().apply("skin", d).is_ok());
+    }
+    let mut d = declaring(&["rock"], &[]);
+    d.appearance = (0..65).map(|_| row(None)).collect();
+    assert!(matches!(
+        Load::new().apply("skin", d),
+        Err(ModError::TooManyRows {
+            what: "appearance",
+            max: 64,
+            ..
+        })
+    ));
+}

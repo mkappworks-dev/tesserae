@@ -119,8 +119,11 @@ A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See
 The Client sends aim reports beside edit intents. The Server answers with metre
 outline bounds and an acceptable ghost cell through the edit resolver. The
 Client meshes held Shapes from catalogue geometry and draws the outline, ghost
-and corner model. The menu and hotbar share a cached model atlas from the same
-geometry. No preview reads World storage.
+and corner model. The menu, hotbar and drag follower share a cached model atlas
+from the same geometry. Games supply optional, bounded preview textures through
+the Declaration's appearance rows; the Client draws them without naming
+Materials. Older contract lines retain colour fallback. Fire uses an engine
+flame silhouette. No preview reads World storage, and terrain keeps its palette.
 
 ## The three invariants this diagram exists to protect
 

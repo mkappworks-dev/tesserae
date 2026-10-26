@@ -257,6 +257,7 @@ pub(super) fn plugin(app: &mut App) {
             menu_view
                 .after(super::menu::rebuild_bar)
                 .before(super::menu::drag_preview),
+            menu_drag.before(super::menu::drag_preview),
             watch_frames,
             aim,
             fly_forward,
@@ -379,6 +380,110 @@ fn menu_view(
         hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
     });
     *hovered = true;
+}
+
+#[derive(Default)]
+struct MenuDrag {
+    source: Option<Entity>,
+    dropped: bool,
+}
+
+fn menu_drag(
+    mut commands: Commands,
+    catalogue: Res<super::edit::Catalogue>,
+    time: Res<Time>,
+    entries: Query<(
+        Entity,
+        &super::menu::Entry,
+        &UiGlobalTransform,
+        &ComputedNode,
+    )>,
+    mut drag: Local<MenuDrag>,
+) {
+    use super::menu::Entry;
+    use bevy::picking::{
+        backend::HitData,
+        events::{Pointer, PointerDrag, PointerDragDrop, PointerDragStart, PointerOver},
+        pointer::{Location, PointerButton, PointerId},
+    };
+
+    let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MENU_DRAG") else {
+        return;
+    };
+    if drag.dropped {
+        return;
+    }
+    let wanted = if name == "fire" {
+        Entry::Fire
+    } else if let Some(material) = catalogue.0.materials.iter().find(|m| m.name == name) {
+        if material.fluid.is_some() {
+            Entry::Fluid(material.id)
+        } else {
+            Entry::Material(material.id)
+        }
+    } else {
+        return;
+    };
+    let slot = std::env::var("TESSERAE_SCREENSHOT_MENU_DRAG_SLOT")
+        .ok()
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(5)
+        .clamp(1, 9)
+        - 1;
+    let Some((target, _, transform, node)) = entries
+        .iter()
+        .find(|(_, e, _, node)| **e == Entry::Slot(slot) && node.size().min_element() > 0.0)
+    else {
+        return;
+    };
+    let affine: bevy::math::Affine2 = transform.into();
+    let position = affine.translation * node.inverse_scale_factor();
+    let pointer = Pointer::new(
+        PointerId::Mouse,
+        Location {
+            target: bevy::camera::NormalizedRenderTarget::None {
+                width: 1920,
+                height: 1080,
+            },
+            position,
+        },
+    );
+    let hit = HitData::new(Entity::PLACEHOLDER, 0.0, None, None);
+    let button = PointerButton::Primary;
+    let Some((source, _, _, _)) = entries.iter().find(|(_, e, _, _)| **e == wanted) else {
+        return;
+    };
+    if drag.source.is_none() {
+        commands.trigger(PointerDragStart {
+            entity: source,
+            pointer: pointer.clone(),
+            button,
+            hit: hit.clone(),
+        });
+        drag.source = Some(source);
+    }
+    commands.trigger(PointerDrag {
+        entity: source,
+        pointer: pointer.clone(),
+        button,
+        distance: Vec2::ZERO,
+        delta: Vec2::ZERO,
+    });
+    commands.trigger(PointerOver {
+        entity: target,
+        pointer: pointer.clone(),
+        hit: hit.clone(),
+    });
+    if std::env::var_os("TESSERAE_SCREENSHOT_MENU_DROP").is_some() && time.elapsed_secs() > 2.0 {
+        commands.trigger(PointerDragDrop {
+            entity: target,
+            dropped: drag.source.unwrap(),
+            pointer,
+            button,
+            hit,
+        });
+        drag.dropped = true;
+    }
 }
 
 /// Ignores the first second and a half: window creation, pipeline

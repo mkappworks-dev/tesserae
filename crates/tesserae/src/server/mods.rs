@@ -15,7 +15,9 @@ use tesserae_mods::{
     discover, plan, resolve,
 };
 
-use crate::content::{CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette};
+use crate::content::{
+    CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette, PreviewTextures,
+};
 use crate::world::WorldSettings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +92,7 @@ pub struct LoadedMods {
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
+    pub previews: Vec<(MaterialId, Vec<u8>)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
 }
@@ -102,6 +105,7 @@ impl Default for LoadedMods {
             world: None,
             view: None,
             appearance: Vec::new(),
+            previews: Vec::new(),
             mods: Vec::new(),
             game: false,
         }
@@ -265,7 +269,6 @@ fn load_with(
             for line in instance.drain_log().lines {
                 eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
             }
-            let appearance = declaration.appearance.clone();
             let root = component.found.manifest.root;
             let applied = apply(
                 declaration,
@@ -276,11 +279,14 @@ fn load_with(
             )
             .map_err(|e| e.to_string())?;
             behaviours.push(applied.behaviour);
-            for row in appearance {
+            for row in applied.appearance {
                 if let Some(index) = loaded
                     .registry
                     .id_of(Kind::Material, &format!("{id}:{}", row.material))
                 {
+                    if let Some(pixels) = row.preview {
+                        loaded.previews.push((index as MaterialId, pixels));
+                    }
                     let c = row.color;
                     loaded
                         .appearance
@@ -356,10 +362,13 @@ pub(super) fn plugin(app: &mut App) {
         .insert_resource(super::streaming::streaming_settings(loaded.view))
         .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
         .add_plugins(runtime::plugin)
+        .add_message::<PreviewTextures>()
         .add_message::<MaterialPalette>()
         .add_message::<ContentCatalogue>();
     app.world_mut()
         .write_message(MaterialPalette(loaded.appearance));
+    app.world_mut()
+        .write_message(PreviewTextures(loaded.previews));
     app.world_mut().write_message(catalogue);
 }
 
@@ -689,6 +698,50 @@ mod tests {
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
         assert_eq!(ids, std::iter::once(0).chain(8..20).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn demo_preview_textures_reach_the_client_under_the_registered_material_ids() {
+        let loaded = super::runtime::tests::demo_loaded(1.0);
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let catalogue = app
+            .world_mut()
+            .resource_mut::<Messages<ContentCatalogue>>()
+            .drain()
+            .next()
+            .unwrap();
+        let textures = app
+            .world_mut()
+            .resource_mut::<Messages<PreviewTextures>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(textures.0.len(), 12);
+        for material in catalogue.materials.iter().filter(|m| m.id != 0) {
+            let (_, pixels) = textures
+                .0
+                .iter()
+                .find(|(id, _)| *id == material.id)
+                .unwrap_or_else(|| panic!("{} needs a preview", material.name));
+            assert_eq!(pixels.len(), tesserae_mods::PREVIEW_TEXTURE_BYTES);
+            assert!(pixels.chunks_exact(4).any(|p| p != &pixels[..4]));
+            if material.name == "demo:glass" {
+                assert!(pixels.chunks_exact(4).any(|p| p[3] < 255));
+            } else {
+                assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
+            }
+            assert_eq!(
+                textures
+                    .0
+                    .iter()
+                    .filter(|(_, other)| other == pixels)
+                    .count(),
+                1,
+                "{} has distinct artwork",
+                material.name
+            );
+        }
     }
 
     #[test]

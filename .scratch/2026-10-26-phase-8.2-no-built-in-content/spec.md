@@ -43,6 +43,17 @@ highlight on hover. The quick slots stay fixed at the bottom centre of the
 menu while the item selection scrolls vertically. Mouse-wheel/trackpad
 input in the open menu browses items without selecting a hotbar slot.
 
+Further user amendments on 2026-10-26: dragging an item carries its model
+under the cursor and highlights an accepting slot green; dropping updates
+the slot model immediately. All demo Materials gain distinct pixel
+textures, with face-specific grass and wood, and fire uses a flame
+silhouette. Optional bounded preview pixels amend unreleased 0.3
+appearance in place (48 by 16 RGBA, top/side/bottom, 3072 bytes, at most
+64 rows per Mod). Older lines use colour fallback. The Game supplies
+Material artwork; the Client draws it in tiles, drags, the held model and
+ghost. This is preview appearance only; placed terrain and the future
+Look-pack API stay separate. Tickets 14 and 15 record these follow-ups.
+
 ## Problem Statement
 
 Step 8.1 made water Game content, but the engine still ships six named solids:

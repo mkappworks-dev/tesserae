@@ -1,12 +1,12 @@
 //! A shared model atlas for the menu and hotbar, built only from content.
 use super::{
-    edit::{Catalogue, Holding},
-    menu::Swatches,
+    edit::Holding,
     preview::item_mesh,
+    preview_material::{PreviewContent, Textures},
 };
 use bevy::{
     camera::{RenderTarget, ScalingMode, visibility::RenderLayers},
-    core_pipeline::tonemapping::Tonemapping,
+    core_pipeline::tonemapping::{DebandDither, Tonemapping},
     prelude::*,
     render::render_resource::TextureFormat,
 };
@@ -31,7 +31,13 @@ struct Atlas {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Atlas>()
-        .add_systems(Update, update.after(super::menu::drag_preview));
+        .init_resource::<Textures>()
+        .add_systems(
+            Update,
+            update
+                .after(super::menu::drag_preview)
+                .after(super::preview_material::receive),
+        );
 }
 
 fn key(holding: Holding) -> (u8, u16, u8, u8) {
@@ -50,7 +56,7 @@ fn key(holding: Holding) -> (u8, u16, u8, u8) {
 fn update(
     mut commands: Commands,
     mut icons: Query<(&TilePreview, &mut ImageNode, &mut Visibility)>,
-    (catalogue, swatches): (Res<Catalogue>, Res<Swatches>),
+    content: PreviewContent,
     mut atlas: ResMut<Atlas>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -60,7 +66,7 @@ fn update(
     wanted.sort_unstable_by_key(|&holding| key(holding));
     wanted.dedup();
     let same = wanted.iter().copied().eq(atlas.entries.iter().map(|e| e.0));
-    if !same || catalogue.is_changed() || swatches.is_changed() {
+    if !same || content.changed() {
         if let Some(root) = atlas.root.take() {
             commands.entity(root).despawn();
             images.remove(atlas.image.id());
@@ -81,7 +87,9 @@ fn update(
                 None,
             ));
             let span = side as f32 * CELL;
-            let root = commands.spawn(Transform::default()).id();
+            let root = commands
+                .spawn((Transform::default(), Visibility::default()))
+                .id();
             atlas.root = Some(root);
             commands.spawn((
                 AtlasCamera,
@@ -101,6 +109,7 @@ fn update(
                 }),
                 Transform::from_xyz(0.0, 0.0, 10.0),
                 Tonemapping::None,
+                DebandDither::Disabled,
                 Msaa::Off,
                 RenderLayers::layer(ICON_LAYER),
                 ChildOf(root),
@@ -113,16 +122,15 @@ fn update(
                     holding,
                     Rect::from_corners(min, min + Vec2::splat(ICON_PX as f32)),
                 ));
-                let Some(mesh) = item_mesh(holding, &catalogue.0) else {
+                let Some(mesh) = item_mesh(holding, &content.catalogue.0) else {
                     continue;
                 };
                 let mesh = meshes.add(mesh);
-                let rgba = swatches.rgba(holding);
-                let material = materials.add(StandardMaterial {
-                    base_color: Color::linear_rgb(rgba.x, rgba.y, rgba.z),
-                    unlit: true,
-                    ..default()
-                });
+                let material = materials.add(content.textures.material(
+                    holding,
+                    content.swatches.rgba(holding),
+                    false,
+                ));
                 let rotation = Quat::from_rotation_x(0.45) * Quat::from_rotation_y(-0.6);
                 let center = Vec3::new(
                     (col as f32 + 0.5) * CELL - span * 0.5,
@@ -158,6 +166,7 @@ fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::{edit::Catalogue, menu::Swatches};
     use crate::content::{CatalogueShape, ContentCatalogue};
     use tesserae_core::{Orientation, SHAPE_STAIR};
 

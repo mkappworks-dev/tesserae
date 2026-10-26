@@ -190,7 +190,10 @@ fn toggle(
     cursor.visible = !grab;
 }
 
-fn receive_palette(mut messages: MessageReader<MaterialPalette>, mut swatches: ResMut<Swatches>) {
+pub(super) fn receive_palette(
+    mut messages: MessageReader<MaterialPalette>,
+    mut swatches: ResMut<Swatches>,
+) {
     for message in messages.read() {
         let mut extension = ChunkMaterialExtension {
             palette: swatches.0,

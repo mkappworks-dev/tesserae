@@ -3,8 +3,9 @@
 Games now declare every named Material except air and name their ground.
 The demo keeps its terrain and render classes using its own content.
 
-Validation: 878 tests pass, five existing manual measurements are ignored,
-and ./scripts/cargo-ci passes. Captures were reviewed and deleted.
+Validation: 885 tests pass, five existing manual measurements are ignored,
+and ./scripts/cargo-ci passes. The initial captures were reviewed and
+deleted. Refined water, glass and lava captures await review in /tmp.
 
 The 115-row interleaved thread-CPU A/B used phase 8.1 main (212d900).
 Stair-heavy meshing moves from 4.163 to 3.462 ms; same-binary id probes
@@ -15,8 +16,9 @@ all other rows beyond 3% are recorded in ticket 13.
 ## Changes
 
 - Retire Material ids 1 through 7, retain registration from 8, and add
-  ADR-0016. Amend unreleased WIT 0.3 with optional named ground; older
-  contract lines load without ground and warn. No 0.4 line is added.
+  ADR-0016. Amend unreleased WIT 0.3 with optional named ground and
+  bounded preview texture data. Older contract lines load without ground,
+  warn, and retain colour fallback. No 0.4 line is added.
 - Register dynamic fixtures for tests and benches. Derive the palette,
   hotbar defaults and dev gallery from declared content.
 - Add one remove action, outside-slot holding, F Shape cycling, square
@@ -24,6 +26,12 @@ all other rows beyond 3% are recorded in ticket 13.
   previews. The tiles share a cached atlas built from content geometry.
 - Highlight hovered menu tiles, keep quick slots fixed at the bottom
   centre, and scroll the item selection independently by wheel or scrollbar.
+- Carry the model under the pointer during a drag, highlight accepting slots
+  green, and replace the destination preview on drop.
+- Supply distinct demo textures for all twelve Materials, with grass top/side
+  and wood grain, plus an engine flame silhouette. Tiles, drag feedback, held
+  models and ghosts share them. Water has soft ripples, lava has flowing
+  streaks, and glass has translucent faces. Terrain keeps its palette.
 
 ## Checklist
 

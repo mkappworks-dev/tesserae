@@ -18,7 +18,7 @@ follower. The menu stays open and dragging never quick-picks the item.
 - [x] Pointer drag events move the model in UI coordinates, including UI scale.
 - [x] Item assignment and slot swapping update the destination model.
 - [x] Drop/cancel/menu close remove the follower without editing the World.
-- [ ] Formatting, relevant tests and final full CI pass.
+- [x] Formatting, relevant tests and final full CI pass.
 
 ## Comments
 
@@ -36,3 +36,11 @@ drags through movement and drop, including a non-default UI scale, and
 check cancellation. All 95 Client tests pass. Formatting is complete;
 combined visual review and full CI follow ticket 15, per the user's
 implement-first workflow.
+
+### 2026-10-26: combined validation
+
+The combined texture and drag tree passes 885 tests with five existing
+manual measurements ignored. The dev capture path now drives the real
+Pointer drag/drop observers to show a water model over slot 5, its green
+drop highlight, and the slot changing from lamp to water. Capture review
+is tracked with ticket 15; files stay in the review folder until accepted.

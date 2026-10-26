@@ -16,6 +16,7 @@ mod overlay;
 mod palette;
 mod pose;
 mod preview;
+mod preview_material;
 mod tile_preview;
 
 use bevy::prelude::*;
@@ -27,6 +28,7 @@ pub fn plugin(app: &mut App) {
         edit::plugin,
         menu::plugin,
         aim::plugin,
+        preview_material::plugin,
         preview::plugin,
         tile_preview::plugin,
         pose::plugin,

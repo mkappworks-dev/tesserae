@@ -205,6 +205,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
             .into_iter()
             .map(|a| content::Appearance {
                 material: a.material,
+                preview: None,
                 color: types::Srgba {
                     r: a.color.r,
                     g: a.color.g,

@@ -3,6 +3,8 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
+mod preview;
+
 use std::cell::RefCell;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
@@ -133,6 +135,14 @@ fn fence() -> ShapeDef {
     }
 }
 
+fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
+    Appearance {
+        material: material.into(),
+        color: Srgba { r, g, b, a },
+        preview: Some(preview::texture(material, [r, g, b])),
+    }
+}
+
 impl Guest for Demo {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
@@ -207,114 +217,18 @@ impl Guest for Demo {
             ],
             shapes: vec![fence()],
             appearance: vec![
-                Appearance {
-                    material: "lamp".into(),
-                    color: Srgba {
-                        r: 245,
-                        g: 227,
-                        b: 184,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "lava".into(),
-                    color: Srgba {
-                        r: 230,
-                        g: 72,
-                        b: 16,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "wood".into(),
-                    color: Srgba {
-                        r: 150,
-                        g: 104,
-                        b: 60,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "ash".into(),
-                    color: Srgba {
-                        r: 70,
-                        g: 66,
-                        b: 62,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "mud".into(),
-                    color: Srgba {
-                        r: 92,
-                        g: 70,
-                        b: 44,
-                        a: 224,
-                    },
-                },
-                Appearance {
-                    material: "brick".into(),
-                    color: Srgba {
-                        r: 168,
-                        g: 74,
-                        b: 52,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "water".into(),
-                    color: Srgba {
-                        r: 26,
-                        g: 82,
-                        b: 158,
-                        a: 166,
-                    },
-                },
-                Appearance {
-                    material: "stone".into(),
-                    color: Srgba {
-                        r: 133,
-                        g: 133,
-                        b: 140,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "dirt".into(),
-                    color: Srgba {
-                        r: 107,
-                        g: 74,
-                        b: 46,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "grass".into(),
-                    color: Srgba {
-                        r: 84,
-                        g: 143,
-                        b: 61,
-                        a: 255,
-                    },
-                },
-                Appearance {
-                    material: "glass".into(),
-                    color: Srgba {
-                        r: 179,
-                        g: 224,
-                        b: 235,
-                        a: 89,
-                    },
-                },
-                Appearance {
-                    material: "leaves".into(),
-                    color: Srgba {
-                        r: 41,
-                        g: 107,
-                        b: 36,
-                        a: 255,
-                    },
-                },
+                appearance("lamp", [245, 227, 184, 255]),
+                appearance("lava", [230, 72, 16, 255]),
+                appearance("wood", [150, 104, 60, 255]),
+                appearance("ash", [70, 66, 62, 255]),
+                appearance("mud", [92, 70, 44, 224]),
+                appearance("brick", [168, 74, 52, 255]),
+                appearance("water", [26, 82, 158, 166]),
+                appearance("stone", [133, 133, 140, 255]),
+                appearance("dirt", [107, 74, 46, 255]),
+                appearance("grass", [84, 143, 61, 255]),
+                appearance("glass", [179, 224, 235, 89]),
+                appearance("leaves", [41, 107, 36, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {

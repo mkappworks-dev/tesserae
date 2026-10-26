@@ -168,15 +168,20 @@ slots stay fixed at the bottom centre. Hovering a tile highlights it; the
 selected slot keeps its white border. The wheel and trackpad browse items while
 the menu is open. Clicking an item holds it outside the slots and closes the
 menu. Drag an item onto a slot to assign it, or drag one slot onto another to
-swap. Press 1 to 9 over an item to assign that slot without moving selection.
-Clicking a slot selects it and keeps the menu open. Selecting a slot by key or
-click, or scrolling during play, returns from an outside item.
+swap. Its model follows the pointer, an accepting slot highlights green, and
+dropping updates the slot's model immediately. Press 1 to 9 over an item to
+assign that slot without moving selection. Clicking a slot selects it and keeps
+the menu open. Selecting a slot by key or click, or scrolling during play,
+returns from an outside item.
 
 An outline marks the Server's remove target, a translucent ghost shows an
 accepted placement, and a small corner model shows the held Shape and its
 orientation. Fire has no ghost. Previews hide in the menu. The Client draws
 these from content and Server answers and never reads a Chunk. The held name
-sits above the square play bar, with one control per line at bottom right.
+sits above the square play bar, with one control per line at bottom right. Games
+can supply pixel textures for all these models through optional preview
+appearance data; missing textures use the Material's colour. The demo supplies
+distinct textures for every Material, and fire has a flame silhouette.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.

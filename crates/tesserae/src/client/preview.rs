@@ -2,8 +2,9 @@
 use super::{
     aim::{Sent, Target},
     camera::FlyCamera,
-    edit::{Catalogue, Holding, Hotbar},
-    menu::{Menu, Swatches},
+    edit::{Holding, Hotbar},
+    menu::Menu,
+    preview_material::{PreviewContent, Textures},
 };
 use crate::world::WorldSettings;
 use bevy::camera::visibility::RenderLayers;
@@ -27,10 +28,15 @@ struct Model {
     hand: Handle<StandardMaterial>,
 }
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Model>().add_systems(
-        Update,
-        (camera, model, position).chain().after(super::aim::report),
-    );
+    app.init_resource::<Model>()
+        .init_resource::<Textures>()
+        .add_systems(
+            Update,
+            (camera, model, position)
+                .chain()
+                .after(super::aim::report)
+                .after(super::preview_material::receive),
+        );
 }
 pub(super) fn camera(
     mut commands: Commands,
@@ -67,8 +73,7 @@ fn geometry(
             orientation,
         } => (material, shape, orientation.bits() as usize),
         Holding::Fluid(material) => (material, 0, 0),
-        Holding::Fire => (0, 0, 0),
-        Holding::Empty => return None,
+        Holding::Fire | Holding::Empty => return None,
     };
     let quads = catalogue.shape(shape)?.geometry.get(orientation)?;
     Some(tesserae_core::mesh::mesh_shape(quads, material))
@@ -77,6 +82,9 @@ pub(super) fn item_mesh(
     held: Holding,
     catalogue: &crate::content::ContentCatalogue,
 ) -> Option<Mesh> {
+    if held == Holding::Fire {
+        return Some(fire_mesh());
+    }
     let layer = geometry(held, catalogue)?;
     let mut mesh = super::chunk_mesh::chunk_mesh_to_mesh(&layer, 1.0);
     let shading: Vec<[f32; 4]> = layer
@@ -88,13 +96,71 @@ pub(super) fn item_mesh(
             [shade, shade, shade, 1.0]
         })
         .collect();
+    // Half-texel insets keep a face from sampling its neighbour in the atlas.
+    let uvs: Vec<[f32; 2]> = layer
+        .positions
+        .iter()
+        .zip(&layer.normals)
+        .map(|(p, n)| {
+            let (u, v, face) = if n[1] > 0.5 {
+                (p[0], p[2], 0.0)
+            } else if n[1] < -0.5 {
+                (p[0], p[2], 2.0)
+            } else if n[0].abs() > 0.5 {
+                (p[2], 1.0 - p[1], 1.0)
+            } else {
+                (p[0], 1.0 - p[1], 1.0)
+            };
+            [
+                (face * 16.0 + 0.5 + u * 15.0) / 48.0,
+                (0.5 + v * 15.0) / 16.0,
+            ]
+        })
+        .collect();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, shading);
     Some(mesh)
 }
 
+fn fire_mesh() -> Mesh {
+    use bevy::{
+        asset::RenderAssetUsages,
+        mesh::{Indices, PrimitiveTopology},
+    };
+    let positions = vec![
+        [0.1, 0.0, 0.5],
+        [0.9, 0.0, 0.5],
+        [0.9, 1.0, 0.5],
+        [0.1, 1.0, 0.5],
+        [0.5, 0.0, 0.1],
+        [0.5, 0.0, 0.9],
+        [0.5, 1.0, 0.9],
+        [0.5, 1.0, 0.1],
+    ];
+    let normals: Vec<[f32; 3]> = [[0.0, 0.0, 1.0]; 4]
+        .into_iter()
+        .chain([[1.0, 0.0, 0.0]; 4])
+        .collect();
+    let uvs: Vec<[f32; 2]> = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]
+        .into_iter()
+        .cycle()
+        .take(8)
+        .map(|[u, v]| [(16.5 + u * 15.0) / 48.0, (0.5 + v * 15.0) / 16.0])
+        .collect();
+    Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0f32; 4]; 8])
+    .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7]))
+}
+
 fn model(
     mut commands: Commands,
-    (hotbar, catalogue, swatches): (Res<Hotbar>, Res<Catalogue>, Res<Swatches>),
+    (hotbar, content): (Res<Hotbar>, PreviewContent),
     mut model: ResMut<Model>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -102,7 +168,7 @@ fn model(
     main: Query<Entity, With<FlyCamera>>,
 ) {
     let held = hotbar.held();
-    if model.held == Some(held) && !catalogue.is_changed() && !swatches.is_changed() {
+    if model.held == Some(held) && !content.changed() {
         return;
     }
     for entity in &old {
@@ -112,24 +178,13 @@ fn model(
     materials.remove(model.ghost.id());
     materials.remove(model.hand.id());
     model.held = Some(held);
-    let Some(mesh) = item_mesh(held, &catalogue.0) else {
+    let Some(mesh) = item_mesh(held, &content.catalogue.0) else {
         return;
     };
     model.mesh = meshes.add(mesh);
-    let rgba = swatches.rgba(held);
-    let colour = Color::linear_rgba(rgba.x, rgba.y, rgba.z, 1.0);
-    model.hand = materials.add(StandardMaterial {
-        base_color: colour,
-        unlit: true,
-        ..default()
-    });
-    model.ghost = materials.add(StandardMaterial {
-        base_color: colour.with_alpha(0.3),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        cull_mode: None,
-        ..default()
-    });
+    let rgba = content.swatches.rgba(held);
+    model.hand = materials.add(content.textures.material(held, rgba, false));
+    model.ghost = materials.add(content.textures.material(held, rgba, true));
     commands.spawn((
         Ghost,
         bevy::light::NotShadowCaster,
@@ -188,6 +243,7 @@ fn position(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::client::{edit::Catalogue, menu::Swatches};
     use crate::content::{CatalogueShape, ContentCatalogue};
     use tesserae_core::{Orientation, SHAPE_STAIR};
     fn catalogue() -> ContentCatalogue {
@@ -204,6 +260,37 @@ mod tests {
             ..default()
         }
     }
+    #[test]
+    fn material_faces_sample_their_own_preview_tiles_and_fire_uses_crossed_planes() {
+        use bevy::mesh::VertexAttributeValues;
+        let catalogue = catalogue();
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        let mesh = item_mesh(Holding::solid(rock, 0), &catalogue).unwrap();
+        let VertexAttributeValues::Float32x3(normals) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL).unwrap()
+        else {
+            panic!("normals")
+        };
+        let VertexAttributeValues::Float32x2(uvs) = mesh.attribute(Mesh::ATTRIBUTE_UV_0).unwrap()
+        else {
+            panic!("uvs")
+        };
+        for (normal, uv) in normals.iter().zip(uvs) {
+            let face = if normal[1] > 0.5 {
+                0.0
+            } else if normal[1] < -0.5 {
+                2.0
+            } else {
+                1.0
+            };
+            assert!(uv[0] > face / 3.0 && uv[0] < (face + 1.0) / 3.0);
+            assert!(uv[1] > 0.0 && uv[1] < 1.0);
+        }
+        let flame = item_mesh(Holding::Fire, &catalogue).unwrap();
+        assert_eq!(flame.count_vertices(), 8);
+        assert_eq!(flame.indices().unwrap().len(), 12);
+    }
+
     #[test]
     fn models_follow_orientation_and_the_ghost_cell_and_hide_for_the_menu() {
         let mut app = App::new();
