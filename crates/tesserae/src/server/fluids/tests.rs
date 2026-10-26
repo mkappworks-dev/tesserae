@@ -1726,9 +1726,9 @@ fn run_seconds(f: &mut Fixture, seconds: f64) {
     }
 }
 
-/// Lava from the demo Game and slime from an independent Mod, placed with the
-/// fluid tool, flow by their own declared metres through the same Server tick
-/// as water: after a second each front is where its rate puts it, each settles
+/// Water and lava from the demo Game and slime from an independent Mod,
+/// placed with the fluid tool, flow by their own declared metres through the
+/// same Server tick: after a second each front is where its rate puts it, each settles
 /// at its own reach, and each recedes. Lava is the slowest of the three.
 #[test]
 fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
@@ -1742,7 +1742,7 @@ fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
         };
         let (lava, slime) = (id("demo:lava"), id("fluids:slime"));
         for (material, after_1_s, reach) in [
-            (id("core:water"), 4.0, 7.0),
+            (id("demo:water"), 4.0, 7.0),
             (lava, 0.75, 3.0),
             (slime, 2.0, 2.0),
         ] {
@@ -1876,7 +1876,7 @@ fn touching(f: &Fixture, a: MaterialId, b: MaterialId) -> bool {
 fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
     for v in [1.0, 0.5, 0.25] {
         let (tables, id) = declared(v);
-        let water = id("core:water");
+        let water = id("demo:water");
         let (lava, stone_id) = (id("demo:lava"), id("core:stone"));
         assert_eq!(stone_id, STONE);
         let mut f = Fixture::with_tables(v, 4.0, 0, tables);
@@ -1920,7 +1920,7 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
 #[test]
 fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() {
     let (tables, id) = declared(1.0);
-    let water = id("core:water");
+    let water = id("demo:water");
     let lava = id("demo:lava");
     let mut f = Fixture::with_tables(1.0, 10.0, 16, tables.clone());
     let home = ChunkCoord::new(0, 0, 0);
@@ -1958,27 +1958,27 @@ fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() 
     );
 }
 
-/// The `fluids` Mod's own rule, slime that is flowing and touches water
+/// The `fluids` Mod's own rule, slime that is flowing and touches its brine
 /// becomes its ash: a second pair through the same native path, with its
 /// state matching (the slime source beside nothing is never consumed).
 #[test]
 fn a_mods_own_pair_reacts_through_the_server() {
     let (tables, id) = declared(1.0);
-    let water = id("core:water");
+    let brine = id("fluids:brine");
     let (slime, ash) = (id("fluids:slime"), id("fluids:ash"));
     let mut f = Fixture::with_tables(1.0, 8.0, 0, tables);
     f.send(0, EditAction::PlaceSource(slime));
     f.settle();
     assert_eq!(f.wet_length_m(), 2.0);
-    f.send(3, EditAction::PlaceSource(water));
+    f.send(3, EditAction::PlaceSource(brine));
     f.settle();
     let ashes: Vec<i32> = (-f.half..=f.half)
         .filter(|&x| f.occupants(x).solid == Voxel::cube(ash))
         .collect();
-    assert_eq!(ashes, vec![2], "the flowing slime beside the water");
+    assert_eq!(ashes, vec![2], "the flowing slime beside the brine");
     assert_eq!(f.fluid(0), Some(Fluid::source(slime)));
-    assert_eq!(f.fluid(3), Some(Fluid::source(water)));
-    assert!(!touching(&f, slime, water));
+    assert_eq!(f.fluid(3), Some(Fluid::source(brine)));
+    assert!(!touching(&f, slime, brine));
     assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != stone()));
 }
 
@@ -1988,7 +1988,7 @@ fn a_mods_own_pair_reacts_through_the_server() {
 #[test]
 fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
     let (tables, id) = declared(1.0);
-    let water = id("core:water");
+    let water = id("demo:water");
     let lava = id("demo:lava");
     let mut f = Fixture::with_tables(1.0, 8.0, 0, tables);
     f.send(0, EditAction::PlaceSource(lava));
@@ -2035,7 +2035,7 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
     let states: Vec<Vec<Occupants>> = (0..3)
         .map(|way| {
             let (tables, id) = declared(0.5);
-            let water = id("core:water");
+            let water = id("demo:water");
             let mut f = Fixture::with_tables(0.5, 4.0, 0, tables);
             f.send(-2, EditAction::PlaceSource(id("demo:lava")));
             f.apply_intents();
@@ -2080,7 +2080,7 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
 fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
     let run = |bound: Option<usize>| {
         let (tables, id) = declared(1.0);
-        let water = id("core:water");
+        let water = id("demo:water");
         let lava = id("demo:lava");
         let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
         match bound {
@@ -2139,7 +2139,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
 fn meshes_are_redelivered_after_a_reaction() {
     let mut h = Harness::new(small(), UNLIMITED);
     let (tables, id) = declared(WorldSettings::default().voxel_size);
-    let water = id("core:water");
+    let water = id("demo:water");
     let lava = id("demo:lava");
     let tables = Arc::new(tables);
     h.app.insert_resource(ContentTables(Arc::clone(&tables)));

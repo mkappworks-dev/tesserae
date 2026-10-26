@@ -247,6 +247,11 @@ at each:
 TESSERAE_VOXEL_SIZE_M=0.25 cargo dev -- --mods games/demo/dist --trust-all
 ```
 
+The water is the demo's own, `demo:water`, declared with its fluid row and
+colour as its lava and mud are: it fills the demo World's lakes, which stand at
+25.5 m in valleys well away from the scenes, and it is the water every scene
+pours.
+
 On its first tick the demo builds its scenes in a row along x, 7 m from spawn
 toward −z and below the Eye; look down to find them. Once the build has landed:
 

@@ -328,9 +328,14 @@ fn the_fluids_guest_declares_a_fluid_a_reaction_and_a_fire() {
         (2.0, 2.0, 1.0)
     );
     assert!(slime.waterlogs && slime.extinguishes && slime.heat.is_none());
+    let brine = tables.fluids.get(id("fluids:brine")).unwrap();
+    assert_eq!((brine.reach_m, brine.sideways_m_per_s), (7.0, 4.0));
     let rule = tables.reactions.rules()[0];
-    assert_eq!(rule.first.fluid, WATER);
-    assert_eq!(rule.second.phase, Phase::Flowing);
+    assert_eq!(
+        (rule.first.fluid, rule.second.fluid),
+        (id("fluids:slime"), id("fluids:brine"))
+    );
+    assert_eq!(rule.first.phase, Phase::Flowing);
     assert_eq!(rule.product, Some(id("fluids:ash")));
     assert!(tables.combustion.contains(id("fluids:wood")));
     assert!(!tables.combustion.contains(STONE));

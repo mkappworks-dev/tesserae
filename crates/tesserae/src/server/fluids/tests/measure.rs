@@ -206,7 +206,7 @@ impl Run {
                 .id_of(tesserae_mods::Kind::Material, name)
                 .unwrap() as MaterialId
         };
-        let (water, lava, wood) = (id("core:water"), id("demo:lava"), id("demo:wood"));
+        let (water, lava, wood) = (id("demo:water"), id("demo:lava"), id("demo:wood"));
         let world = WorldSettings {
             voxel_size: v,
             ..default()

@@ -46,7 +46,8 @@ passes `dev` to the binary as an argument and leaves the feature off. Controls,
 and what each kind of edit costs to rebuild, are in
 [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
-On its own that loads no Game. To run the demo, which plays out water, lava, a
+On its own that loads no Game. To run the demo, which declares its own water as
+it does its lava and fills its lakes with it, and plays out water, lava, a
 second fluid and fire beside spawn:
 
 ```bash

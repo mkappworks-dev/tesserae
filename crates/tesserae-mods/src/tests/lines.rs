@@ -330,6 +330,7 @@ fn registered() -> crate::Registered {
             row("fluids:slime", 8),
             row("fluids:wood", 9),
             row("fluids:ash", 10),
+            row("fluids:brine", 11),
         ],
         shapes: vec![row("core:cube", 0)],
     }
