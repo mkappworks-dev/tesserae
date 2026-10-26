@@ -4,7 +4,8 @@ use super::*;
 use crate::server::edit::set_occupants;
 use tesserae_core::material::WATER;
 use tesserae_core::mesh::FLAME;
-use tesserae_core::{Burn, Burning, CombustionDef, Fluid, Level, Occupants, Overlay};
+use tesserae_core::testgen::register_water;
+use tesserae_core::{Burn, Burning, CombustionDef, Fluid, Level, MaterialId, Occupants, Overlay};
 
 fn burning_stone() -> Tables {
     let mut tables = Tables::builtin();
@@ -23,14 +24,14 @@ fn burning_stone() -> Tables {
     tables
 }
 
-fn harness_with_fire() -> Harness {
+fn harness_with_water(mut tables: Tables) -> (Harness, MaterialId) {
+    let water = register_water(&mut tables);
     let mut h = harness();
-    h.app
-        .insert_resource(ContentTables(Arc::new(burning_stone())));
-    h
+    h.app.insert_resource(ContentTables(Arc::new(tables)));
+    (h, water)
 }
 
-fn flowing(surface: u8) -> Occupants {
+fn flowing(water: MaterialId, surface: u8) -> Occupants {
     let level = Level {
         surface,
         reach: 5,
@@ -38,7 +39,7 @@ fn flowing(surface: u8) -> Occupants {
     };
     Occupants {
         solid: Voxel::AIR,
-        fluid: Fluid::flowing(WATER, [level, Level::DRY, Level::DRY, Level::DRY]),
+        fluid: Fluid::flowing(water, [level, Level::DRY, Level::DRY, Level::DRY]),
         burning: None,
     }
 }
@@ -180,7 +181,7 @@ fn quads_of(layer: &tesserae_core::MeshLayer, material: u32) -> usize {
 /// the generator's and are not rebuilt.
 #[test]
 fn held_fluid_and_fire_reach_the_level_one_cover_and_its_mesh() {
-    let mut h = harness_with_fire();
+    let (mut h, water) = harness_with_water(burning_stone());
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
@@ -188,11 +189,11 @@ fn held_fluid_and_fire_reach_the_level_one_cover_and_its_mesh() {
     let above = h.above_level_one();
 
     h.occupy(chunk, [8, 8, 8], [10, 2, 4], solid(stone()));
-    h.occupy(chunk, [8, 10, 8], [4, 2, 4], flowing(16));
-    h.occupy(chunk, [12, 10, 8], [4, 1, 4], flowing(4));
+    h.occupy(chunk, [8, 10, 8], [4, 2, 4], flowing(water, 16));
+    h.occupy(chunk, [12, 10, 8], [4, 1, 4], flowing(water, 4));
     h.occupy(chunk, [20, 10, 8], [2, 2, 2], fire());
     // Up to the Chunk's +x face, so a cover's face may be crossed.
-    h.occupy(chunk, [24, 10, 8], [8, 2, 4], flowing(16));
+    h.occupy(chunk, [24, 10, 8], [8, 2, 4], flowing(water, 16));
     assert_eq!(
         h.store().get(chunk).unwrap().get(9, 10, 9),
         Voxel::AIR,
@@ -207,8 +208,8 @@ fn held_fluid_and_fire_reach_the_level_one_cover_and_its_mesh() {
         h.cover_shown(covering).overlay.get(x, y, z)
     };
     let surface = |o: Overlay| o.fluid.map(|f| (f.material, f.source, f.surface));
-    assert_eq!(surface(at([8, 10, 8])), Some((WATER, false, 16)));
-    assert_eq!(surface(at([12, 10, 8])), Some((WATER, false, 2)), "a film");
+    assert_eq!(surface(at([8, 10, 8])), Some((water, false, 16)));
+    assert_eq!(surface(at([12, 10, 8])), Some((water, false, 2)), "a film");
     assert!(at([20, 10, 8]).burning.is_some(), "the fire");
 
     let delivered = latest(ready);
@@ -223,7 +224,7 @@ fn held_fluid_and_fire_reach_the_level_one_cover_and_its_mesh() {
     }
     let mesh = &delivered[&(1, covering)];
     assert!(
-        quads_of(&mesh.blended, u32::from(WATER)) > 0,
+        quads_of(&mesh.blended, u32::from(water)) > 0,
         "no water drawn"
     );
     assert!(quads_of(&mesh.cutout, FLAME) > 0, "no flame drawn");
@@ -240,7 +241,7 @@ fn held_fluid_and_fire_reach_the_level_one_cover_and_its_mesh() {
 /// leave the cover with it, which is the generator's again.
 #[test]
 fn a_fluid_only_change_reaches_the_cover_and_eviction_takes_it_out() {
-    let mut h = harness();
+    let (mut h, water) = harness_with_water(Arc::unwrap_or_clone(ContentTables::default().0));
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
@@ -249,7 +250,7 @@ fn a_fluid_only_change_reaches_the_cover_and_eviction_takes_it_out() {
 
     for surface in [16, 8] {
         let before = h.cover_shown(covering);
-        h.occupy(chunk, [10, 10, 10], [4, 2, 4], flowing(surface));
+        h.occupy(chunk, [10, 10, 10], [4, 2, 4], flowing(water, surface));
         let (ready, _) = h.lod_settle();
         assert!(same_chunk(h.store().get(chunk).unwrap(), &packed));
         let after = h.cover_shown(covering);
@@ -262,7 +263,7 @@ fn a_fluid_only_change_reaches_the_cover_and_eviction_takes_it_out() {
             .remove(&(1, covering))
             .expect("the cover was redelivered");
         assert!(same_mesh(&mesh, &h.fresh_mesh(1, covering)));
-        assert!(quads_of(&mesh.blended, u32::from(WATER)) > 0);
+        assert!(quads_of(&mesh.blended, u32::from(water)) > 0);
     }
 
     h.anchor_at(Vec3::new(160.0, 0.0, 0.0));
@@ -283,7 +284,7 @@ fn a_fluid_only_change_reaches_the_cover_and_eviction_takes_it_out() {
 /// mesh the Client is left holding of it are what the settled state gives.
 #[test]
 fn flow_the_simulation_lands_reaches_the_cover_once_it_settles() {
-    let mut h = harness();
+    let (mut h, water) = harness_with_water(Arc::unwrap_or_clone(ContentTables::default().0));
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
@@ -292,8 +293,8 @@ fn flow_the_simulation_lands_reaches_the_cover_once_it_settles() {
     // sharing a coarse Voxel with its floor loses it to the stone.
     h.occupy(chunk, [0, 9, 0], [32, 1, 32], solid(stone()));
     h.occupy(chunk, [16, 10, 16], [1, 1, 1], {
-        let mut source = flowing(16);
-        source.fluid = Some(Fluid::source(WATER));
+        let mut source = flowing(water, 16);
+        source.fluid = Some(Fluid::source(water));
         source
     });
 
@@ -342,7 +343,7 @@ fn flow_the_simulation_lands_reaches_the_cover_once_it_settles() {
     let mesh = held.remove(&(1, covering)).expect("the water was redrawn");
     assert!(same_mesh(&mesh, &h.fresh_mesh(1, covering)));
     assert!(
-        quads_of(&mesh.blended, u32::from(WATER)) > 0,
+        quads_of(&mesh.blended, u32::from(water)) > 0,
         "no water drawn"
     );
 }
@@ -354,7 +355,7 @@ fn flow_the_simulation_lands_reaches_the_cover_once_it_settles() {
 /// mesh are what the held state gives.
 #[test]
 fn water_changing_under_a_cover_every_tick_is_still_redrawn_and_settles() {
-    let mut h = harness();
+    let (mut h, water) = harness_with_water(Arc::unwrap_or_clone(ContentTables::default().0));
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
@@ -375,7 +376,7 @@ fn water_changing_under_a_cover_every_tick_is_still_redrawn_and_settles() {
             chunk,
             [10, 10, 10],
             [2, 2, 2],
-            flowing(if i % 2 == 0 { 16 } else { 6 }),
+            flowing(water, if i % 2 == 0 { 16 } else { 6 }),
         );
         if i == 4 {
             h.app
@@ -502,7 +503,7 @@ fn lake_water() -> (Voxel, Overlay) {
 }
 
 fn moving(surface: u8) -> (Voxel, Overlay) {
-    let o = flowing(surface);
+    let o = flowing(WATER, surface);
     (
         Voxel::AIR,
         Overlay {

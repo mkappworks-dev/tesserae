@@ -1182,6 +1182,7 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     use crate::server::player::Player;
     let mut loaded = guest_fixture("fluids", "fluids", "0.2", 0, 1.0);
     loaded.mods.extend(fixture(9).mods);
+    let water = tesserae_core::testgen::register_water(&mut loaded.tables);
     let mut h = Harness::with(loaded);
     h.app.insert_resource(WorldSettings {
         seed: 0,
@@ -1193,7 +1194,7 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     let stair = Voxel::new(STONE, SHAPE_STAIR, 0);
     h.put([2, 1, 2], stair);
     for action in [
-        EditAction::PlaceSource(tesserae_core::material::WATER),
+        EditAction::PlaceSource(water),
         EditAction::RemoveSource,
         EditAction::Break,
     ] {
@@ -1209,8 +1210,10 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     assert_eq!(h.app.world().resource::<EditHistory>().next, 3);
     h.call();
     let typed = h.log(0);
-    assert_eq!(typed.matches("SourcePlaced(7)").count(), 1, "{typed}");
-    assert_eq!(typed.matches("SourceRemoved(7)").count(), 1, "{typed}");
+    let placed = format!("SourcePlaced({water})");
+    let removed = format!("SourceRemoved({water})");
+    assert_eq!(typed.matches(&placed).count(), 1, "{typed}");
+    assert_eq!(typed.matches(&removed).count(), 1, "{typed}");
     assert_eq!(typed.matches("::Solid(").count(), 1, "{typed}");
     let projected = h.log(1);
     assert!(projected.contains("edits=1"), "{projected}");

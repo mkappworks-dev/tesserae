@@ -197,6 +197,7 @@ impl FluidTable {
 mod tests {
     use super::*;
     use crate::material::WATER;
+    use crate::testgen::WATER_FLUID;
 
     #[test]
     fn water_is_the_one_builtin_fluid() {
@@ -219,35 +220,35 @@ mod tests {
                 "nan reach",
                 FluidDef {
                     reach_m: f32::NAN,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "infinite rate",
                 FluidDef {
                     sideways_m_per_s: f32::INFINITY,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "zero downward",
                 FluidDef {
                     downward_m_per_s: 0.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "negative recession",
                 FluidDef {
                     recession_m_per_s: -1.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "zero drop",
                 FluidDef {
                     reset_drop_m: 0.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
         ] {
@@ -258,13 +259,9 @@ mod tests {
             );
         }
         assert!(!table.contains(lava), "a refused definition left a row");
-        assert_eq!(table.register(lava, FluidDef::WATER), Ok(()));
+        assert_eq!(table.register(lava, WATER_FLUID), Ok(()));
         assert_eq!(
-            table.register(lava, FluidDef::WATER),
-            Err(FluidError::AlreadyAFluid)
-        );
-        assert_eq!(
-            table.register(WATER, FluidDef::WATER),
+            table.register(lava, WATER_FLUID),
             Err(FluidError::AlreadyAFluid)
         );
     }
@@ -282,7 +279,7 @@ mod tests {
                 "reach past the bound",
                 FluidDef {
                     reach_m: 65.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::OutOfRange,
             ),
@@ -290,7 +287,7 @@ mod tests {
                 "rate past the bound",
                 FluidDef {
                     downward_m_per_s: 300.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::OutOfRange,
             ),
@@ -298,7 +295,7 @@ mod tests {
                 "drop past the bound",
                 FluidDef {
                     reset_drop_m: 17.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::OutOfRange,
             ),
@@ -310,7 +307,7 @@ mod tests {
                         reach_m: 2.0,
                     }),
                     extinguishes: false,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::BadHeat,
             ),
@@ -318,7 +315,7 @@ mod tests {
                 "hot and extinguishing",
                 FluidDef {
                     heat: hot,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::HotExtinguisher,
             ),
@@ -328,7 +325,7 @@ mod tests {
         let lava = FluidDef {
             heat: hot,
             extinguishes: false,
-            ..FluidDef::WATER
+            ..WATER_FLUID
         };
         assert_eq!(table.register(9, lava), Ok(()));
     }
@@ -337,15 +334,19 @@ mod tests {
     #[test]
     fn rank_is_the_registration_order() {
         let mut table = FluidTable::builtin();
-        table.register(12, FluidDef::WATER).unwrap();
-        table.register(9, FluidDef::WATER).unwrap();
-        assert_eq!(table.rank(WATER), Some(0));
-        assert_eq!(table.rank(12), Some(1));
-        assert_eq!(table.rank(9), Some(2));
+        let before = table.iter().count() as u16;
+        table.register(12, WATER_FLUID).unwrap();
+        table.register(9, WATER_FLUID).unwrap();
+        assert_eq!(table.rank(12), Some(before));
+        assert_eq!(table.rank(9), Some(before + 1));
         assert_eq!(table.rank(10), None);
         assert_eq!(
-            table.iter().map(|(m, _)| m).collect::<Vec<_>>(),
-            [WATER, 9, 12]
+            table
+                .iter()
+                .map(|(m, _)| m)
+                .skip(before.into())
+                .collect::<Vec<_>>(),
+            [9, 12]
         );
     }
 }

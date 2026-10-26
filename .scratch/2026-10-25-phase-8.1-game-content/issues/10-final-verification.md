@@ -25,6 +25,9 @@ items. Record any limit found as an open item rather than fixing it in passing.
       screenshots are reviewed with the user and then deleted.
 - [ ] Interleaved CPU-time A/B against main shows the meshing, LOD and fluids
       benches within noise.
+      It also stands in for ticket 01's own A/B, whose interim run left
+      `greedy_mesh/terrain_water` +7.5% unexplained: bench water at id 8 and
+      at the built-in 7 in one binary to tell layout from cost.
 - [ ] DESIGN.md has the step 8.1 entry and updated open items. Data-only Mods
       are listed as the agreed next session.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass on the

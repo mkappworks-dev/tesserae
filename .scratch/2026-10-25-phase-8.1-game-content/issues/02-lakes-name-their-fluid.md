@@ -14,6 +14,8 @@ packed cubes of that Material. Everything derived from the lake reads it:
 - the level-1 waterline counts only packed lake-fluid cubes below the level as
   generated;
 - coarse under-water light dims by its own dimming;
+- the Server's cut of a coarse water surface to level 0's height
+  (`server/lod.rs`) applies to the lake fluid's top faces;
 - the spawn point clears the level.
 
 The engine's default World parameters have no lakes. Until tickets 03 and 04

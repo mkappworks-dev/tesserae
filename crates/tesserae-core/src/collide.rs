@@ -454,18 +454,20 @@ mod tests {
     }
 
     /// Stone at layer 0 and a pool of water on it at layer 1.
-    fn pool() -> Grid {
+    fn pool() -> (Grid, Tables) {
+        let mut tables = Tables::builtin();
+        let water = crate::testgen::register_water(&mut tables);
         let mut g = Grid::new();
-        g.floor(0, cube())
-            .floor(1, Voxel::cube(crate::material::WATER));
-        g
+        g.floor(0, cube()).floor(1, Voxel::cube(water));
+        (g, tables)
     }
 
     #[test]
     fn a_body_sinks_through_water_to_the_bed() {
+        let (pool, tables) = pool();
         let fall = super::sweep(
-            &pool(),
-            &Tables::builtin(),
+            &pool,
+            &tables,
             1.0,
             body(0.5, 3.0, 0.5, 1.8),
             [0.0, -5.0, 0.0],
@@ -479,15 +481,9 @@ mod tests {
 
     #[test]
     fn a_ray_through_water_strikes_the_bed() {
-        let hit = super::raycast(
-            &pool(),
-            &Tables::builtin(),
-            1.0,
-            [0.5, 4.0, 0.5],
-            [0.0, -1.0, 0.0],
-            10.0,
-        )
-        .expect("the bed is in reach");
+        let (pool, tables) = pool();
+        let hit = super::raycast(&pool, &tables, 1.0, [0.5, 4.0, 0.5], [0.0, -1.0, 0.0], 10.0)
+            .expect("the bed is in reach");
         assert_eq!(hit.at, [0, 0, 0]);
         assert_eq!(hit.face, POS_Y);
     }

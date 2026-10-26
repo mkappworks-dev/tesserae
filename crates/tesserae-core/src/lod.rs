@@ -666,6 +666,7 @@ mod tests {
     use crate::material::{DIRT, GLASS, GRASS, LEAVES, STONE, WATER};
     use crate::shape::examples::{FENCE_ID, fence};
     use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::testgen::register_water;
     use crate::worldgen::{Worldgen, WorldgenParams};
     use std::collections::BTreeMap;
 
@@ -959,8 +960,8 @@ mod tests {
         let stacked = |bottom: MaterialId, top: MaterialId| {
             std::array::from_fn(|j| cube(if j / 2 % 2 == 1 { top } else { bottom }))
         };
-        assert_eq!(coarse(stacked(STONE, WATER), &t), cube(WATER));
-        assert_eq!(coarse(stacked(WATER, STONE), &t), cube(STONE));
+        assert_eq!(coarse(stacked(STONE, water()), &t), cube(water()));
+        assert_eq!(coarse(stacked(water(), STONE), &t), cube(STONE));
         assert_eq!(coarse(stacked(DIRT, GRASS), &t), cube(GRASS));
         assert_eq!(coarse(stacked(GRASS, DIRT), &t), cube(DIRT));
     }
@@ -968,7 +969,7 @@ mod tests {
     #[test]
     fn the_lowest_id_wins_a_tie_in_height_in_any_order_or_octant() {
         let t = table();
-        let mats = [STONE, DIRT, GRASS, GLASS, LEAVES, WATER];
+        let mats = [STONE, DIRT, GRASS, GLASS, LEAVES, water()];
         for &a in &mats {
             for &b in mats.iter().filter(|&&b| b != a) {
                 let want = cube(a.min(b));
@@ -1109,7 +1110,7 @@ mod tests {
     #[test]
     fn translucent_materials_keep_their_id_and_count_as_occupied() {
         let t = table();
-        for m in [GLASS, LEAVES, WATER] {
+        for m in [GLASS, LEAVES, water()] {
             assert_eq!(coarse([cube(m); 8], &t), cube(m));
             let mut mostly = [cube(m); 8];
             mostly[..3].fill(cube(STONE));
@@ -1207,17 +1208,27 @@ mod tests {
                 let mut children: [Chunk; 8] =
                     std::array::from_fn(|i| Chunk::filled(if i % 3 == 0 { a } else { b }));
                 assert_matches_reference(&children, &t, &format!("{a:?} and {b:?}"));
-                children[5].set(3, 4, 5, cube(WATER));
+                children[5].set(3, 4, 5, cube(water()));
                 assert_matches_reference(&children, &t, &format!("{a:?}, {b:?} and a speck"));
             }
         }
     }
 
-    fn tables() -> Tables {
-        Tables {
+    fn fixture() -> (Tables, MaterialId) {
+        let mut tables = Tables {
             shapes: table(),
             ..Tables::builtin()
-        }
+        };
+        let water = register_water(&mut tables);
+        (tables, water)
+    }
+
+    fn tables() -> Tables {
+        fixture().0
+    }
+
+    fn water() -> MaterialId {
+        fixture().1
     }
 
     /// Every packed Voxel counts as generated, so nothing is dynamic.
@@ -1298,10 +1309,10 @@ mod tests {
         (got.chunk.get(0, 0, 0), got.overlay.get(0, 0, 0))
     }
 
-    fn flowing(surface: u8) -> Overlay {
+    fn flowing(fluid: MaterialId, surface: u8) -> Overlay {
         Overlay {
             fluid: Fluid::flowing(
-                WATER,
+                fluid,
                 [
                     Level {
                         surface,
@@ -1317,10 +1328,10 @@ mod tests {
         }
     }
 
-    fn standing(surface: u8) -> Overlay {
+    fn standing(fluid: MaterialId, surface: u8) -> Overlay {
         Overlay {
             fluid: Fluid::flowing(
-                WATER,
+                fluid,
                 [
                     Level {
                         surface,
@@ -1339,17 +1350,20 @@ mod tests {
 
     #[test]
     fn dynamic_fluid_stands_at_the_share_of_the_coarse_voxel_it_fills() {
-        let full = (Voxel::AIR, flowing(16));
-        assert_eq!(one_cell([full; 8], None), (Voxel::AIR, standing(16)));
+        let full = (Voxel::AIR, flowing(water(), 16));
+        assert_eq!(
+            one_cell([full; 8], None),
+            (Voxel::AIR, standing(water(), 16))
+        );
         assert_eq!(
             one_cell([full, full, DRY, DRY, full, full, DRY, DRY], None),
-            (Voxel::AIR, standing(8)),
+            (Voxel::AIR, standing(water(), 8)),
             "the bottom half"
         );
-        let film = (Voxel::AIR, flowing(4));
+        let film = (Voxel::AIR, flowing(water(), 4));
         assert_eq!(
             one_cell([film, DRY, DRY, DRY, DRY, DRY, DRY, DRY], None),
-            (Voxel::AIR, standing(1)),
+            (Voxel::AIR, standing(water(), 1)),
             "a sixteenth of a coarse Voxel still shows"
         );
         // Stone wins a coarse Voxel that is more stone than water, as it does
@@ -1362,7 +1376,7 @@ mod tests {
         // Stone under half is dropped and the water stands over what it filled.
         assert_eq!(
             one_cell([rock, rock, film, film, DRY, DRY, DRY, DRY], None),
-            (Voxel::AIR, standing(5)),
+            (Voxel::AIR, standing(water(), 5)),
         );
     }
 
@@ -1378,12 +1392,12 @@ mod tests {
         assert_eq!(one_cell([lake; 8], at(1.0)), lake, "every bottom under 1 m");
         assert_eq!(
             one_cell([lake; 8], at(0.0)),
-            (Voxel::AIR, standing(16)),
+            (Voxel::AIR, standing(WATER, 16)),
             "a bottom at the waterline is above it"
         );
-        assert_eq!(one_cell([lake; 8], None), (Voxel::AIR, standing(16)));
+        assert_eq!(one_cell([lake; 8], None), (Voxel::AIR, standing(WATER, 16)));
         // Mostly lake: the lake's, and the correction for it still applies.
-        let full = (Voxel::AIR, flowing(16));
+        let full = (Voxel::AIR, flowing(WATER, 16));
         let mut mixed = [lake; 8];
         mixed[7] = full;
         mixed[6] = full;
@@ -1392,26 +1406,26 @@ mod tests {
         mixed[4] = full;
         assert_eq!(one_cell(mixed, at(1.0)), lake, "a tie is the lake's");
         mixed[3] = full;
-        assert_eq!(one_cell(mixed, at(1.0)), (Voxel::AIR, standing(16)));
+        assert_eq!(one_cell(mixed, at(1.0)), (Voxel::AIR, standing(WATER, 16)));
     }
 
     #[test]
     fn waterlogged_water_weighs_what_it_fills_of_the_voids() {
         let slab = Voxel::shaped(STONE, SHAPE_SLAB, Orientation::IDENTITY);
-        let logged = (slab, standing(16));
-        let film = (Voxel::AIR, flowing(4));
+        let logged = (slab, standing(water(), 16));
+        let film = (Voxel::AIR, flowing(water(), 4));
         // Four half-full slabs: stone 4 x 2048, water 4 x 2048 + 4 x 1024 above.
         assert_eq!(
             one_cell(
                 [logged, logged, film, film, logged, logged, film, film],
                 None
             ),
-            (Voxel::AIR, standing(10))
+            (Voxel::AIR, standing(water(), 10))
         );
         // A stair's notch holds a quarter of the cube: stone wins.
         let stair = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY);
         let notch = Overlay {
-            fluid: Some(Fluid::source(WATER)),
+            fluid: Some(Fluid::source(water())),
             burning: None,
         };
         assert_eq!(

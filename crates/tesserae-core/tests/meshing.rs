@@ -13,15 +13,25 @@ use tesserae_core::{
 const FENCE: u8 = 4;
 const PIPE: u8 = 5;
 
-/// The builtin Tables, then a fence and a six-way pipe registered as a Mod would.
-fn tables() -> &'static Tables {
-    static TABLES: OnceLock<Tables> = OnceLock::new();
+/// The builtin Tables, then a fence, a six-way pipe and the fixture water
+/// registered as a Mod would.
+fn fixture() -> &'static (Tables, u16) {
+    static TABLES: OnceLock<(Tables, u16)> = OnceLock::new();
     TABLES.get_or_init(|| {
         let mut t = Tables::builtin();
         assert_eq!(t.shapes.register(examples::fence()), Ok(FENCE));
         assert_eq!(t.shapes.register(examples::pipe()), Ok(PIPE));
-        t
+        let water = testgen::register_water(&mut t);
+        (t, water)
     })
+}
+
+fn tables() -> &'static Tables {
+    &fixture().0
+}
+
+fn water() -> u16 {
+    fixture().1
 }
 
 fn shapes() -> &'static ShapeTable {
@@ -1099,7 +1109,7 @@ fn uvs_are_the_position_inside_the_voxel() {
 
 // Translucent Materials: what a face is hidden by is the Material across it.
 
-use tesserae_core::material::{GLASS, LEAVES, STONE, WATER};
+use tesserae_core::material::{GLASS, LEAVES, STONE};
 use tesserae_core::{MaterialDef, Occlusion, RenderClass};
 
 fn put(chunk: &mut Chunk, at: [usize; 3], voxel: Voxel) {
@@ -1198,7 +1208,7 @@ fn stone_beside_glass_keeps_its_face_and_glass_beside_stone_loses_its_own() {
 #[test]
 fn every_quad_lands_in_the_layer_of_its_materials_render_class() {
     let mut c = Chunk::air();
-    for (i, m) in [STONE, GLASS, LEAVES, WATER].into_iter().enumerate() {
+    for (i, m) in [STONE, GLASS, LEAVES, water()].into_iter().enumerate() {
         put(&mut c, [10 + 2 * i, 10, 10], Voxel::cube(m));
         put(
             &mut c,
@@ -1228,7 +1238,7 @@ fn every_quad_lands_in_the_layer_of_its_materials_render_class() {
     );
     for (layer, expected) in [
         (&mesh.opaque, vec![STONE]),
-        (&mesh.blended, vec![GLASS, WATER]),
+        (&mesh.blended, vec![GLASS, water()]),
         (&mesh.cutout, vec![LEAVES]),
     ] {
         for m in expected {
@@ -1288,20 +1298,20 @@ fn a_uniform_chunk_declines_only_if_the_material_hides_itself_and_what_is_beside
         declines(&uniform(GLASS), &uniform(STONE)),
         "stone hides glass"
     );
-    assert!(declines(&uniform(WATER), &uniform(WATER)));
+    assert!(declines(&uniform(water()), &uniform(water())));
     // Stone's faces are seen through the glass beside it.
     assert!(!declines(&uniform(STONE), &uniform(GLASS)));
     // Leaves draw every face, inside the Chunk as well as on its boundary.
     assert!(!declines(&uniform(LEAVES), &uniform(LEAVES)));
     assert!(!declines(&uniform(LEAVES), &uniform(STONE)));
     // Water beside glass: neither hides the other.
-    assert!(!declines(&uniform(WATER), &uniform(GLASS)));
+    assert!(!declines(&uniform(water()), &uniform(GLASS)));
 }
 
 /// The occlusion rule, restated from the spec and not from the mesher.
 fn hides(across: u16, here: u16) -> bool {
     match across {
-        GLASS | WATER => across == here,
+        _ if across == GLASS || across == water() => across == here,
         LEAVES => false,
         _ => true,
     }
@@ -1312,7 +1322,7 @@ fn random_translucent_scene(rng: &mut Rng) -> Chunk {
     for z in LO..LO + SPAN {
         for y in LO..LO + SPAN {
             for x in LO..LO + SPAN {
-                let material = [STONE, GLASS, LEAVES, WATER][rng.below(4) as usize];
+                let material = [STONE, GLASS, LEAVES, water()][rng.below(4) as usize];
                 let voxel = match rng.below(10) {
                     0..=3 => continue,
                     4..=7 => Voxel::cube(material),
@@ -1710,7 +1720,7 @@ fn flowing(surface: u8) -> tesserae_core::Overlay {
             source: false,
             surface,
             reach: 1,
-            ..tesserae_core::Fluid::source(tesserae_core::material::WATER)
+            ..tesserae_core::Fluid::source(water())
         }),
         burning: None,
     }
@@ -1828,7 +1838,7 @@ fn a_fence_grows_no_arm_towards_flowing_water() {
     assert_eq!(opaque(&fence, &overlay), bare, "an arm towards flow");
 
     let mut sourced = fence.clone();
-    sourced.set(11, 10, 10, Voxel::cube(tesserae_core::material::WATER));
+    sourced.set(11, 10, 10, Voxel::cube(water()));
     assert_ne!(
         opaque(&sourced, &tesserae_core::ChunkOverlay::none()),
         bare,
@@ -1867,12 +1877,7 @@ fn a_waterlogged_stair_draws_its_water_in_the_notch_alone() {
     let mut chunk = Chunk::air();
     chunk.set(4, 4, 4, stair);
     let mut overlay = tesserae_core::ChunkOverlay::none();
-    overlay.set(
-        4,
-        4,
-        4,
-        soaked(tesserae_core::Fluid::source(tesserae_core::material::WATER)),
-    );
+    overlay.set(4, 4, 4, soaked(tesserae_core::Fluid::source(water())));
     let dry = mesh_chunk(unlit(&chunk), [None; 6], tables());
     let wet = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
     assert_eq!(wet.opaque.positions, dry.opaque.positions);
@@ -1901,9 +1906,7 @@ fn a_waterlogged_slab_draws_water_from_its_top_to_the_surface() {
         descent: 0,
     };
     let none = tesserae_core::Level::DRY;
-    let fluid =
-        tesserae_core::Fluid::flowing(tesserae_core::material::WATER, [level, none, none, none])
-            .unwrap();
+    let fluid = tesserae_core::Fluid::flowing(water(), [level, none, none, none]).unwrap();
     overlay.set(4, 4, 4, soaked(fluid));
     let mesh = mesh_chunk(unlit(&chunk).with_overlay(&overlay), [None; 6], tables());
     assert_eq!(blended_heights(&mesh, [0.0, 1.0, 0.0]), vec![4.75]);
@@ -1916,7 +1919,7 @@ fn a_waterlogged_slab_draws_water_from_its_top_to_the_surface() {
 /// and its void's faces by the lake. Only the lake's outside is drawn.
 #[test]
 fn a_waterlogged_stair_in_a_lake_draws_no_faces_inside_the_water() {
-    let water = tesserae_core::material::WATER;
+    let water = water();
     let stair = Voxel::shaped(1, SHAPE_STAIR, Orientation::new(POS_Y, 0));
     let mut chunk = Chunk::air();
     for x in 3..6 {
@@ -1982,10 +1985,10 @@ fn a_burning_solid_draws_flames_over_its_open_faces_and_keeps_its_geometry() {
 /// An overlay whose palette still lists water and fire though every cell is
 /// dry, as one is after its last wet Voxel drains: it takes the wet path.
 fn drained() -> tesserae_core::ChunkOverlay {
-    use tesserae_core::{Burning, ChunkOverlay, Fluid, Overlay, material::WATER};
+    use tesserae_core::{Burning, ChunkOverlay, Fluid, Overlay};
     let mut overlay = ChunkOverlay::none();
     let wet = Overlay {
-        fluid: Some(Fluid::source(WATER)),
+        fluid: Some(Fluid::source(water())),
         burning: Some(Burning { fuel: 1 }),
     };
     overlay.set(0, 0, 0, wet);
@@ -2000,7 +2003,7 @@ fn drained() -> tesserae_core::ChunkOverlay {
 /// stairs and clear Materials by hand.
 #[test]
 fn a_dry_neighbourhood_meshes_the_same_whichever_path_it_takes() {
-    use tesserae_core::material::{GLASS, LEAVES, WATER};
+    use tesserae_core::material::{GLASS, LEAVES};
     let g = world();
     let mut scenes: Vec<(Chunk, [Chunk; 6])> = ramp_chunks(&g, 1)
         .into_iter()
@@ -2024,7 +2027,7 @@ fn a_dry_neighbourhood_meshes_the_same_whichever_path_it_takes() {
     for (x, voxel) in [
         (2, Voxel::cube(GLASS)),
         (3, Voxel::cube(LEAVES)),
-        (4, Voxel::cube(WATER)),
+        (4, Voxel::cube(water())),
         (5, stair),
     ] {
         for z in 0..CHUNK_SIZE {
@@ -2082,9 +2085,8 @@ fn a_dry_neighbourhood_meshes_the_same_whichever_path_it_takes() {
 /// water across the boundary.
 #[test]
 fn a_dry_chunk_beside_a_wet_one_meshes_against_the_neighbours_fluid() {
-    use tesserae_core::material::WATER;
     let mut center = Chunk::air();
-    center.set(31, 4, 4, Voxel::cube(WATER));
+    center.set(31, 4, 4, Voxel::cube(water()));
     let east = Chunk::air();
     let mut overlay = tesserae_core::ChunkOverlay::none();
     overlay.set(0, 4, 4, flowing(16));

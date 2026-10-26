@@ -676,8 +676,27 @@ mod tests {
         SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
+    use std::sync::{Arc, LazyLock};
+    use tesserae_core::testgen::{WATER_FLUID, register_water};
+
     use super::super::player::{Player, PoseReport};
     use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
+
+    /// The Server's default tables with the fixture water: those of `app_with`,
+    /// and what a test reading water outside an App holds.
+    static WATERED: LazyLock<(Tables, MaterialId)> = LazyLock::new(|| {
+        let mut tables = Arc::unwrap_or_clone(ContentTables::default().0);
+        let water = register_water(&mut tables);
+        (tables, water)
+    });
+
+    fn watered() -> Tables {
+        WATERED.0.clone()
+    }
+
+    fn water() -> MaterialId {
+        WATERED.1
+    }
 
     fn stone() -> Voxel {
         Voxel::cube(STONE)
@@ -704,7 +723,7 @@ mod tests {
     fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
         let mut app = App::new();
         app.insert_resource(WorldSettings::default())
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(watered())))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
@@ -795,7 +814,7 @@ mod tests {
         let mut chunk = ground();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                chunk.set(x, 8, z, Voxel::cube(tesserae_core::material::WATER));
+                chunk.set(x, 8, z, Voxel::cube(water()));
             }
         }
         chunk
@@ -810,10 +829,7 @@ mod tests {
             voxel_at(&app, [5, 7, 5]).is_air(),
             "the bed under the water"
         );
-        assert_eq!(
-            voxel_at(&app, [5, 8, 5]).material(),
-            tesserae_core::material::WATER
-        );
+        assert_eq!(voxel_at(&app, [5, 8, 5]).material(), water());
 
         let mut app = app_with(&[(origin(), pool())]);
         send(&mut app, down(EditAction::Place(stone())));
@@ -1414,10 +1430,10 @@ mod tests {
         assert_eq!(rejections(&mut app), vec![RejectReason::Busy; 10]);
     }
 
-    /// The built-in tables with stone declared fuel, so a stone Voxel may hold
+    /// The watered tables with stone declared fuel, so a stone Voxel may hold
     /// a fire: only declared fuel does.
     fn stone_burns() -> Tables {
-        let mut tables = Tables::builtin();
+        let mut tables = watered();
         tables
             .register_combustion(
                 STONE,
@@ -1448,7 +1464,7 @@ mod tests {
     fn occupants_at(app: &App, at: [i32; 3]) -> Occupants {
         app.world()
             .resource::<ChunkStore>()
-            .occupants(at, &Tables::builtin().fluids)
+            .occupants(at, &app.world().resource::<ContentTables>().0.fluids)
             .expect("held")
     }
 
@@ -1497,13 +1513,13 @@ mod tests {
     #[test]
     fn what_the_tables_refuse_changes_nothing() {
         let mut app = app_with(&[(origin(), pool())]);
-        let water = Fluid::source(tesserae_core::material::WATER);
+        let source = Fluid::source(water());
         let was = occupants_at(&app, [5, 8, 5]);
         let cases = [
             (
                 Occupants {
                     solid: stone(),
-                    fluid: Some(water),
+                    fluid: Some(source),
                     burning: None,
                 },
                 RejectReason::FluidExcluded,
@@ -1511,7 +1527,7 @@ mod tests {
             (
                 Occupants {
                     solid: Voxel::AIR,
-                    fluid: Some(water),
+                    fluid: Some(source),
                     burning: Some(Burning { fuel: 1 }),
                 },
                 RejectReason::NoFuel,
@@ -1526,7 +1542,7 @@ mod tests {
             ),
             (
                 Occupants {
-                    solid: Voxel::cube(tesserae_core::material::WATER),
+                    solid: Voxel::cube(water()),
                     fluid: None,
                     burning: None,
                 },
@@ -1539,10 +1555,7 @@ mod tests {
             assert!(!meshes.is_dirty(origin()), "{occupants:?} dirtied a mesh");
         }
         assert_eq!(occupants_at(&app, [5, 8, 5]), was);
-        assert_eq!(
-            voxel_at(&app, [5, 8, 5]),
-            Voxel::cube(tesserae_core::material::WATER)
-        );
+        assert_eq!(voxel_at(&app, [5, 8, 5]), Voxel::cube(water()));
     }
 
     /// The old whole-Voxel Edit reads through the one interpretation: water
@@ -1551,8 +1564,8 @@ mod tests {
     #[test]
     fn set_voxel_goes_through_the_layer_rules() {
         let mut app = app_with(&[(origin(), ground())]);
-        let water = tesserae_core::material::WATER;
-        let tables = Tables::builtin();
+        let water = water();
+        let tables = watered();
         let put = |app: &mut App, at, voxel| {
             let mut store = app.world_mut().resource_mut::<ChunkStore>();
             set_voxel(&mut store, &mut MeshState::default(), &tables, at, voxel)
@@ -1595,7 +1608,7 @@ mod tests {
             source: false,
             surface: 9,
             reach: 3,
-            ..Fluid::source(tesserae_core::material::WATER)
+            ..Fluid::source(water())
         }
     }
 
@@ -1604,7 +1617,7 @@ mod tests {
     /// its Voxel with one, leaving the bed and the stair.
     #[test]
     fn the_fluid_tool_places_a_source_in_front_and_removes_one_keeping_its_solid() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         send(&mut app, down(EditAction::PlaceSource(water)));
         tick(&mut app);
@@ -1643,7 +1656,7 @@ mod tests {
     /// is the stair throughout.
     #[test]
     fn the_fluid_tool_waterlogs_a_struck_shape_and_drains_it() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         put_occupants(
             &mut app,
@@ -1683,11 +1696,11 @@ mod tests {
     /// refused at the shaped cap leaves the water exactly as it was.
     #[test]
     fn solid_edits_keep_or_displace_fluid_by_the_space_they_leave() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut store = ChunkStore::default();
         store.insert(origin(), ground());
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
+        let tables = watered();
         let at = [5, 8, 5];
         set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(water)).unwrap();
         set_voxel(&mut store, &mut meshes, &tables, at, stair()).unwrap();
@@ -1728,7 +1741,7 @@ mod tests {
     /// it goes through flowing water: flow is packed air.
     #[test]
     fn a_source_replaces_flow_and_the_tool_aims_through_flow() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         let flow = Occupants {
             solid: Voxel::AIR,
@@ -1751,7 +1764,7 @@ mod tests {
     /// origin and reach checks every intent does.
     #[test]
     fn the_fluid_tool_is_refused_like_any_edit_and_changes_nothing() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         let flow = Occupants {
             solid: Voxel::AIR,
@@ -1869,7 +1882,7 @@ mod tests {
     #[test]
     fn source_and_fire_rules_say_why_they_refuse() {
         use tesserae_core::{Burn, CombustionDef, FluidDef, MaterialDef, Occlusion, RenderClass};
-        let mut tables = Tables::builtin();
+        let mut tables = watered();
         let lava = tables
             .materials
             .register(MaterialDef {
@@ -1886,7 +1899,7 @@ mod tests {
                 FluidDef {
                     waterlogs: false,
                     extinguishes: false,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             )
             .unwrap();
@@ -1905,7 +1918,7 @@ mod tests {
                 oil,
                 FluidDef {
                     extinguishes: false,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             )
             .unwrap();
@@ -1924,7 +1937,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let at = |solid, fluid| Occupants {
             solid,
             fluid,

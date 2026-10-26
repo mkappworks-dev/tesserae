@@ -18,9 +18,18 @@ fn dry() -> WorldgenParams {
     }
 }
 
+/// The builtin Tables and the fixture water, which a Mod would register.
+fn fixture() -> &'static (Tables, u16) {
+    static TABLES: OnceLock<(Tables, u16)> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        let mut t = Tables::builtin();
+        let water = testgen::register_water(&mut t);
+        (t, water)
+    })
+}
+
 fn tables() -> &'static Tables {
-    static TABLES: OnceLock<Tables> = OnceLock::new();
-    TABLES.get_or_init(Tables::builtin)
+    &fixture().0
 }
 
 /// Flat full sky, which is what `light_chunk` answers for open terrain and so
@@ -393,7 +402,7 @@ fn mesher(c: &mut Criterion) {
     // Translucent Materials, which cost the table lookups terrain skips. Water
     // over every column is the largest of them: nothing culled against stone
     // any more, and a stone floor split into one run per depth of light.
-    let water = terrain_under(tesserae_core::material::WATER, 3);
+    let water = terrain_under(fixture().1, 3);
     let water_nb = Neighborhood::isolated(LitChunk::new(&water, &sky));
     group.bench_function("terrain_water", |b| {
         b.iter(|| black_box(greedy_mesh(black_box(&water_nb), tables())))
@@ -473,7 +482,7 @@ fn lighting(c: &mut Criterion) {
     });
 
     // The flood with dimming in it: the instantiation terrain never takes.
-    let flooded = terrain_under(tesserae_core::material::WATER, 3);
+    let flooded = terrain_under(fixture().1, 3);
     group.bench_function("straddling_water", |b| {
         b.iter(|| {
             black_box(light_chunk(

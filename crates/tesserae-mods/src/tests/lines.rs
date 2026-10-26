@@ -2,8 +2,9 @@
 //! through the adapter, each guest shown the Edit history of its own line.
 
 use futures_lite::future::block_on;
-use tesserae_core::material::{STONE, WATER};
-use tesserae_core::{FluidDef, MaterialDef, Occlusion, PlaceFault, RenderClass, Tables, Voxel};
+use tesserae_core::material::STONE;
+use tesserae_core::testgen::{WATER_FLUID, register_water};
+use tesserae_core::{MaterialDef, MaterialId, Occlusion, PlaceFault, RenderClass, Tables, Voxel};
 
 use super::sandbox::{Rig, context};
 use crate::{
@@ -15,22 +16,25 @@ fn region(min: [f32; 3], max: [f32; 3]) -> Region {
     Region { min, max }
 }
 
-fn water() -> Voxel {
-    Voxel::cube(WATER)
+fn watered() -> (Tables, MaterialId) {
+    let mut tables = Tables::builtin();
+    let water = register_water(&mut tables);
+    (tables, water)
 }
 
 #[test]
 fn a_fluid_placed_as_a_solid_is_a_source_on_0_1_and_refused_on_0_2() {
-    let tables = Tables::builtin();
+    let (tables, water) = watered();
+    let water = Voxel::cube(water);
     let commands = [Command::Place(vec![Placement {
         at: [0.0; 3],
-        voxel: water(),
+        voxel: water,
     }])];
     let old = validate(&commands, Line::V01, &tables, 1.0).unwrap();
-    assert_eq!(old.commands, [Resolved::Place(vec![([0; 3], water())])]);
+    assert_eq!(old.commands, [Resolved::Place(vec![([0; 3], water)])]);
     let fill = [Command::Fill {
         region: region([0.0; 3], [1.0; 3]),
-        voxel: water(),
+        voxel: water,
     }];
     assert!(validate(&fill, Line::V01, &tables, 1.0).is_ok());
     for commands in [&commands[..], &fill[..]] {
@@ -46,13 +50,13 @@ fn a_fluid_placed_as_a_solid_is_a_source_on_0_1_and_refused_on_0_2() {
 
 #[test]
 fn source_and_fire_commands_resolve_to_lazy_regions_under_the_fill_caps() {
-    let tables = Tables::builtin();
+    let (tables, water) = watered();
     let a = region([0.0; 3], [2.0; 3]);
     let batch = validate(
         &[
             Command::PlaceSources {
                 region: a,
-                material: WATER,
+                material: water,
             },
             Command::RemoveSources(a),
             Command::Ignite(a),
@@ -79,7 +83,7 @@ fn source_and_fire_commands_resolve_to_lazy_regions_under_the_fill_caps() {
     assert_eq!(
         intents,
         [
-            Intent::Source(WATER),
+            Intent::Source(water),
             Intent::RemoveSource,
             Intent::Ignite,
             Intent::Extinguish
@@ -144,11 +148,12 @@ fn a_source_names_a_fluid_the_tables_hold() {
             "{material}"
         );
     }
-    tables.register_fluid(oil, FluidDef::WATER).unwrap();
+    tables.register_fluid(oil, WATER_FLUID).unwrap();
     assert!(place(&tables, oil).is_ok());
 }
 
 fn edits() -> Vec<EditEvent> {
+    let water = watered().1;
     let at = [1.0, 2.0, 3.0];
     vec![
         // Placing stone into water: a solid Edit that the packed Voxel shows
@@ -159,27 +164,27 @@ fn edits() -> Vec<EditEvent> {
                 before: Voxel::AIR,
                 after: Voxel::cube(STONE),
             },
-            before: water(),
+            before: Voxel::cube(water),
             after: Voxel::cube(STONE),
         },
         // A source into a waterlogged stair: the packed Voxel stays a stair.
         EditEvent {
             at,
-            kind: EditKind::SourcePlaced(WATER),
+            kind: EditKind::SourcePlaced(water),
             before: Voxel::new(STONE, 2, 0),
             after: Voxel::new(STONE, 2, 0),
         },
         // A source into air is packed as a water cube.
         EditEvent {
             at,
-            kind: EditKind::SourcePlaced(WATER),
+            kind: EditKind::SourcePlaced(water),
             before: Voxel::AIR,
-            after: water(),
+            after: Voxel::cube(water),
         },
         EditEvent {
             at,
-            kind: EditKind::SourceRemoved(WATER),
-            before: water(),
+            kind: EditKind::SourceRemoved(water),
+            before: Voxel::cube(water),
             after: Voxel::AIR,
         },
     ]
@@ -222,8 +227,11 @@ fn a_0_2_guest_sees_solid_and_fluid_intents_apart() {
     let line = &log.drain().lines[0].message;
     assert!(line.contains("call=1"), "{line}");
     assert_eq!(line.matches("::Solid(").count(), 1, "{line}");
-    assert_eq!(line.matches("SourcePlaced(7)").count(), 2, "{line}");
-    assert_eq!(line.matches("SourceRemoved(7)").count(), 1, "{line}");
+    let water = watered().1;
+    let placed = format!("SourcePlaced({water})");
+    let removed = format!("SourceRemoved({water})");
+    assert_eq!(line.matches(&placed).count(), 2, "{line}");
+    assert_eq!(line.matches(&removed).count(), 1, "{line}");
     assert!(
         line.contains("before: Voxel { material: 0") && line.contains("after: Voxel { material: 1"),
         "the solid layer, not the packed water: {line}"

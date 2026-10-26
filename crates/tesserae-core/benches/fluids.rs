@@ -8,13 +8,13 @@ use tesserae_core::flow::{
     Advance, Cell, CellView, Continuation, FlowScale, Quota, Reach, Region, Step, Timers, Work,
     advance, chunk_of, reading_outside, still_applies, wake_around, wake_solid_around,
 };
-use tesserae_core::material::{STONE, WATER};
+use tesserae_core::material::STONE;
 use tesserae_core::mesh::POS_Y;
 use tesserae_core::{
     Burn, Burning, CHUNK_SIZE, Chunk, ChunkOverlay, CombustionDef, Fluid, FluidDef, Heat,
     MaterialDef, MaterialId, Occlusion, Occupants, Orientation, Overlay, Phase, Reactant,
     ReactionDef, RenderClass, SHAPE_POST, SHAPE_SLAB, Side, Tables, Voxel, Worldgen,
-    WorldgenParams,
+    WorldgenParams, testgen,
 };
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
@@ -28,12 +28,20 @@ const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 /// ash with the spec's tuning.
 #[derive(Clone, Copy)]
 struct Ids {
+    water: MaterialId,
     lava: MaterialId,
     wood: MaterialId,
 }
 
-fn demo_tables() -> (Tables, Ids) {
+fn water_tables() -> (Tables, MaterialId) {
     let mut tables = Tables::builtin();
+    let water = testgen::register_water(&mut tables);
+    (tables, water)
+}
+
+fn demo_tables() -> (Tables, Ids) {
+    // Water first: an equal claim goes to the earlier registered fluid.
+    let (mut tables, water) = water_tables();
     let lava = tables
         .materials
         .register(MaterialDef {
@@ -84,7 +92,7 @@ fn demo_tables() -> (Tables, Ids) {
                 phase: Phase::Any,
             },
             second: Reactant {
-                fluid: WATER,
+                fluid: water,
                 phase: Phase::Any,
             },
             consumed: Side::First,
@@ -107,7 +115,7 @@ fn demo_tables() -> (Tables, Ids) {
             },
         )
         .unwrap();
-    (tables, Ids { lava, wood })
+    (tables, Ids { water, lava, wood })
 }
 
 /// Held Chunks, outside which terrain is unknown.
@@ -424,11 +432,16 @@ fn rescans(c: &mut Criterion) {
             ..WorldgenParams::default()
         },
     );
+    // Generated lakes are the built-in water until a Game names the lake fluid.
     let shore = (-8..8)
         .flat_map(|x| (-8..8).map(move |z| [x, 1, z]))
         .find(|&[x, y, z]| {
             let chunk = lake.chunk(x, y, z);
-            chunk.uniform().is_none() && chunk.kinds().iter().any(|v| v.material() == WATER)
+            chunk.uniform().is_none()
+                && chunk
+                    .kinds()
+                    .iter()
+                    .any(|v| v.material() == tesserae_core::material::WATER)
         })
         .expect("a lake shore near the origin");
     let mut g = c.benchmark_group("fluids/rescan");
@@ -470,11 +483,12 @@ fn rescans(c: &mut Criterion) {
         });
     }
     // A uniform lake beside held terrain is scanned along its faces only.
-    let mut sim = Sim::new(Tables::builtin(), 1.0, Limits::UNBOUNDED);
+    let (tables, water) = water_tables();
+    let mut sim = Sim::new(tables, 1.0, Limits::UNBOUNDED);
     sim.held.chunks.insert(
         [0, 0, 0],
         (
-            Arc::new(Chunk::filled(Voxel::cube(WATER))),
+            Arc::new(Chunk::filled(Voxel::cube(water))),
             Arc::new(ChunkOverlay::none()),
         ),
     );
@@ -498,8 +512,9 @@ fn rescans(c: &mut Criterion) {
     g.finish();
 
     // Settled terrain: a step with nothing due.
-    let mut settled = open_floor(Tables::builtin(), 1.0, 8.0, 4.0, Limits::UNBOUNDED);
-    settled.source([0, 1, 0], WATER);
+    let (tables, water) = water_tables();
+    let mut settled = open_floor(tables, 1.0, 8.0, 4.0, Limits::UNBOUNDED);
+    settled.source([0, 1, 0], water);
     settled.settle();
     let mut g = c.benchmark_group("fluids/idle");
     g.bench_function("settled_step", |b| {
@@ -515,9 +530,10 @@ fn rescans(c: &mut Criterion) {
 /// its 7 m where it lands and, once removed, everything recedes.
 fn flow_recession(c: &mut Criterion) {
     for v in SIZES {
-        let mut sim = open_floor(Tables::builtin(), v, 8.0, 17.0, Limits::UNBOUNDED);
+        let (tables, water) = water_tables();
+        let mut sim = open_floor(tables, v, 8.0, 17.0, Limits::UNBOUNDED);
         let top = [0, cells(16.0, v), 0];
-        sim.source(top, WATER);
+        sim.source(top, water);
         bench_settle(c, "fluids/waterfall_16m", &format!("{v}"), sim, move |s| {
             s.dry(top)
         });
@@ -530,7 +546,8 @@ fn waterlogging(c: &mut Criterion) {
     let slab = Voxel::shaped(STONE, SHAPE_SLAB, Orientation::new(POS_Y, 0));
     let post = Voxel::shaped(STONE, SHAPE_POST, Orientation::new(POS_Y, 0));
     for v in SIZES {
-        let mut sim = open_floor(Tables::builtin(), v, 8.0, 4.0, Limits::UNBOUNDED);
+        let (tables, water) = water_tables();
+        let mut sim = open_floor(tables, v, 8.0, 4.0, Limits::UNBOUNDED);
         let half = cells(7.5, v);
         for x in -half..half {
             for z in -half..half {
@@ -542,7 +559,7 @@ fn waterlogging(c: &mut Criterion) {
             }
         }
         let top = [cells(2.0, v), cells(2.0, v), 0];
-        sim.source(top, WATER);
+        sim.source(top, water);
         bench_settle(
             c,
             "fluids/waterlogged_floor",
@@ -560,7 +577,7 @@ fn reactions(c: &mut Criterion) {
         let (tables, ids) = demo_tables();
         let mut sim = open_floor(tables, v, 8.0, 4.0, Limits::UNBOUNDED);
         let (w, l) = ([-cells(3.0, v), 1, 0], [cells(3.0, v), 1, 0]);
-        sim.source(w, WATER);
+        sim.source(w, ids.water);
         sim.source(l, ids.lava);
         bench_settle(c, "fluids/reaction_front", &format!("{v}"), sim, |_| {});
     }
@@ -600,7 +617,7 @@ fn fire(c: &mut Criterion) {
         for &at in &cells {
             burning.ignite(at);
         }
-        burning.source([0, w + 1, 0], WATER);
+        burning.source([0, w + 1, 0], ids.water);
         bench_settle(c, "fire/extinguish", &format!("{v}"), burning, |_| {});
     }
 }
@@ -614,11 +631,12 @@ fn saturated(c: &mut Criterion) {
         reserve: 4_096,
         scan_per_step: 4_096,
     };
-    let mut sim = open_floor(Tables::builtin(), 0.25, 8.0, 8.0, limits);
+    let (tables, water) = water_tables();
+    let mut sim = open_floor(tables, 0.25, 8.0, 8.0, limits);
     let half = cells(8.0, 0.25);
     for x in (-half..half).step_by(8) {
         for z in (-half..half).step_by(8) {
-            sim.source([x, 1, z], WATER);
+            sim.source([x, 1, z], water);
         }
     }
     sim.settle();
