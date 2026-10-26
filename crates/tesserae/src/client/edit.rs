@@ -887,13 +887,13 @@ mod tests {
         expect(
             &mut app,
             KeyCode::Digit1,
-            "1: core:stone",
+            "1: test:stone",
             "[click] place  [right click] break",
         );
         expect(
             &mut app,
             KeyCode::Digit3,
-            "3: core:stone core:stair  up +Y, turn 0",
+            "3: test:stone core:stair  up +Y, turn 0",
             "[click] place  [right click] break",
         );
         expect(

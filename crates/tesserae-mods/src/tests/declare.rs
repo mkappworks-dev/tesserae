@@ -81,7 +81,7 @@ fn two_mods_register_in_load_order_after_the_built_ins() {
     assert_eq!(load.registry.id_of(Kind::Shape, "a:s"), Some(4));
     assert_eq!(load.registry.id_of(Kind::Shape, "a:t"), Some(5));
     assert_eq!(load.registry.id_of(Kind::Shape, "b:u"), Some(6));
-    assert_eq!(load.registry.id_of(Kind::Material, "core:leaves"), Some(6));
+    assert_eq!(load.registry.id_of(Kind::Material, "core:leaves"), None);
     assert_eq!(load.registry.id_of(Kind::Material, "core:water"), None);
     assert_eq!(load.registry.id_of(Kind::Shape, "core:post"), Some(3));
     assert_eq!(load.tables.materials.len(), 11);
@@ -143,12 +143,6 @@ fn the_built_ins_are_ids_0_to_6_and_7_is_never_listed() {
         builtin.names(Kind::Material).collect::<Vec<_>>(),
         [
             (0, "core:air"),
-            (1, "core:stone"),
-            (2, "core:dirt"),
-            (3, "core:grass"),
-            (4, "core:lantern"),
-            (5, "core:glass"),
-            (6, "core:leaves"),
         ]
     );
     assert_eq!(builtin.len(Kind::Material), 8);

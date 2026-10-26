@@ -894,7 +894,7 @@ mod tests {
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
         let tables = crate::server::fixture_tables();
-        for unknown in [999, tesserae_core::material::RETIRED] {
+        for unknown in [999, tesserae_core::material::FIRST_MOD_ID.saturating_sub(1)] {
             assert_eq!(
                 set_voxel(
                     &mut store,

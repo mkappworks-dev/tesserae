@@ -497,6 +497,14 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    unchanged and the same water at id 7 and id 8 costs the same in one binary.
    Evidence: `.scratch/2026-10-25-phase-8.1-game-content/`.
 
+   **Step 8.2: no built-in content but air.** Air is the only engine Material;
+   ids 1 to 7 are retired and Mod ids still start at 8. The Game names optional
+   ground on the amended unreleased 0.3 contract; older lines warn and have no
+   ground. The demo declares its solids. Hotbar defaults and the gallery read
+   declared content. A single remove action, an item held outside the slots,
+   square menu and hotbar tiles, and Server-answered aim previews complete the
+   player's content controls. See [ADR-0016](docs/adr/0016-only-air-is-built-in.md).
+
 9. Look-pack API, water shading, visual polish.
 10. Network transport. The `Player` and `PoseReport` are its first customers.
 

@@ -88,7 +88,11 @@ properties of the Material, never of its Shape.
 **Voxel size** — the edge length of one Voxel in metres. A property of a World,
 not of the engine. Default 1.0.
 
-**Air** — the absence of Material. A Voxel, not a null.
+**Air** — the absence of Material. A Voxel, not a null. The only built-in
+Material, id 0; ids 1 to 7 are retired.
+
+**Ground** — the Game's optional rock, soil and surface Materials, named in
+World parameters. Without ground the World is empty air.
 
 **Cave** — a tunnel of Air that World generation carves through solid ground.
 Sized in metres, so it is the same Cave at any Voxel size. Where one breaks the

@@ -1263,7 +1263,7 @@ pub(in crate::server) mod tests {
                 settings,
                 budget,
                 WorldSettings::default(),
-                WorldgenParams::default(),
+                tesserae_core::testgen::world_params(),
             )
         }
 
@@ -1743,7 +1743,7 @@ pub(in crate::server) mod tests {
         let generator = Worldgen::new(
             WorldSettings::default().seed,
             WorldSettings::default().voxel_size,
-            WorldgenParams::default(),
+            tesserae_core::testgen::world_params(),
         );
         let (_, highest_m) = generator.surface_bounds_m();
         let cell = WorldSettings::default().cell_size();
@@ -1771,7 +1771,7 @@ pub(in crate::server) mod tests {
         let generator = Worldgen::new(
             WorldSettings::default().seed,
             WorldSettings::default().voxel_size,
-            WorldgenParams::default(),
+            tesserae_core::testgen::world_params(),
         );
         let (lowest_m, _) = generator.surface_bounds_m();
         let cell = WorldSettings::default().cell_size();

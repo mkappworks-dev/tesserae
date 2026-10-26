@@ -100,9 +100,8 @@ Orange is untrusted and sandboxed. Blue is ours. Dashed grey is third party.
 
 The engine owns how things behave; a Mod's Declaration says which Materials
 behave that way, and with what numbers. The engine has no water, lava, wood or
-mud; those are the demo Game's. Its built-in Materials are air, stone, dirt,
-grass, lantern, glass and leaves, and it has no fluid row of its own, so lakes
-are filled with whichever fluid the Game names
+mud; those are the demo Game's. Its only built-in Material is air. The Game names the rock, soil and surface
+of its ground and the fluid filling its lakes
 ([ADR-0015](adr/0015-water-is-game-content.md)).
 
 | Behaviour              | The engine decides                                                      | Data that switches it on, and who declares it                    |
@@ -113,8 +112,7 @@ are filled with whichever fluid the Game names
 | Two fluids react       | How a Contact is found and applied whole or not at all                  | A reaction row, from a Mod: the demo's lava and water make stone |
 | Heat sets fuel alight  | Exposure through open space, ignition delay, burning and its residue    | A fluid's or a fuel's heat and a combustion row, from a Mod      |
 
-So a World with no Game is dry: nothing flows, burns or reacts, and it has no
-lakes. See [ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
+A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See [ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
 [ADR-0012](adr/0012-mods-declare-once-and-command-in-batches.md).
 
 ## The three invariants this diagram exists to protect

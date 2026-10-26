@@ -148,6 +148,7 @@ fn open_world(
     params: Option<Res<mods::WorldParameters>>,
 ) {
     let params = params.map_or_else(|| worldgen_params(None), |params| params.0);
+    if params.ground.is_none() { info!("World has no ground: no Game named rock, soil and surface"); }
     let generator = Worldgen::new(world.seed, world.voxel_size, params);
     commands.insert_resource(SpawnPoint::new(spawn_eye(&generator)));
     commands.insert_resource(WorldGenerator(generator));

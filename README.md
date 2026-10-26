@@ -49,7 +49,7 @@ and what each kind of edit costs to rebuild, are in
 Once the guests are built, `cargo dev` runs the demo Game, which declares its
 own water as it does its lava, fills its lakes with it, and plays out water,
 lava, a second fluid and fire beside spawn. Until then it opens a World with no
-Game, which is dry because the engine declares no fluid of its own, and says to
+Game, which is empty air because the engine declares no ground, and says to
 run the build:
 
 ```bash

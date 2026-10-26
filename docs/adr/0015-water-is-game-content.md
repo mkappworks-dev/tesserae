@@ -1,5 +1,8 @@
 # Water is Game content, and Material id 7 is retired
 
+Amended by [ADR-0016](0016-only-air-is-built-in.md): air is the only built-in
+Material, ids 1 to 7 are retired, and the Game names its ground.
+
 Status: accepted. Amends [ADR-0009](0009-materials-are-table-data.md)'s list of
 permanent ids.
 

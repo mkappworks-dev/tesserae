@@ -13,7 +13,6 @@ use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
 use crate::worldgen::GroundParams;
-pub use crate::material::{DIRT, GRASS, STONE};
 
 /// Voxel indices, not metres — the point of the fixture. A World's own
 /// generation is `crate::worldgen` and is tuned in metres.

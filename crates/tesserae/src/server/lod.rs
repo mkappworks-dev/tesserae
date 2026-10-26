@@ -1431,7 +1431,7 @@ mod tests {
 
     /// Built on its own so a mistake in `LodGenerators` is not shared with the expectation.
     fn source(j: u32) -> Worldgen {
-        let params = WorldgenParams::default();
+        let params = tesserae_core::testgen::world_params();
         let params = if j == 0 {
             params
         } else {
@@ -1480,7 +1480,7 @@ mod tests {
 
     #[test]
     fn the_source_generators_sit_at_doubling_voxel_sizes_and_only_level_zero_smooths() {
-        let level_zero = Worldgen::new(world().seed, 1.0, WorldgenParams::default());
+        let level_zero = Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params());
         let sources = LodGenerators::new(&world(), &level_zero, LEVELS);
         assert_eq!(sources.levels(), LEVELS);
         assert!(sources.sources[0].params().smoothing.is_some());
@@ -2657,7 +2657,7 @@ mod tests {
                     level_m,
                     material: water,
                 }),
-                ..WorldgenParams::default()
+                ..tesserae_core::testgen::world_params()
             },
         );
         let mut center = Chunk::air();
@@ -2765,7 +2765,7 @@ mod tests {
             WorldgenParams {
                 caves: None,
                 water: None,
-                ..WorldgenParams::default()
+                ..tesserae_core::testgen::world_params()
             },
         )
     }
@@ -2807,9 +2807,9 @@ mod tests {
                 // Ground, so no lake: water has light of its own (`coarse_light_in`).
                 water: None,
                 smoothing: (level == 1)
-                    .then(|| WorldgenParams::default().smoothing)
+                    .then(|| tesserae_core::testgen::world_params().smoothing)
                     .flatten(),
-                ..WorldgenParams::default()
+                ..tesserae_core::testgen::world_params()
             };
             let source = Worldgen::new(world().seed, 2f32.powi(level as i32 - 1), params);
             let cell_m = CHUNK_SIZE as f32 * 2f32.powi(level as i32);

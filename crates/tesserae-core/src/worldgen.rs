@@ -16,10 +16,6 @@ use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
-/// The ids generation assigns. They live in [`crate::material`] with the rest of
-/// the table and are re-exported so a caller that places terrain finds them here.
-pub use crate::material::{DIRT, GRASS, LANTERN, STONE};
-
 /// What a Mod parameterises. Plain `Copy` data with no callbacks, because
 /// crossing the WASM boundary per Voxel is the mistake
 /// `docs/adr/0001-wasm-mod-boundary.md` exists to prevent: a Mod fills this in
@@ -139,7 +135,7 @@ impl Default for WorldgenParams {
             smoothing: Some(SmoothingParams::default()),
             // The engine declares no fluid, so standing fluid is a Game's to add.
             water: None,
-            ground: Some(GroundParams { rock: STONE, soil: DIRT, surface: GRASS }),
+            ground: None,
         }
     }
 }

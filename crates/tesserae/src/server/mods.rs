@@ -666,7 +666,7 @@ mod tests {
         }
         assert!(material("demo:water").fluid < material("demo:lava").fluid);
         assert!(material("demo:wood").solid && material("demo:wood").burns);
-        for solid in ["core:stone", "demo:brick", "demo:lamp"] {
+        for solid in ["demo:stone", "demo:brick", "demo:lamp"] {
             let solid = material(solid);
             assert!(solid.solid && solid.fluid.is_none() && !solid.burns);
         }
@@ -687,7 +687,7 @@ mod tests {
         assert!(turnable.contains(&("demo:fence", false)), "it is connected");
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(ids, std::iter::once(0).chain(8..20).collect::<Vec<_>>());
     }
 
     #[test]
@@ -700,18 +700,8 @@ mod tests {
             .iter()
             .map(|m| m.name.as_str())
             .collect();
-        assert_eq!(
-            names,
-            [
-                "core:air",
-                "core:stone",
-                "core:dirt",
-                "core:grass",
-                "core:lantern",
-                "core:glass",
-                "core:leaves"
-            ]
-        );
+        assert_eq!(names, ["core:air"]);
+        assert_eq!(catalogue.rock, None);
         assert!(catalogue.materials.iter().all(|m| m.fluid.is_none()));
         let fence = catalogue
             .shapes

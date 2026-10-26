@@ -250,7 +250,7 @@ fn unknown_names_bad_values_and_contradictions_fail_the_load() {
             |d| {
                 d.reactions = vec![
                     reaction("lava:lava", "water:water", None),
-                    reaction("water:water", "lava:lava", Some("core:stone")),
+                    reaction("water:water", "lava:lava", None),
                 ]
             },
             "reaction 1: another reaction",
@@ -405,6 +405,7 @@ fn lake(level_m: f32, material: &str) -> content::WorldParams {
             level_m,
             material: material.into(),
         }),
+        ground: Some(content::GroundParams { rock: "game:ground".into(), soil: "game:ground".into(), surface: "game:ground".into() }),
         ..crate::convert::engine_world_params()
     }
 }
@@ -417,7 +418,8 @@ fn load_game(
     let mut tables = Tables::builtin();
     let mut registry = Registry::builtin();
     let mut behaviours: Vec<Behaviour> = Vec::new();
-    for (row, (id, declaration)) in mods.into_iter().enumerate() {
+    for (row, (id, mut declaration)) in mods.into_iter().enumerate() {
+        if row == 0 && id == "game" { declaration.materials.push(material("ground", true)); }
         let applied = apply(declaration, id, &mut tables, &mut registry, row == 0)?;
         assert!(applied.world.is_none_or(|w| w.water.is_none()));
         behaviours.push(applied.behaviour);

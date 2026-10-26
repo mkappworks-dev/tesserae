@@ -571,7 +571,7 @@ mod tests {
         assert_eq!((all.lamp, all.glass, all.leaves, all.fence), (Some(f.lantern), Some(f.glass), Some(f.leaves), Some(FENCE_ID)));
         let mut tables = Tables::builtin();
         let ground = tesserae_core::testgen::register_ground(&mut tables);
-        let params = WorldgenParams { ground: Some(ground), ..WorldgenParams::default() };
+        let params = WorldgenParams { ground: Some(ground), ..tesserae_core::testgen::world_params() };
         let sparse = Parts::select(&tables, params).unwrap();
         assert_eq!((sparse.lamp, sparse.glass, sparse.leaves, sparse.fence, sparse.lake), (None, None, None, None, None));
         for (_, voxel) in super::plan(&world(1.0), corner(), hill, &sparse).into_iter().chain(super::translucent_plan(&world(1.0), corner(), hill, &sparse)) {

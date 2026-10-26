@@ -92,19 +92,6 @@ impl Default for ChunkMaterialExtension {
         // Air never emits a face, so magenta at index 0 means the mesher or the
         // vertex attribute is wrong rather than that the palette is short.
         let mut palette = [srgb(1.0, 0.0, 1.0); PALETTE_LEN + 1];
-        palette[tesserae_core::testgen::STONE as usize] = srgb(0.52, 0.52, 0.55);
-        palette[tesserae_core::testgen::DIRT as usize] = srgb(0.42, 0.29, 0.18);
-        palette[tesserae_core::testgen::GRASS as usize] = srgb(0.33, 0.56, 0.24);
-        // The one Material that emits. Near-white, because the shader tints a
-        // block-lit face by its own palette colour and a saturated emitter
-        // would wash its own glow with its albedo twice over.
-        palette[tesserae_core::worldgen::LANTERN as usize] = srgb(0.96, 0.89, 0.72);
-        // The class is Material data and the amount is appearance: a look pack
-        // may choose both, so this is the placeholder.
-        palette[tesserae_core::material::GLASS as usize] = srgba(0.70, 0.88, 0.92, 0.35);
-        palette[tesserae_core::material::LEAVES as usize] = srgb(0.16, 0.42, 0.14);
-        // Near-white like the lantern, for the same reason: a flame stands in
-        // its own burning light and is tinted by it.
         palette[FLAME_SLOT] = srgb(1.0, 0.86, 0.55);
         ChunkMaterialExtension {
             palette,
@@ -195,47 +182,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn testgen_materials_are_distinguishable_and_not_the_missing_colour() {
+    fn only_flames_have_a_builtin_colour() {
         let palette = ChunkMaterialExtension::default().palette;
-        let missing = palette[0];
-        let used = [
-            tesserae_core::testgen::STONE,
-            tesserae_core::testgen::DIRT,
-            tesserae_core::testgen::GRASS,
-            tesserae_core::worldgen::LANTERN,
-        ];
-        for id in used {
-            assert_ne!(palette[id as usize], missing, "Material {id} unset");
-        }
-        for (i, a) in used.iter().enumerate() {
-            for b in &used[i + 1..] {
-                assert_ne!(palette[*a as usize], palette[*b as usize]);
-            }
-        }
-    }
-
-    #[test]
-    fn glass_is_see_through_and_everything_else_is_not() {
-        use tesserae_core::material::{GLASS, LEAVES, RETIRED};
-        let palette = ChunkMaterialExtension::default().palette;
-        let missing = palette[0];
-        let glass = palette[GLASS as usize];
-        assert!(glass.w > 0.0 && glass.w < 1.0, "glass alpha");
-        assert_ne!(glass.truncate(), missing.truncate(), "glass unset");
-        // A fluid's colour is its Game's appearance; the retired id has none.
-        assert_eq!(palette[RETIRED as usize], missing);
-        // Leaves draw in the opaque pass until step 9 gives them a texture to
-        // cut out, so an alpha here would be ignored and mislead.
-        assert_eq!(palette[LEAVES as usize].w, 1.0);
-        assert_ne!(palette[LEAVES as usize].truncate(), missing.truncate());
-        for id in [
-            tesserae_core::testgen::STONE,
-            tesserae_core::testgen::DIRT,
-            tesserae_core::testgen::GRASS,
-            tesserae_core::worldgen::LANTERN,
-        ] {
-            assert_eq!(palette[id as usize].w, 1.0, "Material {id} alpha");
-        }
+        assert!(palette[..PALETTE_LEN].iter().all(|colour|*colour == palette[0]));
+        assert_ne!(palette[FLAME_SLOT], palette[0]);
     }
 
     #[test]
@@ -246,11 +196,4 @@ mod tests {
         assert!((tesserae_core::mesh::FLAME as usize) >= PALETTE_LEN);
     }
 
-    /// The shader clamps the Material index to the palette's last entry, so a
-    /// Material past the end silently renders as whatever sits there. Every id
-    /// `worldgen` can emit has to be inside it.
-    #[test]
-    fn no_material_worldgen_emits_falls_outside_the_palette() {
-        assert!((tesserae_core::worldgen::LANTERN as usize) < PALETTE_LEN);
-    }
 }

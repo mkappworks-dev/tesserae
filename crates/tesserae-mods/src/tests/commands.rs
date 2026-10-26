@@ -281,17 +281,15 @@ fn filling_with_air_clears_and_is_not_a_place_of_air() {
 }
 
 #[test]
-fn builder_returns_exactly_the_commands_it_was_asked_for_after_validation() {
+fn builder_returns_its_original_ids_and_retired_placements_are_refused() {
     let rig = Rig::new();
-    let tables = fixtures().tables.clone();
     for n in [16u64, 256, 4096] {
         let builder = rig.instance("builder", ModLimits::HOST).unwrap();
         let line = builder.line();
         let (_, commands) = block_on(builder.tick(context(n))).unwrap();
-        let batch = validate(&commands, line, &tables, 1.0).unwrap();
-        let expected: Vec<_> = (0..n as i32).map(|x| ([x, 0, 0], stone())).collect();
-        assert_eq!(batch.commands, [Resolved::Place(expected)], "N = {n}");
-        assert_eq!(batch.voxels, n);
+        let expected = (0..n).map(|x| Placement { at: [x as f32,0.0,0.0], voxel: Voxel::cube(1) }).collect();
+        assert_eq!(commands, [Command::Place(expected)]);
+        assert!(matches!(validate(&commands,line,&fixtures().tables,1.0),Err(BatchError::Voxel { fault: PlaceFault::UnknownMaterial, .. })));
     }
 }
 
@@ -312,12 +310,9 @@ fn a_tick_context_with_three_edits_is_seen_by_the_guest() {
     ctx.edits = vec![edit; 3];
 
     let (_, commands) = block_on(echo.tick(ctx)).unwrap();
-    let batch = check(&commands).unwrap();
+    assert_eq!(commands, [Command::Place(vec![Placement { at: [3.0,0.0,0.0], voxel: Voxel::cube(1) }])]);
+    assert!(matches!(check(&commands),Err(BatchError::Voxel { fault: PlaceFault::UnknownMaterial, .. })));
 
-    assert_eq!(
-        batch.commands,
-        [Resolved::Place(vec![([3, 0, 0], stone())])]
-    );
 }
 
 #[test]

@@ -9,17 +9,8 @@
 use crate::light::MAX_LIGHT;
 use crate::voxel::{AIR, MaterialId, Voxel};
 
-pub const STONE: MaterialId = 1;
-pub const DIRT: MaterialId = 2;
-pub const GRASS: MaterialId = 3;
-/// Emits block light at full strength.
-pub const LANTERN: MaterialId = 4;
-pub const GLASS: MaterialId = 5;
-pub const LEAVES: MaterialId = 6;
-/// Never registered or handed out, so a Mod's ids still start at 8 and a 7
-/// already in a Chunk is drawn as the unknown stand-in.
-/// `docs/adr/0015-water-is-game-content.md`.
-pub const RETIRED: MaterialId = 7;
+pub const FIRST_MOD_ID: MaterialId = 8;
+pub const RETIRED_IDS: std::ops::Range<MaterialId> = 1..FIRST_MOD_ID;
 
 /// Whether a full cube of this Material hides the faces around it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -80,26 +71,7 @@ impl MaterialDef {
         solid: false,
     };
 
-    const LANTERN: MaterialDef = MaterialDef {
-        emission: MAX_LIGHT,
-        ..Self::OPAQUE
-    };
 
-    const GLASS: MaterialDef = MaterialDef {
-        emission: 0,
-        dimming: 0,
-        occlusion: Occlusion::SameMaterial,
-        render: RenderClass::Blend,
-        solid: true,
-    };
-
-    const LEAVES: MaterialDef = MaterialDef {
-        emission: 0,
-        dimming: 1,
-        occlusion: Occlusion::Never,
-        render: RenderClass::Cutout,
-        solid: true,
-    };
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -136,7 +108,7 @@ impl std::error::Error for MaterialError {}
 ///
 /// Rows are dense and sized to the ids handed out, not to `u16::MAX`: ids are
 /// handed out in order, so a table of N Materials is 5N bytes and not 64 KiB of
-/// zeroes. [`RETIRED`] keeps a row, the stand-in, so the ids after it stay put.
+/// zeroes. [`RETIRED_IDS`] keeps a row, the stand-in, so the ids after it stay put.
 #[derive(Clone, Debug)]
 pub struct MaterialTable {
     defs: Vec<MaterialDef>,
@@ -152,11 +124,8 @@ impl MaterialTable {
     /// The Materials every World has, under permanent ids: a Mod's ids start
     /// after them, and a saved World refers to them by number.
     pub fn builtin() -> Self {
-        let mut defs = vec![MaterialDef::OPAQUE; RETIRED as usize + 1];
+        let mut defs = vec![MaterialDef::OPAQUE; FIRST_MOD_ID as usize];
         defs[AIR as usize] = MaterialDef::AIR;
-        defs[LANTERN as usize] = MaterialDef::LANTERN;
-        defs[GLASS as usize] = MaterialDef::GLASS;
-        defs[LEAVES as usize] = MaterialDef::LEAVES;
         MaterialTable { defs }
     }
 
@@ -174,7 +143,7 @@ impl MaterialTable {
         Ok(id)
     }
 
-    /// Ids handed out so far, [`RETIRED`] included: the next registered id.
+    /// Ids handed out so far, [`RETIRED_IDS`] included: the next registered id.
     pub fn len(&self) -> usize {
         self.defs.len()
     }
@@ -184,7 +153,7 @@ impl MaterialTable {
     }
 
     pub fn contains(&self, material: MaterialId) -> bool {
-        (material as usize) < self.defs.len() && material != RETIRED
+        (material as usize) < self.defs.len() && !RETIRED_IDS.contains(&material)
     }
 
     /// An unregistered id answers as [`MaterialDef::OPAQUE`]: a World whose Mod
@@ -241,57 +210,31 @@ mod tests {
     }
 
     #[test]
-    fn the_builtins_have_the_properties_and_ids_the_spec_gives_them() {
+    fn air_is_the_only_builtin_and_retired_ids_are_solid_stand_ins() {
         let t = MaterialTable::builtin();
-        assert_eq!(t.len(), 8);
-        assert_eq!(def(&t, AIR), MaterialDef::AIR);
-        for id in [STONE, DIRT, GRASS] {
-            assert_eq!(def(&t, id), MaterialDef::OPAQUE);
+        assert_eq!(t.len(), FIRST_MOD_ID as usize);
+        assert!(t.contains(AIR));
+        assert_eq!(def(&t,AIR), MaterialDef::AIR);
+        for id in RETIRED_IDS {
+            assert!(!t.contains(id));
+            assert_eq!(def(&t,id), MaterialDef::OPAQUE);
+            assert!(t.solid(Voxel::cube(id)));
+            assert!(t.is_opaque(Voxel::cube(id)));
         }
-        assert_eq!(def(&t, LANTERN).emission, MAX_LIGHT);
-        assert_eq!(def(&t, LANTERN).occlusion, Occlusion::Opaque);
-
-        assert_eq!([GLASS, LEAVES].map(|m| def(&t, m).dimming), [0, 1]);
-        assert_eq!(
-            [GLASS, LEAVES].map(|m| def(&t, m).occlusion),
-            [Occlusion::SameMaterial, Occlusion::Never]
-        );
-        assert_eq!(
-            [GLASS, LEAVES].map(|m| def(&t, m).render),
-            [RenderClass::Blend, RenderClass::Cutout]
-        );
-        assert_eq!(
-            [STONE, DIRT, GRASS, LANTERN, GLASS, LEAVES],
-            [1, 2, 3, 4, 5, 6]
-        );
-        assert!((0..RETIRED).all(|id| t.contains(id)));
-    }
-
-    #[test]
-    fn the_retired_id_is_unknown_and_drawn_as_the_stand_in() {
-        let t = MaterialTable::builtin();
-        assert_eq!(RETIRED, 7);
-        assert!(!t.contains(RETIRED));
-        assert_eq!(def(&t, RETIRED), MaterialDef::OPAQUE);
-        assert!(t.solid(Voxel::cube(RETIRED)));
-        assert!(t.is_opaque(Voxel::cube(RETIRED)));
     }
 
     #[test]
     fn a_mods_first_material_still_gets_eight() {
         let mut t = MaterialTable::builtin();
-        assert_eq!(t.register(MaterialDef::GLASS), Ok(8));
-        assert!(!t.contains(RETIRED) && t.contains(8));
-        assert_eq!(def(&t, RETIRED), MaterialDef::OPAQUE);
+        assert_eq!(t.register(crate::testgen::WATER_MATERIAL), Ok(8));
+        assert!(!t.contains(FIRST_MOD_ID.saturating_sub(1)) && t.contains(8));
+        assert_eq!(def(&t, FIRST_MOD_ID.saturating_sub(1)), MaterialDef::OPAQUE);
     }
 
     #[test]
-    fn nothing_but_the_lantern_emits() {
+    fn no_builtin_emits() {
         let t = MaterialTable::builtin();
-        for id in 0..8 {
-            let expected = if id == LANTERN { MAX_LIGHT } else { 0 };
-            assert_eq!(t.emission(Voxel::cube(id)), expected, "material {id}");
-        }
+        for id in 0..FIRST_MOD_ID { assert_eq!(t.emission(Voxel::cube(id)), 0); }
     }
 
     #[test]
@@ -308,10 +251,10 @@ mod tests {
 
     #[test]
     fn only_a_dimming_of_fifteen_is_opaque_whatever_the_shape() {
-        let t = MaterialTable::builtin();
-        assert!(t.is_opaque(Voxel::cube(STONE)));
-        assert!(t.is_opaque(Voxel::new(STONE, 2, 5)));
-        for id in [GLASS, LEAVES] {
+        let t = &crate::testgen::fixtures().tables;
+        assert!(t.is_opaque(Voxel::cube(crate::testgen::fixtures().ground.rock)));
+        assert!(t.is_opaque(Voxel::new(crate::testgen::fixtures().ground.rock, 2, 5)));
+        for id in [crate::testgen::fixtures().glass, crate::testgen::fixtures().leaves] {
             assert!(!t.is_opaque(Voxel::cube(id)), "material {id}");
         }
     }
@@ -335,7 +278,7 @@ mod tests {
     #[test]
     fn register_rejects_what_cannot_be_a_material() {
         let mut t = MaterialTable::builtin();
-        let ok = MaterialDef::GLASS;
+        let ok = crate::testgen::WATER_MATERIAL;
         for bad in [
             MaterialDef {
                 emission: MAX_LIGHT + 1,
