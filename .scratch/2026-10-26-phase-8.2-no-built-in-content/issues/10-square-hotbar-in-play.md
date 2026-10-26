@@ -1,6 +1,6 @@
 # 10: The hotbar is nine squares during play
 
-Status: ready-for-agent
+Status: done
 Blocked by: 09
 
 Spec: [decision 20](../spec.md).
@@ -20,3 +20,14 @@ where the menu shows the same slots.
 - [ ] Its squares stay square at any window size.
 - [ ] A capture in play is in the `/tmp` review folder.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+The play bar reuses the menu's square tile builder, with the held name above
+nine slots at bottom centre. An outside item adds a marked tenth tile with
+a gap; slot borders stop marking selection until returning to the bar.
+Opening the menu hides the play bar. Headless UI coverage checks the nine
+and ten square states and menu visibility. Captures, formatting, review and
+full CI are deferred to the final verification pass.

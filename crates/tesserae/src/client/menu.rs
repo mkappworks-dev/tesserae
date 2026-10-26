@@ -107,6 +107,10 @@ impl Swatches {
 struct MenuRoot;
 #[derive(Component)]
 struct ShapePanel;
+#[derive(Component)]
+pub(super) struct PlayBarRoot;
+#[derive(Component)]
+struct HeldName;
 
 #[derive(Resource, Default)]
 pub(super) struct PointerState {
@@ -136,6 +140,7 @@ pub(super) fn plugin(app: &mut App) {
                 receive_palette,
                 rebuild.after(super::edit::send_intents),
                 rebuild_shapes,
+                rebuild_bar,
             )
                 .chain(),
         );
@@ -263,6 +268,31 @@ fn rebuild_shapes(mut commands: Commands, menu: Res<Menu>, hotbar: Res<Hotbar>, 
     }
 }
 
+fn rebuild_bar(mut commands:Commands, menu:Res<Menu>, hotbar:Res<Hotbar>, catalogue:Res<Catalogue>, swatches:Res<Swatches>, roots:Query<Entity,With<PlayBarRoot>>,mut shown:Local<Option<Hotbar>>) {
+    let wanted=(!menu.open).then(||hotbar.clone());
+    if *shown==wanted && !catalogue.is_changed() && !swatches.is_changed() {return;}
+    *shown=wanted;
+    for root in &roots {commands.entity(root).despawn();}
+    if menu.open {return;}
+    commands.spawn((PlayBarRoot,Node {
+        position_type:PositionType::Absolute,bottom:Val::Px(10.0),width:Val::Percent(100.0),
+        flex_direction:FlexDirection::Column,align_items:AlignItems::Center,row_gap:Val::Px(6.0),..default()
+    })).with_children(|root| {
+        root.spawn((HeldName,Text::new(hotbar.held().describe(&catalogue.0)),font(15.0),Pickable::IGNORE));
+        root.spawn(Node {column_gap:Val::Px(5.0),align_items:AlignItems::FlexStart,..default()}).with_children(|bar| {
+            for (slot,&holding) in hotbar.slots.iter().enumerate() {
+                tile(bar,Entry::Slot(slot),&holding.describe(&catalogue.0),swatches.of(holding),hotbar.outside.is_none()&&hotbar.selected==slot,Some(slot+1),48.0);
+            }
+            if let Some(held)=hotbar.outside {
+                bar.spawn(Node {margin:UiRect::left(Val::Px(12.0)),..default()}).with_children(|outside| {
+                    let entry=match held {Holding::Solid {material,shape,..}=>Entry::Solid {material,shape},Holding::Fluid(material)=>Entry::Fluid(material),_=>Entry::Fire};
+                    tile(outside,entry,&held.describe(&catalogue.0),swatches.of(held),true,None,48.0);
+                });
+            }
+        });
+    });
+}
+
 fn font(size: f32) -> TextFont {
     TextFont {
         font_size: bevy::text::FontSize::Px(size),
@@ -382,5 +412,23 @@ mod tests {
         app.world_mut().run_system_once(super::super::edit::select_held).unwrap();
         assert_eq!(app.world().resource::<Hotbar>().selected,0);
         assert_eq!(app.world().resource::<Hotbar>().slots[4],Holding::solid(23,0));
+    }
+    #[test]
+    fn play_bar_tracks_the_hand_and_is_hidden_in_the_menu() {
+        let mut app=app();
+        app.init_resource::<Swatches>().add_systems(Update,rebuild_bar);
+        app.update();
+        assert_eq!(app.world_mut().query::<&PlayBarRoot>().iter(app.world()).count(),0);
+        app.world_mut().resource_mut::<Menu>().open=false;
+        app.world_mut().resource_mut::<Hotbar>().outside=Some(Holding::Fluid(24));
+        app.update();
+        assert_eq!(app.world_mut().query::<&PlayBarRoot>().iter(app.world()).count(),1);
+        let squares=app.world_mut().query::<(&Entry,&Node)>().iter(app.world()).filter(|(_,node)|node.aspect_ratio==Some(1.0)).count();
+        assert_eq!(squares,10);
+        app.world_mut().resource_mut::<Hotbar>().select(2);app.update();
+        let squares=app.world_mut().query::<(&Entry,&Node)>().iter(app.world()).filter(|(_,node)|node.aspect_ratio==Some(1.0)).count();
+        assert_eq!(squares,9);
+        app.world_mut().resource_mut::<Menu>().open=true;app.update();
+        assert_eq!(app.world_mut().query::<&PlayBarRoot>().iter(app.world()).count(),0);
     }
 }
