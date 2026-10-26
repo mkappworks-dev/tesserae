@@ -1,6 +1,6 @@
 # 04: The demo declares its own ground, glass and leaves
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec: [decision 7](../spec.md).
@@ -26,3 +26,18 @@ stone. `cargo dev` looks as it does today.
       light as on main. Screenshots go in one `/tmp` folder for the user and
       are not committed.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+The demo declares its five solids with the former placeholder colours and
+names its rock, soil and surface. Its lamp uses the former lantern colour;
+its reactions, stage and scenarios use demo:stone. Existing content keeps
+its registration order, with the five new solids appended. Runtime tests
+expect the new ground and palette, and loaded fluid tests resolve the
+reaction product by its demo name.
+
+Guest rebuilding is underway. Scenario execution, formatting, full CI and
+the visual comparison are deferred to the final verification pass per the
+user's instruction. No screenshot has been reviewed yet.

@@ -1918,8 +1918,8 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
     for v in [1.0, 0.5, 0.25] {
         let (tables, id) = declared(v);
         let water = id("demo:water");
-        let (lava, stone_id) = (id("demo:lava"), id("core:stone"));
-        assert_eq!(stone_id, id("core:stone"));
+        let (lava, stone_id) = (id("demo:lava"), id("demo:stone"));
+        assert_eq!(stone_id, id("demo:stone"));
         let mut f = Fixture::with_tables(v, 4.0, 0, tables);
         f.send(-1, EditAction::PlaceSource(lava));
         f.send(0, EditAction::PlaceSource(water));
@@ -1937,7 +1937,7 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
             .resource_mut::<MeshState>()
             .take_cover_changes();
         f.settle();
-        assert_eq!(f.occupants(-1).solid, Voxel::cube(id("core:stone")), "{v} m");
+        assert_eq!(f.occupants(-1).solid, Voxel::cube(id("demo:stone")), "{v} m");
         assert_eq!(f.fluid(-1), None);
         assert_eq!(f.fluid(0), Some(Fluid::source(water)), "the water is kept");
         assert!(!touching(&f, lava, water));
@@ -1986,7 +1986,7 @@ fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() 
     f.send(4, EditAction::PlaceSource(water));
     f.settle();
     let stones: Vec<i32> = (-f.half..=f.half)
-        .filter(|&x| f.occupants(x).solid == Voxel::cube(id("core:stone")))
+        .filter(|&x| f.occupants(x).solid == Voxel::cube(id("demo:stone")))
         .collect();
     assert!(!stones.is_empty(), "nothing cooled");
     assert!(!touching(&f, lava, water));
@@ -2020,7 +2020,7 @@ fn a_mods_own_pair_reacts_through_the_server() {
     assert_eq!(f.fluid(0), Some(Fluid::source(slime)));
     assert_eq!(f.fluid(3), Some(Fluid::source(brine)));
     assert!(!touching(&f, slime, brine));
-    assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != Voxel::cube(id("core:stone"))));
+    assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != Voxel::cube(id("demo:stone"))));
 }
 
 /// A held step read water beside the lava and would cool it; the player
@@ -2056,7 +2056,7 @@ fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
         f.tick();
         assert_ne!(
             f.occupants(3).solid,
-            Voxel::cube(id("core:stone")),
+            Voxel::cube(id("demo:stone")),
             "an old step's reaction landed"
         );
         assert!(started.elapsed() < CEILING);
@@ -2105,7 +2105,7 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
             }
             f.settle();
             assert!(
-                (-f.half..=f.half).any(|x| f.occupants(x).solid == Voxel::cube(id("core:stone"))),
+                (-f.half..=f.half).any(|x| f.occupants(x).solid == Voxel::cube(id("demo:stone"))),
                 "way {way}: nothing cooled"
             );
             f.state()
@@ -2150,7 +2150,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
         loop {
             f.tick();
             let now = (-4..=4)
-                .filter(|&x| f.occupants(x).solid == Voxel::cube(id("core:stone")))
+                .filter(|&x| f.occupants(x).solid == Voxel::cube(id("demo:stone")))
                 .count();
             if bound.is_some() {
                 assert!(now <= cooled + 1, "{now} landed in one step");
@@ -2222,10 +2222,10 @@ fn meshes_are_redelivered_after_a_reaction() {
     run(&mut h, &|store, meshes, tables| {
         for x in 1..=31 {
             for (dy, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                edit::set_voxel(store, meshes, tables, [x, y + dy, z + dz], Voxel::cube(id("core:stone"))).unwrap();
+                edit::set_voxel(store, meshes, tables, [x, y + dy, z + dz], Voxel::cube(id("demo:stone"))).unwrap();
             }
             let open = (2..=30).contains(&x);
-            let voxel = if open { Voxel::AIR } else { Voxel::cube(id("core:stone")) };
+            let voxel = if open { Voxel::AIR } else { Voxel::cube(id("demo:stone")) };
             edit::set_voxel(store, meshes, tables, [x, y, z], voxel).unwrap();
         }
     });
@@ -2241,7 +2241,7 @@ fn meshes_are_redelivered_after_a_reaction() {
     });
     let store = h.store();
     let cooled = (11..20)
-        .filter(|&x| store.voxel([x, y, z]) == Some(Voxel::cube(id("core:stone"))))
+        .filter(|&x| store.voxel([x, y, z]) == Some(Voxel::cube(id("demo:stone"))))
         .count();
     assert!(cooled > 0, "nothing cooled");
 }

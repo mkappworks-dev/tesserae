@@ -933,6 +933,7 @@ fn assert_lakes_off_the_stage(params: WorldgenParams, size: f32, water: u16) {
 fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
     for size in [1.0, 0.5, 0.25] {
         let loaded = demo_loaded(size);
+        let stone = loaded.registry.id_of(tesserae_mods::Kind::Material, "demo:stone").unwrap() as u16;
         assert_eq!(
             loaded
                 .registry
@@ -947,19 +948,25 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         );
         let params = loaded.world.unwrap();
         assert_eq!(params.relief_m, 4.0);
+        assert_eq!(params.ground.unwrap().rock, stone);
         assert!(params.caves.is_none());
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
         assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
         assert_eq!(
             loaded.appearance,
             [
-                (8, [255, 144, 48, 255]),
+                (8, [245, 227, 184, 255]),
                 (9, [230, 72, 16, 255]),
                 (10, [150, 104, 60, 255]),
                 (11, [70, 66, 62, 255]),
                 (12, [92, 70, 44, 224]),
                 (13, [168, 74, 52, 255]),
-                (14, [26, 82, 158, 166])
+                (14, [26, 82, 158, 166]),
+                (15, [133, 133, 140, 255]),
+                (16, [107, 74, 46, 255]),
+                (17, [84, 143, 61, 255]),
+                (18, [179, 224, 235, 89]),
+                (19, [41, 107, 36, 255])
             ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
@@ -1034,7 +1041,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 rules[0],
                 (lava, demo_water),
                 tesserae_core::Side::First,
-                tesserae_core::worldgen::STONE,
+                stone,
             ),
             (rules[1], (lava, mud), tesserae_core::Side::Second, brick),
         ] {
@@ -1049,12 +1056,12 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             );
         }
         let mut neighbors = [Voxel::AIR; 6];
-        neighbors[0] = Voxel::new(1, 4, 0);
+        neighbors[0] = Voxel::new(stone, 4, 0);
         assert!(
             loaded
                 .tables
                 .shapes
-                .connections(Voxel::new(1, 4, 0), neighbors)
+                .connections(Voxel::new(stone, 4, 0), neighbors)
                 .has(0)
         );
         let mut h = Harness::new(&[]);
@@ -1118,14 +1125,14 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             for y in 24..29 {
                 assert_eq!(
                     h.voxel(index([x as f32, y as f32, -7.0])),
-                    Voxel::cube(STONE)
+                    Voxel::cube(stone)
                 );
             }
         }
-        assert_eq!(h.voxel(index([3.0, 30.0, -7.0])), Voxel::new(STONE, 4, 0));
+        assert_eq!(h.voxel(index([3.0, 30.0, -7.0])), Voxel::new(stone, 4, 0));
         assert_eq!(h.voxel(index([3.0, 31.0, -7.0])), Voxel::cube(8));
-        assert_eq!(h.voxel(index([15.0, 29.0, -7.0])), Voxel::new(STONE, 1, 4));
-        assert_eq!(h.voxel(index([-13.0, 30.0, -5.0])), Voxel::cube(STONE));
+        assert_eq!(h.voxel(index([15.0, 29.0, -7.0])), Voxel::new(stone, 1, 4));
+        assert_eq!(h.voxel(index([-13.0, 30.0, -5.0])), Voxel::cube(stone));
         assert_eq!(h.voxel(index([-12.0, 29.0, -7.0])), Voxel::cube(wood));
         let store = h.app.world().resource::<ChunkStore>();
         assert_eq!(store.light_at(index([3.0, 31.0, -7.0])).block(), 15);
@@ -1211,7 +1218,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             "{size} m: no mud fired to brick"
         );
         assert!(
-            row(9.0, 19.0).any(|at| h.voxel(at) == Voxel::cube(STONE)),
+            row(9.0, 19.0).any(|at| h.voxel(at) == Voxel::cube(stone)),
             "{size} m: no lava cooled to stone"
         );
         let post = index([-23.0, 29.0, -7.0]);
