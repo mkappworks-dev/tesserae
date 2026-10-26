@@ -182,6 +182,7 @@ struct Run {
     v: f32,
     /// The first air Voxel above the generated floor.
     floor: i32,
+    water: MaterialId,
     lava: MaterialId,
     wood: MaterialId,
     tick: usize,
@@ -205,7 +206,7 @@ impl Run {
                 .id_of(tesserae_mods::Kind::Material, name)
                 .unwrap() as MaterialId
         };
-        let (lava, wood) = (id("demo:lava"), id("demo:wood"));
+        let (water, lava, wood) = (id("demo:water"), id("demo:lava"), id("demo:wood"));
         let world = WorldSettings {
             voxel_size: v,
             ..default()
@@ -262,6 +263,7 @@ impl Run {
             h,
             v,
             floor,
+            water,
             lava,
             wood,
             tick: 0,
@@ -780,7 +782,7 @@ fn measure_fluid_and_fire_scenarios() {
     let out = std::path::PathBuf::from(std::env::var("TESSERAE_T09_OUT").unwrap());
     let mut run = Run::new(v);
     background(&mut run);
-    let water = WATER;
+    let water = run.water;
     let mut edits = player_edits;
     let settled = match scenario.as_str() {
         "control" => {
@@ -957,7 +959,7 @@ fn fire_chain(run: &mut Run, edits: &mut dyn FnMut(&mut Run)) -> bool {
     let mut during = |run: &mut Run| {
         edits(run);
         if poured.is_none() && run.sim().now() >= start + 640 {
-            run.source(pour, WATER);
+            run.source(pour, run.water);
             poured = Some(run.tick);
             // The front, burning when the water comes, goes out.
             let front = (x0..x0 + length)
@@ -1012,18 +1014,18 @@ fn saturated(run: &mut Run, edits: &mut dyn FnMut(&mut Run)) -> bool {
         .map(|(y, z)| [run.cells(-6.0), run.floor + y, z])
         .collect();
     for &at in &dam {
-        run.source(at, WATER);
+        run.source(at, run.water);
     }
     run.probes.push(Probe::new(
         "flood_6m_out",
         run.at(-12.0, 0.0, 0.0),
-        Want::Fluid(WATER),
+        Want::Fluid(run.water),
         0,
     ));
     run.probes.push(Probe::new(
         "flood_corner",
         run.at(-1.0, 0.0, 9.0),
-        Want::Fluid(WATER),
+        Want::Fluid(run.water),
         0,
     ));
     for z in z0..z0 + side {
@@ -1062,7 +1064,7 @@ fn relight(run: &mut Run, out: &std::path::Path) {
     let (lava, wood) = (run.lava, Voxel::cube(run.wood));
     let flowing = |surface| {
         Fluid::flowing(
-            WATER,
+            run.water,
             [
                 tesserae_core::Level {
                     surface,

@@ -1022,9 +1022,9 @@ mod tests {
     /// test that read the wrong one of the two would agree with the right one.
     const SHAPE_DIAGONAL: u8 = 4;
 
-    fn tables() -> &'static Tables {
-        static TABLES: OnceLock<Tables> = OnceLock::new();
-        TABLES.get_or_init(|| {
+    fn fixture() -> &'static (Tables, MaterialId) {
+        static FIXTURE: OnceLock<(Tables, MaterialId)> = OnceLock::new();
+        FIXTURE.get_or_init(|| {
             let mut tables = Tables::builtin();
             let id = tables
                 .shapes
@@ -1038,8 +1038,17 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(id, SHAPE_DIAGONAL);
-            tables
+            let water = crate::testgen::register_water(&mut tables);
+            (tables, water)
         })
+    }
+
+    fn tables() -> &'static Tables {
+        &fixture().0
+    }
+
+    fn water() -> MaterialId {
+        fixture().1
     }
 
     /// Lent as the neighbour whose light a test cares about; its Voxels are air.
@@ -2540,7 +2549,7 @@ mod tests {
     // top of the step, geometry blocks light only for an opaque Material, and a
     // translucent Voxel stores the light that reaches it.
 
-    use crate::material::{GLASS, LEAVES, MaterialDef, Occlusion, RenderClass, WATER};
+    use crate::material::{GLASS, LEAVES, MaterialDef, Occlusion, RenderClass};
 
     /// Block light from a lantern at x=10, through one Voxel of `material` at
     /// x=11, to the Voxel behind it.
@@ -2572,13 +2581,13 @@ mod tests {
         assert_eq!(through(Voxel::AIR), [15, 14, 13]);
         assert_eq!(through(Voxel::cube(GLASS)), [15, 14, 13], "glass is clear");
         assert_eq!(through(Voxel::cube(LEAVES)), [15, 13, 12]);
-        assert_eq!(through(Voxel::cube(WATER)), [15, 12, 11]);
+        assert_eq!(through(Voxel::cube(water())), [15, 12, 11]);
         assert_eq!(through(Voxel::cube(STONE))[1], 0, "stone stops it");
     }
 
     #[test]
     fn sky_light_enters_a_translucent_voxel_from_above_at_full_strength_less_its_dimming() {
-        for (material, expected) in [(GLASS, 15), (LEAVES, 14), (WATER, 13)] {
+        for (material, expected) in [(GLASS, 15), (LEAVES, 14), (water(), 13)] {
             let mut chunk = Chunk::air();
             chunk.set(16, 16, 16, Voxel::cube(material));
             let above = full_sky();
@@ -2666,7 +2675,7 @@ mod tests {
         assert_eq!(glass.uniform(), Some(Light::new(MAX_LIGHT, 0)));
 
         let water = light_chunk(
-            &Chunk::filled(Voxel::cube(WATER)),
+            &Chunk::filled(Voxel::cube(water())),
             sky_above(&above),
             tables(),
         );
@@ -2688,7 +2697,7 @@ mod tests {
     fn the_two_solvers_agree_on_translucent_scenes_inside_one_chunk() {
         let pool: Plan = (8..14)
             .flat_map(|x| {
-                (8..14).flat_map(move |z| (4..7).map(move |y| ([x, y, z], Voxel::cube(WATER))))
+                (8..14).flat_map(move |z| (4..7).map(move |y| ([x, y, z], Voxel::cube(water()))))
             })
             .collect();
         let canopy: Plan = (10..20)
@@ -2717,7 +2726,7 @@ mod tests {
             ),
             (
                 [14, 5, 12],
-                Voxel::shaped(WATER, SHAPE_SLAB, Orientation::new(POS_Y, 0)),
+                Voxel::shaped(water(), SHAPE_SLAB, Orientation::new(POS_Y, 0)),
             ),
             ([15, 5, 12], Voxel::cube(LEAVES)),
             (
@@ -2761,8 +2770,8 @@ mod tests {
             (
                 "water either side",
                 vec![
-                    ([31, 5, 16], Voxel::cube(WATER)),
-                    ([32, 5, 16], Voxel::cube(WATER)),
+                    ([31, 5, 16], Voxel::cube(water())),
+                    ([32, 5, 16], Voxel::cube(water())),
                 ],
             ),
             ("leaves west", vec![([31, 5, 16], Voxel::cube(LEAVES))]),
@@ -2797,8 +2806,8 @@ mod tests {
         for voxel in [
             Voxel::cube(GLASS),
             Voxel::cube(LEAVES),
-            Voxel::cube(WATER),
-            Voxel::shaped(WATER, SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
+            Voxel::cube(water()),
+            Voxel::shaped(water(), SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
         ] {
             let mut world = OneChunk::new(Chunk::air());
             world.seed_sky();
@@ -2888,7 +2897,7 @@ mod tests {
     /// same one-value-per-Voxel approximation.
     #[test]
     fn waterlogged_stairs_dim_and_drain_the_same_in_both_solvers() {
-        let water = Some(crate::occupants::Fluid::source(WATER));
+        let water = Some(crate::occupants::Fluid::source(self::water()));
         let mut world = OneChunk::new(Chunk::air());
         for x in 4..=26 {
             for y in 3..=5 {
@@ -2930,7 +2939,7 @@ mod tests {
         use crate::occupants::{Burning, Fluid, Overlay};
         let mut overlay = ChunkOverlay::none();
         let wet = Overlay {
-            fluid: Some(Fluid::source(crate::material::WATER)),
+            fluid: Some(Fluid::source(water())),
             burning: Some(Burning { fuel: 1 }),
         };
         overlay.set(0, 0, 0, wet);

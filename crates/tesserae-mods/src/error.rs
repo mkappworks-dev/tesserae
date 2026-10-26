@@ -134,6 +134,12 @@ pub enum ModError {
         name: String,
         source: CombustionError,
     },
+    /// The Game's lake names a fluid that cannot fill one.
+    Lake {
+        id: String,
+        name: String,
+        source: ParamError,
+    },
 }
 
 impl fmt::Display for ModError {
@@ -146,7 +152,7 @@ impl fmt::Display for ModError {
             ModError::Api { id, api, supported } => write!(
                 f,
                 "mod `{id}` was built against api {api}, but this build of Tesserae supports {}",
-                supported.join(" and ")
+                supported.join(", ")
             ),
             ModError::DuplicateId { id, dirs } => write!(
                 f,
@@ -269,6 +275,11 @@ impl fmt::Display for ModError {
                 name,
                 source,
             } => write!(f, "mod `{id}`: combustion {row} `{name}`: {source}"),
+            ModError::Lake { id, name, source } => write!(
+                f,
+                "mod `{id}`: world: {} `{name}` {}",
+                source.field, source.rule
+            ),
         }
     }
 }

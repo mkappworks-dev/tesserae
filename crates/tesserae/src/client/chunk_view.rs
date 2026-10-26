@@ -514,7 +514,15 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{Chunk, ChunkLight, LitChunk, Tables, Voxel, mesh_chunk, worldgen};
+    use tesserae_core::{
+        Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk, testgen, worldgen,
+    };
+
+    fn watered() -> (Tables, MaterialId) {
+        let mut tables = Tables::builtin();
+        let water = testgen::register_water(&mut tables);
+        (tables, water)
+    }
 
     fn camera_app(eye: Vec3, streaming: StreamingSettings) -> App {
         let mut app = App::new();
@@ -897,13 +905,14 @@ mod tests {
     /// Two pools side by side along x in a stone basin: two water quads in one
     /// plane, facing up, and nothing else blended.
     fn two_pools() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::{STONE, WATER};
+        use tesserae_core::material::STONE;
+        let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..=12 {
             for z in 0..=6 {
                 c.set(x, 4, z, Voxel::cube(STONE));
                 let rim = x == 0 || x == 6 || x == 12 || z == 0 || z == 6;
-                c.set(x, 5, z, Voxel::cube(if rim { STONE } else { WATER }));
+                c.set(x, 5, z, Voxel::cube(if rim { STONE } else { water }));
             }
         }
         let air = Chunk::air();
@@ -911,7 +920,7 @@ mod tests {
         let mesh = mesh_chunk(
             LitChunk::new(&c, &sky),
             [Some(LitChunk::new(&air, &sky)); 6],
-            &Tables::builtin(),
+            &tables,
         );
         assert_eq!(mesh.blended.quad_count(), 2, "the fixture is two pools");
         mesh
@@ -949,13 +958,14 @@ mod tests {
 
     /// A Chunk of water beside open sky: all of its geometry is blended.
     fn blended_geometry() -> tesserae_core::ChunkMesh {
-        let water = Chunk::filled(Voxel::cube(tesserae_core::material::WATER));
+        let (tables, water) = watered();
+        let water = Chunk::filled(Voxel::cube(water));
         let air = Chunk::air();
         let dark = ChunkLight::dark();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut neighbors = [Some(LitChunk::new(&water, &dark)); 6];
         neighbors[0] = Some(LitChunk::new(&air, &sky));
-        let mesh = mesh_chunk(LitChunk::new(&water, &dark), neighbors, &Tables::builtin());
+        let mesh = mesh_chunk(LitChunk::new(&water, &dark), neighbors, &tables);
         assert!(mesh.opaque.is_empty(), "the fixture must be all blended");
         assert!(!mesh.blended.is_empty(), "the fixture must have geometry");
         mesh
@@ -1216,7 +1226,8 @@ mod tests {
 
     /// The dev gallery's glass house in front of its pool, a lantern inside.
     fn glass_house_and_pool() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::{GLASS, LANTERN, STONE, WATER};
+        use tesserae_core::material::{GLASS, LANTERN, STONE};
+        let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..11 {
             for z in 0..12 {
@@ -1226,7 +1237,7 @@ mod tests {
         for k in 0..=5 {
             for i in 0..=8 {
                 let rim = i == 0 || i == 8 || k == 0 || k == 5;
-                c.set(i, 10, k, Voxel::cube(if rim { STONE } else { WATER }));
+                c.set(i, 10, k, Voxel::cube(if rim { STONE } else { water }));
             }
         }
         for k in 7..=10 {
@@ -1246,7 +1257,7 @@ mod tests {
         mesh_chunk(
             LitChunk::new(&c, &sky),
             [Some(LitChunk::new(&air, &sky)); 6],
-            &Tables::builtin(),
+            &tables,
         )
     }
 
@@ -1254,10 +1265,11 @@ mod tests {
     /// above that end, the strip is in front of the cube, but its centre is far
     /// down the strip and farther from the Eye than the cube's.
     fn strip_over_a_cube() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::{GLASS, WATER};
+        use tesserae_core::material::GLASS;
+        let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..30 {
-            c.set(x, 5, 10, Voxel::cube(WATER));
+            c.set(x, 5, 10, Voxel::cube(water));
         }
         c.set(2, 3, 10, Voxel::cube(GLASS));
         let air = Chunk::air();
@@ -1265,7 +1277,7 @@ mod tests {
         mesh_chunk(
             LitChunk::new(&c, &sky),
             [Some(LitChunk::new(&air, &sky)); 6],
-            &Tables::builtin(),
+            &tables,
         )
     }
 
@@ -1314,18 +1326,19 @@ mod tests {
     /// and in the same Chunk the strip of water over a glass cube that a
     /// nearest-centre order draws wrong.
     fn checkerboard_and_a_strip() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::{GLASS, WATER};
+        use tesserae_core::material::GLASS;
+        let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..6 {
             for y in 0..6 {
                 for z in 0..6 {
-                    let m = if (x + y + z) % 2 == 0 { GLASS } else { WATER };
+                    let m = if (x + y + z) % 2 == 0 { GLASS } else { water };
                     c.set(10 + x, 10 + y, 10 + z, Voxel::cube(m));
                 }
             }
         }
         for x in 0..30 {
-            c.set(x, 5, 25, Voxel::cube(WATER));
+            c.set(x, 5, 25, Voxel::cube(water));
         }
         c.set(2, 3, 25, Voxel::cube(GLASS));
         let air = Chunk::air();
@@ -1333,7 +1346,7 @@ mod tests {
         let mesh = mesh_chunk(
             LitChunk::new(&c, &sky),
             [Some(LitChunk::new(&air, &sky)); 6],
-            &Tables::builtin(),
+            &tables,
         );
         assert!(
             mesh.blended.quad_count() > 1000,

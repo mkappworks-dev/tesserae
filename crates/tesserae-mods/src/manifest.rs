@@ -8,7 +8,7 @@ use crate::error::ModError;
 use crate::limits::ManifestLimits;
 
 /// Contract lines this build can host, newest first (spec decision 2).
-pub const SUPPORTED_API: &[&str] = &["0.2", "0.1"];
+pub const SUPPORTED_API: &[&str] = &["0.3", "0.2", "0.1"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]

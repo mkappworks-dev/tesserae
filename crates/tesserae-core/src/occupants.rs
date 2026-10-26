@@ -343,18 +343,20 @@ fn carry(fluid: Fluid, from: Voxel, to: Voxel, tables: &Tables) -> Option<Fluid>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fluid::FluidTable;
-    use crate::material::{STONE, WATER};
+    use crate::material::STONE;
+    use crate::testgen::register_water;
 
     #[test]
     fn a_packed_fluid_voxel_is_a_full_source_with_no_solid() {
-        let fluids = FluidTable::builtin();
-        let got = Occupants::of(Voxel::cube(WATER), Overlay::NONE, &fluids);
+        let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
+        let fluids = tables.fluids;
+        let got = Occupants::of(Voxel::cube(water), Overlay::NONE, &fluids);
         assert_eq!(
             got,
             Occupants {
                 solid: Voxel::AIR,
-                fluid: Some(Fluid::source(WATER)),
+                fluid: Some(Fluid::source(water)),
                 burning: None,
             }
         );
@@ -371,22 +373,24 @@ mod tests {
     /// source with no solid, the overlay otherwise, and never both.
     #[test]
     fn the_encoding_is_canonical_and_round_trips() {
-        let fluids = FluidTable::builtin();
+        let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
+        let fluids = tables.fluids;
         let flowing = Fluid {
             source: false,
             surface: 9,
             reach: 3,
             descent: 8,
-            ..Fluid::source(WATER)
+            ..Fluid::source(water)
         };
         let cases = [
             (
                 Occupants {
                     solid: Voxel::AIR,
-                    fluid: Some(Fluid::source(WATER)),
+                    fluid: Some(Fluid::source(water)),
                     burning: None,
                 },
-                (Voxel::cube(WATER), Overlay::NONE),
+                (Voxel::cube(water), Overlay::NONE),
             ),
             (
                 Occupants {
@@ -405,13 +409,13 @@ mod tests {
             (
                 Occupants {
                     solid: stair(),
-                    fluid: Some(Fluid::source(WATER)),
+                    fluid: Some(Fluid::source(water)),
                     burning: Some(Burning { fuel: 3 }),
                 },
                 (
                     stair(),
                     Overlay {
-                        fluid: Some(Fluid::source(WATER)),
+                        fluid: Some(Fluid::source(water)),
                         burning: Some(Burning { fuel: 3 }),
                     },
                 ),
@@ -447,8 +451,9 @@ mod tests {
     /// air over water still empties it. Source and flow keep their identity.
     #[test]
     fn placing_a_solid_follows_the_layer_rules() {
-        let tables = Tables::builtin();
-        let water = Fluid::source(WATER);
+        let mut tables = Tables::builtin();
+        let water_id = register_water(&mut tables);
+        let water = Fluid::source(water_id);
         let deep = Fluid {
             source: false,
             surface: 12,
@@ -489,13 +494,13 @@ mod tests {
                     fluid: None,
                     burning: Some(Burning { fuel: 5 }),
                 },
-                Voxel::cube(WATER),
+                Voxel::cube(water_id),
                 wet(Voxel::AIR, water, None),
             ),
             (
                 "water onto flowing water",
                 wet(Voxel::AIR, flowing, None),
-                Voxel::cube(WATER),
+                Voxel::cube(water_id),
                 wet(Voxel::AIR, water, None),
             ),
             (
@@ -568,7 +573,8 @@ mod tests {
         assert_eq!(dry.heap_bytes(), 0);
         assert!(!dry.may_contain_fluid() && !dry.may_contain_burning());
 
-        let lake = crate::Chunk::filled(Voxel::cube(WATER));
+        let water = register_water(&mut Tables::builtin());
+        let lake = crate::Chunk::filled(Voxel::cube(water));
         assert_eq!(lake.heap_bytes() + ChunkOverlay::none().heap_bytes(), 0);
 
         let mut wet = ChunkOverlay::none();
@@ -577,7 +583,7 @@ mod tests {
                 source: false,
                 surface: 4,
                 reach: 2,
-                ..Fluid::source(WATER)
+                ..Fluid::source(water)
             }),
             burning: None,
         };

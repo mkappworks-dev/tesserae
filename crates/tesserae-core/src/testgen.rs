@@ -1,13 +1,16 @@
-//! Deterministic terrain for tests and benches.
+//! Deterministic terrain, and a fixture water, for tests and benches.
 //!
-//! Not the real World generation — that is a later step and belongs behind the
+//! The terrain is not the real World generation — that is a later step and belongs behind the
 //! Mod-parameterised interface. This exists so the mesher is benchmarked against
 //! a surface with real overhangs and material layers rather than a solid cube,
 //! which would measure only the greedy fast path.
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
+use crate::fluid::FluidDef;
+use crate::material::{MaterialDef, Occlusion, RenderClass};
 use crate::noise::fbm2;
-use crate::voxel::Voxel;
+use crate::tables::Tables;
+use crate::voxel::{MaterialId, Voxel};
 
 pub use crate::material::{DIRT, GRASS, STONE};
 
@@ -73,6 +76,39 @@ pub fn checkerboard_chunk() -> Chunk {
     chunk
 }
 
+pub const WATER_MATERIAL: MaterialDef = MaterialDef {
+    emission: 0,
+    dimming: 2,
+    occlusion: Occlusion::SameMaterial,
+    render: RenderClass::Blend,
+    solid: false,
+};
+
+/// Water's fluid row, in the same metres and seconds at every Voxel size.
+pub const WATER_FLUID: FluidDef = FluidDef {
+    reach_m: 7.0,
+    sideways_m_per_s: 4.0,
+    downward_m_per_s: 8.0,
+    recession_m_per_s: 4.0,
+    reset_drop_m: 0.5,
+    waterlogs: true,
+    extinguishes: true,
+    heat: None,
+};
+
+/// Registers [`WATER_MATERIAL`] and [`WATER_FLUID`] the way a Mod's
+/// Declaration would, at the next free id, and returns that id.
+pub fn register_water(tables: &mut Tables) -> MaterialId {
+    let water = tables
+        .materials
+        .register(WATER_MATERIAL)
+        .expect("fixture water is a valid Material");
+    tables
+        .register_fluid(water, WATER_FLUID)
+        .expect("fixture water is a valid fluid");
+    water
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,6 +152,33 @@ mod tests {
         assert_eq!(
             h, 11_756_880_781_353_496_971,
             "testgen::terrain_chunk output changed"
+        );
+    }
+
+    #[test]
+    fn fixture_water_registers_at_the_next_id_with_waters_numbers() {
+        let mut tables = Tables::builtin();
+        let next = tables.materials.len();
+        let water = register_water(&mut tables);
+
+        assert_eq!(usize::from(water), next);
+        let m = tables.materials.def(water);
+        assert_eq!(
+            (m.emission, m.dimming, m.occlusion, m.render, m.solid),
+            (0, 2, Occlusion::SameMaterial, RenderClass::Blend, false)
+        );
+        assert_eq!(
+            tables.fluids.get(water),
+            Some(&FluidDef {
+                reach_m: 7.0,
+                sideways_m_per_s: 4.0,
+                downward_m_per_s: 8.0,
+                recession_m_per_s: 4.0,
+                reset_drop_m: 0.5,
+                waterlogs: true,
+                extinguishes: true,
+                heat: None,
+            })
         );
     }
 

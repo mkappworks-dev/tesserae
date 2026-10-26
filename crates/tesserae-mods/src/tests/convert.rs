@@ -2,11 +2,12 @@
 
 use tesserae_core::{
     CaveParams, CollisionBox, MaterialDef, NodeBox, Occlusion, RenderClass, ShapeDef,
-    SmoothingParams, WaterParams, WorldgenParams,
+    SmoothingParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, WorldParams};
 use crate::bindings::tesserae::mods::types;
+use crate::convert::{engine_world_params, world_params};
 
 fn wit_material(
     occlusion: content::Occlusion,
@@ -161,53 +162,62 @@ fn to_sealed_false_survives() {
 }
 
 #[test]
-fn world_params_both_ways() {
-    let full = WorldgenParams {
+fn world_params_field_for_field_with_the_lake_apart() {
+    let wit = WorldParams {
         sea_level_m: 1.5,
         relief_m: 2.5,
         feature_size_m: 3.5,
         soil_depth_m: 4.5,
         octaves: 6,
-        caves: Some(CaveParams {
+        caves: Some(content::CaveParams {
             feature_size_m: 7.5,
             radius_m: 8.5,
             floor_m: -9.5,
             octaves: 3,
         }),
-        smoothing: Some(SmoothingParams { min_rise_m: 0.5 }),
-        water: Some(WaterParams { level_m: 10.5 }),
+        smoothing: Some(content::SmoothingParams { min_rise_m: 0.5 }),
+        water: Some(content::WaterParams {
+            level_m: 10.5,
+            material: "game:brine".into(),
+        }),
     };
-    let bare = WorldgenParams {
+    let (terrain, lake) = world_params(wit.clone());
+    assert_eq!(
+        terrain,
+        WorldgenParams {
+            sea_level_m: 1.5,
+            relief_m: 2.5,
+            feature_size_m: 3.5,
+            soil_depth_m: 4.5,
+            octaves: 6,
+            caves: Some(CaveParams {
+                feature_size_m: 7.5,
+                radius_m: 8.5,
+                floor_m: -9.5,
+                octaves: 3,
+            }),
+            smoothing: Some(SmoothingParams { min_rise_m: 0.5 }),
+            water: None,
+        }
+    );
+    assert_eq!(lake, wit.water);
+    let bare = WorldParams {
         caves: None,
         smoothing: None,
         water: None,
-        ..full
+        ..wit
     };
-
-    for params in [full, bare, WorldgenParams::default()] {
-        let wit: WorldParams = params.into();
-        assert_eq!(WorldgenParams::from(wit), params);
-    }
-
-    let wit: WorldParams = full.into();
-    assert_eq!(wit.sea_level_m, 1.5);
-    assert_eq!(wit.caves.unwrap().floor_m, -9.5);
-    assert_eq!(wit.smoothing.unwrap().min_rise_m, 0.5);
-    assert_eq!(wit.water.unwrap().level_m, 10.5);
+    let (terrain, lake) = world_params(bare);
+    assert!(terrain.caves.is_none() && terrain.smoothing.is_none() && lake.is_none());
 }
 
-/// The reverse direction is what `default-world-params` returns, so it must not
-/// turn an absent record into a present one.
+/// What `default-world-params` returns: the engine's parameters, which have
+/// no lake, so an absent record is never turned into a present one.
 #[test]
-fn absent_records_stay_absent() {
-    let bare: WorldParams = WorldgenParams {
-        caves: None,
-        smoothing: None,
-        water: None,
-        ..WorldgenParams::default()
-    }
-    .into();
-    assert!(bare.caves.is_none() && bare.smoothing.is_none() && bare.water.is_none());
+fn the_engines_world_params_convert_both_ways() {
+    let wit = engine_world_params();
+    assert!(wit.water.is_none());
+    assert_eq!(world_params(wit), (WorldgenParams::default(), None));
 }
 
 #[test]

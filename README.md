@@ -46,14 +46,22 @@ passes `dev` to the binary as an argument and leaves the feature off. Controls,
 and what each kind of edit costs to rebuild, are in
 [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
-On its own that loads no Game. To run the demo, which plays out water, lava, a
-second fluid and fire beside spawn:
+Once the guests are built, `cargo dev` runs the demo Game, which declares its
+own water as it does its lava, fills its lakes with it, and plays out water,
+lava, a second fluid and fire beside spawn. Until then it opens a World with no
+Game, which is dry because the engine declares no fluid of its own, and says to
+run the build:
 
 ```bash
 rustup target add wasm32-wasip2   # once
 ./scripts/build-guests            # after every change under games/
-cargo dev -- --mods games/demo/dist --trust-all
+cargo dev
 ```
+
+A `dev` build trusts the in-repo demo for the run without asking or recording
+anything. `--mods <dir>` or `TESSERAE_MODS_DIR` runs another directory instead,
+with the usual Trust check. A release build never picks the demo itself: its
+default is the user's own mods directory.
 
 What the demo shows, and how to run it at another Voxel size, is in
 [CONTRIBUTING.md](CONTRIBUTING.md#running-the-demo-game).

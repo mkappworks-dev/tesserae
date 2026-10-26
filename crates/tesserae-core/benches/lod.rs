@@ -113,11 +113,12 @@ fn terrain(c: &mut Criterion) {
 
     // Level 1 over held Chunks something changed: read with their overlays, dry
     // and with every open Voxel of the lower four flooded by flowing water.
-    let tables = Tables::builtin();
+    let mut tables = Tables::builtin();
+    let water = testgen::register_water(&mut tables);
     let dry: [ChunkOverlay; 8] = Default::default();
     let flowing = Overlay {
         fluid: Fluid::flowing(
-            tesserae_core::material::WATER,
+            water,
             [
                 Level {
                     surface: 8,

@@ -67,6 +67,7 @@ impl Guest for Fluids {
                 material("slime", false),
                 material("wood", true),
                 material("ash", true),
+                material("brine", false),
             ],
             shapes: vec![],
             appearance: vec![Appearance {
@@ -80,21 +81,35 @@ impl Guest for Fluids {
             }],
             world: None,
             view: None,
-            // Neither water nor lava: its own reach, rates and reset drop.
-            fluids: vec![FluidDef {
-                material: "fluids:slime".into(),
-                reach_m: 2.0,
-                sideways_m_per_s: 2.0,
-                downward_m_per_s: 3.0,
-                recession_m_per_s: 1.0,
-                reset_drop_m: 1.0,
-                waterlogs: true,
-                extinguishes: true,
-                heat: None,
-            }],
+            fluids: vec![
+                // Neither water nor lava: its own reach, rates and reset drop.
+                FluidDef {
+                    material: "fluids:slime".into(),
+                    reach_m: 2.0,
+                    sideways_m_per_s: 2.0,
+                    downward_m_per_s: 3.0,
+                    recession_m_per_s: 1.0,
+                    reset_drop_m: 1.0,
+                    waterlogs: true,
+                    extinguishes: true,
+                    heat: None,
+                },
+                // Water's numbers, so that slime meets it as it would water.
+                FluidDef {
+                    material: "fluids:brine".into(),
+                    reach_m: 7.0,
+                    sideways_m_per_s: 4.0,
+                    downward_m_per_s: 8.0,
+                    recession_m_per_s: 4.0,
+                    reset_drop_m: 0.5,
+                    waterlogs: true,
+                    extinguishes: true,
+                    heat: None,
+                },
+            ],
             reactions: vec![ReactionDef {
                 first: reactant("fluids:slime", FluidState::Flowing),
-                second: reactant("core:water", FluidState::Any),
+                second: reactant("fluids:brine", FluidState::Any),
                 consumed: ReactionSide::First,
                 product: Some("fluids:ash".into()),
                 receiving: None,

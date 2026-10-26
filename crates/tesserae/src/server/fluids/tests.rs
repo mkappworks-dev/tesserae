@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::flow::STEP_S;
 use tesserae_core::light::light_cells;
-use tesserae_core::material::WATER;
+use tesserae_core::testgen::register_water;
 use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{
     Chunk, Fluid, LitChunk, MaterialId, Occupants, Orientation, SHAPE_STAIR, Voxel, mesh_chunk,
@@ -25,6 +25,23 @@ fn stone() -> Voxel {
     Voxel::cube(STONE)
 }
 
+/// The Server's default tables with the fixture water, which every test here
+/// places unless it loads a Game. Building them costs milliseconds; the replays
+/// read them every step.
+static WATERED: std::sync::LazyLock<(Tables, MaterialId)> = std::sync::LazyLock::new(|| {
+    let mut tables = Arc::unwrap_or_clone(ContentTables::default().0);
+    let water = register_water(&mut tables);
+    (tables, water)
+});
+
+fn tables() -> Tables {
+    WATERED.0.clone()
+}
+
+fn water() -> MaterialId {
+    WATERED.1
+}
+
 const Y: i32 = 5;
 const Z: i32 = 5;
 
@@ -40,7 +57,7 @@ struct Fixture {
 
 impl Fixture {
     fn new(voxel_m: f32, half_m: f32, cx: i32) -> Self {
-        Self::with_tables(voxel_m, half_m, cx, Tables::builtin())
+        Self::with_tables(voxel_m, half_m, cx, tables())
     }
 
     fn with_tables(voxel_m: f32, half_m: f32, cx: i32, tables: Tables) -> Self {
@@ -219,9 +236,9 @@ fn a_placed_source_flows_then_recedes_through_the_server_tick() {
     let mut spread_s = Vec::new();
     for v in [1.0, 0.5, 0.25] {
         let mut f = Fixture::new(v, 10.0, 0);
-        f.send(0, EditAction::PlaceSource(WATER));
+        f.send(0, EditAction::PlaceSource(water()));
         f.tick();
-        assert_eq!(f.fluid(0), Some(Fluid::source(WATER)), "{v} m");
+        assert_eq!(f.fluid(0), Some(Fluid::source(water())), "{v} m");
         let start = f.sim().now();
         f.settle();
         spread_s.push((f.sim().now() - start) as f64 * STEP_S);
@@ -273,7 +290,7 @@ fn dividing_a_step_changes_nothing_but_the_ticks_taken() {
         f.sim_mut().job().scramble = scramble;
         let mut trace: HashMap<Step, Vec<Occupants>> = HashMap::default();
         let started = Instant::now();
-        for action in [EditAction::PlaceSource(WATER), EditAction::RemoveSource] {
+        for action in [EditAction::PlaceSource(water()), EditAction::RemoveSource] {
             f.send(0, action);
             loop {
                 f.tick();
@@ -312,12 +329,12 @@ fn dividing_a_step_changes_nothing_but_the_ticks_taken() {
 fn an_older_job_cannot_bring_back_a_removed_source_or_its_flow() {
     let mut f = Fixture::new(1.0, 10.0, 0);
     let placed_at = f.sim().now();
-    f.send(0, EditAction::PlaceSource(WATER));
+    f.send(0, EditAction::PlaceSource(water()));
     f.tick();
     // Placed on `placed_at`'s tick, first read on the step after, and its
     // neighbours' timers run the sideways delay from there.
-    let scale = FlowScale::new(&Tables::builtin(), 1.0);
-    let proposing = placed_at + scale.get(WATER).unwrap().sideways.steps();
+    let scale = FlowScale::new(&tables(), 1.0);
+    let proposing = placed_at + scale.get(water()).unwrap().sideways.steps();
     let started = Instant::now();
     while f.sim().now() + 1 < proposing || f.sim().job.in_flight() > 0 {
         f.tick();
@@ -361,13 +378,13 @@ fn an_older_job_cannot_bring_back_a_removed_source_or_its_flow() {
 #[test]
 fn blocking_a_stream_with_an_edit_keeps_its_source() {
     let mut f = Fixture::new(1.0, 10.0, 0);
-    f.send(0, EditAction::PlaceSource(WATER));
+    f.send(0, EditAction::PlaceSource(water()));
     f.settle();
     f.send(2, EditAction::Place(stone()));
     f.settle();
     assert_eq!(f.occupants(2).solid, stone());
     assert_eq!(f.fluid(2), None, "the stone displaced the water");
-    assert_eq!(f.fluid(0), Some(Fluid::source(WATER)));
+    assert_eq!(f.fluid(0), Some(Fluid::source(water())));
     assert!(f.fluid(1).is_some());
     assert!((3..=8).all(|x| f.fluid(x).is_none()));
     assert!(f.fluid(-7).is_some());
@@ -390,7 +407,7 @@ fn the_fluid_tool_refuses_what_it_cannot_do_and_changes_nothing() {
     assert_eq!(f.store().voxel([0, Y - 1, Z]), Some(stone()));
 
     // On flowing water the removal strikes the floor through it.
-    f.send(0, EditAction::PlaceSource(WATER));
+    f.send(0, EditAction::PlaceSource(water()));
     f.settle();
     f.send(3, EditAction::RemoveSource);
     f.settle();
@@ -400,12 +417,7 @@ fn the_fluid_tool_refuses_what_it_cannot_do_and_changes_nothing() {
 
 fn fresh_light(store: &ChunkStore, coord: ChunkCoord) -> tesserae_core::ChunkLight {
     let chunk = store.get(coord).unwrap();
-    light_cells(
-        chunk,
-        store.overlay(coord).unwrap(),
-        [None; 6],
-        &Tables::builtin(),
-    )
+    light_cells(chunk, store.overlay(coord).unwrap(), [None; 6], &tables())
 }
 
 /// A lantern lights the corridor, all of it in one Chunk with nothing held
@@ -430,7 +442,7 @@ fn water_flowing_in_darkens_and_receding_brightens_as_a_fresh_solve_would() {
             edit::set_voxel(
                 &mut store,
                 &mut meshes,
-                &Tables::builtin(),
+                &tables(),
                 lantern,
                 Voxel::cube(LANTERN),
             )
@@ -441,7 +453,7 @@ fn water_flowing_in_darkens_and_receding_brightens_as_a_fresh_solve_would() {
     assert!(dry > 0, "the lantern reaches x = 3");
     assert!(f.store().light(home) == Some(&fresh_light(f.store(), home)));
 
-    f.send(0, EditAction::PlaceSource(WATER));
+    f.send(0, EditAction::PlaceSource(water()));
     f.settle();
     let wet = block(&f, 3);
     assert!(wet < dry, "water between did not dim it: {wet} vs {dry}");
@@ -484,7 +496,7 @@ fn a_waterlogged_stair_feeds_flow_and_light_follows_as_a_fresh_solve_would() {
         .world_mut()
         .resource_scope(|world, mut store: Mut<ChunkStore>| {
             let mut meshes = world.resource_mut::<MeshState>();
-            let tables = Tables::builtin();
+            let tables = tables();
             edit::set_voxel(
                 &mut store,
                 &mut meshes,
@@ -499,13 +511,13 @@ fn a_waterlogged_stair_feeds_flow_and_light_follows_as_a_fresh_solve_would() {
     let dry = block(&f, -2);
     assert!(f.store().light(home) == Some(&fresh_light(f.store(), home)));
 
-    f.send(0, EditAction::PlaceSource(WATER));
+    f.send(0, EditAction::PlaceSource(water()));
     f.settle();
     assert!(f.rejections().is_empty());
     let soaked = f.occupants(0);
     assert_eq!(
         (soaked.solid, soaked.fluid),
-        (stair, Some(Fluid::source(WATER)))
+        (stair, Some(Fluid::source(water())))
     );
     assert!(f.fluid(-3).is_some(), "{:?}", f.wet());
     assert_eq!(f.fluid(1), None, "through the stair's back");
@@ -534,6 +546,7 @@ fn a_waterlogged_stair_feeds_flow_and_light_follows_as_a_fresh_solve_would() {
 #[test]
 fn a_connection_change_wakes_passage_and_remeshes_the_water_in_it() {
     let mut h = Harness::new(small(), UNLIMITED);
+    h.app.insert_resource(ContentTables(Arc::new(tables())));
     h.settle();
     let rock = ChunkCoord::new(0, -1, 0);
     let (y, z) = (-16, 16);
@@ -591,7 +604,7 @@ fn a_connection_change_wakes_passage_and_remeshes_the_water_in_it() {
     let source = |store: &mut ChunkStore, meshes: &mut MeshState, tables: &Tables| {
         let occupants = Occupants {
             solid: Voxel::AIR,
-            fluid: Some(Fluid::source(WATER)),
+            fluid: Some(Fluid::source(water())),
             burning: None,
         };
         set_occupants(store, meshes, tables, [17, y, z], occupants).unwrap();
@@ -613,6 +626,7 @@ fn a_connection_change_wakes_passage_and_remeshes_the_water_in_it() {
 #[test]
 fn full_detail_meshes_follow_the_water_as_it_flows_and_recedes() {
     let mut h = Harness::new(small(), UNLIMITED);
+    h.app.insert_resource(ContentTables(Arc::new(tables())));
     h.settle();
     let rock = ChunkCoord::new(0, -1, 0);
     let (y, z) = (-16, 16);
@@ -651,14 +665,7 @@ fn full_detail_meshes_follow_the_water_as_it_flows_and_recedes() {
                     fluid,
                     burning: None,
                 };
-                set_occupants(
-                    &mut store,
-                    &mut meshes,
-                    &Tables::builtin(),
-                    source,
-                    occupants,
-                )
-                .unwrap();
+                set_occupants(&mut store, &mut meshes, &tables(), source, occupants).unwrap();
             });
         let started = Instant::now();
         loop {
@@ -678,7 +685,7 @@ fn full_detail_meshes_follow_the_water_as_it_flows_and_recedes() {
         }
         let store = h.store();
         let neighbors: [Option<LitChunk>; 6] = face_neighbors(rock).map(|n| Some(lit(store, n)));
-        let fresh = mesh_chunk(lit(store, rock), neighbors, &Tables::builtin());
+        let fresh = mesh_chunk(lit(store, rock), neighbors, &tables());
         assert!(
             same_mesh(&held[&rock], &fresh),
             "the Client holds a stale mesh"
@@ -688,12 +695,12 @@ fn full_detail_meshes_follow_the_water_as_it_flows_and_recedes() {
 
     let dry = cycle(&mut h, None);
     assert_eq!(dry, 0);
-    let wet = cycle(&mut h, Some(Fluid::source(WATER)));
+    let wet = cycle(&mut h, Some(Fluid::source(water())));
     assert!(wet > 0, "no water drawn");
     let surfaces: Vec<u8> = (17..=23)
         .map(|x| {
             h.store()
-                .occupants([x, y, z], &Tables::builtin().fluids)
+                .occupants([x, y, z], &tables().fluids)
                 .unwrap()
                 .fluid
                 .unwrap()
@@ -704,9 +711,6 @@ fn full_detail_meshes_follow_the_water_as_it_flows_and_recedes() {
     let gone = cycle(&mut h, None);
     assert_eq!(gone, 0, "water left behind in the mesh");
 }
-
-/// Building the tables costs milliseconds; the replays read them every step.
-static BUILTIN: std::sync::LazyLock<Tables> = std::sync::LazyLock::new(Tables::builtin);
 
 /// How far each arm of the plus runs from the shaft's foot: past water's 7 m.
 const ARM: i32 = 9;
@@ -754,7 +758,7 @@ fn plus_chunks(origin: Cell, source: bool) -> BTreeMap<ChunkCoord, Chunk> {
         }
     }
     if source {
-        put(SOURCE, Voxel::cube(WATER));
+        put(SOURCE, Voxel::cube(water()));
     } else {
         put(SOURCE, Voxel::AIR);
     }
@@ -782,7 +786,7 @@ fn plus_cells() -> BTreeSet<Cell> {
 type PlusState = Vec<(Cell, Option<Occupants>)>;
 
 fn plus_state(store: &ChunkStore, origin: Cell) -> PlusState {
-    let fluids = &BUILTIN.fluids;
+    let fluids = &WATERED.0.fluids;
     plus_cells()
         .into_iter()
         .map(|rel| {
@@ -834,7 +838,7 @@ impl Scene {
             voxel_size: 1.0,
             ..default()
         })
-        .init_resource::<ContentTables>()
+        .insert_resource(ContentTables(Arc::new(tables())))
         .init_resource::<ChunkStore>()
         .init_resource::<MeshState>()
         .init_resource::<FluidSim>();
@@ -900,7 +904,7 @@ impl Scene {
                 self.store_mut().remove(c);
             }
             Event::Source(rel, place) => {
-                let fluid = place.then_some(Fluid::source(WATER));
+                let fluid = place.then_some(Fluid::source(water()));
                 self.set(rel, Voxel::AIR, fluid);
             }
             Event::Solid(rel, voxel) => self.set(rel, voxel, None),
@@ -918,7 +922,7 @@ impl Scene {
                     fluid,
                     burning: None,
                 };
-                set_occupants(&mut store, &mut meshes, &BUILTIN, at, occupants)
+                set_occupants(&mut store, &mut meshes, &WATERED.0, at, occupants)
                     .expect("a valid change to held terrain");
             });
     }
@@ -934,7 +938,7 @@ impl Scene {
     }
 
     fn occupants(&self, rel: Cell) -> Option<Occupants> {
-        self.store().occupants(self.abs(rel), &BUILTIN.fluids)
+        self.store().occupants(self.abs(rel), &WATERED.0.fluids)
     }
 
     fn fluid(&self, rel: Cell) -> Option<Fluid> {
@@ -1208,7 +1212,7 @@ fn eviction_drops_a_chunks_work_and_regeneration_brings_its_source_back() {
     s.tick();
     s.apply(Event::Admit(SOURCE));
     s.settle();
-    assert_eq!(s.fluid(SOURCE), Some(Fluid::source(WATER)));
+    assert_eq!(s.fluid(SOURCE), Some(Fluid::source(water())));
     assert!(s.state() == settled, "the regenerated source did not flow");
 }
 
@@ -1351,8 +1355,10 @@ fn settled_water_and_dry_terrain_cost_nothing_per_step() {
     assert_eq!(dry.sim().work, Work::default());
     assert_eq!(dry.sim().scanned, 0);
 
-    dry.store_mut()
-        .insert(ChunkCoord::new(5, 0, 0), Chunk::filled(Voxel::cube(WATER)));
+    dry.store_mut().insert(
+        ChunkCoord::new(5, 0, 0),
+        Chunk::filled(Voxel::cube(water())),
+    );
     dry.store_mut()
         .insert(ChunkCoord::new(6, 0, 0), Chunk::filled(stone()));
     dry.settle();
@@ -1391,7 +1397,7 @@ fn under_saturation_every_chunk_player_edits_and_mod_queues_keep_moving() {
     };
     let corridor = {
         let mut f = Fixture::new(1.0, 10.0, 0);
-        f.send(0, EditAction::PlaceSource(WATER));
+        f.send(0, EditAction::PlaceSource(water()));
         f.send(3, EditAction::Place(stone()));
         f.settle();
         f.state()
@@ -1424,13 +1430,13 @@ fn under_saturation_every_chunk_player_edits_and_mod_queues_keep_moving() {
                 let at = [o[0] + SOURCE[0], o[1] + SOURCE[1], o[2] + SOURCE[2]];
                 let occupants = Occupants {
                     solid: Voxel::AIR,
-                    fluid: Some(Fluid::source(WATER)),
+                    fluid: Some(Fluid::source(water())),
                     burning: None,
                 };
-                set_occupants(&mut store, &mut meshes, &BUILTIN, at, occupants).unwrap();
+                set_occupants(&mut store, &mut meshes, &WATERED.0, at, occupants).unwrap();
             }
         });
-    f.send(0, EditAction::PlaceSource(WATER));
+    f.send(0, EditAction::PlaceSource(water()));
     {
         let mut queues = f.app.world_mut().resource_mut::<PendingCommands>();
         for (index, x) in [(0, 70), (1, 150)] {
@@ -1577,7 +1583,7 @@ fn landing_past_its_bound_takes_turns_round_chunks_and_voxels() {
     let wet = Occupants {
         fluid: Some(Fluid {
             source: false,
-            ..Fluid::source(WATER)
+            ..Fluid::source(water())
         }),
         ..dry
     };
@@ -1594,7 +1600,7 @@ fn landing_past_its_bound_takes_turns_round_chunks_and_voxels() {
         .collect();
     let mut served: BTreeMap<[i32; 3], Vec<Cell>> = BTreeMap::new();
     for call in 0..7 {
-        let (chosen, deferred) = choose(&mut sim, &BUILTIN, all.clone());
+        let (chosen, deferred) = choose(&mut sim, &WATERED.0, all.clone());
         assert_eq!((chosen.len(), deferred.len()), (3, 17));
         let chunks: BTreeSet<[i32; 3]> = chosen.iter().map(|p| chunk_of(p.at).0).collect();
         assert_eq!(chunks.len(), 3, "a Chunk landed twice before all had once");
@@ -1633,7 +1639,7 @@ fn emitters_past_their_bound_wait_while_other_changes_land() {
     let wet = Occupants {
         fluid: Some(Fluid {
             source: false,
-            ..Fluid::source(WATER)
+            ..Fluid::source(water())
         }),
         ..dry
     };
@@ -1655,7 +1661,7 @@ fn emitters_past_their_bound_wait_while_other_changes_land() {
         .collect();
     let mut lamps_per_step = Vec::new();
     for step in 0.. {
-        let (chosen, deferred) = choose(&mut sim, &BUILTIN, pending);
+        let (chosen, deferred) = choose(&mut sim, &WATERED.0, pending);
         if step == 0 {
             assert_eq!(
                 chosen.iter().filter(|p| p.next == wet).count(),
@@ -1700,7 +1706,7 @@ fn a_journal_overflow_coalesces_by_chunk_and_drops_no_change() {
         .resource_scope(|world, mut store: Mut<ChunkStore>| {
             let mut meshes = world.resource_mut::<MeshState>();
             for &at in &fill {
-                edit::set_voxel(&mut store, &mut meshes, &BUILTIN, at, stone()).unwrap();
+                edit::set_voxel(&mut store, &mut meshes, &WATERED.0, at, stone()).unwrap();
             }
         });
     s.apply(Event::Source(SOURCE, false));
@@ -1720,9 +1726,9 @@ fn run_seconds(f: &mut Fixture, seconds: f64) {
     }
 }
 
-/// Lava from the demo Game and slime from an independent Mod, placed with the
-/// fluid tool, flow by their own declared metres through the same Server tick
-/// as water: after a second each front is where its rate puts it, each settles
+/// Water and lava from the demo Game and slime from an independent Mod,
+/// placed with the fluid tool, flow by their own declared metres through the
+/// same Server tick: after a second each front is where its rate puts it, each settles
 /// at its own reach, and each recedes. Lava is the slowest of the three.
 #[test]
 fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
@@ -1735,9 +1741,11 @@ fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
                 .unwrap() as u16
         };
         let (lava, slime) = (id("demo:lava"), id("fluids:slime"));
-        for (material, after_1_s, reach) in
-            [(WATER, 4.0, 7.0), (lava, 0.75, 3.0), (slime, 2.0, 2.0)]
-        {
+        for (material, after_1_s, reach) in [
+            (id("demo:water"), 4.0, 7.0),
+            (lava, 0.75, 3.0),
+            (slime, 2.0, 2.0),
+        ] {
             let mut f = Fixture::with_tables(v, 8.0, 0, loaded.tables.clone());
             f.send(0, EditAction::PlaceSource(material));
             f.tick();
@@ -1760,6 +1768,43 @@ fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
             f.settle();
             assert!(f.wet().is_empty(), "{v} m, {material}: {:?}", f.wet());
             assert!(f.rejections().is_empty());
+        }
+    }
+}
+
+/// Each fluid the demo's catalogue offers the hotbar, held and clicked, lands
+/// as a source, and a right click takes it away again.
+#[test]
+fn every_fluid_the_demo_catalogues_reaches_the_world_as_a_source() {
+    for v in [1.0, 0.25] {
+        let loaded = mod_runtime::tests::demo_loaded(v);
+        let catalogue = super::super::mods::catalogue(&loaded.registry, &loaded.tables, None);
+        let fluids: Vec<_> = catalogue
+            .materials
+            .iter()
+            .filter(|m| m.fluid.is_some())
+            .collect();
+        for name in ["demo:water", "demo:lava", "demo:mud"] {
+            assert!(fluids.iter().any(|m| m.name == name), "{name}");
+        }
+        for fluid in fluids {
+            let mut f = Fixture::with_tables(v, 8.0, 0, loaded.tables.clone());
+            f.send(0, EditAction::PlaceSource(fluid.id));
+            f.tick();
+            assert_eq!(
+                f.fluid(0),
+                Some(Fluid::source(fluid.id)),
+                "{v} m, {}",
+                fluid.name
+            );
+            f.send(0, EditAction::RemoveSource);
+            f.tick();
+            assert!(
+                f.fluid(0).is_none_or(|left| !left.source),
+                "{v} m, {}",
+                fluid.name
+            );
+            assert!(f.rejections().is_empty(), "{v} m, {}", fluid.name);
         }
     }
 }
@@ -1812,13 +1857,13 @@ fn a_source_from_a_player_or_either_contract_line_flows_the_same() {
             let mut f = Fixture::new(0.5, 6.0, 0);
             let at = [0.0, Y as f32 * 0.5, Z as f32 * 0.5];
             match way {
-                0 => f.send(0, EditAction::PlaceSource(WATER)),
+                0 => f.send(0, EditAction::PlaceSource(water())),
                 1 => mod_runtime::tests::drain_validated(
                     &mut f.app,
                     Line::V01,
                     &[Command::Place(vec![Placement {
                         at,
-                        voxel: Voxel::cube(WATER),
+                        voxel: Voxel::cube(water()),
                     }])],
                 ),
                 _ => mod_runtime::tests::drain_validated(
@@ -1829,12 +1874,12 @@ fn a_source_from_a_player_or_either_contract_line_flows_the_same() {
                             min: at,
                             max: at.map(|m| m + 0.5),
                         },
-                        material: WATER,
+                        material: water(),
                     }],
                 ),
             }
             f.tick();
-            assert_eq!(f.fluid(0), Some(Fluid::source(WATER)), "way {way}");
+            assert_eq!(f.fluid(0), Some(Fluid::source(water())), "way {way}");
             f.settle();
             f.state()
         })
@@ -1868,14 +1913,15 @@ fn touching(f: &Fixture, a: MaterialId, b: MaterialId) -> bool {
 fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
     for v in [1.0, 0.5, 0.25] {
         let (tables, id) = declared(v);
+        let water = id("demo:water");
         let (lava, stone_id) = (id("demo:lava"), id("core:stone"));
         assert_eq!(stone_id, STONE);
         let mut f = Fixture::with_tables(v, 4.0, 0, tables);
         f.send(-1, EditAction::PlaceSource(lava));
-        f.send(0, EditAction::PlaceSource(WATER));
+        f.send(0, EditAction::PlaceSource(water));
         f.apply_intents();
         assert_eq!(f.fluid(-1), Some(Fluid::source(lava)));
-        assert_eq!(f.fluid(0), Some(Fluid::source(WATER)));
+        assert_eq!(f.fluid(0), Some(Fluid::source(water)));
         let west = VoxelCoord::of([-1, Y, Z]).chunk;
         assert_ne!(
             west,
@@ -1889,8 +1935,8 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
         f.settle();
         assert_eq!(f.occupants(-1).solid, stone(), "{v} m");
         assert_eq!(f.fluid(-1), None);
-        assert_eq!(f.fluid(0), Some(Fluid::source(WATER)), "the water is kept");
-        assert!(!touching(&f, lava, WATER));
+        assert_eq!(f.fluid(0), Some(Fluid::source(water)), "the water is kept");
+        assert!(!touching(&f, lava, water));
         let cover = f
             .app
             .world_mut()
@@ -1911,6 +1957,7 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
 #[test]
 fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() {
     let (tables, id) = declared(1.0);
+    let water = id("demo:water");
     let lava = id("demo:lava");
     let mut f = Fixture::with_tables(1.0, 10.0, 16, tables.clone());
     let home = ChunkCoord::new(0, 0, 0);
@@ -1932,15 +1979,15 @@ fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() 
     f.settle();
     let lit = block(&f, -2);
     assert!(lit > 0, "lava lights the corridor");
-    f.send(4, EditAction::PlaceSource(WATER));
+    f.send(4, EditAction::PlaceSource(water));
     f.settle();
     let stones: Vec<i32> = (-f.half..=f.half)
         .filter(|&x| f.occupants(x).solid == stone())
         .collect();
     assert!(!stones.is_empty(), "nothing cooled");
-    assert!(!touching(&f, lava, WATER));
+    assert!(!touching(&f, lava, water));
     assert_eq!(f.fluid(-6), Some(Fluid::source(lava)));
-    assert_eq!(f.fluid(4), Some(Fluid::source(WATER)));
+    assert_eq!(f.fluid(4), Some(Fluid::source(water)));
     assert!(block(&f, stones[0]) < lit, "cooled lava still glows");
     assert!(
         f.store().light(home) == Some(&fresh(&f)),
@@ -1948,26 +1995,27 @@ fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() 
     );
 }
 
-/// The `fluids` Mod's own rule, slime that is flowing and touches water
+/// The `fluids` Mod's own rule, slime that is flowing and touches its brine
 /// becomes its ash: a second pair through the same native path, with its
 /// state matching (the slime source beside nothing is never consumed).
 #[test]
 fn a_mods_own_pair_reacts_through_the_server() {
     let (tables, id) = declared(1.0);
+    let brine = id("fluids:brine");
     let (slime, ash) = (id("fluids:slime"), id("fluids:ash"));
     let mut f = Fixture::with_tables(1.0, 8.0, 0, tables);
     f.send(0, EditAction::PlaceSource(slime));
     f.settle();
     assert_eq!(f.wet_length_m(), 2.0);
-    f.send(3, EditAction::PlaceSource(WATER));
+    f.send(3, EditAction::PlaceSource(brine));
     f.settle();
     let ashes: Vec<i32> = (-f.half..=f.half)
         .filter(|&x| f.occupants(x).solid == Voxel::cube(ash))
         .collect();
-    assert_eq!(ashes, vec![2], "the flowing slime beside the water");
+    assert_eq!(ashes, vec![2], "the flowing slime beside the brine");
     assert_eq!(f.fluid(0), Some(Fluid::source(slime)));
-    assert_eq!(f.fluid(3), Some(Fluid::source(WATER)));
-    assert!(!touching(&f, slime, WATER));
+    assert_eq!(f.fluid(3), Some(Fluid::source(brine)));
+    assert!(!touching(&f, slime, brine));
     assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != stone()));
 }
 
@@ -1977,6 +2025,7 @@ fn a_mods_own_pair_reacts_through_the_server() {
 #[test]
 fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
     let (tables, id) = declared(1.0);
+    let water = id("demo:water");
     let lava = id("demo:lava");
     let mut f = Fixture::with_tables(1.0, 8.0, 0, tables);
     f.send(0, EditAction::PlaceSource(lava));
@@ -1984,7 +2033,7 @@ fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
     assert!(f.fluid(3).is_some_and(|l| l.material == lava) && f.fluid(4).is_none());
     let hold = Arc::clone(&f.sim_mut().job().hold);
     hold.hold();
-    f.send(4, EditAction::PlaceSource(WATER));
+    f.send(4, EditAction::PlaceSource(water));
     let started = Instant::now();
     while f.sim().job.in_flight() == 0 {
         f.tick();
@@ -1992,7 +2041,7 @@ fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
     }
     assert_eq!(
         f.fluid(4),
-        Some(Fluid::source(WATER)),
+        Some(Fluid::source(water)),
         "the step read the water"
     );
     f.send(4, EditAction::RemoveSource);
@@ -2023,18 +2072,19 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
     let states: Vec<Vec<Occupants>> = (0..3)
         .map(|way| {
             let (tables, id) = declared(0.5);
+            let water = id("demo:water");
             let mut f = Fixture::with_tables(0.5, 4.0, 0, tables);
             f.send(-2, EditAction::PlaceSource(id("demo:lava")));
             f.apply_intents();
             let at = [0.0, Y as f32 * 0.5, Z as f32 * 0.5];
             match way {
-                0 => f.send(0, EditAction::PlaceSource(WATER)),
+                0 => f.send(0, EditAction::PlaceSource(water)),
                 1 => mod_runtime::tests::drain_validated(
                     &mut f.app,
                     Line::V01,
                     &[Command::Place(vec![Placement {
                         at,
-                        voxel: Voxel::cube(WATER),
+                        voxel: Voxel::cube(water),
                     }])],
                 ),
                 _ => mod_runtime::tests::drain_validated(
@@ -2045,7 +2095,7 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
                             min: at,
                             max: at.map(|m| m + 0.5),
                         },
-                        material: WATER,
+                        material: water,
                     }],
                 ),
             }
@@ -2067,6 +2117,7 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
 fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
     let run = |bound: Option<usize>| {
         let (tables, id) = declared(1.0);
+        let water = id("demo:water");
         let lava = id("demo:lava");
         let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
         match bound {
@@ -2079,7 +2130,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
         }
         f.apply_intents();
         for x in -4..=4 {
-            f.send(x, EditAction::PlaceSource(WATER));
+            f.send(x, EditAction::PlaceSource(water));
         }
         f.apply_intents();
         let above = |f: &Fixture, x: i32| {
@@ -2089,7 +2140,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
                 .unwrap()
                 .fluid
         };
-        assert!((-4..=4).all(|x| above(&f, x) == Some(Fluid::source(WATER))));
+        assert!((-4..=4).all(|x| above(&f, x) == Some(Fluid::source(water))));
         let started = Instant::now();
         let mut cooled = 0;
         loop {
@@ -2108,7 +2159,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
             f.wait_if_running();
         }
         assert_eq!(cooled, 9);
-        assert!((-4..=4).all(|x| above(&f, x) == Some(Fluid::source(WATER))));
+        assert!((-4..=4).all(|x| above(&f, x) == Some(Fluid::source(water))));
         (f.state(), f.sim().deferred)
     };
     let (free, none) = run(None);
@@ -2125,6 +2176,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
 fn meshes_are_redelivered_after_a_reaction() {
     let mut h = Harness::new(small(), UNLIMITED);
     let (tables, id) = declared(WorldSettings::default().voxel_size);
+    let water = id("demo:water");
     let lava = id("demo:lava");
     let tables = Arc::new(tables);
     h.app.insert_resource(ContentTables(Arc::clone(&tables)));
@@ -2174,7 +2226,7 @@ fn meshes_are_redelivered_after_a_reaction() {
         }
     });
     run(&mut h, &|store, meshes, tables| {
-        for (x, material) in [(10, lava), (20, WATER)] {
+        for (x, material) in [(10, lava), (20, water)] {
             let source = Occupants {
                 solid: Voxel::AIR,
                 fluid: Some(Fluid::source(material)),

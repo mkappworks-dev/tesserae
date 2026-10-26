@@ -288,8 +288,9 @@ impl Tables {
 mod tests {
     use super::*;
     use crate::fluid::{FluidDef, FluidError};
-    use crate::material::{LEAVES, MaterialDef, Occlusion, RenderClass, STONE, WATER};
+    use crate::material::{LEAVES, MaterialDef, Occlusion, RenderClass, STONE};
     use crate::occupants::{Burning, Fluid, Occupants};
+    use crate::testgen::{WATER_FLUID, register_water};
 
     #[test]
     fn a_fluid_is_registered_over_a_non_solid_material_only() {
@@ -305,22 +306,23 @@ mod tests {
             })
             .unwrap();
         assert_eq!(
-            tables.register_fluid(999, FluidDef::WATER),
+            tables.register_fluid(999, WATER_FLUID),
             Err(FluidError::NotAMaterial)
         );
         assert_eq!(
-            tables.register_fluid(STONE, FluidDef::WATER),
+            tables.register_fluid(STONE, WATER_FLUID),
             Err(FluidError::Solid)
         );
-        assert_eq!(tables.register_fluid(decor, FluidDef::WATER), Ok(()));
+        assert_eq!(tables.register_fluid(decor, WATER_FLUID), Ok(()));
         assert!(tables.fluids.contains(decor));
     }
 
     /// What the shared Edit path refuses of a reading before it is stored.
     #[test]
     fn vet_occupants_names_the_first_thing_wrong() {
-        let tables = Tables::builtin();
-        let water = Fluid::source(WATER);
+        let mut tables = Tables::builtin();
+        let water_id = register_water(&mut tables);
+        let water = Fluid::source(water_id);
         let ok = |solid, fluid, burning| Occupants {
             solid,
             fluid,
@@ -336,7 +338,7 @@ mod tests {
             Err(PlaceFault::NotFuel),
             "stone is not declared fuel"
         );
-        let mut burns = Tables::builtin();
+        let mut burns = tables.clone();
         burns
             .register_combustion(LEAVES, crate::combustion::tests::WOOD)
             .unwrap();
@@ -351,7 +353,7 @@ mod tests {
             Err(PlaceFault::BadOrientation)
         );
         assert_eq!(
-            tables.vet_occupants(ok(Voxel::cube(WATER), None, None)),
+            tables.vet_occupants(ok(Voxel::cube(water_id), None, None)),
             Err(PlaceFault::NotSolid)
         );
         assert_eq!(
@@ -391,14 +393,15 @@ mod tests {
     /// void, dry levels carrying nothing, and never dry everywhere.
     #[test]
     fn vet_occupants_holds_flow_to_the_solids_voids() {
-        let tables = Tables::builtin();
+        let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
         let stair = Voxel::new(STONE, crate::SHAPE_STAIR, 0);
         let level = Level {
             surface: 12,
             reach: 3,
             descent: 0,
         };
-        let flow = |levels| Fluid::flowing(WATER, levels).unwrap();
+        let flow = |levels| Fluid::flowing(water, levels).unwrap();
         let ok = |solid, fluid: Fluid| {
             tables.vet_occupants(Occupants {
                 solid,
@@ -408,7 +411,7 @@ mod tests {
         };
         let dry = Level::DRY;
         assert_eq!(ok(stair, flow([level, dry, dry, dry])), Ok(()));
-        assert_eq!(ok(stair, Fluid::source(WATER)), Ok(()));
+        assert_eq!(ok(stair, Fluid::source(water)), Ok(()));
         assert_eq!(
             ok(stair, flow([level, level, dry, dry])),
             Err(PlaceFault::BadSurface),
@@ -427,7 +430,7 @@ mod tests {
         let all_dry = Fluid {
             source: false,
             surface: 0,
-            ..Fluid::source(WATER)
+            ..Fluid::source(water)
         };
         assert_eq!(ok(stair, all_dry), Err(PlaceFault::BadSurface));
     }
@@ -436,22 +439,23 @@ mod tests {
     /// the brighter emission.
     #[test]
     fn a_wet_solid_keeps_its_seals_and_takes_the_larger_dimming() {
-        let tables = Tables::builtin();
+        let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
         let stair = Voxel::new(STONE, crate::SHAPE_STAIR, 0);
         let (mask, dim) = tables.light_params(stair);
         assert_eq!(dim, 0);
         assert_eq!(
-            tables.wet_light_params(stair, Some(WATER)),
-            (mask, tables.materials.dimming(Voxel::cube(WATER)))
+            tables.wet_light_params(stair, Some(water)),
+            (mask, tables.materials.dimming(Voxel::cube(water)))
         );
         assert_eq!(
-            tables.wet_light_params(Voxel::AIR, Some(WATER)),
-            tables.light_params(Voxel::cube(WATER))
+            tables.wet_light_params(Voxel::AIR, Some(water)),
+            tables.light_params(Voxel::cube(water))
         );
         assert_eq!(tables.wet_light_params(stair, None), (mask, 0));
         let lantern = Voxel::new(crate::material::LANTERN, crate::SHAPE_STAIR, 0);
         assert_eq!(
-            tables.wet_emission(lantern, Some(WATER)),
+            tables.wet_emission(lantern, Some(water)),
             tables.materials.emission(lantern)
         );
     }
@@ -485,6 +489,7 @@ mod tests {
         use crate::material::{GLASS, LEAVES};
         use crate::reaction::{Phase, Reactant, ReactionDef, ReactionError, Side};
         let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
         let oil = tables
             .materials
             .register(MaterialDef {
@@ -507,19 +512,19 @@ mod tests {
             receiving: None,
         };
         assert_eq!(
-            tables.register_reaction(rule(oil, WATER, None)),
+            tables.register_reaction(rule(oil, water, None)),
             Err(ReactionError::NotAFluid)
         );
-        tables.register_fluid(oil, FluidDef::WATER).unwrap();
-        for product in [WATER, oil, 999, 0] {
+        tables.register_fluid(oil, WATER_FLUID).unwrap();
+        for product in [water, oil, 999, 0] {
             assert_eq!(
-                tables.register_reaction(rule(oil, WATER, Some(product))),
+                tables.register_reaction(rule(oil, water, Some(product))),
                 Err(ReactionError::ProductNotSolid),
                 "{product}"
             );
         }
         assert_eq!(
-            tables.register_reaction(rule(oil, WATER, Some(STONE))),
+            tables.register_reaction(rule(oil, water, Some(STONE))),
             Ok(())
         );
         assert_eq!(tables.reactions.rules().len(), 1);
@@ -536,7 +541,7 @@ mod tests {
         };
         for (fuel, residue, error) in [
             (999, 0, CombustionError::NotAMaterial),
-            (WATER, 0, CombustionError::NotSolid),
+            (water, 0, CombustionError::NotSolid),
             (0, 0, CombustionError::NotSolid),
             (LEAVES, 999, CombustionError::NotAMaterial),
             (LEAVES, oil, CombustionError::NotSolid),
@@ -555,6 +560,7 @@ mod tests {
     #[test]
     fn a_fluid_that_does_not_waterlog_is_held_by_empty_space_only() {
         let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
         let tar = tables
             .materials
             .register(MaterialDef {
@@ -570,13 +576,13 @@ mod tests {
                 tar,
                 FluidDef {
                     waterlogs: false,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             )
             .unwrap();
         let stair = Voxel::new(STONE, crate::SHAPE_STAIR, 0);
         assert!(tables.holds(Voxel::AIR, tar));
         assert!(!tables.holds(stair, tar));
-        assert!(tables.holds(stair, WATER));
+        assert!(tables.holds(stair, water));
     }
 }

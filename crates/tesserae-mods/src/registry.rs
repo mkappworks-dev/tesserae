@@ -18,25 +18,32 @@ impl fmt::Display for Kind {
     }
 }
 
-/// A name's id is its index. Plain data: step 7 writes no file, so nothing here
-/// is serialised yet.
+/// A name's id is its index; a retired id is a slot with no name, which keeps
+/// the ids after it in place. Plain data: step 7 writes no file, so nothing
+/// here is serialised yet.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Registry {
-    pub materials: Vec<String>,
-    pub shapes: Vec<String>,
+    pub(crate) materials: Vec<Option<String>>,
+    pub(crate) shapes: Vec<Option<String>>,
 }
 
-const BUILTIN_MATERIALS: [&str; 8] = [
-    "core:air",
-    "core:stone",
-    "core:dirt",
-    "core:grass",
-    "core:lantern",
-    "core:glass",
-    "core:leaves",
-    "core:water",
+/// Indexed by id; `None` is [`tesserae_core::material::RETIRED`].
+const BUILTIN_MATERIALS: [Option<&str>; 8] = [
+    Some("core:air"),
+    Some("core:stone"),
+    Some("core:dirt"),
+    Some("core:grass"),
+    Some("core:lantern"),
+    Some("core:glass"),
+    Some("core:leaves"),
+    None,
 ];
-const BUILTIN_SHAPES: [&str; 4] = ["core:cube", "core:slab", "core:stair", "core:post"];
+const BUILTIN_SHAPES: [Option<&str>; 4] = [
+    Some("core:cube"),
+    Some("core:slab"),
+    Some("core:stair"),
+    Some("core:post"),
+];
 
 /// A saved order that this load cannot honour.
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -67,14 +74,15 @@ impl std::error::Error for RegistryMismatch {}
 
 impl Registry {
     pub fn builtin() -> Self {
-        let own = |names: &[&str]| names.iter().map(|&n| n.to_owned()).collect();
+        let own = |names: &[Option<&str>]| names.iter().map(|n| n.map(str::to_owned)).collect();
         Registry {
             materials: own(&BUILTIN_MATERIALS),
             shapes: own(&BUILTIN_SHAPES),
         }
     }
 
-    /// How many names of `kind` are built in, which is where a Mod's ids start.
+    /// How many ids of `kind` are built in, a retired one included, which is
+    /// where a Mod's ids start.
     pub fn builtin_len(kind: Kind) -> usize {
         match kind {
             Kind::Material => BUILTIN_MATERIALS.len(),
@@ -82,15 +90,36 @@ impl Registry {
         }
     }
 
-    pub fn names(&self, kind: Kind) -> &[String] {
+    fn slots(&self, kind: Kind) -> &[Option<String>] {
         match kind {
             Kind::Material => &self.materials,
             Kind::Shape => &self.shapes,
         }
     }
 
+    /// Ids handed out so far, a retired one included: the next id.
+    pub fn len(&self, kind: Kind) -> usize {
+        self.slots(kind).len()
+    }
+
+    pub(crate) fn push(&mut self, kind: Kind, name: String) {
+        match kind {
+            Kind::Material => self.materials.push(Some(name)),
+            Kind::Shape => self.shapes.push(Some(name)),
+        }
+    }
+
+    /// Every registered name with its id, in id order. A retired id is not
+    /// among them.
+    pub fn names(&self, kind: Kind) -> impl Iterator<Item = (usize, &str)> {
+        self.slots(kind)
+            .iter()
+            .enumerate()
+            .filter_map(|(id, name)| Some((id, name.as_deref()?)))
+    }
+
     pub fn id_of(&self, kind: Kind, name: &str) -> Option<usize> {
-        self.names(kind).iter().position(|n| n == name)
+        self.names(kind).find(|&(_, n)| n == name).map(|(id, _)| id)
     }
 
     /// `saved` if every name in it is provided by this load, so a World loads
@@ -99,15 +128,18 @@ impl Registry {
     pub fn replay(&self, saved: &Registry) -> Result<Registry, RegistryMismatch> {
         for kind in [Kind::Material, Kind::Shape] {
             let builtin = Registry::builtin();
-            let builtin = builtin.names(kind);
-            let saved_names = saved.names(kind);
-            if let Some(id) = (0..builtin.len()).find(|&i| saved_names.get(i) != builtin.get(i)) {
+            let builtin = builtin.slots(kind);
+            let saved_slots = saved.slots(kind);
+            if let Some(id) = (0..builtin.len()).find(|&i| saved_slots.get(i) != builtin.get(i)) {
                 return Err(RegistryMismatch::BuiltinMoved { kind, id });
             }
-            if let Some(name) = saved_names.iter().find(|n| self.id_of(kind, n).is_none()) {
+            if let Some((_, name)) = saved
+                .names(kind)
+                .find(|&(_, n)| self.id_of(kind, n).is_none())
+            {
                 return Err(RegistryMismatch::Missing {
                     kind,
-                    name: name.clone(),
+                    name: name.to_owned(),
                 });
             }
         }

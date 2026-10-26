@@ -6,7 +6,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::worldgen::{LANTERN, STONE};
-use tesserae_core::{Chunk, ChunkLight, MAX_SHAPED_PER_CHUNK, SHAPE_STAIR, Tables};
+use tesserae_core::{
+    CHUNK_SIZE, Chunk, ChunkLight, MAX_SHAPED_PER_CHUNK, SHAPE_STAIR, Tables, Worldgen,
+    WorldgenParams,
+};
 use tesserae_mods::{Command, EditKind, Line, LogHandle, Placement, Region};
 
 use super::super::{LoadedMods, TrustMode, load};
@@ -22,6 +25,22 @@ pub(in crate::server) fn guest_fixture(
     id: &str,
     guest: &str,
     api: &str,
+    mode: u64,
+    voxel_size: f32,
+) -> LoadedMods {
+    loaded_guest(id, guest, api, "", mode, voxel_size)
+}
+
+/// [`guest_fixture`] loaded as the Game, which alone may set the World.
+fn game_fixture(id: &str, guest: &str, api: &str) -> LoadedMods {
+    loaded_guest(id, guest, api, "root = true\n", 0, 1.0)
+}
+
+fn loaded_guest(
+    id: &str,
+    guest: &str,
+    api: &str,
+    manifest: &str,
     mode: u64,
     voxel_size: f32,
 ) -> LoadedMods {
@@ -44,7 +63,9 @@ pub(in crate::server) fn guest_fixture(
     std::fs::create_dir(&mod_dir).unwrap();
     std::fs::write(
         mod_dir.join("mod.toml"),
-        format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"{guest}.wasm\"\n"),
+        format!(
+            "id = \"{id}\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"{guest}.wasm\"\n{manifest}"
+        ),
     )
     .unwrap();
     std::fs::copy(
@@ -134,6 +155,32 @@ impl Harness {
     fn call(&mut self) {
         self.dispatch();
         self.await_landing();
+    }
+    /// One step of the fluid simulation at most: it may fall behind the Mod's
+    /// ticks, never run ahead of them.
+    fn step_fluids(&mut self) {
+        self.app
+            .world_mut()
+            .run_system_once(crate::server::fluids::simulate)
+            .unwrap();
+    }
+    fn settle_fluids(&mut self) {
+        let started = Instant::now();
+        loop {
+            self.step_fluids();
+            let sim = self
+                .app
+                .world()
+                .resource::<crate::server::fluids::FluidSim>();
+            if sim.is_idle() {
+                return;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(300),
+                "never settled"
+            );
+            std::thread::sleep(Duration::from_micros(50));
+        }
     }
     fn pending(&self) -> &PendingCommands {
         self.app.world().resource::<PendingCommands>()
@@ -820,9 +867,71 @@ pub(in crate::server) fn demo_loaded(size: f32) -> LoadedMods {
     loaded
 }
 
+/// Every fluid the loaded reactions and the lake name.
+fn fluids_named(loaded: &LoadedMods, params: WorldgenParams) -> Vec<u16> {
+    let rules = loaded.tables.reactions.rules().iter();
+    rules
+        .flat_map(|rule| [rule.first.fluid, rule.second.fluid])
+        .chain(params.water.map(|lake| lake.material))
+        .collect()
+}
+
+/// The demo's lakes are its water, in valleys at the default seed, and none
+/// stands on its scenario stage or within 20 m of it.
+fn assert_lakes_off_the_stage(params: WorldgenParams, size: f32, water: u16) {
+    let lake = params.water.expect("the demo has lakes");
+    assert_eq!(lake.material, water);
+    let world = Worldgen::new(WorldSettings::default().seed, size, params);
+    let chunk_m = CHUNK_SIZE as f32 * size;
+    let mut valley = None;
+    'search: for x in (-40..40).map(|i| i as f32 * 4.0) {
+        for z in (-40..40).map(|i| i as f32 * 4.0) {
+            if world.surface_height_m(x, z) < lake.level_m - 0.5 {
+                valley = Some([x, lake.level_m - 0.5, z]);
+                break 'search;
+            }
+        }
+    }
+    let index = valley
+        .expect("no valley within 160 m holds a lake")
+        .map(|m| (m / size).floor() as i32);
+    let chunk = index.map(|i| i.div_euclid(CHUNK_SIZE as i32));
+    let local = index.map(|i| i.rem_euclid(CHUNK_SIZE as i32) as usize);
+    let voxel = world
+        .chunk(chunk[0], chunk[1], chunk[2])
+        .get(local[0], local[1], local[2]);
+    assert_eq!(voxel, Voxel::cube(water), "{size} m: a valley with no lake");
+    let (lowest, _) = world.surface_bounds_m();
+    let (min, max) = ([-45.0, lowest, -29.0], [43.0, lake.level_m, 16.0]);
+    let span = |a: f32, b: f32| (a / chunk_m).floor() as i32..=(b / chunk_m).floor() as i32;
+    for cx in span(min[0], max[0]) {
+        for cy in span(min[1], max[1]) {
+            for cz in span(min[2], max[2]) {
+                let generated = world.chunk(cx, cy, cz);
+                for i in 0..CHUNK_SIZE.pow(3) {
+                    let local = [
+                        i % CHUNK_SIZE,
+                        i / CHUNK_SIZE % CHUNK_SIZE,
+                        i / CHUNK_SIZE.pow(2),
+                    ];
+                    let m: [f32; 3] = std::array::from_fn(|a| {
+                        ([cx, cy, cz][a] * CHUNK_SIZE as i32 + local[a] as i32) as f32 * size
+                    });
+                    let near = (0..3).all(|a| min[a] <= m[a] && m[a] < max[a]);
+                    let voxel = generated.get(local[0], local[1], local[2]);
+                    assert!(
+                        !near || voxel.material() != water,
+                        "{size} m: a lake at {m:?} beside the stage"
+                    );
+                }
+            }
+        }
+    }
+}
+
 #[test]
 fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
-    for size in [1.0, 0.5] {
+    for size in [1.0, 0.5, 0.25] {
         let loaded = demo_loaded(size);
         assert_eq!(
             loaded
@@ -838,7 +947,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         );
         let params = loaded.world.unwrap();
         assert_eq!(params.relief_m, 4.0);
-        assert!(params.water.is_none() && params.caves.is_none());
+        assert!(params.caves.is_none());
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
         assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
         assert_eq!(
@@ -849,7 +958,8 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 (10, [150, 104, 60, 255]),
                 (11, [70, 66, 62, 255]),
                 (12, [92, 70, 44, 224]),
-                (13, [168, 74, 52, 255])
+                (13, [168, 74, 52, 255]),
+                (14, [26, 82, 158, 166])
             ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
@@ -859,15 +969,37 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .id_of(tesserae_mods::Kind::Material, "demo:lava")
             .unwrap() as u16;
         assert_eq!(lava, 9);
+        assert_eq!(loaded.tables.materials.def(lava).emission, 15);
+        let flow = loaded.tables.fluids.get(lava).unwrap();
+        // Its own water, with the fixture water's Material and fluid row.
+        let demo_water = loaded
+            .registry
+            .id_of(tesserae_mods::Kind::Material, "demo:water")
+            .unwrap() as u16;
+        assert_eq!(demo_water, 14);
+        assert_eq!(
+            *loaded.tables.materials.def(demo_water),
+            tesserae_core::testgen::WATER_MATERIAL
+        );
+        let water = loaded.tables.fluids.get(demo_water).unwrap();
+        assert_eq!(*water, tesserae_core::testgen::WATER_FLUID);
+        assert!(
+            loaded.tables.fluids.rank(demo_water) < loaded.tables.fluids.rank(lava),
+            "water's fluid row is not first"
+        );
         assert_eq!(
             loaded
                 .registry
                 .id_of(tesserae_mods::Kind::Material, "core:water"),
-            Some(7)
+            None
         );
-        assert_eq!(loaded.tables.materials.def(lava).emission, 15);
-        let flow = loaded.tables.fluids.get(lava).unwrap();
-        let water = loaded.tables.fluids.get(7).unwrap();
+        assert!(
+            fluids_named(&loaded, params)
+                .iter()
+                .all(|&id| id != tesserae_core::material::RETIRED),
+            "the demo names the retired id"
+        );
+        assert_lakes_off_the_stage(params, size, demo_water);
         assert!(flow.sideways_m_per_s < water.sideways_m_per_s);
         assert!(flow.downward_m_per_s < water.downward_m_per_s);
         assert!(flow.reach_m < water.reach_m);
@@ -884,7 +1016,6 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             material("demo:wood"),
             material("demo:brick"),
         );
-        let core_water = material("core:water");
         assert_eq!((mud, brick), (12, 13));
         let mud_flow = loaded.tables.fluids.get(mud).unwrap();
         assert!(mud_flow.waterlogs && mud_flow.extinguishes && mud_flow.heat.is_none());
@@ -894,15 +1025,15 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         );
         assert_eq!(mud_flow.reach_m, 2.0);
         // Its two reactions, resolved by name, either state of each fluid:
-        // lava touching water becomes core:stone and the water stays; mud
+        // lava touching its water becomes core:stone and the water stays; mud
         // touching lava becomes demo:brick and the lava stays.
         let rules = loaded.tables.reactions.rules();
         assert_eq!(rules.len(), 2);
         for (rule, pair, consumed, product) in [
             (
                 rules[0],
-                (7, lava),
-                tesserae_core::Side::Second,
+                (lava, demo_water),
+                tesserae_core::Side::First,
                 tesserae_core::worldgen::STONE,
             ),
             (rules[1], (lava, mud), tesserae_core::Side::Second, brick),
@@ -938,6 +1069,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .init_resource::<Time<Fixed>>()
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
+            .init_resource::<crate::server::fluids::FluidSim>()
             .add_plugins(super::super::plugin);
         assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 5);
         #[cfg(feature = "dev")]
@@ -949,19 +1081,24 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         h.call();
         assert!(h.log(0).is_empty());
         assert_eq!(h.app.world().resource::<ModJobs>().tick, 0);
-        for y in -1..3 {
-            for z in -2..2 {
-                for x in -2..2 {
-                    let coord = ChunkCoord::new(x, y, z);
-                    let mut store = h.app.world_mut().resource_mut::<ChunkStore>();
-                    store.insert(coord, Chunk::air());
-                    store.set_light(coord, ChunkLight::dark());
-                }
-            }
+        // The stage, what its fluids fall into and the spawn neighbourhood.
+        let chunk = |m: f32| (m / (CHUNK_SIZE as f32 * size)).floor() as i32;
+        let across = chunk(-32.0).min(-2)..=chunk(31.0).max(1);
+        let held: Vec<ChunkCoord> = across
+            .clone()
+            .flat_map(|x| (-1..=chunk(40.0).max(2)).map(move |y| (x, y)))
+            .flat_map(|(x, y)| across.clone().map(move |z| ChunkCoord::new(x, y, z)))
+            .collect();
+        for &coord in &held {
+            let mut store = h.app.world_mut().resource_mut::<ChunkStore>();
+            store.insert(coord, Chunk::air());
+            store.set_light(coord, ChunkLight::dark());
         }
         h.call();
         let total = h.backlog(0);
-        assert_eq!(total, if size == 1.0 { 94 } else { 684 });
+        let by_size =
+            |counts: [u64; 3]| counts[[1.0, 0.5, 0.25].iter().position(|&s| s == size).unwrap()];
+        assert_eq!(total, by_size([94, 684, 5326]));
         assert_eq!(h.pending().queues[0].commands.len(), 16);
         let mut ticks = 0;
         while h.backlog(0) > 0 {
@@ -1006,7 +1143,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         assert!(log.contains(&format!("demo build applied={total} rejected=0")));
         assert!(log.contains("demo scenario: sources placed, fuel lit"));
         let started = h.backlog(0);
-        assert_eq!(started, if size == 1.0 { 6 } else { 12 });
+        assert_eq!(started, by_size([6, 12, 36]));
         while h.backlog(0) > 0 {
             h.drain();
         }
@@ -1014,8 +1151,8 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         for (at, fluid) in [
             ([6.0, 29.0, -7.0], mud),
             ([9.0, 29.0, -7.0], lava),
-            ([19.0, 29.0, -7.0], core_water),
-            ([22.0, 35.0, -7.0], core_water),
+            ([19.0, 29.0, -7.0], demo_water),
+            ([22.0, 35.0, -7.0], demo_water),
         ] {
             let here = h.occupants(index(at));
             assert_eq!(
@@ -1030,6 +1167,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         let mut calls = 0;
         while !h.log(0).contains("water poured on the burning post") {
             h.call();
+            h.step_fluids();
             calls += 1;
             assert!(calls <= 300, "never doused");
         }
@@ -1039,18 +1177,63 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         }
         assert_eq!(
             h.occupants(index([-23.0, 30.0, -7.0])).fluid,
-            Some(tesserae_core::Fluid::source(core_water))
+            Some(tesserae_core::Fluid::source(demo_water))
         );
         while !h.log(0).contains("source taken away") {
             h.call();
+            h.step_fluids();
             calls += 1;
             assert!(calls <= 1600, "the waterfall never dried");
         }
+        let falling = h.occupants(index([23.0, 30.0, -7.0])).fluid;
+        assert_eq!(
+            falling.map(|f| f.material),
+            Some(demo_water),
+            "no waterfall"
+        );
         while h.backlog(0) > 0 {
             h.drain();
         }
         assert_eq!(h.occupants(index([22.0, 35.0, -7.0])).fluid, None);
         assert_eq!(h.pending().queues[0].report.rejected, 0);
+        h.settle_fluids();
+        assert_eq!(
+            h.occupants(index([23.0, 30.0, -7.0])).fluid,
+            None,
+            "{size} m"
+        );
+        let row = |from: f32, to: f32| {
+            let [x0, y, z] = index([from, 29.0, -7.0]);
+            (x0..index([to, 29.0, -7.0])[0]).map(move |x| [x, y, z])
+        };
+        assert!(
+            row(6.0, 9.0).any(|at| h.voxel(at) == Voxel::cube(brick)),
+            "{size} m: no mud fired to brick"
+        );
+        assert!(
+            row(9.0, 19.0).any(|at| h.voxel(at) == Voxel::cube(STONE)),
+            "{size} m: no lava cooled to stone"
+        );
+        let post = index([-23.0, 29.0, -7.0]);
+        let span = (1.0 / size) as i32;
+        let cells = (0..span)
+            .flat_map(|dz| (0..span).flat_map(move |dy| (0..span).map(move |dx| [dx, dy, dz])));
+        for d in cells {
+            let at = [post[0] + d[0], post[1] + d[1], post[2] + d[2]];
+            let here = h.occupants(at);
+            assert_eq!(here.solid, Voxel::cube(wood), "{size} m: {at:?}");
+            assert!(here.burning.is_none(), "{size} m: {at:?} was not put out");
+        }
+        for &coord in &held {
+            let store = h.app.world().resource::<ChunkStore>();
+            let kinds = store.get(coord).unwrap().kinds();
+            assert!(
+                kinds
+                    .iter()
+                    .all(|v| v.material() != tesserae_core::material::RETIRED),
+                "the retired id at {coord}"
+            );
+        }
         for _ in 0..8 {
             h.call();
         }
@@ -1173,16 +1356,20 @@ fn a_0_2_mod_placing_a_fluid_as_a_solid_is_refused_whole() {
     assert!(h.log(0).contains("call=2 applied=0 rejected=1"));
 }
 
-/// One player's fluid-tool and solid Edits, seen by a 0.1 and a 0.2 Mod at
-/// once: the 0.2 one is told what each meant, the 0.1 one only the Edits
-/// that changed a packed Voxel. Neither hears of the simulation.
+/// One player's fluid-tool, solid and fire Edits, seen by a 0.1, a 0.2 and a
+/// 0.3 Mod at once: the 0.3 one is told what each meant, the 0.2 one all but
+/// the fire, and the 0.1 one only the Edits that changed a packed Voxel, each
+/// once. None hears of the simulation or of a refused intent.
 #[test]
 fn each_line_sees_player_edits_in_its_own_projection() {
     use crate::server::edit::{EditAction, EditIntent};
     use crate::server::player::Player;
     let mut loaded = guest_fixture("fluids", "fluids", "0.2", 0, 1.0);
     loaded.mods.extend(fixture(9).mods);
+    loaded.mods.extend(game_fixture("lake", "lake", "0.3").mods);
+    let water = tesserae_core::testgen::register_water(&mut loaded.tables);
     let mut h = Harness::with(loaded);
+    let wood = h.material("fluids:wood");
     h.app.insert_resource(WorldSettings {
         seed: 0,
         voxel_size: 1.0,
@@ -1192,10 +1379,14 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     h.app.world_mut().spawn(Player::at(eye));
     let stair = Voxel::new(STONE, SHAPE_STAIR, 0);
     h.put([2, 1, 2], stair);
+    h.put([2, 0, 2], Voxel::cube(wood));
     for action in [
-        EditAction::PlaceSource(tesserae_core::material::WATER),
+        EditAction::PlaceSource(water),
         EditAction::RemoveSource,
         EditAction::Break,
+        EditAction::Ignite,
+        EditAction::PutOut,
+        EditAction::PutOut,
     ] {
         h.app.world_mut().write_message(EditIntent {
             action,
@@ -1206,18 +1397,74 @@ fn each_line_sees_player_edits_in_its_own_projection() {
         h.app.world_mut().run_schedule(FixedPreUpdate);
     }
     assert_eq!(h.voxel([2, 1, 2]), Voxel::AIR);
-    assert_eq!(h.app.world().resource::<EditHistory>().next, 3);
+    assert_eq!(h.occupants([2, 0, 2]).solid, Voxel::cube(wood));
+    assert_eq!(h.occupants([2, 0, 2]).burning, None);
+    assert_eq!(h.app.world().resource::<EditHistory>().next, 5);
     h.call();
+    h.call();
+    let placed = format!("SourcePlaced({water})");
+    let removed = format!("SourceRemoved({water})");
+    let ignited = format!("Ignited({wood})");
+    let put_out = format!("PutOut({wood})");
+    let native = h.log(2);
+    for (kind, count) in [
+        (placed.as_str(), 1),
+        (removed.as_str(), 1),
+        ("::Solid(", 1),
+        (ignited.as_str(), 1),
+        (put_out.as_str(), 1),
+    ] {
+        assert_eq!(native.matches(kind).count(), count, "{kind}: {native}");
+    }
     let typed = h.log(0);
-    assert_eq!(typed.matches("SourcePlaced(7)").count(), 1, "{typed}");
-    assert_eq!(typed.matches("SourceRemoved(7)").count(), 1, "{typed}");
+    assert_eq!(typed.matches(&placed).count(), 1, "{typed}");
+    assert_eq!(typed.matches(&removed).count(), 1, "{typed}");
     assert_eq!(typed.matches("::Solid(").count(), 1, "{typed}");
+    assert!(
+        !typed.contains("Ignited") && !typed.contains("PutOut"),
+        "{typed}"
+    );
     let projected = h.log(1);
     assert!(projected.contains("edits=1"), "{projected}");
     assert!(
         projected.contains("before: Voxel { material: 1, shape: 2"),
         "{projected}"
     );
+}
+
+/// What the picker menu sends for a Mod's solid in a Shape is the existing
+/// place intent: the Server accepts it and a 0.3 Mod sees a solid Edit.
+#[test]
+fn a_declared_solid_placed_from_the_menu_is_a_solid_edit() {
+    use crate::server::edit::{EditAction, EditIntent};
+    use crate::server::player::Player;
+    let mut loaded = guest_fixture("fluids", "fluids", "0.2", 0, 1.0);
+    loaded.mods.extend(game_fixture("lake", "lake", "0.3").mods);
+    let mut h = Harness::with(loaded);
+    let wood = h.material("fluids:wood");
+    h.app.insert_resource(WorldSettings {
+        seed: 0,
+        voxel_size: 1.0,
+    });
+    h.app.add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 4.5, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([2, 0, 2], Voxel::cube(STONE));
+    let stair = Voxel::shaped(wood, SHAPE_STAIR, tesserae_core::Orientation::IDENTITY);
+    h.app.world_mut().write_message(EditIntent {
+        action: EditAction::Place(stair),
+        origin: eye,
+        direction: Vec3::NEG_Y,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    assert_eq!(h.voxel([2, 1, 2]), stair);
+    h.call();
+    h.call();
+    let seen = h.log(1);
+    assert_eq!(seen.matches("::Solid(").count(), 1, "{seen}");
+    let after = format!("after: Voxel {{ material: {wood}, shape: {SHAPE_STAIR}");
+    assert!(seen.contains(&after), "{seen}");
 }
 
 /// A Manifest that names one line for a component of another is refused at
@@ -1239,6 +1486,26 @@ fn a_mismatched_line_or_an_unknown_name_fails_the_load() {
             "hello",
             "0.2",
             "its Manifest says api 0.2, but its component is built against 0.1",
+        ),
+        (
+            "lake",
+            "0.2",
+            "its Manifest says api 0.2, but its component is built against 0.3",
+        ),
+        (
+            "lake",
+            "0.1",
+            "its Manifest says api 0.1, but its component is built against 0.3",
+        ),
+        (
+            "fluids",
+            "0.3",
+            "its Manifest says api 0.3, but its component is built against 0.2",
+        ),
+        (
+            "hello",
+            "0.3",
+            "its Manifest says api 0.3, but its component is built against 0.1",
         ),
         (
             "bad-fluid",

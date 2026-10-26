@@ -1,4 +1,4 @@
-wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.2", world: "mod" });
+wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, HeatDef, MaterialDef,
-    Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ViewParams,
+    Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ViewParams, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -136,7 +136,12 @@ impl Guest for Demo {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
         world.relief_m = 4.0;
-        world.water = None;
+        // Under the lowest ground within 20 m of the stage at the engine's
+        // default seed, 26 m, so lakes stand in valleys and the stage is dry.
+        world.water = Some(WaterParams {
+            level_m: 25.5,
+            material: "demo:water".into(),
+        });
         world.caves = None;
         Declaration {
             materials: vec![
@@ -170,6 +175,14 @@ impl Guest for Demo {
                     solid: false,
                 },
                 solid("brick"),
+                MaterialDef {
+                    name: "water".into(),
+                    emission: 0,
+                    dimming: 2,
+                    occlusion: Occlusion::SameMaterial,
+                    render: RenderClass::Blend,
+                    solid: false,
+                },
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -227,13 +240,34 @@ impl Guest for Demo {
                         a: 255,
                     },
                 },
+                Appearance {
+                    material: "water".into(),
+                    color: Srgba {
+                        r: 26,
+                        g: 82,
+                        b: 158,
+                        a: 166,
+                    },
+                },
             ],
             world: Some(world),
             view: Some(ViewParams {
                 view_distance_m: 160.0,
                 lod_distance_m: 3000.0,
             }),
+            // Water first: registration order decides an otherwise equal claim.
             fluids: vec![
+                FluidDef {
+                    material: "demo:water".into(),
+                    reach_m: 7.0,
+                    sideways_m_per_s: 4.0,
+                    downward_m_per_s: 8.0,
+                    recession_m_per_s: 4.0,
+                    reset_drop_m: 0.5,
+                    waterlogs: true,
+                    extinguishes: true,
+                    heat: None,
+                },
                 // Slower and shorter than water, and hot; it stays out of Shapes.
                 FluidDef {
                     material: "demo:lava".into(),
@@ -271,7 +305,7 @@ impl Guest for Demo {
                         state: FluidState::Any,
                     },
                     second: Reactant {
-                        fluid: "core:water".into(),
+                        fluid: "demo:water".into(),
                         state: FluidState::Any,
                     },
                     consumed: ReactionSide::First,
@@ -326,7 +360,7 @@ impl Guest for Demo {
             stone: material("core:stone"),
             lamp: material("demo:lamp"),
             lava: material("demo:lava"),
-            water: material("core:water"),
+            water: material("demo:water"),
             mud: material("demo:mud"),
             wood: material("demo:wood"),
             cube: shape("core:cube"),

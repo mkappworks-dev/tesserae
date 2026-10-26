@@ -15,11 +15,13 @@ new properties now share the one table.
 
 **The `MaterialId` to definition mapping is therefore save data.** Ids 0 to 7
 (air, stone, dirt, grass, lantern, glass, leaves, water) are permanent and never
-renumbered; a Mod's Materials take ids from 8 in registration order, so a World
-needs the same name-to-id registry in its save that Shapes need, and it is one
-registry for both. An id the table does not know is drawn as an opaque stand-in,
-the opposite of an unknown Shape, because a missing Material has a safe worst
-case and a missing Shape does not.
+renumbered (amended by [ADR-0015](0015-water-is-game-content.md): water is Game
+content, the built-ins are ids 0 to 6 and id 7 is retired); a Mod's Materials
+take ids from 8 in registration order, so a World needs the same name-to-id
+registry in its save that Shapes need, and it is one registry for both. An id
+the table does not know is drawn as an opaque stand-in, the opposite of an
+unknown Shape, because a missing Material has a safe worst case and a missing
+Shape does not.
 
 **Dimming is the entered Voxel's, applied after the usual step, and geometry
 only blocks light where dimming is 15.** An opaque cube is the case where the

@@ -1,9 +1,10 @@
-//! Both contract lines run side by side: 0.2 through its own records, 0.1
-//! through the adapter, each guest shown the Edit history of its own line.
+//! Every contract line runs side by side: 0.3 through its own records, 0.2 and
+//! 0.1 through the adapters, each guest shown the Edit history of its own line.
 
 use futures_lite::future::block_on;
-use tesserae_core::material::{STONE, WATER};
-use tesserae_core::{FluidDef, MaterialDef, Occlusion, PlaceFault, RenderClass, Tables, Voxel};
+use tesserae_core::material::STONE;
+use tesserae_core::testgen::{WATER_FLUID, register_water};
+use tesserae_core::{MaterialDef, MaterialId, Occlusion, PlaceFault, RenderClass, Tables, Voxel};
 
 use super::sandbox::{Rig, context};
 use crate::{
@@ -15,22 +16,25 @@ fn region(min: [f32; 3], max: [f32; 3]) -> Region {
     Region { min, max }
 }
 
-fn water() -> Voxel {
-    Voxel::cube(WATER)
+fn watered() -> (Tables, MaterialId) {
+    let mut tables = Tables::builtin();
+    let water = register_water(&mut tables);
+    (tables, water)
 }
 
 #[test]
 fn a_fluid_placed_as_a_solid_is_a_source_on_0_1_and_refused_on_0_2() {
-    let tables = Tables::builtin();
+    let (tables, water) = watered();
+    let water = Voxel::cube(water);
     let commands = [Command::Place(vec![Placement {
         at: [0.0; 3],
-        voxel: water(),
+        voxel: water,
     }])];
     let old = validate(&commands, Line::V01, &tables, 1.0).unwrap();
-    assert_eq!(old.commands, [Resolved::Place(vec![([0; 3], water())])]);
+    assert_eq!(old.commands, [Resolved::Place(vec![([0; 3], water)])]);
     let fill = [Command::Fill {
         region: region([0.0; 3], [1.0; 3]),
-        voxel: water(),
+        voxel: water,
     }];
     assert!(validate(&fill, Line::V01, &tables, 1.0).is_ok());
     for commands in [&commands[..], &fill[..]] {
@@ -46,13 +50,13 @@ fn a_fluid_placed_as_a_solid_is_a_source_on_0_1_and_refused_on_0_2() {
 
 #[test]
 fn source_and_fire_commands_resolve_to_lazy_regions_under_the_fill_caps() {
-    let tables = Tables::builtin();
+    let (tables, water) = watered();
     let a = region([0.0; 3], [2.0; 3]);
     let batch = validate(
         &[
             Command::PlaceSources {
                 region: a,
-                material: WATER,
+                material: water,
             },
             Command::RemoveSources(a),
             Command::Ignite(a),
@@ -79,7 +83,7 @@ fn source_and_fire_commands_resolve_to_lazy_regions_under_the_fill_caps() {
     assert_eq!(
         intents,
         [
-            Intent::Source(WATER),
+            Intent::Source(water),
             Intent::RemoveSource,
             Intent::Ignite,
             Intent::Extinguish
@@ -144,11 +148,12 @@ fn a_source_names_a_fluid_the_tables_hold() {
             "{material}"
         );
     }
-    tables.register_fluid(oil, FluidDef::WATER).unwrap();
+    tables.register_fluid(oil, WATER_FLUID).unwrap();
     assert!(place(&tables, oil).is_ok());
 }
 
 fn edits() -> Vec<EditEvent> {
+    let water = watered().1;
     let at = [1.0, 2.0, 3.0];
     vec![
         // Placing stone into water: a solid Edit that the packed Voxel shows
@@ -159,31 +164,47 @@ fn edits() -> Vec<EditEvent> {
                 before: Voxel::AIR,
                 after: Voxel::cube(STONE),
             },
-            before: water(),
+            before: Voxel::cube(water),
             after: Voxel::cube(STONE),
         },
         // A source into a waterlogged stair: the packed Voxel stays a stair.
         EditEvent {
             at,
-            kind: EditKind::SourcePlaced(WATER),
+            kind: EditKind::SourcePlaced(water),
             before: Voxel::new(STONE, 2, 0),
             after: Voxel::new(STONE, 2, 0),
         },
         // A source into air is packed as a water cube.
         EditEvent {
             at,
-            kind: EditKind::SourcePlaced(WATER),
+            kind: EditKind::SourcePlaced(water),
             before: Voxel::AIR,
-            after: water(),
+            after: Voxel::cube(water),
         },
         EditEvent {
             at,
-            kind: EditKind::SourceRemoved(WATER),
-            before: water(),
+            kind: EditKind::SourceRemoved(water),
+            before: Voxel::cube(water),
             after: Voxel::AIR,
+        },
+        // Fire lives beside the Voxel: the packed Voxel stays the fuel.
+        EditEvent {
+            at,
+            kind: EditKind::Ignited(FUEL),
+            before: Voxel::cube(FUEL),
+            after: Voxel::cube(FUEL),
+        },
+        EditEvent {
+            at,
+            kind: EditKind::PutOut(FUEL),
+            before: Voxel::cube(FUEL),
+            after: Voxel::cube(FUEL),
         },
     ]
 }
+
+/// Any id: the Edit history is never checked against the tables.
+const FUEL: MaterialId = 9;
 
 /// The 0.1 echo guest counts what its projection reports: every solid Edit
 /// and the fluid Edits that changed the packed Voxel, and nothing else.
@@ -206,7 +227,7 @@ fn a_0_1_guest_sees_the_voxel_projection_of_player_edits() {
             .iter()
             .map(EditEvent::in_voxel_projection)
             .collect::<Vec<_>>(),
-        [true, false, true, true]
+        [true, false, true, true, false, false]
     );
 }
 
@@ -222,12 +243,42 @@ fn a_0_2_guest_sees_solid_and_fluid_intents_apart() {
     let line = &log.drain().lines[0].message;
     assert!(line.contains("call=1"), "{line}");
     assert_eq!(line.matches("::Solid(").count(), 1, "{line}");
-    assert_eq!(line.matches("SourcePlaced(7)").count(), 2, "{line}");
-    assert_eq!(line.matches("SourceRemoved(7)").count(), 1, "{line}");
+    let water = watered().1;
+    let placed = format!("SourcePlaced({water})");
+    let removed = format!("SourceRemoved({water})");
+    assert_eq!(line.matches(&placed).count(), 2, "{line}");
+    assert_eq!(line.matches(&removed).count(), 1, "{line}");
     assert!(
         line.contains("before: Voxel { material: 0") && line.contains("after: Voxel { material: 1"),
         "the solid layer, not the packed water: {line}"
     );
+    assert!(
+        !line.contains("Ignited") && !line.contains("PutOut"),
+        "{line}"
+    );
+}
+
+/// The 0.3 guest is told of fire the player started and put out, by the
+/// fuel's Material, beside every Edit 0.2 sees.
+#[test]
+fn a_0_3_guest_sees_ignitions_and_put_outs_with_the_fuel() {
+    let rig = Rig::new();
+    let lake = rig.instance("lake", ModLimits::HOST).unwrap();
+    let log = lake.log();
+    let mut ctx = context(0);
+    ctx.edits = edits();
+    block_on(lake.tick(ctx)).unwrap();
+    let line = &log.drain().lines[0].message;
+    let water = watered().1;
+    for (case, count) in [
+        ("::Solid(".to_owned(), 1),
+        (format!("SourcePlaced({water})"), 2),
+        (format!("SourceRemoved({water})"), 1),
+        (format!("Ignited({FUEL})"), 1),
+        (format!("PutOut({FUEL})"), 1),
+    ] {
+        assert_eq!(line.matches(&case).count(), count, "{case}: {line}");
+    }
 }
 
 /// Commands from a 0.2 guest arrive as the native ones they name.
@@ -275,10 +326,10 @@ fn registered() -> crate::Registered {
     };
     crate::Registered {
         materials: vec![
-            row("core:water", 7),
             row("fluids:slime", 8),
             row("fluids:wood", 9),
             row("fluids:ash", 10),
+            row("fluids:brine", 11),
         ],
         shapes: vec![row("core:cube", 0)],
     }

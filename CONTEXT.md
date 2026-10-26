@@ -23,11 +23,12 @@ post-process settings. The equivalent of a Minecraft shaderpack.
 requested limits; marks whether it is a Game.
 
 **Contract line** — one incompatible version of the WIT contract a Mod is built
-against, `0.1` or `0.2`. Patches within a line stay compatible; a closed record
-or variant that grows needs a new line.
+against, `0.1`, `0.2` or `0.3`. Patches within a line stay compatible; a closed
+record or variant that grows needs a new line.
 
 **Adapter** — the host's translation of a component built against an older
-contract line to and from the current one, so it keeps loading unchanged.
+contract line to and from the next one, chained up to the current one, so it
+keeps loading unchanged.
 
 **Declaration** — the content a Mod supplies when loaded: Materials, Shapes,
 appearance, fluids, reactions, combustion and, for a Game, World parameters.
@@ -94,8 +95,9 @@ Sized in metres, so it is the same Cave at any Voxel size. Where one breaks the
 surface it has a **mouth**, and sky light can enter there.
 
 **Water level** — the height in metres up to which World generation fills the
-open air above the ground with water. One level for the whole World, so a valley
-below it is a lake; a Cave is never filled.
+open air above the ground with the Game's lake fluid, any fluid it declared. One
+level for the whole World, so a valley below it is a lake; a Cave is never
+filled. A Game that names no lake fluid, and a World with no Game, have none.
 
 **Light level** — how much light reaches a Voxel, from 0 to 15. The one quantity
 in the engine that is **dimensionless**: a count of attenuation steps, not a
@@ -181,10 +183,11 @@ either layer alone.
 
 **Fluid** — a Material that flows, with a row of behaviour in metres and
 seconds: reach, sideways, downward and recession rates, reset drop, whether it
-waterlogs or extinguishes, and its heat. Water is built in; a Mod declares the
-rest. A Voxel holds at most one fluid Material.
+waterlogs or extinguishes, and its heat. None is built in: water is a Game's
+Material like lava, so a World with no Game has no fluid. A Voxel holds at most
+one fluid Material.
 
-**Source** — fluid that stays: generated water, and fluid a player or a Mod
+**Source** — fluid that stays: generated lake fluid, and fluid a player or a Mod
 places. It feeds flow without losing volume, and only an Edit, a Command or a
 reaction removes it. Flow never becomes one.
 
@@ -259,7 +262,7 @@ Chunks below it.
 **Child** — one of the eight finer Chunks a Coarse Chunk is derived from:
 generated, or held and changed and read with its Overlay.
 
-**Waterline** — the height below which packed water at level 1 is lake water
+**Waterline** — the height below which packed lake fluid at level 1 is a lake
 generation could have made; any other fluid there is dynamic.
 
 **Emitter bound** — how many changes that start or stop block light, such as

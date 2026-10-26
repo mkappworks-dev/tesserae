@@ -1,11 +1,11 @@
-//! A fly camera: WASD to move, mouse to look, shift to sprint, scroll to change
-//! speed, R to return to the spawn point, Esc to release the cursor.
+//! A fly camera: WASD to move, mouse to look, shift to sprint, `-` and `=` to
+//! change speed, R to return to the spawn point, Esc to release the cursor.
 //!
 //! Hand-rolled rather than a dependency so the Client's one piece of input
 //! handling stays small enough to read, and so it is already expressed in
 //! metres per second when the player controller replaces it.
 
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::f32::consts::FRAC_PI_2;
@@ -20,9 +20,9 @@ const PITCH_LIMIT: f32 = FRAC_PI_2 - 1e-3;
 /// enough to keep up once streaming exists.
 const SPEED_RANGE: std::ops::RangeInclusive<f32> = 0.5..=64.0;
 
-/// Multiplier per scroll line, so the range above crosses in about fifty
-/// notches regardless of where in it you start.
-const SPEED_PER_NOTCH: f32 = 1.1;
+/// Multiplier per press, so the range above crosses in a dozen presses
+/// regardless of where in it you start.
+const SPEED_PER_PRESS: f32 = 1.5;
 
 /// The Player's camera. `With<Camera3d>` also matches the coarse-level cameras,
 /// so anything that means "the camera" filters by this.
@@ -78,7 +78,15 @@ pub struct CameraHome(pub Transform);
 struct CursorHint;
 
 pub(super) fn plugin(app: &mut App) {
-    let input = (grab_cursor, show_hint, reset, look, adjust_speed, fly).chain();
+    let input = (
+        grab_cursor.run_if(super::menu::closed),
+        show_hint,
+        reset,
+        look,
+        adjust_speed,
+        fly,
+    )
+        .chain();
     #[cfg(feature = "dev")]
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
     app.add_systems(Startup, spawn_hint)
@@ -137,26 +145,23 @@ fn reset(
     fly.pitch = restored.pitch;
 }
 
-/// Scroll changes how fast you fly rather than the field of view: in a fly
-/// camera the distance to what you are looking at is the thing you actually
-/// want to control, and W/S already do that. Multiplicative so a notch means
-/// the same thing when crawling along a face and when crossing the grid.
+/// Keys change how fast you fly rather than the field of view: in a fly camera
+/// the distance to what you are looking at is the thing you actually want to
+/// control, and W/S already do that. The scroll wheel picks a hotbar slot.
 fn adjust_speed(
-    scroll: Res<AccumulatedMouseScroll>,
+    keys: Res<ButtonInput<KeyCode>>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     mut fly: Single<&mut FlyCamera>,
 ) {
-    if cursor.grab_mode == CursorGrabMode::None || scroll.delta.y == 0.0 {
+    if cursor.grab_mode == CursorGrabMode::None {
         return;
     }
-    // A trackpad reports pixels and a wheel reports lines; without this a
-    // trackpad flick would cross the whole range in one gesture.
-    let notches = match scroll.unit {
-        MouseScrollUnit::Line => scroll.delta.y,
-        MouseScrollUnit::Pixel => scroll.delta.y / 16.0,
-    };
-    fly.speed =
-        (fly.speed * SPEED_PER_NOTCH.powf(notches)).clamp(*SPEED_RANGE.start(), *SPEED_RANGE.end());
+    let presses =
+        keys.just_pressed(KeyCode::Equal) as i32 - keys.just_pressed(KeyCode::Minus) as i32;
+    if presses != 0 {
+        fly.speed = (fly.speed * SPEED_PER_PRESS.powi(presses))
+            .clamp(*SPEED_RANGE.start(), *SPEED_RANGE.end());
+    }
 }
 
 fn grab_cursor(
@@ -174,7 +179,7 @@ fn grab_cursor(
     }
 }
 
-fn look(
+pub(super) fn look(
     motion: Res<AccumulatedMouseMotion>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<(&mut Transform, &mut FlyCamera)>,

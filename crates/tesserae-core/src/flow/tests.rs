@@ -1,7 +1,26 @@
 use super::*;
 use crate::agenda::Agenda;
 use crate::fluid::FluidDef;
-use crate::material::{STONE, WATER};
+use crate::material::STONE;
+use crate::testgen::{WATER_FLUID, register_water};
+use std::sync::OnceLock;
+
+fn fixture() -> &'static (Tables, MaterialId) {
+    static FIXTURE: OnceLock<(Tables, MaterialId)> = OnceLock::new();
+    FIXTURE.get_or_init(|| {
+        let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
+        (tables, water)
+    })
+}
+
+fn tables() -> Tables {
+    fixture().0.clone()
+}
+
+fn water() -> MaterialId {
+    fixture().1
+}
 
 /// A box of held cells, air unless built otherwise; outside it is unknown.
 struct Grid {
@@ -44,7 +63,7 @@ const UNLIMITED: Quota = Quota {
 
 impl Sim {
     fn new(voxel_m: f32, min: Cell, max: Cell) -> Self {
-        Self::with_tables(voxel_m, min, max, Tables::builtin())
+        Self::with_tables(voxel_m, min, max, tables())
     }
 
     fn with_tables(voxel_m: f32, min: Cell, max: Cell, tables: Tables) -> Self {
@@ -161,7 +180,7 @@ impl Sim {
         self.edit(
             at,
             Occupants {
-                fluid: Some(Fluid::source(WATER)),
+                fluid: Some(Fluid::source(water())),
                 ..here
             },
         );
@@ -331,14 +350,15 @@ fn wet_length_m(sim: &Sim, y: i32) -> f32 {
 
 #[test]
 fn the_scale_turns_metres_and_metres_per_second_into_voxels_and_steps() {
-    let tables = Tables::builtin();
+    let tables = tables();
+    let rank = tables.fluids.rank(water()).unwrap();
     for (v, reach, reset, sideways, downward) in [
         (1.0, 7, 8, 16, 8),
         (0.5, 14, 16, 8, 4),
         (0.25, 28, 32, 4, 2),
     ] {
-        let s = *FlowScale::new(&tables, v).get(WATER).unwrap();
-        assert_eq!((s.reach, s.reset, s.rank), (reach, reset, 0), "{v} m");
+        let s = *FlowScale::new(&tables, v).get(water()).unwrap();
+        assert_eq!((s.reach, s.reset, s.rank), (reach, reset, rank), "{v} m");
         assert_eq!(
             [s.sideways, s.downward, s.recession].map(Pace::steps),
             [sideways, downward, sideways],
@@ -392,7 +412,7 @@ fn the_front_advances_at_the_declared_rate_at_every_voxel_size() {
         for seconds in [0.25, 0.5, 1.0, 1.5] {
             sim.run_seconds(seconds - elapsed);
             elapsed = seconds;
-            let expected = (FluidDef::WATER.sideways_m_per_s as f64 * seconds) as f32;
+            let expected = (WATER_FLUID.sideways_m_per_s as f64 * seconds) as f32;
             let got = wet_length_m(&sim, 1);
             assert!(
                 (got - expected).abs() <= v + 1e-4,
@@ -412,7 +432,7 @@ fn removing_the_source_recedes_every_flowing_voxel_at_the_recession_rate() {
         sim.settle();
         sim.remove_fluid([0, 1, 0]);
         // Halfway through the time 7 m takes at the rate, some is still left.
-        let rate = FluidDef::WATER.recession_m_per_s as f64;
+        let rate = WATER_FLUID.recession_m_per_s as f64;
         sim.run_seconds(3.5 / rate);
         let left = wet_length_m(&sim, 1);
         assert!(left > 0.0, "{v} m: receded too fast");
@@ -421,7 +441,7 @@ fn removing_the_source_recedes_every_flowing_voxel_at_the_recession_rate() {
         let total_s = (3.5 / rate) + steps as f64 * STEP_S;
         assert!(
             (total_s - 7.0 / rate).abs()
-                <= sim.scale.get(WATER).unwrap().recession.steps() as f64 * STEP_S,
+                <= sim.scale.get(water()).unwrap().recession.steps() as f64 * STEP_S,
             "{v} m: receded in {total_s} s"
         );
     }
@@ -612,7 +632,7 @@ fn blocking_a_stream_dries_downstream_and_keeps_the_source() {
     sim.settle();
     sim.put([2, 1, 0], stone());
     sim.settle();
-    assert_eq!(sim.fluid([0, 1, 0]), Some(Fluid::source(WATER)));
+    assert_eq!(sim.fluid([0, 1, 0]), Some(Fluid::source(water())));
     assert!(sim.fluid([1, 1, 0]).is_some(), "still fed");
     for x in 3..=8 {
         assert!(sim.fluid([x, 1, 0]).is_none(), "{x} still wet");
@@ -720,11 +740,9 @@ fn solids_block_flow_and_a_source_placed_on_flow_is_the_only_new_source() {
 #[test]
 fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     use crate::worldgen::{Worldgen, WorldgenParams};
-    let generator = Worldgen::new(7, 1.0, WorldgenParams::default());
-    let level = generator
-        .water_level_m()
-        .expect("the default World has water") as i32;
-    let tables = Tables::builtin();
+    let generator = Worldgen::new(7, 1.0, WorldgenParams::default().with_default_lake(water()));
+    let level = generator.water().expect("the World has a lake").level_m as i32;
+    let tables = tables();
     let size = CHUNK_SIZE as i32;
     // A lake Voxel over a bed at least five Voxels deep, in the generator's own
     // output near the origin.
@@ -740,7 +758,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
             for x in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
                     for y in 5..CHUNK_SIZE - 1 {
-                        let wet = voxels.get(x, y + 1, z) == Voxel::cube(WATER);
+                        let wet = voxels.get(x, y + 1, z) == Voxel::cube(water());
                         if wet && (y - 5..=y).all(|y| solid(y, x, z)) {
                             let at = [
                                 c[0] * size + x as i32,
@@ -772,7 +790,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     let above_bed = [bed[0], bed[1] + 1, bed[2]];
     assert_eq!(
         read(&region, above_bed).fluid,
-        Some(Fluid::source(WATER)),
+        Some(Fluid::source(water())),
         "generated water reads as a source"
     );
     let write = |region: &mut Region, at: Cell, occupants: Occupants| {
@@ -1038,7 +1056,7 @@ mod waterlogging {
     /// supply.
     #[test]
     fn a_stair_fills_from_above_keeps_its_solid_and_recedes() {
-        let mut sim = lane(Tables::builtin(), 6);
+        let mut sim = lane(tables(), 6);
         sim.build([2, 1, 0], stair(1));
         sim.place_source([-2, 1, 0]);
         sim.settle();
@@ -1069,7 +1087,7 @@ mod waterlogging {
     /// opening do pass.
     #[test]
     fn sealed_and_jointly_sealed_faces_pass_nothing() {
-        let tables = Tables::builtin();
+        let tables = tables();
         let back_to_west = (0..4)
             .map(stair)
             .find(|&v| tables.shapes.seals(v, NEG_X))
@@ -1084,7 +1102,7 @@ mod waterlogging {
             (back_to_west, false),
             (open_to_west, true),
         ] {
-            let mut sim = lane(Tables::builtin(), 4);
+            let mut sim = lane(tables.clone(), 4);
             sim.build([0, 1, 0], slab(crate::mesh::POS_Y));
             sim.build([1, 1, 0], neighbour);
             sim.build([-1, 1, 0], stone());
@@ -1108,7 +1126,7 @@ mod waterlogging {
     /// and the void across the partition stays dry though its Voxel is wet.
     #[test]
     fn a_partition_keeps_the_far_void_and_beyond_dry() {
-        let mut tables = Tables::builtin();
+        let mut tables = tables();
         let wall = tables
             .shapes
             .register(ShapeDef {
@@ -1131,7 +1149,7 @@ mod waterlogging {
     /// to the other and, with the source gone, a loop through them dries.
     #[test]
     fn separate_voids_keep_separate_state_and_dry_without_supply() {
-        let mut tables = Tables::builtin();
+        let mut tables = tables();
         let shelf = tables
             .shapes
             .register(ShapeDef {
@@ -1230,7 +1248,7 @@ mod waterlogging {
     /// opens the passage.
     #[test]
     fn a_connected_arm_closes_and_opens_passage() {
-        let mut tables = Tables::builtin();
+        let mut tables = tables();
         let b = NodeBox::new;
         let window = tables
             .shapes
@@ -1308,7 +1326,7 @@ mod waterlogging {
     #[test]
     fn waterlogged_flow_is_the_same_under_any_division() {
         let build = || {
-            let mut sim = lane(Tables::builtin(), 8);
+            let mut sim = lane(tables(), 8);
             for x in 1..=5 {
                 sim.build([x, 1, 0], slab(crate::mesh::POS_Y));
             }
@@ -1379,7 +1397,7 @@ mod declared {
 
     /// Water's built-in table plus `defs`, registered in order.
     pub(super) fn with(defs: &[FluidDef]) -> (Tables, Vec<MaterialId>) {
-        let mut tables = Tables::builtin();
+        let mut tables = tables();
         let ids = defs
             .iter()
             .map(|def| {
@@ -1487,9 +1505,9 @@ mod declared {
     #[test]
     fn each_declared_fluid_spreads_its_own_metres_at_its_own_rate() {
         for v in SIZES {
-            for (def, material) in [(FluidDef::WATER, None), (LAVA, Some(0)), (SLIME, Some(1))] {
+            for (def, material) in [(WATER_FLUID, None), (LAVA, Some(0)), (SLIME, Some(1))] {
                 let (tables, ids) = with(&[LAVA, SLIME]);
-                let material = material.map_or(WATER, |i| ids[i]);
+                let material = material.map_or(water(), |i| ids[i]);
                 let mut sim = corridor_of(tables, v, 8.0);
                 source(&mut sim, [0, 1, 0], material);
                 sim.run_seconds(1.0);
@@ -1516,7 +1534,7 @@ mod declared {
     /// neither displaces the other's source.
     #[test]
     fn an_equal_claim_goes_to_the_earlier_registered_fluid_and_nothing_mixes() {
-        let mut tables = Tables::builtin();
+        let mut tables = tables();
         let later = liquid(&mut tables, 0);
         let earlier = liquid(&mut tables, 0);
         assert!(later < earlier);
@@ -1549,7 +1567,7 @@ mod declared {
             SHAPE_STAIR,
             Orientation::new(crate::mesh::POS_Y, 1).bits(),
         );
-        for (material, fills) in [(WATER, true), (lava, false)] {
+        for (material, fills) in [(water(), true), (lava, false)] {
             let mut sim = corridor_of(tables.clone(), 1.0, 6.0);
             sim.build([2, 1, 0], stair);
             source(&mut sim, [2, 2, 0], material);
@@ -1564,7 +1582,7 @@ mod declared {
         };
         assert_eq!(pool.place_solid(stair, &tables).fluid, None);
         let water = Occupants {
-            fluid: Some(Fluid::source(WATER)),
+            fluid: Some(Fluid::source(water())),
             ..pool
         };
         assert!(water.place_solid(stair, &tables).fluid.is_some());
@@ -1623,7 +1641,7 @@ mod reactions {
     fn cooling() -> (Tables, MaterialId) {
         let (mut tables, ids) = with(&[LAVA]);
         tables
-            .register_reaction(rule(ids[0], WATER, Some(STONE)))
+            .register_reaction(rule(ids[0], water(), Some(STONE)))
             .unwrap();
         (tables, ids[0])
     }
@@ -1655,14 +1673,14 @@ mod reactions {
                 let mut sim = corridor_of(tables, v, 6.0);
                 let end = sim.cells(4.0);
                 source(&mut sim, [-flip * end, 1, 0], lava);
-                source(&mut sim, [flip * end, 1, 0], WATER);
+                source(&mut sim, [flip * end, 1, 0], water());
                 sim.settle();
                 let stones: Vec<i32> = (-end..=end)
                     .filter(|&x| sim.occupants([x, 1, 0]).solid == stone())
                     .collect();
                 assert!(!stones.is_empty(), "{v} m {flip}: nothing reacted");
                 assert!(
-                    !touching(&sim, lava, WATER),
+                    !touching(&sim, lava, water()),
                     "{v} m {flip}: they still touch"
                 );
                 assert!(sim.fluid([-flip * end, 1, 0]).unwrap().source);
@@ -1674,7 +1692,7 @@ mod reactions {
                     let m = material(&sim, [x, 1, 0]);
                     if m.is_some() {
                         assert_eq!(
-                            m == Some(WATER),
+                            m == Some(water()),
                             (x - wall) * flip > 0,
                             "{v} m {flip}: {m:?} at {x}"
                         );
@@ -1790,7 +1808,9 @@ mod reactions {
     /// A rule consuming slime touching water, with no product.
     fn dissolving() -> (Tables, MaterialId) {
         let (mut tables, ids) = with(&[SLIME]);
-        tables.register_reaction(rule(ids[0], WATER, None)).unwrap();
+        tables
+            .register_reaction(rule(ids[0], water(), None))
+            .unwrap();
         (tables, ids[0])
     }
 
@@ -1818,7 +1838,7 @@ mod reactions {
             source(&mut sim, [2, 1, 0], slime);
             sim.settle();
             let here = sim.occupants([1, 1, 0]);
-            assert_eq!(here.fluid.map(|f| f.material), Some(WATER), "{walled}");
+            assert_eq!(here.fluid.map(|f| f.material), Some(water()), "{walled}");
             if walled {
                 assert!(
                     !here.fluid.unwrap().level(1).is_wet(),
@@ -1830,11 +1850,11 @@ mod reactions {
                 );
                 assert_eq!(sim.work.reacted, 0);
             } else {
-                assert_eq!(material(&sim, [2, 1, 0]), Some(WATER), "the slime went");
+                assert_eq!(material(&sim, [2, 1, 0]), Some(water()), "the slime went");
                 assert!(
                     sim.wet()
                         .iter()
-                        .all(|&at| material(&sim, at) == Some(WATER))
+                        .all(|&at| material(&sim, at) == Some(water()))
                 );
             }
         }
@@ -1879,7 +1899,7 @@ mod reactions {
         let slime = ids[0];
         let ash = solid(&mut tables);
         tables
-            .register_reaction(rule(WATER, slime, Some(ash)))
+            .register_reaction(rule(water(), slime, Some(ash)))
             .unwrap();
         let stair = (0..4)
             .map(|turn| Voxel::new(STONE, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits()))
@@ -1895,7 +1915,7 @@ mod reactions {
         sim.settle();
         let wet_stair = sim.occupants([0, 1, 0]);
         assert_eq!(wet_stair.solid, stair);
-        assert_eq!(wet_stair.fluid, Some(Fluid::source(WATER)));
+        assert_eq!(wet_stair.fluid, Some(Fluid::source(water())));
         assert_eq!(sim.fluid([1, 1, 0]), Some(Fluid::source(slime)));
         assert!(sim.work.blocked > 0);
         let work = sim.work;
@@ -1948,7 +1968,7 @@ mod reactions {
     fn a_voxel_beside_unknown_terrain_does_not_react() {
         let (tables, lava) = cooling();
         let mut sim = Sim::with_tables(1.0, [-1, 0, 0], [0, 0, 0], tables);
-        source(&mut sim, [-1, 0, 0], WATER);
+        source(&mut sim, [-1, 0, 0], water());
         source(&mut sim, [0, 0, 0], lava);
         sim.settle();
         assert_eq!(
@@ -1974,7 +1994,7 @@ mod reactions {
         sim.wake_all();
         sim.settle();
         assert_eq!(sim.occupants([0, 0, 0]).solid, stone());
-        assert_eq!(sim.fluid([-1, 0, 0]), Some(Fluid::source(WATER)));
+        assert_eq!(sim.fluid([-1, 0, 0]), Some(Fluid::source(water())));
     }
 
     /// Reactions and flow divided among workers, in any order, change

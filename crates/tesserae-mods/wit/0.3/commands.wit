@@ -1,0 +1,51 @@
+package tesserae:mods@0.3.0;
+
+/// What a Mod asks the World to do, in batches returned from `tick`.
+interface commands {
+    use types.{vec3, box-m, voxel};
+
+    /// One Voxel to write. The engine floors `at` to the Voxel containing it and
+    /// rejects the whole batch if the voxel is air, unknown, malformed, or a
+    /// fluid: fluid goes in with `place-sources`.
+    record placement {
+        at: vec3,
+        voxel: voxel,
+    }
+
+    /// Fill a region with one solid Voxel, or with air to break what is there.
+    /// The engine rejects the batch when the region covers more Voxels than its
+    /// cap at this World's Voxel size.
+    record fill {
+        region: box-m,
+        voxel: voxel,
+    }
+
+    /// Sources of one fluid in every Voxel of a region whose lower corner is
+    /// inside it. A Voxel takes one if it holds no other fluid and no source,
+    /// and either has no solid or a partial Shape the fluid waterlogs; flowing
+    /// fluid of the same Material becomes the source.
+    record source-fill {
+        region: box-m,
+        /// A fluid Material's id, as `start` was told.
+        material: u16,
+    }
+
+    /// Closed in 0.3: a new case is a breaking change. The engine validates the
+    /// whole batch before queueing any of it and applies it through the same
+    /// path as a player's Edit, a budget per tick. Region cases are walked a
+    /// Voxel at a time and count against the same caps as `fill`; a Voxel the
+    /// case does not apply to counts as rejected in the next report.
+    variant command {
+        fill(fill),
+        place(list<placement>),
+        place-sources(source-fill),
+        /// Takes away the sources in a region, leaving the solids they share
+        /// Voxels with; flow they fed recedes.
+        remove-sources(box-m),
+        /// Sets alight the declared fuel in a region, where no extinguishing
+        /// fluid protects it.
+        ignite(box-m),
+        /// Puts out what burns in a region.
+        extinguish(box-m),
+    }
+}

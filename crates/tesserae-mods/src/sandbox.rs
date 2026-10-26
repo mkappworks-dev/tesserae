@@ -13,12 +13,12 @@ use wasmtime::component::{Component, Linker};
 use wasmtime::{Engine, Store, Trap};
 use wasmtime_wasi::runtime::with_ambient_tokio_runtime;
 
-use crate::adapt::Line;
+use crate::adapt::{Line, v02 as adapt_v02};
 use crate::bindings::exports::tesserae::mods::guest;
 use crate::bindings::exports::tesserae::mods::guest::{Registered, WorldInfo};
 use crate::bindings::tesserae::mods::commands;
 use crate::bindings::tesserae::mods::content::Declaration;
-use crate::bindings::{Mod, v01};
+use crate::bindings::{Mod, v01, v02};
 use crate::command::{Command, MAX_VOXELS_PER_CALL};
 use crate::context::TickContext;
 use crate::host::HostState;
@@ -56,7 +56,8 @@ impl std::error::Error for ModFault {}
 /// The generated guest of whichever line the component exports.
 enum Guest {
     V01(v01::Mod),
-    V02(Mod),
+    V02(v02::Mod),
+    V03(Mod),
 }
 
 pub struct ModInstance {
@@ -86,7 +87,7 @@ impl ModInstance {
         let denied = store.data().denied();
         // A component of no line this build hosts fails on the Linker's own
         // account of what it imports.
-        let line = Line::of(engine, component).unwrap_or(Line::V02);
+        let line = Line::of(engine, component).unwrap_or(Line::V03);
         // Instantiation runs the guest's initialisers, so it gets the same bounds as a call.
         let wall = limits.max_call_wall;
         let guest = match line {
@@ -99,6 +100,14 @@ impl ModInstance {
                 .await?,
             ),
             Line::V02 => Guest::V02(
+                guarded(
+                    wall,
+                    &denied,
+                    v02::Mod::instantiate_async(&mut store, component, linker),
+                )
+                .await?,
+            ),
+            Line::V03 => Guest::V03(
                 guarded(
                     wall,
                     &denied,
@@ -123,20 +132,28 @@ impl ModInstance {
         match self.guest {
             Guest::V01(_) => Line::V01,
             Guest::V02(_) => Line::V02,
+            Guest::V03(_) => Line::V03,
         }
     }
 
-    /// A 0.1 Declaration comes back as the 0.2 one it means.
+    /// An older line's Declaration comes back as the 0.3 one it means; what
+    /// it cannot mean is warned of in the Mod's log.
     pub async fn declare(mut self) -> Result<(ModInstance, Declaration), ModFault> {
         self.refuel()?;
         let denied = self.store.data().denied();
         let wall = self.limits.max_call_wall;
+        let log = self.log();
         let declaration = match &self.guest {
             Guest::V01(m) => {
                 let call = m.tesserae_mods_guest().call_declare(&mut self.store);
-                guarded(wall, &denied, call).await?.into()
+                let declaration = guarded(wall, &denied, call).await?.into();
+                adapt_v02::declaration(declaration, &log)
             }
             Guest::V02(m) => {
+                let call = m.tesserae_mods_guest().call_declare(&mut self.store);
+                adapt_v02::declaration(guarded(wall, &denied, call).await?, &log)
+            }
+            Guest::V03(m) => {
                 let call = m.tesserae_mods_guest().call_declare(&mut self.store);
                 guarded(wall, &denied, call).await?
             }
@@ -154,13 +171,22 @@ impl ModInstance {
         let wall = self.limits.max_call_wall;
         match &self.guest {
             Guest::V01(m) => {
+                let ids = v02::exports::tesserae::mods::guest::Registered::from(&ids);
                 let ids = v01::exports::tesserae::mods::guest::Registered::from(&ids);
+                let world = v02::exports::tesserae::mods::guest::WorldInfo::from(world);
                 let call = m
                     .tesserae_mods_guest()
                     .call_start(&mut self.store, world.into(), &ids);
                 guarded(wall, &denied, call).await?;
             }
             Guest::V02(m) => {
+                let ids = v02::exports::tesserae::mods::guest::Registered::from(&ids);
+                let call = m
+                    .tesserae_mods_guest()
+                    .call_start(&mut self.store, world.into(), &ids);
+                guarded(wall, &denied, call).await?;
+            }
+            Guest::V03(m) => {
                 let call = m
                     .tesserae_mods_guest()
                     .call_start(&mut self.store, world, &ids);
@@ -188,9 +214,28 @@ impl ModInstance {
                     v01::tesserae::mods::commands::Command::Place(p) => p.len(),
                     v01::tesserae::mods::commands::Command::Fill(_) => 0,
                 })?;
-                batch.into_iter().map(Command::from).collect()
+                batch
+                    .into_iter()
+                    .map(|c| {
+                        let c = v02::tesserae::mods::commands::Command::from(c);
+                        Command::from(commands::Command::from(c))
+                    })
+                    .collect()
             }
             Guest::V02(m) => {
+                let context = guest::TickContext::from(context).into();
+                let call = m.tesserae_mods_guest().call_tick(&mut self.store, &context);
+                let batch = guarded(wall, &denied, call).await?;
+                check_size_with(&batch, |c| match c {
+                    v02::tesserae::mods::commands::Command::Place(p) => p.len(),
+                    _ => 0,
+                })?;
+                batch
+                    .into_iter()
+                    .map(|c| Command::from(commands::Command::from(c)))
+                    .collect()
+            }
+            Guest::V03(m) => {
                 let context = guest::TickContext::from(context);
                 let call = m.tesserae_mods_guest().call_tick(&mut self.store, &context);
                 let batch = guarded(wall, &denied, call).await?;

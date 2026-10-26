@@ -131,26 +131,39 @@ cargo run -p tesserae --features dev
 
 `--features dev` adds shader hot-reloading; without it the command still runs,
 and a shader edit then needs a restart. A window opens on a generated World you
-can fly around and edit. No Game is loaded unless you pass one; see
-[Running the demo Game](#running-the-demo-game).
+can fly around and edit. Once the guests are built that World is the demo
+Game's; without a Game it is dry, with no fluid, lakes or anything that burns.
+See [Running the demo Game](#running-the-demo-game).
 
 **Controls:**
 
-| key                   | does                                                           |
-| --------------------- | -------------------------------------------------------------- |
-| click                 | grab the cursor — mouse look does nothing until you do         |
-| `Esc`                 | release the cursor                                             |
-| mouse                 | look                                                           |
-| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away          |
-| `Space` / `Left Ctrl` | up and down                                                    |
-| `Shift`               | sprint, 5x                                                     |
-| scroll                | movement speed, 0.5 to 64 m/s                                  |
-| `R`                   | back to the spawn point                                        |
-| left click            | break the block under the crosshair (cursor grabbed)           |
-| right click           | place the held block against the face you are aimed at         |
-| `1` to `8`            | hold stone, slab, stair, post, lantern, glass, leaves or water |
-| `9`                   | hold a stone fence (`dev` builds only)                         |
-| `Q` / `E`             | turn the held shape a quarter / flip which way is up           |
+| key                   | does                                                                        |
+| --------------------- | --------------------------------------------------------------------------- |
+| click, cursor free    | grab the cursor — mouse look does nothing until you do; it edits nothing    |
+| `Esc`                 | release the cursor, closing the menu if it is open                          |
+| mouse                 | look                                                                        |
+| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away                       |
+| `Space` / `Left Ctrl` | up and down                                                                 |
+| `Shift`               | sprint, 5x                                                                  |
+| `-` / `=`             | movement speed down / up, 0.5 to 64 m/s                                     |
+| `R`                   | back to the spawn point                                                     |
+| `1` to `9`, scroll    | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps |
+| click                 | place what the slot holds: a block, a fluid source, or fire on fuel         |
+| right click           | break the block, remove the source, or put the fire out                     |
+| `Q` / `E`             | turn the held shape a quarter / flip which way is up                        |
+| `Tab`                 | open or close the menu that fills the slot; closing grabs the cursor        |
+
+The hotbar starts with stone, a stone slab, stair and post, lantern, glass and
+leaves, then the Game's lake fluid (or its first declared fluid) and fire when
+anything burns. A slot left over is empty: a click does nothing and a right
+click breaks. A right click is the secondary button, a two-finger tap on a Mac
+trackpad. The corner of the screen names the held slot and what each button does
+with it.
+
+The menu lists every solid Material, then the Shapes of the one chosen, every
+fluid, and fire when anything burns, each by its full name beside its colour.
+While it is open the cursor is free: the mouse does not look around and a click
+edits nothing. Clicking a slot in the menu's bar selects it.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.
@@ -220,10 +233,11 @@ the benches but does not measure them — a regression is a human judgement.
 Install the guest target with `rustup target add wasm32-wasip2`, then run
 `./scripts/build-guests` from the repository root to build the independent test
 guests and MIT demo. The demo component and Manifest are copied to
-`games/demo/dist/demo/`; [run it](#running-the-demo-game) with `--trust-all` for
-an explicit unattended trust grant, or omit `--trust-all` to review the terminal
-prompt. Guest edits need a rebuild and World reopen; runtime Mod reload is
-deferred.
+`games/demo/dist/demo/`, where `cargo dev` [runs it](#running-the-demo-game)
+with no flags, trusted for that run only. Any other directory, given with
+`--mods`, gets the normal Trust check: `--trust-all` for an explicit unattended
+grant, or omit it to review the terminal prompt. Guest edits need a rebuild and
+World reopen; runtime Mod reload is deferred.
 
 The host API is deliberately **batched**: region operations and a command queue,
 not per-voxel calls. Crossing the WASM boundary copies, so call frequency — not
@@ -235,17 +249,27 @@ before adding a host function.
 ```bash
 rustup target add wasm32-wasip2   # once
 ./scripts/build-guests            # after every change under games/
-cargo dev -- --mods games/demo/dist --trust-all
+cargo dev
 ```
 
-`cargo dev` keeps the `dev` tools; `cargo run -p tesserae -- …` runs the same
-Game without them. In a `dev` build, `TESSERAE_VOXEL_SIZE_M` opens the World at
-1.0 (the default), 0.5 or 0.25 m, and the demo builds the same scenes in metres
-at each:
+Once the guests are built, `cargo dev` loads the demo from `games/demo/dist` on
+its own and trusts it for the run, with no prompt and no Trust record; before
+that it opens a World with no Game and logs that `./scripts/build-guests` must
+be run. A directory named by `--mods` or `TESSERAE_MODS_DIR` replaces the demo
+and goes through the normal Trust check. Only a `dev` build does this:
+`cargo run -p tesserae -- --mods games/demo/dist` runs the same Game without the
+`dev` tools, with the full Trust check. In a `dev` build,
+`TESSERAE_VOXEL_SIZE_M` opens the World at 1.0 (the default), 0.5 or 0.25 m, and
+the demo builds the same scenes in metres at each:
 
 ```bash
-TESSERAE_VOXEL_SIZE_M=0.25 cargo dev -- --mods games/demo/dist --trust-all
+TESSERAE_VOXEL_SIZE_M=0.25 cargo dev
 ```
+
+The water is the demo's own, `demo:water`, declared with its fluid row and
+colour as its lava and mud are: it fills the demo World's lakes, which stand at
+25.5 m in valleys well away from the scenes, and it is the water every scene
+pours.
 
 On its first tick the demo builds its scenes in a row along x, 7 m from spawn
 toward −z and below the Eye; look down to find them. Once the build has landed:

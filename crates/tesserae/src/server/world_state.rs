@@ -422,7 +422,7 @@ impl SpawnPoint {
 mod tests {
     use super::*;
     use tesserae_core::light::MAX_LIGHT;
-    use tesserae_core::material::WATER;
+    use tesserae_core::testgen::register_water;
     use tesserae_core::{Burning, CHUNK_SIZE, Fluid, Tables, relight, worldgen};
 
     #[test]
@@ -622,12 +622,13 @@ mod tests {
 
     #[test]
     fn the_store_reads_a_position_through_the_one_interpretation() {
+        let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
         let mut store = ChunkStore::default();
-        store.insert(ChunkCoord::new(0, 0, 0), Chunk::filled(Voxel::cube(WATER)));
-        let tables = Tables::builtin();
+        store.insert(ChunkCoord::new(0, 0, 0), Chunk::filled(Voxel::cube(water)));
         let read = store.occupants([5, 5, 5], &tables.fluids).expect("held");
         assert_eq!(read.solid, Voxel::AIR);
-        assert_eq!(read.fluid, Some(Fluid::source(WATER)));
+        assert_eq!(read.fluid, Some(Fluid::source(water)));
         assert_eq!(store.occupants([99, 0, 0], &tables.fluids), None);
     }
 

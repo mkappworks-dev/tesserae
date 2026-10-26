@@ -65,7 +65,7 @@ impl Load {
 }
 
 fn names(registry: &Registry, kind: Kind) -> Vec<&str> {
-    registry.names(kind).iter().map(String::as_str).collect()
+    registry.names(kind).map(|(_, name)| name).collect()
 }
 
 #[test]
@@ -81,7 +81,8 @@ fn two_mods_register_in_load_order_after_the_built_ins() {
     assert_eq!(load.registry.id_of(Kind::Shape, "a:s"), Some(4));
     assert_eq!(load.registry.id_of(Kind::Shape, "a:t"), Some(5));
     assert_eq!(load.registry.id_of(Kind::Shape, "b:u"), Some(6));
-    assert_eq!(load.registry.id_of(Kind::Material, "core:water"), Some(7));
+    assert_eq!(load.registry.id_of(Kind::Material, "core:leaves"), Some(6));
+    assert_eq!(load.registry.id_of(Kind::Material, "core:water"), None);
     assert_eq!(load.registry.id_of(Kind::Shape, "core:post"), Some(3));
     assert_eq!(load.tables.materials.len(), 11);
     assert_eq!(load.tables.shapes.len(), 7);
@@ -131,6 +132,35 @@ fn replay_fails_when_a_built_in_is_not_where_it_belongs() {
         Err(RegistryMismatch::BuiltinMoved {
             kind: Kind::Shape,
             id: 1
+        })
+    );
+}
+
+#[test]
+fn the_built_ins_are_ids_0_to_6_and_7_is_never_listed() {
+    let builtin = Registry::builtin();
+    assert_eq!(
+        builtin.names(Kind::Material).collect::<Vec<_>>(),
+        [
+            (0, "core:air"),
+            (1, "core:stone"),
+            (2, "core:dirt"),
+            (3, "core:grass"),
+            (4, "core:lantern"),
+            (5, "core:glass"),
+            (6, "core:leaves"),
+        ]
+    );
+    assert_eq!(builtin.len(Kind::Material), 8);
+    assert_eq!(builtin.id_of(Kind::Material, ""), None);
+
+    let mut saved = Registry::builtin();
+    saved.materials[7] = Some("a:x".into());
+    assert_eq!(
+        Registry::builtin().replay(&saved),
+        Err(RegistryMismatch::BuiltinMoved {
+            kind: Kind::Material,
+            id: 7
         })
     );
 }
@@ -333,7 +363,7 @@ fn a_bad_row_after_a_good_one_registers_nothing_of_its_names() {
     let mut load = Load::new();
     load.apply("a", declaring(&["ok", "Bad"], &[])).unwrap_err();
     assert_eq!(load.tables.materials.len(), 8);
-    assert_eq!(names(&load.registry, Kind::Material).len(), 8);
+    assert_eq!(names(&load.registry, Kind::Material).len(), 7);
 }
 
 #[test]
@@ -350,11 +380,11 @@ fn the_built_in_namespace_is_not_a_mods() {
 }
 
 fn world(caves: bool) -> content::WorldParams {
-    let mut params = WorldgenParams::default();
+    let mut params = crate::convert::engine_world_params();
     if !caves {
         params.caves = None;
     }
-    params.into()
+    params
 }
 
 #[test]
@@ -422,7 +452,7 @@ fn a_game_that_sets_nothing_keeps_the_engines_defaults() {
 #[test]
 fn invalid_world_parameters_are_a_load_error_naming_the_field() {
     type Edit = fn(&mut content::WorldParams);
-    let cases: [(Edit, &str); 6] = [
+    let cases: [(Edit, &str); 7] = [
         (|p| p.relief_m = f32::NAN, "relief_m"),
         (|p| p.feature_size_m = f32::INFINITY, "feature_size_m"),
         (|p| p.relief_m = -1.0, "relief_m"),
@@ -438,6 +468,15 @@ fn invalid_world_parameters_are_a_load_error_naming_the_field() {
                 })
             },
             "caves.radius_m",
+        ),
+        (
+            |p| {
+                p.water = Some(content::WaterParams {
+                    level_m: f32::NAN,
+                    material: "game:brine".into(),
+                })
+            },
+            "water.level_m",
         ),
     ];
     for (edit, field) in cases {
@@ -493,9 +532,8 @@ fn the_reach_is_checked_in_metres() {
 
 #[test]
 fn the_engines_default_world_converts_and_validates() {
-    let wit: content::WorldParams = WorldgenParams::default().into();
-    let back = WorldgenParams::from(wit);
-    assert_eq!(back, WorldgenParams::default());
+    let (back, lake) = crate::convert::world_params(crate::convert::engine_world_params());
+    assert_eq!((back, lake), (WorldgenParams::default(), None));
     assert_eq!(back.validate(), Ok(()));
 }
 

@@ -4,9 +4,9 @@ use super::*;
 use bevy::platform::collections::HashMap;
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::light::light_cells;
-use tesserae_core::material::WATER;
+use tesserae_core::testgen::register_water;
 use tesserae_core::worldgen::{LANTERN, STONE};
-use tesserae_core::{Burn, Burning, CombustionDef, Fluid, Occupants};
+use tesserae_core::{Burn, Burning, CombustionDef, Fluid, MaterialId, Occupants};
 
 const Y: i32 = -16;
 const Z: i32 = 16;
@@ -46,12 +46,19 @@ fn place(h: &mut Harness, at: [i32; 3], voxel: Voxel) {
     );
 }
 
-fn water(source: bool) -> Occupants {
+fn with_water(mut tables: Tables) -> (Harness, MaterialId) {
+    let water = register_water(&mut tables);
+    let mut h = Harness::new(small(), UNLIMITED);
+    h.app.insert_resource(ContentTables(Arc::new(tables)));
+    (h, water)
+}
+
+fn water(material: MaterialId, source: bool) -> Occupants {
     let fluid = if source {
-        Fluid::source(WATER)
+        Fluid::source(material)
     } else {
         Fluid::flowing(
-            WATER,
+            material,
             [
                 tesserae_core::Level {
                     surface: 8,
@@ -140,7 +147,7 @@ fn fixed_point_cells(h: &Harness) -> HashMap<ChunkCoord, ChunkLight> {
 /// on its neighbourhood's light, are both meshed while the water still moves.
 #[test]
 fn a_solve_beside_water_that_never_stops_changing_lands_and_both_are_meshed() {
-    let mut h = Harness::new(small(), UNLIMITED);
+    let (mut h, fixture) = with_water(Arc::unwrap_or_clone(ContentTables::default().0));
     h.settle();
     tunnel(&mut h, 4, 20);
     h.settle();
@@ -158,7 +165,7 @@ fn a_solve_beside_water_that_never_stops_changing_lands_and_both_are_meshed() {
     let mut i = 0;
     while !(rock_meshed && east_lit_at.is_some()) && started.elapsed() < SETTLE_CEILING {
         i += 1;
-        occupy(&mut h, [12, Y, Z], water(i % 2 == 0));
+        occupy(&mut h, [12, Y, Z], water(fixture, i % 2 == 0));
         if i == 2 {
             h.jobs_mut().relight.hold.release();
         }
@@ -186,7 +193,6 @@ fn a_solve_beside_water_that_never_stops_changing_lands_and_both_are_meshed() {
 /// Each time the light ends where a fresh solve of the final cells puts it.
 #[test]
 fn a_solve_whose_neighbours_plane_dims_or_brightens_meanwhile_does_not_land() {
-    let mut h = Harness::new(small(), UNLIMITED);
     let mut burning_stone = Tables::builtin();
     burning_stone
         .register_combustion(
@@ -200,8 +206,7 @@ fn a_solve_whose_neighbours_plane_dims_or_brightens_meanwhile_does_not_land() {
             },
         )
         .unwrap();
-    h.app
-        .insert_resource(ContentTables(Arc::new(burning_stone)));
+    let (mut h, fixture) = with_water(burning_stone);
     h.settle();
     let generator = h.app.world().resource::<WorldGenerator>();
     let edge = CHUNK_SIZE as i32 - 1;
@@ -213,7 +218,7 @@ fn a_solve_whose_neighbours_plane_dims_or_brightens_meanwhile_does_not_land() {
     assert_eq!(h.store().voxel(on_plane), Some(Voxel::AIR));
 
     let changes: [(&str, Occupants); 4] = [
-        ("water arriving", water(true)),
+        ("water arriving", water(fixture, true)),
         (
             "water leaving",
             Occupants {
@@ -317,7 +322,7 @@ fn light_moving_on_a_boundary_plane_redraws_the_chunk_it_shades() {
 /// current.
 #[test]
 fn water_changing_on_a_boundary_every_tick_is_meshed_on_both_sides_and_settles() {
-    let mut h = Harness::new(small(), UNLIMITED);
+    let (mut h, fixture) = with_water(Arc::unwrap_or_clone(ContentTables::default().0));
     h.settle();
     let edge = CHUNK_SIZE as i32 - 1;
     tunnel(&mut h, edge - 6, edge + 6);
@@ -334,7 +339,7 @@ fn water_changing_on_a_boundary_every_tick_is_meshed_on_both_sides_and_settles()
     let both = |d: &HashMap<ChunkCoord, usize>| d.contains_key(&ROCK) && d.contains_key(&EAST);
     while !(both(&delivered) && h.jobs().mesh.stale() > 0) && started.elapsed() < SETTLE_CEILING {
         i += 1;
-        occupy(&mut h, [edge, Y, Z], water(i % 2 == 0));
+        occupy(&mut h, [edge, Y, Z], water(fixture, i % 2 == 0));
         if i == 3 {
             h.jobs_mut().mesh.hold.release();
         }
@@ -373,7 +378,7 @@ fn water_changing_on_a_boundary_every_tick_is_meshed_on_both_sides_and_settles()
 /// its mesh follows, and the light is what a fresh solve gives.
 #[test]
 fn a_solve_spoilt_every_tick_by_its_neighbours_plane_still_lands() {
-    let mut h = Harness::new(small(), UNLIMITED);
+    let (mut h, fixture) = with_water(Arc::unwrap_or_clone(ContentTables::default().0));
     h.settle();
     let edge = CHUNK_SIZE as i32 - 1;
     tunnel(&mut h, edge - 4, edge);
@@ -401,7 +406,11 @@ fn a_solve_spoilt_every_tick_by_its_neighbours_plane_still_lands() {
         occupy(
             &mut h,
             [edge, Y, Z],
-            if i % 2 == 0 { water(true) } else { dry },
+            if i % 2 == 0 {
+                water(fixture, true)
+            } else {
+                dry
+            },
         );
         assert_ne!(
             h.store().light_at([edge, Y, Z]),

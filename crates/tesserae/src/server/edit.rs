@@ -77,6 +77,12 @@ pub enum EditAction {
     /// Take away the source the ray strikes, leaving any solid it shares the
     /// Voxel with.
     RemoveSource,
+    /// Set the solid the ray strikes alight, by the rule a Mod's ignition
+    /// meets.
+    Ignite,
+    /// Put out the solid the ray strikes, by the rule a Mod's extinguish
+    /// meets.
+    PutOut,
 }
 
 /// What the Client wants done: an action, and the ray it wants it done along, in
@@ -284,7 +290,7 @@ pub(in crate::server) fn apply_pending(
                     .ok_or(RejectReason::NotLoaded)?;
                 match change {
                     Change::Solid(voxel) => set_voxel(&mut store, &mut meshes, &tables, at, voxel)?,
-                    Change::Fluid(occupants) => {
+                    Change::Occupants(occupants) => {
                         set_occupants(&mut store, &mut meshes, &tables, at, occupants)?
                     }
                 }
@@ -292,8 +298,10 @@ pub(in crate::server) fn apply_pending(
                 let now = store
                     .occupants(at, &tables.fluids)
                     .expect("the edited Chunk is held");
-                let kind = match (change, intent_fluid(&was, &now)) {
-                    (Change::Fluid(_), Some(kind)) => kind,
+                let kind = match (p.intent.action, change, intent_fluid(&was, &now)) {
+                    (EditAction::Ignite, ..) => EditKind::Ignited(now.solid.material()),
+                    (EditAction::PutOut, ..) => EditKind::PutOut(now.solid.material()),
+                    (_, Change::Occupants(_), Some(kind)) => kind,
                     _ => EditKind::Solid {
                         before: was.solid,
                         after: now.solid,
@@ -340,8 +348,9 @@ fn intent_fluid(was: &Occupants, now: &Occupants) -> Option<EditKind> {
 enum Change {
     /// A whole-Voxel placement, through the solid-layer rule.
     Solid(Voxel),
-    /// Exactly these occupants: a source placed or taken away.
-    Fluid(Occupants),
+    /// Exactly these occupants: a source placed or taken away, or a fire lit
+    /// or put out.
+    Occupants(Occupants),
 }
 
 /// Where an intent lands, and what goes there.
@@ -378,6 +387,11 @@ fn resolve(
         stops,
     )
     .ok_or(RejectReason::OutOfReach)?;
+    let struck = || {
+        store
+            .occupants(hit.at, &tables.fluids)
+            .ok_or(RejectReason::NotLoaded)
+    };
     let step = FACE_STEPS[hit.face];
     let in_front = [
         hit.at[0] + step[0],
@@ -396,18 +410,11 @@ fn resolve(
                 Some(_) => Ok((in_front, Change::Solid(voxel))),
             }
         }
-        EditAction::RemoveSource => {
-            let here = store
-                .occupants(hit.at, &tables.fluids)
-                .ok_or(RejectReason::NotLoaded)?;
-            Ok((hit.at, Change::Fluid(without_source(here)?)))
-        }
+        EditAction::RemoveSource => Ok((hit.at, Change::Occupants(without_source(struck()?)?))),
         EditAction::PlaceSource(material) => {
             // A Shape with room for fluid takes the source itself, keeping its
             // solid; anything else gets it in front of the face struck.
-            let struck = store
-                .occupants(hit.at, &tables.fluids)
-                .ok_or(RejectReason::NotLoaded)?;
+            let struck = struck()?;
             let into = if !struck.solid.is_air()
                 && tables.shapes.void_slots(struck.solid) > 0
                 && tables.holds(struck.solid, material)
@@ -422,8 +429,16 @@ fn resolve(
             if into == in_front && !there.solid.is_air() {
                 return Err(RejectReason::Occupied);
             }
-            Ok((into, Change::Fluid(with_source(there, material, tables)?)))
+            Ok((
+                into,
+                Change::Occupants(with_source(there, material, tables)?),
+            ))
         }
+        EditAction::Ignite => {
+            let wet = tesserae_core::fire::is_wet(store, tables, hit.at);
+            Ok((hit.at, Change::Occupants(ignite(struck()?, wet, tables)?)))
+        }
+        EditAction::PutOut => Ok((hit.at, Change::Occupants(extinguish(struck()?)?))),
     }
 }
 
@@ -676,8 +691,27 @@ mod tests {
         SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
+    use std::sync::{Arc, LazyLock};
+    use tesserae_core::testgen::{WATER_FLUID, register_water};
+
     use super::super::player::{Player, PoseReport};
     use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
+
+    /// The Server's default tables with the fixture water: those of `app_with`,
+    /// and what a test reading water outside an App holds.
+    static WATERED: LazyLock<(Tables, MaterialId)> = LazyLock::new(|| {
+        let mut tables = Arc::unwrap_or_clone(ContentTables::default().0);
+        let water = register_water(&mut tables);
+        (tables, water)
+    });
+
+    fn watered() -> Tables {
+        WATERED.0.clone()
+    }
+
+    fn water() -> MaterialId {
+        WATERED.1
+    }
 
     fn stone() -> Voxel {
         Voxel::cube(STONE)
@@ -702,9 +736,13 @@ mod tests {
     }
 
     fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
+        app_with_tables(chunks, watered())
+    }
+
+    fn app_with_tables(chunks: &[(ChunkCoord, Chunk)], tables: Tables) -> App {
         let mut app = App::new();
         app.insert_resource(WorldSettings::default())
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(tables)))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
@@ -795,7 +833,7 @@ mod tests {
         let mut chunk = ground();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                chunk.set(x, 8, z, Voxel::cube(tesserae_core::material::WATER));
+                chunk.set(x, 8, z, Voxel::cube(water()));
             }
         }
         chunk
@@ -810,10 +848,7 @@ mod tests {
             voxel_at(&app, [5, 7, 5]).is_air(),
             "the bed under the water"
         );
-        assert_eq!(
-            voxel_at(&app, [5, 8, 5]).material(),
-            tesserae_core::material::WATER
-        );
+        assert_eq!(voxel_at(&app, [5, 8, 5]).material(), water());
 
         let mut app = app_with(&[(origin(), pool())]);
         send(&mut app, down(EditAction::Place(stone())));
@@ -860,18 +895,21 @@ mod tests {
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
         let tables = Tables::builtin();
-        assert_eq!(
-            set_voxel(
-                &mut store,
-                &mut meshes,
-                &tables,
-                [0, 0, 0],
-                Voxel::cube(999)
-            ),
-            Err(RejectReason::UnknownMaterial)
-        );
+        for unknown in [999, tesserae_core::material::RETIRED] {
+            assert_eq!(
+                set_voxel(
+                    &mut store,
+                    &mut meshes,
+                    &tables,
+                    [0, 0, 0],
+                    Voxel::cube(unknown)
+                ),
+                Err(RejectReason::UnknownMaterial)
+            );
+        }
         assert!(store.voxel([0, 0, 0]).unwrap().is_air(), "nothing changed");
-        for (i, material) in (1..tables.materials.len() as u16).enumerate() {
+        let known = (1..tables.materials.len() as u16).filter(|&m| tables.materials.contains(m));
+        for (i, material) in known.enumerate() {
             let at = [i as i32, 1, 0];
             set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(material))
                 .unwrap_or_else(|r| panic!("Material {material}: {r:?}"));
@@ -1414,10 +1452,10 @@ mod tests {
         assert_eq!(rejections(&mut app), vec![RejectReason::Busy; 10]);
     }
 
-    /// The built-in tables with stone declared fuel, so a stone Voxel may hold
+    /// The watered tables with stone declared fuel, so a stone Voxel may hold
     /// a fire: only declared fuel does.
     fn stone_burns() -> Tables {
-        let mut tables = Tables::builtin();
+        let mut tables = watered();
         tables
             .register_combustion(
                 STONE,
@@ -1448,7 +1486,7 @@ mod tests {
     fn occupants_at(app: &App, at: [i32; 3]) -> Occupants {
         app.world()
             .resource::<ChunkStore>()
-            .occupants(at, &Tables::builtin().fluids)
+            .occupants(at, &app.world().resource::<ContentTables>().0.fluids)
             .expect("held")
     }
 
@@ -1497,13 +1535,13 @@ mod tests {
     #[test]
     fn what_the_tables_refuse_changes_nothing() {
         let mut app = app_with(&[(origin(), pool())]);
-        let water = Fluid::source(tesserae_core::material::WATER);
+        let source = Fluid::source(water());
         let was = occupants_at(&app, [5, 8, 5]);
         let cases = [
             (
                 Occupants {
                     solid: stone(),
-                    fluid: Some(water),
+                    fluid: Some(source),
                     burning: None,
                 },
                 RejectReason::FluidExcluded,
@@ -1511,7 +1549,7 @@ mod tests {
             (
                 Occupants {
                     solid: Voxel::AIR,
-                    fluid: Some(water),
+                    fluid: Some(source),
                     burning: Some(Burning { fuel: 1 }),
                 },
                 RejectReason::NoFuel,
@@ -1526,7 +1564,7 @@ mod tests {
             ),
             (
                 Occupants {
-                    solid: Voxel::cube(tesserae_core::material::WATER),
+                    solid: Voxel::cube(water()),
                     fluid: None,
                     burning: None,
                 },
@@ -1539,10 +1577,7 @@ mod tests {
             assert!(!meshes.is_dirty(origin()), "{occupants:?} dirtied a mesh");
         }
         assert_eq!(occupants_at(&app, [5, 8, 5]), was);
-        assert_eq!(
-            voxel_at(&app, [5, 8, 5]),
-            Voxel::cube(tesserae_core::material::WATER)
-        );
+        assert_eq!(voxel_at(&app, [5, 8, 5]), Voxel::cube(water()));
     }
 
     /// The old whole-Voxel Edit reads through the one interpretation: water
@@ -1551,8 +1586,8 @@ mod tests {
     #[test]
     fn set_voxel_goes_through_the_layer_rules() {
         let mut app = app_with(&[(origin(), ground())]);
-        let water = tesserae_core::material::WATER;
-        let tables = Tables::builtin();
+        let water = water();
+        let tables = watered();
         let put = |app: &mut App, at, voxel| {
             let mut store = app.world_mut().resource_mut::<ChunkStore>();
             set_voxel(&mut store, &mut MeshState::default(), &tables, at, voxel)
@@ -1595,7 +1630,7 @@ mod tests {
             source: false,
             surface: 9,
             reach: 3,
-            ..Fluid::source(tesserae_core::material::WATER)
+            ..Fluid::source(water())
         }
     }
 
@@ -1604,7 +1639,7 @@ mod tests {
     /// its Voxel with one, leaving the bed and the stair.
     #[test]
     fn the_fluid_tool_places_a_source_in_front_and_removes_one_keeping_its_solid() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         send(&mut app, down(EditAction::PlaceSource(water)));
         tick(&mut app);
@@ -1643,7 +1678,7 @@ mod tests {
     /// is the stair throughout.
     #[test]
     fn the_fluid_tool_waterlogs_a_struck_shape_and_drains_it() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         put_occupants(
             &mut app,
@@ -1683,11 +1718,11 @@ mod tests {
     /// refused at the shaped cap leaves the water exactly as it was.
     #[test]
     fn solid_edits_keep_or_displace_fluid_by_the_space_they_leave() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut store = ChunkStore::default();
         store.insert(origin(), ground());
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
+        let tables = watered();
         let at = [5, 8, 5];
         set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(water)).unwrap();
         set_voxel(&mut store, &mut meshes, &tables, at, stair()).unwrap();
@@ -1728,7 +1763,7 @@ mod tests {
     /// it goes through flowing water: flow is packed air.
     #[test]
     fn a_source_replaces_flow_and_the_tool_aims_through_flow() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         let flow = Occupants {
             solid: Voxel::AIR,
@@ -1751,7 +1786,7 @@ mod tests {
     /// origin and reach checks every intent does.
     #[test]
     fn the_fluid_tool_is_refused_like_any_edit_and_changes_nothing() {
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         let flow = Occupants {
             solid: Voxel::AIR,
@@ -1863,13 +1898,198 @@ mod tests {
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), 5);
     }
 
+    /// The ground with declared wood, burning for 8 s, set into its top where
+    /// `down` strikes, at (4, 7, 5) and at (5, 7, 5).
+    fn wood_app() -> (App, MaterialId) {
+        use tesserae_core::{Burn, CombustionDef, MaterialDef, Occlusion, RenderClass};
+        let mut tables = watered();
+        let wood = tables
+            .materials
+            .register(MaterialDef {
+                emission: 0,
+                dimming: 15,
+                occlusion: Occlusion::Opaque,
+                render: RenderClass::Opaque,
+                solid: true,
+            })
+            .unwrap();
+        tables
+            .register_combustion(
+                wood,
+                CombustionDef {
+                    threshold: 6,
+                    ignition_delay_s: 2.0,
+                    emission: 12,
+                    heat: None,
+                    burn: Burn::For {
+                        seconds: 8.0,
+                        residue: 0,
+                    },
+                },
+            )
+            .unwrap();
+        let mut chunk = ground();
+        chunk.set(4, 7, 5, Voxel::cube(wood));
+        chunk.set(5, 7, 5, Voxel::cube(wood));
+        (app_with_tables(&[(origin(), chunk)], tables), wood)
+    }
+
+    fn down_at(x: f32, action: EditAction) -> EditIntent {
+        EditIntent {
+            origin: Vec3::new(x, DOWN_EYE.y, DOWN_EYE.z),
+            ..down(action)
+        }
+    }
+
+    /// The fire tool lights the declared fuel its ray strikes with the whole
+    /// 8 s a fresh fire has, as a Mod's ignition does, and puts it out,
+    /// leaving the wood.
+    #[test]
+    fn the_fire_tool_lights_declared_fuel_with_its_whole_fuel_and_puts_it_out() {
+        let (mut app, wood) = wood_app();
+        let unlit = Occupants {
+            solid: Voxel::cube(wood),
+            fluid: None,
+            burning: None,
+        };
+        send(&mut app, down(EditAction::Ignite));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 7, 5]),
+            Occupants {
+                burning: Some(Burning { fuel: 512 }),
+                ..unlit
+            }
+        );
+        send(&mut app, down(EditAction::PutOut));
+        tick(&mut app);
+        assert_eq!(occupants_at(&app, [5, 7, 5]), unlit);
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// With no Game nothing is declared fuel, so every built-in solid is
+    /// refused as one that does not burn.
+    #[test]
+    fn a_world_with_no_game_burns_nothing() {
+        let mut chunk = ground();
+        for x in 1..=6 {
+            chunk.set(x, 7, 5, Voxel::cube(x as MaterialId));
+        }
+        let mut app = app_with_tables(&[(origin(), chunk)], Tables::builtin());
+        for x in 1..=6 {
+            send(&mut app, down_at(x as f32 + 0.5, EditAction::Ignite));
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), [RejectReason::NotFlammable], "{x}");
+            assert!(occupants_at(&app, [x, 7, 5]).burning.is_none());
+        }
+    }
+
+    /// Non-fuel, fuel already alight, fuel under water, nothing in reach and
+    /// nothing burning are refused with the reasons a Mod's fire Commands
+    /// meet, and change nothing.
+    #[test]
+    fn the_fire_tool_refuses_what_a_fire_command_would_and_changes_nothing() {
+        let (mut app, _) = wood_app();
+        let source = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(Fluid::source(water())),
+            burning: None,
+        };
+        put_occupants(&mut app, [4, 8, 5], source).1.unwrap();
+        send(&mut app, down(EditAction::Ignite));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        let column = |app: &App| -> Vec<Occupants> {
+            [4, 5, 6]
+                .into_iter()
+                .flat_map(|x| (0..16).map(move |y| [x, y, 5]))
+                .map(|at| occupants_at(app, at))
+                .collect()
+        };
+        let before = column(&app);
+        let cases = [
+            (down_at(6.5, EditAction::Ignite), "that does not burn"),
+            (down(EditAction::Ignite), "it is already burning"),
+            (down_at(4.5, EditAction::Ignite), "it is too wet to burn"),
+            (down_at(4.5, EditAction::PutOut), "nothing is burning there"),
+            (down_at(6.5, EditAction::PutOut), "nothing is burning there"),
+            (
+                EditIntent {
+                    direction: Vec3::Y,
+                    ..down(EditAction::Ignite)
+                },
+                "nothing in reach",
+            ),
+            (
+                EditIntent {
+                    origin: Vec3::new(5.5, 30.0, 5.5),
+                    ..down(EditAction::PutOut)
+                },
+                "nothing in reach",
+            ),
+        ];
+        for (intent, expected) in cases {
+            send(&mut app, intent);
+            tick(&mut app);
+            let said: Vec<_> = rejections(&mut app).iter().map(|r| r.message()).collect();
+            assert_eq!(said, vec![expected], "{intent:?}");
+        }
+        assert_eq!(before, column(&app));
+    }
+
+    /// Both fire actions meet the origin check on arrival, reach from the
+    /// Eye, and the wait for their Chunk's light that every intent meets.
+    #[test]
+    fn the_fire_tool_is_vetted_queued_and_deferred_like_any_edit() {
+        let (mut app, _) = wood_app();
+        for action in [EditAction::Ignite, EditAction::PutOut] {
+            send_from_afar(
+                &mut app,
+                EditIntent {
+                    origin: DOWN_EYE + Vec3::X * 40.0,
+                    ..down(action)
+                },
+            );
+            assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+            assert!(app.world().resource::<PendingEdits>().0.is_empty());
+
+            // The wood is 7 m below the origin and 9 m below the Eye.
+            set_eye(&mut app, Vec3::new(5.5, 17.0, 5.5));
+            send_from_afar(
+                &mut app,
+                EditIntent {
+                    origin: Vec3::new(5.5, 15.0, 5.5),
+                    ..down(action)
+                },
+            );
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), vec![RejectReason::OutOfReach]);
+        }
+        let burning = |app: &App| occupants_at(app, [5, 7, 5]).burning.is_some();
+        for (action, lit) in [(EditAction::Ignite, true), (EditAction::PutOut, false)] {
+            app.world_mut()
+                .resource_mut::<MeshState>()
+                .mark_unlit(origin());
+            send(&mut app, down(action));
+            tick(&mut app);
+            assert_eq!(burning(&app), !lit, "{action:?} applied too early");
+            assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
+            app.world_mut()
+                .resource_mut::<MeshState>()
+                .mark_lit(origin());
+            tick(&mut app);
+            assert_eq!(burning(&app), lit, "{action:?}");
+        }
+        assert!(rejections(&mut app).is_empty());
+    }
+
     /// The per-Voxel rules a source or fire Command meets, shared with the
     /// fluid tool: room for the fluid, no other fluid or source, declared and
     /// dry fuel to light, and fire to put out.
     #[test]
     fn source_and_fire_rules_say_why_they_refuse() {
         use tesserae_core::{Burn, CombustionDef, FluidDef, MaterialDef, Occlusion, RenderClass};
-        let mut tables = Tables::builtin();
+        let mut tables = watered();
         let lava = tables
             .materials
             .register(MaterialDef {
@@ -1886,7 +2106,7 @@ mod tests {
                 FluidDef {
                     waterlogs: false,
                     extinguishes: false,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             )
             .unwrap();
@@ -1905,7 +2125,7 @@ mod tests {
                 oil,
                 FluidDef {
                     extinguishes: false,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             )
             .unwrap();
@@ -1924,7 +2144,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let water = tesserae_core::material::WATER;
+        let water = water();
         let at = |solid, fluid| Occupants {
             solid,
             fluid,

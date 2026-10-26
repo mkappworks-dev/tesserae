@@ -13,9 +13,9 @@ use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::mesh::POS_Y;
 use crate::noise::{fbm2, fbm3, fbm3_range};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
-use crate::voxel::Voxel;
+use crate::tables::Tables;
+use crate::voxel::{MaterialId, Voxel};
 
-use crate::material::WATER;
 /// The ids generation assigns. They live in [`crate::material`] with the rest of
 /// the table and are re-exported so a caller that places terrain finds them here.
 pub use crate::material::{DIRT, GRASS, LANTERN, STONE};
@@ -43,19 +43,23 @@ pub struct WorldgenParams {
     pub caves: Option<CaveParams>,
     /// `None` is a World of cubes.
     pub smoothing: Option<SmoothingParams>,
-    /// `None` is a World without standing water.
+    /// `None` is a World without lakes.
     pub water: Option<WaterParams>,
 }
 
-/// Water filling the open air above the ground up to one height. Plain `Copy`
-/// data like the rest of [`WorldgenParams`]. A flat sheet and nothing more: it
-/// does not flow, and it fills any hollow open to the sky below its level, but
-/// never a cave, which is carved out of the ground and not above it.
+/// A fluid filling the open air above the ground up to one height: the World's
+/// lakes. Plain `Copy` data like the rest of [`WorldgenParams`]. A flat sheet
+/// of packed cubes, which Occupants reads as sources: it fills any hollow open
+/// to the sky below its level, but never a cave, which is carved out of the
+/// ground and not above it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct WaterParams {
-    /// The height of the water's surface. Clamped to the top of the surface
+    /// The height of the lake's surface. Clamped to the top of the surface
     /// band, because the Server treats everything above that as open sky.
     pub level_m: f32,
+    /// Any registered Material with a fluid row; [`WorldgenParams::validate_lake`]
+    /// checks it against the tables.
+    pub material: MaterialId,
 }
 
 /// Stairs and slabs placed where the ground steps one Voxel. Plain `Copy` data
@@ -105,9 +109,9 @@ impl Default for CaveParams {
     }
 }
 
-/// Where the default water stands, as a fraction of the relief above sea level:
-/// about the 25th percentile of the default ground, so valleys hold lakes and
-/// most land is dry.
+/// Where [`WorldgenParams::with_default_lake`] puts the surface, as a fraction
+/// of the relief above sea level: about the 25th percentile of the default
+/// ground, so valleys hold lakes and most land is dry.
 const DEFAULT_WATER_FRACTION: f32 = 5.0 / 12.0;
 
 impl Default for WorldgenParams {
@@ -121,10 +125,21 @@ impl Default for WorldgenParams {
             octaves: 5,
             caves: Some(CaveParams::default()),
             smoothing: Some(SmoothingParams::default()),
-            // A Mod that changes the sea level or the relief sets this too.
+            // The engine declares no fluid, so standing fluid is a Game's to add.
+            water: None,
+        }
+    }
+}
+
+impl WorldgenParams {
+    /// These parameters with lakes of `material` in the valleys of their ground.
+    pub fn with_default_lake(self, material: MaterialId) -> Self {
+        WorldgenParams {
             water: Some(WaterParams {
-                level_m: sea_level_m + relief_m * DEFAULT_WATER_FRACTION,
+                level_m: self.sea_level_m + self.relief_m * DEFAULT_WATER_FRACTION,
+                material,
             }),
+            ..self
         }
     }
 }
@@ -222,6 +237,31 @@ impl WorldgenParams {
             require(water.level_m.is_finite(), "water.level_m", "must be finite")?;
         }
         Ok(())
+    }
+
+    /// Whether the lake's Material can fill a lake: registered, and a fluid.
+    /// Apart from [`Self::validate`] because it needs every fluid row, which a
+    /// load has only once each Declaration is in.
+    pub fn validate_lake(&self, tables: &Tables) -> Result<(), ParamError> {
+        let Some(water) = self.water else {
+            return Ok(());
+        };
+        let m = water.material;
+        require(
+            tables.materials.contains(m),
+            "water.material",
+            "names no registered Material",
+        )?;
+        require(
+            !tables.materials.solid(Voxel::cube(m)),
+            "water.material",
+            "is solid, not a fluid",
+        )?;
+        require(
+            tables.fluids.contains(m),
+            "water.material",
+            "has no fluid row",
+        )
     }
 }
 
@@ -358,8 +398,8 @@ pub struct Worldgen {
     /// Whether the smoothing pass runs: configured, and a one-Voxel step is at
     /// least `min_rise_m` at this Voxel size.
     smoothing: bool,
-    /// The water's surface, already clamped to the surface band.
-    water_level_m: Option<f32>,
+    /// The lake, its level already clamped to the surface band.
+    water: Option<WaterParams>,
 }
 
 impl Worldgen {
@@ -376,9 +416,10 @@ impl Worldgen {
             smoothing: params
                 .smoothing
                 .is_some_and(|p| EASED_RISE_VOXELS as f32 * voxel_size >= p.min_rise_m),
-            water_level_m: params
-                .water
-                .map(|w| w.level_m.min(params.sea_level_m + params.relief_m)),
+            water: params.water.map(|w| WaterParams {
+                level_m: w.level_m.min(params.sea_level_m + params.relief_m),
+                ..w
+            }),
         }
     }
 
@@ -391,9 +432,9 @@ impl Worldgen {
         self.voxel_size
     }
 
-    /// The water's surface in metres, clamped as generation clamps it.
-    pub fn water_level_m(&self) -> Option<f32> {
-        self.water_level_m
+    /// The lake, its level clamped as generation clamps it.
+    pub fn water(&self) -> Option<WaterParams> {
+        self.water
     }
 
     /// The metre height of the surface over a point on the ground plane.
@@ -500,8 +541,10 @@ impl Worldgen {
                     let y_m = floor_m + y as f32 * self.voxel_size;
                     let below_m = surface_m - y_m;
                     if below_m < 0.0 {
-                        if self.water_level_m.is_some_and(|level_m| y_m < level_m) {
-                            chunk.set(x, y, z, Voxel::cube(WATER));
+                        if let Some(water) = self.water
+                            && y_m < water.level_m
+                        {
+                            chunk.set(x, y, z, Voxel::cube(water.material));
                             continue;
                         }
                         // y_m only rises, so the rest of the column is sky.
@@ -1194,12 +1237,40 @@ mod tests {
         assert!(walls.contains(&STONE), "{walls:?}");
     }
 
-    fn flooded(voxel_size: f32, level_m: f32) -> Worldgen {
+    /// The fixture water and a lava that is hot, opaque and keeps out of
+    /// Shapes: a lake of either is made the same way.
+    fn lake_tables() -> (Tables, [MaterialId; 2]) {
+        let mut tables = Tables::builtin();
+        let water = crate::testgen::register_water(&mut tables);
+        let lava = tables
+            .materials
+            .register(crate::MaterialDef {
+                emission: 12,
+                dimming: crate::light::MAX_LIGHT,
+                occlusion: crate::Occlusion::Opaque,
+                render: crate::RenderClass::Opaque,
+                solid: false,
+            })
+            .unwrap();
+        let hot = crate::FluidDef {
+            waterlogs: false,
+            extinguishes: false,
+            heat: Some(crate::Heat {
+                strength: 10,
+                reach_m: 2.0,
+            }),
+            ..crate::testgen::WATER_FLUID
+        };
+        tables.register_fluid(lava, hot).unwrap();
+        (tables, [water, lava])
+    }
+
+    fn flooded(voxel_size: f32, level_m: f32, material: MaterialId) -> Worldgen {
         Worldgen::new(
             SEED,
             voxel_size,
             WorldgenParams {
-                water: Some(WaterParams { level_m }),
+                water: Some(WaterParams { level_m, material }),
                 // Smoothing yields to water; `smoothing_never_replaces_water`
                 // is about that, and this about the water alone.
                 smoothing: None,
@@ -1208,11 +1279,16 @@ mod tests {
         )
     }
 
-    /// Water only ever replaces air above the ground and below its level, and
-    /// fills all of that: a cave stays dry and the ground is unchanged.
+    /// A lake only ever replaces air above the ground and below its level, and
+    /// fills all of that with its own fluid: a cave stays dry and the ground is
+    /// unchanged.
     #[test]
     fn water_fills_the_open_air_between_the_ground_and_its_level_and_nothing_else() {
-        for voxel_size in [1.0f32, 0.5] {
+        let (_, fluids) = lake_tables();
+        for (voxel_size, material) in [1.0f32, 0.5]
+            .into_iter()
+            .flat_map(|v| fluids.map(|m| (v, m)))
+        {
             let dry = Worldgen::new(
                 SEED,
                 voxel_size,
@@ -1231,7 +1307,7 @@ mod tests {
             let lowest = heights.iter().copied().fold(f32::MAX, f32::min);
             let highest = heights.iter().copied().fold(f32::MIN, f32::max);
             let level_m = (lowest + highest) / 2.0;
-            let wet = flooded(voxel_size, level_m);
+            let wet = flooded(voxel_size, level_m, material);
             let mut filled = 0;
             for (cx, cy, cz) in sweep(voxel_size) {
                 let (a, b) = (dry.chunk(cx, cy, cz), wet.chunk(cx, cy, cz));
@@ -1245,7 +1321,7 @@ mod tests {
                             let (before, after) = (a.get(x, y, z), b.get(x, y, z));
                             let open = before.is_air() && y_m > surface_m && y_m < level_m;
                             if open {
-                                assert_eq!(after, Voxel::cube(WATER), "{x_m} {y_m} {z_m}");
+                                assert_eq!(after, Voxel::cube(material), "{x_m} {y_m} {z_m}");
                                 filled += 1;
                             } else {
                                 assert_eq!(after, before, "{x_m} {y_m} {z_m}");
@@ -1258,10 +1334,56 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_default_parameters_have_no_lakes_and_generate_no_fluid() {
+        assert_eq!(WorldgenParams::default().water, None);
+        let g = Worldgen::new(SEED, 1.0, WorldgenParams::default());
+        for (cx, cy, cz) in sweep(1.0) {
+            for v in g.chunk(cx, cy, cz).kinds() {
+                assert!(
+                    [crate::voxel::AIR, STONE, DIRT, GRASS].contains(&v.material()),
+                    "{v:?}"
+                );
+            }
+        }
+    }
+
+    /// A packed cube of any fluid is a source, so a lake of lava stands as a
+    /// lake of water does.
+    #[test]
+    fn a_lake_of_any_fluid_is_read_as_its_sources() {
+        let (tables, fluids) = lake_tables();
+        for material in fluids {
+            let g = flooded(1.0, mid_level_m(), material);
+            let lake = sweep(1.0)
+                .into_iter()
+                .map(|(cx, cy, cz)| g.chunk(cx, cy, cz))
+                .find_map(|c| c.kinds().iter().copied().find(|v| v.material() == material))
+                .expect("the sweep holds some of the lake");
+            assert_eq!(
+                crate::Occupants::of(lake, crate::Overlay::NONE, &tables.fluids).fluid,
+                Some(crate::Fluid::source(material))
+            );
+        }
+    }
+
+    /// Between the lowest and highest ground of the default sweep.
+    fn mid_level_m() -> f32 {
+        let p = WorldgenParams::default();
+        p.sea_level_m + p.relief_m / 2.0
+    }
+
     /// Under water a step stays a step: a stair holds one Voxel, and in a water
     /// cell its missing half would be an air pocket.
     #[test]
     fn smoothing_never_replaces_water() {
+        let (_, fluids) = lake_tables();
+        for material in fluids {
+            smoothing_never_replaces_a_lake_of(material);
+        }
+    }
+
+    fn smoothing_never_replaces_a_lake_of(material: MaterialId) {
         let wet = |smoothing| {
             Worldgen::new(
                 SEED,
@@ -1269,7 +1391,8 @@ mod tests {
                 WorldgenParams {
                     smoothing,
                     ..WorldgenParams::default()
-                },
+                }
+                .with_default_lake(material),
             )
         };
         let (plain, smoothed) = (wet(None), wet(Some(SmoothingParams::default())));
@@ -1287,7 +1410,7 @@ mod tests {
                     assert!(before.is_air(), "{before:?} became {after:?}");
                     placed += 1;
                 }
-                under_water += usize::from(before == Voxel::cube(WATER));
+                under_water += usize::from(before == Voxel::cube(material));
             }
         }
         assert!(
@@ -1300,7 +1423,8 @@ mod tests {
     /// open sky, so it stops at the band's top.
     #[test]
     fn water_never_rises_above_the_highest_ground() {
-        let g = flooded(1.0, 10_000.0);
+        let (_, [water, _]) = lake_tables();
+        let g = flooded(1.0, 10_000.0, water);
         let (_, highest_m) = g.surface_bounds_m();
         let cy = (highest_m / CHUNK_SIZE as f32).floor() as i32;
         let chunk = g.chunk(0, cy, 0);
@@ -1311,7 +1435,7 @@ mod tests {
                 let v = chunk.get(x, y, z);
                 if y_m > highest_m {
                     assert!(v.is_air(), "{v:?} at {y_m} m");
-                } else if v == Voxel::cube(WATER) {
+                } else if v == Voxel::cube(water) {
                     water += 1;
                 }
             }
@@ -1749,6 +1873,34 @@ mod tests {
     mod validate {
         use super::*;
 
+        #[test]
+        fn a_lake_must_be_made_of_a_registered_fluid() {
+            let (mut tables, fluids) = lake_tables();
+            let dry = tables
+                .materials
+                .register(crate::testgen::WATER_MATERIAL)
+                .unwrap();
+            let lake = |material| WorldgenParams::default().with_default_lake(material);
+            for material in fluids {
+                assert_eq!(lake(material).validate_lake(&tables), Ok(()));
+            }
+            assert_eq!(WorldgenParams::default().validate_lake(&tables), Ok(()));
+            for (material, rule) in [
+                (999, "names no registered Material"),
+                (STONE, "is solid, not a fluid"),
+                (dry, "has no fluid row"),
+            ] {
+                assert_eq!(
+                    lake(material).validate_lake(&tables),
+                    Err(ParamError {
+                        field: "water.material",
+                        rule
+                    }),
+                    "{material}"
+                );
+            }
+        }
+
         fn field(params: WorldgenParams) -> &'static str {
             params.validate().expect_err("rejected").field
         }
@@ -1823,7 +1975,10 @@ mod tests {
                     field(WorldgenParams { smoothing, ..d }),
                     "smoothing.min_rise_m"
                 );
-                let water = Some(WaterParams { level_m: bad });
+                let water = Some(WaterParams {
+                    level_m: bad,
+                    material: crate::voxel::AIR,
+                });
                 assert_eq!(field(WorldgenParams { water, ..d }), "water.level_m");
             }
         }

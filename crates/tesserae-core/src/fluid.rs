@@ -35,21 +35,6 @@ pub struct FluidDef {
     pub heat: Option<Heat>,
 }
 
-impl FluidDef {
-    /// The same metres and seconds at every Voxel size: a 16 m fall lands in
-    /// 2 s and spreads 3 m 0.75 s later at 1, 0.5 and 0.25 m alike.
-    pub const WATER: FluidDef = FluidDef {
-        reach_m: 7.0,
-        sideways_m_per_s: 4.0,
-        downward_m_per_s: 8.0,
-        recession_m_per_s: 4.0,
-        reset_drop_m: 0.5,
-        waterlogs: true,
-        extinguishes: true,
-        heat: None,
-    };
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FluidError {
     /// A reach, rate or drop that is not a finite positive number.
@@ -104,13 +89,12 @@ impl Default for FluidTable {
 }
 
 impl FluidTable {
+    /// Empty: every fluid is a Game's, declared and validated like any other.
     pub fn builtin() -> Self {
-        let mut table = FluidTable {
+        FluidTable {
             defs: Vec::new(),
             registered: 0,
-        };
-        table.set(crate::material::WATER, FluidDef::WATER);
-        table
+        }
     }
 
     /// [`crate::Tables::register_fluid`] also checks the Material; this alone
@@ -151,17 +135,13 @@ impl FluidTable {
         if self.contains(material) {
             return Err(FluidError::AlreadyAFluid);
         }
-        self.set(material, def);
-        Ok(())
-    }
-
-    fn set(&mut self, material: MaterialId, def: FluidDef) {
         let i = material as usize;
         if self.defs.len() <= i {
             self.defs.resize(i + 1, None);
         }
         self.defs[i] = Some((def, self.registered));
         self.registered += 1;
+        Ok(())
     }
 
     pub fn contains(&self, material: MaterialId) -> bool {
@@ -175,7 +155,7 @@ impl FluidTable {
             .map(|(def, _)| def)
     }
 
-    /// Where `material` came in the registration order, water first: what
+    /// Where `material` came in the registration order, first registered first: what
     /// decides an otherwise equal claim between two fluids.
     pub fn rank(&self, material: MaterialId) -> Option<u16> {
         self.defs
@@ -196,16 +176,16 @@ impl FluidTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material::WATER;
+    use crate::material::RETIRED;
+    use crate::testgen::WATER_FLUID;
 
     #[test]
-    fn water_is_the_one_builtin_fluid() {
+    fn no_fluid_is_built_in() {
         let table = FluidTable::builtin();
-        assert_eq!(table.get(WATER), Some(&FluidDef::WATER));
-        for material in 0..WATER {
+        assert_eq!(table.iter().count(), 0);
+        for material in 0..=RETIRED + 1 {
             assert!(!table.contains(material), "{material}");
         }
-        assert!(!table.contains(WATER + 1));
     }
 
     /// Non-finite values, bad ranges and contradictory definitions are refused
@@ -219,35 +199,35 @@ mod tests {
                 "nan reach",
                 FluidDef {
                     reach_m: f32::NAN,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "infinite rate",
                 FluidDef {
                     sideways_m_per_s: f32::INFINITY,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "zero downward",
                 FluidDef {
                     downward_m_per_s: 0.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "negative recession",
                 FluidDef {
                     recession_m_per_s: -1.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
             (
                 "zero drop",
                 FluidDef {
                     reset_drop_m: 0.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
             ),
         ] {
@@ -258,13 +238,9 @@ mod tests {
             );
         }
         assert!(!table.contains(lava), "a refused definition left a row");
-        assert_eq!(table.register(lava, FluidDef::WATER), Ok(()));
+        assert_eq!(table.register(lava, WATER_FLUID), Ok(()));
         assert_eq!(
-            table.register(lava, FluidDef::WATER),
-            Err(FluidError::AlreadyAFluid)
-        );
-        assert_eq!(
-            table.register(WATER, FluidDef::WATER),
+            table.register(lava, WATER_FLUID),
             Err(FluidError::AlreadyAFluid)
         );
     }
@@ -282,7 +258,7 @@ mod tests {
                 "reach past the bound",
                 FluidDef {
                     reach_m: 65.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::OutOfRange,
             ),
@@ -290,7 +266,7 @@ mod tests {
                 "rate past the bound",
                 FluidDef {
                     downward_m_per_s: 300.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::OutOfRange,
             ),
@@ -298,7 +274,7 @@ mod tests {
                 "drop past the bound",
                 FluidDef {
                     reset_drop_m: 17.0,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::OutOfRange,
             ),
@@ -310,7 +286,7 @@ mod tests {
                         reach_m: 2.0,
                     }),
                     extinguishes: false,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::BadHeat,
             ),
@@ -318,7 +294,7 @@ mod tests {
                 "hot and extinguishing",
                 FluidDef {
                     heat: hot,
-                    ..FluidDef::WATER
+                    ..WATER_FLUID
                 },
                 FluidError::HotExtinguisher,
             ),
@@ -328,7 +304,7 @@ mod tests {
         let lava = FluidDef {
             heat: hot,
             extinguishes: false,
-            ..FluidDef::WATER
+            ..WATER_FLUID
         };
         assert_eq!(table.register(9, lava), Ok(()));
     }
@@ -337,15 +313,19 @@ mod tests {
     #[test]
     fn rank_is_the_registration_order() {
         let mut table = FluidTable::builtin();
-        table.register(12, FluidDef::WATER).unwrap();
-        table.register(9, FluidDef::WATER).unwrap();
-        assert_eq!(table.rank(WATER), Some(0));
-        assert_eq!(table.rank(12), Some(1));
-        assert_eq!(table.rank(9), Some(2));
+        let before = table.iter().count() as u16;
+        table.register(12, WATER_FLUID).unwrap();
+        table.register(9, WATER_FLUID).unwrap();
+        assert_eq!(table.rank(12), Some(before));
+        assert_eq!(table.rank(9), Some(before + 1));
         assert_eq!(table.rank(10), None);
         assert_eq!(
-            table.iter().map(|(m, _)| m).collect::<Vec<_>>(),
-            [WATER, 9, 12]
+            table
+                .iter()
+                .map(|(m, _)| m)
+                .skip(before.into())
+                .collect::<Vec<_>>(),
+            [9, 12]
         );
     }
 }

@@ -1,8 +1,8 @@
 //! The Rust side of `wit/`, generated once per contract line. Private: nothing
 //! outside this crate sees a generated type.
 //!
-//! The host speaks the newest line; [`crate::adapt`] carries every older one
-//! to it and back, so a closed line's records never change in place.
+//! The host speaks the newest line; [`crate::adapt`] carries each older one a
+//! line up and back, so a closed line's records never change in place.
 
 pub(crate) mod v01 {
     wasmtime::component::bindgen!({
@@ -24,4 +24,14 @@ pub(crate) mod v02 {
     });
 }
 
-pub(crate) use v02::*;
+pub(crate) mod v03 {
+    wasmtime::component::bindgen!({
+        path: "wit/0.3",
+        world: "mod",
+        imports: { default: async },
+        exports: { default: async },
+        additional_derives: [PartialEq, Clone],
+    });
+}
+
+pub(crate) use v03::*;

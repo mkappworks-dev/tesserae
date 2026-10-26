@@ -3,13 +3,13 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use tesserae_core::WorldgenParams;
 use wasmtime::component::{Linker, ResourceTable};
 use wasmtime::{Config, Engine, ResourceLimiter, StoreLimits, StoreLimitsBuilder};
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::bindings::tesserae::mods::{commands, content, host, types};
-use crate::bindings::{Mod, v01};
+use crate::bindings::{Mod, v01, v02};
+use crate::convert::engine_world_params;
 use crate::limits::ModLimits;
 use crate::log::{Capture, LogBuffer, LogHandle, LogLevel};
 use crate::random::SeededRng;
@@ -148,7 +148,21 @@ impl host::Host for HostState {
     }
 
     async fn default_world_params(&mut self) -> content::WorldParams {
-        WorldgenParams::default().into()
+        engine_world_params()
+    }
+}
+
+impl v02::tesserae::mods::types::Host for HostState {}
+impl v02::tesserae::mods::content::Host for HostState {}
+impl v02::tesserae::mods::commands::Host for HostState {}
+
+impl v02::tesserae::mods::host::Host for HostState {
+    async fn log(&mut self, level: v02::tesserae::mods::types::LogLevel, message: String) {
+        self.log.push(types::LogLevel::from(level).into(), &message);
+    }
+
+    async fn default_world_params(&mut self) -> v02::tesserae::mods::content::WorldParams {
+        engine_world_params().into()
     }
 }
 
@@ -158,11 +172,12 @@ impl v01::tesserae::mods::commands::Host for HostState {}
 
 impl v01::tesserae::mods::host::Host for HostState {
     async fn log(&mut self, level: v01::tesserae::mods::types::LogLevel, message: String) {
-        self.log.push(level.into(), &message);
+        let level = v02::tesserae::mods::types::LogLevel::from(level);
+        self.log.push(types::LogLevel::from(level).into(), &message);
     }
 
     async fn default_world_params(&mut self) -> v01::tesserae::mods::content::WorldParams {
-        WorldgenParams::default().into()
+        v02::tesserae::mods::content::WorldParams::from(engine_world_params()).into()
     }
 }
 
@@ -180,8 +195,9 @@ pub(crate) fn engine() -> wasmtime::Result<Engine> {
 pub(crate) fn linker(engine: &Engine) -> wasmtime::Result<Linker<HostState>> {
     let mut linker = Linker::new(engine);
     wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
-    // Each line's imports carry its own version, so both coexist in one Linker.
+    // Each line's imports carry its own version, so all coexist in one Linker.
     v01::Mod::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |state| state)?;
+    v02::Mod::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |state| state)?;
     Mod::add_to_linker::<_, wasmtime::component::HasSelf<_>>(&mut linker, |state| state)?;
     Ok(linker)
 }
