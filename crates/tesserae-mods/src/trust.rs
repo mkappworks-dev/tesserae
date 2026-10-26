@@ -92,7 +92,19 @@ impl Trust {
         self.record(found, sha256.to_string())
     }
 
+    /// Trusts this build until the process exits; the file is never written.
+    pub fn grant_for_run(&mut self, found: &Found) -> Result<(), ModError> {
+        let sha256 = Trust::hash_of(found)?;
+        self.insert(found, sha256);
+        Ok(())
+    }
+
     fn record(&mut self, found: &Found, sha256: String) -> Result<(), ModError> {
+        self.insert(found, sha256);
+        self.save(&found.manifest.id)
+    }
+
+    fn insert(&mut self, found: &Found, sha256: String) {
         let id = found.manifest.id.clone();
         self.records.retain(|r| !(r.kind == KIND_MOD && r.id == id));
         self.records.push(Record {
@@ -100,7 +112,6 @@ impl Trust {
             id,
             sha256,
         });
-        self.save(&found.manifest.id)
     }
 
     fn save(&self, who: &str) -> Result<(), ModError> {

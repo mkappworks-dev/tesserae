@@ -23,6 +23,8 @@ use crate::world::WorldSettings;
 pub enum TrustMode {
     All,
     None,
+    /// Only for the in-repo demo a `dev` build picks itself, never for a named directory.
+    ThisRun,
 }
 
 struct LoadOptions {
@@ -32,12 +34,15 @@ struct LoadOptions {
 }
 
 impl LoadOptions {
+    /// `None` when a `dev` build's default, the demo, has not been built: the World opens with
+    /// no Game.
     fn resolve(
         args: impl IntoIterator<Item = OsString>,
         mods_env: Option<OsString>,
         trust_env: Option<OsString>,
         default_directory: Option<PathBuf>,
-    ) -> Result<Self, String> {
+        dev_demo: Option<PathBuf>,
+    ) -> Result<Option<Self>, String> {
         let mut directory = mods_env.map(PathBuf::from);
         let mut trust = if trust_env.as_deref() == Some(std::ffi::OsStr::new("1")) {
             TrustMode::All
@@ -54,16 +59,30 @@ impl LoadOptions {
                 return Err(format!("unknown argument: {}", arg.to_string_lossy()));
             }
         }
-        let directory = directory
-            .or(default_directory)
-            .ok_or("cannot resolve the user data directory; pass --mods <dir>")?;
+        let directory = match (directory, dev_demo) {
+            (Some(directory), _) => directory,
+            (None, Some(demo)) if demo.is_dir() => {
+                trust = TrustMode::ThisRun;
+                demo
+            }
+            (None, Some(_)) => return Ok(None),
+            (None, None) => default_directory
+                .ok_or("cannot resolve the user data directory; pass --mods <dir>")?,
+        };
         let trust_file = directory.with_file_name("trust.json");
-        Ok(Self {
+        Ok(Some(Self {
             directory,
             trust_file,
             trust,
-        })
+        }))
     }
+}
+
+/// Where `./scripts/build-guests` puts the demo, fixed at compile time because a `dev` binary
+/// runs from its own checkout whatever the working directory.
+fn dev_demo() -> Option<PathBuf> {
+    cfg!(feature = "dev")
+        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist"))
 }
 
 pub struct LoadedMods {
@@ -94,12 +113,17 @@ impl Default for LoadedMods {
 pub(super) struct WorldParameters(pub WorldgenParams);
 
 pub fn load_from_env(world: &WorldSettings) -> Result<LoadedMods, String> {
-    let options = LoadOptions::resolve(
+    let Some(options) = LoadOptions::resolve(
         std::env::args_os().skip(1),
         std::env::var_os("TESSERAE_MODS_DIR"),
         std::env::var_os("TESSERAE_TRUST_MODS"),
         tesserae_mods::default_mods_dir(),
-    )?;
+        dev_demo(),
+    )?
+    else {
+        eprintln!("No Game: the demo is not built; run ./scripts/build-guests");
+        return Ok(LoadedMods::default());
+    };
     let stdin = io::stdin();
     load_prompted(
         &options.directory,
@@ -123,6 +147,12 @@ fn load_prompted(
 ) -> Result<LoadedMods, String> {
     load_with(directory, trust_file, world, |found, trust| {
         let id = &found.manifest.id;
+        if mode == TrustMode::ThisRun {
+            trust.grant_for_run(found).map_err(|e| e.to_string())?;
+            writeln!(output, "Trusting in-repo demo Mod `{id}` for this run")
+                .map_err(|e| e.to_string())?;
+            return Ok(true);
+        }
         if matches!(
             trust.check(found).map_err(|e| e.to_string())?,
             Verdict::Trusted(_)
@@ -939,7 +969,9 @@ mod tests {
                 env.map(OsString::from),
                 trust.map(OsString::from),
                 Some(PathBuf::from("data/tesserae/mods")),
+                None,
             )
+            .unwrap()
             .unwrap()
         };
         assert_eq!(
@@ -956,6 +988,76 @@ mod tests {
         assert_eq!(cli.trust, TrustMode::All);
         assert_eq!(options(&[], None, Some("1")).trust, TrustMode::All);
         assert_eq!(options(&[], None, Some("yes")).trust, TrustMode::None);
-        assert!(LoadOptions::resolve([OsString::from("--mods")], None, None, None).is_err());
+        assert!(LoadOptions::resolve([OsString::from("--mods")], None, None, None, None).is_err());
+    }
+
+    #[test]
+    fn a_built_dev_demo_is_the_default_trusted_for_the_run_and_an_explicit_directory_wins() {
+        let s = Scratch::new();
+        let demo = s.0.join("games/demo/dist");
+        let options =
+            |args: &[&str], env: Option<&str>, trust: Option<&str>, demo: Option<&Path>| {
+                LoadOptions::resolve(
+                    args.iter().map(OsString::from),
+                    env.map(OsString::from),
+                    trust.map(OsString::from),
+                    Some(PathBuf::from("data/tesserae/mods")),
+                    demo.map(Path::to_path_buf),
+                )
+                .unwrap()
+            };
+
+        assert!(options(&[], None, None, Some(&demo)).is_none());
+        assert!(options(&["--trust-all"], None, Some("1"), Some(&demo)).is_none());
+
+        fs::create_dir_all(&demo).unwrap();
+        for (args, trust) in [(&[][..], None), (&["--trust-all"][..], Some("1"))] {
+            let chosen = options(args, None, trust, Some(&demo)).unwrap();
+            assert_eq!(chosen.directory, demo);
+            assert_eq!(chosen.trust, TrustMode::ThisRun);
+        }
+        let cli = options(&["--mods", "cli"], Some("env"), None, Some(&demo)).unwrap();
+        assert_eq!(cli.directory, PathBuf::from("cli"));
+        assert_eq!(cli.trust, TrustMode::None);
+        let env = options(&[], Some("env"), Some("1"), Some(&demo)).unwrap();
+        assert_eq!(env.directory, PathBuf::from("env"));
+        assert_eq!(env.trust, TrustMode::All);
+        let named = demo.to_str().unwrap();
+        let explicit = options(&["--mods", named], None, None, Some(&demo)).unwrap();
+        assert_eq!(explicit.directory, demo);
+        assert_eq!(explicit.trust, TrustMode::None);
+
+        let release = options(&[], None, None, None).unwrap();
+        assert_eq!(release.directory, PathBuf::from("data/tesserae/mods"));
+        assert_eq!(release.trust, TrustMode::None);
+    }
+
+    #[test]
+    fn only_a_dev_build_offers_the_in_repo_demo() {
+        #[cfg(feature = "dev")]
+        assert!(dev_demo().unwrap().ends_with("games/demo/dist"));
+        #[cfg(not(feature = "dev"))]
+        assert!(dev_demo().is_none());
+    }
+
+    #[test]
+    fn trusted_for_the_run_loads_without_a_prompt_or_a_record_and_ignores_a_stale_one() {
+        let s = Scratch::new();
+        s.add("hello", "hello", "");
+        let (result, output) = prompted(&s, TrustMode::ThisRun, false, "");
+        assert_eq!(result.unwrap().mods.len(), 1);
+        assert!(!output.contains("Trust this exact build?"), "{output}");
+        assert!(!s.0.join("trust.json").exists());
+
+        assert_eq!(s.load(TrustMode::All).unwrap().mods.len(), 1);
+        let recorded = fs::read(s.0.join("trust.json")).unwrap();
+        fs::write(
+            s.0.join("mods/hello/mod.toml"),
+            fs::read_to_string(s.0.join("mods/hello/mod.toml")).unwrap() + "# rebuilt\n",
+        )
+        .unwrap();
+        let (result, _) = prompted(&s, TrustMode::ThisRun, false, "");
+        assert_eq!(result.unwrap().mods.len(), 1);
+        assert_eq!(fs::read(s.0.join("trust.json")).unwrap(), recorded);
     }
 }
