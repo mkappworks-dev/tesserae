@@ -1,6 +1,6 @@
 # 11: The Server answers where the player aims, and the Client outlines it
 
-Status: ready-for-agent
+Status: done
 Blocked by: 07
 
 Spec: [decisions 15 and 16 (the outline)](../spec.md).
@@ -32,3 +32,17 @@ menu is open. The answer holds no Voxel or Chunk (ADR-0002).
       with the menu open.
 - [ ] A capture showing the outline is in the `/tmp` review folder.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+The Client reports changed rays and held items with wrapping sequence ids.
+The Server validates origin and sequence, keeps the latest report and
+answers once a tick through the same resolver as edits. The response has
+metre bounds and a ghost-cell position, with no Voxel or Chunk. Ghosts also
+share placement capacity validation. Fire has no ghost. Client drawing uses
+one wire box and hides it for the menu or an outdated response.
+
+Added Shape-bound/placement agreement and stale/far/non-finite report tests.
+Final review, formatting, full CI and captures remain deferred to ticket 13.

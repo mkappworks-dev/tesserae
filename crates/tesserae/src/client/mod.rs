@@ -1,6 +1,7 @@
 //! The Client: rendering, input and camera. Never mutates World state, and has
 //! no access to it — see `docs/adr/0002-client-server-from-day-one.md`.
 
+mod aim;
 mod blend_order;
 pub mod camera;
 #[cfg(feature = "dev")]
@@ -23,6 +24,7 @@ pub fn plugin(app: &mut App) {
         chunk_view::plugin,
         edit::plugin,
         menu::plugin,
+        aim::plugin,
         pose::plugin,
     ));
     #[cfg(feature = "dev")]

@@ -80,6 +80,21 @@ pub enum EditAction {
 
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AimItem { Solid(Voxel), Fluid(MaterialId), Fire }
+impl AimItem {
+    fn action(self) -> EditAction { match self { Self::Solid(voxel)=>EditAction::Place(voxel), Self::Fluid(material)=>EditAction::PlaceSource(material), Self::Fire=>EditAction::Ignite } }
+}
+
+#[derive(Message, Clone, Copy, Debug)]
+pub struct AimReport { pub seq:u32, pub origin:Vec3, pub direction:Vec3, pub held:Option<AimItem> }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimBounds { pub min:Vec3, pub max:Vec3 }
+#[derive(Message, Clone, Copy, Debug, Default, PartialEq)]
+pub struct AimTarget { pub seq:u32, pub outline:Option<AimBounds>, pub ghost:Option<Vec3> }
+#[derive(Resource, Default)]
+struct AimState { latest:Option<(AimReport,f32)> }
+
 /// What the Client wants done: an action, and the ray it wants it done along, in
 /// metres. Intent only - the Server decides whether it happens.
 #[derive(Message, Clone, Copy, Debug)]
@@ -200,20 +215,62 @@ impl PendingEdits {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<PendingEdits>()
+    app.init_resource::<AimState>()
+        .add_message::<AimReport>()
+        .add_message::<AimTarget>()
+        .init_resource::<PendingEdits>()
         .init_resource::<super::mods::EditHistory>()
         .add_message::<EditIntent>()
         .add_message::<EditRejected>()
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_systems(
             RunFixedMainLoop,
-            receive
-                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
+            (receive, receive_aim).in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
                 .after(player::PlayerInput),
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
-        .add_systems(FixedPreUpdate, apply_pending);
+        .add_systems(FixedPreUpdate, (apply_pending, answer_aim).chain());
+}
+
+fn receive_aim(mut reports:MessageReader<AimReport>, mut state:ResMut<AimState>, player:Single<&Player>) {
+    for report in reports.read() {
+        if state.latest.is_some_and(|(last,_)|report.seq.wrapping_sub(last.seq) as i32 <= 0) {continue;}
+        let intent=EditIntent {origin:report.origin,direction:report.direction,action:EditAction::Remove};
+        if let Ok(distance)=vet_origin(&intent,player.eye()) {state.latest=Some((*report,EDIT_REACH_M-distance));}
+    }
+}
+
+fn answer_aim(state:Res<AimState>,store:Res<ChunkStore>,tables:Res<ContentTables>,world:Res<WorldSettings>,meshes:Res<MeshState>,mut targets:MessageWriter<AimTarget>) {
+    if let Some((report,reach))=state.latest {targets.write(aim_target(&store,&tables,&world,&meshes,report,reach));}
+}
+
+fn aim_target(store:&ChunkStore,tables:&Tables,world:&WorldSettings,meshes:&MeshState,report:AimReport,reach:f32)->AimTarget {
+    let intent=|action|EditIntent {action,origin:report.origin,direction:report.direction};
+    let remove=resolve(store,tables,world,&intent(EditAction::Remove),reach).ok();
+    let place=report.held.and_then(|held|resolve(store,tables,world,&intent(held.action()),reach).ok());
+    let outline_at=if report.held==Some(AimItem::Fire) {place.map(|(at,_)|at)} else {remove.map(|(at,_)|at)};
+    let outline=outline_at.and_then(|at| {
+        let here=store.occupants(at,&tables.fluids)?;
+        let voxel=if here.solid.is_air() {Voxel::cube(here.fluid?.material)}else{here.solid};
+        let around=FACE_STEPS.map(|d|store.voxel([at[0]+d[0],at[1]+d[1],at[2]+d[2]]).unwrap_or(Voxel::AIR));
+        let connections=tables.shapes.connections(voxel,around);
+        let boxes=tables.shapes.selection(voxel,connections);
+        let mut min=Vec3::splat(f32::INFINITY);let mut max=Vec3::splat(f32::NEG_INFINITY);
+        for b in boxes {min=min.min(Vec3::from_array(b.min.map(f32::from)));max=max.max(Vec3::from_array(b.max.map(f32::from)));}
+        if boxes.is_empty() {return None;}
+        let origin=Vec3::from_array(at.map(|i|i as f32*world.voxel_size));
+        Some(AimBounds {min:origin+min*(world.voxel_size/16.0),max:origin+max*(world.voxel_size/16.0)})
+    });
+    let ghost=place.filter(|_|report.held!=Some(AimItem::Fire)).and_then(|(at,change)| {
+        if meshes.is_unlit(VoxelCoord::of(at).chunk) {return None;}
+        let here=store.occupants(at,&tables.fluids)?;
+        let next=match change {Change::Solid(voxel)=>here.place_solid(voxel,tables),Change::Occupants(next)=>next};
+        tables.vet_occupants(next).ok()?;
+        vet_capacity(store,tables,at,next.solid).ok()?;
+        Some(Vec3::from_array(at.map(|i|i as f32*world.voxel_size)))
+    });
+    AimTarget {seq:report.seq,outline,ghost}
 }
 
 pub(in crate::server) fn receive(
@@ -585,21 +642,9 @@ pub(in crate::server) fn set_occupants(
     };
     let (voxel, overlay) = Occupants { solid, ..occupants }.encode(&tables.fluids);
 
-    // Net of what it replaces: swapping one shaped Voxel for another of the same
-    // cost at the cap is not adding one. Counted in stairs, a connected Shape
-    // being charged for its rails.
     let before = chunk.get(place.x, place.y, place.z);
-    let was = store
-        .occupants(at, &tables.fluids)
-        .expect("the Chunk is held");
-    let added = tables.shapes.cap_units(voxel);
-    let removed = tables.shapes.cap_units(before);
-    if added > removed
-        && chunk.shaped_units(|v| tables.shapes.cap_units(v)) + (added - removed) as usize
-            > MAX_SHAPED_PER_CHUNK
-    {
-        return Err(RejectReason::TooManyShaped);
-    }
+    let was = store.occupants(at, &tables.fluids).expect("the Chunk is held");
+    vet_capacity(store,tables,at,voxel)?;
 
     let seen = (store.optical(at), store.wet(at), store.burning(at));
     store.set_overlay(place, overlay);
@@ -656,6 +701,15 @@ pub(in crate::server) fn set_occupants(
             }
         }
     }
+    Ok(())
+}
+
+fn vet_capacity(store:&ChunkStore,tables:&Tables,at:[i32;3],voxel:Voxel)->Result<(),RejectReason> {
+    let place=VoxelCoord::of(at);
+    let chunk=store.get(place.chunk).ok_or(RejectReason::NotLoaded)?;
+    let before=chunk.get(place.x,place.y,place.z);
+    let added=tables.shapes.cap_units(voxel);let removed=tables.shapes.cap_units(before);
+    if added>removed && chunk.shaped_units(|v|tables.shapes.cap_units(v))+(added-removed) as usize>MAX_SHAPED_PER_CHUNK {return Err(RejectReason::TooManyShaped);}
     Ok(())
 }
 
@@ -2220,5 +2274,31 @@ mod tests {
         );
         assert_eq!(extinguish(lit).unwrap().burning, None);
         assert_eq!(extinguish(at(stair(), None)), Err(RejectReason::NotBurning));
+    }
+    #[test]
+    fn aim_bounds_follow_shapes_and_the_ghost_matches_the_edit() {
+        let rock=tesserae_core::testgen::fixtures().ground.rock;
+        for (shape,top) in [(0,8.0),(tesserae_core::SHAPE_SLAB,7.5),(SHAPE_STAIR,8.0)] {
+            let mut chunk=Chunk::air();chunk.set(5,7,5,Voxel::new(rock,shape,0));
+            let mut app=app_with(&[(origin(),chunk)]);
+            let report=AimReport {seq:1,origin:DOWN_EYE,direction:Vec3::NEG_Y,held:Some(AimItem::Solid(stone()))};
+            let target=aim_target(app.world().resource::<ChunkStore>(),&watered(),app.world().resource::<WorldSettings>(),app.world().resource::<MeshState>(),report,EDIT_REACH_M);
+            let bounds=target.outline.unwrap();assert_eq!(bounds.min,Vec3::new(5.0,7.0,5.0));assert_eq!(bounds.max,Vec3::new(6.0,top,6.0));
+            let ghost=target.ghost.unwrap();assert_eq!(ghost,Vec3::new(5.0,8.0,5.0));
+            send(&mut app,down(EditAction::Place(stone())));
+            assert_eq!(app.world().resource::<ChunkStore>().voxel(ghost.to_array().map(|v|v as i32)),Some(stone()));
+            let fire=aim_target(app.world().resource::<ChunkStore>(),&watered(),app.world().resource::<WorldSettings>(),app.world().resource::<MeshState>(),AimReport {held:Some(AimItem::Fire),..report},EDIT_REACH_M);
+            assert_eq!(fire.ghost,None);
+        }
+    }
+    #[test]
+    fn stale_far_and_non_finite_aim_reports_do_not_replace_the_latest() {
+        let mut app=app_with(&[(origin(),ground())]);
+        let report=AimReport {seq:4,origin:DOWN_EYE,direction:Vec3::NEG_Y,held:None};
+        app.world_mut().write_message(report);app.world_mut().run_system_once(receive_aim).unwrap();
+        for bad in [AimReport {seq:3,..report},AimReport {seq:5,origin:DOWN_EYE+Vec3::X*3.0,..report},AimReport {seq:6,direction:Vec3::NAN,..report}] {
+            app.world_mut().write_message(bad);app.world_mut().run_system_once(receive_aim).unwrap();
+        }
+        assert_eq!(app.world().resource::<AimState>().latest.unwrap().0.seq,4);
     }
 }
