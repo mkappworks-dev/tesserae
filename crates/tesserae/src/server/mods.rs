@@ -391,6 +391,7 @@ pub(in crate::server) fn catalogue(
                     .names(Kind::Shape)
                     .find(|&(named, _)| named == id as usize)
                     .map(|(_, name)| name.to_owned()).expect("registered Shape name"),
+                geometry: tables.shapes.preview_geometry(id),
                 turnable: id != SHAPE_FULL_CUBE
                     && !tables.shapes.is_connected_shape(id),
             }

@@ -1014,6 +1014,14 @@ impl ShapeTable {
         !self.connects.is_empty()
     }
 
+    pub fn preview_geometry(&self, shape: ShapeId) -> Vec<Vec<ShapeQuad>> {
+        if !self.contains(shape) { return Vec::new(); }
+        (0..ORIENTATIONS).map(|orientation| {
+            let (start,len)=self.variants[shape as usize*ORIENTATIONS+orientation].quads;
+            self.quads[start as usize..(start+len) as usize].to_vec()
+        }).collect()
+    }
+
     pub fn is_connected_shape(&self, shape: ShapeId) -> bool {
         self.variants.get(shape as usize * ORIENTATIONS).is_some_and(|variant| variant.connect != NO_CONNECT)
     }

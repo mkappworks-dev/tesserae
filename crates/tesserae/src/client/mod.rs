@@ -15,6 +15,7 @@ mod menu;
 mod overlay;
 mod palette;
 mod pose;
+mod preview;
 
 use bevy::prelude::*;
 
@@ -25,6 +26,7 @@ pub fn plugin(app: &mut App) {
         edit::plugin,
         menu::plugin,
         aim::plugin,
+        preview::plugin,
         pose::plugin,
     ));
     #[cfg(feature = "dev")]

@@ -92,6 +92,11 @@ impl Swatches {
         Color::linear_rgb(rgba.x, rgba.y, rgba.z)
     }
 
+    pub(super) fn rgba(&self, holding: Holding) -> Vec4 {
+        let slot=match holding {Holding::Solid {material,..}|Holding::Fluid(material)=>material as usize,Holding::Fire=>FLAME_SLOT,Holding::Empty=>return Vec4::ZERO};
+        self.0.get(slot).copied().unwrap_or(Vec4::ONE)
+    }
+
     pub(super) fn of(&self, holding: Holding) -> Color {
         match holding {
             Holding::Solid { material, .. } | Holding::Fluid(material) => {

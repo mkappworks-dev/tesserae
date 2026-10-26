@@ -248,7 +248,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(Startup, uncap_frame_rate).add_systems(
         Update,
         (
-            render_offscreen.run_if(|capture: Res<Capture>, target: Option<Res<Offscreen>>| {
+            render_offscreen.after(super::preview::camera).run_if(|capture: Res<Capture>, target: Option<Res<Offscreen>>| {
                 capture.offscreen && target.is_none()
             }),
             watch_frames,

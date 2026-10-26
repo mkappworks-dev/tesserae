@@ -38,6 +38,7 @@ pub struct CatalogueShape {
     /// Whether turning it changes anything: a cube looks the same however it
     /// is turned and a connected Shape ignores its orientation.
     pub turnable: bool,
+    pub geometry: Vec<Vec<tesserae_core::shape::ShapeQuad>>,
 }
 
 impl ContentCatalogue {

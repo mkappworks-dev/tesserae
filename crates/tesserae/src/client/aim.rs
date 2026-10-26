@@ -6,7 +6,7 @@ use super::{camera::FlyCamera,edit::{Holding,Hotbar},menu::Menu};
 #[derive(Resource,Default)]
 pub(super) struct Target(pub(super) AimTarget);
 #[derive(Resource,Default)]
-struct Sent {seq:u32,last:Option<(Vec3,Vec3,Option<AimItem>)>}
+pub(super) struct Sent {pub(super) seq:u32,last:Option<(Vec3,Vec3,Option<AimItem>)>}
 #[derive(Component)]
 pub(super) struct Outline(pub(super) AimBounds);
 

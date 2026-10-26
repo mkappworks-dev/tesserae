@@ -1,6 +1,6 @@
 # 12: A ghost where the held item will land, and the held item in a corner
 
-Status: ready-for-agent
+Status: done
 Blocked by: 08, 11
 
 Spec: [decision 16](../spec.md).
@@ -27,3 +27,19 @@ the held item, its Shape or its orientation change.
 - [ ] Captures of a stair ghost in two orientations and of the corner model
       are in the `/tmp` review folder.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+Catalogue Shapes now carry read-only quads for each orientation, with
+connected Shapes represented without arms. The core mesher builds an
+isolated unit Shape from those quads. The Client reuses its mesh for a
+see-through ghost at the Server's accepted cell and a small corner model on
+an isolated camera layer. Fluids and fire use cube geometry and their
+placeholder colours; fire never shows a ghost. Models follow held-item,
+Shape and orientation changes and hide in the menu. Old asset handles are
+released when replacing a model.
+
+Added headless model/position/orientation/menu visibility coverage. Final
+formatting, review, CI, captures and benchmarks are ticket 13.

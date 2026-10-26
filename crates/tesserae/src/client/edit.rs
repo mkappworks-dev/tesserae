@@ -469,6 +469,7 @@ mod tests {
             id,
             name: name.to_owned(),
             turnable,
+            geometry: crate::server::fixture_tables().shapes.preview_geometry(id),
         })
         .collect();
         ContentCatalogue {
