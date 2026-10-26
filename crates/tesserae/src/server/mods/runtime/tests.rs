@@ -489,12 +489,12 @@ fn only_successful_player_edits_enter_history_and_context_in_metres() {
         .resource_mut::<ChunkStore>()
         .set_voxel(VoxelCoord::of([2, 2, 2]), Voxel::cube(h.rock()));
     h.app.world_mut().write_message(EditIntent {
-        action: EditAction::Break,
+        action: EditAction::Remove,
         origin: eye,
         direction: Vec3::NEG_Y,
     });
     h.app.world_mut().write_message(EditIntent {
-        action: EditAction::Break,
+        action: EditAction::Remove,
         origin: eye,
         direction: Vec3::Y,
     });
@@ -831,7 +831,7 @@ fn the_fixed_pre_update_drain_runs_after_player_apply_pending() {
             voxel: Voxel::cube(h.lamp()),
         }])], &tables_of(&h)));
     h.app.world_mut().write_message(EditIntent {
-        action: EditAction::Break,
+        action: EditAction::Remove,
         origin: eye,
         direction: Vec3::NEG_Y,
     });
@@ -1400,11 +1400,11 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     h.put([2, 0, 2], Voxel::cube(wood));
     for action in [
         EditAction::PlaceSource(water),
-        EditAction::RemoveSource,
-        EditAction::Break,
+        EditAction::Remove,
+        EditAction::Remove,
         EditAction::Ignite,
-        EditAction::PutOut,
-        EditAction::PutOut,
+        EditAction::Remove,
+        EditAction::Remove,
     ] {
         h.app.world_mut().write_message(EditIntent {
             action,

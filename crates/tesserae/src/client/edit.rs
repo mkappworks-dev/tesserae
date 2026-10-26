@@ -84,21 +84,14 @@ impl Holding {
         }
     }
 
-    /// What a right click asks for.
-    fn remove(self) -> EditAction {
-        match self {
-            Holding::Fluid(_) => EditAction::RemoveSource,
-            Holding::Fire => EditAction::PutOut,
-            Holding::Solid { .. } | Holding::Empty => EditAction::Break,
-        }
-    }
+    fn remove(self) -> EditAction { EditAction::Remove }
 
     fn verbs(self) -> (&'static str, &'static str) {
         match self {
-            Holding::Solid { .. } => ("place", "break"),
-            Holding::Fluid(_) => ("place source", "remove source"),
-            Holding::Fire => ("ignite", "put out"),
-            Holding::Empty => ("nothing", "break"),
+            Holding::Solid { .. } => ("place", "remove"),
+            Holding::Fluid(_) => ("place source", "remove"),
+            Holding::Fire => ("ignite", "remove"),
+            Holding::Empty => ("nothing", "remove"),
         }
     }
 
@@ -728,26 +721,26 @@ mod tests {
                     SHAPE_STAIR,
                     Orientation::IDENTITY
                 ))),
-                Some(EditAction::Break)
+                Some(EditAction::Remove)
             ]
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit8),
             [
                 Some(EditAction::PlaceSource(DEMO_WATER)),
-                Some(EditAction::RemoveSource)
+                Some(EditAction::Remove)
             ]
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit9),
-            [Some(EditAction::Ignite), Some(EditAction::PutOut)]
+            [Some(EditAction::Ignite), Some(EditAction::Remove)]
         );
 
         let mut dry = app_with(CursorGrabMode::Locked, dry());
         frame(&mut dry);
         assert_eq!(
             both_buttons(&mut dry, KeyCode::Digit9),
-            [None, Some(EditAction::Break)],
+            [None, Some(EditAction::Remove)],
             "an empty slot"
         );
 
@@ -771,7 +764,7 @@ mod tests {
             both_buttons(&mut app, KeyCode::Digit8),
             [
                 Some(EditAction::PlaceSource(LAVA)),
-                Some(EditAction::RemoveSource)
+                Some(EditAction::Remove)
             ]
         );
     }

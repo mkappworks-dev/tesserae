@@ -1,6 +1,6 @@
 # 07: A right click removes whatever is aimed at
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: [decisions 13 and 14](../spec.md).
@@ -28,3 +28,15 @@ right click.
       empty slot sends nothing.
 - [ ] 0.3 Mods see put-outs, solid Edits and fluid Edits as before.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+EditAction has one Remove. Its ray stops at solids and packed sources,
+passes flowing fluid, and removes fire before solid before source. Breaking
+a solid retains its fluid through the existing solid-layer rule. History
+still records put-outs, solid Edits and source removals by the layer changed.
+Every right click sends Remove, including an empty hand; empty left clicks
+send nothing. Existing action-path tests use the unified intent. Changed
+layer-order expectations are part of the deferred final review and CI pass.

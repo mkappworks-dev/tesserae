@@ -67,22 +67,17 @@ const MAX_PENDING: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EditAction {
-    /// Remove the Voxel the ray strikes.
-    Break,
+    /// Remove fire, then solid, then source at the first occupied Voxel.
+    Remove,
     /// Put this Voxel in the empty space in front of the face the ray strikes.
     Place(Voxel),
     /// Put a source of this fluid in front of the face the ray strikes. The ray
     /// stops at sources as well as solids and goes through flowing fluid.
     PlaceSource(MaterialId),
-    /// Take away the source the ray strikes, leaving any solid it shares the
-    /// Voxel with.
-    RemoveSource,
     /// Set the solid the ray strikes alight, by the rule a Mod's ignition
     /// meets.
     Ignite,
-    /// Put out the solid the ray strikes, by the rule a Mod's extinguish
-    /// meets.
-    PutOut,
+
 }
 
 /// What the Client wants done: an action, and the ray it wants it done along, in
@@ -300,7 +295,7 @@ pub(in crate::server) fn apply_pending(
                     .expect("the edited Chunk is held");
                 let kind = match (p.intent.action, change, intent_fluid(&was, &now)) {
                     (EditAction::Ignite, ..) => EditKind::Ignited(now.solid.material()),
-                    (EditAction::PutOut, ..) => EditKind::PutOut(now.solid.material()),
+                    (EditAction::Remove, ..) if was.burning.is_some() => EditKind::PutOut(now.solid.material()),
                     (_, Change::Occupants(_), Some(kind)) => kind,
                     _ => EditKind::Solid {
                         before: was.solid,
@@ -366,7 +361,7 @@ fn resolve(
     }
     let fluid_tool = matches!(
         intent.action,
-        EditAction::PlaceSource(_) | EditAction::RemoveSource
+        EditAction::PlaceSource(_) | EditAction::Remove
     );
     if let EditAction::PlaceSource(material) = intent.action
         && !tables.fluids.contains(material)
@@ -400,7 +395,12 @@ fn resolve(
     ];
 
     match intent.action {
-        EditAction::Break => Ok((hit.at, Change::Solid(Voxel::AIR))),
+        EditAction::Remove => {
+            let here = struck()?;
+            if here.burning.is_some() { Ok((hit.at, Change::Occupants(extinguish(here)?))) }
+            else if !here.solid.is_air() { Ok((hit.at, Change::Solid(Voxel::AIR))) }
+            else { Ok((hit.at, Change::Occupants(without_source(here)?))) }
+        },
         EditAction::Place(voxel) => {
             tables.vet_placed(voxel)?;
             match store.voxel(in_front) {
@@ -410,7 +410,6 @@ fn resolve(
                 Some(_) => Ok((in_front, Change::Solid(voxel))),
             }
         }
-        EditAction::RemoveSource => Ok((hit.at, Change::Occupants(without_source(struck()?)?))),
         EditAction::PlaceSource(material) => {
             // A Shape with room for fluid takes the source itself, keeping its
             // solid; anything else gets it in front of the face struck.
@@ -438,7 +437,6 @@ fn resolve(
             let wet = tesserae_core::fire::is_wet(store, tables, hit.at);
             Ok((hit.at, Change::Occupants(ignite(struck()?, wet, tables)?)))
         }
-        EditAction::PutOut => Ok((hit.at, Change::Occupants(extinguish(struck()?)?))),
     }
 }
 
@@ -815,7 +813,7 @@ mod tests {
         let mut app = app_with(&[(origin(), ground())]);
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone());
 
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert!(voxel_at(&app, [5, 7, 5]).is_air());
 
@@ -841,7 +839,7 @@ mod tests {
     #[test]
     fn the_ray_goes_through_water_so_break_takes_the_bed_and_place_replaces_the_water() {
         let mut app = app_with(&[(origin(), pool())]);
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert!(
             voxel_at(&app, [5, 7, 5]).is_air(),
@@ -1082,7 +1080,7 @@ mod tests {
         app.world_mut().spawn(Player::at(DOWN_EYE));
         app.update();
 
-        app.world_mut().write_message(down(EditAction::Break));
+        app.world_mut().write_message(down(EditAction::Remove));
         // Three frames in which no time passes and so no fixed tick runs. A
         // reader inside the fixed loop would have lost the message by the second.
         for _ in 0..3 {
@@ -1108,7 +1106,7 @@ mod tests {
             (
                 EditIntent {
                     direction: Vec3::Y,
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
@@ -1116,14 +1114,14 @@ mod tests {
             (
                 EditIntent {
                     origin: Vec3::new(5.5, 30.0, 5.5),
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
             (
                 EditIntent {
                     origin: Vec3::NAN,
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
@@ -1151,7 +1149,7 @@ mod tests {
     fn from(eye: Vec3) -> EditIntent {
         EditIntent {
             origin: eye,
-            ..down(EditAction::Break)
+            ..down(EditAction::Remove)
         }
     }
 
@@ -1183,7 +1181,7 @@ mod tests {
     #[test]
     fn the_origin_is_judged_when_the_intent_arrives_not_when_it_is_applied() {
         let mut app = app_with(&[(origin(), ground())]);
-        send_from_afar(&mut app, down(EditAction::Break));
+        send_from_afar(&mut app, down(EditAction::Remove));
 
         // The Player moves on while the intent waits for its Chunk's light.
         set_eye(&mut app, DOWN_EYE + Vec3::X * 100.0);
@@ -1253,7 +1251,7 @@ mod tests {
             .insert(origin(), ground());
         app.update();
 
-        app.world_mut().write_message(down(EditAction::Break));
+        app.world_mut().write_message(down(EditAction::Remove));
         app.world_mut().write_message(PoseReport {
             seq: 1,
             eye: DOWN_EYE,
@@ -1273,7 +1271,7 @@ mod tests {
             &mut app,
             EditIntent {
                 origin: Vec3::new(5.5, origin_y, 5.5),
-                ..down(EditAction::Break)
+                ..down(EditAction::Remove)
             },
         );
         tick(&mut app);
@@ -1413,7 +1411,7 @@ mod tests {
             .resource_mut::<MeshState>()
             .mark_unlit(origin());
 
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         for _ in 0..MAX_DEFERRED_TICKS {
             tick(&mut app);
             assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "applied too early");
@@ -1432,7 +1430,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<MeshState>()
             .mark_unlit(origin());
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         for _ in 0..=MAX_DEFERRED_TICKS + 1 {
             tick(&mut app);
         }
@@ -1444,7 +1442,7 @@ mod tests {
     fn a_flood_of_intents_is_bounded() {
         let mut app = app_with(&[(origin(), ground())]);
         for _ in 0..MAX_PENDING + 10 {
-            app.world_mut().write_message(down(EditAction::Break));
+            app.world_mut().write_message(down(EditAction::Remove));
         }
         app.world_mut().run_system_once(receive).unwrap();
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), MAX_PENDING);
@@ -1648,7 +1646,7 @@ mod tests {
             Some(Fluid::source(water))
         );
 
-        send(&mut app, down(EditAction::RemoveSource));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "the bed went too");
@@ -1659,7 +1657,7 @@ mod tests {
             burning: None,
         };
         assert_eq!(put_occupants(&mut app, [5, 8, 5], wet_stair).1, Ok(()));
-        send(&mut app, down(EditAction::RemoveSource));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(
             occupants_at(&app, [5, 8, 5]),
@@ -1705,7 +1703,7 @@ mod tests {
         assert_eq!(rejections(&mut app), vec![RejectReason::Occupied]);
         assert_eq!(occupants_at(&app, [5, 8, 5]), wet);
 
-        send(&mut app, down(EditAction::RemoveSource));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
         assert_eq!(voxel_at(&app, [5, 8, 5]), stair());
@@ -1795,7 +1793,7 @@ mod tests {
         put_occupants(&mut app, [6, 8, 5], flow).1.unwrap();
         let before: Vec<Occupants> = (0..16).map(|y| occupants_at(&app, [5, y, 5])).collect();
         let cases = [
-            (down(EditAction::RemoveSource), RejectReason::NoSource),
+            (down(EditAction::Remove), RejectReason::NoSource),
             (
                 down(EditAction::PlaceSource(tesserae_core::testgen::fixtures().ground.rock)),
                 RejectReason::NotAFluid,
@@ -1810,7 +1808,7 @@ mod tests {
             (
                 EditIntent {
                     origin: Vec3::new(5.5, 30.0, 5.5),
-                    ..down(EditAction::RemoveSource)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
@@ -1825,7 +1823,7 @@ mod tests {
             &mut app,
             EditIntent {
                 origin: Vec3::new(6.5, 12.0, 5.5),
-                ..down(EditAction::RemoveSource)
+                ..down(EditAction::Remove)
             },
         );
         tick(&mut app);
@@ -1855,7 +1853,7 @@ mod tests {
             burning: None,
         };
         put_occupants(&mut app, [5, 8, 5], flow).1.unwrap();
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert!(voxel_at(&app, [5, 7, 5]).is_air(), "the bed under the flow");
         assert_eq!(occupants_at(&app, [5, 8, 5]), flow);
@@ -1889,7 +1887,7 @@ mod tests {
                 &mut app,
                 EditIntent {
                     origin: Vec3::new(x as f32 + 0.5, 12.0, 5.5),
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
             );
         }
@@ -1960,7 +1958,7 @@ mod tests {
                 ..unlit
             }
         );
-        send(&mut app, down(EditAction::PutOut));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(occupants_at(&app, [5, 7, 5]), unlit);
         assert!(rejections(&mut app).is_empty());
@@ -2010,8 +2008,8 @@ mod tests {
             (down_at(6.5, EditAction::Ignite), "that does not burn"),
             (down(EditAction::Ignite), "it is already burning"),
             (down_at(4.5, EditAction::Ignite), "it is too wet to burn"),
-            (down_at(4.5, EditAction::PutOut), "nothing is burning there"),
-            (down_at(6.5, EditAction::PutOut), "nothing is burning there"),
+            (down_at(4.5, EditAction::Remove), "nothing is burning there"),
+            (down_at(6.5, EditAction::Remove), "nothing is burning there"),
             (
                 EditIntent {
                     direction: Vec3::Y,
@@ -2022,7 +2020,7 @@ mod tests {
             (
                 EditIntent {
                     origin: Vec3::new(5.5, 30.0, 5.5),
-                    ..down(EditAction::PutOut)
+                    ..down(EditAction::Remove)
                 },
                 "nothing in reach",
             ),
@@ -2041,7 +2039,7 @@ mod tests {
     #[test]
     fn the_fire_tool_is_vetted_queued_and_deferred_like_any_edit() {
         let (mut app, _) = wood_app();
-        for action in [EditAction::Ignite, EditAction::PutOut] {
+        for action in [EditAction::Ignite, EditAction::Remove] {
             send_from_afar(
                 &mut app,
                 EditIntent {
@@ -2065,7 +2063,7 @@ mod tests {
             assert_eq!(rejections(&mut app), vec![RejectReason::OutOfReach]);
         }
         let burning = |app: &App| occupants_at(app, [5, 7, 5]).burning.is_some();
-        for (action, lit) in [(EditAction::Ignite, true), (EditAction::PutOut, false)] {
+        for (action, lit) in [(EditAction::Ignite, true), (EditAction::Remove, false)] {
             app.world_mut()
                 .resource_mut::<MeshState>()
                 .mark_unlit(origin());

@@ -301,7 +301,7 @@ fn water_puts_a_burning_stair_out_and_drying_it_relights_after_a_fresh_delay() {
     run_seconds(&mut f, 4.0);
     assert!(!burning(&f, 0), "wet fuel caught");
 
-    f.send(0, EditAction::RemoveSource);
+    f.send(0, EditAction::Remove);
     let again = steps_until(&mut f, |f| burning(f, 0));
     assert!(
         (DELAY..=DELAY + 2).contains(&again),
@@ -345,7 +345,7 @@ fn an_older_job_cannot_light_fuel_whose_heat_is_gone_or_burn_out_replaced_fuel()
     let proposing = lit_at + DELAY;
     let hold = hold_at(&mut f, proposing);
     assert!(!burning(&f, 0), "caught early");
-    f.send(-2, EditAction::Break);
+    f.send(-2, EditAction::Remove);
     f.apply_intents();
     assert!(f.occupants(-2).solid.is_air(), "broken");
     let stale = f.sim().stale;
@@ -576,7 +576,7 @@ fn under_saturation_fire_flow_edits_and_mod_queues_all_keep_moving() {
             f.send(9, EditAction::Place(stone()));
             f.apply_intents();
             assert_eq!(f.occupants(9).solid, stone(), "the Edit waited on fire");
-            f.send(9, EditAction::Break);
+            f.send(9, EditAction::Remove);
             f.apply_intents();
             edited = true;
         }

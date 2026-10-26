@@ -262,7 +262,7 @@ fn a_placed_source_flows_then_recedes_through_the_server_tick() {
                 .all(|&x| x == 0 || f.occupants(x).solid.is_air())
         );
 
-        f.send(0, EditAction::RemoveSource);
+        f.send(0, EditAction::Remove);
         f.settle();
         assert!(f.wet().is_empty(), "{v} m: {:?}", f.wet());
         assert_eq!(
@@ -294,7 +294,7 @@ fn dividing_a_step_changes_nothing_but_the_ticks_taken() {
         f.sim_mut().job().scramble = scramble;
         let mut trace: HashMap<Step, Vec<Occupants>> = HashMap::default();
         let started = Instant::now();
-        for action in [EditAction::PlaceSource(water()), EditAction::RemoveSource] {
+        for action in [EditAction::PlaceSource(water()), EditAction::Remove] {
             f.send(0, action);
             loop {
                 f.tick();
@@ -358,7 +358,7 @@ fn an_older_job_cannot_bring_back_a_removed_source_or_its_flow() {
         "the held step is the proposing one"
     );
 
-    f.send(0, EditAction::RemoveSource);
+    f.send(0, EditAction::Remove);
     f.apply_intents();
     assert!(f.fluid(0).is_none(), "removed");
     hold.release();
@@ -400,7 +400,7 @@ fn blocking_a_stream_with_an_edit_keeps_its_source() {
 #[test]
 fn the_fluid_tool_refuses_what_it_cannot_do_and_changes_nothing() {
     let mut f = Fixture::new(1.0, 10.0, 0);
-    f.send(0, EditAction::RemoveSource);
+    f.send(0, EditAction::Remove);
     f.send(0, EditAction::PlaceSource(tesserae_core::testgen::fixtures().ground.rock));
     f.settle();
     assert_eq!(
@@ -413,7 +413,7 @@ fn the_fluid_tool_refuses_what_it_cannot_do_and_changes_nothing() {
     // On flowing water the removal strikes the floor through it.
     f.send(0, EditAction::PlaceSource(water()));
     f.settle();
-    f.send(3, EditAction::RemoveSource);
+    f.send(3, EditAction::Remove);
     f.settle();
     assert_eq!(f.rejections(), vec![RejectReason::NoSource]);
     assert!(f.fluid(3).is_some_and(|w| !w.source));
@@ -466,7 +466,7 @@ fn water_flowing_in_darkens_and_receding_brightens_as_a_fresh_solve_would() {
         "darkening disagrees with a fresh solve"
     );
 
-    f.send(0, EditAction::RemoveSource);
+    f.send(0, EditAction::Remove);
     f.settle();
     assert_eq!(block(&f, 3), dry, "the light did not come back");
     assert!(
@@ -531,7 +531,7 @@ fn a_waterlogged_stair_feeds_flow_and_light_follows_as_a_fresh_solve_would() {
         "darkening disagrees with a fresh solve"
     );
 
-    f.send(0, EditAction::RemoveSource);
+    f.send(0, EditAction::Remove);
     f.settle();
     assert!(f.wet().is_empty(), "{:?}", f.wet());
     assert_eq!(f.occupants(0).solid, stair);
@@ -1768,7 +1768,7 @@ fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
                     .all(|&x| f.fluid(x).unwrap().material == material
                         && (x == 0) == f.fluid(x).unwrap().source)
             );
-            f.send(0, EditAction::RemoveSource);
+            f.send(0, EditAction::Remove);
             f.settle();
             assert!(f.wet().is_empty(), "{v} m, {material}: {:?}", f.wet());
             assert!(f.rejections().is_empty());
@@ -1801,7 +1801,7 @@ fn every_fluid_the_demo_catalogues_reaches_the_world_as_a_source() {
                 "{v} m, {}",
                 fluid.name
             );
-            f.send(0, EditAction::RemoveSource);
+            f.send(0, EditAction::Remove);
             f.tick();
             assert!(
                 f.fluid(0).is_none_or(|left| !left.source),
@@ -1844,7 +1844,7 @@ fn lava_lights_the_dark_as_it_flows_and_the_light_goes_with_it() {
     f.settle();
     assert!(block(&f, 5) > 0, "lava 3 m away did not light x = 5");
     assert!(f.store().light(home) == Some(&fresh(&f)));
-    f.send(0, EditAction::RemoveSource);
+    f.send(0, EditAction::Remove);
     f.settle();
     assert_eq!(block(&f, 5), 0);
     assert!(f.store().light(home) == Some(&fresh(&f)));
@@ -2048,7 +2048,7 @@ fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
         Some(Fluid::source(water)),
         "the step read the water"
     );
-    f.send(4, EditAction::RemoveSource);
+    f.send(4, EditAction::Remove);
     f.apply_intents();
     let stale = f.sim().stale;
     hold.release();
