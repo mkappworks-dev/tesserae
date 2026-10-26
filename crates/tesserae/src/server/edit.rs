@@ -79,11 +79,9 @@ pub enum EditAction {
     RemoveSource,
     /// Set the solid the ray strikes alight, by the rule a Mod's ignition
     /// meets.
-    #[cfg_attr(not(test), expect(dead_code, reason = "until the Client sends it"))]
     Ignite,
     /// Put out the solid the ray strikes, by the rule a Mod's extinguish
     /// meets.
-    #[cfg_attr(not(test), expect(dead_code, reason = "until the Client sends it"))]
     PutOut,
 }
 

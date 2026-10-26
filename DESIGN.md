@@ -563,12 +563,12 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   levels 2 and up are generator-only, so from level 2's inner edge, 256 m at the
   defaults, held fluid and fire disappear and generated water returns. A writer
   changing the plane of light a neighbour's solve reads every tick can hold that
-  neighbour's mesh back by up to four spoilt solves. The player's fluid tool
-  places water only. Fuel beside terrain that is not held keeps its progress
-  until it is, but flow beside it drops the change it was waiting for and starts
-  its delay again. Reactions have no delay of their own, and a thin film against
-  a cube wets all of it. Lava draining outdoors at 0.25 m is the costliest step
-  measured; a bulk relight is the named follow-up.
+  neighbour's mesh back by up to four spoilt solves. Fuel beside terrain that is
+  not held keeps its progress until it is, but flow beside it drops the change
+  it was waiting for and starts its delay again. Reactions have no delay of
+  their own, and a thin film against a cube wets all of it. Lava draining
+  outdoors at 0.25 m is the costliest step measured; a bulk relight is the named
+  follow-up.
 - **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
   Connection groups still belong to a Shape and not a Material after step 7, a

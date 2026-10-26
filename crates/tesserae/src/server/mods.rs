@@ -9,13 +9,14 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use tesserae_core::{MaterialId, Tables, WorldgenParams};
+use tesserae_core::worldgen::STONE;
+use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, Voxel, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
     discover, plan, resolve,
 };
 
-use crate::content::MaterialPalette;
+use crate::content::{CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette};
 use crate::world::WorldSettings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -325,17 +326,66 @@ pub(super) fn plugin(app: &mut App) {
         (!loaded.game && loaded.tables.shapes.len() < 256)
             .then_some(loaded.tables.shapes.len() as u8),
     ));
-    app.insert_resource(super::ContentTables::from_loaded(
-        loaded.tables,
-        loaded.game,
-    ))
-    .insert_resource(WorldParameters(super::worldgen_params(loaded.world)))
-    .insert_resource(super::streaming::streaming_settings(loaded.view))
-    .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
-    .add_plugins(runtime::plugin)
-    .add_message::<MaterialPalette>();
+    let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
+    let params = super::worldgen_params(loaded.world);
+    let catalogue = catalogue(
+        &loaded.registry,
+        &tables.0,
+        params.water.map(|lake| lake.material),
+    );
+    app.insert_resource(tables)
+        .insert_resource(WorldParameters(params))
+        .insert_resource(super::streaming::streaming_settings(loaded.view))
+        .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
+        .add_plugins(runtime::plugin)
+        .add_message::<MaterialPalette>()
+        .add_message::<ContentCatalogue>();
     app.world_mut()
         .write_message(MaterialPalette(loaded.appearance));
+    app.world_mut().write_message(catalogue);
+}
+
+pub(in crate::server) fn catalogue(
+    registry: &Registry,
+    tables: &Tables,
+    lake: Option<MaterialId>,
+) -> ContentCatalogue {
+    let materials = registry
+        .materials
+        .iter()
+        .enumerate()
+        .map(|(id, name)| {
+            let id = id as MaterialId;
+            CatalogueMaterial {
+                id,
+                name: name.clone(),
+                solid: tables.materials.def(id).solid,
+                fluid: tables.fluids.rank(id),
+                burns: tables.combustion.contains(id),
+            }
+        })
+        .collect();
+    let shapes = (0..tables.shapes.len())
+        .map(|id| {
+            let id = id as ShapeId;
+            CatalogueShape {
+                id,
+                // The dev Server's reference fence is the one Shape no Registry names.
+                name: registry
+                    .shapes
+                    .get(id as usize)
+                    .cloned()
+                    .unwrap_or_else(|| "dev:fence".to_owned()),
+                turnable: id != SHAPE_FULL_CUBE
+                    && !tables.shapes.is_connected(Voxel::new(STONE, id, 0)),
+            }
+        })
+        .collect();
+    ContentCatalogue {
+        materials,
+        shapes,
+        lake,
+    }
 }
 
 #[cfg(test)]
@@ -567,6 +617,82 @@ mod tests {
             over_a_valley(generator, defaults.sea_level_m + defaults.relief_m / 2.0),
             tesserae_core::Voxel::AIR
         );
+    }
+
+    fn published_catalogue(loaded: LoadedMods) -> ContentCatalogue {
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let mut sent: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<ContentCatalogue>>()
+            .drain()
+            .collect();
+        assert_eq!(sent.len(), 1);
+        sent.pop().unwrap()
+    }
+
+    /// Every registered name, with what the Client may do with it, and the
+    /// Game's lake.
+    #[test]
+    fn the_catalogue_names_the_demos_content_and_its_lake() {
+        let catalogue = published_catalogue(super::runtime::tests::demo_loaded(1.0));
+        let material = |name: &str| {
+            catalogue
+                .materials
+                .iter()
+                .find(|m| m.name == name)
+                .unwrap_or_else(|| panic!("{name}"))
+        };
+        assert_eq!(catalogue.lake, Some(material("demo:water").id));
+        for fluid in ["demo:water", "demo:lava", "demo:mud"] {
+            let fluid = material(fluid);
+            assert!(fluid.fluid.is_some() && !fluid.solid && !fluid.burns);
+        }
+        assert!(material("demo:water").fluid < material("demo:lava").fluid);
+        assert!(material("demo:wood").solid && material("demo:wood").burns);
+        for solid in ["core:stone", "demo:brick", "demo:lamp"] {
+            let solid = material(solid);
+            assert!(solid.solid && solid.fluid.is_none() && !solid.burns);
+        }
+        let turnable: Vec<_> = catalogue
+            .shapes
+            .iter()
+            .map(|s| (s.name.as_str(), s.turnable))
+            .collect();
+        assert_eq!(
+            turnable[..4],
+            [
+                ("core:cube", false),
+                ("core:slab", true),
+                ("core:stair", true),
+                ("core:post", true)
+            ]
+        );
+        assert!(turnable.contains(&("demo:fence", false)), "it is connected");
+        assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
+        for (id, entry) in catalogue.materials.iter().enumerate() {
+            assert_eq!(entry.id as usize, id);
+        }
+    }
+
+    /// Until the built-in water goes, a World with no Game still has it, as
+    /// its lake through the bridge.
+    #[test]
+    fn a_world_with_no_game_catalogues_the_builtins_and_its_lake_fluid() {
+        let catalogue = published_catalogue(LoadedMods::default());
+        assert!(!catalogue.anything_burns());
+        let lake = catalogue.lake.and_then(|id| catalogue.material(id));
+        assert_eq!(lake.map(|m| m.name.as_str()), Some("core:water"));
+        assert_eq!(catalogue.materials.len(), 8);
+        let fence = catalogue
+            .shapes
+            .get(4)
+            .map(|s| (s.name.as_str(), s.turnable));
+        if cfg!(feature = "dev") {
+            assert_eq!(fence, Some(("dev:fence", false)));
+        } else {
+            assert_eq!(fence, None);
+        }
     }
 
     #[cfg(feature = "dev")]

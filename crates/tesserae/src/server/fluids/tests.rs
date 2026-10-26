@@ -1772,6 +1772,43 @@ fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
     }
 }
 
+/// Each fluid the demo's catalogue offers the hotbar, held and clicked, lands
+/// as a source, and a right click takes it away again.
+#[test]
+fn every_fluid_the_demo_catalogues_reaches_the_world_as_a_source() {
+    for v in [1.0, 0.25] {
+        let loaded = mod_runtime::tests::demo_loaded(v);
+        let catalogue = super::super::mods::catalogue(&loaded.registry, &loaded.tables, None);
+        let fluids: Vec<_> = catalogue
+            .materials
+            .iter()
+            .filter(|m| m.fluid.is_some())
+            .collect();
+        for name in ["demo:water", "demo:lava", "demo:mud"] {
+            assert!(fluids.iter().any(|m| m.name == name), "{name}");
+        }
+        for fluid in fluids {
+            let mut f = Fixture::with_tables(v, 8.0, 0, loaded.tables.clone());
+            f.send(0, EditAction::PlaceSource(fluid.id));
+            f.tick();
+            assert_eq!(
+                f.fluid(0),
+                Some(Fluid::source(fluid.id)),
+                "{v} m, {}",
+                fluid.name
+            );
+            f.send(0, EditAction::RemoveSource);
+            f.tick();
+            assert!(
+                f.fluid(0).is_none_or(|left| !left.source),
+                "{v} m, {}",
+                fluid.name
+            );
+            assert!(f.rejections().is_empty(), "{v} m, {}", fluid.name);
+        }
+    }
+}
+
 /// Lava lights a dark corridor as it flows in and the light goes as it
 /// recedes, each time what a fresh solve of the final cells gives.
 #[test]

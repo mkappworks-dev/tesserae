@@ -136,21 +136,27 @@ can fly around and edit. No Game is loaded unless you pass one; see
 
 **Controls:**
 
-| key                   | does                                                           |
-| --------------------- | -------------------------------------------------------------- |
-| click                 | grab the cursor — mouse look does nothing until you do         |
-| `Esc`                 | release the cursor                                             |
-| mouse                 | look                                                           |
-| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away          |
-| `Space` / `Left Ctrl` | up and down                                                    |
-| `Shift`               | sprint, 5x                                                     |
-| scroll                | movement speed, 0.5 to 64 m/s                                  |
-| `R`                   | back to the spawn point                                        |
-| left click            | break the block under the crosshair (cursor grabbed)           |
-| right click           | place the held block against the face you are aimed at         |
-| `1` to `8`            | hold stone, slab, stair, post, lantern, glass, leaves or water |
-| `9`                   | hold a stone fence (`dev` builds only)                         |
-| `Q` / `E`             | turn the held shape a quarter / flip which way is up           |
+| key                   | does                                                                        |
+| --------------------- | --------------------------------------------------------------------------- |
+| click, cursor free    | grab the cursor — mouse look does nothing until you do; it edits nothing    |
+| `Esc`                 | release the cursor                                                          |
+| mouse                 | look                                                                        |
+| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away                       |
+| `Space` / `Left Ctrl` | up and down                                                                 |
+| `Shift`               | sprint, 5x                                                                  |
+| `-` / `=`             | movement speed down / up, 0.5 to 64 m/s                                     |
+| `R`                   | back to the spawn point                                                     |
+| `1` to `9`, scroll    | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps |
+| click                 | place what the slot holds: a block, a fluid source, or fire on fuel         |
+| right click           | break the block, remove the source, or put the fire out                     |
+| `Q` / `E`             | turn the held shape a quarter / flip which way is up                        |
+
+The hotbar starts with stone, a stone slab, stair and post, lantern, glass and
+leaves, then the Game's lake fluid (or its first declared fluid) and fire when
+anything burns. A slot left over is empty: a click does nothing and a right
+click breaks. A right click is the secondary button, a two-finger tap on a Mac
+trackpad. The corner of the screen names the held slot and what each button does
+with it.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.
