@@ -16,9 +16,10 @@ pub const GRASS: MaterialId = 3;
 pub const LANTERN: MaterialId = 4;
 pub const GLASS: MaterialId = 5;
 pub const LEAVES: MaterialId = 6;
-/// Only a Material until fluids (build-order step 8): reserved now so neither
-/// the simulation nor the shading renumbers anything.
-pub const WATER: MaterialId = 7;
+/// Never registered or handed out, so a Mod's ids still start at 8 and a 7
+/// already in a Chunk is drawn as the unknown stand-in.
+/// `docs/adr/0015-water-is-game-content.md`.
+pub const RETIRED: MaterialId = 7;
 
 /// Whether a full cube of this Material hides the faces around it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -56,7 +57,7 @@ pub struct MaterialDef {
     pub dimming: u8,
     pub occlusion: Occlusion,
     pub render: RenderClass,
-    /// Whether a body collides with it and the edit ray stops on it. Water is
+    /// Whether a body collides with it and the edit ray stops on it. A fluid is
     /// not: a body sinks through it and a ray goes through it to the bed.
     pub solid: bool,
 }
@@ -99,14 +100,6 @@ impl MaterialDef {
         render: RenderClass::Cutout,
         solid: true,
     };
-
-    const WATER: MaterialDef = MaterialDef {
-        emission: 0,
-        dimming: 2,
-        occlusion: Occlusion::SameMaterial,
-        render: RenderClass::Blend,
-        solid: false,
-    };
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -141,9 +134,9 @@ impl std::error::Error for MaterialError {}
 /// afterwards, so a Mod never makes a per-Voxel call across the WASM boundary.
 /// `docs/adr/0001-wasm-mod-boundary.md`.
 ///
-/// Rows are dense and sized to the registered count, not to `u16::MAX`: ids are
+/// Rows are dense and sized to the ids handed out, not to `u16::MAX`: ids are
 /// handed out in order, so a table of N Materials is 5N bytes and not 64 KiB of
-/// zeroes.
+/// zeroes. [`RETIRED`] keeps a row, the stand-in, so the ids after it stay put.
 #[derive(Clone, Debug)]
 pub struct MaterialTable {
     defs: Vec<MaterialDef>,
@@ -159,12 +152,11 @@ impl MaterialTable {
     /// The Materials every World has, under permanent ids: a Mod's ids start
     /// after them, and a saved World refers to them by number.
     pub fn builtin() -> Self {
-        let mut defs = vec![MaterialDef::OPAQUE; WATER as usize + 1];
+        let mut defs = vec![MaterialDef::OPAQUE; RETIRED as usize + 1];
         defs[AIR as usize] = MaterialDef::AIR;
         defs[LANTERN as usize] = MaterialDef::LANTERN;
         defs[GLASS as usize] = MaterialDef::GLASS;
         defs[LEAVES as usize] = MaterialDef::LEAVES;
-        defs[WATER as usize] = MaterialDef::WATER;
         MaterialTable { defs }
     }
 
@@ -182,6 +174,7 @@ impl MaterialTable {
         Ok(id)
     }
 
+    /// Ids handed out so far, [`RETIRED`] included: the next registered id.
     pub fn len(&self) -> usize {
         self.defs.len()
     }
@@ -191,7 +184,7 @@ impl MaterialTable {
     }
 
     pub fn contains(&self, material: MaterialId) -> bool {
-        (material as usize) < self.defs.len()
+        (material as usize) < self.defs.len() && material != RETIRED
     }
 
     /// An unregistered id answers as [`MaterialDef::OPAQUE`]: a World whose Mod
@@ -258,26 +251,38 @@ mod tests {
         assert_eq!(def(&t, LANTERN).emission, MAX_LIGHT);
         assert_eq!(def(&t, LANTERN).occlusion, Occlusion::Opaque);
 
+        assert_eq!([GLASS, LEAVES].map(|m| def(&t, m).dimming), [0, 1]);
         assert_eq!(
-            [GLASS, LEAVES, WATER].map(|m| def(&t, m).dimming),
-            [0, 1, 2]
+            [GLASS, LEAVES].map(|m| def(&t, m).occlusion),
+            [Occlusion::SameMaterial, Occlusion::Never]
         );
         assert_eq!(
-            [GLASS, LEAVES, WATER].map(|m| def(&t, m).occlusion),
-            [
-                Occlusion::SameMaterial,
-                Occlusion::Never,
-                Occlusion::SameMaterial
-            ]
+            [GLASS, LEAVES].map(|m| def(&t, m).render),
+            [RenderClass::Blend, RenderClass::Cutout]
         );
         assert_eq!(
-            [GLASS, LEAVES, WATER].map(|m| def(&t, m).render),
-            [RenderClass::Blend, RenderClass::Cutout, RenderClass::Blend]
+            [STONE, DIRT, GRASS, LANTERN, GLASS, LEAVES],
+            [1, 2, 3, 4, 5, 6]
         );
-        assert_eq!(
-            [STONE, DIRT, GRASS, LANTERN, GLASS, LEAVES, WATER],
-            [1, 2, 3, 4, 5, 6, 7]
-        );
+        assert!((0..RETIRED).all(|id| t.contains(id)));
+    }
+
+    #[test]
+    fn the_retired_id_is_unknown_and_drawn_as_the_stand_in() {
+        let t = MaterialTable::builtin();
+        assert_eq!(RETIRED, 7);
+        assert!(!t.contains(RETIRED));
+        assert_eq!(def(&t, RETIRED), MaterialDef::OPAQUE);
+        assert!(t.solid(Voxel::cube(RETIRED)));
+        assert!(t.is_opaque(Voxel::cube(RETIRED)));
+    }
+
+    #[test]
+    fn a_mods_first_material_still_gets_eight() {
+        let mut t = MaterialTable::builtin();
+        assert_eq!(t.register(MaterialDef::GLASS), Ok(8));
+        assert!(!t.contains(RETIRED) && t.contains(8));
+        assert_eq!(def(&t, RETIRED), MaterialDef::OPAQUE);
     }
 
     #[test]
@@ -306,7 +311,7 @@ mod tests {
         let t = MaterialTable::builtin();
         assert!(t.is_opaque(Voxel::cube(STONE)));
         assert!(t.is_opaque(Voxel::new(STONE, 2, 5)));
-        for id in [GLASS, LEAVES, WATER] {
+        for id in [GLASS, LEAVES] {
             assert!(!t.is_opaque(Voxel::cube(id)), "material {id}");
         }
     }

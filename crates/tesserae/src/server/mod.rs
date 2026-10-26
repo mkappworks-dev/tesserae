@@ -89,14 +89,7 @@ pub fn plugin(app: &mut App) {
             player::plugin,
         ));
     #[cfg(feature = "dev")]
-    if app
-        .world()
-        .resource::<crate::content::DevFence>()
-        .0
-        .is_some()
-    {
-        app.add_plugins(gallery::plugin);
-    }
+    app.add_plugins(gallery::plugin);
 }
 
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
@@ -106,15 +99,7 @@ pub fn plugin(app: &mut App) {
 /// height, and `=off` takes it out.
 #[cfg(feature = "dev")]
 fn worldgen_params(params: Option<WorldgenParams>) -> WorldgenParams {
-    dev_worldgen_params(params.unwrap_or_else(bridged_default), |name| {
-        std::env::var(name).ok()
-    })
-}
-
-/// TODO(phase 8.1 ticket 09): the engine's default World is dry; this keeps
-/// today's lakes of the built-in water until the demo declares its own.
-fn bridged_default() -> WorldgenParams {
-    WorldgenParams::default().with_default_lake(tesserae_core::material::WATER)
+    dev_worldgen_params(params.unwrap_or_default(), |name| std::env::var(name).ok())
 }
 
 #[cfg(feature = "dev")]
@@ -160,7 +145,7 @@ fn dev_worldgen_params(
 
 #[cfg(not(feature = "dev"))]
 fn worldgen_params(params: Option<WorldgenParams>) -> WorldgenParams {
-    params.unwrap_or_else(bridged_default)
+    params.unwrap_or_default()
 }
 
 /// Builds the generator and picks the spawn point. One system so there is no
@@ -231,9 +216,8 @@ mod tests {
     }
 
     #[test]
-    fn a_world_with_no_game_keeps_its_lakes_of_the_built_in_water() {
-        let water = worldgen_params(None).water.expect("lakes");
-        assert_eq!(water.material, tesserae_core::material::WATER);
+    fn a_world_with_no_game_is_dry() {
+        assert_eq!(worldgen_params(None).water, None);
     }
 
     #[cfg(feature = "dev")]

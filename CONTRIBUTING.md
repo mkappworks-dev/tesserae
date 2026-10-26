@@ -131,8 +131,9 @@ cargo run -p tesserae --features dev
 
 `--features dev` adds shader hot-reloading; without it the command still runs,
 and a shader edit then needs a restart. A window opens on a generated World you
-can fly around and edit. No Game is loaded unless you pass one; see
-[Running the demo Game](#running-the-demo-game).
+can fly around and edit. Once the guests are built that World is the demo
+Game's; without a Game it is dry, with no fluid, lakes or anything that burns.
+See [Running the demo Game](#running-the-demo-game).
 
 **Controls:**
 

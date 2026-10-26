@@ -2104,3 +2104,31 @@ fn a_dry_chunk_beside_a_wet_one_meshes_against_the_neighbours_fluid() {
     assert_eq!(east_faces(unlit(&east)), 1);
     assert_eq!(east_faces(unlit(&east).with_overlay(&overlay)), 0);
 }
+
+/// Id 7 is retired: a Chunk that holds it draws the opaque stand-in any
+/// unknown Material draws, hides its neighbours' faces and is never a fluid,
+/// even beside a registered one.
+#[test]
+fn the_retired_id_draws_the_opaque_stand_in_and_is_never_a_fluid() {
+    use tesserae_core::material::RETIRED;
+    use tesserae_core::{Occupants, Overlay};
+    let mut c = Chunk::air();
+    c.set(16, 16, 16, Voxel::cube(RETIRED));
+    let mesh = mesh_isolated(&c);
+    assert_eq!(mesh.quad_count(), 6);
+    assert!(mesh.blended.positions.is_empty() && mesh.cutout.positions.is_empty());
+    assert!(mesh.opaque.materials.iter().all(|&m| m == RETIRED as u32));
+
+    c.set(17, 16, 16, Voxel::cube(1));
+    assert_eq!(
+        mesh_isolated(&c).quad_count(),
+        10,
+        "the shared face is hidden"
+    );
+
+    let read = Occupants::of(Voxel::cube(RETIRED), Overlay::NONE, &tables().fluids);
+    assert_eq!(read.solid, Voxel::cube(RETIRED));
+    assert_eq!(read.fluid, None);
+    assert!(tables().fluids.contains(water()) && !tables().fluids.contains(RETIRED));
+    assert!(tables().materials.solid(Voxel::cube(RETIRED)));
+}

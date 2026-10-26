@@ -895,18 +895,21 @@ mod tests {
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
         let tables = Tables::builtin();
-        assert_eq!(
-            set_voxel(
-                &mut store,
-                &mut meshes,
-                &tables,
-                [0, 0, 0],
-                Voxel::cube(999)
-            ),
-            Err(RejectReason::UnknownMaterial)
-        );
+        for unknown in [999, tesserae_core::material::RETIRED] {
+            assert_eq!(
+                set_voxel(
+                    &mut store,
+                    &mut meshes,
+                    &tables,
+                    [0, 0, 0],
+                    Voxel::cube(unknown)
+                ),
+                Err(RejectReason::UnknownMaterial)
+            );
+        }
         assert!(store.voxel([0, 0, 0]).unwrap().is_air(), "nothing changed");
-        for (i, material) in (1..tables.materials.len() as u16).enumerate() {
+        let known = (1..tables.materials.len() as u16).filter(|&m| tables.materials.contains(m));
+        for (i, material) in known.enumerate() {
             let at = [i as i32, 1, 0];
             set_voxel(&mut store, &mut meshes, &tables, at, Voxel::cube(material))
                 .unwrap_or_else(|r| panic!("Material {material}: {r:?}"));
@@ -1962,6 +1965,23 @@ mod tests {
         tick(&mut app);
         assert_eq!(occupants_at(&app, [5, 7, 5]), unlit);
         assert!(rejections(&mut app).is_empty());
+    }
+
+    /// With no Game nothing is declared fuel, so every built-in solid is
+    /// refused as one that does not burn.
+    #[test]
+    fn a_world_with_no_game_burns_nothing() {
+        let mut chunk = ground();
+        for x in 1..=6 {
+            chunk.set(x, 7, 5, Voxel::cube(x as MaterialId));
+        }
+        let mut app = app_with_tables(&[(origin(), chunk)], Tables::builtin());
+        for x in 1..=6 {
+            send(&mut app, down_at(x as f32 + 0.5, EditAction::Ignite));
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), [RejectReason::NotFlammable], "{x}");
+            assert!(occupants_at(&app, [x, 7, 5]).burning.is_none());
+        }
     }
 
     /// Non-fuel, fuel already alight, fuel under water, nothing in reach and

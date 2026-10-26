@@ -302,27 +302,19 @@ fn load_with(
         if let Some(world) = &mut loaded.world {
             world.water = lake;
         }
+        let listed = |kind| {
+            loaded
+                .registry
+                .names(kind)
+                .map(|(id, name)| tesserae_mods::RegisteredId {
+                    id: id as u32,
+                    name: name.to_owned(),
+                })
+                .collect()
+        };
         let ids = Registered {
-            materials: loaded
-                .registry
-                .materials
-                .iter()
-                .enumerate()
-                .map(|(id, name)| tesserae_mods::RegisteredId {
-                    id: id as u32,
-                    name: name.clone(),
-                })
-                .collect(),
-            shapes: loaded
-                .registry
-                .shapes
-                .iter()
-                .enumerate()
-                .map(|(id, name)| tesserae_mods::RegisteredId {
-                    id: id as u32,
-                    name: name.clone(),
-                })
-                .collect(),
+            materials: listed(Kind::Material),
+            shapes: listed(Kind::Shape),
         };
         let instances = std::mem::take(&mut loaded.mods);
         for (component, instance) in compiled.iter().zip(instances) {
@@ -381,14 +373,12 @@ pub(in crate::server) fn catalogue(
     lake: Option<MaterialId>,
 ) -> ContentCatalogue {
     let materials = registry
-        .materials
-        .iter()
-        .enumerate()
+        .names(Kind::Material)
         .map(|(id, name)| {
             let id = id as MaterialId;
             CatalogueMaterial {
                 id,
-                name: name.clone(),
+                name: name.to_owned(),
                 solid: tables.materials.def(id).solid,
                 fluid: tables.fluids.rank(id),
                 burns: tables.combustion.contains(id),
@@ -402,10 +392,9 @@ pub(in crate::server) fn catalogue(
                 id,
                 // The dev Server's reference fence is the one Shape no Registry names.
                 name: registry
-                    .shapes
-                    .get(id as usize)
-                    .cloned()
-                    .unwrap_or_else(|| "dev:fence".to_owned()),
+                    .names(Kind::Shape)
+                    .find(|&(named, _)| named == id as usize)
+                    .map_or_else(|| "dev:fence".to_owned(), |(_, name)| name.to_owned()),
                 turnable: id != SHAPE_FULL_CUBE
                     && !tables.shapes.is_connected(Voxel::new(STONE, id, 0)),
             }
@@ -700,20 +689,33 @@ mod tests {
         );
         assert!(turnable.contains(&("demo:fence", false)), "it is connected");
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
-        for (id, entry) in catalogue.materials.iter().enumerate() {
-            assert_eq!(entry.id as usize, id);
-        }
+        let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
+        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]);
     }
 
-    /// Until the built-in water goes, a World with no Game still has it, as
-    /// its lake through the bridge.
     #[test]
-    fn a_world_with_no_game_catalogues_the_builtins_and_its_lake_fluid() {
+    fn a_world_with_no_game_catalogues_the_builtins_and_nothing_that_flows_or_burns() {
         let catalogue = published_catalogue(LoadedMods::default());
         assert!(!catalogue.anything_burns());
-        let lake = catalogue.lake.and_then(|id| catalogue.material(id));
-        assert_eq!(lake.map(|m| m.name.as_str()), Some("core:water"));
-        assert_eq!(catalogue.materials.len(), 8);
+        assert_eq!(catalogue.lake, None);
+        let names: Vec<_> = catalogue
+            .materials
+            .iter()
+            .map(|m| m.name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "core:air",
+                "core:stone",
+                "core:dirt",
+                "core:grass",
+                "core:lantern",
+                "core:glass",
+                "core:leaves"
+            ]
+        );
+        assert!(catalogue.materials.iter().all(|m| m.fluid.is_none()));
         let fence = catalogue
             .shapes
             .get(4)

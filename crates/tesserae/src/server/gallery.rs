@@ -26,13 +26,14 @@
 //! once.
 
 use bevy::prelude::*;
-use tesserae_core::material::{GLASS, LEAVES, WATER};
+use tesserae_core::material::{GLASS, LEAVES};
 use tesserae_core::mesh::{NEG_Y, POS_X, POS_Y};
 use tesserae_core::shape::examples::FENCE_ID;
 use tesserae_core::worldgen::{DIRT, GRASS, LANTERN, STONE};
 use tesserae_core::{MaterialId, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, Voxel};
 
 use super::builder::{self, Progress, Step};
+use super::mods::WorldParameters;
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, SpawnPoint};
 use super::{ContentTables, WorldGenerator};
@@ -68,7 +69,7 @@ fn build(
     mut progress: Local<Progress>,
     generator: Res<WorldGenerator>,
     (tables, fence): (Res<ContentTables>, Res<crate::content::DevFence>),
-    world: Res<WorldSettings>,
+    (world, params): (Res<WorldSettings>, Res<WorldParameters>),
     spawn: Option<Res<SpawnPoint>>,
 ) {
     let Some(spawn) = spawn else {
@@ -77,15 +78,16 @@ fn build(
     let corner = spawn.metres() + Vec3::new(ASIDE_M, 0.0, -AHEAD_M);
     let surface = |x, z| generator.surface_height_m(x, z);
     let mut plan = plan(&world, corner, surface);
-    for (_, voxel) in &mut plan {
-        if voxel.shape() == FENCE_ID {
-            *voxel = Voxel::new(
-                voxel.material(),
-                fence.0.expect("gallery has a fence"),
-                voxel.orientation(),
-            );
+    // A Game's own fence is its content, so with a Game the line is left out.
+    plan.retain_mut(|(_, voxel)| {
+        if voxel.shape() != FENCE_ID {
+            return true;
         }
-    }
+        fence.0.is_some_and(|fence| {
+            *voxel = Voxel::new(voxel.material(), fence, voxel.orientation());
+            true
+        })
+    });
     // `TESSERAE_TRANSLUCENT_ROW=0` leaves the row out, so a capture can hold
     // no blended Voxel and be compared with one from before the blended pass.
     // `TESSERAE_TRANSLUCENT_ROW_ASIDE_M` moves it, so the fixed camera can see
@@ -96,7 +98,8 @@ fn build(
             .and_then(|v| v.parse().ok())
             .unwrap_or(ROW_ASIDE_M);
         let row = spawn.metres() + Vec3::new(aside_m, 0.0, -AHEAD_M);
-        plan.extend(translucent_plan(&world, row, surface));
+        let lake = params.0.water.map(|lake| lake.material);
+        plan.extend(translucent_plan(&world, row, surface, lake));
     }
     if builder::step(&plan, &mut progress, &mut store, &mut meshes, &tables) == Step::Completed {
         info!("gallery: {} Voxels at {corner:?}", plan.len());
@@ -208,23 +211,27 @@ fn plan(world: &WorldSettings, corner: Vec3, surface_m: impl Fn(f32, f32) -> f32
     plan
 }
 
-/// Glass, water and leaves, the first Materials the blended pass draws: a pool
-/// with a glass house in front of it, so a wrong blend order has something to
-/// show itself on, and a canopy on a trunk beside them.
+/// Glass, the lake's fluid and leaves, the first Materials the blended pass
+/// draws: a pool with a glass house in front of it, so a wrong blend order has
+/// something to show itself on, and a canopy on a trunk beside them. With no
+/// lake fluid there is no pool.
 fn translucent_plan(
     world: &WorldSettings,
     corner: Vec3,
     surface_m: impl Fn(f32, f32) -> f32,
+    lake: Option<MaterialId>,
 ) -> Plan {
     let (mut plan, [ox, top, oz]) = plinth(world, corner, surface_m, ROW_WIDTH, ROW_DEPTH);
     let at = |i: i32, j: i32, k: i32| [ox + i, top + j, oz + k];
     let mut put = |i, j, k, voxel| plan.push((at(i, j, k), voxel));
 
-    // A basin of stone with water level with its rim, at the back.
-    for k in 0..=5 {
-        for i in 0..=8 {
-            let rim = i == 0 || i == 8 || k == 0 || k == 5;
-            put(i, 0, k, Voxel::cube(if rim { STONE } else { WATER }));
+    // A basin of stone with the fluid level with its rim, at the back.
+    if let Some(fluid) = lake {
+        for k in 0..=5 {
+            for i in 0..=8 {
+                let rim = i == 0 || i == 8 || k == 0 || k == 5;
+                put(i, 0, k, Voxel::cube(if rim { STONE } else { fluid }));
+            }
         }
     }
 
@@ -265,6 +272,7 @@ pub(super) fn measurement_plan(world: &WorldSettings, generator: &tesserae_core:
         world,
         spawn + Vec3::new(ROW_ASIDE_M, 0.0, -AHEAD_M),
         surface,
+        generator.water().map(|lake| lake.material),
     ));
     result
 }
@@ -396,8 +404,15 @@ mod tests {
         }
     }
 
+    /// The fixture water as the Game's lake fluid, in tables that hold it.
+    fn watered() -> (ContentTables, MaterialId) {
+        let mut tables = tesserae_core::Tables::builtin();
+        let water = tesserae_core::testgen::register_water(&mut tables);
+        (ContentTables(std::sync::Arc::new(tables)), water)
+    }
+
     fn translucent() -> Plan {
-        translucent_plan(&world(1.0), corner(), hill)
+        translucent_plan(&world(1.0), corner(), hill, Some(watered().1))
     }
 
     fn lattice(plan: &Plan, material: MaterialId) -> Vec<[i32; 3]> {
@@ -408,10 +423,24 @@ mod tests {
     }
 
     #[test]
-    fn the_translucent_row_shows_glass_water_and_leaves() {
+    fn the_translucent_row_shows_glass_the_lake_fluid_and_leaves() {
         let plan = translucent();
-        for material in [GLASS, WATER, LEAVES] {
+        for material in [GLASS, watered().1, LEAVES] {
             assert!(!lattice(&plan, material).is_empty(), "Material {material}");
+        }
+    }
+
+    /// Lava lakes make a lava pool; a World with no lake fluid has no pool and
+    /// no basin, and keeps its glass house and canopy.
+    #[test]
+    fn the_pool_is_the_lake_fluid_and_absent_without_one() {
+        const LAVA: MaterialId = 9;
+        let lava = translucent_plan(&world(1.0), corner(), hill, Some(LAVA));
+        assert_eq!(lattice(&lava, LAVA).len(), 7 * 4);
+        let dry = translucent_plan(&world(1.0), corner(), hill, None);
+        assert_eq!(dry.len(), translucent().len() - 9 * 6, "basin and pool");
+        for material in [GLASS, LEAVES] {
+            assert!(!lattice(&dry, material).is_empty(), "Material {material}");
         }
     }
 
@@ -420,14 +449,18 @@ mod tests {
     #[test]
     fn the_glass_house_stands_between_the_camera_and_the_pool() {
         let plan = translucent();
-        let nearest_water = lattice(&plan, WATER).iter().map(|at| at[2]).max().unwrap();
+        let nearest_water = lattice(&plan, watered().1)
+            .iter()
+            .map(|at| at[2])
+            .max()
+            .unwrap();
         let glass: Vec<_> = lattice(&plan, GLASS);
         assert!(glass.iter().all(|at| at[2] > nearest_water), "{glass:?}");
     }
 
     #[test]
     fn every_voxel_in_the_translucent_row_is_a_registered_material() {
-        let table = ContentTables::default();
+        let (table, _) = watered();
         for (at, v) in translucent() {
             assert!(!v.is_air(), "{at:?}");
             assert!(table.materials.contains(v.material()), "{at:?}");
@@ -440,7 +473,7 @@ mod tests {
         let w = world(1.0);
         let shapes = plan(&w, corner(), hill);
         let row_corner = corner() + Vec3::new(ROW_ASIDE_M - ASIDE_M, 0.0, 0.0);
-        let row = translucent_plan(&w, row_corner, hill);
+        let row = translucent_plan(&w, row_corner, hill, Some(watered().1));
         let x_max = |plan: &Plan| plan.iter().map(|(at, _)| at[0]).max().unwrap();
         let x_min = |plan: &Plan| plan.iter().map(|(at, _)| at[0]).min().unwrap();
         assert!(x_max(&row) < x_min(&shapes), "the two overlap in x");
@@ -467,12 +500,13 @@ mod tests {
         }
         // Water with nothing under or beside it would be a sheet in the air.
         let at: HashMap<[i32; 3], Voxel> = plan.iter().copied().collect();
-        for [x, y, z] in lattice(&plan, WATER) {
+        let water = watered().1;
+        for [x, y, z] in lattice(&plan, water) {
             assert_eq!(at.get(&[x, y - 1, z]).map(|v| v.material()), Some(STONE));
             for [dx, dz] in [[1, 0], [-1, 0], [0, 1], [0, -1]] {
                 let side = at.get(&[x + dx, y, z + dz]).map(|v| v.material());
                 assert!(
-                    matches!(side, Some(STONE | WATER)),
+                    side == Some(STONE) || side == Some(water),
                     "water at {:?} spills to {side:?}",
                     [x, y, z]
                 );

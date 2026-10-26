@@ -326,7 +326,6 @@ fn registered() -> crate::Registered {
     };
     crate::Registered {
         materials: vec![
-            row("core:water", 7),
             row("fluids:slime", 8),
             row("fluids:wood", 9),
             row("fluids:ash", 10),

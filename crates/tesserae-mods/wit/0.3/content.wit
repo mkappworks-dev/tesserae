@@ -216,8 +216,9 @@ interface content {
     }
 
     /// Everything a Mod adds, in registration order: a name's id is its index
-    /// after the engine's built-ins. A `world` or `view` from a Mod that is not
-    /// the Game is a load error, not ignored.
+    /// after the engine's built-ins, so Materials start at 8 (7 is retired and
+    /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
+    /// not the Game is a load error, not ignored.
     ///
     /// `fluids`, `reactions` and `combustion` name Materials by full name and
     /// are resolved after every Mod's Declaration and before the World opens;

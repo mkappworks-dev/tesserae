@@ -447,8 +447,8 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    their geometry; Mods declare fluids, contact reactions and fuel in a 0.2
    contract line that 0.1 components reach through an adapter; local heat
    exposure through open space ignites fuel, which burns for a declared time to
-   a residue and is put out by water touching it. Fluid and fire live in an
-   Overlay beside the packed Voxel with one reading of both
+   a residue and is put out by an extinguishing fluid touching it. Fluid and
+   fire live in an Overlay beside the packed Voxel with one reading of both
    ([ADR-0013](docs/adr/0013-fluid-and-fire-live-beside-the-voxel.md)), and the
    simulation advances in logical steps under count bounds
    ([ADR-0014](docs/adr/0014-simulation-advances-in-bounded-logical-steps.md)).
@@ -459,21 +459,24 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    `EMITTERS_PER_STEP` 4, an Agenda of 16384 entries plus a reserve of 4096,
    4096 Voxels rescanned a step, 1024 evaluations a Job and 4 Jobs in flight,
    and a light solve made on the tick after `SPOILT_BEFORE_ON_TICK` (4) spoilt
-   solves. Water reaches 7 m at 4 m/s sideways and 8 m/s down; the demo's lava 3
-   m at 0.75 and 1.5 m/s. **These Server figures are at the `dev` profile**
-   (opt-level 1, what `cargo dev` runs), which overstates a release build, and
-   were taken on a shared host at one-minute loads of 1.5 to 7.6: the worst
-   main-thread tick was 11.2 ms of thread CPU (lava draining at 0.25 m) against
-   the 15.625 ms of a 64 Hz tick, with no tick over it in any scenario and every
-   player Edit landing on its tick. At 8 emitters a lava step reached 13.75 ms,
-   which is why the bound is 4. In release a flow evaluation costs 0.3 to 0.5
-   us, a fuel evaluation up to 8.9 us at 0.25 m, and a Chunk-sized rescan about
-   9 ms of worker CPU. A dry, unburning Chunk's meshing is 15 to 45% faster than
-   before the phase and its bulk light within noise of it, in release thread
-   CPU; registering the built-in Shapes costs 8 to 15% more (4.8 ms), which is
-   the Void derivation itself. A quota bounds work, not time. Evidence: tickets
-   09 and 11 of `.scratch/2026-10-22-phase-8-fluid-simulation/`, which the MIT
-   demo exercises at all three sizes.
+   solves. The demo's water reaches 7 m at 4 m/s sideways and 8 m/s down, its
+   lava 3 m at 0.75 and 1.5 m/s. Water was built in at the time and is the
+   demo's own since step 8.1
+   ([ADR-0015](docs/adr/0015-water-is-game-content.md)). **These Server figures
+   are at the `dev` profile** (opt-level 1, what `cargo dev` runs), which
+   overstates a release build, and were taken on a shared host at one-minute
+   loads of 1.5 to 7.6: the worst main-thread tick was 11.2 ms of thread CPU
+   (lava draining at 0.25 m) against the 15.625 ms of a 64 Hz tick, with no tick
+   over it in any scenario and every player Edit landing on its tick. At 8
+   emitters a lava step reached 13.75 ms, which is why the bound is 4. In
+   release a flow evaluation costs 0.3 to 0.5 us, a fuel evaluation up to 8.9 us
+   at 0.25 m, and a Chunk-sized rescan about 9 ms of worker CPU. A dry,
+   unburning Chunk's meshing is 15 to 45% faster than before the phase and its
+   bulk light within noise of it, in release thread CPU; registering the
+   built-in Shapes costs 8 to 15% more (4.8 ms), which is the Void derivation
+   itself. A quota bounds work, not time. Evidence: tickets 09 and 11 of
+   `.scratch/2026-10-22-phase-8-fluid-simulation/`, which the MIT demo exercises
+   at all three sizes.
 9. Look-pack API, water shading, visual polish.
 10. Network transport. The `Player` and `PoseReport` are its first customers.
 
@@ -579,11 +582,12 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   06 of `.scratch/2026-10-12-material-table-transparency/`), with each Chunk's
   blended quads in an exact order. A coarse blended fragment is discarded where
   the finer level has drawn its Chunk, so water is never drawn twice at a ring
-  join (the LOD spec's decision 9). A default World has lakes: `WaterParams`
-  fills open air up to one water level, about the 25th percentile of the ground,
-  and slope smoothing leaves an underwater step as a step. Water is not solid to
-  a body or the edit ray (`MaterialDef::solid`), and leaves are cut out on a
-  pass of their own. The Client's hotbar is a stopgap.
+  join (the LOD spec's decision 9). A Game's World may have lakes: `WaterParams`
+  fills open air up to one level with a fluid the Game declared, and slope
+  smoothing leaves an underwater step as a step; the engine's default World has
+  none. A fluid is not solid to a body or the edit ray (`MaterialDef::solid`),
+  and leaves are cut out on a pass of their own. The Client's hotbar is a
+  stopgap.
 - **The Player's pose is rate-limited, not true.** The Server clamps a pose that
   moves faster than `PlayerLimits` and tells the Client, but flying is the only
   way to move, so a modified Client can still fly at the cap and edit within

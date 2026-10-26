@@ -987,15 +987,17 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             loaded.tables.fluids.rank(demo_water) < loaded.tables.fluids.rank(lava),
             "water's fluid row is not first"
         );
-        let core_water = loaded
-            .registry
-            .id_of(tesserae_mods::Kind::Material, "core:water")
-            .map(|id| id as u16);
+        assert_eq!(
+            loaded
+                .registry
+                .id_of(tesserae_mods::Kind::Material, "core:water"),
+            None
+        );
         assert!(
             fluids_named(&loaded, params)
                 .iter()
-                .all(|&id| Some(id) != core_water),
-            "the demo names core:water"
+                .all(|&id| id != tesserae_core::material::RETIRED),
+            "the demo names the retired id"
         );
         assert_lakes_off_the_stage(params, size, demo_water);
         assert!(flow.sideways_m_per_s < water.sideways_m_per_s);
@@ -1226,8 +1228,10 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             let store = h.app.world().resource::<ChunkStore>();
             let kinds = store.get(coord).unwrap().kinds();
             assert!(
-                kinds.iter().all(|v| Some(v.material()) != core_water),
-                "core:water at {coord}"
+                kinds
+                    .iter()
+                    .all(|v| v.material() != tesserae_core::material::RETIRED),
+                "the retired id at {coord}"
             );
         }
         for _ in 0..8 {

@@ -102,7 +102,6 @@ impl Default for ChunkMaterialExtension {
         // The class is Material data and the amount is appearance: a look pack
         // may choose both, so this is the placeholder.
         palette[tesserae_core::material::GLASS as usize] = srgba(0.70, 0.88, 0.92, 0.35);
-        palette[tesserae_core::material::WATER as usize] = srgba(0.10, 0.32, 0.62, 0.65);
         palette[tesserae_core::material::LEAVES as usize] = srgb(0.16, 0.42, 0.14);
         // Near-white like the lantern, for the same reason: a flame stands in
         // its own burning light and is tinted by it.
@@ -216,16 +215,15 @@ mod tests {
     }
 
     #[test]
-    fn glass_and_water_are_see_through_and_everything_else_is_not() {
-        use tesserae_core::material::{GLASS, LEAVES, WATER};
+    fn glass_is_see_through_and_everything_else_is_not() {
+        use tesserae_core::material::{GLASS, LEAVES, RETIRED};
         let palette = ChunkMaterialExtension::default().palette;
         let missing = palette[0];
-        for id in [GLASS, WATER] {
-            let colour = palette[id as usize];
-            assert!(colour.w > 0.0 && colour.w < 1.0, "Material {id} alpha");
-            assert_ne!(colour.truncate(), missing.truncate(), "Material {id} unset");
-        }
-        assert_ne!(palette[GLASS as usize], palette[WATER as usize]);
+        let glass = palette[GLASS as usize];
+        assert!(glass.w > 0.0 && glass.w < 1.0, "glass alpha");
+        assert_ne!(glass.truncate(), missing.truncate(), "glass unset");
+        // A fluid's colour is its Game's appearance; the retired id has none.
+        assert_eq!(palette[RETIRED as usize], missing);
         // Leaves draw in the opaque pass until step 9 gives them a texture to
         // cut out, so an alpha here would be ignored and mislead.
         assert_eq!(palette[LEAVES as usize].w, 1.0);

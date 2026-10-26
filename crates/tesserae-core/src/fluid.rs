@@ -35,21 +35,6 @@ pub struct FluidDef {
     pub heat: Option<Heat>,
 }
 
-impl FluidDef {
-    /// The same metres and seconds at every Voxel size: a 16 m fall lands in
-    /// 2 s and spreads 3 m 0.75 s later at 1, 0.5 and 0.25 m alike.
-    pub const WATER: FluidDef = FluidDef {
-        reach_m: 7.0,
-        sideways_m_per_s: 4.0,
-        downward_m_per_s: 8.0,
-        recession_m_per_s: 4.0,
-        reset_drop_m: 0.5,
-        waterlogs: true,
-        extinguishes: true,
-        heat: None,
-    };
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum FluidError {
     /// A reach, rate or drop that is not a finite positive number.
@@ -104,13 +89,12 @@ impl Default for FluidTable {
 }
 
 impl FluidTable {
+    /// Empty: every fluid is a Game's, declared and validated like any other.
     pub fn builtin() -> Self {
-        let mut table = FluidTable {
+        FluidTable {
             defs: Vec::new(),
             registered: 0,
-        };
-        table.set(crate::material::WATER, FluidDef::WATER);
-        table
+        }
     }
 
     /// [`crate::Tables::register_fluid`] also checks the Material; this alone
@@ -151,17 +135,13 @@ impl FluidTable {
         if self.contains(material) {
             return Err(FluidError::AlreadyAFluid);
         }
-        self.set(material, def);
-        Ok(())
-    }
-
-    fn set(&mut self, material: MaterialId, def: FluidDef) {
         let i = material as usize;
         if self.defs.len() <= i {
             self.defs.resize(i + 1, None);
         }
         self.defs[i] = Some((def, self.registered));
         self.registered += 1;
+        Ok(())
     }
 
     pub fn contains(&self, material: MaterialId) -> bool {
@@ -175,7 +155,7 @@ impl FluidTable {
             .map(|(def, _)| def)
     }
 
-    /// Where `material` came in the registration order, water first: what
+    /// Where `material` came in the registration order, first registered first: what
     /// decides an otherwise equal claim between two fluids.
     pub fn rank(&self, material: MaterialId) -> Option<u16> {
         self.defs
@@ -196,17 +176,16 @@ impl FluidTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material::WATER;
+    use crate::material::RETIRED;
     use crate::testgen::WATER_FLUID;
 
     #[test]
-    fn water_is_the_one_builtin_fluid() {
+    fn no_fluid_is_built_in() {
         let table = FluidTable::builtin();
-        assert_eq!(table.get(WATER), Some(&FluidDef::WATER));
-        for material in 0..WATER {
+        assert_eq!(table.iter().count(), 0);
+        for material in 0..=RETIRED + 1 {
             assert!(!table.contains(material), "{material}");
         }
-        assert!(!table.contains(WATER + 1));
     }
 
     /// Non-finite values, bad ranges and contradictory definitions are refused

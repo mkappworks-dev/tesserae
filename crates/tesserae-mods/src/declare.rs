@@ -91,8 +91,8 @@ pub fn apply(
     registry: &mut Registry,
     is_root: bool,
 ) -> Result<Applied, ModError> {
-    debug_assert_eq!(tables.materials.len(), registry.materials.len());
-    debug_assert_eq!(tables.shapes.len(), registry.shapes.len());
+    debug_assert_eq!(tables.materials.len(), registry.len(Kind::Material));
+    debug_assert_eq!(tables.shapes.len(), registry.len(Kind::Shape));
     let id = || mod_id.to_owned();
 
     if mod_id == CORE {
@@ -172,7 +172,7 @@ pub fn apply(
                 name: name.clone(),
                 source,
             })?;
-        registry.materials.push(name);
+        registry.push(Kind::Material, name);
     }
     for (row, shape) in declaration.shapes.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Shape, row, &shape.name)?;
@@ -185,7 +185,7 @@ pub fn apply(
                 name: name.clone(),
                 source,
             })?;
-        registry.shapes.push(name);
+        registry.push(Kind::Shape, name);
     }
     Ok(Applied {
         world,
@@ -383,10 +383,11 @@ fn check_count<'a>(
     registry: &Registry,
 ) -> Result<(), ModError> {
     let count = names.len();
-    let (total_max, held) = match kind {
-        Kind::Material => (MAX_MATERIALS, registry.materials.len()),
-        Kind::Shape => (MAX_SHAPES, registry.shapes.len()),
+    let total_max = match kind {
+        Kind::Material => MAX_MATERIALS,
+        Kind::Shape => MAX_SHAPES,
     };
+    let held = registry.len(kind);
     if count > MAX_PER_MOD {
         return Err(ModError::TooMany {
             id: mod_id.to_owned(),
