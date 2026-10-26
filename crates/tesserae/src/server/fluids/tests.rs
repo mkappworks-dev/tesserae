@@ -5,8 +5,7 @@ use std::time::{Duration, Instant};
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::flow::STEP_S;
 use tesserae_core::light::light_cells;
-use tesserae_core::testgen::register_water;
-use tesserae_core::worldgen::{LANTERN, STONE};
+
 use tesserae_core::{
     Chunk, Fluid, LitChunk, MaterialId, Occupants, Orientation, SHAPE_STAIR, Voxel, mesh_chunk,
 };
@@ -22,15 +21,15 @@ use super::super::streaming::tests::{Harness, UNLIMITED, lit, same_mesh, small};
 const CEILING: Duration = Duration::from_secs(300);
 
 fn stone() -> Voxel {
-    Voxel::cube(STONE)
+    Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
 }
 
 /// The Server's default tables with the fixture water, which every test here
 /// places unless it loads a Game. Building them costs milliseconds; the replays
 /// read them every step.
 static WATERED: std::sync::LazyLock<(Tables, MaterialId)> = std::sync::LazyLock::new(|| {
-    let mut tables = Arc::unwrap_or_clone(ContentTables::default().0);
-    let water = register_water(&mut tables);
+    let tables = crate::server::fixture_tables();
+    let water = tesserae_core::testgen::fixtures().water;
     (tables, water)
 });
 
@@ -57,10 +56,15 @@ struct Fixture {
 
 impl Fixture {
     fn new(voxel_m: f32, half_m: f32, cx: i32) -> Self {
-        Self::with_tables(voxel_m, half_m, cx, tables())
+        Self::with_ground(voxel_m, half_m, cx, tables(), tesserae_core::testgen::fixtures().ground.rock)
     }
 
-    fn with_tables(voxel_m: f32, half_m: f32, cx: i32, tables: Tables) -> Self {
+    fn with_tables(voxel_m: f32, half_m: f32, cx: i32, mut tables: Tables) -> Self {
+        let ground = tesserae_core::testgen::register_ground(&mut tables);
+        Self::with_ground(voxel_m, half_m, cx, tables, ground.rock)
+    }
+
+    fn with_ground(voxel_m: f32, half_m: f32, cx: i32, tables: Tables, rock: MaterialId) -> Self {
         AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
         let half = (half_m / voxel_m).round() as i32;
         let mut chunks: HashMap<ChunkCoord, Chunk> = HashMap::default();
@@ -72,15 +76,15 @@ impl Fixture {
                 .set(v.x, v.y, v.z, voxel);
         };
         for x in -half - 1..=half + 1 {
-            put(x, Y - 1, Z, stone());
+            put(x, Y - 1, Z, Voxel::cube(rock));
             for y in Y - 1..=Y + 2 {
-                put(x, y, Z - 1, stone());
-                put(x, y, Z + 1, stone());
+                put(x, y, Z - 1, Voxel::cube(rock));
+                put(x, y, Z + 1, Voxel::cube(rock));
             }
         }
         for y in Y..=Y + 2 {
-            put(-half - 1, y, Z, stone());
-            put(half + 1, y, Z, stone());
+            put(-half - 1, y, Z, Voxel::cube(rock));
+            put(half + 1, y, Z, Voxel::cube(rock));
         }
         let world = WorldSettings {
             voxel_size: voxel_m,
@@ -397,7 +401,7 @@ fn blocking_a_stream_with_an_edit_keeps_its_source() {
 fn the_fluid_tool_refuses_what_it_cannot_do_and_changes_nothing() {
     let mut f = Fixture::new(1.0, 10.0, 0);
     f.send(0, EditAction::RemoveSource);
-    f.send(0, EditAction::PlaceSource(STONE));
+    f.send(0, EditAction::PlaceSource(tesserae_core::testgen::fixtures().ground.rock));
     f.settle();
     assert_eq!(
         f.rejections(),
@@ -444,7 +448,7 @@ fn water_flowing_in_darkens_and_receding_brightens_as_a_fresh_solve_would() {
                 &mut meshes,
                 &tables(),
                 lantern,
-                Voxel::cube(LANTERN),
+                Voxel::cube(tesserae_core::testgen::fixtures().lantern),
             )
             .unwrap();
         });
@@ -483,7 +487,7 @@ fn a_waterlogged_stair_feeds_flow_and_light_follows_as_a_fresh_solve_would() {
     let home = ChunkCoord::new(0, 0, 0);
     let lantern = [16 - 9, Y, Z];
     let stair = Voxel::shaped(
-        STONE,
+        tesserae_core::testgen::fixtures().ground.rock,
         SHAPE_STAIR,
         Orientation::new(tesserae_core::mesh::POS_Y, 1),
     );
@@ -502,7 +506,7 @@ fn a_waterlogged_stair_feeds_flow_and_light_follows_as_a_fresh_solve_would() {
                 &mut meshes,
                 &tables,
                 lantern,
-                Voxel::cube(LANTERN),
+                Voxel::cube(tesserae_core::testgen::fixtures().lantern),
             )
             .unwrap();
             edit::set_voxel(&mut store, &mut meshes, &tables, [16, Y, Z], stair).unwrap();
@@ -550,7 +554,7 @@ fn a_connection_change_wakes_passage_and_remeshes_the_water_in_it() {
     h.settle();
     let rock = ChunkCoord::new(0, -1, 0);
     let (y, z) = (-16, 16);
-    let fence = Voxel::new(STONE, tesserae_core::shape::examples::FENCE_ID, 0);
+    let fence = Voxel::new(tesserae_core::testgen::fixtures().ground.rock, tesserae_core::shape::examples::FENCE_ID, 0);
     let run = |h: &mut Harness, change: &dyn Fn(&mut ChunkStore, &mut MeshState, &Tables)| {
         h.app
             .world_mut()
@@ -1644,7 +1648,7 @@ fn emitters_past_their_bound_wait_while_other_changes_land() {
         ..dry
     };
     let lamp = Occupants {
-        solid: Voxel::cube(LANTERN),
+        solid: Voxel::cube(tesserae_core::testgen::fixtures().lantern),
         ..dry
     };
     let change = |at: Cell, next: Occupants| Proposal {
@@ -1915,7 +1919,7 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
         let (tables, id) = declared(v);
         let water = id("demo:water");
         let (lava, stone_id) = (id("demo:lava"), id("core:stone"));
-        assert_eq!(stone_id, STONE);
+        assert_eq!(stone_id, id("core:stone"));
         let mut f = Fixture::with_tables(v, 4.0, 0, tables);
         f.send(-1, EditAction::PlaceSource(lava));
         f.send(0, EditAction::PlaceSource(water));
@@ -1933,7 +1937,7 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
             .resource_mut::<MeshState>()
             .take_cover_changes();
         f.settle();
-        assert_eq!(f.occupants(-1).solid, stone(), "{v} m");
+        assert_eq!(f.occupants(-1).solid, Voxel::cube(id("core:stone")), "{v} m");
         assert_eq!(f.fluid(-1), None);
         assert_eq!(f.fluid(0), Some(Fluid::source(water)), "the water is kept");
         assert!(!touching(&f, lava, water));
@@ -1982,7 +1986,7 @@ fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() 
     f.send(4, EditAction::PlaceSource(water));
     f.settle();
     let stones: Vec<i32> = (-f.half..=f.half)
-        .filter(|&x| f.occupants(x).solid == stone())
+        .filter(|&x| f.occupants(x).solid == Voxel::cube(id("core:stone")))
         .collect();
     assert!(!stones.is_empty(), "nothing cooled");
     assert!(!touching(&f, lava, water));
@@ -2016,7 +2020,7 @@ fn a_mods_own_pair_reacts_through_the_server() {
     assert_eq!(f.fluid(0), Some(Fluid::source(slime)));
     assert_eq!(f.fluid(3), Some(Fluid::source(brine)));
     assert!(!touching(&f, slime, brine));
-    assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != stone()));
+    assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != Voxel::cube(id("core:stone"))));
 }
 
 /// A held step read water beside the lava and would cool it; the player
@@ -2052,7 +2056,7 @@ fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
         f.tick();
         assert_ne!(
             f.occupants(3).solid,
-            stone(),
+            Voxel::cube(id("core:stone")),
             "an old step's reaction landed"
         );
         assert!(started.elapsed() < CEILING);
@@ -2101,7 +2105,7 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
             }
             f.settle();
             assert!(
-                (-f.half..=f.half).any(|x| f.occupants(x).solid == stone()),
+                (-f.half..=f.half).any(|x| f.occupants(x).solid == Voxel::cube(id("core:stone"))),
                 "way {way}: nothing cooled"
             );
             f.state()
@@ -2146,7 +2150,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
         loop {
             f.tick();
             let now = (-4..=4)
-                .filter(|&x| f.occupants(x).solid == stone())
+                .filter(|&x| f.occupants(x).solid == Voxel::cube(id("core:stone")))
                 .count();
             if bound.is_some() {
                 assert!(now <= cooled + 1, "{now} landed in one step");
@@ -2218,10 +2222,10 @@ fn meshes_are_redelivered_after_a_reaction() {
     run(&mut h, &|store, meshes, tables| {
         for x in 1..=31 {
             for (dy, dz) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                edit::set_voxel(store, meshes, tables, [x, y + dy, z + dz], stone()).unwrap();
+                edit::set_voxel(store, meshes, tables, [x, y + dy, z + dz], Voxel::cube(id("core:stone"))).unwrap();
             }
             let open = (2..=30).contains(&x);
-            let voxel = if open { Voxel::AIR } else { stone() };
+            let voxel = if open { Voxel::AIR } else { Voxel::cube(id("core:stone")) };
             edit::set_voxel(store, meshes, tables, [x, y, z], voxel).unwrap();
         }
     });
@@ -2237,7 +2241,7 @@ fn meshes_are_redelivered_after_a_reaction() {
     });
     let store = h.store();
     let cooled = (11..20)
-        .filter(|&x| store.voxel([x, y, z]) == Some(stone()))
+        .filter(|&x| store.voxel([x, y, z]) == Some(Voxel::cube(id("core:stone"))))
         .count();
     assert!(cooled > 0, "nothing cooled");
 }

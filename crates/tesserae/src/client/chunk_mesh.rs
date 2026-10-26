@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn material_indices_survive_as_uint32() {
         let mut chunk = Chunk::air();
-        chunk.set(0, 0, 0, Voxel::cube(testgen::GRASS));
+        chunk.set(0, 0, 0, Voxel::cube(tesserae_core::testgen::fixtures().ground.surface));
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
             &testgen::fixtures().tables,
@@ -164,7 +164,7 @@ mod tests {
             panic!("the material index must stay an integer, not become a float");
         };
         assert_eq!(materials.len(), source.opaque.positions.len());
-        assert!(materials.iter().all(|m| *m == testgen::GRASS as u32));
+        assert!(materials.iter().all(|m| *m == tesserae_core::testgen::fixtures().ground.surface as u32));
     }
 
     /// The same trap as the Material index: a light level is two packed
@@ -175,7 +175,7 @@ mod tests {
         // In the middle, so all six faces look out at air inside the Chunk.
         // At a corner, three of them look into the isolated Neighborhood's dark
         // shell and the assertion below is about the shell instead.
-        chunk.set(16, 16, 16, Voxel::cube(testgen::GRASS));
+        chunk.set(16, 16, 16, Voxel::cube(tesserae_core::testgen::fixtures().ground.surface));
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
             &testgen::fixtures().tables,

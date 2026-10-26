@@ -34,7 +34,7 @@ struct Ids {
 }
 
 fn water_tables() -> (Tables, MaterialId) {
-    let mut tables = fixtures().tables.clone();
+    let tables = fixtures().tables.clone();
     let water = fixtures().water;
     (tables, water)
 }

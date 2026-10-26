@@ -685,14 +685,13 @@ mod tests {
     use std::time::Duration;
     use tesserae_core::mesh::POS_X;
     use tesserae_core::shape::examples;
-    use tesserae_core::worldgen::{LANTERN, STONE};
     use tesserae_core::{
         Burning, CHUNK_SIZE, Chunk, ChunkLight, Fluid, LitChunk, Occupants, Orientation, Overlay,
         SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
     use std::sync::{Arc, LazyLock};
-    use tesserae_core::testgen::{WATER_FLUID, register_water};
+    use tesserae_core::testgen::{WATER_FLUID};
 
     use super::super::player::{Player, PoseReport};
     use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
@@ -700,8 +699,8 @@ mod tests {
     /// The Server's default tables with the fixture water: those of `app_with`,
     /// and what a test reading water outside an App holds.
     static WATERED: LazyLock<(Tables, MaterialId)> = LazyLock::new(|| {
-        let mut tables = Arc::unwrap_or_clone(ContentTables::default().0);
-        let water = register_water(&mut tables);
+        let tables = crate::server::fixture_tables();
+        let water = tesserae_core::testgen::fixtures().water;
         (tables, water)
     });
 
@@ -714,11 +713,11 @@ mod tests {
     }
 
     fn stone() -> Voxel {
-        Voxel::cube(STONE)
+        Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
     }
 
     fn stair() -> Voxel {
-        Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY)
+        Voxel::shaped(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR, Orientation::IDENTITY)
     }
 
     /// Chunk (0, 0, 0) with stone filling y = 0..8, so the surface is at 8 m, and
@@ -866,13 +865,13 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
         set_voxel(
             &mut store,
             &mut meshes,
             &tables,
             [0, 0, 0],
-            Voxel::new(STONE, 0, 13),
+            Voxel::new(tesserae_core::testgen::fixtures().ground.rock, 0, 13),
         )
         .unwrap();
         assert_eq!(store.voxel([0, 0, 0]), Some(stone()));
@@ -883,7 +882,7 @@ mod tests {
                 &mut meshes,
                 &tables,
                 [1, 0, 0],
-                Voxel::new(STONE, 0, 99)
+                Voxel::new(tesserae_core::testgen::fixtures().ground.rock, 0, 99)
             ),
             Err(RejectReason::BadOrientation)
         );
@@ -894,7 +893,7 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
         for unknown in [999, tesserae_core::material::RETIRED] {
             assert_eq!(
                 set_voxel(
@@ -920,7 +919,7 @@ mod tests {
     #[test]
     fn an_edit_re_floods_the_light_around_it() {
         let mut app = app_with(&[(origin(), ground())]);
-        send(&mut app, down(EditAction::Place(Voxel::cube(LANTERN))));
+        send(&mut app, down(EditAction::Place(Voxel::cube(tesserae_core::testgen::fixtures().lantern))));
         tick(&mut app);
         let store = app.world().resource::<ChunkStore>();
         assert_eq!(store.light_at([5, 8, 5]).block(), 15);
@@ -943,7 +942,7 @@ mod tests {
         set_voxel(
             &mut store,
             &mut meshes,
-            &Tables::builtin(),
+            &crate::server::fixture_tables(),
             [last, 4, 4],
             Voxel::AIR,
         )
@@ -961,13 +960,13 @@ mod tests {
     }
 
     fn fence_table() -> Tables {
-        let mut t = Tables::builtin();
+        let mut t = crate::server::fixture_tables();
         assert_eq!(t.shapes.register(examples::fence()), Ok(examples::FENCE_ID));
         t
     }
 
     fn fence() -> Voxel {
-        Voxel::new(STONE, examples::FENCE_ID, 0)
+        Voxel::new(tesserae_core::testgen::fixtures().ground.rock, examples::FENCE_ID, 0)
     }
 
     /// How many quads `coord` would mesh to, with its neighbours as the store holds
@@ -1062,7 +1061,7 @@ mod tests {
     fn a_connected_shape_is_stored_without_the_orientation_it_ignores() {
         let table = fence_table();
         let mut app = app_with(&[(origin(), Chunk::air())]);
-        let turned = Voxel::new(STONE, examples::FENCE_ID, Orientation::new(POS_X, 3).bits());
+        let turned = Voxel::new(tesserae_core::testgen::fixtures().ground.rock, examples::FENCE_ID, Orientation::new(POS_X, 3).bits());
         edit_at(&mut app, &table, [5, 4, 5], turned);
         assert_eq!(voxel_at(&app, [5, 4, 5]), fence());
     }
@@ -1073,7 +1072,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
             .insert_resource(WorldSettings::default())
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
@@ -1133,11 +1132,11 @@ mod tests {
                 RejectReason::NoMaterial,
             ),
             (
-                down(EditAction::Place(Voxel::new(STONE, 200, 0))),
+                down(EditAction::Place(Voxel::new(tesserae_core::testgen::fixtures().ground.rock, 200, 0))),
                 RejectReason::UnknownShape,
             ),
             (
-                down(EditAction::Place(Voxel::new(STONE, SHAPE_STAIR, 24))),
+                down(EditAction::Place(Voxel::new(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR, 24))),
                 RejectReason::BadOrientation,
             ),
         ];
@@ -1204,7 +1203,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(WorldSettings::default())
             .insert_resource(SpawnPoint::new(Vec3::ZERO))
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins((plugin, super::super::player::plugin));
@@ -1245,7 +1244,7 @@ mod tests {
             .insert_resource(SpawnPoint::new(
                 DOWN_EYE + Vec3::new(10.0, -SPAWN_EYE_ALTITUDE_M, 0.0),
             ))
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins((plugin, super::super::player::plugin));
@@ -1315,7 +1314,7 @@ mod tests {
         // having noticed.
         app.world_mut()
             .resource_mut::<ChunkStore>()
-            .set_voxel(VoxelCoord::of([5, 8, 5]), Voxel::new(STONE, SHAPE_POST, 0));
+            .set_voxel(VoxelCoord::of([5, 8, 5]), Voxel::new(tesserae_core::testgen::fixtures().ground.rock, SHAPE_POST, 0));
         send(
             &mut app,
             EditIntent {
@@ -1374,7 +1373,7 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), full);
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
 
         // Free space still exists above the stairs; another stair is refused...
         assert_eq!(
@@ -1387,7 +1386,7 @@ mod tests {
             Ok(())
         );
         // ...and replacing a stair with another is net zero.
-        let swapped = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(POS_Y, 1));
+        let swapped = Voxel::shaped(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, 1));
         assert_eq!(
             set_voxel(&mut store, &mut meshes, &tables, [0, 8, 0], swapped),
             Ok(())
@@ -1458,7 +1457,7 @@ mod tests {
         let mut tables = watered();
         tables
             .register_combustion(
-                STONE,
+                tesserae_core::testgen::fixtures().ground.rock,
                 tesserae_core::CombustionDef {
                     threshold: 6,
                     ignition_delay_s: 2.0,
@@ -1557,7 +1556,7 @@ mod tests {
             (
                 Occupants {
                     solid: Voxel::AIR,
-                    fluid: Some(Fluid::source(STONE)),
+                    fluid: Some(Fluid::source(tesserae_core::testgen::fixtures().ground.rock)),
                     burning: None,
                 },
                 RejectReason::NotAFluid,
@@ -1798,7 +1797,7 @@ mod tests {
         let cases = [
             (down(EditAction::RemoveSource), RejectReason::NoSource),
             (
-                down(EditAction::PlaceSource(STONE)),
+                down(EditAction::PlaceSource(tesserae_core::testgen::fixtures().ground.rock)),
                 RejectReason::NotAFluid,
             ),
             (
@@ -1975,7 +1974,7 @@ mod tests {
         for x in 1..=6 {
             chunk.set(x, 7, 5, Voxel::cube(x as MaterialId));
         }
-        let mut app = app_with_tables(&[(origin(), chunk)], Tables::builtin());
+        let mut app = app_with_tables(&[(origin(), chunk)], crate::server::fixture_tables());
         for x in 1..=6 {
             send(&mut app, down_at(x as f32 + 0.5, EditAction::Ignite));
             tick(&mut app);
@@ -2131,7 +2130,7 @@ mod tests {
             .unwrap();
         tables
             .register_combustion(
-                STONE,
+                tesserae_core::testgen::fixtures().ground.rock,
                 CombustionDef {
                     threshold: 6,
                     ignition_delay_s: 2.0,
@@ -2172,7 +2171,7 @@ mod tests {
             ),
             (at(stone(), None), water, RejectReason::FluidExcluded),
             (at(stair(), None), lava, RejectReason::FluidExcluded),
-            (at(air, None), LANTERN, RejectReason::NotAFluid),
+            (at(air, None), tesserae_core::testgen::fixtures().lantern, RejectReason::NotAFluid),
         ] {
             assert_eq!(
                 with_source(here, material, &tables),
@@ -2207,7 +2206,7 @@ mod tests {
         assert_eq!(lit.solid, stair());
         for (here, reason) in [
             (at(air, None), RejectReason::NoFuel),
-            (at(Voxel::cube(LANTERN), None), RejectReason::NotFlammable),
+            (at(Voxel::cube(tesserae_core::testgen::fixtures().lantern), None), RejectReason::NotFlammable),
             (lit, RejectReason::AlreadyBurning),
             (at(stair(), flow), RejectReason::Wet),
         ] {

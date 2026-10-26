@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use criterion::{BatchSize, BenchmarkId, Criterion};
 use futures_lite::future::block_on;
-use tesserae_core::worldgen::STONE;
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{Tables, Voxel};
 use tesserae_mods::{
     BatchReport, Command, Compiled, Declaration, Line, ModHost, ModInstance, ModLimits, Placement,
@@ -172,7 +172,7 @@ fn context(tick: u64) -> TickContext {
 }
 
 fn natives(count: u32) -> Vec<Command> {
-    let voxel = Voxel::cube(STONE);
+    let voxel = Voxel::cube(fixtures().ground.rock);
     let at = |i: u32| Placement {
         at: [i as f32, 0.0, 0.0],
         voxel,
@@ -196,7 +196,7 @@ impl Rig {
         let host = ModHost::new().unwrap();
         let scratch = Scratch::new();
         let compiled = scratch.load(&host, &["builder", "catalog", "hello"]);
-        let tables = Arc::new(Tables::builtin());
+        let tables = Arc::new(fixtures().tables.clone());
         let spawn = |id: &str| {
             let one = compiled.iter().find(|c| c.found.manifest.id == id).unwrap();
             Some(block_on(host.instantiate(one, 7)).unwrap())

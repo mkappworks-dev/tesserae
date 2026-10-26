@@ -3,7 +3,6 @@
 //! load before a World could open.
 
 use futures_lite::future::block_on;
-use tesserae_core::material::STONE;
 use tesserae_core::{
     Burn, CombustionError, FluidDef, FluidError, Heat, Phase, ReactionError, Side, Tables,
 };
@@ -370,7 +369,7 @@ fn the_fluids_guest_declares_a_fluid_a_reaction_and_a_fire() {
     assert_eq!(rule.first.phase, Phase::Flowing);
     assert_eq!(rule.product, Some(id("fluids:ash")));
     assert!(tables.combustion.contains(id("fluids:wood")));
-    assert!(!tables.combustion.contains(STONE));
+    assert!(!tables.combustion.contains(id("fluids:ash")));
 }
 
 #[test]

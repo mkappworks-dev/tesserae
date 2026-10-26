@@ -1,8 +1,8 @@
 use std::fs;
 
 use futures_lite::future::block_on;
-use tesserae_core::worldgen::STONE;
-use tesserae_core::{PlaceFault, Tables, Voxel};
+use tesserae_core::testgen::fixtures;
+use tesserae_core::{PlaceFault, Voxel};
 
 use super::sandbox::{Rig, context};
 use crate::{
@@ -12,7 +12,7 @@ use crate::{
 };
 
 fn stone() -> Voxel {
-    Voxel::cube(STONE)
+    Voxel::cube(fixtures().ground.rock)
 }
 
 fn fill(min: [f32; 3], max: [f32; 3], voxel: Voxel) -> Command {
@@ -27,7 +27,7 @@ fn place(at: [f32; 3], voxel: Voxel) -> Command {
 }
 
 fn check(commands: &[Command]) -> Result<crate::CommandBatch, BatchError> {
-    validate(commands, Line::V02, &Tables::builtin(), 1.0)
+    validate(commands, Line::V02, &fixtures().tables.clone(), 1.0)
 }
 
 fn only_fill(batch: &crate::CommandBatch) -> VoxelBox {
@@ -39,7 +39,7 @@ fn only_fill(batch: &crate::CommandBatch) -> VoxelBox {
 
 #[test]
 fn a_fill_covers_the_same_metres_at_any_voxel_size_and_64_times_the_voxels_at_a_quarter() {
-    let tables = Tables::builtin();
+    let tables = fixtures().tables.clone();
     let command = [fill([0.0, 0.0, 0.0], [4.0, 4.0, 4.0], stone())];
 
     let coarse = only_fill(&validate(&command, Line::V02, &tables, 1.0).unwrap());
@@ -133,7 +133,7 @@ fn a_point_is_the_voxel_containing_it() {
 
 #[test]
 fn every_rejection_is_named_and_the_batch_is_counted() {
-    let tables = Tables::builtin();
+    let tables = fixtures().tables.clone();
     let materials = tables.materials.len() as u16;
     let shapes = tables.shapes.len() as u8;
     let ok = || fill([0.0; 3], [1.0; 3], stone());
@@ -226,7 +226,7 @@ fn every_rejection_is_named_and_the_batch_is_counted() {
         }
     );
     assert_eq!(
-        rejected(vec![place([0.0; 3], Voxel::new(STONE, shapes, 0))]),
+        rejected(vec![place([0.0; 3], Voxel::new(fixtures().ground.rock, shapes, 0))]),
         BatchError::Voxel {
             command: 0,
             fault: PlaceFault::UnknownShape
@@ -235,7 +235,7 @@ fn every_rejection_is_named_and_the_batch_is_counted() {
     assert_eq!(
         rejected(vec![
             ok(),
-            fill([0.0; 3], [1.0; 3], Voxel::new(STONE, 0, 24))
+            fill([0.0; 3], [1.0; 3], Voxel::new(fixtures().ground.rock, 0, 24))
         ]),
         BatchError::Voxel {
             command: 1,
@@ -283,7 +283,7 @@ fn filling_with_air_clears_and_is_not_a_place_of_air() {
 #[test]
 fn builder_returns_exactly_the_commands_it_was_asked_for_after_validation() {
     let rig = Rig::new();
-    let tables = Tables::builtin();
+    let tables = fixtures().tables.clone();
     for n in [16u64, 256, 4096] {
         let builder = rig.instance("builder", ModLimits::HOST).unwrap();
         let line = builder.line();

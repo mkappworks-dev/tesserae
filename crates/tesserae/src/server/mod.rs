@@ -308,3 +308,10 @@ mod tests {
         assert_eq!(coarse, fine);
     }
 }
+
+#[cfg(test)]
+pub(crate) fn fixture_tables() -> Tables {
+    let mut tables = tesserae_core::testgen::fixtures().tables.clone();
+    tables.shapes.register(tesserae_core::shape::examples::fence()).unwrap();
+    tables
+}

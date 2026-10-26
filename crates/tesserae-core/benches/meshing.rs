@@ -23,7 +23,7 @@ fn dry() -> WorldgenParams {
 fn fixture() -> &'static (Tables, u16) {
     static TABLES: OnceLock<(Tables, u16)> = OnceLock::new();
     TABLES.get_or_init(|| {
-        let mut t = fixtures().tables.clone();
+        let t = fixtures().tables.clone();
         let water = fixtures().water;
         (t, water)
     })
