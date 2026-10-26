@@ -14,6 +14,10 @@ pub enum EditKind {
     },
     SourcePlaced(MaterialId),
     SourceRemoved(MaterialId),
+    /// Declared fuel set alight, by the fuel's Material.
+    Ignited(MaterialId),
+    /// A burning solid put out, by the fuel's Material.
+    PutOut(MaterialId),
 }
 
 /// One player Edit since the last call, in metres.
@@ -27,10 +31,14 @@ pub struct EditEvent {
 }
 
 impl EditEvent {
-    /// Whether the 0.1 projection reports it: every solid Edit, and a fluid
-    /// one only where it changed the packed Voxel.
+    /// Whether the 0.1 projection reports it: every solid Edit, a fluid one
+    /// only where it changed the packed Voxel, and never a fire one.
     pub fn in_voxel_projection(&self) -> bool {
-        matches!(self.kind, EditKind::Solid { .. }) || self.before != self.after
+        match self.kind {
+            EditKind::Solid { .. } => true,
+            EditKind::SourcePlaced(_) | EditKind::SourceRemoved(_) => self.before != self.after,
+            EditKind::Ignited(_) | EditKind::PutOut(_) => false,
+        }
     }
 }
 

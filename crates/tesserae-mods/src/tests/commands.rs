@@ -330,7 +330,7 @@ fn an_oversized_list_is_a_fault_before_anything_is_converted() {
 
 #[test]
 fn the_shipped_contract_has_no_voxel_import() {
-    for line in ["0.1", "0.2"] {
+    for line in ["0.1", "0.2", "0.3"] {
         let wit = format!("{}/wit/{line}", env!("CARGO_MANIFEST_DIR"));
         let mut files = 0;
         for entry in fs::read_dir(wit).unwrap() {

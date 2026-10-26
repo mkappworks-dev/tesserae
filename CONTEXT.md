@@ -23,11 +23,12 @@ post-process settings. The equivalent of a Minecraft shaderpack.
 requested limits; marks whether it is a Game.
 
 **Contract line** — one incompatible version of the WIT contract a Mod is built
-against, `0.1` or `0.2`. Patches within a line stay compatible; a closed record
-or variant that grows needs a new line.
+against, `0.1`, `0.2` or `0.3`. Patches within a line stay compatible; a closed
+record or variant that grows needs a new line.
 
 **Adapter** — the host's translation of a component built against an older
-contract line to and from the current one, so it keeps loading unchanged.
+contract line to and from the next one, chained up to the current one, so it
+keeps loading unchanged.
 
 **Declaration** — the content a Mod supplies when loaded: Materials, Shapes,
 appearance, fluids, reactions, combustion and, for a Game, World parameters.

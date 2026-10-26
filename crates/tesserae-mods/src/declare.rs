@@ -4,10 +4,11 @@ use std::collections::HashSet;
 
 use tesserae_core::{
     AIR, Burn, CombustionDef, FluidDef, Heat, MaterialId, ParamError, Phase, Reactant, ReactionDef,
-    Side, Tables, WorldgenParams,
+    Side, Tables, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
+use crate::convert::world_params;
 use crate::error::ModError;
 use crate::registry::{Kind, Registry};
 
@@ -63,18 +64,21 @@ impl From<content::ViewParams> for ViewParams {
 /// every Mod's names before [`resolve`] registers them.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Applied {
+    /// With no lake: [`resolve`] returns the one it names.
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
     pub behaviour: Behaviour,
 }
 
-/// One Mod's fluid, reaction and fire rows, by full Material name.
+/// One Mod's fluid, reaction and fire rows and the Game's lake, by full
+/// Material name.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Behaviour {
     mod_id: String,
     fluids: Vec<content::FluidDef>,
     reactions: Vec<content::ReactionDef>,
     combustion: Vec<content::CombustionDef>,
+    lake: Option<content::WaterParams>,
 }
 
 /// Validates `declaration` and registers it after whatever `tables` and
@@ -132,13 +136,21 @@ pub fn apply(
         registry,
     )?;
 
-    let world = declaration.world.map(WorldgenParams::from);
-    if let Some(params) = &world {
-        params.validate().map_err(|source| ModError::Params {
-            id: id(),
-            what: "world",
-            source,
-        })?;
+    let (world, lake) = declaration.world.map(world_params).unzip();
+    let lake = lake.flatten();
+    if let Some(params) = world {
+        // `validate` reads only the lake's level; its fluid waits for `resolve`.
+        let water = lake.as_ref().map(|l| WaterParams {
+            level_m: l.level_m,
+            material: AIR,
+        });
+        WorldgenParams { water, ..params }
+            .validate()
+            .map_err(|source| ModError::Params {
+                id: id(),
+                what: "world",
+                source,
+            })?;
     }
     let view = declaration.view.map(ViewParams::from);
     if let Some(params) = &view {
@@ -183,19 +195,21 @@ pub fn apply(
             fluids: declaration.fluids,
             reactions: declaration.reactions,
             combustion: declaration.combustion,
+            lake,
         },
     })
 }
 
 /// Registers every Mod's fluids, then reactions, then fires, in load order,
 /// once every Declaration is in: a row may name any Mod's Material. Fluids
-/// come first because a reaction is between fluids. The tables are complete
-/// and immutable when this returns; the World opens after it.
+/// come first because a reaction is between fluids. Returns the Game's lake,
+/// last because any declared fluid may fill it. The tables are complete and
+/// immutable when this returns; the World opens after it.
 pub fn resolve(
     behaviours: Vec<Behaviour>,
     tables: &mut Tables,
     registry: &Registry,
-) -> Result<(), ModError> {
+) -> Result<Option<WaterParams>, ModError> {
     for b in &behaviours {
         for (row, fluid) in b.fluids.iter().enumerate() {
             let material = lookup(b, registry, "fluid", row, &fluid.material)?;
@@ -282,7 +296,46 @@ pub fn resolve(
                 })?;
         }
     }
-    Ok(())
+    let mut lake = None;
+    for b in &behaviours {
+        if let Some(water) = &b.lake {
+            lake = Some(resolve_lake(b, water, tables, registry)?);
+        }
+    }
+    Ok(lake)
+}
+
+/// The lake's fluid by id, refused as [`WorldgenParams::validate_lake`]
+/// refuses it.
+fn resolve_lake(
+    b: &Behaviour,
+    water: &content::WaterParams,
+    tables: &Tables,
+    registry: &Registry,
+) -> Result<WaterParams, ModError> {
+    let refused = |source| ModError::Lake {
+        id: b.mod_id.clone(),
+        name: water.material.clone(),
+        source,
+    };
+    let material = registry
+        .id_of(Kind::Material, &water.material)
+        .ok_or(ParamError {
+            field: "water.material",
+            rule: "names no registered Material",
+        })
+        .map_err(refused)? as MaterialId;
+    let lake = WaterParams {
+        level_m: water.level_m,
+        material,
+    };
+    WorldgenParams {
+        water: Some(lake),
+        ..WorldgenParams::default()
+    }
+    .validate_lake(tables)
+    .map_err(refused)?;
+    Ok(lake)
 }
 
 fn heat(h: content::HeatDef) -> Heat {

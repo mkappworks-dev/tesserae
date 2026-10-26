@@ -350,11 +350,11 @@ fn the_built_in_namespace_is_not_a_mods() {
 }
 
 fn world(caves: bool) -> content::WorldParams {
-    let mut params = WorldgenParams::default();
+    let mut params = crate::convert::engine_world_params();
     if !caves {
         params.caves = None;
     }
-    params.into()
+    params
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn a_game_that_sets_nothing_keeps_the_engines_defaults() {
 #[test]
 fn invalid_world_parameters_are_a_load_error_naming_the_field() {
     type Edit = fn(&mut content::WorldParams);
-    let cases: [(Edit, &str); 6] = [
+    let cases: [(Edit, &str); 7] = [
         (|p| p.relief_m = f32::NAN, "relief_m"),
         (|p| p.feature_size_m = f32::INFINITY, "feature_size_m"),
         (|p| p.relief_m = -1.0, "relief_m"),
@@ -438,6 +438,15 @@ fn invalid_world_parameters_are_a_load_error_naming_the_field() {
                 })
             },
             "caves.radius_m",
+        ),
+        (
+            |p| {
+                p.water = Some(content::WaterParams {
+                    level_m: f32::NAN,
+                    material: "game:brine".into(),
+                })
+            },
+            "water.level_m",
         ),
     ];
     for (edit, field) in cases {
@@ -493,9 +502,8 @@ fn the_reach_is_checked_in_metres() {
 
 #[test]
 fn the_engines_default_world_converts_and_validates() {
-    let wit: content::WorldParams = WorldgenParams::default().into();
-    let back = WorldgenParams::from(wit);
-    assert_eq!(back, WorldgenParams::default());
+    let (back, lake) = crate::convert::world_params(crate::convert::engine_world_params());
+    assert_eq!((back, lake), (WorldgenParams::default(), None));
     assert_eq!(back.validate(), Ok(()));
 }
 

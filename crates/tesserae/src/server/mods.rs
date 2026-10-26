@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use tesserae_core::{MaterialId, Tables, WorldgenParams};
 use tesserae_mods::{
-    Kind, ModError, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams,
-    WorldInfo, apply, discover, plan, resolve,
+    Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
+    discover, plan, resolve,
 };
 
 use crate::content::MaterialPalette;
@@ -223,7 +223,6 @@ fn load_with(
     let loaded = bevy::tasks::block_on(async {
         let mut loaded = LoadedMods::default();
         let mut behaviours = Vec::new();
-        let mut game = None;
         for component in &compiled {
             let id = &component.found.manifest.id;
             let fault = |e| format!("mod `{id}`: {e}");
@@ -231,7 +230,11 @@ fn load_with(
                 .instantiate(component, world.seed)
                 .await
                 .map_err(fault)?;
-            let (instance, declaration) = instance.declare().await.map_err(fault)?;
+            let (mut instance, declaration) = instance.declare().await.map_err(fault)?;
+            // Where an adapter warns of what an older line could not declare.
+            for line in instance.drain_log().lines {
+                eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
+            }
             let appearance = declaration.appearance.clone();
             let root = component.found.manifest.root;
             let applied = apply(
@@ -255,7 +258,6 @@ fn load_with(
                 }
             }
             if root {
-                game = Some(id.clone());
                 loaded.world = applied.world;
                 loaded.view = applied.view;
                 loaded.game = true;
@@ -264,16 +266,10 @@ fn load_with(
         }
         // Every name is registered now; what flows, reacts and burns is fixed
         // before any Mod starts and the World opens.
-        resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
-        if let (Some(id), Some(world)) = (game, &loaded.world) {
-            world
-                .validate_lake(&loaded.tables)
-                .map_err(|source| ModError::Params {
-                    id,
-                    what: "world",
-                    source,
-                })
-                .map_err(|e| e.to_string())?;
+        let lake =
+            resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+        if let Some(world) = &mut loaded.world {
+            world.water = lake;
         }
         let ids = Registered {
             materials: loaded
@@ -369,9 +365,12 @@ mod tests {
             }
         }
         fn add(&self, id: &str, guest: &str, extra: &str) {
+            self.add_on("0.1", id, guest, extra);
+        }
+        fn add_on(&self, api: &str, id: &str, guest: &str, extra: &str) {
             let dir = self.0.join("mods").join(id);
             fs::create_dir_all(&dir).unwrap();
-            fs::write(dir.join("mod.toml"), format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"mod.wasm\"\n{extra}\n")).unwrap();
+            fs::write(dir.join("mod.toml"), format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"mod.wasm\"\n{extra}\n")).unwrap();
             fs::copy(
                 Path::new(env!("CARGO_MANIFEST_DIR"))
                     .join(format!("../../target/guests/{guest}.wasm")),
@@ -501,6 +500,73 @@ mod tests {
         let generator = app.world().resource::<super::super::WorldGenerator>();
         assert!(generator.params().caves.is_none());
         assert_eq!(generator.params().relief_m, 12.0);
+    }
+
+    /// The World a load opens, as `cargo run` opens it.
+    fn opened(loaded: LoadedMods) -> App {
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .insert_resource(WorldSettings {
+                seed: 123,
+                voxel_size: 0.5,
+            })
+            .add_plugins(plugin)
+            .add_systems(Startup, super::super::open_world);
+        app.update();
+        app
+    }
+
+    /// What generation puts in the open air above a valley floor, below
+    /// `level_m`, near the origin.
+    fn over_a_valley(generator: &tesserae_core::Worldgen, level_m: f32) -> tesserae_core::Voxel {
+        let (x, z) = (-64..64)
+            .flat_map(|x| (-64..64).map(move |z| (x as f32, z as f32)))
+            .find(|&(x, z)| generator.surface_height_m(x, z) < level_m - 2.0)
+            .expect("ground below the level near the origin");
+        let y = (generator.surface_height_m(x, z) + level_m) / 2.0;
+        let n = tesserae_core::CHUNK_SIZE as i32;
+        let cell = |m: f32| (m / generator.voxel_size()).floor() as i32;
+        let [x, y, z] = [cell(x), cell(y), cell(z)];
+        let local = |c: i32| c.rem_euclid(n) as usize;
+        generator
+            .chunk(x.div_euclid(n), y.div_euclid(n), z.div_euclid(n))
+            .get(local(x), local(y), local(z))
+    }
+
+    #[test]
+    fn a_0_3_games_lakes_are_made_of_the_fluid_it_names() {
+        let s = Scratch::new();
+        s.add_on("0.3", "lake", "lake", "root = true");
+        let loaded = s.load(TrustMode::All).unwrap();
+        let brine = loaded.registry.id_of(Kind::Material, "lake:brine").unwrap() as MaterialId;
+        let water = loaded.world.and_then(|w| w.water).expect("a lake");
+        assert_eq!(water.material, brine);
+        let app = opened(loaded);
+        let generator = &app.world().resource::<super::super::WorldGenerator>().0;
+        assert_eq!(generator.water().map(|w| w.material), Some(brine));
+        assert_eq!(
+            over_a_valley(generator, water.level_m),
+            tesserae_core::Voxel::cube(brine)
+        );
+    }
+
+    /// The `pond` Game asks for water at the level the `lake` Game fills, on
+    /// a line that cannot name its fluid.
+    #[test]
+    fn a_0_2_game_that_asks_for_standing_water_opens_a_dry_world() {
+        let s = Scratch::new();
+        s.add_on("0.2", "pond", "pond", "root = true");
+        let loaded = s.load(TrustMode::All).unwrap();
+        assert!(loaded.game);
+        assert_eq!(loaded.world.expect("the Game's parameters").water, None);
+        let app = opened(loaded);
+        let generator = &app.world().resource::<super::super::WorldGenerator>().0;
+        assert_eq!(generator.water(), None);
+        let defaults = WorldgenParams::default();
+        assert_eq!(
+            over_a_valley(generator, defaults.sea_level_m + defaults.relief_m / 2.0),
+            tesserae_core::Voxel::AIR
+        );
     }
 
     #[cfg(feature = "dev")]

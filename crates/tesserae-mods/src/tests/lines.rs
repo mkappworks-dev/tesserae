@@ -1,5 +1,5 @@
-//! Both contract lines run side by side: 0.2 through its own records, 0.1
-//! through the adapter, each guest shown the Edit history of its own line.
+//! Every contract line runs side by side: 0.3 through its own records, 0.2 and
+//! 0.1 through the adapters, each guest shown the Edit history of its own line.
 
 use futures_lite::future::block_on;
 use tesserae_core::material::STONE;
@@ -187,8 +187,24 @@ fn edits() -> Vec<EditEvent> {
             before: Voxel::cube(water),
             after: Voxel::AIR,
         },
+        // Fire lives beside the Voxel: the packed Voxel stays the fuel.
+        EditEvent {
+            at,
+            kind: EditKind::Ignited(FUEL),
+            before: Voxel::cube(FUEL),
+            after: Voxel::cube(FUEL),
+        },
+        EditEvent {
+            at,
+            kind: EditKind::PutOut(FUEL),
+            before: Voxel::cube(FUEL),
+            after: Voxel::cube(FUEL),
+        },
     ]
 }
+
+/// Any id: the Edit history is never checked against the tables.
+const FUEL: MaterialId = 9;
 
 /// The 0.1 echo guest counts what its projection reports: every solid Edit
 /// and the fluid Edits that changed the packed Voxel, and nothing else.
@@ -211,7 +227,7 @@ fn a_0_1_guest_sees_the_voxel_projection_of_player_edits() {
             .iter()
             .map(EditEvent::in_voxel_projection)
             .collect::<Vec<_>>(),
-        [true, false, true, true]
+        [true, false, true, true, false, false]
     );
 }
 
@@ -236,6 +252,33 @@ fn a_0_2_guest_sees_solid_and_fluid_intents_apart() {
         line.contains("before: Voxel { material: 0") && line.contains("after: Voxel { material: 1"),
         "the solid layer, not the packed water: {line}"
     );
+    assert!(
+        !line.contains("Ignited") && !line.contains("PutOut"),
+        "{line}"
+    );
+}
+
+/// The 0.3 guest is told of fire the player started and put out, by the
+/// fuel's Material, beside every Edit 0.2 sees.
+#[test]
+fn a_0_3_guest_sees_ignitions_and_put_outs_with_the_fuel() {
+    let rig = Rig::new();
+    let lake = rig.instance("lake", ModLimits::HOST).unwrap();
+    let log = lake.log();
+    let mut ctx = context(0);
+    ctx.edits = edits();
+    block_on(lake.tick(ctx)).unwrap();
+    let line = &log.drain().lines[0].message;
+    let water = watered().1;
+    for (case, count) in [
+        ("::Solid(".to_owned(), 1),
+        (format!("SourcePlaced({water})"), 2),
+        (format!("SourceRemoved({water})"), 1),
+        (format!("Ignited({FUEL})"), 1),
+        (format!("PutOut({FUEL})"), 1),
+    ] {
+        assert_eq!(line.matches(&case).count(), count, "{case}: {line}");
+    }
 }
 
 /// Commands from a 0.2 guest arrive as the native ones they name.

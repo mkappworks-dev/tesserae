@@ -1,0 +1,236 @@
+package tesserae:mods@0.3.0;
+
+/// What a Mod declares once, at load, from `declare`.
+interface content {
+    use types.{node-box, collision-box, connect-def, srgba};
+
+    /// Whether a full cube of the Material hides the faces around it. Closed
+    /// in 0.3: a new case is a breaking change.
+    enum occlusion {
+        /// Hides every neighbour's face. Requires `dimming` 15 and render class
+        /// `opaque`, or the engine rejects the Material.
+        opaque,
+        /// Hides the faces of the same Material only.
+        same-material,
+        /// Hides nothing, not even itself.
+        never,
+    }
+
+    /// Which mesh a Material's faces are drawn in.
+    enum render-class {
+        opaque,
+        blend,
+        cutout,
+    }
+
+    /// One Material. The engine registers it under `<mod id>:<name>` and hands
+    /// the Mod its id in `start`. Colour is not here; see `appearance`.
+    record material-def {
+        /// The Mod's local part, `[a-z][a-z0-9_]{0,31}`.
+        name: string,
+        /// Block light emitted, 0 to 15.
+        emission: u8,
+        /// Light levels removed entering the Voxel, 0 to 15; 15 is opaque.
+        dimming: u8,
+        occlusion: occlusion,
+        render: render-class,
+        /// Whether a body collides with it and the edit ray stops on it.
+        solid: bool,
+    }
+
+    /// One Shape. The engine registers it under `<mod id>:<name>`, derives its
+    /// faces, light and collision once, and registers all 24 orientations.
+    record shape-def {
+        name: string,
+        /// The geometry, at most 16 boxes; they may overlap.
+        boxes: list<node-box>,
+        /// What bodies collide with when it differs from what is drawn.
+        collision: option<list<collision-box>>,
+        connect: option<connect-def>,
+    }
+
+    /// A placeholder colour for one of this Mod's Materials, read by the
+    /// Client's flat palette until a Look pack replaces it. A Material with none
+    /// is drawn magenta.
+    record appearance {
+        /// The Material's local name.
+        material: string,
+        color: srgba,
+    }
+
+    /// Cave carving. The engine feeds it to native generation unchanged once
+    /// validated; every distance is in metres.
+    record cave-params {
+        feature-size-m: f32,
+        radius-m: f32,
+        floor-m: f32,
+        octaves: u32,
+    }
+
+    /// Smoothing of one-Voxel steps into stairs and slabs.
+    record smoothing-params {
+        min-rise-m: f32,
+    }
+
+    /// Standing fluid up to one height, in metres: lakes of one fluid in the
+    /// valleys of the ground.
+    record water-params {
+        level-m: f32,
+        /// A fluid, `<mod id>:<name>`, of any loaded Mod. It resolves once every
+        /// Mod has declared; a name that is unknown, solid or has no fluid row
+        /// fails the load.
+        material: string,
+    }
+
+    /// Terrain generation parameters, field for field the engine's own. Only the
+    /// Game may set them; the engine rejects non-finite or out-of-range values.
+    /// An absent cave, smoothing or water record means none, not the default;
+    /// the engine's default has no water.
+    record world-params {
+        sea-level-m: f32,
+        relief-m: f32,
+        feature-size-m: f32,
+        soil-depth-m: f32,
+        octaves: u32,
+        caves: option<cave-params>,
+        smoothing: option<smoothing-params>,
+        water: option<water-params>,
+    }
+
+    /// How far the Client streams, in metres. Only the Game may set it; the
+    /// engine rejects values outside its supported ranges.
+    record view-params {
+        view-distance-m: f32,
+        lod-distance-m: f32,
+    }
+
+    /// Exposure a hot fluid or a burning solid gives off: `strength` where it
+    /// is, falling to nothing over `reach-m` of open path. Solids block it; it
+    /// is not a temperature and does not conduct through them.
+    record heat-def {
+        /// Dimensionless, 1 to 15.
+        strength: u8,
+        /// Finite, positive and at most 16 m.
+        reach-m: f32,
+    }
+
+    /// How one Material flows. Distances are metres and rates metres per
+    /// second, so the same row runs the same fluid at any Voxel size.
+    record fluid-def {
+        /// A registered Material, `<mod id>:<name>`, that is not solid. It may
+        /// belong to any loaded Mod; names resolve once every Mod has declared.
+        material: string,
+        /// How far a stream spreads sideways from where it last fell, at most
+        /// 64 m.
+        reach-m: f32,
+        /// At most 256 m/s each.
+        sideways-m-per-s: f32,
+        downward-m-per-s: f32,
+        /// How fast flow that lost its supply drains away.
+        recession-m-per-s: f32,
+        /// Gravity descent that renews `reach-m`, at most 16 m. Crossing a
+        /// Voxel boundary alone renews nothing.
+        reset-drop-m: f32,
+        /// Whether it stands in the empty space of partial Shapes.
+        waterlogs: bool,
+        /// Whether it puts out burning fuel it touches, and keeps that fuel
+        /// from igniting: standing in the fuel's Voxel, or across one of its
+        /// faces against the solid, never through a sealed face or a
+        /// partition. A hot fluid cannot extinguish.
+        extinguishes: bool,
+        heat: option<heat-def>,
+    }
+
+    /// Which states of a fluid a reaction matches.
+    enum fluid-state {
+        any,
+        source,
+        flowing,
+    }
+
+    record reactant {
+        /// A fluid, `<mod id>:<name>`.
+        fluid: string,
+        state: fluid-state,
+    }
+
+    /// One participant of a reaction, by its place in it.
+    enum reaction-side {
+        first,
+        second,
+    }
+
+    /// What two fluids do where they touch: a wet void of each meeting the
+    /// other's across a face, the passage flow takes, so a sealed face or a
+    /// solid partition is no contact. Declared either way round, a pair is one
+    /// rule; two rules that could match one contact are a load error, and
+    /// receiving sides never keep two rules apart (a level contact receives
+    /// both ways). A result lands whole or not at all.
+    record reaction-def {
+        first: reactant,
+        second: reactant,
+        /// The participant whose fluid the contact removes.
+        consumed: reaction-side,
+        /// A solid Material placed as a cube where the consumed fluid was. Only
+        /// where no solid stands: fluid waterlogging a Shape is not consumed
+        /// into a product, and the contact waits until that changes.
+        product: option<string>,
+        /// When set, the rule matches only a contact where the other
+        /// participant arrives at this one: it lies above it, or beside it on a
+        /// floor no lower, where flow into it would come from; never below.
+        /// Gravity alone decides, not the horizontal direction or which
+        /// participant the rule names first. `none` matches any contact.
+        receiving: option<reaction-side>,
+    }
+
+    /// How a fire ends.
+    variant burn-end {
+        /// After `seconds`, at most 1000, the solid's Material becomes
+        /// `residue`, keeping its Shape; `none` removes the solid.
+        after(burn-after),
+        /// Never: a deliberately permanent fire.
+        permanent,
+    }
+
+    record burn-after {
+        seconds: f32,
+        residue: option<string>,
+    }
+
+    /// How one solid Material catches fire and burns. A Material with no row
+    /// never burns, whatever it looks like.
+    record combustion-def {
+        /// A solid Material, `<mod id>:<name>`.
+        fuel: string,
+        /// Exposure from 1 to 15 at or above which it starts to ignite.
+        ignition-threshold: u8,
+        /// Continuous exposure before it catches, from 0 to 600 s. Fuel
+        /// beside terrain the World does not hold waits, keeping its progress
+        /// and what is left of its burn until that terrain is held.
+        ignition-delay-s: f32,
+        /// Block light while it burns, 0 to 15.
+        emission: u8,
+        /// Exposure it gives off while it burns; `none` does not spread.
+        heat: option<heat-def>,
+        end: burn-end,
+    }
+
+    /// Everything a Mod adds, in registration order: a name's id is its index
+    /// after the engine's built-ins. A `world` or `view` from a Mod that is not
+    /// the Game is a load error, not ignored.
+    ///
+    /// `fluids`, `reactions` and `combustion` name Materials by full name and
+    /// are resolved after every Mod's Declaration and before the World opens;
+    /// an unknown name or a value out of range fails the load.
+    record declaration {
+        materials: list<material-def>,
+        shapes: list<shape-def>,
+        appearance: list<appearance>,
+        /// `none` keeps the engine's default; `some` replaces it whole.
+        %world: option<world-params>,
+        view: option<view-params>,
+        fluids: list<fluid-def>,
+        reactions: list<reaction-def>,
+        combustion: list<combustion-def>,
+    }
+}

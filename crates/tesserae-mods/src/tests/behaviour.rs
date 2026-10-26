@@ -362,3 +362,148 @@ fn a_0_1_declaration_comes_through_the_adapter_unchanged() {
     let (tables, _) = load(vec![("catalog", declaration)]).unwrap();
     assert_eq!(tables.fluids.iter().count(), 1, "water alone");
 }
+
+fn lake(level_m: f32, material: &str) -> content::WorldParams {
+    content::WorldParams {
+        water: Some(content::WaterParams {
+            level_m,
+            material: material.into(),
+        }),
+        ..crate::convert::engine_world_params()
+    }
+}
+
+/// The first `(mod id, declaration)` as the Game, then as [`load`], with the
+/// lake `resolve` hands back.
+fn load_game(
+    mods: Vec<(&str, Declaration)>,
+) -> Result<(Registry, Option<tesserae_core::WaterParams>), ModError> {
+    let mut tables = Tables::builtin();
+    let mut registry = Registry::builtin();
+    let mut behaviours: Vec<Behaviour> = Vec::new();
+    for (row, (id, declaration)) in mods.into_iter().enumerate() {
+        let applied = apply(declaration, id, &mut tables, &mut registry, row == 0)?;
+        assert!(applied.world.is_none_or(|w| w.water.is_none()));
+        behaviours.push(applied.behaviour);
+    }
+    let lake = resolve(behaviours, &mut tables, &registry)?;
+    Ok((registry, lake))
+}
+
+#[test]
+fn a_games_lake_is_any_declared_fluid_whichever_mod_declares_it() {
+    let game = Declaration {
+        world: Some(lake(4.0, "lava:lava")),
+        ..empty()
+    };
+    let (registry, lake) = load_game(vec![("game", game), ("lava", lava_mod())]).unwrap();
+    assert_eq!(
+        lake,
+        Some(tesserae_core::WaterParams {
+            level_m: 4.0,
+            material: registry.id_of(Kind::Material, "lava:lava").unwrap() as u16,
+        })
+    );
+}
+
+#[test]
+fn a_lake_that_is_unknown_solid_or_has_no_fluid_row_fails_the_load_naming_the_field() {
+    for (name, rule) in [
+        ("nobody:brine", "names no registered Material"),
+        ("lava:basalt", "is solid, not a fluid"),
+        ("game:still", "has no fluid row"),
+    ] {
+        let game = Declaration {
+            materials: vec![material("still", false)],
+            world: Some(lake(4.0, name)),
+            ..empty()
+        };
+        let error = load_game(vec![("game", game), ("lava", lava_mod())])
+            .err()
+            .unwrap();
+        assert!(
+            matches!(&error, ModError::Lake { source, .. } if source.field == "water.material"),
+            "{error:?}"
+        );
+        assert_eq!(
+            error.to_string(),
+            format!("mod `game`: world: water.material `{name}` {rule}")
+        );
+    }
+}
+
+/// The real 0.3 guest: its lake names the fluid it declares, and nothing is
+/// warned of.
+#[test]
+fn the_lake_guest_fills_its_lakes_with_its_own_fluid() {
+    let rig = Rig::new();
+    let instance = rig.instance("lake", ModLimits::HOST).unwrap();
+    assert_eq!(instance.line(), crate::Line::V03);
+    let log = instance.log();
+    let (_, declaration) = block_on(instance.declare()).unwrap();
+    let (registry, lake) = load_game(vec![("lake", declaration)]).unwrap();
+    let defaults = tesserae_core::WorldgenParams::default();
+    assert_eq!(
+        lake,
+        Some(tesserae_core::WaterParams {
+            level_m: defaults.sea_level_m + defaults.relief_m / 2.0,
+            material: registry.id_of(Kind::Material, "lake:brine").unwrap() as u16,
+        })
+    );
+    assert!(log.drain().lines.is_empty());
+}
+
+fn assert_warned_dry(log: &crate::LogHandle) {
+    let lines = log.drain().lines;
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert_eq!(lines[0].level, crate::LogLevel::Warn);
+    assert!(
+        lines[0]
+            .message
+            .contains("names no fluid before contract line 0.3")
+            && lines[0].message.contains("this World has no lakes"),
+        "{}",
+        lines[0].message
+    );
+}
+
+/// A 0.2 Game's standing water names no fluid: it loads, says why its World
+/// is dry, and has no lake.
+#[test]
+fn a_0_2_games_standing_water_is_dropped_with_a_warning() {
+    let rig = Rig::new();
+    let instance = rig.instance("pond", ModLimits::HOST).unwrap();
+    assert_eq!(instance.line(), crate::Line::V02);
+    let log = instance.log();
+    let (_, declaration) = block_on(instance.declare()).unwrap();
+    let world = declaration.world.clone().unwrap();
+    assert!(world.water.is_none());
+    assert_eq!(
+        crate::convert::world_params(world).0,
+        tesserae_core::WorldgenParams::default()
+    );
+    assert_eq!(load_game(vec![("pond", declaration)]).unwrap().1, None);
+    assert_warned_dry(&log);
+}
+
+/// 0.1 goes up through the 0.2 adapter, so its standing water is dropped the
+/// same way.
+#[test]
+fn a_0_1_games_standing_water_is_dropped_on_the_way_through_0_2() {
+    use crate::bindings::{v01, v02};
+    let mut world = v01::tesserae::mods::content::WorldParams::from(
+        v02::tesserae::mods::content::WorldParams::from(crate::convert::engine_world_params()),
+    );
+    world.water = Some(v01::tesserae::mods::content::WaterParams { level_m: 4.0 });
+    let old = v01::tesserae::mods::content::Declaration {
+        materials: vec![],
+        shapes: vec![],
+        appearance: vec![],
+        world: Some(world),
+        view: None,
+    };
+    let log = crate::log::LogBuffer::shared();
+    let declaration = crate::adapt::v02::declaration(old.into(), &log);
+    assert!(declaration.world.unwrap().water.is_none());
+    assert_warned_dry(&log);
+}

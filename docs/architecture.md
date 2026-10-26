@@ -172,8 +172,9 @@ tesserae/
 │   ├── tesserae-mods/          NO Bevy, NO wgpu — sandbox + validation     ▸ 7
 │   │   ├── wit/0.1/            tesserae:mods@0.1.0, closed, world mod
 │   │   ├── wit/0.2/            tesserae:mods@0.2.0: fluids, sources, fire  ▸ 8
+│   │   ├── wit/0.3/            tesserae:mods@0.3.0: named lakes, fire Edits ▸ 8.1
 │   │   ├── src/                loader, Trust, Registry, async calls, limits
-│   │   │   ├── adapt.rs        the 0.1 line carried to 0.2 and back        ▸ 8
+│   │   │   ├── adapt/          each older line carried one line up and back ▸ 8.1
 │   │   │   └── command.rs      pure batch validation, VoxelBox + BoxCursor
 │   │   ├── tests/guests/       independent WASI sandbox fixtures
 │   │   └── benches/            host crossings + native validation

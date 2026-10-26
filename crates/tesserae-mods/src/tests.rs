@@ -70,7 +70,7 @@ fn hello_declares_nothing() {
 #[test]
 fn imports_are_host_and_wasi_only() {
     let engine = engine().unwrap();
-    for guest in ["hello", "fluids"] {
+    for guest in ["hello", "fluids", "lake"] {
         let component = load(&engine, guest);
         let violations = import_violations(&engine, &component);
         assert!(violations.is_empty(), "{guest}: {violations:?}");
@@ -87,6 +87,8 @@ fn a_component_exports_the_line_it_was_built_against() {
         ("queue", Some(Line::V01)),
         ("fluids", Some(Line::V02)),
         ("bad-fluid", Some(Line::V02)),
+        ("pond", Some(Line::V02)),
+        ("lake", Some(Line::V03)),
         ("naive", None),
     ] {
         assert_eq!(Line::of(&engine, &load(&engine, guest)), line, "{guest}");
@@ -99,11 +101,11 @@ fn import_violations(engine: &Engine, component: &Component) -> Vec<String> {
         if name.starts_with("wasi:") {
             continue;
         }
-        let Some(prefix) = name
-            .strip_suffix("@0.1.0")
-            .or_else(|| name.strip_suffix("@0.2.0"))
+        let Some(prefix) = ["@0.1.0", "@0.2.0", "@0.3.0"]
+            .into_iter()
+            .find_map(|line| name.strip_suffix(line))
         else {
-            violations.push(format!("{name}: not a 0.1.0 or 0.2.0 import"));
+            violations.push(format!("{name}: not a 0.1.0, 0.2.0 or 0.3.0 import"));
             continue;
         };
         let ComponentItem::ComponentInstance(instance) = item.ty else {

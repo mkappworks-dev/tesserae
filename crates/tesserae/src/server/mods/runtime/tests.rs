@@ -1244,6 +1244,26 @@ fn a_mismatched_line_or_an_unknown_name_fails_the_load() {
             "its Manifest says api 0.2, but its component is built against 0.1",
         ),
         (
+            "lake",
+            "0.2",
+            "its Manifest says api 0.2, but its component is built against 0.3",
+        ),
+        (
+            "lake",
+            "0.1",
+            "its Manifest says api 0.1, but its component is built against 0.3",
+        ),
+        (
+            "fluids",
+            "0.3",
+            "its Manifest says api 0.3, but its component is built against 0.2",
+        ),
+        (
+            "hello",
+            "0.3",
+            "its Manifest says api 0.3, but its component is built against 0.1",
+        ),
+        (
             "bad-fluid",
             "0.2",
             "fluid 0 names Material `nobody:quicksilver`",

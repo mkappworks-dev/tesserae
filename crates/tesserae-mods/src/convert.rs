@@ -4,7 +4,7 @@
 
 use tesserae_core::{
     Arm, CaveParams, CollisionBox, ConnectDef, MaterialDef, NodeBox, Occlusion, RenderClass,
-    ShapeDef, SmoothingParams, Voxel, WaterParams, WorldgenParams,
+    ShapeDef, SmoothingParams, Voxel, WorldgenParams,
 };
 
 use crate::bindings::exports::tesserae::mods::guest;
@@ -121,51 +121,52 @@ impl From<content::MaterialDef> for MaterialDef {
     }
 }
 
-impl From<content::WorldParams> for WorldgenParams {
-    fn from(p: content::WorldParams) -> Self {
-        WorldgenParams {
-            sea_level_m: p.sea_level_m,
-            relief_m: p.relief_m,
-            feature_size_m: p.feature_size_m,
-            soil_depth_m: p.soil_depth_m,
-            octaves: p.octaves,
-            caves: p.caves.map(|c| CaveParams {
-                feature_size_m: c.feature_size_m,
-                radius_m: c.radius_m,
-                floor_m: c.floor_m,
-                octaves: c.octaves,
-            }),
-            smoothing: p.smoothing.map(|s| SmoothingParams {
-                min_rise_m: s.min_rise_m,
-            }),
-            // A 0.2 record names no fluid; the built-in water stands in until 0.3.
-            water: p.water.map(|w| WaterParams {
-                level_m: w.level_m,
-                material: tesserae_core::material::WATER,
-            }),
-        }
-    }
+/// A Game's terrain, and the lake it names apart: the name resolves only once
+/// every Mod has declared.
+pub(crate) fn world_params(
+    p: content::WorldParams,
+) -> (WorldgenParams, Option<content::WaterParams>) {
+    let terrain = WorldgenParams {
+        sea_level_m: p.sea_level_m,
+        relief_m: p.relief_m,
+        feature_size_m: p.feature_size_m,
+        soil_depth_m: p.soil_depth_m,
+        octaves: p.octaves,
+        caves: p.caves.map(|c| CaveParams {
+            feature_size_m: c.feature_size_m,
+            radius_m: c.radius_m,
+            floor_m: c.floor_m,
+            octaves: c.octaves,
+        }),
+        smoothing: p.smoothing.map(|s| SmoothingParams {
+            min_rise_m: s.min_rise_m,
+        }),
+        water: None,
+    };
+    (terrain, p.water)
 }
 
-impl From<WorldgenParams> for content::WorldParams {
-    fn from(p: WorldgenParams) -> Self {
-        content::WorldParams {
-            sea_level_m: p.sea_level_m,
-            relief_m: p.relief_m,
-            feature_size_m: p.feature_size_m,
-            soil_depth_m: p.soil_depth_m,
-            octaves: p.octaves,
-            caves: p.caves.map(|c| content::CaveParams {
-                feature_size_m: c.feature_size_m,
-                radius_m: c.radius_m,
-                floor_m: c.floor_m,
-                octaves: c.octaves,
-            }),
-            smoothing: p.smoothing.map(|s| content::SmoothingParams {
-                min_rise_m: s.min_rise_m,
-            }),
-            water: p.water.map(|w| content::WaterParams { level_m: w.level_m }),
-        }
+/// What `default-world-params` returns: the engine's own terrain parameters.
+pub(crate) fn engine_world_params() -> content::WorldParams {
+    let p = WorldgenParams::default();
+    // A lake would need its fluid's name, and the engine declares no fluid.
+    debug_assert!(p.water.is_none());
+    content::WorldParams {
+        sea_level_m: p.sea_level_m,
+        relief_m: p.relief_m,
+        feature_size_m: p.feature_size_m,
+        soil_depth_m: p.soil_depth_m,
+        octaves: p.octaves,
+        caves: p.caves.map(|c| content::CaveParams {
+            feature_size_m: c.feature_size_m,
+            radius_m: c.radius_m,
+            floor_m: c.floor_m,
+            octaves: c.octaves,
+        }),
+        smoothing: p.smoothing.map(|s| content::SmoothingParams {
+            min_rise_m: s.min_rise_m,
+        }),
+        water: None,
     }
 }
 
@@ -252,6 +253,8 @@ impl From<EditEvent> for guest::EditEvent {
                 }),
                 EditKind::SourcePlaced(material) => guest::EditKind::SourcePlaced(material),
                 EditKind::SourceRemoved(material) => guest::EditKind::SourceRemoved(material),
+                EditKind::Ignited(fuel) => guest::EditKind::Ignited(fuel),
+                EditKind::PutOut(fuel) => guest::EditKind::PutOut(fuel),
             },
         }
     }
