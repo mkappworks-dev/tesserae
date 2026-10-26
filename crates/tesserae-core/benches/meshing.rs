@@ -15,7 +15,7 @@ use tesserae_core::{
 fn dry() -> WorldgenParams {
     WorldgenParams {
         water: None,
-        ..WorldgenParams::default()
+        ..tesserae_core::testgen::world_params()
     }
 }
 
@@ -150,7 +150,7 @@ fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
                     (0..CHUNK_SIZE).any(|y| {
                         (0..CHUNK_SIZE).any(|x| {
                             with.get(x, y, z).is_air()
-                                && without.get(x, y, z).material() == tesserae_core::material::GRASS
+                                && without.get(x, y, z).material() == tesserae_core::testgen::fixtures().ground.surface
                         })
                     })
                 });
@@ -767,7 +767,7 @@ fn shore() -> (Worldgen, (i32, i32, i32)) {
         1.0,
         WorldgenParams {
             caves: None,
-            ..WorldgenParams::default()
+            ..tesserae_core::testgen::world_params()
         }
         .with_default_lake(fixture().1),
     );

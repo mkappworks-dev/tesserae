@@ -133,6 +133,10 @@ pub fn register_water(tables: &mut Tables) -> MaterialId {
     water
 }
 
+pub fn world_params() -> crate::WorldgenParams {
+    crate::WorldgenParams { ground: Some(fixtures().ground), ..crate::WorldgenParams::default() }
+}
+
 /// Shared registered content for algorithm tests and benches.
 pub struct Fixtures {
     pub tables: Tables,

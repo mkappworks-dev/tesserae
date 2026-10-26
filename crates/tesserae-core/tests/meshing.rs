@@ -365,7 +365,7 @@ fn a_shaped_uniform_chunk_is_not_an_occluder() {
 /// be the same triangle soup `greedy_mesh` would have produced.
 #[test]
 fn declining_never_changes_the_mesh_it_would_have_produced() {
-    let g = Worldgen::new(0x7e55, 1.0, WorldgenParams::default());
+    let g = Worldgen::new(0x7e55, 1.0, tesserae_core::testgen::world_params());
     let center = g.chunk(0, 0, 0);
     let neighbors = [
         g.chunk(-1, 0, 0),
@@ -1406,7 +1406,7 @@ fn a_block_of_glass_draws_only_its_skin() {
 // with real neighbours, not a hand-built scene in an isolated shell.
 
 fn world() -> Worldgen {
-    Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default())
+    Worldgen::new(0x7e55_e2ae, 1.0, tesserae_core::testgen::world_params())
 }
 
 /// Chunk coordinates near the origin, at the height the surface crosses it,

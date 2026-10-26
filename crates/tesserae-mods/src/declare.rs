@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use tesserae_core::{
     AIR, Burn, CombustionDef, FluidDef, Heat, MaterialId, ParamError, Phase, Reactant, ReactionDef,
-    Side, Tables, WaterParams, WorldgenParams,
+    GroundParams, Side, Tables, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -79,6 +79,7 @@ pub struct Behaviour {
     reactions: Vec<content::ReactionDef>,
     combustion: Vec<content::CombustionDef>,
     lake: Option<content::WaterParams>,
+    ground: Option<content::GroundParams>,
 }
 
 /// Validates `declaration` and registers it after whatever `tables` and
@@ -136,6 +137,7 @@ pub fn apply(
         registry,
     )?;
 
+    let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
     if let Some(params) = world {
@@ -196,6 +198,7 @@ pub fn apply(
             reactions: declaration.reactions,
             combustion: declaration.combustion,
             lake,
+            ground,
         },
     })
 }
@@ -209,7 +212,7 @@ pub fn resolve(
     behaviours: Vec<Behaviour>,
     tables: &mut Tables,
     registry: &Registry,
-) -> Result<Option<WaterParams>, ModError> {
+) -> Result<(Option<GroundParams>, Option<WaterParams>), ModError> {
     for b in &behaviours {
         for (row, fluid) in b.fluids.iter().enumerate() {
             let material = lookup(b, registry, "fluid", row, &fluid.material)?;
@@ -296,13 +299,29 @@ pub fn resolve(
                 })?;
         }
     }
+    let mut ground = None;
+    for b in &behaviours {
+        if let Some(names) = &b.ground {
+            let material = |field, name: &str| {
+                registry.id_of(Kind::Material, name).map(|id| id as MaterialId).ok_or_else(|| ModError::Params {
+                    id: b.mod_id.clone(), what: "world", source: ParamError { field, rule: "names no registered Material" },
+                })
+            };
+            let resolved = GroundParams {
+                rock: material("ground.rock", &names.rock)?, soil: material("ground.soil", &names.soil)?, surface: material("ground.surface", &names.surface)?,
+            };
+            WorldgenParams { ground: Some(resolved), ..WorldgenParams::default() }.validate_ground(tables)
+                .map_err(|source| ModError::Params { id: b.mod_id.clone(), what: "world", source })?;
+            ground = Some(resolved);
+        }
+    }
     let mut lake = None;
     for b in &behaviours {
         if let Some(water) = &b.lake {
-            lake = Some(resolve_lake(b, water, tables, registry)?);
+            lake = Some(resolve_lake(b, water, ground, tables, registry)?);
         }
     }
-    Ok(lake)
+    Ok((ground, lake))
 }
 
 /// The lake's fluid by id, refused as [`WorldgenParams::validate_lake`]
@@ -310,6 +329,7 @@ pub fn resolve(
 fn resolve_lake(
     b: &Behaviour,
     water: &content::WaterParams,
+    ground: Option<GroundParams>,
     tables: &Tables,
     registry: &Registry,
 ) -> Result<WaterParams, ModError> {
@@ -331,6 +351,7 @@ fn resolve_lake(
     };
     WorldgenParams {
         water: Some(lake),
+        ground,
         ..WorldgenParams::default()
     }
     .validate_lake(tables)

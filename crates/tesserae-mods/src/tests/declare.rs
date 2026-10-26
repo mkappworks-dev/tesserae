@@ -533,7 +533,7 @@ fn the_reach_is_checked_in_metres() {
 #[test]
 fn the_engines_default_world_converts_and_validates() {
     let (back, lake) = crate::convert::world_params(crate::convert::engine_world_params());
-    assert_eq!((back, lake), (WorldgenParams::default(), None));
+    assert_eq!((back, lake), (WorldgenParams { ground: None, ..WorldgenParams::default() }, None));
     assert_eq!(back.validate(), Ok(()));
 }
 

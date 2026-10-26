@@ -429,9 +429,9 @@ fn rescans(c: &mut Criterion) {
     let lake = Worldgen::new(
         SEED,
         1.0,
-        WorldgenParams::default().with_default_lake(water),
+        tesserae_core::testgen::world_params().with_default_lake(water),
     );
-    let dry = Worldgen::new(SEED, 1.0, WorldgenParams::default());
+    let dry = Worldgen::new(SEED, 1.0, tesserae_core::testgen::world_params());
     let shore = (-8..8)
         .flat_map(|x| (-8..8).map(move |z| [x, 1, z]))
         .find(|&[x, y, z]| {

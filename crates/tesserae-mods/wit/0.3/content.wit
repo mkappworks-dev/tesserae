@@ -86,6 +86,12 @@ interface content {
     /// Game may set them; the engine rejects non-finite or out-of-range values.
     /// An absent cave, smoothing or water record means none, not the default;
     /// the engine's default has no water.
+    record ground-params {
+        rock: string,
+        soil: string,
+        surface: string,
+    }
+
     record world-params {
         sea-level-m: f32,
         relief-m: f32,
@@ -95,6 +101,7 @@ interface content {
         caves: option<cave-params>,
         smoothing: option<smoothing-params>,
         water: option<water-params>,
+        ground: option<ground-params>,
     }
 
     /// How far the Client streams, in metres. Only the Game may set it; the

@@ -123,6 +123,7 @@ fn world(p: old::WorldParams, log: &LogHandle) -> content::WorldParams {
         smoothing: p.smoothing.map(|s| content::SmoothingParams {
             min_rise_m: s.min_rise_m,
         }),
+        ground: crate::convert::engine_world_params().ground,
         water: None,
     }
 }

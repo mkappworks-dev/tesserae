@@ -1,6 +1,6 @@
 # 03: The ground is named by the World parameters
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [decisions 3, 4 and 5](../spec.md).
@@ -39,3 +39,23 @@ it names its lake fluid, and generation uses them.
 - [ ] The guests and the demo are rebuilt against the amended 0.3 WIT, and
       every 0.1, 0.2 and 0.3 fixture passes.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+WorldgenParams now carries optional GroundParams. Generation, deep uniform
+rock and smoothing use its ids; absent ground returns air before noise or
+cave work. Ground validation and lake-without-ground refusal run after all
+Declarations. The amended 0.3 record carries full names resolved after
+behaviour registration. Native defaults and older adapters retain the
+built-in bridge until ticket 06.
+
+Core generation tests and benches now use registered fixture ground through
+shared World parameters. Added load-seam coverage for named ground and
+invalid fields, and generation coverage for empty ground at all three sizes.
+
+Guest rebuild uses `env -u CARGO_TARGET_DIR caffeinate -i
+./scripts/build-guests`: this session's shared target override otherwise
+puts guest artifacts somewhere the script does not copy from. Full
+formatting, review and CI remain deferred to ticket 13 per user instruction.

@@ -16,7 +16,7 @@ const DEEPEST_LEVEL: u32 = 5;
 fn dry() -> WorldgenParams {
     WorldgenParams {
         water: None,
-        ..WorldgenParams::default()
+        ..tesserae_core::testgen::world_params()
     }
 }
 

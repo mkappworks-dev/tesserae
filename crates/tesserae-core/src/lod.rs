@@ -1020,7 +1020,7 @@ mod tests {
         let params = WorldgenParams {
             caves: None,
             water: None,
-            ..WorldgenParams::default()
+            ..crate::testgen::world_params()
         };
         let below = level - 1;
         // Level 0 keeps its stairs; the sources above it are cubes, as in the Server.
@@ -1085,7 +1085,7 @@ mod tests {
                     voxel_m,
                     WorldgenParams {
                         caves: None,
-                        ..WorldgenParams::default()
+                        ..crate::testgen::world_params()
                     },
                 )
                 .surface_height_m(cx * voxel_m, cz * voxel_m);
@@ -1100,7 +1100,7 @@ mod tests {
                     signed >= -0.5,
                     "level {level} at {x_m}, {z_m}: top {top_m} m lost its surface Voxel"
                 );
-                capped[level as usize - 1] += (voxel.material() == crate::material::GRASS) as usize;
+                capped[level as usize - 1] += (voxel.material() == crate::testgen::fixtures().ground.surface) as usize;
             }
         }
         // Not every column: where the surface pokes one finer Voxel into the next coarse
@@ -1304,7 +1304,7 @@ mod tests {
         let generator = Worldgen::new(
             SEED,
             1.0,
-            WorldgenParams::default().with_default_lake(water()),
+            crate::testgen::world_params().with_default_lake(water()),
         );
         let level_m = generator.water().expect("the World has a lake").level_m;
         let waterline = Some(Waterline {

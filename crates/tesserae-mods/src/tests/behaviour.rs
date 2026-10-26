@@ -422,7 +422,7 @@ fn load_game(
         assert!(applied.world.is_none_or(|w| w.water.is_none()));
         behaviours.push(applied.behaviour);
     }
-    let lake = resolve(behaviours, &mut tables, &registry)?;
+    let (_, lake) = resolve(behaviours, &mut tables, &registry)?;
     Ok((registry, lake))
 }
 
@@ -613,4 +613,49 @@ fn core_water_and_id_7_are_unknown_on_every_line() {
             "{line:?}"
         );
     }
+}
+
+#[test]
+fn a_games_ground_resolves_after_all_declarations_and_generates_its_materials() {
+    let mut game = empty();
+    let mut world = crate::convert::engine_world_params();
+    world.ground = Some(content::GroundParams { rock: "game:rock".into(), soil: "game:soil".into(), surface: "game:surface".into() });
+    game.world = Some(world);
+    for name in ["rock", "soil", "surface"] {
+        game.materials.push(content::MaterialDef {
+            name: name.into(), emission: 0, dimming: 15, occlusion: content::Occlusion::Opaque, render: content::RenderClass::Opaque, solid: true,
+        });
+    }
+    let mut tables = Tables::builtin();
+    let mut registry = Registry::builtin();
+    let applied = apply(game, "game", &mut tables, &mut registry, true).unwrap();
+    let (ground, water) = resolve(vec![applied.behaviour], &mut tables, &registry).unwrap();
+    let ground = ground.unwrap();
+    assert_eq!([ground.rock, ground.soil, ground.surface], ["game:rock", "game:soil", "game:surface"].map(|n| registry.id_of(Kind::Material, n).unwrap() as u16));
+    for size in [1.0, 0.5, 0.25] {
+        let params = tesserae_core::WorldgenParams { ground: Some(ground), water, ..applied.world.unwrap() };
+        let generator = tesserae_core::Worldgen::new(7, size, params);
+        let y = (generator.surface_height_m(0.0, 0.0) / size / tesserae_core::CHUNK_SIZE as f32).floor() as i32;
+        let chunk = generator.chunk(0, y, 0);
+        assert!(chunk.kinds().iter().all(|v| v.is_air() || [ground.rock, ground.soil, ground.surface].contains(&v.material())));
+        assert!(chunk.kinds().iter().any(|v| v.material() == ground.surface));
+    }
+}
+
+#[test]
+fn unknown_and_non_solid_ground_and_lakes_without_ground_fail_the_load() {
+    for field in ["rock", "soil", "surface"] {
+        for name in ["missing:ground", "core:air", "lava:lava"] {
+            let mut params = lake(4.0, "lava:lava");
+            let mut ground = params.ground.take().unwrap();
+            match field { "rock" => ground.rock = name.into(), "soil" => ground.soil = name.into(), _ => ground.surface = name.into() }
+            params.ground = Some(ground);
+            let game = Declaration { world: Some(params), ..empty() };
+            let message = load_game(vec![("game", game), ("lava", lava_mod())]).unwrap_err().to_string();
+            assert!(message.contains(&format!("ground.{field}")), "{message}");
+        }
+    }
+    let mut params = lake(4.0, "lava:lava"); params.ground = None;
+    let game = Declaration { world: Some(params), ..empty() };
+    assert!(load_game(vec![("game", game), ("lava", lava_mod())]).unwrap_err().to_string().contains("requires ground"));
 }

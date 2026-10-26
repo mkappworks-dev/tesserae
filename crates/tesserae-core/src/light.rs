@@ -2104,7 +2104,7 @@ mod tests {
             // These tests diff a World against the same one without tunnels; a
             // stair beside a mouth would be a difference of its own.
             smoothing: None,
-            ..WorldgenParams::default()
+            ..crate::testgen::world_params()
         };
         assert!(params.caves.is_some());
         (
@@ -2168,7 +2168,7 @@ mod tests {
                 let breached = (0..CHUNK_SIZE).any(|z| {
                     (0..CHUNK_SIZE).any(|y| {
                         (0..CHUNK_SIZE)
-                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == crate::material::GRASS)
+                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == crate::testgen::fixtures().ground.surface)
                     })
                 });
                 if breached {
@@ -2250,7 +2250,7 @@ mod tests {
         let params = WorldgenParams {
             caves: caves.then(Default::default),
             smoothing: Some(crate::worldgen::SmoothingParams::default()),
-            ..WorldgenParams::default()
+            ..crate::testgen::world_params()
         };
         (
             Worldgen::new(0x7e55_e2ae, 1.0, params),
@@ -2346,7 +2346,7 @@ mod tests {
             WorldgenParams {
                 caves: None,
                 smoothing: None,
-                ..WorldgenParams::default()
+                ..crate::testgen::world_params()
             },
         );
         for cz in -8..8 {
@@ -2359,7 +2359,7 @@ mod tests {
                 let breached = (0..CHUNK_SIZE).any(|z| {
                     (0..CHUNK_SIZE).any(|y| {
                         (0..CHUNK_SIZE)
-                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == crate::material::GRASS)
+                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == crate::testgen::fixtures().ground.surface)
                     })
                 });
                 if breached == mouth {
@@ -2954,7 +2954,7 @@ mod tests {
     #[test]
     fn a_dry_chunk_lights_the_same_by_the_dry_sweep_and_the_wet_one() {
 
-        let world = Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default());
+        let world = Worldgen::new(0x7e55_e2ae, 1.0, crate::testgen::world_params());
         let mut chunks: Vec<Chunk> = (-1..=2)
             .flat_map(|y| [[0, y, 0], [3, y, -2]])
             .map(|[x, y, z]| world.chunk(x, y, z))

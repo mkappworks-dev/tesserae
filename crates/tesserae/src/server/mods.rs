@@ -297,10 +297,11 @@ fn load_with(
         }
         // Every name is registered now; what flows, reacts and burns is fixed
         // before any Mod starts and the World opens.
-        let lake =
+        let (ground, lake) =
             resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
         if let Some(world) = &mut loaded.world {
             world.water = lake;
+            world.ground = ground;
         }
         let listed = |kind| {
             loaded
