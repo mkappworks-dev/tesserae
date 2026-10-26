@@ -367,7 +367,14 @@ pub(super) fn select_held(
             }
         }
     }
+    let menu_open = menu.as_ref().is_some_and(|m| m.open);
+    if menu_open {
+        *scrolled = 0.0;
+    }
     for event in wheel.read() {
+        if menu_open {
+            continue;
+        }
         let notches = match event.unit {
             MouseScrollUnit::Line => event.y,
             MouseScrollUnit::Pixel => event.y / PIXELS_PER_NOTCH,
@@ -926,6 +933,24 @@ mod tests {
             app.world().resource::<Hotbar>().held(),
             Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR)
         );
+    }
+
+    #[test]
+    fn scrolling_an_open_menu_does_not_select_a_slot_or_clear_the_outside_item() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Fire);
+        for (unit, deltas) in [
+            (MouseScrollUnit::Line, vec![-1.0, -2.0]),
+            (MouseScrollUnit::Pixel, vec![-100.0, -300.0]),
+        ] {
+            assert_eq!(scroll(&mut app, unit, &deltas), 0);
+            assert_eq!(
+                app.world().resource::<Hotbar>().outside,
+                Some(Holding::Fire)
+            );
+        }
     }
 
     /// A swipe arrives as many small deltas; they add up to a slot.

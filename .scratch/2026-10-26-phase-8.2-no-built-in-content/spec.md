@@ -38,6 +38,11 @@ hotbar tiles show miniature block previews instead of flat colours. This
 supersedes decision 19's original flat-colour rendering and the matching
 out-of-scope item. The corner held-item model is smaller (scale 0.06).
 
+Further user amendment on 2026-10-26, after PR #21 opened: menu tiles
+highlight on hover. The quick slots stay fixed at the bottom centre of the
+menu while the item selection scrolls vertically. Mouse-wheel/trackpad
+input in the open menu browses items without selecting a hotbar slot.
+
 ## Problem Statement
 
 Step 8.1 made water Game content, but the engine still ships six named solids:

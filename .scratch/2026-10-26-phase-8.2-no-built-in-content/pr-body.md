@@ -3,7 +3,7 @@
 Games now declare every named Material except air and name their ground.
 The demo keeps its terrain and render classes using its own content.
 
-Validation: 875 tests pass, five existing manual measurements are ignored,
+Validation: 878 tests pass, five existing manual measurements are ignored,
 and ./scripts/cargo-ci passes. Captures were reviewed and deleted.
 
 The 115-row interleaved thread-CPU A/B used phase 8.1 main (212d900).
@@ -22,6 +22,8 @@ all other rows beyond 3% are recorded in ticket 13.
 - Add one remove action, outside-slot holding, F Shape cycling, square
   menu/hotbar model tiles, and Server-answered outline and placement
   previews. The tiles share a cached atlas built from content geometry.
+- Highlight hovered menu tiles, keep quick slots fixed at the bottom
+  centre, and scroll the item selection independently by wheel or scrollbar.
 
 ## Checklist
 

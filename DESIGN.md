@@ -503,7 +503,7 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    read declared content. A single remove action, an item held outside the
    slots, square menu and hotbar model tiles, and Server-answered aim previews
    complete the player's content controls. Tiles share a content-only model
-   atlas. The final captures were reviewed, all 875 checks pass, and the
+   atlas. The final captures were reviewed, all 878 checks pass, and the
    interleaved thread-CPU comparison against phase 8.1 main covers 115 rows.
    Same-binary probes isolate id moves from layout shifts; unchanged meshing and
    coarse derivation remain comparable. Results, outliers and exceptions are

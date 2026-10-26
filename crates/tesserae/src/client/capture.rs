@@ -254,6 +254,9 @@ pub(super) fn plugin(app: &mut App) {
                 },
             ),
             capture_holding,
+            menu_view
+                .after(super::menu::rebuild_bar)
+                .before(super::menu::highlight_tiles),
             watch_frames,
             aim,
             fly_forward,
@@ -299,7 +302,19 @@ fn render_offscreen(
     main: Single<Entity, With<MainCamera>>,
     menu: Res<super::menu::Menu>,
 ) {
-    let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
+    let dimension = |name, fallback| {
+        std::env::var(name)
+            .ok()
+            .and_then(|n| n.parse::<u32>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(fallback)
+    };
+    let image = Image::new_target_texture(
+        dimension("TESSERAE_SCREENSHOT_WIDTH", 1920),
+        dimension("TESSERAE_SCREENSHOT_HEIGHT", 1080),
+        TextureFormat::Rgba8UnormSrgb,
+        None,
+    );
     let handle = images.add(image);
     // Every window camera must draw into the capture; the icon atlas stays separate.
     for camera in &cameras {
@@ -312,6 +327,58 @@ fn render_offscreen(
         commands.entity(*main).insert(IsDefaultUiCamera);
     }
     commands.insert_resource(Offscreen(handle));
+}
+
+fn menu_view(
+    mut commands: Commands,
+    catalogue: Res<super::edit::Catalogue>,
+    entries: Query<(Entity, &super::menu::Entry)>,
+    mut positions: Query<&mut ScrollPosition, With<bevy::ui_widgets::ScrollArea>>,
+    mut hovered: Local<bool>,
+) {
+    if let Some(scroll) = std::env::var("TESSERAE_SCREENSHOT_MENU_SCROLL_PX")
+        .ok()
+        .and_then(|n| n.parse::<f32>().ok())
+    {
+        for mut position in &mut positions {
+            position.y = scroll;
+        }
+    }
+    if *hovered {
+        return;
+    }
+    let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MENU_HOVER") else {
+        return;
+    };
+    let Some(material) = catalogue.0.materials.iter().find(|m| m.name == name) else {
+        return;
+    };
+    let Some((entity, _)) = entries
+        .iter()
+        .find(|(_, e)| **e == super::menu::Entry::Material(material.id))
+    else {
+        return;
+    };
+    use bevy::picking::{
+        backend::HitData,
+        events::{Pointer, PointerOver},
+        pointer::{Location, PointerId},
+    };
+    commands.trigger(PointerOver {
+        entity,
+        pointer: Pointer::new(
+            PointerId::Mouse,
+            Location {
+                target: bevy::camera::NormalizedRenderTarget::None {
+                    width: 1280,
+                    height: 600,
+                },
+                position: Vec2::ZERO,
+            },
+        ),
+        hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+    });
+    *hovered = true;
 }
 
 /// Ignores the first second and a half: window creation, pipeline

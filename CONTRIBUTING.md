@@ -163,11 +163,14 @@ solid leaves its fluid. A right click is the secondary button, a two-finger tap
 on a Mac trackpad.
 
 The menu shows square model tiles for solids, the Shapes of the last hovered
-solid, fluids and fire, then the nine slots. Clicking an item holds it outside
-the slots and closes the menu. Drag an item onto a slot to assign it, or drag
-one slot onto another to swap. Press 1 to 9 over an item to assign that slot
-without moving selection. Clicking a slot selects it and keeps the menu open.
-Selecting a slot by key, scroll or click returns from an outside item.
+solid, fluids and fire in a vertically scrollable selection area. The nine quick
+slots stay fixed at the bottom centre. Hovering a tile highlights it; the
+selected slot keeps its white border. The wheel and trackpad browse items while
+the menu is open. Clicking an item holds it outside the slots and closes the
+menu. Drag an item onto a slot to assign it, or drag one slot onto another to
+swap. Press 1 to 9 over an item to assign that slot without moving selection.
+Clicking a slot selects it and keeps the menu open. Selecting a slot by key or
+click, or scrolling during play, returns from an outside item.
 
 An outline marks the Server's remove target, a translucent ghost shows an
 accepted placement, and a small corner model shows the held Shape and its

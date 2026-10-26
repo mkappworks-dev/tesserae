@@ -206,3 +206,22 @@ not a changed coarse derivation or a reason to alter simulation bounds.
 The approved step is complete. No push or PR creation was authorized or
 performed. A template-based copyable PR body is prepared in ../pr-body.md;
 publishing it and pushing this feature branch remain separate actions.
+
+### 2026-10-26: hover and scrolling follow-up for PR #21
+
+The user requested a visible hover state and quick slots fixed at the
+bottom centre, with the item selection scrolling independently. Tiles use
+a brighter hover background and an accent border, retaining the selected
+slot's white border. The selection uses Bevy's ScrollArea and a vertical
+scrollbar; slots live in a separate footer. Assigning slots preserves the
+browse position. Open-menu wheel input no longer selects a hotbar slot or
+clears an outside-held item.
+
+Added pointer-enter/exit styling coverage, native line/pixel scroll input
+with a stationary footer and retained browse position, and a Client input
+test for wheel events while the menu is open. Core code, Game/WIT content
+and simulation bounds are unchanged, so the previous core A/B still applies.
+Formatting and full CI pass: 878 tests passed, five existing measurement
+tests remain ignored. The user reviewed and accepted the hover, scrolled
+and full-size menu captures on 2026-10-26; the /tmp review folder was then
+deleted.
