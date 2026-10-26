@@ -175,7 +175,7 @@ fn choose(
     }
     match entry {
         Entry::Material(id) => menu.material = Some(id),
-        Entry::Slot(slot) => hotbar.selected = slot,
+        Entry::Slot(slot) => hotbar.select(slot),
         _ => {
             let selected = hotbar.selected;
             hotbar.slots[selected] = entry.holding().expect("a slot's contents");

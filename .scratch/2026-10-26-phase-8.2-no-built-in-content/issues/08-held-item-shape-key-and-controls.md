@@ -1,6 +1,6 @@
 # 08: An item held outside the slots, F for Shape, and the controls listed
 
-Status: ready-for-agent
+Status: done
 Blocked by: 07
 
 Spec: [decisions 17, 18 and 20 (the control list)](../spec.md).
@@ -27,3 +27,14 @@ Text stays ASCII.
       9 and scroll, Q, E, F, Tab, movement, sprint, speed, return to spawn and
       Esc.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+Hotbar carries an optional outside item; held reads it before the selected
+slot. Slot selection and actual wheel steps clear it. Q/E/F operate on the
+held solid, and F cycles catalogue Shape ids in order while preserving its
+orientation. Controls and the camera prompt use one ASCII control per line;
+notices remain a separate line. Menu quick pick follows in ticket 09.
+Formatting, input-suite review and full CI remain deferred to ticket 13.

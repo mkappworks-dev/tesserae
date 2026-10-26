@@ -27,7 +27,7 @@ use crate::server::edit::{EditAction, EditIntent, EditRejected};
 /// How long a rejection stays on screen.
 const NOTICE_SECS: f32 = 2.5;
 
-const SLOT_KEYS: [KeyCode; 9] = [
+pub(super) const SLOT_KEYS: [KeyCode; 9] = [
     KeyCode::Digit1,
     KeyCode::Digit2,
     KeyCode::Digit3,
@@ -140,6 +140,7 @@ impl Holding {
 pub(super) struct Hotbar {
     pub(super) slots: [Holding; SLOT_KEYS.len()],
     pub(super) selected: usize,
+    pub(super) outside: Option<Holding>,
 }
 
 impl Default for Hotbar {
@@ -147,6 +148,7 @@ impl Default for Hotbar {
         Hotbar {
             slots: [Holding::Empty; SLOT_KEYS.len()],
             selected: 0,
+            outside: None,
         }
     }
 }
@@ -180,10 +182,21 @@ impl Hotbar {
     }
 
     pub(super) fn held(&self) -> Holding {
-        self.slots[self.selected]
+        self.outside.unwrap_or(self.slots[self.selected])
+    }
+
+    pub(super) fn select(&mut self, slot: usize) {
+        self.selected = slot;
+        self.outside = None;
+    }
+
+    fn held_mut(&mut self) -> &mut Holding {
+        if let Some(ref mut held) = self.outside { held } else { &mut self.slots[self.selected] }
     }
 
     fn step(&mut self, by: i32) {
+        if by == 0 { return; }
+        self.outside = None;
         let len = self.slots.len() as i32;
         self.selected = (self.selected as i32 + by).rem_euclid(len) as usize;
     }
@@ -302,7 +315,7 @@ fn select_held(
 ) {
     for (slot, key) in SLOT_KEYS.iter().enumerate() {
         if keys.just_pressed(*key) {
-            hotbar.selected = slot;
+            hotbar.select(slot);
         }
     }
     for event in wheel.read() {
@@ -319,17 +332,15 @@ fn select_held(
         // Scrolling down, a negative y, moves along the bar.
         hotbar.step(-whole as i32);
     }
-    let selected = hotbar.selected;
-    if let Holding::Solid {
-        shape, orientation, ..
-    } = &mut hotbar.slots[selected]
-        && catalogue.0.shape(*shape).is_some_and(|s| s.turnable)
-    {
-        if keys.just_pressed(KeyCode::KeyQ) {
-            *orientation = orientation.turned();
+    if let Holding::Solid { shape, orientation, .. } = hotbar.held_mut() {
+        if keys.just_pressed(KeyCode::KeyF) && !catalogue.0.shapes.is_empty() {
+            let next = catalogue.0.shapes.iter().filter(|s|s.id > *shape).map(|s|s.id).min()
+                .or_else(||catalogue.0.shapes.iter().map(|s|s.id).min());
+            if let Some(next) = next { *shape = next; }
         }
-        if keys.just_pressed(KeyCode::KeyE) {
-            *orientation = orientation.flipped();
+        if catalogue.0.shape(*shape).is_some_and(|s|s.turnable) {
+            if keys.just_pressed(KeyCode::KeyQ) { *orientation = orientation.turned(); }
+            if keys.just_pressed(KeyCode::KeyE) { *orientation = orientation.flipped(); }
         }
     }
 }
@@ -385,13 +396,13 @@ fn show_rejections(
     notice.tick(time.delta_secs());
 }
 
-const HINT: &str = "[1-9] or scroll: choose  [Q] turn  [E] flip  [Tab] menu";
+const HINT: &str = "[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/C] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
 
 fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> String {
     let held = hotbar.held();
     let (place, remove) = held.verbs();
     format!(
-        "{}: {}\n[click] {place}  [right click] {remove}\n{HINT}\n{}",
+        "{}: {}\n[click] {place}\n[right click] {remove}\n{HINT}\n{}",
         hotbar.selected + 1,
         held.describe(catalogue),
         notice.text()
@@ -1169,5 +1180,19 @@ mod tests {
         let slots = Hotbar::defaults(&catalogue);
         assert_eq!(slots[0], Holding::solid(f.glass, SHAPE_FULL_CUBE));
         assert!(slots[1..].iter().all(|slot|*slot == Holding::Empty));
+    }
+    #[test]
+    fn outside_holding_survives_shape_changes_and_slot_selection_restores_the_bar() {
+        let f = tesserae_core::testgen::fixtures();
+        let mut hotbar = Hotbar::default();
+        hotbar.outside = Some(Holding::solid(f.glass, SHAPE_STAIR));
+        let slots = hotbar.slots;
+        assert_eq!(hotbar.held().place(), Some(EditAction::Place(Voxel::new(f.glass, SHAPE_STAIR, 0))));
+        hotbar.select(4);
+        assert_eq!(hotbar.outside,None);
+        assert_eq!(hotbar.slots,slots);
+        hotbar.outside = Some(Holding::Fire);
+        hotbar.step(1);
+        assert_eq!(hotbar.outside,None);
     }
 }
