@@ -20,7 +20,6 @@ use bevy::prelude::*;
 use tesserae_core::lod::{
     Child, Coarse, UnderWater, Waterline, coarse_light_in, downsample_changed,
 };
-use tesserae_core::material::WATER;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, Tables, Voxel, Worldgen,
     WorldgenParams, mesh_chunk,
@@ -538,11 +537,12 @@ pub(in crate::server) fn generate_coarse(
     downsample_changed(children, coord.y, tables, waterline)
 }
 
-/// What generation fills with water at level 0, for level 1 to recognise.
+/// What generation fills with its lake at level 0, for level 1 to recognise.
 fn waterline(source: &Worldgen) -> Option<Waterline> {
-    source.water_level_m().map(|level_m| Waterline {
-        level_m,
+    source.water().map(|w| Waterline {
+        level_m: w.level_m,
         voxel_m: source.voxel_size(),
+        material: w.material,
     })
 }
 
@@ -566,9 +566,10 @@ fn mesh_coarse(
     around: &[Shown; 6],
     tables: &Tables,
 ) -> ChunkMesh {
-    let water = surface.water_level_m().map(|level_m| UnderWater {
-        level_m,
-        dimming: tables.materials.dimming(Voxel::cube(WATER)),
+    let water = surface.water().map(|w| UnderWater {
+        level_m: w.level_m,
+        material: w.material,
+        dimming: tables.materials.dimming(Voxel::cube(w.material)),
         step_m: voxel_m / 2f32.powi(level as i32),
     });
     let lit = coarse_light_in(
@@ -621,7 +622,7 @@ fn level_the_water(
     {
         let up = normals[0] == [0.0, 1.0, 0.0];
         // Only the surface row: an upward face a coarse Voxel or more away is not this water's.
-        if !(up && materials[0] == u32::from(WATER) && (corners[0][1] - at).abs() < 1.0) {
+        if !(up && materials[0] == u32::from(water.material) && (corners[0][1] - at).abs() < 1.0) {
             continue;
         }
         if wet {
@@ -2646,11 +2647,16 @@ mod tests {
     /// A Chunk of `rows` layers of water at `level`, alone in the air, meshed as the Server
     /// meshes it, under water standing at `level_m`.
     fn coarse_water(level: u32, rows: usize, level_m: Option<f32>) -> ChunkMesh {
+        let mut tables = Tables::builtin();
+        let water = tesserae_core::testgen::register_water(&mut tables);
         let surface = Worldgen::new(
             world().seed,
             world().voxel_size,
             WorldgenParams {
-                water: level_m.map(|level_m| tesserae_core::WaterParams { level_m }),
+                water: level_m.map(|level_m| tesserae_core::WaterParams {
+                    level_m,
+                    material: water,
+                }),
                 ..WorldgenParams::default()
             },
         );
@@ -2658,7 +2664,7 @@ mod tests {
         for x in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
                 for y in 0..rows {
-                    center.set(x, y, z, Voxel::cube(tesserae_core::material::WATER));
+                    center.set(x, y, z, Voxel::cube(water));
                 }
             }
         }
@@ -2670,7 +2676,7 @@ mod tests {
             ChunkCoord::new(0, 0, 0),
             &shown(packed(center)),
             &std::array::from_fn(|_| air.clone()),
-            &Tables::builtin(),
+            &tables,
         )
     }
 

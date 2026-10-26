@@ -175,7 +175,10 @@ fn world_params_both_ways() {
             octaves: 3,
         }),
         smoothing: Some(SmoothingParams { min_rise_m: 0.5 }),
-        water: Some(WaterParams { level_m: 10.5 }),
+        water: Some(WaterParams {
+            level_m: 10.5,
+            material: tesserae_core::material::WATER,
+        }),
     };
     let bare = WorldgenParams {
         caves: None,

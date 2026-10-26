@@ -743,7 +743,7 @@ fn neighborhood(c: &mut Criterion) {
     });
 }
 
-/// A default World as it is generated, lakes and all, without caves like
+/// A default World with lakes as it is generated, without caves like
 /// [`worldgen`], and the surface Chunk of the first column along +x whose ground
 /// is under its water: what a shore costs.
 fn shore() -> (Worldgen, (i32, i32, i32)) {
@@ -753,9 +753,10 @@ fn shore() -> (Worldgen, (i32, i32, i32)) {
         WorldgenParams {
             caves: None,
             ..WorldgenParams::default()
-        },
+        }
+        .with_default_lake(fixture().1),
     );
-    let level = g.water_level_m().expect("the default World has water");
+    let level = g.water().expect("the World has a lake").level_m;
     let cell = tesserae_core::CHUNK_SIZE as f32;
     let cx = (0..)
         .find(|&cx| g.surface_height_m((cx as f32 + 0.5) * cell, 0.5 * cell) < level - 2.0)

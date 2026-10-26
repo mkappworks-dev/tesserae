@@ -1,7 +1,7 @@
 use super::*;
 use crate::agenda::Agenda;
 use crate::fluid::FluidDef;
-use crate::material::{STONE, WATER};
+use crate::material::STONE;
 use crate::testgen::{WATER_FLUID, register_water};
 use std::sync::OnceLock;
 
@@ -740,11 +740,9 @@ fn solids_block_flow_and_a_source_placed_on_flow_is_the_only_new_source() {
 #[test]
 fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     use crate::worldgen::{Worldgen, WorldgenParams};
-    let generator = Worldgen::new(7, 1.0, WorldgenParams::default());
-    let level = generator
-        .water_level_m()
-        .expect("the default World has water") as i32;
-    let tables = Tables::builtin();
+    let generator = Worldgen::new(7, 1.0, WorldgenParams::default().with_default_lake(water()));
+    let level = generator.water().expect("the World has a lake").level_m as i32;
+    let tables = tables();
     let size = CHUNK_SIZE as i32;
     // A lake Voxel over a bed at least five Voxels deep, in the generator's own
     // output near the origin.
@@ -760,7 +758,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
             for x in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
                     for y in 5..CHUNK_SIZE - 1 {
-                        let wet = voxels.get(x, y + 1, z) == Voxel::cube(WATER);
+                        let wet = voxels.get(x, y + 1, z) == Voxel::cube(water());
                         if wet && (y - 5..=y).all(|y| solid(y, x, z)) {
                             let at = [
                                 c[0] * size + x as i32,
@@ -792,7 +790,7 @@ fn a_shaft_dug_under_a_generated_lake_fills_from_it() {
     let above_bed = [bed[0], bed[1] + 1, bed[2]];
     assert_eq!(
         read(&region, above_bed).fluid,
-        Some(Fluid::source(WATER)),
+        Some(Fluid::source(water())),
         "generated water reads as a source"
     );
     let write = |region: &mut Region, at: Cell, occupants: Occupants| {

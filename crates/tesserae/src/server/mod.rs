@@ -102,11 +102,19 @@ pub fn plugin(app: &mut App) {
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and
 /// `TESSERAE_SMOOTHING=0` turn the caves and the slope-smoothing stairs off, so
 /// a streaming change can be measured with and without them on one binary and
-/// not across two builds. `TESSERAE_WATER_LEVEL_M` moves the water to that
+/// not across two builds. `TESSERAE_WATER_LEVEL_M` moves the lake to that
 /// height, and `=off` takes it out.
 #[cfg(feature = "dev")]
 fn worldgen_params(params: Option<WorldgenParams>) -> WorldgenParams {
-    dev_worldgen_params(params.unwrap_or_default(), |name| std::env::var(name).ok())
+    dev_worldgen_params(params.unwrap_or_else(bridged_default), |name| {
+        std::env::var(name).ok()
+    })
+}
+
+/// TODO(phase 8.1 ticket 09): the engine's default World is dry; this keeps
+/// today's lakes of the built-in water until the demo declares its own.
+fn bridged_default() -> WorldgenParams {
+    WorldgenParams::default().with_default_lake(tesserae_core::material::WATER)
 }
 
 #[cfg(feature = "dev")]
@@ -126,14 +134,25 @@ fn dev_worldgen_params(
         } else {
             params.smoothing
         },
-        water: match env("TESSERAE_WATER_LEVEL_M").as_deref() {
-            Some("off") => None,
-            Some(v) => v
-                .parse()
-                .ok()
-                .map(|level_m| tesserae_core::WaterParams { level_m })
-                .or(params.water),
-            None => params.water,
+        water: match (env("TESSERAE_WATER_LEVEL_M").as_deref(), params.water) {
+            (Some("off"), _) => None,
+            (Some(_), None) => {
+                warn!(
+                    "TESSERAE_WATER_LEVEL_M: the Game names no lake fluid, so there is no lake to move"
+                );
+                None
+            }
+            (Some(v), Some(water)) => {
+                Some(
+                    v.parse()
+                        .ok()
+                        .map_or(water, |level_m| tesserae_core::WaterParams {
+                            level_m,
+                            ..water
+                        }),
+                )
+            }
+            (None, water) => water,
         },
         ..params
     }
@@ -141,7 +160,7 @@ fn dev_worldgen_params(
 
 #[cfg(not(feature = "dev"))]
 fn worldgen_params(params: Option<WorldgenParams>) -> WorldgenParams {
-    params.unwrap_or_default()
+    params.unwrap_or_else(bridged_default)
 }
 
 /// Builds the generator and picks the spawn point. One system so there is no
@@ -158,12 +177,12 @@ fn open_world(
     commands.insert_resource(WorldGenerator(generator));
 }
 
-/// Over the origin, clear of the ground and of any water standing on it.
+/// Over the origin, clear of the ground and of any lake standing on it.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
     let ground_m = generator.surface_height_m(0.0, 0.0);
     let top_m = generator
-        .water_level_m()
-        .map_or(ground_m, |w| w.max(ground_m));
+        .water()
+        .map_or(ground_m, |w| w.level_m.max(ground_m));
     Vec3::new(0.0, top_m + SPAWN_CLEARANCE_M, 0.0)
 }
 
@@ -177,7 +196,8 @@ mod tests {
         let loaded = WorldgenParams {
             relief_m: 12.0,
             ..WorldgenParams::default()
-        };
+        }
+        .with_default_lake(LAKE);
         assert!(loaded.caves.is_some());
         let params = dev_worldgen_params(loaded, |name| match name {
             "TESSERAE_CAVES" | "TESSERAE_SMOOTHING" => Some("0".into()),
@@ -186,13 +206,34 @@ mod tests {
         });
         assert!(params.caves.is_none());
         assert!(params.smoothing.is_none());
-        assert_eq!(params.water.unwrap().level_m, 27.0);
+        let water = params.water.unwrap();
+        assert_eq!((water.level_m, water.material), (27.0, LAKE));
         assert_eq!(params.relief_m, 12.0);
         assert!(
             dev_worldgen_params(loaded, |_| Some("off".into()))
                 .water
                 .is_none()
         );
+    }
+
+    /// Any id: these parameters are never generated or validated.
+    #[cfg(feature = "dev")]
+    const LAKE: tesserae_core::MaterialId = 9;
+
+    #[cfg(feature = "dev")]
+    #[test]
+    fn a_water_level_with_no_lake_fluid_changes_nothing() {
+        let dry = WorldgenParams::default();
+        let params = dev_worldgen_params(dry, |name| {
+            (name == "TESSERAE_WATER_LEVEL_M").then(|| "27".into())
+        });
+        assert_eq!(params, dry);
+    }
+
+    #[test]
+    fn a_world_with_no_game_keeps_its_lakes_of_the_built_in_water() {
+        let water = worldgen_params(None).water.expect("lakes");
+        assert_eq!(water.material, tesserae_core::material::WATER);
     }
 
     #[cfg(feature = "dev")]
@@ -251,13 +292,19 @@ mod tests {
         assert_eq!(spawn.y, surface_m + SPAWN_CLEARANCE_M);
     }
 
+    /// A lake of any fluid; spawning reads only its level.
+    const LAVA: tesserae_core::MaterialId = 10;
+
     #[test]
     fn the_spawn_point_is_above_water_that_covers_the_ground_there() {
         let generator = Worldgen::new(
             WorldSettings::default().seed,
             1.0,
             WorldgenParams {
-                water: Some(tesserae_core::WaterParams { level_m: 70.0 }),
+                water: Some(tesserae_core::WaterParams {
+                    level_m: 70.0,
+                    material: LAVA,
+                }),
                 ..WorldgenParams::default()
             },
         );

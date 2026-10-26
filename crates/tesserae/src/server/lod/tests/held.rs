@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::server::edit::set_occupants;
-use tesserae_core::material::WATER;
 use tesserae_core::mesh::FLAME;
 use tesserae_core::testgen::register_water;
 use tesserae_core::{Burn, Burning, CombustionDef, Fluid, Level, MaterialId, Occupants, Overlay};
@@ -412,6 +411,20 @@ fn water_changing_under_a_cover_every_tick_is_still_redrawn_and_settles() {
 /// under a lake whose level-0 surface is `level_rows` Voxels up, built from
 /// eight level-0 children `fill` writes, meshed against air as the Server
 /// meshes it.
+/// The built-in tables and the fixture water, which the lakes here are made of.
+fn lake_tables() -> &'static (Tables, MaterialId) {
+    static TABLES: std::sync::OnceLock<(Tables, MaterialId)> = std::sync::OnceLock::new();
+    TABLES.get_or_init(|| {
+        let mut tables = Tables::builtin();
+        let water = register_water(&mut tables);
+        (tables, water)
+    })
+}
+
+fn lake_fluid() -> MaterialId {
+    lake_tables().1
+}
+
 struct Lake {
     voxel_m: f32,
     level_m: f32,
@@ -460,6 +473,7 @@ impl Lake {
             WorldgenParams {
                 water: Some(tesserae_core::WaterParams {
                     level_m: self.level_m,
+                    material: lake_fluid(),
                 }),
                 ..WorldgenParams::default()
             },
@@ -467,7 +481,7 @@ impl Lake {
     }
 
     fn coarse(&self) -> Coarse {
-        let tables = Tables::builtin();
+        let tables = lake_tables().0.clone();
         let children: [Child; 8] =
             std::array::from_fn(|i| Child::Changed(&self.children[i], &self.overlays[i]));
         downsample_changed(children, 0, &tables, waterline(&self.surface()))
@@ -482,7 +496,7 @@ impl Lake {
             ChunkCoord::new(0, 0, 0),
             &shown(self.coarse()),
             &std::array::from_fn(|_| air.clone()),
-            &Tables::builtin(),
+            &lake_tables().0,
         )
     }
 
@@ -494,16 +508,16 @@ impl Lake {
             self.children[i].get(local[0], local[1], local[2]),
             self.overlays[i].get(local[0], local[1], local[2]),
         );
-        v.material() == WATER || o.fluid.is_some()
+        v.material() == lake_fluid() || o.fluid.is_some()
     }
 }
 
 fn lake_water() -> (Voxel, Overlay) {
-    (Voxel::cube(WATER), Overlay::NONE)
+    (Voxel::cube(lake_fluid()), Overlay::NONE)
 }
 
 fn moving(surface: u8) -> (Voxel, Overlay) {
-    let o = flowing(WATER, surface);
+    let o = flowing(lake_fluid(), surface);
     (
         Voxel::AIR,
         Overlay {
@@ -521,7 +535,7 @@ fn tops(mesh: &ChunkMesh) -> Vec<[f32; 5]> {
         .positions
         .chunks(4)
         .zip(layer.normals.chunks(4).zip(layer.materials.chunks(4)))
-        .filter(|(_, (n, m))| n[0] == [0.0, 1.0, 0.0] && m[0] == u32::from(WATER))
+        .filter(|(_, (n, m))| n[0] == [0.0, 1.0, 0.0] && m[0] == u32::from(lake_fluid()))
         .map(|(c, _)| {
             let lo = |a: usize| c.iter().map(|p| p[a]).fold(f32::MAX, f32::min);
             let hi = |a: usize| c.iter().map(|p| p[a]).fold(f32::MIN, f32::max);

@@ -138,7 +138,11 @@ impl From<content::WorldParams> for WorldgenParams {
             smoothing: p.smoothing.map(|s| SmoothingParams {
                 min_rise_m: s.min_rise_m,
             }),
-            water: p.water.map(|w| WaterParams { level_m: w.level_m }),
+            // A 0.2 record names no fluid; the built-in water stands in until 0.3.
+            water: p.water.map(|w| WaterParams {
+                level_m: w.level_m,
+                material: tesserae_core::material::WATER,
+            }),
         }
     }
 }

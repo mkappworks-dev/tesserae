@@ -7,7 +7,6 @@ use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
 use crate::light::{ChunkLight, Light, MAX_LIGHT};
-use crate::material::WATER;
 use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
 use crate::worldgen::Worldgen;
 
@@ -171,20 +170,22 @@ fn packed_octant(child: &Chunk, i: usize, shapes: &ShapeTable, out: &mut Chunk) 
     }
 }
 
-/// Where generation puts water, so level 1 can tell the lake it made from
-/// water that flowed or was placed: a level-0 Voxel whose bottom is below
-/// `level_m`, computed as [`Worldgen::chunk`] computes it.
+/// Where generation puts its lake, so level 1 can tell the lake it made from
+/// fluid that flowed or was placed: a packed cube of the lake's Material in a
+/// level-0 Voxel whose bottom is below `level_m`, computed as
+/// [`Worldgen::chunk`] computes it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Waterline {
     pub level_m: f32,
     /// A level-0 Voxel's edge.
     pub voxel_m: f32,
+    pub material: MaterialId,
 }
 
 impl Waterline {
-    fn generates(&self, child_y: i32, y: usize) -> bool {
+    fn generates(&self, voxel: Voxel, child_y: i32, y: usize) -> bool {
         let floor_m = (child_y * CHUNK_SIZE as i32) as f32 * self.voxel_m;
-        floor_m + y as f32 * self.voxel_m < self.level_m
+        voxel.material() == self.material && floor_m + y as f32 * self.voxel_m < self.level_m
     }
 }
 
@@ -312,11 +313,12 @@ impl Changed<'_> {
                     let Some(fluid) = here.fluid else {
                         continue;
                     };
-                    let generated = voxel.material() == WATER
-                        && self.waterline.is_some_and(|w| w.generates(self.child_y, y));
+                    let generated = self
+                        .waterline
+                        .is_some_and(|w| w.generates(voxel, self.child_y, y));
                     let w = if generated {
                         let w = weight(shapes, voxel);
-                        lake.add(WATER, w, dy);
+                        lake.add(voxel.material(), w, dy);
                         w
                     } else {
                         let w = fluid_volume(here.solid, fluid, shapes);
@@ -508,12 +510,13 @@ fn is_solid_throughout(chunk: &Chunk) -> bool {
     chunk.uniform().is_some_and(|v| !v.is_air())
 }
 
-/// What a coarse Chunk needs to light its Water as level 0 does.
+/// What a coarse Chunk needs to light its lake as level 0 does.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct UnderWater {
-    /// The water's surface, in metres.
+    /// The lake's surface, in metres.
     pub level_m: f32,
-    /// Levels Water removes per Voxel it fills.
+    pub material: MaterialId,
+    /// Levels the lake's Material removes per Voxel it fills.
     pub dimming: u8,
     /// A level-0 Voxel's edge. A light level counts steps, not metres, so depth
     /// is counted in these.
@@ -542,12 +545,16 @@ impl UnderWater {
         cells: impl Iterator<Item = [i32; 3]>,
     ) {
         let floor_m = base_y as f32 * voxel_m;
-        if floor_m >= self.level_m || chunk.uniform().is_some_and(|v| v.material() != WATER) {
+        if floor_m >= self.level_m
+            || chunk
+                .uniform()
+                .is_some_and(|v| v.material() != self.material)
+        {
             return;
         }
         for [x, y, z] in cells {
             let (x, y, z) = (x as usize, y as usize, z as usize);
-            if chunk.get(x, y, z).material() == WATER {
+            if chunk.get(x, y, z).material() == self.material {
                 light.set(x, y, z, self.light_at((base_y + y as i32) as f32 * voxel_m));
             }
         }
@@ -663,7 +670,7 @@ pub fn coarse_light_in(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material::{DIRT, GLASS, GRASS, LEAVES, STONE, WATER};
+    use crate::material::{DIRT, GLASS, GRASS, LEAVES, STONE};
     use crate::shape::examples::{FENCE_ID, fence};
     use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
     use crate::testgen::register_water;
@@ -849,10 +856,10 @@ mod tests {
 
     fn pool(orientations: &[Orientation]) -> Vec<Voxel> {
         let mut pool = vec![Voxel::AIR, Voxel::new(0, SHAPE_STAIR, 5)];
-        pool.extend([STONE, DIRT, GRASS, GLASS, LEAVES, WATER].map(cube));
+        pool.extend([STONE, DIRT, GRASS, GLASS, LEAVES, water()].map(cube));
         for shape in [SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST, FENCE_ID] {
             for &o in orientations {
-                for m in [STONE, DIRT, WATER] {
+                for m in [STONE, DIRT, water()] {
                     pool.push(Voxel::shaped(m, shape, o));
                 }
             }
@@ -1214,13 +1221,32 @@ mod tests {
         }
     }
 
-    fn fixture() -> (Tables, MaterialId) {
+    /// The fixture water, and a translucent lava whose dimming is not water's.
+    fn fixture() -> (Tables, [MaterialId; 2]) {
         let mut tables = Tables {
             shapes: table(),
             ..Tables::builtin()
         };
         let water = register_water(&mut tables);
-        (tables, water)
+        let lava = tables
+            .materials
+            .register(crate::MaterialDef {
+                emission: 10,
+                dimming: 4,
+                ..crate::testgen::WATER_MATERIAL
+            })
+            .unwrap();
+        let hot = crate::FluidDef {
+            waterlogs: false,
+            extinguishes: false,
+            heat: Some(crate::Heat {
+                strength: 10,
+                reach_m: 2.0,
+            }),
+            ..crate::testgen::WATER_FLUID
+        };
+        tables.register_fluid(lava, hot).unwrap();
+        (tables, [water, lava])
     }
 
     fn tables() -> Tables {
@@ -1228,14 +1254,21 @@ mod tests {
     }
 
     fn water() -> MaterialId {
-        fixture().1
+        fixture().1[0]
     }
 
-    /// Every packed Voxel counts as generated, so nothing is dynamic.
-    const DROWNED: Option<Waterline> = Some(Waterline {
-        level_m: f32::MAX,
-        voxel_m: 1.0,
-    });
+    fn lava() -> MaterialId {
+        fixture().1[1]
+    }
+
+    /// Every packed water Voxel counts as generated, so nothing is dynamic.
+    fn drowned() -> Option<Waterline> {
+        Some(Waterline {
+            level_m: f32::MAX,
+            voxel_m: 1.0,
+            material: water(),
+        })
+    }
 
     fn changed<'a>(children: &'a [Chunk; 8], overlays: &'a [ChunkOverlay; 8]) -> [Child<'a>; 8] {
         std::array::from_fn(|i| Child::Changed(&children[i], &overlays[i]))
@@ -1257,7 +1290,7 @@ mod tests {
         let dry: [ChunkOverlay; 8] = Default::default();
         for seed in 0..6u64 {
             let children = random_children(seed.wrapping_mul(0x51_7cc1_b727_220a) | 1);
-            let got = downsample_changed(changed(&children, &dry), 0, &t, DROWNED);
+            let got = downsample_changed(changed(&children, &dry), 0, &t, drowned());
             assert_same(
                 &got.chunk,
                 &run(&children, &t.shapes),
@@ -1267,13 +1300,16 @@ mod tests {
         }
 
         // Generated lake water at its own waterline is lake water, read either way.
-        let generator = Worldgen::new(SEED, 1.0, WorldgenParams::default());
-        let level_m = generator
-            .water_level_m()
-            .expect("the default World has water");
+        let generator = Worldgen::new(
+            SEED,
+            1.0,
+            WorldgenParams::default().with_default_lake(water()),
+        );
+        let level_m = generator.water().expect("the World has a lake").level_m;
         let waterline = Some(Waterline {
             level_m,
             voxel_m: 1.0,
+            material: water(),
         });
         let mut lakes = 0;
         for (cx, cz) in [(0, 0), (3, -2), (-4, 5), (7, 7), (-6, -3), (2, 9)] {
@@ -1282,10 +1318,9 @@ mod tests {
                 let (x, y, z) = (i as i32 % 2, i as i32 / 2 % 2, i as i32 / 4);
                 generator.chunk(2 * cx + x, 2 * cy + y, 2 * cz + z)
             });
-            lakes +=
-                usize::from(children.iter().any(|c| {
-                    c.kinds().iter().any(|v| v.material() == WATER) && c.uniform().is_none()
-                }));
+            lakes += usize::from(children.iter().any(|c| {
+                c.kinds().iter().any(|v| v.material() == water()) && c.uniform().is_none()
+            }));
             let got = downsample_changed(changed(&children, &dry), cy, &t, waterline);
             assert_same(&got.chunk, &run(&children, &t.shapes), "lake");
             assert_eq!(got.overlay.uniform(), Some(Overlay::NONE), "lake");
@@ -1382,22 +1417,39 @@ mod tests {
 
     #[test]
     fn only_water_the_generator_could_have_made_stays_packed() {
-        let lake = (cube(WATER), Overlay::NONE);
+        for (lake, other) in [(water(), lava()), (lava(), water())] {
+            only_the_lake_stays_packed(lake, other);
+        }
+    }
+
+    /// Packed `lake` under its waterline is generated; packed `other` there is a
+    /// fluid that was placed, whatever the two are.
+    fn only_the_lake_stays_packed(material: MaterialId, other: MaterialId) {
+        let lake = (cube(material), Overlay::NONE);
         let at = |level_m| {
             Some(Waterline {
                 level_m,
                 voxel_m: 0.5,
+                material,
             })
         };
+        assert_eq!(
+            one_cell([(cube(other), Overlay::NONE); 8], at(1.0)),
+            (Voxel::AIR, standing(other, 16)),
+            "another fluid under the waterline is dynamic"
+        );
         assert_eq!(one_cell([lake; 8], at(1.0)), lake, "every bottom under 1 m");
         assert_eq!(
             one_cell([lake; 8], at(0.0)),
-            (Voxel::AIR, standing(WATER, 16)),
+            (Voxel::AIR, standing(material, 16)),
             "a bottom at the waterline is above it"
         );
-        assert_eq!(one_cell([lake; 8], None), (Voxel::AIR, standing(WATER, 16)));
+        assert_eq!(
+            one_cell([lake; 8], None),
+            (Voxel::AIR, standing(material, 16))
+        );
         // Mostly lake: the lake's, and the correction for it still applies.
-        let full = (Voxel::AIR, flowing(WATER, 16));
+        let full = (Voxel::AIR, flowing(material, 16));
         let mut mixed = [lake; 8];
         mixed[7] = full;
         mixed[6] = full;
@@ -1406,7 +1458,10 @@ mod tests {
         mixed[4] = full;
         assert_eq!(one_cell(mixed, at(1.0)), lake, "a tie is the lake's");
         mixed[3] = full;
-        assert_eq!(one_cell(mixed, at(1.0)), (Voxel::AIR, standing(WATER, 16)));
+        assert_eq!(
+            one_cell(mixed, at(1.0)),
+            (Voxel::AIR, standing(material, 16))
+        );
     }
 
     #[test]
@@ -1771,7 +1826,7 @@ mod tests {
     /// Level 0's own flood, as the truth: a column of water `depth` Voxels deep
     /// over stone under open sky, and the sky light in each water Voxel, top
     /// first.
-    fn level_zero_water(depth: usize) -> Vec<u8> {
+    fn level_zero_water(material: MaterialId, depth: usize) -> Vec<u8> {
         let mut c = Chunk::air();
         for x in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
@@ -1779,7 +1834,7 @@ mod tests {
                     c.set(x, y, z, Voxel::cube(STONE));
                 }
                 for y in 4..4 + depth {
-                    c.set(x, y, z, Voxel::cube(WATER));
+                    c.set(x, y, z, Voxel::cube(material));
                 }
             }
         }
@@ -1787,7 +1842,7 @@ mod tests {
         let air = Chunk::air();
         let mut border = [None; 6];
         border[POS_Y] = Some(crate::mesh::LitChunk::new(&air, &sky));
-        let light = crate::light::light_chunk(&c, border, &crate::Tables::builtin());
+        let light = crate::light::light_chunk(&c, border, &tables());
         (4..4 + depth)
             .rev()
             .map(|y| light.get(16, y, 16).sky())
@@ -1796,7 +1851,13 @@ mod tests {
 
     #[test]
     fn coarse_water_is_dimmed_by_its_depth_as_the_level_zero_flood_dims_it() {
-        let truth = level_zero_water(10);
+        for material in [water(), lava()] {
+            coarse_lake_is_dimmed_as_level_zero(material);
+        }
+    }
+
+    fn coarse_lake_is_dimmed_as_level_zero(material: MaterialId) {
+        let truth = level_zero_water(material, 10);
         // Level 1, 2 m Voxels: stone to 30 m, water from 30 m to 40 m, air above.
         let mut c = Chunk::air();
         for x in 0..CHUNK_SIZE {
@@ -1805,15 +1866,14 @@ mod tests {
                     c.set(x, y, z, Voxel::cube(STONE));
                 }
                 for y in 15..20 {
-                    c.set(x, y, z, Voxel::cube(WATER));
+                    c.set(x, y, z, Voxel::cube(material));
                 }
             }
         }
         let water = UnderWater {
             level_m: 40.0,
-            dimming: crate::Tables::builtin()
-                .materials
-                .dimming(Voxel::cube(WATER)),
+            material,
+            dimming: tables().materials.dimming(Voxel::cube(material)),
             step_m: 1.0,
         };
         let lit = coarse_light_in(

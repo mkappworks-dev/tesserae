@@ -423,32 +423,25 @@ fn bench_settle(c: &mut Criterion, group: &str, name: &str, start: Sim, then: im
 /// the activation scan a non-uniform lake Chunk gets on arrival, and a
 /// journal-coalesced dry Chunk.
 fn rescans(c: &mut Criterion) {
-    let lake = Worldgen::new(SEED, 1.0, WorldgenParams::default());
-    let dry = Worldgen::new(
+    let (tables, water) = water_tables();
+    let lake = Worldgen::new(
         SEED,
         1.0,
-        WorldgenParams {
-            water: None,
-            ..WorldgenParams::default()
-        },
+        WorldgenParams::default().with_default_lake(water),
     );
-    // Generated lakes are the built-in water until a Game names the lake fluid.
+    let dry = Worldgen::new(SEED, 1.0, WorldgenParams::default());
     let shore = (-8..8)
         .flat_map(|x| (-8..8).map(move |z| [x, 1, z]))
         .find(|&[x, y, z]| {
             let chunk = lake.chunk(x, y, z);
-            chunk.uniform().is_none()
-                && chunk
-                    .kinds()
-                    .iter()
-                    .any(|v| v.material() == tesserae_core::material::WATER)
+            chunk.uniform().is_none() && chunk.kinds().iter().any(|v| v.material() == water)
         })
         .expect("a lake shore near the origin");
     let mut g = c.benchmark_group("fluids/rescan");
     g.sample_size(20);
     g.throughput(Throughput::Elements(CHUNK_SIZE.pow(3) as u64));
     for (name, generator) in [("lake_shore", &lake), ("dry_terrain", &dry)] {
-        let mut sim = Sim::new(Tables::builtin(), 1.0, Limits::UNBOUNDED);
+        let mut sim = Sim::new(tables.clone(), 1.0, Limits::UNBOUNDED);
         for d in [
             [0, 0, 0],
             [-1, 0, 0],

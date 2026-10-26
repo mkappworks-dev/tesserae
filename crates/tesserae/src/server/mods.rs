@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use bevy::prelude::*;
 use tesserae_core::{MaterialId, Tables, WorldgenParams};
 use tesserae_mods::{
-    Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
-    discover, plan, resolve,
+    Kind, ModError, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams,
+    WorldInfo, apply, discover, plan, resolve,
 };
 
 use crate::content::MaterialPalette;
@@ -223,6 +223,7 @@ fn load_with(
     let loaded = bevy::tasks::block_on(async {
         let mut loaded = LoadedMods::default();
         let mut behaviours = Vec::new();
+        let mut game = None;
         for component in &compiled {
             let id = &component.found.manifest.id;
             let fault = |e| format!("mod `{id}`: {e}");
@@ -254,6 +255,7 @@ fn load_with(
                 }
             }
             if root {
+                game = Some(id.clone());
                 loaded.world = applied.world;
                 loaded.view = applied.view;
                 loaded.game = true;
@@ -263,6 +265,16 @@ fn load_with(
         // Every name is registered now; what flows, reacts and burns is fixed
         // before any Mod starts and the World opens.
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+        if let (Some(id), Some(world)) = (game, &loaded.world) {
+            world
+                .validate_lake(&loaded.tables)
+                .map_err(|source| ModError::Params {
+                    id,
+                    what: "world",
+                    source,
+                })
+                .map_err(|e| e.to_string())?;
+        }
         let ids = Registered {
             materials: loaded
                 .registry
