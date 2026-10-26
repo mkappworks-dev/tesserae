@@ -306,16 +306,20 @@ fn receive_catalogue(
 /// A wheel's line is a slot. A trackpad's pixels add up to one, and what is
 /// left over is dropped when a new gesture starts or the direction reverses,
 /// so half a swipe never joins the next.
-fn select_held(
+pub(super) fn select_held(
     keys: Res<ButtonInput<KeyCode>>,
     mut wheel: MessageReader<MouseWheel>,
     catalogue: Res<Catalogue>,
     mut hotbar: ResMut<Hotbar>,
     mut scrolled: Local<f32>,
+    menu: Option<Res<super::menu::Menu>>,
+    pointer: Option<Res<super::menu::PointerState>>,
 ) {
     for (slot, key) in SLOT_KEYS.iter().enumerate() {
         if keys.just_pressed(*key) {
-            hotbar.select(slot);
+            if menu.as_ref().is_some_and(|m|m.open) && let Some(item) = pointer.as_ref().and_then(|p|p.hovered).and_then(|e|e.holding()) {
+                hotbar.slots[slot] = item;
+            } else { hotbar.select(slot); }
         }
     }
     for event in wheel.read() {

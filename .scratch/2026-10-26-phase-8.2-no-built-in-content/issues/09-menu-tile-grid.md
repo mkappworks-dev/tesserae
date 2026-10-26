@@ -1,6 +1,6 @@
 # 09: The menu is a grid of square tiles
 
-Status: ready-for-agent
+Status: done
 Blocked by: 08
 
 Spec: [decision 19](../spec.md).
@@ -30,3 +30,15 @@ held item are marked by a border.
 - [ ] Clicks never edit the World while the menu is open.
 - [ ] A capture of the open menu is in the `/tmp` review folder.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+The menu uses square colour tiles with labels below and slot numbers in a
+corner. Solids quick-pick cubes; Shape tiles follow the last hovered solid.
+Click holds outside the slots and closes with cursor grab. Slot clicks stay
+open; drag assigns or swaps; numbered keys over items assign without moving
+selection. Shape-panel updates preserve the item entities being dragged.
+Pointer events and key input have headless coverage. Final formatting,
+review, CI and captures remain deferred to ticket 13.
