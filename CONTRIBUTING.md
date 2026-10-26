@@ -139,7 +139,7 @@ can fly around and edit. No Game is loaded unless you pass one; see
 | key                   | does                                                                        |
 | --------------------- | --------------------------------------------------------------------------- |
 | click, cursor free    | grab the cursor — mouse look does nothing until you do; it edits nothing    |
-| `Esc`                 | release the cursor                                                          |
+| `Esc`                 | release the cursor, closing the menu if it is open                          |
 | mouse                 | look                                                                        |
 | `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away                       |
 | `Space` / `Left Ctrl` | up and down                                                                 |
@@ -150,6 +150,7 @@ can fly around and edit. No Game is loaded unless you pass one; see
 | click                 | place what the slot holds: a block, a fluid source, or fire on fuel         |
 | right click           | break the block, remove the source, or put the fire out                     |
 | `Q` / `E`             | turn the held shape a quarter / flip which way is up                        |
+| `Tab`                 | open or close the menu that fills the slot; closing grabs the cursor        |
 
 The hotbar starts with stone, a stone slab, stair and post, lantern, glass and
 leaves, then the Game's lake fluid (or its first declared fluid) and fire when
@@ -157,6 +158,11 @@ anything burns. A slot left over is empty: a click does nothing and a right
 click breaks. A right click is the secondary button, a two-finger tap on a Mac
 trackpad. The corner of the screen names the held slot and what each button does
 with it.
+
+The menu lists every solid Material, then the Shapes of the one chosen, every
+fluid, and fire when anything burns, each by its full name beside its colour.
+While it is open the cursor is free: the mouse does not look around and a click
+edits nothing. Clicking a slot in the menu's bar selects it.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.

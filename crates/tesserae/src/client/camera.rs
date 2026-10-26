@@ -78,7 +78,15 @@ pub struct CameraHome(pub Transform);
 struct CursorHint;
 
 pub(super) fn plugin(app: &mut App) {
-    let input = (grab_cursor, show_hint, reset, look, adjust_speed, fly).chain();
+    let input = (
+        grab_cursor.run_if(super::menu::closed),
+        show_hint,
+        reset,
+        look,
+        adjust_speed,
+        fly,
+    )
+        .chain();
     #[cfg(feature = "dev")]
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
     app.add_systems(Startup, spawn_hint)
@@ -171,7 +179,7 @@ fn grab_cursor(
     }
 }
 
-fn look(
+pub(super) fn look(
     motion: Res<AccumulatedMouseMotion>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<(&mut Transform, &mut FlyCamera)>,

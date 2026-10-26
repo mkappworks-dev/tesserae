@@ -47,7 +47,7 @@ const PIXELS_PER_NOTCH: f32 = 100.0;
 
 /// What one hotbar slot holds.
 #[derive(Clone, Copy, PartialEq, Debug)]
-enum Holding {
+pub(super) enum Holding {
     Solid {
         material: MaterialId,
         shape: ShapeId,
@@ -60,7 +60,7 @@ enum Holding {
 }
 
 impl Holding {
-    fn solid(material: MaterialId, shape: ShapeId) -> Self {
+    pub(super) fn solid(material: MaterialId, shape: ShapeId) -> Self {
         Holding::Solid {
             material,
             shape,
@@ -104,7 +104,7 @@ impl Holding {
         }
     }
 
-    fn describe(self, catalogue: &ContentCatalogue) -> String {
+    pub(super) fn describe(self, catalogue: &ContentCatalogue) -> String {
         let material = |id| {
             catalogue
                 .material(id)
@@ -145,10 +145,10 @@ impl Holding {
 }
 
 /// The nine slots and which one is held.
-#[derive(Resource, PartialEq, Debug)]
-struct Hotbar {
-    slots: [Holding; SLOT_KEYS.len()],
-    selected: usize,
+#[derive(Resource, Clone, PartialEq, Debug)]
+pub(super) struct Hotbar {
+    pub(super) slots: [Holding; SLOT_KEYS.len()],
+    pub(super) selected: usize,
 }
 
 impl Default for Hotbar {
@@ -186,7 +186,7 @@ impl Hotbar {
         slots.try_into().expect("nine slots")
     }
 
-    fn held(&self) -> Holding {
+    pub(super) fn held(&self) -> Holding {
         self.slots[self.selected]
     }
 
@@ -198,7 +198,7 @@ impl Hotbar {
 
 /// The last catalogue the Server sent.
 #[derive(Resource, Default)]
-struct Catalogue(ContentCatalogue);
+pub(super) struct Catalogue(pub(super) ContentCatalogue);
 
 /// The last thing the Server declined, and how long it has left on screen.
 #[derive(Resource, Default)]
@@ -349,7 +349,7 @@ fn select_held(
 /// one that makes the cursor grabbed, so "grabbed now" is not enough: it has to
 /// have been grabbed on the frame before as well, and that holds whichever of
 /// this and `camera::grab_cursor` runs first within a frame.
-fn send_intents(
+pub(super) fn send_intents(
     mouse: Res<ButtonInput<MouseButton>>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
@@ -392,7 +392,7 @@ fn show_rejections(
     notice.tick(time.delta_secs());
 }
 
-const HINT: &str = "[1-9] or scroll: choose  [Q] turn  [E] flip";
+const HINT: &str = "[1-9] or scroll: choose  [Q] turn  [E] flip  [Tab] menu";
 
 fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> String {
     let held = hotbar.held();
@@ -421,9 +421,13 @@ fn update_hud(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::{CatalogueMaterial, CatalogueShape};
+    use crate::client::camera::look;
+    use crate::client::menu::{self, Entry};
+    use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};
     use crate::server::edit::RejectReason;
     use crate::server::player::{PoseCorrection, PoseReport};
+    use bevy::input::mouse::AccumulatedMouseMotion;
+    use bevy::ui_widgets::Activate;
 
     const DEMO_WATER: MaterialId = 14;
     const LAVA: MaterialId = 9;
@@ -517,7 +521,8 @@ mod tests {
             .add_message::<EditRejected>()
             .add_message::<PoseReport>()
             .add_message::<PoseCorrection>()
-            .add_plugins(crate::client::pose::plugin)
+            .add_message::<MaterialPalette>()
+            .add_plugins((crate::client::pose::plugin, menu::plugin))
             .add_systems(
                 Update,
                 (
@@ -949,5 +954,227 @@ mod tests {
         assert_eq!(notice.text(), "nope");
         notice.tick(0.2);
         assert_eq!(notice.text(), "");
+    }
+
+    fn cursor(app: &mut App) -> CursorGrabMode {
+        let mut q = app.world_mut().query::<&CursorOptions>();
+        q.single(app.world()).unwrap().grab_mode
+    }
+
+    /// Every entry the open menu shows, bar slots aside.
+    fn offered(app: &mut App) -> Vec<Entry> {
+        let mut q = app.world_mut().query::<&Entry>();
+        q.iter(app.world())
+            .copied()
+            .filter(|e| !matches!(e, Entry::Slot(_)))
+            .collect()
+    }
+
+    fn texts(app: &mut App) -> Vec<String> {
+        let mut q = app.world_mut().query::<&Text>();
+        q.iter(app.world()).map(|t| t.0.clone()).collect()
+    }
+
+    /// What Bevy's button widget triggers when an entry is clicked.
+    fn choose(app: &mut App, entry: Entry) {
+        let mut q = app.world_mut().query::<(Entity, &Entry)>();
+        let entity = q
+            .iter(app.world())
+            .find(|&(_, e)| *e == entry)
+            .unwrap_or_else(|| panic!("{entry:?} is not offered"))
+            .0;
+        app.world_mut().trigger(Activate { entity });
+        frame(app);
+    }
+
+    fn id(catalogue: &ContentCatalogue, name: &str) -> MaterialId {
+        catalogue
+            .materials
+            .iter()
+            .find(|m| m.name == name)
+            .unwrap_or_else(|| panic!("{name}"))
+            .id
+    }
+
+    #[test]
+    fn the_menu_offers_every_solid_in_every_shape_every_fluid_and_fire() {
+        let catalogue = demo();
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        assert!(offered(&mut app).is_empty(), "closed");
+        key(&mut app, KeyCode::Tab);
+        assert_eq!(cursor(&mut app), CursorGrabMode::None);
+
+        let solids: Vec<_> = catalogue.materials.iter().filter(|m| m.solid).collect();
+        for name in ["demo:wood", "demo:brick", "demo:lamp"] {
+            assert!(solids.iter().any(|m| m.name == name), "{name}");
+        }
+        for solid in &solids {
+            assert!(offered(&mut app).contains(&Entry::Material(solid.id)));
+            choose(&mut app, Entry::Material(solid.id));
+            let shapes: Vec<_> = offered(&mut app)
+                .into_iter()
+                .filter_map(|e| match e {
+                    Entry::Solid { material, shape } => {
+                        assert_eq!(material, solid.id, "only the chosen solid's");
+                        Some(shape)
+                    }
+                    _ => None,
+                })
+                .collect();
+            for shape in &catalogue.shapes {
+                assert!(shapes.contains(&shape.id), "{} {}", solid.name, shape.name);
+            }
+            assert_eq!(shapes.len(), catalogue.shapes.len());
+        }
+        let offered = offered(&mut app);
+        assert_eq!(
+            offered
+                .iter()
+                .filter(|e| matches!(e, Entry::Material(_)))
+                .count(),
+            solids.len(),
+            "solids only"
+        );
+        for fluid in ["demo:water", "demo:lava", "demo:mud"] {
+            assert!(
+                offered.contains(&Entry::Fluid(id(&catalogue, fluid))),
+                "{fluid}"
+            );
+        }
+        assert!(offered.contains(&Entry::Fire));
+
+        let texts = texts(&mut app);
+        for name in [
+            "demo:wood",
+            "demo:brick",
+            "demo:lamp",
+            "core:stair",
+            "dev:fence",
+            "demo:water",
+            "demo:lava",
+            "demo:mud",
+            "fire",
+        ] {
+            assert!(texts.iter().any(|t| t == name), "{name} by its full name");
+        }
+    }
+
+    #[test]
+    fn with_no_fluid_and_no_fuel_the_menu_offers_the_builtin_solids_and_shapes_only() {
+        let mut app = app_with(CursorGrabMode::Locked, dry());
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        let offered = offered(&mut app);
+        let solids: Vec<_> = (1..=6).map(Entry::Material).collect();
+        let shapes: Vec<_> = (0..5)
+            .map(|shape| Entry::Solid {
+                material: STONE,
+                shape,
+            })
+            .collect();
+        assert_eq!(offered.len(), solids.len() + shapes.len(), "{offered:?}");
+        for entry in solids.iter().chain(&shapes) {
+            assert!(offered.contains(entry), "{entry:?}");
+        }
+        let texts = texts(&mut app);
+        assert!(!texts.iter().any(|t| t == "Fluids" || t == "Fire"));
+    }
+
+    #[test]
+    fn a_chosen_entry_fills_the_selected_slot_and_the_next_click_sends_it() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        key(&mut app, KeyCode::Digit2);
+        key(&mut app, KeyCode::Tab);
+        choose(&mut app, Entry::Material(WOOD));
+        choose(
+            &mut app,
+            Entry::Solid {
+                material: WOOD,
+                shape: SHAPE_STAIR,
+            },
+        );
+        let hotbar = app.world().resource::<Hotbar>();
+        assert_eq!(hotbar.selected, 1);
+        assert_eq!(hotbar.slots[1], Holding::solid(WOOD, SHAPE_STAIR));
+
+        key(&mut app, KeyCode::Tab);
+        assert_eq!(cursor(&mut app), CursorGrabMode::Locked, "closing grabs");
+        press(&mut app, MouseButton::Left);
+        let sent = frame(&mut app);
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sent[0].action,
+            EditAction::Place(Voxel::shaped(WOOD, SHAPE_STAIR, Orientation::IDENTITY))
+        );
+
+        key(&mut app, KeyCode::Tab);
+        choose(&mut app, Entry::Fluid(LAVA));
+        key(&mut app, KeyCode::Escape);
+        assert!(offered(&mut app).is_empty(), "Escape closes it");
+        assert_eq!(
+            cursor(&mut app),
+            CursorGrabMode::None,
+            "and leaves the cursor free, as Escape does outside it"
+        );
+        assert_eq!(
+            app.world().resource::<Hotbar>().held(),
+            Holding::Fluid(LAVA)
+        );
+    }
+
+    #[test]
+    fn clicking_a_hotbar_slot_while_the_menu_is_open_selects_it() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        choose(&mut app, Entry::Slot(4));
+        assert_eq!(app.world().resource::<Hotbar>().selected, 4);
+        choose(&mut app, Entry::Fire);
+        choose(&mut app, Entry::Slot(0));
+        choose(&mut app, Entry::Fluid(DEMO_WATER));
+        let slots = app.world().resource::<Hotbar>().slots;
+        assert_eq!(slots[4], Holding::Fire);
+        assert_eq!(slots[0], Holding::Fluid(DEMO_WATER));
+    }
+
+    #[test]
+    fn nothing_is_edited_and_the_camera_does_not_turn_while_the_menu_is_open() {
+        let mut app = app(CursorGrabMode::Locked);
+        app.init_resource::<AccumulatedMouseMotion>()
+            .add_systems(Update, look);
+        let mut camera = app.world_mut().query::<&FlyCamera>();
+        let entity = app
+            .world_mut()
+            .query_filtered::<Entity, With<FlyCamera>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(Transform::default());
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        let moved = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<AccumulatedMouseMotion>()
+                .delta = Vec2::new(40.0, 25.0);
+        };
+        for button in [MouseButton::Left, MouseButton::Right] {
+            moved(&mut app);
+            press(&mut app, button);
+            assert!(frame(&mut app).is_empty(), "{button:?}");
+        }
+        let fly = camera.single(app.world()).unwrap();
+        assert_eq!((fly.yaw, fly.pitch), (0.0, 0.0));
+
+        key(&mut app, KeyCode::Tab);
+        moved(&mut app);
+        frame(&mut app);
+        assert_ne!(
+            camera.single(app.world()).unwrap().yaw,
+            0.0,
+            "it turns once closed"
+        );
     }
 }

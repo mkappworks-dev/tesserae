@@ -1428,6 +1428,41 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     );
 }
 
+/// What the picker menu sends for a Mod's solid in a Shape is the existing
+/// place intent: the Server accepts it and a 0.3 Mod sees a solid Edit.
+#[test]
+fn a_declared_solid_placed_from_the_menu_is_a_solid_edit() {
+    use crate::server::edit::{EditAction, EditIntent};
+    use crate::server::player::Player;
+    let mut loaded = guest_fixture("fluids", "fluids", "0.2", 0, 1.0);
+    loaded.mods.extend(game_fixture("lake", "lake", "0.3").mods);
+    let mut h = Harness::with(loaded);
+    let wood = h.material("fluids:wood");
+    h.app.insert_resource(WorldSettings {
+        seed: 0,
+        voxel_size: 1.0,
+    });
+    h.app.add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 4.5, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([2, 0, 2], Voxel::cube(STONE));
+    let stair = Voxel::shaped(wood, SHAPE_STAIR, tesserae_core::Orientation::IDENTITY);
+    h.app.world_mut().write_message(EditIntent {
+        action: EditAction::Place(stair),
+        origin: eye,
+        direction: Vec3::NEG_Y,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    assert_eq!(h.voxel([2, 1, 2]), stair);
+    h.call();
+    h.call();
+    let seen = h.log(1);
+    assert_eq!(seen.matches("::Solid(").count(), 1, "{seen}");
+    let after = format!("after: Voxel {{ material: {wood}, shape: {SHAPE_STAIR}");
+    assert!(seen.contains(&after), "{seen}");
+}
+
 /// A Manifest that names one line for a component of another is refused at
 /// load, and so is a Declaration whose names do not resolve, before any Mod
 /// starts.

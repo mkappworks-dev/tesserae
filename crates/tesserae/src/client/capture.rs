@@ -1,7 +1,8 @@
 //! Writes a PNG of the running app and exits. `dev` only, and inert unless
 //! `TESSERAE_SCREENSHOT` names a path. `TESSERAE_SCREENSHOT_OFFSCREEN` renders
 //! into an image instead of the window, which is what to use when nobody is
-//! looking at the screen.
+//! looking at the screen. `TESSERAE_SCREENSHOT_MENU` opens the picker menu, so
+//! the picture shows it.
 //!
 //! Through Bevy's own screenshot path rather than an OS screen grab, because a
 //! screen grab needs macOS Screen Recording permission that a build machine, or
@@ -240,9 +241,11 @@ pub(super) fn plugin(app: &mut App) {
         taken: false,
         pending_seen: false,
         frames: FrameLog::default(),
-    })
-    .add_systems(Startup, uncap_frame_rate)
-    .add_systems(
+    });
+    if std::env::var_os("TESSERAE_SCREENSHOT_MENU").is_some() {
+        app.insert_resource(super::menu::Menu::opened());
+    }
+    app.add_systems(Startup, uncap_frame_rate).add_systems(
         Update,
         (
             render_offscreen.run_if(|capture: Res<Capture>, target: Option<Res<Offscreen>>| {
@@ -290,6 +293,8 @@ fn render_offscreen(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     cameras: Query<Entity, With<Camera3d>>,
+    main: Single<Entity, With<MainCamera>>,
+    menu: Res<super::menu::Menu>,
 ) {
     let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
     let handle = images.add(image);
@@ -298,6 +303,10 @@ fn render_offscreen(
         commands
             .entity(camera)
             .insert(RenderTarget::Image(handle.clone().into()));
+    }
+    // The UI follows a window camera by default, and none is left.
+    if menu.open {
+        commands.entity(*main).insert(IsDefaultUiCamera);
     }
     commands.insert_resource(Offscreen(handle));
 }

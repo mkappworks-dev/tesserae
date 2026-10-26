@@ -9,6 +9,7 @@ pub mod chunk_mesh;
 pub mod chunk_view;
 pub mod drawn_mask;
 pub mod edit;
+mod menu;
 #[cfg(feature = "dev")]
 mod overlay;
 mod palette;
@@ -21,6 +22,7 @@ pub fn plugin(app: &mut App) {
         camera::plugin,
         chunk_view::plugin,
         edit::plugin,
+        menu::plugin,
         pose::plugin,
     ));
     #[cfg(feature = "dev")]

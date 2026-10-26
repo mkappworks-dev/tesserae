@@ -192,7 +192,8 @@ tesserae/
 │           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
-│           │   └── edit.rs         place/break intents, hotbar, crosshair   ▸ 5
+│           │   ├── edit.rs         place/break intents, hotbar, crosshair   ▸ 5
+│           │   └── menu.rs         the picker that fills a hotbar slot      ▸ 8
 │           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
