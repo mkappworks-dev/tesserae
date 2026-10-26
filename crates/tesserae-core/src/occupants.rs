@@ -342,14 +342,14 @@ fn carry(fluid: Fluid, from: Voxel, to: Voxel, tables: &Tables) -> Option<Fluid>
 
 #[cfg(test)]
 mod tests {
+    use crate::testgen::fixtures;
     use super::*;
-    use crate::material::STONE;
-    use crate::testgen::register_water;
+
 
     #[test]
     fn a_packed_fluid_voxel_is_a_full_source_with_no_solid() {
-        let mut tables = Tables::builtin();
-        let water = register_water(&mut tables);
+        let tables = fixtures().tables.clone();
+        let water = fixtures().water;
         let fluids = tables.fluids;
         let got = Occupants::of(Voxel::cube(water), Overlay::NONE, &fluids);
         assert_eq!(
@@ -360,21 +360,21 @@ mod tests {
                 burning: None,
             }
         );
-        let dry = Occupants::of(Voxel::cube(STONE), Overlay::NONE, &fluids);
-        assert_eq!(dry.solid, Voxel::cube(STONE));
+        let dry = Occupants::of(Voxel::cube(fixtures().ground.rock), Overlay::NONE, &fluids);
+        assert_eq!(dry.solid, Voxel::cube(fixtures().ground.rock));
         assert_eq!((dry.fluid, dry.burning), (None, None));
     }
 
     fn stair() -> Voxel {
-        Voxel::new(STONE, crate::SHAPE_STAIR, 0)
+        Voxel::new(fixtures().ground.rock, crate::SHAPE_STAIR, 0)
     }
 
     /// The fluid Material has one home: the packed Voxel when it is a full
     /// source with no solid, the overlay otherwise, and never both.
     #[test]
     fn the_encoding_is_canonical_and_round_trips() {
-        let mut tables = Tables::builtin();
-        let water = register_water(&mut tables);
+        let tables = fixtures().tables.clone();
+        let water = fixtures().water;
         let fluids = tables.fluids;
         let flowing = Fluid {
             source: false,
@@ -451,8 +451,8 @@ mod tests {
     /// air over water still empties it. Source and flow keep their identity.
     #[test]
     fn placing_a_solid_follows_the_layer_rules() {
-        let mut tables = Tables::builtin();
-        let water_id = register_water(&mut tables);
+        let tables = fixtures().tables.clone();
+        let water_id = fixtures().water;
         let water = Fluid::source(water_id);
         let deep = Fluid {
             source: false,
@@ -460,7 +460,7 @@ mod tests {
             reach: 3,
             ..water
         };
-        let slab = Voxel::new(STONE, crate::SHAPE_SLAB, 0);
+        let slab = Voxel::new(fixtures().ground.rock, crate::SHAPE_SLAB, 0);
         let flowing = Fluid {
             source: false,
             surface: 4,
@@ -475,9 +475,9 @@ mod tests {
             (
                 "stone into water",
                 wet(Voxel::AIR, water, None),
-                Voxel::cube(STONE),
+                Voxel::cube(fixtures().ground.rock),
                 Occupants {
-                    solid: Voxel::cube(STONE),
+                    solid: Voxel::cube(fixtures().ground.rock),
                     ..empty
                 },
             ),
@@ -490,7 +490,7 @@ mod tests {
             (
                 "water onto burning stone",
                 Occupants {
-                    solid: Voxel::cube(STONE),
+                    solid: Voxel::cube(fixtures().ground.rock),
                     fluid: None,
                     burning: Some(Burning { fuel: 5 }),
                 },
@@ -516,9 +516,9 @@ mod tests {
                     fluid: None,
                     burning: Some(Burning { fuel: 5 }),
                 },
-                Voxel::cube(STONE),
+                Voxel::cube(fixtures().ground.rock),
                 Occupants {
-                    solid: Voxel::cube(STONE),
+                    solid: Voxel::cube(fixtures().ground.rock),
                     ..empty
                 },
             ),
@@ -552,9 +552,9 @@ mod tests {
             (
                 "stone into a waterlogged stair",
                 wet(stair(), water, None),
-                Voxel::cube(STONE),
+                Voxel::cube(fixtures().ground.rock),
                 Occupants {
-                    solid: Voxel::cube(STONE),
+                    solid: Voxel::cube(fixtures().ground.rock),
                     ..empty
                 },
             ),
@@ -573,7 +573,7 @@ mod tests {
         assert_eq!(dry.heap_bytes(), 0);
         assert!(!dry.may_contain_fluid() && !dry.may_contain_burning());
 
-        let water = register_water(&mut Tables::builtin());
+        let water = fixtures().water;
         let lake = crate::Chunk::filled(Voxel::cube(water));
         assert_eq!(lake.heap_bytes() + ChunkOverlay::none().heap_bytes(), 0);
 

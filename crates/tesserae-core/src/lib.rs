@@ -47,6 +47,6 @@ pub use shape::{
 pub use tables::{PlaceFault, Tables};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{
-    CaveParams, MAX_HEIGHT_M, MAX_OCTAVES, MAX_SMOOTHED_PER_CHUNK, ParamError, SmoothingParams,
+    CaveParams, GroundParams, MAX_HEIGHT_M, MAX_OCTAVES, MAX_SMOOTHED_PER_CHUNK, ParamError, SmoothingParams,
     WaterParams, Worldgen, WorldgenParams,
 };

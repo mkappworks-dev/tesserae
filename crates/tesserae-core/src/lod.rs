@@ -669,11 +669,12 @@ pub fn coarse_light_in(
 
 #[cfg(test)]
 mod tests {
+    use crate::testgen::fixtures;
     use super::*;
-    use crate::material::{DIRT, GLASS, GRASS, LEAVES, STONE};
+
     use crate::shape::examples::{FENCE_ID, fence};
     use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
-    use crate::testgen::register_water;
+
     use crate::worldgen::{Worldgen, WorldgenParams};
     use std::collections::BTreeMap;
 
@@ -702,7 +703,7 @@ mod tests {
                 collision: None,
             })
             .unwrap();
-        let v = Voxel::new(STONE, id, 0);
+        let v = Voxel::new(fixtures().ground.rock, id, 0);
         assert_eq!(t.volume(v), 2047);
         v
     }
@@ -835,7 +836,7 @@ mod tests {
     }
 
     fn slab() -> Voxel {
-        Voxel::shaped(STONE, SHAPE_SLAB, Orientation::IDENTITY)
+        Voxel::shaped(fixtures().ground.rock, SHAPE_SLAB, Orientation::IDENTITY)
     }
 
     /// Hand-rolled to avoid a dependency; the stream must not change between runs.
@@ -856,10 +857,10 @@ mod tests {
 
     fn pool(orientations: &[Orientation]) -> Vec<Voxel> {
         let mut pool = vec![Voxel::AIR, Voxel::new(0, SHAPE_STAIR, 5)];
-        pool.extend([STONE, DIRT, GRASS, GLASS, LEAVES, water()].map(cube));
+        pool.extend([fixtures().ground.rock, fixtures().ground.soil, fixtures().ground.surface, fixtures().glass, fixtures().leaves, water()].map(cube));
         for shape in [SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST, FENCE_ID] {
             for &o in orientations {
-                for m in [STONE, DIRT, water()] {
+                for m in [fixtures().ground.rock, fixtures().ground.soil, water()] {
                     pool.push(Voxel::shaped(m, shape, o));
                 }
             }
@@ -905,22 +906,22 @@ mod tests {
     fn half_the_volume_is_solid_and_the_bare_post_is_air() {
         let mut t = table();
         let nearly = nearly_a_slab(&mut t);
-        let stair = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY);
-        let post = Voxel::shaped(STONE, SHAPE_POST, Orientation::IDENTITY);
-        let fence = Voxel::new(STONE, FENCE_ID, 0);
+        let stair = Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::IDENTITY);
+        let post = Voxel::shaped(fixtures().ground.rock, SHAPE_POST, Orientation::IDENTITY);
+        let fence = Voxel::new(fixtures().ground.rock, FENCE_ID, 0);
 
-        assert_eq!(coarse([slab(); 8], &t), cube(STONE), "a tie is solid");
-        assert_eq!(coarse([stair; 8], &t), cube(STONE));
+        assert_eq!(coarse([slab(); 8], &t), cube(fixtures().ground.rock), "a tie is solid");
+        assert_eq!(coarse([stair; 8], &t), cube(fixtures().ground.rock));
         assert_eq!(coarse([post; 8], &t), Voxel::AIR);
         assert_eq!(coarse([fence; 8], &t), Voxel::AIR);
         assert_eq!(coarse([nearly; 8], &t), Voxel::AIR);
 
-        let mut exactly = [cube(STONE), cube(STONE), cube(STONE), slab(), slab()]
+        let mut exactly = [cube(fixtures().ground.rock), cube(fixtures().ground.rock), cube(fixtures().ground.rock), slab(), slab()]
             .into_iter()
             .chain([Voxel::AIR; 3]);
         let mut at_half = [Voxel::AIR; 8];
         at_half.fill_with(|| exactly.next().unwrap());
-        assert_eq!(coarse(at_half, &t), cube(STONE));
+        assert_eq!(coarse(at_half, &t), cube(fixtures().ground.rock));
         at_half[4] = nearly;
         assert_eq!(coarse(at_half, &t), Voxel::AIR, "one sub-cell under");
     }
@@ -933,9 +934,9 @@ mod tests {
             assert!(!out.may_contain_shaped());
             assert_eq!(out.shaped_count(), 0);
         }
-        let stairs = std::array::from_fn(|_| Chunk::filled(Voxel::new(DIRT, SHAPE_STAIR, 7)));
+        let stairs = std::array::from_fn(|_| Chunk::filled(Voxel::new(fixtures().ground.soil, SHAPE_STAIR, 7)));
         let out = run(&stairs, &t);
-        assert_eq!(out.uniform(), Some(cube(DIRT)));
+        assert_eq!(out.uniform(), Some(cube(fixtures().ground.soil)));
     }
 
     /// Grass is the one-Voxel cap over dirt, so every odd surface height is a
@@ -945,15 +946,15 @@ mod tests {
         let t = table();
         for surface in 0..LATTICE {
             let children = split(|_, y, _| match y.cmp(&surface) {
-                std::cmp::Ordering::Less => cube(DIRT),
-                std::cmp::Ordering::Equal => cube(GRASS),
+                std::cmp::Ordering::Less => cube(fixtures().ground.soil),
+                std::cmp::Ordering::Equal => cube(fixtures().ground.surface),
                 std::cmp::Ordering::Greater => Voxel::AIR,
             });
             let out = run(&children, &t);
             for cy in 0..CHUNK_SIZE {
                 let want = match cy.cmp(&(surface / 2)) {
-                    std::cmp::Ordering::Less => cube(DIRT),
-                    std::cmp::Ordering::Equal => cube(GRASS),
+                    std::cmp::Ordering::Less => cube(fixtures().ground.soil),
+                    std::cmp::Ordering::Equal => cube(fixtures().ground.surface),
                     std::cmp::Ordering::Greater => Voxel::AIR,
                 };
                 assert_eq!(out.get(5, cy, 9), want, "surface {surface}, row {cy}");
@@ -967,16 +968,16 @@ mod tests {
         let stacked = |bottom: MaterialId, top: MaterialId| {
             std::array::from_fn(|j| cube(if j / 2 % 2 == 1 { top } else { bottom }))
         };
-        assert_eq!(coarse(stacked(STONE, water()), &t), cube(water()));
-        assert_eq!(coarse(stacked(water(), STONE), &t), cube(STONE));
-        assert_eq!(coarse(stacked(DIRT, GRASS), &t), cube(GRASS));
-        assert_eq!(coarse(stacked(GRASS, DIRT), &t), cube(DIRT));
+        assert_eq!(coarse(stacked(fixtures().ground.rock, water()), &t), cube(water()));
+        assert_eq!(coarse(stacked(water(), fixtures().ground.rock), &t), cube(fixtures().ground.rock));
+        assert_eq!(coarse(stacked(fixtures().ground.soil, fixtures().ground.surface), &t), cube(fixtures().ground.surface));
+        assert_eq!(coarse(stacked(fixtures().ground.surface, fixtures().ground.soil), &t), cube(fixtures().ground.soil));
     }
 
     #[test]
     fn the_lowest_id_wins_a_tie_in_height_in_any_order_or_octant() {
         let t = table();
-        let mats = [STONE, DIRT, GRASS, GLASS, LEAVES, water()];
+        let mats = [fixtures().ground.rock, fixtures().ground.soil, fixtures().ground.surface, fixtures().glass, fixtures().leaves, water()];
         for &a in &mats {
             for &b in mats.iter().filter(|&&b| b != a) {
                 let want = cube(a.min(b));
@@ -1099,7 +1100,7 @@ mod tests {
                     signed >= -0.5,
                     "level {level} at {x_m}, {z_m}: top {top_m} m lost its surface Voxel"
                 );
-                capped[level as usize - 1] += (voxel.material() == GRASS) as usize;
+                capped[level as usize - 1] += (voxel.material() == crate::material::GRASS) as usize;
             }
         }
         // Not every column: where the surface pokes one finer Voxel into the next coarse
@@ -1117,10 +1118,10 @@ mod tests {
     #[test]
     fn translucent_materials_keep_their_id_and_count_as_occupied() {
         let t = table();
-        for m in [GLASS, LEAVES, water()] {
+        for m in [fixtures().glass, fixtures().leaves, water()] {
             assert_eq!(coarse([cube(m); 8], &t), cube(m));
             let mut mostly = [cube(m); 8];
-            mostly[..3].fill(cube(STONE));
+            mostly[..3].fill(cube(fixtures().ground.rock));
             assert_eq!(coarse(mostly, &t), cube(m), "five of eight");
 
             let mut pane = [Voxel::AIR; 8];
@@ -1133,7 +1134,7 @@ mod tests {
         }
 
         let mut c = Chunk::air();
-        c.set(10, 11, 12, cube(GLASS));
+        c.set(10, 11, 12, cube(fixtures().glass));
         let air = Chunk::air();
         assert_eq!(
             downsample([&c, &air, &air, &air, &air, &air, &air, &air], &t).uniform(),
@@ -1146,7 +1147,7 @@ mod tests {
         let t = table();
         let children = split(|x, y, z| {
             if (32..36).contains(&x) && (4..6).contains(&y) && (38..40).contains(&z) {
-                cube(STONE)
+                cube(fixtures().ground.rock)
             } else {
                 Voxel::AIR
             }
@@ -1175,14 +1176,14 @@ mod tests {
     fn every_orientation_of_every_shape_weighs_the_same() {
         let t = table();
         for shape in [SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
-            let want = t.volume(Voxel::shaped(STONE, shape, Orientation::IDENTITY));
+            let want = t.volume(Voxel::shaped(fixtures().ground.rock, shape, Orientation::IDENTITY));
             for o in Orientation::all() {
-                let v = Voxel::shaped(STONE, shape, o);
+                let v = Voxel::shaped(fixtures().ground.rock, shape, o);
                 assert_eq!(t.volume(v), want);
                 assert_eq!(
                     coarse([v; 8], &t),
                     if 8 * want as u32 >= SOLID_AT {
-                        cube(STONE)
+                        cube(fixtures().ground.rock)
                     } else {
                         Voxel::AIR
                     }
@@ -1197,11 +1198,11 @@ mod tests {
         let uniform = [
             Voxel::AIR,
             Voxel::new(0, SHAPE_STAIR, 9),
-            cube(STONE),
+            cube(fixtures().ground.rock),
             slab(),
-            Voxel::shaped(DIRT, SHAPE_STAIR, Orientation::new(3, 2)),
-            Voxel::shaped(STONE, SHAPE_POST, Orientation::IDENTITY),
-            Voxel::new(STONE, FENCE_ID, 0),
+            Voxel::shaped(fixtures().ground.soil, SHAPE_STAIR, Orientation::new(3, 2)),
+            Voxel::shaped(fixtures().ground.rock, SHAPE_POST, Orientation::IDENTITY),
+            Voxel::new(fixtures().ground.rock, FENCE_ID, 0),
         ];
         for v in uniform {
             let children = std::array::from_fn(|_| Chunk::filled(v));
@@ -1225,9 +1226,9 @@ mod tests {
     fn fixture() -> (Tables, [MaterialId; 2]) {
         let mut tables = Tables {
             shapes: table(),
-            ..Tables::builtin()
+            ..fixtures().tables.clone()
         };
-        let water = register_water(&mut tables);
+        let water = fixtures().water;
         let lava = tables
             .materials
             .register(crate::MaterialDef {
@@ -1403,10 +1404,10 @@ mod tests {
         );
         // Stone wins a coarse Voxel that is more stone than water, as it does
         // against a lake.
-        let rock = (cube(STONE), Overlay::NONE);
+        let rock = (cube(fixtures().ground.rock), Overlay::NONE);
         assert_eq!(
             one_cell([rock, rock, rock, full, DRY, DRY, DRY, DRY], None),
-            (cube(STONE), Overlay::NONE)
+            (cube(fixtures().ground.rock), Overlay::NONE)
         );
         // Stone under half is dropped and the water stands over what it filled.
         assert_eq!(
@@ -1466,7 +1467,7 @@ mod tests {
 
     #[test]
     fn waterlogged_water_weighs_what_it_fills_of_the_voids() {
-        let slab = Voxel::shaped(STONE, SHAPE_SLAB, Orientation::IDENTITY);
+        let slab = Voxel::shaped(fixtures().ground.rock, SHAPE_SLAB, Orientation::IDENTITY);
         let logged = (slab, standing(water(), 16));
         let film = (Voxel::AIR, flowing(water(), 4));
         // Four half-full slabs: stone 4 x 2048, water 4 x 2048 + 4 x 1024 above.
@@ -1478,14 +1479,14 @@ mod tests {
             (Voxel::AIR, standing(water(), 10))
         );
         // A stair's notch holds a quarter of the cube: stone wins.
-        let stair = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY);
+        let stair = Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::IDENTITY);
         let notch = Overlay {
             fluid: Some(Fluid::source(water())),
             burning: None,
         };
         assert_eq!(
             one_cell([(stair, notch); 8], None),
-            (cube(STONE), Overlay::NONE)
+            (cube(fixtures().ground.rock), Overlay::NONE)
         );
     }
 
@@ -1495,8 +1496,8 @@ mod tests {
             fluid: None,
             burning: Some(Burning { fuel }),
         };
-        let burning = |fuel| (cube(STONE), fire(fuel));
-        let cold = (cube(STONE), Overlay::NONE);
+        let burning = |fuel| (cube(fixtures().ground.rock), fire(fuel));
+        let cold = (cube(fixtures().ground.rock), Overlay::NONE);
         assert_eq!(
             one_cell(
                 [
@@ -1511,7 +1512,7 @@ mod tests {
                 ],
                 None
             ),
-            (cube(STONE), fire(9))
+            (cube(fixtures().ground.rock), fire(9))
         );
         assert_eq!(
             one_cell(
@@ -1527,7 +1528,7 @@ mod tests {
                 ],
                 None
             ),
-            (cube(STONE), Overlay::NONE)
+            (cube(fixtures().ground.rock), Overlay::NONE)
         );
         // A fire too small to keep its Voxel solid is gone with it.
         assert_eq!(
@@ -1579,7 +1580,7 @@ mod tests {
         for y in 0..10 {
             for x in 0..CHUNK_SIZE {
                 for z in 0..CHUNK_SIZE {
-                    center.set(x, y, z, Voxel::cube(STONE));
+                    center.set(x, y, z, Voxel::cube(fixtures().ground.rock));
                 }
             }
         }
@@ -1619,7 +1620,7 @@ mod tests {
                         .wrapping_add(coord[2] * 15_485_863 + z as i32)
                         .wrapping_mul(2_654_435_761u32 as i32);
                     if (h >> 7).rem_euclid(3) == 0 {
-                        chunk.set(x, y, z, Voxel::cube(STONE));
+                        chunk.set(x, y, z, Voxel::cube(fixtures().ground.rock));
                     }
                 }
             }
@@ -1722,7 +1723,7 @@ mod tests {
 
     #[test]
     fn seven_solid_chunks_are_open_sky_and_ask_for_no_height() {
-        let rock = Chunk::filled(Voxel::cube(STONE));
+        let rock = Chunk::filled(Voxel::cube(fixtures().ground.rock));
         let surface = Flat::at(40.0);
         let lit = coarse_light(&surface, 2.0, [0, 0, 0], &rock, [&rock; 6]);
         assert_all_uniform(&lit, OPEN_SKY);
@@ -1750,7 +1751,7 @@ mod tests {
                 (f32::MIN, f32::MAX)
             }
         }
-        let rock = Chunk::filled(Voxel::cube(STONE));
+        let rock = Chunk::filled(Voxel::cube(fixtures().ground.rock));
         // The last two sit a fraction of a Voxel either side of the band's two edges, where a
         // bound a Voxel out of place turns a plane of the shell the wrong way.
         let cases: [(f32, i32, &Chunk, &Chunk); 5] = [
@@ -1810,7 +1811,7 @@ mod tests {
     /// fix it; when one does, this test flips.
     #[test]
     fn a_pit_open_to_the_sky_is_covered_below_its_top_voxel() {
-        let mut center = Chunk::filled(Voxel::cube(STONE));
+        let mut center = Chunk::filled(Voxel::cube(fixtures().ground.rock));
         for y in 5..CHUNK_SIZE {
             center.set(8, y, 8, Voxel::AIR);
         }
@@ -1831,7 +1832,7 @@ mod tests {
         for x in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
                 for y in 0..4 {
-                    c.set(x, y, z, Voxel::cube(STONE));
+                    c.set(x, y, z, Voxel::cube(fixtures().ground.rock));
                 }
                 for y in 4..4 + depth {
                     c.set(x, y, z, Voxel::cube(material));
@@ -1863,7 +1864,7 @@ mod tests {
         for x in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
                 for y in 0..15 {
-                    c.set(x, y, z, Voxel::cube(STONE));
+                    c.set(x, y, z, Voxel::cube(fixtures().ground.rock));
                 }
                 for y in 15..20 {
                     c.set(x, y, z, Voxel::cube(material));

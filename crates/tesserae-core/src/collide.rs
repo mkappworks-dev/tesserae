@@ -363,11 +363,11 @@ fn ray_box(o: [f32; 3], d: [f32; 3], cell: [i32; 3], b: &NodeBox) -> Option<(f32
 
 #[cfg(test)]
 mod tests {
+    use crate::testgen::fixtures;
     use super::*;
     use crate::mesh::{NEG_Y, NEG_Z, POS_X, POS_Y};
     use crate::shape::examples;
     use crate::shape::{CollisionBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
-    use crate::worldgen::STONE;
     use std::collections::HashMap;
 
     /// A volume of what a test places, loaded over `lo..=hi` and unknown outside.
@@ -449,14 +449,14 @@ mod tests {
     fn with_materials(shapes: &ShapeTable) -> Tables {
         Tables {
             shapes: shapes.clone(),
-            ..Tables::builtin()
+            ..fixtures().tables.clone()
         }
     }
 
     /// Stone at layer 0 and a pool of water on it at layer 1.
     fn pool() -> (Grid, Tables) {
-        let mut tables = Tables::builtin();
-        let water = crate::testgen::register_water(&mut tables);
+        let mut tables = fixtures().tables.clone();
+        let water = fixtures().water;
         let mut g = Grid::new();
         g.floor(0, cube()).floor(1, Voxel::cube(water));
         (g, tables)
@@ -494,7 +494,7 @@ mod tests {
         g.floor(0, Voxel::cube(999));
         let fall = super::sweep(
             &g,
-            &Tables::builtin(),
+            &fixtures().tables.clone(),
             1.0,
             body(0.5, 3.0, 0.5, 1.8),
             [0.0, -5.0, 0.0],
@@ -507,15 +507,15 @@ mod tests {
     }
 
     fn cube() -> Voxel {
-        Voxel::cube(STONE)
+        Voxel::cube(fixtures().ground.rock)
     }
 
     fn slab(up: usize) -> Voxel {
-        Voxel::shaped(STONE, SHAPE_SLAB, Orientation::new(up, 0))
+        Voxel::shaped(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(up, 0))
     }
 
     fn stair(turn: u8) -> Voxel {
-        Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(POS_Y, turn))
+        Voxel::shaped(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, turn))
     }
 
     /// A body 0.4 m square and `height` tall standing with its feet at `(x, y, z)`.
@@ -635,7 +635,7 @@ mod tests {
         g.floor(0, cube());
         g.put(
             [5, 1, 5],
-            Voxel::shaped(STONE, SHAPE_POST, Orientation::IDENTITY),
+            Voxel::shaped(fixtures().ground.rock, SHAPE_POST, Orientation::IDENTITY),
         );
         // The post is x in [5.375, 5.625], z in [5.375, 5.625].
         let beside = sweep(
@@ -673,7 +673,7 @@ mod tests {
             .unwrap();
         let mut g = Grid::new();
         g.floor(0, cube());
-        g.put([5, 1, 5], Voxel::new(STONE, plate, 0));
+        g.put([5, 1, 5], Voxel::new(fixtures().ground.rock, plate, 0));
         let walk = sweep(&g, &t, 1.0, body(5.5, 1.0, 3.0, 1.8), [0.0, 0.0, 4.0]);
         assert!(!walk.blocked[2]);
     }
@@ -689,7 +689,7 @@ mod tests {
             })
             .unwrap();
         let mut g = Grid::new();
-        g.put([5, 1, 5], Voxel::new(STONE, plate, 0));
+        g.put([5, 1, 5], Voxel::new(fixtures().ground.rock, plate, 0));
         let hit = raycast(&g, &t, 1.0, [5.5, 4.0, 5.5], [0.0, -1.0, 0.0], 10.0).unwrap();
         assert_eq!((hit.at, hit.face), ([5, 1, 5], POS_Y));
         assert!(
@@ -711,7 +711,7 @@ mod tests {
             })
             .unwrap();
         let mut g = Grid::new();
-        g.put([5, 1, 5], Voxel::new(STONE, sign, 0));
+        g.put([5, 1, 5], Voxel::new(fixtures().ground.rock, sign, 0));
         // The ray crosses the empty front of the cell and strikes the sign itself.
         let ray = raycast(&g, &t, 1.0, [5.5, 1.5, 3.0], [0.0, 0.0, 1.0], 10.0).unwrap();
         assert!(
@@ -733,7 +733,7 @@ mod tests {
                 collision: Some(vec![CollisionBox::new([6, 0, 6], [10, 24, 10])]),
             })
             .unwrap();
-        Voxel::new(STONE, id, 0)
+        Voxel::new(fixtures().ground.rock, id, 0)
     }
 
     #[test]
@@ -790,7 +790,7 @@ mod tests {
             })
             .unwrap();
         let mut g = Grid::new();
-        g.put([5, 3, 5], Voxel::new(STONE, id, 0));
+        g.put([5, 3, 5], Voxel::new(fixtures().ground.rock, id, 0));
         // Head at 1.8 m, rising: the box's underside is half a Voxel below its
         // cell, at 2.5 m, in a cell the head has not reached by its own cell.
         let rise = sweep(&g, &t, 1.0, body(5.5, 0.0, 5.5, 1.8), [0.0, 1.0, 0.0]);
@@ -802,7 +802,7 @@ mod tests {
     fn an_overhang_rotates_with_its_shape() {
         let mut t = table();
         let fence = fence_post(&mut t);
-        let on_its_side = Voxel::new(STONE, fence.shape(), Orientation::new(POS_X, 0).bits());
+        let on_its_side = Voxel::new(fixtures().ground.rock, fence.shape(), Orientation::new(POS_X, 0).bits());
         let reach = t.collision(on_its_side, Connections::NONE)[0];
         assert_eq!((reach.min[0], reach.max[0]), (0, 24));
         assert_eq!((reach.min[1], reach.max[1]), (6, 10));
@@ -819,8 +819,8 @@ mod tests {
 
     fn fences() -> (ShapeTable, Voxel, Voxel) {
         let mut t = table();
-        let fence = Voxel::new(STONE, t.register(examples::fence()).unwrap(), 0);
-        let pipe = Voxel::new(STONE, t.register(examples::pipe()).unwrap(), 0);
+        let fence = Voxel::new(fixtures().ground.rock, t.register(examples::fence()).unwrap(), 0);
+        let pipe = Voxel::new(fixtures().ground.rock, t.register(examples::pipe()).unwrap(), 0);
         (t, fence, pipe)
     }
 

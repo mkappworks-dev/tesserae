@@ -1,15 +1,15 @@
+use crate::testgen::fixtures;
 use super::*;
 use crate::agenda::Agenda;
 use crate::fluid::FluidDef;
-use crate::material::STONE;
-use crate::testgen::{WATER_FLUID, register_water};
+use crate::testgen::{WATER_FLUID};
 use std::sync::OnceLock;
 
 fn fixture() -> &'static (Tables, MaterialId) {
     static FIXTURE: OnceLock<(Tables, MaterialId)> = OnceLock::new();
     FIXTURE.get_or_init(|| {
-        let mut tables = Tables::builtin();
-        let water = register_water(&mut tables);
+        let tables = fixtures().tables.clone();
+        let water = fixtures().water;
         (tables, water)
     })
 }
@@ -315,7 +315,7 @@ impl Sim {
 }
 
 fn stone() -> Voxel {
-    Voxel::cube(STONE)
+    Voxel::cube(fixtures().ground.rock)
 }
 
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
@@ -369,7 +369,7 @@ fn the_scale_turns_metres_and_metres_per_second_into_voxels_and_steps() {
         }
         assert_eq!(reach as f32 * v, 7.0, "reach is metres at {v} m");
     }
-    assert!(FlowScale::new(&tables, 1.0).get(STONE).is_none());
+    assert!(FlowScale::new(&tables, 1.0).get(fixtures().ground.rock).is_none());
 }
 
 /// Reach is metres of path, surfaces fall away from the source, and the
@@ -1017,12 +1017,12 @@ mod waterlogging {
     use crate::{SHAPE_SLAB, SHAPE_STAIR};
 
     fn slab(up: usize) -> Voxel {
-        Voxel::new(STONE, SHAPE_SLAB, Orientation::new(up, 0).bits())
+        Voxel::new(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(up, 0).bits())
     }
 
     fn stair(turn: u8) -> Voxel {
         Voxel::new(
-            STONE,
+            fixtures().ground.rock,
             SHAPE_STAIR,
             Orientation::new(crate::mesh::POS_Y, turn).bits(),
         )
@@ -1136,7 +1136,7 @@ mod waterlogging {
             })
             .unwrap();
         let mut sim = lane(tables, 5);
-        sim.build([1, 1, 0], Voxel::new(STONE, wall, 0));
+        sim.build([1, 1, 0], Voxel::new(fixtures().ground.rock, wall, 0));
         sim.place_source([-2, 1, 0]);
         sim.settle();
         assert_eq!(levels(&sim, [1, 1, 0]), vec![true, false]);
@@ -1158,7 +1158,7 @@ mod waterlogging {
                 collision: None,
             })
             .unwrap();
-        let shelf = Voxel::new(STONE, shelf, 0);
+        let shelf = Voxel::new(fixtures().ground.rock, shelf, 0);
         let mut sim = lane(tables, 8);
         for x in 1..=3 {
             sim.build([x, 1, 0], shelf);
@@ -1272,7 +1272,7 @@ mod waterlogging {
                 collision: None,
             })
             .unwrap();
-        let window = Voxel::new(STONE, window, 0);
+        let window = Voxel::new(fixtures().ground.rock, window, 0);
         let arm = Connections::NONE.with(POS_X);
         assert_eq!(tables.shapes.voids(window, Connections::NONE).len(), 1);
         assert_eq!(tables.shapes.voids(window, arm).len(), 2);
@@ -1563,7 +1563,7 @@ mod declared {
         let (tables, ids) = with(&[LAVA]);
         let lava = ids[0];
         let stair = Voxel::new(
-            STONE,
+            fixtures().ground.rock,
             SHAPE_STAIR,
             Orientation::new(crate::mesh::POS_Y, 1).bits(),
         );
@@ -1641,7 +1641,7 @@ mod reactions {
     fn cooling() -> (Tables, MaterialId) {
         let (mut tables, ids) = with(&[LAVA]);
         tables
-            .register_reaction(rule(ids[0], water(), Some(STONE)))
+            .register_reaction(rule(ids[0], water(), Some(fixtures().ground.rock)))
             .unwrap();
         (tables, ids[0])
     }
@@ -1831,7 +1831,7 @@ mod reactions {
                 .unwrap();
             let mut sim = corridor_of(tables, 1.0, 5.0);
             if walled {
-                sim.build([1, 1, 0], Voxel::new(STONE, wall, 0));
+                sim.build([1, 1, 0], Voxel::new(fixtures().ground.rock, wall, 0));
             }
             // Water reaches the walled Voxel before slime can.
             sim.place_source([0, 1, 0]);
@@ -1865,7 +1865,7 @@ mod reactions {
     #[test]
     fn a_sealed_face_is_no_contact() {
         let (tables, slime) = dissolving();
-        let stair = |turn| Voxel::new(STONE, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits());
+        let stair = |turn| Voxel::new(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits());
         let sealed = (0..4)
             .map(stair)
             .find(|&v| tables.shapes.seals(v, POS_X))
@@ -1902,7 +1902,7 @@ mod reactions {
             .register_reaction(rule(water(), slime, Some(ash)))
             .unwrap();
         let stair = (0..4)
-            .map(|turn| Voxel::new(STONE, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits()))
+            .map(|turn| Voxel::new(fixtures().ground.rock, SHAPE_STAIR, Orientation::new(POS_Y, turn).bits()))
             .find(|&v| !tables.shapes.seals(v, POS_X))
             .unwrap();
         let mut sim = corridor_of(tables, 1.0, 4.0);
@@ -2031,7 +2031,7 @@ mod reactions {
     /// With no rule naming a fluid, nothing reads past what flow reads.
     #[test]
     fn without_reactions_the_read_set_is_flows_own() {
-        assert_eq!(Reach::of(&Tables::builtin()), Reach::default());
+        assert_eq!(Reach::of(&fixtures().tables.clone()), Reach::default());
         assert!(Reach::of(&cooling().0).contacts);
         let _ = liquid;
     }

@@ -1,3 +1,4 @@
+use tesserae_core::testgen::fixtures;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::{Arc, OnceLock};
@@ -22,8 +23,8 @@ fn dry() -> WorldgenParams {
 fn fixture() -> &'static (Tables, u16) {
     static TABLES: OnceLock<(Tables, u16)> = OnceLock::new();
     TABLES.get_or_init(|| {
-        let mut t = Tables::builtin();
-        let water = testgen::register_water(&mut t);
+        let mut t = fixtures().tables.clone();
+        let water = fixtures().water;
         (t, water)
     })
 }
@@ -149,7 +150,7 @@ fn cave_fixtures(g: &Worldgen) -> CaveFixtures {
                     (0..CHUNK_SIZE).any(|y| {
                         (0..CHUNK_SIZE).any(|x| {
                             with.get(x, y, z).is_air()
-                                && without.get(x, y, z).material() == testgen::GRASS
+                                && without.get(x, y, z).material() == tesserae_core::material::GRASS
                         })
                     })
                 });
@@ -184,7 +185,7 @@ fn caved() -> Worldgen {
 fn fence_tables() -> &'static Tables {
     static TABLES: OnceLock<Tables> = OnceLock::new();
     TABLES.get_or_init(|| {
-        let mut t = Tables::builtin();
+        let mut t = fixtures().tables.clone();
         assert_eq!(t.shapes.register(fence()), Ok(FENCE_ID));
         t
     })
@@ -194,7 +195,9 @@ fn fence_tables() -> &'static Tables {
 /// facing every which way: pass 2 as it would meet a building, which is more
 /// than a Chunk is allowed to hold once `n` passes `MAX_SHAPED_PER_CHUNK`.
 fn terrain_with_stairs(n: usize) -> Chunk {
-    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    let fixture_ground = fixtures().ground;
+    let fixture_rock = fixtures().ground.rock;
+    let mut chunk = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     let mut placed = 0;
     'columns: for z in 0..CHUNK_SIZE {
         for x in 0..CHUNK_SIZE {
@@ -208,7 +211,7 @@ fn terrain_with_stairs(n: usize) -> Chunk {
                 continue;
             };
             let o = Orientation::from_bits(((x * 7 + z * 3) % 24) as u8).unwrap();
-            chunk.set(x, y, z, Voxel::shaped(testgen::STONE, SHAPE_STAIR, o));
+            chunk.set(x, y, z, Voxel::shaped(fixture_ground.rock, SHAPE_STAIR, o));
             placed += 1;
         }
     }
@@ -219,7 +222,8 @@ fn terrain_with_stairs(n: usize) -> Chunk {
 /// flooded valley, the translucent case at its largest, since every exposed
 /// terrain face is now seen through something.
 fn terrain_under(material: u16, depth: usize) -> Chunk {
-    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    let fixture_ground = fixtures().ground;
+    let mut chunk = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     for z in 0..CHUNK_SIZE {
         for x in 0..CHUNK_SIZE {
             let Some(top) = (0..CHUNK_SIZE)
@@ -239,7 +243,9 @@ fn terrain_under(material: u16, depth: usize) -> Chunk {
 /// Terrain with a canopy of leaves in 4x4 patches floating above the surface:
 /// light that is dimmed and not stopped, and faces that are never culled.
 fn terrain_with_canopy() -> Chunk {
-    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    let fixture_ground = fixtures().ground;
+    let fixture_leaves = fixtures().leaves;
+    let mut chunk = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     for z in 0..CHUNK_SIZE {
         for x in 0..CHUNK_SIZE {
             if (x / 4 + z / 4) % 2 != 0 {
@@ -252,7 +258,7 @@ fn terrain_with_canopy() -> Chunk {
                 continue;
             };
             for y in top + 4..(top + 7).min(CHUNK_SIZE) {
-                chunk.set(x, y, z, Voxel::cube(tesserae_core::material::LEAVES));
+                chunk.set(x, y, z, Voxel::cube(fixture_leaves));
             }
         }
     }
@@ -261,6 +267,7 @@ fn terrain_with_canopy() -> Chunk {
 
 /// A hollow box of glass: nothing but skin, and a second skin inside it.
 fn glass_room() -> Chunk {
+    let fixture_glass = fixtures().glass;
     let mut chunk = Chunk::air();
     let (lo, hi) = (6, 26);
     for z in lo..hi {
@@ -268,7 +275,7 @@ fn glass_room() -> Chunk {
             for x in lo..hi {
                 let shell = [x, y, z].iter().any(|&c| c == lo || c == hi - 1);
                 if shell {
-                    chunk.set(x, y, z, Voxel::cube(tesserae_core::material::GLASS));
+                    chunk.set(x, y, z, Voxel::cube(fixture_glass));
                 }
             }
         }
@@ -279,7 +286,9 @@ fn glass_room() -> Chunk {
 /// Terrain with a fence on top of every column, as many as `n`: what a building
 /// would be, where neighbours at the same height grow arms towards each other.
 fn terrain_with_fences(n: usize) -> Chunk {
-    let mut chunk = testgen::terrain_chunk(0, 0, 0);
+    let fixture_ground = fixtures().ground;
+    let fixture_rock = fixtures().ground.rock;
+    let mut chunk = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     let mut placed = 0;
     'columns: for z in 0..CHUNK_SIZE {
         for x in 0..CHUNK_SIZE {
@@ -292,7 +301,7 @@ fn terrain_with_fences(n: usize) -> Chunk {
             else {
                 continue;
             };
-            chunk.set(x, y + 1, z, Voxel::new(testgen::STONE, FENCE_ID, 0));
+            chunk.set(x, y + 1, z, Voxel::new(fixture_ground.rock, FENCE_ID, 0));
             placed += 1;
         }
     }
@@ -302,14 +311,15 @@ fn terrain_with_fences(n: usize) -> Chunk {
 /// A flat floor with a fence on every column of it: every fence has all four
 /// arms out, the most a connected Shape can cost per Voxel.
 fn flat_fences(n: usize) -> Chunk {
+    let fixture_rock = fixtures().ground.rock;
     let mut chunk = Chunk::air();
     for z in 0..CHUNK_SIZE {
         for x in 0..CHUNK_SIZE {
             for y in 0..8 {
-                chunk.set(x, y, z, Voxel::cube(testgen::STONE));
+                chunk.set(x, y, z, Voxel::cube(fixture_rock));
             }
             if z * CHUNK_SIZE + x < n {
-                chunk.set(x, 8, z, Voxel::new(testgen::STONE, FENCE_ID, 0));
+                chunk.set(x, 8, z, Voxel::new(fixture_rock, FENCE_ID, 0));
             }
         }
     }
@@ -317,23 +327,25 @@ fn flat_fences(n: usize) -> Chunk {
 }
 
 fn mesher(c: &mut Criterion) {
+    let fixture_ground = fixtures().ground;
+    let fixture_rock = fixtures().ground.rock;
     let mut group = c.benchmark_group("greedy_mesh");
 
     let sky = open_sky();
-    let terrain = testgen::terrain_chunk(0, 0, 0);
+    let terrain = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     let terrain_nb = Neighborhood::isolated(LitChunk::new(&terrain, &sky));
     group.bench_function("terrain", |b| {
         b.iter(|| black_box(greedy_mesh(black_box(&terrain_nb), tables())))
     });
 
-    let solid = Chunk::filled(Voxel::cube(testgen::STONE));
+    let solid = Chunk::filled(Voxel::cube(fixture_ground.rock));
     let solid_nb = Neighborhood::isolated(LitChunk::new(&solid, &sky));
     group.bench_function("solid", |b| {
         b.iter(|| black_box(greedy_mesh(black_box(&solid_nb), tables())))
     });
 
     // Nothing merges here; this is the ceiling on per-chunk mesh cost.
-    let checker = testgen::checkerboard_chunk();
+    let checker = testgen::checkerboard_chunk(fixture_ground.rock);
     let checker_nb = Neighborhood::isolated(LitChunk::new(&checker, &sky));
     group.bench_function("checkerboard", |b| {
         b.iter(|| black_box(greedy_mesh(black_box(&checker_nb), tables())))
@@ -369,7 +381,7 @@ fn mesher(c: &mut Criterion) {
         b.iter(|| black_box(greedy_mesh(black_box(&budget_nb), tables())))
     });
     let all = Chunk::filled(Voxel::shaped(
-        testgen::STONE,
+        fixture_ground.rock,
         SHAPE_STAIR,
         Orientation::IDENTITY,
     ));
@@ -385,7 +397,7 @@ fn mesher(c: &mut Criterion) {
     // for its arms in stair-sized units.
     let units = fence_tables()
         .shapes
-        .cap_units(Voxel::new(testgen::STONE, FENCE_ID, 0)) as usize;
+        .cap_units(Voxel::new(fixture_ground.rock, FENCE_ID, 0)) as usize;
     let at_cap = MAX_SHAPED_PER_CHUNK / units;
     eprintln!("a fence costs {units} stairs of the cap: {at_cap} fit");
     let fences = terrain_with_fences(at_cap);
@@ -425,6 +437,7 @@ fn mesher(c: &mut Criterion) {
 /// cases the bulk solver answers from `uniform()` alone. Those two are most of
 /// a streamed 3D ring: it is mostly open sky and mostly deep rock.
 fn lighting(c: &mut Criterion) {
+    let fixture_rock = fixtures().ground.rock;
     let mut group = c.benchmark_group("light_chunk");
     let (g, straddling, _, _) = worldgen();
 
@@ -561,7 +574,7 @@ fn lighting(c: &mut Criterion) {
         b.iter(|| black_box(light_chunk(black_box(&air), black_box(border), tables())))
     });
 
-    let solid = Chunk::filled(Voxel::cube(testgen::STONE));
+    let solid = Chunk::filled(Voxel::cube(fixture_rock));
     group.bench_function("opaque", |b| {
         b.iter(|| black_box(light_chunk(black_box(&solid), black_box(border), tables())))
     });
@@ -590,6 +603,7 @@ fn lighting(c: &mut Criterion) {
 /// between `declined_*` and `straddling` is what makes a vertical extent
 /// affordable.
 fn streamed_mesher(c: &mut Criterion) {
+    let fixture_rock = fixtures().ground.rock;
     let mut group = c.benchmark_group("mesh_chunk");
     let (g, straddling, _, _) = worldgen();
 
@@ -718,7 +732,7 @@ fn streamed_mesher(c: &mut Criterion) {
         b.iter(|| black_box(mesh_chunk(black_box(lit_air), black_box(refs), tables())))
     });
 
-    let solid = Chunk::filled(Voxel::cube(testgen::STONE));
+    let solid = Chunk::filled(Voxel::cube(fixture_rock));
     let lit_solid = LitChunk::new(&solid, &sky);
     let enclosed: [Option<LitChunk>; 6] = [Some(lit_solid); 6];
     group.bench_function("declined_enclosed", |b| {
@@ -735,7 +749,8 @@ fn streamed_mesher(c: &mut Criterion) {
 }
 
 fn neighborhood(c: &mut Criterion) {
-    let terrain = testgen::terrain_chunk(0, 0, 0);
+    let fixture_ground = fixtures().ground;
+    let terrain = testgen::terrain_chunk(0, 0, 0, fixture_ground);
     let sky = open_sky();
     let lit = LitChunk::new(&terrain, &sky);
     c.bench_function("neighborhood_isolated", |b| {
@@ -765,6 +780,7 @@ fn shore() -> (Worldgen, (i32, i32, i32)) {
 }
 
 fn generation(c: &mut Criterion) {
+    let fixture_ground = fixtures().ground;
     let mut group = c.benchmark_group("worldgen");
     let (g, straddling, sky, deep) = worldgen();
 
@@ -835,7 +851,8 @@ fn generation(c: &mut Criterion) {
     // fixture, tuned in Voxel indices, and the three benches above are the
     // generator. The id change is a rename, not a regression.
     c.bench_function("testgen_terrain_chunk", |b| {
-        b.iter(|| black_box(testgen::terrain_chunk(black_box(0), 0, 0)))
+        let ground = fixture_ground;
+        b.iter(|| black_box(testgen::terrain_chunk(black_box(0), 0, 0, ground)))
     });
 }
 
@@ -867,6 +884,7 @@ fn shapes_table(c: &mut Criterion) {
 /// surface-crossing Chunk with its dense light is the expensive case for the
 /// copy; the second pair is what a write costs once the store holds `Arc`s.
 fn snapshot(c: &mut Criterion) {
+    let fixture_rock = fixtures().ground.rock;
     let mut group = c.benchmark_group("snapshot");
     let (g, straddling, _, _) = worldgen();
     let chunk = g.chunk(0, straddling, 0);
@@ -893,7 +911,7 @@ fn snapshot(c: &mut Criterion) {
         })
     });
 
-    let stone = Voxel::cube(testgen::STONE);
+    let stone = Voxel::cube(fixture_rock);
     let mut unshared = Arc::new(chunk.clone());
     let mut flip = false;
     group.bench_function("make_mut_unshared", |b| {

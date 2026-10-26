@@ -62,6 +62,17 @@ pub struct WaterParams {
     pub material: MaterialId,
 }
 
+/// The three solid Materials the ground is made of, from the bottom up.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct GroundParams {
+    /// Everything below the soil.
+    pub rock: MaterialId,
+    /// The layer `soil_depth_m` deep under the surface.
+    pub soil: MaterialId,
+    /// The top Voxel of each column, and the smoothing's stairs and slabs.
+    pub surface: MaterialId,
+}
+
 /// Stairs and slabs placed where the ground steps one Voxel. Plain `Copy` data
 /// like the rest of [`WorldgenParams`].
 #[derive(Clone, Copy, PartialEq, Debug)]

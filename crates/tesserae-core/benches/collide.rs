@@ -1,3 +1,4 @@
+use tesserae_core::testgen::fixtures;
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::OnceLock;
@@ -8,7 +9,7 @@ use tesserae_core::{
 
 fn shapes() -> &'static Tables {
     static TABLE: OnceLock<Tables> = OnceLock::new();
-    TABLE.get_or_init(Tables::builtin)
+    TABLE.get_or_init(|| fixtures().tables.clone())
 }
 
 /// One Chunk at the origin, unknown (`None`) outside it, which is how the Server's
@@ -52,10 +53,12 @@ fn body(x: f32, y: f32, z: f32) -> Aabb {
 /// The sweep and the ray on a floor and a wall of cubes, then of slabs, and on
 /// terrain. The slab cases are the ones that visit a shaped Voxel's boxes.
 fn collide(c: &mut Criterion) {
+    let fixture_rock = fixtures().ground.rock;
+    let fixture_ground = fixtures().ground;
     let table = shapes();
-    let cubes = room(Voxel::cube(testgen::STONE));
+    let cubes = room(Voxel::cube(fixture_rock));
     let slabs = room(Voxel::shaped(
-        testgen::STONE,
+        fixture_rock,
         SHAPE_SLAB,
         Orientation::new(POS_Y, 0),
     ));
@@ -98,7 +101,7 @@ fn collide(c: &mut Criterion) {
         });
     }
 
-    let terrain = Scene(testgen::terrain_chunk(0, 0, 0));
+    let terrain = Scene(testgen::terrain_chunk(0, 0, 0, fixture_ground));
     group.bench_function("ray_terrain", |b| {
         b.iter(|| {
             black_box(raycast(

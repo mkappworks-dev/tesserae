@@ -1,6 +1,6 @@
 # 01: Fixture Materials, and the core suite on them
 
-Status: ready-for-agent
+Status: done
 Blocked by: None (can start immediately)
 
 Spec: [decision 21](../spec.md).
@@ -41,3 +41,25 @@ did.
 - [ ] The meshing, light, LOD, collide and fluids benches register the
       fixtures and build the same Chunks as before.
 - [ ] `cargo fmt --all`, `npm run fmt` and `./scripts/cargo-ci` pass.
+
+## Comments
+
+### 2026-10-26: implementation
+
+The register calls return ids from MaterialTable registration; the ground
+returns GroundParams for ticket 03. Shared test support registers those rows
+and water together, so every algorithm reads the table that owns its ids.
+Terrain and checkerboard now accept their Materials. The terrain hash maps
+registered ids back to layer labels to keep the original workload pinned.
+The only app change adapts chunk_mesh's terrain test to the new signature.
+
+Exceptions until ticket 03: worldgen's generation and smoothing tests;
+light's generated cave-mouth surface checks; lod's generated surface cap
+check; meshing's cave fixture scan. Generated terrain in benches likewise
+keeps its built-in ground until the generator accepts ground parameters.
+MaterialTable's built-in row/id tests remain until ticket 06. Standalone
+ReactionTable tests use arbitrary ids without consulting MaterialTable.
+The testgen solid re-exports remain for production callers until migration.
+
+Formatting, review and full CI are deferred to the end of the phase at the
+user's request on 2026-10-26. Acceptance checks will be recorded there.
