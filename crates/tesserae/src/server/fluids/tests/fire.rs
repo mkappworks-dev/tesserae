@@ -193,6 +193,50 @@ fn fire_spreads_burns_out_and_its_light_comes_and_goes_as_a_fresh_solve_would() 
     }
 }
 
+/// Wood lit by the player's fire tool and wood lit by a Mod's Command land
+/// the same and burn the same: the next wood catches after the same delay,
+/// both burn out to ash and the light ends as a fresh solve gives it.
+#[test]
+fn a_fire_lit_by_a_player_or_a_mod_spreads_and_burns_out_the_same() {
+    let states: Vec<Vec<Occupants>> = [true, false]
+        .into_iter()
+        .map(|player| {
+            let (tables, fuel) = fire_tables(15);
+            let mut f = Fixture::with_tables(0.5, 2.0, 16, tables.clone());
+            let home = ChunkCoord::new(0, 0, 0);
+            put(&mut f, -2, Voxel::cube(fuel.wood));
+            put(&mut f, 0, Voxel::cube(fuel.wood));
+            settle_light(&mut f, home, &tables);
+            if player {
+                f.send(-2, EditAction::Ignite);
+                f.apply_intents();
+            } else {
+                assert_eq!(command(&mut f, -2, Intent::Ignite), Ok(()));
+            }
+            assert_eq!(
+                f.occupants(-2).burning,
+                Some(tesserae_core::Burning { fuel: BURN as u16 }),
+                "player {player}"
+            );
+            let lit = f.state();
+            let caught = steps_until(&mut f, |f| burning(f, 0));
+            assert!(
+                (DELAY..=DELAY + 2).contains(&caught),
+                "player {player}: caught after {caught} steps"
+            );
+            f.settle();
+            for x in [-2, 0] {
+                assert_eq!(f.occupants(x).solid, Voxel::cube(fuel.ash));
+            }
+            assert!(agrees_with_a_fresh_solve(&f, home, &tables));
+            assert_eq!(f.sim().timers(), 0, "player {player}");
+            assert!(f.rejections().is_empty());
+            [lit, f.state()].concat()
+        })
+        .collect();
+    assert!(states[0] == states[1]);
+}
+
 /// Two woods either side of a brazier catch in the same step and burn out in
 /// the same step. Under a landing bound of one, the change put off lands the
 /// step after, as flow's does: it does not wait out its delay or its fuel

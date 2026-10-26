@@ -28,6 +28,22 @@ pub(in crate::server) fn guest_fixture(
     mode: u64,
     voxel_size: f32,
 ) -> LoadedMods {
+    loaded_guest(id, guest, api, "", mode, voxel_size)
+}
+
+/// [`guest_fixture`] loaded as the Game, which alone may set the World.
+fn game_fixture(id: &str, guest: &str, api: &str) -> LoadedMods {
+    loaded_guest(id, guest, api, "root = true\n", 0, 1.0)
+}
+
+fn loaded_guest(
+    id: &str,
+    guest: &str,
+    api: &str,
+    manifest: &str,
+    mode: u64,
+    voxel_size: f32,
+) -> LoadedMods {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/phase7-runs");
     std::fs::create_dir_all(&root).unwrap();
@@ -47,7 +63,9 @@ pub(in crate::server) fn guest_fixture(
     std::fs::create_dir(&mod_dir).unwrap();
     std::fs::write(
         mod_dir.join("mod.toml"),
-        format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"{guest}.wasm\"\n"),
+        format!(
+            "id = \"{id}\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"{guest}.wasm\"\n{manifest}"
+        ),
     )
     .unwrap();
     std::fs::copy(
@@ -1334,17 +1352,20 @@ fn a_0_2_mod_placing_a_fluid_as_a_solid_is_refused_whole() {
     assert!(h.log(0).contains("call=2 applied=0 rejected=1"));
 }
 
-/// One player's fluid-tool and solid Edits, seen by a 0.1 and a 0.2 Mod at
-/// once: the 0.2 one is told what each meant, the 0.1 one only the Edits
-/// that changed a packed Voxel. Neither hears of the simulation.
+/// One player's fluid-tool, solid and fire Edits, seen by a 0.1, a 0.2 and a
+/// 0.3 Mod at once: the 0.3 one is told what each meant, the 0.2 one all but
+/// the fire, and the 0.1 one only the Edits that changed a packed Voxel, each
+/// once. None hears of the simulation or of a refused intent.
 #[test]
 fn each_line_sees_player_edits_in_its_own_projection() {
     use crate::server::edit::{EditAction, EditIntent};
     use crate::server::player::Player;
     let mut loaded = guest_fixture("fluids", "fluids", "0.2", 0, 1.0);
     loaded.mods.extend(fixture(9).mods);
+    loaded.mods.extend(game_fixture("lake", "lake", "0.3").mods);
     let water = tesserae_core::testgen::register_water(&mut loaded.tables);
     let mut h = Harness::with(loaded);
+    let wood = h.material("fluids:wood");
     h.app.insert_resource(WorldSettings {
         seed: 0,
         voxel_size: 1.0,
@@ -1354,10 +1375,14 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     h.app.world_mut().spawn(Player::at(eye));
     let stair = Voxel::new(STONE, SHAPE_STAIR, 0);
     h.put([2, 1, 2], stair);
+    h.put([2, 0, 2], Voxel::cube(wood));
     for action in [
         EditAction::PlaceSource(water),
         EditAction::RemoveSource,
         EditAction::Break,
+        EditAction::Ignite,
+        EditAction::PutOut,
+        EditAction::PutOut,
     ] {
         h.app.world_mut().write_message(EditIntent {
             action,
@@ -1368,14 +1393,33 @@ fn each_line_sees_player_edits_in_its_own_projection() {
         h.app.world_mut().run_schedule(FixedPreUpdate);
     }
     assert_eq!(h.voxel([2, 1, 2]), Voxel::AIR);
-    assert_eq!(h.app.world().resource::<EditHistory>().next, 3);
+    assert_eq!(h.occupants([2, 0, 2]).solid, Voxel::cube(wood));
+    assert_eq!(h.occupants([2, 0, 2]).burning, None);
+    assert_eq!(h.app.world().resource::<EditHistory>().next, 5);
     h.call();
-    let typed = h.log(0);
+    h.call();
     let placed = format!("SourcePlaced({water})");
     let removed = format!("SourceRemoved({water})");
+    let ignited = format!("Ignited({wood})");
+    let put_out = format!("PutOut({wood})");
+    let native = h.log(2);
+    for (kind, count) in [
+        (placed.as_str(), 1),
+        (removed.as_str(), 1),
+        ("::Solid(", 1),
+        (ignited.as_str(), 1),
+        (put_out.as_str(), 1),
+    ] {
+        assert_eq!(native.matches(kind).count(), count, "{kind}: {native}");
+    }
+    let typed = h.log(0);
     assert_eq!(typed.matches(&placed).count(), 1, "{typed}");
     assert_eq!(typed.matches(&removed).count(), 1, "{typed}");
     assert_eq!(typed.matches("::Solid(").count(), 1, "{typed}");
+    assert!(
+        !typed.contains("Ignited") && !typed.contains("PutOut"),
+        "{typed}"
+    );
     let projected = h.log(1);
     assert!(projected.contains("edits=1"), "{projected}");
     assert!(

@@ -77,6 +77,14 @@ pub enum EditAction {
     /// Take away the source the ray strikes, leaving any solid it shares the
     /// Voxel with.
     RemoveSource,
+    /// Set the solid the ray strikes alight, by the rule a Mod's ignition
+    /// meets.
+    #[cfg_attr(not(test), expect(dead_code, reason = "until the Client sends it"))]
+    Ignite,
+    /// Put out the solid the ray strikes, by the rule a Mod's extinguish
+    /// meets.
+    #[cfg_attr(not(test), expect(dead_code, reason = "until the Client sends it"))]
+    PutOut,
 }
 
 /// What the Client wants done: an action, and the ray it wants it done along, in
@@ -284,7 +292,7 @@ pub(in crate::server) fn apply_pending(
                     .ok_or(RejectReason::NotLoaded)?;
                 match change {
                     Change::Solid(voxel) => set_voxel(&mut store, &mut meshes, &tables, at, voxel)?,
-                    Change::Fluid(occupants) => {
+                    Change::Occupants(occupants) => {
                         set_occupants(&mut store, &mut meshes, &tables, at, occupants)?
                     }
                 }
@@ -292,8 +300,10 @@ pub(in crate::server) fn apply_pending(
                 let now = store
                     .occupants(at, &tables.fluids)
                     .expect("the edited Chunk is held");
-                let kind = match (change, intent_fluid(&was, &now)) {
-                    (Change::Fluid(_), Some(kind)) => kind,
+                let kind = match (p.intent.action, change, intent_fluid(&was, &now)) {
+                    (EditAction::Ignite, ..) => EditKind::Ignited(now.solid.material()),
+                    (EditAction::PutOut, ..) => EditKind::PutOut(now.solid.material()),
+                    (_, Change::Occupants(_), Some(kind)) => kind,
                     _ => EditKind::Solid {
                         before: was.solid,
                         after: now.solid,
@@ -340,8 +350,9 @@ fn intent_fluid(was: &Occupants, now: &Occupants) -> Option<EditKind> {
 enum Change {
     /// A whole-Voxel placement, through the solid-layer rule.
     Solid(Voxel),
-    /// Exactly these occupants: a source placed or taken away.
-    Fluid(Occupants),
+    /// Exactly these occupants: a source placed or taken away, or a fire lit
+    /// or put out.
+    Occupants(Occupants),
 }
 
 /// Where an intent lands, and what goes there.
@@ -378,6 +389,11 @@ fn resolve(
         stops,
     )
     .ok_or(RejectReason::OutOfReach)?;
+    let struck = || {
+        store
+            .occupants(hit.at, &tables.fluids)
+            .ok_or(RejectReason::NotLoaded)
+    };
     let step = FACE_STEPS[hit.face];
     let in_front = [
         hit.at[0] + step[0],
@@ -396,18 +412,11 @@ fn resolve(
                 Some(_) => Ok((in_front, Change::Solid(voxel))),
             }
         }
-        EditAction::RemoveSource => {
-            let here = store
-                .occupants(hit.at, &tables.fluids)
-                .ok_or(RejectReason::NotLoaded)?;
-            Ok((hit.at, Change::Fluid(without_source(here)?)))
-        }
+        EditAction::RemoveSource => Ok((hit.at, Change::Occupants(without_source(struck()?)?))),
         EditAction::PlaceSource(material) => {
             // A Shape with room for fluid takes the source itself, keeping its
             // solid; anything else gets it in front of the face struck.
-            let struck = store
-                .occupants(hit.at, &tables.fluids)
-                .ok_or(RejectReason::NotLoaded)?;
+            let struck = struck()?;
             let into = if !struck.solid.is_air()
                 && tables.shapes.void_slots(struck.solid) > 0
                 && tables.holds(struck.solid, material)
@@ -422,8 +431,16 @@ fn resolve(
             if into == in_front && !there.solid.is_air() {
                 return Err(RejectReason::Occupied);
             }
-            Ok((into, Change::Fluid(with_source(there, material, tables)?)))
+            Ok((
+                into,
+                Change::Occupants(with_source(there, material, tables)?),
+            ))
         }
+        EditAction::Ignite => {
+            let wet = tesserae_core::fire::is_wet(store, tables, hit.at);
+            Ok((hit.at, Change::Occupants(ignite(struck()?, wet, tables)?)))
+        }
+        EditAction::PutOut => Ok((hit.at, Change::Occupants(extinguish(struck()?)?))),
     }
 }
 
@@ -721,9 +738,13 @@ mod tests {
     }
 
     fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
+        app_with_tables(chunks, watered())
+    }
+
+    fn app_with_tables(chunks: &[(ChunkCoord, Chunk)], tables: Tables) -> App {
         let mut app = App::new();
         app.insert_resource(WorldSettings::default())
-            .insert_resource(ContentTables(Arc::new(watered())))
+            .insert_resource(ContentTables(Arc::new(tables)))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
@@ -1874,6 +1895,174 @@ mod tests {
         }
         tick(&mut app);
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), 5);
+    }
+
+    /// The ground with declared wood, burning for 8 s, set into its top where
+    /// `down` strikes, at (4, 7, 5) and at (5, 7, 5).
+    fn wood_app() -> (App, MaterialId) {
+        use tesserae_core::{Burn, CombustionDef, MaterialDef, Occlusion, RenderClass};
+        let mut tables = watered();
+        let wood = tables
+            .materials
+            .register(MaterialDef {
+                emission: 0,
+                dimming: 15,
+                occlusion: Occlusion::Opaque,
+                render: RenderClass::Opaque,
+                solid: true,
+            })
+            .unwrap();
+        tables
+            .register_combustion(
+                wood,
+                CombustionDef {
+                    threshold: 6,
+                    ignition_delay_s: 2.0,
+                    emission: 12,
+                    heat: None,
+                    burn: Burn::For {
+                        seconds: 8.0,
+                        residue: 0,
+                    },
+                },
+            )
+            .unwrap();
+        let mut chunk = ground();
+        chunk.set(4, 7, 5, Voxel::cube(wood));
+        chunk.set(5, 7, 5, Voxel::cube(wood));
+        (app_with_tables(&[(origin(), chunk)], tables), wood)
+    }
+
+    fn down_at(x: f32, action: EditAction) -> EditIntent {
+        EditIntent {
+            origin: Vec3::new(x, DOWN_EYE.y, DOWN_EYE.z),
+            ..down(action)
+        }
+    }
+
+    /// The fire tool lights the declared fuel its ray strikes with the whole
+    /// 8 s a fresh fire has, as a Mod's ignition does, and puts it out,
+    /// leaving the wood.
+    #[test]
+    fn the_fire_tool_lights_declared_fuel_with_its_whole_fuel_and_puts_it_out() {
+        let (mut app, wood) = wood_app();
+        let unlit = Occupants {
+            solid: Voxel::cube(wood),
+            fluid: None,
+            burning: None,
+        };
+        send(&mut app, down(EditAction::Ignite));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 7, 5]),
+            Occupants {
+                burning: Some(Burning { fuel: 512 }),
+                ..unlit
+            }
+        );
+        send(&mut app, down(EditAction::PutOut));
+        tick(&mut app);
+        assert_eq!(occupants_at(&app, [5, 7, 5]), unlit);
+        assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Non-fuel, fuel already alight, fuel under water, nothing in reach and
+    /// nothing burning are refused with the reasons a Mod's fire Commands
+    /// meet, and change nothing.
+    #[test]
+    fn the_fire_tool_refuses_what_a_fire_command_would_and_changes_nothing() {
+        let (mut app, _) = wood_app();
+        let source = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(Fluid::source(water())),
+            burning: None,
+        };
+        put_occupants(&mut app, [4, 8, 5], source).1.unwrap();
+        send(&mut app, down(EditAction::Ignite));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        let column = |app: &App| -> Vec<Occupants> {
+            [4, 5, 6]
+                .into_iter()
+                .flat_map(|x| (0..16).map(move |y| [x, y, 5]))
+                .map(|at| occupants_at(app, at))
+                .collect()
+        };
+        let before = column(&app);
+        let cases = [
+            (down_at(6.5, EditAction::Ignite), "that does not burn"),
+            (down(EditAction::Ignite), "it is already burning"),
+            (down_at(4.5, EditAction::Ignite), "it is too wet to burn"),
+            (down_at(4.5, EditAction::PutOut), "nothing is burning there"),
+            (down_at(6.5, EditAction::PutOut), "nothing is burning there"),
+            (
+                EditIntent {
+                    direction: Vec3::Y,
+                    ..down(EditAction::Ignite)
+                },
+                "nothing in reach",
+            ),
+            (
+                EditIntent {
+                    origin: Vec3::new(5.5, 30.0, 5.5),
+                    ..down(EditAction::PutOut)
+                },
+                "nothing in reach",
+            ),
+        ];
+        for (intent, expected) in cases {
+            send(&mut app, intent);
+            tick(&mut app);
+            let said: Vec<_> = rejections(&mut app).iter().map(|r| r.message()).collect();
+            assert_eq!(said, vec![expected], "{intent:?}");
+        }
+        assert_eq!(before, column(&app));
+    }
+
+    /// Both fire actions meet the origin check on arrival, reach from the
+    /// Eye, and the wait for their Chunk's light that every intent meets.
+    #[test]
+    fn the_fire_tool_is_vetted_queued_and_deferred_like_any_edit() {
+        let (mut app, _) = wood_app();
+        for action in [EditAction::Ignite, EditAction::PutOut] {
+            send_from_afar(
+                &mut app,
+                EditIntent {
+                    origin: DOWN_EYE + Vec3::X * 40.0,
+                    ..down(action)
+                },
+            );
+            assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
+            assert!(app.world().resource::<PendingEdits>().0.is_empty());
+
+            // The wood is 7 m below the origin and 9 m below the Eye.
+            set_eye(&mut app, Vec3::new(5.5, 17.0, 5.5));
+            send_from_afar(
+                &mut app,
+                EditIntent {
+                    origin: Vec3::new(5.5, 15.0, 5.5),
+                    ..down(action)
+                },
+            );
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), vec![RejectReason::OutOfReach]);
+        }
+        let burning = |app: &App| occupants_at(app, [5, 7, 5]).burning.is_some();
+        for (action, lit) in [(EditAction::Ignite, true), (EditAction::PutOut, false)] {
+            app.world_mut()
+                .resource_mut::<MeshState>()
+                .mark_unlit(origin());
+            send(&mut app, down(action));
+            tick(&mut app);
+            assert_eq!(burning(&app), !lit, "{action:?} applied too early");
+            assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
+            app.world_mut()
+                .resource_mut::<MeshState>()
+                .mark_lit(origin());
+            tick(&mut app);
+            assert_eq!(burning(&app), lit, "{action:?}");
+        }
+        assert!(rejections(&mut app).is_empty());
     }
 
     /// The per-Voxel rules a source or fire Command meets, shared with the
