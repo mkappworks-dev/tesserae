@@ -259,3 +259,10 @@ transparent UI blending. Core and benchmark inputs did not change; the
 prior interleaved evidence remains applicable. User visual review and the
 retained folder are tracked in tickets 15 and 16. Ticket 16 records the
 remaining capture/measurement limitations.
+
+### 2026-10-27: final capture approval
+
+The user accepted the final shared World/preview textures, baby-blue
+glass, consistent lava and translucent textured ghost. Tickets 15 and 16
+now have complete visual review. The sole remaining capture folder,
+/tmp/tesserae-p82-previews-review-wbb76ry6, was deleted after that approval.

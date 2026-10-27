@@ -102,3 +102,10 @@ inputs did not change, so ticket 13's interleaved CPU results stand; no
 new GPU performance claim is made. Bevy/winit logs its existing skipped
 Destroyed event after the capture saves and exits. Capture drivers inject
 UI observers; physical OS pointer input is not automated.
+
+### 2026-10-27: visual review complete
+
+The user accepted all four linked captures of shared appearance, clearer
+baby-blue glass, consistent lava and the textured placement ghost. This
+also completes ticket 15's visual check. The reviewed capture folder
+/tmp/tesserae-p82-previews-review-wbb76ry6 was deleted after approval.

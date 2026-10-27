@@ -1,6 +1,6 @@
 # 15: Distinct material textures for content previews
 
-Status: ready-for-human
+Status: done
 Blocked by: 14
 
 User follow-up on 2026-10-26 for PR #21.
@@ -18,7 +18,8 @@ record with optional bounded RGBA preview data, supplied by the demo.
 Older contract lines provide no preview texture and retain their colour
 fallback. The engine draws generic texture data without naming Materials.
 This adds preview appearance only; placed terrain still uses its existing
-palette and the Look-pack work stays separate.
+palette and the Look-pack work stays separate. Ticket 16 subsequently
+extends this scope to one texture shared by previews and placed Voxels.
 
 ## Acceptance criteria
 
@@ -28,7 +29,7 @@ palette and the Look-pack work stays separate.
 - [x] Invalid preview payloads fail load before reaching GPU allocation.
 - [x] The Client reads content only; the engine declares no named Material.
 - [x] Guests/demo rebuild, relevant tests, formatting and full CI pass.
-- [ ] Final captures are reviewed and removed afterwards.
+- [x] Final captures are reviewed and removed afterwards.
 
 ## Comments
 
@@ -100,3 +101,12 @@ shared `texture` field and GPU atlas. Its captures supersede the earlier
 files; combined visual review remains pending in the same /tmp folder.
 Implementation and full CI are complete: 886 tests pass, five existing
 manual measurements are ignored. The folder remains until user review.
+
+### 2026-10-27: final visual approval
+
+The user reviewed and accepted the shared World/preview textures, clearer
+baby-blue glass, consistent lava and translucent textured placement ghost:
+"Reviewed; these look right." This completes the combined review for
+tickets 15 and 16. The capture folder
+/tmp/tesserae-p82-previews-review-wbb76ry6 was then deleted, as requested.
+All acceptance criteria are complete.
