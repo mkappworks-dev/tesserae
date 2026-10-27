@@ -5,8 +5,8 @@ The demo keeps its terrain and render classes using its own content.
 
 Validation: 902 tests pass, five existing manual measurements are ignored,
 and ./scripts/cargo-ci passes. All texture, controls, empty-hand and
-placement-ghost captures were reviewed and their folders deleted. The new
-removal progress, placement-cue and help captures are retained for review.
+placement-ghost captures were reviewed and their folders deleted. Removal
+progress, placement-cue and help captures were also approved and deleted.
 
 The 115-row interleaved thread-CPU A/B used phase 8.1 main (212d900).
 Stair-heavy meshing moves from 4.163 to 3.462 ms; same-binary id probes

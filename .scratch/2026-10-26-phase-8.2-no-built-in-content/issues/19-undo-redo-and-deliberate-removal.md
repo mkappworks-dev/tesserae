@@ -64,9 +64,13 @@ changes.
 
 Native offscreen captures were inspected: progress over the selected
 Voxel, hidden ghost during removal, centred placement cue and help with
-undo/redo. The review folder is retained pending user review:
-/tmp/tesserae-p82-removal-review-v41f269b. Its three PNGs are not committed.
+undo/redo. The user approved all three captures on 2026-10-27. The reviewed
+folder /tmp/tesserae-p82-removal-review-v41f269b was deleted after approval.
+Its PNGs were never committed.
 The capture fixes progress at 60% using a dev-only rendering seam; input
 hold/cancel/once-per-hold semantics are covered by regression tests.
 All captures exited successfully with no rendering or validation errors;
 macOS logged its existing harmless window-destroy notification at exit.
+
+Visual review is complete: removal progress, placement cue and updated
+help were accepted without further changes. No visual exceptions remain.
