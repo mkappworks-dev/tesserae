@@ -83,6 +83,7 @@ impl IncomingMeshes<'_, '_> {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ChunkEntities>()
+        .init_resource::<super::material_textures::Textures>()
         .add_systems(Startup, (add_material, spawn_light))
         .add_systems(PostStartup, spawn_camera);
     add_view_systems(app);
@@ -94,9 +95,11 @@ pub(super) fn plugin(app: &mut App) {
 /// unload handled first would leave the mesh with nothing to despawn it; and
 /// what each level has drawn is published after both.
 fn add_view_systems(app: &mut App) {
+    app.init_resource::<super::material_textures::Textures>();
     app.add_systems(
         Update,
         (
+            update_textures.after(super::material_textures::receive),
             upload_meshes,
             drop_meshes,
             sort_blended.run_if(blend_sort_on),
@@ -104,6 +107,21 @@ fn add_view_systems(app: &mut App) {
         )
             .chain(),
     );
+}
+
+fn update_textures(
+    textures: Res<super::material_textures::Textures>,
+    terrain: Res<TerrainMaterial>,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+) {
+    if !textures.is_changed() {
+        return;
+    }
+    for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+        if let Some(mut material) = materials.get_mut(handle) {
+            textures.apply(&mut material.extension);
+        }
+    }
 }
 
 /// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
@@ -159,7 +177,6 @@ fn add_material(
             ..opaque.extension.clone()
         },
     };
-    // The holes are cut by the shader's pattern, which sets alpha to zero.
     let cutout = ChunkMaterial {
         base: StandardMaterial {
             alpha_mode: AlphaMode::Mask(0.5),
@@ -514,13 +531,11 @@ mod tests {
     use bevy::ecs::system::RunSystemOnce;
     use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{
-        Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk, testgen, worldgen,
-    };
+    use tesserae_core::{Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk};
 
     fn watered() -> (Tables, MaterialId) {
-        let mut tables = Tables::builtin();
-        let water = testgen::register_water(&mut tables);
+        let tables = crate::server::fixture_tables();
+        let water = tesserae_core::testgen::fixtures().water;
         (tables, water)
     }
 
@@ -769,6 +784,55 @@ mod tests {
     }
 
     #[test]
+    fn terrain_and_item_models_share_one_texture_atlas_and_clear_removed_rows() {
+        use crate::client::{
+            edit::Holding,
+            material_textures::{self, Textures},
+        };
+        use crate::content::MaterialTextures;
+        let mut app = app();
+        app.init_asset::<Image>()
+            .add_plugins(material_textures::plugin);
+        app.world_mut().write_message(MaterialTextures(vec![
+            (23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
+            (63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
+        ]));
+        app.update();
+        let held = Holding::solid(23, 0);
+        let first = app.world().resource::<Textures>().texture(held).unwrap();
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+            let extension = &materials.get(handle).unwrap().extension;
+            assert_eq!(extension.texture.as_ref(), Some(&first));
+            assert_eq!(extension.textured, UVec4::new(1 << 23, 1 << 31, 1, 0));
+        }
+        let item = app
+            .world()
+            .resource::<Textures>()
+            .material(held, Vec4::ONE, false);
+        assert_eq!(item.base_color_texture, Some(first.clone()));
+        assert_eq!(app.world().resource::<Assets<Image>>().len(), 1);
+        app.world_mut().write_message(MaterialTextures(Vec::new()));
+        app.update();
+        assert!(app.world().resource::<Textures>().texture(held).is_none());
+        assert!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(first.id())
+                .is_none()
+        );
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+            assert_eq!(
+                materials.get(handle).unwrap().extension.textured,
+                UVec4::new(0, 0, 1, 0)
+            );
+        }
+    }
+
+    #[test]
     fn the_palette_message_reaches_all_three_terrain_material_uniforms() {
         let app = app_with_palette(Some(crate::content::MaterialPalette(vec![(
             8,
@@ -891,28 +955,51 @@ mod tests {
     /// Two panes of glass one behind the other along z, in one Chunk.
     fn two_panes() -> tesserae_core::ChunkMesh {
         let mut c = Chunk::air();
-        c.set(5, 5, 5, Voxel::cube(tesserae_core::material::GLASS));
-        c.set(5, 5, 10, Voxel::cube(tesserae_core::material::GLASS));
+        c.set(
+            5,
+            5,
+            5,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
+        c.set(
+            5,
+            5,
+            10,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         mesh_chunk(
             LitChunk::new(&c, &sky),
             [Some(LitChunk::new(&air, &sky)); 6],
-            &Tables::builtin(),
+            &crate::server::fixture_tables(),
         )
     }
 
     /// Two pools side by side along x in a stone basin: two water quads in one
     /// plane, facing up, and nothing else blended.
     fn two_pools() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::STONE;
         let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..=12 {
             for z in 0..=6 {
-                c.set(x, 4, z, Voxel::cube(STONE));
+                c.set(
+                    x,
+                    4,
+                    z,
+                    Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
+                );
                 let rim = x == 0 || x == 6 || x == 12 || z == 0 || z == 6;
-                c.set(x, 5, z, Voxel::cube(if rim { STONE } else { water }));
+                c.set(
+                    x,
+                    5,
+                    z,
+                    Voxel::cube(if rim {
+                        tesserae_core::testgen::fixtures().ground.rock
+                    } else {
+                        water
+                    }),
+                );
             }
         }
         let air = Chunk::air();
@@ -945,13 +1032,17 @@ mod tests {
     }
 
     fn geometry() -> tesserae_core::ChunkMesh {
-        let solid = Chunk::filled(Voxel::cube(worldgen::STONE));
+        let solid = Chunk::filled(Voxel::cube(tesserae_core::testgen::fixtures().ground.rock));
         let air = Chunk::air();
         let dark = ChunkLight::dark();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut neighbors = [Some(LitChunk::new(&solid, &dark)); 6];
         neighbors[0] = Some(LitChunk::new(&air, &sky));
-        let mesh = mesh_chunk(LitChunk::new(&solid, &dark), neighbors, &Tables::builtin());
+        let mesh = mesh_chunk(
+            LitChunk::new(&solid, &dark),
+            neighbors,
+            &crate::server::fixture_tables(),
+        );
         assert!(!mesh.is_empty(), "the fixture must have geometry");
         mesh
     }
@@ -1226,18 +1317,31 @@ mod tests {
 
     /// The dev gallery's glass house in front of its pool, a lantern inside.
     fn glass_house_and_pool() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::{GLASS, LANTERN, STONE};
         let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..11 {
             for z in 0..12 {
-                c.set(x, 9, z, Voxel::cube(STONE));
+                c.set(
+                    x,
+                    9,
+                    z,
+                    Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
+                );
             }
         }
         for k in 0..=5 {
             for i in 0..=8 {
                 let rim = i == 0 || i == 8 || k == 0 || k == 5;
-                c.set(i, 10, k, Voxel::cube(if rim { STONE } else { water }));
+                c.set(
+                    i,
+                    10,
+                    k,
+                    Voxel::cube(if rim {
+                        tesserae_core::testgen::fixtures().ground.rock
+                    } else {
+                        water
+                    }),
+                );
             }
         }
         for k in 7..=10 {
@@ -1245,13 +1349,28 @@ mod tests {
                 let wall = i == 1 || i == 5 || k == 7 || k == 10;
                 for j in 0..=2 {
                     if wall {
-                        c.set(i, 10 + j, k, Voxel::cube(GLASS));
+                        c.set(
+                            i,
+                            10 + j,
+                            k,
+                            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+                        );
                     }
                 }
-                c.set(i, 13, k, Voxel::cube(GLASS));
+                c.set(
+                    i,
+                    13,
+                    k,
+                    Voxel::cube(tesserae_core::testgen::fixtures().glass),
+                );
             }
         }
-        c.set(3, 10, 8, Voxel::cube(LANTERN));
+        c.set(
+            3,
+            10,
+            8,
+            Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         mesh_chunk(
@@ -1265,13 +1384,17 @@ mod tests {
     /// above that end, the strip is in front of the cube, but its centre is far
     /// down the strip and farther from the Eye than the cube's.
     fn strip_over_a_cube() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::GLASS;
         let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..30 {
             c.set(x, 5, 10, Voxel::cube(water));
         }
-        c.set(2, 3, 10, Voxel::cube(GLASS));
+        c.set(
+            2,
+            3,
+            10,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         mesh_chunk(
@@ -1326,13 +1449,16 @@ mod tests {
     /// and in the same Chunk the strip of water over a glass cube that a
     /// nearest-centre order draws wrong.
     fn checkerboard_and_a_strip() -> tesserae_core::ChunkMesh {
-        use tesserae_core::material::GLASS;
         let (tables, water) = watered();
         let mut c = Chunk::air();
         for x in 0..6 {
             for y in 0..6 {
                 for z in 0..6 {
-                    let m = if (x + y + z) % 2 == 0 { GLASS } else { water };
+                    let m = if (x + y + z) % 2 == 0 {
+                        tesserae_core::testgen::fixtures().glass
+                    } else {
+                        water
+                    };
                     c.set(10 + x, 10 + y, 10 + z, Voxel::cube(m));
                 }
             }
@@ -1340,7 +1466,12 @@ mod tests {
         for x in 0..30 {
             c.set(x, 5, 25, Voxel::cube(water));
         }
-        c.set(2, 3, 25, Voxel::cube(GLASS));
+        c.set(
+            2,
+            3,
+            25,
+            Voxel::cube(tesserae_core::testgen::fixtures().glass),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mesh = mesh_chunk(
@@ -1416,14 +1547,24 @@ mod tests {
     /// Two leaf cubes beside open sky: every face is in the cutout layer.
     fn leaves() -> tesserae_core::ChunkMesh {
         let mut c = Chunk::air();
-        c.set(5, 5, 5, Voxel::cube(tesserae_core::material::LEAVES));
-        c.set(6, 5, 5, Voxel::cube(tesserae_core::material::LEAVES));
+        c.set(
+            5,
+            5,
+            5,
+            Voxel::cube(tesserae_core::testgen::fixtures().leaves),
+        );
+        c.set(
+            6,
+            5,
+            5,
+            Voxel::cube(tesserae_core::testgen::fixtures().leaves),
+        );
         let air = Chunk::air();
         let sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mesh = mesh_chunk(
             LitChunk::new(&c, &sky),
             [Some(LitChunk::new(&air, &sky)); 6],
-            &Tables::builtin(),
+            &crate::server::fixture_tables(),
         );
         assert!(mesh.opaque.is_empty() && !mesh.cutout.is_empty());
         mesh

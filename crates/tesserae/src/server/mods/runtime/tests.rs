@@ -5,7 +5,6 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tesserae_core::collide::VoxelVolume;
-use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, MAX_SHAPED_PER_CHUNK, SHAPE_STAIR, Tables, Worldgen,
     WorldgenParams,
@@ -91,18 +90,37 @@ struct Harness {
     app: App,
     logs: Vec<LogHandle>,
     registry: Registry,
+    rock: u16,
+    lamp: u16,
 }
 
 impl Harness {
     fn new(modes: &[u64]) -> Self {
         let mut loaded = LoadedMods::default();
         for mode in modes {
-            loaded.mods.extend(fixture(*mode).mods);
+            let next = fixture(*mode);
+            if loaded.mods.is_empty() {
+                loaded.tables = next.tables;
+                loaded.registry = next.registry;
+            }
+            loaded.mods.extend(next.mods);
         }
         Self::with(loaded)
     }
 
-    fn with(loaded: LoadedMods) -> Self {
+    fn with(mut loaded: LoadedMods) -> Self {
+        let rock = loaded
+            .registry
+            .names(tesserae_mods::Kind::Material)
+            .find(|(_, name)| name.ends_with(":stone"))
+            .map(|(id, _)| id as u16)
+            .unwrap_or_else(|| tesserae_core::testgen::register_ground(&mut loaded.tables).rock);
+        let lamp = loaded
+            .registry
+            .names(tesserae_mods::Kind::Material)
+            .find(|(_, name)| name.ends_with(":lamp"))
+            .map(|(id, _)| id as u16)
+            .unwrap_or_else(|| tesserae_core::testgen::register_lantern(&mut loaded.tables));
         AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(4).build());
         let registry = loaded.registry.clone();
         let logs = loaded.mods.iter().map(ModInstance::log).collect();
@@ -120,6 +138,8 @@ impl Harness {
             app,
             logs,
             registry,
+            rock,
+            lamp,
         }
     }
 
@@ -222,27 +242,27 @@ impl Harness {
 }
 
 /// Stone placed into air, as a player's Place.
-fn solid_edit() -> EditKind {
+fn solid_edit(rock: u16) -> EditKind {
     EditKind::Solid {
         before: Voxel::AIR,
-        after: Voxel::cube(STONE),
+        after: Voxel::cube(rock),
     }
 }
 
 fn home() -> ChunkCoord {
     ChunkCoord::new(0, 0, 0)
 }
-fn fill(side: f32) -> Command {
+fn fill(side: f32, rock: u16) -> Command {
     Command::Fill {
         region: Region {
             min: [0.0; 3],
             max: [side; 3],
         },
-        voxel: Voxel::cube(STONE),
+        voxel: Voxel::cube(rock),
     }
 }
-fn batch(commands: &[Command]) -> CommandBatch {
-    validate(commands, Line::V02, &Tables::builtin(), 1.0).unwrap()
+fn batch(commands: &[Command], tables: &Tables) -> CommandBatch {
+    validate(commands, Line::V02, tables, 1.0).unwrap()
 }
 
 #[test]
@@ -257,7 +277,7 @@ fn a_full_fill_resumes_its_cursor_and_a_second_mod_is_served_in_the_same_tick() 
         ticks += 1;
         if ticks == 1 {
             assert_eq!(h.backlog(1), 0);
-            assert_eq!(h.voxel([31, 31, 31]), Voxel::cube(STONE));
+            assert_eq!(h.voxel([31, 31, 31]), Voxel::cube(h.rock));
             assert_eq!(h.backlog(0), 32768 - MOD_VOXELS_PER_TICK as u64 + 1);
         }
     }
@@ -267,7 +287,7 @@ fn a_full_fill_resumes_its_cursor_and_a_second_mod_is_served_in_the_same_tick() 
     for y in 0..32 {
         for z in 0..32 {
             for x in 0..32 {
-                assert_eq!(h.voxel([x, y, z]), Voxel::cube(STONE));
+                assert_eq!(h.voxel([x, y, z]), Voxel::cube(h.rock));
             }
         }
     }
@@ -290,7 +310,7 @@ fn unloaded_and_shaped_cap_refusals_reach_the_next_guest_report() {
             i % 32,
             i / 1024,
             (i / 32) % 32,
-            Voxel::new(STONE, SHAPE_STAIR, 0),
+            Voxel::new(h.rock, SHAPE_STAIR, 0),
         );
     }
     h.app
@@ -369,7 +389,7 @@ fn a_trap_disables_once_without_losing_queued_work_or_stopping_another_guest() {
     }
     h.call();
     assert!(h.log(1).contains("call=3"));
-    assert_eq!(h.voxel([0, 0, 0]), Voxel::cube(STONE));
+    assert_eq!(h.voxel([0, 0, 0]), Voxel::cube(h.rock));
     assert_eq!(
         h.app
             .world_mut()
@@ -386,11 +406,12 @@ fn a_trap_disables_once_without_losing_queued_work_or_stopping_another_guest() {
 #[test]
 fn an_oversized_lift_is_fatal_and_does_not_erase_earlier_commands() {
     let mut h = Harness::new(&[7]);
+    let accepted = batch(&[fill(4.0, h.rock)], &tables_of(&h));
     h.app
         .world_mut()
         .resource_mut::<PendingCommands>()
         .queue(0)
-        .push(batch(&[fill(4.0)]));
+        .push(accepted);
     h.call();
     let disabled: Vec<_> = h
         .app
@@ -404,7 +425,7 @@ fn an_oversized_lift_is_fatal_and_does_not_erase_earlier_commands() {
     while h.backlog(0) > 0 {
         h.drain();
     }
-    assert_eq!(h.voxel([3, 3, 3]), Voxel::cube(STONE));
+    assert_eq!(h.voxel([3, 3, 3]), Voxel::cube(h.rock));
 }
 
 #[test]
@@ -420,9 +441,9 @@ fn backlog_pauses_calls_without_consuming_events_or_reports_and_resumes_after_dr
         .resource_mut::<EditHistory>()
         .record(EditEvent {
             at: [1.0; 3],
-            kind: solid_edit(),
+            kind: solid_edit(h.rock),
             before: Voxel::AIR,
-            after: Voxel::cube(STONE),
+            after: Voxel::cube(h.rock),
         });
     h.call();
     assert!(h.log(0).is_empty());
@@ -446,9 +467,9 @@ fn history_is_bounded_and_each_mod_counts_only_the_events_it_missed() {
     for i in 0..MAX_EDIT_EVENTS + 7 {
         history.record(EditEvent {
             at: [i as f32, 0.0, 0.0],
-            kind: solid_edit(),
+            kind: solid_edit(tesserae_core::testgen::fixtures().ground.rock),
             before: Voxel::AIR,
-            after: Voxel::cube(STONE),
+            after: Voxel::cube(tesserae_core::testgen::fixtures().ground.rock),
         });
         assert_eq!(history.since(&mut fast, &mut fast_dropped).len(), 1);
     }
@@ -476,14 +497,14 @@ fn only_successful_player_edits_enter_history_and_context_in_metres() {
     h.app
         .world_mut()
         .resource_mut::<ChunkStore>()
-        .set_voxel(VoxelCoord::of([2, 2, 2]), Voxel::cube(STONE));
+        .set_voxel(VoxelCoord::of([2, 2, 2]), Voxel::cube(h.rock));
     h.app.world_mut().write_message(EditIntent {
-        action: EditAction::Break,
+        action: EditAction::Remove,
         origin: eye,
         direction: Vec3::NEG_Y,
     });
     h.app.world_mut().write_message(EditIntent {
-        action: EditAction::Break,
+        action: EditAction::Remove,
         origin: eye,
         direction: Vec3::Y,
     });
@@ -502,7 +523,10 @@ fn only_successful_player_edits_enter_history_and_context_in_metres() {
     let log = h.log(0);
     assert!(log.contains("edits=1"), "{log}");
     assert!(log.contains("x: 1.0, y: 1.0, z: 1.0"), "{log}");
-    assert!(log.contains("before: Voxel { material: 1"), "{log}");
+    assert!(
+        log.contains(&format!("before: Voxel {{ material: {}", h.rock)),
+        "{log}"
+    );
     assert!(log.contains("after: Voxel { material: 0"), "{log}");
     h.drain();
     h.call();
@@ -538,28 +562,36 @@ fn a_held_unlit_chunk_waits_without_blocking_another_mod_or_losing_its_cursor() 
         .world_mut()
         .resource_mut::<ChunkStore>()
         .insert(ChunkCoord::new(1, 0, 0), Chunk::air());
+    let accepted = batch(
+        &[Command::Place(vec![Placement {
+            at: [32.0, 0.0, 0.0],
+            voxel: Voxel::cube(h.rock),
+        }])],
+        &tables_of(&h),
+    );
     h.app
         .world_mut()
         .resource_mut::<PendingCommands>()
         .queue(1)
-        .push(batch(&[Command::Place(vec![Placement {
-            at: [32.0, 0.0, 0.0],
-            voxel: Voxel::cube(STONE),
-        }])]));
+        .push(accepted);
+    let accepted = batch(
+        &[Command::Place(vec![Placement {
+            at: [33.0, 0.0, 0.0],
+            voxel: Voxel::cube(h.rock),
+        }])],
+        &tables_of(&h),
+    );
     h.app
         .world_mut()
         .resource_mut::<PendingCommands>()
         .queue(2)
-        .push(batch(&[Command::Place(vec![Placement {
-            at: [33.0, 0.0, 0.0],
-            voxel: Voxel::cube(STONE),
-        }])]));
+        .push(accepted);
     // FIFO keeps the second Mod's later placement behind its waiting first one.
     h.drain();
     assert_eq!(h.backlog(0), 32768);
     assert_eq!(h.backlog(1), 2);
     assert_eq!(h.backlog(2), 0);
-    assert_eq!(h.voxel([33, 0, 0]), Voxel::cube(STONE));
+    assert_eq!(h.voxel([33, 0, 0]), Voxel::cube(h.rock));
     h.app
         .world_mut()
         .resource_mut::<MeshState>()
@@ -568,16 +600,34 @@ fn a_held_unlit_chunk_waits_without_blocking_another_mod_or_losing_its_cursor() 
         h.drain();
     }
     assert_eq!(h.backlog(1), 0);
-    assert_eq!(h.voxel([32, 0, 0]), Voxel::cube(STONE));
+    assert_eq!(h.voxel([32, 0, 0]), Voxel::cube(h.rock));
 }
 
 #[test]
 fn fixture_fill_redelivers_mesh_matches_fresh_light_and_invalidates_the_cover() {
     use crate::server::jobs::{Border, solve};
     use crate::server::streaming::tests::{Harness as StreamingHarness, UNLIMITED, small};
-    let mut h = StreamingHarness::new(small(), UNLIMITED);
-    h.settle();
     let loaded = fixture(1);
+    let rock = loaded
+        .registry
+        .id_of(tesserae_mods::Kind::Material, "fixture1:stone")
+        .unwrap() as u16;
+    let params = WorldgenParams {
+        ground: Some(tesserae_core::GroundParams {
+            rock,
+            soil: rock,
+            surface: rock,
+        }),
+        ..WorldgenParams::default()
+    };
+    let mut h = StreamingHarness::with_world(small(), UNLIMITED, WorldSettings::default(), params);
+    let lamp = loaded
+        .registry
+        .id_of(tesserae_mods::Kind::Material, "fixture1:lamp")
+        .unwrap() as u16;
+    let tables = std::sync::Arc::new(loaded.tables);
+    h.app.insert_resource(ContentTables(tables));
+    h.settle();
     let jobs = ModJobs::new(loaded.registry, loaded.mods);
     h.app
         .insert_resource(jobs)
@@ -626,7 +676,7 @@ fn fixture_fill_redelivers_mesh_matches_fresh_light_and_invalidates_the_cover() 
                 assert_eq!(
                     store.voxel([x, y, z]),
                     Some(if [x, y, z] == [1, 1, 1] {
-                        Voxel::cube(LANTERN)
+                        Voxel::cube(lamp)
                     } else {
                         Voxel::AIR
                     })
@@ -705,7 +755,9 @@ fn measure_gallery_budget() {
     );
     let world = *h.app.world().resource::<WorldSettings>();
     let generator = &h.app.world().resource::<WorldGenerator>().0;
-    let plan = gallery::measurement_plan(&world, generator);
+    let rock = generator.params().ground.unwrap().rock;
+    let plan =
+        gallery::measurement_plan(&world, generator, h.app.world().resource::<ContentTables>());
     let corner = plan[0].0;
     let center = Vec3::from_array(corner.map(|i| i as f32 * world.voxel_size));
     h.anchor_at(center);
@@ -721,9 +773,9 @@ fn measure_gallery_budget() {
                 dt_s: 1.0 / 64.0,
                 edits: vec![EditEvent {
                     at: mod_min.map(|i| i as f32),
-                    kind: solid_edit(),
+                    kind: solid_edit(rock),
                     before: Voxel::AIR,
-                    after: Voxel::cube(STONE),
+                    after: Voxel::cube(rock),
                 }],
                 last: BatchReport::default(),
             })
@@ -810,26 +862,30 @@ fn the_fixed_pre_update_drain_runs_after_player_apply_pending() {
     h.app
         .world_mut()
         .resource_mut::<ChunkStore>()
-        .set_voxel(VoxelCoord::of([2, 2, 2]), Voxel::cube(STONE));
+        .set_voxel(VoxelCoord::of([2, 2, 2]), Voxel::cube(h.rock));
+    let accepted = batch(
+        &[Command::Place(vec![Placement {
+            at: [2.0; 3],
+            voxel: Voxel::cube(h.lamp),
+        }])],
+        &tables_of(&h),
+    );
     h.app
         .world_mut()
         .resource_mut::<PendingCommands>()
         .queue(0)
-        .push(batch(&[Command::Place(vec![Placement {
-            at: [2.0; 3],
-            voxel: Voxel::cube(LANTERN),
-        }])]));
+        .push(accepted);
     h.app.world_mut().write_message(EditIntent {
-        action: EditAction::Break,
+        action: EditAction::Remove,
         origin: eye,
         direction: Vec3::NEG_Y,
     });
     h.app.world_mut().run_schedule(RunFixedMainLoop);
     h.app.world_mut().run_schedule(FixedPreUpdate);
-    assert_eq!(h.voxel([2, 2, 2]), Voxel::cube(LANTERN));
+    assert_eq!(h.voxel([2, 2, 2]), Voxel::cube(h.lamp));
     let history = h.app.world().resource::<EditHistory>();
     assert_eq!(history.events.len(), 1);
-    assert_eq!(history.events[0].before, Voxel::cube(STONE));
+    assert_eq!(history.events[0].before, Voxel::cube(h.rock));
     assert_eq!(history.events[0].after, Voxel::AIR);
 }
 
@@ -933,6 +989,10 @@ fn assert_lakes_off_the_stage(params: WorldgenParams, size: f32, water: u16) {
 fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
     for size in [1.0, 0.5, 0.25] {
         let loaded = demo_loaded(size);
+        let stone = loaded
+            .registry
+            .id_of(tesserae_mods::Kind::Material, "demo:stone")
+            .unwrap() as u16;
         assert_eq!(
             loaded
                 .registry
@@ -947,19 +1007,25 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         );
         let params = loaded.world.unwrap();
         assert_eq!(params.relief_m, 4.0);
+        assert_eq!(params.ground.unwrap().rock, stone);
         assert!(params.caves.is_none());
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
         assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
         assert_eq!(
             loaded.appearance,
             [
-                (8, [255, 144, 48, 255]),
+                (8, [245, 227, 184, 255]),
                 (9, [230, 72, 16, 255]),
                 (10, [150, 104, 60, 255]),
                 (11, [70, 66, 62, 255]),
                 (12, [92, 70, 44, 224]),
                 (13, [168, 74, 52, 255]),
-                (14, [26, 82, 158, 166])
+                (14, [26, 82, 158, 166]),
+                (15, [133, 133, 140, 255]),
+                (16, [107, 74, 46, 255]),
+                (17, [84, 143, 61, 255]),
+                (18, [164, 210, 250, 89]),
+                (19, [41, 107, 36, 255])
             ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
@@ -996,7 +1062,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         assert!(
             fluids_named(&loaded, params)
                 .iter()
-                .all(|&id| id != tesserae_core::material::RETIRED),
+                .all(|&id| id != tesserae_core::material::FIRST_MOD_ID.saturating_sub(1)),
             "the demo names the retired id"
         );
         assert_lakes_off_the_stage(params, size, demo_water);
@@ -1025,7 +1091,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         );
         assert_eq!(mud_flow.reach_m, 2.0);
         // Its two reactions, resolved by name, either state of each fluid:
-        // lava touching its water becomes core:stone and the water stays; mud
+        // lava touching its water becomes demo:stone and the water stays; mud
         // touching lava becomes demo:brick and the lava stays.
         let rules = loaded.tables.reactions.rules();
         assert_eq!(rules.len(), 2);
@@ -1034,7 +1100,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 rules[0],
                 (lava, demo_water),
                 tesserae_core::Side::First,
-                tesserae_core::worldgen::STONE,
+                stone,
             ),
             (rules[1], (lava, mud), tesserae_core::Side::Second, brick),
         ] {
@@ -1049,12 +1115,12 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             );
         }
         let mut neighbors = [Voxel::AIR; 6];
-        neighbors[0] = Voxel::new(1, 4, 0);
+        neighbors[0] = Voxel::new(stone, 4, 0);
         assert!(
             loaded
                 .tables
                 .shapes
-                .connections(Voxel::new(1, 4, 0), neighbors)
+                .connections(Voxel::new(stone, 4, 0), neighbors)
                 .has(0)
         );
         let mut h = Harness::new(&[]);
@@ -1073,7 +1139,6 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .add_plugins(super::super::plugin);
         assert_eq!(h.app.world().resource::<ContentTables>().shapes.len(), 5);
         #[cfg(feature = "dev")]
-        assert_eq!(h.app.world().resource::<crate::content::DevFence>().0, None);
         h.app
             .insert_resource(crate::server::world_state::SpawnPoint::new(Vec3::new(
                 0.0, 28.0, 0.0,
@@ -1118,14 +1183,14 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             for y in 24..29 {
                 assert_eq!(
                     h.voxel(index([x as f32, y as f32, -7.0])),
-                    Voxel::cube(STONE)
+                    Voxel::cube(stone)
                 );
             }
         }
-        assert_eq!(h.voxel(index([3.0, 30.0, -7.0])), Voxel::new(STONE, 4, 0));
+        assert_eq!(h.voxel(index([3.0, 30.0, -7.0])), Voxel::new(stone, 4, 0));
         assert_eq!(h.voxel(index([3.0, 31.0, -7.0])), Voxel::cube(8));
-        assert_eq!(h.voxel(index([15.0, 29.0, -7.0])), Voxel::new(STONE, 1, 4));
-        assert_eq!(h.voxel(index([-13.0, 30.0, -5.0])), Voxel::cube(STONE));
+        assert_eq!(h.voxel(index([15.0, 29.0, -7.0])), Voxel::new(stone, 1, 4));
+        assert_eq!(h.voxel(index([-13.0, 30.0, -5.0])), Voxel::cube(stone));
         assert_eq!(h.voxel(index([-12.0, 29.0, -7.0])), Voxel::cube(wood));
         let store = h.app.world().resource::<ChunkStore>();
         assert_eq!(store.light_at(index([3.0, 31.0, -7.0])).block(), 15);
@@ -1211,7 +1276,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             "{size} m: no mud fired to brick"
         );
         assert!(
-            row(9.0, 19.0).any(|at| h.voxel(at) == Voxel::cube(STONE)),
+            row(9.0, 19.0).any(|at| h.voxel(at) == Voxel::cube(stone)),
             "{size} m: no lava cooled to stone"
         );
         let post = index([-23.0, 29.0, -7.0]);
@@ -1228,9 +1293,9 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             let store = h.app.world().resource::<ChunkStore>();
             let kinds = store.get(coord).unwrap().kinds();
             assert!(
-                kinds
-                    .iter()
-                    .all(|v| v.material() != tesserae_core::material::RETIRED),
+                kinds.iter().all(
+                    |v| v.material() != tesserae_core::material::FIRST_MOD_ID.saturating_sub(1)
+                ),
                 "the retired id at {coord}"
             );
         }
@@ -1277,7 +1342,7 @@ fn first_mod_call_waits_for_held_lit_spawn_neighborhood_then_runs_once() {
     h.call();
     assert!(h.log(0).contains("call=1 tick=1"));
     h.drain();
-    assert_eq!(h.voxel([31, 31, 31]), Voxel::cube(STONE));
+    assert_eq!(h.voxel([31, 31, 31]), Voxel::cube(h.rock));
     h.app
         .world_mut()
         .resource_mut::<ChunkStore>()
@@ -1300,8 +1365,8 @@ fn fluids_fixture(mode: u64) -> Harness {
 fn a_0_2_mod_places_and_removes_sources_through_the_edit_path() {
     let mut h = fluids_fixture(1);
     let slime = h.material("fluids:slime");
-    h.put([0, 0, 0], Voxel::cube(STONE));
-    h.put([1, 1, 0], Voxel::cube(STONE));
+    h.put([0, 0, 0], Voxel::cube(h.rock));
+    h.put([1, 1, 0], Voxel::cube(h.rock));
     h.call();
     assert_eq!(h.backlog(0), 2);
     h.drain();
@@ -1311,12 +1376,12 @@ fn a_0_2_mod_places_and_removes_sources_through_the_edit_path() {
         Some(tesserae_core::Fluid::source(slime))
     );
     assert_eq!(h.occupants([1, 1, 0]).fluid, None);
-    assert_eq!(h.occupants([1, 1, 0]).solid, Voxel::cube(STONE));
+    assert_eq!(h.occupants([1, 1, 0]).solid, Voxel::cube(h.rock));
     h.call();
     assert!(h.log(0).contains("call=2 applied=1 rejected=1"));
     h.drain();
     assert_eq!(h.occupants([0, 1, 0]).fluid, None);
-    assert_eq!(h.voxel([0, 0, 0]), Voxel::cube(STONE), "the bed stays");
+    assert_eq!(h.voxel([0, 0, 0]), Voxel::cube(h.rock), "the bed stays");
     h.call();
     assert!(h.log(0).contains("call=3 applied=1 rejected=0"));
 }
@@ -1377,16 +1442,16 @@ fn each_line_sees_player_edits_in_its_own_projection() {
     h.app.add_plugins(edit::plugin);
     let eye = Vec3::new(2.5, 4.5, 2.5);
     h.app.world_mut().spawn(Player::at(eye));
-    let stair = Voxel::new(STONE, SHAPE_STAIR, 0);
+    let stair = Voxel::new(h.rock, SHAPE_STAIR, 0);
     h.put([2, 1, 2], stair);
     h.put([2, 0, 2], Voxel::cube(wood));
     for action in [
         EditAction::PlaceSource(water),
-        EditAction::RemoveSource,
-        EditAction::Break,
+        EditAction::Remove,
+        EditAction::Remove,
         EditAction::Ignite,
-        EditAction::PutOut,
-        EditAction::PutOut,
+        EditAction::Ignite,
+        EditAction::Remove,
     ] {
         h.app.world_mut().write_message(EditIntent {
             action,
@@ -1425,9 +1490,9 @@ fn each_line_sees_player_edits_in_its_own_projection() {
         "{typed}"
     );
     let projected = h.log(1);
-    assert!(projected.contains("edits=1"), "{projected}");
+    assert!(projected.contains("edits=2"), "{projected}");
     assert!(
-        projected.contains("before: Voxel { material: 1, shape: 2"),
+        projected.contains(&format!("before: Voxel {{ material: {}, shape: 2", h.rock)),
         "{projected}"
     );
 }
@@ -1449,7 +1514,7 @@ fn a_declared_solid_placed_from_the_menu_is_a_solid_edit() {
     h.app.add_plugins(edit::plugin);
     let eye = Vec3::new(2.5, 4.5, 2.5);
     h.app.world_mut().spawn(Player::at(eye));
-    h.put([2, 0, 2], Voxel::cube(STONE));
+    h.put([2, 0, 2], Voxel::cube(h.rock));
     let stair = Voxel::shaped(wood, SHAPE_STAIR, tesserae_core::Orientation::IDENTITY);
     h.app.world_mut().write_message(EditIntent {
         action: EditAction::Place(stair),
@@ -1586,4 +1651,65 @@ pub(in crate::server) fn demo_and_fluids(size: f32) -> LoadedMods {
     .unwrap();
     std::fs::remove_dir_all(dir).unwrap();
     loaded
+}
+
+#[test]
+fn undo_and_redo_publish_inverse_and_forward_mod_events() {
+    use crate::server::{
+        edit::{EditAction, EditIntent},
+        player::Player,
+        undo::{self, HistoryAction},
+    };
+    use bevy::ecs::system::RunSystemOnce;
+    let mut h = Harness::new(&[9]);
+    h.app
+        .insert_resource(WorldSettings::default())
+        .add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 6.0, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([2, 2, 2], Voxel::cube(h.rock));
+    h.app.world_mut().write_message(EditIntent {
+        action: EditAction::Remove,
+        origin: eye,
+        direction: Vec3::NEG_Y,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    let mut cursor = 0;
+    let mut dropped = 0;
+    let forward = h
+        .app
+        .world()
+        .resource::<EditHistory>()
+        .since(&mut cursor, &mut dropped)[0];
+    for action in [HistoryAction::Undo, HistoryAction::Redo] {
+        h.app.world_mut().write_message(action);
+        h.app.world_mut().run_system_once(undo::receive).unwrap();
+        h.app
+            .world_mut()
+            .resource_mut::<Messages<HistoryAction>>()
+            .clear();
+        h.app.world_mut().run_system_once(undo::apply).unwrap();
+        let events = h
+            .app
+            .world()
+            .resource::<EditHistory>()
+            .since(&mut cursor, &mut dropped);
+        assert_eq!(events.len(), 1);
+        let event = events[0];
+        assert_eq!(event.at, forward.at);
+        if action == HistoryAction::Undo {
+            assert_eq!((event.before, event.after), (forward.after, forward.before));
+            assert_eq!(
+                event.kind,
+                tesserae_mods::EditKind::Solid {
+                    before: forward.after,
+                    after: forward.before
+                }
+            );
+        } else {
+            assert_eq!(event, forward);
+        }
+    }
+    assert_eq!(dropped, 0);
 }

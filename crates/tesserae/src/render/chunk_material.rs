@@ -1,9 +1,9 @@
-//! The chunk material: `StandardMaterial` plus a colour per Material index.
+//! The chunk material: `StandardMaterial` plus Game appearance by Material id.
 //!
 //! Extending `StandardMaterial` rather than writing a bare `Material` is what
 //! buys shadows, clustered lighting, fog and tonemapping from `bevy_pbr` — the
-//! decision in DESIGN.md's "Bevy depth" row. Step 9 replaces the flat palette
-//! with a look-pack's texture array and keeps this shape.
+//! decision in DESIGN.md's "Bevy depth" row. The texture is shared with item
+//! rendering; a later Look pack can replace appearance through this boundary.
 
 use bevy::asset::AssetPath;
 use bevy::mesh::MeshVertexBufferLayoutRef;
@@ -74,6 +74,11 @@ pub struct ChunkMaterialExtension {
     /// buffer of one zero word cuts nothing, which is the opaque material's.
     #[storage(102, read_only)]
     pub drawn: Handle<ShaderBuffer>,
+    #[texture(103)]
+    #[sampler(104)]
+    pub texture: Option<Handle<Image>>,
+    #[uniform(105)]
+    pub textured: UVec4,
 }
 
 /// `base_color` is linear in the shader, so a colour picked by eye has to be
@@ -92,24 +97,13 @@ impl Default for ChunkMaterialExtension {
         // Air never emits a face, so magenta at index 0 means the mesher or the
         // vertex attribute is wrong rather than that the palette is short.
         let mut palette = [srgb(1.0, 0.0, 1.0); PALETTE_LEN + 1];
-        palette[tesserae_core::testgen::STONE as usize] = srgb(0.52, 0.52, 0.55);
-        palette[tesserae_core::testgen::DIRT as usize] = srgb(0.42, 0.29, 0.18);
-        palette[tesserae_core::testgen::GRASS as usize] = srgb(0.33, 0.56, 0.24);
-        // The one Material that emits. Near-white, because the shader tints a
-        // block-lit face by its own palette colour and a saturated emitter
-        // would wash its own glow with its albedo twice over.
-        palette[tesserae_core::worldgen::LANTERN as usize] = srgb(0.96, 0.89, 0.72);
-        // The class is Material data and the amount is appearance: a look pack
-        // may choose both, so this is the placeholder.
-        palette[tesserae_core::material::GLASS as usize] = srgba(0.70, 0.88, 0.92, 0.35);
-        palette[tesserae_core::material::LEAVES as usize] = srgb(0.16, 0.42, 0.14);
-        // Near-white like the lantern, for the same reason: a flame stands in
-        // its own burning light and is tinted by it.
         palette[FLAME_SLOT] = srgb(1.0, 0.86, 0.55);
         ChunkMaterialExtension {
             palette,
             lod: LodParams::new(0, &[]),
             drawn: Handle::default(),
+            texture: None,
+            textured: UVec4::ZERO,
         }
     }
 }
@@ -131,27 +125,16 @@ impl MaterialExtension for ChunkMaterialExtension {
         embedded("chunk_prepass.wesl")
     }
 
+    fn prepass_vertex_shader() -> ShaderRef {
+        embedded("chunk_prepass.wesl")
+    }
+
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // The depth and shadow passes run `bevy_pbr`'s own prepass vertex
-        // shader, which reads the UV at 1 and the normal at 3, and the cutout
-        // material's holes need the right UV there.
-        if descriptor
-            .vertex
-            .shader_defs
-            .contains(&"PREPASS_PIPELINE".into())
-        {
-            descriptor.vertex.buffers = vec![layout.0.get_layout(&[
-                Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-                Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
-                Mesh::ATTRIBUTE_NORMAL.at_shader_location(3),
-            ])?];
-            return Ok(());
-        }
         // The base material's layout stops at `bevy_pbr`'s attributes, so the
         // custom one has to be declared here or the vertex shader reads
         // garbage. Spelling the set out is safe because this material is only
@@ -171,6 +154,18 @@ impl MaterialExtension for ChunkMaterialExtension {
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
             ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
+            ShaderDefVal::UInt(
+                "CHUNK_TEXTURE_EDGE".into(),
+                super::texture_atlas::EDGE as u32,
+            ),
+            ShaderDefVal::UInt(
+                "CHUNK_TEXTURE_WIDTH".into(),
+                super::texture_atlas::WIDTH as u32,
+            ),
+            ShaderDefVal::UInt(
+                "CHUNK_TEXTURE_HEIGHT".into(),
+                super::texture_atlas::HEIGHT as u32,
+            ),
         ];
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
@@ -195,47 +190,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn testgen_materials_are_distinguishable_and_not_the_missing_colour() {
+    fn only_flames_have_a_builtin_colour() {
         let palette = ChunkMaterialExtension::default().palette;
-        let missing = palette[0];
-        let used = [
-            tesserae_core::testgen::STONE,
-            tesserae_core::testgen::DIRT,
-            tesserae_core::testgen::GRASS,
-            tesserae_core::worldgen::LANTERN,
-        ];
-        for id in used {
-            assert_ne!(palette[id as usize], missing, "Material {id} unset");
-        }
-        for (i, a) in used.iter().enumerate() {
-            for b in &used[i + 1..] {
-                assert_ne!(palette[*a as usize], palette[*b as usize]);
-            }
-        }
-    }
-
-    #[test]
-    fn glass_is_see_through_and_everything_else_is_not() {
-        use tesserae_core::material::{GLASS, LEAVES, RETIRED};
-        let palette = ChunkMaterialExtension::default().palette;
-        let missing = palette[0];
-        let glass = palette[GLASS as usize];
-        assert!(glass.w > 0.0 && glass.w < 1.0, "glass alpha");
-        assert_ne!(glass.truncate(), missing.truncate(), "glass unset");
-        // A fluid's colour is its Game's appearance; the retired id has none.
-        assert_eq!(palette[RETIRED as usize], missing);
-        // Leaves draw in the opaque pass until step 9 gives them a texture to
-        // cut out, so an alpha here would be ignored and mislead.
-        assert_eq!(palette[LEAVES as usize].w, 1.0);
-        assert_ne!(palette[LEAVES as usize].truncate(), missing.truncate());
-        for id in [
-            tesserae_core::testgen::STONE,
-            tesserae_core::testgen::DIRT,
-            tesserae_core::testgen::GRASS,
-            tesserae_core::worldgen::LANTERN,
-        ] {
-            assert_eq!(palette[id as usize].w, 1.0, "Material {id} alpha");
-        }
+        assert!(
+            palette[..PALETTE_LEN]
+                .iter()
+                .all(|colour| *colour == palette[0])
+        );
+        assert_ne!(palette[FLAME_SLOT], palette[0]);
     }
 
     #[test]
@@ -244,13 +206,5 @@ mod tests {
         assert_eq!(palette.len(), 64 + 1, "the Materials' and the flames'");
         assert_ne!(palette[FLAME_SLOT], palette[0], "flames unset");
         assert!((tesserae_core::mesh::FLAME as usize) >= PALETTE_LEN);
-    }
-
-    /// The shader clamps the Material index to the palette's last entry, so a
-    /// Material past the end silently renders as whatever sits there. Every id
-    /// `worldgen` can emit has to be inside it.
-    #[test]
-    fn no_material_worldgen_emits_falls_outside_the_palette() {
-        assert!((tesserae_core::worldgen::LANTERN as usize) < PALETTE_LEN);
     }
 }

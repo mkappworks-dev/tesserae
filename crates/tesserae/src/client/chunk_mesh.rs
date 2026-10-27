@@ -64,17 +64,17 @@ mod tests {
     use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::{
-        Chunk, ChunkLight, ChunkMesh, LitChunk, Neighborhood, Tables, Voxel, greedy_mesh, testgen,
+        Chunk, ChunkLight, ChunkMesh, LitChunk, Neighborhood, Voxel, greedy_mesh, testgen,
     };
 
     /// Full sky, which is what the solver answers for open terrain.
     static SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
 
     fn terrain_mesh(voxel_size: f32) -> (ChunkMesh, Mesh) {
-        let chunk = testgen::terrain_chunk(0, 0, 0);
+        let chunk = testgen::terrain_chunk(0, 0, 0, testgen::fixtures().ground);
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &Tables::builtin(),
+            &testgen::fixtures().tables,
         );
         let mesh = chunk_mesh_to_mesh(&source.opaque, voxel_size);
         (source, mesh)
@@ -152,10 +152,15 @@ mod tests {
     #[test]
     fn material_indices_survive_as_uint32() {
         let mut chunk = Chunk::air();
-        chunk.set(0, 0, 0, Voxel::cube(testgen::GRASS));
+        chunk.set(
+            0,
+            0,
+            0,
+            Voxel::cube(tesserae_core::testgen::fixtures().ground.surface),
+        );
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &Tables::builtin(),
+            &testgen::fixtures().tables,
         );
         let mesh = chunk_mesh_to_mesh(&source.opaque, 1.0);
 
@@ -164,7 +169,11 @@ mod tests {
             panic!("the material index must stay an integer, not become a float");
         };
         assert_eq!(materials.len(), source.opaque.positions.len());
-        assert!(materials.iter().all(|m| *m == testgen::GRASS as u32));
+        assert!(
+            materials
+                .iter()
+                .all(|m| *m == tesserae_core::testgen::fixtures().ground.surface as u32)
+        );
     }
 
     /// The same trap as the Material index: a light level is two packed
@@ -175,10 +184,15 @@ mod tests {
         // In the middle, so all six faces look out at air inside the Chunk.
         // At a corner, three of them look into the isolated Neighborhood's dark
         // shell and the assertion below is about the shell instead.
-        chunk.set(16, 16, 16, Voxel::cube(testgen::GRASS));
+        chunk.set(
+            16,
+            16,
+            16,
+            Voxel::cube(tesserae_core::testgen::fixtures().ground.surface),
+        );
         let source = greedy_mesh(
             &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &Tables::builtin(),
+            &testgen::fixtures().tables,
         );
 
         for voxel_size in [1.0, 0.25] {

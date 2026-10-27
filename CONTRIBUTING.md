@@ -132,38 +132,82 @@ cargo run -p tesserae --features dev
 `--features dev` adds shader hot-reloading; without it the command still runs,
 and a shader edit then needs a restart. A window opens on a generated World you
 can fly around and edit. Once the guests are built that World is the demo
-Game's; without a Game it is dry, with no fluid, lakes or anything that burns.
-See [Running the demo Game](#running-the-demo-game).
+Game's; without a Game it is empty air, with no ground, lakes or fuel. See
+[Running the demo Game](#running-the-demo-game).
 
 **Controls:**
 
-| key                   | does                                                                        |
-| --------------------- | --------------------------------------------------------------------------- |
-| click, cursor free    | grab the cursor — mouse look does nothing until you do; it edits nothing    |
-| `Esc`                 | release the cursor, closing the menu if it is open                          |
-| mouse                 | look                                                                        |
-| `W` `A` `S` `D`       | move; `W`/`S` are how you get closer and further away                       |
-| `Space` / `Left Ctrl` | up and down                                                                 |
-| `Shift`               | sprint, 5x                                                                  |
-| `-` / `=`             | movement speed down / up, 0.5 to 64 m/s                                     |
-| `R`                   | back to the spawn point                                                     |
-| `1` to `9`, scroll    | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps |
-| click                 | place what the slot holds: a block, a fluid source, or fire on fuel         |
-| right click           | break the block, remove the source, or put the fire out                     |
-| `Q` / `E`             | turn the held shape a quarter / flip which way is up                        |
-| `Tab`                 | open or close the menu that fills the slot; closing grabs the cursor        |
+| key                                  | does                                                                        |
+| ------------------------------------ | --------------------------------------------------------------------------- |
+| click, cursor free                   | grab the cursor — mouse look does nothing until you do; it edits nothing    |
+| `Esc`                                | release the cursor, closing the menu if it is open                          |
+| mouse                                | look                                                                        |
+| `W` `A` `S` `D`                      | move; `W`/`S` are how you get closer and further away                       |
+| `Space` / `Left Ctrl`                | up and down                                                                 |
+| `Shift`                              | sprint, 5x                                                                  |
+| `-` / `=`                            | movement speed down / up, 0.5 to 64 m/s                                     |
+| `R`                                  | back to the spawn point                                                     |
+| `1` to `9`, scroll                   | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps |
+| hold left                            | remove fire first, then solid, then source                                  |
+| `Ctrl`/`Cmd`+`Z`                     | undo the last direct player edit                                            |
+| `Ctrl`/`Cmd`+`Shift`+`Z`, `Ctrl`+`Y` | redo an undone edit                                                         |
+| right click                          | place the held solid, fluid source, or fire on fuel                         |
+| `F`                                  | cycle the held solid through its Shapes                                     |
+| `Q` / `E`                            | turn the held shape a quarter / flip which way is up                        |
+| `Tab`                                | open or close the tile menu; closing grabs the cursor                       |
+| `X`                                  | empty the hand without changing any slot                                    |
+| middle click / `P`                   | sample the aimed Voxel into the hand without removing it                    |
+| `I` / info button                    | show or hide controls                                                       |
+| `F3`                                 | show or hide diagnostics in a dev build                                     |
 
-The hotbar starts with stone, a stone slab, stair and post, lantern, glass and
-leaves, then the Game's lake fluid (or its first declared fluid) and fire when
-anything burns. A slot left over is empty: a click does nothing and a right
-click breaks. A right click is the secondary button, a two-finger tap on a Mac
-trackpad. The corner of the screen names the held slot and what each button does
-with it.
+The hotbar starts with the Game's ground rock as a cube, slab, stair and post,
+then other declared solids until seven slots are filled, then its lake fluid (or
+first declared fluid), and fire when anything burns. Remaining slots are empty.
+Without a Game all nine squares are empty. X enters empty hand without changing
+any assigned slot; selecting a slot restores its item. Empty hand has no held
+model or placement ghost. Holding left still removes; right click does nothing.
+Middle click or P samples a solid's Material, Shape and orientation, or a fluid,
+through the Server without changing the World. Physical pickup and inventory
+remain later work. Breaking a waterlogged solid leaves its fluid. A right click
+is the secondary button, a two-finger tap on a Mac trackpad.
 
-The menu lists every solid Material, then the Shapes of the one chosen, every
-fluid, and fire when anything burns, each by its full name beside its colour.
-While it is open the cursor is free: the mouse does not look around and a click
-edits nothing. Clicking a slot in the menu's bar selects it.
+The menu shows square model tiles for solids, the Shapes of the last hovered
+solid, fluids and fire in a vertically scrollable selection area. The nine quick
+slots stay fixed at the bottom centre. Hovering a tile highlights it; the
+selected slot keeps its white border. The wheel and trackpad browse items while
+the menu is open. Clicking an item holds it outside the slots and closes the
+menu. Drag an item onto a slot to assign it, or drag one slot onto another to
+swap. Its model follows the pointer, an accepting slot highlights green, and
+dropping updates the slot's model immediately. Press 1 to 9 over an item to
+assign that slot without moving selection. Clicking a slot selects it and keeps
+the menu open. Selecting a slot by key or click, or scrolling during play,
+returns from an outside item.
+
+Removal needs a deliberate hold, default 350 ms. A progress bar sits above the
+target; release or a changed target resets it, and each hold removes only once.
+Games and Mods can set `remove-time-s` per Material from 0.05 to 60 seconds;
+older contract lines use the default. During removal the placement ghost hides.
+Undo/redo keeps the last 128 direct player edits for this session. It restores
+only the edited cell, without rewinding fluid or fire simulation elsewhere. A
+changed cell or a regenerated Chunk is refused with visible feedback; a refusal
+keeps the entry at the top of its stack. A new successful edit clears redo.
+
+An outline marks the Server's remove target, a translucent ghost shows an
+accepted placement with a right-click cue, and a small corner model shows the
+held Shape and its orientation. Fire has no ghost. Previews hide in the menu.
+The Client draws these from content and Server answers and never reads a Chunk.
+The held name sits above the square play bar. The controls panel starts hidden;
+I or the bottom-right information button toggles it. F3 independently toggles
+the dev chunk/FPS readout, also hidden by default. Edit rejections stay visible
+when help is closed. Games supply one pixel texture per Material through
+appearance data. The same texture is used by placed Voxels, generated terrain,
+menu and hotbar tiles, drag feedback, held models and the placement ghost. The
+ghost shows that texture at 75 percent opacity. The last compatible Server aim
+answer remains visible briefly while the next arrives, so movement snaps between
+accepted cells without flickering between them. Expired, out-of-order or
+incompatible answers are hidden. Missing textures use the Material's colour. The
+demo supplies distinct textures for every Material, and fire has a flame
+silhouette.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.

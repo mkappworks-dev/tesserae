@@ -4,8 +4,7 @@ use super::*;
 use bevy::platform::collections::HashMap;
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::light::light_cells;
-use tesserae_core::testgen::register_water;
-use tesserae_core::worldgen::{LANTERN, STONE};
+
 use tesserae_core::{Burn, Burning, CombustionDef, Fluid, MaterialId, Occupants};
 
 const Y: i32 = -16;
@@ -17,7 +16,7 @@ const ROCK: ChunkCoord = ChunkCoord::new(0, -1, 0);
 const EAST: ChunkCoord = ChunkCoord::new(1, -1, 0);
 
 fn stone() -> Voxel {
-    Voxel::cube(STONE)
+    Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
 }
 
 fn occupy(h: &mut Harness, at: [i32; 3], occupants: Occupants) {
@@ -46,8 +45,8 @@ fn place(h: &mut Harness, at: [i32; 3], voxel: Voxel) {
     );
 }
 
-fn with_water(mut tables: Tables) -> (Harness, MaterialId) {
-    let water = register_water(&mut tables);
+fn with_water(tables: Tables) -> (Harness, MaterialId) {
+    let water = tesserae_core::testgen::fixtures().water;
     let mut h = Harness::new(small(), UNLIMITED);
     h.app.insert_resource(ContentTables(Arc::new(tables)));
     (h, water)
@@ -147,7 +146,7 @@ fn fixed_point_cells(h: &Harness) -> HashMap<ChunkCoord, ChunkLight> {
 /// on its neighbourhood's light, are both meshed while the water still moves.
 #[test]
 fn a_solve_beside_water_that_never_stops_changing_lands_and_both_are_meshed() {
-    let (mut h, fixture) = with_water(Arc::unwrap_or_clone(ContentTables::default().0));
+    let (mut h, fixture) = with_water(crate::server::fixture_tables());
     h.settle();
     tunnel(&mut h, 4, 20);
     h.settle();
@@ -193,10 +192,10 @@ fn a_solve_beside_water_that_never_stops_changing_lands_and_both_are_meshed() {
 /// Each time the light ends where a fresh solve of the final cells puts it.
 #[test]
 fn a_solve_whose_neighbours_plane_dims_or_brightens_meanwhile_does_not_land() {
-    let mut burning_stone = Tables::builtin();
+    let mut burning_stone = crate::server::fixture_tables();
     burning_stone
         .register_combustion(
-            STONE,
+            tesserae_core::testgen::fixtures().ground.rock,
             CombustionDef {
                 threshold: 6,
                 ignition_delay_s: 2.0,
@@ -294,7 +293,11 @@ fn light_moving_on_a_boundary_plane_redraws_the_chunk_it_shades() {
         held.insert(m.coord, m.mesh);
     }
 
-    place(&mut h, [edge - 3, Y, Z], Voxel::cube(LANTERN));
+    place(
+        &mut h,
+        [edge - 3, Y, Z],
+        Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+    );
     let east_light = |h: &Harness| h.store().light(EAST).unwrap().clone();
     let before = east_light(&h);
     for m in h.settle().0 {
@@ -322,7 +325,7 @@ fn light_moving_on_a_boundary_plane_redraws_the_chunk_it_shades() {
 /// current.
 #[test]
 fn water_changing_on_a_boundary_every_tick_is_meshed_on_both_sides_and_settles() {
-    let (mut h, fixture) = with_water(Arc::unwrap_or_clone(ContentTables::default().0));
+    let (mut h, fixture) = with_water(crate::server::fixture_tables());
     h.settle();
     let edge = CHUNK_SIZE as i32 - 1;
     tunnel(&mut h, edge - 6, edge + 6);
@@ -378,12 +381,16 @@ fn water_changing_on_a_boundary_every_tick_is_meshed_on_both_sides_and_settles()
 /// its mesh follows, and the light is what a fresh solve gives.
 #[test]
 fn a_solve_spoilt_every_tick_by_its_neighbours_plane_still_lands() {
-    let (mut h, fixture) = with_water(Arc::unwrap_or_clone(ContentTables::default().0));
+    let (mut h, fixture) = with_water(crate::server::fixture_tables());
     h.settle();
     let edge = CHUNK_SIZE as i32 - 1;
     tunnel(&mut h, edge - 4, edge);
     place(&mut h, [edge + 1, Y, Z], stone());
-    place(&mut h, [edge - 4, Y, Z], Voxel::cube(LANTERN));
+    place(
+        &mut h,
+        [edge - 4, Y, Z],
+        Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+    );
     h.settle();
     assert!(
         h.store().light_at([edge, Y, Z]).block() > 0,

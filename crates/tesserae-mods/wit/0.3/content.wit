@@ -36,6 +36,8 @@ interface content {
         render: render-class,
         /// Whether a body collides with it and the edit ray stops on it.
         solid: bool,
+        /// Hold-to-remove duration, 0.05 to 60 seconds; none uses 0.35.
+        remove-time-s: option<f32>,
     }
 
     /// One Shape. The engine registers it under `<mod id>:<name>`, derives its
@@ -50,12 +52,16 @@ interface content {
     }
 
     /// A placeholder colour for one of this Mod's Materials, read by the
-    /// Client's flat palette until a Look pack replaces it. A Material with none
-    /// is drawn magenta.
+    /// Client's flat palette until a Look pack replaces it, plus optional
+    /// shared texture artwork. A Material with none is drawn magenta.
     record appearance {
         /// The Material's local name.
         material: string,
         color: srgba,
+        /// Optional RGBA atlas shared by World and item rendering: 48 by 16
+        /// pixels, three 16 by 16 tiles across, in top / side / bottom order.
+        /// Exactly 3072 bytes; sRGB colour with straight alpha.
+        texture: option<list<u8>>,
     }
 
     /// Cave carving. The engine feeds it to native generation unchanged once
@@ -82,10 +88,18 @@ interface content {
         material: string,
     }
 
+    /// Ground Materials by full name, resolved after every Mod has declared.
+    /// Each must be a registered solid without a fluid row.
+    record ground-params {
+        rock: string,
+        soil: string,
+        surface: string,
+    }
+
     /// Terrain generation parameters, field for field the engine's own. Only the
     /// Game may set them; the engine rejects non-finite or out-of-range values.
-    /// An absent cave, smoothing or water record means none, not the default;
-    /// the engine's default has no water.
+    /// Absent cave, smoothing, water and ground records mean none, not defaults.
+    /// The engine's default has neither ground nor water; water requires ground.
     record world-params {
         sea-level-m: f32,
         relief-m: f32,
@@ -95,6 +109,7 @@ interface content {
         caves: option<cave-params>,
         smoothing: option<smoothing-params>,
         water: option<water-params>,
+        ground: option<ground-params>,
     }
 
     /// How far the Client streams, in metres. Only the Game may set it; the
@@ -226,6 +241,7 @@ interface content {
     record declaration {
         materials: list<material-def>,
         shapes: list<shape-def>,
+        /// At most 64 rows; texture pixel lengths are validated before use.
         appearance: list<appearance>,
         /// `none` keeps the engine's default; `some` replaces it whole.
         %world: option<world-params>,

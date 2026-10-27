@@ -100,10 +100,9 @@ Orange is untrusted and sandboxed. Blue is ours. Dashed grey is third party.
 
 The engine owns how things behave; a Mod's Declaration says which Materials
 behave that way, and with what numbers. The engine has no water, lava, wood or
-mud; those are the demo Game's. Its built-in Materials are air, stone, dirt,
-grass, lantern, glass and leaves, and it has no fluid row of its own, so lakes
-are filled with whichever fluid the Game names
-([ADR-0015](adr/0015-water-is-game-content.md)).
+mud; those are the demo Game's. Its only built-in Material is air. The Game
+names the rock, soil and surface of its ground and the fluid filling its lakes
+([ADR-0016](adr/0016-only-air-is-built-in.md)).
 
 | Behaviour              | The engine decides                                                      | Data that switches it on, and who declares it                    |
 | ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -113,9 +112,43 @@ are filled with whichever fluid the Game names
 | Two fluids react       | How a Contact is found and applied whole or not at all                  | A reaction row, from a Mod: the demo's lava and water make stone |
 | Heat sets fuel alight  | Exposure through open space, ignition delay, burning and its residue    | A fluid's or a fuel's heat and a combustion row, from a Mod      |
 
-So a World with no Game is dry: nothing flows, burns or reacts, and it has no
-lakes. See [ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
+A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See
+[ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
 [ADR-0012](adr/0012-mods-declare-once-and-command-in-batches.md).
+
+The Client sends aim reports beside edit intents. The Server answers with metre
+outline bounds and an acceptable ghost cell through the edit resolver. The
+Client meshes held Shapes from catalogue geometry and draws the outline, ghost
+and corner model. The menu, hotbar and drag follower share a cached model atlas
+from the same geometry. Games supply one optional, bounded texture per Material
+through the Declaration's appearance rows. One GPU texture atlas is shared by
+World surfaces and item models; the Client draws it without naming Materials.
+Greedy terrain faces repeat per Voxel, and colour, depth and shadow passes use
+the same texture alpha. Older contract lines retain colour fallback. Fire uses
+engine flame artwork. The placement ghost uses the held model at 75 percent
+opacity. The Client tracks a bounded history of aim requests and accepts
+monotonic Server replies; it retains a compatible answer for at most 200 ms
+while waiting for the next. Item changes, large turns or Eye displacement hide
+it immediately. Sampling a Voxel is a separate read-only Server intent, not an
+Edit; the Client applies a reply only if its hand selection has not changed. UI
+atlas images use premultiplied blending to preserve transparency. No preview
+reads World storage.
+
+The Server also supplies removal target identity and bounds. The Client draws a
+progress bar above it and sends a guarded removal after the Material's hold
+time. This is a gesture guard, not a network anti-cheat timer. The unreleased
+0.3 Material Declaration carries optional `remove-time-s`, validated from 0.05
+to 60 seconds and defaulting to 350 ms, published in the content catalogue. Core
+tables and simulation retain no input timing. The Server compares target
+identity again before applying the removal.
+
+Undo/redo owns at most 128 before/after Occupants entries and 16 queued requests
+on the integrated Server. It checks Chunk Lifetime, settled light and exact
+current Occupants before replaying through the normal change, light, mesh and
+simulation wake path. Successful replay publishes inverse or forward Mod edit
+events. New successful changes clear redo; refusals preserve history and World
+state. Simulation consequences elsewhere are not rewound. Multiplayer history
+ownership remains part of the network transport work.
 
 ## The three invariants this diagram exists to protect
 
@@ -195,8 +228,8 @@ tesserae/
 │           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
-│           │   ├── edit.rs         place/break intents, hotbar, crosshair   ▸ 5
-│           │   └── menu.rs         the picker that fills a hotbar slot      ▸ 8
+│           │   ├── edit.rs         place/remove intents, hotbar, crosshair   ▸ 5
+│           │   └── menu.rs         tile menu and square play bar      ▸ 8
 │           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9

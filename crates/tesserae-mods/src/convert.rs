@@ -141,6 +141,7 @@ pub(crate) fn world_params(
         smoothing: p.smoothing.map(|s| SmoothingParams {
             min_rise_m: s.min_rise_m,
         }),
+        ground: None,
         water: None,
     };
     (terrain, p.water)
@@ -166,6 +167,7 @@ pub(crate) fn engine_world_params() -> content::WorldParams {
         smoothing: p.smoothing.map(|s| content::SmoothingParams {
             min_rise_m: s.min_rise_m,
         }),
+        ground: None,
         water: None,
     }
 }

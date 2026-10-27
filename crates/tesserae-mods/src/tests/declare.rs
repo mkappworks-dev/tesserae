@@ -17,6 +17,7 @@ fn material(name: &str) -> content::MaterialDef {
         dimming: 15,
         occlusion: content::Occlusion::Opaque,
         render: content::RenderClass::Opaque,
+        remove_time_s: None,
         solid: true,
     }
 }
@@ -81,7 +82,7 @@ fn two_mods_register_in_load_order_after_the_built_ins() {
     assert_eq!(load.registry.id_of(Kind::Shape, "a:s"), Some(4));
     assert_eq!(load.registry.id_of(Kind::Shape, "a:t"), Some(5));
     assert_eq!(load.registry.id_of(Kind::Shape, "b:u"), Some(6));
-    assert_eq!(load.registry.id_of(Kind::Material, "core:leaves"), Some(6));
+    assert_eq!(load.registry.id_of(Kind::Material, "core:leaves"), None);
     assert_eq!(load.registry.id_of(Kind::Material, "core:water"), None);
     assert_eq!(load.registry.id_of(Kind::Shape, "core:post"), Some(3));
     assert_eq!(load.tables.materials.len(), 11);
@@ -141,15 +142,7 @@ fn the_built_ins_are_ids_0_to_6_and_7_is_never_listed() {
     let builtin = Registry::builtin();
     assert_eq!(
         builtin.names(Kind::Material).collect::<Vec<_>>(),
-        [
-            (0, "core:air"),
-            (1, "core:stone"),
-            (2, "core:dirt"),
-            (3, "core:grass"),
-            (4, "core:lantern"),
-            (5, "core:glass"),
-            (6, "core:leaves"),
-        ]
+        [(0, "core:air"),]
     );
     assert_eq!(builtin.len(Kind::Material), 8);
     assert_eq!(builtin.id_of(Kind::Material, ""), None);
@@ -363,7 +356,7 @@ fn a_bad_row_after_a_good_one_registers_nothing_of_its_names() {
     let mut load = Load::new();
     load.apply("a", declaring(&["ok", "Bad"], &[])).unwrap_err();
     assert_eq!(load.tables.materials.len(), 8);
-    assert_eq!(names(&load.registry, Kind::Material).len(), 7);
+    assert_eq!(names(&load.registry, Kind::Material).len(), 1);
 }
 
 #[test]
@@ -533,7 +526,16 @@ fn the_reach_is_checked_in_metres() {
 #[test]
 fn the_engines_default_world_converts_and_validates() {
     let (back, lake) = crate::convert::world_params(crate::convert::engine_world_params());
-    assert_eq!((back, lake), (WorldgenParams::default(), None));
+    assert_eq!(
+        (back, lake),
+        (
+            WorldgenParams {
+                ground: None,
+                ..WorldgenParams::default()
+            },
+            None
+        )
+    );
     assert_eq!(back.validate(), Ok(()));
 }
 
@@ -630,5 +632,74 @@ fn the_demo_fence_and_pipe_declared_as_data_register_as_the_core_examples_do() {
             derived(&native, id),
             "shape {id}"
         );
+    }
+}
+
+#[test]
+fn preview_texture_payloads_are_bounded_and_name_the_invalid_appearance_row() {
+    let row = |texture| content::Appearance {
+        material: "rock".into(),
+        color: types::Srgba {
+            r: 120,
+            g: 100,
+            b: 80,
+            a: 255,
+        },
+        texture,
+    };
+    for len in [
+        0,
+        1024,
+        crate::MATERIAL_TEXTURE_BYTES - 1,
+        crate::MATERIAL_TEXTURE_BYTES + 1,
+    ] {
+        let mut d = declaring(&["rock"], &[]);
+        d.appearance.push(row(Some(vec![0; len])));
+        let error = Load::new().apply("skin", d).unwrap_err();
+        assert!(matches!(error,ModError::MaterialTexture { row:0,bytes,.. } if bytes==len));
+        let message = error.to_string();
+        assert!(message.contains("appearance 0 `rock`"), "{message}");
+        assert!(message.contains("3072"), "{message}");
+    }
+    for preview in [None, Some(vec![255; crate::MATERIAL_TEXTURE_BYTES])] {
+        let mut d = declaring(&["rock"], &[]);
+        d.appearance.push(row(preview));
+        assert!(Load::new().apply("skin", d).is_ok());
+    }
+    let mut d = declaring(&["rock"], &[]);
+    d.appearance = (0..65).map(|_| row(None)).collect();
+    assert!(matches!(
+        Load::new().apply("skin", d),
+        Err(ModError::TooManyRows {
+            what: "appearance",
+            max: 64,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn material_removal_time_is_validated_and_defaults_for_absent_metadata() {
+    use std::time::Duration;
+    for (seconds, expected) in [
+        (None, Duration::from_millis(350)),
+        (Some(0.05), Duration::from_secs_f32(0.05)),
+        (Some(60.0), Duration::from_secs(60)),
+    ] {
+        let mut load = Load::new();
+        let mut declaration = declaring(&["stone"], &[]);
+        declaration.materials[0].remove_time_s = seconds;
+        let applied = load.apply("game", declaration).unwrap();
+        let id =
+            load.registry.id_of(Kind::Material, "game:stone").unwrap() as tesserae_core::MaterialId;
+        assert_eq!(applied.remove_times, vec![(id, expected)]);
+    }
+    for seconds in [0.0, -1.0, 0.049, 60.1, f32::NAN, f32::INFINITY] {
+        let mut declaration = declaring(&["stone"], &[]);
+        declaration.materials[0].remove_time_s = Some(seconds);
+        let error = Load::new().apply("game", declaration).unwrap_err();
+        assert!(matches!(error, ModError::RemoveTime { .. }));
+        let text = error.to_string();
+        assert!(text.contains("game:stone") && text.contains("0.05 to 60"));
     }
 }

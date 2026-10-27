@@ -479,23 +479,44 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    at all three sizes.
 
    **Step 8.1: water is Game content, and the player places anything declared.
-   Done.** The engine builds in no fluid: the built-in Materials are ids 0 to 6,
-   id 7 is retired and never reused, a Mod's Materials still start at 8, and a
-   World with no Game is dry
-   ([ADR-0015](docs/adr/0015-water-is-game-content.md)). A Game's lakes name
-   their fluid in contract line 0.3, which 0.2 and 0.1 components reach through
-   adapters; a 0.2 Game that asks for standing water opens dry with a warning.
-   The demo declares `demo:water` and lakes at 25.5 m, clear of its stage. A
-   player ignites fuel and puts fire out through the Edit path, under the same
-   rules and messages as a Mod's Commands, and a 0.3 Mod sees both as Edits. The
-   hotbar is built from a content catalogue the Server publishes, and a Tab menu
-   puts any declared solid in any of its Shapes, any fluid or fire into a slot.
-   `cargo dev` loads the in-repo demo once it is built, trusted for that run
-   only. Against main, interleaved thread-CPU-time runs put the meshing,
-   collide, LOD and fluids benches within noise; the one steady outlier,
-   `greedy_mesh/terrain_water` at +7%, is code layout, since its mesher is
-   unchanged and the same water at id 7 and id 8 costs the same in one binary.
-   Evidence: `.scratch/2026-10-25-phase-8.1-game-content/`.
+   Done.** At this step the engine built in no fluid and retired id 7; step 8.2
+   below retires the remaining solids. Mod Materials still start at 8. A World
+   with no Game became dry ([ADR-0015](docs/adr/0015-water-is-game-content.md)).
+   A Game's lakes name their fluid in contract line 0.3, which 0.2 and 0.1
+   components reach through adapters; a 0.2 Game that asks for standing water
+   opens dry with a warning. The demo declares `demo:water` and lakes at 25.5 m,
+   clear of its stage. A player ignites fuel and puts fire out through the Edit
+   path, under the same rules and messages as a Mod's Commands, and a 0.3 Mod
+   sees both as Edits. The hotbar is built from a content catalogue the Server
+   publishes, and a Tab menu puts any declared solid in any of its Shapes, any
+   fluid or fire into a slot. `cargo dev` loads the in-repo demo once it is
+   built, trusted for that run only. Against main, interleaved thread-CPU-time
+   runs put the meshing, collide, LOD and fluids benches within noise; the one
+   steady outlier, `greedy_mesh/terrain_water` at +7%, is code layout, since its
+   mesher is unchanged and the same water at id 7 and id 8 costs the same in one
+   binary. Evidence: `.scratch/2026-10-25-phase-8.1-game-content/`.
+
+   **Step 8.2: no built-in content but air. Done.** Air is the only engine
+   Material; ids 1 to 7 are retired and Mod ids still start at 8. The Game names
+   optional ground on the amended unreleased 0.3 contract; older lines warn and
+   have no ground. The demo declares its solids. Hotbar defaults and the gallery
+   read declared content. A single remove action, an item held outside the
+   slots, square menu and hotbar model tiles, and Server-answered aim previews
+   complete the player's content controls. Tiles share a content-only model
+   atlas, with one Game-supplied texture shared by World surfaces, previews and
+   translucent placement ghosts, plus a model that follows slot drags. The final
+   texture captures were reviewed and deleted; the controls follow-up was also
+   reviewed and its capture folder deleted. Help and diagnostics toggle
+   independently, targeting stays stable during movement, and X selects empty
+   hand with familiar mouse bindings. Deliberate removal has a progress bar and
+   a Mod-defined Material hold time; guarded Server undo/redo restores direct
+   player edits. Removal progress, placement cues and help were also reviewed
+   and their capture folder deleted. All 902 tests pass, and the interleaved
+   thread-CPU comparison against phase 8.1 main covers 115 rows. Same-binary
+   probes isolate id moves from layout shifts; unchanged meshing and coarse
+   derivation remain comparable. Results, outliers and exceptions are recorded
+   in ticket 13 of `.scratch/2026-10-26-phase-8.2-no-built-in-content/`. See
+   [ADR-0016](docs/adr/0016-only-air-is-built-in.md).
 
 9. Look-pack API, water shading, visual polish.
 10. Network transport. The `Player` and `PoseReport` are its first customers.

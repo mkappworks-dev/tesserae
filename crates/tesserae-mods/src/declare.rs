@@ -1,10 +1,13 @@
 //! A Declaration into `tesserae-core`'s tables and the Registry.
 
 use std::collections::HashSet;
+use std::time::Duration;
+
+pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
 use tesserae_core::{
-    AIR, Burn, CombustionDef, FluidDef, Heat, MaterialId, ParamError, Phase, Reactant, ReactionDef,
-    Side, Tables, WaterParams, WorldgenParams,
+    AIR, Burn, CombustionDef, FluidDef, GroundParams, Heat, MaterialId, ParamError, Phase,
+    Reactant, ReactionDef, Side, Tables, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -12,14 +15,16 @@ use crate::convert::world_params;
 use crate::error::ModError;
 use crate::registry::{Kind, Registry};
 
-/// The palette holds 64 colours and 8 are built in (`PALETTE_LEN`).
+/// The palette has 64 slots; ids 0 through 7 are reserved (`PALETTE_LEN`).
 pub const MAX_MATERIALS: usize = 56;
 /// A `ShapeId` is a `u8` and 4 are built in.
 pub const MAX_SHAPES: usize = 252;
 pub const MAX_PER_MOD: usize = 64;
-/// Fluid, reaction and fire rows one Mod may declare, each.
+/// Appearance, fluid, reaction and fire rows one Mod may declare, each.
 pub const MAX_BEHAVIOURS_PER_MOD: usize = 64;
 pub const MAX_NAME_BYTES: usize = 32;
+pub const MATERIAL_TEXTURE_EDGE: usize = 16;
+pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 3 * 4;
 
 /// The Game's view distance and level-of-detail reach, in metres.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -64,6 +69,9 @@ impl From<content::ViewParams> for ViewParams {
 /// every Mod's names before [`resolve`] registers them.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Applied {
+    pub remove_times: Vec<(MaterialId, Duration)>,
+    /// Validated appearance data, transferred without copying texture pixels.
+    pub appearance: Vec<content::Appearance>,
     /// With no lake: [`resolve`] returns the one it names.
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
@@ -79,6 +87,7 @@ pub struct Behaviour {
     reactions: Vec<content::ReactionDef>,
     combustion: Vec<content::CombustionDef>,
     lake: Option<content::WaterParams>,
+    ground: Option<content::GroundParams>,
 }
 
 /// Validates `declaration` and registers it after whatever `tables` and
@@ -110,6 +119,7 @@ pub fn apply(
     }
 
     for (what, count) in [
+        ("appearance", declaration.appearance.len()),
         ("fluid", declaration.fluids.len()),
         ("reaction", declaration.reactions.len()),
         ("combustion", declaration.combustion.len()),
@@ -120,6 +130,18 @@ pub fn apply(
                 what,
                 count,
                 max: MAX_BEHAVIOURS_PER_MOD,
+            });
+        }
+    }
+    for (row, appearance) in declaration.appearance.iter().enumerate() {
+        if let Some(pixels) = &appearance.texture
+            && pixels.len() != MATERIAL_TEXTURE_BYTES
+        {
+            return Err(ModError::MaterialTexture {
+                id: id(),
+                row,
+                name: appearance.material.clone(),
+                bytes: pixels.len(),
             });
         }
     }
@@ -136,6 +158,7 @@ pub fn apply(
         registry,
     )?;
 
+    let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
     if let Some(params) = world {
@@ -161,9 +184,22 @@ pub fn apply(
         })?;
     }
 
+    let mut remove_times = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Material, row, &material.name)?;
-        tables
+        let seconds = material.remove_time_s.unwrap_or(0.35);
+        if !(0.05..=60.0).contains(&seconds) {
+            return Err(ModError::RemoveTime {
+                id: id(),
+                row,
+                name,
+                seconds,
+            });
+        }
+        let duration = material
+            .remove_time_s
+            .map_or(DEFAULT_REMOVE_TIME, Duration::from_secs_f32);
+        let material_id = tables
             .materials
             .register(material.into())
             .map_err(|source| ModError::Material {
@@ -172,6 +208,7 @@ pub fn apply(
                 name: name.clone(),
                 source,
             })?;
+        remove_times.push((material_id, duration));
         registry.push(Kind::Material, name);
     }
     for (row, shape) in declaration.shapes.into_iter().enumerate() {
@@ -188,6 +225,8 @@ pub fn apply(
         registry.push(Kind::Shape, name);
     }
     Ok(Applied {
+        remove_times,
+        appearance: declaration.appearance,
         world,
         view,
         behaviour: Behaviour {
@@ -196,6 +235,7 @@ pub fn apply(
             reactions: declaration.reactions,
             combustion: declaration.combustion,
             lake,
+            ground,
         },
     })
 }
@@ -209,7 +249,7 @@ pub fn resolve(
     behaviours: Vec<Behaviour>,
     tables: &mut Tables,
     registry: &Registry,
-) -> Result<Option<WaterParams>, ModError> {
+) -> Result<(Option<GroundParams>, Option<WaterParams>), ModError> {
     for b in &behaviours {
         for (row, fluid) in b.fluids.iter().enumerate() {
             let material = lookup(b, registry, "fluid", row, &fluid.material)?;
@@ -296,13 +336,47 @@ pub fn resolve(
                 })?;
         }
     }
+    let mut ground = None;
+    for b in &behaviours {
+        if let Some(names) = &b.ground {
+            let material = |field, name: &str| {
+                registry
+                    .id_of(Kind::Material, name)
+                    .map(|id| id as MaterialId)
+                    .ok_or_else(|| ModError::Params {
+                        id: b.mod_id.clone(),
+                        what: "world",
+                        source: ParamError {
+                            field,
+                            rule: "names no registered Material",
+                        },
+                    })
+            };
+            let resolved = GroundParams {
+                rock: material("ground.rock", &names.rock)?,
+                soil: material("ground.soil", &names.soil)?,
+                surface: material("ground.surface", &names.surface)?,
+            };
+            WorldgenParams {
+                ground: Some(resolved),
+                ..WorldgenParams::default()
+            }
+            .validate_ground(tables)
+            .map_err(|source| ModError::Params {
+                id: b.mod_id.clone(),
+                what: "world",
+                source,
+            })?;
+            ground = Some(resolved);
+        }
+    }
     let mut lake = None;
     for b in &behaviours {
         if let Some(water) = &b.lake {
-            lake = Some(resolve_lake(b, water, tables, registry)?);
+            lake = Some(resolve_lake(b, water, ground, tables, registry)?);
         }
     }
-    Ok(lake)
+    Ok((ground, lake))
 }
 
 /// The lake's fluid by id, refused as [`WorldgenParams::validate_lake`]
@@ -310,6 +384,7 @@ pub fn resolve(
 fn resolve_lake(
     b: &Behaviour,
     water: &content::WaterParams,
+    ground: Option<GroundParams>,
     tables: &Tables,
     registry: &Registry,
 ) -> Result<WaterParams, ModError> {
@@ -331,6 +406,7 @@ fn resolve_lake(
     };
     WorldgenParams {
         water: Some(lake),
+        ground,
         ..WorldgenParams::default()
     }
     .validate_lake(tables)

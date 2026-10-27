@@ -104,6 +104,18 @@ pub enum ModError {
         api: String,
         exported: &'static str,
     },
+    RemoveTime {
+        id: String,
+        row: usize,
+        name: String,
+        seconds: f32,
+    },
+    MaterialTexture {
+        id: String,
+        row: usize,
+        name: String,
+        bytes: usize,
+    },
     TooManyRows {
         id: String,
         what: &'static str,
@@ -145,6 +157,15 @@ pub enum ModError {
 impl fmt::Display for ModError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ModError::RemoveTime {
+                id,
+                row,
+                name,
+                seconds,
+            } => write!(
+                f,
+                "Mod `{id}` Material row {row} `{name}` removal time {seconds} must be finite and from 0.05 to 60 seconds"
+            ),
             ModError::Io { who, path, source } => {
                 write!(f, "mod `{who}`: {}: {source}", path.display())
             }
@@ -241,6 +262,16 @@ impl fmt::Display for ModError {
             ModError::LineMismatch { id, api, exported } => write!(
                 f,
                 "mod `{id}`: its Manifest says api {api}, but its component is built against {exported}"
+            ),
+            ModError::MaterialTexture {
+                id,
+                row,
+                name,
+                bytes,
+            } => write!(
+                f,
+                "mod `{id}`: appearance {row} `{name}`: texture has {bytes} bytes; expected {} RGBA bytes (top, side, bottom)",
+                crate::declare::MATERIAL_TEXTURE_BYTES,
             ),
             ModError::TooManyRows {
                 id,

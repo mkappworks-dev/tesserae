@@ -93,11 +93,13 @@ fn material(m: old::MaterialDef) -> content::MaterialDef {
             old::RenderClass::Blend => content::RenderClass::Blend,
             old::RenderClass::Cutout => content::RenderClass::Cutout,
         },
+        remove_time_s: None,
         solid: m.solid,
     }
 }
 
 fn world(p: old::WorldParams, log: &LogHandle) -> content::WorldParams {
+    log.push(LogLevel::Warn, "World parameters name no ground before contract line 0.3, so this World has no ground; name rock, soil and surface on 0.3");
     if let Some(water) = p.water {
         log.push(
             LogLevel::Warn,
@@ -123,6 +125,7 @@ fn world(p: old::WorldParams, log: &LogHandle) -> content::WorldParams {
         smoothing: p.smoothing.map(|s| content::SmoothingParams {
             min_rise_m: s.min_rise_m,
         }),
+        ground: None,
         water: None,
     }
 }
@@ -203,6 +206,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
             .into_iter()
             .map(|a| content::Appearance {
                 material: a.material,
+                texture: None,
                 color: types::Srgba {
                     r: a.color.r,
                     g: a.color.g,

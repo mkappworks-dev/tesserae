@@ -1151,7 +1151,7 @@ mod tests {
     use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{CHUNK_SIZE, ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample, worldgen};
+    use tesserae_core::{CHUNK_SIZE, ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample};
 
     static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
 
@@ -1400,7 +1400,7 @@ mod tests {
     }
 
     fn stone() -> Voxel {
-        Voxel::cube(worldgen::STONE)
+        Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
     }
 
     fn expected_cover(h: &Harness, chunk: ChunkCoord) -> Chunk {
@@ -1431,7 +1431,7 @@ mod tests {
 
     /// Built on its own so a mistake in `LodGenerators` is not shared with the expectation.
     fn source(j: u32) -> Worldgen {
-        let params = WorldgenParams::default();
+        let params = tesserae_core::testgen::world_params();
         let params = if j == 0 {
             params
         } else {
@@ -1459,7 +1459,7 @@ mod tests {
             Some((at, chunk)) if at == i => chunk,
             _ => &made[i],
         });
-        downsample(refs, &Tables::builtin().shapes)
+        downsample(refs, &crate::server::fixture_tables().shapes)
     }
 
     fn assert_holds_exactly_the_load_set(h: &Harness) {
@@ -1480,7 +1480,7 @@ mod tests {
 
     #[test]
     fn the_source_generators_sit_at_doubling_voxel_sizes_and_only_level_zero_smooths() {
-        let level_zero = Worldgen::new(world().seed, 1.0, WorldgenParams::default());
+        let level_zero = Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params());
         let sources = LodGenerators::new(&world(), &level_zero, LEVELS);
         assert_eq!(sources.levels(), LEVELS);
         assert!(sources.sources[0].params().smoothing.is_some());
@@ -1541,7 +1541,7 @@ mod tests {
     #[test]
     fn a_held_level_zero_child_is_used_in_its_octant() {
         let mut h = harness();
-        let lantern = Chunk::filled(Voxel::cube(worldgen::LANTERN));
+        let lantern = Chunk::filled(Voxel::cube(tesserae_core::testgen::fixtures().lantern));
         let origin = ChunkCoord::new(0, 0, 0);
         let edited = child(origin, 5);
         assert_eq!(edited, ChunkCoord::new(1, 0, 1));
@@ -1555,7 +1555,7 @@ mod tests {
         let half = CHUNK_SIZE / 2;
         assert_eq!(
             got.get(half + 2, 2, half + 2),
-            Voxel::cube(worldgen::LANTERN)
+            Voxel::cube(tesserae_core::testgen::fixtures().lantern)
         );
         assert!(same_chunk(got, &expected(1, origin, Some((5, &lantern)))));
         assert!(!same_chunk(got, &expected(1, origin, None)));
@@ -1563,7 +1563,7 @@ mod tests {
 
     #[test]
     fn the_job_uses_what_it_is_handed_and_generates_the_rest() {
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
         let source = source(0);
         let coord = ChunkCoord::new(2, -1, 3);
         let made = |i: usize| {
@@ -1583,7 +1583,9 @@ mod tests {
         });
         assert!(same_chunk(&run(&held_even), &all));
 
-        let lantern = Arc::new(Chunk::filled(Voxel::cube(worldgen::LANTERN)));
+        let lantern = Arc::new(Chunk::filled(Voxel::cube(
+            tesserae_core::testgen::fixtures().lantern,
+        )));
         let mut edited = held_even;
         edited[2] = Some(Held {
             chunk: Arc::clone(&lantern),
@@ -1605,7 +1607,7 @@ mod tests {
             })
             .collect();
         let refs: [&Chunk; 8] = std::array::from_fn(|i| if i == at { chunk } else { &made[i] });
-        downsample(refs, &Tables::builtin().shapes)
+        downsample(refs, &crate::server::fixture_tables().shapes)
     }
 
     #[test]
@@ -1772,7 +1774,9 @@ mod tests {
             .resource_mut::<LodJobs>()
             .generate
             .spawn((1, far), || {
-                packed(Chunk::filled(Voxel::cube(worldgen::LANTERN)))
+                packed(Chunk::filled(Voxel::cube(
+                    tesserae_core::testgen::fixtures().lantern,
+                )))
             });
         h.lod_settle();
         assert!(!h.lod_store().contains(1, far), "the far Chunk landed");
@@ -1789,7 +1793,9 @@ mod tests {
             .resource_mut::<LodJobs>()
             .generate
             .spawn((1, coord), || {
-                packed(Chunk::filled(Voxel::cube(worldgen::LANTERN)))
+                packed(Chunk::filled(Voxel::cube(
+                    tesserae_core::testgen::fixtures().lantern,
+                )))
             });
         h.lod_settle();
         let after = h.lod_store().shared(1, coord).unwrap();
@@ -1806,7 +1812,7 @@ mod tests {
         let coord = ChunkCoord::new(0, 0, 0);
         let before = h.lod_store().shared(1, coord).unwrap();
 
-        let lantern = Chunk::filled(Voxel::cube(worldgen::LANTERN));
+        let lantern = Chunk::filled(Voxel::cube(tesserae_core::testgen::fixtures().lantern));
         h.app
             .world_mut()
             .resource_mut::<ChunkStore>()
@@ -2072,8 +2078,12 @@ mod tests {
     fn a_coarse_mesh_has_no_shaped_voxel_geometry_though_its_children_do() {
         let mut h = harness();
         // A held child of stairs, which level 0 would give shaped geometry.
-        let stairs = Chunk::filled(Voxel::new(worldgen::STONE, SHAPE_STAIR, 5));
-        let tables = Tables::builtin();
+        let stairs = Chunk::filled(Voxel::new(
+            tesserae_core::testgen::fixtures().ground.rock,
+            SHAPE_STAIR,
+            5,
+        ));
+        let tables = crate::server::fixture_tables();
         let level_zero = mesh_chunk(
             LitChunk::new(&stairs, &OPEN_SKY),
             Default::default(),
@@ -2629,7 +2639,7 @@ mod tests {
 
     /// A coarse Chunk and its six neighbours, built as the Server builds them.
     fn chunks_around(coord: ChunkCoord, source: &Worldgen) -> (Shown, [Shown; 6]) {
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
         let make = |c: ChunkCoord| {
             shown(generate_coarse(
                 source,
@@ -2647,8 +2657,8 @@ mod tests {
     /// A Chunk of `rows` layers of water at `level`, alone in the air, meshed as the Server
     /// meshes it, under water standing at `level_m`.
     fn coarse_water(level: u32, rows: usize, level_m: Option<f32>) -> ChunkMesh {
-        let mut tables = Tables::builtin();
-        let water = tesserae_core::testgen::register_water(&mut tables);
+        let tables = crate::server::fixture_tables();
+        let water = tesserae_core::testgen::fixtures().water;
         let surface = Worldgen::new(
             world().seed,
             world().voxel_size,
@@ -2657,7 +2667,7 @@ mod tests {
                     level_m,
                     material: water,
                 }),
-                ..WorldgenParams::default()
+                ..tesserae_core::testgen::world_params()
             },
         );
         let mut center = Chunk::air();
@@ -2745,7 +2755,7 @@ mod tests {
             coord,
             &center,
             &around,
-            &Tables::builtin(),
+            &crate::server::fixture_tables(),
         )
     }
 
@@ -2765,7 +2775,7 @@ mod tests {
             WorldgenParams {
                 caves: None,
                 water: None,
-                ..WorldgenParams::default()
+                ..tesserae_core::testgen::world_params()
             },
         )
     }
@@ -2792,7 +2802,7 @@ mod tests {
     /// and the rest read cubes, as the Server builds them.
     #[test]
     fn ground_without_caves_is_lit_exactly_as_open_sky_at_every_level() {
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
         let mut state = 0x5eed_u64;
         let mut next = |range: i32| {
             state = state
@@ -2807,9 +2817,9 @@ mod tests {
                 // Ground, so no lake: water has light of its own (`coarse_light_in`).
                 water: None,
                 smoothing: (level == 1)
-                    .then(|| WorldgenParams::default().smoothing)
+                    .then(|| tesserae_core::testgen::world_params().smoothing)
                     .flatten(),
-                ..WorldgenParams::default()
+                ..tesserae_core::testgen::world_params()
             };
             let source = Worldgen::new(world().seed, 2f32.powi(level as i32 - 1), params);
             let cell_m = CHUNK_SIZE as f32 * 2f32.powi(level as i32);

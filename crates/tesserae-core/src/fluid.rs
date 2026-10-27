@@ -176,14 +176,14 @@ impl FluidTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material::RETIRED;
+    use crate::material::FIRST_MOD_ID;
     use crate::testgen::WATER_FLUID;
 
     #[test]
     fn no_fluid_is_built_in() {
         let table = FluidTable::builtin();
         assert_eq!(table.iter().count(), 0);
-        for material in 0..=RETIRED + 1 {
+        for material in 0..=FIRST_MOD_ID.saturating_sub(1) + 1 {
             assert!(!table.contains(material), "{material}");
         }
     }

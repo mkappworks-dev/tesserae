@@ -67,22 +67,77 @@ const MAX_PENDING: usize = 256;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EditAction {
-    /// Remove the Voxel the ray strikes.
-    Break,
+    /// Remove fire, then solid, then source at the first occupied Voxel.
+    Remove,
+    /// Complete a deliberate hold only if the ray still strikes this target.
+    RemoveAt(AimRemoval),
     /// Put this Voxel in the empty space in front of the face the ray strikes.
     Place(Voxel),
     /// Put a source of this fluid in front of the face the ray strikes. The ray
     /// stops at sources as well as solids and goes through flowing fluid.
     PlaceSource(MaterialId),
-    /// Take away the source the ray strikes, leaving any solid it shares the
-    /// Voxel with.
-    RemoveSource,
     /// Set the solid the ray strikes alight, by the rule a Mod's ignition
     /// meets.
     Ignite,
-    /// Put out the solid the ray strikes, by the rule a Mod's extinguish
-    /// meets.
-    PutOut,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AimItem {
+    Solid(Voxel),
+    Fluid(MaterialId),
+    Fire,
+}
+impl AimItem {
+    fn action(self) -> EditAction {
+        match self {
+            Self::Solid(voxel) => EditAction::Place(voxel),
+            Self::Fluid(material) => EditAction::PlaceSource(material),
+            Self::Fire => EditAction::Ignite,
+        }
+    }
+}
+
+#[derive(Message, Clone, Copy, Debug)]
+pub struct AimReport {
+    pub seq: u32,
+    pub origin: Vec3,
+    pub direction: Vec3,
+    pub held: Option<AimItem>,
+}
+#[derive(Message, Clone, Copy, Debug)]
+pub struct PickIntent {
+    pub seq: u32,
+    pub origin: Vec3,
+    pub direction: Vec3,
+}
+#[derive(Message, Clone, Copy, Debug)]
+pub struct PickedItem {
+    pub seq: u32,
+    pub item: Option<AimItem>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimBounds {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimRemoval {
+    pub at: [i32; 3],
+    pub bounds: AimBounds,
+    pub material: MaterialId,
+    pub burning: bool,
+}
+#[derive(Message, Clone, Copy, Debug, Default, PartialEq)]
+pub struct AimTarget {
+    pub seq: u32,
+    pub outline: Option<AimBounds>,
+    pub ghost: Option<Vec3>,
+    pub removal: Option<AimRemoval>,
+}
+#[derive(Resource, Default)]
+struct AimState {
+    latest: Option<(AimReport, f32)>,
 }
 
 /// What the Client wants done: an action, and the ray it wants it done along, in
@@ -131,6 +186,10 @@ pub enum RejectReason {
     NotBurning,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,
+    NoUndo,
+    NoRedo,
+    HistoryChanged,
+    TargetChanged,
 }
 
 impl RejectReason {
@@ -157,6 +216,10 @@ impl RejectReason {
             RejectReason::Wet => "it is too wet to burn",
             RejectReason::NotBurning => "nothing is burning there",
             RejectReason::Busy => "the server is busy, try again",
+            RejectReason::NoUndo => "nothing to undo",
+            RejectReason::NoRedo => "nothing to redo",
+            RejectReason::HistoryChanged => "that cell changed; cannot undo or redo it",
+            RejectReason::TargetChanged => "removal target changed; hold again",
         }
     }
 }
@@ -197,7 +260,6 @@ struct Pending {
 #[derive(Resource, Default)]
 pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
 
-#[cfg(test)]
 impl PendingEdits {
     pub(in crate::server) fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -205,20 +267,198 @@ impl PendingEdits {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<PendingEdits>()
+    app.init_resource::<super::undo::Journal>()
+        .add_message::<super::undo::HistoryAction>()
+        .add_message::<super::undo::HistoryApplied>()
+        .init_resource::<AimState>()
+        .add_message::<AimReport>()
+        .add_message::<AimTarget>()
+        .add_message::<PickIntent>()
+        .add_message::<PickedItem>()
+        .init_resource::<PendingEdits>()
         .init_resource::<super::mods::EditHistory>()
         .add_message::<EditIntent>()
         .add_message::<EditRejected>()
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_systems(
             RunFixedMainLoop,
-            receive
+            (receive, receive_aim, pick, super::undo::receive)
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
                 .after(player::PlayerInput),
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
-        .add_systems(FixedPreUpdate, apply_pending);
+        .add_systems(
+            FixedPreUpdate,
+            (
+                apply_pending,
+                super::undo::apply.before(super::mods::Drain),
+                answer_aim,
+            )
+                .chain(),
+        );
+}
+
+fn pick(
+    mut requests: MessageReader<PickIntent>,
+    mut answers: MessageWriter<PickedItem>,
+    store: Res<ChunkStore>,
+    tables: Res<ContentTables>,
+    world: Res<WorldSettings>,
+    player: Single<&Player>,
+) {
+    if let Some(request) = requests.read().last() {
+        answers.write(PickedItem {
+            seq: request.seq,
+            item: pick_item(&store, &tables, &world, *request, player.eye()),
+        });
+    }
+}
+fn pick_item(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    request: PickIntent,
+    eye: Vec3,
+) -> Option<AimItem> {
+    let intent = EditIntent {
+        origin: request.origin,
+        direction: request.direction,
+        action: EditAction::Remove,
+    };
+    let distance = vet_origin(&intent, eye).ok()?;
+    let (at, _) = resolve(store, tables, world, &intent, EDIT_REACH_M - distance).ok()?;
+    let here = store.occupants(at, &tables.fluids)?;
+    if !here.solid.is_air() {
+        Some(AimItem::Solid(here.solid))
+    } else {
+        here.fluid.map(|fluid| AimItem::Fluid(fluid.material))
+    }
+}
+
+fn receive_aim(
+    mut reports: MessageReader<AimReport>,
+    mut state: ResMut<AimState>,
+    player: Single<&Player>,
+) {
+    for report in reports.read() {
+        if state
+            .latest
+            .is_some_and(|(last, _)| report.seq.wrapping_sub(last.seq) as i32 <= 0)
+        {
+            continue;
+        }
+        let intent = EditIntent {
+            origin: report.origin,
+            direction: report.direction,
+            action: EditAction::Remove,
+        };
+        if let Ok(distance) = vet_origin(&intent, player.eye()) {
+            state.latest = Some((*report, EDIT_REACH_M - distance));
+        }
+    }
+}
+
+fn answer_aim(
+    state: Res<AimState>,
+    store: Res<ChunkStore>,
+    tables: Res<ContentTables>,
+    world: Res<WorldSettings>,
+    meshes: Res<MeshState>,
+    mut targets: MessageWriter<AimTarget>,
+) {
+    if let Some((report, reach)) = state.latest {
+        targets.write(aim_target(&store, &tables, &world, &meshes, report, reach));
+    }
+}
+
+fn aim_target(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    meshes: &MeshState,
+    report: AimReport,
+    reach: f32,
+) -> AimTarget {
+    let intent = |action| EditIntent {
+        action,
+        origin: report.origin,
+        direction: report.direction,
+    };
+    let remove = resolve(store, tables, world, &intent(EditAction::Remove), reach).ok();
+    let place = report
+        .held
+        .and_then(|held| resolve(store, tables, world, &intent(held.action()), reach).ok());
+    let outline_at = if report.held == Some(AimItem::Fire) {
+        place.map(|(at, _)| at)
+    } else {
+        remove.map(|(at, _)| at)
+    };
+    let removal = remove.and_then(|(at, _)| removal_target(store, tables, world, at));
+    let outline = outline_at
+        .and_then(|at| removal_target(store, tables, world, at))
+        .map(|r| r.bounds);
+    let ghost = place
+        .filter(|_| report.held != Some(AimItem::Fire))
+        .and_then(|(at, change)| {
+            if meshes.is_unlit(VoxelCoord::of(at).chunk) {
+                return None;
+            }
+            let here = store.occupants(at, &tables.fluids)?;
+            let next = match change {
+                Change::Solid(voxel) => here.place_solid(voxel, tables),
+                Change::Occupants(next) => next,
+            };
+            tables.vet_occupants(next).ok()?;
+            vet_capacity(store, tables, at, next.solid).ok()?;
+            Some(Vec3::from_array(at.map(|i| i as f32 * world.voxel_size)))
+        });
+    AimTarget {
+        seq: report.seq,
+        removal,
+        outline,
+        ghost,
+    }
+}
+
+fn removal_target(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    at: [i32; 3],
+) -> Option<AimRemoval> {
+    let here = store.occupants(at, &tables.fluids)?;
+    let voxel = if here.solid.is_air() {
+        Voxel::cube(here.fluid?.material)
+    } else {
+        here.solid
+    };
+    let around = FACE_STEPS.map(|d| {
+        store
+            .voxel([at[0] + d[0], at[1] + d[1], at[2] + d[2]])
+            .unwrap_or(Voxel::AIR)
+    });
+    let connections = tables.shapes.connections(voxel, around);
+    let boxes = tables.shapes.selection(voxel, connections);
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for b in boxes {
+        min = min.min(Vec3::from_array(b.min.map(f32::from)));
+        max = max.max(Vec3::from_array(b.max.map(f32::from)));
+    }
+    if boxes.is_empty() {
+        return None;
+    }
+    let origin = Vec3::from_array(at.map(|i| i as f32 * world.voxel_size));
+    Some(AimRemoval {
+        at,
+        material: voxel.material(),
+        burning: here.burning.is_some(),
+        bounds: AimBounds {
+            min: origin + min * (world.voxel_size / 16.0),
+            max: origin + max * (world.voxel_size / 16.0),
+        },
+    })
 }
 
 pub(in crate::server) fn receive(
@@ -265,7 +505,10 @@ fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<f32, RejectReason> {
 
 pub(in crate::server) fn apply_pending(
     mut pending: ResMut<PendingEdits>,
-    mut history: ResMut<super::mods::EditHistory>,
+    (mut history, mut journal): (
+        ResMut<super::mods::EditHistory>,
+        ResMut<super::undo::Journal>,
+    ),
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
     mut rejected: MessageWriter<EditRejected>,
@@ -300,18 +543,30 @@ pub(in crate::server) fn apply_pending(
                     .expect("the edited Chunk is held");
                 let kind = match (p.intent.action, change, intent_fluid(&was, &now)) {
                     (EditAction::Ignite, ..) => EditKind::Ignited(now.solid.material()),
-                    (EditAction::PutOut, ..) => EditKind::PutOut(now.solid.material()),
+                    (EditAction::Remove | EditAction::RemoveAt(_), ..) if was.burning.is_some() => {
+                        EditKind::PutOut(now.solid.material())
+                    }
                     (_, Change::Occupants(_), Some(kind)) => kind,
                     _ => EditKind::Solid {
                         before: was.solid,
                         after: now.solid,
                     },
                 };
-                history.record(tesserae_mods::EditEvent {
+                let event = tesserae_mods::EditEvent {
                     at: at.map(|i| i as f32 * world.voxel_size),
                     kind,
                     before,
                     after,
+                };
+                history.record(event);
+                journal.record(super::undo::Entry {
+                    at,
+                    lifetime: store
+                        .lifetime(VoxelCoord::of(at).chunk)
+                        .expect("the edited Chunk is held"),
+                    before: was,
+                    after: now,
+                    event,
                 });
                 Ok(())
             });
@@ -366,7 +621,7 @@ fn resolve(
     }
     let fluid_tool = matches!(
         intent.action,
-        EditAction::PlaceSource(_) | EditAction::RemoveSource
+        EditAction::PlaceSource(_) | EditAction::Remove | EditAction::RemoveAt(_)
     );
     if let EditAction::PlaceSource(material) = intent.action
         && !tables.fluids.contains(material)
@@ -387,6 +642,11 @@ fn resolve(
         stops,
     )
     .ok_or(RejectReason::OutOfReach)?;
+    if let EditAction::RemoveAt(expected) = intent.action
+        && removal_target(store, tables, world, hit.at) != Some(expected)
+    {
+        return Err(RejectReason::TargetChanged);
+    }
     let struck = || {
         store
             .occupants(hit.at, &tables.fluids)
@@ -400,7 +660,16 @@ fn resolve(
     ];
 
     match intent.action {
-        EditAction::Break => Ok((hit.at, Change::Solid(Voxel::AIR))),
+        EditAction::Remove | EditAction::RemoveAt(_) => {
+            let here = struck()?;
+            if here.burning.is_some() {
+                Ok((hit.at, Change::Occupants(extinguish(here)?)))
+            } else if !here.solid.is_air() {
+                Ok((hit.at, Change::Solid(Voxel::AIR)))
+            } else {
+                Ok((hit.at, Change::Occupants(without_source(here)?)))
+            }
+        }
         EditAction::Place(voxel) => {
             tables.vet_placed(voxel)?;
             match store.voxel(in_front) {
@@ -410,7 +679,6 @@ fn resolve(
                 Some(_) => Ok((in_front, Change::Solid(voxel))),
             }
         }
-        EditAction::RemoveSource => Ok((hit.at, Change::Occupants(without_source(struck()?)?))),
         EditAction::PlaceSource(material) => {
             // A Shape with room for fluid takes the source itself, keeping its
             // solid; anything else gets it in front of the face struck.
@@ -438,7 +706,6 @@ fn resolve(
             let wet = tesserae_core::fire::is_wet(store, tables, hit.at);
             Ok((hit.at, Change::Occupants(ignite(struck()?, wet, tables)?)))
         }
-        EditAction::PutOut => Ok((hit.at, Change::Occupants(extinguish(struck()?)?))),
     }
 }
 
@@ -587,21 +854,11 @@ pub(in crate::server) fn set_occupants(
     };
     let (voxel, overlay) = Occupants { solid, ..occupants }.encode(&tables.fluids);
 
-    // Net of what it replaces: swapping one shaped Voxel for another of the same
-    // cost at the cap is not adding one. Counted in stairs, a connected Shape
-    // being charged for its rails.
     let before = chunk.get(place.x, place.y, place.z);
     let was = store
         .occupants(at, &tables.fluids)
         .expect("the Chunk is held");
-    let added = tables.shapes.cap_units(voxel);
-    let removed = tables.shapes.cap_units(before);
-    if added > removed
-        && chunk.shaped_units(|v| tables.shapes.cap_units(v)) + (added - removed) as usize
-            > MAX_SHAPED_PER_CHUNK
-    {
-        return Err(RejectReason::TooManyShaped);
-    }
+    vet_capacity(store, tables, at, voxel)?;
 
     let seen = (store.optical(at), store.wet(at), store.burning(at));
     store.set_overlay(place, overlay);
@@ -661,6 +918,26 @@ pub(in crate::server) fn set_occupants(
     Ok(())
 }
 
+fn vet_capacity(
+    store: &ChunkStore,
+    tables: &Tables,
+    at: [i32; 3],
+    voxel: Voxel,
+) -> Result<(), RejectReason> {
+    let place = VoxelCoord::of(at);
+    let chunk = store.get(place.chunk).ok_or(RejectReason::NotLoaded)?;
+    let before = chunk.get(place.x, place.y, place.z);
+    let added = tables.shapes.cap_units(voxel);
+    let removed = tables.shapes.cap_units(before);
+    if added > removed
+        && chunk.shaped_units(|v| tables.shapes.cap_units(v)) + (added - removed) as usize
+            > MAX_SHAPED_PER_CHUNK
+    {
+        return Err(RejectReason::TooManyShaped);
+    }
+    Ok(())
+}
+
 /// The whole-Voxel Edit a player's click, a Mod's Command and a `dev` builder
 /// make: `voxel` applied to the solid layer by [`Occupants::place_solid`], then
 /// [`set_occupants`].
@@ -685,14 +962,13 @@ mod tests {
     use std::time::Duration;
     use tesserae_core::mesh::POS_X;
     use tesserae_core::shape::examples;
-    use tesserae_core::worldgen::{LANTERN, STONE};
     use tesserae_core::{
         Burning, CHUNK_SIZE, Chunk, ChunkLight, Fluid, LitChunk, Occupants, Orientation, Overlay,
         SHAPE_POST, SHAPE_STAIR, mesh_chunk,
     };
 
     use std::sync::{Arc, LazyLock};
-    use tesserae_core::testgen::{WATER_FLUID, register_water};
+    use tesserae_core::testgen::WATER_FLUID;
 
     use super::super::player::{Player, PoseReport};
     use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
@@ -700,8 +976,8 @@ mod tests {
     /// The Server's default tables with the fixture water: those of `app_with`,
     /// and what a test reading water outside an App holds.
     static WATERED: LazyLock<(Tables, MaterialId)> = LazyLock::new(|| {
-        let mut tables = Arc::unwrap_or_clone(ContentTables::default().0);
-        let water = register_water(&mut tables);
+        let tables = crate::server::fixture_tables();
+        let water = tesserae_core::testgen::fixtures().water;
         (tables, water)
     });
 
@@ -714,11 +990,15 @@ mod tests {
     }
 
     fn stone() -> Voxel {
-        Voxel::cube(STONE)
+        Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
     }
 
     fn stair() -> Voxel {
-        Voxel::shaped(STONE, SHAPE_STAIR, Orientation::IDENTITY)
+        Voxel::shaped(
+            tesserae_core::testgen::fixtures().ground.rock,
+            SHAPE_STAIR,
+            Orientation::IDENTITY,
+        )
     }
 
     /// Chunk (0, 0, 0) with stone filling y = 0..8, so the surface is at 8 m, and
@@ -816,7 +1096,7 @@ mod tests {
         let mut app = app_with(&[(origin(), ground())]);
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone());
 
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert!(voxel_at(&app, [5, 7, 5]).is_air());
 
@@ -840,15 +1120,15 @@ mod tests {
     }
 
     #[test]
-    fn the_ray_goes_through_water_so_break_takes_the_bed_and_place_replaces_the_water() {
+    fn remove_takes_the_surface_source_and_place_replaces_water() {
         let mut app = app_with(&[(origin(), pool())]);
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
+        assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "the bed stays");
         assert!(
-            voxel_at(&app, [5, 7, 5]).is_air(),
-            "the bed under the water"
+            voxel_at(&app, [5, 8, 5]).is_air(),
+            "the surface source goes"
         );
-        assert_eq!(voxel_at(&app, [5, 8, 5]).material(), water());
 
         let mut app = app_with(&[(origin(), pool())]);
         send(&mut app, down(EditAction::Place(stone())));
@@ -866,13 +1146,13 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
         set_voxel(
             &mut store,
             &mut meshes,
             &tables,
             [0, 0, 0],
-            Voxel::new(STONE, 0, 13),
+            Voxel::new(tesserae_core::testgen::fixtures().ground.rock, 0, 13),
         )
         .unwrap();
         assert_eq!(store.voxel([0, 0, 0]), Some(stone()));
@@ -883,19 +1163,19 @@ mod tests {
                 &mut meshes,
                 &tables,
                 [1, 0, 0],
-                Voxel::new(STONE, 0, 99)
+                Voxel::new(tesserae_core::testgen::fixtures().ground.rock, 0, 99)
             ),
             Err(RejectReason::BadOrientation)
         );
     }
 
     #[test]
-    fn a_material_the_table_does_not_hold_is_rejected_and_every_builtin_is_placed() {
+    fn retired_and_unknown_materials_are_rejected_and_registered_materials_are_placed() {
         let mut store = ChunkStore::default();
         store.insert(origin(), Chunk::air());
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
-        for unknown in [999, tesserae_core::material::RETIRED] {
+        let tables = crate::server::fixture_tables();
+        for unknown in std::iter::once(999).chain(tesserae_core::material::RETIRED_IDS) {
             assert_eq!(
                 set_voxel(
                     &mut store,
@@ -920,7 +1200,12 @@ mod tests {
     #[test]
     fn an_edit_re_floods_the_light_around_it() {
         let mut app = app_with(&[(origin(), ground())]);
-        send(&mut app, down(EditAction::Place(Voxel::cube(LANTERN))));
+        send(
+            &mut app,
+            down(EditAction::Place(Voxel::cube(
+                tesserae_core::testgen::fixtures().lantern,
+            ))),
+        );
         tick(&mut app);
         let store = app.world().resource::<ChunkStore>();
         assert_eq!(store.light_at([5, 8, 5]).block(), 15);
@@ -943,7 +1228,7 @@ mod tests {
         set_voxel(
             &mut store,
             &mut meshes,
-            &Tables::builtin(),
+            &crate::server::fixture_tables(),
             [last, 4, 4],
             Voxel::AIR,
         )
@@ -961,13 +1246,15 @@ mod tests {
     }
 
     fn fence_table() -> Tables {
-        let mut t = Tables::builtin();
-        assert_eq!(t.shapes.register(examples::fence()), Ok(examples::FENCE_ID));
-        t
+        crate::server::fixture_tables()
     }
 
     fn fence() -> Voxel {
-        Voxel::new(STONE, examples::FENCE_ID, 0)
+        Voxel::new(
+            tesserae_core::testgen::fixtures().ground.rock,
+            examples::FENCE_ID,
+            0,
+        )
     }
 
     /// How many quads `coord` would mesh to, with its neighbours as the store holds
@@ -1062,7 +1349,11 @@ mod tests {
     fn a_connected_shape_is_stored_without_the_orientation_it_ignores() {
         let table = fence_table();
         let mut app = app_with(&[(origin(), Chunk::air())]);
-        let turned = Voxel::new(STONE, examples::FENCE_ID, Orientation::new(POS_X, 3).bits());
+        let turned = Voxel::new(
+            tesserae_core::testgen::fixtures().ground.rock,
+            examples::FENCE_ID,
+            Orientation::new(POS_X, 3).bits(),
+        );
         edit_at(&mut app, &table, [5, 4, 5], turned);
         assert_eq!(voxel_at(&app, [5, 4, 5]), fence());
     }
@@ -1073,7 +1364,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
             .insert_resource(WorldSettings::default())
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins(plugin);
@@ -1083,7 +1374,7 @@ mod tests {
         app.world_mut().spawn(Player::at(DOWN_EYE));
         app.update();
 
-        app.world_mut().write_message(down(EditAction::Break));
+        app.world_mut().write_message(down(EditAction::Remove));
         // Three frames in which no time passes and so no fixed tick runs. A
         // reader inside the fixed loop would have lost the message by the second.
         for _ in 0..3 {
@@ -1109,7 +1400,7 @@ mod tests {
             (
                 EditIntent {
                     direction: Vec3::Y,
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
@@ -1117,14 +1408,14 @@ mod tests {
             (
                 EditIntent {
                     origin: Vec3::new(5.5, 30.0, 5.5),
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
             (
                 EditIntent {
                     origin: Vec3::NAN,
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
@@ -1133,11 +1424,19 @@ mod tests {
                 RejectReason::NoMaterial,
             ),
             (
-                down(EditAction::Place(Voxel::new(STONE, 200, 0))),
+                down(EditAction::Place(Voxel::new(
+                    tesserae_core::testgen::fixtures().ground.rock,
+                    200,
+                    0,
+                ))),
                 RejectReason::UnknownShape,
             ),
             (
-                down(EditAction::Place(Voxel::new(STONE, SHAPE_STAIR, 24))),
+                down(EditAction::Place(Voxel::new(
+                    tesserae_core::testgen::fixtures().ground.rock,
+                    SHAPE_STAIR,
+                    24,
+                ))),
                 RejectReason::BadOrientation,
             ),
         ];
@@ -1152,7 +1451,7 @@ mod tests {
     fn from(eye: Vec3) -> EditIntent {
         EditIntent {
             origin: eye,
-            ..down(EditAction::Break)
+            ..down(EditAction::Remove)
         }
     }
 
@@ -1184,7 +1483,7 @@ mod tests {
     #[test]
     fn the_origin_is_judged_when_the_intent_arrives_not_when_it_is_applied() {
         let mut app = app_with(&[(origin(), ground())]);
-        send_from_afar(&mut app, down(EditAction::Break));
+        send_from_afar(&mut app, down(EditAction::Remove));
 
         // The Player moves on while the intent waits for its Chunk's light.
         set_eye(&mut app, DOWN_EYE + Vec3::X * 100.0);
@@ -1204,7 +1503,7 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(WorldSettings::default())
             .insert_resource(SpawnPoint::new(Vec3::ZERO))
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins((plugin, super::super::player::plugin));
@@ -1245,7 +1544,7 @@ mod tests {
             .insert_resource(SpawnPoint::new(
                 DOWN_EYE + Vec3::new(10.0, -SPAWN_EYE_ALTITUDE_M, 0.0),
             ))
-            .init_resource::<ContentTables>()
+            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
             .init_resource::<ChunkStore>()
             .init_resource::<MeshState>()
             .add_plugins((plugin, super::super::player::plugin));
@@ -1254,7 +1553,7 @@ mod tests {
             .insert(origin(), ground());
         app.update();
 
-        app.world_mut().write_message(down(EditAction::Break));
+        app.world_mut().write_message(down(EditAction::Remove));
         app.world_mut().write_message(PoseReport {
             seq: 1,
             eye: DOWN_EYE,
@@ -1274,7 +1573,7 @@ mod tests {
             &mut app,
             EditIntent {
                 origin: Vec3::new(5.5, origin_y, 5.5),
-                ..down(EditAction::Break)
+                ..down(EditAction::Remove)
             },
         );
         tick(&mut app);
@@ -1313,9 +1612,14 @@ mod tests {
         // A post stands in the air a ray passes beside before striking the
         // ground, so the cell in front of the ground is taken without the ray
         // having noticed.
-        app.world_mut()
-            .resource_mut::<ChunkStore>()
-            .set_voxel(VoxelCoord::of([5, 8, 5]), Voxel::new(STONE, SHAPE_POST, 0));
+        app.world_mut().resource_mut::<ChunkStore>().set_voxel(
+            VoxelCoord::of([5, 8, 5]),
+            Voxel::new(
+                tesserae_core::testgen::fixtures().ground.rock,
+                SHAPE_POST,
+                0,
+            ),
+        );
         send(
             &mut app,
             EditIntent {
@@ -1374,7 +1678,7 @@ mod tests {
         let mut store = ChunkStore::default();
         store.insert(origin(), full);
         let mut meshes = MeshState::default();
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
 
         // Free space still exists above the stairs; another stair is refused...
         assert_eq!(
@@ -1387,7 +1691,11 @@ mod tests {
             Ok(())
         );
         // ...and replacing a stair with another is net zero.
-        let swapped = Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(POS_Y, 1));
+        let swapped = Voxel::shaped(
+            tesserae_core::testgen::fixtures().ground.rock,
+            SHAPE_STAIR,
+            Orientation::new(POS_Y, 1),
+        );
         assert_eq!(
             set_voxel(&mut store, &mut meshes, &tables, [0, 8, 0], swapped),
             Ok(())
@@ -1414,7 +1722,7 @@ mod tests {
             .resource_mut::<MeshState>()
             .mark_unlit(origin());
 
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         for _ in 0..MAX_DEFERRED_TICKS {
             tick(&mut app);
             assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "applied too early");
@@ -1433,7 +1741,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<MeshState>()
             .mark_unlit(origin());
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         for _ in 0..=MAX_DEFERRED_TICKS + 1 {
             tick(&mut app);
         }
@@ -1445,7 +1753,7 @@ mod tests {
     fn a_flood_of_intents_is_bounded() {
         let mut app = app_with(&[(origin(), ground())]);
         for _ in 0..MAX_PENDING + 10 {
-            app.world_mut().write_message(down(EditAction::Break));
+            app.world_mut().write_message(down(EditAction::Remove));
         }
         app.world_mut().run_system_once(receive).unwrap();
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), MAX_PENDING);
@@ -1458,7 +1766,7 @@ mod tests {
         let mut tables = watered();
         tables
             .register_combustion(
-                STONE,
+                tesserae_core::testgen::fixtures().ground.rock,
                 tesserae_core::CombustionDef {
                     threshold: 6,
                     ignition_delay_s: 2.0,
@@ -1557,7 +1865,9 @@ mod tests {
             (
                 Occupants {
                     solid: Voxel::AIR,
-                    fluid: Some(Fluid::source(STONE)),
+                    fluid: Some(Fluid::source(
+                        tesserae_core::testgen::fixtures().ground.rock,
+                    )),
                     burning: None,
                 },
                 RejectReason::NotAFluid,
@@ -1634,11 +1944,8 @@ mod tests {
         }
     }
 
-    /// The fluid tool puts a source where a Place would put a Voxel, and takes
-    /// one away where it strikes it: off the bed and out of a stair that shares
-    /// its Voxel with one, leaving the bed and the stair.
     #[test]
-    fn the_fluid_tool_places_a_source_in_front_and_removes_one_keeping_its_solid() {
+    fn a_source_is_placed_in_front_and_remove_takes_solid_before_source() {
         let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         send(&mut app, down(EditAction::PlaceSource(water)));
@@ -1649,7 +1956,7 @@ mod tests {
             Some(Fluid::source(water))
         );
 
-        send(&mut app, down(EditAction::RemoveSource));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "the bed went too");
@@ -1660,24 +1967,20 @@ mod tests {
             burning: None,
         };
         assert_eq!(put_occupants(&mut app, [5, 8, 5], wet_stair).1, Ok(()));
-        send(&mut app, down(EditAction::RemoveSource));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(
             occupants_at(&app, [5, 8, 5]),
             Occupants {
-                fluid: None,
+                solid: Voxel::AIR,
                 ..wet_stair
             }
         );
         assert!(rejections(&mut app).is_empty());
     }
 
-    /// The fluid tool waterlogs a Shape it strikes and takes the source back
-    /// out of it, the stair staying put each time; a stair that already holds
-    /// a source is occupied. Collision and picking read the packed Voxel, which
-    /// is the stair throughout.
     #[test]
-    fn the_fluid_tool_waterlogs_a_struck_shape_and_drains_it() {
+    fn a_waterlogged_stair_is_removed_before_its_source() {
         let water = water();
         let mut app = app_with(&[(origin(), ground())]);
         put_occupants(
@@ -1706,10 +2009,16 @@ mod tests {
         assert_eq!(rejections(&mut app), vec![RejectReason::Occupied]);
         assert_eq!(occupants_at(&app, [5, 8, 5]), wet);
 
-        send(&mut app, down(EditAction::RemoveSource));
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        assert_eq!(
+            occupants_at(&app, [5, 8, 5]).fluid,
+            Some(Fluid::source(water))
+        );
+        assert_eq!(occupants_at(&app, [5, 8, 5]).solid, Voxel::AIR);
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(occupants_at(&app, [5, 8, 5]).fluid, None);
-        assert_eq!(voxel_at(&app, [5, 8, 5]), stair());
         assert!(rejections(&mut app).is_empty());
     }
 
@@ -1796,9 +2105,10 @@ mod tests {
         put_occupants(&mut app, [6, 8, 5], flow).1.unwrap();
         let before: Vec<Occupants> = (0..16).map(|y| occupants_at(&app, [5, y, 5])).collect();
         let cases = [
-            (down(EditAction::RemoveSource), RejectReason::NoSource),
             (
-                down(EditAction::PlaceSource(STONE)),
+                down(EditAction::PlaceSource(
+                    tesserae_core::testgen::fixtures().ground.rock,
+                )),
                 RejectReason::NotAFluid,
             ),
             (
@@ -1811,7 +2121,7 @@ mod tests {
             (
                 EditIntent {
                     origin: Vec3::new(5.5, 30.0, 5.5),
-                    ..down(EditAction::RemoveSource)
+                    ..down(EditAction::Remove)
                 },
                 RejectReason::OutOfReach,
             ),
@@ -1826,12 +2136,13 @@ mod tests {
             &mut app,
             EditIntent {
                 origin: Vec3::new(6.5, 12.0, 5.5),
-                ..down(EditAction::RemoveSource)
+                ..down(EditAction::Remove)
             },
         );
         tick(&mut app);
-        assert_eq!(rejections(&mut app), vec![RejectReason::NoSource]);
+        assert!(rejections(&mut app).is_empty());
         assert_eq!(occupants_at(&app, [6, 8, 5]), flow);
+        assert!(voxel_at(&app, [6, 7, 5]).is_air());
 
         send_from_afar(
             &mut app,
@@ -1856,7 +2167,7 @@ mod tests {
             burning: None,
         };
         put_occupants(&mut app, [5, 8, 5], flow).1.unwrap();
-        send(&mut app, down(EditAction::Break));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert!(voxel_at(&app, [5, 7, 5]).is_air(), "the bed under the flow");
         assert_eq!(occupants_at(&app, [5, 8, 5]), flow);
@@ -1890,7 +2201,7 @@ mod tests {
                 &mut app,
                 EditIntent {
                     origin: Vec3::new(x as f32 + 0.5, 12.0, 5.5),
-                    ..down(EditAction::Break)
+                    ..down(EditAction::Remove)
                 },
             );
         }
@@ -1961,7 +2272,7 @@ mod tests {
                 ..unlit
             }
         );
-        send(&mut app, down(EditAction::PutOut));
+        send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert_eq!(occupants_at(&app, [5, 7, 5]), unlit);
         assert!(rejections(&mut app).is_empty());
@@ -1975,7 +2286,7 @@ mod tests {
         for x in 1..=6 {
             chunk.set(x, 7, 5, Voxel::cube(x as MaterialId));
         }
-        let mut app = app_with_tables(&[(origin(), chunk)], Tables::builtin());
+        let mut app = app_with_tables(&[(origin(), chunk)], crate::server::fixture_tables());
         for x in 1..=6 {
             send(&mut app, down_at(x as f32 + 0.5, EditAction::Ignite));
             tick(&mut app);
@@ -2011,8 +2322,6 @@ mod tests {
             (down_at(6.5, EditAction::Ignite), "that does not burn"),
             (down(EditAction::Ignite), "it is already burning"),
             (down_at(4.5, EditAction::Ignite), "it is too wet to burn"),
-            (down_at(4.5, EditAction::PutOut), "nothing is burning there"),
-            (down_at(6.5, EditAction::PutOut), "nothing is burning there"),
             (
                 EditIntent {
                     direction: Vec3::Y,
@@ -2023,7 +2332,7 @@ mod tests {
             (
                 EditIntent {
                     origin: Vec3::new(5.5, 30.0, 5.5),
-                    ..down(EditAction::PutOut)
+                    ..down(EditAction::Remove)
                 },
                 "nothing in reach",
             ),
@@ -2042,7 +2351,7 @@ mod tests {
     #[test]
     fn the_fire_tool_is_vetted_queued_and_deferred_like_any_edit() {
         let (mut app, _) = wood_app();
-        for action in [EditAction::Ignite, EditAction::PutOut] {
+        for action in [EditAction::Ignite, EditAction::Remove] {
             send_from_afar(
                 &mut app,
                 EditIntent {
@@ -2066,7 +2375,7 @@ mod tests {
             assert_eq!(rejections(&mut app), vec![RejectReason::OutOfReach]);
         }
         let burning = |app: &App| occupants_at(app, [5, 7, 5]).burning.is_some();
-        for (action, lit) in [(EditAction::Ignite, true), (EditAction::PutOut, false)] {
+        for (action, lit) in [(EditAction::Ignite, true), (EditAction::Remove, false)] {
             app.world_mut()
                 .resource_mut::<MeshState>()
                 .mark_unlit(origin());
@@ -2131,7 +2440,7 @@ mod tests {
             .unwrap();
         tables
             .register_combustion(
-                STONE,
+                tesserae_core::testgen::fixtures().ground.rock,
                 CombustionDef {
                     threshold: 6,
                     ignition_delay_s: 2.0,
@@ -2172,7 +2481,11 @@ mod tests {
             ),
             (at(stone(), None), water, RejectReason::FluidExcluded),
             (at(stair(), None), lava, RejectReason::FluidExcluded),
-            (at(air, None), LANTERN, RejectReason::NotAFluid),
+            (
+                at(air, None),
+                tesserae_core::testgen::fixtures().lantern,
+                RejectReason::NotAFluid,
+            ),
         ] {
             assert_eq!(
                 with_source(here, material, &tables),
@@ -2207,7 +2520,13 @@ mod tests {
         assert_eq!(lit.solid, stair());
         for (here, reason) in [
             (at(air, None), RejectReason::NoFuel),
-            (at(Voxel::cube(LANTERN), None), RejectReason::NotFlammable),
+            (
+                at(
+                    Voxel::cube(tesserae_core::testgen::fixtures().lantern),
+                    None,
+                ),
+                RejectReason::NotFlammable,
+            ),
             (lit, RejectReason::AlreadyBurning),
             (at(stair(), flow), RejectReason::Wet),
         ] {
@@ -2223,5 +2542,295 @@ mod tests {
         );
         assert_eq!(extinguish(lit).unwrap().burning, None);
         assert_eq!(extinguish(at(stair(), None)), Err(RejectReason::NotBurning));
+    }
+    #[test]
+    fn picking_samples_geometry_without_editing_and_rejects_forged_origins() {
+        let voxel = Voxel::shaped(
+            tesserae_core::testgen::fixtures().ground.rock,
+            SHAPE_STAIR,
+            tesserae_core::Orientation::IDENTITY.turned(),
+        );
+        let mut chunk = Chunk::air();
+        chunk.set(5, 7, 5, voxel);
+        let app = app_with(&[(origin(), chunk)]);
+        let request = PickIntent {
+            seq: 1,
+            origin: DOWN_EYE,
+            direction: Vec3::NEG_Y,
+        };
+        let store = app.world().resource::<ChunkStore>();
+        let world = app.world().resource::<WorldSettings>();
+        assert_eq!(
+            pick_item(store, &watered(), world, request, DOWN_EYE),
+            Some(AimItem::Solid(voxel))
+        );
+        assert_eq!(store.voxel([5, 7, 5]), Some(voxel));
+        assert_eq!(
+            pick_item(
+                store,
+                &watered(),
+                world,
+                PickIntent {
+                    origin: Vec3::splat(100.0),
+                    ..request
+                },
+                DOWN_EYE
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn aim_bounds_follow_shapes_and_the_ghost_matches_the_edit() {
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        for (shape, top) in [
+            (0, 8.0),
+            (tesserae_core::SHAPE_SLAB, 7.5),
+            (SHAPE_STAIR, 8.0),
+        ] {
+            let mut chunk = Chunk::air();
+            chunk.set(5, 7, 5, Voxel::new(rock, shape, 0));
+            let mut app = app_with(&[(origin(), chunk)]);
+            let report = AimReport {
+                seq: 1,
+                origin: DOWN_EYE,
+                direction: Vec3::NEG_Y,
+                held: Some(AimItem::Solid(stone())),
+            };
+            let target = aim_target(
+                app.world().resource::<ChunkStore>(),
+                &watered(),
+                app.world().resource::<WorldSettings>(),
+                app.world().resource::<MeshState>(),
+                report,
+                EDIT_REACH_M,
+            );
+            let bounds = target.outline.unwrap();
+            assert_eq!(bounds.min, Vec3::new(5.0, 7.0, 5.0));
+            assert_eq!(bounds.max, Vec3::new(6.0, top, 6.0));
+            let ghost = target.ghost.unwrap();
+            assert_eq!(ghost, Vec3::new(5.0, 8.0, 5.0));
+            send(&mut app, down(EditAction::Place(stone())));
+            tick(&mut app);
+            assert_eq!(
+                app.world()
+                    .resource::<ChunkStore>()
+                    .voxel(ghost.to_array().map(|v| v as i32)),
+                Some(stone())
+            );
+            let fire = aim_target(
+                app.world().resource::<ChunkStore>(),
+                &watered(),
+                app.world().resource::<WorldSettings>(),
+                app.world().resource::<MeshState>(),
+                AimReport {
+                    held: Some(AimItem::Fire),
+                    ..report
+                },
+                EDIT_REACH_M,
+            );
+            assert_eq!(fire.ghost, None);
+        }
+    }
+    #[test]
+    fn a_ghost_waits_for_light_and_fire_outlines_fuel_without_a_ghost() {
+        let (mut app, _) = wood_app();
+        let report = AimReport {
+            seq: 1,
+            origin: DOWN_EYE,
+            direction: Vec3::NEG_Y,
+            held: Some(AimItem::Solid(stone())),
+        };
+        let target = |app: &App, held| {
+            aim_target(
+                app.world().resource::<ChunkStore>(),
+                app.world().resource::<ContentTables>(),
+                app.world().resource::<WorldSettings>(),
+                app.world().resource::<MeshState>(),
+                AimReport { held, ..report },
+                EDIT_REACH_M,
+            )
+        };
+        assert!(target(&app, report.held).ghost.is_some());
+        app.world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(origin());
+        let waiting = target(&app, report.held);
+        assert!(waiting.outline.is_some());
+        assert_eq!(waiting.ghost, None);
+        let fire = target(&app, Some(AimItem::Fire));
+        assert!(fire.outline.is_some());
+        assert_eq!(fire.ghost, None);
+    }
+
+    #[test]
+    fn stale_far_and_non_finite_aim_reports_do_not_replace_the_latest() {
+        let mut app = app_with(&[(origin(), ground())]);
+        let report = AimReport {
+            seq: 4,
+            origin: DOWN_EYE,
+            direction: Vec3::NEG_Y,
+            held: None,
+        };
+        app.world_mut().write_message(report);
+        app.world_mut().run_system_once(receive_aim).unwrap();
+        for bad in [
+            AimReport { seq: 3, ..report },
+            AimReport {
+                seq: 5,
+                origin: DOWN_EYE + Vec3::X * 3.0,
+                ..report
+            },
+            AimReport {
+                seq: 6,
+                direction: Vec3::NAN,
+                ..report
+            },
+        ] {
+            app.world_mut().write_message(bad);
+            app.world_mut().run_system_once(receive_aim).unwrap();
+        }
+        assert_eq!(app.world().resource::<AimState>().latest.unwrap().0.seq, 4);
+    }
+    #[test]
+    fn remove_puts_out_fire_before_breaking_the_solid() {
+        let (mut app, wood) = wood_app();
+        send(&mut app, down(EditAction::Ignite));
+        tick(&mut app);
+        assert!(occupants_at(&app, [5, 7, 5]).burning.is_some());
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        assert_eq!(occupants_at(&app, [5, 7, 5]).solid.material(), wood);
+        assert!(occupants_at(&app, [5, 7, 5]).burning.is_none());
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        assert!(occupants_at(&app, [5, 7, 5]).solid.is_air());
+        assert!(rejections(&mut app).is_empty());
+    }
+    fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
+        use super::super::undo;
+        app.world_mut().write_message(action);
+        app.world_mut().run_system_once(undo::receive).unwrap();
+        app.world_mut()
+            .resource_mut::<Messages<undo::HistoryAction>>()
+            .clear();
+        app.world_mut().run_system_once(undo::apply).unwrap();
+    }
+
+    #[test]
+    fn undo_redo_restores_solid_sources_and_fire_through_world_edits() {
+        use super::super::undo::HistoryAction::{Redo, Undo};
+        for action in [
+            EditAction::Remove,
+            EditAction::PlaceSource(water()),
+            EditAction::Ignite,
+        ] {
+            let (mut app, _) = wood_app();
+            let at = if matches!(action, EditAction::PlaceSource(_)) {
+                [5, 8, 5]
+            } else {
+                [5, 7, 5]
+            };
+            let before = occupants_at(&app, at);
+            send(&mut app, down(action));
+            tick(&mut app);
+            assert!(rejections(&mut app).is_empty());
+            let after = occupants_at(&app, at);
+            assert_ne!(before, after);
+            replay(&mut app, Undo);
+            assert_eq!(occupants_at(&app, at), before);
+            replay(&mut app, Redo);
+            assert_eq!(occupants_at(&app, at), after);
+            assert!(rejections(&mut app).is_empty());
+            assert!(app.world().resource::<MeshState>().is_dirty(origin()));
+        }
+    }
+
+    #[test]
+    fn history_refuses_conflicting_or_regenerated_cells_and_new_edits_clear_redo() {
+        use super::super::undo::HistoryAction::{Redo, Undo};
+        let mut app = app_with(&[(origin(), ground())]);
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::NoUndo]);
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        let air = occupants_at(&app, [5, 7, 5]);
+        let changed = Occupants {
+            solid: stone(),
+            ..air
+        };
+        put_occupants(&mut app, [5, 7, 5], changed).1.unwrap();
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::HistoryChanged]);
+        assert_eq!(occupants_at(&app, [5, 7, 5]), changed);
+        put_occupants(&mut app, [5, 7, 5], air).1.unwrap();
+        replay(&mut app, Undo);
+        assert!(rejections(&mut app).is_empty());
+        send(&mut app, down(EditAction::Place(stair())));
+        tick(&mut app);
+        replay(&mut app, Redo);
+        assert_eq!(rejections(&mut app), [RejectReason::NoRedo]);
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .remove(origin());
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::NotLoaded]);
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(origin(), ground());
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::HistoryChanged]);
+    }
+
+    #[test]
+    fn completed_hold_refuses_a_different_cell_material_or_burning_state() {
+        let (mut app, _) = wood_app();
+        let tables = app.world().resource::<ContentTables>();
+        let expected = removal_target(
+            app.world().resource::<ChunkStore>(),
+            tables,
+            &WorldSettings::default(),
+            [5, 7, 5],
+        )
+        .unwrap();
+        send(
+            &mut app,
+            down(EditAction::RemoveAt(AimRemoval {
+                at: [4, 7, 5],
+                ..expected
+            })),
+        );
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::TargetChanged]);
+        send(
+            &mut app,
+            down(EditAction::RemoveAt(AimRemoval {
+                burning: true,
+                ..expected
+            })),
+        );
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::TargetChanged]);
+        send(&mut app, down(EditAction::RemoveAt(expected)));
+        tick(&mut app);
+        assert!(voxel_at(&app, expected.at).is_air());
+        assert!(rejections(&mut app).is_empty());
+    }
+    #[test]
+    fn undo_waits_for_settled_light_and_preserves_its_entry_after_a_refusal() {
+        use super::super::undo::HistoryAction::Undo;
+        let mut app = app_with(&[(origin(), ground())]);
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(origin());
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::Busy]);
+        assert!(voxel_at(&app, [5, 7, 5]).is_air());
+        app.insert_resource(MeshState::default());
+        replay(&mut app, Undo);
+        assert_eq!(voxel_at(&app, [5, 7, 5]), stone());
+        assert!(rejections(&mut app).is_empty());
     }
 }

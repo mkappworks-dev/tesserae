@@ -1009,10 +1009,10 @@ fn brighten(volume: &mut impl LightVolume, tables: &Tables, from: Vec<[i32; 3]>,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::material::LANTERN;
     use crate::shape::{NodeBox, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef};
+    use crate::testgen::fixtures;
     use crate::voxel::MaterialId;
-    use crate::worldgen::{GRASS, STONE, Worldgen, WorldgenParams};
+    use crate::worldgen::{Worldgen, WorldgenParams};
     use std::sync::OnceLock;
 
     const LAST: usize = CHUNK_SIZE - 1;
@@ -1025,7 +1025,7 @@ mod tests {
     fn fixture() -> &'static (Tables, MaterialId) {
         static FIXTURE: OnceLock<(Tables, MaterialId)> = OnceLock::new();
         FIXTURE.get_or_init(|| {
-            let mut tables = Tables::builtin();
+            let mut tables = fixtures().tables.clone();
             let id = tables
                 .shapes
                 .register(ShapeDef {
@@ -1038,7 +1038,7 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(id, SHAPE_DIAGONAL);
-            let water = crate::testgen::register_water(&mut tables);
+            let water = fixtures().water;
             (tables, water)
         })
     }
@@ -1174,7 +1174,7 @@ mod tests {
         let mut chunk = Chunk::air();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                chunk.set(x, 0, z, Voxel::cube(STONE));
+                chunk.set(x, 0, z, Voxel::cube(fixtures().ground.rock));
             }
         }
         let above = full_sky();
@@ -1200,7 +1200,7 @@ mod tests {
     #[test]
     fn an_emitter_falls_off_by_manhattan_distance_and_stops() {
         let mut chunk = Chunk::air();
-        chunk.set(16, 16, 16, Voxel::cube(LANTERN));
+        chunk.set(16, 16, 16, Voxel::cube(fixtures().lantern));
         let light = light_chunk(&chunk, [None; 6], tables());
         assert_eq!(light.get(16, 16, 16).block(), MAX_LIGHT);
         for d in 0..=MAX_LIGHT as usize {
@@ -1218,10 +1218,10 @@ mod tests {
         let mut chunk = Chunk::air();
         for y in 0..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
-                chunk.set(10, y, z, Voxel::cube(STONE));
+                chunk.set(10, y, z, Voxel::cube(fixtures().ground.rock));
             }
         }
-        chunk.set(8, 16, 16, Voxel::cube(LANTERN));
+        chunk.set(8, 16, 16, Voxel::cube(fixtures().lantern));
         let light = light_chunk(&chunk, [None; 6], tables());
         assert_eq!(light.get(9, 16, 16).block(), MAX_LIGHT - 1);
         assert_eq!(light.get(11, 16, 16).block(), 0, "through the wall");
@@ -1236,7 +1236,7 @@ mod tests {
 
     #[test]
     fn an_opaque_chunk_answers_dark_without_going_dense() {
-        let solid = Chunk::filled(Voxel::cube(STONE));
+        let solid = Chunk::filled(Voxel::cube(fixtures().ground.rock));
         let above = full_sky();
         let light = light_chunk(&solid, sky_above(&above), tables());
         assert_eq!(light.uniform(), Some(Light::DARK));
@@ -1460,7 +1460,7 @@ mod tests {
         let mut world = OneChunk::new(Chunk::air());
         let before = world.light.clone();
 
-        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([16, 16, 16], Voxel::cube(fixtures().lantern));
         assert_eq!(world.light([16, 16, 16]).block(), MAX_LIGHT);
         assert_eq!(world.light([16 + 5, 16, 16]).block(), MAX_LIGHT - 5);
 
@@ -1477,7 +1477,7 @@ mod tests {
         world.seed_sky();
         assert_eq!(world.light([16, 4, 16]).sky(), MAX_LIGHT);
 
-        world.place([16, 20, 16], Voxel::cube(STONE));
+        world.place([16, 20, 16], Voxel::cube(fixtures().ground.rock));
 
         assert_eq!(world.light([16, 20, 16]).sky(), 0, "the roof itself");
         // One Voxel under a one-Voxel roof still sees the sky from four sides.
@@ -1492,17 +1492,17 @@ mod tests {
         // A floor, a wall with a gap in it, and an emitter behind the wall.
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
-                chunk.set(x, 0, z, Voxel::cube(STONE));
+                chunk.set(x, 0, z, Voxel::cube(fixtures().ground.rock));
             }
         }
         for y in 1..CHUNK_SIZE {
             for z in 0..CHUNK_SIZE {
                 if y != 4 || z != 16 {
-                    chunk.set(20, y, z, Voxel::cube(STONE));
+                    chunk.set(20, y, z, Voxel::cube(fixtures().ground.rock));
                 }
             }
         }
-        chunk.set(24, 2, 16, Voxel::cube(LANTERN));
+        chunk.set(24, 2, 16, Voxel::cube(fixtures().lantern));
 
         let bulk = light_chunk(&chunk, [None; 6], tables());
 
@@ -1539,11 +1539,15 @@ mod tests {
     type Plan = Vec<([i32; 3], Voxel)>;
 
     fn stair(turn: u8) -> Voxel {
-        Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(POS_Y, turn))
+        Voxel::shaped(
+            fixtures().ground.rock,
+            SHAPE_STAIR,
+            Orientation::new(POS_Y, turn),
+        )
     }
 
     fn slab(up: usize) -> Voxel {
-        Voxel::shaped(STONE, SHAPE_SLAB, Orientation::new(up, 0))
+        Voxel::shaped(fixtures().ground.rock, SHAPE_SLAB, Orientation::new(up, 0))
     }
 
     /// A one-Voxel tunnel along +X at y=5, z=16, walled in stone, with a lantern
@@ -1553,10 +1557,10 @@ mod tests {
         let mut plan = Vec::new();
         for x in x0..=x1 {
             for at in [[x, 4, 16], [x, 6, 16], [x, 5, 15], [x, 5, 17]] {
-                plan.push((at, Voxel::cube(STONE)));
+                plan.push((at, Voxel::cube(fixtures().ground.rock)));
             }
         }
-        plan.push(([lantern_x, 5, 16], Voxel::cube(LANTERN)));
+        plan.push(([lantern_x, 5, 16], Voxel::cube(fixtures().lantern)));
         plan
     }
 
@@ -1572,7 +1576,7 @@ mod tests {
             }
             world
         };
-        let cubes = roofed(Voxel::cube(STONE));
+        let cubes = roofed(Voxel::cube(fixtures().ground.rock));
         let stairs = roofed(stair(0));
 
         // Under the roof, and nowhere above it: a stair seals its underside.
@@ -1632,7 +1636,7 @@ mod tests {
     #[test]
     fn a_lantern_still_lights_what_it_stands_beside() {
         let mut world = OneChunk::new(Chunk::air());
-        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([16, 16, 16], Voxel::cube(fixtures().lantern));
         world.place([17, 16, 16], stair(0));
         assert_eq!(world.light([17, 16, 16]).block(), MAX_LIGHT - 1);
         assert_eq!(world.light([16, 17, 16]).block(), MAX_LIGHT - 1);
@@ -1641,7 +1645,7 @@ mod tests {
     #[test]
     fn removing_a_shaped_voxel_returns_every_voxel_to_where_it_was() {
         for voxel in [stair(0), stair(2), slab(POS_Y), slab(NEG_Y), {
-            Voxel::shaped(STONE, SHAPE_POST, Orientation::IDENTITY)
+            Voxel::shaped(fixtures().ground.rock, SHAPE_POST, Orientation::IDENTITY)
         }] {
             let mut world = OneChunk::new(Chunk::air());
             world.seed_sky();
@@ -1894,11 +1898,19 @@ mod tests {
     }
 
     fn diagonal() -> Voxel {
-        Voxel::shaped(STONE, SHAPE_DIAGONAL, Orientation::IDENTITY)
+        Voxel::shaped(
+            fixtures().ground.rock,
+            SHAPE_DIAGONAL,
+            Orientation::IDENTITY,
+        )
     }
 
     fn upside_down_stair() -> Voxel {
-        Voxel::shaped(STONE, SHAPE_STAIR, Orientation::new(NEG_Y, 0))
+        Voxel::shaped(
+            fixtures().ground.rock,
+            SHAPE_STAIR,
+            Orientation::new(NEG_Y, 0),
+        )
     }
 
     /// Block light at the three cells of the tunnel that matter for a pair of
@@ -1965,7 +1977,7 @@ mod tests {
     #[test]
     fn a_partial_shape_beside_a_cube_source_or_air_is_not_jointly_sealed() {
         let mut world = OneChunk::new(Chunk::air());
-        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([16, 16, 16], Voxel::cube(fixtures().lantern));
         world.place([17, 16, 16], slab(POS_Y));
         world.place([15, 16, 16], slab(NEG_Y));
         assert_eq!(world.light([17, 16, 16]).block(), MAX_LIGHT - 1);
@@ -2043,7 +2055,7 @@ mod tests {
                 plan.push(([13, y, z], slab(NEG_Y)));
             }
             for x in 14..CHUNK_SIZE as i32 {
-                plan.push(([x, top + 1, z], Voxel::cube(STONE)));
+                plan.push(([x, top + 1, z], Voxel::cube(fixtures().ground.rock)));
             }
         }
         plan
@@ -2088,7 +2100,7 @@ mod tests {
     #[test]
     fn the_volumes_edge_bounds_the_fill_rather_than_being_treated_as_air() {
         let mut world = OneChunk::new(Chunk::air());
-        world.place([0, 0, 0], Voxel::cube(LANTERN));
+        world.place([0, 0, 0], Voxel::cube(fixtures().lantern));
         assert_eq!(world.light([1, 0, 0]).block(), MAX_LIGHT - 1);
         // Nothing panicked stepping outside, and nothing was written there.
         assert_eq!(world.light([-1, 0, 0]), Light::DARK);
@@ -2104,7 +2116,7 @@ mod tests {
             // These tests diff a World against the same one without tunnels; a
             // stair beside a mouth would be a difference of its own.
             smoothing: None,
-            ..WorldgenParams::default()
+            ..crate::testgen::world_params()
         };
         assert!(params.caves.is_some());
         (
@@ -2167,8 +2179,11 @@ mod tests {
                 let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
                 let breached = (0..CHUNK_SIZE).any(|z| {
                     (0..CHUNK_SIZE).any(|y| {
-                        (0..CHUNK_SIZE)
-                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == GRASS)
+                        (0..CHUNK_SIZE).any(|x| {
+                            a.get(x, y, z).is_air()
+                                && b.get(x, y, z).material()
+                                    == crate::testgen::fixtures().ground.surface
+                        })
                     })
                 });
                 if breached {
@@ -2250,7 +2265,7 @@ mod tests {
         let params = WorldgenParams {
             caves: caves.then(Default::default),
             smoothing: Some(crate::worldgen::SmoothingParams::default()),
-            ..WorldgenParams::default()
+            ..crate::testgen::world_params()
         };
         (
             Worldgen::new(0x7e55_e2ae, 1.0, params),
@@ -2346,7 +2361,7 @@ mod tests {
             WorldgenParams {
                 caves: None,
                 smoothing: None,
-                ..WorldgenParams::default()
+                ..crate::testgen::world_params()
             },
         );
         for cz in -8..8 {
@@ -2358,8 +2373,11 @@ mod tests {
                 let b = bare.chunk(cx, cy, cz);
                 let breached = (0..CHUNK_SIZE).any(|z| {
                     (0..CHUNK_SIZE).any(|y| {
-                        (0..CHUNK_SIZE)
-                            .any(|x| a.get(x, y, z).is_air() && b.get(x, y, z).material() == GRASS)
+                        (0..CHUNK_SIZE).any(|x| {
+                            a.get(x, y, z).is_air()
+                                && b.get(x, y, z).material()
+                                    == crate::testgen::fixtures().ground.surface
+                        })
                     })
                 });
                 if breached == mouth {
@@ -2505,12 +2523,12 @@ mod tests {
                 .collect();
             let mut placed = build();
             for &at in &lanterns {
-                placed.place(at, Voxel::cube(LANTERN));
+                placed.place(at, Voxel::cube(fixtures().lantern));
             }
 
             let mut fresh = build();
             for &at in &lanterns {
-                fresh.set_voxel(at, Voxel::cube(LANTERN));
+                fresh.set_voxel(at, Voxel::cube(fixtures().lantern));
             }
             fresh.solve_bulk();
             assert_eq!(
@@ -2549,13 +2567,13 @@ mod tests {
     // top of the step, geometry blocks light only for an opaque Material, and a
     // translucent Voxel stores the light that reaches it.
 
-    use crate::material::{GLASS, LEAVES, MaterialDef, Occlusion, RenderClass};
+    use crate::material::{MaterialDef, Occlusion, RenderClass};
 
     /// Block light from a lantern at x=10, through one Voxel of `material` at
     /// x=11, to the Voxel behind it.
     fn through(material: Voxel) -> [u8; 3] {
         let mut plan: Plan = vec![
-            ([10, 16, 16], Voxel::cube(LANTERN)),
+            ([10, 16, 16], Voxel::cube(fixtures().lantern)),
             ([11, 16, 16], material),
         ];
         let mut chunk = Chunk::air();
@@ -2579,15 +2597,27 @@ mod tests {
     #[test]
     fn a_lantern_behind_a_translucent_voxel_is_dimmed_by_exactly_its_dimming() {
         assert_eq!(through(Voxel::AIR), [15, 14, 13]);
-        assert_eq!(through(Voxel::cube(GLASS)), [15, 14, 13], "glass is clear");
-        assert_eq!(through(Voxel::cube(LEAVES)), [15, 13, 12]);
+        assert_eq!(
+            through(Voxel::cube(fixtures().glass)),
+            [15, 14, 13],
+            "glass is clear"
+        );
+        assert_eq!(through(Voxel::cube(fixtures().leaves)), [15, 13, 12]);
         assert_eq!(through(Voxel::cube(water())), [15, 12, 11]);
-        assert_eq!(through(Voxel::cube(STONE))[1], 0, "stone stops it");
+        assert_eq!(
+            through(Voxel::cube(fixtures().ground.rock))[1],
+            0,
+            "stone stops it"
+        );
     }
 
     #[test]
     fn sky_light_enters_a_translucent_voxel_from_above_at_full_strength_less_its_dimming() {
-        for (material, expected) in [(GLASS, 15), (LEAVES, 14), (water(), 13)] {
+        for (material, expected) in [
+            (fixtures().glass, 15),
+            (fixtures().leaves, 14),
+            (water(), 13),
+        ] {
             let mut chunk = Chunk::air();
             chunk.set(16, 16, 16, Voxel::cube(material));
             let above = full_sky();
@@ -2619,15 +2649,15 @@ mod tests {
             }
             world.light([16, 10, 16]).sky()
         };
-        assert_eq!(under(GLASS), MAX_LIGHT);
-        assert!(under(STONE) < MAX_LIGHT);
+        assert_eq!(under(fixtures().glass), MAX_LIGHT);
+        assert!(under(fixtures().ground.rock) < MAX_LIGHT);
     }
 
     /// Joint sealing is a fact about opaque geometry: two halves of glass cover a
     /// plane between them and still let light through it, in both solvers.
     #[test]
     fn two_half_walls_of_glass_seal_nothing_jointly() {
-        let glass_slab = |up| Voxel::shaped(GLASS, SHAPE_SLAB, Orientation::new(up, 0));
+        let glass_slab = |up| Voxel::shaped(fixtures().glass, SHAPE_SLAB, Orientation::new(up, 0));
         let pair = (glass_slab(POS_Y), glass_slab(NEG_Y));
         assert_eq!(
             through_a_pair(pair.0, pair.1),
@@ -2659,7 +2689,7 @@ mod tests {
         // Opaque: geometry decides, nothing is subtracted, so the notch holds
         // the light that reached it (step 5's behaviour, kept).
         let mut world = OneChunk::new(Chunk::air());
-        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([16, 16, 16], Voxel::cube(fixtures().lantern));
         world.place([14, 16, 16], stair(0));
         assert_eq!(world.light([14, 16, 16]).block(), MAX_LIGHT - 2);
     }
@@ -2668,7 +2698,7 @@ mod tests {
     fn a_uniform_chunk_of_a_translucent_material_is_not_dark() {
         let above = full_sky();
         let glass = light_chunk(
-            &Chunk::filled(Voxel::cube(GLASS)),
+            &Chunk::filled(Voxel::cube(fixtures().glass)),
             sky_above(&above),
             tables(),
         );
@@ -2686,7 +2716,7 @@ mod tests {
         assert_eq!(water.get(5, LAST - 5, 5).sky(), 0, "all of it gone");
 
         let stone = light_chunk(
-            &Chunk::filled(Voxel::cube(STONE)),
+            &Chunk::filled(Voxel::cube(fixtures().ground.rock)),
             sky_above(&above),
             tables(),
         );
@@ -2701,7 +2731,7 @@ mod tests {
             })
             .collect();
         let canopy: Plan = (10..20)
-            .flat_map(|x| (10..20).map(move |z| ([x, 18, z], Voxel::cube(LEAVES))))
+            .flat_map(|x| (10..20).map(move |z| ([x, 18, z], Voxel::cube(fixtures().leaves))))
             .collect();
         let house: Plan = {
             let mut plan = Plan::new();
@@ -2710,28 +2740,28 @@ mod tests {
                     for y in 2..=6 {
                         let wall = x == 4 || x == 10 || z == 4 || z == 10 || y == 6;
                         if wall {
-                            plan.push(([x, y, z], Voxel::cube(GLASS)));
+                            plan.push(([x, y, z], Voxel::cube(fixtures().glass)));
                         }
                     }
                 }
             }
-            plan.push(([7, 3, 7], Voxel::cube(LANTERN)));
+            plan.push(([7, 3, 7], Voxel::cube(fixtures().lantern)));
             plan
         };
         let mixed: Plan = vec![
-            ([12, 5, 12], Voxel::cube(LANTERN)),
+            ([12, 5, 12], Voxel::cube(fixtures().lantern)),
             (
                 [13, 5, 12],
-                Voxel::shaped(GLASS, SHAPE_STAIR, Orientation::new(POS_Y, 1)),
+                Voxel::shaped(fixtures().glass, SHAPE_STAIR, Orientation::new(POS_Y, 1)),
             ),
             (
                 [14, 5, 12],
                 Voxel::shaped(water(), SHAPE_SLAB, Orientation::new(POS_Y, 0)),
             ),
-            ([15, 5, 12], Voxel::cube(LEAVES)),
+            ([15, 5, 12], Voxel::cube(fixtures().leaves)),
             (
                 [12, 20, 12],
-                Voxel::shaped(LEAVES, SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
+                Voxel::shaped(fixtures().leaves, SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
             ),
             ([12, 21, 12], stair(0)),
         ];
@@ -2774,13 +2804,19 @@ mod tests {
                     ([32, 5, 16], Voxel::cube(water())),
                 ],
             ),
-            ("leaves west", vec![([31, 5, 16], Voxel::cube(LEAVES))]),
-            ("glass east", vec![([32, 5, 16], Voxel::cube(GLASS))]),
+            (
+                "leaves west",
+                vec![([31, 5, 16], Voxel::cube(fixtures().leaves))],
+            ),
+            (
+                "glass east",
+                vec![([32, 5, 16], Voxel::cube(fixtures().glass))],
+            ),
             (
                 "a glass stair on the seam",
                 vec![(
                     [31, 5, 16],
-                    Voxel::shaped(GLASS, SHAPE_STAIR, Orientation::new(POS_Y, 1)),
+                    Voxel::shaped(fixtures().glass, SHAPE_STAIR, Orientation::new(POS_Y, 1)),
                 )],
             ),
         ] {
@@ -2804,8 +2840,8 @@ mod tests {
     #[test]
     fn placing_and_removing_a_translucent_voxel_returns_every_voxel_to_where_it_was() {
         for voxel in [
-            Voxel::cube(GLASS),
-            Voxel::cube(LEAVES),
+            Voxel::cube(fixtures().glass),
+            Voxel::cube(fixtures().leaves),
             Voxel::cube(water()),
             Voxel::shaped(water(), SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
         ] {
@@ -2831,7 +2867,7 @@ mod tests {
     fn amber() -> (&'static Tables, Voxel) {
         static T: OnceLock<(Tables, MaterialId)> = OnceLock::new();
         let (t, id) = T.get_or_init(|| {
-            let mut t = Tables::builtin();
+            let mut t = fixtures().tables.clone();
             let id = t
                 .materials
                 .register(MaterialDef {
@@ -2852,7 +2888,7 @@ mod tests {
         let (tables, amber) = amber();
         let mut world = OneChunk::new(Chunk::air());
         world.tables = tables;
-        world.place([16, 16, 16], Voxel::cube(LANTERN));
+        world.place([16, 16, 16], Voxel::cube(fixtures().lantern));
         world.place([17, 16, 16], amber);
         assert_eq!(
             world.light([17, 16, 16]).block(),
@@ -2904,12 +2940,12 @@ mod tests {
                 for z in 11..=13 {
                     let shell = y == 3 || y == 5 || z == 11 || z == 13 || x == 4 || x == 26;
                     if shell {
-                        world.place([x, y, z], Voxel::cube(STONE));
+                        world.place([x, y, z], Voxel::cube(fixtures().ground.rock));
                     }
                 }
             }
         }
-        world.place([5, 4, 12], Voxel::cube(LANTERN));
+        world.place([5, 4, 12], Voxel::cube(fixtures().lantern));
         let stairs: Vec<[i32; 3]> = (8..14).map(|x| [x, 4, 12]).collect();
         for &at in &stairs {
             world.place(at, stair(0));
@@ -2953,22 +2989,33 @@ mod tests {
     /// stairs and slabs and hand-built clear, emitting and shaped rooms alike.
     #[test]
     fn a_dry_chunk_lights_the_same_by_the_dry_sweep_and_the_wet_one() {
-        use crate::material::{GLASS, LEAVES};
-        let world = Worldgen::new(0x7e55_e2ae, 1.0, WorldgenParams::default());
+        let world = Worldgen::new(0x7e55_e2ae, 1.0, crate::testgen::world_params());
         let mut chunks: Vec<Chunk> = (-1..=2)
             .flat_map(|y| [[0, y, 0], [3, y, -2]])
             .map(|[x, y, z]| world.chunk(x, y, z))
             .collect();
         let mut room = Chunk::air();
         for (i, voxel) in [
-            Voxel::cube(GLASS),
-            Voxel::cube(LEAVES),
-            Voxel::cube(LANTERN),
+            Voxel::cube(fixtures().glass),
+            Voxel::cube(fixtures().leaves),
+            Voxel::cube(fixtures().lantern),
             stair(1),
-            Voxel::shaped(STONE, SHAPE_SLAB, Orientation::new(NEG_Y, 0)),
-            Voxel::shaped(GLASS, SHAPE_STAIR, Orientation::new(POS_Y, 2)),
-            Voxel::shaped(STONE, SHAPE_DIAGONAL, Orientation::new(POS_Y, 0)),
-            Voxel::shaped(STONE, SHAPE_POST, Orientation::new(POS_Y, 0)),
+            Voxel::shaped(
+                fixtures().ground.rock,
+                SHAPE_SLAB,
+                Orientation::new(NEG_Y, 0),
+            ),
+            Voxel::shaped(fixtures().glass, SHAPE_STAIR, Orientation::new(POS_Y, 2)),
+            Voxel::shaped(
+                fixtures().ground.rock,
+                SHAPE_DIAGONAL,
+                Orientation::new(POS_Y, 0),
+            ),
+            Voxel::shaped(
+                fixtures().ground.rock,
+                SHAPE_POST,
+                Orientation::new(POS_Y, 0),
+            ),
         ]
         .into_iter()
         .enumerate()

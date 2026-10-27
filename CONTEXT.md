@@ -46,9 +46,10 @@ Materials and Shapes.
 
 **Material** — what a Voxel is made of. Stone, water, oak. A row of game data:
 the light it emits and the light it dims, which faces it hides, which mesh it is
-drawn in, and whether it is solid. Not its appearance: a Material's colour is a
-placeholder until a Look pack supplies one, and Bevy's `Material` and
-`MaterialExtension`, which shade a surface, are a different thing.
+drawn in, and whether it is solid. Not its appearance: colours and textures are
+separate Declaration data, shared by World surfaces and item previews until a
+Look pack supplies appearance. Bevy's `Material` and `MaterialExtension`, which
+shade a surface, are a different thing.
 
 **Shape** — a Voxel's geometry. A full cube, a stair, a slab, a fence. "A stone
 voxel" and "a stone stair" share a Material and differ in Shape, so neither word
@@ -88,7 +89,11 @@ properties of the Material, never of its Shape.
 **Voxel size** — the edge length of one Voxel in metres. A property of a World,
 not of the engine. Default 1.0.
 
-**Air** — the absence of Material. A Voxel, not a null.
+**Air** — the absence of Material. A Voxel, not a null. The only built-in
+Material, id 0; ids 1 to 7 are retired.
+
+**Ground** — the Game's optional rock, soil and surface Materials, named in
+World parameters. Without ground the World is empty air.
 
 **Cave** — a tunnel of Air that World generation carves through solid ground.
 Sized in metres, so it is the same Cave at any Voxel size. Where one breaks the

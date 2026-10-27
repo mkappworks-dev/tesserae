@@ -20,6 +20,7 @@ fn wit_material(
         dimming,
         occlusion,
         render,
+        remove_time_s: None,
         solid,
     }
 }
@@ -175,6 +176,7 @@ fn world_params_field_for_field_with_the_lake_apart() {
             floor_m: -9.5,
             octaves: 3,
         }),
+        ground: None,
         smoothing: Some(content::SmoothingParams { min_rise_m: 0.5 }),
         water: Some(content::WaterParams {
             level_m: 10.5,
@@ -197,6 +199,7 @@ fn world_params_field_for_field_with_the_lake_apart() {
                 octaves: 3,
             }),
             smoothing: Some(SmoothingParams { min_rise_m: 0.5 }),
+            ground: None,
             water: None,
         }
     );
@@ -217,7 +220,16 @@ fn world_params_field_for_field_with_the_lake_apart() {
 fn the_engines_world_params_convert_both_ways() {
     let wit = engine_world_params();
     assert!(wit.water.is_none());
-    assert_eq!(world_params(wit), (WorldgenParams::default(), None));
+    assert_eq!(
+        world_params(wit),
+        (
+            WorldgenParams {
+                ground: None,
+                ..WorldgenParams::default()
+            },
+            None
+        )
+    );
 }
 
 #[test]

@@ -160,7 +160,13 @@ fn agrees_with_a_fresh_solve(f: &Fixture, home: ChunkCoord, tables: &Tables) -> 
 fn fire_spreads_burns_out_and_its_light_comes_and_goes_as_a_fresh_solve_would() {
     for v in [1.0, 0.5, 0.25] {
         let (tables, fuel) = fire_tables(15);
-        let mut f = Fixture::with_tables(v, 2.0, 16, tables.clone());
+        let mut f = Fixture::with_tables(
+            v,
+            2.0,
+            16,
+            tables.clone(),
+            tesserae_core::testgen::fixtures().ground.rock,
+        );
         let home = ChunkCoord::new(0, 0, 0);
         put(&mut f, -2, Voxel::cube(fuel.wood));
         put(&mut f, 0, Voxel::cube(fuel.wood));
@@ -202,7 +208,13 @@ fn a_fire_lit_by_a_player_or_a_mod_spreads_and_burns_out_the_same() {
         .into_iter()
         .map(|player| {
             let (tables, fuel) = fire_tables(15);
-            let mut f = Fixture::with_tables(0.5, 2.0, 16, tables.clone());
+            let mut f = Fixture::with_tables(
+                0.5,
+                2.0,
+                16,
+                tables.clone(),
+                tesserae_core::testgen::fixtures().ground.rock,
+            );
             let home = ChunkCoord::new(0, 0, 0);
             put(&mut f, -2, Voxel::cube(fuel.wood));
             put(&mut f, 0, Voxel::cube(fuel.wood));
@@ -244,7 +256,13 @@ fn a_fire_lit_by_a_player_or_a_mod_spreads_and_burns_out_the_same() {
 #[test]
 fn a_fire_change_past_the_landing_bound_lands_the_next_step() {
     let (tables, fuel) = fire_tables(0);
-    let mut f = Fixture::with_tables(1.0, 4.0, 16, tables);
+    let mut f = Fixture::with_tables(
+        1.0,
+        4.0,
+        16,
+        tables,
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     f.sim_mut().set_bounds(AGENDA, 1);
     put(&mut f, -2, Voxel::cube(fuel.wood));
     put(&mut f, 0, Voxel::cube(fuel.brazier));
@@ -276,7 +294,13 @@ fn a_fire_change_past_the_landing_bound_lands_the_next_step() {
 #[test]
 fn water_puts_a_burning_stair_out_and_drying_it_relights_after_a_fresh_delay() {
     let (tables, fuel) = fire_tables(0);
-    let mut f = Fixture::with_tables(1.0, 6.0, 16, tables.clone());
+    let mut f = Fixture::with_tables(
+        1.0,
+        6.0,
+        16,
+        tables.clone(),
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     let home = ChunkCoord::new(0, 0, 0);
     let stair = (0..4)
         .map(|t| Voxel::new(fuel.wood, SHAPE_STAIR, Orientation::new(POS_Y, t).bits()))
@@ -301,7 +325,7 @@ fn water_puts_a_burning_stair_out_and_drying_it_relights_after_a_fresh_delay() {
     run_seconds(&mut f, 4.0);
     assert!(!burning(&f, 0), "wet fuel caught");
 
-    f.send(0, EditAction::RemoveSource);
+    f.drain_source(0);
     let again = steps_until(&mut f, |f| burning(f, 0));
     assert!(
         (DELAY..=DELAY + 2).contains(&again),
@@ -337,7 +361,13 @@ fn hold_at(f: &mut Fixture, step: Step) -> Arc<crate::server::jobs::Gate> {
 #[test]
 fn an_older_job_cannot_light_fuel_whose_heat_is_gone_or_burn_out_replaced_fuel() {
     let (tables, fuel) = fire_tables(15);
-    let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
+    let mut f = Fixture::with_tables(
+        1.0,
+        6.0,
+        0,
+        tables,
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     put(&mut f, -2, Voxel::cube(fuel.brazier));
     put(&mut f, 0, Voxel::cube(fuel.wood));
     let lit_at = f.sim().now();
@@ -345,7 +375,8 @@ fn an_older_job_cannot_light_fuel_whose_heat_is_gone_or_burn_out_replaced_fuel()
     let proposing = lit_at + DELAY;
     let hold = hold_at(&mut f, proposing);
     assert!(!burning(&f, 0), "caught early");
-    f.send(-2, EditAction::Break);
+    f.send(-2, EditAction::Remove);
+    f.send(-2, EditAction::Remove);
     f.apply_intents();
     assert!(f.occupants(-2).solid.is_air(), "broken");
     let stale = f.sim().stale;
@@ -377,7 +408,13 @@ fn an_older_job_cannot_light_fuel_whose_heat_is_gone_or_burn_out_replaced_fuel()
 #[test]
 fn a_player_placed_stream_running_against_a_burning_cube_puts_it_out() {
     let (tables, fuel) = fire_tables(15);
-    let mut f = Fixture::with_tables(1.0, 6.0, 16, tables.clone());
+    let mut f = Fixture::with_tables(
+        1.0,
+        6.0,
+        16,
+        tables.clone(),
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     let home = ChunkCoord::new(0, 0, 0);
     put(&mut f, 0, Voxel::cube(fuel.wood));
     settle_light(&mut f, home, &tables);
@@ -409,7 +446,13 @@ fn a_player_placed_stream_running_against_a_burning_cube_puts_it_out() {
 #[test]
 fn an_older_job_cannot_burn_out_fuel_that_water_under_it_now_wets() {
     let (tables, fuel) = fire_tables(15);
-    let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
+    let mut f = Fixture::with_tables(
+        1.0,
+        6.0,
+        0,
+        tables,
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     let wood = [f.cx, Y + 1, Z];
     put_at(&mut f, wood, Voxel::cube(fuel.wood));
     f.settle();
@@ -436,7 +479,13 @@ fn an_older_job_cannot_burn_out_fuel_that_water_under_it_now_wets() {
 fn dividing_a_step_changes_nothing_a_fire_does() {
     let run = |evaluations: usize, jobs: usize, scramble: bool| {
         let (tables, fuel) = fire_tables(15);
-        let mut f = Fixture::with_tables(0.5, 6.0, 0, tables);
+        let mut f = Fixture::with_tables(
+            0.5,
+            6.0,
+            0,
+            tables,
+            tesserae_core::testgen::fixtures().ground.rock,
+        );
         f.sim_mut().set_division(evaluations, jobs);
         f.sim_mut().job().scramble = scramble;
         for x in [-8, -6, -4, -2] {
@@ -479,7 +528,13 @@ fn dividing_a_step_changes_nothing_a_fire_does() {
 #[test]
 fn eviction_pauses_progress_and_readmission_without_the_fire_drops_it() {
     let (tables, fuel) = fire_tables(15);
-    let mut f = Fixture::with_tables(1.0, 6.0, 0, tables);
+    let mut f = Fixture::with_tables(
+        1.0,
+        6.0,
+        0,
+        tables,
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     let west = ChunkCoord::new(-1, 0, 0);
     put(&mut f, -2, Voxel::cube(fuel.brazier));
     put(&mut f, 0, Voxel::cube(fuel.wood));
@@ -523,7 +578,13 @@ fn eviction_pauses_progress_and_readmission_without_the_fire_drops_it() {
 fn under_saturation_fire_flow_edits_and_mod_queues_all_keep_moving() {
     let scene = |bounded: bool| {
         let (tables, fuel) = fire_tables(15);
-        let mut f = Fixture::with_tables(1.0, 10.0, 0, tables);
+        let mut f = Fixture::with_tables(
+            1.0,
+            10.0,
+            0,
+            tables,
+            tesserae_core::testgen::fixtures().ground.rock,
+        );
         // A fire's timers hold their entries for its whole delay and burn,
         // so the agenda is sized to the fire and the Mods' wakes overflow it.
         let limits = Limits {
@@ -576,7 +637,7 @@ fn under_saturation_fire_flow_edits_and_mod_queues_all_keep_moving() {
             f.send(9, EditAction::Place(stone()));
             f.apply_intents();
             assert_eq!(f.occupants(9).solid, stone(), "the Edit waited on fire");
-            f.send(9, EditAction::Break);
+            f.send(9, EditAction::Remove);
             f.apply_intents();
             edited = true;
         }
@@ -626,7 +687,13 @@ fn declared_fuel_from_real_mods_catches_burns_and_is_protected_by_their_fluids()
     assert_eq!(def.heat.map(|h| h.reach_m), Some(2.0));
     assert_eq!(def.fuel_steps() as Step, BURN);
     assert!(!tables.combustion.contains(ash), "ash burns");
-    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables.clone());
+    let mut f = Fixture::with_tables(
+        1.0,
+        8.0,
+        0,
+        tables.clone(),
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     put(&mut f, 5, Voxel::cube(wood));
     f.send(0, EditAction::PlaceSource(lava));
     let caught = steps_until(&mut f, |f| burning(f, 5));
@@ -640,7 +707,13 @@ fn declared_fuel_from_real_mods_catches_burns_and_is_protected_by_their_fluids()
 
     let (slime, their_wood, their_ash) = (id("fluids:slime"), id("fluids:wood"), id("fluids:ash"));
     for wet in [true, false] {
-        let mut f = Fixture::with_tables(1.0, 8.0, 0, tables.clone());
+        let mut f = Fixture::with_tables(
+            1.0,
+            8.0,
+            0,
+            tables.clone(),
+            tesserae_core::testgen::fixtures().ground.rock,
+        );
         put(&mut f, 2, Voxel::new(their_wood, SHAPE_STAIR, 0));
         if wet {
             f.send(2, EditAction::PlaceSource(slime));
@@ -653,7 +726,13 @@ fn declared_fuel_from_real_mods_catches_burns_and_is_protected_by_their_fluids()
         assert_eq!(burning(&f, 2), !wet, "slime-wet {wet}");
     }
 
-    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables);
+    let mut f = Fixture::with_tables(
+        1.0,
+        8.0,
+        0,
+        tables,
+        tesserae_core::testgen::fixtures().ground.rock,
+    );
     put(&mut f, 0, Voxel::cube(their_wood));
     let at = [0.0, Y as f32, Z as f32];
     mod_runtime::tests::drain_validated(

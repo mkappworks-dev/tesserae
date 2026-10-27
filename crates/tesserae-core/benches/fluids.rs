@@ -8,13 +8,12 @@ use tesserae_core::flow::{
     Advance, Cell, CellView, Continuation, FlowScale, Quota, Reach, Region, Step, Timers, Work,
     advance, chunk_of, reading_outside, still_applies, wake_around, wake_solid_around,
 };
-use tesserae_core::material::STONE;
 use tesserae_core::mesh::POS_Y;
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     Burn, Burning, CHUNK_SIZE, Chunk, ChunkOverlay, CombustionDef, Fluid, FluidDef, Heat,
     MaterialDef, MaterialId, Occlusion, Occupants, Orientation, Overlay, Phase, Reactant,
     ReactionDef, RenderClass, SHAPE_POST, SHAPE_SLAB, Side, Tables, Voxel, Worldgen,
-    WorldgenParams, testgen,
 };
 
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
@@ -34,12 +33,13 @@ struct Ids {
 }
 
 fn water_tables() -> (Tables, MaterialId) {
-    let mut tables = Tables::builtin();
-    let water = testgen::register_water(&mut tables);
+    let tables = fixtures().tables.clone();
+    let water = fixtures().water;
     (tables, water)
 }
 
 fn demo_tables() -> (Tables, Ids) {
+    let fixture_rock = fixtures().ground.rock;
     // Water first: an equal claim goes to the earlier registered fluid.
     let (mut tables, water) = water_tables();
     let lava = tables
@@ -96,7 +96,7 @@ fn demo_tables() -> (Tables, Ids) {
                 phase: Phase::Any,
             },
             consumed: Side::First,
-            product: Some(STONE),
+            product: Some(fixture_rock),
             receiving: None,
         })
         .unwrap();
@@ -377,7 +377,8 @@ fn report(name: &str, sim: &Sim) {
 }
 
 fn stone() -> Voxel {
-    Voxel::cube(STONE)
+    let fixture_rock = fixtures().ground.rock;
+    Voxel::cube(fixture_rock)
 }
 
 /// A stone floor at y = 0 under open air, `half_m` each way round the origin
@@ -427,9 +428,9 @@ fn rescans(c: &mut Criterion) {
     let lake = Worldgen::new(
         SEED,
         1.0,
-        WorldgenParams::default().with_default_lake(water),
+        tesserae_core::testgen::world_params().with_default_lake(water),
     );
-    let dry = Worldgen::new(SEED, 1.0, WorldgenParams::default());
+    let dry = Worldgen::new(SEED, 1.0, tesserae_core::testgen::world_params());
     let shore = (-8..8)
         .flat_map(|x| (-8..8).map(move |z| [x, 1, z]))
         .find(|&[x, y, z]| {
@@ -536,8 +537,9 @@ fn flow_recession(c: &mut Criterion) {
 /// Water poured onto a floor of bottom slabs running off into a floor of
 /// posts, every flowing Voxel in a Shape's voids: the waterlogging-heavy case.
 fn waterlogging(c: &mut Criterion) {
-    let slab = Voxel::shaped(STONE, SHAPE_SLAB, Orientation::new(POS_Y, 0));
-    let post = Voxel::shaped(STONE, SHAPE_POST, Orientation::new(POS_Y, 0));
+    let fixture_rock = fixtures().ground.rock;
+    let slab = Voxel::shaped(fixture_rock, SHAPE_SLAB, Orientation::new(POS_Y, 0));
+    let post = Voxel::shaped(fixture_rock, SHAPE_POST, Orientation::new(POS_Y, 0));
     for v in SIZES {
         let (tables, water) = water_tables();
         let mut sim = open_floor(tables, v, 8.0, 4.0, Limits::UNBOUNDED);

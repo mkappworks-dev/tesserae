@@ -3,14 +3,14 @@
 use super::*;
 use crate::server::edit::set_occupants;
 use tesserae_core::mesh::FLAME;
-use tesserae_core::testgen::register_water;
+
 use tesserae_core::{Burn, Burning, CombustionDef, Fluid, Level, MaterialId, Occupants, Overlay};
 
 fn burning_stone() -> Tables {
-    let mut tables = Tables::builtin();
+    let mut tables = crate::server::fixture_tables();
     tables
         .register_combustion(
-            worldgen::STONE,
+            tesserae_core::testgen::fixtures().ground.rock,
             CombustionDef {
                 threshold: 6,
                 ignition_delay_s: 2.0,
@@ -23,8 +23,8 @@ fn burning_stone() -> Tables {
     tables
 }
 
-fn harness_with_water(mut tables: Tables) -> (Harness, MaterialId) {
-    let water = register_water(&mut tables);
+fn harness_with_water(tables: Tables) -> (Harness, MaterialId) {
+    let water = tesserae_core::testgen::fixtures().water;
     let mut h = harness();
     h.app.insert_resource(ContentTables(Arc::new(tables)));
     (h, water)
@@ -240,7 +240,7 @@ fn held_fluid_and_fire_reach_the_level_one_cover_and_its_mesh() {
 /// leave the cover with it, which is the generator's again.
 #[test]
 fn a_fluid_only_change_reaches_the_cover_and_eviction_takes_it_out() {
-    let (mut h, water) = harness_with_water(Arc::unwrap_or_clone(ContentTables::default().0));
+    let (mut h, water) = harness_with_water(crate::server::fixture_tables());
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
@@ -283,7 +283,7 @@ fn a_fluid_only_change_reaches_the_cover_and_eviction_takes_it_out() {
 /// mesh the Client is left holding of it are what the settled state gives.
 #[test]
 fn flow_the_simulation_lands_reaches_the_cover_once_it_settles() {
-    let (mut h, water) = harness_with_water(Arc::unwrap_or_clone(ContentTables::default().0));
+    let (mut h, water) = harness_with_water(crate::server::fixture_tables());
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
@@ -354,7 +354,7 @@ fn flow_the_simulation_lands_reaches_the_cover_once_it_settles() {
 /// mesh are what the held state gives.
 #[test]
 fn water_changing_under_a_cover_every_tick_is_still_redrawn_and_settles() {
-    let (mut h, water) = harness_with_water(Arc::unwrap_or_clone(ContentTables::default().0));
+    let (mut h, water) = harness_with_water(crate::server::fixture_tables());
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
@@ -415,8 +415,8 @@ fn water_changing_under_a_cover_every_tick_is_still_redrawn_and_settles() {
 fn lake_tables() -> &'static (Tables, MaterialId) {
     static TABLES: std::sync::OnceLock<(Tables, MaterialId)> = std::sync::OnceLock::new();
     TABLES.get_or_init(|| {
-        let mut tables = Tables::builtin();
-        let water = register_water(&mut tables);
+        let tables = crate::server::fixture_tables();
+        let water = tesserae_core::testgen::fixtures().water;
         (tables, water)
     })
 }
@@ -475,7 +475,7 @@ impl Lake {
                     level_m: self.level_m,
                     material: lake_fluid(),
                 }),
-                ..WorldgenParams::default()
+                ..tesserae_core::testgen::world_params()
             },
         )
     }
@@ -639,7 +639,7 @@ fn every_coarse_face_of_water_that_moved_lies_in_a_level_zero_chunk_holding_it()
             (stone(), Overlay::NONE),
         );
         let slab = Voxel::shaped(
-            worldgen::STONE,
+            tesserae_core::testgen::fixtures().ground.rock,
             tesserae_core::SHAPE_SLAB,
             tesserae_core::Orientation::IDENTITY,
         );

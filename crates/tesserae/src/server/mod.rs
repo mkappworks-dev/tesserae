@@ -24,6 +24,7 @@ mod lod_rings;
 pub mod mods;
 pub mod player;
 pub mod streaming;
+pub mod undo;
 pub mod world_state;
 
 use std::sync::Arc;
@@ -63,16 +64,7 @@ impl Default for ContentTables {
 }
 
 impl ContentTables {
-    fn from_loaded(mut tables: Tables, game: bool) -> Self {
-        #[cfg(feature = "dev")]
-        if !game && tables.shapes.len() < 256 {
-            tables
-                .shapes
-                .register(tesserae_core::shape::examples::fence())
-                .expect("the demo fence fits the table");
-        }
-        #[cfg(not(feature = "dev"))]
-        let _ = (&mut tables, game);
+    fn from_loaded(tables: Tables, _game: bool) -> Self {
         ContentTables(Arc::new(tables))
     }
 }
@@ -157,6 +149,9 @@ fn open_world(
     params: Option<Res<mods::WorldParameters>>,
 ) {
     let params = params.map_or_else(|| worldgen_params(None), |params| params.0);
+    if params.ground.is_none() {
+        info!("World has no ground: no Game named rock, soil and surface");
+    }
     let generator = Worldgen::new(world.seed, world.voxel_size, params);
     commands.insert_resource(SpawnPoint::new(spawn_eye(&generator)));
     commands.insert_resource(WorldGenerator(generator));
@@ -169,6 +164,16 @@ fn spawn_eye(generator: &Worldgen) -> Vec3 {
         .water()
         .map_or(ground_m, |w| w.level_m.max(ground_m));
     Vec3::new(0.0, top_m + SPAWN_CLEARANCE_M, 0.0)
+}
+
+#[cfg(test)]
+pub(crate) fn fixture_tables() -> Tables {
+    let mut tables = tesserae_core::testgen::fixtures().tables.clone();
+    tables
+        .shapes
+        .register(tesserae_core::shape::examples::fence())
+        .unwrap();
+    tables
 }
 
 #[cfg(test)]

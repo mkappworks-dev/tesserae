@@ -9,14 +9,15 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
-use tesserae_core::worldgen::STONE;
-use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, Voxel, WorldgenParams};
+use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
     discover, plan, resolve,
 };
 
-use crate::content::{CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette};
+use crate::content::{
+    CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette, MaterialTextures,
+};
 use crate::world::WorldSettings;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +92,8 @@ pub struct LoadedMods {
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
+    pub textures: Vec<(MaterialId, Vec<u8>)>,
+    pub remove_times: Vec<(MaterialId, std::time::Duration)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
 }
@@ -103,6 +106,8 @@ impl Default for LoadedMods {
             world: None,
             view: None,
             appearance: Vec::new(),
+            textures: Vec::new(),
+            remove_times: Vec::new(),
             mods: Vec::new(),
             game: false,
         }
@@ -266,7 +271,6 @@ fn load_with(
             for line in instance.drain_log().lines {
                 eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
             }
-            let appearance = declaration.appearance.clone();
             let root = component.found.manifest.root;
             let applied = apply(
                 declaration,
@@ -276,12 +280,16 @@ fn load_with(
                 root,
             )
             .map_err(|e| e.to_string())?;
+            loaded.remove_times.extend(applied.remove_times);
             behaviours.push(applied.behaviour);
-            for row in appearance {
+            for row in applied.appearance {
                 if let Some(index) = loaded
                     .registry
                     .id_of(Kind::Material, &format!("{id}:{}", row.material))
                 {
+                    if let Some(pixels) = row.texture {
+                        loaded.textures.push((index as MaterialId, pixels));
+                    }
                     let c = row.color;
                     loaded
                         .appearance
@@ -297,10 +305,11 @@ fn load_with(
         }
         // Every name is registered now; what flows, reacts and burns is fixed
         // before any Mod starts and the World opens.
-        let lake =
+        let (ground, lake) =
             resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
         if let Some(world) = &mut loaded.world {
             world.water = lake;
+            world.ground = ground;
         }
         let listed = |kind| {
             loaded
@@ -343,27 +352,31 @@ pub(super) fn plugin(app: &mut App) {
         .world_mut()
         .remove_non_send::<LoadedMods>()
         .unwrap_or_default();
-    #[cfg(feature = "dev")]
-    app.insert_resource(crate::content::DevFence(
-        (!loaded.game && loaded.tables.shapes.len() < 256)
-            .then_some(loaded.tables.shapes.len() as u8),
-    ));
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let params = super::worldgen_params(loaded.world);
-    let catalogue = catalogue(
+    let mut catalogue = catalogue(
         &loaded.registry,
         &tables.0,
         params.water.map(|lake| lake.material),
+        params.ground.map(|ground| ground.rock),
     );
+    for (id, duration) in loaded.remove_times {
+        if let Some(material) = catalogue.materials.iter_mut().find(|m| m.id == id) {
+            material.remove_time = duration;
+        }
+    }
     app.insert_resource(tables)
         .insert_resource(WorldParameters(params))
         .insert_resource(super::streaming::streaming_settings(loaded.view))
         .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
         .add_plugins(runtime::plugin)
+        .add_message::<MaterialTextures>()
         .add_message::<MaterialPalette>()
         .add_message::<ContentCatalogue>();
     app.world_mut()
         .write_message(MaterialPalette(loaded.appearance));
+    app.world_mut()
+        .write_message(MaterialTextures(loaded.textures));
     app.world_mut().write_message(catalogue);
 }
 
@@ -371,12 +384,14 @@ pub(in crate::server) fn catalogue(
     registry: &Registry,
     tables: &Tables,
     lake: Option<MaterialId>,
+    rock: Option<MaterialId>,
 ) -> ContentCatalogue {
     let materials = registry
         .names(Kind::Material)
         .map(|(id, name)| {
             let id = id as MaterialId;
             CatalogueMaterial {
+                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
                 id,
                 name: name.to_owned(),
                 solid: tables.materials.def(id).solid,
@@ -390,13 +405,13 @@ pub(in crate::server) fn catalogue(
             let id = id as ShapeId;
             CatalogueShape {
                 id,
-                // The dev Server's reference fence is the one Shape no Registry names.
                 name: registry
                     .names(Kind::Shape)
                     .find(|&(named, _)| named == id as usize)
-                    .map_or_else(|| "dev:fence".to_owned(), |(_, name)| name.to_owned()),
-                turnable: id != SHAPE_FULL_CUBE
-                    && !tables.shapes.is_connected(Voxel::new(STONE, id, 0)),
+                    .map(|(_, name)| name.to_owned())
+                    .expect("registered Shape name"),
+                geometry: tables.shapes.preview_geometry(id),
+                turnable: id != SHAPE_FULL_CUBE && !tables.shapes.is_connected_shape(id),
             }
         })
         .collect();
@@ -404,6 +419,7 @@ pub(in crate::server) fn catalogue(
         materials,
         shapes,
         lake,
+        rock,
     }
 }
 
@@ -669,7 +685,7 @@ mod tests {
         }
         assert!(material("demo:water").fluid < material("demo:lava").fluid);
         assert!(material("demo:wood").solid && material("demo:wood").burns);
-        for solid in ["core:stone", "demo:brick", "demo:lamp"] {
+        for solid in ["demo:stone", "demo:brick", "demo:lamp"] {
             let solid = material(solid);
             assert!(solid.solid && solid.fluid.is_none() && !solid.burns);
         }
@@ -690,7 +706,54 @@ mod tests {
         assert!(turnable.contains(&("demo:fence", false)), "it is connected");
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, [0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14]);
+        assert_eq!(ids, std::iter::once(0).chain(8..20).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn demo_preview_textures_reach_the_client_under_the_registered_material_ids() {
+        let loaded = super::runtime::tests::demo_loaded(1.0);
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let catalogue = app
+            .world_mut()
+            .resource_mut::<Messages<ContentCatalogue>>()
+            .drain()
+            .next()
+            .unwrap();
+        let textures = app
+            .world_mut()
+            .resource_mut::<Messages<MaterialTextures>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(textures.0.len(), 12);
+        for material in catalogue.materials.iter().filter(|m| m.id != 0) {
+            let (_, pixels) = textures
+                .0
+                .iter()
+                .find(|(id, _)| *id == material.id)
+                .unwrap_or_else(|| panic!("{} needs a preview", material.name));
+            assert_eq!(pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
+            assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
+            if matches!(
+                material.name.as_str(),
+                "demo:glass" | "demo:water" | "demo:mud"
+            ) {
+                assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
+            } else {
+                assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
+            }
+            assert_eq!(
+                textures
+                    .0
+                    .iter()
+                    .filter(|(_, other)| other == pixels)
+                    .count(),
+                1,
+                "{} has distinct artwork",
+                material.name
+            );
+        }
     }
 
     #[test]
@@ -703,60 +766,14 @@ mod tests {
             .iter()
             .map(|m| m.name.as_str())
             .collect();
-        assert_eq!(
-            names,
-            [
-                "core:air",
-                "core:stone",
-                "core:dirt",
-                "core:grass",
-                "core:lantern",
-                "core:glass",
-                "core:leaves"
-            ]
-        );
+        assert_eq!(names, ["core:air"]);
+        assert_eq!(catalogue.rock, None);
         assert!(catalogue.materials.iter().all(|m| m.fluid.is_none()));
         let fence = catalogue
             .shapes
             .get(4)
             .map(|s| (s.name.as_str(), s.turnable));
-        if cfg!(feature = "dev") {
-            assert_eq!(fence, Some(("dev:fence", false)));
-        } else {
-            assert_eq!(fence, None);
-        }
-    }
-
-    #[cfg(feature = "dev")]
-    #[test]
-    fn dev_fence_follows_content_shapes_and_is_absent_with_a_game() {
-        let s = Scratch::new();
-        s.add("catalog", "catalog", "");
-        let mut app = App::new();
-        app.insert_non_send(s.load(TrustMode::All).unwrap())
-            .add_plugins(plugin);
-        let fence = app.world().resource::<crate::content::DevFence>().0;
-        assert_eq!(fence, Some(12));
-        assert_eq!(
-            app.world()
-                .resource::<super::super::ContentTables>()
-                .shapes
-                .len(),
-            13
-        );
-        let s = Scratch::new();
-        s.game();
-        let mut app = App::new();
-        app.insert_non_send(s.load(TrustMode::All).unwrap())
-            .add_plugins(plugin);
-        assert_eq!(app.world().resource::<crate::content::DevFence>().0, None);
-        assert_eq!(
-            app.world()
-                .resource::<super::super::ContentTables>()
-                .shapes
-                .len(),
-            13
-        );
+        assert_eq!(fence, None);
     }
 
     #[test]
@@ -1061,5 +1078,29 @@ mod tests {
         let (result, _) = prompted(&s, TrustMode::ThisRun, false, "");
         assert_eq!(result.unwrap().mods.len(), 1);
         assert_eq!(fs::read(s.0.join("trust.json")).unwrap(), recorded);
+    }
+    #[test]
+    fn catalogue_preserves_mod_removal_times_by_registered_material_id() {
+        let mut loaded = super::runtime::tests::demo_loaded(1.0);
+        let id = loaded.registry.id_of(Kind::Material, "demo:stone").unwrap() as MaterialId;
+        assert!(
+            loaded
+                .remove_times
+                .iter()
+                .any(|(material, _)| *material == id)
+        );
+        let duration = std::time::Duration::from_secs(2);
+        loaded
+            .remove_times
+            .iter_mut()
+            .find(|(material, _)| *material == id)
+            .unwrap()
+            .1 = duration;
+        let catalogue = published_catalogue(loaded);
+        assert_eq!(catalogue.material(id).unwrap().remove_time, duration);
+        assert_eq!(
+            catalogue.material(0).unwrap().remove_time,
+            tesserae_mods::DEFAULT_REMOVE_TIME
+        );
     }
 }

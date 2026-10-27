@@ -1263,7 +1263,7 @@ pub(in crate::server) mod tests {
                 settings,
                 budget,
                 WorldSettings::default(),
-                WorldgenParams::default(),
+                tesserae_core::testgen::world_params(),
             )
         }
 
@@ -1290,7 +1290,7 @@ pub(in crate::server) mod tests {
                 .init_resource::<lod::LodState>()
                 .init_resource::<lod::LodJobs>()
                 .init_resource::<lod::LodBudget>()
-                .init_resource::<ContentTables>()
+                .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
                 .init_resource::<ChunkStore>()
                 .init_resource::<LoadOrder>()
                 .init_resource::<MeshState>()
@@ -1508,7 +1508,11 @@ pub(in crate::server) mod tests {
             let store = h.store();
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(*coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, *coord), neighbors, &Tables::builtin());
+            let fresh = mesh_chunk(
+                lit(store, *coord),
+                neighbors,
+                &crate::server::fixture_tables(),
+            );
             assert!(
                 same_mesh(held, &fresh),
                 "{coord}: the Client holds a stale mesh ({} quads, should be {})",
@@ -1554,7 +1558,11 @@ pub(in crate::server) mod tests {
             assert!(!republished.mesh.is_empty(), "{coord} has a new face");
             let neighbors: [Option<LitChunk>; 6] =
                 face_neighbors(coord).map(|n| Some(lit(store, n)));
-            let fresh = mesh_chunk(lit(store, coord), neighbors, &Tables::builtin());
+            let fresh = mesh_chunk(
+                lit(store, coord),
+                neighbors,
+                &crate::server::fixture_tables(),
+            );
             assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
         }
         assert_eq!(ready.len(), 2, "nothing else was touched");
@@ -1743,7 +1751,7 @@ pub(in crate::server) mod tests {
         let generator = Worldgen::new(
             WorldSettings::default().seed,
             WorldSettings::default().voxel_size,
-            WorldgenParams::default(),
+            tesserae_core::testgen::world_params(),
         );
         let (_, highest_m) = generator.surface_bounds_m();
         let cell = WorldSettings::default().cell_size();
@@ -1771,7 +1779,7 @@ pub(in crate::server) mod tests {
         let generator = Worldgen::new(
             WorldSettings::default().seed,
             WorldSettings::default().voxel_size,
-            WorldgenParams::default(),
+            tesserae_core::testgen::world_params(),
         );
         let (lowest_m, _) = generator.surface_bounds_m();
         let cell = WorldSettings::default().cell_size();
@@ -1854,7 +1862,7 @@ pub(in crate::server) mod tests {
         generator: &WorldGenerator,
         world: &WorldSettings,
     ) -> bevy::platform::collections::HashMap<ChunkCoord, ChunkLight> {
-        let tables = Tables::builtin();
+        let tables = crate::server::fixture_tables();
         let sky_chunk = Chunk::air();
         let open_sky = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
         let mut coords: Vec<ChunkCoord> = store.coords().collect();
@@ -1948,7 +1956,7 @@ pub(in crate::server) mod tests {
                         &mut meshes,
                         &tables,
                         at,
-                        Voxel::cube(tesserae_core::worldgen::LANTERN),
+                        Voxel::cube(tesserae_core::testgen::fixtures().lantern),
                     )
                     .expect("the Chunk is loaded and lit");
                 },
@@ -2015,7 +2023,7 @@ pub(in crate::server) mod tests {
         while (delivered == 0 || h.jobs().mesh.stale() == 0) && started.elapsed() < SETTLE_CEILING {
             i += 1;
             let voxel = if i % 2 == 0 {
-                Voxel::cube(tesserae_core::worldgen::STONE)
+                Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
             } else {
                 Voxel::AIR
             };
@@ -2101,7 +2109,11 @@ pub(in crate::server) mod tests {
                 let store = h.store();
                 let neighbors: [Option<LitChunk>; 6] =
                     face_neighbors(*coord).map(|n| Some(lit(store, n)));
-                let fresh = mesh_chunk(lit(store, *coord), neighbors, &Tables::builtin());
+                let fresh = mesh_chunk(
+                    lit(store, *coord),
+                    neighbors,
+                    &crate::server::fixture_tables(),
+                );
                 assert!(
                     same_mesh(held, &fresh),
                     "{coord} is stale, {cells} Cells away"

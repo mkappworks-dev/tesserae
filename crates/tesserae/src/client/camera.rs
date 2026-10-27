@@ -98,7 +98,7 @@ fn spawn_hint(mut commands: Commands) {
         CursorHint,
         // ASCII only: Bevy's embedded default font is a FiraMono subset and
         // renders anything outside it, a middle dot included, as tofu.
-        Text::new("Click to look around  -  Esc to release the cursor"),
+        Text::new("Click to look around\nEsc to release the cursor"),
         TextFont {
             font_size: bevy::text::FontSize::Px(14.0),
             ..default()
@@ -168,12 +168,15 @@ fn grab_cursor(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+    panels: Option<Res<super::help::Panels>>,
 ) {
     let mut cursor = cursor.into_inner();
     if keys.just_pressed(KeyCode::Escape) {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
-    } else if mouse.just_pressed(MouseButton::Left) {
+    } else if mouse.just_pressed(MouseButton::Left)
+        && !panels.is_some_and(|panels| panels.pointer_over_info)
+    {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
     }
@@ -221,7 +224,9 @@ fn fly(
         (KeyCode::Space, Vec3::Y),
         (KeyCode::ControlLeft, Vec3::NEG_Y),
     ] {
-        if keys.pressed(key) {
+        if keys.pressed(key)
+            && !(key == KeyCode::ControlLeft && keys.any_pressed([KeyCode::KeyZ, KeyCode::KeyY]))
+        {
             direction += axis;
         }
     }

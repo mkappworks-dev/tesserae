@@ -245,12 +245,30 @@ pub(super) fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_SCREENSHOT_MENU").is_some() {
         app.insert_resource(super::menu::Menu::opened());
     }
+    app.insert_resource(super::help::Panels {
+        help: std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some(),
+        debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
+        ..default()
+    });
+    app.add_systems(
+        Update,
+        super::removal::capture_progress
+            .after(super::removal::hold)
+            .before(super::removal::bar),
+    );
     app.add_systems(Startup, uncap_frame_rate).add_systems(
         Update,
         (
-            render_offscreen.run_if(|capture: Res<Capture>, target: Option<Res<Offscreen>>| {
-                capture.offscreen && target.is_none()
-            }),
+            render_offscreen.after(super::preview::camera).run_if(
+                |capture: Res<Capture>, target: Option<Res<Offscreen>>| {
+                    capture.offscreen && target.is_none()
+                },
+            ),
+            capture_holding,
+            menu_view
+                .after(super::menu::rebuild_bar)
+                .before(super::menu::drag_preview),
+            menu_drag.before(super::menu::drag_preview),
             watch_frames,
             aim,
             fly_forward,
@@ -292,13 +310,25 @@ struct Offscreen(Handle<Image>);
 fn render_offscreen(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    cameras: Query<Entity, With<Camera3d>>,
+    cameras: Query<Entity, (With<Camera3d>, Without<super::tile_preview::AtlasCamera>)>,
     main: Single<Entity, With<MainCamera>>,
     menu: Res<super::menu::Menu>,
 ) {
-    let image = Image::new_target_texture(1920, 1080, TextureFormat::Rgba8UnormSrgb, None);
+    let dimension = |name, fallback| {
+        std::env::var(name)
+            .ok()
+            .and_then(|n| n.parse::<u32>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(fallback)
+    };
+    let image = Image::new_target_texture(
+        dimension("TESSERAE_SCREENSHOT_WIDTH", 1920),
+        dimension("TESSERAE_SCREENSHOT_HEIGHT", 1080),
+        TextureFormat::Rgba8UnormSrgb,
+        None,
+    );
     let handle = images.add(image);
-    // Every camera: one left on the window would draw there, not in the image.
+    // Every window camera must draw into the capture; the icon atlas stays separate.
     for camera in &cameras {
         commands
             .entity(camera)
@@ -309,6 +339,162 @@ fn render_offscreen(
         commands.entity(*main).insert(IsDefaultUiCamera);
     }
     commands.insert_resource(Offscreen(handle));
+}
+
+fn menu_view(
+    mut commands: Commands,
+    catalogue: Res<super::edit::Catalogue>,
+    entries: Query<(Entity, &super::menu::Entry)>,
+    mut positions: Query<&mut ScrollPosition, With<bevy::ui_widgets::ScrollArea>>,
+    mut hovered: Local<bool>,
+) {
+    if let Some(scroll) = std::env::var("TESSERAE_SCREENSHOT_MENU_SCROLL_PX")
+        .ok()
+        .and_then(|n| n.parse::<f32>().ok())
+    {
+        for mut position in &mut positions {
+            position.y = scroll;
+        }
+    }
+    if *hovered {
+        return;
+    }
+    let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MENU_HOVER") else {
+        return;
+    };
+    let Some(material) = catalogue.0.materials.iter().find(|m| m.name == name) else {
+        return;
+    };
+    let Some((entity, _)) = entries
+        .iter()
+        .find(|(_, e)| **e == super::menu::Entry::Material(material.id))
+    else {
+        return;
+    };
+    use bevy::picking::{
+        backend::HitData,
+        events::{Pointer, PointerOver},
+        pointer::{Location, PointerId},
+    };
+    commands.trigger(PointerOver {
+        entity,
+        pointer: Pointer::new(
+            PointerId::Mouse,
+            Location {
+                target: bevy::camera::NormalizedRenderTarget::None {
+                    width: 1280,
+                    height: 600,
+                },
+                position: Vec2::ZERO,
+            },
+        ),
+        hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+    });
+    *hovered = true;
+}
+
+#[derive(Default)]
+struct MenuDrag {
+    source: Option<Entity>,
+    dropped: bool,
+}
+
+fn menu_drag(
+    mut commands: Commands,
+    catalogue: Res<super::edit::Catalogue>,
+    time: Res<Time>,
+    entries: Query<(
+        Entity,
+        &super::menu::Entry,
+        &UiGlobalTransform,
+        &ComputedNode,
+    )>,
+    mut drag: Local<MenuDrag>,
+) {
+    use super::menu::Entry;
+    use bevy::picking::{
+        backend::HitData,
+        events::{Pointer, PointerDrag, PointerDragDrop, PointerDragStart, PointerOver},
+        pointer::{Location, PointerButton, PointerId},
+    };
+
+    let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MENU_DRAG") else {
+        return;
+    };
+    if drag.dropped {
+        return;
+    }
+    let wanted = if name == "fire" {
+        Entry::Fire
+    } else if let Some(material) = catalogue.0.materials.iter().find(|m| m.name == name) {
+        if material.fluid.is_some() {
+            Entry::Fluid(material.id)
+        } else {
+            Entry::Material(material.id)
+        }
+    } else {
+        return;
+    };
+    let slot = std::env::var("TESSERAE_SCREENSHOT_MENU_DRAG_SLOT")
+        .ok()
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(5)
+        .clamp(1, 9)
+        - 1;
+    let Some((target, _, transform, node)) = entries
+        .iter()
+        .find(|(_, e, _, node)| **e == Entry::Slot(slot) && node.size().min_element() > 0.0)
+    else {
+        return;
+    };
+    let affine: bevy::math::Affine2 = transform.into();
+    let position = affine.translation * node.inverse_scale_factor();
+    let pointer = Pointer::new(
+        PointerId::Mouse,
+        Location {
+            target: bevy::camera::NormalizedRenderTarget::None {
+                width: 1920,
+                height: 1080,
+            },
+            position,
+        },
+    );
+    let hit = HitData::new(Entity::PLACEHOLDER, 0.0, None, None);
+    let button = PointerButton::Primary;
+    let Some((source, _, _, _)) = entries.iter().find(|(_, e, _, _)| **e == wanted) else {
+        return;
+    };
+    if drag.source.is_none() {
+        commands.trigger(PointerDragStart {
+            entity: source,
+            pointer: pointer.clone(),
+            button,
+            hit: hit.clone(),
+        });
+        drag.source = Some(source);
+    }
+    commands.trigger(PointerDrag {
+        entity: source,
+        pointer: pointer.clone(),
+        button,
+        distance: Vec2::ZERO,
+        delta: Vec2::ZERO,
+    });
+    commands.trigger(PointerOver {
+        entity: target,
+        pointer: pointer.clone(),
+        hit: hit.clone(),
+    });
+    if std::env::var_os("TESSERAE_SCREENSHOT_MENU_DROP").is_some() && time.elapsed_secs() > 2.0 {
+        commands.trigger(PointerDragDrop {
+            entity: target,
+            dropped: drag.source.unwrap(),
+            pointer,
+            button,
+            hit,
+        });
+        drag.dropped = true;
+    }
 }
 
 /// Ignores the first second and a half: window creation, pipeline
@@ -376,6 +562,53 @@ fn climb_m_s(lift_m: f32, fly_for_s: f32, horizontal_m_s: f32) -> f32 {
         .max(0.0)
         .sqrt();
     wanted.clamp(-room, room)
+}
+
+fn capture_holding(
+    catalogue: Res<super::edit::Catalogue>,
+    mut hotbar: ResMut<super::edit::Hotbar>,
+    mut configured: Local<bool>,
+) {
+    if *configured {
+        return;
+    }
+    let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MATERIAL") else {
+        return;
+    };
+    if name == "empty" {
+        hotbar.outside = Some(super::edit::Holding::Empty);
+        *configured = true;
+        return;
+    }
+    let Some(material) = catalogue
+        .0
+        .materials
+        .iter()
+        .find(|material| material.name == name)
+    else {
+        return;
+    };
+    let shape_name =
+        std::env::var("TESSERAE_SCREENSHOT_SHAPE").unwrap_or_else(|_| "core:cube".into());
+    let Some(shape) = catalogue
+        .0
+        .shapes
+        .iter()
+        .find(|shape| shape.name == shape_name)
+    else {
+        return;
+    };
+    let orientation = std::env::var("TESSERAE_SCREENSHOT_ORIENTATION")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .and_then(tesserae_core::Orientation::from_bits)
+        .unwrap_or(tesserae_core::Orientation::IDENTITY);
+    hotbar.outside = Some(super::edit::Holding::Solid {
+        material: material.id,
+        shape: shape.id,
+        orientation,
+    });
+    *configured = true;
 }
 
 fn aim(

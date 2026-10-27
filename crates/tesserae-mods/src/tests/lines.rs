@@ -2,8 +2,8 @@
 //! 0.1 through the adapters, each guest shown the Edit history of its own line.
 
 use futures_lite::future::block_on;
-use tesserae_core::material::STONE;
-use tesserae_core::testgen::{WATER_FLUID, register_water};
+use tesserae_core::testgen::WATER_FLUID;
+use tesserae_core::testgen::fixtures;
 use tesserae_core::{MaterialDef, MaterialId, Occlusion, PlaceFault, RenderClass, Tables, Voxel};
 
 use super::sandbox::{Rig, context};
@@ -17,8 +17,8 @@ fn region(min: [f32; 3], max: [f32; 3]) -> Region {
 }
 
 fn watered() -> (Tables, MaterialId) {
-    let mut tables = Tables::builtin();
-    let water = register_water(&mut tables);
+    let tables = fixtures().tables.clone();
+    let water = fixtures().water;
     (tables, water)
 }
 
@@ -115,7 +115,7 @@ fn source_and_fire_commands_resolve_to_lazy_regions_under_the_fill_caps() {
 
 #[test]
 fn a_source_names_a_fluid_the_tables_hold() {
-    let mut tables = Tables::builtin();
+    let mut tables = fixtures().tables.clone();
     let oil = tables
         .materials
         .register(MaterialDef {
@@ -138,7 +138,7 @@ fn a_source_names_a_fluid_the_tables_hold() {
         )
     };
     for (material, fault) in [
-        (STONE, PlaceFault::NotAFluid),
+        (fixtures().ground.rock, PlaceFault::NotAFluid),
         (oil, PlaceFault::NotAFluid),
         (999, PlaceFault::UnknownMaterial),
     ] {
@@ -162,17 +162,17 @@ fn edits() -> Vec<EditEvent> {
             at,
             kind: EditKind::Solid {
                 before: Voxel::AIR,
-                after: Voxel::cube(STONE),
+                after: Voxel::cube(fixtures().ground.rock),
             },
             before: Voxel::cube(water),
-            after: Voxel::cube(STONE),
+            after: Voxel::cube(fixtures().ground.rock),
         },
         // A source into a waterlogged stair: the packed Voxel stays a stair.
         EditEvent {
             at,
             kind: EditKind::SourcePlaced(water),
-            before: Voxel::new(STONE, 2, 0),
-            after: Voxel::new(STONE, 2, 0),
+            before: Voxel::new(fixtures().ground.rock, 2, 0),
+            after: Voxel::new(fixtures().ground.rock, 2, 0),
         },
         // A source into air is packed as a water cube.
         EditEvent {
@@ -219,7 +219,7 @@ fn a_0_1_guest_sees_the_voxel_projection_of_player_edits() {
         commands,
         [Command::Place(vec![Placement {
             at: [3.0, 0.0, 0.0],
-            voxel: Voxel::cube(STONE)
+            voxel: Voxel::cube(1)
         }])]
     );
     assert_eq!(
@@ -249,7 +249,11 @@ fn a_0_2_guest_sees_solid_and_fluid_intents_apart() {
     assert_eq!(line.matches(&placed).count(), 2, "{line}");
     assert_eq!(line.matches(&removed).count(), 1, "{line}");
     assert!(
-        line.contains("before: Voxel { material: 0") && line.contains("after: Voxel { material: 1"),
+        line.contains("before: Voxel { material: 0")
+            && line.contains(&format!(
+                "after: Voxel {{ material: {}",
+                fixtures().ground.rock
+            )),
         "the solid layer, not the packed water: {line}"
     );
     assert!(

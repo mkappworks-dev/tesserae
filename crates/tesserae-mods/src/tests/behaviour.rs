@@ -3,7 +3,6 @@
 //! load before a World could open.
 
 use futures_lite::future::block_on;
-use tesserae_core::material::STONE;
 use tesserae_core::{
     Burn, CombustionError, FluidDef, FluidError, Heat, Phase, ReactionError, Side, Tables,
 };
@@ -24,6 +23,7 @@ fn material(name: &str, solid: bool) -> MaterialDef {
         dimming: 2,
         occlusion: Occlusion::Never,
         render: RenderClass::Blend,
+        remove_time_s: None,
         solid,
     }
 }
@@ -251,7 +251,7 @@ fn unknown_names_bad_values_and_contradictions_fail_the_load() {
             |d| {
                 d.reactions = vec![
                     reaction("lava:lava", "water:water", None),
-                    reaction("water:water", "lava:lava", Some("core:stone")),
+                    reaction("water:water", "lava:lava", None),
                 ]
             },
             "reaction 1: another reaction",
@@ -370,7 +370,7 @@ fn the_fluids_guest_declares_a_fluid_a_reaction_and_a_fire() {
     assert_eq!(rule.first.phase, Phase::Flowing);
     assert_eq!(rule.product, Some(id("fluids:ash")));
     assert!(tables.combustion.contains(id("fluids:wood")));
-    assert!(!tables.combustion.contains(STONE));
+    assert!(!tables.combustion.contains(id("fluids:ash")));
 }
 
 #[test]
@@ -406,6 +406,11 @@ fn lake(level_m: f32, material: &str) -> content::WorldParams {
             level_m,
             material: material.into(),
         }),
+        ground: Some(content::GroundParams {
+            rock: "game:ground".into(),
+            soil: "game:ground".into(),
+            surface: "game:ground".into(),
+        }),
         ..crate::convert::engine_world_params()
     }
 }
@@ -418,12 +423,15 @@ fn load_game(
     let mut tables = Tables::builtin();
     let mut registry = Registry::builtin();
     let mut behaviours: Vec<Behaviour> = Vec::new();
-    for (row, (id, declaration)) in mods.into_iter().enumerate() {
+    for (row, (id, mut declaration)) in mods.into_iter().enumerate() {
+        if row == 0 && id == "game" {
+            declaration.materials.push(material("ground", true));
+        }
         let applied = apply(declaration, id, &mut tables, &mut registry, row == 0)?;
         assert!(applied.world.is_none_or(|w| w.water.is_none()));
         behaviours.push(applied.behaviour);
     }
-    let lake = resolve(behaviours, &mut tables, &registry)?;
+    let (_, lake) = resolve(behaviours, &mut tables, &registry)?;
     Ok((registry, lake))
 }
 
@@ -492,16 +500,18 @@ fn the_lake_guest_fills_its_lakes_with_its_own_fluid() {
 
 fn assert_warned_dry(log: &crate::LogHandle) {
     let lines = log.drain().lines;
-    assert_eq!(lines.len(), 1, "{lines:?}");
-    assert_eq!(lines[0].level, crate::LogLevel::Warn);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines.iter().all(|line| line.level == crate::LogLevel::Warn));
     assert!(
-        lines[0]
-            .message
-            .contains("names no fluid before contract line 0.3")
-            && lines[0].message.contains("this World has no lakes"),
-        "{}",
-        lines[0].message
+        lines
+            .iter()
+            .any(|line| line.message.contains("no ground before contract line 0.3"))
     );
+    assert!(lines.iter().any(|line| {
+        line.message
+            .contains("names no fluid before contract line 0.3")
+            && line.message.contains("this World has no lakes")
+    }));
 }
 
 /// A 0.2 Game's standing water names no fluid: it loads, says why its World
@@ -545,11 +555,8 @@ fn a_0_1_games_standing_water_is_dropped_on_the_way_through_0_2() {
     assert_warned_dry(&log);
 }
 
-/// No line maps `core:water` to anything: 0.3 and 0.2 rows that name it fail
-/// as any unknown name does, and id 7 is an unknown Material in a Command on
-/// every line, 0.1's included.
 #[test]
-fn core_water_and_id_7_are_unknown_on_every_line() {
+fn retired_core_material_names_and_ids_are_unknown_on_every_line() {
     use crate::bindings::v02::tesserae::mods::content as v02;
     let named = |declaration| {
         load(vec![("lava", lava_mod()), ("game", declaration)])
@@ -557,44 +564,49 @@ fn core_water_and_id_7_are_unknown_on_every_line() {
             .unwrap()
             .to_string()
     };
-    let native = Declaration {
-        reactions: vec![reaction("lava:lava", "core:water", None)],
-        ..empty()
-    };
-    let old = v02::Declaration {
-        materials: vec![],
-        shapes: vec![],
-        appearance: vec![],
-        world: None,
-        view: None,
-        fluids: vec![v02::FluidDef {
-            material: "core:water".into(),
-            reach_m: 7.0,
-            sideways_m_per_s: 4.0,
-            downward_m_per_s: 8.0,
-            recession_m_per_s: 4.0,
-            reset_drop_m: 0.5,
-            waterlogs: true,
-            extinguishes: true,
-            heat: None,
-        }],
-        reactions: vec![],
-        combustion: vec![],
-    };
-    let log = crate::log::LogBuffer::shared();
-    for (line, message, expected) in [
-        (
-            "0.3",
-            named(native),
-            "reaction 0 names Material `core:water`",
-        ),
-        (
-            "0.2",
-            named(crate::adapt::v02::declaration(old, &log)),
-            "fluid 0 names Material `core:water`",
-        ),
+    for name in [
+        "stone", "dirt", "grass", "lantern", "glass", "leaves", "water",
     ] {
-        assert!(message.contains(expected), "{line}: {message}");
+        let name = format!("core:{name}");
+        let native = Declaration {
+            reactions: vec![reaction("lava:lava", &name, None)],
+            ..empty()
+        };
+        let old = v02::Declaration {
+            materials: vec![],
+            shapes: vec![],
+            appearance: vec![],
+            world: None,
+            view: None,
+            fluids: vec![v02::FluidDef {
+                material: name.clone(),
+                reach_m: 7.0,
+                sideways_m_per_s: 4.0,
+                downward_m_per_s: 8.0,
+                recession_m_per_s: 4.0,
+                reset_drop_m: 0.5,
+                waterlogs: true,
+                extinguishes: true,
+                heat: None,
+            }],
+            reactions: vec![],
+            combustion: vec![],
+        };
+        let log = crate::log::LogBuffer::shared();
+        for (line, message, expected) in [
+            (
+                "0.3",
+                named(native),
+                format!("reaction 0 names Material `{name}`"),
+            ),
+            (
+                "0.2",
+                named(crate::adapt::v02::declaration(old, &log)),
+                format!("fluid 0 names Material `{name}`"),
+            ),
+        ] {
+            assert!(message.contains(&expected), "{line}: {message}");
+        }
     }
 
     let tables = Tables::builtin();
@@ -605,13 +617,100 @@ fn core_water_and_id_7_are_unknown_on_every_line() {
         }])]
     };
     for line in [crate::Line::V01, crate::Line::V02, crate::Line::V03] {
-        assert_eq!(
-            crate::validate(&at(tesserae_core::Voxel::cube(7)), line, &tables, 1.0),
-            Err(crate::BatchError::Voxel {
-                command: 0,
-                fault: tesserae_core::PlaceFault::UnknownMaterial
-            }),
-            "{line:?}"
-        );
+        for id in tesserae_core::material::RETIRED_IDS {
+            assert_eq!(
+                crate::validate(&at(tesserae_core::Voxel::cube(id)), line, &tables, 1.0),
+                Err(crate::BatchError::Voxel {
+                    command: 0,
+                    fault: tesserae_core::PlaceFault::UnknownMaterial
+                }),
+                "{line:?} id {id}"
+            );
+        }
     }
+}
+
+#[test]
+fn a_games_ground_resolves_after_all_declarations_and_generates_its_materials() {
+    let mut game = empty();
+    let mut world = crate::convert::engine_world_params();
+    world.ground = Some(content::GroundParams {
+        rock: "game:rock".into(),
+        soil: "game:soil".into(),
+        surface: "game:surface".into(),
+    });
+    game.world = Some(world);
+    for name in ["rock", "soil", "surface"] {
+        game.materials.push(content::MaterialDef {
+            name: name.into(),
+            emission: 0,
+            dimming: 15,
+            occlusion: content::Occlusion::Opaque,
+            render: content::RenderClass::Opaque,
+            remove_time_s: None,
+            solid: true,
+        });
+    }
+    let mut tables = Tables::builtin();
+    let mut registry = Registry::builtin();
+    let applied = apply(game, "game", &mut tables, &mut registry, true).unwrap();
+    let (ground, water) = resolve(vec![applied.behaviour], &mut tables, &registry).unwrap();
+    let ground = ground.unwrap();
+    assert_eq!(
+        [ground.rock, ground.soil, ground.surface],
+        ["game:rock", "game:soil", "game:surface"]
+            .map(|n| registry.id_of(Kind::Material, n).unwrap() as u16)
+    );
+    for size in [1.0, 0.5, 0.25] {
+        let params = tesserae_core::WorldgenParams {
+            ground: Some(ground),
+            water,
+            ..applied.world.unwrap()
+        };
+        let generator = tesserae_core::Worldgen::new(7, size, params);
+        let y = (generator.surface_height_m(0.0, 0.0) / size / tesserae_core::CHUNK_SIZE as f32)
+            .floor() as i32;
+        let chunk = generator.chunk(0, y, 0);
+        assert!(
+            chunk.kinds().iter().all(|v| v.is_air()
+                || [ground.rock, ground.soil, ground.surface].contains(&v.material()))
+        );
+        assert!(chunk.kinds().iter().any(|v| v.material() == ground.surface));
+    }
+}
+
+#[test]
+fn unknown_and_non_solid_ground_and_lakes_without_ground_fail_the_load() {
+    for field in ["rock", "soil", "surface"] {
+        for name in ["missing:ground", "core:air", "lava:lava"] {
+            let mut params = lake(4.0, "lava:lava");
+            let mut ground = params.ground.take().unwrap();
+            match field {
+                "rock" => ground.rock = name.into(),
+                "soil" => ground.soil = name.into(),
+                _ => ground.surface = name.into(),
+            }
+            params.ground = Some(ground);
+            let game = Declaration {
+                world: Some(params),
+                ..empty()
+            };
+            let message = load_game(vec![("game", game), ("lava", lava_mod())])
+                .unwrap_err()
+                .to_string();
+            assert!(message.contains(&format!("ground.{field}")), "{message}");
+        }
+    }
+    let mut params = lake(4.0, "lava:lava");
+    params.ground = None;
+    let game = Declaration {
+        world: Some(params),
+        ..empty()
+    };
+    assert!(
+        load_game(vec![("game", game), ("lava", lava_mod())])
+            .unwrap_err()
+            .to_string()
+            .contains("requires ground")
+    );
 }

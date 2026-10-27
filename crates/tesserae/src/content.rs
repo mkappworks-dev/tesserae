@@ -6,6 +6,10 @@ use tesserae_core::{MaterialId, ShapeId};
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 
+/// Shared RGBA texture atlases, keyed by registered Material id.
+#[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
+pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
+
 /// What the registered content is called and what a player can do with it.
 /// Content only: it holds no Voxel, Chunk or Occupants, so a Client reading it
 /// reads nothing of the World (ADR-0002).
@@ -17,10 +21,12 @@ pub struct ContentCatalogue {
     pub shapes: Vec<CatalogueShape>,
     /// The fluid the Game's lakes are made of.
     pub lake: Option<MaterialId>,
+    pub rock: Option<MaterialId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatalogueMaterial {
+    pub remove_time: std::time::Duration,
     pub id: MaterialId,
     pub name: String,
     pub solid: bool,
@@ -37,6 +43,7 @@ pub struct CatalogueShape {
     /// Whether turning it changes anything: a cube looks the same however it
     /// is turned and a connected Shape ignores its orientation.
     pub turnable: bool,
+    pub geometry: Vec<Vec<tesserae_core::shape::ShapeQuad>>,
 }
 
 impl ContentCatalogue {
@@ -61,7 +68,3 @@ impl ContentCatalogue {
         self.materials.iter().any(|m| m.burns)
     }
 }
-
-#[cfg(feature = "dev")]
-#[derive(Resource)]
-pub struct DevFence(pub Option<tesserae_core::ShapeId>);

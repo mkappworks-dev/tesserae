@@ -27,17 +27,9 @@ pub struct Registry {
     pub(crate) shapes: Vec<Option<String>>,
 }
 
-/// Indexed by id; `None` is [`tesserae_core::material::RETIRED`].
-const BUILTIN_MATERIALS: [Option<&str>; 8] = [
-    Some("core:air"),
-    Some("core:stone"),
-    Some("core:dirt"),
-    Some("core:grass"),
-    Some("core:lantern"),
-    Some("core:glass"),
-    Some("core:leaves"),
-    None,
-];
+/// Retired ids retain unnamed slots so Mod ids keep starting at 8.
+const BUILTIN_MATERIALS: [Option<&str>; 8] =
+    [Some("core:air"), None, None, None, None, None, None, None];
 const BUILTIN_SHAPES: [Option<&str>; 4] = [
     Some("core:cube"),
     Some("core:slab"),

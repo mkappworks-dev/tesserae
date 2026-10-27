@@ -15,9 +15,7 @@ use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
 use bevy::input::touch::TouchPhase;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use tesserae_core::material::{GLASS, LEAVES};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
-use tesserae_core::worldgen::{LANTERN, STONE};
 use tesserae_core::{
     MaterialId, Orientation, SHAPE_FULL_CUBE, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeId, Voxel,
 };
@@ -29,7 +27,7 @@ use crate::server::edit::{EditAction, EditIntent, EditRejected};
 /// How long a rejection stays on screen.
 const NOTICE_SECS: f32 = 2.5;
 
-const SLOT_KEYS: [KeyCode; 9] = [
+pub(super) const SLOT_KEYS: [KeyCode; 9] = [
     KeyCode::Digit1,
     KeyCode::Digit2,
     KeyCode::Digit3,
@@ -68,7 +66,6 @@ impl Holding {
         }
     }
 
-    /// What a click asks for.
     fn place(self) -> Option<EditAction> {
         match self {
             Holding::Solid {
@@ -86,21 +83,40 @@ impl Holding {
         }
     }
 
-    /// What a right click asks for.
-    fn remove(self) -> EditAction {
+    fn verbs(self) -> (&'static str, &'static str) {
         match self {
-            Holding::Fluid(_) => EditAction::RemoveSource,
-            Holding::Fire => EditAction::PutOut,
-            Holding::Solid { .. } | Holding::Empty => EditAction::Break,
+            Holding::Solid { .. } => ("place", "remove"),
+            Holding::Fluid(_) => ("place source", "remove"),
+            Holding::Fire => ("ignite", "remove"),
+            Holding::Empty => ("nothing", "remove"),
         }
     }
 
-    fn verbs(self) -> (&'static str, &'static str) {
+    pub(super) fn tile_label(self, catalogue: &ContentCatalogue) -> String {
         match self {
-            Holding::Solid { .. } => ("place", "break"),
-            Holding::Fluid(_) => ("place source", "remove source"),
-            Holding::Fire => ("ignite", "put out"),
-            Holding::Empty => ("nothing", "break"),
+            Holding::Solid {
+                material, shape, ..
+            } => {
+                let material = catalogue
+                    .material(material)
+                    .map_or("unknown", |m| m.name.as_str());
+                if shape == SHAPE_FULL_CUBE {
+                    material.into()
+                } else {
+                    format!(
+                        "{material}\n{}",
+                        catalogue
+                            .shape(shape)
+                            .map_or("unknown", |s| s.name.as_str())
+                    )
+                }
+            }
+            Holding::Fluid(material) => catalogue
+                .material(material)
+                .map_or("unknown", |m| m.name.as_str())
+                .into(),
+            Holding::Fire => "fire".into(),
+            Holding::Empty => "empty".into(),
         }
     }
 
@@ -149,6 +165,7 @@ impl Holding {
 pub(super) struct Hotbar {
     pub(super) slots: [Holding; SLOT_KEYS.len()],
     pub(super) selected: usize,
+    pub(super) outside: Option<Holding>,
 }
 
 impl Default for Hotbar {
@@ -156,23 +173,28 @@ impl Default for Hotbar {
         Hotbar {
             slots: [Holding::Empty; SLOT_KEYS.len()],
             selected: 0,
+            outside: None,
         }
     }
 }
 
 impl Hotbar {
-    /// The built-in solids, then the Game's lake fluid or else its first
-    /// declared one, then fire if anything burns.
     fn defaults(catalogue: &ContentCatalogue) -> [Holding; SLOT_KEYS.len()] {
-        let mut slots = vec![
-            Holding::solid(STONE, SHAPE_FULL_CUBE),
-            Holding::solid(STONE, SHAPE_SLAB),
-            Holding::solid(STONE, SHAPE_STAIR),
-            Holding::solid(STONE, SHAPE_POST),
-            Holding::solid(LANTERN, SHAPE_FULL_CUBE),
-            Holding::solid(GLASS, SHAPE_FULL_CUBE),
-            Holding::solid(LEAVES, SHAPE_FULL_CUBE),
-        ];
+        let mut slots = Vec::new();
+        if let Some(rock) = catalogue.rock {
+            for shape in [SHAPE_FULL_CUBE, SHAPE_SLAB, SHAPE_STAIR, SHAPE_POST] {
+                slots.push(Holding::solid(rock, shape));
+            }
+        }
+        for material in &catalogue.materials {
+            if slots.len() == 7 {
+                break;
+            }
+            if material.solid && material.fluid.is_none() && Some(material.id) != catalogue.rock {
+                slots.push(Holding::solid(material.id, SHAPE_FULL_CUBE));
+            }
+        }
+        slots.resize(7, Holding::Empty);
         slots.extend(
             catalogue
                 .lake
@@ -187,10 +209,27 @@ impl Hotbar {
     }
 
     pub(super) fn held(&self) -> Holding {
-        self.slots[self.selected]
+        self.outside.unwrap_or(self.slots[self.selected])
+    }
+
+    pub(super) fn select(&mut self, slot: usize) {
+        self.selected = slot;
+        self.outside = None;
+    }
+
+    fn held_mut(&mut self) -> &mut Holding {
+        if let Some(ref mut held) = self.outside {
+            held
+        } else {
+            &mut self.slots[self.selected]
+        }
     }
 
     fn step(&mut self, by: i32) {
+        if by == 0 {
+            return;
+        }
+        self.outside = None;
         let len = self.slots.len() as i32;
         self.selected = (self.selected as i32 + by).rem_euclid(len) as usize;
     }
@@ -227,11 +266,14 @@ impl Notice {
 
 #[derive(Component)]
 struct HeldHud;
+#[derive(Component)]
+struct NoticeHud;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Hotbar>()
         .init_resource::<Catalogue>()
         .init_resource::<Notice>()
+        .add_message::<crate::server::undo::HistoryApplied>()
         .add_systems(Startup, spawn_hud)
         .add_systems(
             Update,
@@ -270,13 +312,27 @@ fn spawn_hud(mut commands: Commands) {
         ));
     commands.spawn((
         HeldHud,
+        super::help::HelpPanel,
+        Visibility::Hidden,
         Text::default(),
         font(14.0),
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
         Node {
             position_type: PositionType::Absolute,
             right: Val::Px(16.0),
-            bottom: Val::Px(16.0),
+            bottom: Val::Px(60.0),
+            ..default()
+        },
+    ));
+    commands.spawn((
+        NoticeHud,
+        Text::default(),
+        font(14.0),
+        TextColor(Color::srgb(1.0, 0.7, 0.3)),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(16.0),
+            top: Val::Px(48.0),
             ..default()
         },
     ));
@@ -300,19 +356,37 @@ fn receive_catalogue(
 /// A wheel's line is a slot. A trackpad's pixels add up to one, and what is
 /// left over is dropped when a new gesture starts or the direction reverses,
 /// so half a swipe never joins the next.
-fn select_held(
+pub(super) fn select_held(
     keys: Res<ButtonInput<KeyCode>>,
     mut wheel: MessageReader<MouseWheel>,
     catalogue: Res<Catalogue>,
     mut hotbar: ResMut<Hotbar>,
     mut scrolled: Local<f32>,
+    menu: Option<Res<super::menu::Menu>>,
+    pointer: Option<Res<super::menu::PointerState>>,
 ) {
     for (slot, key) in SLOT_KEYS.iter().enumerate() {
         if keys.just_pressed(*key) {
-            hotbar.selected = slot;
+            if menu.as_ref().is_some_and(|m| m.open)
+                && let Some(item) = pointer
+                    .as_ref()
+                    .and_then(|p| p.hovered)
+                    .and_then(|e| e.holding())
+            {
+                hotbar.slots[slot] = item;
+            } else {
+                hotbar.select(slot);
+            }
         }
     }
+    let menu_open = menu.as_ref().is_some_and(|m| m.open);
+    if menu_open {
+        *scrolled = 0.0;
+    }
     for event in wheel.read() {
+        if menu_open {
+            continue;
+        }
         let notches = match event.unit {
             MouseScrollUnit::Line => event.y,
             MouseScrollUnit::Pixel => event.y / PIXELS_PER_NOTCH,
@@ -326,24 +400,38 @@ fn select_held(
         // Scrolling down, a negative y, moves along the bar.
         hotbar.step(-whole as i32);
     }
-    let selected = hotbar.selected;
+    if !menu_open && keys.just_pressed(KeyCode::KeyX) {
+        hotbar.outside = Some(Holding::Empty);
+    }
     if let Holding::Solid {
         shape, orientation, ..
-    } = &mut hotbar.slots[selected]
-        && catalogue.0.shape(*shape).is_some_and(|s| s.turnable)
+    } = hotbar.held_mut()
     {
-        if keys.just_pressed(KeyCode::KeyQ) {
-            *orientation = orientation.turned();
+        if keys.just_pressed(KeyCode::KeyF) && !catalogue.0.shapes.is_empty() {
+            let next = catalogue
+                .0
+                .shapes
+                .iter()
+                .filter(|s| s.id > *shape)
+                .map(|s| s.id)
+                .min()
+                .or_else(|| catalogue.0.shapes.iter().map(|s| s.id).min());
+            if let Some(next) = next {
+                *shape = next;
+            }
         }
-        if keys.just_pressed(KeyCode::KeyE) {
-            *orientation = orientation.flipped();
+        if catalogue.0.shape(*shape).is_some_and(|s| s.turnable) {
+            if keys.just_pressed(KeyCode::KeyQ) {
+                *orientation = orientation.turned();
+            }
+            if keys.just_pressed(KeyCode::KeyE) {
+                *orientation = orientation.flipped();
+            }
         }
     }
 }
 
-/// A click asks for what the held slot places and a right click for what it
-/// removes, along the camera's centre ray, each on the press: nothing waits to
-/// tell a double click from a single one.
+/// Right places immediately along the camera centre ray.
 ///
 /// The click that grabs the cursor is not also an Edit. That click is also the
 /// one that makes the cursor grabbed, so "grabbed now" is not enough: it has to
@@ -364,10 +452,8 @@ pub(super) fn send_intents(
         return;
     }
     let held = hotbar.held();
-    let action = if mouse.just_pressed(MouseButton::Left) {
+    let action = if mouse.just_pressed(MouseButton::Right) {
         held.place()
-    } else if mouse.just_pressed(MouseButton::Right) {
-        Some(held.remove())
     } else {
         None
     };
@@ -383,23 +469,46 @@ pub(super) fn send_intents(
 
 fn show_rejections(
     mut rejected: MessageReader<EditRejected>,
+    mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
     time: Res<Time>,
 ) {
+    for message in applied.read() {
+        notice.show(match message.0 {
+            crate::server::undo::HistoryAction::Undo => "Undone",
+            crate::server::undo::HistoryAction::Redo => "Redone",
+        });
+    }
     for message in rejected.read() {
         notice.show(message.reason.message());
     }
     notice.tick(time.delta_secs());
 }
 
-const HINT: &str = "[1-9] or scroll: choose  [Q] turn  [E] flip  [Tab] menu";
+const DEBUG_HINT: &str = if cfg!(feature = "dev") {
+    "\n[F3] diagnostics"
+} else {
+    ""
+};
+
+const HINT: &str = "[I] controls\n[X] empty hand\n[Ctrl/Cmd+Z] undo\n[Ctrl/Cmd+Shift+Z / Ctrl+Y] redo\n[Middle/P] pick block\n[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
 
 fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> String {
     let held = hotbar.held();
     let (place, remove) = held.verbs();
+    let place = if held == Holding::Empty {
+        place.to_owned()
+    } else {
+        format!("{place} {}", held.describe(catalogue))
+    };
+    let hand = if hotbar.outside.is_some() {
+        "held".into()
+    } else {
+        (hotbar.selected + 1).to_string()
+    };
     format!(
-        "{}: {}\n[click] {place}  [right click] {remove}\n{HINT}\n{}",
-        hotbar.selected + 1,
+        "{}: {}\n[hold left] {remove}\n[right click] {place}\n{HINT}{DEBUG_HINT}\n{}",
+        hand,
         held.describe(catalogue),
         notice.text()
     )
@@ -410,7 +519,11 @@ fn update_hud(
     catalogue: Res<Catalogue>,
     notice: Res<Notice>,
     mut hud: Single<&mut Text, With<HeldHud>>,
+    mut notices: Query<&mut Text, (With<NoticeHud>, Without<HeldHud>)>,
 ) {
+    for mut text in &mut notices {
+        text.set_if_neq(Text::new(notice.text()));
+    }
     let line = hud_text(&hotbar, &catalogue.0, &notice);
     // Through the comparison, so the UI is not re-laid out every frame.
     if hud.0 != line {
@@ -429,12 +542,31 @@ mod tests {
     use bevy::input::mouse::AccumulatedMouseMotion;
     use bevy::ui_widgets::Activate;
 
-    const DEMO_WATER: MaterialId = 14;
-    const LAVA: MaterialId = 9;
-    const WOOD: MaterialId = 12;
+    fn demo_ids() -> &'static [MaterialId; 7] {
+        static IDS: std::sync::OnceLock<[MaterialId; 7]> = std::sync::OnceLock::new();
+        IDS.get_or_init(|| {
+            let mut tables = tesserae_core::testgen::fixtures().tables.clone();
+            std::array::from_fn(|_| {
+                tables
+                    .materials
+                    .register(tesserae_core::MaterialDef::OPAQUE)
+                    .unwrap()
+            })
+        })
+    }
+    fn demo_water() -> MaterialId {
+        demo_ids()[6]
+    }
+    fn lava() -> MaterialId {
+        demo_ids()[1]
+    }
+    fn wood() -> MaterialId {
+        demo_ids()[4]
+    }
 
     fn material(id: MaterialId, name: &str, solid: bool) -> CatalogueMaterial {
         CatalogueMaterial {
+            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
             id,
             name: name.to_owned(),
             solid,
@@ -445,18 +577,16 @@ mod tests {
 
     /// The built-in solids and Shapes, a connected fence, and no fluid or fuel.
     fn dry() -> ContentCatalogue {
+        let f = tesserae_core::testgen::fixtures();
         let materials = [
-            "core:air",
-            "core:stone",
-            "core:dirt",
-            "core:grass",
-            "core:lantern",
-            "core:glass",
-            "core:leaves",
+            (0, "core:air"),
+            (f.ground.rock, "test:stone"),
+            (f.lantern, "test:lantern"),
+            (f.glass, "test:glass"),
+            (f.leaves, "test:leaves"),
         ]
-        .iter()
-        .zip(0..)
-        .map(|(name, id)| material(id, name, id != 0))
+        .into_iter()
+        .map(|(id, name)| material(id, name, id != 0))
         .collect();
         let shapes = [
             ("core:cube", false),
@@ -471,12 +601,14 @@ mod tests {
             id,
             name: name.to_owned(),
             turnable,
+            geometry: crate::server::fixture_tables().shapes.preview_geometry(id),
         })
         .collect();
         ContentCatalogue {
             materials,
             shapes,
             lake: None,
+            rock: Some(tesserae_core::testgen::fixtures().ground.rock),
         }
     }
 
@@ -485,13 +617,13 @@ mod tests {
     fn demo() -> ContentCatalogue {
         let mut catalogue = dry();
         for (id, name, solid, fluid, burns) in [
-            (8, "demo:lamp", true, None, false),
-            (LAVA, "demo:lava", false, Some(1), false),
-            (10, "demo:mud", false, Some(2), false),
-            (11, "demo:brick", true, None, false),
-            (WOOD, "demo:wood", true, None, true),
-            (13, "demo:ash", true, None, false),
-            (DEMO_WATER, "demo:water", false, Some(0), false),
+            (demo_ids()[0], "demo:lamp", true, None, false),
+            (lava(), "demo:lava", false, Some(1), false),
+            (demo_ids()[2], "demo:mud", false, Some(2), false),
+            (demo_ids()[3], "demo:brick", true, None, false),
+            (wood(), "demo:wood", true, None, true),
+            (demo_ids()[5], "demo:ash", true, None, false),
+            (demo_water(), "demo:water", false, Some(0), false),
         ] {
             catalogue.materials.push(CatalogueMaterial {
                 fluid,
@@ -499,7 +631,7 @@ mod tests {
                 ..material(id, name, solid)
             });
         }
-        catalogue.lake = Some(DEMO_WATER);
+        catalogue.lake = Some(demo_water());
         catalogue
     }
 
@@ -519,6 +651,7 @@ mod tests {
             .add_message::<ContentCatalogue>()
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
+            .add_message::<crate::server::undo::HistoryApplied>()
             .add_message::<PoseReport>()
             .add_message::<PoseCorrection>()
             .add_message::<MaterialPalette>()
@@ -585,10 +718,9 @@ mod tests {
         frame(app);
     }
 
-    /// The actions a click and a right click send with the slot on `slot_key`.
     fn both_buttons(app: &mut App, slot_key: KeyCode) -> [Option<EditAction>; 2] {
         key(app, slot_key);
-        [MouseButton::Left, MouseButton::Right].map(|button| {
+        [MouseButton::Right, MouseButton::Left].map(|button| {
             press(app, button);
             let sent = frame(app);
             assert!(sent.len() <= 1);
@@ -634,7 +766,7 @@ mod tests {
         let mut camera = app.world_mut().query::<&mut GlobalTransform>();
         *camera.single_mut(app.world_mut()).unwrap() =
             GlobalTransform::from(Transform::from_xyz(40.0, 9.0, -7.0));
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
 
         app.update();
         let reports: Vec<_> = app
@@ -656,29 +788,32 @@ mod tests {
     #[test]
     fn the_click_that_grabs_the_cursor_is_not_also_an_edit() {
         let mut app = app(CursorGrabMode::None);
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty(), "nothing is grabbed yet");
 
         // The camera's own system grabs the cursor on that click; whichever runs
         // first, the frame it happens in sends nothing.
         grab(&mut app, CursorGrabMode::Locked);
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty(), "the grabbing click");
 
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         assert_eq!(frame(&mut app).len(), 1, "the next click is an Edit");
     }
 
     #[test]
     fn the_default_hotbar_is_the_builtin_solids_then_the_lake_fluid_then_fire() {
         let solids = [
-            Holding::solid(STONE, SHAPE_FULL_CUBE),
-            Holding::solid(STONE, SHAPE_SLAB),
-            Holding::solid(STONE, SHAPE_STAIR),
-            Holding::solid(STONE, SHAPE_POST),
-            Holding::solid(LANTERN, SHAPE_FULL_CUBE),
-            Holding::solid(GLASS, SHAPE_FULL_CUBE),
-            Holding::solid(LEAVES, SHAPE_FULL_CUBE),
+            Holding::solid(
+                tesserae_core::testgen::fixtures().ground.rock,
+                SHAPE_FULL_CUBE,
+            ),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_SLAB),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR),
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_POST),
+            Holding::solid(tesserae_core::testgen::fixtures().lantern, SHAPE_FULL_CUBE),
+            Holding::solid(tesserae_core::testgen::fixtures().glass, SHAPE_FULL_CUBE),
+            Holding::solid(tesserae_core::testgen::fixtures().leaves, SHAPE_FULL_CUBE),
         ];
         let with = |last: [Holding; 2]| {
             let mut slots = solids.to_vec();
@@ -687,7 +822,7 @@ mod tests {
         };
         assert_eq!(
             Hotbar::defaults(&demo()).to_vec(),
-            with([Holding::Fluid(DEMO_WATER), Holding::Fire])
+            with([Holding::Fluid(demo_water()), Holding::Fire])
         );
         assert_eq!(
             Hotbar::defaults(&dry()).to_vec(),
@@ -699,14 +834,15 @@ mod tests {
         };
         assert_eq!(
             Hotbar::defaults(&no_lake)[7],
-            Holding::Fluid(DEMO_WATER),
+            Holding::Fluid(demo_water()),
             "the first declared fluid, not the lowest id"
         );
         let mut lava_lakes = demo();
-        lava_lakes.lake = Some(LAVA);
-        assert_eq!(Hotbar::defaults(&lava_lakes)[7], Holding::Fluid(LAVA));
+        lava_lakes.lake = Some(lava());
+        assert_eq!(Hotbar::defaults(&lava_lakes)[7], Holding::Fluid(lava()));
         let mut fuel_only = dry();
         fuel_only.materials.push(CatalogueMaterial {
+            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
             burns: true,
             ..material(8, "wood:log", true)
         });
@@ -719,48 +855,45 @@ mod tests {
         frame(&mut app);
         assert_eq!(
             app.world().resource::<Hotbar>().slots.to_vec(),
-            with([Holding::Fluid(DEMO_WATER), Holding::Fire]),
+            with([Holding::Fluid(demo_water()), Holding::Fire]),
             "from the catalogue the Server sent"
         );
     }
 
-    /// Each button acts on the press, for every kind of slot.
+    /// Placement is immediate; removal belongs to the deliberate-hold system.
     #[test]
-    fn a_click_places_what_the_slot_holds_and_a_right_click_removes_it() {
+    fn right_click_places_and_left_click_does_not_remove_immediately() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit3),
             [
                 Some(EditAction::Place(Voxel::shaped(
-                    STONE,
+                    tesserae_core::testgen::fixtures().ground.rock,
                     SHAPE_STAIR,
                     Orientation::IDENTITY
                 ))),
-                Some(EditAction::Break)
+                None
             ]
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit8),
-            [
-                Some(EditAction::PlaceSource(DEMO_WATER)),
-                Some(EditAction::RemoveSource)
-            ]
+            [Some(EditAction::PlaceSource(demo_water())), None]
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit9),
-            [Some(EditAction::Ignite), Some(EditAction::PutOut)]
+            [Some(EditAction::Ignite), None]
         );
 
         let mut dry = app_with(CursorGrabMode::Locked, dry());
         frame(&mut dry);
         assert_eq!(
             both_buttons(&mut dry, KeyCode::Digit9),
-            [None, Some(EditAction::Break)],
+            [None, None],
             "an empty slot"
         );
 
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         let sent = frame(&mut app);
         assert_eq!(
             sent[0].origin,
@@ -773,15 +906,12 @@ mod tests {
     #[test]
     fn a_held_fluid_places_and_removes_sources_of_that_fluid() {
         let mut lava_lakes = demo();
-        lava_lakes.lake = Some(LAVA);
+        lava_lakes.lake = Some(lava());
         let mut app = app_with(CursorGrabMode::Locked, lava_lakes);
         frame(&mut app);
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit8),
-            [
-                Some(EditAction::PlaceSource(LAVA)),
-                Some(EditAction::RemoveSource)
-            ]
+            [Some(EditAction::PlaceSource(lava())), None]
         );
     }
 
@@ -789,7 +919,10 @@ mod tests {
     fn keys_six_and_seven_hold_glass_and_leaves() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
-        for (slot_key, material) in [(KeyCode::Digit6, GLASS), (KeyCode::Digit7, LEAVES)] {
+        for (slot_key, material) in [
+            (KeyCode::Digit6, tesserae_core::testgen::fixtures().glass),
+            (KeyCode::Digit7, tesserae_core::testgen::fixtures().leaves),
+        ] {
             assert_eq!(
                 both_buttons(&mut app, slot_key)[0],
                 Some(EditAction::Place(Voxel::cube(material)))
@@ -822,8 +955,26 @@ mod tests {
         assert_eq!(scroll(&mut app, line, &[-1.0, -1.0]), 2, "a notch each");
         assert_eq!(
             app.world().resource::<Hotbar>().held(),
-            Holding::solid(STONE, SHAPE_STAIR)
+            Holding::solid(tesserae_core::testgen::fixtures().ground.rock, SHAPE_STAIR)
         );
+    }
+
+    #[test]
+    fn scrolling_an_open_menu_does_not_select_a_slot_or_clear_the_outside_item() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Fire);
+        for (unit, deltas) in [
+            (MouseScrollUnit::Line, vec![-1.0, -2.0]),
+            (MouseScrollUnit::Pixel, vec![-100.0, -300.0]),
+        ] {
+            assert_eq!(scroll(&mut app, unit, &deltas), 0);
+            assert_eq!(
+                app.world().resource::<Hotbar>().outside,
+                Some(Holding::Fire)
+            );
+        }
     }
 
     /// A swipe arrives as many small deltas; they add up to a slot.
@@ -868,10 +1019,13 @@ mod tests {
         key(&mut app, KeyCode::KeyE);
         assert_eq!(
             app.world().resource::<Hotbar>().held(),
-            Holding::solid(STONE, SHAPE_FULL_CUBE),
+            Holding::solid(
+                tesserae_core::testgen::fixtures().ground.rock,
+                SHAPE_FULL_CUBE
+            ),
             "a cube is not turned"
         );
-        let fence = Holding::solid(STONE, 4);
+        let fence = Holding::solid(tesserae_core::testgen::fixtures().ground.rock, 4);
         app.world_mut().resource_mut::<Hotbar>().slots[0] = fence;
         key(&mut app, KeyCode::KeyQ);
         assert_eq!(
@@ -882,57 +1036,58 @@ mod tests {
     }
 
     #[test]
-    fn the_hud_names_the_held_slot_and_what_each_button_does() {
+    fn f_cycles_the_outside_solid_and_preserves_its_orientation_and_slots() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
-        let expect = |app: &mut App, slot_key, first: &str, second: &str| {
-            key(app, slot_key);
-            let text = hud(app);
-            let lines: Vec<_> = text.lines().collect();
-            assert_eq!(lines[0], first);
-            assert_eq!(lines[1], second);
-            assert_eq!(lines[2], HINT);
-        };
-        expect(
-            &mut app,
-            KeyCode::Digit1,
-            "1: core:stone",
-            "[click] place  [right click] break",
-        );
-        expect(
-            &mut app,
-            KeyCode::Digit3,
-            "3: core:stone core:stair  up +Y, turn 0",
-            "[click] place  [right click] break",
-        );
-        expect(
-            &mut app,
-            KeyCode::Digit8,
-            "8: demo:water source",
-            "[click] place source  [right click] remove source",
-        );
-        expect(
-            &mut app,
-            KeyCode::Digit9,
-            "9: fire",
-            "[click] ignite  [right click] put out",
-        );
-        app.world_mut().resource_mut::<Hotbar>().slots[1] = Holding::solid(WOOD, 4);
-        expect(
-            &mut app,
-            KeyCode::Digit2,
-            "2: demo:wood dev:fence",
-            "[click] place  [right click] break",
-        );
+        let before = app.world().resource::<Hotbar>().slots;
+        let material = tesserae_core::testgen::fixtures().ground.rock;
+        let orientation = Orientation::IDENTITY.turned().flipped();
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Solid {
+            material,
+            shape: SHAPE_POST,
+            orientation,
+        });
+        for shape in [4, SHAPE_FULL_CUBE, SHAPE_SLAB] {
+            key(&mut app, KeyCode::KeyF);
+            assert_eq!(
+                app.world().resource::<Hotbar>().held(),
+                Holding::Solid {
+                    material,
+                    shape,
+                    orientation,
+                }
+            );
+        }
+        for held in [Holding::Fluid(demo_water()), Holding::Fire, Holding::Empty] {
+            app.world_mut().resource_mut::<Hotbar>().outside = Some(held);
+            key(&mut app, KeyCode::KeyF);
+            assert_eq!(app.world().resource::<Hotbar>().held(), held);
+        }
+        assert_eq!(app.world().resource::<Hotbar>().slots, before);
+        key(&mut app, KeyCode::Digit2);
+        assert_eq!(app.world().resource::<Hotbar>().outside, None);
+        assert_eq!(app.world().resource::<Hotbar>().selected, 1);
+    }
 
-        let mut dry = app_with(CursorGrabMode::Locked, dry());
-        frame(&mut dry);
-        expect(
-            &mut dry,
-            KeyCode::Digit9,
-            "9: empty",
-            "[click] nothing  [right click] break",
-        );
+    #[test]
+    fn the_hud_names_the_held_slot_and_lists_one_control_per_line() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        for (keycode, expected, verb) in [
+            (KeyCode::Digit1, "1: test:stone", "place"),
+            (KeyCode::Digit8, "8: demo:water source", "place source"),
+            (KeyCode::Digit9, "9: fire", "ignite"),
+        ] {
+            key(&mut app, keycode);
+            let text = hud(&app);
+            let lines: Vec<_> = text.lines().collect();
+            assert_eq!(lines[0], expected);
+            assert_eq!(lines[1], "[hold left] remove");
+            assert!(lines[2].starts_with(&format!("[right click] {verb}")));
+            for hint in HINT.lines() {
+                assert!(lines.contains(&hint), "{hint}");
+            }
+        }
     }
 
     #[test]
@@ -963,6 +1118,9 @@ mod tests {
 
     /// Every entry the open menu shows, bar slots aside.
     fn offered(app: &mut App) -> Vec<Entry> {
+        if !app.world().resource::<menu::Menu>().open {
+            return Vec::new();
+        }
         let mut q = app.world_mut().query::<&Entry>();
         q.iter(app.world())
             .copied()
@@ -984,6 +1142,36 @@ mod tests {
             .unwrap_or_else(|| panic!("{entry:?} is not offered"))
             .0;
         app.world_mut().trigger(Activate { entity });
+        frame(app);
+    }
+
+    fn hover(app: &mut App, entry: Entry) {
+        use bevy::picking::{
+            backend::HitData,
+            events::{Pointer, PointerOver},
+            pointer::{Location, PointerId},
+        };
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &Entry)>()
+            .iter(app.world())
+            .find(|(_, e)| **e == entry)
+            .unwrap()
+            .0;
+        app.world_mut().trigger(PointerOver {
+            entity,
+            pointer: Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: bevy::camera::NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            ),
+            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+        });
         frame(app);
     }
 
@@ -1011,7 +1199,7 @@ mod tests {
         }
         for solid in &solids {
             assert!(offered(&mut app).contains(&Entry::Material(solid.id)));
-            choose(&mut app, Entry::Material(solid.id));
+            hover(&mut app, Entry::Material(solid.id));
             let shapes: Vec<_> = offered(&mut app)
                 .into_iter()
                 .filter_map(|e| match e {
@@ -1066,10 +1254,15 @@ mod tests {
         frame(&mut app);
         key(&mut app, KeyCode::Tab);
         let offered = offered(&mut app);
-        let solids: Vec<_> = (1..=6).map(Entry::Material).collect();
+        let solids: Vec<_> = dry()
+            .materials
+            .iter()
+            .filter(|m| m.solid)
+            .map(|m| Entry::Material(m.id))
+            .collect();
         let shapes: Vec<_> = (0..5)
             .map(|shape| Entry::Solid {
-                material: STONE,
+                material: tesserae_core::testgen::fixtures().ground.rock,
                 shape,
             })
             .collect();
@@ -1082,48 +1275,36 @@ mod tests {
     }
 
     #[test]
-    fn a_chosen_entry_fills_the_selected_slot_and_the_next_click_sends_it() {
+    fn a_chosen_entry_is_held_outside_the_slots_and_the_next_click_places_it() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
         key(&mut app, KeyCode::Digit2);
         key(&mut app, KeyCode::Tab);
-        choose(&mut app, Entry::Material(WOOD));
+        let slots = app.world().resource::<Hotbar>().slots;
+        hover(&mut app, Entry::Material(wood()));
         choose(
             &mut app,
             Entry::Solid {
-                material: WOOD,
+                material: wood(),
                 shape: SHAPE_STAIR,
             },
         );
-        let hotbar = app.world().resource::<Hotbar>();
-        assert_eq!(hotbar.selected, 1);
-        assert_eq!(hotbar.slots[1], Holding::solid(WOOD, SHAPE_STAIR));
-
-        key(&mut app, KeyCode::Tab);
-        assert_eq!(cursor(&mut app), CursorGrabMode::Locked, "closing grabs");
-        press(&mut app, MouseButton::Left);
+        assert_eq!(app.world().resource::<Hotbar>().slots, slots);
+        assert_eq!(
+            app.world().resource::<Hotbar>().outside,
+            Some(Holding::solid(wood(), SHAPE_STAIR))
+        );
+        assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
+        press(&mut app, MouseButton::Right);
         let sent = frame(&mut app);
         assert_eq!(sent.len(), 1);
         assert_eq!(
             sent[0].action,
-            EditAction::Place(Voxel::shaped(WOOD, SHAPE_STAIR, Orientation::IDENTITY))
+            EditAction::Place(Voxel::shaped(wood(), SHAPE_STAIR, Orientation::IDENTITY))
         );
-
-        key(&mut app, KeyCode::Tab);
-        choose(&mut app, Entry::Fluid(LAVA));
-        key(&mut app, KeyCode::Escape);
-        assert!(offered(&mut app).is_empty(), "Escape closes it");
-        assert_eq!(
-            cursor(&mut app),
-            CursorGrabMode::None,
-            "and leaves the cursor free, as Escape does outside it"
-        );
-        assert_eq!(
-            app.world().resource::<Hotbar>().held(),
-            Holding::Fluid(LAVA)
-        );
+        key(&mut app, KeyCode::Digit2);
+        assert_eq!(app.world().resource::<Hotbar>().outside, None);
     }
-
     #[test]
     fn clicking_a_hotbar_slot_while_the_menu_is_open_selects_it() {
         let mut app = app(CursorGrabMode::Locked);
@@ -1131,12 +1312,15 @@ mod tests {
         key(&mut app, KeyCode::Tab);
         choose(&mut app, Entry::Slot(4));
         assert_eq!(app.world().resource::<Hotbar>().selected, 4);
-        choose(&mut app, Entry::Fire);
-        choose(&mut app, Entry::Slot(0));
-        choose(&mut app, Entry::Fluid(DEMO_WATER));
-        let slots = app.world().resource::<Hotbar>().slots;
-        assert_eq!(slots[4], Holding::Fire);
-        assert_eq!(slots[0], Holding::Fluid(DEMO_WATER));
+        assert!(app.world().resource::<menu::Menu>().open);
+        hover(&mut app, Entry::Fluid(demo_water()));
+        key(&mut app, KeyCode::Digit1);
+        assert_eq!(
+            app.world().resource::<Hotbar>().slots[0],
+            Holding::Fluid(demo_water())
+        );
+        assert_eq!(app.world().resource::<Hotbar>().selected, 4);
+        assert!(app.world().resource::<menu::Menu>().open);
     }
 
     #[test]
@@ -1160,7 +1344,7 @@ mod tests {
                 .resource_mut::<AccumulatedMouseMotion>()
                 .delta = Vec2::new(40.0, 25.0);
         };
-        for button in [MouseButton::Left, MouseButton::Right] {
+        for button in [MouseButton::Right, MouseButton::Left] {
             moved(&mut app);
             press(&mut app, button);
             assert!(frame(&mut app).is_empty(), "{button:?}");
@@ -1176,5 +1360,54 @@ mod tests {
             0.0,
             "it turns once closed"
         );
+    }
+    #[test]
+    fn defaults_are_empty_without_declared_solids_or_ground() {
+        assert_eq!(
+            Hotbar::defaults(&ContentCatalogue::default()),
+            [Holding::Empty; 9]
+        );
+        let f = tesserae_core::testgen::fixtures();
+        let catalogue = ContentCatalogue {
+            materials: vec![material(f.glass, "test:glass", true)],
+            ..default()
+        };
+        let slots = Hotbar::defaults(&catalogue);
+        assert_eq!(slots[0], Holding::solid(f.glass, SHAPE_FULL_CUBE));
+        assert!(slots[1..].iter().all(|slot| *slot == Holding::Empty));
+    }
+    #[test]
+    fn outside_holding_survives_shape_changes_and_slot_selection_restores_the_bar() {
+        let f = tesserae_core::testgen::fixtures();
+        let mut hotbar = Hotbar {
+            outside: Some(Holding::solid(f.glass, SHAPE_STAIR)),
+            ..default()
+        };
+        let slots = hotbar.slots;
+        assert_eq!(
+            hotbar.held().place(),
+            Some(EditAction::Place(Voxel::new(f.glass, SHAPE_STAIR, 0)))
+        );
+        hotbar.select(4);
+        assert_eq!(hotbar.outside, None);
+        assert_eq!(hotbar.slots, slots);
+        hotbar.outside = Some(Holding::Fire);
+        hotbar.step(1);
+        assert_eq!(hotbar.outside, None);
+    }
+    #[test]
+    fn empty_hand_keeps_slots_and_neither_button_edits_immediately() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        let before = app.world().resource::<Hotbar>().slots;
+        key(&mut app, KeyCode::KeyX);
+        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+        assert_eq!(app.world().resource::<Hotbar>().slots, before);
+        press(&mut app, MouseButton::Right);
+        assert!(frame(&mut app).is_empty());
+        press(&mut app, MouseButton::Left);
+        assert!(frame(&mut app).is_empty());
+        key(&mut app, KeyCode::Digit1);
+        assert_eq!(app.world().resource::<Hotbar>().held(), before[0]);
     }
 }

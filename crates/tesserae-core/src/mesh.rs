@@ -391,6 +391,24 @@ impl MeshLayer {
     }
 }
 
+/// Mesh one isolated Shape from read-only geometry, in unit Voxel space.
+pub fn mesh_shape(quads: &[ShapeQuad], material: MaterialId) -> MeshLayer {
+    let mut layer = MeshLayer::default();
+    for quad in quads {
+        push_merged_quad(
+            &mut layer,
+            &Pending::new(
+                [0; 3],
+                quad,
+                RenderClass::Opaque,
+                material,
+                Light::new(15, 0),
+            ),
+        );
+    }
+    layer
+}
+
 /// Triangle soup for one Chunk, in Voxel-index space. The caller scales by the
 /// World's Voxel size; nothing here is in metres.
 ///
