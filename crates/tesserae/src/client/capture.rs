@@ -1,4 +1,5 @@
-//! Writes a PNG of the running app and exits. `dev` only, and inert unless
+//! Writes a PNG of the running app and exits. Available with `dev` or
+//! `profiling`, and inert unless
 //! `TESSERAE_SCREENSHOT` names a path. `TESSERAE_SCREENSHOT_OFFSCREEN` renders
 //! into an image instead of the window, which is what to use when nobody is
 //! looking at the screen. `TESSERAE_SCREENSHOT_MENU` opens the picker menu, so
@@ -37,6 +38,7 @@ const SETTLE_FOR_S: f32 = 4.0;
 
 #[derive(Resource)]
 struct Capture {
+    origin: Option<std::time::Instant>,
     path: String,
     fly_for_s: f32,
     settle_for_s: f32,
@@ -196,6 +198,12 @@ fn percentile(sorted: &[f32], p: f32) -> Option<f32> {
 }
 
 impl Capture {
+    fn elapsed_s(&self, time: &Time<Real>) -> f32 {
+        self.origin.map_or_else(
+            || time.elapsed_secs(),
+            |origin| origin.elapsed().as_secs_f32(),
+        )
+    }
     /// Time for the picture: after the flight, and long enough past it for the
     /// Chunks ahead to arrive.
     fn due(&self, elapsed_s: f32) -> bool {
@@ -222,7 +230,16 @@ pub(super) fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_SCREENSHOT_MAGENTA_SKY").is_some() {
         app.insert_resource(ClearColor(Color::srgb(1.0, 0.0, 1.0)));
     }
+    #[cfg(feature = "profiling")]
+    let origin = std::env::var_os("TESSERAE_PROFILE_FIXTURE").and_then(|_| {
+        app.world()
+            .get_resource::<crate::profiling::ProcessStart>()
+            .map(|start| start.0)
+    });
+    #[cfg(not(feature = "profiling"))]
+    let origin = None;
     app.insert_resource(Capture {
+        origin,
         path,
         fly_for_s: seconds("TESSERAE_SCREENSHOT_FLY_S", FLY_FOR_S),
         settle_for_s: seconds("TESSERAE_SCREENSHOT_SETTLE_S", SETTLE_FOR_S),
@@ -503,26 +520,26 @@ fn menu_drag(
 const SETTLES_AFTER_S: f32 = 1.5;
 
 fn watch_frames(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     stats: Res<StreamingStats>,
     mut capture: ResMut<Capture>,
     mut cost: ResMut<MainThreadCost>,
 ) {
+    let elapsed_s = capture.elapsed_s(&time);
     let fly_for_s = capture.fly_for_s;
-    let frame_cost = cost.take_frame();
-    capture
-        .frames
-        .note_cost(time.elapsed_secs(), frame_cost, fly_for_s);
-    capture.frames.note_shown(time.elapsed_secs(), stats.shown);
-    capture
-        .frames
-        .note_levels(time.elapsed_secs(), &stats.levels);
-    capture
-        .frames
-        .note_settled(time.elapsed_secs(), stats.settled);
-    let may_fly = time.elapsed_secs() >= capture.fly_after_s;
+    let frame_cost =
+        if cfg!(feature = "profiling") && std::env::var_os("TESSERAE_PROFILE_CSV").is_some() {
+            cost.frame()
+        } else {
+            cost.take_frame()
+        };
+    capture.frames.note_cost(elapsed_s, frame_cost, fly_for_s);
+    capture.frames.note_shown(elapsed_s, stats.shown);
+    capture.frames.note_levels(elapsed_s, &stats.levels);
+    capture.frames.note_settled(elapsed_s, stats.settled);
+    let may_fly = elapsed_s >= capture.fly_after_s;
     capture.frames.record(
-        time.elapsed_secs(),
+        elapsed_s,
         time.delta_secs(),
         stats.settled && may_fly,
         fly_for_s,
@@ -536,21 +553,20 @@ fn watch_frames(
 /// own forward vector for a few seconds flies it into the ground and the
 /// picture comes out black.
 fn fly_forward(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
+    movement_time: Res<Time>,
     capture: Res<Capture>,
     camera: Single<(&mut Transform, &FlyCamera), With<MainCamera>>,
 ) {
-    if !capture
-        .frames
-        .flying(time.elapsed_secs(), capture.fly_for_s)
-    {
+    let elapsed_s = capture.elapsed_s(&time);
+    if !capture.frames.flying(elapsed_s, capture.fly_for_s) {
         return;
     }
     let (mut transform, fly) = camera.into_inner();
     let heading = transform.forward().with_y(0.0).normalize_or_zero();
     let speed = capture.speed_m_s.unwrap_or(fly.speed);
     let climb = climb_m_s(capture.lift_m, capture.fly_for_s, speed);
-    transform.translation += (heading * speed + Vec3::Y * climb) * time.delta_secs();
+    transform.translation += (heading * speed + Vec3::Y * climb) * movement_time.delta_secs();
 }
 
 /// The climb that adds `lift_m` over the flight, held to what the Server's speed
@@ -637,7 +653,7 @@ fn aim(
 /// Runs before `shutter` rather than inside it, so neither function carries the
 /// other's system parameters.
 fn report(
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     capture: Res<Capture>,
     stats: Res<StreamingStats>,
     camera: Single<&Transform, With<MainCamera>>,
@@ -645,7 +661,8 @@ fn report(
     meshes: Res<Assets<Mesh>>,
     world: Res<WorldSettings>,
 ) {
-    if !capture.due(time.elapsed_secs()) {
+    let elapsed_s = capture.elapsed_s(&time);
+    if !capture.due(elapsed_s) {
         return;
     }
     let ms = |s: f32| format!("{:.1}", s * 1000.0);
@@ -791,11 +808,12 @@ fn log_levels(frames: &FrameLog, levels: &[LevelStats], held_bytes: &[usize]) {
 
 fn shutter(
     mut commands: Commands,
-    time: Res<Time>,
+    time: Res<Time<Real>>,
     mut capture: ResMut<Capture>,
     offscreen: Option<Res<Offscreen>>,
 ) {
-    if !capture.due(time.elapsed_secs()) {
+    let elapsed_s = capture.elapsed_s(&time);
+    if !capture.due(elapsed_s) {
         return;
     }
     capture.taken = true;

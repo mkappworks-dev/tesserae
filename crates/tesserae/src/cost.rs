@@ -1,4 +1,5 @@
-//! What streaming costs the main thread, measured where it is spent. `dev` only.
+//! What streaming costs the main thread, measured where it is spent.
+//! Available to dev captures and opt-in profiling builds.
 //!
 //! Frame time under vsync is the display's refresh interval, which changes from
 //! run to run, so it cannot say what a change to streaming did. These are the
@@ -13,6 +14,7 @@ use bevy::prelude::*;
 #[derive(Resource, Default)]
 pub struct MainThreadCost {
     started: Option<Instant>,
+    enabled: bool,
     tick_s: f32,
     longest_tick_s: f32,
     upload_s: f32,
@@ -33,6 +35,9 @@ pub struct FrameCost {
 }
 
 impl MainThreadCost {
+    pub fn enabled(&self) -> bool {
+        self.enabled
+    }
     fn ticked(&mut self, took: Duration) {
         let seconds = took.as_secs_f32();
         self.tick_s += seconds;
@@ -50,17 +55,22 @@ impl MainThreadCost {
         self.sorts += meshes;
     }
 
-    pub fn take_frame(&mut self) -> FrameCost {
-        let frame = FrameCost {
+    pub fn frame(&self) -> FrameCost {
+        FrameCost {
             tick_s: self.tick_s,
             longest_tick_s: self.longest_tick_s,
             upload_s: self.upload_s,
             uploads: self.uploads,
             sort_s: self.sort_s,
             sorts: self.sorts,
-        };
+        }
+    }
+
+    pub fn take_frame(&mut self) -> FrameCost {
+        let frame = self.frame();
         *self = MainThreadCost {
             started: self.started,
+            enabled: self.enabled,
             ..default()
         };
         frame
@@ -68,7 +78,7 @@ impl MainThreadCost {
 }
 
 pub fn tick_started(mut cost: ResMut<MainThreadCost>) {
-    cost.started = Some(Instant::now());
+    cost.started = cost.enabled.then(Instant::now);
 }
 
 pub fn tick_ended(mut cost: ResMut<MainThreadCost>) {
@@ -77,8 +87,20 @@ pub fn tick_ended(mut cost: ResMut<MainThreadCost>) {
     }
 }
 
+pub fn collecting() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        cfg!(any(test, feature = "dev"))
+            || std::env::var_os("TESSERAE_PROFILE_CSV").is_some()
+            || std::env::var_os("TESSERAE_SCREENSHOT").is_some()
+    })
+}
+
 pub fn plugin(app: &mut App) {
-    app.init_resource::<MainThreadCost>();
+    app.insert_resource(MainThreadCost {
+        enabled: collecting(),
+        ..default()
+    });
 }
 
 #[cfg(test)]

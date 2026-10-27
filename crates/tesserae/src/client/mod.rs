@@ -4,7 +4,7 @@
 mod aim;
 mod blend_order;
 pub mod camera;
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
@@ -26,6 +26,8 @@ mod tile_preview;
 use bevy::prelude::*;
 
 pub fn plugin(app: &mut App) {
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    app.add_plugins(capture::plugin);
     app.add_plugins((
         camera::plugin,
         chunk_view::plugin,
@@ -45,6 +47,5 @@ pub fn plugin(app: &mut App) {
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
         overlay::plugin,
-        capture::plugin,
     ));
 }

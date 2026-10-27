@@ -44,7 +44,7 @@ impl Shell {
     }
 
     /// Relies on the hole lying inside the outer extent.
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn count(self) -> usize {
         self.outer.count() - self.hole.map_or(0, Extent::count)
     }

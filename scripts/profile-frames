@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+"""Sequential rendered fixtures. Builds are deliberately a separate operation."""
+import argparse
+import csv
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import time
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def digest(path):
+    value = hashlib.sha256()
+    with path.open('rb') as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b''):
+            value.update(chunk)
+    return value.hexdigest()
+
+
+def distribution(values):
+    values = sorted(values)
+    return dict(n=len(values), **{
+        key: values[max(0, math.ceil(len(values) * p) - 1)] if values else None
+        for key, p in [('p50', .5), ('p95', .95), ('p99', .99), ('max', 1)]
+    })
+
+
+def analyze(folder):
+    result = {}
+    audit = {}
+    for path in sorted(folder.glob('*/frames.csv')):
+        rows = list(csv.DictReader(path.read_text().splitlines()))
+        assert [int(r['frame_id']) for r in rows] == list(range(len(rows)))
+        result[path.parent.name] = {}
+        for phase in ['startup', 'stationary', 'transition', 'fixture', 'settle']:
+            selected = [r for r in rows if r['phase'] == phase]
+            result[path.parent.name][phase] = {
+                key: distribution([float(r[key]) for r in selected if r[key]])
+                for key in rows[0] if key.endswith('_ms')
+            }
+        render = list(csv.DictReader(path.with_suffix('.render.csv').read_text().splitlines()))
+        assert len({r['frame_id'] for r in render}) == len(render)
+        by_id = {r['frame_id']: r['phase'] for r in rows}
+        if 'start_s' in rows[0]:
+            fixture = [r for r in rows if r['phase'] == 'fixture']
+            audit[path.parent.name] = {
+                'complete_fixture_window': bool(fixture) and float(fixture[-1]['end_s']) >= 31.9,
+                'streaming_ready_before_flight': any(
+                    r['streaming_settled'] == 'true' and float(r['start_s']) < 20
+                    for r in rows),
+                'simulation_step_advance': int(fixture[-1]['simulation_step']) - int(fixture[0]['simulation_step']) if fixture else 0,
+                'simulation_landed_delta': int(fixture[-1]['landed']) - int(fixture[0]['landed']) if fixture else 0,
+                'fixture_ready_all': all(r.get('fixture_ready') == 'true' for r in fixture),
+                'fire_burning_frames': sum(r.get('fixture_fire_burning') == 'true' for r in fixture),
+                'fixture_frames': len(fixture),
+                'fixture_ignitions': max((int(r.get('fixture_ignitions', 0)) for r in fixture), default=0),
+                'render_rows': len(render), 'frame_rows': len(rows),
+            }
+        for phase in result[path.parent.name]:
+            for key in ['render_schedule_wall_ms', 'render_thread_cpu_ms']:
+                result[path.parent.name][phase][key] = distribution([
+                    float(r[key]) for r in render
+                    if by_id.get(r['frame_id']) == phase and r[key]
+                ])
+    (folder / 'audit.json').write_text(json.dumps(audit, indent=2) + '\n')
+    overhead = {}
+    for path in sorted(folder.glob('*-on/native.log')):
+        off = path.parent.with_name(path.parent.name[:-3] + '-off') / 'native.log'
+        if not off.exists():
+            continue
+        def legacy(log):
+            return {key: float(value) for key, value in re.findall(
+                r'(median_flight_ms|p99_flight_ms)=([0-9.]+)', log.read_text())}
+        on_values, off_values = legacy(path), legacy(off)
+        overhead[path.parent.name] = {
+            key: {'on_ms': value, 'off_ms': off_values[key],
+                  'ratio': value / off_values[key] if off_values[key] else None,
+                  'rounding_ms': 0.1}
+            for key, value in on_values.items() if key in off_values
+        }
+    (folder / 'overhead.json').write_text(json.dumps(overhead, indent=2) + '\n')
+    (folder / 'summary.json').write_text(json.dumps(result, indent=2) + '\n')
+
+
+def competitors():
+    ps = subprocess.check_output(['ps', '-axo', 'pid=,comm='], text=True)
+    return [line for line in ps.splitlines() if re.search(
+        r'/(cargo|rustc|tesserae[^/ ]*|meshing-[^/ ]+|fluids-[^/ ]+)$', line)]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--binary', type=Path)
+    parser.add_argument('--profile', choices=['dev', 'release'])
+    parser.add_argument('--features', help='exact Cargo features used for this executable')
+    parser.add_argument('--game', type=Path, default=ROOT / 'games/demo/dist')
+    parser.add_argument('--presented', action='store_true')
+    parser.add_argument('--repeats', type=int, default=3)
+    parser.add_argument('--fixtures', nargs='+',
+                        choices=['active', 'stationary', 'flight', 'transparency'],
+                        default=['active', 'stationary', 'flight', 'transparency'])
+    parser.add_argument('--analyze-only', action='store_true')
+    parser.add_argument('output', type=Path)
+    args = parser.parse_args()
+    if args.analyze_only:
+        analyze(args.output)
+        return
+    if not args.binary or not args.profile or not args.features:
+        parser.error('--binary, --profile and --features are required')
+    if args.repeats < 3:
+        parser.error('comparisons require at least three interleaved rounds')
+    if not args.game.is_dir():
+        parser.error('Game distribution is missing; use the existing built distribution')
+    if competitors():
+        raise SystemExit('Competing build/benchmark process: ' + str(competitors()))
+    # mkdir is exclusive; a host-wide lock prevents this runner competing with itself.
+    lock = Path('/tmp/tesserae-frame-profile.lock')
+    lock.mkdir()
+    try:
+        args.output.mkdir(parents=True, exist_ok=False)
+        binary = args.output.resolve() / 'tesserae-profile'
+        shutil.copy2(args.binary, binary)
+        shutil.copy2(__file__, args.output / 'profile-frames.py')
+        metadata = {
+            'executable_sha256': digest(binary), 'build_profile': args.profile,
+            'driver_sha256': digest(Path(__file__)),
+            'manifests': {str(p.relative_to(ROOT)): digest(p) for p in [
+                ROOT / 'Cargo.toml', ROOT / 'Cargo.lock',
+                ROOT / 'crates/tesserae/Cargo.toml']},
+            'features': args.features, 'engine_head': subprocess.check_output(
+                ['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+            'engine_diff_sha256': hashlib.sha256(subprocess.check_output(
+                ['git', 'diff', 'HEAD'], cwd=ROOT)).hexdigest(),
+            'engine_sources': {str(p.relative_to(ROOT)): digest(p)
+                               for p in (ROOT / 'crates').rglob('*.rs')},
+            'game': {str(p.relative_to(args.game)): digest(p)
+                     for p in sorted(args.game.rglob('*')) if p.is_file()},
+            'host': subprocess.check_output(['uname', '-a'], text=True).strip(),
+            'kind': 'rendered-presented' if args.presented else 'rendered-offscreen',
+            'seed': '0x7e55e2ae00000001', 'quality': 'unchanged',
+            'phase_boundaries_s': [0, 16, 20, 22, 32],
+            'physical_target': 'window (see runtime metadata)' if args.presented else [1920, 1080],
+        }
+        (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        for repeat in range(args.repeats):
+            cases = list(args.fixtures)
+            if repeat % 2:
+                cases.reverse()
+            for case in cases:
+                for enabled in ([True, False] if repeat % 2 == 0 else [False, True]):
+                    if competitors():
+                        raise SystemExit('Contended run refused: ' + str(competitors()))
+                    run = args.output / f'{case}-{repeat + 1}-{"on" if enabled else "off"}'
+                    run.mkdir()
+                    env = {k: v for k, v in os.environ.items()
+                           if not k.startswith('TESSERAE_')}
+                    env.update(RUST_LOG='info', BEVY_ASSET_ROOT=str(ROOT), TESSERAE_MODS_DIR=str(args.game.resolve()),
+                               TESSERAE_TRUST_MODS='1', TESSERAE_PROFILE_FIXTURE=case,
+                               TESSERAE_SCREENSHOT=str(run.resolve() / 'capture.png'),
+                               TESSERAE_SCREENSHOT_WIDTH='1920', TESSERAE_SCREENSHOT_HEIGHT='1080',
+                               TESSERAE_SCREENSHOT_FLY_AFTER_S='20', TESSERAE_SCREENSHOT_FLY_S='12',
+                               TESSERAE_SCREENSHOT_SETTLE_S='1',
+                               TESSERAE_SCREENSHOT_SPEED_M_S='12' if case == 'flight' else '0')
+                    if not args.presented:
+                        env['TESSERAE_SCREENSHOT_OFFSCREEN'] = '1'
+                    if enabled:
+                        env['TESSERAE_PROFILE_CSV'] = str(run.resolve() / 'frames.csv')
+                    # Continuous updates must match with logging on and off.
+                    env['TESSERAE_PROFILE_CONTINUOUS'] = '1'
+                    print('Running', run.name, flush=True)
+                    start = time.monotonic()
+                    with (run / 'native.log').open('w') as log:
+                        subprocess.run(['/usr/bin/caffeinate', '-i', str(binary)], cwd=ROOT,
+                                       env=env, stdout=log, stderr=subprocess.STDOUT,
+                                       check=True, timeout=120)
+                    if enabled:
+                        measured = list(csv.DictReader((run / 'frames.csv').read_text().splitlines()))
+                        fixture_rows = [r for r in measured if r['phase'] == 'fixture']
+                        assert fixture_rows and float(fixture_rows[-1]['end_s']) >= 31.9, 'Incomplete fixture window'
+                        assert all(r['fixture_ready'] == 'true' for r in fixture_rows), 'Fixture not ready'
+                        if case == 'active':
+                            assert all(r['fixture_fire_burning'] == 'true' for r in fixture_rows), 'Fire was inactive in the measurement window'
+                    (run / 'run.json').write_text(json.dumps({
+                        'elapsed_s': time.monotonic() - start, 'env': {
+                            k: v for k, v in env.items() if k.startswith('TESSERAE_')},
+                        'executable_sha256': digest(binary),
+                    }, indent=2) + '\n')
+        analyze(args.output)
+    finally:
+        lock.rmdir()
+
+
+if __name__ == '__main__':
+    main()

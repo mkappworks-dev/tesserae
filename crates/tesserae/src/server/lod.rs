@@ -60,7 +60,7 @@ pub(in crate::server) struct LodBudget {
     pub landed_per_tick: LodCounts,
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 impl LodBudget {
     /// Lets a budget sweep run without a rebuild.
     fn with_env_overrides(mut self) -> Self {
@@ -85,7 +85,7 @@ impl LodBudget {
 
 fn lod_budget() -> LodBudget {
     let budget = LodBudget::default();
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     let budget = budget.with_env_overrides();
     budget
 }
@@ -193,12 +193,12 @@ impl LodStore {
         self.at(level).into_iter().flat_map(|l| l.keys().copied())
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn len(&self, level: u32) -> usize {
         self.at(level).map_or(0, HashMap::len)
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn non_uniform(&self, level: u32) -> usize {
         self.at(level)
             .map_or(0, |l| l.values().filter(|c| c.uniform().is_none()).count())
@@ -238,7 +238,7 @@ struct Level {
     /// also what tells landing a replacement from an intruder.
     regenerating: HashSet<ChunkCoord>,
     delivered: HashSet<ChunkCoord>,
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     sizes: HashMap<ChunkCoord, measure::MeshSize>,
 }
 
@@ -268,14 +268,14 @@ impl LodState {
         offsets
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn delivered_len(&self, level: u32) -> usize {
         self.levels
             .get(level as usize - 1)
             .map_or(0, |l| l.delivered.len())
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn mesh_sizes(&self, level: u32) -> measure::MeshSize {
         self.levels
             .get(level as usize - 1)
@@ -331,7 +331,7 @@ pub(in crate::server) struct LodJobs {
     pub times: measure::JobTimes,
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 pub(in crate::server) mod measure {
     use std::ops::Add;
     use std::sync::Arc;
@@ -414,6 +414,9 @@ pub(in crate::server) mod measure {
         }
 
         fn time<T>(&self, level: u32, stage: usize, work: impl FnOnce() -> T) -> T {
+            if !crate::cost::collecting() {
+                return work();
+            }
             let started = Instant::now();
             let out = work();
             let spent = &self.0[level as usize][stage];
@@ -444,7 +447,7 @@ pub(in crate::server) mod measure {
     }
 }
 
-#[cfg(not(feature = "dev"))]
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
 pub(in crate::server) mod measure {
     #[derive(Clone, Default)]
     pub struct JobTimes;
@@ -875,7 +878,7 @@ fn retire(
             .collect();
         for coord in released {
             level.delivered.remove(&coord);
-            #[cfg(feature = "dev")]
+            #[cfg(any(feature = "dev", feature = "profiling"))]
             level.sizes.remove(&coord);
             unloaded.write(LodUnloaded {
                 level: plan.level,
@@ -991,8 +994,10 @@ fn land_meshes(
         if lv.dirty.contains(&coord) {
             jobs.mesh.note_stale();
         }
-        #[cfg(feature = "dev")]
-        lv.sizes.insert(coord, measure::MeshSize::of(&mesh));
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        if crate::cost::collecting() {
+            lv.sizes.insert(coord, measure::MeshSize::of(&mesh));
+        }
         ready.write(LodMeshReady { level, coord, mesh });
         lv.delivered.insert(coord);
     }
@@ -1972,7 +1977,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]
     fn the_dev_report_counts_the_jobs_and_weighs_the_meshes_the_client_holds() {
         let mut h = harness();

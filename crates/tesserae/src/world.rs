@@ -50,14 +50,14 @@ impl Default for WorldSettings {
 }
 
 /// The Voxel sizes every physical fixture is tested at.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 const DEV_VOXEL_SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 
 impl WorldSettings {
     /// The defaults, except that under `dev` `TESSERAE_VOXEL_SIZE_M` picks one
     /// of [`DEV_VOXEL_SIZES`], so one binary opens a World at each of them.
     /// Save data does not exist yet, so nothing else chooses it.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn from_env(env: impl Fn(&str) -> Option<String>) -> Self {
         let defaults = WorldSettings::default();
         let Some(asked) = env("TESSERAE_VOXEL_SIZE_M") else {
@@ -108,7 +108,7 @@ impl WorldSettings {
     /// The single conversion from metres to a Voxel index, so everything
     /// physical stays in metres: `docs/adr/0003-voxel-size-is-per-world.md`.
     /// A floor division for the same reason as [`WorldSettings::chunk_at`].
-    #[cfg_attr(not(feature = "dev"), allow(dead_code))]
+    #[cfg_attr(not(any(feature = "dev", feature = "profiling")), allow(dead_code))]
     pub fn voxel_at(&self, metres: Vec3) -> [i32; 3] {
         let v = (metres / self.voxel_size).floor();
         [v.x as i32, v.y as i32, v.z as i32]
@@ -136,7 +136,7 @@ impl WorldSettings {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]
     fn the_dev_voxel_size_is_one_of_the_tested_sizes_or_the_default() {
         let with = |v: Option<&str>| {

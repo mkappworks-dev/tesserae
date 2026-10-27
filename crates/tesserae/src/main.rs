@@ -2,8 +2,10 @@
 
 mod client;
 mod content;
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 mod cost;
+#[cfg(feature = "profiling")]
+mod profiling;
 mod render;
 mod server;
 mod world;
@@ -12,9 +14,11 @@ use bevy::app::TaskPoolPlugin;
 use bevy::prelude::*;
 
 fn main() -> std::process::ExitCode {
-    #[cfg(feature = "dev")]
+    #[cfg(feature = "profiling")]
+    let process_start = profiling::ProcessStart(std::time::Instant::now());
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     let settings = world::WorldSettings::from_env(|name| std::env::var(name).ok());
-    #[cfg(not(feature = "dev"))]
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
     let settings = world::WorldSettings::default();
     let loaded = match server::mods::load_from_env(&settings) {
         Ok(loaded) => loaded,
@@ -23,8 +27,10 @@ fn main() -> std::process::ExitCode {
             return std::process::ExitCode::FAILURE;
         }
     };
-    App::new()
-        .insert_resource(settings)
+    let mut app = App::new();
+    #[cfg(feature = "profiling")]
+    app.insert_resource(process_start);
+    app.insert_resource(settings)
         .insert_non_send(loaded)
         .add_plugins(
             DefaultPlugins
@@ -45,7 +51,7 @@ fn main() -> std::process::ExitCode {
 
 /// Bevy's default pool sizes, except that a `dev` run can pin the async compute
 /// pool, which streaming jobs run on, to measure what its size is worth.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 fn task_pools() -> TaskPoolPlugin {
     use bevy::app::{TaskPoolOptions, TaskPoolThreadAssignmentPolicy};
 
@@ -67,15 +73,17 @@ fn task_pools() -> TaskPoolPlugin {
     }
 }
 
-#[cfg(not(feature = "dev"))]
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
 fn task_pools() -> TaskPoolPlugin {
     TaskPoolPlugin::default()
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 fn dev_plugins(app: &mut App) {
     app.add_plugins(cost::plugin);
+    #[cfg(feature = "profiling")]
+    app.add_plugins(profiling::plugin);
 }
 
-#[cfg(not(feature = "dev"))]
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
 fn dev_plugins(_: &mut App) {}

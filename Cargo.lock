@@ -6006,6 +6006,7 @@ name = "tesserae"
 version = "0.0.0"
 dependencies = [
  "bevy",
+ "libc",
  "tesserae-core",
  "tesserae-mods",
 ]

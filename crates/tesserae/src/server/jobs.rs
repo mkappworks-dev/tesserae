@@ -41,11 +41,11 @@ pub(in crate::server) struct Stage<T, K = ChunkCoord> {
     dispatched: usize,
     landed: usize,
     /// Every job landed since the World opened, for the `dev` report.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     landed_total: usize,
     /// Results that finished and were thrown away at landing because what they
     /// were computed from had changed.
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     stale: usize,
     /// While true, a job does not start its work, so a test can change the World
     /// under a job it knows is in flight.
@@ -66,9 +66,9 @@ impl<T, K> Default for Stage<T, K> {
             finished: HashMap::default(),
             dispatched: 0,
             landed: 0,
-            #[cfg(feature = "dev")]
+            #[cfg(any(feature = "dev", feature = "profiling"))]
             landed_total: 0,
-            #[cfg(any(test, feature = "dev"))]
+            #[cfg(any(test, feature = "dev", feature = "profiling"))]
             stale: 0,
             #[cfg(test)]
             hold: Arc::default(),
@@ -155,7 +155,7 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
     pub fn take(&mut self, key: K) -> Option<T> {
         let out = self.finished.remove(&key)?;
         self.landed += 1;
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         {
             self.landed_total += 1;
         }
@@ -173,18 +173,18 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
     /// Records a result that was out of date when it landed, whether it was then
     /// thrown away or delivered anyway.
     pub fn note_stale(&mut self) {
-        #[cfg(any(test, feature = "dev"))]
+        #[cfg(any(test, feature = "dev", feature = "profiling"))]
         {
             self.stale += 1;
         }
     }
 
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn stale(&self) -> usize {
         self.stale
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn landed_total(&self) -> usize {
         self.landed_total
     }
@@ -326,7 +326,7 @@ pub(in crate::server) struct Jobs {
 }
 
 impl Jobs {
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn in_flight(&self) -> usize {
         self.generate.in_flight() + self.relight.in_flight() + self.mesh.in_flight()
     }

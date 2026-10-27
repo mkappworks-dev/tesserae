@@ -209,7 +209,7 @@ fn place_hint(
     }
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 pub(super) fn capture_progress(target: Res<Target>, mut progress: ResMut<Progress>) {
     let Some(fraction) = std::env::var("TESSERAE_SCREENSHOT_REMOVE_PROGRESS")
         .ok()

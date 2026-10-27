@@ -382,7 +382,39 @@ impl FluidSim {
     }
 }
 
+#[cfg(feature = "profiling")]
+#[derive(Resource, Default, Clone, Copy)]
+pub struct SimulationProfile {
+    pub step: u64,
+    pub idle: bool,
+    pub running: bool,
+    pub awaiting: usize,
+    pub suspended: usize,
+    pub timers: usize,
+    pub landed: usize,
+    pub deferred: usize,
+}
+
+#[cfg(feature = "profiling")]
+fn publish_profile(sim: Res<FluidSim>, mut status: ResMut<SimulationProfile>) {
+    *status = SimulationProfile {
+        step: sim.now,
+        idle: sim.running.is_none() && sim.agenda.is_empty(),
+        running: sim.running.is_some(),
+        awaiting: sim.awaiting.len(),
+        suspended: sim.suspended.len(),
+        timers: sim.timers.len(),
+        landed: sim.landed,
+        deferred: sim.deferred,
+    };
+}
+
 pub(super) fn plugin(app: &mut App) {
+    #[cfg(feature = "profiling")]
+    if std::env::var_os("TESSERAE_PROFILE_CSV").is_some() {
+        app.init_resource::<SimulationProfile>()
+            .add_systems(FixedPostUpdate, publish_profile);
+    }
     app.init_resource::<FluidSim>()
         // After everything that changes the World on this tick, so the step that
         // starts reads all of it, and before `FixedUpdate` meshes what lands.
