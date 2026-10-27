@@ -146,9 +146,14 @@ pub(super) fn receive(
             let slot = *material as usize;
             pixels[slot * row_bytes..(slot + 1) * row_bytes].copy_from_slice(row);
             textures.present[slot] = true;
-            textures.alpha[slot] = if row.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255) {
+            textures.alpha[slot] = if row
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .any(|p| p[3] > 0 && p[3] < 255)
+            {
                 AlphaMode::Blend
-            } else if row.chunks_exact(4).any(|p| p[3] == 0) {
+            } else if row.as_chunks::<4>().0.iter().any(|p| p[3] == 0) {
                 AlphaMode::Mask(0.5)
             } else {
                 AlphaMode::Opaque
@@ -290,8 +295,8 @@ mod tests {
         assert_eq!(pixels.len(), WIDTH * HEIGHT * 4);
         let row_bytes = WIDTH * EDGE * 4;
         let pixels = &pixels[FLAME_SLOT * row_bytes..(FLAME_SLOT + 1) * row_bytes];
-        assert!(pixels.chunks_exact(4).any(|p| p[3] == 0));
-        assert!(pixels.chunks_exact(4).any(|p| p[3] == 255));
+        assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 0));
+        assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] == 255));
         assert!(textures.texture(Holding::solid(23, 0)).is_none());
     }
 }

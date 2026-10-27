@@ -734,14 +734,14 @@ mod tests {
                 .find(|(id, _)| *id == material.id)
                 .unwrap_or_else(|| panic!("{} needs a preview", material.name));
             assert_eq!(pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
-            assert!(pixels.chunks_exact(4).any(|p| p != &pixels[..4]));
+            assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
                 material.name.as_str(),
                 "demo:glass" | "demo:water" | "demo:mud"
             ) {
-                assert!(pixels.chunks_exact(4).any(|p| p[3] < 255));
+                assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {
-                assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));
+                assert!(pixels.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
             }
             assert_eq!(
                 textures
