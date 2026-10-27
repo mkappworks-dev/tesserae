@@ -3,9 +3,9 @@
 Games now declare every named Material except air and name their ground.
 The demo keeps its terrain and render classes using its own content.
 
-Validation: 885 tests pass, five existing manual measurements are ignored,
+Validation: 886 tests pass, five existing manual measurements are ignored,
 and ./scripts/cargo-ci passes. The initial captures were reviewed and
-deleted. Refined water, glass and lava captures await review in /tmp.
+deleted. Shared World/preview texture captures await review in /tmp.
 
 The 115-row interleaved thread-CPU A/B used phase 8.1 main (212d900).
 Stair-heavy meshing moves from 4.163 to 3.462 ms; same-binary id probes
@@ -17,7 +17,7 @@ all other rows beyond 3% are recorded in ticket 13.
 
 - Retire Material ids 1 through 7, retain registration from 8, and add
   ADR-0016. Amend unreleased WIT 0.3 with optional named ground and
-  bounded preview texture data. Older contract lines load without ground,
+  bounded shared texture data. Older contract lines load without ground,
   warn, and retain colour fallback. No 0.4 line is added.
 - Register dynamic fixtures for tests and benches. Derive the palette,
   hotbar defaults and dev gallery from declared content.
@@ -30,8 +30,11 @@ all other rows beyond 3% are recorded in ticket 13.
   green, and replace the destination preview on drop.
 - Supply distinct demo textures for all twelve Materials, with grass top/side
   and wood grain, plus an engine flame silhouette. Tiles, drag feedback, held
-  models and ghosts share them. Water has soft ripples, lava has flowing
-  streaks, and glass has translucent faces. Terrain keeps its palette.
+  models, ghosts and World surfaces share one GPU texture atlas. Merged
+  terrain faces repeat per Voxel, with matching cutouts in depth and shadow
+  passes. Water has soft ripples, lava has an even orange flow pattern, and
+  glass has clear baby-blue faces. The textured ghost uses 40% opacity.
+  Correct premultiplied UI blending keeps glass previews from darkening.
 
 ## Checklist
 

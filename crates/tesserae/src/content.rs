@@ -6,9 +6,9 @@ use tesserae_core::{MaterialId, ShapeId};
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 
-/// Preview-only RGBA atlases, keyed by registered Material id.
+/// Shared RGBA texture atlases, keyed by registered Material id.
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
-pub struct PreviewTextures(pub Vec<(MaterialId, Vec<u8>)>);
+pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
 
 /// What the registered content is called and what a player can do with it.
 /// Content only: it holds no Voxel, Chunk or Occupants, so a Client reading it

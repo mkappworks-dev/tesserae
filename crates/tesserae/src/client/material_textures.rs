@@ -1,9 +1,13 @@
-//! Game-supplied preview skins, independent of the World's material shader.
+//! Game artwork uploaded once for terrain, tiles and held models.
 use super::{
     edit::{Catalogue, Holding},
     menu::Swatches,
 };
-use crate::content::PreviewTextures;
+use crate::content::MaterialTextures;
+use crate::render::{
+    chunk_material::{ChunkMaterialExtension, FLAME_SLOT},
+    texture_atlas::{EDGE, HEIGHT, ROWS, WIDTH},
+};
 use bevy::{
     asset::RenderAssetUsages,
     ecs::system::SystemParam,
@@ -11,19 +15,24 @@ use bevy::{
     prelude::*,
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
-use std::collections::HashMap;
-use tesserae_core::MaterialId;
-use tesserae_mods::PREVIEW_TEXTURE_EDGE;
 
-#[derive(Resource, Default)]
+const GHOST_OPACITY: f32 = 0.4;
+
+#[derive(Resource)]
 pub(super) struct Textures {
-    materials: HashMap<MaterialId, Skin>,
-    fire: Option<Handle<Image>>,
+    atlas: Option<Handle<Image>>,
+    present: [bool; ROWS],
+    alpha: [AlphaMode; ROWS],
 }
 
-struct Skin {
-    image: Handle<Image>,
-    alpha: AlphaMode,
+impl Default for Textures {
+    fn default() -> Self {
+        Self {
+            atlas: None,
+            present: [false; ROWS],
+            alpha: [AlphaMode::Opaque; ROWS],
+        }
+    }
 }
 
 #[derive(SystemParam)]
@@ -40,36 +49,51 @@ impl PreviewContent<'_> {
 }
 
 impl Textures {
-    pub(super) fn texture(&self, held: Holding) -> Option<Handle<Image>> {
+    fn slot(held: Holding) -> Option<usize> {
         match held {
-            Holding::Solid { material, .. } | Holding::Fluid(material) => {
-                self.materials.get(&material).map(|skin| skin.image.clone())
-            }
-            Holding::Fire => self.fire.clone(),
+            Holding::Solid { material, .. } | Holding::Fluid(material) => Some(material as usize),
+            Holding::Fire => Some(FLAME_SLOT),
             Holding::Empty => None,
+        }
+    }
+
+    pub(super) fn texture(&self, held: Holding) -> Option<Handle<Image>> {
+        Self::slot(held)
+            .filter(|&slot| self.present.get(slot) == Some(&true))
+            .and(self.atlas.clone())
+    }
+
+    pub(super) fn apply(&self, extension: &mut ChunkMaterialExtension) {
+        extension.texture = self.atlas.clone();
+        extension.textured = UVec4::ZERO;
+        for (slot, &present) in self.present.iter().enumerate() {
+            if present {
+                extension.textured[slot / 32] |= 1 << (slot % 32);
+            }
         }
     }
 
     pub(super) fn material(&self, held: Holding, rgba: Vec4, ghost: bool) -> StandardMaterial {
         let texture = self.texture(held);
-        let alpha = match held {
-            Holding::Solid { material, .. } | Holding::Fluid(material) => self
-                .materials
-                .get(&material)
-                .map_or(AlphaMode::Opaque, |skin| skin.alpha),
-            Holding::Fire => AlphaMode::Mask(0.5),
-            Holding::Empty => AlphaMode::Opaque,
-        };
+        let alpha = Self::slot(held)
+            .and_then(|slot| self.alpha.get(slot))
+            .copied()
+            .unwrap_or(AlphaMode::Opaque);
         let rgb = if texture.is_some() {
             Vec3::ONE
         } else {
             rgba.truncate()
         };
         StandardMaterial {
-            base_color: Color::linear_rgba(rgb.x, rgb.y, rgb.z, if ghost { 0.3 } else { 1.0 }),
+            base_color: Color::linear_rgba(
+                rgb.x,
+                rgb.y,
+                rgb.z,
+                if ghost { GHOST_OPACITY } else { 1.0 },
+            ),
             base_color_texture: texture,
             alpha_mode: if ghost { AlphaMode::Blend } else { alpha },
-            cull_mode: if ghost || held == Holding::Fire {
+            cull_mode: if held == Holding::Fire {
                 None
             } else {
                 Some(bevy::render::render_resource::Face::Back)
@@ -82,15 +106,15 @@ impl Textures {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Textures>()
-        .add_message::<PreviewTextures>()
+        .add_message::<MaterialTextures>()
         .add_systems(Update, receive.after(super::menu::receive_palette));
 }
 
 fn image(pixels: Vec<u8>) -> Image {
     let mut image = Image::new(
         Extent3d {
-            width: (PREVIEW_TEXTURE_EDGE * 3) as u32,
-            height: PREVIEW_TEXTURE_EDGE as u32,
+            width: WIDTH as u32,
+            height: HEIGHT as u32,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
@@ -103,40 +127,41 @@ fn image(pixels: Vec<u8>) -> Image {
 }
 
 pub(super) fn receive(
-    mut messages: MessageReader<PreviewTextures>,
+    mut messages: MessageReader<MaterialTextures>,
     mut textures: ResMut<Textures>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    if textures.fire.is_none() {
-        textures.fire = Some(images.add(image(flame())));
+    if textures.atlas.is_some() && messages.is_empty() {
+        return;
     }
-    for message in messages.read() {
-        for (_, old) in textures.materials.drain() {
-            images.remove(old.image.id());
-        }
-        for (material, pixels) in &message.0 {
-            let alpha = if pixels.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255) {
+    let mut pixels = vec![255; WIDTH * HEIGHT * 4];
+    textures.present.fill(false);
+    textures.alpha.fill(AlphaMode::Opaque);
+    let row_bytes = WIDTH * EDGE * 4;
+    pixels[FLAME_SLOT * row_bytes..(FLAME_SLOT + 1) * row_bytes].copy_from_slice(&flame());
+    textures.present[FLAME_SLOT] = true;
+    textures.alpha[FLAME_SLOT] = AlphaMode::Mask(0.5);
+    if let Some(message) = messages.read().last() {
+        for (material, row) in &message.0 {
+            let slot = *material as usize;
+            pixels[slot * row_bytes..(slot + 1) * row_bytes].copy_from_slice(row);
+            textures.present[slot] = true;
+            textures.alpha[slot] = if row.chunks_exact(4).any(|p| p[3] > 0 && p[3] < 255) {
                 AlphaMode::Blend
-            } else if pixels.chunks_exact(4).any(|p| p[3] == 0) {
+            } else if row.chunks_exact(4).any(|p| p[3] == 0) {
                 AlphaMode::Mask(0.5)
             } else {
                 AlphaMode::Opaque
             };
-            if let Some(old) = textures.materials.insert(
-                *material,
-                Skin {
-                    image: images.add(image(pixels.clone())),
-                    alpha,
-                },
-            ) {
-                images.remove(old.image.id());
-            }
         }
+    }
+    if let Some(old) = textures.atlas.replace(images.add(image(pixels))) {
+        images.remove(old.id());
     }
 }
 
 fn flame() -> Vec<u8> {
-    let mut pixels = Vec::with_capacity(PREVIEW_TEXTURE_EDGE * PREVIEW_TEXTURE_EDGE * 3 * 4);
+    let mut pixels = Vec::with_capacity(EDGE * EDGE * 3 * 4);
     for y in 0..16i32 {
         for _ in 0..3 {
             for x in 0..16i32 {
@@ -165,7 +190,7 @@ fn flame() -> Vec<u8> {
 mod tests {
     use super::*;
     use tesserae_core::SHAPE_FULL_CUBE;
-    use tesserae_mods::PREVIEW_TEXTURE_BYTES;
+    use tesserae_mods::MATERIAL_TEXTURE_BYTES;
 
     #[test]
     fn content_textures_replace_old_assets_and_materials_keep_the_colour_fallback() {
@@ -179,9 +204,9 @@ mod tests {
             .material(held, rgba, false);
         assert_eq!(fallback.base_color, Color::linear_rgb(0.2, 0.3, 0.4));
         assert!(fallback.base_color_texture.is_none());
-        app.world_mut().write_message(PreviewTextures(vec![(
+        app.world_mut().write_message(MaterialTextures(vec![(
             23,
-            vec![255; PREVIEW_TEXTURE_BYTES],
+            vec![255; MATERIAL_TEXTURE_BYTES],
         )]));
         app.update();
         let first = app.world().resource::<Textures>().texture(held).unwrap();
@@ -192,9 +217,9 @@ mod tests {
         assert_eq!(textured.base_color, Color::WHITE);
         assert_eq!(textured.base_color_texture, Some(first.clone()));
         assert_eq!(textured.alpha_mode, AlphaMode::Opaque);
-        app.world_mut().write_message(PreviewTextures(vec![(
+        app.world_mut().write_message(MaterialTextures(vec![(
             23,
-            vec![120; PREVIEW_TEXTURE_BYTES],
+            vec![120; MATERIAL_TEXTURE_BYTES],
         )]));
         app.update();
         assert!(
@@ -205,8 +230,8 @@ mod tests {
         );
         assert_eq!(
             app.world().resource::<Assets<Image>>().len(),
-            2,
-            "one skin and the engine flame"
+            1,
+            "one atlas shared by Materials and the engine flame"
         );
         assert_ne!(
             app.world().resource::<Textures>().texture(held).unwrap(),
@@ -217,7 +242,15 @@ mod tests {
             .resource::<Textures>()
             .material(held, rgba, true);
         assert_eq!(ghost.alpha_mode, AlphaMode::Blend);
-        assert_eq!(ghost.base_color.alpha(), 0.3);
+        assert_eq!(ghost.base_color.alpha(), GHOST_OPACITY);
+        assert_eq!(
+            ghost.base_color_texture,
+            app.world().resource::<Textures>().texture(held)
+        );
+        assert_eq!(
+            ghost.cull_mode,
+            Some(bevy::render::render_resource::Face::Back)
+        );
         assert_eq!(
             app.world()
                 .resource::<Textures>()
@@ -225,10 +258,10 @@ mod tests {
                 .alpha_mode,
             AlphaMode::Blend
         );
-        let mut cutout = vec![255; PREVIEW_TEXTURE_BYTES];
+        let mut cutout = vec![255; MATERIAL_TEXTURE_BYTES];
         cutout[3] = 0;
         app.world_mut()
-            .write_message(PreviewTextures(vec![(23, cutout)]));
+            .write_message(MaterialTextures(vec![(23, cutout)]));
         app.update();
         assert_eq!(
             app.world()
@@ -254,7 +287,9 @@ mod tests {
             .get(fire.base_color_texture.as_ref().unwrap().id())
             .unwrap();
         let pixels = image.data.as_ref().unwrap();
-        assert_eq!(pixels.len(), PREVIEW_TEXTURE_BYTES);
+        assert_eq!(pixels.len(), WIDTH * HEIGHT * 4);
+        let row_bytes = WIDTH * EDGE * 4;
+        let pixels = &pixels[FLAME_SLOT * row_bytes..(FLAME_SLOT + 1) * row_bytes];
         assert!(pixels.chunks_exact(4).any(|p| p[3] == 0));
         assert!(pixels.chunks_exact(4).any(|p| p[3] == 255));
         assert!(textures.texture(Holding::solid(23, 0)).is_none());

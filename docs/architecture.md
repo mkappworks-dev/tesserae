@@ -120,10 +120,14 @@ The Client sends aim reports beside edit intents. The Server answers with metre
 outline bounds and an acceptable ghost cell through the edit resolver. The
 Client meshes held Shapes from catalogue geometry and draws the outline, ghost
 and corner model. The menu, hotbar and drag follower share a cached model atlas
-from the same geometry. Games supply optional, bounded preview textures through
-the Declaration's appearance rows; the Client draws them without naming
-Materials. Older contract lines retain colour fallback. Fire uses an engine
-flame silhouette. No preview reads World storage, and terrain keeps its palette.
+from the same geometry. Games supply one optional, bounded texture per Material
+through the Declaration's appearance rows. One GPU texture atlas is shared by
+World surfaces and item models; the Client draws it without naming Materials.
+Greedy terrain faces repeat per Voxel, and colour, depth and shadow passes use
+the same texture alpha. Older contract lines retain colour fallback. Fire uses
+engine flame artwork. The placement ghost uses the held model at 40 percent
+opacity. UI atlas images use premultiplied blending to preserve transparency. No
+preview reads World storage.
 
 ## The three invariants this diagram exists to protect
 

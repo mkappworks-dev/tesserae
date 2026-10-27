@@ -96,17 +96,14 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
             }
         }
         "lava" => {
-            let (along, across) = if face == 1 { (y, x) } else { (x, y) };
-            let drift = (along as f32 * 0.42).sin() * 1.5 + (along as f32 * 0.9 + 0.5).sin() * 0.35;
-            let flow = (across as f32 * 0.82 + drift).sin();
-            if flow > 0.82 {
-                tint([255, 218, 76], (n - 128) / 45)
-            } else if flow > 0.2 {
-                tint([255, 142, 20], (n - 128) / 38)
-            } else if flow > -0.7 {
-                tint([230, 73, 11], (n - 128) / 28)
+            let drift = (y as f32 * 0.4).sin() * 0.75;
+            let flow = (x as f32 * 0.75 + drift).sin();
+            if flow > 0.75 {
+                tint([255, 178, 36], (n - 128) / 65)
+            } else if flow > 0.0 {
+                tint([255, 134, 19], (n - 128) / 55)
             } else {
-                tint([160, 40, 13], (n - 128) / 25)
+                tint([239, 99, 13], (n - 128) / 48)
             }
         }
         "mud" => {
@@ -136,31 +133,31 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
         }
         "glass" => {
             if x == 0 || y == 0 || x == 15 || y == 15 {
-                [197, 232, 240]
+                [181, 216, 255]
             } else if (8..=9).contains(&(x + y)) {
-                [238, 252, 255]
+                [224, 242, 255]
             } else {
-                [173, 220, 231]
+                [151, 201, 246]
             }
         }
         _ => tint(base, (n - 128) / 12),
     }
 }
 
-pub fn texture(name: &str, base: [u8; 3]) -> Vec<u8> {
+pub fn texture(name: &str, [r, g, b, opacity]: [u8; 4]) -> Vec<u8> {
     let mut pixels = Vec::with_capacity(EDGE * EDGE * 3 * 4);
     for y in 0..EDGE {
         for face in 0..3 {
             for x in 0..EDGE {
-                let [r, g, b] = pixel(name, face, x, y, base);
+                let [r, g, b] = pixel(name, face, x, y, [r, g, b]);
                 let alpha = if name != "glass" {
-                    255
+                    opacity
                 } else if x == 0 || y == 0 || x == 15 || y == 15 {
-                    215
+                    100
                 } else if (8..=9).contains(&(x + y)) {
-                    150
+                    48
                 } else {
-                    38
+                    8
                 };
                 pixels.extend_from_slice(&[r, g, b, alpha]);
             }

@@ -16,7 +16,7 @@ use tesserae_mods::{
 };
 
 use crate::content::{
-    CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette, PreviewTextures,
+    CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette, MaterialTextures,
 };
 use crate::world::WorldSettings;
 
@@ -92,7 +92,7 @@ pub struct LoadedMods {
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
-    pub previews: Vec<(MaterialId, Vec<u8>)>,
+    pub textures: Vec<(MaterialId, Vec<u8>)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
 }
@@ -105,7 +105,7 @@ impl Default for LoadedMods {
             world: None,
             view: None,
             appearance: Vec::new(),
-            previews: Vec::new(),
+            textures: Vec::new(),
             mods: Vec::new(),
             game: false,
         }
@@ -284,8 +284,8 @@ fn load_with(
                     .registry
                     .id_of(Kind::Material, &format!("{id}:{}", row.material))
                 {
-                    if let Some(pixels) = row.preview {
-                        loaded.previews.push((index as MaterialId, pixels));
+                    if let Some(pixels) = row.texture {
+                        loaded.textures.push((index as MaterialId, pixels));
                     }
                     let c = row.color;
                     loaded
@@ -362,13 +362,13 @@ pub(super) fn plugin(app: &mut App) {
         .insert_resource(super::streaming::streaming_settings(loaded.view))
         .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
         .add_plugins(runtime::plugin)
-        .add_message::<PreviewTextures>()
+        .add_message::<MaterialTextures>()
         .add_message::<MaterialPalette>()
         .add_message::<ContentCatalogue>();
     app.world_mut()
         .write_message(MaterialPalette(loaded.appearance));
     app.world_mut()
-        .write_message(PreviewTextures(loaded.previews));
+        .write_message(MaterialTextures(loaded.textures));
     app.world_mut().write_message(catalogue);
 }
 
@@ -713,7 +713,7 @@ mod tests {
             .unwrap();
         let textures = app
             .world_mut()
-            .resource_mut::<Messages<PreviewTextures>>()
+            .resource_mut::<Messages<MaterialTextures>>()
             .drain()
             .next()
             .unwrap();
@@ -724,9 +724,12 @@ mod tests {
                 .iter()
                 .find(|(id, _)| *id == material.id)
                 .unwrap_or_else(|| panic!("{} needs a preview", material.name));
-            assert_eq!(pixels.len(), tesserae_mods::PREVIEW_TEXTURE_BYTES);
+            assert_eq!(pixels.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
             assert!(pixels.chunks_exact(4).any(|p| p != &pixels[..4]));
-            if material.name == "demo:glass" {
+            if matches!(
+                material.name.as_str(),
+                "demo:glass" | "demo:water" | "demo:mud"
+            ) {
                 assert!(pixels.chunks_exact(4).any(|p| p[3] < 255));
             } else {
                 assert!(pixels.chunks_exact(4).all(|p| p[3] == 255));

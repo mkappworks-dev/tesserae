@@ -90,3 +90,13 @@ ripples; lava has curved hot ribbons along its flow; glass has translucent
 faces, thin edges and a small reflection. Preview materials derive opaque,
 masked or blended rendering from the supplied alpha bytes, keeping this
 choice generic and Game-owned. Cache tests cover all three alpha cases.
+
+### 2026-10-27: shared appearance follow-up
+
+The user accepted water, requested still clearer baby-blue glass and more
+consistent lava, then asked for the same artwork after placement and on a
+translucent ghost. Ticket 16 supersedes the preview-only boundary with one
+shared `texture` field and GPU atlas. Its captures supersede the earlier
+files; combined visual review remains pending in the same /tmp folder.
+Implementation and full CI are complete: 886 tests pass, five existing
+manual measurements are ignored. The folder remains until user review.

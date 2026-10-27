@@ -7,7 +7,6 @@
 
 import bevy_pbr::render::{
     forward_io::{FragmentOutput, VertexOutput},
-    mesh_functions,
     mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
@@ -15,9 +14,12 @@ import bevy_pbr::render::{
         STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK, STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
         STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
     },
-    view_transformations::position_world_to_clip,
 };
-import super::leaf_hole::leaf_hole;
+import super::{
+    leaf_hole::leaf_hole,
+    chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
+    material_texture::{material_slot, has_texture, sample_texture},
+};
 
 // Bindings 0-99 are the base StandardMaterial's. CHUNK_PALETTE_LEN,
 // CHUNK_PALETTE_SLOTS and CHUNK_FLAME are injected by
@@ -93,31 +95,6 @@ const BLOCK_LIGHT_TINT: vec3<f32> = vec3<f32>(1.0, 0.72, 0.42);
 // exposure works in.
 const BLOCK_LIGHT_STRENGTH: f32 = 4.0;
 
-// Locations 0-7 are bevy_pbr's; the greedy mesher's Material index takes 10 and
-// its packed light 11. Attributes arrive uncompressed because
-// chunk_mesh_to_mesh leaves Bevy's per-attribute vertex compression off.
-// Turning it on needs decompress_vertex here.
-struct ChunkVertex {
-    @builtin(instance_index) instance_index: u32,
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-    @location(10) material: u32,
-    @location(11) light: u32,
-}
-
-// Mirrors bevy_pbr's VertexOutput, which the fragment stage rebuilds from this.
-struct ChunkVertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0) world_position: vec4<f32>,
-    @location(1) world_normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-    @location(6) @interpolate(flat) instance_index: u32,
-    @location(10) @interpolate(flat) material: u32,
-    @location(11) @interpolate(flat) light: u32,
-    @location(12) @interpolate(flat) level: u32,
-}
-
 // Flat, like the Material index: every vertex of a greedy quad carries the same
 // level because light is part of the merge key, so interpolating would only
 // blur the seam between two quads that deliberately did not merge.
@@ -145,23 +122,7 @@ fn level_tint(level: u32) -> vec3<f32> {
 
 @vertex
 fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
-    let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
-
-    let level = mesh_functions::get_tag(in.instance_index);
-
-    var out: ChunkVertexOutput;
-    out.world_position = mesh_functions::mesh_position_local_to_world(
-        world_from_local,
-        vec4<f32>(in.position, 1.0),
-    );
-    out.clip_position = position_world_to_clip(out.world_position.xyz);
-    out.world_normal = mesh_functions::mesh_normal_local_to_world(in.normal, in.instance_index);
-    out.uv = in.uv;
-    out.instance_index = in.instance_index;
-    out.material = in.material;
-    out.light = in.light;
-    out.level = level;
-    return out;
+    return transform_vertex(in);
 }
 
 @fragment
@@ -198,12 +159,12 @@ fn fragment(
 
     // Multiplied rather than assigned so the base material's base_color still
     // works as a whole-chunk tint.
-    let slot = select(
-        min(in.material, constants::CHUNK_PALETTE_LEN - 1u),
-        constants::CHUNK_PALETTE_LEN,
-        in.material == constants::CHUNK_FLAME,
-    );
-    pbr_input.material.base_color *= palette[slot];
+    let slot = material_slot(in.material);
+    if has_texture(slot) {
+        pbr_input.material.base_color *= sample_texture(slot, in.uv, in.world_normal);
+    } else {
+        pbr_input.material.base_color *= palette[slot];
+    }
 
     if lod.tint != 0u && in.level != 0u {
         pbr_input.material.base_color = vec4<f32>(
@@ -241,7 +202,7 @@ fn fragment(
     );
 
     let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
-    if alpha_mode == STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK && leaf_hole(in.uv) {
+    if alpha_mode == STANDARD_MATERIAL_FLAGS_ALPHA_MODE_MASK && !has_texture(slot) && leaf_hole(in.uv) {
         pbr_input.material.base_color.a = 0.0;
     }
 

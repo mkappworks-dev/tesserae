@@ -246,3 +246,16 @@ The user accepted the drag feedback and the other textures, requesting
 smoother water, clearer glass and flowing lava. Those three were revised;
 review remains tracked in ticket 15. The current /tmp folder is retained
 until that review. No new validation exceptions besides those above.
+
+### 2026-10-27: shared World texture validation
+
+Ticket 16 extends appearance to the World with one Game-authored texture
+shared by terrain, previews and the 40-percent-opacity ghost. The final
+combined tree passes formatting and ./scripts/cargo-ci: 886 tests, zero
+failures and five existing ignored manual measurement tests. Full guest
+rebuild, Clippy, rustdoc, default build, bench compilation, boundaries and
+cargo-deny pass. Native Metal captures exercise the shared shaders and
+transparent UI blending. Core and benchmark inputs did not change; the
+prior interleaved evidence remains applicable. User visual review and the
+retained folder are tracked in tickets 15 and 16. Ticket 16 records the
+remaining capture/measurement limitations.

@@ -10,13 +10,13 @@ pub mod chunk_mesh;
 pub mod chunk_view;
 pub mod drawn_mask;
 pub mod edit;
+mod material_textures;
 mod menu;
 #[cfg(feature = "dev")]
 mod overlay;
 mod palette;
 mod pose;
 mod preview;
-mod preview_material;
 mod tile_preview;
 
 use bevy::prelude::*;
@@ -28,7 +28,7 @@ pub fn plugin(app: &mut App) {
         edit::plugin,
         menu::plugin,
         aim::plugin,
-        preview_material::plugin,
+        material_textures::plugin,
         preview::plugin,
         tile_preview::plugin,
         pose::plugin,

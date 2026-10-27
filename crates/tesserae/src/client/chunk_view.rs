@@ -83,6 +83,7 @@ impl IncomingMeshes<'_, '_> {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<ChunkEntities>()
+        .init_resource::<super::material_textures::Textures>()
         .add_systems(Startup, (add_material, spawn_light))
         .add_systems(PostStartup, spawn_camera);
     add_view_systems(app);
@@ -94,9 +95,11 @@ pub(super) fn plugin(app: &mut App) {
 /// unload handled first would leave the mesh with nothing to despawn it; and
 /// what each level has drawn is published after both.
 fn add_view_systems(app: &mut App) {
+    app.init_resource::<super::material_textures::Textures>();
     app.add_systems(
         Update,
         (
+            update_textures.after(super::material_textures::receive),
             upload_meshes,
             drop_meshes,
             sort_blended.run_if(blend_sort_on),
@@ -104,6 +107,21 @@ fn add_view_systems(app: &mut App) {
         )
             .chain(),
     );
+}
+
+fn update_textures(
+    textures: Res<super::material_textures::Textures>,
+    terrain: Res<TerrainMaterial>,
+    mut materials: ResMut<Assets<ChunkMaterial>>,
+) {
+    if !textures.is_changed() {
+        return;
+    }
+    for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+        if let Some(mut material) = materials.get_mut(handle) {
+            textures.apply(&mut material.extension);
+        }
+    }
 }
 
 /// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
@@ -159,7 +177,6 @@ fn add_material(
             ..opaque.extension.clone()
         },
     };
-    // The holes are cut by the shader's pattern, which sets alpha to zero.
     let cutout = ChunkMaterial {
         base: StandardMaterial {
             alpha_mode: AlphaMode::Mask(0.5),
@@ -764,6 +781,55 @@ mod tests {
         }
         app.update();
         app
+    }
+
+    #[test]
+    fn terrain_and_item_models_share_one_texture_atlas_and_clear_removed_rows() {
+        use crate::client::{
+            edit::Holding,
+            material_textures::{self, Textures},
+        };
+        use crate::content::MaterialTextures;
+        let mut app = app();
+        app.init_asset::<Image>()
+            .add_plugins(material_textures::plugin);
+        app.world_mut().write_message(MaterialTextures(vec![
+            (23, vec![255; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
+            (63, vec![120; tesserae_mods::MATERIAL_TEXTURE_BYTES]),
+        ]));
+        app.update();
+        let held = Holding::solid(23, 0);
+        let first = app.world().resource::<Textures>().texture(held).unwrap();
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+            let extension = &materials.get(handle).unwrap().extension;
+            assert_eq!(extension.texture.as_ref(), Some(&first));
+            assert_eq!(extension.textured, UVec4::new(1 << 23, 1 << 31, 1, 0));
+        }
+        let item = app
+            .world()
+            .resource::<Textures>()
+            .material(held, Vec4::ONE, false);
+        assert_eq!(item.base_color_texture, Some(first.clone()));
+        assert_eq!(app.world().resource::<Assets<Image>>().len(), 1);
+        app.world_mut().write_message(MaterialTextures(Vec::new()));
+        app.update();
+        assert!(app.world().resource::<Textures>().texture(held).is_none());
+        assert!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(first.id())
+                .is_none()
+        );
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+            assert_eq!(
+                materials.get(handle).unwrap().extension.textured,
+                UVec4::new(0, 0, 1, 0)
+            );
+        }
     }
 
     #[test]

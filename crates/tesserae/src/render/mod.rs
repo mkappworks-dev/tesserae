@@ -2,6 +2,8 @@
 
 pub mod chunk_material;
 pub mod fog;
+pub(crate) mod texture_atlas;
+pub(crate) mod tile_icon;
 
 use bevy::asset::embedded_asset;
 use bevy::pbr::MaterialPlugin;
@@ -16,8 +18,15 @@ pub fn plugin(app: &mut App) {
     // it is content, which is the opposite case.
     embedded_asset!(app, "chunk_material.wesl");
     embedded_asset!(app, "chunk_prepass.wesl");
+    embedded_asset!(app, "tile_icon.wesl");
     // A module the other two import, so it must be loaded to be found: an
     // embedded file nothing holds a handle to is never registered.
     load_shader_library!(app, "leaf_hole.wesl");
-    app.add_plugins((MaterialPlugin::<ChunkMaterial>::default(), fog::plugin));
+    load_shader_library!(app, "chunk_vertex.wesl");
+    load_shader_library!(app, "material_texture.wesl");
+    app.add_plugins((
+        MaterialPlugin::<ChunkMaterial>::default(),
+        bevy::ui_render::UiMaterialPlugin::<tile_icon::TileIcon>::default(),
+        fog::plugin,
+    ));
 }

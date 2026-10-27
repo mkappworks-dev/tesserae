@@ -179,9 +179,11 @@ accepted placement, and a small corner model shows the held Shape and its
 orientation. Fire has no ghost. Previews hide in the menu. The Client draws
 these from content and Server answers and never reads a Chunk. The held name
 sits above the square play bar, with one control per line at bottom right. Games
-can supply pixel textures for all these models through optional preview
-appearance data; missing textures use the Material's colour. The demo supplies
-distinct textures for every Material, and fire has a flame silhouette.
+supply one pixel texture per Material through appearance data. The same texture
+is used by placed Voxels, generated terrain, menu and hotbar tiles, drag
+feedback, held models and the placement ghost. The ghost shows that texture at
+40 percent opacity. Missing textures use the Material's colour. The demo
+supplies distinct textures for every Material, and fire has a flame silhouette.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.

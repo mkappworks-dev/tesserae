@@ -3,7 +3,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
-mod preview;
+mod textures;
 
 use std::cell::RefCell;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
@@ -139,7 +139,7 @@ fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     Appearance {
         material: material.into(),
         color: Srgba { r, g, b, a },
-        preview: Some(preview::texture(material, [r, g, b])),
+        texture: Some(textures::texture(material, [r, g, b, a])),
     }
 }
 
@@ -227,7 +227,7 @@ impl Guest for Demo {
                 appearance("stone", [133, 133, 140, 255]),
                 appearance("dirt", [107, 74, 46, 255]),
                 appearance("grass", [84, 143, 61, 255]),
-                appearance("glass", [179, 224, 235, 89]),
+                appearance("glass", [164, 210, 250, 89]),
                 appearance("leaves", [41, 107, 36, 255]),
             ],
             world: Some(world),

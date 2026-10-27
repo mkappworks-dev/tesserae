@@ -54,6 +54,16 @@ Material artwork; the Client draws it in tiles, drags, the held model and
 ghost. This is preview appearance only; placed terrain and the future
 Look-pack API stay separate. Tickets 14 and 15 record these follow-ups.
 
+Further user amendment on 2026-10-26/27: placed Voxels must use the same
+texture as their previews. Ticket 16 supersedes the preview-only scope:
+unreleased 0.3 appearance now names one optional `texture`, shared by all
+World and item rendering. The Client uploads one GPU atlas; colour remains
+a fallback. Merged faces repeat per Voxel, and depth/shadow alpha matches
+the visible texture. The ghost shows the held texture at 40 percent
+opacity. Glass becomes clearer and baby blue; lava becomes more even.
+The future Look-pack API remains separate. There is no second Mod or
+separately authored World/preview texture.
+
 ## Problem Statement
 
 Step 8.1 made water Game content, but the engine still ships six named solids:

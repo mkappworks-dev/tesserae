@@ -1,9 +1,9 @@
-//! The chunk material: `StandardMaterial` plus a colour per Material index.
+//! The chunk material: `StandardMaterial` plus Game appearance by Material id.
 //!
 //! Extending `StandardMaterial` rather than writing a bare `Material` is what
 //! buys shadows, clustered lighting, fog and tonemapping from `bevy_pbr` — the
-//! decision in DESIGN.md's "Bevy depth" row. Step 9 replaces the flat palette
-//! with a look-pack's texture array and keeps this shape.
+//! decision in DESIGN.md's "Bevy depth" row. The texture is shared with item
+//! rendering; a later Look pack can replace appearance through this boundary.
 
 use bevy::asset::AssetPath;
 use bevy::mesh::MeshVertexBufferLayoutRef;
@@ -74,6 +74,11 @@ pub struct ChunkMaterialExtension {
     /// buffer of one zero word cuts nothing, which is the opaque material's.
     #[storage(102, read_only)]
     pub drawn: Handle<ShaderBuffer>,
+    #[texture(103)]
+    #[sampler(104)]
+    pub texture: Option<Handle<Image>>,
+    #[uniform(105)]
+    pub textured: UVec4,
 }
 
 /// `base_color` is linear in the shader, so a colour picked by eye has to be
@@ -97,6 +102,8 @@ impl Default for ChunkMaterialExtension {
             palette,
             lod: LodParams::new(0, &[]),
             drawn: Handle::default(),
+            texture: None,
+            textured: UVec4::ZERO,
         }
     }
 }
@@ -118,27 +125,16 @@ impl MaterialExtension for ChunkMaterialExtension {
         embedded("chunk_prepass.wesl")
     }
 
+    fn prepass_vertex_shader() -> ShaderRef {
+        embedded("chunk_prepass.wesl")
+    }
+
     fn specialize(
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // The depth and shadow passes run `bevy_pbr`'s own prepass vertex
-        // shader, which reads the UV at 1 and the normal at 3, and the cutout
-        // material's holes need the right UV there.
-        if descriptor
-            .vertex
-            .shader_defs
-            .contains(&"PREPASS_PIPELINE".into())
-        {
-            descriptor.vertex.buffers = vec![layout.0.get_layout(&[
-                Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-                Mesh::ATTRIBUTE_UV_0.at_shader_location(1),
-                Mesh::ATTRIBUTE_NORMAL.at_shader_location(3),
-            ])?];
-            return Ok(());
-        }
         // The base material's layout stops at `bevy_pbr`'s attributes, so the
         // custom one has to be declared here or the vertex shader reads
         // garbage. Spelling the set out is safe because this material is only
@@ -158,6 +154,18 @@ impl MaterialExtension for ChunkMaterialExtension {
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
             ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
+            ShaderDefVal::UInt(
+                "CHUNK_TEXTURE_EDGE".into(),
+                super::texture_atlas::EDGE as u32,
+            ),
+            ShaderDefVal::UInt(
+                "CHUNK_TEXTURE_WIDTH".into(),
+                super::texture_atlas::WIDTH as u32,
+            ),
+            ShaderDefVal::UInt(
+                "CHUNK_TEXTURE_HEIGHT".into(),
+                super::texture_atlas::HEIGHT as u32,
+            ),
         ];
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {

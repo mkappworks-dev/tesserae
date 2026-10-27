@@ -3,9 +3,10 @@ use super::{
     aim::{Sent, Target},
     camera::FlyCamera,
     edit::{Holding, Hotbar},
+    material_textures::{PreviewContent, Textures},
     menu::Menu,
-    preview_material::{PreviewContent, Textures},
 };
+use crate::render::{chunk_material::FLAME_SLOT, texture_atlas};
 use crate::world::WorldSettings;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
@@ -35,7 +36,7 @@ pub(super) fn plugin(app: &mut App) {
             (camera, model, position)
                 .chain()
                 .after(super::aim::report)
-                .after(super::preview_material::receive),
+                .after(super::material_textures::receive),
         );
 }
 pub(super) fn camera(
@@ -96,25 +97,25 @@ pub(super) fn item_mesh(
             [shade, shade, shade, 1.0]
         })
         .collect();
-    // Half-texel insets keep a face from sampling its neighbour in the atlas.
+    let material = match held {
+        Holding::Solid { material, .. } | Holding::Fluid(material) => material as usize,
+        _ => return None,
+    };
     let uvs: Vec<[f32; 2]> = layer
         .positions
         .iter()
         .zip(&layer.normals)
         .map(|(p, n)| {
             let (u, v, face) = if n[1] > 0.5 {
-                (p[0], p[2], 0.0)
+                (p[0], p[2], 0)
             } else if n[1] < -0.5 {
-                (p[0], p[2], 2.0)
+                (p[0], p[2], 2)
             } else if n[0].abs() > 0.5 {
-                (p[2], 1.0 - p[1], 1.0)
+                (p[2], 1.0 - p[1], 1)
             } else {
-                (p[0], 1.0 - p[1], 1.0)
+                (p[0], 1.0 - p[1], 1)
             };
-            [
-                (face * 16.0 + 0.5 + u * 15.0) / 48.0,
-                (0.5 + v * 15.0) / 16.0,
-            ]
+            texture_atlas::uv(material, face, [u, v])
         })
         .collect();
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
@@ -145,7 +146,7 @@ fn fire_mesh() -> Mesh {
         .into_iter()
         .cycle()
         .take(8)
-        .map(|[u, v]| [(16.5 + u * 15.0) / 48.0, (0.5 + v * 15.0) / 16.0])
+        .map(|uv| texture_atlas::uv(FLAME_SLOT, 1, uv))
         .collect();
     Mesh::new(
         PrimitiveTopology::TriangleList,
@@ -284,7 +285,8 @@ mod tests {
                 1.0
             };
             assert!(uv[0] > face / 3.0 && uv[0] < (face + 1.0) / 3.0);
-            assert!(uv[1] > 0.0 && uv[1] < 1.0);
+            let row = rock as f32 / texture_atlas::ROWS as f32;
+            assert!(uv[1] > row && uv[1] < row + 1.0 / texture_atlas::ROWS as f32);
         }
         let flame = item_mesh(Holding::Fire, &catalogue).unwrap();
         assert_eq!(flame.count_vertices(), 8);

@@ -20,8 +20,8 @@ pub const MAX_PER_MOD: usize = 64;
 /// Appearance, fluid, reaction and fire rows one Mod may declare, each.
 pub const MAX_BEHAVIOURS_PER_MOD: usize = 64;
 pub const MAX_NAME_BYTES: usize = 32;
-pub const PREVIEW_TEXTURE_EDGE: usize = 16;
-pub const PREVIEW_TEXTURE_BYTES: usize = PREVIEW_TEXTURE_EDGE * PREVIEW_TEXTURE_EDGE * 3 * 4;
+pub const MATERIAL_TEXTURE_EDGE: usize = 16;
+pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 3 * 4;
 
 /// The Game's view distance and level-of-detail reach, in metres.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -130,10 +130,10 @@ pub fn apply(
         }
     }
     for (row, appearance) in declaration.appearance.iter().enumerate() {
-        if let Some(pixels) = &appearance.preview
-            && pixels.len() != PREVIEW_TEXTURE_BYTES
+        if let Some(pixels) = &appearance.texture
+            && pixels.len() != MATERIAL_TEXTURE_BYTES
         {
-            return Err(ModError::PreviewTexture {
+            return Err(ModError::MaterialTexture {
                 id: id(),
                 row,
                 name: appearance.material.clone(),

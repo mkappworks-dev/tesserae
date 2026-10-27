@@ -503,12 +503,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    read declared content. A single remove action, an item held outside the
    slots, square menu and hotbar model tiles, and Server-answered aim previews
    complete the player's content controls. Tiles share a content-only model
-   atlas, with Game-supplied preview textures and a model that follows slot
-   drags. The original captures were reviewed; the texture follow-up awaits
-   visual review. All 885 tests pass, and the interleaved thread-CPU comparison
-   against phase 8.1 main covers 115 rows. Same-binary probes isolate id moves
-   from layout shifts; unchanged meshing and coarse derivation remain
-   comparable. Results, outliers and exceptions are recorded in ticket 13 of
+   atlas, with one Game-supplied texture shared by World surfaces, previews and
+   translucent placement ghosts, plus a model that follows slot drags. The
+   original captures were reviewed; the texture follow-up awaits visual review.
+   All 886 tests pass, and the interleaved thread-CPU comparison against phase
+   8.1 main covers 115 rows. Same-binary probes isolate id moves from layout
+   shifts; unchanged meshing and coarse derivation remain comparable. Results,
+   outliers and exceptions are recorded in ticket 13 of
    `.scratch/2026-10-26-phase-8.2-no-built-in-content/`. See
    [ADR-0016](docs/adr/0016-only-air-is-built-in.md).
 

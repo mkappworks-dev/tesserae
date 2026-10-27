@@ -700,10 +700,6 @@ pub(super) fn drag_preview(
         commands.spawn((
             DragPreview,
             super::tile_preview::TilePreview(held),
-            ImageNode {
-                color: Color::srgba(1.0, 1.0, 1.0, 0.9),
-                ..default()
-            },
             Node {
                 position_type: PositionType::Absolute,
                 left: Val::Px(position.x),
@@ -867,7 +863,6 @@ pub(super) fn tile(
                     if holding != Holding::Empty {
                         square.spawn((
                             super::tile_preview::TilePreview(holding),
-                            ImageNode::default(),
                             Node {
                                 position_type: PositionType::Absolute,
                                 width: Val::Percent(100.0),

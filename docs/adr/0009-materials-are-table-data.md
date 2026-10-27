@@ -1,7 +1,8 @@
 # Materials are table data, and light dimming belongs to them
 
 Amended by [ADR-0016](0016-only-air-is-built-in.md): air is the only built-in
-Material, ids 1 to 7 are retired, and the Game names its ground.
+Material, ids 1 to 7 are retired, and the Game names its ground and supplies
+optional textures shared by World surfaces and item previews.
 
 A Voxel is `(Material, Shape, Orientation)`.
 [ADR-0006](0006-shapes-are-table-data.md) made the second a row in a table and

@@ -51,14 +51,15 @@ interface content {
 
     /// A placeholder colour for one of this Mod's Materials, read by the
     /// Client's flat palette until a Look pack replaces it, plus optional
-    /// preview-only artwork. A Material with none is drawn magenta.
+    /// shared texture artwork. A Material with none is drawn magenta.
     record appearance {
         /// The Material's local name.
         material: string,
         color: srgba,
-        /// Optional preview-only RGBA atlas: 48 by 16 pixels, three 16 by 16
-        /// tiles across, in top / side / bottom order. Exactly 3072 bytes.
-        preview: option<list<u8>>,
+        /// Optional RGBA atlas shared by World and item rendering: 48 by 16
+        /// pixels, three 16 by 16 tiles across, in top / side / bottom order.
+        /// Exactly 3072 bytes; sRGB colour with straight alpha.
+        texture: option<list<u8>>,
     }
 
     /// Cave carving. The engine feeds it to native generation unchanged once
@@ -238,7 +239,7 @@ interface content {
     record declaration {
         materials: list<material-def>,
         shapes: list<shape-def>,
-        /// At most 64 rows; preview pixel lengths are validated before use.
+        /// At most 64 rows; texture pixel lengths are validated before use.
         appearance: list<appearance>,
         /// `none` keeps the engine's default; `some` replaces it whole.
         %world: option<world-params>,
