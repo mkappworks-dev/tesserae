@@ -64,6 +64,22 @@ opacity. Glass becomes clearer and baby blue; lava becomes more even.
 The future Look-pack API remains separate. There is no second Mod or
 separately authored World/preview texture.
 
+Further user amendment on 2026-10-27 (tickets 17 and 18): hide controls
+behind I/an information button, and hide dev diagnostics behind F3.
+Increase the textured placement ghost to 75 percent opacity and retain a
+recent compatible Server aim reply while its successor arrives, snapping
+to accepted cells rather than flashing between replies. Reject expired,
+out-of-order, mismatched-item or distant/turned replies.
+
+After comparing control models, the user selected Minecraft/Luanti style:
+left click removes, right click places/ignites. X empties the hand without
+changing slots; selecting a slot restores its item. Empty hand still
+removes with left click and places nothing with right click. Middle click
+or P samples Server-resolved content without changing it. An eraser,
+right-click context menu, physical pickup and inventory are outside this
+follow-up. This supersedes the earlier click-binding decision; the single
+remove action and its priority remain unchanged.
+
 ## Problem Statement
 
 Step 8.1 made water Game content, but the engine still ships six named solids:

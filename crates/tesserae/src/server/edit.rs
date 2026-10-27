@@ -102,6 +102,18 @@ pub struct AimReport {
     pub direction: Vec3,
     pub held: Option<AimItem>,
 }
+#[derive(Message, Clone, Copy, Debug)]
+pub struct PickIntent {
+    pub seq: u32,
+    pub origin: Vec3,
+    pub direction: Vec3,
+}
+#[derive(Message, Clone, Copy, Debug)]
+pub struct PickedItem {
+    pub seq: u32,
+    pub item: Option<AimItem>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AimBounds {
     pub min: Vec3,
@@ -241,6 +253,8 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<AimState>()
         .add_message::<AimReport>()
         .add_message::<AimTarget>()
+        .add_message::<PickIntent>()
+        .add_message::<PickedItem>()
         .init_resource::<PendingEdits>()
         .init_resource::<super::mods::EditHistory>()
         .add_message::<EditIntent>()
@@ -248,13 +262,50 @@ pub(super) fn plugin(app: &mut App) {
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_systems(
             RunFixedMainLoop,
-            (receive, receive_aim)
+            (receive, receive_aim, pick)
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
                 .after(player::PlayerInput),
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
         .add_systems(FixedPreUpdate, (apply_pending, answer_aim).chain());
+}
+
+fn pick(
+    mut requests: MessageReader<PickIntent>,
+    mut answers: MessageWriter<PickedItem>,
+    store: Res<ChunkStore>,
+    tables: Res<ContentTables>,
+    world: Res<WorldSettings>,
+    player: Single<&Player>,
+) {
+    if let Some(request) = requests.read().last() {
+        answers.write(PickedItem {
+            seq: request.seq,
+            item: pick_item(&store, &tables, &world, *request, player.eye()),
+        });
+    }
+}
+fn pick_item(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    request: PickIntent,
+    eye: Vec3,
+) -> Option<AimItem> {
+    let intent = EditIntent {
+        origin: request.origin,
+        direction: request.direction,
+        action: EditAction::Remove,
+    };
+    let distance = vet_origin(&intent, eye).ok()?;
+    let (at, _) = resolve(store, tables, world, &intent, EDIT_REACH_M - distance).ok()?;
+    let here = store.occupants(at, &tables.fluids)?;
+    if !here.solid.is_air() {
+        Some(AimItem::Solid(here.solid))
+    } else {
+        here.fluid.map(|fluid| AimItem::Fluid(fluid.material))
+    }
 }
 
 fn receive_aim(
@@ -2430,6 +2481,43 @@ mod tests {
         assert_eq!(extinguish(lit).unwrap().burning, None);
         assert_eq!(extinguish(at(stair(), None)), Err(RejectReason::NotBurning));
     }
+    #[test]
+    fn picking_samples_geometry_without_editing_and_rejects_forged_origins() {
+        let voxel = Voxel::shaped(
+            tesserae_core::testgen::fixtures().ground.rock,
+            SHAPE_STAIR,
+            tesserae_core::Orientation::IDENTITY.turned(),
+        );
+        let mut chunk = Chunk::air();
+        chunk.set(5, 7, 5, voxel);
+        let app = app_with(&[(origin(), chunk)]);
+        let request = PickIntent {
+            seq: 1,
+            origin: DOWN_EYE,
+            direction: Vec3::NEG_Y,
+        };
+        let store = app.world().resource::<ChunkStore>();
+        let world = app.world().resource::<WorldSettings>();
+        assert_eq!(
+            pick_item(store, &watered(), world, request, DOWN_EYE),
+            Some(AimItem::Solid(voxel))
+        );
+        assert_eq!(store.voxel([5, 7, 5]), Some(voxel));
+        assert_eq!(
+            pick_item(
+                store,
+                &watered(),
+                world,
+                PickIntent {
+                    origin: Vec3::splat(100.0),
+                    ..request
+                },
+                DOWN_EYE
+            ),
+            None
+        );
+    }
+
     #[test]
     fn aim_bounds_follow_shapes_and_the_ghost_matches_the_edit() {
         let rock = tesserae_core::testgen::fixtures().ground.rock;

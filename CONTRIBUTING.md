@@ -148,19 +148,26 @@ Game's; without a Game it is empty air, with no ground, lakes or fuel. See
 | `-` / `=`             | movement speed down / up, 0.5 to 64 m/s                                     |
 | `R`                   | back to the spawn point                                                     |
 | `1` to `9`, scroll    | choose a hotbar slot; scrolling (or a two-finger swipe) moves one and wraps |
-| click                 | place the held solid, fluid source, or fire on fuel                         |
-| right click           | remove fire first, then solid, then source                                  |
+| left click            | remove fire first, then solid, then source                                  |
+| right click           | place the held solid, fluid source, or fire on fuel                         |
 | `F`                   | cycle the held solid through its Shapes                                     |
 | `Q` / `E`             | turn the held shape a quarter / flip which way is up                        |
 | `Tab`                 | open or close the tile menu; closing grabs the cursor                       |
+| `X`                   | empty the hand without changing any slot                                    |
+| middle click / `P`    | sample the aimed Voxel into the hand without removing it                    |
+| `I` / info button     | show or hide controls                                                       |
+| `F3`                  | show or hide diagnostics in a dev build                                     |
 
 The hotbar starts with the Game's ground rock as a cube, slab, stair and post,
 then other declared solids until seven slots are filled, then its lake fluid (or
 first declared fluid), and fire when anything burns. Remaining slots are empty.
-Without a Game all nine squares are empty. A click with nothing held does
-nothing; a right click still removes what is aimed at. Breaking a waterlogged
-solid leaves its fluid. A right click is the secondary button, a two-finger tap
-on a Mac trackpad.
+Without a Game all nine squares are empty. X enters empty hand without changing
+any assigned slot; selecting a slot restores its item. Empty hand has no held
+model or placement ghost. Left click still removes; right click does nothing.
+Middle click or P samples a solid's Material, Shape and orientation, or a fluid,
+through the Server without changing the World. Physical pickup and inventory
+remain later work. Breaking a waterlogged solid leaves its fluid. A right click
+is the secondary button, a two-finger tap on a Mac trackpad.
 
 The menu shows square model tiles for solids, the Shapes of the last hovered
 solid, fluids and fire in a vertically scrollable selection area. The nine quick
@@ -178,12 +185,18 @@ An outline marks the Server's remove target, a translucent ghost shows an
 accepted placement, and a small corner model shows the held Shape and its
 orientation. Fire has no ghost. Previews hide in the menu. The Client draws
 these from content and Server answers and never reads a Chunk. The held name
-sits above the square play bar, with one control per line at bottom right. Games
-supply one pixel texture per Material through appearance data. The same texture
-is used by placed Voxels, generated terrain, menu and hotbar tiles, drag
-feedback, held models and the placement ghost. The ghost shows that texture at
-40 percent opacity. Missing textures use the Material's colour. The demo
-supplies distinct textures for every Material, and fire has a flame silhouette.
+sits above the square play bar. The controls panel starts hidden; I or the
+bottom-right information button toggles it. F3 independently toggles the dev
+chunk/FPS readout, also hidden by default. Edit rejections stay visible when
+help is closed. Games supply one pixel texture per Material through appearance
+data. The same texture is used by placed Voxels, generated terrain, menu and
+hotbar tiles, drag feedback, held models and the placement ghost. The ghost
+shows that texture at 75 percent opacity. The last compatible Server aim answer
+remains visible briefly while the next arrives, so movement snaps between
+accepted cells without flickering between them. Expired, out-of-order or
+incompatible answers are hidden. Missing textures use the Material's colour. The
+demo supplies distinct textures for every Material, and fire has a flame
+silhouette.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
 what you are looking at is `W`/`S`.

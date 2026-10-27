@@ -3,9 +3,9 @@
 Games now declare every named Material except air and name their ground.
 The demo keeps its terrain and render classes using its own content.
 
-Validation: 886 tests pass, five existing manual measurements are ignored,
-and ./scripts/cargo-ci passes. All captures, including shared World/item
-textures and the translucent ghost, were reviewed and deleted.
+Validation: 890 tests pass, five existing manual measurements are ignored,
+and ./scripts/cargo-ci passes. Prior texture captures were reviewed and
+deleted. The controls/empty-hand/stronger-ghost captures await review.
 
 The 115-row interleaved thread-CPU A/B used phase 8.1 main (212d900).
 Stair-heavy meshing moves from 4.163 to 3.462 ms; same-binary id probes
@@ -33,8 +33,15 @@ all other rows beyond 3% are recorded in ticket 13.
   models, ghosts and World surfaces share one GPU texture atlas. Merged
   terrain faces repeat per Voxel, with matching cutouts in depth and shadow
   passes. Water has soft ripples, lava has an even orange flow pattern, and
-  glass has clear baby-blue faces. The textured ghost uses 40% opacity.
+  glass has clear baby-blue faces. The textured ghost uses 75% opacity.
   Correct premultiplied UI blending keeps glass previews from darkening.
+
+- Hide controls behind I/an information button and diagnostics behind F3.
+  Keep edit rejection feedback visible independently.
+- Keep recent compatible Server aim replies visible during movement, with
+  exact cell snapping and bounded age/pose checks.
+- Use left-click remove and right-click placement. X empties the hand;
+  middle-click/P samples Server-resolved content without changing it.
 
 ## Checklist
 

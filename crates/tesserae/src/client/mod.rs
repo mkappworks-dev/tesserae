@@ -16,6 +16,7 @@ mod menu;
 #[cfg(feature = "dev")]
 mod overlay;
 mod palette;
+mod pick;
 mod pose;
 mod preview;
 mod tile_preview;
@@ -34,6 +35,7 @@ pub fn plugin(app: &mut App) {
         preview::plugin,
         tile_preview::plugin,
         pose::plugin,
+        pick::plugin,
     ));
     #[cfg(feature = "dev")]
     app.add_plugins((

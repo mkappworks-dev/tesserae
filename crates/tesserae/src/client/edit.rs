@@ -66,7 +66,6 @@ impl Holding {
         }
     }
 
-    /// What a click asks for.
     fn place(self) -> Option<EditAction> {
         match self {
             Holding::Solid {
@@ -404,6 +403,9 @@ pub(super) fn select_held(
         // Scrolling down, a negative y, moves along the bar.
         hotbar.step(-whole as i32);
     }
+    if !menu_open && keys.just_pressed(KeyCode::KeyX) {
+        hotbar.outside = Some(Holding::Empty);
+    }
     if let Holding::Solid {
         shape, orientation, ..
     } = hotbar.held_mut()
@@ -432,8 +434,8 @@ pub(super) fn select_held(
     }
 }
 
-/// A click asks for what the held slot places and a right click for what it
-/// removes, along the camera's centre ray, each on the press: nothing waits to
+/// Left removes and right places along the camera's centre ray, each on
+/// the press: nothing waits to
 /// tell a double click from a single one.
 ///
 /// The click that grabs the cursor is not also an Edit. That click is also the
@@ -456,9 +458,9 @@ pub(super) fn send_intents(
     }
     let held = hotbar.held();
     let action = if mouse.just_pressed(MouseButton::Left) {
-        held.place()
-    } else if mouse.just_pressed(MouseButton::Right) {
         Some(held.remove())
+    } else if mouse.just_pressed(MouseButton::Right) {
+        held.place()
     } else {
         None
     };
@@ -488,7 +490,8 @@ const DEBUG_HINT: &str = if cfg!(feature = "dev") {
 } else {
     ""
 };
-const HINT: &str = "[I] controls\n[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
+
+const HINT: &str = "[I] controls\n[X] empty hand\n[Middle/P] pick block\n[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
 
 fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> String {
     let held = hotbar.held();
@@ -504,7 +507,7 @@ fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> S
         (hotbar.selected + 1).to_string()
     };
     format!(
-        "{}: {}\n[click] {place}\n[right click] {remove}\n{HINT}{DEBUG_HINT}\n{}",
+        "{}: {}\n[left click] {remove}\n[right click] {place}\n{HINT}{DEBUG_HINT}\n{}",
         hand,
         held.describe(catalogue),
         notice.text()
@@ -713,10 +716,9 @@ mod tests {
         frame(app);
     }
 
-    /// The actions a click and a right click send with the slot on `slot_key`.
     fn both_buttons(app: &mut App, slot_key: KeyCode) -> [Option<EditAction>; 2] {
         key(app, slot_key);
-        [MouseButton::Left, MouseButton::Right].map(|button| {
+        [MouseButton::Right, MouseButton::Left].map(|button| {
             press(app, button);
             let sent = frame(app);
             assert!(sent.len() <= 1);
@@ -762,7 +764,7 @@ mod tests {
         let mut camera = app.world_mut().query::<&mut GlobalTransform>();
         *camera.single_mut(app.world_mut()).unwrap() =
             GlobalTransform::from(Transform::from_xyz(40.0, 9.0, -7.0));
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
 
         app.update();
         let reports: Vec<_> = app
@@ -891,7 +893,7 @@ mod tests {
             "an empty slot"
         );
 
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         let sent = frame(&mut app);
         assert_eq!(
             sent[0].origin,
@@ -1083,8 +1085,8 @@ mod tests {
             let text = hud(&app);
             let lines: Vec<_> = text.lines().collect();
             assert_eq!(lines[0], expected);
-            assert!(lines[1].starts_with(&format!("[click] {verb}")));
-            assert_eq!(lines[2], "[right click] remove");
+            assert_eq!(lines[1], "[left click] remove");
+            assert!(lines[2].starts_with(&format!("[right click] {verb}")));
             for hint in HINT.lines() {
                 assert!(lines.contains(&hint), "{hint}");
             }
@@ -1296,7 +1298,7 @@ mod tests {
             Some(Holding::solid(wood(), SHAPE_STAIR))
         );
         assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         let sent = frame(&mut app);
         assert_eq!(sent.len(), 1);
         assert_eq!(
@@ -1345,7 +1347,7 @@ mod tests {
                 .resource_mut::<AccumulatedMouseMotion>()
                 .delta = Vec2::new(40.0, 25.0);
         };
-        for button in [MouseButton::Left, MouseButton::Right] {
+        for button in [MouseButton::Right, MouseButton::Left] {
             moved(&mut app);
             press(&mut app, button);
             assert!(frame(&mut app).is_empty(), "{button:?}");
@@ -1395,5 +1397,20 @@ mod tests {
         hotbar.outside = Some(Holding::Fire);
         hotbar.step(1);
         assert_eq!(hotbar.outside, None);
+    }
+    #[test]
+    fn empty_hand_keeps_slots_and_left_removes_while_right_does_nothing() {
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        let before = app.world().resource::<Hotbar>().slots;
+        key(&mut app, KeyCode::KeyX);
+        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+        assert_eq!(app.world().resource::<Hotbar>().slots, before);
+        press(&mut app, MouseButton::Right);
+        assert!(frame(&mut app).is_empty());
+        press(&mut app, MouseButton::Left);
+        assert_eq!(frame(&mut app)[0].action, EditAction::Remove);
+        key(&mut app, KeyCode::Digit1);
+        assert_eq!(app.world().resource::<Hotbar>().held(), before[0]);
     }
 }

@@ -125,9 +125,14 @@ through the Declaration's appearance rows. One GPU texture atlas is shared by
 World surfaces and item models; the Client draws it without naming Materials.
 Greedy terrain faces repeat per Voxel, and colour, depth and shadow passes use
 the same texture alpha. Older contract lines retain colour fallback. Fire uses
-engine flame artwork. The placement ghost uses the held model at 40 percent
-opacity. UI atlas images use premultiplied blending to preserve transparency. No
-preview reads World storage.
+engine flame artwork. The placement ghost uses the held model at 75 percent
+opacity. The Client tracks a bounded history of aim requests and accepts
+monotonic Server replies; it retains a compatible answer for at most 200 ms
+while waiting for the next. Item changes, large turns or Eye displacement hide
+it immediately. Sampling a Voxel is a separate read-only Server intent, not an
+Edit; the Client applies a reply only if its hand selection has not changed. UI
+atlas images use premultiplied blending to preserve transparency. No preview
+reads World storage.
 
 ## The three invariants this diagram exists to protect
 
