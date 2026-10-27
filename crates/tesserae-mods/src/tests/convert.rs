@@ -20,6 +20,7 @@ fn wit_material(
         dimming,
         occlusion,
         render,
+        remove_time_s: None,
         solid,
     }
 }

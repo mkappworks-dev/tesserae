@@ -1072,6 +1072,7 @@ mod tests {
                 .0
                 .materials
                 .push(CatalogueMaterial {
+                    remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
                     id: 23,
                     name: "test:block".into(),
                     solid: true,

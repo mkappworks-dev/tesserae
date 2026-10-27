@@ -48,6 +48,13 @@ faces repeat per Voxel, and depth/shadow cutouts sample the same alpha as the
 visible face. Fire's artwork remains engine drawing. Basic texture appearance
 amends ADR-0009's temporary flat palette; the Look-pack API remains separate.
 
+The user also requested content-defined deliberate removal. The unreleased 0.3
+Material record gains optional `remove-time-s`, finite and from 0.05 to 60 s. An
+absent value, including both legacy adapters, uses 350 ms. This is input
+metadata published in the catalogue, separate from core Material simulation
+properties. The Client holds and renders progress from Server aim metadata; the
+Server revalidates the completed target before changing it.
+
 ## Consequences
 
 A Game controls every named Material in its World. A World without a Game opens

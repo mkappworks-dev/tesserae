@@ -34,6 +34,7 @@ impl Guest for Lake {
                     dimming: 2,
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
+                    remove_time_s: None,
                     solid: false,
                 },
                 MaterialDef {
@@ -42,6 +43,7 @@ impl Guest for Lake {
                     dimming: 15,
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
+                    remove_time_s: None,
                     solid: true,
                 },
             ],

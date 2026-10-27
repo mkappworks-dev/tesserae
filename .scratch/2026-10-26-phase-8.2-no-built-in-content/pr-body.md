@@ -3,9 +3,10 @@
 Games now declare every named Material except air and name their ground.
 The demo keeps its terrain and render classes using its own content.
 
-Validation: 890 tests pass, five existing manual measurements are ignored,
+Validation: 902 tests pass, five existing manual measurements are ignored,
 and ./scripts/cargo-ci passes. All texture, controls, empty-hand and
-placement-ghost captures were reviewed and their folders deleted.
+placement-ghost captures were reviewed and their folders deleted. The new
+removal progress, placement-cue and help captures are retained for review.
 
 The 115-row interleaved thread-CPU A/B used phase 8.1 main (212d900).
 Stair-heavy meshing moves from 4.163 to 3.462 ms; same-binary id probes
@@ -17,7 +18,8 @@ all other rows beyond 3% are recorded in ticket 13.
 
 - Retire Material ids 1 through 7, retain registration from 8, and add
   ADR-0016. Amend unreleased WIT 0.3 with optional named ground and
-  bounded shared texture data. Older contract lines load without ground,
+  bounded shared texture data and per-Material removal timing. Older
+  contract lines load without ground,
   warn, and retain colour fallback. No 0.4 line is added.
 - Register dynamic fixtures for tests and benches. Derive the palette,
   hotbar defaults and dev gallery from declared content.
@@ -40,7 +42,15 @@ all other rows beyond 3% are recorded in ticket 13.
   Keep edit rejection feedback visible independently.
 - Keep recent compatible Server aim replies visible during movement, with
   exact cell snapping and bounded age/pose checks.
-- Use left-click remove and right-click placement. X empties the hand;
+- Hold left to remove with a progress bar over the target; right-click
+  placement stays immediate. Material Declarations choose 0.05 to 60 seconds
+  or use the 350 ms default. Release and target changes reset progress;
+  each hold removes once, with Server target validation.
+- Add bounded Server undo/redo for direct player edits, exact cell and
+  Chunk Lifetime guards, and inverse/forward Mod events. Ctrl/Cmd+Z undoes;
+  Ctrl/Cmd+Shift+Z or Ctrl+Y redoes. Changed cells are refused visibly, and
+  simulation elsewhere is not rewound.
+- X empties the hand;
   middle-click/P samples Server-resolved content without changing it.
 
 ## Checklist

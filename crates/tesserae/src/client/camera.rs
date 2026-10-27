@@ -224,7 +224,9 @@ fn fly(
         (KeyCode::Space, Vec3::Y),
         (KeyCode::ControlLeft, Vec3::NEG_Y),
     ] {
-        if keys.pressed(key) {
+        if keys.pressed(key)
+            && !(key == KeyCode::ControlLeft && keys.any_pressed([KeyCode::KeyZ, KeyCode::KeyY]))
+        {
             direction += axis;
         }
     }

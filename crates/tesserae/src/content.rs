@@ -26,6 +26,7 @@ pub struct ContentCatalogue {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatalogueMaterial {
+    pub remove_time: std::time::Duration,
     pub id: MaterialId,
     pub name: String,
     pub solid: bool,

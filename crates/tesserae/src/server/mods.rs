@@ -93,6 +93,7 @@ pub struct LoadedMods {
     pub view: Option<ViewParams>,
     pub appearance: Vec<(MaterialId, [u8; 4])>,
     pub textures: Vec<(MaterialId, Vec<u8>)>,
+    pub remove_times: Vec<(MaterialId, std::time::Duration)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
 }
@@ -106,6 +107,7 @@ impl Default for LoadedMods {
             view: None,
             appearance: Vec::new(),
             textures: Vec::new(),
+            remove_times: Vec::new(),
             mods: Vec::new(),
             game: false,
         }
@@ -278,6 +280,7 @@ fn load_with(
                 root,
             )
             .map_err(|e| e.to_string())?;
+            loaded.remove_times.extend(applied.remove_times);
             behaviours.push(applied.behaviour);
             for row in applied.appearance {
                 if let Some(index) = loaded
@@ -351,12 +354,17 @@ pub(super) fn plugin(app: &mut App) {
         .unwrap_or_default();
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let params = super::worldgen_params(loaded.world);
-    let catalogue = catalogue(
+    let mut catalogue = catalogue(
         &loaded.registry,
         &tables.0,
         params.water.map(|lake| lake.material),
         params.ground.map(|ground| ground.rock),
     );
+    for (id, duration) in loaded.remove_times {
+        if let Some(material) = catalogue.materials.iter_mut().find(|m| m.id == id) {
+            material.remove_time = duration;
+        }
+    }
     app.insert_resource(tables)
         .insert_resource(WorldParameters(params))
         .insert_resource(super::streaming::streaming_settings(loaded.view))
@@ -383,6 +391,7 @@ pub(in crate::server) fn catalogue(
         .map(|(id, name)| {
             let id = id as MaterialId;
             CatalogueMaterial {
+                remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
                 id,
                 name: name.to_owned(),
                 solid: tables.materials.def(id).solid,
@@ -1069,5 +1078,29 @@ mod tests {
         let (result, _) = prompted(&s, TrustMode::ThisRun, false, "");
         assert_eq!(result.unwrap().mods.len(), 1);
         assert_eq!(fs::read(s.0.join("trust.json")).unwrap(), recorded);
+    }
+    #[test]
+    fn catalogue_preserves_mod_removal_times_by_registered_material_id() {
+        let mut loaded = super::runtime::tests::demo_loaded(1.0);
+        let id = loaded.registry.id_of(Kind::Material, "demo:stone").unwrap() as MaterialId;
+        assert!(
+            loaded
+                .remove_times
+                .iter()
+                .any(|(material, _)| *material == id)
+        );
+        let duration = std::time::Duration::from_secs(2);
+        loaded
+            .remove_times
+            .iter_mut()
+            .find(|(material, _)| *material == id)
+            .unwrap()
+            .1 = duration;
+        let catalogue = published_catalogue(loaded);
+        assert_eq!(catalogue.material(id).unwrap().remove_time, duration);
+        assert_eq!(
+            catalogue.material(0).unwrap().remove_time,
+            tesserae_mods::DEFAULT_REMOVE_TIME
+        );
     }
 }

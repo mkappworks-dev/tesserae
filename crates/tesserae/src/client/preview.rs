@@ -36,6 +36,7 @@ pub(super) fn plugin(app: &mut App) {
             (camera, model, position)
                 .chain()
                 .after(super::aim::receive)
+                .after(super::removal::bar)
                 .after(super::material_textures::receive),
         );
 }
@@ -210,6 +211,7 @@ fn model(
     }
 }
 fn position(
+    removal: Option<Res<super::removal::Progress>>,
     menu: Res<Menu>,
     world: Res<WorldSettings>,
     hotbar: Res<Hotbar>,
@@ -217,7 +219,8 @@ fn position(
     mut ghost: Query<(&mut Transform, &mut Visibility), GhostOnly>,
     mut hand: Query<&mut Visibility, HandOnly>,
 ) {
-    let cell = (!menu.open
+    let cell = (!removal.is_some_and(|r| r.active())
+        && !menu.open
         && target.current(&sent, time.elapsed_secs_f64())
         && hotbar.held() != Holding::Fire)
         .then_some(target.0.ghost)

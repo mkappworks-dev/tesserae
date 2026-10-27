@@ -23,6 +23,7 @@ fn material(name: &str, solid: bool) -> MaterialDef {
         dimming: 2,
         occlusion: Occlusion::Never,
         render: RenderClass::Blend,
+        remove_time_s: None,
         solid,
     }
 }
@@ -646,6 +647,7 @@ fn a_games_ground_resolves_after_all_declarations_and_generates_its_materials() 
             dimming: 15,
             occlusion: content::Occlusion::Opaque,
             render: content::RenderClass::Opaque,
+            remove_time_s: None,
             solid: true,
         });
     }

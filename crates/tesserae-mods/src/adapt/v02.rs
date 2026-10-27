@@ -93,6 +93,7 @@ fn material(m: old::MaterialDef) -> content::MaterialDef {
             old::RenderClass::Blend => content::RenderClass::Blend,
             old::RenderClass::Cutout => content::RenderClass::Cutout,
         },
+        remove_time_s: None,
         solid: m.solid,
     }
 }

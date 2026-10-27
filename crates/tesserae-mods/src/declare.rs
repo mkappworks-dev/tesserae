@@ -1,6 +1,9 @@
 //! A Declaration into `tesserae-core`'s tables and the Registry.
 
 use std::collections::HashSet;
+use std::time::Duration;
+
+pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
 use tesserae_core::{
     AIR, Burn, CombustionDef, FluidDef, GroundParams, Heat, MaterialId, ParamError, Phase,
@@ -66,6 +69,7 @@ impl From<content::ViewParams> for ViewParams {
 /// every Mod's names before [`resolve`] registers them.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Applied {
+    pub remove_times: Vec<(MaterialId, Duration)>,
     /// Validated appearance data, transferred without copying texture pixels.
     pub appearance: Vec<content::Appearance>,
     /// With no lake: [`resolve`] returns the one it names.
@@ -180,9 +184,22 @@ pub fn apply(
         })?;
     }
 
+    let mut remove_times = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Material, row, &material.name)?;
-        tables
+        let seconds = material.remove_time_s.unwrap_or(0.35);
+        if !(0.05..=60.0).contains(&seconds) {
+            return Err(ModError::RemoveTime {
+                id: id(),
+                row,
+                name,
+                seconds,
+            });
+        }
+        let duration = material
+            .remove_time_s
+            .map_or(DEFAULT_REMOVE_TIME, Duration::from_secs_f32);
+        let material_id = tables
             .materials
             .register(material.into())
             .map_err(|source| ModError::Material {
@@ -191,6 +208,7 @@ pub fn apply(
                 name: name.clone(),
                 source,
             })?;
+        remove_times.push((material_id, duration));
         registry.push(Kind::Material, name);
     }
     for (row, shape) in declaration.shapes.into_iter().enumerate() {
@@ -207,6 +225,7 @@ pub fn apply(
         registry.push(Kind::Shape, name);
     }
     Ok(Applied {
+        remove_times,
         appearance: declaration.appearance,
         world,
         view,

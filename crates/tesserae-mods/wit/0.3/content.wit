@@ -36,6 +36,8 @@ interface content {
         render: render-class,
         /// Whether a body collides with it and the edit ray stops on it.
         solid: bool,
+        /// Hold-to-remove duration, 0.05 to 60 seconds; none uses 0.35.
+        remove-time-s: option<f32>,
     }
 
     /// One Shape. The engine registers it under `<mod id>:<name>`, derives its

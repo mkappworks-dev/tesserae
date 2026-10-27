@@ -83,10 +83,6 @@ impl Holding {
         }
     }
 
-    fn remove(self) -> EditAction {
-        EditAction::Remove
-    }
-
     fn verbs(self) -> (&'static str, &'static str) {
         match self {
             Holding::Solid { .. } => ("place", "remove"),
@@ -277,6 +273,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Hotbar>()
         .init_resource::<Catalogue>()
         .init_resource::<Notice>()
+        .add_message::<crate::server::undo::HistoryApplied>()
         .add_systems(Startup, spawn_hud)
         .add_systems(
             Update,
@@ -434,9 +431,7 @@ pub(super) fn select_held(
     }
 }
 
-/// Left removes and right places along the camera's centre ray, each on
-/// the press: nothing waits to
-/// tell a double click from a single one.
+/// Right places immediately along the camera centre ray.
 ///
 /// The click that grabs the cursor is not also an Edit. That click is also the
 /// one that makes the cursor grabbed, so "grabbed now" is not enough: it has to
@@ -457,9 +452,7 @@ pub(super) fn send_intents(
         return;
     }
     let held = hotbar.held();
-    let action = if mouse.just_pressed(MouseButton::Left) {
-        Some(held.remove())
-    } else if mouse.just_pressed(MouseButton::Right) {
+    let action = if mouse.just_pressed(MouseButton::Right) {
         held.place()
     } else {
         None
@@ -476,9 +469,16 @@ pub(super) fn send_intents(
 
 fn show_rejections(
     mut rejected: MessageReader<EditRejected>,
+    mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
     time: Res<Time>,
 ) {
+    for message in applied.read() {
+        notice.show(match message.0 {
+            crate::server::undo::HistoryAction::Undo => "Undone",
+            crate::server::undo::HistoryAction::Redo => "Redone",
+        });
+    }
     for message in rejected.read() {
         notice.show(message.reason.message());
     }
@@ -491,7 +491,7 @@ const DEBUG_HINT: &str = if cfg!(feature = "dev") {
     ""
 };
 
-const HINT: &str = "[I] controls\n[X] empty hand\n[Middle/P] pick block\n[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
+const HINT: &str = "[I] controls\n[X] empty hand\n[Ctrl/Cmd+Z] undo\n[Ctrl/Cmd+Shift+Z / Ctrl+Y] redo\n[Middle/P] pick block\n[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
 
 fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> String {
     let held = hotbar.held();
@@ -507,7 +507,7 @@ fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> S
         (hotbar.selected + 1).to_string()
     };
     format!(
-        "{}: {}\n[left click] {remove}\n[right click] {place}\n{HINT}{DEBUG_HINT}\n{}",
+        "{}: {}\n[hold left] {remove}\n[right click] {place}\n{HINT}{DEBUG_HINT}\n{}",
         hand,
         held.describe(catalogue),
         notice.text()
@@ -566,6 +566,7 @@ mod tests {
 
     fn material(id: MaterialId, name: &str, solid: bool) -> CatalogueMaterial {
         CatalogueMaterial {
+            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
             id,
             name: name.to_owned(),
             solid,
@@ -650,6 +651,7 @@ mod tests {
             .add_message::<ContentCatalogue>()
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
+            .add_message::<crate::server::undo::HistoryApplied>()
             .add_message::<PoseReport>()
             .add_message::<PoseCorrection>()
             .add_message::<MaterialPalette>()
@@ -786,16 +788,16 @@ mod tests {
     #[test]
     fn the_click_that_grabs_the_cursor_is_not_also_an_edit() {
         let mut app = app(CursorGrabMode::None);
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty(), "nothing is grabbed yet");
 
         // The camera's own system grabs the cursor on that click; whichever runs
         // first, the frame it happens in sends nothing.
         grab(&mut app, CursorGrabMode::Locked);
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty(), "the grabbing click");
 
-        press(&mut app, MouseButton::Left);
+        press(&mut app, MouseButton::Right);
         assert_eq!(frame(&mut app).len(), 1, "the next click is an Edit");
     }
 
@@ -840,6 +842,7 @@ mod tests {
         assert_eq!(Hotbar::defaults(&lava_lakes)[7], Holding::Fluid(lava()));
         let mut fuel_only = dry();
         fuel_only.materials.push(CatalogueMaterial {
+            remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
             burns: true,
             ..material(8, "wood:log", true)
         });
@@ -857,9 +860,9 @@ mod tests {
         );
     }
 
-    /// Each button acts on the press, for every kind of slot.
+    /// Placement is immediate; removal belongs to the deliberate-hold system.
     #[test]
-    fn a_click_places_what_the_slot_holds_and_a_right_click_removes_it() {
+    fn right_click_places_and_left_click_does_not_remove_immediately() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
         assert_eq!(
@@ -870,26 +873,23 @@ mod tests {
                     SHAPE_STAIR,
                     Orientation::IDENTITY
                 ))),
-                Some(EditAction::Remove)
+                None
             ]
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit8),
-            [
-                Some(EditAction::PlaceSource(demo_water())),
-                Some(EditAction::Remove)
-            ]
+            [Some(EditAction::PlaceSource(demo_water())), None]
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit9),
-            [Some(EditAction::Ignite), Some(EditAction::Remove)]
+            [Some(EditAction::Ignite), None]
         );
 
         let mut dry = app_with(CursorGrabMode::Locked, dry());
         frame(&mut dry);
         assert_eq!(
             both_buttons(&mut dry, KeyCode::Digit9),
-            [None, Some(EditAction::Remove)],
+            [None, None],
             "an empty slot"
         );
 
@@ -911,10 +911,7 @@ mod tests {
         frame(&mut app);
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit8),
-            [
-                Some(EditAction::PlaceSource(lava())),
-                Some(EditAction::Remove)
-            ]
+            [Some(EditAction::PlaceSource(lava())), None]
         );
     }
 
@@ -1085,7 +1082,7 @@ mod tests {
             let text = hud(&app);
             let lines: Vec<_> = text.lines().collect();
             assert_eq!(lines[0], expected);
-            assert_eq!(lines[1], "[left click] remove");
+            assert_eq!(lines[1], "[hold left] remove");
             assert!(lines[2].starts_with(&format!("[right click] {verb}")));
             for hint in HINT.lines() {
                 assert!(lines.contains(&hint), "{hint}");
@@ -1399,7 +1396,7 @@ mod tests {
         assert_eq!(hotbar.outside, None);
     }
     #[test]
-    fn empty_hand_keeps_slots_and_left_removes_while_right_does_nothing() {
+    fn empty_hand_keeps_slots_and_neither_button_edits_immediately() {
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
         let before = app.world().resource::<Hotbar>().slots;
@@ -1409,7 +1406,7 @@ mod tests {
         press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty());
         press(&mut app, MouseButton::Left);
-        assert_eq!(frame(&mut app)[0].action, EditAction::Remove);
+        assert!(frame(&mut app).is_empty());
         key(&mut app, KeyCode::Digit1);
         assert_eq!(app.world().resource::<Hotbar>().held(), before[0]);
     }

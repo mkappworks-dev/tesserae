@@ -250,6 +250,12 @@ pub(super) fn plugin(app: &mut App) {
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
         ..default()
     });
+    app.add_systems(
+        Update,
+        super::removal::capture_progress
+            .after(super::removal::hold)
+            .before(super::removal::bar),
+    );
     app.add_systems(Startup, uncap_frame_rate).add_systems(
         Update,
         (

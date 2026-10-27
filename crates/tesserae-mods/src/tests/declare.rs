@@ -17,6 +17,7 @@ fn material(name: &str) -> content::MaterialDef {
         dimming: 15,
         occlusion: content::Occlusion::Opaque,
         render: content::RenderClass::Opaque,
+        remove_time_s: None,
         solid: true,
     }
 }
@@ -675,4 +676,30 @@ fn preview_texture_payloads_are_bounded_and_name_the_invalid_appearance_row() {
             ..
         })
     ));
+}
+
+#[test]
+fn material_removal_time_is_validated_and_defaults_for_absent_metadata() {
+    use std::time::Duration;
+    for (seconds, expected) in [
+        (None, Duration::from_millis(350)),
+        (Some(0.05), Duration::from_secs_f32(0.05)),
+        (Some(60.0), Duration::from_secs(60)),
+    ] {
+        let mut load = Load::new();
+        let mut declaration = declaring(&["stone"], &[]);
+        declaration.materials[0].remove_time_s = seconds;
+        let applied = load.apply("game", declaration).unwrap();
+        let id =
+            load.registry.id_of(Kind::Material, "game:stone").unwrap() as tesserae_core::MaterialId;
+        assert_eq!(applied.remove_times, vec![(id, expected)]);
+    }
+    for seconds in [0.0, -1.0, 0.049, 60.1, f32::NAN, f32::INFINITY] {
+        let mut declaration = declaring(&["stone"], &[]);
+        declaration.materials[0].remove_time_s = Some(seconds);
+        let error = Load::new().apply("game", declaration).unwrap_err();
+        assert!(matches!(error, ModError::RemoveTime { .. }));
+        let text = error.to_string();
+        assert!(text.contains("game:stone") && text.contains("0.05 to 60"));
+    }
 }

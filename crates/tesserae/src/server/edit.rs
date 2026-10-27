@@ -69,6 +69,8 @@ const MAX_PENDING: usize = 256;
 pub enum EditAction {
     /// Remove fire, then solid, then source at the first occupied Voxel.
     Remove,
+    /// Complete a deliberate hold only if the ray still strikes this target.
+    RemoveAt(AimRemoval),
     /// Put this Voxel in the empty space in front of the face the ray strikes.
     Place(Voxel),
     /// Put a source of this fluid in front of the face the ray strikes. The ray
@@ -119,11 +121,19 @@ pub struct AimBounds {
     pub min: Vec3,
     pub max: Vec3,
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AimRemoval {
+    pub at: [i32; 3],
+    pub bounds: AimBounds,
+    pub material: MaterialId,
+    pub burning: bool,
+}
 #[derive(Message, Clone, Copy, Debug, Default, PartialEq)]
 pub struct AimTarget {
     pub seq: u32,
     pub outline: Option<AimBounds>,
     pub ghost: Option<Vec3>,
+    pub removal: Option<AimRemoval>,
 }
 #[derive(Resource, Default)]
 struct AimState {
@@ -176,6 +186,10 @@ pub enum RejectReason {
     NotBurning,
     /// Its Chunk's light never settled, or too many edits were queued.
     Busy,
+    NoUndo,
+    NoRedo,
+    HistoryChanged,
+    TargetChanged,
 }
 
 impl RejectReason {
@@ -202,6 +216,10 @@ impl RejectReason {
             RejectReason::Wet => "it is too wet to burn",
             RejectReason::NotBurning => "nothing is burning there",
             RejectReason::Busy => "the server is busy, try again",
+            RejectReason::NoUndo => "nothing to undo",
+            RejectReason::NoRedo => "nothing to redo",
+            RejectReason::HistoryChanged => "that cell changed; cannot undo or redo it",
+            RejectReason::TargetChanged => "removal target changed; hold again",
         }
     }
 }
@@ -242,7 +260,6 @@ struct Pending {
 #[derive(Resource, Default)]
 pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
 
-#[cfg(test)]
 impl PendingEdits {
     pub(in crate::server) fn is_empty(&self) -> bool {
         self.0.is_empty()
@@ -250,7 +267,10 @@ impl PendingEdits {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<AimState>()
+    app.init_resource::<super::undo::Journal>()
+        .add_message::<super::undo::HistoryAction>()
+        .add_message::<super::undo::HistoryApplied>()
+        .init_resource::<AimState>()
         .add_message::<AimReport>()
         .add_message::<AimTarget>()
         .add_message::<PickIntent>()
@@ -262,13 +282,21 @@ pub(super) fn plugin(app: &mut App) {
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_systems(
             RunFixedMainLoop,
-            (receive, receive_aim, pick)
+            (receive, receive_aim, pick, super::undo::receive)
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
                 .after(player::PlayerInput),
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
-        .add_systems(FixedPreUpdate, (apply_pending, answer_aim).chain());
+        .add_systems(
+            FixedPreUpdate,
+            (
+                apply_pending,
+                super::undo::apply.before(super::mods::Drain),
+                answer_aim,
+            )
+                .chain(),
+        );
 }
 
 fn pick(
@@ -366,35 +394,10 @@ fn aim_target(
     } else {
         remove.map(|(at, _)| at)
     };
-    let outline = outline_at.and_then(|at| {
-        let here = store.occupants(at, &tables.fluids)?;
-        let voxel = if here.solid.is_air() {
-            Voxel::cube(here.fluid?.material)
-        } else {
-            here.solid
-        };
-        let around = FACE_STEPS.map(|d| {
-            store
-                .voxel([at[0] + d[0], at[1] + d[1], at[2] + d[2]])
-                .unwrap_or(Voxel::AIR)
-        });
-        let connections = tables.shapes.connections(voxel, around);
-        let boxes = tables.shapes.selection(voxel, connections);
-        let mut min = Vec3::splat(f32::INFINITY);
-        let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for b in boxes {
-            min = min.min(Vec3::from_array(b.min.map(f32::from)));
-            max = max.max(Vec3::from_array(b.max.map(f32::from)));
-        }
-        if boxes.is_empty() {
-            return None;
-        }
-        let origin = Vec3::from_array(at.map(|i| i as f32 * world.voxel_size));
-        Some(AimBounds {
-            min: origin + min * (world.voxel_size / 16.0),
-            max: origin + max * (world.voxel_size / 16.0),
-        })
-    });
+    let removal = remove.and_then(|(at, _)| removal_target(store, tables, world, at));
+    let outline = outline_at
+        .and_then(|at| removal_target(store, tables, world, at))
+        .map(|r| r.bounds);
     let ghost = place
         .filter(|_| report.held != Some(AimItem::Fire))
         .and_then(|(at, change)| {
@@ -412,9 +415,50 @@ fn aim_target(
         });
     AimTarget {
         seq: report.seq,
+        removal,
         outline,
         ghost,
     }
+}
+
+fn removal_target(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    at: [i32; 3],
+) -> Option<AimRemoval> {
+    let here = store.occupants(at, &tables.fluids)?;
+    let voxel = if here.solid.is_air() {
+        Voxel::cube(here.fluid?.material)
+    } else {
+        here.solid
+    };
+    let around = FACE_STEPS.map(|d| {
+        store
+            .voxel([at[0] + d[0], at[1] + d[1], at[2] + d[2]])
+            .unwrap_or(Voxel::AIR)
+    });
+    let connections = tables.shapes.connections(voxel, around);
+    let boxes = tables.shapes.selection(voxel, connections);
+    let mut min = Vec3::splat(f32::INFINITY);
+    let mut max = Vec3::splat(f32::NEG_INFINITY);
+    for b in boxes {
+        min = min.min(Vec3::from_array(b.min.map(f32::from)));
+        max = max.max(Vec3::from_array(b.max.map(f32::from)));
+    }
+    if boxes.is_empty() {
+        return None;
+    }
+    let origin = Vec3::from_array(at.map(|i| i as f32 * world.voxel_size));
+    Some(AimRemoval {
+        at,
+        material: voxel.material(),
+        burning: here.burning.is_some(),
+        bounds: AimBounds {
+            min: origin + min * (world.voxel_size / 16.0),
+            max: origin + max * (world.voxel_size / 16.0),
+        },
+    })
 }
 
 pub(in crate::server) fn receive(
@@ -461,7 +505,10 @@ fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<f32, RejectReason> {
 
 pub(in crate::server) fn apply_pending(
     mut pending: ResMut<PendingEdits>,
-    mut history: ResMut<super::mods::EditHistory>,
+    (mut history, mut journal): (
+        ResMut<super::mods::EditHistory>,
+        ResMut<super::undo::Journal>,
+    ),
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
     mut rejected: MessageWriter<EditRejected>,
@@ -496,7 +543,7 @@ pub(in crate::server) fn apply_pending(
                     .expect("the edited Chunk is held");
                 let kind = match (p.intent.action, change, intent_fluid(&was, &now)) {
                     (EditAction::Ignite, ..) => EditKind::Ignited(now.solid.material()),
-                    (EditAction::Remove, ..) if was.burning.is_some() => {
+                    (EditAction::Remove | EditAction::RemoveAt(_), ..) if was.burning.is_some() => {
                         EditKind::PutOut(now.solid.material())
                     }
                     (_, Change::Occupants(_), Some(kind)) => kind,
@@ -505,11 +552,21 @@ pub(in crate::server) fn apply_pending(
                         after: now.solid,
                     },
                 };
-                history.record(tesserae_mods::EditEvent {
+                let event = tesserae_mods::EditEvent {
                     at: at.map(|i| i as f32 * world.voxel_size),
                     kind,
                     before,
                     after,
+                };
+                history.record(event);
+                journal.record(super::undo::Entry {
+                    at,
+                    lifetime: store
+                        .lifetime(VoxelCoord::of(at).chunk)
+                        .expect("the edited Chunk is held"),
+                    before: was,
+                    after: now,
+                    event,
                 });
                 Ok(())
             });
@@ -564,7 +621,7 @@ fn resolve(
     }
     let fluid_tool = matches!(
         intent.action,
-        EditAction::PlaceSource(_) | EditAction::Remove
+        EditAction::PlaceSource(_) | EditAction::Remove | EditAction::RemoveAt(_)
     );
     if let EditAction::PlaceSource(material) = intent.action
         && !tables.fluids.contains(material)
@@ -585,6 +642,11 @@ fn resolve(
         stops,
     )
     .ok_or(RejectReason::OutOfReach)?;
+    if let EditAction::RemoveAt(expected) = intent.action
+        && removal_target(store, tables, world, hit.at) != Some(expected)
+    {
+        return Err(RejectReason::TargetChanged);
+    }
     let struck = || {
         store
             .occupants(hit.at, &tables.fluids)
@@ -598,7 +660,7 @@ fn resolve(
     ];
 
     match intent.action {
-        EditAction::Remove => {
+        EditAction::Remove | EditAction::RemoveAt(_) => {
             let here = struck()?;
             if here.burning.is_some() {
                 Ok((hit.at, Change::Occupants(extinguish(here)?)))
@@ -2643,6 +2705,132 @@ mod tests {
         send(&mut app, down(EditAction::Remove));
         tick(&mut app);
         assert!(occupants_at(&app, [5, 7, 5]).solid.is_air());
+        assert!(rejections(&mut app).is_empty());
+    }
+    fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
+        use super::super::undo;
+        app.world_mut().write_message(action);
+        app.world_mut().run_system_once(undo::receive).unwrap();
+        app.world_mut()
+            .resource_mut::<Messages<undo::HistoryAction>>()
+            .clear();
+        app.world_mut().run_system_once(undo::apply).unwrap();
+    }
+
+    #[test]
+    fn undo_redo_restores_solid_sources_and_fire_through_world_edits() {
+        use super::super::undo::HistoryAction::{Redo, Undo};
+        for action in [
+            EditAction::Remove,
+            EditAction::PlaceSource(water()),
+            EditAction::Ignite,
+        ] {
+            let (mut app, _) = wood_app();
+            let at = if matches!(action, EditAction::PlaceSource(_)) {
+                [5, 8, 5]
+            } else {
+                [5, 7, 5]
+            };
+            let before = occupants_at(&app, at);
+            send(&mut app, down(action));
+            tick(&mut app);
+            assert!(rejections(&mut app).is_empty());
+            let after = occupants_at(&app, at);
+            assert_ne!(before, after);
+            replay(&mut app, Undo);
+            assert_eq!(occupants_at(&app, at), before);
+            replay(&mut app, Redo);
+            assert_eq!(occupants_at(&app, at), after);
+            assert!(rejections(&mut app).is_empty());
+            assert!(app.world().resource::<MeshState>().is_dirty(origin()));
+        }
+    }
+
+    #[test]
+    fn history_refuses_conflicting_or_regenerated_cells_and_new_edits_clear_redo() {
+        use super::super::undo::HistoryAction::{Redo, Undo};
+        let mut app = app_with(&[(origin(), ground())]);
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::NoUndo]);
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        let air = occupants_at(&app, [5, 7, 5]);
+        let changed = Occupants {
+            solid: stone(),
+            ..air
+        };
+        put_occupants(&mut app, [5, 7, 5], changed).1.unwrap();
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::HistoryChanged]);
+        assert_eq!(occupants_at(&app, [5, 7, 5]), changed);
+        put_occupants(&mut app, [5, 7, 5], air).1.unwrap();
+        replay(&mut app, Undo);
+        assert!(rejections(&mut app).is_empty());
+        send(&mut app, down(EditAction::Place(stair())));
+        tick(&mut app);
+        replay(&mut app, Redo);
+        assert_eq!(rejections(&mut app), [RejectReason::NoRedo]);
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .remove(origin());
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::NotLoaded]);
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(origin(), ground());
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::HistoryChanged]);
+    }
+
+    #[test]
+    fn completed_hold_refuses_a_different_cell_material_or_burning_state() {
+        let (mut app, _) = wood_app();
+        let tables = app.world().resource::<ContentTables>();
+        let expected = removal_target(
+            app.world().resource::<ChunkStore>(),
+            tables,
+            &WorldSettings::default(),
+            [5, 7, 5],
+        )
+        .unwrap();
+        send(
+            &mut app,
+            down(EditAction::RemoveAt(AimRemoval {
+                at: [4, 7, 5],
+                ..expected
+            })),
+        );
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::TargetChanged]);
+        send(
+            &mut app,
+            down(EditAction::RemoveAt(AimRemoval {
+                burning: true,
+                ..expected
+            })),
+        );
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::TargetChanged]);
+        send(&mut app, down(EditAction::RemoveAt(expected)));
+        tick(&mut app);
+        assert!(voxel_at(&app, expected.at).is_air());
+        assert!(rejections(&mut app).is_empty());
+    }
+    #[test]
+    fn undo_waits_for_settled_light_and_preserves_its_entry_after_a_refusal() {
+        use super::super::undo::HistoryAction::Undo;
+        let mut app = app_with(&[(origin(), ground())]);
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<MeshState>()
+            .mark_unlit(origin());
+        replay(&mut app, Undo);
+        assert_eq!(rejections(&mut app), [RejectReason::Busy]);
+        assert!(voxel_at(&app, [5, 7, 5]).is_air());
+        app.insert_resource(MeshState::default());
+        replay(&mut app, Undo);
+        assert_eq!(voxel_at(&app, [5, 7, 5]), stone());
         assert!(rejections(&mut app).is_empty());
     }
 }

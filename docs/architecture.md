@@ -134,6 +134,22 @@ Edit; the Client applies a reply only if its hand selection has not changed. UI
 atlas images use premultiplied blending to preserve transparency. No preview
 reads World storage.
 
+The Server also supplies removal target identity and bounds. The Client draws a
+progress bar above it and sends a guarded removal after the Material's hold
+time. This is a gesture guard, not a network anti-cheat timer. The unreleased
+0.3 Material Declaration carries optional `remove-time-s`, validated from 0.05
+to 60 seconds and defaulting to 350 ms, published in the content catalogue. Core
+tables and simulation retain no input timing. The Server compares target
+identity again before applying the removal.
+
+Undo/redo owns at most 128 before/after Occupants entries and 16 queued requests
+on the integrated Server. It checks Chunk Lifetime, settled light and exact
+current Occupants before replaying through the normal change, light, mesh and
+simulation wake path. Successful replay publishes inverse or forward Mod edit
+events. New successful changes clear redo; refusals preserve history and World
+state. Simulation consequences elsewhere are not rewound. Multiplayer history
+ownership remains part of the network transport work.
+
 ## The three invariants this diagram exists to protect
 
 Each of these is a mistake that will not look wrong in review.

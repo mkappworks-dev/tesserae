@@ -508,11 +508,13 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    texture captures were reviewed and deleted; the controls follow-up was also
    reviewed and its capture folder deleted. Help and diagnostics toggle
    independently, targeting stays stable during movement, and X selects empty
-   hand with familiar mouse bindings. All 890 tests pass, and the interleaved
-   thread-CPU comparison against phase 8.1 main covers 115 rows. Same-binary
-   probes isolate id moves from layout shifts; unchanged meshing and coarse
-   derivation remain comparable. Results, outliers and exceptions are recorded
-   in ticket 13 of `.scratch/2026-10-26-phase-8.2-no-built-in-content/`. See
+   hand with familiar mouse bindings. Deliberate removal has a progress bar and
+   a Mod-defined Material hold time; guarded Server undo/redo restores direct
+   player edits. All 902 tests pass, and the interleaved thread-CPU comparison
+   against phase 8.1 main covers 115 rows. Same-binary probes isolate id moves
+   from layout shifts; unchanged meshing and coarse derivation remain
+   comparable. Results, outliers and exceptions are recorded in ticket 13 of
+   `.scratch/2026-10-26-phase-8.2-no-built-in-content/`. See
    [ADR-0016](docs/adr/0016-only-air-is-built-in.md).
 
 9. Look-pack API, water shading, visual polish.

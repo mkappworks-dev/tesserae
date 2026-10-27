@@ -1652,3 +1652,64 @@ pub(in crate::server) fn demo_and_fluids(size: f32) -> LoadedMods {
     std::fs::remove_dir_all(dir).unwrap();
     loaded
 }
+
+#[test]
+fn undo_and_redo_publish_inverse_and_forward_mod_events() {
+    use crate::server::{
+        edit::{EditAction, EditIntent},
+        player::Player,
+        undo::{self, HistoryAction},
+    };
+    use bevy::ecs::system::RunSystemOnce;
+    let mut h = Harness::new(&[9]);
+    h.app
+        .insert_resource(WorldSettings::default())
+        .add_plugins(edit::plugin);
+    let eye = Vec3::new(2.5, 6.0, 2.5);
+    h.app.world_mut().spawn(Player::at(eye));
+    h.put([2, 2, 2], Voxel::cube(h.rock));
+    h.app.world_mut().write_message(EditIntent {
+        action: EditAction::Remove,
+        origin: eye,
+        direction: Vec3::NEG_Y,
+    });
+    h.app.world_mut().run_schedule(RunFixedMainLoop);
+    h.app.world_mut().run_schedule(FixedPreUpdate);
+    let mut cursor = 0;
+    let mut dropped = 0;
+    let forward = h
+        .app
+        .world()
+        .resource::<EditHistory>()
+        .since(&mut cursor, &mut dropped)[0];
+    for action in [HistoryAction::Undo, HistoryAction::Redo] {
+        h.app.world_mut().write_message(action);
+        h.app.world_mut().run_system_once(undo::receive).unwrap();
+        h.app
+            .world_mut()
+            .resource_mut::<Messages<HistoryAction>>()
+            .clear();
+        h.app.world_mut().run_system_once(undo::apply).unwrap();
+        let events = h
+            .app
+            .world()
+            .resource::<EditHistory>()
+            .since(&mut cursor, &mut dropped);
+        assert_eq!(events.len(), 1);
+        let event = events[0];
+        assert_eq!(event.at, forward.at);
+        if action == HistoryAction::Undo {
+            assert_eq!((event.before, event.after), (forward.after, forward.before));
+            assert_eq!(
+                event.kind,
+                tesserae_mods::EditKind::Solid {
+                    before: forward.after,
+                    after: forward.before
+                }
+            );
+        } else {
+            assert_eq!(event, forward);
+        }
+    }
+    assert_eq!(dropped, 0);
+}

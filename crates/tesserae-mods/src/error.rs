@@ -104,6 +104,12 @@ pub enum ModError {
         api: String,
         exported: &'static str,
     },
+    RemoveTime {
+        id: String,
+        row: usize,
+        name: String,
+        seconds: f32,
+    },
     MaterialTexture {
         id: String,
         row: usize,
@@ -151,6 +157,15 @@ pub enum ModError {
 impl fmt::Display for ModError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            ModError::RemoveTime {
+                id,
+                row,
+                name,
+                seconds,
+            } => write!(
+                f,
+                "Mod `{id}` Material row {row} `{name}` removal time {seconds} must be finite and from 0.05 to 60 seconds"
+            ),
             ModError::Io { who, path, source } => {
                 write!(f, "mod `{who}`: {}: {source}", path.display())
             }

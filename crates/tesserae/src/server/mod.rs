@@ -24,6 +24,7 @@ mod lod_rings;
 pub mod mods;
 pub mod player;
 pub mod streaming;
+pub mod undo;
 pub mod world_state;
 
 use std::sync::Arc;

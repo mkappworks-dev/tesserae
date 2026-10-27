@@ -67,6 +67,7 @@ fn solid(name: &str) -> MaterialDef {
         dimming: 15,
         occlusion: Occlusion::Opaque,
         render: RenderClass::Opaque,
+        remove_time_s: Some(0.35),
         solid: true,
     }
 }
@@ -167,6 +168,7 @@ impl Guest for Demo {
                     dimming: 15,
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
+                    remove_time_s: None,
                     solid: true,
                 },
                 MaterialDef {
@@ -175,6 +177,7 @@ impl Guest for Demo {
                     dimming: 15,
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
+                    remove_time_s: None,
                     solid: false,
                 },
                 solid("wood"),
@@ -188,6 +191,7 @@ impl Guest for Demo {
                     dimming: 6,
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
+                    remove_time_s: None,
                     solid: false,
                 },
                 solid("brick"),
@@ -197,6 +201,7 @@ impl Guest for Demo {
                     dimming: 2,
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
+                    remove_time_s: None,
                     solid: false,
                 },
                 solid("stone"),

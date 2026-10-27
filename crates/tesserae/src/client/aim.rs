@@ -161,6 +161,7 @@ mod tests {
             max: Vec3::ONE,
         };
         let answer = AimTarget {
+            removal: None,
             seq: 3,
             outline: Some(bounds),
             ghost: None,

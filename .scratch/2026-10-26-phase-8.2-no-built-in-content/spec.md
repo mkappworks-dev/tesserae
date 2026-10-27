@@ -548,3 +548,25 @@ step 8.1's ticket 10.
 - **The ADR, tickets and commits** name no other open-source voxel engine.
 - **Screenshots** for review go in one `/tmp` folder. They are never committed
   and are deleted after review.
+
+
+## User amendment: deliberate removal and undo/redo (2026-10-27)
+
+The approved left-remove/right-place controls stay consistent in held and
+empty hand. Left removal now requires a deliberate hold with a progress
+bar above the target. Release, a changed target, menu/cursor changes or
+invalid aim reset progress. Each hold removes once. While removing, hide
+the placement ghost. Amend unreleased 0.3 Material Declarations with
+optional remove-time-s, finite from 0.05 to 60 seconds, default 350 ms.
+Legacy adapters use the default. Content metadata stays outside core
+tables. Server target metadata drives progress; completed holds validate
+the intended cell, Material, bounds and burning state again.
+
+Ctrl/Cmd+Z undoes direct player edits; Ctrl/Cmd+Shift+Z or Ctrl+Y redoes.
+Keep 128 bounded Server-owned entries and 16 queued requests, guard exact
+Occupants and Chunk Lifetime, and replay through normal edit effects with
+inverse/forward Mod events. Simulation elsewhere is not rewound. Changed,
+unloaded or unsettled cells are refused visibly; a refusal retains the
+entry. New successful changes clear redo. A contextual right-click cue,
+success/refusal feedback and updated help explain the controls. Ticket 19
+records implementation and validation.
