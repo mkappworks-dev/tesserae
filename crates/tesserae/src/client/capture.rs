@@ -245,6 +245,11 @@ pub(super) fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_SCREENSHOT_MENU").is_some() {
         app.insert_resource(super::menu::Menu::opened());
     }
+    app.insert_resource(super::help::Panels {
+        help: std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some(),
+        debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
+        ..default()
+    });
     app.add_systems(Startup, uncap_frame_rate).add_systems(
         Update,
         (
@@ -564,6 +569,11 @@ fn capture_holding(
     let Ok(name) = std::env::var("TESSERAE_SCREENSHOT_MATERIAL") else {
         return;
     };
+    if name == "empty" {
+        hotbar.outside = Some(super::edit::Holding::Empty);
+        *configured = true;
+        return;
+    }
     let Some(material) = catalogue
         .0
         .materials

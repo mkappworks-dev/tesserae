@@ -10,6 +10,7 @@ pub mod chunk_mesh;
 pub mod chunk_view;
 pub mod drawn_mask;
 pub mod edit;
+mod help;
 mod material_textures;
 mod menu;
 #[cfg(feature = "dev")]
@@ -26,6 +27,7 @@ pub fn plugin(app: &mut App) {
         camera::plugin,
         chunk_view::plugin,
         edit::plugin,
+        help::plugin,
         menu::plugin,
         aim::plugin,
         material_textures::plugin,

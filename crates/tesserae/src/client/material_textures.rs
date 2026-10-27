@@ -16,7 +16,7 @@ use bevy::{
     render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 
-const GHOST_OPACITY: f32 = 0.4;
+const GHOST_OPACITY: f32 = 0.75;
 
 #[derive(Resource)]
 pub(super) struct Textures {

@@ -20,6 +20,8 @@ pub(super) fn plugin(app: &mut App) {
 fn spawn_readout(mut commands: Commands) {
     commands.spawn((
         StreamingReadout,
+        super::help::DebugPanel,
+        Visibility::Hidden,
         // ASCII only: Bevy's embedded default font is a FiraMono subset and
         // renders anything outside it, a middle dot included, as tofu.
         Text::new("streaming"),

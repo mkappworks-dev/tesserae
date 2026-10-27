@@ -35,7 +35,7 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             (camera, model, position)
                 .chain()
-                .after(super::aim::report)
+                .after(super::aim::receive)
                 .after(super::material_textures::receive),
         );
 }
@@ -213,12 +213,13 @@ fn position(
     menu: Res<Menu>,
     world: Res<WorldSettings>,
     hotbar: Res<Hotbar>,
-    target: Res<Target>,
-    sent: Res<Sent>,
+    (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     mut ghost: Query<(&mut Transform, &mut Visibility), GhostOnly>,
     mut hand: Query<&mut Visibility, HandOnly>,
 ) {
-    let cell = (!menu.open && target.0.seq == sent.seq && hotbar.held() != Holding::Fire)
+    let cell = (!menu.open
+        && target.current(&sent, time.elapsed_secs_f64())
+        && hotbar.held() != Holding::Fire)
         .then_some(target.0.ghost)
         .flatten();
     for (mut transform, mut visibility) in &mut ghost {
@@ -304,6 +305,7 @@ mod tests {
             .init_resource::<WorldSettings>()
             .init_resource::<Sent>()
             .init_resource::<Target>()
+            .init_resource::<Time>()
             .init_resource::<Assets<Mesh>>()
             .init_resource::<Assets<StandardMaterial>>()
             .add_plugins(plugin);
@@ -313,7 +315,13 @@ mod tests {
             Transform::default(),
         ));
         app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::solid(rock, SHAPE_STAIR));
-        app.world_mut().resource_mut::<Target>().0.ghost = Some(Vec3::new(3.0, 4.0, 5.0));
+        let view = (Vec3::ZERO, Vec3::NEG_Z, None);
+        app.world_mut().resource_mut::<Sent>().last = Some(view);
+        {
+            let mut target = app.world_mut().resource_mut::<Target>();
+            target.0.ghost = Some(Vec3::new(3.0, 4.0, 5.0));
+            target.1 = Some(view);
+        }
         app.update();
         let first = app.world().resource::<Model>().mesh.clone();
         let (transform, visibility) = app

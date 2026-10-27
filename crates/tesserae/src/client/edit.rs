@@ -271,6 +271,8 @@ impl Notice {
 
 #[derive(Component)]
 struct HeldHud;
+#[derive(Component)]
+struct NoticeHud;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Hotbar>()
@@ -314,13 +316,27 @@ fn spawn_hud(mut commands: Commands) {
         ));
     commands.spawn((
         HeldHud,
+        super::help::HelpPanel,
+        Visibility::Hidden,
         Text::default(),
         font(14.0),
         TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
         Node {
             position_type: PositionType::Absolute,
             right: Val::Px(16.0),
-            bottom: Val::Px(16.0),
+            bottom: Val::Px(60.0),
+            ..default()
+        },
+    ));
+    commands.spawn((
+        NoticeHud,
+        Text::default(),
+        font(14.0),
+        TextColor(Color::srgb(1.0, 0.7, 0.3)),
+        Node {
+            position_type: PositionType::Absolute,
+            left: Val::Px(16.0),
+            top: Val::Px(48.0),
             ..default()
         },
     ));
@@ -467,7 +483,12 @@ fn show_rejections(
     notice.tick(time.delta_secs());
 }
 
-const HINT: &str = "[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
+const DEBUG_HINT: &str = if cfg!(feature = "dev") {
+    "\n[F3] diagnostics"
+} else {
+    ""
+};
+const HINT: &str = "[I] controls\n[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
 
 fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> String {
     let held = hotbar.held();
@@ -483,7 +504,7 @@ fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> S
         (hotbar.selected + 1).to_string()
     };
     format!(
-        "{}: {}\n[click] {place}\n[right click] {remove}\n{HINT}\n{}",
+        "{}: {}\n[click] {place}\n[right click] {remove}\n{HINT}{DEBUG_HINT}\n{}",
         hand,
         held.describe(catalogue),
         notice.text()
@@ -495,7 +516,11 @@ fn update_hud(
     catalogue: Res<Catalogue>,
     notice: Res<Notice>,
     mut hud: Single<&mut Text, With<HeldHud>>,
+    mut notices: Query<&mut Text, (With<NoticeHud>, Without<HeldHud>)>,
 ) {
+    for mut text in &mut notices {
+        text.set_if_neq(Text::new(notice.text()));
+    }
     let line = hud_text(&hotbar, &catalogue.0, &notice);
     // Through the comparison, so the UI is not re-laid out every frame.
     if hud.0 != line {

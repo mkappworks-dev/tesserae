@@ -168,12 +168,15 @@ fn grab_cursor(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+    panels: Option<Res<super::help::Panels>>,
 ) {
     let mut cursor = cursor.into_inner();
     if keys.just_pressed(KeyCode::Escape) {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
-    } else if mouse.just_pressed(MouseButton::Left) {
+    } else if mouse.just_pressed(MouseButton::Left)
+        && !panels.is_some_and(|panels| panels.pointer_over_info)
+    {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
     }
