@@ -4,8 +4,8 @@ Games now declare every named Material except air and name their ground.
 The demo keeps its terrain and render classes using its own content.
 
 Validation: 890 tests pass, five existing manual measurements are ignored,
-and ./scripts/cargo-ci passes. Prior texture captures were reviewed and
-deleted. The controls/empty-hand/stronger-ghost captures await review.
+and ./scripts/cargo-ci passes. All texture, controls, empty-hand and
+placement-ghost captures were reviewed and their folders deleted.
 
 The 115-row interleaved thread-CPU A/B used phase 8.1 main (212d900).
 Stair-heavy meshing moves from 4.163 to 3.462 ms; same-binary id probes

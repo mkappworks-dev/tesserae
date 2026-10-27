@@ -66,3 +66,10 @@ Destroyed warning occurs at screenshot-app shutdown. Captures show static
 states; delayed-reply movement is covered by the headless regression test.
 User review is pending, so the folder remains. Core/bench inputs did not
 change and the existing interleaved benchmark evidence remains applicable.
+
+### 2026-10-27: visual approval
+
+The user reviewed and accepted the quiet HUD, help/diagnostics panels,
+empty-hand view and stronger placement ghost: "Reviewed; these look right."
+The combined visual review is complete. The reviewed capture folder
+/tmp/tesserae-p82-controls-review-9x02y9zh was deleted after that approval.

@@ -56,3 +56,10 @@ Full formatting and ./scripts/cargo-ci pass on the combined 17/18 tree:
 890 tests (396 app, 327 core, 69 meshing integration, 98 Mods), zero
 failures and five existing ignored measurement harnesses. Native capture
 review is shared with ticket 17 and remains pending in its /tmp folder.
+
+### 2026-10-27: visual approval
+
+The user reviewed and accepted the quiet HUD, help/diagnostics panels,
+empty-hand view and stronger placement ghost: "Reviewed; these look right."
+The combined visual review is complete. The reviewed capture folder
+/tmp/tesserae-p82-controls-review-9x02y9zh was deleted after that approval.
