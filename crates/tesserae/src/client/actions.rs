@@ -1,4 +1,8 @@
 //! Stable actions and a single keyboard/mouse resolution pass.
+use bevy::input::{
+    mouse::{AccumulatedMouseMotion, MouseScrollUnit, MouseWheel},
+    touch::TouchPhase,
+};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -203,24 +207,36 @@ pub(super) struct State {
     pub released: bool,
     pub cancelled: bool,
 }
+pub(super) const PIXELS_PER_NOTCH: f32 = 100.0;
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ScrollDelta {
+    pub notches: f32,
+    pub started: bool,
+}
+#[derive(Default, Debug)]
+pub(super) struct Axes {
+    pub look: Vec2,
+    pub scroll: Vec<ScrollDelta>,
+}
 #[derive(Resource, Default)]
-pub(super) struct Actions(
-    pub HashMap<Action, State>,
-    HashSet<Action>,
-    HashSet<Trigger>,
-    bool,
-    HashSet<Action>,
-);
+pub(super) struct Actions {
+    states: HashMap<Action, State>,
+    raw_held: HashSet<Action>,
+    raw_triggers: HashSet<Trigger>,
+    reserved_cancel: bool,
+    prior_effective_held: HashSet<Action>,
+    pub axes: Axes,
+}
 impl Actions {
     pub fn consume_cancel(&mut self) {
-        self.3 = false;
+        self.reserved_cancel = false;
         self.cancel(Action::ReleaseCursor);
     }
     pub fn cancel_requested(&self) -> bool {
-        self.3 || self.started(Action::ReleaseCursor)
+        self.reserved_cancel || self.started(Action::ReleaseCursor)
     }
     pub fn state(&self, action: Action) -> State {
-        self.0.get(&action).copied().unwrap_or_default()
+        self.states.get(&action).copied().unwrap_or_default()
     }
     pub fn started(&self, action: Action) -> bool {
         self.state(action).started
@@ -229,8 +245,8 @@ impl Actions {
         self.state(action).held
     }
     pub fn cancel(&mut self, action: Action) {
-        let previously_held = self.4.contains(&action);
-        let state = self.0.entry(action).or_default();
+        let previously_held = self.prior_effective_held.contains(&action);
+        let state = self.states.entry(action).or_default();
         *state = State {
             cancelled: previously_held || state.started || state.cancelled,
             ..default()
@@ -242,12 +258,12 @@ impl Actions {
         keys: &ButtonInput<KeyCode>,
         mouse: &ButtonInput<MouseButton>,
     ) {
-        self.4 = self
-            .0
+        self.prior_effective_held = self
+            .states
             .iter()
             .filter_map(|(&action, state)| state.held.then_some(action))
             .collect();
-        self.3 = keys.just_pressed(KeyCode::Escape);
+        self.reserved_cancel = keys.just_pressed(KeyCode::Escape);
         let matches = |binding: Binding| binding.active(keys, mouse);
         let consumed: HashSet<_> = bindings
             .0
@@ -277,16 +293,16 @@ impl Actions {
             };
             let continuing = alternatives.iter().flatten().any(|binding| {
                 matches(*binding)
-                    && self.2.contains(&binding.trigger)
+                    && self.raw_triggers.contains(&binding.trigger)
                     && !just_pressed(binding.trigger)
             });
-            let previous = self.1.contains(&action);
+            let previous = self.raw_held.contains(&action);
             if held {
-                self.1.insert(action);
+                self.raw_held.insert(action);
             } else {
-                self.1.remove(&action);
+                self.raw_held.remove(&action);
             }
-            self.0.insert(
+            self.states.insert(
                 action,
                 State {
                     started: held
@@ -301,7 +317,7 @@ impl Actions {
                 },
             );
         }
-        self.2 = keys
+        self.raw_triggers = keys
             .get_pressed()
             .copied()
             .map(Trigger::Key)
@@ -372,6 +388,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(PreUpdate, labels.after(bevy::input::InputSystems));
     app.init_resource::<Bindings>()
         .init_resource::<Actions>()
+        .add_message::<MouseWheel>()
         .add_systems(PreUpdate, collect.after(bevy::input::InputSystems));
 }
 fn collect(
@@ -379,8 +396,22 @@ fn collect(
     mouse: Res<ButtonInput<MouseButton>>,
     bindings: Res<Bindings>,
     mut actions: ResMut<Actions>,
+    motion: Option<Res<AccumulatedMouseMotion>>,
+    mut wheel: MessageReader<MouseWheel>,
 ) {
     actions.resolve(&bindings, &keys, &mouse);
+    actions.axes.look = motion.map_or(Vec2::ZERO, |motion| motion.delta);
+    actions.axes.scroll.clear();
+    actions
+        .axes
+        .scroll
+        .extend(wheel.read().map(|event| ScrollDelta {
+            notches: match event.unit {
+                MouseScrollUnit::Line => event.y,
+                MouseScrollUnit::Pixel => event.y / PIXELS_PER_NOTCH,
+            },
+            started: event.phase == TouchPhase::Started,
+        }));
 }
 
 #[cfg(test)]

@@ -5,7 +5,6 @@
 //! handling stays small enough to read, and so it is already expressed in
 //! metres per second when the player controller replaces it.
 
-use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::f32::consts::FRAC_PI_2;
@@ -232,22 +231,22 @@ pub(super) fn grab_cursor(
 pub(super) fn look(
     preferences: Res<super::profile::Preferences>,
     ownership: Res<super::input::Ownership>,
-    motion: Res<AccumulatedMouseMotion>,
+    actions: Res<Actions>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<(&mut Transform, &mut FlyCamera)>,
 ) {
     if !ownership.gameplay()
         || cursor.grab_mode == CursorGrabMode::None
-        || motion.delta == Vec2::ZERO
+        || actions.axes.look == Vec2::ZERO
     {
         return;
     }
 
     let (mut transform, mut fly) = camera.into_inner();
     fly.sensitivity = preferences.sensitivity;
-    fly.yaw -= motion.delta.x * fly.sensitivity;
+    fly.yaw -= actions.axes.look.x * fly.sensitivity;
     fly.pitch = (fly.pitch
-        - motion.delta.y * fly.sensitivity * if preferences.invert_y { -1.0 } else { 1.0 })
+        - actions.axes.look.y * fly.sensitivity * if preferences.invert_y { -1.0 } else { 1.0 })
     .clamp(-PITCH_LIMIT, PITCH_LIMIT);
     transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }

@@ -105,6 +105,43 @@ fn show(panels: Res<Panels>, mut nodes: PanelNodes) {
 mod tests {
     use super::*;
     #[test]
+    fn focused_free_cursor_and_catalogue_keep_the_help_shortcuts() {
+        use bevy::window::{CursorOptions, PrimaryWindow};
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .init_resource::<super::super::input::Ownership>()
+            .init_resource::<super::super::menu::Menu>()
+            .init_resource::<Panels>()
+            .add_systems(Update, (super::super::input::resolve, toggle).chain());
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+            CursorOptions::default(),
+        ));
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyI);
+        app.update();
+        assert!(app.world().resource::<Panels>().help);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = true;
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F3);
+        app.update();
+        assert!(app.world().resource::<Panels>().debug);
+    }
+
+    #[test]
     fn help_keys_and_button_are_independent_of_diagnostics() {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin);

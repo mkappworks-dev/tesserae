@@ -11,8 +11,6 @@
 //! exercise the edit path by hand, and a real inventory replaces them. What a
 //! slot can hold comes from the Server's content catalogue.
 
-use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
-use bevy::input::touch::TouchPhase;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
@@ -38,10 +36,6 @@ pub(super) const SLOT_KEYS: [KeyCode; 9] = [
     KeyCode::Digit8,
     KeyCode::Digit9,
 ];
-
-/// How far a trackpad scrolls for one slot. Its deltas come in many small
-/// pixel steps, and a slot per step would cross the bar in one swipe.
-const PIXELS_PER_NOTCH: f32 = 100.0;
 
 /// What one hotbar slot holds.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -362,7 +356,6 @@ pub(super) fn select_held(
         Res<super::input::Ownership>,
         Res<super::actions::Actions>,
     ),
-    mut wheel: MessageReader<MouseWheel>,
     catalogue: Res<Catalogue>,
     mut hotbar: ResMut<Hotbar>,
     mut scrolled: Local<f32>,
@@ -370,7 +363,6 @@ pub(super) fn select_held(
     pointer: Option<Res<super::menu::PointerState>>,
 ) {
     if ownership.owner == super::input::Owner::Unfocused {
-        wheel.clear();
         *scrolled = 0.0;
         return;
     }
@@ -392,15 +384,12 @@ pub(super) fn select_held(
     if menu_open || !ownership.gameplay() {
         *scrolled = 0.0;
     }
-    for event in wheel.read() {
+    for event in &actions.axes.scroll {
         if menu_open || !ownership.gameplay() {
             continue;
         }
-        let notches = match event.unit {
-            MouseScrollUnit::Line => event.y,
-            MouseScrollUnit::Pixel => event.y / PIXELS_PER_NOTCH,
-        };
-        if event.phase == TouchPhase::Started || notches * *scrolled < 0.0 {
+        let notches = event.notches;
+        if event.started || notches * *scrolled < 0.0 {
             *scrolled = 0.0;
         }
         *scrolled += notches
@@ -609,6 +598,7 @@ fn update_hud(
 
 #[cfg(test)]
 mod tests {
+    use super::super::actions::PIXELS_PER_NOTCH;
     use super::*;
     use crate::client::camera::look;
     use crate::client::menu::{self, Entry};
@@ -616,6 +606,10 @@ mod tests {
     use crate::server::edit::RejectReason;
     use crate::server::player::{PoseCorrection, PoseReport};
     use bevy::input::mouse::AccumulatedMouseMotion;
+    use bevy::input::{
+        mouse::{MouseScrollUnit, MouseWheel},
+        touch::TouchPhase,
+    };
     use bevy::ui_widgets::Activate;
 
     fn demo_ids() -> &'static [MaterialId; 7] {

@@ -6,6 +6,7 @@ use std::collections::HashSet;
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
 pub(super) enum Owner {
     Gameplay,
+    PointerFree,
     Catalogue,
     Settings,
     BindingCapture,
@@ -103,7 +104,7 @@ pub(super) fn resolve(
     } else if cursor.grab_mode == CursorGrabMode::Locked {
         Owner::Gameplay
     } else {
-        Owner::Unfocused
+        Owner::PointerFree
     };
     ownership.resolve(owner, &keys, &mouse);
     if let Some(ui) = ui
@@ -115,22 +116,20 @@ pub(super) fn resolve(
         ownership.buttons.extend(mouse.get_pressed().copied());
     }
 
+    if !ownership.gameplay() {
+        actions.axes = default();
+    }
     use super::actions::{Action, Trigger};
     for (&action, alternatives) in &bindings.0 {
         if matches!(
             action,
             Action::Catalogue | Action::ReleaseCursor | Action::Help | Action::Diagnostics
         ) {
-            if matches!(
-                owner,
-                Owner::Unfocused | Owner::Settings | Owner::BindingCapture | Owner::TextEntry
-            ) || alternatives
-                .iter()
-                .flatten()
-                .all(|binding| match binding.trigger {
-                    Trigger::Key(key) => ownership.keys.contains(&key),
-                    Trigger::Mouse(button) => ownership.buttons.contains(&button),
-                })
+            if ownership.changed
+                || matches!(
+                    owner,
+                    Owner::Unfocused | Owner::Settings | Owner::BindingCapture | Owner::TextEntry
+                )
             {
                 actions.cancel(action);
             }
@@ -159,6 +158,74 @@ pub(super) fn gameplay(ownership: Res<Ownership>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn ownership_discards_look_and_scroll_in_the_shared_frame() {
+        use bevy::input::mouse::{AccumulatedMouseMotion, MouseScrollUnit, MouseWheel};
+        use bevy::input::touch::TouchPhase;
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .insert_resource(Ownership::playing())
+            .init_resource::<super::super::menu::Menu>()
+            .init_resource::<AccumulatedMouseMotion>()
+            .add_systems(Update, resolve);
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    focused: true,
+                    ..default()
+                },
+                PrimaryWindow,
+                CursorOptions {
+                    grab_mode: CursorGrabMode::Locked,
+                    ..default()
+                },
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = true;
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(4.0, 8.0);
+        app.world_mut().write_message(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: -1.0,
+            window,
+            phase: TouchPhase::Moved,
+        });
+        app.update();
+        let actions = app.world().resource::<super::super::actions::Actions>();
+        assert_eq!(actions.axes.look, Vec2::ZERO);
+        assert!(actions.axes.scroll.is_empty());
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::ZERO;
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = false;
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::super::actions::Actions>()
+                .axes
+                .scroll
+                .is_empty()
+        );
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(2.0, 3.0);
+        app.update();
+        assert_eq!(
+            app.world()
+                .resource::<super::super::actions::Actions>()
+                .axes
+                .look,
+            Vec2::new(2.0, 3.0)
+        );
+    }
+
     #[test]
     fn device_cancellation_is_one_transition_at_every_update_rate() {
         use super::super::actions::{Action, Actions};
