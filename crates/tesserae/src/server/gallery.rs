@@ -93,7 +93,13 @@ impl Parts {
 
 pub(super) fn plugin(app: &mut App) {
     // After the tick's own streaming.
-    app.add_systems(FixedPostUpdate, build);
+    let reopened = app
+        .world()
+        .get_resource::<super::persistence::Persistence>()
+        .is_some_and(|p| p.reopened_eye.is_some());
+    if !reopened {
+        app.add_systems(FixedPostUpdate, build.run_if(super::persistence::playing));
+    }
 }
 
 fn build(

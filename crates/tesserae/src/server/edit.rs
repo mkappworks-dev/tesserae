@@ -261,6 +261,9 @@ struct Pending {
 pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
 
 impl PendingEdits {
+    pub(super) fn clear(&mut self) {
+        self.0.clear();
+    }
     pub(in crate::server) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -291,8 +294,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             FixedPreUpdate,
             (
-                apply_pending,
-                super::undo::apply.before(super::mods::Drain),
+                apply_pending.run_if(super::persistence::playing),
+                super::undo::apply
+                    .run_if(super::persistence::playing)
+                    .before(super::mods::Drain),
                 answer_aim,
             )
                 .chain(),

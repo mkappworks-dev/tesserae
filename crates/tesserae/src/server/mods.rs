@@ -96,6 +96,7 @@ pub struct LoadedMods {
     pub remove_times: Vec<(MaterialId, std::time::Duration)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
+    pub required: Vec<tesserae_core::save::RequiredMod>,
 }
 
 impl Default for LoadedMods {
@@ -110,6 +111,7 @@ impl Default for LoadedMods {
             remove_times: Vec::new(),
             mods: Vec::new(),
             game: false,
+            required: Vec::new(),
         }
     }
 }
@@ -117,7 +119,10 @@ impl Default for LoadedMods {
 #[derive(Resource)]
 pub(super) struct WorldParameters(pub WorldgenParams);
 
-pub fn load_from_env(world: &WorldSettings) -> Result<LoadedMods, String> {
+pub fn load_from_env(
+    world: &WorldSettings,
+    opening: &super::persistence::Opening,
+) -> Result<LoadedMods, String> {
     let Some(options) = LoadOptions::resolve(
         std::env::args_os().skip(1),
         std::env::var_os("TESSERAE_MODS_DIR"),
@@ -131,10 +136,10 @@ pub fn load_from_env(world: &WorldSettings) -> Result<LoadedMods, String> {
     };
     let stdin = io::stdin();
     load_prompted(
+        (Some(opening), world),
         &options.directory,
         &options.trust_file,
         options.trust,
-        world,
         stdin.is_terminal(),
         &mut stdin.lock(),
         &mut io::stderr().lock(),
@@ -142,15 +147,16 @@ pub fn load_from_env(world: &WorldSettings) -> Result<LoadedMods, String> {
 }
 
 fn load_prompted(
+    opening_world: (Option<&super::persistence::Opening>, &WorldSettings),
     directory: &Path,
     trust_file: &Path,
     mode: TrustMode,
-    world: &WorldSettings,
     terminal: bool,
     reader: &mut impl BufRead,
     output: &mut impl Write,
 ) -> Result<LoadedMods, String> {
-    load_with(directory, trust_file, world, |found, trust| {
+    let (opening, world) = opening_world;
+    load_with_opening(opening, directory, trust_file, world, |found, trust| {
         let id = &found.manifest.id;
         if mode == TrustMode::ThisRun {
             trust.grant_for_run(found).map_err(|e| e.to_string())?;
@@ -221,7 +227,18 @@ fn load(
     })
 }
 
+#[cfg(test)]
 fn load_with(
+    directory: &Path,
+    trust_file: &Path,
+    world: &WorldSettings,
+    authorize: impl FnMut(&tesserae_mods::Found, &mut Trust) -> Result<bool, String>,
+) -> Result<LoadedMods, String> {
+    load_with_opening(None, directory, trust_file, world, authorize)
+}
+
+fn load_with_opening(
+    opening: Option<&super::persistence::Opening>,
     directory: &Path,
     trust_file: &Path,
     world: &WorldSettings,
@@ -261,6 +278,14 @@ fn load_with(
         let mut behaviours = Vec::new();
         for component in &compiled {
             let id = &component.found.manifest.id;
+            let manifest = &component.found.manifest;
+            loaded.required.push(tesserae_core::save::RequiredMod {
+                id: id.clone(),
+                version: manifest.version.clone(),
+                contract: manifest.api.clone(),
+                game: manifest.root,
+                build_sha256: component.build_sha256.clone(),
+            });
             let fault = |e| format!("mod `{id}`: {e}");
             let instance = host
                 .instantiate(component, world.seed)
@@ -325,14 +350,26 @@ fn load_with(
             materials: listed(Kind::Material),
             shapes: listed(Kind::Shape),
         };
+        if let Some(recovered) = opening.and_then(|o| o.recovered.as_ref()) {
+            let (content, _) = super::persistence::content(&loaded);
+            recovered
+                .commit
+                .compatible(&content)
+                .map_err(|e| e.to_string())?;
+        }
         let instances = std::mem::take(&mut loaded.mods);
         for (component, instance) in compiled.iter().zip(instances) {
             let instance = instance
                 .start(
-                    WorldInfo {
-                        voxel_size_m: world.voxel_size,
-                        seed: world.seed,
-                    },
+                    opening.map_or_else(
+                        || WorldInfo {
+                            voxel_size_m: world.voxel_size,
+                            seed: world.seed,
+                            world_id: String::new(),
+                            reopened: false,
+                        },
+                        |o| o.info(world),
+                    ),
                     ids.clone(),
                 )
                 .await
@@ -353,7 +390,15 @@ pub(super) fn plugin(app: &mut App) {
         .remove_non_send::<LoadedMods>()
         .unwrap_or_default();
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
-    let params = super::worldgen_params(loaded.world);
+    let reopened = app
+        .world()
+        .get_resource::<super::persistence::Persistence>()
+        .is_some_and(|p| p.reopened_eye.is_some());
+    let params = if reopened {
+        loaded.world.unwrap_or_default()
+    } else {
+        super::worldgen_params(loaded.world)
+    };
     let mut catalogue = catalogue(
         &loaded.registry,
         &tables.0,
@@ -421,6 +466,25 @@ pub(in crate::server) fn catalogue(
         lake,
         rock,
     }
+}
+
+#[cfg(test)]
+pub(super) fn demo_for_save(
+    opening: &super::persistence::Opening,
+    world: &WorldSettings,
+) -> LoadedMods {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist");
+    load_with_opening(
+        Some(opening),
+        &path,
+        &path.join("unused-trust.json"),
+        world,
+        |found, trust| {
+            trust.grant_for_run(found).map_err(|e| e.to_string())?;
+            Ok(true)
+        },
+    )
+    .expect("build demo with scripts/build-guests")
 }
 
 #[cfg(test)]
@@ -841,13 +905,16 @@ mod tests {
     ) -> (Result<LoadedMods, String>, String) {
         let mut output = Vec::new();
         let result = load_prompted(
+            (
+                None,
+                &WorldSettings {
+                    seed: 123,
+                    voxel_size: 0.5,
+                },
+            ),
             &s.0.join("mods"),
             &s.0.join("trust.json"),
             mode,
-            &WorldSettings {
-                seed: 123,
-                voxel_size: 0.5,
-            },
             tty,
             &mut input.as_bytes(),
             &mut output,

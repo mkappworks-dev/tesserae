@@ -230,6 +230,8 @@ impl Rig {
         let builder = Some(
             block_on(builder.start(
                 WorldInfo {
+                    world_id: String::new(),
+                    reopened: false,
                     seed: 7,
                     voxel_size_m: 1.0,
                 },

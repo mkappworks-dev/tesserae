@@ -259,6 +259,7 @@ fn failed_rename_retains_last_complete_commit_and_does_not_advance_writer() {
     c.sequence = 2;
     assert!(writer.write(&c).is_err());
     fs::remove_dir_all(&blocker).unwrap();
+    c.sequence = writer.next_sequence().unwrap();
     writer.write(&c).unwrap();
     assert!(d.0.join("00000000000000000001.commit").exists());
 }

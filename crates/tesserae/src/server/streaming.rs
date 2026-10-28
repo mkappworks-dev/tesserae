@@ -615,12 +615,20 @@ fn retire(
         .spoilt
         .retain(|&c, _| evict.contains(delta(center, c)));
 
+    store
+        .pending_evictions
+        .retain(|&c| !evict.contains(delta(center, c)));
+    store
+        .approved_evictions
+        .retain(|&c, _| !evict.contains(delta(center, c)));
     let stale: Vec<ChunkCoord> = store
         .coords()
         .filter(|&c| !evict.contains(delta(center, c)))
         .collect();
     for coord in stale {
-        store.remove(coord);
+        if !store.remove(coord) {
+            continue;
+        }
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
         // An unedited Chunk is what the generator makes again; only an edited one
@@ -654,6 +662,9 @@ fn land_generated(
             continue;
         }
         store.insert(coord, chunk);
+        if store.revisions.contains_key(&coord) {
+            meshes.voxels_changed(coord);
+        }
         // Only this Chunk's *geometry* is affected, and only its own light is
         // queued. Re-dirtying the six neighbours' meshes here looks obviously
         // necessary and is not: `publish` will not mesh a Chunk until all six

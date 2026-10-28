@@ -147,7 +147,9 @@ pub(super) fn plugin(app: &mut App) {
             (
                 // Before the edit path, so it sees the grab a close makes and
                 // the first click after one edits.
-                toggle.before(super::edit::send_intents),
+                toggle
+                    .run_if(crate::server::persistence::playing)
+                    .before(super::edit::send_intents),
                 receive_palette,
                 rebuild.after(super::edit::send_intents),
                 rebuild_shapes,

@@ -90,7 +90,7 @@ pub(super) fn plugin(app: &mut App) {
     #[cfg(feature = "dev")]
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
     app.add_systems(Startup, spawn_hint)
-        .add_systems(Update, input);
+        .add_systems(Update, input.run_if(crate::server::persistence::playing));
 }
 
 fn spawn_hint(mut commands: Commands) {

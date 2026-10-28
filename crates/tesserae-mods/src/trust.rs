@@ -157,7 +157,7 @@ fn read_component(found: &Found) -> Result<Vec<u8>, ModError> {
 }
 
 /// Length-prefixed so bytes cannot move between the component and the Manifest unnoticed.
-fn hash(component: &[u8], manifest: &[u8]) -> String {
+pub(crate) fn hash(component: &[u8], manifest: &[u8]) -> String {
     let mut sha = Sha256::new();
     sha.update((component.len() as u64).to_le_bytes());
     sha.update(component);

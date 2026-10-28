@@ -1,0 +1,511 @@
+//! Server-owned World opening, checkpoints and save completion landing.
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures::check_ready};
+use tesserae_core::save::{self, Commit, Content, Generation, Mapping, WorldId, Writer};
+
+use super::fluids::FluidSim;
+use super::mods::LoadedMods;
+use super::player::Player;
+use super::world_state::{ChunkStore, Lifetime};
+use crate::world::{ChunkCoord, WorldSettings};
+
+pub struct Opening {
+    pub directory: Option<PathBuf>,
+    pub id: WorldId,
+    pub recovered: Option<save::Recovered>,
+}
+
+impl Opening {
+    pub fn from_env() -> Result<Self, String> {
+        let explicit = std::env::var_os("TESSERAE_WORLD_DIR").map(PathBuf::from);
+        let directory = if std::env::var_os("TESSERAE_EPHEMERAL").is_some() {
+            None
+        } else if explicit.is_some() {
+            explicit
+        } else if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_some()
+            || std::env::var_os("TESSERAE_SCREENSHOT").is_some()
+        {
+            None
+        } else {
+            Some(
+                tesserae_mods::default_mods_dir()
+                    .map(|p| p.with_file_name("worlds").join("default"))
+                    .ok_or("cannot resolve World directory; set TESSERAE_WORLD_DIR")?,
+            )
+        };
+        let recovered = directory
+            .as_ref()
+            .map(|p| save::inspect(p))
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .flatten();
+        let id = recovered
+            .as_ref()
+            .map_or_else(WorldId::new, |r| r.commit.world.clone());
+        Ok(Self {
+            directory,
+            id,
+            recovered,
+        })
+    }
+
+    pub fn info(&self, world: &WorldSettings) -> tesserae_mods::WorldInfo {
+        tesserae_mods::WorldInfo {
+            seed: world.seed,
+            voxel_size_m: world.voxel_size,
+            world_id: self.id.as_str().into(),
+            reopened: self.recovered.is_some(),
+        }
+    }
+}
+
+pub(super) fn content(loaded: &LoadedMods) -> (Content, Mapping) {
+    use tesserae_mods::Kind;
+    let mapping = Mapping {
+        materials: loaded
+            .registry
+            .names(Kind::Material)
+            .map(|(id, n)| (id as u16, n.to_owned()))
+            .collect(),
+        shapes: loaded
+            .registry
+            .names(Kind::Shape)
+            .map(|(id, n)| (id as u8, n.to_owned()))
+            .collect(),
+    };
+    (
+        Content {
+            mods: loaded.required.clone(),
+            materials: mapping.materials.values().cloned().collect(),
+            shapes: mapping.shapes.values().cloned().collect(),
+        },
+        mapping,
+    )
+}
+
+#[derive(Message, Clone, Copy)]
+pub enum SaveAction {
+    SaveQuit,
+    Retry,
+    Return,
+    AskUnsafe,
+    ConfirmUnsafe,
+    CancelUnsafe,
+}
+
+#[derive(Resource, Default, Clone, PartialEq)]
+pub struct SaveStatus {
+    pub saving: bool,
+    pub quitting: bool,
+    pub confirm_unsafe: bool,
+    pub dirty: bool,
+    pub detail: String,
+    pub error: Option<String>,
+}
+impl SaveStatus {
+    pub fn modal(&self) -> bool {
+        self.quitting || self.confirm_unsafe
+    }
+}
+
+pub fn playing(status: Option<Res<SaveStatus>>) -> bool {
+    status.is_none_or(|s| !s.modal())
+}
+
+struct Completed {
+    result: Result<(), String>,
+    identities: Vec<(ChunkCoord, Lifetime, u64)>,
+    revisions: BTreeMap<ChunkCoord, u64>,
+    simulation_revision: u64,
+    eye: Vec3,
+    #[cfg(feature = "profiling")]
+    write_ms: f64,
+}
+
+#[cfg(feature = "profiling")]
+#[derive(Resource, Default, Clone, Copy)]
+pub(crate) struct SaveProfile {
+    pub snapshots: u64,
+    pub snapshot_ms: f64,
+    pub worker_ms: f64,
+    pub chunks: usize,
+}
+
+type RestoredSimulation = (save::Simulation, Vec<([i32; 3], save::Simulation)>);
+
+#[derive(Resource)]
+pub struct Persistence {
+    writer: Option<Arc<Mutex<Writer>>>,
+    id: WorldId,
+    pub(super) mapping: Mapping,
+    content: Content,
+    generation: Generation,
+    settings: WorldSettings,
+    task: Option<Task<Completed>>,
+    failed: bool,
+    elapsed: f64,
+    saved_revisions: BTreeMap<ChunkCoord, u64>,
+    saved_simulation: u64,
+    saved_eye: Option<Vec3>,
+    pub(super) reopened_eye: Option<Vec3>,
+    initial_simulation: Option<RestoredSimulation>,
+    initial_chunks: Vec<save::SavedChunk>,
+    opening_detail: String,
+}
+
+impl Persistence {
+    pub fn prepare(
+        opening: Opening,
+        loaded: &mut LoadedMods,
+        settings: WorldSettings,
+    ) -> Result<Self, String> {
+        let (content, mapping) = content(loaded);
+        let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
+            if let Some(recovered) = opening.recovered {
+                recovered
+                    .commit
+                    .compatible(&content)
+                    .map_err(|e| e.to_string())?;
+                let c = recovered.commit;
+                loaded.world = Some(c.parameters.restore(&mapping).map_err(|e| e.to_string())?);
+                let revisions = c
+                    .chunks
+                    .iter()
+                    .map(|c| (coord(c.coord), c.revision))
+                    .collect();
+                let detail = if recovered.skipped.is_empty() {
+                    "World reopened".into()
+                } else {
+                    format!(
+                        "Recovered previous commit: {}",
+                        recovered.skipped.join("; ")
+                    )
+                };
+                (
+                    Some(Vec3::from_array(c.player.eye_m)),
+                    Some((c.simulation, c.paused)),
+                    c.chunks,
+                    c.parameters,
+                    revisions,
+                    detail,
+                )
+            } else {
+                (
+                    None,
+                    None,
+                    vec![],
+                    Generation::capture(super::worldgen_params(loaded.world), &mapping)
+                        .map_err(|e| e.to_string())?,
+                    BTreeMap::new(),
+                    "New World • unsaved".into(),
+                )
+            };
+        let writer = opening
+            .directory
+            .as_ref()
+            .map(|p| Writer::acquire(p, &opening.id, &content))
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .map(|w| Arc::new(Mutex::new(w)));
+        eprintln!("{detail}; World {}", opening.id.as_str());
+        Ok(Self {
+            writer,
+            id: opening.id,
+            mapping,
+            content,
+            generation,
+            settings,
+            task: None,
+            failed: false,
+            elapsed: 0.0,
+            saved_revisions,
+            saved_simulation: 0,
+            saved_eye: reopened_eye,
+            reopened_eye,
+            initial_simulation,
+            initial_chunks,
+            opening_detail: detail,
+        })
+    }
+}
+
+pub(super) fn plugin(app: &mut App) {
+    #[cfg(feature = "profiling")]
+    app.init_resource::<SaveProfile>();
+    app.init_resource::<SaveStatus>()
+        .add_message::<SaveAction>();
+    let Some(mut p) = app.world_mut().remove_resource::<Persistence>() else {
+        return;
+    };
+    app.world_mut().resource_mut::<SaveStatus>().detail = if p.writer.is_none() {
+        "Temporary World • persistence disabled".into()
+    } else {
+        p.opening_detail.clone()
+    };
+    let mut store = app.world_mut().resource_mut::<ChunkStore>();
+    store.persistent = p.writer.is_some();
+    store.checkpoint = store.persistent && p.reopened_eye.is_none();
+    for saved in p.initial_chunks.drain(..) {
+        let restored = saved
+            .restore(&p.mapping)
+            .expect("validated before World opening");
+        let home = coord(saved.coord);
+        store
+            .archived
+            .insert(home, (Arc::new(restored.0), Arc::new(restored.1)));
+        store.revisions.insert(home, saved.revision);
+    }
+    let mut simulation = FluidSim::default();
+    if let Some((active, paused)) = p.initial_simulation.take() {
+        simulation.restore(active, paused);
+    }
+    app.insert_resource(simulation)
+        .insert_resource(p)
+        .add_systems(FixedFirst, requests)
+        .add_systems(FixedPreUpdate, drive.after(super::fluids::simulate));
+}
+
+fn requests(
+    mut intents: MessageReader<SaveAction>,
+    mut status: ResMut<SaveStatus>,
+    mut store: ResMut<ChunkStore>,
+    persistence: Option<ResMut<Persistence>>,
+    mut exit: MessageWriter<AppExit>,
+    mut edits: ResMut<super::edit::PendingEdits>,
+    mut journal: ResMut<super::undo::Journal>,
+) {
+    let Some(mut p) = persistence else {
+        intents.clear();
+        return;
+    };
+    for action in intents.read() {
+        match action {
+            SaveAction::SaveQuit | SaveAction::Retry => {
+                if matches!(action, SaveAction::SaveQuit) {
+                    status.quitting = true;
+                }
+                status.confirm_unsafe = false;
+                status.error = None;
+                edits.clear();
+                journal.cancel_requests();
+                p.failed = false;
+                store.checkpoint = true;
+            }
+            SaveAction::Return => {
+                status.quitting = false;
+                status.confirm_unsafe = false;
+                if p.task.is_none() {
+                    store.checkpoint = false;
+                }
+            }
+            SaveAction::AskUnsafe => status.confirm_unsafe = true,
+            SaveAction::ConfirmUnsafe if status.confirm_unsafe => {
+                exit.write(AppExit::Success);
+            }
+            SaveAction::CancelUnsafe => status.confirm_unsafe = false,
+            _ => {}
+        }
+    }
+}
+
+fn drive(
+    mut p: ResMut<Persistence>,
+    mut status: ResMut<SaveStatus>,
+    mut store: ResMut<ChunkStore>,
+    mut sim: ResMut<FluidSim>,
+    (player, time): (Query<&Player>, Res<Time<Fixed>>),
+    mut exit: MessageWriter<AppExit>,
+    #[cfg(feature = "profiling")] mut profile: ResMut<SaveProfile>,
+) {
+    let Ok(player) = player.single() else {
+        return;
+    };
+    p.elapsed += time.delta_secs_f64();
+    if let Some(done) = p.task.as_mut().and_then(check_ready) {
+        #[cfg(feature = "profiling")]
+        {
+            profile.worker_ms = done.write_ms;
+        }
+        p.task = None;
+        status.saving = false;
+        match done.result {
+            Ok(()) => {
+                for (home, life, revision) in done.identities {
+                    if store.lifetime(home) == Some(life)
+                        && store.revisions.get(&home).copied().unwrap_or(0) == revision
+                        && store.pending_evictions.contains(&home)
+                    {
+                        store.approved_evictions.insert(home, (life, revision));
+                    }
+                }
+                p.saved_revisions = done.revisions;
+                p.saved_simulation = done.simulation_revision;
+                p.saved_eye = Some(done.eye);
+                status.detail = "World saved".into();
+                status.error = None;
+                if status.quitting
+                    && p.saved_revisions == store.revisions
+                    && done.eye == player.eye()
+                    && p.saved_simulation == sim.revision
+                {
+                    exit.write(AppExit::Success);
+                } else if status.quitting {
+                    store.checkpoint = true;
+                }
+            }
+            Err(error) => {
+                error!("World save failed: {error}");
+                status.error = Some(error);
+                status.detail = "Save failed • changes remain unsaved".into();
+                p.failed = true;
+                store.checkpoint = status.quitting;
+            }
+        }
+    }
+    status.dirty = p.saved_revisions != store.revisions
+        || p.saved_eye != Some(player.eye())
+        || p.saved_simulation != sim.revision;
+    if p.elapsed >= 30.0 {
+        p.elapsed = 0.0;
+        if status.dirty {
+            store.checkpoint = true;
+            p.failed = false;
+        }
+    }
+    if p.task.is_some() {
+        store.checkpoint = status.quitting;
+    }
+    if p.task.is_none()
+        && !p.failed
+        && store
+            .pending_evictions
+            .iter()
+            .any(|h| !store.approved_evictions.contains_key(h))
+    {
+        store.checkpoint = true;
+    }
+    if p.task.is_some() || p.failed || !store.checkpoint || !sim.at_boundary() {
+        return;
+    }
+    if p.writer.is_none() {
+        status.detail = "Temporary World • persistence disabled".into();
+        store.checkpoint = false;
+        if status.quitting {
+            exit.write(AppExit::Success);
+        }
+        return;
+    }
+    #[cfg(feature = "profiling")]
+    let capture_started = std::time::Instant::now();
+    sim.pause_evictions(&store, &p.mapping);
+    let captured = sim.checkpoint(&p.mapping);
+    let (simulation, paused) = match captured {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            status.error = Some(error.to_string());
+            p.failed = true;
+            return;
+        }
+    };
+    let chunks: Vec<_> = store
+        .revisions
+        .iter()
+        .filter_map(|(&home, &revision)| {
+            store
+                .saved_source(home)
+                .map(|(chunk, overlay)| (home, revision, chunk, overlay))
+        })
+        .collect();
+    let identities = store
+        .pending_evictions
+        .iter()
+        .filter_map(|&home| {
+            Some((
+                home,
+                store.lifetime(home)?,
+                store.revisions.get(&home).copied().unwrap_or(0),
+            ))
+        })
+        .collect();
+    let revisions = store.revisions.clone();
+    let simulation_revision = sim.revision;
+    let eye = player.eye();
+    let writer = Arc::clone(p.writer.as_ref().expect("persistent"));
+    let mapping = p.mapping.clone();
+    let content = p.content.clone();
+    let generation = p.generation.clone();
+    let settings = p.settings;
+    let id = p.id.clone();
+    #[cfg(feature = "profiling")]
+    {
+        profile.chunks = chunks.len();
+        profile.snapshots += 1;
+    }
+    p.task = Some(IoTaskPool::get().spawn(async move {
+        #[cfg(feature = "profiling")]
+        let write_started = std::time::Instant::now();
+        let result = (|| {
+            let chunks = chunks
+                .into_iter()
+                .map(|(home, revision, chunk, overlay)| {
+                    save::SavedChunk::capture(key(home), revision, &chunk, &overlay, &mapping)
+                })
+                .collect::<Result<_, _>>()?;
+            let mut writer = writer
+                .lock()
+                .map_err(|_| save::Error::Corrupt("save worker lock poisoned".into()))?;
+            let commit = Commit {
+                format: save::FORMAT_VERSION,
+                generator: save::GENERATOR_VERSION,
+                world: id,
+                sequence: writer.next_sequence()?,
+                seed: settings.seed,
+                voxel_size_m: settings.voxel_size,
+                parameters: generation,
+                content,
+                player: save::Player {
+                    eye_m: eye.to_array(),
+                    extensions: BTreeMap::new(),
+                },
+                chunks,
+                simulation,
+                paused: paused
+                    .into_iter()
+                    .map(|(home, saved)| (home, (*saved).clone()))
+                    .collect(),
+            };
+            writer.write(&commit)
+        })()
+        .map_err(|e: save::Error| e.to_string());
+        Completed {
+            result,
+            identities,
+            revisions,
+            simulation_revision,
+            eye,
+            #[cfg(feature = "profiling")]
+            write_ms: write_started.elapsed().as_secs_f64() * 1e3,
+        }
+    }));
+    #[cfg(feature = "profiling")]
+    {
+        profile.snapshot_ms = capture_started.elapsed().as_secs_f64() * 1e3;
+    }
+    status.saving = true;
+    status.detail = "Saving World…".into();
+    store.checkpoint = status.quitting;
+}
+
+pub(super) fn key(c: ChunkCoord) -> [i32; 3] {
+    [c.x, c.y, c.z]
+}
+pub(super) fn coord(c: [i32; 3]) -> ChunkCoord {
+    ChunkCoord::new(c[0], c[1], c[2])
+}
+
+#[cfg(test)]
+mod tests;

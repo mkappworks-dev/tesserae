@@ -455,6 +455,14 @@ impl Timers {
         Ok(timers)
     }
 
+    pub fn homes(&self) -> std::collections::BTreeSet<[i32; 3]> {
+        self.flow
+            .keys()
+            .chain(self.fire.keys())
+            .map(|at| chunk_of(*at).0)
+            .collect()
+    }
+
     /// Takes the timers of `cells`, for a worker evaluating just those.
     pub fn split_off(&mut self, cells: &[Cell]) -> Timers {
         Timers {

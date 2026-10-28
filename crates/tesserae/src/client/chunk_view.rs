@@ -449,7 +449,7 @@ fn spawn_camera(
     world: Res<WorldSettings>,
     fog_settings: Res<FogSettings>,
 ) {
-    let eye = spawn.eye();
+    let eye = spawn.entry_eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
 

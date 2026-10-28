@@ -21,6 +21,7 @@ mod pick;
 mod pose;
 mod preview;
 mod removal;
+mod save;
 mod tile_preview;
 
 use bevy::prelude::*;
@@ -29,6 +30,7 @@ pub fn plugin(app: &mut App) {
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_plugins(capture::plugin);
     app.add_plugins((
+        save::plugin,
         camera::plugin,
         chunk_view::plugin,
         edit::plugin,

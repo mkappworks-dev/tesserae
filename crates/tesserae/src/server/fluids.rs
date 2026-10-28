@@ -107,6 +107,9 @@ const EDITED_CAP: usize = 4096;
 #[derive(Resource)]
 pub(in crate::server) struct FluidSim {
     now: Step,
+    pub(super) revision: u64,
+    paused_chunks: BTreeMap<ChunkCoord, Arc<tesserae_core::save::Simulation>>,
+    boundary_held: bool,
     agenda: Agenda,
     /// Held here between steps and by the running step's slices during one.
     timers: Timers,
@@ -171,6 +174,9 @@ impl Default for FluidSim {
     fn default() -> Self {
         FluidSim {
             now: 0,
+            revision: 0,
+            paused_chunks: BTreeMap::new(),
+            boundary_held: false,
             agenda: Agenda::new(AGENDA),
             timers: Timers::default(),
             running: None,
@@ -215,7 +221,137 @@ fn offset(at: Cell, d: Cell) -> Cell {
     [at[0] + d[0], at[1] + d[1], at[2] + d[2]]
 }
 
+pub(super) type SimulationCheckpoint = (
+    tesserae_core::save::Simulation,
+    Vec<([i32; 3], Arc<tesserae_core::save::Simulation>)>,
+);
+
 impl FluidSim {
+    pub(super) fn at_boundary(&self) -> bool {
+        self.running.is_none()
+    }
+
+    pub(super) fn checkpoint(
+        &self,
+        mapping: &tesserae_core::save::Mapping,
+    ) -> Result<SimulationCheckpoint, tesserae_core::save::Error> {
+        if !self.at_boundary() {
+            return Err(tesserae_core::save::Error::Incompatible(
+                "step is running".into(),
+            ));
+        }
+        Ok((
+            self.active_checkpoint(mapping)?,
+            self.paused_chunks
+                .iter()
+                .filter(|(_, s)| !s.homes().is_empty())
+                .map(|(&h, s)| (key(h), Arc::clone(s)))
+                .collect(),
+        ))
+    }
+
+    fn active_checkpoint(
+        &self,
+        mapping: &tesserae_core::save::Mapping,
+    ) -> Result<tesserae_core::save::Simulation, tesserae_core::save::Error> {
+        let simulation = tesserae_core::save::Simulation {
+            logical_step: self.now,
+            landed_per_step: self.landed_per_step,
+            emitters_per_step: self.emitters_per_step,
+            timers: self.timers.checkpoint(self.now, mapping)?,
+            agenda: self.agenda.checkpoint(self.now)?,
+            landing_turn: self.turn,
+            landing_cursors: self.cursors.iter().map(|(&h, &at)| (h, at)).collect(),
+        };
+        Ok(simulation)
+    }
+
+    pub(super) fn restore(
+        &mut self,
+        active: tesserae_core::save::Simulation,
+        paused: Vec<([i32; 3], tesserae_core::save::Simulation)>,
+    ) {
+        self.now = active.logical_step;
+        self.boundary_held = true;
+        self.landed_per_step = active.landed_per_step;
+        self.emitters_per_step = active.emitters_per_step;
+        let template = active.empty();
+        self.agenda =
+            Agenda::restore(&template.agenda, self.now).expect("validated Agenda metadata");
+        self.turn = active.landing_turn;
+        for (home, saved) in active.partition() {
+            self.paused_chunks.insert(coord(home), Arc::new(saved));
+        }
+        for (home, simulation) in paused {
+            self.paused_chunks.insert(coord(home), Arc::new(simulation));
+        }
+    }
+
+    pub(super) fn pause_evictions(
+        &mut self,
+        store: &ChunkStore,
+        mapping: &tesserae_core::save::Mapping,
+    ) {
+        let active = self
+            .active_checkpoint(mapping)
+            .expect("validated content and completed step");
+        let mut parts = active.partition();
+        for &home in &store.pending_evictions {
+            if self.paused_chunks.contains_key(&home) {
+                continue;
+            }
+            self.paused_chunks.insert(
+                home,
+                Arc::new(parts.remove(&key(home)).unwrap_or_else(|| active.empty())),
+            );
+            self.simulated.remove(&home);
+            self.awaiting.remove(&home);
+            self.suspended.remove(&home);
+            self.agenda.forget(key(home));
+            self.timers.retain(|at| VoxelCoord::of(at).chunk != home);
+            self.cursors.remove(&key(home));
+            self.revision += 1;
+        }
+    }
+
+    fn resume_ready(
+        &mut self,
+        store: &ChunkStore,
+        meshes: &MeshState,
+        tables: &Tables,
+        heat: &HeatScale,
+        mapping: &tesserae_core::save::Mapping,
+    ) {
+        let ready: Vec<_> = self
+            .paused_chunks
+            .keys()
+            .copied()
+            .filter(|h| {
+                store.contains(*h) && !meshes.is_unlit(*h) && !store.pending_evictions.contains(h)
+            })
+            .collect();
+        for home in ready {
+            let saved = self.paused_chunks.remove(&home).expect("paused");
+            self.agenda
+                .resume(&saved.agenda, self.now)
+                .expect("validated Agenda");
+            self.agenda.unpark(key(home));
+            self.timers.merge(
+                Timers::restore(&saved.timers, self.now, mapping).expect("validated timers"),
+            );
+            self.cursors.extend(saved.landing_cursors.iter().copied());
+            self.simulated
+                .insert(home, store.lifetime(home).expect("held"));
+            self.awaiting.remove(&home);
+            if wet(store, home, &tables.fluids) || holds_fuel(store, tables, key(home)) {
+                self.agenda.rescan(Span::chunk(key(home)));
+            }
+            self.rescan_readers(home);
+            self.rescan_fuel_around(store, tables, heat, home);
+            self.revision += 1;
+        }
+    }
+
     #[cfg(test)]
     pub fn now(&self) -> Step {
         self.now
@@ -432,6 +568,7 @@ pub(in crate::server) fn simulate(
     mut meshes: ResMut<MeshState>,
     tables: Res<ContentTables>,
     world: Res<WorldSettings>,
+    persistence: Option<Res<super::persistence::Persistence>>,
 ) {
     let sim = &mut *sim;
     sim.reach = Reach::of(&tables);
@@ -439,20 +576,47 @@ pub(in crate::server) fn simulate(
         sim.scale
             .get_or_insert_with(|| Arc::new(FlowScale::new(&tables, world.voxel_size))),
     );
+    if sim.at_boundary()
+        && let Some(p) = persistence.as_ref()
+    {
+        sim.resume_ready(&store, &meshes, &tables, &scale.heat, &p.mapping);
+    }
     absorb_chunks(sim, &mut store, &meshes, &tables, &scale.heat);
     absorb_changes(sim, &mut store, &tables.0, &scale.heat);
+    if store.persistent {
+        store.simulation_chunks = sim
+            .agenda
+            .homes()
+            .into_iter()
+            .chain(sim.timers.homes())
+            .map(coord)
+            .collect();
+        if let Some(running) = &sim.running {
+            store
+                .simulation_chunks
+                .extend(running.read.keys().copied().map(coord));
+        }
+    }
     #[cfg(test)]
     if sim.running.is_some() && sim.stall > 0 {
         sim.stall -= 1;
         return;
+    }
+    if sim.running.is_some() || (!store.checkpoint && !sim.agenda.is_empty()) {
+        sim.revision += 1;
     }
     if sim.running.is_some() {
         if !collect(sim, &tables.0, &scale) {
             return;
         }
         land_step(sim, &mut store, &mut meshes, &tables.0, &scale.heat);
-    } else {
+    } else if !sim.boundary_held {
         sim.next_step();
+    }
+    sim.boundary_held = false;
+    if store.checkpoint {
+        sim.boundary_held = true;
+        return;
     }
     start_step(sim, &store, &tables.0, &scale);
 }
@@ -468,13 +632,24 @@ fn absorb_chunks(
 ) {
     let fluids = &tables.fluids;
     for coord in store.take_lifecycle() {
+        if !store.contains(coord)
+            && sim
+                .paused_chunks
+                .get(&coord)
+                .is_some_and(|s| s.homes().is_empty())
+        {
+            sim.paused_chunks.remove(&coord);
+        }
         if let Some(&life) = sim.simulated.get(&coord)
             && store.lifetime(coord) != Some(life)
         {
             evict(sim, store, coord, fluids);
             sim.rescan_fuel_around(store, tables, heat, coord);
         }
-        if store.contains(coord) && !sim.simulated.contains_key(&coord) {
+        if store.contains(coord)
+            && !sim.simulated.contains_key(&coord)
+            && !sim.paused_chunks.contains_key(&coord)
+        {
             sim.awaiting.insert(coord);
         }
     }

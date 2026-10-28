@@ -96,3 +96,13 @@ gap is held again, unless its solid was replaced meanwhile.
   cube wets all of it; both follow from the whole-Voxel rule.
 - The save step inherits the inventory above, including the timers and the
   Logical step.
+
+## Durable eviction and reopen
+
+Persistent Worlds now replace the historical discard behavior above. Server
+checkpoints at completed logical-step boundaries retain full Chunk/Overlay
+state, running and frozen timers, Agenda wakes and rescan cursors. Eviction
+pauses the Chunk and requires a successful matching save before release. Its
+remaining delays resume on admission, even if other Chunks ran meanwhile;
+offline wall time is never added. Light, meshes, connections and Lifetimes
+remain derived. See [World persistence](../world-persistence.md).

@@ -17,17 +17,37 @@ fn main() -> std::process::ExitCode {
     #[cfg(feature = "profiling")]
     let process_start = profiling::ProcessStart(std::time::Instant::now());
     #[cfg(any(feature = "dev", feature = "profiling"))]
-    let settings = world::WorldSettings::from_env(|name| std::env::var(name).ok());
+    let mut settings = world::WorldSettings::from_env(|name| std::env::var(name).ok());
     #[cfg(not(any(feature = "dev", feature = "profiling")))]
-    let settings = world::WorldSettings::default();
-    let loaded = match server::mods::load_from_env(&settings) {
+    let mut settings = world::WorldSettings::default();
+    let opening = match server::persistence::Opening::from_env() {
+        Ok(opening) => opening,
+        Err(error) => {
+            eprintln!("Cannot open World: {error}");
+            return std::process::ExitCode::FAILURE;
+        }
+    };
+    if let Some(recovered) = &opening.recovered {
+        settings.seed = recovered.commit.seed;
+        settings.voxel_size = recovered.commit.voxel_size_m;
+    }
+    let mut loaded = match server::mods::load_from_env(&settings, &opening) {
         Ok(loaded) => loaded,
         Err(error) => {
             eprintln!("Cannot open World: {error}");
             return std::process::ExitCode::FAILURE;
         }
     };
+    let persistence =
+        match server::persistence::Persistence::prepare(opening, &mut loaded, settings) {
+            Ok(persistence) => persistence,
+            Err(error) => {
+                eprintln!("Cannot open World: {error}");
+                return std::process::ExitCode::FAILURE;
+            }
+        };
     let mut app = App::new();
+    app.insert_resource(persistence);
     #[cfg(feature = "profiling")]
     app.insert_resource(process_start);
     app.insert_resource(settings)
@@ -35,6 +55,7 @@ fn main() -> std::process::ExitCode {
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {
+                    close_when_requested: false,
                     primary_window: Some(Window {
                         title: "Tesserae".into(),
                         ..default()

@@ -166,6 +166,11 @@ impl ModInstance {
         world: WorldInfo,
         ids: Registered,
     ) -> Result<ModInstance, ModFault> {
+        if world.reopened && !matches!(self.guest, Guest::V03(_)) {
+            return Err(ModFault::Trap(
+                "this contract cannot distinguish new and reopened Worlds".into(),
+            ));
+        }
         self.refuel()?;
         let denied = self.store.data().denied();
         let wall = self.limits.max_call_wall;
@@ -189,7 +194,7 @@ impl ModInstance {
             Guest::V03(m) => {
                 let call = m
                     .tesserae_mods_guest()
-                    .call_start(&mut self.store, world, &ids);
+                    .call_start(&mut self.store, &world, &ids);
                 guarded(wall, &denied, call).await?;
             }
         }

@@ -144,7 +144,7 @@ pub(in crate::server) struct LodStore {
     /// Index `level - 1`, grown on first write so the store needs no level count.
     levels: Vec<HashMap<ChunkCoord, Arc<Chunk>>>,
     /// Level 1's fluid and fire, for the Chunks that show any.
-    overlays: HashMap<ChunkCoord, Arc<ChunkOverlay>>,
+    overlays: HashMap<(u32, ChunkCoord), Arc<ChunkOverlay>>,
 }
 
 static DRY: std::sync::LazyLock<Arc<ChunkOverlay>> =
@@ -181,8 +181,8 @@ impl LodStore {
     /// A held Chunk with what stands beside its Voxels, which is nothing but at level 1.
     pub fn shown(&self, level: u32, coord: ChunkCoord) -> Option<Shown> {
         let chunk = self.shared(level, coord)?;
-        let overlay = match self.overlays.get(&coord) {
-            Some(overlay) if level == 1 => Arc::clone(overlay),
+        let overlay = match self.overlays.get(&(level, coord)) {
+            Some(overlay) => Arc::clone(overlay),
             _ => Arc::clone(&DRY),
         };
         Some(Shown { chunk, overlay })
@@ -206,10 +206,11 @@ impl LodStore {
 
     pub(in crate::server) fn insert(&mut self, level: u32, coord: ChunkCoord, coarse: Coarse) {
         self.at_mut(level).insert(coord, Arc::new(coarse.chunk));
-        if level == 1 && coarse.overlay.uniform() != Some(tesserae_core::Overlay::NONE) {
-            self.overlays.insert(coord, Arc::new(coarse.overlay));
-        } else if level == 1 {
-            self.overlays.remove(&coord);
+        if coarse.overlay.uniform() != Some(tesserae_core::Overlay::NONE) {
+            self.overlays
+                .insert((level, coord), Arc::new(coarse.overlay));
+        } else {
+            self.overlays.remove(&(level, coord));
         }
     }
 
@@ -219,9 +220,7 @@ impl LodStore {
         mut keep: impl FnMut(ChunkCoord) -> bool,
     ) {
         self.at_mut(level).retain(|&c, _| keep(c));
-        if level == 1 {
-            self.overlays.retain(|&c, _| keep(c));
-        }
+        self.overlays.retain(|&(l, c), _| l != level || keep(c));
     }
 }
 
@@ -540,6 +539,38 @@ pub(in crate::server) fn generate_coarse(
     downsample_changed(children, coord.y, tables, waterline)
 }
 
+fn generate_persistent(
+    level: u32,
+    coord: ChunkCoord,
+    sources: &[Worldgen],
+    saved: &std::collections::BTreeMap<ChunkCoord, Held>,
+    tables: &Tables,
+) -> Coarse {
+    let children = std::array::from_fn(|i| {
+        let child = child(coord, i);
+        if level == 1 {
+            return saved.get(&child).cloned();
+        }
+        let divisor = 1i32 << (level - 1);
+        let relevant = saved.keys().any(|home| {
+            ChunkCoord::new(
+                home.x.div_euclid(divisor),
+                home.y.div_euclid(divisor),
+                home.z.div_euclid(divisor),
+            ) == child
+        });
+        relevant.then(|| {
+            let coarse = generate_persistent(level - 1, child, sources, saved, tables);
+            Held {
+                chunk: Arc::new(coarse.chunk),
+                changed: Some(Arc::new(coarse.overlay)),
+            }
+        })
+    });
+    let source = &sources[level as usize - 1];
+    generate_coarse(source, coord, &children, tables, waterline(source))
+}
+
 /// What generation fills with its lake at level 0, for level 1 to recognise.
 fn waterline(source: &Worldgen) -> Option<Waterline> {
     source.water().map(|w| Waterline {
@@ -804,13 +835,13 @@ pub(in crate::server) fn stream_lod(
     jobs.mesh.reset_counts();
     jobs.mesh.poll();
 
-    // Level 1 only: levels above it are generated from the generator alone and
-    // never read the ChunkStore, so an Edit cannot reach them.
     for coord in changed {
-        let covering = cover(coord);
-        // A job in flight read its children before the change and lands stale.
-        if store.contains(1, covering) || jobs.generate.contains((1, covering)) {
-            state.invalidate(1, covering);
+        let mut covering = coord;
+        for level in 1..if chunks.persistent { levels } else { 2 } {
+            covering = cover(covering);
+            if store.contains(level, covering) || jobs.generate.contains((level, covering)) {
+                state.invalidate(level, covering);
+            }
         }
     }
 
@@ -1061,6 +1092,34 @@ fn dispatch(
             } else {
                 Default::default()
             };
+            let persistent: std::collections::BTreeMap<_, _> = if chunks.persistent {
+                chunks
+                    .revisions
+                    .keys()
+                    .filter_map(|&home| {
+                        let divisor = 1i32 << plan.level;
+                        if ChunkCoord::new(
+                            home.x.div_euclid(divisor),
+                            home.y.div_euclid(divisor),
+                            home.z.div_euclid(divisor),
+                        ) != coord
+                        {
+                            return None;
+                        }
+                        let (chunk, overlay) = chunks.saved_source(home)?;
+                        Some((
+                            home,
+                            Held {
+                                chunk,
+                                changed: Some(overlay),
+                            },
+                        ))
+                    })
+                    .collect()
+            } else {
+                Default::default()
+            };
+            let sources = (!persistent.is_empty()).then(|| generators.sources.clone());
             let source = generators.sources[Plan::index(plan.level)].clone();
             let waterline = if plan.level == 1 {
                 waterline(&source)
@@ -1072,7 +1131,11 @@ fn dispatch(
             let level = plan.level;
             jobs.generate.spawn((level, coord), move || {
                 times.generated(level, || {
-                    generate_coarse(&source, coord, &held_children, &tables, waterline)
+                    if let Some(sources) = sources {
+                        generate_persistent(level, coord, &sources, &persistent, &tables)
+                    } else {
+                        generate_coarse(&source, coord, &held_children, &tables, waterline)
+                    }
                 })
             });
         }
@@ -2853,4 +2916,48 @@ mod tests {
     }
 
     mod held;
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn archived_removals_are_sources_for_every_coarse_level() {
+        let tables = crate::server::fixture_tables();
+        let world = WorldSettings::default();
+        let base = Worldgen::new(
+            world.seed,
+            world.voxel_size,
+            tesserae_core::testgen::world_params(),
+        );
+        let generators = LodGenerators::new(&world, &base, 5);
+        let home = ChunkCoord::new(0, -2, 0);
+        let saved = BTreeMap::from([(
+            home,
+            Held {
+                chunk: Arc::new(Chunk::air()),
+                changed: Some(Arc::new(ChunkOverlay::none())),
+            },
+        )]);
+        for level in 1..=4 {
+            let divisor = 1i32 << level;
+            let covering = ChunkCoord::new(0, home.y.div_euclid(divisor), 0);
+            let coarse = generate_persistent(level, covering, &generators.sources, &saved, &tables);
+            let plain = generate_coarse(
+                &generators.sources[level as usize - 1],
+                covering,
+                &Default::default(),
+                &tables,
+                None,
+            );
+            let y = (home.y * 32).div_euclid(divisor).rem_euclid(32) as usize;
+            assert!(coarse.chunk.get(0, y, 0).is_air(), "level {level}");
+            assert!(
+                !plain.chunk.get(0, y, 0).is_air(),
+                "fixture must contain ground at level {level}"
+            );
+        }
+    }
 }

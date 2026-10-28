@@ -37,6 +37,7 @@ struct Row {
     cpu_s: Option<f64>,
     cost: FrameCost,
     sim: SimulationProfile,
+    save: crate::server::persistence::SaveProfile,
     fixture: ProfileFixtureStatus,
     shown: bool,
     settled: bool,
@@ -98,10 +99,11 @@ fn end(
     mut profile: ResMut<Profile>,
     _thread: NonSend<std::rc::Rc<()>>,
     mut cost: ResMut<MainThreadCost>,
-    (sim, streaming, fixture): (
+    (sim, streaming, fixture, save_profile): (
         Res<SimulationProfile>,
         Res<StreamingStats>,
         Res<ProfileFixtureStatus>,
+        Res<crate::server::persistence::SaveProfile>,
     ),
     (settings, view): (Res<WorldSettings>, Res<StreamingSettings>),
     (windows, cameras): (Query<&Window>, Query<(&Camera, &RenderTarget)>),
@@ -120,6 +122,7 @@ fn end(
         cpu_s,
         cost: cost.take_frame(),
         sim: *sim,
+        save: *save_profile,
         fixture: *fixture,
         shown: streaming.shown,
         settled: streaming.settled,
@@ -149,13 +152,13 @@ fn save(
     );
     writeln!(
         out,
-        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning"
+        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks"
     )?;
     for r in &profile.rows {
         let phase = phase(r.start_s);
         writeln!(
             out,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.id,
             r.start_s,
             r.start_s + r.interval_s,
@@ -182,7 +185,11 @@ fn save(
             r.focused,
             r.fixture.ready,
             r.fixture.ignitions,
-            r.fixture.fire_burning
+            r.fixture.fire_burning,
+            r.save.snapshots,
+            r.save.snapshot_ms,
+            r.save.worker_ms,
+            r.save.chunks
         )?;
     }
     out.flush()?;
@@ -294,6 +301,7 @@ mod tests {
                 cpu_s: Some(0.01),
                 cost: FrameCost::default(),
                 sim: SimulationProfile::default(),
+                save: crate::server::persistence::SaveProfile::default(),
                 fixture: ProfileFixtureStatus::default(),
                 shown: false,
                 settled: false,

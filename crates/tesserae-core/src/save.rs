@@ -518,9 +518,20 @@ impl Commit {
             self.simulation.logical_step,
             &mapping,
         )?;
-        for (_, paused) in &self.paused {
-            crate::agenda::Agenda::restore(&paused.agenda, paused.logical_step)?;
-            crate::flow::Timers::restore(&paused.timers, paused.logical_step, &mapping)?;
+        if self.simulation.logical_step > u64::MAX / 4 {
+            return Err(Error::Corrupt(
+                "logical step exceeds supported range".into(),
+            ));
+        }
+        let mut homes = self.simulation.homes();
+        for (home, paused) in &self.paused {
+            if !homes.insert(*home) || paused.homes().iter().any(|h| h != home) {
+                return Err(Error::Corrupt(
+                    "overlapping or misplaced paused simulation".into(),
+                ));
+            }
+            crate::agenda::Agenda::restore(&paused.agenda, self.simulation.logical_step)?;
+            crate::flow::Timers::restore(&paused.timers, self.simulation.logical_step, &mapping)?;
         }
         Ok(())
     }
@@ -540,9 +551,7 @@ impl std::fmt::Display for Error {
             Self::Io(e) => e.fmt(f),
             Self::Corrupt(s) => write!(f, "corrupt World save: {s}"),
             Self::Incompatible(s) => write!(f, "cannot open World: {s}"),
-            Self::Busy => {
-                f.write_str("World is already open or a stale writer lock needs recovery")
-            }
+            Self::Busy => f.write_str("World already has an active writer"),
         }
     }
 }
@@ -553,8 +562,8 @@ impl From<io::Error> for Error {
     }
 }
 
-/// Single writer for one World's directory. Dropping it removes only its lock.
-/// A process interruption leaves a lock for explicit recovery by the caller.
+/// Single writer for one World's directory, locked by the OS until close or
+/// process interruption. The lock file stays to avoid unlink/recreate races.
 pub struct Writer {
     directory: PathBuf,
     _lock: File,
@@ -579,26 +588,6 @@ impl Writer {
                 "directory belongs to another World".into(),
             ));
         }
-        // Sequence numbers of corrupt commits are also reserved after recovery.
-        let last = match fs::read_dir(directory) {
-            Ok(entries) => {
-                let mut last = None;
-                for entry in entries {
-                    let path = entry?.path();
-                    if path.extension().is_some_and(|e| e == "commit") {
-                        let n = path
-                            .file_stem()
-                            .and_then(|n| n.to_str())
-                            .and_then(|n| n.parse::<u64>().ok())
-                            .ok_or_else(|| Error::Corrupt("invalid commit filename".into()))?;
-                        last = Some(last.map_or(n, |v: u64| v.max(n)));
-                    }
-                }
-                last
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e.into()),
-        };
         fs::create_dir_all(directory)?;
         let lock = OpenOptions::new()
             .read(true)
@@ -614,7 +603,7 @@ impl Writer {
             directory: directory.to_owned(),
             _lock: lock,
             world: world.clone(),
-            last,
+            last: None,
             installed: installed.clone(),
         };
         // Another writer may have completed between the read-only validation
@@ -625,7 +614,20 @@ impl Writer {
                     "directory belongs to another World".into(),
                 ));
             }
-            writer.last = Some(writer.last.unwrap_or(0).max(recovered.commit.sequence));
+            writer.last = Some(recovered.commit.sequence);
+        }
+        // Reserve every filename, including corrupt commits skipped by recovery,
+        // while holding the lock rather than racing an earlier writer.
+        for entry in fs::read_dir(directory)? {
+            let path = entry?.path();
+            if path.extension().is_some_and(|e| e == "commit") {
+                let n = path
+                    .file_stem()
+                    .and_then(|n| n.to_str())
+                    .and_then(|n| n.parse::<u64>().ok())
+                    .ok_or_else(|| Error::Corrupt("invalid commit filename".into()))?;
+                writer.last = Some(writer.last.unwrap_or(0).max(n));
+            }
         }
         Ok(writer)
     }
@@ -657,6 +659,7 @@ impl Writer {
             .directory
             .join(format!("{:020}.commit", commit.sequence));
         if path.exists() {
+            self.last = Some(commit.sequence);
             return Err(Error::Incompatible("commit sequence already exists".into()));
         }
         let body = serde_json::to_vec(commit).map_err(|e| Error::Corrupt(e.to_string()))?;
@@ -678,9 +681,10 @@ impl Writer {
             before(WritePhase::FileSync)?;
             file.sync_all()?;
             before(WritePhase::Rename)?;
-            fs::rename(&temp, &path)?;
+            drop(file);
+            rename_commit(&temp, &path)?;
             before(WritePhase::DirectorySync)?;
-            File::open(&self.directory)?.sync_all()?;
+            sync_directory(&self.directory)?;
             Ok::<_, Error>(())
         })();
         if result.is_err() {
@@ -691,6 +695,36 @@ impl Writer {
         }
         result
     }
+}
+
+#[cfg(not(windows))]
+fn rename_commit(from: &Path, to: &Path) -> io::Result<()> {
+    fs::rename(from, to)
+}
+
+#[cfg(windows)]
+fn rename_commit(from: &Path, to: &Path) -> io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+    let from: Vec<_> = from.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<_> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+    // Both paths are live, nul-terminated UTF-16 buffers for this synchronous call.
+    if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) } == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+fn sync_directory(directory: &Path) -> io::Result<()> {
+    File::open(directory)?.sync_all()
+}
+
+#[cfg(windows)]
+fn sync_directory(_directory: &Path) -> io::Result<()> {
+    // Windows uses the write-through rename; POSIX directory fsync is unavailable.
+    Ok(())
 }
 
 pub struct Recovered {
@@ -839,15 +873,70 @@ impl DirtyState {
 mod tests;
 
 impl Simulation {
-    pub fn only(&self, home: [i32; 3]) -> Self {
-        let mine = |at: [i32; 3]| crate::flow::chunk_of(at).0 == home;
-        let mut saved = self.clone();
-        saved.timers.flow.retain(|e| mine(e.0));
-        saved.timers.fire.retain(|e| mine(e.0));
-        saved.agenda.wakes.retain(|e| mine(e.0));
-        saved.agenda.rescans.retain(|r| r.home == home);
-        saved.landing_cursors.retain(|e| e.0 == home);
-        saved
+    pub fn empty(&self) -> Self {
+        Self {
+            logical_step: self.logical_step,
+            landed_per_step: self.landed_per_step,
+            emitters_per_step: self.emitters_per_step,
+            timers: TimerState {
+                flow: vec![],
+                fire: vec![],
+            },
+            agenda: Agenda {
+                capacity: self.agenda.capacity,
+                reserve: self.agenda.reserve,
+                scan_per_step: self.agenda.scan_per_step,
+                wakes: vec![],
+                rescans: vec![],
+                turn: self.agenda.turn,
+            },
+            landing_turn: self.landing_turn,
+            landing_cursors: vec![],
+        }
+    }
+
+    pub fn partition(&self) -> BTreeMap<[i32; 3], Self> {
+        let mut parts = BTreeMap::<_, Self>::new();
+        for e in &self.timers.flow {
+            parts
+                .entry(crate::flow::chunk_of(e.0).0)
+                .or_insert_with(|| self.empty())
+                .timers
+                .flow
+                .push(e.clone());
+        }
+        for e in &self.timers.fire {
+            parts
+                .entry(crate::flow::chunk_of(e.0).0)
+                .or_insert_with(|| self.empty())
+                .timers
+                .fire
+                .push(e.clone());
+        }
+        for e in &self.agenda.wakes {
+            parts
+                .entry(crate::flow::chunk_of(e.0).0)
+                .or_insert_with(|| self.empty())
+                .agenda
+                .wakes
+                .push(*e);
+        }
+        for r in &self.agenda.rescans {
+            parts
+                .entry(r.home)
+                .or_insert_with(|| self.empty())
+                .agenda
+                .rescans
+                .push(r.clone());
+        }
+        for e in &self.landing_cursors {
+            parts
+                .entry(e.0)
+                .or_insert_with(|| self.empty())
+                .landing_cursors
+                .push(*e);
+        }
+        parts
     }
 
     pub fn homes(&self) -> BTreeSet<[i32; 3]> {

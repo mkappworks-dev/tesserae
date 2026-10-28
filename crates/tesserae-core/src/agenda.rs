@@ -341,10 +341,28 @@ impl Agenda {
             }
             self.rescans.insert(home, scan);
         }
+        if self.turn.is_none() {
+            self.turn = restored.turn;
+        }
         for (at, due) in restored.due {
-            self.wake(at, due);
+            if self.due.contains_key(&at)
+                || self.len() < self.limits.capacity.saturating_add(self.limits.reserve)
+            {
+                self.set_due(at, due);
+            } else {
+                self.wake(at, due);
+            }
         }
         Ok(())
+    }
+
+    pub fn homes(&self) -> BTreeSet<[i32; 3]> {
+        self.due
+            .keys()
+            .chain(self.in_step.iter())
+            .map(|at| chunk_of(*at).0)
+            .chain(self.rescans.keys().copied())
+            .collect()
     }
 
     pub fn limits(&self) -> Limits {
