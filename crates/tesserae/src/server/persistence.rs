@@ -148,6 +148,7 @@ pub struct Persistence {
     task: Option<Task<Completed>>,
     failed: bool,
     elapsed: f64,
+    last_clock: f64,
     saved_revisions: BTreeMap<ChunkCoord, u64>,
     saved_simulation: u64,
     saved_eye: Option<Vec3>,
@@ -201,7 +202,7 @@ impl Persistence {
                     Generation::capture(super::worldgen_params(loaded.world), &mapping)
                         .map_err(|e| e.to_string())?,
                     BTreeMap::new(),
-                    "New World • unsaved".into(),
+                    "New World - unsaved".into(),
                 )
             };
         let writer = opening
@@ -222,6 +223,7 @@ impl Persistence {
             task: None,
             failed: false,
             elapsed: 0.0,
+            last_clock: 0.0,
             saved_revisions,
             saved_simulation: 0,
             saved_eye: reopened_eye,
@@ -242,7 +244,7 @@ pub(super) fn plugin(app: &mut App) {
         return;
     };
     app.world_mut().resource_mut::<SaveStatus>().detail = if p.writer.is_none() {
-        "Temporary World • persistence disabled".into()
+        "Temporary World - persistence disabled".into()
     } else {
         p.opening_detail.clone()
     };
@@ -317,14 +319,16 @@ fn drive(
     mut status: ResMut<SaveStatus>,
     mut store: ResMut<ChunkStore>,
     mut sim: ResMut<FluidSim>,
-    (player, time): (Query<&Player>, Res<Time<Fixed>>),
+    (player, time): (Query<&Player>, Res<Time<Real>>),
     mut exit: MessageWriter<AppExit>,
     #[cfg(feature = "profiling")] mut profile: ResMut<SaveProfile>,
 ) {
     let Ok(player) = player.single() else {
         return;
     };
-    p.elapsed += time.delta_secs_f64();
+    let now = time.elapsed_secs_f64();
+    p.elapsed += (now - p.last_clock).max(0.0);
+    p.last_clock = now;
     if let Some(done) = p.task.as_mut().and_then(check_ready) {
         #[cfg(feature = "profiling")]
         {
@@ -345,7 +349,7 @@ fn drive(
                 p.saved_revisions = done.revisions;
                 p.saved_simulation = done.simulation_revision;
                 p.saved_eye = Some(done.eye);
-                status.detail = "World saved".into();
+                status.detail = "Last save complete".into();
                 status.error = None;
                 if status.quitting
                     && p.saved_revisions == store.revisions
@@ -360,7 +364,7 @@ fn drive(
             Err(error) => {
                 error!("World save failed: {error}");
                 status.error = Some(error);
-                status.detail = "Save failed • changes remain unsaved".into();
+                status.detail = "Save failed - changes remain unsaved".into();
                 p.failed = true;
                 store.checkpoint = status.quitting;
             }
@@ -371,7 +375,7 @@ fn drive(
         || p.saved_simulation != sim.revision;
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
-        if status.dirty {
+        if status.dirty && !status.quitting {
             store.checkpoint = true;
             p.failed = false;
         }
@@ -392,7 +396,7 @@ fn drive(
         return;
     }
     if p.writer.is_none() {
-        status.detail = "Temporary World • persistence disabled".into();
+        status.detail = "Temporary World - persistence disabled".into();
         store.checkpoint = false;
         if status.quitting {
             exit.write(AppExit::Success);
@@ -496,7 +500,7 @@ fn drive(
         profile.snapshot_ms = capture_started.elapsed().as_secs_f64() * 1e3;
     }
     status.saving = true;
-    status.detail = "Saving World…".into();
+    status.detail = "Saving World...".into();
     store.checkpoint = status.quitting;
 }
 

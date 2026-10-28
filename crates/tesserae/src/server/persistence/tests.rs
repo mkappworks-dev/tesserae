@@ -70,6 +70,10 @@ impl Rig {
             .world_mut()
             .resource_mut::<Time<Fixed>>()
             .advance_by(Duration::from_secs_f64(1.0 / 64.0));
+        self.app
+            .world_mut()
+            .resource_mut::<Time<Real>>()
+            .advance_by(Duration::from_secs_f64(1.0 / 64.0));
         self.app.world_mut().run_schedule(FixedFirst);
         self.app.world_mut().run_schedule(FixedPreUpdate);
         std::thread::yield_now();
@@ -91,7 +95,11 @@ impl Rig {
             !r.app.world().resource::<ChunkStore>().checkpoint
                 && !r.app.world().resource::<SaveStatus>().saving
         });
-        assert!(self.app.world().resource::<SaveStatus>().error.is_none());
+        assert!(
+            self.app.world().resource::<SaveStatus>().error.is_none(),
+            "{:?}",
+            self.app.world().resource::<SaveStatus>().error
+        );
     }
     fn insert(&mut self) {
         let mut chunk = Chunk::filled(Voxel::cube(self.stone));
@@ -328,6 +336,14 @@ fn failed_save_quit_keeps_world_open_then_retry_saves_and_exits() {
             .contains(coord([0; 3]))
     );
     std::fs::rename(moved, &dir.0).unwrap();
+    rig.app
+        .world_mut()
+        .resource_mut::<Time<Real>>()
+        .advance_by(Duration::from_secs(31));
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().error.is_some());
+    assert!(rig.app.world().resource::<Persistence>().task.is_none());
+    assert!(rig.app.world().resource::<Messages<AppExit>>().is_empty());
     rig.app.world_mut().write_message(SaveAction::Retry);
     rig.until(|r| !r.app.world().resource::<Messages<AppExit>>().is_empty());
     assert!(rig.app.world().resource::<SaveStatus>().error.is_none());
@@ -370,7 +386,10 @@ fn autosave_at_thirty_seconds_preserves_current_server_player() {
     let eye = Vec3::new(12.0, 34.0, -56.0);
     let mut query = rig.app.world_mut().query::<&mut Player>();
     query.single_mut(rig.app.world_mut()).unwrap().set_eye(eye);
-    rig.app.world_mut().resource_mut::<Persistence>().elapsed = 30.0;
+    rig.app
+        .world_mut()
+        .resource_mut::<Time<Real>>()
+        .advance_by(Duration::from_secs(30));
     rig.until(|r| r.app.world().resource::<Persistence>().saved_eye == Some(eye));
     drop(rig);
     let reopened = Rig::new(&dir);

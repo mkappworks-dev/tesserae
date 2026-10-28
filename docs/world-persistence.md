@@ -110,7 +110,8 @@ new simulation steps, finishes the running step, and exits only after a commit
 covers the current revision set, Player Eye and simulation revision. Return
 resumes play; failed writes never authorize eviction or report success.
 
-Autosave requests run every 30 seconds of Server time. A changed or simulated
+Autosave requests run every 30 seconds of real elapsed time, independent of
+clamped virtual time and logical simulation progress. A changed or simulated
 Chunk leaving the streaming radius first requests a checkpoint and remains held
 until its current state commits. Its simulation pauses at the boundary while
 that write runs. Failures retain it. Returning before eviction cancels the

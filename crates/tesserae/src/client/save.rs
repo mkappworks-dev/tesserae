@@ -91,13 +91,13 @@ fn show(
             } else if let Some(error) = &status.error {
                 format!("World remains open. Save failed:\n{error}")
             } else if status.saving {
-                "Saving World…".into()
+                "Saving World...".into()
             } else {
-                format!(
-                    "{}{}",
-                    status.detail,
-                    if status.dirty { " • unsaved" } else { "" }
-                )
+                if status.dirty {
+                    format!("Unsaved changes\n{}", status.detail)
+                } else {
+                    status.detail.clone()
+                }
             };
             panel.spawn((
                 Text::new(detail),
@@ -142,7 +142,7 @@ fn show(
                     button("Retry Save & Quit", SaveAction::Retry);
                 }
                 button("Return to World", SaveAction::Return);
-                button("Exit without saving…", SaveAction::AskUnsafe);
+                button("Exit without saving...", SaveAction::AskUnsafe);
             } else {
                 if status.error.is_some() {
                     button("Retry save", SaveAction::Retry);
@@ -150,4 +150,48 @@ fn show(
                 button("Save & Quit", SaveAction::SaveQuit);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::ecs::message::Messages;
+    use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn window_close_requests_server_save_instead_of_destroying_world_window() {
+        let mut app = App::new();
+        app.init_resource::<SaveStatus>()
+            .add_message::<WindowCloseRequested>()
+            .add_message::<SaveAction>()
+            .add_message::<AppExit>();
+        let window = app
+            .world_mut()
+            .spawn((
+                PrimaryWindow,
+                CursorOptions {
+                    grab_mode: CursorGrabMode::Locked,
+                    visible: false,
+                    ..default()
+                },
+            ))
+            .id();
+        app.world_mut().resource_mut::<SaveStatus>().quitting = true;
+        app.world_mut()
+            .write_message(WindowCloseRequested { window });
+        app.world_mut().run_system_once(close_request).unwrap();
+        assert!(matches!(
+            app.world_mut()
+                .resource_mut::<Messages<SaveAction>>()
+                .drain()
+                .next(),
+            Some(SaveAction::SaveQuit)
+        ));
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+        assert!(app.world().get_entity(window).is_ok());
+        assert_eq!(
+            app.world().get::<CursorOptions>(window).unwrap().grab_mode,
+            CursorGrabMode::None
+        );
+    }
 }
