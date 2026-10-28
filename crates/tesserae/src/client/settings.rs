@@ -187,7 +187,11 @@ fn activate(
     mut store: ResMut<Store>,
     mut bindings: ResMut<Bindings>,
     mut preferences: ResMut<Preferences>,
+    save: Option<Res<crate::server::persistence::SaveStatus>>,
 ) {
+    if save.is_some_and(|status| status.modal()) {
+        return;
+    }
     let Ok(operation) = operations.get(event.entity) else {
         return;
     };
@@ -300,7 +304,15 @@ fn capture(
     mut settings: ResMut<Settings>,
     active: (Res<Bindings>, Res<Preferences>),
     mut actions: ResMut<super::actions::Actions>,
+    save: Option<Res<crate::server::persistence::SaveStatus>>,
 ) {
+    if save.is_some_and(|status| status.modal()) {
+        if settings.capture.take().is_some() {
+            settings.notice = "Binding capture cancelled while the save dialog is open.".into();
+            settings.dirty = true;
+        }
+        return;
+    }
     if !settings.open {
         return;
     }
@@ -599,6 +611,30 @@ mod tests {
         let entity = app.world_mut().spawn(operation).id();
         app.world_mut().trigger(Activate { entity });
     }
+    #[test]
+    fn save_modals_cancel_capture_and_block_settings_activation() {
+        let mut app = app();
+        app.init_resource::<crate::server::persistence::SaveStatus>();
+        activate_operation(&mut app, Operation::Open);
+        activate_operation(&mut app, Operation::Capture(Action::Forward, 0));
+        app.world_mut()
+            .resource_mut::<crate::server::persistence::SaveStatus>()
+            .quitting = true;
+        app.update();
+        assert!(app.world().resource::<Settings>().capture.is_none());
+        activate_operation(&mut app, Operation::Invert);
+        assert!(
+            !app.world()
+                .resource::<Settings>()
+                .draft
+                .as_ref()
+                .unwrap()
+                .1
+                .invert_y
+        );
+        assert!(app.world().resource::<Settings>().open);
+    }
+
     #[test]
     fn failed_apply_keeps_active_preferences_and_the_draft() {
         let mut app = app();

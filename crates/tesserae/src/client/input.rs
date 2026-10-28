@@ -11,6 +11,7 @@ pub(super) enum Owner {
     Settings,
     BindingCapture,
     TextEntry,
+    Modal,
     #[default]
     Unfocused,
 }
@@ -75,13 +76,16 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
+type Contexts<'w> = (
+    Res<'w, super::menu::Menu>,
+    Option<Res<'w, super::settings::Settings>>,
+    Option<Res<'w, UiInput>>,
+    Option<Res<'w, crate::server::persistence::SaveStatus>>,
+);
+
 pub(super) fn resolve(
     (keys, mouse): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
-    (menu, settings, ui): (
-        Res<super::menu::Menu>,
-        Option<Res<super::settings::Settings>>,
-        Option<Res<UiInput>>,
-    ),
+    (menu, settings, ui, save): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -90,6 +94,8 @@ pub(super) fn resolve(
     let (window, cursor) = *window;
     let owner = if !window.focused {
         Owner::Unfocused
+    } else if save.is_some_and(|status| status.modal()) {
+        Owner::Modal
     } else if ui.as_ref().is_some_and(|ui| ui.text_entry) {
         Owner::TextEntry
     } else if settings
@@ -128,7 +134,11 @@ pub(super) fn resolve(
             if ownership.changed
                 || matches!(
                     owner,
-                    Owner::Unfocused | Owner::Settings | Owner::BindingCapture | Owner::TextEntry
+                    Owner::Unfocused
+                        | Owner::Settings
+                        | Owner::BindingCapture
+                        | Owner::TextEntry
+                        | Owner::Modal
                 )
             {
                 actions.cancel(action);
@@ -158,6 +168,52 @@ pub(super) fn gameplay(ownership: Res<Ownership>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn save_modals_cancel_input_until_fresh_activation() {
+        use super::super::actions::{Action, Actions};
+        use crate::server::persistence::SaveStatus;
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .insert_resource(Ownership::playing())
+            .init_resource::<super::super::menu::Menu>()
+            .init_resource::<SaveStatus>()
+            .add_systems(Update, resolve);
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+            CursorOptions {
+                grab_mode: CursorGrabMode::Locked,
+                ..default()
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Right);
+        app.update();
+        assert!(app.world().resource::<Actions>().started(Action::Respawn));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        app.world_mut().resource_mut::<SaveStatus>().quitting = true;
+        app.update();
+        assert_eq!(app.world().resource::<Ownership>().owner, Owner::Modal);
+        assert!(!app.world().resource::<Actions>().held(Action::Place));
+        app.world_mut().resource_mut::<SaveStatus>().quitting = false;
+        app.update();
+        app.update();
+        assert!(!app.world().resource::<Actions>().held(Action::Place));
+        assert!(!app.world().resource::<Actions>().held(Action::Respawn));
+    }
+
     #[test]
     fn ownership_discards_look_and_scroll_in_the_shared_frame() {
         use bevy::input::mouse::{AccumulatedMouseMotion, MouseScrollUnit, MouseWheel};

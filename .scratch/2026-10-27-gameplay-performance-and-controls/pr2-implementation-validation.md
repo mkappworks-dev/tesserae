@@ -105,3 +105,30 @@ not that fixture image, establish gesture timing and cancellation correctness.
 Early empty-World and preliminary captures remain separately retained. Native
 visual acceptance remains available for user review. No performance speedup,
 GPU elapsed-time or display-latency claim is made.
+
+
+## Rebase onto saved-World main (2026-10-28)
+
+Rebased onto `aa3c2b1` (PR #23). The earlier commit identifiers, test counts,
+and native captures above describe the pre-rebase implementation.
+
+Preserved main's save plugin and playing gates on camera and history consumers.
+Save dialogs now own input, cancel active gestures and binding capture, and
+block settings activation while retaining the draft. Held gameplay bindings
+require a fresh activation after the modal closes. Two added regressions cover
+the actual resolver and settings consumers; all 133 Client tests passed.
+
+Full CI passed after the rebase: 957 tests passed, zero failed, five existing
+measurements ignored. Formatting, all-target/all-feature Clippy, rustdoc,
+default-feature checks, benchmark compilation, boundaries and dependency checks
+passed. The CI wrapper retains the script's order and checks, replacing only
+its guest rebuild step with artifact reuse. Main changed WIT 0.3 world-info;
+only its incompatible lake and demo artifacts were rebuilt. Other guests were
+reused. No WIT or Game source contents changed in this branch's integration.
+Cargo ran under caffeinate with warnings denied and the shared target directory.
+
+Rebase CI logs, wrapper and rebuilt guest hashes are retained in
+`/tmp/tesserae-ui-ux-v3-65IqS3`. The native captures above remain historical;
+this rebase was validated with automated checks, without new native captures.
+The refined menu, logo and accent studies in that directory are design
+prototypes; the visual redesign has not been applied to the native UI.

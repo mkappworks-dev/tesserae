@@ -86,6 +86,7 @@ pub(super) fn plugin(app: &mut App) {
     app.add_systems(
         Update,
         grab_cursor
+            .run_if(crate::server::persistence::playing)
             .run_if(super::menu::closed)
             .after(super::menu::toggle),
     );
@@ -101,8 +102,13 @@ pub(super) fn plugin(app: &mut App) {
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
     app.add_systems(Startup, spawn_hint)
         .add_systems(Update, input.run_if(crate::server::persistence::playing))
-        .add_systems(Update, (show_hint.after(super::input::resolve), sprint_hint.after(fly)));
-
+        .add_systems(
+            Update,
+            (
+                show_hint.after(super::input::resolve),
+                sprint_hint.after(fly),
+            ),
+        );
 }
 
 fn spawn_hint(mut commands: Commands) {
