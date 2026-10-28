@@ -16,6 +16,7 @@ mod history;
 mod input;
 mod material_textures;
 mod menu;
+mod menu_ui;
 #[cfg(feature = "dev")]
 mod overlay;
 mod palette;
@@ -39,6 +40,7 @@ pub fn plugin(app: &mut App) {
         profile::plugin,
         presentation::plugin,
         settings::plugin,
+        menu_ui::plugin,
         actions::plugin,
         input::plugin,
     ));

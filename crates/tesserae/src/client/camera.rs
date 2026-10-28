@@ -213,7 +213,6 @@ pub(super) fn grab_cursor(
     mouse: Res<ButtonInput<MouseButton>>,
     actions: Res<Actions>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
-    panels: Option<Res<super::help::Panels>>,
     settings: Option<Res<super::settings::Settings>>,
     ui: Option<Res<super::input::UiInput>>,
 ) {
@@ -226,9 +225,7 @@ pub(super) fn grab_cursor(
     if actions.cancel_requested() {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
-    } else if mouse.just_pressed(MouseButton::Left)
-        && !panels.is_some_and(|panels| panels.pointer_over_info)
-    {
+    } else if mouse.just_pressed(MouseButton::Left) {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;
     }

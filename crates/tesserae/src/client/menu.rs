@@ -114,6 +114,8 @@ pub(super) struct TileState {
 #[derive(Component)]
 struct ShapePanel;
 #[derive(Component)]
+struct Inspect(MaterialId);
+#[derive(Component)]
 pub(super) struct PlayBarRoot;
 #[derive(Component)]
 struct HeldName;
@@ -125,16 +127,20 @@ pub(super) struct PointerState {
     pub(super) hovered: Option<Entry>,
     drag: Option<Entry>,
     dragged: Option<Holding>,
+    pinned: bool,
     cursor: Vec2,
     suppress_click: bool,
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Menu>()
+        .init_resource::<super::menu_ui::Searches>()
         .init_resource::<Swatches>()
         .init_resource::<PointerState>()
+        .init_resource::<crate::client::menu_ui::Searches>()
         .init_resource::<UiScale>()
         .add_observer(choose)
+        .add_observer(inspect)
         .add_observer(hover)
         .add_observer(unhover)
         .add_observer(press)
@@ -189,6 +195,7 @@ pub(super) fn toggle(
     }
     pointer.drag = None;
     pointer.dragged = None;
+    pointer.pinned = false;
     let open = tab && !menu.open;
     let grab = tab && menu.open;
     *menu = Menu {
@@ -250,6 +257,20 @@ fn choose(
     }
 }
 
+fn inspect(
+    event: On<Activate>,
+    entries: Query<&Inspect>,
+    mut menu: ResMut<Menu>,
+    mut pointer: ResMut<PointerState>,
+) {
+    if !menu.open {
+        return;
+    }
+    if let Ok(inspect) = entries.get(event.entity) {
+        menu.material = Some(inspect.0);
+        pointer.pinned = true;
+    }
+}
 fn hover(
     event: On<PointerOver>,
     entries: Query<&Entry>,
@@ -262,7 +283,9 @@ fn hover(
     if let Ok(&entry) = entries.get(event.entity) {
         state.hovered = Some(entry);
         if let Entry::Material(material) | Entry::Solid { material, .. } = entry {
-            menu.material = Some(material);
+            if !state.pinned {
+                menu.material = Some(material);
+            }
         }
     }
 }
@@ -355,9 +378,14 @@ fn rebuild(
     selection: Query<&ScrollPosition, With<MenuSelection>>,
     mut state: ResMut<PointerState>,
     mut shown: Local<Option<Hotbar>>,
+    searches: Res<super::menu_ui::Searches>,
 ) {
     let wanted = menu.open.then(|| hotbar.clone());
-    if *shown == wanted && !catalogue.is_changed() && !bindings.is_changed() && !labels.is_changed()
+    if *shown == wanted
+        && !catalogue.is_changed()
+        && !bindings.is_changed()
+        && !labels.is_changed()
+        && !searches.is_changed()
     {
         return;
     }
@@ -367,6 +395,11 @@ fn rebuild(
     *shown = wanted;
     let scroll = selection.iter().next().map_or(Vec2::ZERO, |p| p.0);
     state.hovered = None;
+    if !menu.open {
+        state.drag = None;
+        state.dragged = None;
+        state.pinned = false;
+    }
     for root in &roots {
         commands.entity(root).despawn();
     }
@@ -377,8 +410,9 @@ fn rebuild(
             &hotbar,
             &catalogue.0,
             scroll,
+            &searches.catalogue,
             format!(
-                "Click: hold item\nDrag onto a slot: assign\n{}-{} over an item: assign\nScroll: browse items\n{}: close\n{}: close and release cursor",
+                "Click to hold | Drag or {}-{} to assign | {}: close | {}: release cursor",
                 bindings.label(super::actions::Action::Slot1, &labels),
                 bindings.label(super::actions::Action::Slot9, &labels),
                 bindings.label(super::actions::Action::Catalogue, &labels),
@@ -512,52 +546,31 @@ fn spawn_menu(
     hotbar: &Hotbar,
     catalogue: &ContentCatalogue,
     scroll: Vec2,
+    search: &str,
     heading: String,
 ) {
+    use super::menu_ui as ui;
     commands
         .spawn((
             MenuRoot,
+            GlobalZIndex(10),
             Node {
                 position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
+                left: Val::Percent(5.0),
+                right: Val::Percent(5.0),
+                top: Val::Px(246.0),
+                bottom: Val::Px(16.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0),
-                padding: UiRect {
-                    left: Val::Percent(5.0),
-                    right: Val::Percent(5.0),
-                    top: Val::Px(20.0),
-                    bottom: Val::Px(10.0),
-                },
+                row_gap: Val::Px(16.0),
                 ..default()
             },
-            BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.94)),
-            GlobalZIndex(10),
         ))
         .with_children(|root| {
-            root.spawn(Node {
-                width: Val::Percent(100.0),
-                column_gap: Val::Px(12.0),
-                flex_shrink: 0.0,
-                ..default()
-            })
-            .with_children(|header| {
-                header.spawn((
-                    Text::new(heading),
-                    font(14.0),
-                    Node {
-                        flex_grow: 1.0,
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
-                super::save::quit_button(header);
-            });
             root.spawn(Node {
                 flex_grow: 1.0,
                 flex_basis: Val::Px(0.0),
                 min_height: Val::Px(0.0),
-                column_gap: Val::Px(8.0),
+                column_gap: Val::Px(20.0),
                 ..default()
             })
             .with_children(|area| {
@@ -571,47 +584,72 @@ fn spawn_menu(
                             min_width: Val::Px(0.0),
                             min_height: Val::Px(0.0),
                             flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(12.0),
+                            row_gap: Val::Px(16.0),
                             overflow: Overflow::scroll_y(),
                             ..default()
                         },
                     ))
-                    .with_children(|list| menu_choices(list, material, hotbar, catalogue))
+                    .with_children(|list| menu_choices(list, hotbar, catalogue, search))
                     .id();
                 area.spawn((
                     Scrollbar::new(selection, ControlOrientation::Vertical, 24.0),
                     Node {
-                        width: Val::Px(8.0),
+                        width: Val::Px(6.0),
                         flex_shrink: 0.0,
                         ..default()
                     },
-                    BackgroundColor(Color::srgb(0.08, 0.09, 0.10)),
+                    BackgroundColor(ui::CARD),
                 ))
                 .with_child((
                     ScrollbarThumb {
-                        border_radius: BorderRadius::all(Val::Px(4.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
                         border: UiRect::all(Val::Px(0.0)),
                     },
-                    BackgroundColor(Color::srgb(0.5, 0.52, 0.55)),
+                    BackgroundColor(ui::MUTED),
                 ));
+                area.spawn((
+                    ShapePanel,
+                    ScrollArea,
+                    BackgroundColor(ui::CARD),
+                    Node {
+                        width: Val::Percent(30.0),
+                        min_width: Val::Px(180.0),
+                        max_width: Val::Px(300.0),
+                        padding: UiRect::all(Val::Px(16.0)),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(12.0),
+                        overflow: Overflow::scroll_y(),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ))
+                .with_children(|panel| shape_tiles(panel, material, hotbar, catalogue));
             });
             root.spawn((
                 MenuSlots,
+                ScrollPosition::default(),
                 Node {
                     flex_shrink: 0.0,
                     flex_direction: FlexDirection::Column,
-                    align_items: AlignItems::Center,
-                    row_gap: Val::Px(4.0),
+                    row_gap: Val::Px(8.0),
+                    border: UiRect::top(Val::Px(1.0)),
+                    padding: UiRect::top(Val::Px(12.0)),
                     ..default()
                 },
+                BorderColor::all(ui::EDGE),
             ))
             .with_children(|slots| {
-                slots.spawn((Text::new("Slots"), font(15.0), Pickable::IGNORE));
+                ui::text(slots, "QUICK SLOTS", 11.0, ui::MUTED);
                 slots
-                    .spawn(Node {
-                        column_gap: Val::Px(8.0),
-                        ..default()
-                    })
+                    .spawn((
+                        ScrollArea,
+                        Node {
+                            column_gap: Val::Px(8.0),
+                            overflow: Overflow::scroll_x(),
+                            min_height: Val::Px(88.0),
+                            ..default()
+                        },
+                    ))
                     .with_children(|bar| {
                         for (slot, &holding) in hotbar.slots.iter().enumerate() {
                             tile(
@@ -619,53 +657,66 @@ fn spawn_menu(
                                 Entry::Slot(slot),
                                 &holding.tile_label(catalogue),
                                 holding,
-                                hotbar.selected == slot,
+                                hotbar.outside.is_none() && hotbar.selected == slot,
                                 Some(slot + 1),
-                                72.0,
+                                64.0,
                             );
                         }
                     });
+                ui::text(slots, heading, 11.0, ui::MUTED);
             });
         });
 }
 
 fn menu_choices(
     root: &mut ChildSpawnerCommands,
-    material: Option<MaterialId>,
     hotbar: &Hotbar,
     catalogue: &ContentCatalogue,
+    search: &str,
 ) {
+    if !catalogue
+        .materials
+        .iter()
+        .any(|m| super::menu_ui::matches(search, &m.name))
+        && !super::menu_ui::matches(search, "fire")
+    {
+        super::menu_ui::text(
+            root,
+            "No matches. Try another Material or clear your search.",
+            14.0,
+            super::menu_ui::INK,
+        );
+    }
     section(root, "Solids", |list| {
         for material in catalogue
             .materials
             .iter()
-            .filter(|m| m.solid && m.fluid.is_none())
+            .filter(|m| m.solid && m.fluid.is_none() && super::menu_ui::matches(search, &m.name))
         {
             let entry = Entry::Material(material.id);
-            tile(
-                list,
-                entry,
-                &material.name,
-                entry.holding().unwrap(),
-                matches_item(hotbar.held(), entry),
-                None,
-                72.0,
-            );
+            list.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(5.0),
+                ..default()
+            })
+            .with_children(|item| {
+                tile(
+                    item,
+                    entry,
+                    &material.name,
+                    entry.holding().unwrap(),
+                    matches_item(hotbar.held(), entry),
+                    None,
+                    96.0,
+                );
+                super::menu_ui::button(item, "Inspect", Inspect(material.id), false, false, false);
+            });
         }
     });
-    root.spawn((
-        ShapePanel,
-        Node {
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(4.0),
-            flex_shrink: 0.0,
-            ..default()
-        },
-    ))
-    .with_children(|panel| shape_tiles(panel, material, hotbar, catalogue));
     let mut fluids: Vec<_> = catalogue
         .materials
         .iter()
+        .filter(|m| super::menu_ui::matches(search, &m.name))
         .filter_map(|m| Some((m.fluid?, m)))
         .collect();
     fluids.sort_by_key(|(rank, _)| *rank);
@@ -685,7 +736,7 @@ fn menu_choices(
             }
         });
     }
-    if catalogue.anything_burns() {
+    if catalogue.anything_burns() && super::menu_ui::matches(search, "fire") {
         section(root, "Fire", |list| {
             tile(
                 list,
@@ -752,17 +803,17 @@ pub(super) fn highlight_tiles(
     for (entry, tile, mut background, mut border) in &mut tiles {
         let hovered = menu.open && pointer.hovered == Some(*entry);
         let colour = if hovered {
-            Color::srgb(0.18, 0.21, 0.26)
+            Color::srgb(0.10, 0.16, 0.10)
         } else {
             Color::srgb(0.06, 0.07, 0.08)
         };
         let drop_target = hovered && pointer.drag.is_some() && matches!(entry, Entry::Slot(_));
         let edge = if drop_target {
-            Color::srgb(0.35, 1.0, 0.65)
+            crate::client::menu_ui::LEAF
         } else if tile.selected {
-            Color::WHITE
+            crate::client::menu_ui::LEAF
         } else if hovered {
-            Color::srgb(1.0, 0.8, 0.35)
+            crate::client::menu_ui::LEAF
         } else {
             Color::srgb(0.25, 0.25, 0.25)
         };
@@ -878,12 +929,13 @@ pub(super) fn tile(
                         height: Val::Px(size),
                         aspect_ratio: Some(1.0),
                         flex_shrink: 0.0,
-                        border: UiRect::all(Val::Px(2.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(5.0)),
                         ..default()
                     },
                     BackgroundColor(Color::srgb(0.06, 0.07, 0.08)),
                     BorderColor::all(if highlighted {
-                        Color::WHITE
+                        crate::client::menu_ui::LEAF
                     } else {
                         Color::srgb(0.25, 0.25, 0.25)
                     }),
@@ -969,11 +1021,13 @@ mod tests {
         })
         .init_resource::<Hotbar>()
         .init_resource::<PointerState>()
+        .init_resource::<crate::client::menu_ui::Searches>()
         .init_resource::<Catalogue>()
         .init_resource::<UiScale>()
         .init_resource::<ButtonInput<KeyCode>>()
         .add_message::<MouseWheel>()
         .add_observer(choose)
+        .add_observer(inspect)
         .add_observer(hover)
         .add_observer(unhover)
         .add_observer(press)
@@ -1185,7 +1239,7 @@ mod tests {
             app.update();
             assert_eq!(
                 *app.world().get::<BorderColor>(target).unwrap(),
-                BorderColor::all(Color::srgb(0.35, 1.0, 0.65))
+                BorderColor::all(crate::client::menu_ui::LEAF)
             );
             app.world_mut().trigger(PointerDragDrop {
                 entity: target,
@@ -1260,7 +1314,7 @@ mod tests {
                     TileState { selected },
                     BackgroundColor(Color::srgb(0.06, 0.07, 0.08)),
                     BorderColor::all(if selected {
-                        Color::WHITE
+                        crate::client::menu_ui::LEAF
                     } else {
                         Color::srgb(0.25, 0.25, 0.25)
                     }),
@@ -1287,7 +1341,7 @@ mod tests {
             }
             assert_eq!(
                 *app.world().get::<BorderColor>(slot).unwrap(),
-                BorderColor::all(Color::WHITE)
+                BorderColor::all(crate::client::menu_ui::LEAF)
             );
             app.world_mut().trigger(PointerOut {
                 entity: target,
@@ -1334,7 +1388,7 @@ mod tests {
         assert_eq!(app.world().get::<ScrollPosition>(footer).unwrap().y, 0.0);
         assert_eq!(
             app.world().get::<Node>(footer).unwrap().align_items,
-            AlignItems::Center
+            AlignItems::Default
         );
         app.world_mut().entity_mut(selection).insert(ComputedNode {
             size: Vec2::new(400.0, 200.0),

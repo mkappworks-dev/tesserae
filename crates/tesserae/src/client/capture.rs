@@ -266,9 +266,7 @@ pub(super) fn plugin(app: &mut App) {
         app.insert_resource(super::menu::Menu::opened());
     }
     app.insert_resource(super::help::Panels {
-        help: std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some(),
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
-        ..default()
     });
     app.add_systems(
         Update,

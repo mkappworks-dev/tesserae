@@ -235,7 +235,7 @@ pub(super) struct Catalogue(pub(super) ContentCatalogue);
 
 /// The last thing the Server declined, and how long it has left on screen.
 #[derive(Resource, Default)]
-struct Notice {
+pub(super) struct Notice {
     shown: Option<(&'static str, f32)>,
 }
 
@@ -258,8 +258,6 @@ impl Notice {
     }
 }
 
-#[derive(Component)]
-struct HeldHud;
 #[derive(Component)]
 struct NoticeHud;
 
@@ -304,20 +302,6 @@ fn spawn_hud(mut commands: Commands) {
             font(22.0),
             TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
         ));
-    commands.spawn((
-        HeldHud,
-        super::help::HelpPanel,
-        Visibility::Hidden,
-        Text::default(),
-        font(14.0),
-        TextColor(Color::srgba(1.0, 1.0, 1.0, 0.85)),
-        Node {
-            position_type: PositionType::Absolute,
-            right: Val::Px(16.0),
-            bottom: Val::Px(60.0),
-            ..default()
-        },
-    ));
     commands.spawn((
         NoticeHud,
         Text::default(),
@@ -531,7 +515,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
     lines.join("\n")
 }
 
-fn hud_text(
+pub(super) fn hud_text(
     hotbar: &Hotbar,
     catalogue: &ContentCatalogue,
     notice: &Notice,
@@ -567,32 +551,9 @@ fn hud_text(
     )
 }
 
-fn update_hud(
-    (bindings, labels, preferences): (
-        Res<super::actions::Bindings>,
-        Res<super::actions::Labels>,
-        Res<super::profile::Preferences>,
-    ),
-    hotbar: Res<Hotbar>,
-    catalogue: Res<Catalogue>,
-    notice: Res<Notice>,
-    mut hud: Single<&mut Text, With<HeldHud>>,
-    mut notices: Query<&mut Text, (With<NoticeHud>, Without<HeldHud>)>,
-) {
+fn update_hud(notice: Res<Notice>, mut notices: Query<&mut Text, With<NoticeHud>>) {
     for mut text in &mut notices {
         text.set_if_neq(Text::new(notice.text()));
-    }
-    let line = hud_text(
-        &hotbar,
-        &catalogue.0,
-        &notice,
-        &bindings,
-        &labels,
-        &preferences,
-    );
-    // Through the comparison, so the UI is not re-laid out every frame.
-    if hud.0 != line {
-        hud.0 = line;
     }
 }
 

@@ -5,7 +5,7 @@ use super::{
 };
 use bevy::{
     prelude::*,
-    ui_widgets::{Activate, Button, ScrollArea},
+    ui_widgets::{Activate, ScrollArea},
 };
 
 type Conflict = (Action, [Option<Binding>; 2], Vec<(Action, usize)>);
@@ -18,21 +18,27 @@ pub(super) struct Settings {
     conflict: Option<Conflict>,
     unsaved: bool,
     notice: String,
-    dirty: bool,
+    pub(super) dirty: bool,
+    pub(super) tab: super::menu_ui::Tab,
+    last_controls: super::menu_ui::Tab,
+    pending: Option<super::menu_ui::Tab>,
 }
 impl Settings {
+    pub(super) fn modal(&self) -> bool {
+        self.unsaved || self.conflict.is_some()
+    }
     pub fn capturing(&self) -> bool {
         self.capture.is_some()
     }
 }
 
 #[derive(Component)]
-struct Panel;
+pub(super) struct Panel;
 #[derive(Component)]
-struct Access;
+pub(super) struct SettingsScroll;
 #[derive(Component, Clone, Copy)]
-enum Operation {
-    Open,
+pub(super) enum Operation {
+    Navigate(super::menu_ui::Tab),
     Apply,
     Cancel,
     Back,
@@ -44,84 +50,73 @@ enum Operation {
     Clear(Action, usize),
     Replace,
     CancelConflict,
-    Sprint,
-    Removal,
+    Sprint(bool),
+    Removal(bool),
     Invert,
-    Sensitivity,
-    ScrollDirection,
-    ScrollSensitivity,
-    Sync,
-    Cap,
+    Sensitivity(f32),
+    ScrollDirection(bool),
+    ScrollSensitivity(f32),
+    Sync(bool),
+    Cap(Option<u32>),
 }
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Settings>()
+        .init_resource::<super::menu::Menu>()
+        .init_resource::<bevy::input_focus::InputFocus>()
         .add_observer(activate)
         .add_systems(Startup, launch)
-        .add_systems(Update, show_access)
+        .add_systems(
+            Update,
+            open_shortcut
+                .after(super::menu::toggle)
+                .before(capture)
+                .before(super::input::resolve),
+        )
         .add_systems(
             Update,
             (capture, render).chain().before(super::input::resolve),
         );
 }
 fn button(parent: &mut ChildSpawnerCommands, text: String, operation: Operation) {
-    parent
-        .spawn((
-            Button,
-            operation,
-            Node {
-                min_height: Val::Px(36.0),
-                padding: UiRect::all(Val::Px(7.0)),
-                margin: UiRect::all(Val::Px(3.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.15, 0.18, 0.23)),
-        ))
-        .with_child((
-            Text::new(text),
-            TextFont {
-                font_size: bevy::text::FontSize::Px(14.0),
-                ..default()
-            },
-        ));
+    super::menu_ui::button(parent, text, operation, false, false, false);
 }
-fn launch(
-    mut commands: Commands,
-    mut settings: ResMut<Settings>,
-    bindings: Res<Bindings>,
-    preferences: Res<Preferences>,
-) {
-    if std::env::var_os("TESSERAE_SCREENSHOT_SETTINGS").is_some() {
+fn launch(mut settings: ResMut<Settings>, bindings: Res<Bindings>, preferences: Res<Preferences>) {
+    if std::env::var_os("TESSERAE_SCREENSHOT_SETTINGS").is_some()
+        || std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some()
+    {
+        settings.tab = match std::env::var("TESSERAE_SCREENSHOT_SETTINGS_TAB").as_deref() {
+            Ok("bindings") => super::menu_ui::Tab::Bindings,
+            Ok("display") => super::menu_ui::Tab::Display,
+            _ => super::menu_ui::Tab::Behavior,
+        };
         settings.open = true;
         settings.dirty = true;
         settings.draft = Some((bindings.clone(), preferences.clone()));
     }
-    commands
-        .spawn((
-            Access,
-            Visibility::Hidden,
-            Node {
-                position_type: PositionType::Absolute,
-                right: Val::Px(16.0),
-                top: Val::Px(54.0),
-                ..default()
-            },
-            GlobalZIndex(90),
-        ))
-        .with_children(|parent| button(parent, "Controls / Display".into(), Operation::Open));
 }
-fn show_access(
-    settings: Res<Settings>,
-    menu: Res<super::menu::Menu>,
-    panels: Res<super::help::Panels>,
-    mut access: Query<&mut Visibility, With<Access>>,
+
+fn open_shortcut(
+    actions: Res<super::actions::Actions>,
+    mut settings: ResMut<Settings>,
+    mut menu: ResMut<super::menu::Menu>,
+    bindings: Res<Bindings>,
+    preferences: Res<Preferences>,
+    ui: Res<super::input::UiInput>,
+    status: Res<crate::server::persistence::SaveStatus>,
+    mut cursor: Query<&mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
 ) {
-    for mut visibility in &mut access {
-        visibility.set_if_neq(if !settings.open && (menu.open || panels.help) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        });
+    if !actions.started(Action::Help) || ui.text_entry || status.modal() || settings.open {
+        return;
+    }
+    settings.open = true;
+    settings.tab = settings.last_controls;
+    settings.draft = Some((bindings.clone(), preferences.clone()));
+    settings.dirty = true;
+    menu.open = false;
+    for mut cursor in &mut cursor {
+        cursor.grab_mode = bevy::window::CursorGrabMode::None;
+        cursor.visible = true;
     }
 }
 
@@ -150,6 +145,7 @@ fn close(settings: &mut Settings) {
     settings.capture = None;
     settings.conflict = None;
     settings.unsaved = false;
+    settings.pending = None;
 }
 fn propose(settings: &mut Settings, action: Action, proposed: [Option<Binding>; 2]) {
     let draft = &mut settings.draft.as_mut().unwrap().0;
@@ -188,6 +184,8 @@ fn activate(
     mut bindings: ResMut<Bindings>,
     mut preferences: ResMut<Preferences>,
     save: Option<Res<crate::server::persistence::SaveStatus>>,
+    mut menu: ResMut<super::menu::Menu>,
+    mut focus: ResMut<bevy::input_focus::InputFocus>,
 ) {
     if save.is_some_and(|status| status.modal()) {
         return;
@@ -208,21 +206,61 @@ fn activate(
     {
         return;
     }
+    if settings.unsaved
+        && !matches!(
+            operation,
+            Operation::Apply | Operation::Discard | Operation::Stay
+        )
+    {
+        return;
+    }
     settings.dirty = true;
     match *operation {
-        Operation::Open => {
-            settings.open = true;
-            settings.draft = Some((bindings.clone(), preferences.clone()));
-            settings.notice = store.error.clone().unwrap_or_default();
+        Operation::Navigate(tab) => {
+            if tab == super::menu_ui::Tab::Catalogue {
+                if settings
+                    .draft
+                    .as_ref()
+                    .is_some_and(|(b, p)| b != &*bindings || p != &*preferences)
+                {
+                    settings.unsaved = true;
+                    settings.pending = Some(tab);
+                } else {
+                    close(&mut settings);
+                    menu.open = true;
+                }
+            } else {
+                if !settings.open {
+                    settings.draft = Some((bindings.clone(), preferences.clone()));
+                }
+                settings.open = true;
+                settings.tab = tab;
+                if tab != super::menu_ui::Tab::Display {
+                    settings.last_controls = tab;
+                }
+                menu.open = false;
+            }
+            focus.clear();
         }
         Operation::Apply => {
             let exiting = settings.unsaved;
             if apply(&mut settings, &mut store, &mut bindings, &mut preferences) && exiting {
+                let target = settings.pending.take();
                 close(&mut settings);
+                menu.open = target == Some(super::menu_ui::Tab::Catalogue);
             }
         }
-        Operation::Cancel | Operation::Discard => close(&mut settings),
+        Operation::Cancel | Operation::Discard => {
+            let target = settings.pending.take();
+            close(&mut settings);
+            menu.open = target == Some(super::menu_ui::Tab::Catalogue);
+        }
         Operation::Back => {
+            settings.pending = None;
+            if !settings.open {
+                menu.open = false;
+                return;
+            }
             if settings
                 .draft
                 .as_ref()
@@ -233,8 +271,12 @@ fn activate(
                 close(&mut settings);
             }
         }
-        Operation::Stay => settings.unsaved = false,
+        Operation::Stay => {
+            settings.unsaved = false;
+            settings.pending = None;
+        }
         Operation::Capture(action, slot) => {
+            focus.clear();
             settings.capture = Some((action, slot, false));
             settings.notice =
                 "Release inputs, then press a key or mouse button. Escape cancels.".into();
@@ -264,41 +306,20 @@ fn activate(
                     *p = Preferences::default();
                 }
                 Operation::Clear(action, slot) => draft.0.get_mut(&action).unwrap()[slot] = None,
-                Operation::Sprint => p.toggle_sprint = !p.toggle_sprint,
-                Operation::Removal => p.tap_remove = !p.tap_remove,
+                Operation::Sprint(value) => p.toggle_sprint = value,
+                Operation::Removal(value) => p.tap_remove = value,
                 Operation::Invert => p.invert_y = !p.invert_y,
-                Operation::Sensitivity => {
-                    p.sensitivity = if p.sensitivity >= 0.006 {
-                        0.0015
-                    } else {
-                        p.sensitivity * 2.0
-                    }
-                }
-                Operation::ScrollDirection => p.reverse_scroll = !p.reverse_scroll,
-                Operation::ScrollSensitivity => {
-                    p.scroll_sensitivity = if p.scroll_sensitivity >= 2.0 {
-                        0.5
-                    } else {
-                        p.scroll_sensitivity * 2.0
-                    }
-                }
-                Operation::Sync => p.display_sync = !p.display_sync,
-                Operation::Cap => {
-                    p.fps_cap = match p.fps_cap {
-                        None => Some(60),
-                        Some(60) => Some(120),
-                        Some(120) => Some(144),
-                        Some(144) => Some(240),
-                        Some(240) => Some(1000),
-                        _ => None,
-                    }
-                }
+                Operation::Sensitivity(value) => p.sensitivity = value,
+                Operation::ScrollDirection(value) => p.reverse_scroll = value,
+                Operation::ScrollSensitivity(value) => p.scroll_sensitivity = value,
+                Operation::Sync(value) => p.display_sync = value,
+                Operation::Cap(value) => p.fps_cap = value,
                 _ => {}
             }
         }
     }
 }
-fn capture(
+pub(super) fn capture(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut settings: ResMut<Settings>,
@@ -316,7 +337,7 @@ fn capture(
     if !settings.open {
         return;
     }
-    if keys.just_pressed(KeyCode::Escape) {
+    if actions.cancel_requested() && keys.just_pressed(KeyCode::Escape) {
         actions.consume_cancel();
         settings.dirty = true;
         if settings.capture.take().is_some() || settings.conflict.take().is_some() {
@@ -414,15 +435,123 @@ fn capture(
     settings.dirty = true;
     // Keep capture independent of gameplay action bindings, including a remapped menu key.
 }
-fn render(
+fn setting_row(
+    parent: &mut ChildSpawnerCommands,
+    title: &str,
+    description: &str,
+    choices: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    use super::menu_ui as ui;
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(9.0),
+                padding: UiRect::all(Val::Px(16.0)),
+                border: UiRect::bottom(Val::Px(1.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+            BackgroundColor(ui::CARD),
+            BorderColor::all(ui::EDGE),
+        ))
+        .with_children(|row| {
+            ui::text(row, title, 15.0, ui::INK);
+            ui::text(row, description, 12.0, ui::MUTED);
+            row.spawn(Node {
+                column_gap: Val::Px(6.0),
+                row_gap: Val::Px(6.0),
+                flex_wrap: FlexWrap::Wrap,
+                ..default()
+            })
+            .with_children(choices);
+        });
+}
+fn option(
+    parent: &mut ChildSpawnerCommands,
+    label: impl Into<String>,
+    operation: Operation,
+    selected: bool,
+) {
+    super::menu_ui::button(parent, label, operation, selected, false, false);
+}
+fn action_name(action: Action) -> &'static str {
+    use Action::*;
+    match action {
+        Forward => "Move forward",
+        Backward => "Move backward",
+        Left => "Move left",
+        Right => "Move right",
+        Ascend => "Ascend",
+        Descend => "Descend",
+        Sprint => "Sprint",
+        Respawn => "Respawn",
+        Faster => "Increase flight speed",
+        Slower => "Decrease flight speed",
+        Remove => "Remove",
+        Place => "Place / ignite",
+        Sample => "Sample",
+        EmptyHand => "Empty hand",
+        Shape => "Next Shape",
+        Turn => "Turn Shape",
+        Flip => "Flip Shape",
+        Slot1 => "Quick slot 1",
+        Slot2 => "Quick slot 2",
+        Slot3 => "Quick slot 3",
+        Slot4 => "Quick slot 4",
+        Slot5 => "Quick slot 5",
+        Slot6 => "Quick slot 6",
+        Slot7 => "Quick slot 7",
+        Slot8 => "Quick slot 8",
+        Slot9 => "Quick slot 9",
+        Undo => "Undo",
+        Redo => "Redo",
+        Catalogue => "Open Catalogue",
+        ReleaseCursor => "Release cursor",
+        Help => "Open input settings",
+        Diagnostics => "Diagnostics",
+    }
+}
+fn category(action: Action) -> &'static str {
+    use Action::*;
+    match action {
+        Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
+        | Slower => "Movement",
+        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | Undo | Redo => "Building",
+        _ => "Interface",
+    }
+}
+pub(super) fn render(
     mut commands: Commands,
     mut settings: ResMut<Settings>,
     panels: Query<Entity, With<Panel>>,
     labels: Res<super::actions::Labels>,
+    searches: Res<super::menu_ui::Searches>,
+    active: (Res<Bindings>, Res<Preferences>),
+    scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
+    mut positions: Local<[Vec2; 3]>,
+    mut previous: Local<Option<super::menu_ui::Tab>>,
+    context: (
+        Res<super::edit::Hotbar>,
+        Res<super::edit::Catalogue>,
+        Res<super::edit::Notice>,
+    ),
 ) {
-    if !settings.dirty {
+    use super::menu_ui::{self as ui, Tab};
+    if !settings.dirty && !labels.is_changed() {
         return;
     }
+    if let Some(tab) = *previous {
+        let index = match tab {
+            Tab::Behavior => 0,
+            Tab::Bindings => 1,
+            _ => 2,
+        };
+        if let Some(scroll) = scrolls.iter().next() {
+            positions[index] = scroll.0;
+        }
+    }
+    *previous = settings.open.then_some(settings.tab);
     settings.dirty = false;
     for entity in &panels {
         commands.entity(entity).despawn();
@@ -433,152 +562,77 @@ fn render(
     let Some((bindings, p)) = &settings.draft else {
         return;
     };
-    commands
-        .spawn((
-            Panel,
-            GlobalZIndex(100),
-            BackgroundColor(Color::srgba(0.025, 0.03, 0.045, 0.99)),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(5.0),
-                right: Val::Percent(5.0),
-                top: Val::Percent(5.0),
-                bottom: Val::Percent(5.0),
-                flex_direction: FlexDirection::Column,
-                padding: UiRect::all(Val::Px(12.0)),
-                ..default()
-            },
-        ))
-        .with_children(|root| {
-            root.spawn(Text::new(format!(
-                "Controls and display\n{}",
-                settings.notice
-            )));
-            if settings.capture.is_some() {
-                button(root, "Cancel binding".into(), Operation::Cancel);
-                return;
-            }
-            root.spawn((Node {
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
-                ..default()
-            },))
-                .with_children(|row| {
-                    for (label, operation) in [
-                        ("Apply", Operation::Apply),
-                        ("Cancel", Operation::Cancel),
-                        ("Back", Operation::Back),
-                        ("Reset all", Operation::Reset),
-                    ] {
-                        button(row, label.into(), operation);
+    let changed = bindings != &*active.0 || p != &*active.1;
+    let index = match settings.tab {
+        Tab::Behavior => 0,
+        Tab::Bindings => 1,
+        _ => 2,
+    };
+    commands.spawn((Panel,GlobalZIndex(20),Node {position_type:PositionType::Absolute,left:Val::Percent(5.0),right:Val::Percent(5.0),top:Val::Px(if settings.tab==Tab::Bindings {246.0}else{192.0}),bottom:Val::Px(18.0),flex_direction:FlexDirection::Column,row_gap:Val::Px(12.0),..default()})).with_children(|root| {
+        if !settings.notice.is_empty() {ui::text(root,&settings.notice,12.0,ui::LEAF);}
+        if settings.capture.is_some() {
+            ui::text(root,"Change binding",22.0,ui::INK);
+            ui::text(root,"Release inputs, then press a key or mouse button. Escape cancels.",14.0,ui::MUTED);
+            button(root,"Cancel binding".into(),Operation::Cancel);return;
+        }
+        if settings.unsaved {
+            ui::text(root,"Keep your changes?",22.0,ui::INK);
+            ui::text(root,"Apply saves your preferences. Discard leaves without saving.",14.0,ui::MUTED);
+            root.spawn(Node {column_gap:Val::Px(8.0),..default()}).with_children(|row| {button(row,"Stay".into(),Operation::Stay);button(row,"Discard".into(),Operation::Discard);button(row,"Apply and continue".into(),Operation::Apply);});return;
+        }
+        if let Some((_,_,conflicts))=&settings.conflict {
+            ui::text(root,"Binding already in use",22.0,ui::INK);
+            let names:Vec<_>=conflicts.iter().map(|(action,_)|action_name(*action)).collect();
+            ui::text(root,format!("Replace bindings assigned to {}?",names.join(", ")),14.0,ui::MUTED);
+            root.spawn(Node {column_gap:Val::Px(8.0),..default()}).with_children(|row| {button(row,"Keep existing".into(),Operation::CancelConflict);button(row,"Replace binding".into(),Operation::Replace);});return;
+        }
+        root.spawn((SettingsScroll,ScrollArea,ScrollPosition(positions[index]),Node {flex_direction:FlexDirection::Column,flex_grow:1.0,min_height:Val::Px(0.0),overflow:Overflow::scroll_y(),row_gap:Val::Px(2.0),..default()})).with_children(|list| {
+            match settings.tab {
+                Tab::Behavior=>{
+                    ui::text(list,super::edit::hud_text(&context.0,&context.1.0,&context.2,bindings,&labels,p),12.0,ui::MUTED);
+                    setting_row(list,"Sprint activation",if p.toggle_sprint {"Press once to sprint; press again to stop."}else{"Sprint while the binding is held."},|row| {option(row,"Hold",Operation::Sprint(false),!p.toggle_sprint);option(row,"Toggle",Operation::Sprint(true),p.toggle_sprint);});
+                    setting_row(list,"Removal activation",if p.tap_remove {"Timed removal on one target. A second tap cancels."}else{"Hold on one target until removal completes."},|row| {option(row,"Hold",Operation::Removal(false),!p.tap_remove);option(row,"Timed tap",Operation::Removal(true),p.tap_remove);});
+                    setting_row(list,"Mouse sensitivity","Relative to the default mouse feel.",|row| {for value in [0.00075,0.0015,0.003,0.006,0.012] {option(row,format!("{:.2}x",value/0.003),Operation::Sensitivity(value),p.sensitivity==value);}});
+                    setting_row(list,"Invert vertical look","Reverse the vertical mouse direction.",|row| {option(row,if p.invert_y {"On"}else{"Off"},Operation::Invert,p.invert_y);});
+                    setting_row(list,"Scroll direction","Select quick slots with the scroll wheel.",|row| {option(row,"Standard",Operation::ScrollDirection(false),!p.reverse_scroll);option(row,"Reversed",Operation::ScrollDirection(true),p.reverse_scroll);});
+                    setting_row(list,"Scroll sensitivity","Higher values move through quick slots faster.",|row| {for value in [0.5,1.0,2.0] {option(row,format!("{value:.1}x"),Operation::ScrollSensitivity(value),p.scroll_sensitivity==value);}});
+                    setting_row(list,"Using the Catalogue","Click a Material to hold it. Drag to a quick slot, or press its number while pointing at an item. Shapes and Materials come from your Game.",|row| {ui::text(row,format!("{}: Catalogue   {}: input settings   {}: release cursor",bindings.label(Action::Catalogue,&labels),bindings.label(Action::Help,&labels),bindings.label(Action::ReleaseCursor,&labels)),12.0,ui::MUTED);});
+                }
+                Tab::Display=>{
+                    setting_row(list,"Display sync","Match frame presentation to your display.",|row| {option(row,"Display synced",Operation::Sync(true),p.display_sync);option(row,"Sync off",Operation::Sync(false),!p.display_sync);});
+                    ui::text(list,if p.display_sync {"Recommended for normal play. Avoids tearing when supported by your display."}else{"Sync is off. Frames may tear; a frame limit can reduce unnecessary work."},12.0,ui::MUTED);
+                    setting_row(list,"Frame rate limit","An optional ceiling, independent of display sync.",|row| {for cap in [None,Some(60),Some(120),Some(144),Some(240),Some(1000)] {option(row,cap.map_or("No limit".into(),|n|format!("{n} FPS")),Operation::Cap(cap),p.fps_cap==cap);}});
+                    ui::text(list,"Visual quality and simulation settings stay unchanged.",12.0,ui::MUTED);
+                }
+                Tab::Bindings=>{
+                    let mut entries:Vec<_>=bindings.0.iter().filter(|(action,_)|ui::matches(&searches.bindings,&format!("{} {} {}",action_name(**action),category(**action),bindings.label(**action,&labels)))).collect();
+                    entries.sort_by_key(|(action,_)|(category(**action),action_name(**action)));
+                    ui::text(list,format!("{} actions",entries.len()),12.0,ui::MUTED);
+                    if entries.is_empty() {ui::text(list,"No matches. Try another action or key, or clear your search.",15.0,ui::INK);}
+                    for (&action,alternatives) in entries {
+                        list.spawn((Node {padding:UiRect::all(Val::Px(12.0)),flex_direction:FlexDirection::Column,row_gap:Val::Px(8.0),flex_shrink:0.0,..default()},BackgroundColor(ui::CARD))).with_children(|row| {
+                            row.spawn(Node {column_gap:Val::Px(12.0),align_items:AlignItems::Center,..default()}).with_children(|heading| {ui::text(heading,action_name(action),14.0,ui::INK);ui::text(heading,category(action),11.0,ui::MUTED);});
+                            row.spawn(Node {column_gap:Val::Px(8.0),row_gap:Val::Px(6.0),flex_wrap:FlexWrap::Wrap,..default()}).with_children(|choices| {
+                                for (slot,binding) in alternatives.iter().enumerate() {
+                                    choices.spawn(Node {column_gap:Val::Px(5.0),align_items:AlignItems::Center,..default()}).with_children(|alternative| {
+                                        ui::text(alternative,if slot==0 {"Primary"}else{"Alternative"},11.0,ui::MUTED);
+                                        button(alternative,binding.map_or("Add binding".into(),|b|labels.binding(b)),Operation::Capture(action,slot));
+                                        if binding.is_some() {button(alternative,"Clear".into(),Operation::Clear(action,slot));}
+                                    });
+                                }
+                                button(choices,"Restore".into(),Operation::ResetAction(action));
+                            });
+                        });
                     }
-                });
-            if settings.unsaved {
-                root.spawn(Text::new(
-                    "Unsaved changes: Apply saves; Discard closes; Stay keeps editing.",
-                ));
-                root.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    ..default()
-                })
-                .with_children(|row| {
-                    button(row, "Apply".into(), Operation::Apply);
-                    button(row, "Discard".into(), Operation::Discard);
-                    button(row, "Stay".into(), Operation::Stay);
-                });
-            }
-            if settings.unsaved {
-                return;
-            }
-            if let Some((_, _, conflicts)) = &settings.conflict {
-                root.spawn(Text::new(format!(
-                    "Binding conflicts with {conflicts:?}. Replace or cancel?"
-                )));
-                root.spawn(Node {
-                    flex_direction: FlexDirection::Row,
-                    ..default()
-                })
-                .with_children(|row| {
-                    button(row, "Replace".into(), Operation::Replace);
-                    button(row, "Cancel binding".into(), Operation::CancelConflict);
-                });
-            }
-            if settings.conflict.is_some() {
-                return;
-            }
-            root.spawn((
-                ScrollArea,
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    flex_grow: 1.0,
-                    min_height: Val::Px(0.0),
-                    overflow: Overflow::scroll_y(),
-                    ..default()
-                },
-            ))
-            .with_children(|list| {
-                for (label, operation) in [
-                    (
-                        format!(
-                            "Sprint: {}",
-                            if p.toggle_sprint { "toggle" } else { "hold" }
-                        ),
-                        Operation::Sprint,
-                    ),
-                    (
-                        format!(
-                            "Removal: {}",
-                            if p.tap_remove { "timed tap" } else { "hold" }
-                        ),
-                        Operation::Removal,
-                    ),
-                    (
-                        format!("Mouse sensitivity: {}", p.sensitivity),
-                        Operation::Sensitivity,
-                    ),
-                    (format!("Invert Y: {}", p.invert_y), Operation::Invert),
-                    (
-                        format!("Reverse hotbar scroll: {}", p.reverse_scroll),
-                        Operation::ScrollDirection,
-                    ),
-                    (
-                        format!("Scroll sensitivity: {}", p.scroll_sensitivity),
-                        Operation::ScrollSensitivity,
-                    ),
-                    (format!("Display sync: {}", p.display_sync), Operation::Sync),
-                    (
-                        format!(
-                            "FPS cap: {}",
-                            p.fps_cap.map_or("Uncapped".into(), |n| n.to_string())
-                        ),
-                        Operation::Cap,
-                    ),
-                ] {
-                    button(list, label, operation);
                 }
-                let mut entries: Vec<_> = bindings.0.iter().collect();
-                entries.sort_by_key(|(action, _)| format!("{action:?}"));
-                for (&action, alternatives) in entries {
-                    list.spawn(Node {
-                        flex_direction: FlexDirection::Row,
-                        flex_wrap: FlexWrap::Wrap,
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        row.spawn(Text::new(format!("{action:?}")));
-                        for (slot, binding) in alternatives.iter().enumerate() {
-                            button(
-                                row,
-                                binding.map_or("Unbound".into(), |b| labels.binding(b)),
-                                Operation::Capture(action, slot),
-                            );
-                            button(row, "Clear".into(), Operation::Clear(action, slot));
-                        }
-                        button(row, "Reset".into(), Operation::ResetAction(action));
-                    });
-                }
-            });
+                Tab::Catalogue=>{}
+            }
         });
+        root.spawn((Node {flex_shrink:0.0,padding:UiRect::top(Val::Px(12.0)),border:UiRect::top(Val::Px(1.0)),justify_content:JustifyContent::SpaceBetween,column_gap:Val::Px(8.0),flex_wrap:FlexWrap::Wrap,row_gap:Val::Px(8.0),..default()},BorderColor::all(ui::EDGE))).with_children(|footer| {
+            footer.spawn(Node {flex_direction:FlexDirection::Column,row_gap:Val::Px(5.0),..default()}).with_children(|status| {ui::text(status,if changed {"Changes not applied"}else{"No pending changes"},12.0,if changed {ui::LEAF}else{ui::MUTED});button(status,"Restore defaults".into(),Operation::Reset);});
+            footer.spawn(Node {column_gap:Val::Px(8.0),align_items:AlignItems::Center,..default()}).with_children(|actions| {button(actions,"Cancel".into(),Operation::Cancel);ui::button(actions,"Apply changes",Operation::Apply,false,false,true);});
+        });
+    });
 }
 
 #[cfg(test)]
@@ -590,6 +644,8 @@ mod tests {
             .init_resource::<Bindings>()
             .init_resource::<Preferences>()
             .init_resource::<Settings>()
+            .init_resource::<super::super::menu::Menu>()
+            .init_resource::<bevy::input_focus::InputFocus>()
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
             .insert_resource(Store {
@@ -615,7 +671,10 @@ mod tests {
     fn save_modals_cancel_capture_and_block_settings_activation() {
         let mut app = app();
         app.init_resource::<crate::server::persistence::SaveStatus>();
-        activate_operation(&mut app, Operation::Open);
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
         activate_operation(&mut app, Operation::Capture(Action::Forward, 0));
         app.world_mut()
             .resource_mut::<crate::server::persistence::SaveStatus>()
@@ -641,7 +700,10 @@ mod tests {
         let parent = app.world().resource::<Store>().path.clone();
         std::fs::write(&parent, b"not a directory").unwrap();
         app.world_mut().resource_mut::<Store>().path = parent.join("profile.json");
-        activate_operation(&mut app, Operation::Open);
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
         activate_operation(&mut app, Operation::Invert);
         activate_operation(&mut app, Operation::Apply);
         assert!(!app.world().resource::<Preferences>().invert_y);
@@ -662,7 +724,10 @@ mod tests {
     #[test]
     fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
         let mut app = app();
-        activate_operation(&mut app, Operation::Open);
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
         activate_operation(&mut app, Operation::Invert);
         assert!(!app.world().resource::<Preferences>().invert_y);
         activate_operation(&mut app, Operation::Back);
@@ -681,7 +746,10 @@ mod tests {
     #[test]
     fn capture_waits_for_opening_release_and_conflicts_require_a_choice() {
         let mut app = app();
-        activate_operation(&mut app, Operation::Open);
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
