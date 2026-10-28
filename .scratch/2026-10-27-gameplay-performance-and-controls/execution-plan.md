@@ -14,27 +14,19 @@ The PR 1 session was launched with Sol High.
 
 | # | Planned PR | Tickets | Model | Effort |
 | --- | --- | --- | --- | --- |
-| 1 | Frame profiling and release benchmarks (merged) | 11–12 | Sol | High |
-| 2 | Input ownership and semantic actions | 01–02 | Terra | Medium |
-| 3 | Remapping, sprint toggle and timed tap removal | 03–04 | Terra | Medium |
-| 4 | Display sync and FPS limit settings | 28 | Terra | Medium |
-| 5 | Searchable catalogue and accessible navigation | 05–06 | Terra | Medium |
-| 6 | Creative organization and remembered shortcuts | 17 | Terra | Medium |
-| 7 | World identity, save schema and lifecycle | 22 | Sol | High |
-| 8 | Durable World changes and simulation state | 23 | Sol | High |
-| 9 | Free-flight and physics movement modes | 24 | Sol | High |
-| 10 | Game character rendering and animation | 25 | Terra | Medium |
-| 11 | First-person and third-person views | 26 | Terra | Medium |
-| 12 | World selection and seeded creation | 27 | Terra | Medium |
-| 13 | Use interaction and read-only tool mode | 20 | Terra | Medium |
-| 14 | Corner measurement tool | 21 | Terra | Medium |
-| 15 | Configurable controller support | 07 | Terra | Medium |
-| 16 | Desktop touch controls and preferences | 08–10 | Terra | Medium |
+| 1 | Profiling and release benchmarks (merged as #22) | 11–12 | Sol | High |
+| 2 | Input, actions, controls and display settings | 01–04, 28 | Terra | Medium |
+| 3 | Catalogue accessibility, search and creative organization | 05–06, 17 | Terra | Medium |
+| 4 | Save schema, lifecycle and durable World state | 22–23 | Sol | High |
+| 5 | Flight and physics movement | 24 | Sol | High |
+| 6 | Character and first/third-person cameras | 25–26 | Terra | Medium |
+| 7 | World selection and seeded creation | 27 | Terra | Medium |
+| 8 | Use interaction and corner measurement | 20–21 | Terra | Medium |
+| 9 | Controller | 07 | Terra | Medium |
+| 10 | Desktop touch | 08–10 | Terra | Medium |
 
-Each PR runs sequentially in its own branch/worktree. P0 is complete;
-PR 2 (tickets 01–02) is next. Starting later work, extra threads, publication
-and merges require their own applicable user authorization. No parallel
-coding agents are planned.
+PR 2 is authorized for local implementation in this session. No push,
+publication, merge, parallel agents or automatic later sessions are authorized.
 
 ## Conditional experiment backlog
 

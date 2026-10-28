@@ -1,10 +1,10 @@
 # 02: C0: Semantic actions and defaults
 
-Status: needs-triage
+Status: ready-for-agent
 Blocked by: 01
 
 Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: C0; keep this separate from other PR scopes.
+PR boundary: combined PR 2 (tickets 01–04 and 28).
 
 ## What to build
 
@@ -27,8 +27,8 @@ controller and touch without bundling their adapters.
 Use behavior/intent regressions and the spec's build/review requirements.
 Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
 Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+All Q1–Q49 product choices and shared understanding are confirmed. Local
+implementation is authorized; push, publication and merge are not.
 
 ## Comments
 
@@ -46,3 +46,8 @@ Do not implement until the relevant decisions and readiness are established.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+### 2026-10-28: Agent Brief
+
+Implement as part of the confirmed combined PR 2, preserving the acceptance
+criteria above. Earlier readiness and separate-PR statements are superseded.
