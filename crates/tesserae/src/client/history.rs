@@ -4,8 +4,11 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_message::<HistoryAction>()
-        .add_systems(Update, send.before(super::removal::hold));
+    app.add_message::<HistoryAction>().add_systems(
+        Update,
+        send.run_if(crate::server::persistence::playing)
+            .before(super::removal::hold),
+    );
 }
 fn action(keys: &ButtonInput<KeyCode>) -> Option<HistoryAction> {
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);

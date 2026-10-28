@@ -256,9 +256,16 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(FixedPreUpdate, land.before(edit::apply_pending))
         .add_systems(
             FixedPreUpdate,
-            drain.after(edit::apply_pending).after(land).in_set(Drain),
+            drain
+                .run_if(super::super::persistence::playing)
+                .after(edit::apply_pending)
+                .after(land)
+                .in_set(Drain),
         )
-        .add_systems(FixedPostUpdate, dispatch);
+        .add_systems(
+            FixedPostUpdate,
+            dispatch.run_if(super::super::persistence::playing),
+        );
 }
 
 fn land(
@@ -327,7 +334,7 @@ fn dispatch(
 ) {
     if !jobs.started {
         if let Some(spawn) = spawn {
-            let center = world.chunk_at(spawn.metres());
+            let center = world.chunk_at(spawn.startup_anchor());
             // A first-call spawn build must not race generation or the bulk light solve.
             for y in -1..=1 {
                 for z in -1..=1 {

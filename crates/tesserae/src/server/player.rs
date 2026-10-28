@@ -184,7 +184,11 @@ fn spawn_player(
     limits: Res<PlayerLimits>,
     time: Res<Time>,
 ) {
-    commands.spawn(Player::new(spawn.eye(), *limits, time.elapsed_secs_f64()));
+    commands.spawn(Player::new(
+        spawn.entry_eye(),
+        *limits,
+        time.elapsed_secs_f64(),
+    ));
 }
 
 /// Every frame, for the reason `edit::receive` is.
@@ -243,6 +247,20 @@ mod tests {
     }
 
     /// Each `update` is `step_ms` of Server time, so the budget is deterministic.
+    #[test]
+    fn reopening_uses_exact_saved_eye_but_respawn_keeps_the_original_spawn() {
+        let saved = Vec3::new(-123.0, 4.5, 678.0);
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(SpawnPoint::for_tests(SPAWN).with_entry(saved))
+            .add_plugins(plugin);
+        app.update();
+        assert_eq!(eye(&mut app), saved);
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        assert_eq!(eye(&mut app), spawn_eye());
+    }
+
     fn app_with_step(step_ms: u64) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

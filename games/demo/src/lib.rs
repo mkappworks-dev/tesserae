@@ -342,6 +342,11 @@ impl Guest for Demo {
         let shape = |name| ids.shapes.iter().find(|row| row.name == name).unwrap().id as u8;
         STATE.replace(State {
             size_m: world.voxel_size_m,
+            stage: if world.reopened {
+                Stage::Dried
+            } else {
+                Stage::Unbuilt
+            },
             stone: material("demo:stone"),
             lamp: material("demo:lamp"),
             lava: material("demo:lava"),

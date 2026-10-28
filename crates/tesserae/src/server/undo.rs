@@ -37,6 +37,10 @@ pub(super) struct Journal {
     requests: VecDeque<HistoryAction>,
 }
 impl Journal {
+    pub(super) fn cancel_requests(&mut self) {
+        self.requests.clear();
+    }
+
     pub(super) fn record(&mut self, entry: Entry) {
         if entry.before == entry.after {
             return;

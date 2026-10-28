@@ -12,6 +12,10 @@ interface guest {
         /// and none assumes a Voxel is a metre.
         voxel-size-m: f32,
         seed: u64,
+        /// Durable identity, independent of seed. Empty only for ephemeral hosts.
+        world-id: string,
+        /// Reopen registers content but must not repeat new-World construction.
+        reopened: bool,
     }
 
     /// One registered name and the id the engine gave it.

@@ -1,10 +1,10 @@
 # 22: S0: World identity, save schema and lifecycle
 
-Status: needs-triage
+Status: done
 Blocked by: none
 
 Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: S0; keep this separate from other PR scopes.
+PR boundary: PR 4, step 22 followed by 23 in one local PR scope.
 
 ## What to build
 
@@ -19,18 +19,19 @@ This contract precedes persistence code, not another unresolved user choice.
 
 ## Acceptance criteria
 
-- [ ] Schema covers agreed state and explicit recovery/compatibility behavior.
-- [ ] Same-seed Worlds have distinct durable identity.
-- [ ] New/open lifecycle prevents demo construction replay on restored data.
-- [ ] Remaining technical format choices are documented and testable.
+- [x] Schema covers agreed state and explicit recovery/compatibility behavior.
+- [x] Same-seed Worlds have distinct durable identity.
+- [x] New/open lifecycle prevents demo construction replay on restored data.
+- [x] Remaining technical format choices are documented and testable.
 
 ## Validation and authorization
 
 Use behavior/intent regressions and the spec's build/review requirements.
 Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
 Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+All Q1–Q49 choices and shared understanding were confirmed. The user
+explicitly authorized local PR 4 implementation and focused commits for
+tickets 22–23. Push, publication, merge and later scopes remain unauthorized.
 
 ## Comments
 
@@ -44,3 +45,31 @@ existing build/profile hygiene. No push, publication or merge is authorized.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+### Current authorization and Agent Brief
+
+The user confirmed Q1–Q49 and explicitly authorized local PR 4 work for
+tickets 22–23 together, superseding the historical pending confirmation
+and separate S0/S1 boundaries above. No push, publication or merge. Work
+from main b7997b0 in the dedicated persistence worktree; no dependency on
+PR 2 changes. Implement durable identity/content, recoverable commits and
+Server snapshots before runtime save/eviction/lifecycle integration. Keep
+readiness distinct from completion; record actual validation and limits.
+
+### First batch (historical)
+
+The first batch supplied the storage/checkpoint foundation. Runtime and
+new/open WIT lifecycle were incomplete then; completion notes below
+supersede that intermediate state. See
+[save validation](../world-persistence-validation.md) and
+[technical contract](../../../../docs/world-persistence.md).
+
+### Completed contract and lifecycle
+
+Implemented versioned named records, UUID identity, exact compiled-build
+requirements, OS writer locking, immutable checksummed commits and explicit
+recovery. The amended unreleased 0.3 WIT carries World id and reopening.
+The real demo guest builds on new World and emits no construction/scenario
+Commands on reopen. Older contracts refuse reopen. Timer/Agenda state,
+Player entry and revision/Lifetime guards have automated regressions.
+See docs/world-persistence.md and the save-specific validation notes.

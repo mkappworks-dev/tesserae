@@ -13,6 +13,7 @@ use crate::trust::{Trust, Verdict};
 pub struct Compiled {
     pub found: Found,
     pub limits: ModLimits,
+    pub build_sha256: String,
     pub(crate) component: Component,
 }
 
@@ -50,6 +51,7 @@ impl ModHost {
         trusted
             .into_iter()
             .map(|(found, bytes)| {
+                let build_sha256 = crate::trust::hash(&bytes, &found.manifest_bytes);
                 let component =
                     Component::new(&self.engine, bytes).map_err(|source| ModError::Compile {
                         id: found.manifest.id.clone(),
@@ -67,6 +69,7 @@ impl ModHost {
                 Ok(Compiled {
                     found,
                     limits,
+                    build_sha256,
                     component,
                 })
             })

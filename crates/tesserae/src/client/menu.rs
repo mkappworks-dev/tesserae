@@ -147,7 +147,9 @@ pub(super) fn plugin(app: &mut App) {
             (
                 // Before the edit path, so it sees the grab a close makes and
                 // the first click after one edits.
-                toggle.before(super::edit::send_intents),
+                toggle
+                    .run_if(crate::server::persistence::playing)
+                    .before(super::edit::send_intents),
                 receive_palette,
                 rebuild.after(super::edit::send_intents),
                 rebuild_shapes,
@@ -515,15 +517,24 @@ fn spawn_menu(
             GlobalZIndex(10),
         ))
         .with_children(|root| {
-            root.spawn((
-                Text::new(heading),
-                font(14.0),
-                Node {
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ));
+            root.spawn(Node {
+                width: Val::Percent(100.0),
+                column_gap: Val::Px(12.0),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|header| {
+                header.spawn((
+                    Text::new(heading),
+                    font(14.0),
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+                super::save::quit_button(header);
+            });
             root.spawn(Node {
                 flex_grow: 1.0,
                 flex_basis: Val::Px(0.0),

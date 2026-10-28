@@ -238,3 +238,13 @@ tesserae/
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
 └── USE-GRANT.md                the most important file in the repo
 ```
+
+## World persistence
+
+The Server owns opening, checkpoint requests, immutable snapshots and completion
+landing in `server/persistence.rs`. Core supplies named durable records,
+checkpoints and the recoverable filesystem protocol without Bevy/wgpu. The IO
+pool serializes and writes snapshots; workers never read mutable World state.
+The Client receives save status and sends lifecycle intents. Mods observe
+new/open through WIT, and restored changes also feed coarse derivation. Details
+and limits: [World persistence](world-persistence.md).

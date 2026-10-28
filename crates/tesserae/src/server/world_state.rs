@@ -7,7 +7,7 @@
 //! compile rather than merely being noticed in review. The Client gets finished
 //! meshes through `super::streaming`'s messages and needs no read access either.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use bevy::platform::collections::HashMap;
@@ -38,6 +38,13 @@ pub struct ChunkStore {
     overlays: HashMap<ChunkCoord, Arc<ChunkOverlay>>,
     lifetimes: HashMap<ChunkCoord, Lifetime>,
     next_lifetime: u64,
+    pub(super) persistent: bool,
+    pub(super) checkpoint: bool,
+    pub(super) simulation_chunks: BTreeSet<ChunkCoord>,
+    pub(super) pending_evictions: BTreeSet<ChunkCoord>,
+    pub(super) approved_evictions: HashMap<ChunkCoord, (Lifetime, u64)>,
+    pub(super) revisions: BTreeMap<ChunkCoord, u64>,
+    pub(super) archived: BTreeMap<ChunkCoord, (Arc<Chunk>, Arc<ChunkOverlay>)>,
     /// Positions whose occupants changed since `super::fluids` last looked:
     /// what it wakes the simulation around.
     changed: Vec<[i32; 3]>,
@@ -85,6 +92,15 @@ pub(in crate::server) struct Snapshot {
 }
 
 impl ChunkStore {
+    pub(super) fn saved_source(
+        &self,
+        coord: ChunkCoord,
+    ) -> Option<(Arc<Chunk>, Arc<ChunkOverlay>)> {
+        self.shared(coord)
+            .map(|s| (s.chunk, s.overlay))
+            .or_else(|| self.archived.get(&coord).cloned())
+    }
+
     pub fn get(&self, coord: ChunkCoord) -> Option<&Chunk> {
         self.chunks.get(&coord).map(Arc::as_ref)
     }
@@ -173,6 +189,9 @@ impl ChunkStore {
     }
 
     pub(in crate::server) fn note_changed(&mut self, at: [i32; 3], solid: bool, heated: bool) {
+        if self.persistent {
+            *self.revisions.entry(VoxelCoord::of(at).chunk).or_default() += 1;
+        }
         if self.changed.len() < JOURNAL_CAP {
             self.changed.push(at);
             if solid {
@@ -220,9 +239,12 @@ impl ChunkStore {
     /// from its neighbours, which is also what makes a Chunk arriving next to
     /// it brighten this one.
     pub(in crate::server) fn insert(&mut self, coord: ChunkCoord, chunk: Chunk) {
-        self.chunks.insert(coord, Arc::new(chunk));
+        let restored = self.archived.remove(&coord);
+        let (chunk, overlay) =
+            restored.unwrap_or_else(|| (Arc::new(chunk), Arc::new(ChunkOverlay::none())));
+        self.chunks.insert(coord, chunk);
         self.light.insert(coord, Arc::new(ChunkLight::dark()));
-        self.overlays.insert(coord, Arc::new(ChunkOverlay::none()));
+        self.overlays.insert(coord, overlay);
         self.next_lifetime += 1;
         self.lifetimes.insert(coord, Lifetime(self.next_lifetime));
         self.lifecycle.insert(coord);
@@ -248,12 +270,40 @@ impl ChunkStore {
         }
     }
 
-    pub(in crate::server) fn remove(&mut self, coord: ChunkCoord) {
+    pub(in crate::server) fn remove(&mut self, coord: ChunkCoord) -> bool {
+        if self.persistent
+            && self.contains(coord)
+            && (self.revisions.contains_key(&coord)
+                || self.simulation_chunks.contains(&coord)
+                || self.pending_evictions.contains(&coord))
+        {
+            let revision = self.revisions.get(&coord).copied().unwrap_or(0);
+            if self.approved_evictions.get(&coord).copied()
+                != self.lifetime(coord).map(|life| (life, revision))
+            {
+                if self.pending_evictions.insert(coord) {
+                    self.checkpoint = true;
+                }
+                return false;
+            }
+            if self.revisions.contains_key(&coord) {
+                self.archived.insert(
+                    coord,
+                    (
+                        Arc::clone(&self.chunks[&coord]),
+                        Arc::clone(&self.overlays[&coord]),
+                    ),
+                );
+            }
+        }
+        self.pending_evictions.remove(&coord);
+        self.approved_evictions.remove(&coord);
         self.chunks.remove(&coord);
         self.light.remove(&coord);
         self.overlays.remove(&coord);
         self.lifetimes.remove(&coord);
         self.lifecycle.insert(coord);
+        true
     }
 }
 
@@ -392,11 +442,24 @@ pub const SPAWN_EYE_ALTITUDE_M: f32 = 18.0;
 /// doc. The Client reads it to frame its camera; framing is a Client decision,
 /// the spawn point is not.
 #[derive(Resource, Clone, Copy, Debug)]
-pub struct SpawnPoint(Vec3);
+pub struct SpawnPoint(Vec3, Option<Vec3>);
 
 impl SpawnPoint {
     pub(in crate::server) fn new(metres: Vec3) -> Self {
-        SpawnPoint(metres)
+        SpawnPoint(metres, None)
+    }
+
+    pub(in crate::server) fn with_entry(mut self, eye: Vec3) -> Self {
+        self.1 = Some(eye);
+        self
+    }
+
+    pub(in crate::server) fn startup_anchor(self) -> Vec3 {
+        self.1.unwrap_or(self.0)
+    }
+
+    pub fn entry_eye(self) -> Vec3 {
+        self.1.unwrap_or_else(|| self.eye())
     }
 
     /// The spawn point itself, on the ground; the Eye is [`SpawnPoint::eye`].
@@ -414,7 +477,7 @@ impl SpawnPoint {
     /// For tests outside `server`, which cannot reach `new`.
     #[cfg(test)]
     pub(crate) fn for_tests(metres: Vec3) -> Self {
-        SpawnPoint(metres)
+        SpawnPoint(metres, None)
     }
 }
 

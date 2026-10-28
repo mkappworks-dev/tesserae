@@ -54,3 +54,12 @@ process.
   tick on each message and a pose history on `Player`.
 - **One Player.** The systems take `Single<&Player>`; the transport replaces
   that with a lookup from the sender's `Entity`.
+
+## Durable Player entry
+
+World saves store the current Server-owned Eye. Reopening publishes it as the
+entry Eye separately from the generated respawn point, so the spawn altitude is
+not applied twice and respawn retains its existing meaning. Pose sequence
+numbers and movement budgets restart with the connection. Client-only look
+orientation is not Server Player state; future movement/view data needs an
+explicit versioned extension. See [World persistence](../world-persistence.md).

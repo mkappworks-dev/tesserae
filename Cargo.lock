@@ -6016,6 +6016,11 @@ name = "tesserae-core"
 version = "0.0.0"
 dependencies = [
  "criterion",
+ "serde",
+ "serde_json",
+ "sha2",
+ "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

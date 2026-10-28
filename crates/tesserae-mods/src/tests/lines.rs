@@ -311,6 +311,8 @@ fn a_0_2_guest_commands_sources_and_fire_in_regions() {
         let fluids = rig.instance("fluids", ModLimits::HOST).unwrap();
         let fluids = block_on(fluids.start(
             crate::WorldInfo {
+                world_id: String::new(),
+                reopened: false,
                 voxel_size_m: 1.0,
                 seed: mode,
             },
@@ -337,4 +339,22 @@ fn registered() -> crate::Registered {
         ],
         shapes: vec![row("core:cube", 0)],
     }
+}
+
+#[test]
+fn older_contract_refuses_reopen_instead_of_replaying_new_world_startup() {
+    let rig = Rig::new();
+    let guest = rig.instance("fluids", ModLimits::HOST).unwrap();
+    let result = block_on(guest.start(
+        crate::WorldInfo {
+            seed: 1,
+            voxel_size_m: 1.0,
+            world_id: "durable-world".into(),
+            reopened: true,
+        },
+        registered(),
+    ));
+    assert!(
+        matches!(result, Err(crate::ModFault::Trap(message)) if message.contains("cannot distinguish"))
+    );
 }

@@ -396,6 +396,73 @@ pub struct Timers {
 }
 
 impl Timers {
+    pub fn checkpoint(
+        &self,
+        now: Step,
+        mapping: &crate::save::Mapping,
+    ) -> Result<crate::save::TimerState, crate::save::Error> {
+        let mut flow: Vec<_> = self
+            .flow
+            .iter()
+            .map(|(&at, t)| {
+                Ok((
+                    at,
+                    t.ready.saturating_sub(now),
+                    t.want.map(|f| mapping.fluid(f)).transpose()?,
+                ))
+            })
+            .collect::<Result<_, crate::save::Error>>()?;
+        let mut fire: Vec<_> = self
+            .fire
+            .iter()
+            .map(|(&at, t)| {
+                let (clock, change) = t.checkpoint(now, mapping)?;
+                Ok((at, clock, change))
+            })
+            .collect::<Result<_, crate::save::Error>>()?;
+        flow.sort_unstable_by_key(|e| e.0);
+        fire.sort_unstable_by_key(|e| e.0);
+        Ok(crate::save::TimerState { flow, fire })
+    }
+
+    pub fn restore(
+        saved: &crate::save::TimerState,
+        now: Step,
+        mapping: &crate::save::Mapping,
+    ) -> Result<Self, crate::save::Error> {
+        use crate::save::Error;
+        let mut timers = Self::default();
+        for (at, remaining, want) in &saved.flow {
+            let timer = Timer {
+                ready: now
+                    .checked_add(*remaining)
+                    .ok_or_else(|| Error::Corrupt("flow deadline overflow".into()))?,
+                want: want
+                    .as_ref()
+                    .map(|f| mapping.restore_fluid(f))
+                    .transpose()?,
+            };
+            if timers.flow.insert(*at, timer).is_some() {
+                return Err(Error::Corrupt("duplicate flow timer".into()));
+            }
+        }
+        for (at, clock, change) in &saved.fire {
+            let timer = crate::fire::FireTimer::restore(clock, change, now, mapping)?;
+            if timers.fire.insert(*at, timer).is_some() {
+                return Err(Error::Corrupt("duplicate fire timer".into()));
+            }
+        }
+        Ok(timers)
+    }
+
+    pub fn homes(&self) -> std::collections::BTreeSet<[i32; 3]> {
+        self.flow
+            .keys()
+            .chain(self.fire.keys())
+            .map(|at| chunk_of(*at).0)
+            .collect()
+    }
+
     /// Takes the timers of `cells`, for a worker evaluating just those.
     pub fn split_off(&mut self, cells: &[Cell]) -> Timers {
         Timers {

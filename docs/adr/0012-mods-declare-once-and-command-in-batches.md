@@ -111,3 +111,13 @@ is permission to run within the sandbox, never permission to bypass it.
   0.1 or 0.2 is a separate decision.
 - A Command since 0.2 can only ask for sources and fires the Server's own rules
   allow. A Mod cannot set flow, reach, exposure or ignition progress directly.
+
+## Persistent opening lifecycle
+
+The unreleased 0.3 `world-info` now carries durable `world-id` and `reopened`.
+Declaration, registration and `start` run on both opening kinds; the Mod must
+restrict initial construction to a new World. Reopening never snapshots
+arbitrary guest memory. Older lines refuse persistent reopening because their
+closed records cannot express this distinction. Their new-World behavior and
+adapters remain supported. Required build identity binds the exact trusted
+component and manifest bytes compiled by the host.

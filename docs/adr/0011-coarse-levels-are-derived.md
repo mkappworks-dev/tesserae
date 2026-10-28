@@ -84,3 +84,14 @@ The coarse levels then read it instead of the generator and need no other
 change, which lifts the first loss above. Placed lanterns being durable is also
 when "a coarse Voxel holding an emitter keeps its Material if it passes the
 half-volume test" becomes worth its one line.
+
+## Persistent Worlds
+
+The save step resolves the deferred loss above for persistent Worlds. Saved
+level-0 changes are a source even while evicted. At every coarse level, Jobs
+recursively derive only branches containing saved changes, while untouched
+branches use their existing level-specific generator. Invalidation follows all
+affected ancestors. Fluid/fire Overlays are carried through the same volume vote
+at those levels; natural thin-feature loss remains. Coarse Chunks are still
+derived data and never saved or edited. Ephemeral Worlds retain the original
+generator-only policy above level 1.

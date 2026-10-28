@@ -252,6 +252,59 @@ enum Clock {
 }
 
 impl FireTimer {
+    pub(crate) fn checkpoint(
+        &self,
+        now: Step,
+        mapping: &crate::save::Mapping,
+    ) -> Result<(crate::save::FireClock, crate::save::FireChange), crate::save::Error> {
+        use crate::save::{FireChange, FireClock};
+        let clock = match self.clock {
+            Clock::Runs { ready } => FireClock::Running {
+                remaining: ready.saturating_sub(now),
+            },
+            Clock::Frozen { left, solid } => FireClock::Frozen {
+                remaining: left,
+                solid: mapping.voxel(solid)?,
+            },
+        };
+        let change = match self.want {
+            Fire::Ignite { fuel } => FireChange::Ignite { fuel },
+            Fire::Extinguish => FireChange::Extinguish,
+            Fire::Burnout { residue } => FireChange::Burnout {
+                residue: mapping.voxel(residue)?,
+            },
+        };
+        Ok((clock, change))
+    }
+
+    pub(crate) fn restore(
+        clock: &crate::save::FireClock,
+        change: &crate::save::FireChange,
+        now: Step,
+        mapping: &crate::save::Mapping,
+    ) -> Result<Self, crate::save::Error> {
+        use crate::save::{Error, FireChange, FireClock};
+        let clock = match clock {
+            FireClock::Running { remaining } => Clock::Runs {
+                ready: now
+                    .checked_add(*remaining)
+                    .ok_or_else(|| Error::Corrupt("fire deadline overflow".into()))?,
+            },
+            FireClock::Frozen { remaining, solid } => Clock::Frozen {
+                left: *remaining,
+                solid: mapping.restore_voxel(solid)?,
+            },
+        };
+        let want = match change {
+            FireChange::Ignite { fuel } => Fire::Ignite { fuel: *fuel },
+            FireChange::Extinguish => Fire::Extinguish,
+            FireChange::Burnout { residue } => Fire::Burnout {
+                residue: mapping.restore_voxel(residue)?,
+            },
+        };
+        Ok(Self { clock, want })
+    }
+
     pub(crate) fn new(ready: Step, want: Fire) -> Self {
         FireTimer {
             clock: Clock::Runs { ready },
