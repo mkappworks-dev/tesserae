@@ -5,9 +5,9 @@ directory, which Bevy finds through `BEVY_ASSET_ROOT` in
 [`.cargo/config.toml`](../.cargo/config.toml) during development and through the
 executable's own directory in a release archive.
 
-Mostly empty for now: texturing is step 9 of the build order in
-[DESIGN.md](../DESIGN.md), and the one shader step 2 needs is embedded in the
-binary rather than loaded from here, as `bevy_pbr`'s own shaders are.
+The menu fonts are bundled here. Engine-authored media follows the CC0 rule
+below; third-party fonts retain their upstream license. Engine shaders are
+embedded in the binary, as `bevy_pbr`'s own shaders are.
 
 ## Licence
 
@@ -26,3 +26,11 @@ page, and there is nothing yet for it to cover.
 
 Look packs and other Mods. They are loaded from a user directory through the WIT
 contract, ship their own WESL, and are not ours to licence.
+
+## Bundled UI fonts
+
+The files under `fonts/` are Liberation Fonts 2.1.5, bundled unchanged under SIL
+Open Font License 1.1, rather than CC0. Their copyright, license and author
+notices are retained beside them. The source archive is the
+[upstream 2.1.5 binary release](https://github.com/liberationfonts/liberation-fonts/files/7261482/liberation-fonts-ttf-2.1.5.tar.gz).
+Liberation Sans and Liberation Mono match the approved menu prototype's fonts.

@@ -1,10 +1,23 @@
 # Controls and display settings
 
-Open the catalogue or help panel, then choose **Controls / Display**. Each
-keyboard/mouse action has two alternatives. Changes stay in a draft until
-**Apply** successfully saves them. **Cancel** discards the draft. Back or Escape
-with changes offers Apply, Discard and Stay. Escape always cancels binding
-capture. Capture waits for the opening inputs to be released.
+Open the menu with **Tab**. Its top-level pages are **Catalogue**, **Behavior**,
+**Key bindings** and **Display**. **I** opens the last-used Behavior or Key
+bindings page; the in-game information button has moved into the menu. Behavior
+includes an expandable quick reference, independent of the **F3** diagnostics.
+
+Catalogue searches Material names; Key bindings searches action names,
+categories and both assigned alternatives. Search queries stay with their page.
+**/** focuses search. Escape clears its text, then releases text focus, before
+it can close the menu. Typing in search never activates gameplay or menu
+shortcuts. Inspect a Material to pin its details, choose a Shape, then hold it
+or assign it to a quick slot without changing the selected hand.
+
+Each keyboard/mouse action has two alternatives. Behavior, binding and display
+changes share one draft across their pages. **Apply changes** saves and
+activates it only after a successful write; **Cancel** discards it. Leaving for
+Catalogue, Back or Escape with edits offers Apply, Discard and Stay. Restore
+defaults asks for confirmation and changes only the draft. Escape always cancels
+binding capture. Capture waits for the opening inputs to be released.
 
 Conflicting bindings offer Replace or Cancel. Modifier sides are equivalent for
 chords; physical modifier keys can also be bound individually. Specific chords

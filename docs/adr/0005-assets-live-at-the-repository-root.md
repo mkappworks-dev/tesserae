@@ -39,3 +39,13 @@ The engine's own shaders are not assets either — they are embedded in the bina
 with `embedded_asset!`, as `bevy_pbr`'s are, so they are watched by
 `embedded_watcher` rather than `file_watcher`. A shader that stops hot-reloading
 after being moved between the two is the expected form of this mistake.
+
+## Third-party UI fonts (2026-10-29)
+
+The CC0 rule applies to engine-authored media. Unmodified Liberation Sans and
+Liberation Mono are bundled under `assets/fonts/` to match the approved menu
+reference independently of installed system fonts. They retain upstream SIL Open
+Font License 1.1, copyright and author notices; they are not relicensed as CC0.
+The fonts are also embedded for deterministic UI startup. Release archives
+continue to ship the root assets directory and its license notices beside the
+binary.

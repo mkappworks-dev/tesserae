@@ -1176,12 +1176,28 @@ mod tests {
 
     /// What Bevy's button widget triggers when an entry is clicked.
     fn choose(app: &mut App, entry: Entry) {
-        let mut q = app.world_mut().query::<(Entity, &Entry)>();
-        let entity = q
-            .iter(app.world())
-            .find(|&(_, e)| *e == entry)
-            .unwrap_or_else(|| panic!("{entry:?} is not offered"))
-            .0;
+        let entity = if let Entry::Solid { material, shape } = entry {
+            let shape_button = app
+                .world_mut()
+                .query::<(Entity, &menu::DetailAction)>()
+                .iter(app.world())
+                .find_map(|(entity, action)| {
+                    matches!(action,menu::DetailAction::Shape(id) if *id==shape).then_some(entity)
+                })
+                .expect("Shape offered");
+            app.world_mut().trigger(Activate {
+                entity: shape_button,
+            });
+            frame(app);
+            app.world_mut().query::<(Entity,&menu::DetailAction)>().iter(app.world()).find_map(|(entity,action)|matches!(action,menu::DetailAction::Hold(Holding::Solid {material:m,shape:s,..}) if *m==material&&*s==shape).then_some(entity)).expect("Hold button uses the selected Material and Shape")
+        } else {
+            app.world_mut()
+                .query::<(Entity, &Entry)>()
+                .iter(app.world())
+                .find(|(_, value)| **value == entry)
+                .unwrap_or_else(|| panic!("{entry:?} is not offered"))
+                .0
+        };
         app.world_mut().trigger(Activate { entity });
         frame(app);
     }
@@ -1241,14 +1257,16 @@ mod tests {
         for solid in &solids {
             assert!(offered(&mut app).contains(&Entry::Material(solid.id)));
             hover(&mut app, Entry::Material(solid.id));
-            let shapes: Vec<_> = offered(&mut app)
-                .into_iter()
-                .filter_map(|e| match e {
-                    Entry::Solid { material, shape } => {
-                        assert_eq!(material, solid.id, "only the chosen solid's");
-                        Some(shape)
+            let shapes: Vec<_> = app
+                .world_mut()
+                .query::<&menu::DetailAction>()
+                .iter(app.world())
+                .filter_map(|action| {
+                    if let menu::DetailAction::Shape(id) = action {
+                        Some(*id)
+                    } else {
+                        None
                     }
-                    _ => None,
                 })
                 .collect();
             for shape in &catalogue.shapes {
@@ -1285,7 +1303,12 @@ mod tests {
             "demo:mud",
             "fire",
         ] {
-            assert!(texts.iter().any(|t| t == name), "{name} by its full name");
+            assert!(
+                texts
+                    .iter()
+                    .any(|t| t == &super::super::menu_ui::title(name)),
+                "{name} by its display name"
+            );
         }
     }
 
@@ -1301,14 +1324,21 @@ mod tests {
             .filter(|m| m.solid)
             .map(|m| Entry::Material(m.id))
             .collect();
-        let shapes: Vec<_> = (0..5)
-            .map(|shape| Entry::Solid {
-                material: tesserae_core::testgen::fixtures().ground.rock,
-                shape,
+        let shapes: Vec<_> = app
+            .world_mut()
+            .query::<&menu::DetailAction>()
+            .iter(app.world())
+            .filter_map(|action| {
+                if let menu::DetailAction::Shape(id) = action {
+                    Some(*id)
+                } else {
+                    None
+                }
             })
             .collect();
-        assert_eq!(offered.len(), solids.len() + shapes.len(), "{offered:?}");
-        for entry in solids.iter().chain(&shapes) {
+        assert_eq!(shapes.len(), 5);
+        assert_eq!(offered.len(), solids.len());
+        for entry in &solids {
             assert!(offered.contains(entry), "{entry:?}");
         }
         let texts = texts(&mut app);

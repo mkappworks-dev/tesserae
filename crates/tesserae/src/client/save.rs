@@ -10,29 +10,14 @@ struct Panel;
 struct Action(SaveAction);
 
 pub(super) fn quit_button(parent: &mut ChildSpawnerCommands) {
-    parent
-        .spawn((
-            Button,
-            Action(SaveAction::SaveQuit),
-            Node {
-                min_width: Val::Px(160.0),
-                min_height: Val::Px(44.0),
-                align_self: AlignSelf::FlexStart,
-                padding: UiRect::all(Val::Px(10.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.15, 0.22, 0.3)),
-        ))
-        .with_child((
-            Text::new("Save & Quit"),
-            TextFont {
-                font_size: bevy::text::FontSize::Px(16.0),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
+    super::menu_ui::compact_button(
+        parent,
+        "Save & Quit",
+        Action(SaveAction::SaveQuit),
+        false,
+        24.0,
+        10.0,
+    );
 }
 
 #[derive(Clone, PartialEq)]
