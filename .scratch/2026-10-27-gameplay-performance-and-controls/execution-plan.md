@@ -2,8 +2,9 @@
 
 Updated 2026-10-28. This adds execution guidance to the confirmed spec;
 feature scope, dependencies and acceptance criteria remain in spec.md and
-the numbered tickets. PR titles below describe planned scopes, not published
-GitHub PRs.
+the numbered tickets. Numbers below identify sequence positions, not GitHub
+PR numbers. P0 merged as [PR 22](https://github.com/mkappworks-dev/tesserae/pull/22);
+positions 2–16 remain planned scopes.
 
 Default: GPT-6.1 Terra (`gpt-6.1-terra`), Medium reasoning effort.
 Use GPT-6.1 Sol (`gpt-6.1-sol`) with High effort for the investigation,
@@ -13,7 +14,7 @@ The PR 1 session was launched with Sol High.
 
 | # | Planned PR | Tickets | Model | Effort |
 | --- | --- | --- | --- | --- |
-| 1 | Frame profiling and release benchmarks | 11–12 | Sol | High |
+| 1 | Frame profiling and release benchmarks (merged) | 11–12 | Sol | High |
 | 2 | Input ownership and semantic actions | 01–02 | Terra | Medium |
 | 3 | Remapping, sprint toggle and timed tap removal | 03–04 | Terra | Medium |
 | 4 | Display sync and FPS limit settings | 28 | Terra | Medium |
@@ -30,24 +31,34 @@ The PR 1 session was launched with Sol High.
 | 15 | Configurable controller support | 07 | Terra | Medium |
 | 16 | Desktop touch controls and preferences | 08–10 | Terra | Medium |
 
-Each PR runs sequentially in its own branch/worktree. The user requested a
-new session and worktree for PR 1; it runs on
-`tech/frame-profiling-benchmarks`. That request supersedes the earlier
-same-session preference for PR 1. It does not authorize parallel agents or
-automatically starting all later sessions. No push or publication is
-authorized.
+Each PR runs sequentially in its own branch/worktree. P0 is complete;
+PR 2 (tickets 01–02) is next. Starting later work, extra threads, publication
+and merges require their own applicable user authorization. No parallel
+coding agents are planned.
 
-The following remain conditional or deferred; they are outside the sixteen
-defined implementation scopes above.
+## Conditional experiment backlog
 
-| Status | Separate PR scope | Tickets | Model | Effort |
-| --- | --- | --- | --- | --- |
-| Evidence gate | Static atlas optimization | 13 | Terra | Medium |
-| Evidence gate | Quiet UI optimization | 14 | Terra | Medium |
-| Evidence gate | Per-view render optimization | 15 | Sol | High |
-| Evidence gate | Emitter relight optimization | 16 | Sol | High |
-| Deferred | Owned inventory transactions | 18 | Decide later | — |
-| Deferred | Owned resource persistence | 19 | Decide later | — |
+Tickets 13–16 are hypotheses, not scheduled implementation PRs. P0 did not
+establish worthwhile gains for any of them. They do not block PR 2, and no
+PR title or implementation commitment is reserved. Each ticket records the
+specific missing evidence. Use stable matched runs at unchanged quality,
+measure an effect above overhead/variation, and preserve output and tails.
+Promote only a demonstrated candidate; defer or close a failed experiment.
+
+- Ticket 13: investigate recurring atlas work and readiness-safe invalidation.
+- Ticket 14: attribute idle UI/system/layout work before adding caches.
+- Ticket 15: obtain valid per-view CPU/GPU attribution before choosing a change.
+- Ticket 16: attribute emitter relight in targeted simulation stress fixtures
+  and prove a bounded equivalent algorithm before implementation.
+
+See [P0 validation](implementation-validation.md) for qualified measurements
+and evidence gates. Whole-schedule timings do not establish per-view or GPU
+bottlenecks; the broad noisy series cannot justify small gains.
+
+## Deferred product work
+
+Tickets 18–19, owned inventory transactions and resource persistence, remain
+deferred. They are separate from the conditional performance experiments.
 
 For Terra Medium scopes, increase effort to High only when a concrete
 problem warrants it: repeated failed fixes, ambiguous ownership, concurrency

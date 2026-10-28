@@ -1,6 +1,6 @@
 # Desktop gameplay, World persistence and measured performance
 
-Status: shared understanding confirmed; local P0 implementation authorized.
+Status: shared understanding confirmed; P0 merged; C0 is next planned scope.
 
 Source baseline: `7907b6de57e337d6257fc5d345c27e098db0b6d1`.
 All Q1–Q49 recommendations were accepted during the grilling interview.
@@ -18,9 +18,10 @@ and profiling, then controls/UI; subsequent scopes follow their dependencies.
 The user requested implementation but correctly identified missing grilling.
 Earlier readiness labels were premature. The interview is complete and
 the user confirmed shared understanding with
-ok after the consolidated plan. Local implementation begins with P0. No push,
-PR publication or merge is authorized. PR 21 was merged externally and is
-not to be reopened or extended. Its approved phase-8.2 spec stays intact.
+ok after the consolidated plan. P0 was subsequently implemented and its
+publication authorized; PR 22 is now merged. Later scopes do not start
+from this cleanup, and publication/merge permissions do not carry forward
+automatically. PR 21 remains closed; its approved phase-8.2 spec stays intact.
 
 ## Performance and presentation
 
@@ -271,7 +272,7 @@ use Alt+wheel in third-person by default. No accidental control stealing.
 ## PR boundaries and ticket map
 
 Each PR stays narrow. Dependencies do not authorize bundling unrelated work.
-Start with P0 baseline/profiling, tickets 11–12 only in the current branch.
+P0 baseline/profiling (tickets 11–12) is complete; C0 (01–02) is next.
 Implement inline and sequentially, one PR at a time, with a separate branch/
 worktree for each PR. Later scopes start after their prerequisites. Continue
 in the same session where practical; no parallel coding agents or extra
@@ -284,10 +285,6 @@ threads are planned. Touch is not first by default.
 | 03–04 | C1: controls profile, settings and behavior | C0 |
 | 28 | P5: display sync, caps and uncapped settings | C1 profile/UI |
 | 05–06 | C2: focus, search and readable catalogue | C0; C1 labels |
-| 13 | P1: static atlas optimization | P0 evidence |
-| 14 | P2: quiet UI optimization | P0 evidence |
-| 15 | P3: one per-view render optimization | valid GPU/per-view evidence |
-| 16 | P4: emitter relight optimization | simulation proof/evidence |
 | 17 | I0: creative organization and shortcuts | C0, C2, profile storage |
 | 22 | S0: World save/lifecycle schema | agreed save policy |
 | 23 | S1: durable World/simulation changes | S0 |
@@ -301,9 +298,29 @@ threads are planned. Touch is not first by default.
 | 08–10 | C4: desktop touch and hardware acceptance | C0, C2 |
 | 18–19 | I1/I2: owned inventory and resource saves | deferred |
 
-P3/P4 remain evidence-gated; they do not imply an approved speculative
-algorithm. I1/I2 remain deferred, not implementation-ready. Real controller/
-touch tests and user visual review are acceptance requirements, not claims
+P0 merged as [PR 22](https://github.com/mkappworks-dev/tesserae/pull/22).
+C0 (tickets 01–02, sequence position PR 2) is the next planned scope.
+
+Conditional performance experiments are outside the implementation sequence:
+
+- Ticket 13 / P1: attribute recurring atlas cost and validate an on-demand
+  candidate at unchanged appearance.
+- Ticket 14 / P2: attribute idle UI/system/layout cost before reducing work.
+- Ticket 15 / P3: obtain usable per-view CPU/GPU evidence, then select one
+  bounded candidate.
+- Ticket 16 / P4: attribute emitter relight in targeted simulation fixtures
+  and prove bounded equivalent outcomes before code.
+
+P0 supplied instrumentation and a qualified baseline, not measured gains
+from these four candidates. None is implementation-ready or blocks C0.
+Promote one to an implementation PR only after its ticket-specific evidence
+and stable matched comparison justify the complexity. A failed experiment
+may remain deferred or be closed without implementation. This clarifies
+scheduling; all accepted quality, ownership and simulation rules remain.
+
+P1–P4 remain evidence-gated; no speculative algorithm is pre-approved.
+I1/I2 remain deferred, not implementation-ready. Real controller/touch
+tests and user visual review are acceptance requirements, not claims
 this Mac's injected input tests can satisfy.
 
 ## Acceptance, build and review
@@ -340,5 +357,6 @@ All user-facing questions Q1–Q49 are accepted. Remaining technical choices
 are implementation/design work under these constraints, not invented user
 requirements. Hardware access and measured optimization evidence remain
 validation gates. The user confirmed shared understanding after the full
-interview; local implementation is authorized. Push/publication/merge remain
-separate actions without authorization.
+interview. P0 merged under subsequent user authorization. Later work and
+its publication/merge remain separate actions requiring applicable user
+instructions; this planning cleanup starts no implementation.
