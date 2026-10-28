@@ -20,8 +20,16 @@ pub(super) struct Settings {
     notice: String,
     dirty: bool,
 }
+impl Settings {
+    pub fn capturing(&self) -> bool {
+        self.capture.is_some()
+    }
+}
+
 #[derive(Component)]
 struct Panel;
+#[derive(Component)]
+struct Access;
 #[derive(Component, Clone, Copy)]
 enum Operation {
     Open,
@@ -50,6 +58,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Settings>()
         .add_observer(activate)
         .add_systems(Startup, launch)
+        .add_systems(Update, show_access)
         .add_systems(
             Update,
             (capture, render).chain().before(super::input::resolve),
@@ -89,6 +98,8 @@ fn launch(
     }
     commands
         .spawn((
+            Access,
+            Visibility::Hidden,
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(16.0),
@@ -99,6 +110,21 @@ fn launch(
         ))
         .with_children(|parent| button(parent, "Controls / Display".into(), Operation::Open));
 }
+fn show_access(
+    settings: Res<Settings>,
+    menu: Res<super::menu::Menu>,
+    panels: Res<super::help::Panels>,
+    mut access: Query<&mut Visibility, With<Access>>,
+) {
+    for mut visibility in &mut access {
+        visibility.set_if_neq(if !settings.open && (menu.open || panels.help) {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
+}
+
 fn apply(
     settings: &mut Settings,
     store: &mut Store,
@@ -136,6 +162,19 @@ fn activate(
     let Ok(operation) = operations.get(event.entity) else {
         return;
     };
+    if settings.capture.is_some() {
+        if matches!(operation, Operation::Cancel) {
+            settings.capture = None;
+            settings.notice.clear();
+            settings.dirty = true;
+        }
+        return;
+    }
+    if settings.conflict.is_some()
+        && !matches!(operation, Operation::Replace | Operation::CancelConflict)
+    {
+        return;
+    }
     settings.dirty = true;
     match *operation {
         Operation::Open => {
@@ -230,14 +269,27 @@ fn capture(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut settings: ResMut<Settings>,
+    active: (Res<Bindings>, Res<Preferences>),
 ) {
     if !settings.open {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
         settings.dirty = true;
-        if settings.capture.take().is_none() {
-            settings.unsaved = true;
+        if settings.capture.take().is_some() || settings.conflict.take().is_some() {
+            settings.notice.clear();
+            return;
+        }
+        if settings.capture.is_none() {
+            if settings
+                .draft
+                .as_ref()
+                .is_some_and(|(b, p)| b != &*active.0 || p != &*active.1)
+            {
+                settings.unsaved = true;
+            } else {
+                close(&mut settings);
+            }
         }
         settings.conflict = None;
         return;
@@ -290,12 +342,16 @@ fn capture(
         KeyCode::SuperRight,
     ]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    let modifier = if primary && shift {
-        Modifier::PrimaryShift
-    } else if primary {
-        Modifier::Primary
-    } else {
-        Modifier::None
+    let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
+    let modifier = match (primary, shift, alt) {
+        (true, true, true) => Modifier::PrimaryAltShift,
+        (true, false, true) => Modifier::PrimaryAlt,
+        (true, true, false) => Modifier::PrimaryShift,
+        (true, false, false) => Modifier::Primary,
+        (false, true, true) => Modifier::AltShift,
+        (false, false, true) => Modifier::Alt,
+        (false, true, false) => Modifier::Shift,
+        _ => Modifier::None,
     };
     let binding = Binding { trigger, modifier };
     let draft = &mut settings.draft.as_mut().unwrap().0;
@@ -307,13 +363,8 @@ fn capture(
                 .iter()
                 .enumerate()
                 .filter_map(move |(index, b)| {
-                    b.filter(|b| {
-                        b.trigger == trigger
-                            && (b.modifier == modifier
-                                || b.modifier == Modifier::None
-                                || modifier == Modifier::None)
-                    })
-                    .map(|_| (other, index))
+                    b.filter(|b| b.trigger == trigger && b.modifier.overlaps(modifier))
+                        .map(|_| (other, index))
                 })
         })
         .filter(|pair| *pair != (action, slot))
@@ -368,6 +419,10 @@ fn render(
                 "Controls and display\n{}",
                 settings.notice
             )));
+            if settings.capture.is_some() {
+                button(root, "Cancel binding".into(), Operation::Cancel);
+                return;
+            }
             root.spawn((Node {
                 flex_direction: FlexDirection::Row,
                 flex_wrap: FlexWrap::Wrap,
@@ -397,6 +452,9 @@ fn render(
                     button(row, "Stay".into(), Operation::Stay);
                 });
             }
+            if settings.unsaved {
+                return;
+            }
             if let Some((_, _, _, conflicts)) = &settings.conflict {
                 root.spawn(Text::new(format!(
                     "Binding conflicts with {conflicts:?}. Replace or cancel?"
@@ -409,6 +467,9 @@ fn render(
                     button(row, "Replace".into(), Operation::Replace);
                     button(row, "Cancel binding".into(), Operation::CancelConflict);
                 });
+            }
+            if settings.conflict.is_some() {
+                return;
             }
             root.spawn((
                 ScrollArea,
@@ -514,6 +575,30 @@ mod tests {
         let entity = app.world_mut().spawn(operation).id();
         app.world_mut().trigger(Activate { entity });
     }
+    #[test]
+    fn failed_apply_keeps_active_preferences_and_the_draft() {
+        let mut app = app();
+        let parent = app.world().resource::<Store>().path.clone();
+        std::fs::write(&parent, b"not a directory").unwrap();
+        app.world_mut().resource_mut::<Store>().path = parent.join("profile.json");
+        activate_operation(&mut app, Operation::Open);
+        activate_operation(&mut app, Operation::Invert);
+        activate_operation(&mut app, Operation::Apply);
+        assert!(!app.world().resource::<Preferences>().invert_y);
+        assert!(
+            app.world()
+                .resource::<Settings>()
+                .draft
+                .as_ref()
+                .unwrap()
+                .1
+                .invert_y
+        );
+        assert!(app.world().resource::<Settings>().open);
+        assert!(app.world().resource::<Store>().error.is_some());
+        std::fs::remove_file(parent).unwrap();
+    }
+
     #[test]
     fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
         let mut app = app();

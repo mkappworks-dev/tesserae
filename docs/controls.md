@@ -1,0 +1,60 @@
+# Controls and display settings
+
+Open the catalogue or help panel, then choose **Controls / Display**. Each
+keyboard/mouse action has two alternatives. Changes stay in a draft until
+**Apply** successfully saves them. **Cancel** discards the draft. Back or Escape
+with changes offers Apply, Discard and Stay. Escape always cancels binding
+capture. Capture waits for the opening inputs to be released.
+
+Conflicting bindings offer Replace or Cancel. Modifier sides are equivalent for
+chords; physical modifier keys can also be bound individually. Specific chords
+consume their trigger before plain actions. History chords also suppress
+descent. Redo takes precedence over undo; empty hand suppresses sampling;
+placement, sampling, selection and history cancel pending removal.
+
+Gameplay input is cancelled when ownership changes. Inputs held through a menu,
+focus change or device cancellation require release before activation. Pending
+sampling replies are discarded. The Server continues simulating while UI is open
+and remains the sole authority over Edits and the Player's pose.
+
+Hold sprint and hold removal are the defaults. Toggle sprint survives stops, but
+clears on UI entry, focus loss and respawn. Its indicator is visible while
+enabled. Timed tap removal uses the Game's Material duration, stays on one
+original target, and completes once. A second tap cancels it. Invalid aim, a
+lost or changed target, or another selection/edit/history action cancels it
+without restarting.
+
+Mouse sensitivity, invert Y, scroll direction and scroll sensitivity are user
+preferences. Labels use observed logical keyboard events separately from the
+serialized physical key identifiers. Keys without an observed logical event use
+a readable physical-key fallback. Changing a keyboard layout does not silently
+relocate bindings.
+
+The version 1 user profile defaults to:
+
+- macOS: `~/Library/Application Support/Tesserae/user-profile.json`
+- Linux: `$XDG_CONFIG_HOME/Tesserae/user-profile.json`, or
+  `~/.config/Tesserae/user-profile.json`
+- Windows: `%APPDATA%/Tesserae/user-profile.json`
+
+`TESSERAE_USER_PROFILE` overrides the path. New actions merge their defaults.
+Invalid or unsupported profiles remain on disk and loading reports an error.
+Apply preserves the previous valid profile as `.json.bak`, or preserves corrupt
+data under a timestamped `.corrupt-*` name. Saves write and sync a temporary
+file, then atomically replace the destination. Save failure keeps the active
+preferences and draft distinct. Profiles contain no World data or Material ids.
+
+Normal play defaults to display sync. FPS caps and explicit uncapped rendering
+change presentation pacing only; they do not change quality, view distance or
+Server simulation rules. Capture fixtures retain their explicit uncapped policy
+and record that override. A synced or capped FPS counter does not measure
+renderer capacity.
+
+Profiling records selected presentation preferences, requested window mode,
+focus, physical camera targets and observed backend surface configurations. The
+backend observations come from wgpu's concrete surface configuration events,
+including mode and dimensions, rather than an inference from `AutoVsync` or
+`AutoNoVsync`. They require the `wgpu_core::device::resource=debug` log
+directive; `scripts/profile-frames` sets it. Missing surfaces or filtered logs
+leave actual configuration unavailable. Observation timestamps are seconds since
+the observer was created.

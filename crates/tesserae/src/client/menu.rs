@@ -170,7 +170,11 @@ pub(super) fn toggle(
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     mut pointer: ResMut<PointerState>,
     settings: Option<Res<super::settings::Settings>>,
+    window: Single<&Window, With<PrimaryWindow>>,
 ) {
+    if !window.focused {
+        return;
+    }
     if settings.is_some_and(|settings| settings.open) {
         return;
     }
@@ -336,7 +340,12 @@ fn drop_on_slot(
 
 fn rebuild(
     mut commands: Commands,
-    (menu, hotbar): (Res<Menu>, Res<Hotbar>),
+    (menu, hotbar, bindings, labels): (
+        Res<Menu>,
+        Res<Hotbar>,
+        Res<super::actions::Bindings>,
+        Res<super::actions::Labels>,
+    ),
     catalogue: Res<Catalogue>,
     roots: Query<Entity, With<MenuRoot>>,
     selection: Query<&ScrollPosition, With<MenuSelection>>,
@@ -344,7 +353,8 @@ fn rebuild(
     mut shown: Local<Option<Hotbar>>,
 ) {
     let wanted = menu.open.then(|| hotbar.clone());
-    if *shown == wanted && !catalogue.is_changed() {
+    if *shown == wanted && !catalogue.is_changed() && !bindings.is_changed() && !labels.is_changed()
+    {
         return;
     }
     if state.drag.is_some() && menu.open {
@@ -363,6 +373,13 @@ fn rebuild(
             &hotbar,
             &catalogue.0,
             scroll,
+            format!(
+                "Click: hold item\nDrag onto a slot: assign\n{}-{} over an item: assign\nScroll: browse items\n{}: close\n{}: close and release cursor",
+                bindings.label(super::actions::Action::Slot1, &labels),
+                bindings.label(super::actions::Action::Slot9, &labels),
+                bindings.label(super::actions::Action::Catalogue, &labels),
+                bindings.label(super::actions::Action::ReleaseCursor, &labels)
+            ),
         );
     }
 }
@@ -491,15 +508,8 @@ fn spawn_menu(
     hotbar: &Hotbar,
     catalogue: &ContentCatalogue,
     scroll: Vec2,
+    heading: String,
 ) {
-    let heading = concat!(
-        "Click: hold item\n",
-        "Drag onto a slot: assign\n",
-        "1-9 over an item: assign\n",
-        "Scroll: browse items\n",
-        "Tab: close\n",
-        "Esc: close and release cursor"
-    );
     commands
         .spawn((
             MenuRoot,

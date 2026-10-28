@@ -56,6 +56,8 @@ pub(super) type Controls<'w, 's> = (
     Res<'w, super::input::Ownership>,
     Single<'w, 's, &'static CursorOptions, With<PrimaryWindow>>,
     Res<'w, Menu>,
+    Res<'w, super::edit::Hotbar>,
+    Local<'s, super::edit::Hotbar>,
 );
 type BarOnly = (With<Bar>, Without<Fill>);
 type FillOnly = (With<Fill>, Without<Bar>);
@@ -128,7 +130,7 @@ fn spawn(mut commands: Commands) {
     ));
 }
 pub(super) fn hold(
-    (actions, preferences, ownership, cursor, menu): Controls,
+    (actions, preferences, ownership, cursor, menu, hotbar, mut previous_hand): Controls,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     catalogue: Res<Catalogue>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
@@ -142,20 +144,23 @@ pub(super) fn hold(
     let history_requested = history.read().count() > 0;
     use super::actions::{Action, SLOTS};
     let state = actions.state(Action::Remove);
-    let interrupted = [
-        Action::Place,
-        Action::Sample,
-        Action::EmptyHand,
-        Action::Shape,
-        Action::Turn,
-        Action::Flip,
-        Action::Undo,
-        Action::Redo,
-        Action::Respawn,
-    ]
-    .into_iter()
-    .chain(SLOTS)
-    .any(|action| actions.started(action));
+    let selection_changed = *previous_hand != *hotbar;
+    *previous_hand = hotbar.clone();
+    let interrupted = (preferences.tap_remove && progress.tap && selection_changed)
+        || [
+            Action::Place,
+            Action::Sample,
+            Action::EmptyHand,
+            Action::Shape,
+            Action::Turn,
+            Action::Flip,
+            Action::Undo,
+            Action::Redo,
+            Action::Respawn,
+        ]
+        .into_iter()
+        .chain(SLOTS)
+        .any(|action| actions.started(action));
     if !ownership.gameplay()
         || state.cancelled
         || !ready
@@ -252,12 +257,24 @@ pub(super) fn bar(
             Val::Percent((progress.elapsed / progress.duration.max(0.05)).clamp(0.0, 1.0) * 100.0);
     }
 }
+type PlaceHints<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Visibility, &'static mut Text),
+    (With<PlaceHint>, Without<super::preview::Ghost>),
+>;
 fn place_hint(
     ghosts: Query<&Visibility, With<super::preview::Ghost>>,
-    mut hints: Query<&mut Visibility, (With<PlaceHint>, Without<super::preview::Ghost>)>,
+    mut hints: PlaceHints,
+    bindings: Res<super::actions::Bindings>,
+    labels: Res<super::actions::Labels>,
 ) {
     let shown = ghosts.iter().any(|v| *v == Visibility::Visible);
-    for mut hint in &mut hints {
+    for (mut hint, mut text) in &mut hints {
+        text.set_if_neq(Text::new(format!(
+            "{} to place",
+            bindings.label(super::actions::Action::Place, &labels)
+        )));
         *hint = if shown {
             Visibility::Visible
         } else {
@@ -331,6 +348,7 @@ mod tests {
             .init_resource::<Sent>()
             .init_resource::<Target>()
             .init_resource::<Catalogue>()
+            .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<Menu>()
             .init_resource::<ButtonInput<MouseButton>>()
             .add_message::<EditIntent>()

@@ -8,6 +8,8 @@ pub(super) enum Owner {
     Gameplay,
     Catalogue,
     Settings,
+    BindingCapture,
+    TextEntry,
     #[default]
     Unfocused,
 }
@@ -18,6 +20,7 @@ pub(super) struct Ownership {
     pub changed: bool,
     keys: HashSet<KeyCode>,
     buttons: HashSet<MouseButton>,
+    device_epoch: u64,
 }
 
 impl Ownership {
@@ -54,19 +57,30 @@ impl Ownership {
     }
 }
 
+#[derive(Resource, Default)]
+pub(super) struct UiInput {
+    pub text_entry: bool,
+    pub device_epoch: u64,
+}
+
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Ownership>().add_systems(
-        Update,
-        resolve
-            .after(super::menu::toggle)
-            .after(super::camera::grab_cursor),
-    );
+    app.init_resource::<UiInput>()
+        .init_resource::<Ownership>()
+        .add_systems(
+            Update,
+            resolve
+                .after(super::menu::toggle)
+                .after(super::camera::grab_cursor),
+        );
 }
 
 pub(super) fn resolve(
     (keys, mouse): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
-    menu: Res<super::menu::Menu>,
-    settings: Option<Res<super::settings::Settings>>,
+    (menu, settings, ui): (
+        Res<super::menu::Menu>,
+        Option<Res<super::settings::Settings>>,
+        Option<Res<UiInput>>,
+    ),
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -75,7 +89,14 @@ pub(super) fn resolve(
     let (window, cursor) = *window;
     let owner = if !window.focused {
         Owner::Unfocused
-    } else if settings.is_some_and(|settings| settings.open) {
+    } else if ui.as_ref().is_some_and(|ui| ui.text_entry) {
+        Owner::TextEntry
+    } else if settings
+        .as_ref()
+        .is_some_and(|settings| settings.capturing())
+    {
+        Owner::BindingCapture
+    } else if settings.as_ref().is_some_and(|settings| settings.open) {
         Owner::Settings
     } else if menu.open {
         Owner::Catalogue
@@ -85,20 +106,31 @@ pub(super) fn resolve(
         Owner::Unfocused
     };
     ownership.resolve(owner, &keys, &mouse);
+    if let Some(ui) = ui
+        && ui.device_epoch != ownership.device_epoch
+    {
+        ownership.device_epoch = ui.device_epoch;
+        ownership.changed = true;
+        ownership.keys.extend(keys.get_pressed().copied());
+        ownership.buttons.extend(mouse.get_pressed().copied());
+    }
+
     use super::actions::{Action, Trigger};
     for (&action, alternatives) in &bindings.0 {
         if matches!(
             action,
             Action::Catalogue | Action::ReleaseCursor | Action::Help | Action::Diagnostics
         ) {
-            if matches!(owner, Owner::Unfocused | Owner::Settings)
-                || alternatives
-                    .iter()
-                    .flatten()
-                    .all(|binding| match binding.trigger {
-                        Trigger::Key(key) => ownership.keys.contains(&key),
-                        Trigger::Mouse(button) => ownership.buttons.contains(&button),
-                    })
+            if matches!(
+                owner,
+                Owner::Unfocused | Owner::Settings | Owner::BindingCapture | Owner::TextEntry
+            ) || alternatives
+                .iter()
+                .flatten()
+                .all(|binding| match binding.trigger {
+                    Trigger::Key(key) => ownership.keys.contains(&key),
+                    Trigger::Mouse(button) => ownership.buttons.contains(&button),
+                })
             {
                 actions.cancel(action);
             }

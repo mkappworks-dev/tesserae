@@ -144,7 +144,9 @@ fn spawn_hint(mut commands: Commands) {
 
 fn show_hint(
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-    visibility: Single<&mut Visibility, With<CursorHint>>,
+    hint: Single<(&mut Visibility, &mut Text), With<CursorHint>>,
+    bindings: Res<super::actions::Bindings>,
+    labels: Res<super::actions::Labels>,
 ) {
     let wanted = if cursor.grab_mode == CursorGrabMode::None {
         Visibility::Inherited
@@ -153,7 +155,12 @@ fn show_hint(
     };
     // Through change detection rather than unconditionally, so the UI is not
     // re-laid out every frame.
-    visibility.into_inner().set_if_neq(wanted);
+    let (mut visibility, mut text) = hint.into_inner();
+    visibility.set_if_neq(wanted);
+    text.set_if_neq(Text::new(format!(
+        "Click to look around\n{} to release the cursor",
+        bindings.label(Action::ReleaseCursor, &labels)
+    )));
 }
 
 fn reset(
@@ -313,6 +320,146 @@ fn sprint_hint(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn toggle_sprint_survives_a_stop_and_clears_on_menu_and_respawn() {
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .insert_resource(super::super::input::Ownership::playing())
+            .init_resource::<Time>()
+            .add_systems(Update, fly);
+        app.world_mut()
+            .spawn((Transform::default(), FlyCamera::default()));
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .toggle_sprint = true;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftRight);
+        app.update();
+        assert!(app.world().resource::<Sprint>().0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::ShiftRight);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.update();
+        assert!(app.world().resource::<Sprint>().0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        assert!(!app.world().resource::<Sprint>().0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release_all();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        app.update();
+        assert!(app.world().resource::<Sprint>().0);
+        app.world_mut()
+            .resource_mut::<super::super::input::Ownership>()
+            .owner = super::super::input::Owner::Catalogue;
+        app.update();
+        assert!(!app.world().resource::<Sprint>().0);
+    }
+
+    #[test]
+    fn same_frame_menu_transitions_cancel_movement_and_respawn_until_release() {
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .init_resource::<super::super::menu::Menu>()
+            .init_resource::<super::super::menu::PointerState>()
+            .insert_resource(super::super::input::Ownership::playing())
+            .init_resource::<Time>()
+            .add_message::<RespawnIntent>()
+            .add_systems(
+                Update,
+                (
+                    super::super::menu::toggle,
+                    super::super::input::resolve,
+                    reset,
+                    fly,
+                )
+                    .chain(),
+            );
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+            CursorOptions {
+                grab_mode: CursorGrabMode::Locked,
+                ..default()
+            },
+        ));
+        let camera = app
+            .world_mut()
+            .spawn((
+                Transform::default(),
+                FlyCamera::default(),
+                CameraHome(Transform::default()),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs_f32(1.0 / 60.0));
+        for key in [KeyCode::KeyW, KeyCode::KeyR, KeyCode::Tab] {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+        }
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::ZERO
+        );
+        assert!(app.world().resource::<Messages<RespawnIntent>>().is_empty());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::Tab);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.update();
+        assert_eq!(
+            app.world().get::<Transform>(camera).unwrap().translation,
+            Vec3::ZERO
+        );
+        assert!(app.world().resource::<Messages<RespawnIntent>>().is_empty());
+        for key in [KeyCode::KeyW, KeyCode::KeyR] {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .release(key);
+        }
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.update();
+        for key in [KeyCode::KeyW, KeyCode::KeyR] {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+        }
+        app.update();
+        assert!(app.world().get::<Transform>(camera).unwrap().translation.z < 0.0);
+        assert_eq!(app.world().resource::<Messages<RespawnIntent>>().len(), 1);
+    }
 
     #[test]
     fn focus_return_requires_a_fresh_respawn_activation() {

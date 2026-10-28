@@ -11,7 +11,7 @@ use std::{
 
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub(super) struct Preferences {
+pub(crate) struct Preferences {
     pub toggle_sprint: bool,
     pub tap_remove: bool,
     pub sensitivity: f32,
@@ -69,8 +69,24 @@ impl Store {
         (Self { path, error }, bindings, preferences)
     }
     pub fn save(&mut self, bindings: &Bindings, preferences: &Preferences) -> io::Result<()> {
-        let result =
-            encode(bindings, preferences).and_then(|bytes| atomic_write(&self.path, &bytes));
+        let result = encode(bindings, preferences).and_then(|bytes| {
+            decode(&bytes)?;
+            if let Ok(previous) = fs::read(&self.path) {
+                let backup = if decode(&previous).is_ok() {
+                    self.path.with_extension("json.bak")
+                } else {
+                    self.path.with_extension(format!(
+                        "corrupt-{}",
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_err(io::Error::other)?
+                            .as_nanos()
+                    ))
+                };
+                atomic_write(&backup, &previous)?;
+            }
+            atomic_write(&self.path, &bytes)
+        });
         self.error = result
             .as_ref()
             .err()
@@ -99,6 +115,21 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         };
         let alternatives = serde_json::from_value(value).map_err(io::Error::other)?;
         bindings.0.insert(action, alternatives);
+    }
+    use super::actions::{Action, Trigger};
+    let mut seen = Vec::new();
+    for (&action, alternatives) in &bindings.0 {
+        for binding in alternatives.iter().flatten() {
+            if binding.trigger == Trigger::Key(KeyCode::Escape) && action != Action::ReleaseCursor {
+                return Err(io::Error::other("Escape is reserved for cancellation"));
+            }
+            if seen.iter().any(|previous: &&super::actions::Binding| {
+                previous.trigger == binding.trigger && previous.modifier.overlaps(binding.modifier)
+            }) {
+                return Err(io::Error::other("conflicting user bindings"));
+            }
+            seen.push(binding);
+        }
     }
     Ok((bindings, document.preferences))
 }

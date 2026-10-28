@@ -27,6 +27,8 @@ struct Profile {
     pending: Option<Row>,
     saved: bool,
     render: RenderSamples,
+    surfaces: SurfaceConfigurations,
+    presentation: String,
 }
 
 struct Row {
@@ -64,6 +66,11 @@ pub fn plugin(app: &mut App) {
     }
     app.init_resource::<ProfileFixtureStatus>();
     app.insert_non_send(std::rc::Rc::new(()));
+    let surfaces = app
+        .world()
+        .get_resource::<SurfaceConfigurations>()
+        .cloned()
+        .unwrap_or_default();
     app.insert_resource(Profile {
         origin: app
             .world()
@@ -76,9 +83,11 @@ pub fn plugin(app: &mut App) {
         pending: None,
         saved: false,
         render,
+        surfaces,
+        presentation: String::new(),
     })
     .insert_resource(bevy::winit::WinitSettings::continuous())
-    .add_systems(First, begin)
+    .add_systems(First, begin.after(crate::client::presentation::FramePacing))
     .add_systems(Last, end);
 }
 
@@ -105,12 +114,24 @@ fn end(
         Res<ProfileFixtureStatus>,
         Res<crate::server::persistence::SaveProfile>,
     ),
-    (settings, view): (Res<WorldSettings>, Res<StreamingSettings>),
+    (settings, view, preferences): (
+        Res<WorldSettings>,
+        Res<StreamingSettings>,
+        Option<Res<crate::client::profile::Preferences>>,
+    ),
     (windows, cameras): (Query<&Window>, Query<(&Camera, &RenderTarget)>),
     mut exit: MessageReader<AppExit>,
 ) {
     if profile.saved {
         return;
+    }
+    if let Some(preferences) = preferences {
+        profile.presentation = format!(
+            "selected_display_sync={} selected_fps_cap={:?} capture_override={}",
+            preferences.display_sync,
+            preferences.fps_cap,
+            std::env::var_os("TESSERAE_SCREENSHOT").is_some()
+        );
     }
     let wall_s = profile.start.elapsed().as_secs_f64();
     let cpu_s = profile.cpu.zip(thread_cpu()).map(|(a, b)| b - a);
@@ -201,7 +222,7 @@ fn save(
     );
     writeln!(
         meta,
-        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed=unavailable\npresent_elapsed=unavailable\nbackend_resolved_present_mode=unavailable\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=fixture capture free flight; virtual movement semantics\nview=first person\nquality=unchanged; no profiling quality switches",
+        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed=unavailable\npresent_elapsed=unavailable\nbackend_resolved_present_mode=see observed backend_surface_configuration records; unavailable when no surface is configured or logging is filtered\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=fixture capture free flight; virtual movement semantics\nview=first person\nquality=unchanged; no profiling quality switches",
         settings.seed,
         settings.voxel_size,
         view.view_distance_m,
@@ -211,6 +232,10 @@ fn save(
         profile.rows.len() >= MAX_FRAMES,
         profile.rows.first().map_or(0.0, |r| r.start_s)
     )?;
+    writeln!(meta, "{}", profile.presentation)?;
+    for configuration in profile.surfaces.0.lock().unwrap().iter() {
+        writeln!(meta, "backend_surface_configuration={configuration}")?;
+    }
     for w in windows.iter() {
         writeln!(
             meta,
@@ -281,6 +306,21 @@ fn thread_cpu() -> Option<f64> {
 mod tests {
     use super::*;
     #[test]
+    fn surface_metadata_observes_backend_configuration_events() {
+        use bevy::log::tracing_subscriber::prelude::*;
+        let configurations = SurfaceConfigurations::default();
+        let subscriber =
+            bevy::log::tracing_subscriber::registry().with(SurfaceLayer(configurations.clone()));
+        bevy::log::tracing::subscriber::with_default(subscriber, || {
+            bevy::log::tracing::debug!(target: "wgpu_core::device::resource", "configuring surface with SurfaceConfiguration {{ width: 1920, height: 1080, present_mode: Immediate }}");
+            bevy::log::tracing::debug!(target: "other", "configuring surface with ignored");
+        });
+        let records = configurations.0.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].contains("present_mode: Immediate"));
+    }
+
+    #[test]
     fn completed_intervals_retain_stalls_and_frame_identity() {
         let mut app = App::new();
         let now = Instant::now();
@@ -293,6 +333,8 @@ mod tests {
             rows: Vec::new(),
             saved: false,
             render: RenderSamples::default(),
+            surfaces: SurfaceConfigurations::default(),
+            presentation: String::new(),
             pending: Some(Row {
                 id: 0,
                 start_s: 1.25,
@@ -308,7 +350,7 @@ mod tests {
                 focused: false,
             }),
         });
-        app.add_systems(First, begin);
+        app.add_systems(First, begin.after(crate::client::presentation::FramePacing));
         app.update();
         let profile = app.world().resource::<Profile>();
         assert_eq!(profile.rows.len(), 1);
@@ -384,4 +426,69 @@ fn render_end(world: &mut World) {
             rows.push((id, wall, cpu));
         }
     }
+}
+
+#[derive(Resource, Clone)]
+struct SurfaceConfigurations(std::sync::Arc<std::sync::Mutex<Vec<String>>>, Instant);
+impl Default for SurfaceConfigurations {
+    fn default() -> Self {
+        Self(default(), Instant::now())
+    }
+}
+struct SurfaceLayer(SurfaceConfigurations);
+impl<S: bevy::log::tracing::Subscriber> bevy::log::tracing_subscriber::Layer<S> for SurfaceLayer {
+    fn on_event(
+        &self,
+        event: &bevy::log::tracing::Event<'_>,
+        _context: bevy::log::tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let target = event.metadata().target();
+        if target != "wgpu_core::device::resource" && target != "log" {
+            return;
+        }
+        struct Message {
+            text: String,
+            target: bool,
+        }
+        impl bevy::log::tracing::field::Visit for Message {
+            fn record_str(&mut self, field: &bevy::log::tracing::field::Field, value: &str) {
+                if field.name() == "log.target" {
+                    self.target = value == "wgpu_core::device::resource";
+                }
+                if field.name() == "message" {
+                    self.text = value.to_owned();
+                }
+            }
+            fn record_debug(
+                &mut self,
+                field: &bevy::log::tracing::field::Field,
+                value: &dyn std::fmt::Debug,
+            ) {
+                if field.name() == "message" {
+                    self.text = format!("{value:?}");
+                }
+            }
+        }
+        let mut message = Message {
+            text: String::new(),
+            target: target == "wgpu_core::device::resource",
+        };
+        event.record(&mut message);
+        if message.target && message.text.starts_with("configuring surface with ") {
+            let mut configurations = self.0.0.lock().unwrap();
+            if configurations.len() < 64 {
+                configurations.push(format!(
+                    "observer_elapsed_s={} {}",
+                    self.0.1.elapsed().as_secs_f64(),
+                    message.text
+                ));
+            }
+        }
+    }
+}
+pub(crate) fn surface_log_layer(app: &mut App) -> Option<bevy::log::BoxedLayer> {
+    std::env::var_os("TESSERAE_PROFILE_CSV")?;
+    let configurations = SurfaceConfigurations::default();
+    app.insert_resource(configurations.clone());
+    Some(Box::new(SurfaceLayer(configurations)))
 }

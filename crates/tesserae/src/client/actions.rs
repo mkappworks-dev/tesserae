@@ -59,7 +59,34 @@ pub(super) enum Modifier {
     Control,
     Primary,
     PrimaryShift,
+    Shift,
+    Alt,
+    AltShift,
+    PrimaryAlt,
+    PrimaryAltShift,
 }
+impl Modifier {
+    fn matches(self, ctrl: bool, command: bool, shift: bool, alt: bool) -> bool {
+        match self {
+            Self::None => true,
+            Self::Control => ctrl,
+            Self::Primary => (ctrl || command) && !shift && !alt,
+            Self::PrimaryShift => (ctrl || command) && shift && !alt,
+            Self::Shift => shift && !alt,
+            Self::Alt => alt && !shift,
+            Self::AltShift => alt && shift,
+            Self::PrimaryAlt => (ctrl || command) && alt && !shift,
+            Self::PrimaryAltShift => (ctrl || command) && alt && shift,
+        }
+    }
+    pub fn overlaps(self, other: Self) -> bool {
+        (0..16).any(|mask| {
+            self.matches(mask & 1 != 0, mask & 2 != 0, mask & 4 != 0, mask & 8 != 0)
+                && other.matches(mask & 1 != 0, mask & 2 != 0, mask & 4 != 0, mask & 8 != 0)
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Binding {
     pub trigger: Trigger,
@@ -161,7 +188,11 @@ pub(super) struct State {
     pub cancelled: bool,
 }
 #[derive(Resource, Default)]
-pub(super) struct Actions(pub HashMap<Action, State>, HashSet<Action>);
+pub(super) struct Actions(
+    pub HashMap<Action, State>,
+    HashSet<Action>,
+    HashSet<Trigger>,
+);
 impl Actions {
     pub fn state(&self, action: Action) -> State {
         self.0.get(&action).copied().unwrap_or_default()
@@ -186,20 +217,15 @@ impl Actions {
         mouse: &ButtonInput<MouseButton>,
     ) {
         let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-        let primary = ctrl || keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]);
+        let command = keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]);
+        let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
         let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
         let matches = |binding: Binding| {
             let trigger = match binding.trigger {
                 Trigger::Key(key) => keys.pressed(key),
                 Trigger::Mouse(button) => mouse.pressed(button),
             };
-            trigger
-                && match binding.modifier {
-                    Modifier::None => true,
-                    Modifier::Control => ctrl,
-                    Modifier::Primary => primary && !shift,
-                    Modifier::PrimaryShift => primary && shift,
-                }
+            trigger && binding.modifier.matches(ctrl, command, shift, alt)
         };
         let consumed: HashSet<_> = bindings
             .0
@@ -223,6 +249,15 @@ impl Actions {
                 matches(*binding)
                     && (binding.modifier != Modifier::None || !consumed.contains(&binding.trigger))
             }) && !(action == Descend && history);
+            let just_pressed = |trigger| match trigger {
+                Trigger::Key(key) => keys.just_pressed(key),
+                Trigger::Mouse(button) => mouse.just_pressed(button),
+            };
+            let continuing = alternatives.iter().flatten().any(|binding| {
+                matches(*binding)
+                    && self.2.contains(&binding.trigger)
+                    && !just_pressed(binding.trigger)
+            });
             let previous = self.1.contains(&action);
             if held {
                 self.1.insert(action);
@@ -234,19 +269,22 @@ impl Actions {
                 State {
                     started: held
                         && (!previous
-                            || alternatives.iter().flatten().any(|binding| {
-                                matches(*binding)
-                                    && match binding.trigger {
-                                        Trigger::Key(key) => keys.just_pressed(key),
-                                        Trigger::Mouse(button) => mouse.just_pressed(button),
-                                    }
-                            })),
+                            || (!continuing
+                                && alternatives.iter().flatten().any(|binding| {
+                                    matches(*binding) && just_pressed(binding.trigger)
+                                }))),
                     held,
                     released: previous && !held,
                     cancelled: false,
                 },
             );
         }
+        self.2 = keys
+            .get_pressed()
+            .copied()
+            .map(Trigger::Key)
+            .chain(mouse.get_pressed().copied().map(Trigger::Mouse))
+            .collect();
     }
 }
 
@@ -269,6 +307,11 @@ impl Labels {
             Modifier::Control => "Ctrl+",
             Modifier::Primary => "Ctrl/Cmd+",
             Modifier::PrimaryShift => "Ctrl/Cmd+Shift+",
+            Modifier::Shift => "Shift+",
+            Modifier::Alt => "Alt+",
+            Modifier::AltShift => "Alt+Shift+",
+            Modifier::PrimaryAlt => "Ctrl/Cmd+Alt+",
+            Modifier::PrimaryAltShift => "Ctrl/Cmd+Alt+Shift+",
         };
         format!("{modifier}{trigger}")
     }
@@ -331,8 +374,64 @@ pub(super) fn test_plugin(app: &mut App) {
 mod tests {
     use super::*;
     #[test]
+    fn a_second_alternative_does_not_restart_an_already_held_action() {
+        let bindings = Bindings::default();
+        let mut actions = Actions::default();
+        let mut keys = ButtonInput::default();
+        let mouse = ButtonInput::default();
+        keys.press(KeyCode::ShiftLeft);
+        actions.resolve(&bindings, &keys, &mouse);
+        assert!(actions.started(Sprint));
+        keys.clear();
+        keys.press(KeyCode::ShiftRight);
+        actions.resolve(&bindings, &keys, &mouse);
+        assert!(!actions.started(Sprint));
+        keys.clear();
+        keys.release(KeyCode::ShiftLeft);
+        actions.resolve(&bindings, &keys, &mouse);
+        assert!(actions.held(Sprint));
+        assert!(!actions.state(Sprint).released);
+        keys.release(KeyCode::ShiftRight);
+        actions.resolve(&bindings, &keys, &mouse);
+        assert!(actions.state(Sprint).released);
+    }
+
+    #[test]
+    fn logical_labels_do_not_change_physical_binding_ids() {
+        let mut app = App::new();
+        app.add_plugins(test_plugin);
+        app.world_mut()
+            .write_message(bevy::input::keyboard::KeyboardInput {
+                key_code: KeyCode::KeyW,
+                logical_key: bevy::input::keyboard::Key::Character("z".into()),
+                state: bevy::input::ButtonState::Pressed,
+                text: Some("z".into()),
+                repeat: false,
+                window: Entity::PLACEHOLDER,
+            });
+        app.update();
+        let bindings = app.world().resource::<Bindings>();
+        assert_eq!(
+            bindings.label(Action::Forward, app.world().resource::<Labels>()),
+            "Z"
+        );
+        assert_eq!(
+            bindings.0[&Action::Forward][0].unwrap().trigger,
+            Trigger::Key(KeyCode::KeyW)
+        );
+    }
+
+    #[test]
     fn history_chords_consume_descent_and_have_identical_edges_at_all_update_rates() {
-        for hz in [60, 144, 1000] {
+        for (hz, modifier) in [60, 144, 1000].into_iter().flat_map(|hz| {
+            [
+                KeyCode::ControlLeft,
+                KeyCode::ControlRight,
+                KeyCode::SuperLeft,
+                KeyCode::SuperRight,
+            ]
+            .map(|modifier| (hz, modifier))
+        }) {
             let mut actions = Actions::default();
             let bindings = Bindings::default();
             let mut keys = ButtonInput::default();
@@ -341,7 +440,7 @@ mod tests {
             let mut redo = 0;
             for frame in 0..hz {
                 if frame == 0 {
-                    keys.press(KeyCode::ControlRight);
+                    keys.press(modifier);
                     keys.press(KeyCode::KeyZ);
                 }
                 if frame == hz / 2 {

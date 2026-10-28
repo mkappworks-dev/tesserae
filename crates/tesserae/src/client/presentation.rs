@@ -3,9 +3,14 @@ use super::profile::Preferences;
 use bevy::{prelude::*, window::PresentMode};
 use std::time::{Duration, Instant};
 
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FramePacing;
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(First, throttle)
-        .add_systems(PostUpdate, policy);
+    app.add_systems(
+        First,
+        throttle.in_set(FramePacing).before(bevy::time::TimeSystems),
+    )
+    .add_systems(PostUpdate, policy);
 }
 fn throttle(preferences: Res<Preferences>, mut previous: Local<Option<Instant>>) {
     if std::env::var_os("TESSERAE_SCREENSHOT").is_some() {
