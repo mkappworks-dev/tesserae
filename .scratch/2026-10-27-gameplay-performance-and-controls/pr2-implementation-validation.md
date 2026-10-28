@@ -6,7 +6,8 @@ Local work for tickets 01–04 and 28. No push, publication or merge.
 
 - `11c192e`: confirmed condensed plan and ticket authorization.
 - `4ca94b4`: semantic input, ownership, profile, controls and display settings.
-- Follow-up changes add backend configuration observations and validation fixes.
+- `19ee970`: backend configuration observations, ownership edge cases and validation fixes.
+- Final follow-up preserves the reserved Escape route after rebinding.
 
 ## Implemented
 
@@ -26,8 +27,10 @@ World settings. Backend metadata observes wgpu's concrete configuration event.
 
 ## Checks so far
 
-- Client suite: 119 passing tests, including cue/context and alternative-edge changes.
-- Workspace all-target/all-feature Clippy passed; final follow-up rerun pending.
+- Client suite: 120 passing tests, including cue/context, alternative-edge and reserved Escape changes.
+- Workspace all-target/all-feature Clippy and formatting passed. Four profiler
+  regressions passed, including backend event observation. Benchmark compilation,
+  demo boundary and dependency policy checks passed.
 - Native settings rendering and profiler metadata ran successfully offscreen.
   Concrete backend configuration recorded `present_mode: Immediate`,
   2560 x 1440 surface dimensions; camera output was separately offscreen.
@@ -36,7 +39,7 @@ World settings. Backend metadata observes wgpu's concrete configuration event.
   Action and removal traces cover 60/144/1000 updates per second.
 - `scripts/cargo-ci` ran with its guest-build step replaced by cached-artifact
   reuse. Lint, docs and default-feature checks passed. Workspace tests stopped
-  with 396 passed, 18 failed, two ignored in the application crate.
+  with 402 passed, 18 failed, two ignored in the application crate.
   All 18 failures concern incompatible demo/lake guest artifacts: the cached
   components expose a four-field record where this branch expects two.
 - The two Python profiling-script tests passed with warnings treated as errors.
@@ -52,5 +55,7 @@ rendering rather than Game content or completed removal gestures. The
 incompatible cached Game prevents those native content captures until resolved.
 These are functional captures, with no performance-improvement claim.
 
-Final CI completion, remaining acceptance review and final ticket status are
+The last CI failure predates only the final reserved-Escape regression/fix.
+Final CI completion, native Game gesture captures, remaining acceptance review
+and final ticket status are
 still pending. Do not treat the local commits as a completed PR 2 acceptance.

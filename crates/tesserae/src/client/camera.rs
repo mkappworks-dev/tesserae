@@ -217,7 +217,7 @@ pub(super) fn grab_cursor(
         cursor.visible = true;
         return;
     }
-    if actions.started(Action::ReleaseCursor) {
+    if actions.cancel_requested() {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
     } else if mouse.just_pressed(MouseButton::Left)

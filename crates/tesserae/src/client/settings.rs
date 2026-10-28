@@ -270,11 +270,13 @@ fn capture(
     mouse: Res<ButtonInput<MouseButton>>,
     mut settings: ResMut<Settings>,
     active: (Res<Bindings>, Res<Preferences>),
+    mut actions: ResMut<super::actions::Actions>,
 ) {
     if !settings.open {
         return;
     }
     if keys.just_pressed(KeyCode::Escape) {
+        actions.consume_cancel();
         settings.dirty = true;
         if settings.capture.take().is_some() || settings.conflict.take().is_some() {
             settings.notice.clear();
@@ -551,7 +553,8 @@ mod tests {
     use super::*;
     fn app() -> App {
         let mut app = App::new();
-        app.init_resource::<Bindings>()
+        app.init_resource::<super::super::actions::Actions>()
+            .init_resource::<Bindings>()
             .init_resource::<Preferences>()
             .init_resource::<Settings>()
             .init_resource::<ButtonInput<KeyCode>>()

@@ -192,8 +192,16 @@ pub(super) struct Actions(
     pub HashMap<Action, State>,
     HashSet<Action>,
     HashSet<Trigger>,
+    bool,
 );
 impl Actions {
+    pub fn consume_cancel(&mut self) {
+        self.3 = false;
+        self.cancel(Action::ReleaseCursor);
+    }
+    pub fn cancel_requested(&self) -> bool {
+        self.3 || self.started(Action::ReleaseCursor)
+    }
     pub fn state(&self, action: Action) -> State {
         self.0.get(&action).copied().unwrap_or_default()
     }
@@ -216,6 +224,7 @@ impl Actions {
         keys: &ButtonInput<KeyCode>,
         mouse: &ButtonInput<MouseButton>,
     ) {
+        self.3 = keys.just_pressed(KeyCode::Escape);
         let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
         let command = keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]);
         let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
@@ -373,6 +382,19 @@ pub(super) fn test_plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn escape_remains_a_cancel_route_after_release_cursor_is_rebound() {
+        let mut bindings = Bindings::default();
+        bindings.0.insert(ReleaseCursor, [None, None]);
+        let mut actions = Actions::default();
+        let mut keys = ButtonInput::default();
+        keys.press(KeyCode::Escape);
+        actions.resolve(&bindings, &keys, &ButtonInput::default());
+        assert!(actions.cancel_requested());
+        actions.consume_cancel();
+        assert!(!actions.cancel_requested());
+    }
+
     #[test]
     fn a_second_alternative_does_not_restart_an_already_held_action() {
         let bindings = Bindings::default();

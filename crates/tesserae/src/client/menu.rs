@@ -179,7 +179,7 @@ pub(super) fn toggle(
         return;
     }
     let tab = actions.started(super::actions::Action::Catalogue);
-    let escape = actions.started(super::actions::Action::ReleaseCursor) && menu.open;
+    let escape = actions.cancel_requested() && menu.open;
     if !tab && !escape {
         return;
     }
