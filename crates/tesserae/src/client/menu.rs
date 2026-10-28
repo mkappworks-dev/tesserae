@@ -517,15 +517,24 @@ fn spawn_menu(
             GlobalZIndex(10),
         ))
         .with_children(|root| {
-            root.spawn((
-                Text::new(heading),
-                font(14.0),
-                Node {
-                    flex_shrink: 0.0,
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ));
+            root.spawn(Node {
+                width: Val::Percent(100.0),
+                column_gap: Val::Px(12.0),
+                flex_shrink: 0.0,
+                ..default()
+            })
+            .with_children(|header| {
+                header.spawn((
+                    Text::new(heading),
+                    font(14.0),
+                    Node {
+                        flex_grow: 1.0,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+                super::save::quit_button(header);
+            });
             root.spawn(Node {
                 flex_grow: 1.0,
                 flex_basis: Val::Px(0.0),

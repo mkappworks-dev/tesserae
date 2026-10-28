@@ -9,6 +9,55 @@ struct Panel;
 #[derive(Component)]
 struct Action(SaveAction);
 
+pub(super) fn quit_button(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Button,
+            Action(SaveAction::SaveQuit),
+            Node {
+                min_width: Val::Px(160.0),
+                min_height: Val::Px(44.0),
+                align_self: AlignSelf::FlexStart,
+                padding: UiRect::all(Val::Px(10.0)),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::srgb(0.15, 0.22, 0.3)),
+        ))
+        .with_child((
+            Text::new("Save & Quit"),
+            TextFont {
+                font_size: bevy::text::FontSize::Px(16.0),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ));
+}
+
+#[derive(Clone, PartialEq)]
+enum View {
+    Hidden,
+    Saving,
+    Error(String),
+    Quitting(bool, Option<String>),
+    Confirm,
+}
+
+fn view(status: &SaveStatus) -> View {
+    if status.confirm_unsafe {
+        View::Confirm
+    } else if status.quitting {
+        View::Quitting(status.saving, status.error.clone())
+    } else if let Some(error) = &status.error {
+        View::Error(error.clone())
+    } else if status.saving {
+        View::Saving
+    } else {
+        View::Hidden
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     app.add_observer(activate)
         .add_systems(PreUpdate, close_request)
@@ -43,19 +92,28 @@ fn show(
     mut commands: Commands,
     status: Res<SaveStatus>,
     existing: Query<Entity, With<Panel>>,
-    mut previous: Local<Option<SaveStatus>>,
+    mut previous: Local<Option<View>>,
 ) {
-    if previous.as_ref() == Some(&*status) && !existing.is_empty() {
+    let wanted = view(&status);
+    if previous.as_ref() == Some(&wanted) {
         return;
     }
-    *previous = Some(status.clone());
+    *previous = Some(wanted.clone());
     for entity in &existing {
         commands.entity(entity).despawn();
+    }
+    if wanted == View::Hidden {
+        return;
     }
     let modal = status.modal();
     commands
         .spawn((
             Panel,
+            if status.error.is_none() && !modal {
+                Pickable::IGNORE
+            } else {
+                Pickable::default()
+            },
             GlobalZIndex(100),
             Node {
                 position_type: PositionType::Absolute,
@@ -93,11 +151,7 @@ fn show(
             } else if status.saving {
                 "Saving World...".into()
             } else {
-                if status.dirty {
-                    format!("Unsaved changes\n{}", status.detail)
-                } else {
-                    status.detail.clone()
-                }
+                "Finishing World save...".into()
             };
             panel.spawn((
                 Text::new(detail),
@@ -147,7 +201,6 @@ fn show(
                 if status.error.is_some() {
                     button("Retry save", SaveAction::Retry);
                 }
-                button("Save & Quit", SaveAction::SaveQuit);
             }
         });
 }
@@ -157,6 +210,65 @@ mod tests {
     use super::*;
     use bevy::ecs::message::Messages;
     use bevy::ecs::system::RunSystemOnce;
+
+    #[test]
+    fn normal_play_is_quiet_saving_is_transient_and_failures_stay_visible() {
+        let mut app = App::new();
+        app.init_resource::<SaveStatus>().add_systems(Update, show);
+        app.world_mut().resource_mut::<SaveStatus>().dirty = true;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Panel>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        app.world_mut().resource_mut::<SaveStatus>().saving = true;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Panel>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        assert_eq!(
+            app.world_mut().query::<&Action>().iter(app.world()).count(),
+            0
+        );
+        app.world_mut().resource_mut::<SaveStatus>().saving = false;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Panel>>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        app.world_mut().resource_mut::<SaveStatus>().error = Some("disk full".into());
+        app.update();
+        let panel = app
+            .world_mut()
+            .query_filtered::<Entity, With<Panel>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().resource_mut::<SaveStatus>().dirty = false;
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<Panel>>()
+                .single(app.world())
+                .unwrap(),
+            panel
+        );
+        assert!(
+            app.world_mut()
+                .query::<&Action>()
+                .iter(app.world())
+                .any(|a| matches!(a.0, SaveAction::Retry))
+        );
+    }
 
     #[test]
     fn window_close_requests_server_save_instead_of_destroying_world_window() {

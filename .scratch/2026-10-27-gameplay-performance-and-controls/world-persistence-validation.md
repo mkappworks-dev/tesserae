@@ -186,3 +186,26 @@ fields were added to PR 1's raw frame profiler; frame timestamps remain
 unclamped and simulation progress is retained. No GPU/present time is
 inferred. The corrected save panel was visually inspected by the agent;
 user review of the panel and failure/confirmation dialogs remains pending.
+
+## Automatic-save UI follow-up
+
+The user approved removing the persistent save HUD. Save & Quit now lives
+in the catalogue/menu header. Normal play has no saved/unsaved panel or
+manual-save button; a noninteractive indicator exists only while a write
+is running. Save failures remain visible with Retry, and failed quit keeps
+its Return/unsafe-exit confirmation controls. Autosave timing and Server
+persistence behavior are unchanged.
+
+Client regressions: 108 passed, including normal-play suppression,
+transient saving, persistent errors, menu regressions and window-close
+routing. All-target/all-feature workspace Clippy passed. Rustfmt,
+Prettier on the changed technical document and diff whitespace checks passed.
+Native offscreen play/menu captures at 1024 x 640 are retained in
+`/tmp/tesserae-pr4-review-DENphQ/menu-ui`. These are visual checks, not timing
+comparisons; user visual review remains pending.
+
+The first follow-up captures used the shared target executable after a
+parallel build replaced it. Those images are excluded under
+`menu-ui/foreign-binary-excluded`. The corrected captures use a private
+executable copied immediately after rebuilding this branch; its SHA-256 is
+retained in `menu-ui/binary.sha256`. No other workspace or process was changed.

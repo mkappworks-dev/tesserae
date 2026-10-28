@@ -11,10 +11,12 @@ another directory. World list/create/rename/seed UI belongs to PR 7.
 fixtures also default to ephemeral unless given an explicit World directory. Use
 a fresh directory under `/tmp` for measurements, never a personal World.
 
-The upper-right Save & Quit control and the window close action request a Server
-save. A failed quit leaves the World open, with Retry, Return to World, and a
-separately confirmed exit without saving. Ordinary autosave failures leave play
-running and retain changed Chunks that cannot safely be evicted.
+The menu's Save & Quit control and the window close action request a Server
+save. Saving is automatic; ordinary play shows only a temporary saving
+indicator, with no persistent saved/unsaved panel. A failed quit leaves the
+World open, with Retry, Return to World, and a separately confirmed exit without
+saving. Ordinary autosave failures leave play running and retain changed Chunks
+that cannot safely be evicted.
 
 ## Authoritative records
 
