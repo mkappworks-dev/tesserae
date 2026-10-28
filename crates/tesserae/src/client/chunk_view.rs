@@ -126,12 +126,12 @@ fn update_textures(
 
 /// `TESSERAE_BLEND_SORT=0` under `dev` draws blended quads in the mesher's
 /// order, so a capture can show what the sort fixes.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 fn blend_sort_on() -> bool {
     !std::env::var("TESSERAE_BLEND_SORT").is_ok_and(|v| v == "0")
 }
 
-#[cfg(not(feature = "dev"))]
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
 fn blend_sort_on() -> bool {
     true
 }
@@ -192,12 +192,12 @@ fn add_material(
     });
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 fn debug_tint() -> u32 {
     std::env::var("TESSERAE_LOD_TINT").is_ok_and(|v| v != "0") as u32
 }
 
-#[cfg(not(feature = "dev"))]
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
 fn debug_tint() -> u32 {
     0
 }
@@ -272,7 +272,7 @@ impl Draw<'_, '_, '_> {
 }
 
 #[cfg_attr(
-    feature = "dev",
+    any(feature = "dev", feature = "profiling"),
     expect(
         clippy::too_many_arguments,
         reason = "a Bevy system; the extra parameter is the dev cost counter"
@@ -286,11 +286,13 @@ fn upload_meshes(
     material: Res<TerrainMaterial>,
     world: Res<WorldSettings>,
     existing: Query<&Mesh3d>,
-    #[cfg(feature = "dev")] mut cost: ResMut<crate::cost::MainThreadCost>,
+    #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
+        crate::cost::MainThreadCost,
+    >,
 ) {
-    #[cfg(feature = "dev")]
-    let started = std::time::Instant::now();
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let started = cost.enabled().then(std::time::Instant::now);
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     let mut uploaded = 0;
     let entities = &mut *entities;
     let mut draw = Draw {
@@ -334,18 +336,18 @@ fn upload_meshes(
                 None => draw.commands.entity(entity).remove::<BlendOrder>(),
             };
         }
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         {
             uploaded += [opaque, blended, cutout]
                 .iter()
                 .map(|e| u32::from(e.is_some()))
                 .sum::<u32>();
         }
-        #[cfg(not(feature = "dev"))]
+        #[cfg(not(any(feature = "dev", feature = "profiling")))]
         let _ = (opaque, cutout);
     }
-    #[cfg(feature = "dev")]
-    if uploaded > 0 {
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    if let Some(started) = started.filter(|_| uploaded > 0) {
         cost.uploaded(started.elapsed(), uploaded);
     }
 }
@@ -774,7 +776,7 @@ mod tests {
         add_view_systems(&mut app);
         // `upload_meshes` takes the dev-only counter as a `ResMut`, so without
         // it the system fails parameter validation instead of running.
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         app.init_resource::<crate::cost::MainThreadCost>();
         if let Some(palette) = palette {
             app.world_mut().write_message(palette);

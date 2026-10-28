@@ -12,10 +12,16 @@
 //!
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 mod builder;
 pub mod edit;
 mod fluids;
+#[cfg(feature = "profiling")]
+mod profile_fixture;
+#[cfg(feature = "profiling")]
+pub use fluids::SimulationProfile;
+#[cfg(feature = "profiling")]
+pub use profile_fixture::ProfileFixtureStatus;
 #[cfg(feature = "dev")]
 mod gallery;
 mod jobs;
@@ -70,6 +76,8 @@ impl ContentTables {
 }
 
 pub fn plugin(app: &mut App) {
+    #[cfg(feature = "profiling")]
+    app.add_plugins(profile_fixture::plugin);
     app.add_plugins(mods::plugin)
         .init_resource::<world_state::ChunkStore>()
         .init_resource::<ContentTables>()
@@ -81,7 +89,9 @@ pub fn plugin(app: &mut App) {
             player::plugin,
         ));
     #[cfg(feature = "dev")]
-    app.add_plugins(gallery::plugin);
+    if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
+        app.add_plugins(gallery::plugin);
+    }
 }
 
 /// What the World is generated with. Under `dev`, `TESSERAE_CAVES=0` and

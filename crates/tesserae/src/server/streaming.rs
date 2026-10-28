@@ -198,7 +198,7 @@ impl Default for StreamingBudget {
     }
 }
 
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 impl StreamingBudget {
     /// Overrides from the environment, so a sweep needs no rebuild:
     /// `TESSERAE_BUDGET` is six comma-separated counts, the in-flight caps then
@@ -236,7 +236,7 @@ pub(super) fn streaming_settings(view: Option<tesserae_mods::ViewParams>) -> Str
         settings.view_distance_m = view.view_distance_m;
         settings.lod_distance_m = view.lod_distance_m;
     }
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     if std::env::var("TESSERAE_LOD").is_ok_and(|v| v == "0") {
         return StreamingSettings {
             lod_distance_m: settings.view_distance_m,
@@ -248,7 +248,7 @@ pub(super) fn streaming_settings(view: Option<tesserae_mods::ViewParams>) -> Str
 
 fn streaming_budget() -> StreamingBudget {
     let budget = StreamingBudget::default();
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     let budget = budget.with_env_overrides();
     budget
 }
@@ -276,7 +276,7 @@ impl Extent {
     }
 
     /// How many Cells are inside, without building them.
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub fn count(self) -> usize {
         let h = self.horizontal;
         let columns: i32 = (-h..=h).map(|x| 2 * (h * h - x * x).isqrt() + 1).sum();
@@ -403,7 +403,7 @@ impl MeshState {
     /// Whether a Chunk inside `load` is waiting on a light solve. Outside it
     /// `relight` never looks, so a Chunk the anchor has drifted away from can
     /// stay in `unlit` for good without anything being left to do.
-    #[cfg(any(test, feature = "dev"))]
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     fn unlit_within(&self, center: ChunkCoord, load: Extent) -> bool {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
     }
@@ -440,10 +440,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_message::<LodUnloaded>()
         .add_plugins(lod::plugin)
         .add_systems(FixedUpdate, (stream, lod::stream_lod).chain());
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_systems(FixedFirst, crate::cost::tick_started)
         .add_systems(FixedLast, crate::cost::tick_ended);
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_plugins(stats::plugin);
 }
 
@@ -942,7 +942,7 @@ fn dispatch_meshes(
 /// rather than the Chunk store itself; the invariant in
 /// `docs/adr/0002-client-server-from-day-one.md` is that the Client has no
 /// access to World state, and a count is not a window onto it.
-#[cfg(feature = "dev")]
+#[cfg(any(feature = "dev", feature = "profiling"))]
 pub mod stats {
     use super::*;
     use crate::server::lod_rings::level_count;
@@ -994,8 +994,10 @@ pub mod stats {
     }
 
     pub(super) fn plugin(app: &mut App) {
-        app.init_resource::<StreamingStats>()
-            .add_systems(FixedPostUpdate, publish_stats);
+        app.init_resource::<StreamingStats>().add_systems(
+            FixedPostUpdate,
+            publish_stats.run_if(crate::cost::collecting),
+        );
     }
 
     #[expect(
@@ -1401,7 +1403,7 @@ pub(in crate::server) mod tests {
 
     /// The Server tick's streaming half, level 0 then the coarse levels, on a
     /// schedule a measurement runs by itself.
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub(in crate::server) fn add_stream_systems(
         app: &mut App,
         schedule: impl bevy::ecs::schedule::ScheduleLabel,
@@ -2286,7 +2288,7 @@ pub(in crate::server) mod tests {
         assert_lit_like(&h, &expected);
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]
     fn stats_report_settled_only_when_the_server_has_nothing_left_to_do() {
         fn settled(h: &mut Harness) -> bool {
@@ -2332,7 +2334,7 @@ pub(in crate::server) mod tests {
         );
     }
 
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]
     fn stats_count_what_each_level_holds_and_has_meshed() {
         let mut h = Harness::new(

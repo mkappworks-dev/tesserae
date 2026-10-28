@@ -326,13 +326,15 @@ pub(super) fn sort_blended(
     eye: Query<&GlobalTransform, With<MainCamera>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut blended: Query<(&mut BlendOrder, &Mesh3d, &Transform)>,
-    #[cfg(feature = "dev")] mut cost: ResMut<crate::cost::MainThreadCost>,
+    #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
+        crate::cost::MainThreadCost,
+    >,
 ) {
     let Ok(eye) = eye.single() else {
         return;
     };
     let started = std::time::Instant::now();
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     let mut sorted = 0;
     let mut stale: Vec<_> = blended
         .iter_mut()
@@ -354,11 +356,13 @@ pub(super) fn sort_blended(
         if let Some(mut mesh) = meshes.get_mut(&mesh.0) {
             mesh.insert_indices(Indices::U32(indices));
         }
-        #[cfg(feature = "dev")]
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         {
             sorted += 1;
         }
     }
-    #[cfg(feature = "dev")]
-    cost.sorted(started.elapsed(), sorted);
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    if cost.enabled() {
+        cost.sorted(started.elapsed(), sorted);
+    }
 }

@@ -29,7 +29,7 @@ pub(super) struct Menu {
 }
 
 impl Menu {
-    #[cfg(feature = "dev")]
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub(super) fn opened() -> Self {
         Menu {
             open: true,

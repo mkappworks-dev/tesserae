@@ -16,7 +16,10 @@ license.workspace = true
 # loads from the repo-root assets/.
 dev = ["bevy/embedded_watcher", "bevy/file_watcher"]
 
+profiling = ["dep:libc"]
+
 [dependencies]
+libc = { version = "0.2", optional = true }
 bevy = "0.20.0"
 # The version is not redundant with the path: a path dependency without one
 # is unpublishable to crates.io, and cargo-deny counts it as a wildcard.

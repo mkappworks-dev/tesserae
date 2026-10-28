@@ -1,0 +1,102 @@
+diff --git a/crates/tesserae/src/client/capture.rs b/crates/tesserae/src/client/capture.rs
+index 58239d2..157a622 100644
+--- a/crates/tesserae/src/client/capture.rs
++++ b/crates/tesserae/src/client/capture.rs
+@@ -222,6 +222,7 @@ pub(super) fn plugin(app: &mut App) {
+     if std::env::var_os("TESSERAE_SCREENSHOT_MAGENTA_SKY").is_some() {
+         app.insert_resource(ClearColor(Color::srgb(1.0, 0.0, 1.0)));
+     }
++    research_plugin(app);
+     app.insert_resource(Capture {
+         path,
+         fly_for_s: seconds("TESSERAE_SCREENSHOT_FLY_S", FLY_FOR_S),
+@@ -507,9 +508,11 @@ fn watch_frames(
+     stats: Res<StreamingStats>,
+     mut capture: ResMut<Capture>,
+     mut cost: ResMut<MainThreadCost>,
++    mut research: ResMut<Research>,
+ ) {
+     let fly_for_s = capture.fly_for_s;
+     let frame_cost = cost.take_frame();
++    research.rows.push((time.elapsed_secs_f64(), time.delta_secs_f64(), frame_cost));
+     capture
+         .frames
+         .note_cost(time.elapsed_secs(), frame_cost, fly_for_s);
+@@ -936,3 +939,77 @@ mod tests {
+         assert!(!log.settled);
+     }
+ }
++
++
++#[derive(Resource, Default)]
++struct Research {
++    rows: Vec<(f64, f64, FrameCost)>,
++    spans: Vec<(f64, f64)>,
++    started: Option<std::time::Instant>,
++    saved: bool,
++}
++
++fn research_plugin(app: &mut App) {
++    app.insert_resource(bevy::winit::WinitSettings::continuous())
++        .init_resource::<Research>()
++        .add_systems(First, research_start)
++        .add_systems(Last, research_end)
++        .add_systems(Update, research_settings.after(render_offscreen));
++    if std::env::var_os("TESSERAE_RESEARCH_DIAGNOSTICS").is_some() {
++        app.add_plugins(bevy::render::diagnostic::RenderDiagnosticsPlugin);
++    }
++}
++fn research_start(mut research: ResMut<Research>) {
++    research.started = Some(std::time::Instant::now());
++}
++fn research_end(
++    mut research: ResMut<Research>,
++    capture: Res<Capture>,
++    time: Res<Time<Real>>,
++    diagnostics: Res<bevy::diagnostic::DiagnosticsStore>,
++) {
++    if let Some(start) = research.started {
++        research.spans.push((time.elapsed_secs_f64(), start.elapsed().as_secs_f64()));
++    }
++    if research.saved || !capture.due(time.elapsed_secs()) && !capture.taken {
++        return;
++    }
++    research.saved = true;
++    let Some(path) = std::env::var_os("TESSERAE_RESEARCH_CSV") else { return; };
++    use std::io::Write;
++    let mut out = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
++    writeln!(out, "elapsed_s,frame_ms,tick_ms,longest_tick_ms,upload_ms,uploads,sort_ms,sorts").unwrap();
++    for (t, delta, cost) in &research.rows {
++        writeln!(out, "{t},{},{},{},{},{},{},{}", delta*1000.0, cost.tick_s*1000.0, cost.longest_tick_s*1000.0, cost.upload_s*1000.0, cost.uploads, cost.sort_s*1000.0, cost.sorts).unwrap();
++    }
++    let path = std::path::PathBuf::from(path);
++    let mut spans = std::io::BufWriter::new(std::fs::File::create(path.with_extension("spans.csv")).unwrap());
++    writeln!(spans,"elapsed_s,main_schedule_wall_ms").unwrap();
++    for (t, span) in &research.spans { writeln!(spans,"{t},{}",span*1000.0).unwrap(); }
++    let mut diag = std::io::BufWriter::new(std::fs::File::create(path.with_extension("diagnostics.csv")).unwrap());
++    writeln!(diag,"path,value,mean,suffix").unwrap();
++    for d in diagnostics.iter() {
++        writeln!(diag,"{},{},{},{}", d.path(), d.value().unwrap_or(0.0),d.average().unwrap_or(0.0),d.suffix).unwrap();
++    }
++}
++fn research_settings(
++    time: Res<Time>,
++    mut cameras: Query<(Entity, &mut Camera, Has<super::tile_preview::AtlasCamera>)>,
++    mut lights: Query<&mut DirectionalLight>,
++    mut commands: Commands,
++    mut logged: Local<bool>,
++    windows: Query<&Window>,
++) {
++    if !*logged && time.elapsed_secs() > 2.0 {
++        *logged = true;
++        for w in &windows { info!("research_window physical={}x{} scale={} present={:?} focused={}",w.physical_width(),w.physical_height(),w.scale_factor(),w.present_mode,w.focused); }
++        info!("research_cameras {}", cameras.iter().count());
++    }
++    for (entity,mut camera,atlas) in &mut cameras {
++        if atlas && std::env::var_os("TESSERAE_RESEARCH_FREEZE_ATLAS").is_some() && time.elapsed_secs() > 5.0 { camera.is_active = false; }
++        if std::env::var_os("TESSERAE_RESEARCH_NO_MSAA").is_some() { commands.entity(entity).insert(Msaa::Off); }
++    }
++    if std::env::var_os("TESSERAE_RESEARCH_NO_SHADOWS").is_some() {
++        for mut light in &mut lights { light.shadow_maps_enabled = false; }
++    }
++}

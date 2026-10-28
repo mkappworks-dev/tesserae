@@ -272,6 +272,11 @@ the benches but does not measure them — a regression is a human judgement.
 **Keep it that way.** CI fails the `Boundaries` job if `tesserae-core` or
 `tesserae-mods` acquires a `bevy` or `wgpu` edge, even transitively.
 
+Rendered frame measurements use the opt-in `profiling` feature and
+[`scripts/profile-frames`](docs/performance/frame-profiling.md). Build once,
+then run the fixed-seed release fixtures sequentially; headless kernel
+throughput and presented/offscreen frame times are separate evidence.
+
 ### Working on mods
 
 Install the guest target with `rustup target add wasm32-wasip2`, then run
