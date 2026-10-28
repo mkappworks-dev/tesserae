@@ -210,9 +210,10 @@ pub(super) fn grab_cursor(
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     panels: Option<Res<super::help::Panels>>,
     settings: Option<Res<super::settings::Settings>>,
+    ui: Option<Res<super::input::UiInput>>,
 ) {
     let mut cursor = cursor.into_inner();
-    if settings.is_some_and(|settings| settings.open) {
+    if settings.is_some_and(|settings| settings.open) || ui.is_some_and(|ui| ui.text_entry) {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
         return;

@@ -171,7 +171,11 @@ pub(super) fn toggle(
     mut pointer: ResMut<PointerState>,
     settings: Option<Res<super::settings::Settings>>,
     window: Single<&Window, With<PrimaryWindow>>,
+    ui: Option<Res<super::input::UiInput>>,
 ) {
+    if ui.is_some_and(|ui| ui.text_entry) {
+        return;
+    }
     if !window.focused {
         return;
     }
@@ -981,6 +985,22 @@ mod tests {
             .spawn((PrimaryWindow, Window::default(), CursorOptions::default()));
         app
     }
+    #[test]
+    fn text_entry_owns_the_catalogue_toggle_key() {
+        let mut app = app();
+        app.insert_resource(super::super::input::UiInput {
+            text_entry: true,
+            ..default()
+        });
+        let before = app.world().resource::<Menu>().open;
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Tab);
+        app.world_mut().run_schedule(PreUpdate);
+        app.world_mut().run_system_once(toggle).unwrap();
+        assert_eq!(app.world().resource::<Menu>().open, before);
+    }
+
     #[test]
     fn picking_holds_outside_the_bar_and_closes_but_selecting_a_slot_keeps_the_menu_open() {
         let mut app = app();

@@ -417,6 +417,29 @@ mod tests {
     }
 
     #[test]
+    fn a_second_tap_cancels_without_automatic_restart() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .tap_remove = true;
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+        assert!(step(&mut app, 0.05).is_empty());
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        assert!(step(&mut app, 0.05).is_empty());
+        assert!(!app.world().resource::<Progress>().active());
+        assert!(step(&mut app, 1.0).is_empty());
+    }
+
+    #[test]
     fn timed_tap_completes_once_at_all_update_rates_and_never_transfers_target() {
         for hz in [60, 144, 1000] {
             let mut app = app();
@@ -432,8 +455,15 @@ mod tests {
                 .resource_mut::<ButtonInput<MouseButton>>()
                 .release(MouseButton::Left);
             let mut count = 0;
-            for _ in 0..hz {
-                count += step(&mut app, 1.0 / hz as f32).len();
+            for frame in 1..=hz {
+                let intents = step(&mut app, 1.0 / hz as f32);
+                if !intents.is_empty() {
+                    let elapsed = f64::from(frame) / f64::from(hz);
+                    let duration = tesserae_mods::DEFAULT_REMOVE_TIME.as_secs_f64();
+                    assert!(elapsed + 1e-6 >= duration);
+                    assert!(elapsed <= duration + 1.0 / f64::from(hz) + 1e-6);
+                }
+                count += intents.len();
             }
             assert_eq!(count, 1);
             app.world_mut()

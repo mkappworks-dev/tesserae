@@ -209,6 +209,7 @@ pub(super) struct Actions(
     HashSet<Action>,
     HashSet<Trigger>,
     bool,
+    HashSet<Action>,
 );
 impl Actions {
     pub fn consume_cancel(&mut self) {
@@ -228,9 +229,10 @@ impl Actions {
         self.state(action).held
     }
     pub fn cancel(&mut self, action: Action) {
+        let previously_held = self.4.contains(&action);
         let state = self.0.entry(action).or_default();
         *state = State {
-            cancelled: state.held,
+            cancelled: previously_held || state.started || state.cancelled,
             ..default()
         };
     }
@@ -240,6 +242,11 @@ impl Actions {
         keys: &ButtonInput<KeyCode>,
         mouse: &ButtonInput<MouseButton>,
     ) {
+        self.4 = self
+            .0
+            .iter()
+            .filter_map(|(&action, state)| state.held.then_some(action))
+            .collect();
         self.3 = keys.just_pressed(KeyCode::Escape);
         let matches = |binding: Binding| binding.active(keys, mouse);
         let consumed: HashSet<_> = bindings
@@ -388,6 +395,39 @@ pub(super) fn test_plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn both_sides_and_both_default_redo_gestures_resolve_once() {
+        let bindings = Bindings::default();
+        for modifier in [KeyCode::ControlLeft, KeyCode::ControlRight] {
+            let mut keys = ButtonInput::default();
+            keys.press(modifier);
+            keys.press(KeyCode::KeyY);
+            let mut actions = Actions::default();
+            actions.resolve(&bindings, &keys, &ButtonInput::default());
+            assert!(actions.started(Redo));
+            assert!(!actions.started(Undo));
+            assert!(!actions.held(Descend));
+        }
+        for modifier in [
+            KeyCode::ControlLeft,
+            KeyCode::ControlRight,
+            KeyCode::SuperLeft,
+            KeyCode::SuperRight,
+        ] {
+            for shift in [KeyCode::ShiftLeft, KeyCode::ShiftRight] {
+                let mut keys = ButtonInput::default();
+                for key in [modifier, shift, KeyCode::KeyZ] {
+                    keys.press(key);
+                }
+                let mut actions = Actions::default();
+                actions.resolve(&bindings, &keys, &ButtonInput::default());
+                assert!(actions.started(Redo));
+                assert!(!actions.started(Undo));
+                assert!(!actions.held(Descend));
+            }
+        }
+    }
+
     #[test]
     fn escape_remains_a_cancel_route_after_release_cursor_is_rebound() {
         let mut bindings = Bindings::default();

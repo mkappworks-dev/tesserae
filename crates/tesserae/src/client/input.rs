@@ -160,6 +160,51 @@ pub(super) fn gameplay(ownership: Res<Ownership>) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn device_cancellation_is_one_transition_at_every_update_rate() {
+        use super::super::actions::{Action, Actions};
+        for hz in [60, 144, 1000] {
+            let mut app = App::new();
+            app.add_plugins(super::super::actions::test_plugin)
+                .insert_resource(Ownership::playing())
+                .init_resource::<UiInput>()
+                .init_resource::<super::super::menu::Menu>()
+                .add_systems(Update, resolve);
+            app.world_mut().spawn((
+                Window {
+                    focused: true,
+                    ..default()
+                },
+                PrimaryWindow,
+                CursorOptions {
+                    grab_mode: CursorGrabMode::Locked,
+                    ..default()
+                },
+            ));
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::KeyR);
+            let mut starts = 0;
+            let mut cancellations = 0;
+            for frame in 0..hz {
+                if frame == hz / 2 {
+                    app.world_mut().resource_mut::<UiInput>().device_epoch += 1;
+                }
+                app.update();
+                let state = app.world().resource::<Actions>().state(Action::Respawn);
+                starts += usize::from(state.started);
+                cancellations += usize::from(state.cancelled);
+                if frame >= hz / 2 {
+                    assert!(!state.held);
+                }
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .clear();
+            }
+            assert_eq!((starts, cancellations), (1, 1));
+        }
+    }
+
+    #[test]
     fn an_idle_alternative_cannot_resume_a_cancelled_held_binding() {
         use super::super::actions::{Action, Actions, Binding, Bindings, Modifier, Trigger};
         let mut app = App::new();
