@@ -23,7 +23,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(activate)
         .add_observer(over)
         .add_observer(out)
-        .add_systems(Update, (toggle, show).chain());
+        .add_systems(Update, (toggle.after(super::input::resolve), show).chain());
 }
 fn spawn_button(mut commands: Commands) {
     commands
@@ -76,11 +76,11 @@ fn out(
         panels.pointer_over_info = false;
     }
 }
-fn toggle(keys: Res<ButtonInput<KeyCode>>, mut panels: ResMut<Panels>) {
-    if keys.just_pressed(KeyCode::KeyI) {
+fn toggle(actions: Res<super::actions::Actions>, mut panels: ResMut<Panels>) {
+    if actions.started(super::actions::Action::Help) {
         panels.help = !panels.help;
     }
-    if keys.just_pressed(KeyCode::F3) {
+    if actions.started(super::actions::Action::Diagnostics) {
         panels.debug = !panels.debug;
     }
 }
@@ -107,6 +107,7 @@ mod tests {
     #[test]
     fn help_keys_and_button_are_independent_of_diagnostics() {
         let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin);
         app.init_resource::<ButtonInput<KeyCode>>()
             .add_plugins(plugin);
         let help = app

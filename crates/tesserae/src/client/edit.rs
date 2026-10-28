@@ -279,7 +279,7 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             (
                 receive_catalogue,
-                select_held,
+                select_held.after(super::input::resolve),
                 // The report and the intent read one `GlobalTransform`.
                 send_intents.after(super::pose::report_pose),
                 show_rejections,
@@ -357,7 +357,11 @@ fn receive_catalogue(
 /// left over is dropped when a new gesture starts or the direction reverses,
 /// so half a swipe never joins the next.
 pub(super) fn select_held(
-    keys: Res<ButtonInput<KeyCode>>,
+    (preferences, ownership, actions): (
+        Res<super::profile::Preferences>,
+        Res<super::input::Ownership>,
+        Res<super::actions::Actions>,
+    ),
     mut wheel: MessageReader<MouseWheel>,
     catalogue: Res<Catalogue>,
     mut hotbar: ResMut<Hotbar>,
@@ -365,8 +369,13 @@ pub(super) fn select_held(
     menu: Option<Res<super::menu::Menu>>,
     pointer: Option<Res<super::menu::PointerState>>,
 ) {
-    for (slot, key) in SLOT_KEYS.iter().enumerate() {
-        if keys.just_pressed(*key) {
+    if ownership.owner == super::input::Owner::Unfocused {
+        wheel.clear();
+        *scrolled = 0.0;
+        return;
+    }
+    for (slot, action) in super::actions::SLOTS.iter().enumerate() {
+        if actions.started(*action) {
             if menu.as_ref().is_some_and(|m| m.open)
                 && let Some(item) = pointer
                     .as_ref()
@@ -380,11 +389,11 @@ pub(super) fn select_held(
         }
     }
     let menu_open = menu.as_ref().is_some_and(|m| m.open);
-    if menu_open {
+    if menu_open || !ownership.gameplay() {
         *scrolled = 0.0;
     }
     for event in wheel.read() {
-        if menu_open {
+        if menu_open || !ownership.gameplay() {
             continue;
         }
         let notches = match event.unit {
@@ -394,20 +403,26 @@ pub(super) fn select_held(
         if event.phase == TouchPhase::Started || notches * *scrolled < 0.0 {
             *scrolled = 0.0;
         }
-        *scrolled += notches;
+        *scrolled += notches
+            * preferences.scroll_sensitivity
+            * if preferences.reverse_scroll {
+                -1.0
+            } else {
+                1.0
+            };
         let whole = scrolled.trunc();
         *scrolled -= whole;
         // Scrolling down, a negative y, moves along the bar.
         hotbar.step(-whole as i32);
     }
-    if !menu_open && keys.just_pressed(KeyCode::KeyX) {
+    if !menu_open && actions.started(super::actions::Action::EmptyHand) {
         hotbar.outside = Some(Holding::Empty);
     }
     if let Holding::Solid {
         shape, orientation, ..
     } = hotbar.held_mut()
     {
-        if keys.just_pressed(KeyCode::KeyF) && !catalogue.0.shapes.is_empty() {
+        if actions.started(super::actions::Action::Shape) && !catalogue.0.shapes.is_empty() {
             let next = catalogue
                 .0
                 .shapes
@@ -421,10 +436,10 @@ pub(super) fn select_held(
             }
         }
         if catalogue.0.shape(*shape).is_some_and(|s| s.turnable) {
-            if keys.just_pressed(KeyCode::KeyQ) {
+            if actions.started(super::actions::Action::Turn) {
                 *orientation = orientation.turned();
             }
-            if keys.just_pressed(KeyCode::KeyE) {
+            if actions.started(super::actions::Action::Flip) {
                 *orientation = orientation.flipped();
             }
         }
@@ -438,7 +453,8 @@ pub(super) fn select_held(
 /// have been grabbed on the frame before as well, and that holds whichever of
 /// this and `camera::grab_cursor` runs first within a frame.
 pub(super) fn send_intents(
-    mouse: Res<ButtonInput<MouseButton>>,
+    ownership: Res<super::input::Ownership>,
+    actions: Res<super::actions::Actions>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     hotbar: Res<Hotbar>,
@@ -448,11 +464,11 @@ pub(super) fn send_intents(
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
     *was_grabbed = grabbed;
-    if !ready {
+    if !ready || !ownership.gameplay() {
         return;
     }
     let held = hotbar.held();
-    let action = if mouse.just_pressed(MouseButton::Right) {
+    let action = if actions.started(super::actions::Action::Place) {
         held.place()
     } else {
         None
@@ -485,15 +501,55 @@ fn show_rejections(
     notice.tick(time.delta_secs());
 }
 
-const DEBUG_HINT: &str = if cfg!(feature = "dev") {
-    "\n[F3] diagnostics"
-} else {
-    ""
-};
+fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -> String {
+    use super::actions::Action::*;
+    let mut lines = Vec::new();
+    for (action, verb) in [
+        (Help, "controls"),
+        (EmptyHand, "empty hand"),
+        (Undo, "undo"),
+        (Redo, "redo"),
+        (Sample, "pick block"),
+        (Turn, "turn"),
+        (Flip, "flip"),
+        (Shape, "Shape"),
+        (Catalogue, "menu"),
+        (Forward, "forward"),
+        (Backward, "backward"),
+        (Left, "left"),
+        (Right, "right"),
+        (Ascend, "up"),
+        (Descend, "down"),
+        (Sprint, "sprint"),
+        (Slower, "slower"),
+        (Faster, "faster"),
+        (Respawn, "return to spawn"),
+        (ReleaseCursor, "release cursor"),
+    ] {
+        lines.push(format!("[{}] {verb}", bindings.label(action, labels)));
+    }
+    lines.push(format!(
+        "[{}] to [{}] or scroll: choose a slot",
+        bindings.label(Slot1, labels),
+        bindings.label(Slot9, labels)
+    ));
+    if cfg!(feature = "dev") {
+        lines.push(format!(
+            "[{}] diagnostics",
+            bindings.label(Diagnostics, labels)
+        ));
+    }
+    lines.join("\n")
+}
 
-const HINT: &str = "[I] controls\n[X] empty hand\n[Ctrl/Cmd+Z] undo\n[Ctrl/Cmd+Shift+Z / Ctrl+Y] redo\n[Middle/P] pick block\n[1-9] or scroll: choose a slot\n[Q] turn\n[E] flip\n[F] Shape\n[Tab] menu\n[WASD] move\n[Space/Left Ctrl] up/down\n[Shift] sprint\n[-/=] speed\n[R] return to spawn\n[Esc] release cursor";
-
-fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> String {
+fn hud_text(
+    hotbar: &Hotbar,
+    catalogue: &ContentCatalogue,
+    notice: &Notice,
+    bindings: &super::actions::Bindings,
+    labels: &super::actions::Labels,
+    preferences: &super::profile::Preferences,
+) -> String {
     let held = hotbar.held();
     let (place, remove) = held.verbs();
     let place = if held == Holding::Empty {
@@ -506,8 +562,16 @@ fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> S
     } else {
         (hotbar.selected + 1).to_string()
     };
+    let remove_binding = bindings.label(super::actions::Action::Remove, labels);
+    let place_binding = bindings.label(super::actions::Action::Place, labels);
+    let mode = if preferences.tap_remove {
+        "tap"
+    } else {
+        "hold"
+    };
+    let hints = hints(bindings, labels);
     format!(
-        "{}: {}\n[hold left] {remove}\n[right click] {place}\n{HINT}{DEBUG_HINT}\n{}",
+        "{}: {}\n[{mode} {remove_binding}] {remove}\n[{place_binding}] {place}\n{hints}\n{}",
         hand,
         held.describe(catalogue),
         notice.text()
@@ -515,6 +579,11 @@ fn hud_text(hotbar: &Hotbar, catalogue: &ContentCatalogue, notice: &Notice) -> S
 }
 
 fn update_hud(
+    (bindings, labels, preferences): (
+        Res<super::actions::Bindings>,
+        Res<super::actions::Labels>,
+        Res<super::profile::Preferences>,
+    ),
     hotbar: Res<Hotbar>,
     catalogue: Res<Catalogue>,
     notice: Res<Notice>,
@@ -524,7 +593,14 @@ fn update_hud(
     for mut text in &mut notices {
         text.set_if_neq(Text::new(notice.text()));
     }
-    let line = hud_text(&hotbar, &catalogue.0, &notice);
+    let line = hud_text(
+        &hotbar,
+        &catalogue.0,
+        &notice,
+        &bindings,
+        &labels,
+        &preferences,
+    );
     // Through the comparison, so the UI is not re-laid out every frame.
     if hud.0 != line {
         hud.0 = line;
@@ -641,6 +717,8 @@ mod tests {
 
     fn app_with(grab: CursorGrabMode, catalogue: ContentCatalogue) -> App {
         let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin);
+        app.insert_resource(super::super::input::Ownership::playing());
         app.add_plugins(MinimalPlugins)
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<ButtonInput<KeyCode>>()
@@ -752,6 +830,9 @@ mod tests {
             app.world().resource::<Hotbar>(),
             &app.world().resource::<Catalogue>().0,
             app.world().resource::<Notice>(),
+            app.world().resource::<super::super::actions::Bindings>(),
+            app.world().resource::<super::super::actions::Labels>(),
+            app.world().resource::<super::super::profile::Preferences>(),
         )
     }
 
@@ -1082,9 +1163,14 @@ mod tests {
             let text = hud(&app);
             let lines: Vec<_> = text.lines().collect();
             assert_eq!(lines[0], expected);
-            assert_eq!(lines[1], "[hold left] remove");
-            assert!(lines[2].starts_with(&format!("[right click] {verb}")));
-            for hint in HINT.lines() {
+            assert_eq!(lines[1], "[hold Left mouse] remove");
+            assert!(lines[2].starts_with(&format!("[Right mouse] {verb}")));
+            for hint in hints(
+                app.world().resource::<super::super::actions::Bindings>(),
+                app.world().resource::<super::super::actions::Labels>(),
+            )
+            .lines()
+            {
                 assert!(lines.contains(&hint), "{hint}");
             }
         }

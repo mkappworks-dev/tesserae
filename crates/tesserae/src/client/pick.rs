@@ -26,7 +26,7 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 fn send(
-    (mouse, keys): (Res<ButtonInput<MouseButton>>, Res<ButtonInput<KeyCode>>),
+    (ownership, actions): (Res<super::input::Ownership>, Res<super::actions::Actions>),
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     (menu, hotbar): (Res<Menu>, Res<Hotbar>),
@@ -37,17 +37,18 @@ fn send(
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked && !menu.open;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
     *was_grabbed = grabbed;
-    if !grabbed
-        || keys.just_pressed(KeyCode::KeyX)
-        || super::edit::SLOT_KEYS
-            .iter()
-            .any(|key| keys.just_pressed(*key))
+    use super::actions::{Action, SLOTS};
+    if !ownership.gameplay()
+        || !grabbed
+        || actions.started(Action::EmptyHand)
+        || SLOTS.iter().any(|action| actions.started(*action))
     {
         pending.request = None;
     }
     if ready
-        && !keys.just_pressed(KeyCode::KeyX)
-        && (mouse.just_pressed(MouseButton::Middle) || keys.just_pressed(KeyCode::KeyP))
+        && ownership.gameplay()
+        && !actions.started(Action::EmptyHand)
+        && actions.started(Action::Sample)
     {
         pending.seq = pending.seq.wrapping_add(1);
         pending.request = Some((pending.seq, hotbar.clone()));

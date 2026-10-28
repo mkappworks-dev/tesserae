@@ -164,14 +164,18 @@ pub(super) fn plugin(app: &mut App) {
 /// Tab opens and closes; closing grabs the cursor for building. Escape closes
 /// and leaves the cursor free, as it does outside the menu, so the next click
 /// grabs it and edits nothing.
-fn toggle(
-    keys: Res<ButtonInput<KeyCode>>,
+pub(super) fn toggle(
+    actions: Res<super::actions::Actions>,
     mut menu: ResMut<Menu>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     mut pointer: ResMut<PointerState>,
+    settings: Option<Res<super::settings::Settings>>,
 ) {
-    let tab = keys.just_pressed(KeyCode::Tab);
-    let escape = keys.just_pressed(KeyCode::Escape) && menu.open;
+    if settings.is_some_and(|settings| settings.open) {
+        return;
+    }
+    let tab = actions.started(super::actions::Action::Catalogue);
+    let escape = actions.started(super::actions::Action::ReleaseCursor) && menu.open;
     if !tab && !escape {
         return;
     }
@@ -943,6 +947,8 @@ mod tests {
     }
     fn app() -> App {
         let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin);
+        app.insert_resource(super::super::input::Ownership::playing());
         app.insert_resource(Menu {
             open: true,
             material: None,
@@ -1041,6 +1047,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Digit5);
+        app.world_mut().run_schedule(PreUpdate);
         app.world_mut()
             .run_system_once(super::super::edit::select_held)
             .unwrap();
@@ -1199,6 +1206,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Tab);
+        app.world_mut().run_schedule(PreUpdate);
         app.world_mut().run_system_once(toggle).unwrap();
         app.update();
         assert!(app.world().resource::<PointerState>().drag.is_none());

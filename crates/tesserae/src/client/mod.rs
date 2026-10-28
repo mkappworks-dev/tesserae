@@ -1,6 +1,7 @@
 //! The Client: rendering, input and camera. Never mutates World state, and has
 //! no access to it — see `docs/adr/0002-client-server-from-day-one.md`.
 
+mod actions;
 mod aim;
 mod blend_order;
 pub mod camera;
@@ -12,6 +13,7 @@ pub mod drawn_mask;
 pub mod edit;
 mod help;
 mod history;
+mod input;
 mod material_textures;
 mod menu;
 #[cfg(feature = "dev")]
@@ -19,9 +21,12 @@ mod overlay;
 mod palette;
 mod pick;
 mod pose;
+mod presentation;
 mod preview;
+mod profile;
 mod removal;
 mod save;
+mod settings;
 mod tile_preview;
 
 use bevy::prelude::*;
@@ -31,6 +36,13 @@ pub fn plugin(app: &mut App) {
     app.add_plugins(capture::plugin);
     app.add_plugins((
         save::plugin,
+        profile::plugin,
+        presentation::plugin,
+        settings::plugin,
+        actions::plugin,
+        input::plugin,
+    ));
+    app.add_plugins((
         camera::plugin,
         chunk_view::plugin,
         edit::plugin,

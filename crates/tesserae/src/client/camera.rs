@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::f32::consts::FRAC_PI_2;
 
+use super::actions::{Action, Actions};
 use crate::server::player::{FLY_SPEED_CEILING_MPS, RespawnIntent};
 
 /// Just inside ±90°, where the yaw/pitch basis degenerates.
@@ -76,17 +77,29 @@ pub struct CameraHome(pub Transform);
 /// else on screen says so, which reads as the mouse not working at all.
 #[derive(Component)]
 struct CursorHint;
+#[derive(Component)]
+struct SprintHint;
+#[derive(Resource, Default)]
+pub(super) struct Sprint(pub bool);
 
 pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<Sprint>();
+    app.add_systems(
+        Update,
+        grab_cursor
+            .run_if(super::menu::closed)
+            .after(super::menu::toggle),
+    );
     let input = (
-        grab_cursor.run_if(super::menu::closed),
         show_hint,
         reset,
-        look,
+        look.run_if(super::input::gameplay),
         adjust_speed,
         fly,
+        sprint_hint,
     )
-        .chain();
+        .chain()
+        .after(super::input::resolve);
     #[cfg(feature = "dev")]
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
     app.add_systems(Startup, spawn_hint)
@@ -94,6 +107,22 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 fn spawn_hint(mut commands: Commands) {
+    commands.spawn((
+        SprintHint,
+        Visibility::Hidden,
+        Pickable::IGNORE,
+        Text::new("Sprint enabled"),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(16.0),
+            left: Val::Percent(45.0),
+            ..default()
+        },
+        TextFont {
+            font_size: bevy::text::FontSize::Px(14.0),
+            ..default()
+        },
+    ));
     commands.spawn((
         CursorHint,
         // ASCII only: Bevy's embedded default font is a FiraMono subset and
@@ -128,11 +157,12 @@ fn show_hint(
 }
 
 fn reset(
-    keys: Res<ButtonInput<KeyCode>>,
+    ownership: Res<super::input::Ownership>,
+    actions: Res<Actions>,
     camera: Single<(&mut Transform, &mut FlyCamera, &CameraHome)>,
     mut respawn: MessageWriter<RespawnIntent>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyR) {
+    if !ownership.gameplay() || !actions.started(Action::Respawn) {
         return;
     }
     // Asked, not done: moving the camera here would be a teleport the Server
@@ -149,29 +179,38 @@ fn reset(
 /// the distance to what you are looking at is the thing you actually want to
 /// control, and W/S already do that. The scroll wheel picks a hotbar slot.
 fn adjust_speed(
-    keys: Res<ButtonInput<KeyCode>>,
+    ownership: Res<super::input::Ownership>,
+    actions: Res<Actions>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     mut fly: Single<&mut FlyCamera>,
 ) {
     if cursor.grab_mode == CursorGrabMode::None {
         return;
     }
-    let presses =
-        keys.just_pressed(KeyCode::Equal) as i32 - keys.just_pressed(KeyCode::Minus) as i32;
+    if !ownership.gameplay() {
+        return;
+    }
+    let presses = actions.started(Action::Faster) as i32 - actions.started(Action::Slower) as i32;
     if presses != 0 {
         fly.speed = (fly.speed * SPEED_PER_PRESS.powi(presses))
             .clamp(*SPEED_RANGE.start(), *SPEED_RANGE.end());
     }
 }
 
-fn grab_cursor(
+pub(super) fn grab_cursor(
     mouse: Res<ButtonInput<MouseButton>>,
-    keys: Res<ButtonInput<KeyCode>>,
+    actions: Res<Actions>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     panels: Option<Res<super::help::Panels>>,
+    settings: Option<Res<super::settings::Settings>>,
 ) {
     let mut cursor = cursor.into_inner();
-    if keys.just_pressed(KeyCode::Escape) {
+    if settings.is_some_and(|settings| settings.open) {
+        cursor.grab_mode = CursorGrabMode::None;
+        cursor.visible = true;
+        return;
+    }
+    if actions.started(Action::ReleaseCursor) {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
     } else if mouse.just_pressed(MouseButton::Left)
@@ -183,17 +222,25 @@ fn grab_cursor(
 }
 
 pub(super) fn look(
+    preferences: Res<super::profile::Preferences>,
+    ownership: Res<super::input::Ownership>,
     motion: Res<AccumulatedMouseMotion>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<(&mut Transform, &mut FlyCamera)>,
 ) {
-    if cursor.grab_mode == CursorGrabMode::None || motion.delta == Vec2::ZERO {
+    if !ownership.gameplay()
+        || cursor.grab_mode == CursorGrabMode::None
+        || motion.delta == Vec2::ZERO
+    {
         return;
     }
 
     let (mut transform, mut fly) = camera.into_inner();
+    fly.sensitivity = preferences.sensitivity;
     fly.yaw -= motion.delta.x * fly.sensitivity;
-    fly.pitch = (fly.pitch - motion.delta.y * fly.sensitivity).clamp(-PITCH_LIMIT, PITCH_LIMIT);
+    fly.pitch = (fly.pitch
+        - motion.delta.y * fly.sensitivity * if preferences.invert_y { -1.0 } else { 1.0 })
+    .clamp(-PITCH_LIMIT, PITCH_LIMIT);
     transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }
 
@@ -209,7 +256,10 @@ fn flight_speed(fly: &FlyCamera, sprinting: bool) -> f32 {
 }
 
 fn fly(
-    keys: Res<ButtonInput<KeyCode>>,
+    preferences: Res<super::profile::Preferences>,
+    mut sprint: ResMut<Sprint>,
+    ownership: Res<super::input::Ownership>,
+    actions: Res<Actions>,
     time: Res<Time>,
     camera: Single<(&mut Transform, &FlyCamera)>,
 ) {
@@ -217,28 +267,107 @@ fn fly(
 
     let mut direction = Vec3::ZERO;
     for (key, axis) in [
-        (KeyCode::KeyW, *transform.forward()),
-        (KeyCode::KeyS, *transform.back()),
-        (KeyCode::KeyA, *transform.left()),
-        (KeyCode::KeyD, *transform.right()),
-        (KeyCode::Space, Vec3::Y),
-        (KeyCode::ControlLeft, Vec3::NEG_Y),
+        (Action::Forward, *transform.forward()),
+        (Action::Backward, *transform.back()),
+        (Action::Left, *transform.left()),
+        (Action::Right, *transform.right()),
+        (Action::Ascend, Vec3::Y),
+        (Action::Descend, Vec3::NEG_Y),
     ] {
-        if keys.pressed(key)
-            && !(key == KeyCode::ControlLeft && keys.any_pressed([KeyCode::KeyZ, KeyCode::KeyY]))
-        {
+        if ownership.gameplay() && actions.held(key) {
             direction += axis;
         }
     }
 
-    let sprinting = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
+    if !ownership.gameplay() || actions.started(Action::Respawn) {
+        sprint.0 = false;
+    } else if preferences.toggle_sprint && actions.started(Action::Sprint) {
+        sprint.0 = !sprint.0;
+    }
+    if !preferences.toggle_sprint {
+        sprint.0 = false;
+    }
+    let sprinting = if preferences.toggle_sprint {
+        sprint.0
+    } else {
+        actions.held(Action::Sprint)
+    };
     let speed = flight_speed(fly, sprinting);
     transform.translation += direction.normalize_or_zero() * speed * time.delta_secs();
+}
+
+fn sprint_hint(
+    sprint: Res<Sprint>,
+    preferences: Res<super::profile::Preferences>,
+    mut hints: Query<&mut Visibility, With<SprintHint>>,
+) {
+    for mut hint in &mut hints {
+        hint.set_if_neq(if preferences.toggle_sprint && sprint.0 {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        });
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focus_return_requires_a_fresh_respawn_activation() {
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin);
+        app.init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<super::super::menu::Menu>()
+            .insert_resource(super::super::input::Ownership::playing())
+            .add_message::<RespawnIntent>()
+            .add_systems(Update, (super::super::input::resolve, reset).chain());
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    focused: false,
+                    ..default()
+                },
+                PrimaryWindow,
+                CursorOptions {
+                    grab_mode: CursorGrabMode::Locked,
+                    ..default()
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            Transform::default(),
+            FlyCamera::default(),
+            CameraHome(Transform::default()),
+        ));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        app.world_mut()
+            .entity_mut(window)
+            .get_mut::<Window>()
+            .unwrap()
+            .focused = true;
+        app.update();
+        app.update();
+        assert!(app.world().resource::<Messages<RespawnIntent>>().is_empty());
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::KeyR);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyR);
+        app.update();
+        assert_eq!(app.world().resource::<Messages<RespawnIntent>>().len(), 1);
+    }
 
     #[test]
     fn looking_along_round_trips_through_the_rotation_it_implies() {
@@ -281,8 +410,10 @@ mod tests {
     #[test]
     fn the_reset_key_asks_the_server_and_turns_the_camera_but_does_not_move_it() {
         let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin);
         app.add_plugins(MinimalPlugins)
             .init_resource::<ButtonInput<KeyCode>>()
+            .insert_resource(super::super::input::Ownership::playing())
             .add_message::<RespawnIntent>()
             .add_systems(Update, reset);
         let home = Transform::from_xyz(0.0, 50.0, 0.0).looking_to(Vec3::NEG_Z, Vec3::Y);

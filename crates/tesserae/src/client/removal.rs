@@ -15,6 +15,7 @@ pub(super) struct Progress {
     elapsed: f32,
     duration: f32,
     consumed: bool,
+    tap: bool,
     was_grabbed: bool,
 }
 impl Progress {
@@ -50,7 +51,9 @@ impl Progress {
     }
 }
 pub(super) type Controls<'w, 's> = (
-    Res<'w, ButtonInput<MouseButton>>,
+    Res<'w, super::actions::Actions>,
+    Res<'w, super::profile::Preferences>,
+    Res<'w, super::input::Ownership>,
     Single<'w, 's, &'static CursorOptions, With<PrimaryWindow>>,
     Res<'w, Menu>,
 );
@@ -69,7 +72,11 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Startup, spawn)
         .add_systems(
             Update,
-            (hold.after(super::aim::receive), bar.after(hold)).chain(),
+            (
+                hold.after(super::aim::receive).after(super::input::resolve),
+                bar.after(hold),
+            )
+                .chain(),
         )
         .add_systems(PostUpdate, place_hint);
 }
@@ -121,7 +128,7 @@ fn spawn(mut commands: Commands) {
     ));
 }
 pub(super) fn hold(
-    (mouse, cursor, menu): Controls,
+    (actions, preferences, ownership, cursor, menu): Controls,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     catalogue: Res<Catalogue>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
@@ -133,25 +140,75 @@ pub(super) fn hold(
     let ready = grabbed && progress.was_grabbed;
     progress.was_grabbed = grabbed;
     let history_requested = history.read().count() > 0;
-    if !mouse.pressed(MouseButton::Left) {
+    use super::actions::{Action, SLOTS};
+    let state = actions.state(Action::Remove);
+    let interrupted = [
+        Action::Place,
+        Action::Sample,
+        Action::EmptyHand,
+        Action::Shape,
+        Action::Turn,
+        Action::Flip,
+        Action::Undo,
+        Action::Redo,
+        Action::Respawn,
+    ]
+    .into_iter()
+    .chain(SLOTS)
+    .any(|action| actions.started(action));
+    if !ownership.gameplay()
+        || state.cancelled
+        || !ready
+        || menu.open
+        || interrupted
+        || history_requested
+    {
         progress.reset();
-        progress.consumed = false;
-        return;
-    }
-    if !ready || menu.open || mouse.pressed(MouseButton::Right) || history_requested {
-        progress.reset();
+        progress.tap = false;
         progress.consumed = true;
         return;
+    }
+    if preferences.tap_remove {
+        if state.started {
+            if progress.tap {
+                progress.reset();
+                progress.tap = false;
+                progress.consumed = true;
+                return;
+            }
+            progress.reset();
+            progress.tap = true;
+            progress.consumed = false;
+        }
+        if !progress.tap {
+            return;
+        }
+    } else {
+        progress.tap = false;
+        if !state.held || state.released {
+            progress.reset();
+            progress.consumed = false;
+            return;
+        }
     }
     let wanted = target
         .current(&sent, time.elapsed_secs_f64())
         .then_some(target.0.removal)
         .flatten();
+    if preferences.tap_remove
+        && (wanted.is_none() || (progress.target.is_some() && wanted != progress.target))
+    {
+        progress.reset();
+        progress.tap = false;
+        progress.consumed = true;
+        return;
+    }
     let duration = wanted
         .and_then(|r| catalogue.0.material(r.material))
         .map_or(tesserae_mods::DEFAULT_REMOVE_TIME, |m| m.remove_time)
         .as_secs_f32();
     if let Some(target) = progress.advance(wanted, duration, time.delta_secs()) {
+        progress.tap = false;
         intents.write(EditIntent {
             action: EditAction::RemoveAt(target),
             origin: camera.translation(),
@@ -267,7 +324,9 @@ mod tests {
     }
     fn app() -> App {
         let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin);
         app.init_resource::<Progress>()
+            .insert_resource(super::super::input::Ownership::playing())
             .init_resource::<Time>()
             .init_resource::<Sent>()
             .init_resource::<Target>()
@@ -300,12 +359,53 @@ mod tests {
             .advance_by(std::time::Duration::from_secs_f32(seconds));
         let now = app.world().resource::<Time>().elapsed_secs_f64();
         app.world_mut().resource_mut::<Target>().2 = now;
+        app.world_mut().run_schedule(PreUpdate);
         app.world_mut().run_system_once(hold).unwrap();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
         app.world_mut()
             .resource_mut::<Messages<EditIntent>>()
             .drain()
             .collect()
     }
+    #[test]
+    fn timed_tap_completes_once_at_all_update_rates_and_never_transfers_target() {
+        for hz in [60, 144, 1000] {
+            let mut app = app();
+            app.world_mut()
+                .resource_mut::<super::super::profile::Preferences>()
+                .tap_remove = true;
+            step(&mut app, 0.0);
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .press(MouseButton::Left);
+            assert!(step(&mut app, 0.0).is_empty());
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .release(MouseButton::Left);
+            let mut count = 0;
+            for _ in 0..hz {
+                count += step(&mut app, 1.0 / hz as f32).len();
+            }
+            assert_eq!(count, 1);
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .press(MouseButton::Left);
+            step(&mut app, 0.0);
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .release(MouseButton::Left);
+            app.world_mut().resource_mut::<Target>().0.removal = Some(target(1));
+            assert!(step(&mut app, 1.0).is_empty());
+            assert!(!app.world().resource::<Progress>().active());
+            assert!(step(&mut app, 1.0).is_empty());
+        }
+    }
+
     #[test]
     fn capture_click_and_menu_cancel_until_release_but_empty_hand_can_remove() {
         let mut app = app();
