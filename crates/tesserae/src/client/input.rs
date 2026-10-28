@@ -139,13 +139,13 @@ pub(super) fn resolve(
         let catalogue_slot = owner == Owner::Catalogue && super::actions::SLOTS.contains(&action);
         if !catalogue_slot
             && (!ownership.gameplay()
-                || alternatives
-                    .iter()
-                    .flatten()
-                    .all(|binding| match binding.trigger {
-                        Trigger::Key(key) => !ownership.key(key),
-                        Trigger::Mouse(button) => !ownership.button(button),
-                    }))
+                || alternatives.iter().flatten().all(|binding| {
+                    !binding.active(&keys, &mouse)
+                        || match binding.trigger {
+                            Trigger::Key(key) => !ownership.key(key),
+                            Trigger::Mouse(button) => !ownership.button(button),
+                        }
+                }))
         {
             actions.cancel(action);
         }
@@ -159,6 +159,60 @@ pub(super) fn gameplay(ownership: Res<Ownership>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_idle_alternative_cannot_resume_a_cancelled_held_binding() {
+        use super::super::actions::{Action, Actions, Binding, Bindings, Modifier, Trigger};
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .insert_resource(Ownership::playing())
+            .init_resource::<super::super::menu::Menu>()
+            .add_systems(Update, resolve);
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+            CursorOptions {
+                grab_mode: CursorGrabMode::Locked,
+                ..default()
+            },
+        ));
+        app.world_mut()
+            .resource_mut::<Bindings>()
+            .0
+            .get_mut(&Action::Forward)
+            .unwrap()[1] = Some(Binding {
+            trigger: Trigger::Key(KeyCode::KeyT),
+            modifier: Modifier::None,
+        });
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = true;
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = false;
+        app.update();
+        app.update();
+        assert!(!app.world().resource::<Actions>().held(Action::Forward));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::KeyW);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyW);
+        app.update();
+        assert!(app.world().resource::<Actions>().started(Action::Forward));
+    }
+
     #[test]
     fn held_inputs_require_release_after_every_ownership_transition() {
         let mut ownership = Ownership::playing();

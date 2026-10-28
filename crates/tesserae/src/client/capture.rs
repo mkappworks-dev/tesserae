@@ -259,6 +259,9 @@ pub(super) fn plugin(app: &mut App) {
         pending_seen: false,
         frames: FrameLog::default(),
     });
+    if std::env::var_os("TESSERAE_SCREENSHOT_SPRINT").is_some() {
+        app.insert_resource(super::camera::Sprint(true));
+    }
     if std::env::var_os("TESSERAE_SCREENSHOT_MENU").is_some() {
         app.insert_resource(super::menu::Menu::opened());
     }

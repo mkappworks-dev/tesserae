@@ -91,19 +91,19 @@ pub(super) fn plugin(app: &mut App) {
             .after(super::menu::toggle),
     );
     let input = (
-        show_hint,
         reset,
         look.run_if(super::input::gameplay),
         adjust_speed,
         fly,
-        sprint_hint,
     )
         .chain()
         .after(super::input::resolve);
     #[cfg(feature = "dev")]
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
     app.add_systems(Startup, spawn_hint)
-        .add_systems(Update, input.run_if(crate::server::persistence::playing));
+        .add_systems(Update, input.run_if(crate::server::persistence::playing))
+        .add_systems(Update, (show_hint.after(super::input::resolve), sprint_hint.after(fly)));
+
 }
 
 fn spawn_hint(mut commands: Commands) {

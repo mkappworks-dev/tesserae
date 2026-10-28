@@ -146,21 +146,23 @@ pub(super) fn hold(
     let state = actions.state(Action::Remove);
     let selection_changed = *previous_hand != *hotbar;
     *previous_hand = hotbar.clone();
-    let interrupted = (preferences.tap_remove && progress.tap && selection_changed)
-        || [
-            Action::Place,
-            Action::Sample,
-            Action::EmptyHand,
-            Action::Shape,
-            Action::Turn,
-            Action::Flip,
-            Action::Undo,
-            Action::Redo,
-            Action::Respawn,
-        ]
-        .into_iter()
-        .chain(SLOTS)
-        .any(|action| actions.started(action));
+    let tap_interrupted = preferences.tap_remove
+        && (selection_changed
+            || [
+                Action::Sample,
+                Action::EmptyHand,
+                Action::Shape,
+                Action::Turn,
+                Action::Flip,
+                Action::Respawn,
+            ]
+            .into_iter()
+            .chain(SLOTS)
+            .any(|action| actions.started(action)));
+    let interrupted = actions.held(Action::Place)
+        || actions.started(Action::Undo)
+        || actions.started(Action::Redo)
+        || tap_interrupted;
     if !ownership.gameplay()
         || state.cancelled
         || !ready
@@ -390,6 +392,30 @@ mod tests {
             .drain()
             .collect()
     }
+    #[test]
+    fn a_held_place_binding_keeps_priority_over_a_later_remove_press() {
+        let mut app = app();
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Right);
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        assert!(step(&mut app, 1.0).is_empty());
+        assert!(step(&mut app, 1.0).is_empty());
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release_all();
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        assert!(step(&mut app, 0.0).is_empty());
+        assert_eq!(step(&mut app, 0.4).len(), 1);
+    }
+
     #[test]
     fn timed_tap_completes_once_at_all_update_rates_and_never_transfers_target() {
         for hz in [60, 144, 1000] {

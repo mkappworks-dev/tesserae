@@ -37,12 +37,14 @@ The version 1 user profile defaults to:
   `~/.config/Tesserae/user-profile.json`
 - Windows: `%APPDATA%/Tesserae/user-profile.json`
 
-`TESSERAE_USER_PROFILE` overrides the path. New actions merge their defaults.
-Invalid or unsupported profiles remain on disk and loading reports an error.
-Apply preserves the previous valid profile as `.json.bak`, or preserves corrupt
-data under a timestamped `.corrupt-*` name. Saves write and sync a temporary
-file, then atomically replace the destination. Save failure keeps the active
-preferences and draft distinct. Profiles contain no World data or Material ids.
+`TESSERAE_USER_PROFILE` overrides the path. New actions merge their defaults. A
+new default that conflicts with an existing user binding stays unbound rather
+than displacing that binding. Invalid or unsupported profiles remain on disk and
+loading reports an error. Apply preserves the previous valid profile as
+`.json.bak`, or preserves corrupt data under a timestamped `.corrupt-*` name.
+Saves write and sync a temporary file, then atomically replace the destination.
+Save failure keeps the active preferences and draft distinct. Profiles contain
+no World data or Material ids.
 
 Normal play defaults to display sync. FPS caps and explicit uncapped rendering
 change presentation pacing only; they do not change quality, view distance or

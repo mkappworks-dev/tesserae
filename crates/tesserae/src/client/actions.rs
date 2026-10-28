@@ -93,6 +93,22 @@ pub(super) struct Binding {
     pub modifier: Modifier,
 }
 
+impl Binding {
+    pub fn active(&self, keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>) -> bool {
+        let pressed = match self.trigger {
+            Trigger::Key(key) => keys.pressed(key),
+            Trigger::Mouse(button) => mouse.pressed(button),
+        };
+        pressed
+            && self.modifier.matches(
+                keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]),
+                keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]),
+                keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+                keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
+            )
+    }
+}
+
 #[derive(Resource, Clone, PartialEq, Debug)]
 pub(super) struct Bindings(pub HashMap<Action, [Option<Binding>; 2]>);
 impl Default for Bindings {
@@ -225,17 +241,7 @@ impl Actions {
         mouse: &ButtonInput<MouseButton>,
     ) {
         self.3 = keys.just_pressed(KeyCode::Escape);
-        let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-        let command = keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]);
-        let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
-        let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-        let matches = |binding: Binding| {
-            let trigger = match binding.trigger {
-                Trigger::Key(key) => keys.pressed(key),
-                Trigger::Mouse(button) => mouse.pressed(button),
-            };
-            trigger && binding.modifier.matches(ctrl, command, shift, alt)
-        };
+        let matches = |binding: Binding| binding.active(keys, mouse);
         let consumed: HashSet<_> = bindings
             .0
             .values()

@@ -8,7 +8,7 @@ use bevy::{
     ui_widgets::{Activate, Button, ScrollArea},
 };
 
-type Conflict = (Action, usize, Binding, Vec<(Action, usize)>);
+type Conflict = (Action, [Option<Binding>; 2], Vec<(Action, usize)>);
 
 #[derive(Resource, Default)]
 pub(super) struct Settings {
@@ -151,6 +151,35 @@ fn close(settings: &mut Settings) {
     settings.conflict = None;
     settings.unsaved = false;
 }
+fn propose(settings: &mut Settings, action: Action, proposed: [Option<Binding>; 2]) {
+    let draft = &mut settings.draft.as_mut().unwrap().0;
+    let conflicts: Vec<_> = draft
+        .0
+        .iter()
+        .filter(|(other, _)| **other != action)
+        .flat_map(|(&other, alternatives)| {
+            alternatives
+                .iter()
+                .enumerate()
+                .filter_map(move |(index, binding)| {
+                    binding
+                        .filter(|binding| {
+                            proposed.iter().flatten().any(|new| {
+                                new.trigger == binding.trigger
+                                    && new.modifier.overlaps(binding.modifier)
+                            })
+                        })
+                        .map(|_| (other, index))
+                })
+        })
+        .collect();
+    if conflicts.is_empty() {
+        draft.0.insert(action, proposed);
+    } else {
+        settings.conflict = Some((action, proposed, conflicts));
+    }
+}
+
 fn activate(
     event: On<Activate>,
     operations: Query<&Operation>,
@@ -210,13 +239,16 @@ fn activate(
             settings.conflict = None;
         }
         Operation::Replace => {
-            if let Some((action, slot, binding, conflicts)) = settings.conflict.take() {
+            if let Some((action, proposed, conflicts)) = settings.conflict.take() {
                 let draft = &mut settings.draft.as_mut().unwrap().0;
                 for (other, index) in conflicts {
                     draft.0.get_mut(&other).unwrap()[index] = None;
                 }
-                draft.0.get_mut(&action).unwrap()[slot] = Some(binding);
+                draft.0.insert(action, proposed);
             }
+        }
+        Operation::ResetAction(action) => {
+            propose(&mut settings, action, Bindings::default().0[&action])
         }
         operation => {
             let Some((draft, p)) = settings.draft.as_mut() else {
@@ -226,9 +258,6 @@ fn activate(
                 Operation::Reset => {
                     *draft = Bindings::default();
                     *p = Preferences::default();
-                }
-                Operation::ResetAction(action) => {
-                    draft.0.insert(action, Bindings::default().0[&action]);
                 }
                 Operation::Clear(action, slot) => draft.0.get_mut(&action).unwrap()[slot] = None,
                 Operation::Sprint => p.toggle_sprint = !p.toggle_sprint,
@@ -356,26 +385,18 @@ fn capture(
         _ => Modifier::None,
     };
     let binding = Binding { trigger, modifier };
-    let draft = &mut settings.draft.as_mut().unwrap().0;
-    let conflicts: Vec<_> = draft
-        .0
-        .iter()
-        .flat_map(|(&other, alternatives)| {
-            alternatives
-                .iter()
-                .enumerate()
-                .filter_map(move |(index, b)| {
-                    b.filter(|b| b.trigger == trigger && b.modifier.overlaps(modifier))
-                        .map(|_| (other, index))
-                })
-        })
-        .filter(|pair| *pair != (action, slot))
-        .collect();
-    if conflicts.is_empty() {
-        draft.0.get_mut(&action).unwrap()[slot] = Some(binding);
-    } else {
-        settings.conflict = Some((action, slot, binding, conflicts));
+    let mut proposed = settings.draft.as_ref().unwrap().0.0[&action];
+    for (index, alternative) in proposed.iter_mut().enumerate() {
+        if index != slot
+            && alternative.is_some_and(|other| {
+                other.trigger == binding.trigger && other.modifier.overlaps(binding.modifier)
+            })
+        {
+            *alternative = None;
+        }
     }
+    proposed[slot] = Some(binding);
+    propose(&mut settings, action, proposed);
     settings.capture = None;
     settings.notice.clear();
     settings.dirty = true;
@@ -457,7 +478,7 @@ fn render(
             if settings.unsaved {
                 return;
             }
-            if let Some((_, _, _, conflicts)) = &settings.conflict {
+            if let Some((_, _, conflicts)) = &settings.conflict {
                 root.spawn(Text::new(format!(
                     "Binding conflicts with {conflicts:?}. Replace or cancel?"
                 )));
@@ -659,6 +680,27 @@ mod tests {
         assert_eq!(
             app.world().resource::<Bindings>().0[&Action::Forward],
             Bindings::default().0[&Action::Forward]
+        );
+        activate_operation(&mut app, Operation::ResetAction(Action::Sample));
+        assert!(app.world().resource::<Settings>().conflict.is_some());
+        activate_operation(&mut app, Operation::CancelConflict);
+        assert!(
+            app.world()
+                .resource::<Settings>()
+                .draft
+                .as_ref()
+                .unwrap()
+                .0
+                .0[&Action::Sample][0]
+                .is_none()
+        );
+        activate_operation(&mut app, Operation::ResetAction(Action::Sample));
+        activate_operation(&mut app, Operation::Replace);
+        let draft = &app.world().resource::<Settings>().draft.as_ref().unwrap().0;
+        assert!(draft.0[&Action::Forward][0].is_none());
+        assert_eq!(
+            draft.0[&Action::Sample],
+            Bindings::default().0[&Action::Sample]
         );
     }
 }

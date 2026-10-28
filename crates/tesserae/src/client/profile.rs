@@ -3,7 +3,7 @@ use super::actions::Bindings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::{self, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
@@ -109,26 +109,37 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         return Err(io::Error::other("invalid preference value"));
     }
     let mut bindings = Bindings::default();
+    let mut explicit = HashSet::new();
     for (id, value) in document.bindings {
         let Ok(action) = serde_json::from_value(serde_json::Value::String(id)) else {
             continue;
         };
         let alternatives = serde_json::from_value(value).map_err(io::Error::other)?;
         bindings.0.insert(action, alternatives);
+        explicit.insert(action);
     }
     use super::actions::{Action, Trigger};
-    let mut seen = Vec::new();
-    for (&action, alternatives) in &bindings.0 {
-        for binding in alternatives.iter().flatten() {
+    let mut seen: Vec<super::actions::Binding> = Vec::new();
+    let mut actions: Vec<_> = bindings.0.keys().copied().collect();
+    actions.sort_by_key(|action| (!explicit.contains(action), format!("{action:?}")));
+    for action in actions {
+        for alternative in bindings.0.get_mut(&action).unwrap() {
+            let Some(binding) = *alternative else {
+                continue;
+            };
             if binding.trigger == Trigger::Key(KeyCode::Escape) && action != Action::ReleaseCursor {
                 return Err(io::Error::other("Escape is reserved for cancellation"));
             }
-            if seen.iter().any(|previous: &&super::actions::Binding| {
+            if seen.iter().any(|previous| {
                 previous.trigger == binding.trigger && previous.modifier.overlaps(binding.modifier)
             }) {
-                return Err(io::Error::other("conflicting user bindings"));
+                if explicit.contains(&action) {
+                    return Err(io::Error::other("conflicting user bindings"));
+                }
+                *alternative = None;
+            } else {
+                seen.push(binding);
             }
-            seen.push(binding);
         }
     }
     Ok((bindings, document.preferences))
@@ -210,6 +221,25 @@ pub(super) fn plugin(app: &mut App) {
 mod tests {
     use super::super::actions::Action;
     use super::*;
+    #[test]
+    fn a_new_default_never_displaces_an_existing_user_binding() {
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&encode(&Bindings::default(), &Preferences::default()).unwrap())
+                .unwrap();
+        let bindings = document["bindings"].as_object_mut().unwrap();
+        bindings.remove("sample");
+        bindings.get_mut("forward").unwrap()[0]["trigger"]["key"] = "KeyP".into();
+        document["preferences"]["invert_y"] = true.into();
+        let (bindings, prefs) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
+        assert!(prefs.invert_y);
+        assert!(bindings.0[&Action::Sample][0].is_none());
+        assert!(bindings.0[&Action::Sample][1].is_some());
+        assert_eq!(
+            bindings.0[&Action::Forward][0].unwrap().trigger,
+            super::super::actions::Trigger::Key(KeyCode::KeyP)
+        );
+    }
+
     #[test]
     fn new_actions_merge_and_unknown_actions_do_not_destroy_preferences() {
         let bytes = br#"{"version":1,"bindings":{"future_action":null,"forward":[null,null]},"preferences":{"invert_y":true}}"#;
