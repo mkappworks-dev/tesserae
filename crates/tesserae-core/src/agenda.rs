@@ -237,6 +237,116 @@ impl Agenda {
         }
     }
 
+    /// Checkpoint only between logical steps: worker-owned entries and timers
+    /// must land before the Server takes its durable snapshot.
+    pub fn checkpoint(&self, now: Step) -> Result<crate::save::Agenda, crate::save::Error> {
+        if !self.in_step.is_empty() {
+            return Err(crate::save::Error::Incompatible(
+                "simulation step is still running".into(),
+            ));
+        }
+        let mut wakes: Vec<_> = self
+            .due
+            .iter()
+            .map(|(&at, &due)| (at, due.saturating_sub(now)))
+            .collect();
+        wakes.sort_unstable();
+        Ok(crate::save::Agenda {
+            capacity: self.limits.capacity,
+            reserve: self.limits.reserve,
+            scan_per_step: self.limits.scan_per_step,
+            wakes,
+            turn: self.turn,
+            rescans: self
+                .rescans
+                .iter()
+                .map(|(&home, r)| crate::save::Rescan {
+                    home,
+                    pass: r.pass.iter().map(|s| (s.min, s.max)).collect(),
+                    span: r.span,
+                    offset: r.offset,
+                    next: r.next.iter().map(|s| (s.min, s.max)).collect(),
+                    parked: r.parked.map(|s| (s.min, s.max)),
+                })
+                .collect(),
+        })
+    }
+
+    pub fn restore(saved: &crate::save::Agenda, now: Step) -> Result<Self, crate::save::Error> {
+        use crate::save::Error;
+        let invalid = || Error::Corrupt("invalid simulation Agenda".into());
+        let cap = saved
+            .capacity
+            .checked_add(saved.reserve)
+            .ok_or_else(invalid)?;
+        if saved.wakes.len() > cap || saved.scan_per_step == 0 {
+            return Err(invalid());
+        }
+        let mut agenda = Self::new(Limits {
+            capacity: saved.capacity,
+            reserve: saved.reserve,
+            scan_per_step: saved.scan_per_step,
+        });
+        for &(at, remaining) in &saved.wakes {
+            let due = now.checked_add(remaining).ok_or_else(invalid)?;
+            if agenda.due.insert(at, due).is_some() {
+                return Err(invalid());
+            }
+            agenda.queue.insert((due, at));
+        }
+        for r in &saved.rescans {
+            let span = |&(min, max): &(Cell, Cell)| -> Result<Span, Error> {
+                if (0..3).any(|a| min[a] > max[a])
+                    || chunk_of(min).0 != r.home
+                    || chunk_of(max).0 != r.home
+                {
+                    return Err(invalid());
+                }
+                Ok(Span { min, max })
+            };
+            let pass: Vec<_> = r.pass.iter().map(span).collect::<Result<_, _>>()?;
+            if r.span > pass.len() || (r.span < pass.len() && r.offset >= pass[r.span].len()) {
+                return Err(invalid());
+            }
+            let restored = Rescan {
+                pass,
+                span: r.span,
+                offset: r.offset,
+                next: r.next.iter().map(span).collect::<Result<_, _>>()?,
+                parked: r.parked.as_ref().map(span).transpose()?,
+            };
+            if agenda.rescans.insert(r.home, restored).is_some() {
+                return Err(invalid());
+            }
+        }
+        agenda.turn = saved.turn;
+        Ok(agenda)
+    }
+
+    /// Re-admit paused work using the ordinary bounded overflow policy.
+    pub fn resume(
+        &mut self,
+        saved: &crate::save::Agenda,
+        now: Step,
+    ) -> Result<(), crate::save::Error> {
+        let restored = Self::restore(saved, now)?;
+        for (home, mut scan) in restored.rescans {
+            if let Some(existing) = self.rescans.remove(&home) {
+                for span in existing.pass.into_iter().chain(existing.next) {
+                    add_span(&mut scan.next, span);
+                }
+                if let Some(parked) = existing.parked {
+                    add_span(&mut scan.next, parked);
+                }
+            }
+            self.rescans.insert(home, scan);
+        }
+        for (at, due) in restored.due {
+            self.wake(at, due);
+        }
+        Ok(())
+    }
+
     pub fn limits(&self) -> Limits {
         self.limits
     }

@@ -72,7 +72,8 @@ pub struct GroundParams {
 
 /// Stairs and slabs placed where the ground steps one Voxel. Plain `Copy` data
 /// like the rest of [`WorldgenParams`].
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SmoothingParams {
     /// The smallest step in the ground, in metres, worth easing. A stair or slab
     /// is half a Voxel tall, so what one can ease is a rise of exactly one Voxel,
@@ -91,7 +92,8 @@ impl Default for SmoothingParams {
 
 /// Tunnels carved out of solid ground. Plain `Copy` data like the rest of
 /// [`WorldgenParams`]: a Mod chooses numbers, generation stays native.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaveParams {
     /// The period of the lowest octave of the field the tunnels follow, in
     /// metres: roughly how far apart two tunnels run.
