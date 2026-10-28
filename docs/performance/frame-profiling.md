@@ -135,3 +135,20 @@ For the focused reference, keep the same executable/profile/Game arguments and
 pass `--fixtures flight -- /tmp/fresh-flight-reference` to the runner. The `--`
 terminates the fixture list before the output path. Three interleaved rounds
 remain mandatory.
+
+## World save events
+
+Persistent fixtures append `save_snapshots`, `save_snapshot_ms`,
+`save_worker_ms` and `save_chunks` to the raw frame rows. An explicit disposable
+`TESSERAE_WORLD_DIR` enables saves for a capture; fixtures otherwise remain
+ephemeral. `TESSERAE_EPHEMERAL=1` always disables persistence.
+
+The snapshot counter increments when the Server dispatches an immutable save.
+Snapshot milliseconds measure its capture work on the Server, already included
+in the full tick/frame spans. Worker milliseconds describe the latest completed
+encoding/validation/checksum/write task, including filesystem waits; they are
+wall time, not worker CPU. Values persist across rows until the next event, so
+select counter changes to identify snapshots rather than treating each row as a
+new save. A worker result can appear on a later frame than its snapshot; check
+the retained commit files and native diagnostics for successful writes. These
+fields do not establish power-loss safety, GPU cost or present latency.

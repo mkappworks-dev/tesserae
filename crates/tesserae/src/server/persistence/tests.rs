@@ -508,3 +508,32 @@ fn completed_snapshot_cannot_authorize_a_replacement_chunk_lifetime() {
             .contains_key(&coord([0; 3]))
     );
 }
+
+#[test]
+fn return_after_failed_quit_resumes_world_without_discarding_unsaved_changes() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.settled_save();
+    rig.solid([4, 1, 4], rig.stone);
+    let moved = dir.0.with_extension("moved");
+    std::fs::rename(&dir.0, &moved).unwrap();
+    rig.app.world_mut().write_message(SaveAction::SaveQuit);
+    rig.until(|r| r.app.world().resource::<SaveStatus>().error.is_some());
+    rig.app.world_mut().write_message(SaveAction::Return);
+    rig.tick();
+    assert!(!rig.app.world().resource::<SaveStatus>().modal());
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    assert!(rig.app.world().resource::<Messages<AppExit>>().is_empty());
+    assert!(
+        rig.app
+            .world()
+            .resource::<ChunkStore>()
+            .contains(coord([0; 3]))
+    );
+    std::fs::rename(moved, &dir.0).unwrap();
+    rig.solid([4, 1, 4], 0);
+    rig.app.world_mut().write_message(SaveAction::Retry);
+    rig.settled_save();
+    assert!(rig.app.world().resource::<SaveStatus>().error.is_none());
+}

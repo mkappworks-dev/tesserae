@@ -97,8 +97,8 @@ guarantee is made.
 
 Every authoritative Player/Mod/simulation change advances its Chunk revision. At
 a completed logical-step boundary the Server gathers all worker results and
-captures immutable Chunk handles, the bounded Agenda and timers. Serialization,
-content-name encoding, checksumming and filesystem writes run on the IO pool.
+captures immutable Chunk handles, the bounded Agenda and timers. Chunk name
+encoding, serialization, checksumming and filesystem writes run on the IO pool.
 Paused Chunk checkpoints are immutable shared handles, and simulation work is
 partitioned once for a batch of eviction candidates.
 

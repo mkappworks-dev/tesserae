@@ -29,8 +29,9 @@ This contract precedes persistence code, not another unresolved user choice.
 Use behavior/intent regressions and the spec's build/review requirements.
 Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
 Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+All Q1–Q49 choices and shared understanding were confirmed. The user
+explicitly authorized local PR 4 implementation and focused commits for
+tickets 22–23. Push, publication, merge and later scopes remain unauthorized.
 
 ## Comments
 
@@ -55,10 +56,11 @@ PR 2 changes. Implement durable identity/content, recoverable commits and
 Server snapshots before runtime save/eviction/lifecycle integration. Keep
 readiness distinct from completion; record actual validation and limits.
 
-### Local progress
+### First batch (historical)
 
-A tested storage/checkpoint foundation exists, but runtime integration and
-new/open WIT lifecycle remain outstanding. This ticket is not done. See
+The first batch supplied the storage/checkpoint foundation. Runtime and
+new/open WIT lifecycle were incomplete then; completion notes below
+supersede that intermediate state. See
 [save validation](../world-persistence-validation.md) and
 [technical contract](../../../../docs/world-persistence.md).
 
