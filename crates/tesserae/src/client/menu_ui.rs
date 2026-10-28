@@ -67,6 +67,10 @@ struct Quiet;
 #[derive(Component)]
 pub(super) struct BindingControl;
 #[derive(Component)]
+pub(super) struct EmptyBinding;
+#[derive(Component)]
+pub(super) struct EmptyBorder(pub Entity);
+#[derive(Component)]
 pub(super) struct Segment;
 #[derive(Component)]
 struct SearchPlaceholder;
@@ -79,6 +83,7 @@ struct SearchCount(Tab);
 #[derive(Component)]
 struct HeadingPill(Tab);
 #[derive(Component)]
+#[require(bevy::picking::hover::Hovered)]
 pub(super) struct Styled {
     pub selected: bool,
     pub tab: bool,
@@ -205,6 +210,7 @@ pub(super) fn plugin(app: &mut App) {
                 .after(InputFocusSystems::Dispatch)
                 .after(bevy::picking::PickingSystems::Last),
         )
+        .add_systems(Update, dashed_border_colors.after(button_label_colors))
         .add_systems(
             Update,
             (search_keys, sync_search)
@@ -318,14 +324,20 @@ type StyledButtons<'w, 's> = Query<
         &'static bevy::picking::hover::Hovered,
         Has<Quiet>,
         Has<BindingControl>,
+        Has<EmptyBinding>,
+        Has<bevy::ui::InteractionDisabled>,
         &'static mut BackgroundColor,
         &'static mut BorderColor,
     ),
 >;
 fn style(mut buttons: StyledButtons) {
-    for (style, interaction, quiet, binding, mut background, mut border) in &mut buttons {
-        let hover = interaction.0;
-        background.0 = if style.primary {
+    for (style, interaction, quiet, binding, empty, disabled, mut background, mut border) in
+        &mut buttons
+    {
+        let hover = interaction.0 && !disabled;
+        background.0 = if empty {
+            Color::NONE
+        } else if style.primary {
             LEAF
         } else if style.tab || quiet && !hover {
             Color::NONE
@@ -336,7 +348,9 @@ fn style(mut buttons: StyledButtons) {
         } else {
             CARD
         };
-        *border = BorderColor::all(if hover || style.selected || style.primary {
+        *border = BorderColor::all(if empty {
+            Color::NONE
+        } else if hover || style.selected || style.primary {
             LEAF
         } else if style.tab || quiet {
             Color::NONE
@@ -772,7 +786,7 @@ fn search_presentation(
     mut frames: Query<&mut BorderColor, With<SearchFrame>>,
     mut counts: Query<(&SearchCount, &mut Text)>,
     searches: Res<Searches>,
-    catalogue: Res<super::edit::Catalogue>,
+    (catalogue, settings): (Res<super::edit::Catalogue>, Res<Settings>),
     bindings: (Res<super::actions::Bindings>, Res<super::actions::Labels>),
 ) {
     let focused = focus.get().is_some_and(|entity| fields.contains(entity));
@@ -802,14 +816,11 @@ fn search_presentation(
                     .0
                     .keys()
                     .filter(|action| {
-                        matches(
+                        settings.binding_visible(
+                            **action,
                             &searches.bindings,
-                            &format!(
-                                "{} {} {}",
-                                super::settings::action_name(**action),
-                                super::settings::category(**action),
-                                bindings.0.label(**action, &bindings.1)
-                            ),
+                            &bindings.0,
+                            &bindings.1,
                         )
                     })
                     .count(),
@@ -874,7 +885,10 @@ pub(super) enum IconKind {
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
 #[derive(Resource)]
-struct IconAtlas(Handle<Image>);
+struct IconAtlas {
+    icons: Handle<Image>,
+    empty_border: Handle<Image>,
+}
 fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     use bevy::{
         asset::RenderAssetUsages,
@@ -925,7 +939,7 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             }
         }
     }
-    commands.insert_resource(IconAtlas(images.add(Image::new(
+    let icons = images.add(Image::new(
         Extent3d {
             width: 384,
             height: 64,
@@ -935,17 +949,45 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         data,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
-    ))));
+    ));
+    let mut border = vec![0; 150 * 33 * 4];
+    for y in 0..33 {
+        for x in 0..150 {
+            let p = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+            let q = (p - Vec2::new(75.0, 16.5)).abs() - Vec2::new(71.0, 12.5);
+            let distance = q.max(Vec2::ZERO).length() + q.max_element().min(0.0) - 4.0;
+            let along = if !(4..146).contains(&x) { y } else { x };
+            if (-1.0..=0.0).contains(&distance) && along % 7 < 4 {
+                border[(y * 150 + x) * 4..(y * 150 + x) * 4 + 4].copy_from_slice(&[255; 4]);
+            }
+        }
+    }
+    let empty_border = images.add(Image::new(
+        Extent3d {
+            width: 150,
+            height: 33,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        border,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    ));
+    commands.insert_resource(IconAtlas {
+        icons,
+        empty_border,
+    });
 }
 fn materialize_icons(
     mut commands: Commands,
     atlas: Res<IconAtlas>,
     icons: Query<(Entity, &Icon), Added<Icon>>,
+    borders: Query<Entity, Added<EmptyBorder>>,
 ) {
     for (entity, icon) in &icons {
         let index = icon.0 as u32;
         commands.entity(entity).insert(ImageNode {
-            image: atlas.0.clone(),
+            image: atlas.icons.clone(),
             rect: Some(Rect::new(
                 (index * 64) as f32,
                 0.0,
@@ -953,6 +995,13 @@ fn materialize_icons(
                 64.0,
             )),
             color: icon.1,
+            ..default()
+        });
+    }
+    for entity in &borders {
+        commands.entity(entity).insert(ImageNode {
+            image: atlas.empty_border.clone(),
+            color: EDGE,
             ..default()
         });
     }
@@ -1005,7 +1054,13 @@ fn heading_status(
         let value = if pill.0 == Tab::Catalogue {
             format!(
                 "{} MATERIALS",
-                catalogue.0.materials.len() + usize::from(catalogue.0.anything_burns())
+                catalogue
+                    .0
+                    .materials
+                    .iter()
+                    .filter(|m| m.solid || m.fluid.is_some())
+                    .count()
+                    + usize::from(catalogue.0.anything_burns())
             )
         } else if settings.changed(&active.0, &active.1) {
             "UNSAVED CHANGES".into()
@@ -1126,6 +1181,18 @@ pub(super) fn paragraph(
         Pickable::IGNORE,
     ));
 }
+fn dashed_border_colors(
+    mut borders: Query<(&EmptyBorder, &mut ImageNode)>,
+    buttons: Query<&bevy::picking::hover::Hovered>,
+) {
+    for (border, mut image) in &mut borders {
+        image.color = if buttons.get(border.0).is_ok_and(|hovered| hovered.0) {
+            LEAF
+        } else {
+            EDGE
+        };
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1151,6 +1218,78 @@ mod tests {
             .query_filtered::<Entity, With<SearchField>>()
             .single(app.world())
             .unwrap()
+    }
+    #[test]
+    fn native_button_factories_subscribe_to_hover_and_keep_tab_and_button_borders_distinct() {
+        let mut app = app();
+        app.add_systems(Update, (style, button_label_colors).chain().after(shell));
+        app.update();
+        let (tab, back) = {
+            let mut operations = app.world_mut().query::<(Entity, &Operation)>();
+            let tab = operations
+                .iter(app.world())
+                .find_map(|(e, op)| matches!(op, Operation::Navigate(Tab::Behavior)).then_some(e))
+                .unwrap();
+            let back = operations
+                .iter(app.world())
+                .find_map(|(e, op)| matches!(op, Operation::Back).then_some(e))
+                .unwrap();
+            (tab, back)
+        };
+        for entity in [tab, back] {
+            assert!(
+                app.world()
+                    .get::<bevy::picking::hover::Hovered>(entity)
+                    .is_some()
+            );
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(bevy::picking::hover::Hovered(true));
+        }
+        app.update();
+        assert_eq!(
+            *app.world().get::<BorderColor>(tab).unwrap(),
+            BorderColor::all(LEAF)
+        );
+        assert_eq!(
+            app.world().get::<Node>(tab).unwrap().border,
+            UiRect::bottom(Val::Px(2.0))
+        );
+        assert_eq!(
+            *app.world().get::<BorderColor>(back).unwrap(),
+            BorderColor::all(LEAF)
+        );
+        assert_eq!(
+            app.world().get::<Node>(back).unwrap().border,
+            UiRect::all(Val::Px(1.0))
+        );
+        let parent = app.world_mut().spawn(Node::default()).id();
+        app.world_mut()
+            .commands()
+            .entity(parent)
+            .with_children(|children| {
+                quiet_button(children, "Restore defaults", Operation::Reset, 10.0);
+            });
+        app.world_mut().flush();
+        app.update();
+        let quiet = app
+            .world_mut()
+            .query_filtered::<Entity, With<Quiet>>()
+            .iter(app.world())
+            .find(|entity| {
+                app.world()
+                    .get::<Operation>(*entity)
+                    .is_some_and(|op| matches!(op, Operation::Reset))
+            })
+            .unwrap();
+        assert_eq!(
+            app.world().get::<BackgroundColor>(quiet).unwrap().0,
+            Color::NONE
+        );
+        assert_eq!(
+            *app.world().get::<BorderColor>(quiet).unwrap(),
+            BorderColor::all(Color::NONE)
+        );
     }
     #[test]
     fn filtering_preserves_the_native_editor_and_focus_and_retains_each_query() {

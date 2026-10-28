@@ -27,6 +27,26 @@ pub(super) struct Settings {
     pending: Option<super::menu_ui::Tab>,
 }
 impl Settings {
+    pub(super) fn binding_visible(
+        &self,
+        action: Action,
+        query: &str,
+        bindings: &Bindings,
+        labels: &super::actions::Labels,
+    ) -> bool {
+        (!query.trim().is_empty() || category(action) == self.category.label())
+            && super::menu_ui::matches(
+                query,
+                &format!(
+                    "{} {} {} {}",
+                    action_name(action),
+                    category(action),
+                    bindings.label(action, labels),
+                    binding_display(bindings.label(action, labels))
+                ),
+            )
+    }
+
     pub(super) fn changed(&self, bindings: &Bindings, preferences: &Preferences) -> bool {
         self.draft
             .as_ref()
@@ -622,7 +642,7 @@ pub(super) fn category(action: Action) -> &'static str {
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower => "Movement",
-        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | Undo | Redo => "Building",
+        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip => "Building",
         _ => "Interface",
     }
 }
@@ -645,7 +665,11 @@ pub(super) fn render(
     panels: Query<Entity, With<Panel>>,
     (labels, searches, active): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
-    (mut positions, mut previous): (Local<[Vec2; 3]>, Local<Option<super::menu_ui::Tab>>),
+    (mut positions, mut previous, mut query): (
+        Local<[Vec2; 3]>,
+        Local<Option<super::menu_ui::Tab>>,
+        Local<String>,
+    ),
     (context, pressed): RenderContext,
 ) {
     use super::menu_ui::{self as ui, Tab};
@@ -661,6 +685,10 @@ pub(super) fn render(
         if let Some(scroll) = scrolls.iter().next() {
             positions[index] = scroll.0;
         }
+    }
+    if *query != searches.bindings {
+        positions[1] = Vec2::ZERO;
+        *query = searches.bindings.clone();
     }
     *previous = settings.open.then_some(settings.tab);
     settings.dirty = false;
@@ -1112,7 +1140,7 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             card,
             "Display sync",
             "Match frame presentation to your display.",
-            true,
+            false,
             |row| {
                 segment(row, |buttons| {
                     option(
@@ -1150,20 +1178,19 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                 },
             )
         });
-        card.spawn(Node {
-            flex_direction: FlexDirection::Column,
-            padding: UiRect::top(Val::Px(17.0)),
-            row_gap: Val::Px(4.0),
-            ..default()
-        })
+        card.spawn((
+            BorderColor::all(ui::EDGE),
+            Node {
+                flex_direction: FlexDirection::Column,
+                padding: UiRect::vertical(Val::Px(17.0)),
+                border: UiRect::bottom(Val::Px(1.0)),
+                row_gap: Val::Px(4.0),
+                ..default()
+            },
+        ))
         .with_children(|limit| {
             ui::weighted_text(limit, "Frame rate limit", 13.0, 550, ui::INK);
-            ui::text(
-                limit,
-                "An optional ceiling, independent of display sync.",
-                11.0,
-                ui::MUTED,
-            );
+            ui::description(limit, "An optional ceiling, independent of display sync.");
             limit
                 .spawn(Node {
                     column_gap: Val::Px(6.0),
@@ -1174,7 +1201,7 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                 })
                 .with_children(|caps| {
                     for cap in [None, Some(60), Some(120), Some(144), Some(240), Some(1000)] {
-                        ui::compact_button(
+                        let button = ui::compact_button(
                             caps,
                             cap.map_or("No limit".into(), |n| n.to_string()),
                             Operation::Cap(cap),
@@ -1182,6 +1209,16 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                             35.0,
                             11.0,
                         );
+                        caps.commands().entity(button).insert(Node {
+                            min_width: Val::Px(48.0),
+                            min_height: Val::Px(35.0),
+                            padding: UiRect::axes(Val::Px(13.0), Val::Px(9.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(5.0)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        });
                     }
                 });
         });
@@ -1192,16 +1229,32 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             ..default()
         })
         .with_children(|summary| {
-            ui::icon(
-                summary,
-                if p.display_sync {
-                    ui::IconKind::Sync
-                } else {
-                    ui::IconKind::Uncapped
-                },
-                ui::LEAF,
-                18.0,
-            );
+            summary
+                .spawn((
+                    BackgroundColor(Color::srgb(0.069, 0.118, 0.081)),
+                    BorderColor::all(Color::srgb(0.1735, 0.3373, 0.2126)),
+                    Node {
+                        width: Val::Px(29.0),
+                        height: Val::Px(29.0),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(5.0)),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                ))
+                .with_children(|icon| {
+                    ui::icon(
+                        icon,
+                        if p.display_sync {
+                            ui::IconKind::Sync
+                        } else {
+                            ui::IconKind::Uncapped
+                        },
+                        ui::LEAF,
+                        16.0,
+                    )
+                });
             summary
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
@@ -1290,19 +1343,10 @@ fn bindings_page(
         .0
         .iter()
         .filter(|(action, _)| {
-            (searching || category(**action) == settings.category.label())
-                && ui::matches(
-                    &searches.bindings,
-                    &format!(
-                        "{} {} {}",
-                        action_name(**action),
-                        category(**action),
-                        bindings.label(**action, labels)
-                    ),
-                )
+            settings.binding_visible(**action, &searches.bindings, bindings, labels)
         })
         .collect();
-    entries.sort_by_key(|(action, _)| action_name(**action));
+    entries.sort_by_key(|(action, _)| binding_order(**action));
     if entries.is_empty() {
         ui::text(
             list,
@@ -1331,42 +1375,65 @@ fn bindings_page(
                     ..default()
                 })
                 .with_children(|cell| {
-                    cell.spawn((
-                        bevy::ui_widgets::Button,
-                        Operation::Capture(action, slot),
-                        ui::BindingControl,
-                        ui::Styled {
-                            selected: false,
-                            tab: false,
-                            primary: false,
-                        },
-                        Node {
-                            flex_grow: 1.0,
-                            min_width: Val::Px(0.0),
-                            min_height: Val::Px(33.0),
-                            padding: UiRect::axes(Val::Px(4.0), Val::Px(7.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            ..default()
-                        },
-                        BackgroundColor(ui::BG),
-                        BorderColor::all(ui::EDGE),
-                    ))
-                    .with_child((
-                        Text::new(binding.map_or("Add binding".into(), |b| labels.binding(b))),
-                        TextFont {
-                            font: bevy::text::FontSource::family("Liberation Mono"),
-                            ..ui::font(10.0)
-                        },
-                        TextColor(if binding.is_some() {
-                            ui::INK
-                        } else {
-                            ui::MUTED
-                        }),
-                        Pickable::IGNORE,
-                    ));
+                    let button = cell
+                        .spawn((
+                            bevy::ui_widgets::Button,
+                            bevy::input_focus::tab_navigation::TabIndex(0),
+                            Operation::Capture(action, slot),
+                            ui::BindingControl,
+                            ui::Styled {
+                                selected: false,
+                                tab: false,
+                                primary: false,
+                            },
+                            Node {
+                                flex_grow: 1.0,
+                                min_width: Val::Px(0.0),
+                                min_height: Val::Px(33.0),
+                                padding: UiRect::axes(Val::Px(4.0), Val::Px(7.0)),
+                                border: UiRect::all(Val::Px(1.0)),
+                                border_radius: BorderRadius::all(Val::Px(4.0)),
+                                align_items: AlignItems::Center,
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            BackgroundColor(ui::BG),
+                            BorderColor::all(ui::EDGE),
+                        ))
+                        .with_child((
+                            Text::new(binding.map_or("Add binding".into(), |b| {
+                                binding_display(labels.binding(b))
+                            })),
+                            TextFont {
+                                font: bevy::text::FontSource::family("Liberation Mono"),
+                                ..ui::font(10.0)
+                            },
+                            TextColor(if binding.is_some() {
+                                ui::INK
+                            } else {
+                                ui::MUTED
+                            }),
+                            bevy::text::LineHeight::RelativeToFont(1.5),
+                            Pickable::IGNORE,
+                        ))
+                        .id();
+                    if binding.is_none() {
+                        cell.commands()
+                            .entity(button)
+                            .insert(ui::EmptyBinding)
+                            .with_child((
+                                ui::EmptyBorder(button),
+                                Node {
+                                    position_type: PositionType::Absolute,
+                                    left: Val::Px(-1.0),
+                                    right: Val::Px(-1.0),
+                                    top: Val::Px(-1.0),
+                                    bottom: Val::Px(-1.0),
+                                    ..default()
+                                },
+                                Pickable::IGNORE,
+                            ));
+                    }
                     if binding.is_some() {
                         ui::quiet_button(cell, "×", Operation::Clear(action, slot), 12.0);
                     }
@@ -1562,6 +1629,57 @@ fn modal(commands: &mut Commands, settings: &Settings) {
     }
 }
 
+fn binding_order(action: Action) -> usize {
+    use Action::*;
+    [
+        Forward,
+        Backward,
+        Left,
+        Right,
+        Ascend,
+        Descend,
+        Sprint,
+        Respawn,
+        Faster,
+        Slower,
+        Place,
+        Remove,
+        Sample,
+        EmptyHand,
+        Turn,
+        Flip,
+        Shape,
+        Catalogue,
+        Help,
+        ReleaseCursor,
+        Undo,
+        Redo,
+        Diagnostics,
+        Slot1,
+        Slot2,
+        Slot3,
+        Slot4,
+        Slot5,
+        Slot6,
+        Slot7,
+        Slot8,
+        Slot9,
+    ]
+    .iter()
+    .position(|candidate| *candidate == action)
+    .unwrap()
+}
+fn binding_display(value: String) -> String {
+    value
+        .replace("ControlLeft", "Left Ctrl")
+        .replace("ControlRight", "Right Ctrl")
+        .replace("ShiftLeft", "Left Shift")
+        .replace("ShiftRight", "Right Shift")
+        .replace("AltLeft", "Left Alt")
+        .replace("AltRight", "Right Alt")
+        .replace("SuperLeft", "Left Super")
+        .replace("SuperRight", "Right Super")
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1639,6 +1757,12 @@ mod tests {
     fn searching_bindings_renders_actual_mouse_actions_and_restore_requires_confirmation() {
         use super::super::menu_ui::{Searches, Tab};
         let mut app = app();
+        assert!(app.world().resource::<Settings>().binding_visible(
+            Action::Descend,
+            "Left Ctrl",
+            app.world().resource::<Bindings>(),
+            &super::super::actions::Labels::default()
+        ));
         app.init_resource::<super::super::actions::Labels>()
             .init_resource::<Searches>()
             .init_resource::<super::super::edit::Hotbar>()
