@@ -1,6 +1,6 @@
 # 28: P5: Display sync, FPS caps and uncapped settings
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03, 04
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -17,10 +17,10 @@ presentation settings separate from optional reduced-quality experiments.
 
 ## Acceptance criteria
 
-- [ ] Settings persist/reset and follow Apply/Cancel/unsaved-exit rules.
-- [ ] Cap/mode changes never silently alter quality, reach or Server tick rate.
-- [ ] Uncapped benchmark mode and normal display-synced play are distinct.
-- [ ] Actual mode/focus/target metadata accompanies comparison results.
+- [x] Settings persist/reset and follow Apply/Cancel/unsaved-exit rules.
+- [x] Cap/mode changes never silently alter quality, reach or Server tick rate.
+- [x] Uncapped benchmark mode and normal display-synced play are distinct.
+- [x] Actual mode/focus/target metadata accompanies comparison results.
 
 ## Validation and authorization
 
@@ -41,3 +41,10 @@ alternatives above. Readiness awaits the final shared-understanding check.
 
 Implement as part of the confirmed combined PR 2, preserving the acceptance
 criteria above. Earlier readiness and separate-PR statements are superseded.
+
+### 2026-10-28: implementation complete
+
+Implemented and validated in the sequential local PR 2 batches. Evidence,
+artifact repair and retained native captures are recorded in
+[PR 2 validation](../pr2-implementation-validation.md). Visual fixtures are
+separate from timing/intent regressions. No push, publication or merge.

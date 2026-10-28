@@ -1,6 +1,6 @@
 # 03: C1: User controls and behavior profile
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -17,10 +17,10 @@ Keep this separate from Worlds, per-Game shortcuts and owned inventory.
 
 ## Acceptance criteria
 
-- [ ] Restart/reset/corrupt-profile/new-action cases preserve valid preferences.
-- [ ] Binding conflicts offer replace/cancel in overlapping contexts only.
-- [ ] Labels are layout-aware and independent of serialized physical ids.
-- [ ] Profile writes contain no runtime Material ids or World state.
+- [x] Restart/reset/corrupt-profile/new-action cases preserve valid preferences.
+- [x] Binding conflicts offer replace/cancel in overlapping contexts only.
+- [x] Labels are layout-aware and independent of serialized physical ids.
+- [x] Profile writes contain no runtime Material ids or World state.
 
 ## Validation and authorization
 
@@ -59,3 +59,10 @@ alternatives above. Readiness awaits the final shared-understanding check.
 
 Implement as part of the confirmed combined PR 2, preserving the acceptance
 criteria above. Earlier readiness and separate-PR statements are superseded.
+
+### 2026-10-28: implementation complete
+
+Implemented and validated in the sequential local PR 2 batches. Evidence,
+artifact repair and retained native captures are recorded in
+[PR 2 validation](../pr2-implementation-validation.md). Visual fixtures are
+separate from timing/intent regressions. No push, publication or merge.

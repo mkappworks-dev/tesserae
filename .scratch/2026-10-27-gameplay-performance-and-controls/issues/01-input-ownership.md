@@ -1,6 +1,6 @@
 # 01: C0: Explicit input ownership
 
-Status: ready-for-agent
+Status: done
 Blocked by: none
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -18,10 +18,10 @@ simulate other devices or introduce Client World access.
 
 ## Acceptance criteria
 
-- [ ] UI focus prevents gameplay movement, respawn, Edits, history and samples.
-- [ ] Capture/close/regain-focus inputs never leak a destructive activation.
-- [ ] Held input cannot resume cancelled work; pending samples are discarded.
-- [ ] Exercise actual input consumers and same-frame ordering in regressions.
+- [x] UI focus prevents gameplay movement, respawn, Edits, history and samples.
+- [x] Capture/close/regain-focus inputs never leak a destructive activation.
+- [x] Held input cannot resume cancelled work; pending samples are discarded.
+- [x] Exercise actual input consumers and same-frame ordering in regressions.
 
 ## Validation and authorization
 
@@ -52,3 +52,10 @@ alternatives above. Readiness awaits the final shared-understanding check.
 
 Implement as part of the confirmed combined PR 2, preserving the acceptance
 criteria above. Earlier readiness and separate-PR statements are superseded.
+
+### 2026-10-28: implementation complete
+
+Implemented and validated in the sequential local PR 2 batches. Evidence,
+artifact repair and retained native captures are recorded in
+[PR 2 validation](../pr2-implementation-validation.md). Visual fixtures are
+separate from timing/intent regressions. No push, publication or merge.

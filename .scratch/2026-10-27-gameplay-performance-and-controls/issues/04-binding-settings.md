@@ -1,6 +1,6 @@
 # 04: C1: Controls UI and configurable gestures
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -21,11 +21,11 @@ Show its indicator; hold behaviors remain defaults.
 
 ## Acceptance criteria
 
-- [ ] Capture/settings navigation sends zero unintended gameplay intents.
-- [ ] Tap never bypasses timing, transfers progress or repeats automatically.
-- [ ] Toggle sprint resets as specified; modes and labels survive restart.
-- [ ] Test non-US layout, both modifier sides and default redo alternatives.
-- [ ] Retain native settings/gesture captures for visual review.
+- [x] Capture/settings navigation sends zero unintended gameplay intents.
+- [x] Tap never bypasses timing, transfers progress or repeats automatically.
+- [x] Toggle sprint resets as specified; modes and labels survive restart.
+- [x] Test non-US layout, both modifier sides and default redo alternatives.
+- [x] Retain native settings/gesture captures for visual review.
 
 ## Validation and authorization
 
@@ -64,3 +64,10 @@ alternatives above. Readiness awaits the final shared-understanding check.
 
 Implement as part of the confirmed combined PR 2, preserving the acceptance
 criteria above. Earlier readiness and separate-PR statements are superseded.
+
+### 2026-10-28: implementation complete
+
+Implemented and validated in the sequential local PR 2 batches. Evidence,
+artifact repair and retained native captures are recorded in
+[PR 2 validation](../pr2-implementation-validation.md). Visual fixtures are
+separate from timing/intent regressions. No push, publication or merge.
