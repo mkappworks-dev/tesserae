@@ -136,7 +136,7 @@ pub(super) struct PointerState {
     pinned: bool,
     item: Option<Holding>,
     shape: Option<ShapeId>,
-    assigning: Option<Holding>,
+    pub(super) assigning: Option<Holding>,
     cursor: Vec2,
     suppress_click: bool,
 }
@@ -524,7 +524,8 @@ fn rebuild(
             scroll,
             &searches.catalogue,
             format!(
-                "Click to select/clear | Drag or {}-{} to assign | {}: close | {}: release cursor",
+                "Click to select/clear | {}: clear selection | {}-{}: assign | {}: close | {}: release cursor",
+                bindings.label(super::actions::Action::EmptyHand, &labels),
                 bindings.label(super::actions::Action::Slot1, &labels),
                 bindings.label(super::actions::Action::Slot9, &labels),
                 bindings.label(super::actions::Action::Catalogue, &labels),

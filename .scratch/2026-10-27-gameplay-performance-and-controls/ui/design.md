@@ -57,3 +57,18 @@ five/six-column wrapping, all four pages, search and modal states were reviewed.
 The dark palette, leaf accent, Mosaic T, layout dimensions, Aileron family and
 icon shapes follow the updated reference. Native text rasterization and real
 Game previews differ from browser placeholder rendering.
+
+
+The direct-selection/clear and footer refinement is implemented in `eb27484`.
+Its twelve native captures and review entry point are retained separately at
+`/tmp/tesserae-selection-review-uq4y8tkg/`; those supersede the earlier explicit
+Hold captures. All 143 Client tests passed, including real edit consumers and
+selection summaries.
+
+
+The Catalogue also supports the existing remappable Empty hand action (X by
+default), with its binding shown in the footer. Both button and shortcut remain
+available; text entry owns X while search is focused. Settings close actions,
+including Cancel and Tab, prompt Save changes / Discard / Stay for dirty drafts.
+Save failure retains the prompt and draft. Reset/capture/search cancellation
+still consumes its own Escape first.

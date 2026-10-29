@@ -11,17 +11,20 @@ categories and both assigned alternatives. Search queries stay with their page.
 it can close the menu. Typing in search never activates gameplay or menu
 shortcuts. Clicking a catalogue item selects it for placement while keeping the
 menu open. Clicking the selected item again, or **Clear selection**, empties the
-hand. Choose a Shape to hold that variation; close the menu to place it.
-**Assign to slot** updates a shortcut. The quick-slot header shows the current
-selection, such as **Selected: Stone · Cube**, or **Nothing selected**.
-Catalogue tiles are 128 × 113 logical pixels and wrap into as many columns as
-the window fits. Behavior, Key bindings and Display scroll through all the space
-above the footer divider; **Restore defaults** is a button in that footer.
+hand. **X** also clears selection in the Catalogue; the footer hint follows the
+remappable Empty hand binding and is inactive while typing in search. Choose a
+Shape to hold that variation; close the menu to place it. **Assign to slot**
+updates a shortcut. The quick-slot header shows the current selection, such as
+**Selected: Stone · Cube**, or **Nothing selected**. Catalogue tiles are 128 ×
+113 logical pixels and wrap into as many columns as the window fits. Behavior,
+Key bindings and Display scroll through all the space above the footer divider;
+**Restore defaults** is a button in that footer.
 
 Each keyboard/mouse action has two alternatives. Behavior, binding and display
 changes share one draft across their pages. **Apply changes** saves and
-activates it only after a successful write; **Cancel** discards it. Leaving for
-Catalogue, Back or Escape with edits offers Apply, Discard and Stay. Restore
+activates it only after a successful write. Closing through **Cancel**, Back,
+Escape, Tab, or leaving for Catalogue with edits offers **Save changes**,
+**Discard** and **Stay**. A failed save keeps the draft and prompt open. Restore
 defaults asks for confirmation and changes only the draft. Escape always cancels
 binding capture. Capture waits for the opening inputs to be released.
 

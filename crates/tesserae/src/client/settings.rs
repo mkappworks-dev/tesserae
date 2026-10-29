@@ -348,12 +348,12 @@ fn activate(
                 menu.open = target == Some(super::menu_ui::Tab::Catalogue);
             }
         }
-        Operation::Cancel | Operation::Discard => {
+        Operation::Discard => {
             let target = settings.pending.take();
             close(&mut settings);
             menu.open = target == Some(super::menu_ui::Tab::Catalogue);
         }
-        Operation::Back => {
+        Operation::Cancel | Operation::Back => {
             settings.pending = None;
             if !settings.open {
                 menu.open = false;
@@ -440,7 +440,9 @@ pub(super) fn capture(
     if !settings.open {
         return;
     }
-    if actions.cancel_requested() && keys.just_pressed(KeyCode::Escape) {
+    let close_shortcut =
+        actions.started(Action::Catalogue) && !settings.modal() && !settings.capturing();
+    if actions.cancel_requested() || close_shortcut {
         actions.consume_cancel();
         settings.dirty = true;
         if settings.unsaved {
@@ -1633,7 +1635,7 @@ fn modal(commands: &mut Commands, settings: &Settings) {
                 let (title,description)=if settings.unsaved {("Keep your changes?","You have unapplied behavior, binding or display changes.".into())}else if settings.resetting {("Restore defaults?","This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into())}else{let names=settings.conflict.as_ref().map(|(_,_,conflicts)|conflicts.iter().map(|(action,_)|action_name(*action)).collect::<Vec<_>>().join(", ")).unwrap_or_default();("Binding already in use",format!("This binding is assigned to {names}. Replace it?"))};
                 ui::weighted_text(dialog,title,19.0,620,ui::INK);ui::paragraph(dialog,description,12.0,ui::MUTED);
                 dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,column_gap:Val::Px(7.0),row_gap:Val::Px(7.0),flex_wrap:FlexWrap::Wrap,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions| {
-                    if settings.unsaved {first=Some(ui::button(actions,"Stay",Operation::Stay,false,false,false));ui::button(actions,"Discard",Operation::Discard,false,false,false);ui::button(actions,"Apply & continue",Operation::Apply,false,false,true);}
+                    if settings.unsaved {first=Some(ui::button(actions,"Stay",Operation::Stay,false,false,false));ui::button(actions,"Discard",Operation::Discard,false,false,false);ui::button(actions,"Save changes",Operation::Apply,false,false,true);}
                     else if settings.resetting {first=Some(ui::button(actions,"Cancel",Operation::CancelReset,false,false,false));ui::button(actions,"Restore defaults",Operation::ConfirmReset,false,false,true);}
                     else {first=Some(ui::button(actions,"Keep existing",Operation::CancelConflict,false,false,false));ui::button(actions,"Replace binding",Operation::Replace,false,false,true);}
                 });
@@ -1968,7 +1970,9 @@ mod tests {
             Operation::Navigate(super::super::menu_ui::Tab::Behavior),
         );
         activate_operation(&mut app, Operation::Invert);
+        activate_operation(&mut app, Operation::Back);
         activate_operation(&mut app, Operation::Apply);
+        assert!(app.world().resource::<Settings>().unsaved);
         assert!(!app.world().resource::<Preferences>().invert_y);
         assert!(
             app.world()
@@ -1984,6 +1988,49 @@ mod tests {
         std::fs::remove_file(parent).unwrap();
     }
 
+    #[test]
+    fn dirty_settings_prompt_on_every_exit_and_save_before_closing() {
+        use super::super::menu_ui::Tab;
+        for tab in [Tab::Behavior, Tab::Bindings, Tab::Display] {
+            for exit in 0..5 {
+                let mut app = app();
+                app.add_plugins(super::super::actions::test_plugin);
+                activate_operation(&mut app, Operation::Navigate(tab));
+                activate_operation(&mut app, Operation::Invert);
+                match exit {
+                    0 => activate_operation(&mut app, Operation::Back),
+                    1 => activate_operation(&mut app, Operation::Cancel),
+                    2 => activate_operation(&mut app, Operation::Navigate(Tab::Catalogue)),
+                    _ => {
+                        app.world_mut()
+                            .resource_mut::<ButtonInput<KeyCode>>()
+                            .press(if exit == 3 {
+                                KeyCode::Escape
+                            } else {
+                                KeyCode::Tab
+                            });
+                        app.update();
+                    }
+                }
+                assert!(
+                    app.world().resource::<Settings>().unsaved,
+                    "{tab:?}, exit {exit}"
+                );
+                assert!(app.world().resource::<Settings>().open);
+                assert!(!app.world().resource::<Preferences>().invert_y);
+                activate_operation(&mut app, Operation::Apply);
+                assert!(!app.world().resource::<Settings>().open);
+                assert!(app.world().resource::<Preferences>().invert_y);
+                assert_eq!(
+                    app.world().resource::<super::super::menu::Menu>().open,
+                    exit == 2
+                );
+                let path = app.world().resource::<Store>().path.clone();
+                assert!(Store::load(path.clone()).2.invert_y);
+                std::fs::remove_file(path).unwrap();
+            }
+        }
+    }
     #[test]
     fn draft_apply_cancel_and_unsaved_exit_are_distinct() {
         let mut app = app();
@@ -2001,6 +2048,9 @@ mod tests {
         assert!(app.world().resource::<Preferences>().invert_y);
         activate_operation(&mut app, Operation::Invert);
         activate_operation(&mut app, Operation::Cancel);
+        assert!(app.world().resource::<Settings>().unsaved);
+        activate_operation(&mut app, Operation::Discard);
+        assert!(!app.world().resource::<Settings>().open);
         assert!(app.world().resource::<Preferences>().invert_y);
         let path = &app.world().resource::<Store>().path;
         assert!(Store::load(path.clone()).2.invert_y);

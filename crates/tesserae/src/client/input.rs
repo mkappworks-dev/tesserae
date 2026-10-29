@@ -145,10 +145,10 @@ pub(super) fn resolve(
             }
             continue;
         }
-        let catalogue_slot = owner == Owner::Catalogue
+        let catalogue_action = owner == Owner::Catalogue
             && !ownership.changed
-            && super::actions::SLOTS.contains(&action);
-        if !catalogue_slot
+            && (super::actions::SLOTS.contains(&action) || action == Action::EmptyHand);
+        if !catalogue_action
             && (!ownership.gameplay()
                 || alternatives.iter().flatten().all(|binding| {
                     !binding.active(&keys, &mouse)
@@ -173,43 +173,48 @@ mod tests {
     #[test]
     fn leaving_search_cancels_same_frame_catalogue_slot_input_until_a_fresh_press() {
         use super::super::actions::{Action, Actions};
-        let mut app = App::new();
-        app.add_plugins(super::super::actions::test_plugin)
-            .init_resource::<Ownership>()
-            .init_resource::<super::super::menu::Menu>()
-            .insert_resource(UiInput {
-                text_entry: true,
-                ..default()
-            })
-            .add_systems(Update, resolve);
-        app.world_mut()
-            .resource_mut::<super::super::menu::Menu>()
-            .open = true;
-        app.world_mut().spawn((
-            PrimaryWindow,
-            Window {
-                focused: true,
-                ..default()
-            },
-            CursorOptions::default(),
-        ));
-        app.update();
-        app.world_mut().resource_mut::<UiInput>().text_entry = false;
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Digit5);
-        app.update();
-        assert_eq!(app.world().resource::<Ownership>().owner, Owner::Catalogue);
-        assert!(!app.world().resource::<Actions>().started(Action::Slot5));
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .reset_all();
-        app.update();
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Digit5);
-        app.update();
-        assert!(app.world().resource::<Actions>().started(Action::Slot5));
+        for (action, key) in [
+            (Action::Slot5, KeyCode::Digit5),
+            (Action::EmptyHand, KeyCode::KeyX),
+        ] {
+            let mut app = App::new();
+            app.add_plugins(super::super::actions::test_plugin)
+                .init_resource::<Ownership>()
+                .init_resource::<super::super::menu::Menu>()
+                .insert_resource(UiInput {
+                    text_entry: true,
+                    ..default()
+                })
+                .add_systems(Update, resolve);
+            app.world_mut()
+                .resource_mut::<super::super::menu::Menu>()
+                .open = true;
+            app.world_mut().spawn((
+                PrimaryWindow,
+                Window {
+                    focused: true,
+                    ..default()
+                },
+                CursorOptions::default(),
+            ));
+            app.update();
+            app.world_mut().resource_mut::<UiInput>().text_entry = false;
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.update();
+            assert_eq!(app.world().resource::<Ownership>().owner, Owner::Catalogue);
+            assert!(!app.world().resource::<Actions>().started(action));
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .reset_all();
+            app.update();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.update();
+            assert!(app.world().resource::<Actions>().started(action));
+        }
     }
     #[test]
     fn save_modals_cancel_input_until_fresh_activation() {

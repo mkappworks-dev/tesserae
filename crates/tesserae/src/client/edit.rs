@@ -342,7 +342,7 @@ pub(super) fn select_held(
     mut hotbar: ResMut<Hotbar>,
     mut scrolled: Local<f32>,
     menu: Option<Res<super::menu::Menu>>,
-    pointer: Option<Res<super::menu::PointerState>>,
+    mut pointer: Option<ResMut<super::menu::PointerState>>,
 ) {
     if ownership.owner == super::input::Owner::Unfocused {
         *scrolled = 0.0;
@@ -386,8 +386,11 @@ pub(super) fn select_held(
         // Scrolling down, a negative y, moves along the bar.
         hotbar.step(-whole as i32);
     }
-    if !menu_open && actions.started(super::actions::Action::EmptyHand) {
+    if actions.started(super::actions::Action::EmptyHand) {
         hotbar.outside = Some(Holding::Empty);
+        if let Some(pointer) = pointer.as_mut() {
+            pointer.assigning = None;
+        }
     }
     if let Holding::Solid {
         shape, orientation, ..
@@ -1422,6 +1425,36 @@ mod tests {
             assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
             assert!(app.world().resource::<menu::Menu>().open);
         }
+    }
+
+    #[test]
+    fn catalogue_clear_shortcut_respects_search_ownership_in_the_edit_schedule() {
+        let mut app = app(CursorGrabMode::Locked);
+        app.init_resource::<super::super::input::UiInput>()
+            .add_systems(
+                Update,
+                super::super::input::resolve
+                    .after(menu::toggle)
+                    .before(select_held),
+            );
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        frame(&mut app);
+        let held = app.world().resource::<Hotbar>().held();
+        assert_ne!(held, Holding::Empty);
+        app.world_mut()
+            .resource_mut::<super::super::input::UiInput>()
+            .text_entry = true;
+        key(&mut app, KeyCode::KeyX);
+        assert_eq!(app.world().resource::<Hotbar>().held(), held);
+        app.world_mut()
+            .resource_mut::<super::super::input::UiInput>()
+            .text_entry = false;
+        frame(&mut app);
+        key(&mut app, KeyCode::KeyX);
+        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+        assert!(app.world().resource::<menu::Menu>().open);
+        assert!(frame(&mut app).is_empty());
     }
 
     #[test]
