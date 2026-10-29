@@ -1,4 +1,5 @@
 //! Input ownership is settled before any gameplay consumer runs.
+use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::HashSet;
@@ -22,6 +23,7 @@ pub(super) struct Ownership {
     pub changed: bool,
     keys: HashSet<KeyCode>,
     buttons: HashSet<MouseButton>,
+    pads: HashSet<GamepadButton>,
     device_epoch: u64,
 }
 
@@ -35,6 +37,9 @@ impl Ownership {
     pub fn button(&self, button: MouseButton) -> bool {
         self.gameplay() && !self.buttons.contains(&button)
     }
+    pub fn pad(&self, button: GamepadButton) -> bool {
+        self.gameplay() && !self.pads.contains(&button)
+    }
     #[cfg(test)]
     pub fn playing() -> Self {
         Self {
@@ -42,20 +47,20 @@ impl Ownership {
             ..default()
         }
     }
-    fn resolve(
-        &mut self,
-        owner: Owner,
-        keys: &ButtonInput<KeyCode>,
-        mouse: &ButtonInput<MouseButton>,
-    ) {
+    fn resolve(&mut self, owner: Owner, inputs: super::actions::Inputs) {
         self.changed = self.owner != owner;
         self.owner = owner;
-        self.keys.retain(|key| keys.pressed(*key));
-        self.buttons.retain(|button| mouse.pressed(*button));
+        self.keys.retain(|key| inputs.keys.pressed(*key));
+        self.buttons.retain(|button| inputs.mouse.pressed(*button));
+        self.pads.retain(|button| inputs.pad.pressed(*button));
         if self.changed || owner != Owner::Gameplay {
-            self.keys.extend(keys.get_pressed().copied());
-            self.buttons.extend(mouse.get_pressed().copied());
+            self.own_pressed(inputs);
         }
+    }
+    fn own_pressed(&mut self, inputs: super::actions::Inputs) {
+        self.keys.extend(inputs.keys.get_pressed().copied());
+        self.buttons.extend(inputs.mouse.get_pressed().copied());
+        self.pads.extend(inputs.pad.get_pressed().copied());
     }
 }
 
@@ -84,7 +89,7 @@ type Contexts<'w> = (
 );
 
 pub(super) fn resolve(
-    (keys, mouse): (Res<ButtonInput<KeyCode>>, Res<ButtonInput<MouseButton>>),
+    (keys, mouse, pad): super::actions::Devices,
     (menu, settings, ui, save): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
@@ -112,21 +117,31 @@ pub(super) fn resolve(
     } else {
         Owner::PointerFree
     };
-    ownership.resolve(owner, &keys, &mouse);
+    let inputs = super::actions::Inputs {
+        keys: &keys,
+        mouse: &mouse,
+        pad: &pad.buttons,
+    };
+    // Every pad button, including those a menu withholds from actions, so one
+    // held while a menu closes is still owned until it is released.
+    let held = super::actions::Inputs {
+        pad: &pad.navigation,
+        ..inputs
+    };
+    ownership.resolve(owner, held);
     if let Some(ui) = ui
         && ui.device_epoch != ownership.device_epoch
     {
         ownership.device_epoch = ui.device_epoch;
         ownership.changed = true;
-        ownership.keys.extend(keys.get_pressed().copied());
-        ownership.buttons.extend(mouse.get_pressed().copied());
+        ownership.own_pressed(held);
     }
 
     if !ownership.gameplay() {
         actions.axes = default();
     }
     use super::actions::{Action, Trigger};
-    for (&action, alternatives) in &bindings.0 {
+    for (&action, alternatives) in &bindings.keyboard {
         if matches!(
             action,
             Action::Catalogue | Action::ReleaseCursor | Action::Help | Action::Diagnostics
@@ -145,16 +160,22 @@ pub(super) fn resolve(
             }
             continue;
         }
+        // Catalogue shortcuts are keyboard ones; the pad navigates there.
         let catalogue_action = owner == Owner::Catalogue
             && !ownership.changed
-            && (super::actions::SLOTS.contains(&action) || action == Action::EmptyHand);
+            && (super::actions::SLOTS.contains(&action) || action == Action::EmptyHand)
+            && alternatives
+                .iter()
+                .flatten()
+                .any(|binding| binding.active(inputs));
         if !catalogue_action
             && (!ownership.gameplay()
-                || alternatives.iter().flatten().all(|binding| {
-                    !binding.active(&keys, &mouse)
+                || bindings.alternatives(action).all(|binding| {
+                    !binding.active(inputs)
                         || match binding.trigger {
                             Trigger::Key(key) => !ownership.key(key),
                             Trigger::Mouse(button) => !ownership.button(button),
+                            Trigger::Pad(button) => !ownership.pad(button),
                         }
                 }))
         {
@@ -396,7 +417,7 @@ mod tests {
         ));
         app.world_mut()
             .resource_mut::<Bindings>()
-            .0
+            .keyboard
             .get_mut(&Action::Forward)
             .unwrap()[1] = Some(Binding {
             trigger: Trigger::Key(KeyCode::KeyT),
@@ -436,17 +457,25 @@ mod tests {
         let mut mouse = ButtonInput::default();
         keys.press(KeyCode::KeyR);
         mouse.press(MouseButton::Left);
-        ownership.resolve(Owner::Catalogue, &keys, &mouse);
-        ownership.resolve(Owner::Gameplay, &keys, &mouse);
-        ownership.resolve(Owner::Gameplay, &keys, &mouse);
+        let pad = ButtonInput::default();
+        fn inputs<'a>(
+            keys: &'a ButtonInput<KeyCode>,
+            mouse: &'a ButtonInput<MouseButton>,
+            pad: &'a ButtonInput<GamepadButton>,
+        ) -> super::super::actions::Inputs<'a> {
+            super::super::actions::Inputs { keys, mouse, pad }
+        }
+        ownership.resolve(Owner::Catalogue, inputs(&keys, &mouse, &pad));
+        ownership.resolve(Owner::Gameplay, inputs(&keys, &mouse, &pad));
+        ownership.resolve(Owner::Gameplay, inputs(&keys, &mouse, &pad));
         assert!(!ownership.key(KeyCode::KeyR));
         assert!(!ownership.button(MouseButton::Left));
         keys.release(KeyCode::KeyR);
         mouse.release(MouseButton::Left);
-        ownership.resolve(Owner::Gameplay, &keys, &mouse);
+        ownership.resolve(Owner::Gameplay, inputs(&keys, &mouse, &pad));
         keys.press(KeyCode::KeyR);
         mouse.press(MouseButton::Left);
-        ownership.resolve(Owner::Gameplay, &keys, &mouse);
+        ownership.resolve(Owner::Gameplay, inputs(&keys, &mouse, &pad));
         assert!(ownership.key(KeyCode::KeyR));
         assert!(ownership.button(MouseButton::Left));
     }

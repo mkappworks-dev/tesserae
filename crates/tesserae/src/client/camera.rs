@@ -19,6 +19,9 @@ const SPEED_RANGE: std::ops::RangeInclusive<f32> = 0.5..=64.0;
 /// regardless of where in it you start.
 const SPEED_PER_PRESS: f32 = 1.5;
 
+/// Radians per second at full right-stick deflection and sensitivity 1.
+const PAD_TURN_RATE: f32 = 3.0;
+
 /// The Player's camera. `With<Camera3d>` also matches the coarse-level cameras,
 /// so anything that means "the camera" filters by this.
 #[derive(Component)]
@@ -73,9 +76,16 @@ pub struct CameraHome(pub Transform);
 struct CursorHint;
 #[derive(Resource, Default)]
 pub(super) struct Sprint(pub bool);
+/// Controller latches: a thumb cannot hold a stick click while pushing that
+/// stick, or hold B while steering look with the same thumb.
+#[derive(Resource, Default)]
+pub(super) struct PadLatch {
+    pub sprint: bool,
+    pub crouch: bool,
+}
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Sprint>();
+    app.init_resource::<Sprint>().init_resource::<PadLatch>();
     app.add_systems(
         Update,
         grab_cursor
@@ -131,10 +141,17 @@ fn show_hint(
     // re-laid out every frame.
     let (mut visibility, mut text) = hint.into_inner();
     visibility.set_if_neq(wanted);
-    text.set_if_neq(Text::new(format!(
-        "Click to look around\n{} to release the cursor",
-        bindings.label(Action::ReleaseCursor, &labels)
-    )));
+    text.set_if_neq(Text::new(if labels.device == super::actions::Device::Pad {
+        format!(
+            "Press {} to play",
+            labels.pad(bevy::input::gamepad::GamepadButton::South)
+        )
+    } else {
+        format!(
+            "Click to look around\n{} to release the cursor",
+            bindings.label(Action::ReleaseCursor, &labels)
+        )
+    }));
 }
 
 fn reset(
@@ -204,21 +221,28 @@ pub(super) fn look(
     preferences: Res<super::profile::Preferences>,
     ownership: Res<super::input::Ownership>,
     actions: Res<Actions>,
+    time: Res<Time>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<(&mut Transform, &mut FlyCamera)>,
 ) {
+    let axes = &actions.axes;
     if !ownership.gameplay()
         || cursor.grab_mode == CursorGrabMode::None
-        || actions.axes.look == Vec2::ZERO
+        || (axes.look == Vec2::ZERO && axes.look_rate == Vec2::ZERO)
     {
         return;
     }
 
     let (mut transform, mut fly) = camera.into_inner();
     fly.sensitivity = preferences.sensitivity;
-    fly.yaw -= actions.axes.look.x * fly.sensitivity;
+    let invert = |inverted| if inverted { -1.0 } else { 1.0 };
+    // Mouse travel is already a distance; a stick is a rate, so elapsed time
+    // makes it the same turn at any frame rate.
+    let pad = axes.look_rate * PAD_TURN_RATE * preferences.pad.look_sensitivity * time.delta_secs();
+    fly.yaw -= axes.look.x * fly.sensitivity + pad.x;
     fly.pitch = (fly.pitch
-        - actions.axes.look.y * fly.sensitivity * if preferences.invert_y { -1.0 } else { 1.0 })
+        - axes.look.y * fly.sensitivity * invert(preferences.invert_y)
+        - pad.y * invert(preferences.pad.invert_y))
     .clamp(-PITCH_LIMIT, PITCH_LIMIT);
     transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }
@@ -226,31 +250,77 @@ pub(super) fn look(
 fn fly(
     mut commands: Commands,
     preferences: Res<super::profile::Preferences>,
-    mut sprint: ResMut<Sprint>,
+    (mut sprint, mut latch): (ResMut<Sprint>, ResMut<PadLatch>),
     ownership: Res<super::input::Ownership>,
     actions: Res<Actions>,
     mut intents: MessageWriter<MovementIntent>,
     camera: Single<(&Transform, &FlyCamera)>,
 ) {
     let (transform, fly) = camera.into_inner();
-
-    let mut direction = Vec3::ZERO;
+    let playing = ownership.gameplay();
+    let physics = fly.movement_mode == crate::server::player::MovementMode::Physics;
+    let descend = actions.state(Action::Descend);
+    let pad_crouch = preferences.pad.toggle_crouch && physics;
+    // A toggled crouch is a pose, not a descent: the B press that started it
+    // must not also count as holding Descend.
+    let held_descend = descend.held && !(pad_crouch && descend.from_pad);
+    let mut planar = Vec3::ZERO;
     for (key, axis) in [
         (Action::Forward, *transform.forward()),
         (Action::Backward, *transform.back()),
         (Action::Left, *transform.left()),
         (Action::Right, *transform.right()),
-        (Action::Ascend, Vec3::Y),
-        (Action::Descend, Vec3::NEG_Y),
     ] {
-        if ownership.gameplay() && actions.held(key) {
-            direction += axis;
+        if playing && actions.held(key) {
+            planar += axis;
         }
     }
+    let mut vertical = Vec3::ZERO;
+    if playing && actions.held(Action::Ascend) {
+        vertical += Vec3::Y;
+    }
+    if playing && held_descend {
+        vertical += Vec3::NEG_Y;
+    }
+    let stick = if playing {
+        actions.axes.movement
+    } else {
+        Vec2::ZERO
+    };
+    let analog = *transform.right() * stick.x + *transform.forward() * stick.y;
+    // Whole keyboard directions stay unit length so pitch and diagonals keep
+    // full speed; only a stick sends less, which the Server reads as throttle.
+    // On foot the Server ignores the vertical part, so a jump or crouch must
+    // not turn a half-pushed stick into a full one.
+    let direction = if planar != Vec3::ZERO || (vertical != Vec3::ZERO && !physics) {
+        (planar + vertical + analog).normalize_or_zero()
+    } else {
+        analog
+    };
 
-    if !ownership.gameplay() || actions.started(Action::Respawn) {
+    if !playing
+        || actions.started(Action::Respawn)
+        || actions.started(Action::MovementMode)
+        || actions.started(Action::Ascend)
+        || !pad_crouch
+    {
+        latch.crouch = false;
+    }
+    if playing && pad_crouch && descend.started && descend.from_pad {
+        latch.crouch = !latch.crouch;
+    }
+    let sprint_state = actions.state(Action::Sprint);
+    if playing && sprint_state.started && sprint_state.from_pad {
+        latch.sprint = true;
+    }
+    let crouching = latch.crouch || (physics && held_descend);
+    if !playing || actions.started(Action::Respawn) || stick == Vec2::ZERO || crouching {
+        latch.sprint = false;
+    }
+
+    if !playing || actions.started(Action::Respawn) {
         sprint.0 = false;
-    } else if preferences.toggle_sprint && actions.started(Action::Sprint) {
+    } else if preferences.toggle_sprint && sprint_state.started && !sprint_state.from_pad {
         sprint.0 = !sprint.0;
         super::menu_ui::notify(
             &mut commands,
@@ -265,27 +335,160 @@ fn fly(
     if !preferences.toggle_sprint {
         sprint.0 = false;
     }
-    let sprinting = if preferences.toggle_sprint {
-        sprint.0
-    } else {
-        actions.held(Action::Sprint)
-    };
+    let sprinting = latch.sprint
+        || if preferences.toggle_sprint {
+            sprint.0
+        } else {
+            actions.held(Action::Sprint)
+        };
     intents.write(MovementIntent {
-        cancelled: !ownership.gameplay() || actions.started(Action::Respawn),
+        cancelled: !playing || actions.started(Action::Respawn),
         direction,
         speed_mps: fly.speed,
         sprint: sprinting,
-        crouch: ownership.gameplay() && actions.held(Action::Descend),
+        crouch: playing && (held_descend || latch.crouch),
         yaw: fly.yaw,
         pitch: fly.pitch,
-        jump: ownership.gameplay() && actions.started(Action::Ascend),
-        switch_mode: ownership.gameplay() && actions.started(Action::MovementMode),
+        jump: playing && actions.started(Action::Ascend),
+        switch_mode: playing && actions.started(Action::MovementMode),
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::input::gamepad::GamepadButton;
+
+    fn pad_app(mode: crate::server::player::MovementMode) -> App {
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .insert_resource(super::super::input::Ownership::playing())
+            .add_message::<MovementIntent>()
+            .add_systems(Update, fly);
+        app.world_mut().spawn((
+            Transform::default(),
+            FlyCamera {
+                movement_mode: mode,
+                ..default()
+            },
+        ));
+        app
+    }
+    /// One frame: buttons in `pressed` are down, everything else is up.
+    fn frame(app: &mut App, pressed: &[GamepadButton], stick: Vec2) -> MovementIntent {
+        let mut pad = app
+            .world_mut()
+            .resource_mut::<super::super::pad::PadInput>();
+        pad.buttons.clear();
+        for button in GamepadButton::all() {
+            if pressed.contains(&button) {
+                pad.buttons.press(button);
+            } else {
+                pad.buttons.release(button);
+            }
+        }
+        pad.movement = stick;
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<MovementIntent>>()
+            .drain()
+            .last()
+            .unwrap()
+    }
+
+    #[test]
+    fn pad_crouch_toggles_on_foot_holds_in_flight_and_leaves_keyboard_hold_alone() {
+        use crate::server::player::MovementMode;
+        use GamepadButton::{East, South};
+        let mut app = pad_app(MovementMode::Physics);
+        assert!(frame(&mut app, &[East], Vec2::ZERO).crouch);
+        let stood = frame(&mut app, &[], Vec2::ZERO);
+        assert!(stood.crouch && stood.direction == Vec3::ZERO);
+        assert!(frame(&mut app, &[], Vec2::ZERO).crouch);
+        frame(&mut app, &[East], Vec2::ZERO);
+        assert!(!frame(&mut app, &[], Vec2::ZERO).crouch);
+        frame(&mut app, &[East], Vec2::ZERO);
+        frame(&mut app, &[], Vec2::ZERO);
+        let jump = frame(&mut app, &[South], Vec2::ZERO);
+        assert!(jump.jump && !jump.crouch);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ControlLeft);
+        assert!(frame(&mut app, &[], Vec2::ZERO).crouch);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::ControlLeft);
+        assert!(!frame(&mut app, &[], Vec2::ZERO).crouch);
+
+        let mut app = pad_app(MovementMode::Flight);
+        let held = frame(&mut app, &[East], Vec2::ZERO);
+        assert!(held.crouch && held.direction == Vec3::NEG_Y);
+        let released = frame(&mut app, &[], Vec2::ZERO);
+        assert!(!released.crouch && released.direction == Vec3::ZERO);
+    }
+
+    #[test]
+    fn a_stick_click_latches_sprint_until_the_stick_rests() {
+        use crate::server::player::MovementMode;
+        let mut app = pad_app(MovementMode::Physics);
+        let forward = Vec2::new(0.0, 0.6);
+        assert!(frame(&mut app, &[GamepadButton::LeftThumb], forward).sprint);
+        let latched = frame(&mut app, &[], forward);
+        assert!(latched.sprint);
+        assert!((latched.direction.length() - 0.6).abs() < 1e-5);
+        assert!(!frame(&mut app, &[], Vec2::ZERO).sprint);
+        assert!(!frame(&mut app, &[], forward).sprint);
+
+        let jump = frame(&mut app, &[GamepadButton::South], forward);
+        assert!(jump.jump && (jump.direction.length() - 0.6).abs() < 1e-5);
+
+        frame(&mut app, &[GamepadButton::LeftThumb], forward);
+        app.world_mut()
+            .resource_mut::<super::super::input::Ownership>()
+            .owner = super::super::input::Owner::Catalogue;
+        assert!(!frame(&mut app, &[], forward).sprint);
+        app.world_mut()
+            .resource_mut::<super::super::input::Ownership>()
+            .owner = super::super::input::Owner::Gameplay;
+        assert!(!frame(&mut app, &[], forward).sprint);
+    }
+
+    #[test]
+    fn stick_look_turns_the_same_amount_at_every_frame_rate() {
+        for hz in [60u32, 144, 1000] {
+            let mut app = App::new();
+            app.add_plugins((bevy::time::TimePlugin, super::super::actions::test_plugin))
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_secs_f64(1.0 / f64::from(hz)),
+                ))
+                .insert_resource(super::super::input::Ownership::playing())
+                .add_systems(Update, look);
+            app.world_mut().spawn((
+                PrimaryWindow,
+                CursorOptions {
+                    grab_mode: CursorGrabMode::Locked,
+                    ..default()
+                },
+            ));
+            let camera = app
+                .world_mut()
+                .spawn((Transform::default(), FlyCamera::default()))
+                .id();
+            app.update();
+            app.world_mut()
+                .resource_mut::<super::super::pad::PadInput>()
+                .look = Vec2::new(1.0, 0.0);
+            for _ in 0..hz {
+                app.update();
+            }
+            let yaw = app.world().get::<FlyCamera>(camera).unwrap().yaw;
+            assert!(
+                (yaw + PAD_TURN_RATE).abs() <= PAD_TURN_RATE / 60.0,
+                "{hz} Hz: {yaw}"
+            );
+        }
+    }
 
     #[test]
     fn crouch_uses_the_remapped_descend_action_and_cancels_on_context_loss() {
@@ -297,7 +500,7 @@ mod tests {
             .add_systems(Update, fly);
         app.world_mut()
             .spawn((Transform::default(), FlyCamera::default()));
-        app.world_mut().resource_mut::<Bindings>().0.insert(
+        app.world_mut().resource_mut::<Bindings>().keyboard.insert(
             Action::Descend,
             [
                 Some(Binding {

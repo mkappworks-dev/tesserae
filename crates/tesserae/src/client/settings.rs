@@ -1,6 +1,6 @@
 //! Draft preferences become active only after a successful Apply.
 use super::{
-    actions::{Action, Binding, Bindings, Modifier, Trigger},
+    actions::{Action, Binding, Bindings, Device, Modifier, Trigger},
     profile::{Preferences, Store},
 };
 use bevy::{
@@ -14,7 +14,7 @@ type Conflict = (Action, [Option<Binding>; 2], Vec<(Action, usize)>);
 pub(super) struct Settings {
     pub open: bool,
     draft: Option<(Bindings, Preferences)>,
-    capture: Option<(Action, usize, bool)>,
+    capture: Option<(Device, Action, usize, bool)>,
     conflict: Option<Conflict>,
     unsaved: bool,
     show_reference: bool,
@@ -41,8 +41,8 @@ impl Settings {
                     "{} {} {} {}",
                     action_name(action),
                     category(action),
-                    bindings.label(action, labels),
-                    binding_display(bindings.label(action, labels))
+                    bindings.label_for(Device::KeyboardMouse, action, labels),
+                    binding_display(bindings.label_for(Device::KeyboardMouse, action, labels))
                 ),
             )
     }
@@ -93,14 +93,16 @@ pub(super) enum Operation {
     ConfirmReset,
     CancelReset,
     Reference,
-    ResetAction(Action),
-    Capture(Action, usize),
-    Clear(Action, usize),
+    ResetAction(Device, Action),
+    Capture(Device, Action, usize),
+    Clear(Device, Action, usize),
     Replace,
     CancelConflict,
     Sprint(bool),
     Removal(bool),
     Invert,
+    PadInvert,
+    PadCrouch(bool),
     ScrollDirection(bool),
     Sync(bool),
     Cap(Option<u32>),
@@ -150,6 +152,7 @@ fn launch(
     {
         settings.tab = match std::env::var("TESSERAE_SCREENSHOT_SETTINGS_TAB").as_deref() {
             Ok("bindings") => super::menu_ui::Tab::Bindings,
+            Ok("controller") => super::menu_ui::Tab::Controller,
             Ok("display") => super::menu_ui::Tab::Display,
             _ => super::menu_ui::Tab::Behavior,
         };
@@ -160,7 +163,7 @@ fn launch(
             match std::env::var("TESSERAE_SCREENSHOT_SETTINGS_DIALOG").as_deref() {
                 Ok("capture") => {
                     settings.tab = super::menu_ui::Tab::Bindings;
-                    settings.capture = Some((Action::Forward, 0, true));
+                    settings.capture = Some((Device::KeyboardMouse, Action::Forward, 0, true));
                 }
                 Ok("reset") => settings.resetting = true,
                 Ok("unsaved") => {
@@ -238,10 +241,19 @@ fn close(settings: &mut Settings) {
     settings.pending = None;
     settings.resetting = false;
 }
+fn device_of(alternatives: &[Option<Binding>; 2]) -> Option<Device> {
+    alternatives
+        .iter()
+        .flatten()
+        .next()
+        .map(|binding| binding.trigger.device())
+}
 fn propose(settings: &mut Settings, action: Action, proposed: [Option<Binding>; 2]) {
-    let draft = &mut settings.draft.as_mut().unwrap().0;
+    let Some(device) = device_of(&proposed) else {
+        return;
+    };
+    let draft = settings.draft.as_mut().unwrap().0.map_mut(device);
     let conflicts: Vec<_> = draft
-        .0
         .iter()
         .filter(|(other, _)| **other != action)
         .flat_map(|(&other, alternatives)| {
@@ -261,7 +273,7 @@ fn propose(settings: &mut Settings, action: Action, proposed: [Option<Binding>; 
         })
         .collect();
     if conflicts.is_empty() {
-        draft.0.insert(action, proposed);
+        draft.insert(action, proposed);
     } else {
         settings.conflict = Some((action, proposed, conflicts));
     }
@@ -377,40 +389,68 @@ fn activate(
             settings.unsaved = false;
             settings.pending = None;
         }
-        Operation::Capture(action, slot) => {
+        Operation::Capture(device, action, slot) => {
             focus.clear();
-            settings.capture = Some((action, slot, false));
-            settings.notice =
-                "Release inputs, then press a key or mouse button. Escape cancels.".into();
+            settings.capture = Some((device, action, slot, false));
+            settings.notice = match device {
+                Device::KeyboardMouse => {
+                    "Release inputs, then press a key or mouse button. Escape cancels."
+                }
+                Device::Pad => "Release inputs, then press a controller button. Menu cancels.",
+            }
+            .into();
         }
         Operation::CancelConflict => {
             settings.conflict = None;
         }
         Operation::Replace => {
-            if let Some((action, proposed, conflicts)) = settings.conflict.take() {
-                let draft = &mut settings.draft.as_mut().unwrap().0;
+            if let Some((action, proposed, conflicts)) = settings.conflict.take()
+                && let Some(device) = device_of(&proposed)
+            {
+                let draft = settings.draft.as_mut().unwrap().0.map_mut(device);
                 for (other, index) in conflicts {
-                    draft.0.get_mut(&other).unwrap()[index] = None;
+                    draft.get_mut(&other).unwrap()[index] = None;
                 }
-                draft.0.insert(action, proposed);
+                draft.insert(action, proposed);
             }
         }
-        Operation::ResetAction(action) => {
-            propose(&mut settings, action, Bindings::default().0[&action])
+        Operation::ResetAction(device, action) => {
+            let defaults = Bindings::default().map(device)[&action];
+            if defaults.iter().all(Option::is_none) {
+                if let Some((draft, _)) = settings.draft.as_mut() {
+                    draft.map_mut(device).insert(action, defaults);
+                }
+            } else {
+                propose(&mut settings, action, defaults);
+            }
         }
         operation => {
             if matches!(operation, Operation::ConfirmReset) {
                 settings.resetting = false;
             }
+            let controller = settings.tab == super::menu_ui::Tab::Controller;
             let Some((draft, p)) = settings.draft.as_mut() else {
                 return;
             };
             match operation {
-                Operation::ConfirmReset => {
-                    *draft = Bindings::default();
-                    *p = Preferences::default();
+                // Each page restores its own device, so a reset on one never
+                // discards preferences tuned for the other.
+                Operation::ConfirmReset if controller => {
+                    draft.pad = Bindings::default().pad;
+                    p.pad = default();
                 }
-                Operation::Clear(action, slot) => draft.0.get_mut(&action).unwrap()[slot] = None,
+                Operation::ConfirmReset => {
+                    draft.keyboard = Bindings::default().keyboard;
+                    *p = Preferences {
+                        pad: p.pad.clone(),
+                        ..default()
+                    };
+                }
+                Operation::Clear(device, action, slot) => {
+                    draft.map_mut(device).get_mut(&action).unwrap()[slot] = None
+                }
+                Operation::PadInvert => p.pad.invert_y = !p.pad.invert_y,
+                Operation::PadCrouch(value) => p.pad.toggle_crouch = value,
                 Operation::Sprint(value) => p.toggle_sprint = value,
                 Operation::Removal(value) => p.tap_remove = value,
                 Operation::Invert => p.invert_y = !p.invert_y,
@@ -423,8 +463,7 @@ fn activate(
     }
 }
 pub(super) fn capture(
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    (keys, mouse, pad): super::actions::Devices,
     mut settings: ResMut<Settings>,
     active: (Res<Bindings>, Res<Preferences>),
     mut actions: ResMut<super::actions::Actions>,
@@ -481,15 +520,58 @@ pub(super) fn capture(
         settings.conflict = None;
         return;
     }
-    let Some((action, slot, armed)) = settings.capture else {
+    let Some((device, action, slot, armed)) = settings.capture else {
         return;
     };
+    let pad = &pad.navigation;
     if !armed {
-        if keys.get_pressed().next().is_none() && mouse.get_pressed().next().is_none() {
-            settings.capture = Some((action, slot, true));
+        if keys.get_pressed().next().is_none()
+            && mouse.get_pressed().next().is_none()
+            && pad.get_pressed().next().is_none()
+        {
+            settings.capture = Some((device, action, slot, true));
         }
         return;
     }
+    let binding = match device {
+        Device::KeyboardMouse => keyboard_binding(&keys, &mouse),
+        Device::Pad => {
+            use bevy::input::gamepad::GamepadButton;
+            let mut buttons: Vec<_> = pad
+                .get_just_pressed()
+                .filter(|b| !matches!(b, GamepadButton::Start | GamepadButton::Mode))
+                .copied()
+                .collect();
+            buttons.sort_by_key(|button| format!("{button:?}"));
+            buttons.first().map(|&button| Binding {
+                trigger: Trigger::Pad(button),
+                modifier: Modifier::None,
+            })
+        }
+    };
+    let Some(binding) = binding else {
+        return;
+    };
+    let mut proposed = settings.draft.as_ref().unwrap().0.map(device)[&action];
+    for (index, alternative) in proposed.iter_mut().enumerate() {
+        if index != slot
+            && alternative.is_some_and(|other| {
+                other.trigger == binding.trigger && other.modifier.overlaps(binding.modifier)
+            })
+        {
+            *alternative = None;
+        }
+    }
+    proposed[slot] = Some(binding);
+    propose(&mut settings, action, proposed);
+    settings.capture = None;
+    settings.notice.clear();
+    settings.dirty = true;
+}
+fn keyboard_binding(
+    keys: &ButtonInput<KeyCode>,
+    mouse: &ButtonInput<MouseButton>,
+) -> Option<Binding> {
     let modifier_key = |key: KeyCode| {
         matches!(
             key,
@@ -519,9 +601,7 @@ pub(super) fn capture(
         );
     }
     triggers.sort_by_key(|trigger| format!("{trigger:?}"));
-    let Some(trigger) = triggers.first().copied() else {
-        return;
-    };
+    let trigger = triggers.first().copied()?;
     let primary = keys.any_pressed([
         KeyCode::ControlLeft,
         KeyCode::ControlRight,
@@ -540,23 +620,7 @@ pub(super) fn capture(
         (false, true, false) => Modifier::Shift,
         _ => Modifier::None,
     };
-    let binding = Binding { trigger, modifier };
-    let mut proposed = settings.draft.as_ref().unwrap().0.0[&action];
-    for (index, alternative) in proposed.iter_mut().enumerate() {
-        if index != slot
-            && alternative.is_some_and(|other| {
-                other.trigger == binding.trigger && other.modifier.overlaps(binding.modifier)
-            })
-        {
-            *alternative = None;
-        }
-    }
-    proposed[slot] = Some(binding);
-    propose(&mut settings, action, proposed);
-    settings.capture = None;
-    settings.notice.clear();
-    settings.dirty = true;
-    // Keep capture independent of gameplay action bindings, including a remapped menu key.
+    Some(Binding { trigger, modifier })
 }
 fn setting_row(
     parent: &mut ChildSpawnerCommands,
@@ -641,6 +705,8 @@ pub(super) fn action_name(action: Action) -> &'static str {
         Slot7 => "Quick slot 7",
         Slot8 => "Quick slot 8",
         Slot9 => "Quick slot 9",
+        PreviousSlot => "Previous quick slot",
+        NextSlot => "Next quick slot",
         Undo => "Undo",
         Redo => "Redo",
         Catalogue => "Open Catalogue",
@@ -678,7 +744,7 @@ pub(super) fn render(
     (labels, searches, active): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
-        Local<[Vec2; 3]>,
+        Local<[Vec2; 4]>,
         Local<Option<super::menu_ui::Tab>>,
         Local<String>,
     ),
@@ -692,6 +758,7 @@ pub(super) fn render(
         let index = match tab {
             Tab::Behavior => 0,
             Tab::Bindings => 1,
+            Tab::Controller => 3,
             _ => 2,
         };
         if let Some(scroll) = scrolls.iter().next() {
@@ -725,6 +792,7 @@ pub(super) fn render(
     let index = match settings.tab {
         Tab::Behavior => 0,
         Tab::Bindings => 1,
+        Tab::Controller => 3,
         _ => 2,
     };
     commands
@@ -806,6 +874,7 @@ fn page(
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
         Tab::Display => display(list, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
+        Tab::Controller => controller(list, bindings, p, labels),
         Tab::Catalogue => {}
     }
 }
@@ -814,11 +883,39 @@ fn page(
 pub(super) enum Scalar {
     Mouse,
     Scroll,
+    PadLook,
+    MoveDeadzone,
+    LookDeadzone,
+}
+impl Scalar {
+    fn range(self) -> std::ops::RangeInclusive<f32> {
+        match self {
+            Self::Mouse | Self::Scroll => 0.25..=3.0,
+            Self::PadLook => super::profile::PAD_SENSITIVITY,
+            Self::MoveDeadzone | Self::LookDeadzone => super::profile::PAD_DEADZONE,
+        }
+    }
+    fn step(self) -> f32 {
+        match self {
+            Self::MoveDeadzone | Self::LookDeadzone => 0.01,
+            _ => 0.05,
+        }
+    }
+    fn display(self, value: f32) -> String {
+        match self {
+            Self::MoveDeadzone | Self::LookDeadzone => format!("{:.0}%", value * 100.0),
+            _ => format!("{value:.2}×"),
+        }
+    }
+    fn fraction(self, value: f32) -> f32 {
+        let range = self.range();
+        ((value - range.start()) / (range.end() - range.start())).clamp(0.0, 1.0)
+    }
 }
 #[derive(Component)]
-struct ScalarThumb(Entity);
+struct ScalarThumb(Entity, Scalar);
 #[derive(Component)]
-struct ScalarLabel(Entity);
+struct ScalarLabel(Entity, Scalar);
 fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32) {
     use super::menu_ui as ui;
     use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderThumb, SliderValue};
@@ -834,9 +931,9 @@ fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32) {
                 .spawn((
                     kind,
                     Slider::default(),
-                    SliderRange::new(0.25, 3.0),
+                    SliderRange::new(*kind.range().start(), *kind.range().end()),
                     SliderValue(value),
-                    SliderStep(0.05),
+                    SliderStep(kind.step()),
                     bevy::input_focus::tab_navigation::TabIndex(0),
                     Node {
                         width: Val::Px(135.0),
@@ -859,21 +956,21 @@ fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32) {
                 ));
                 track.spawn((
                     SliderThumb,
-                    ScalarThumb(slider),
+                    ScalarThumb(slider, kind),
                     BackgroundColor(ui::LEAF),
                     Node {
                         position_type: PositionType::Absolute,
                         width: Val::Px(12.0),
                         height: Val::Px(12.0),
                         border_radius: BorderRadius::all(Val::Px(6.0)),
-                        left: Val::Px(((value - 0.25) / 2.75).clamp(0.0, 1.0) * 123.0),
+                        left: Val::Px(kind.fraction(value) * 123.0),
                         ..default()
                     },
                 ));
             });
             row.spawn((
-                ScalarLabel(slider),
-                Text::new(format!("{value:.2}×")),
+                ScalarLabel(slider, kind),
+                Text::new(kind.display(value)),
                 TextFont {
                     font: bevy::text::FontSource::family("Aileron"),
                     ..ui::font(11.0)
@@ -903,29 +1000,44 @@ fn scalar_changed(
     let Some((_, preferences)) = settings.draft.as_mut() else {
         return;
     };
-    let value = event.value.clamp(0.25, 3.0);
+    let range = kind.range();
+    let value = event.value.clamp(*range.start(), *range.end());
     commands
         .entity(event.source)
         .insert(bevy::ui_widgets::SliderValue(value));
     match kind {
         Scalar::Mouse => preferences.sensitivity = value * 0.003,
         Scalar::Scroll => preferences.scroll_sensitivity = value,
+        Scalar::PadLook => preferences.pad.look_sensitivity = value,
+        Scalar::MoveDeadzone => preferences.pad.move_deadzone = value,
+        Scalar::LookDeadzone => preferences.pad.look_deadzone = value,
     }
     settings.dirty = true;
 }
 fn slider_visuals(
     values: Query<&bevy::ui_widgets::SliderValue>,
-    mut thumbs: Query<(&ScalarThumb, &mut Node)>,
+    mut thumbs: Query<(&ScalarThumb, &mut Node, &mut BackgroundColor)>,
     mut labels: Query<(&ScalarLabel, &mut Text)>,
+    focus: Option<Res<bevy::input_focus::InputFocus>>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
-    for (thumb, mut node) in &mut thumbs {
+    let focused = super::menu_ui::visible_focus(focus.as_deref(), visible.as_deref());
+    for (thumb, mut node, mut background) in &mut thumbs {
         if let Ok(value) = values.get(thumb.0) {
-            node.left = Val::Px(((value.0 - 0.25) / 2.75).clamp(0.0, 1.0) * 123.0);
+            node.left = Val::Px(thumb.1.fraction(value.0) * 123.0);
+        }
+        let colour = if focused == Some(thumb.0) {
+            super::menu_ui::INK
+        } else {
+            super::menu_ui::LEAF
+        };
+        if background.0 != colour {
+            background.0 = colour;
         }
     }
     for (label, mut text) in &mut labels {
         if let Ok(value) = values.get(label.0) {
-            text.set_if_neq(Text::new(format!("{:.2}×", value.0)));
+            text.set_if_neq(Text::new(label.1.display(value.0)));
         }
     }
 }
@@ -987,12 +1099,13 @@ fn segment(parent: &mut ChildSpawnerCommands, choices: impl FnOnce(&mut ChildSpa
         ))
         .with_children(choices);
 }
-fn switch(parent: &mut ChildSpawnerCommands, on: bool) {
+fn switch(parent: &mut ChildSpawnerCommands, on: bool, operation: Operation) {
     use super::menu_ui as ui;
     parent
         .spawn((
             bevy::ui_widgets::Button,
-            Operation::Invert,
+            bevy::input_focus::tab_navigation::TabIndex(0),
+            operation,
             Node {
                 min_height: Val::Px(40.0),
                 align_items: AlignItems::Center,
@@ -1093,7 +1206,7 @@ fn behavior(
             "Invert vertical look",
             "Reverse the mouse look direction.",
             false,
-            |row| switch(row, p.invert_y),
+            |row| switch(row, p.invert_y, Operation::Invert),
         );
         setting_row(
             card,
@@ -1370,7 +1483,7 @@ fn bindings_page(
         }
     });
     let mut entries: Vec<_> = bindings
-        .0
+        .keyboard
         .iter()
         .filter(|(action, _)| {
             settings.binding_visible(**action, &searches.bindings, bindings, labels)
@@ -1385,6 +1498,16 @@ fn bindings_page(
             ui::INK,
         );
     }
+    binding_rows(list, Device::KeyboardMouse, entries, labels, searching);
+}
+fn binding_rows(
+    list: &mut ChildSpawnerCommands,
+    device: Device,
+    entries: Vec<(&Action, &[Option<Binding>; 2])>,
+    labels: &super::actions::Labels,
+    searching: bool,
+) {
+    use super::menu_ui as ui;
     for (&action, alternatives) in entries {
         binding_row(list, false, |row| {
             row.spawn(Node {
@@ -1409,7 +1532,7 @@ fn bindings_page(
                         .spawn((
                             bevy::ui_widgets::Button,
                             bevy::input_focus::tab_navigation::TabIndex(0),
-                            Operation::Capture(action, slot),
+                            Operation::Capture(device, action, slot),
                             ui::BindingControl,
                             ui::Styled {
                                 selected: false,
@@ -1465,13 +1588,105 @@ fn bindings_page(
                             ));
                     }
                     if binding.is_some() {
-                        ui::quiet_button(cell, "×", Operation::Clear(action, slot), 12.0);
+                        ui::quiet_button(cell, "×", Operation::Clear(device, action, slot), 12.0);
                     }
                 });
             }
-            ui::quiet_button(row, "↺", Operation::ResetAction(action), 16.0);
+            ui::quiet_button(row, "↺", Operation::ResetAction(device, action), 16.0);
         });
     }
+}
+fn controller(
+    list: &mut ChildSpawnerCommands,
+    bindings: &Bindings,
+    p: &Preferences,
+    labels: &super::actions::Labels,
+) {
+    use super::menu_ui as ui;
+    let pad = &p.pad;
+    group(list, "STICKS", |card| {
+        setting_row(
+            card,
+            "Look sensitivity",
+            "Turn speed at full right-stick deflection.",
+            false,
+            |row| slider(row, Scalar::PadLook, pad.look_sensitivity),
+        );
+        setting_row(
+            card,
+            "Invert vertical look",
+            "Reverse the right-stick look direction. Mouse look is separate.",
+            false,
+            |row| switch(row, pad.invert_y, Operation::PadInvert),
+        );
+        setting_row(
+            card,
+            "Movement deadzone",
+            "Left-stick travel ignored as drift.",
+            false,
+            |row| slider(row, Scalar::MoveDeadzone, pad.move_deadzone),
+        );
+        setting_row(
+            card,
+            "Look deadzone",
+            "Right-stick travel ignored as drift.",
+            false,
+            |row| slider(row, Scalar::LookDeadzone, pad.look_deadzone),
+        );
+        setting_row(
+            card,
+            "Crouch activation",
+            if pad.toggle_crouch {
+                "Press once to crouch on foot; press again to stand. Hold to descend in flight."
+            } else {
+                "Crouch or descend while the binding is held."
+            },
+            true,
+            |row| {
+                segment(row, |buttons| {
+                    option(
+                        buttons,
+                        "Hold",
+                        Operation::PadCrouch(false),
+                        !pad.toggle_crouch,
+                    );
+                    option(
+                        buttons,
+                        "Toggle",
+                        Operation::PadCrouch(true),
+                        pad.toggle_crouch,
+                    );
+                })
+            },
+        );
+    });
+    use bevy::input::gamepad::GamepadButton::{East, LeftTrigger, RightTrigger, South, Start};
+    ui::text(
+        list,
+        format!(
+            "The left stick moves and the right stick looks. In menus the D-pad or left stick \
+             moves focus, {} selects, {} goes back, {} and {} switch pages, and {} closes.",
+            labels.pad(South),
+            labels.pad(East),
+            labels.pad(LeftTrigger),
+            labels.pad(RightTrigger),
+            labels.pad(Start),
+        ),
+        12.0,
+        ui::MUTED,
+    );
+    binding_row(list, true, |row| {
+        for label in ["ACTION", "PRIMARY", "ALTERNATIVE", ""] {
+            ui::text(row, label, 9.0, ui::MUTED);
+        }
+    });
+    let mut entries: Vec<_> = bindings
+        .pad
+        .iter()
+        .filter(|(action, _)| !matches!(action, Action::ReleaseCursor))
+        .collect();
+    entries.sort_by_key(|(action, _)| binding_order(**action));
+    binding_rows(list, Device::Pad, entries, labels, true);
 }
 fn binding_row(
     parent: &mut ChildSpawnerCommands,
@@ -1639,11 +1854,12 @@ fn modal(commands: &mut Commands, settings: &Settings) {
     let mut anchor = None;
     commands.spawn((Panel,GlobalZIndex(80),BackgroundColor(ui::BG.with_alpha(0.85)),Node {position_type:PositionType::Absolute,left:Val::Px(0.0),right:Val::Px(0.0),top:Val::Px(0.0),bottom:Val::Px(0.0),align_items:AlignItems::Center,justify_content:JustifyContent::Center,..default()})).with_children(|shade| {
         let dialog=shade.spawn((ModalFocus,bevy::input_focus::tab_navigation::TabGroup {modal:true,..default()},BackgroundColor(ui::CARD),BorderColor::all(ui::EDGE),Node {width:Val::Px(390.0),max_width:Val::Percent(92.0),padding:UiRect::all(Val::Px(26.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(10.0)),flex_direction:FlexDirection::Column,row_gap:Val::Px(10.0),..default()})).with_children(|dialog| {
-            if let Some((action,slot,_))=settings.capture {
+            if let Some((device,action,slot,_))=settings.capture {
+                let (prompt,cancel)=match device {Device::KeyboardMouse=>("Press a key or mouse button","Esc cancels. The opening click is ignored."),Device::Pad=>("Press a controller button","Menu or Esc cancels. The opening press is ignored.")};
                 ui::weighted_text(dialog,"Change binding",19.0,620,ui::INK);
                 ui::paragraph(dialog,format!("{} · {}",action_name(action),if slot==0{"Primary"}else{"Alternative"}),12.0,ui::MUTED);
-                dialog.spawn((BackgroundColor(Color::srgb(0.069,0.118,0.081)),BorderColor::all(ui::LEAF),Node {padding:UiRect::all(Val::Px(28.0)),margin:UiRect::vertical(Val::Px(5.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(6.0)),justify_content:JustifyContent::Center,..default()})).with_children(|well|ui::technical_text(well,"Press a key or mouse button",12.0,ui::LEAF));
-                ui::paragraph(dialog,"Esc cancels. The opening click is ignored.",12.0,ui::MUTED);
+                dialog.spawn((BackgroundColor(Color::srgb(0.069,0.118,0.081)),BorderColor::all(ui::LEAF),Node {padding:UiRect::all(Val::Px(28.0)),margin:UiRect::vertical(Val::Px(5.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(6.0)),justify_content:JustifyContent::Center,..default()})).with_children(|well|ui::technical_text(well,prompt,12.0,ui::LEAF));
+                ui::paragraph(dialog,cancel,12.0,ui::MUTED);
                 dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions|{ui::button(actions,"Cancel",Operation::Cancel,false,false,false);});
             }else {
                 let (title,description)=if settings.unsaved {("Keep your changes?","You have unapplied behavior, binding or display changes.".into())}else if settings.resetting {("Restore defaults?","This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into())}else{let names=settings.conflict.as_ref().map(|(_,_,conflicts)|conflicts.iter().map(|(action,_)|action_name(*action)).collect::<Vec<_>>().join(", ")).unwrap_or_default();("Binding already in use",format!("This binding is assigned to {names}. Replace it?"))};
@@ -1677,6 +1893,7 @@ fn binding_order(action: Action) -> usize {
         Descend,
         Sprint,
         Respawn,
+        MovementMode,
         Faster,
         Slower,
         Place,
@@ -1701,6 +1918,8 @@ fn binding_order(action: Action) -> usize {
         Slot7,
         Slot8,
         Slot9,
+        PreviousSlot,
+        NextSlot,
     ]
     .iter()
     .position(|candidate| *candidate == action)
@@ -1730,6 +1949,7 @@ mod tests {
             .init_resource::<bevy::input_focus::InputFocus>()
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<super::super::pad::PadInput>()
             .insert_resource(Store {
                 path: std::env::temp_dir().join(format!(
                     "tesserae-settings-{}-{}.json",
@@ -1818,7 +2038,7 @@ mod tests {
             .query::<&Operation>()
             .iter(app.world())
             .filter_map(|operation| {
-                if let Operation::Capture(action, _) = operation {
+                if let Operation::Capture(_, action, _) = operation {
                     Some(*action)
                 } else {
                     None
@@ -1954,7 +2174,10 @@ mod tests {
             &mut app,
             Operation::Navigate(super::super::menu_ui::Tab::Behavior),
         );
-        activate_operation(&mut app, Operation::Capture(Action::Forward, 0));
+        activate_operation(
+            &mut app,
+            Operation::Capture(Device::KeyboardMouse, Action::Forward, 0),
+        );
         app.world_mut()
             .resource_mut::<crate::server::persistence::SaveStatus>()
             .quitting = true;
@@ -2024,7 +2247,7 @@ mod tests {
                     .resource_mut::<bevy::input_focus::InputFocus>()
                     .set(control, bevy::input_focus::FocusCause::Navigated);
             }
-            app.world_mut().resource_mut::<Bindings>().0.insert(
+            app.world_mut().resource_mut::<Bindings>().keyboard.insert(
                 Action::ReleaseCursor,
                 [
                     Some(Binding {
@@ -2111,6 +2334,70 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
     #[test]
+    fn every_action_has_a_place_on_both_binding_pages() {
+        let bindings = Bindings::default();
+        for action in bindings.keyboard.keys().chain(bindings.pad.keys()) {
+            binding_order(*action);
+        }
+    }
+
+    #[test]
+    fn pad_capture_takes_only_pad_buttons_and_controller_reset_spares_the_keyboard() {
+        use bevy::input::gamepad::GamepadButton;
+        let mut app = app();
+        let press = |app: &mut App, button: GamepadButton| {
+            let mut pad = app
+                .world_mut()
+                .resource_mut::<super::super::pad::PadInput>();
+            pad.navigation.clear();
+            pad.navigation.press(button);
+        };
+        let release = |app: &mut App| {
+            let mut pad = app
+                .world_mut()
+                .resource_mut::<super::super::pad::PadInput>();
+            pad.navigation.clear();
+            pad.navigation.release_all();
+        };
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Controller),
+        );
+        activate_operation(
+            &mut app,
+            Operation::Clear(Device::KeyboardMouse, Action::Sample, 0),
+        );
+        press(&mut app, GamepadButton::South);
+        activate_operation(&mut app, Operation::Capture(Device::Pad, Action::Sample, 1));
+        app.update();
+        assert!(!app.world().resource::<Settings>().capture.unwrap().3);
+        release(&mut app);
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyK);
+        press(&mut app, GamepadButton::Start);
+        app.update();
+        assert!(app.world().resource::<Settings>().capture.is_some());
+        press(&mut app, GamepadButton::DPadUp);
+        app.update();
+        let settings = app.world().resource::<Settings>();
+        assert!(settings.capture.is_none() && settings.conflict.is_none());
+        let draft = &settings.draft.as_ref().unwrap().0;
+        assert_eq!(
+            draft.pad[&Action::Sample][1].unwrap().trigger,
+            Trigger::Pad(GamepadButton::DPadUp)
+        );
+        assert!(draft.keyboard[&Action::Sample][0].is_none());
+
+        activate_operation(&mut app, Operation::Reset);
+        activate_operation(&mut app, Operation::ConfirmReset);
+        let draft = &app.world().resource::<Settings>().draft.as_ref().unwrap().0;
+        assert_eq!(draft.pad, Bindings::default().pad);
+        assert!(draft.keyboard[&Action::Sample][0].is_none());
+    }
+
+    #[test]
     fn capture_waits_for_opening_release_and_conflicts_require_a_choice() {
         let mut app = app();
         activate_operation(
@@ -2120,22 +2407,25 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
-        activate_operation(&mut app, Operation::Capture(Action::Forward, 0));
+        activate_operation(
+            &mut app,
+            Operation::Capture(Device::KeyboardMouse, Action::Forward, 0),
+        );
         app.update();
-        assert!(!app.world().resource::<Settings>().capture.unwrap().2);
+        assert!(!app.world().resource::<Settings>().capture.unwrap().3);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .release(MouseButton::Left);
         app.update();
-        assert!(app.world().resource::<Settings>().capture.unwrap().2);
+        assert!(app.world().resource::<Settings>().capture.unwrap().3);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyP);
         app.update();
         assert!(app.world().resource::<Settings>().conflict.is_some());
         assert_eq!(
-            app.world().resource::<Bindings>().0[&Action::Sample],
-            Bindings::default().0[&Action::Sample]
+            app.world().resource::<Bindings>().keyboard[&Action::Sample],
+            Bindings::default().keyboard[&Action::Sample]
         );
         activate_operation(&mut app, Operation::Replace);
         assert!(
@@ -2145,14 +2435,17 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .0
-                .0[&Action::Sample][0]
+                .keyboard[&Action::Sample][0]
                 .is_none()
         );
         assert_eq!(
-            app.world().resource::<Bindings>().0[&Action::Forward],
-            Bindings::default().0[&Action::Forward]
+            app.world().resource::<Bindings>().keyboard[&Action::Forward],
+            Bindings::default().keyboard[&Action::Forward]
         );
-        activate_operation(&mut app, Operation::ResetAction(Action::Sample));
+        activate_operation(
+            &mut app,
+            Operation::ResetAction(Device::KeyboardMouse, Action::Sample),
+        );
         assert!(app.world().resource::<Settings>().conflict.is_some());
         activate_operation(&mut app, Operation::CancelConflict);
         assert!(
@@ -2162,16 +2455,19 @@ mod tests {
                 .as_ref()
                 .unwrap()
                 .0
-                .0[&Action::Sample][0]
+                .keyboard[&Action::Sample][0]
                 .is_none()
         );
-        activate_operation(&mut app, Operation::ResetAction(Action::Sample));
+        activate_operation(
+            &mut app,
+            Operation::ResetAction(Device::KeyboardMouse, Action::Sample),
+        );
         activate_operation(&mut app, Operation::Replace);
         let draft = &app.world().resource::<Settings>().draft.as_ref().unwrap().0;
-        assert!(draft.0[&Action::Forward][0].is_none());
+        assert!(draft.keyboard[&Action::Forward][0].is_none());
         assert_eq!(
-            draft.0[&Action::Sample],
-            Bindings::default().0[&Action::Sample]
+            draft.keyboard[&Action::Sample],
+            Bindings::default().keyboard[&Action::Sample]
         );
     }
 }

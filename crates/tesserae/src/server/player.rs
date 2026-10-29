@@ -175,8 +175,11 @@ impl Player {
         dt: f32,
     ) {
         let mut direction = self.intent.direction;
+        // Below unit length is a partly deflected stick; the Client sends whole
+        // keyboard directions at unit length, so they keep full speed.
+        let throttle = direction.length().min(1.0);
         if self.mode == MovementMode::Flight {
-            self.eye += direction.normalize_or_zero()
+            self.eye += direction.clamp_length_max(1.0)
                 * (self.intent.speed_mps.clamp(0.5, FLY_SPEED_CEILING_MPS)
                     * if self.intent.sprint { 5.0 } else { 1.0 })
                 .min(FLY_SPEED_CEILING_MPS)
@@ -204,7 +207,7 @@ impl Player {
         } else {
             4.5
         };
-        let horizontal = direction.normalize_or_zero() * speed * dt;
+        let horizontal = direction.normalize_or_zero() * throttle * speed * dt;
         let body = self.body();
         let mut moved = collide::sweep(
             store,
@@ -490,6 +493,37 @@ mod tests {
             assert!(p.body().max[1] <= 2.0001);
             steps(&mut p, &s, 64);
             assert!(p.grounded);
+        }
+    }
+    #[test]
+    fn a_partly_deflected_stick_scales_speed_and_whole_directions_keep_full_speed() {
+        for size in [1.0, 0.5, 0.25] {
+            let s = scene(size);
+            let travel = |mode, direction: Vec3| {
+                let mut p = Player::new(Vec3::new(0.0, EYE_HEIGHT, 0.0), mode);
+                steps(&mut p, &s, 1);
+                let start = p.eye;
+                p.intent.direction = direction;
+                p.intent.speed_mps = 12.0;
+                steps(&mut p, &s, 32);
+                (p.eye - start).with_y(0.0).length()
+            };
+            for mode in [MovementMode::Physics, MovementMode::Flight] {
+                let full = travel(mode, Vec3::X);
+                assert!(full > 0.0);
+                let diagonal = travel(mode, Vec3::new(1.0, 0.0, 1.0));
+                assert!((diagonal - full).abs() < 1e-4, "{mode:?} {size}");
+                let half = travel(mode, Vec3::X * 0.5);
+                assert!(
+                    (half / full - 0.5).abs() < 1e-3,
+                    "{mode:?} {size}: {half}/{full}"
+                );
+                assert!((travel(mode, Vec3::X * 7.0) - full).abs() < 1e-4);
+            }
+            // Pitch must not slow walking: the Client's whole forward is unit length.
+            let pitched = Vec3::new(0.5, -0.866, 0.0);
+            let walk = travel(MovementMode::Physics, pitched);
+            assert!((walk - travel(MovementMode::Physics, Vec3::X)).abs() < 1e-4);
         }
     }
     #[test]

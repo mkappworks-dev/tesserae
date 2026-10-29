@@ -72,7 +72,8 @@ input is released. Respect both modifier sides and platform undo/redo.
 
 Preserve current defaults: hold removal, hold sprint, right place/ignite,
 X empty hand, middle/P sampling and fire > solid > source removal priority.
-Keep Server aim/history guards and one removal per activation.
+Keep Server aim/history guards and one removal per activation, except under
+the opt-in "Repeat while held" preference of ticket 29.
 
 Add optional behavior preferences:
 
@@ -126,6 +127,13 @@ drift. Controller bindings, sensitivity, invert Y and deadzones are separately
 configurable without replacing keyboard/mouse preferences. Apply trigger
 hysteresis and cancellation on disconnect. Validate default mappings on real
 hardware before claiming support; injected tests are not physical validation.
+Controller grilling (2026-10-29) is recorded in ticket 07, now done and
+validated on Xbox, PlayStation and Switch/8BitDo pads. The Server reads the
+movement direction's length, capped at 1, as a throttle (ADR-0008), so
+analog input scales speed and keyboard speeds stay the same. Rumble,
+Nintendo glyphs, an on-screen keyboard and split-screen are excluded. Pad
+defaults follow Minecraft Bedrock: B toggles crouch and LS click latches
+sprint. Optional repeat place/remove while held is device-neutral ticket 29.
 
 Touch owns pointer ids from start to end/cancel. Support simultaneous movement,
 look and explicit actions, with no gesture transfer from UI to gameplay.

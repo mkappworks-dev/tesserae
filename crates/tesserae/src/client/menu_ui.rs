@@ -21,14 +21,24 @@ pub(super) enum Tab {
     #[default]
     Behavior,
     Bindings,
+    Controller,
     Display,
 }
 impl Tab {
+    /// Page order in the header, which LB/RB also follow.
+    pub const ORDER: [Tab; 5] = [
+        Tab::Catalogue,
+        Tab::Behavior,
+        Tab::Bindings,
+        Tab::Controller,
+        Tab::Display,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue => "Catalogue",
             Self::Behavior => "Behavior",
             Self::Bindings => "Key bindings",
+            Self::Controller => "Controller",
             Self::Display => "Display",
         }
     }
@@ -89,6 +99,17 @@ pub(super) struct Styled {
     pub selected: bool,
     pub tab: bool,
     pub primary: bool,
+}
+
+/// The focused entity when focus is being shown, as after pad navigation.
+pub(super) fn visible_focus(
+    focus: Option<&InputFocus>,
+    visible: Option<&bevy::input_focus::InputFocusVisible>,
+) -> Option<Entity> {
+    visible
+        .is_some_and(|visible| visible.0)
+        .then(|| focus.and_then(InputFocus::get))
+        .flatten()
 }
 
 pub(super) fn font(size: f32) -> TextFont {
@@ -321,6 +342,7 @@ type StyledButtons<'w, 's> = Query<
     'w,
     's,
     (
+        Entity,
         &'static Styled,
         &'static bevy::picking::hover::Hovered,
         Has<Quiet>,
@@ -331,11 +353,16 @@ type StyledButtons<'w, 's> = Query<
         &'static mut BorderColor,
     ),
 >;
-fn style(mut buttons: StyledButtons) {
-    for (style, interaction, quiet, binding, empty, disabled, mut background, mut border) in
+fn style(
+    mut buttons: StyledButtons,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = visible_focus(Some(&focus), visible.as_deref());
+    for (entity, style, interaction, quiet, binding, empty, disabled, mut background, mut border) in
         &mut buttons
     {
-        let hover = interaction.0 && !disabled;
+        let hover = (interaction.0 || focused == Some(entity)) && !disabled;
         background.0 = if empty {
             Color::NONE
         } else if style.primary {
@@ -474,7 +501,7 @@ fn chrome(root: &mut ChildSpawnerCommands, tab: Tab, logo: &Handle<Image>) {
                 ..default()
             })
             .with_children(|nav| {
-                for page in [Tab::Catalogue, Tab::Behavior, Tab::Bindings, Tab::Display] {
+                for page in Tab::ORDER {
                     button(
                         nav,
                         page.label(),
@@ -510,6 +537,7 @@ fn chrome(root: &mut ChildSpawnerCommands, tab: Tab, logo: &Handle<Image>) {
                         Tab::Catalogue => "Materials and Shapes for your World.",
                         Tab::Behavior => "Tune how you move, look, and build.",
                         Tab::Bindings => "Find an action and choose up to two bindings.",
+                        Tab::Controller => "Tune the sticks and choose controller buttons.",
                         Tab::Display => "Choose frame pacing without changing visual quality.",
                     },
                     12.0,
@@ -820,7 +848,7 @@ fn search_presentation(
             (
                 bindings
                     .0
-                    .0
+                    .keyboard
                     .keys()
                     .filter(|action| {
                         settings.binding_visible(
@@ -1275,13 +1303,17 @@ pub(super) fn paragraph(
 fn dashed_border_colors(
     mut borders: Query<(&EmptyBorder, &mut ImageNode)>,
     buttons: Query<&bevy::picking::hover::Hovered>,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
+    let focused = visible_focus(Some(&focus), visible.as_deref());
     for (border, mut image) in &mut borders {
-        image.color = if buttons.get(border.0).is_ok_and(|hovered| hovered.0) {
-            LEAF
-        } else {
-            EDGE
-        };
+        image.color =
+            if focused == Some(border.0) || buttons.get(border.0).is_ok_and(|hovered| hovered.0) {
+                LEAF
+            } else {
+                EDGE
+            };
     }
 }
 #[cfg(test)]
