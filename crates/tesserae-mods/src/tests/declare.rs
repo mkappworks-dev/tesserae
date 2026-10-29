@@ -703,3 +703,30 @@ fn material_removal_time_is_validated_and_defaults_for_absent_metadata() {
         assert!(text.contains("game:stone") && text.contains("0.05 to 60"));
     }
 }
+
+#[test]
+fn game_movement_policy_requires_an_allowed_initial_mode() {
+    for (flight, physics, start, valid) in [
+        (true, true, false, true),
+        (false, true, false, true),
+        (true, false, true, true),
+        (false, true, true, false),
+        (true, false, false, false),
+        (false, false, false, false),
+    ] {
+        let mut d = declaring(&[], &[]);
+        let mut world = crate::convert::engine_world_params();
+        world.movement = Some(content::MovementPolicy {
+            allow_flight: flight,
+            allow_physics: physics,
+            start_in_flight: start,
+        });
+        d.world = Some(world);
+        let mut load = Load::new();
+        let result = apply(d, "game", &mut load.tables, &mut load.registry, true);
+        assert_eq!(result.is_ok(), valid);
+        if valid {
+            assert_eq!(result.unwrap().movement.unwrap().allow_flight, flight);
+        }
+    }
+}

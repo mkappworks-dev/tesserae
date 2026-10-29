@@ -45,6 +45,10 @@ impl Rig {
         let (stone, water, wood) = (id("demo:stone"), id("demo:water"), id("demo:wood"));
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
         let eye = p.reopened_eye.unwrap_or(Vec3::new(8.0, 4.0, 8.0));
+        let restored_player = p
+            .reopened_view
+            .map(|v| Player::from_saved(eye, v))
+            .unwrap_or_else(|| Player::at(eye));
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_message::<AppExit>()
@@ -57,7 +61,7 @@ impl Rig {
             .insert_resource(p)
             .add_plugins(plugin)
             .add_systems(FixedPreUpdate, super::super::fluids::simulate);
-        app.world_mut().spawn(Player::at(eye));
+        app.world_mut().spawn(restored_player);
         Self {
             app,
             stone,
@@ -536,4 +540,66 @@ fn return_after_failed_quit_resumes_world_without_discarding_unsaved_changes() {
     rig.app.world_mut().write_message(SaveAction::Retry);
     rig.settled_save();
     assert!(rig.app.world().resource::<SaveStatus>().error.is_none());
+}
+
+#[test]
+fn authoritative_movement_and_view_survive_save_reopen_and_stale_completion() {
+    let dir = Directory::new();
+    let mut r = Rig::new(&dir);
+    let saved = save::MovementV1 {
+        flight: false,
+        crouching: true,
+        yaw: 1.25,
+        pitch: -0.4,
+    };
+    let eye = Vec3::new(12.0, 8.0, -3.0);
+    let id = r
+        .app
+        .world_mut()
+        .query::<(Entity, &Player)>()
+        .single(r.app.world())
+        .unwrap()
+        .0;
+    r.app
+        .world_mut()
+        .entity_mut(id)
+        .insert(Player::from_saved(eye, saved));
+    r.settled_save();
+    assert!(!r.app.world().resource::<SaveStatus>().dirty);
+    let changed = save::MovementV1 {
+        flight: true,
+        crouching: false,
+        ..saved
+    };
+    r.app
+        .world_mut()
+        .entity_mut(id)
+        .insert(Player::from_saved(eye, changed));
+    r.tick();
+    assert!(r.app.world().resource::<SaveStatus>().dirty);
+    r.app.world_mut().resource_mut::<ChunkStore>().checkpoint = true;
+    r.until(|r| r.app.world().resource::<SaveStatus>().saving);
+    let latest = save::MovementV1 {
+        flight: false,
+        crouching: true,
+        yaw: 2.0,
+        ..changed
+    };
+    r.app
+        .world_mut()
+        .entity_mut(id)
+        .insert(Player::from_saved(eye, latest));
+    r.until(|r| !r.app.world().resource::<SaveStatus>().saving);
+    assert!(r.app.world().resource::<SaveStatus>().dirty);
+    r.settled_save();
+    drop(r);
+    let mut reopened = Rig::new(&dir);
+    let p = reopened
+        .app
+        .world_mut()
+        .query::<&Player>()
+        .single(reopened.app.world())
+        .unwrap();
+    assert_eq!(p.eye(), eye);
+    assert_eq!(p.saved_movement(), latest);
 }

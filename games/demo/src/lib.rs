@@ -147,6 +147,11 @@ fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
 impl Guest for Demo {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
+        world.movement = Some(tesserae::mods::content::MovementPolicy {
+            allow_flight: true,
+            allow_physics: true,
+            start_in_flight: false,
+        });
         world.relief_m = 4.0;
         // Under the lowest ground within 20 m of the stage at the engine's
         // default seed, 26 m, so lakes stand in valleys and the stage is dry.

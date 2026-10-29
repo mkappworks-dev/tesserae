@@ -1137,9 +1137,18 @@ fn button_label_colors(
 #[derive(Component)]
 struct Notification(Timer);
 pub(super) fn notify(commands: &mut Commands, message: &str) {
+    commands.queue(|world: &mut World| {
+        let previous: Vec<_> = world
+            .query_filtered::<Entity, With<Notification>>()
+            .iter(world)
+            .collect();
+        for entity in previous {
+            world.despawn(entity);
+        }
+    });
     commands
         .spawn((
-            Notification(Timer::from_seconds(1.8, TimerMode::Once)),
+            Notification(Timer::from_seconds(2.6, TimerMode::Once)),
             GlobalZIndex(40),
             Node {
                 position_type: PositionType::Absolute,
@@ -1154,16 +1163,52 @@ pub(super) fn notify(commands: &mut Commands, message: &str) {
         .with_children(|root| {
             root.spawn((
                 BackgroundColor(CARD),
-                BorderColor::all(EDGE),
+                BorderColor {
+                    left: LEAF,
+                    ..BorderColor::all(EDGE)
+                },
                 Node {
-                    padding: UiRect::axes(Val::Px(15.0), Val::Px(9.0)),
-                    border: UiRect::all(Val::Px(1.0)),
+                    max_width: Val::Px(440.0),
+                    min_height: Val::Px(44.0),
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(10.0),
+                    padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+                    border: UiRect {
+                        left: Val::Px(3.0),
+                        ..UiRect::all(Val::Px(1.0))
+                    },
                     border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
                 Pickable::IGNORE,
             ))
-            .with_children(|toast| text(toast, message, 12.0, INK));
+            .with_children(|toast| {
+                toast
+                    .spawn((
+                        Node {
+                            width: Val::Px(22.0),
+                            height: Val::Px(22.0),
+                            flex_shrink: 0.0,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            border_radius: BorderRadius::all(Val::Px(4.0)),
+                            ..default()
+                        },
+                        BackgroundColor(LEAF.with_alpha(0.12)),
+                        Pickable::IGNORE,
+                    ))
+                    .with_child((
+                        Node {
+                            width: Val::Px(6.0),
+                            height: Val::Px(6.0),
+                            border_radius: BorderRadius::all(Val::Px(2.0)),
+                            ..default()
+                        },
+                        BackgroundColor(LEAF),
+                        Pickable::IGNORE,
+                    ));
+                weighted_text(toast, message, 13.0, 600, INK);
+            });
         });
 }
 fn age_notifications(
@@ -1218,6 +1263,38 @@ fn dashed_border_colors(
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn notifications_replace_previous_messages_and_expire() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .add_systems(Update, super::age_notifications);
+        super::notify(&mut app.world_mut().commands(), "Physics mode");
+        super::notify(&mut app.world_mut().commands(), "Free flight mode");
+        app.world_mut().flush();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<super::Notification>>()
+                .iter(app.world())
+                .count(),
+            1
+        );
+        let messages: Vec<_> = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|text| text.0.as_str())
+            .collect();
+        assert_eq!(messages, ["Free flight mode"]);
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(std::time::Duration::from_secs(3));
+        app.update();
+        assert_eq!(
+            app.world_mut().query::<&Text>().iter(app.world()).count(),
+            0
+        );
+    }
+
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     fn app() -> App {

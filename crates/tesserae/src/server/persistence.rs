@@ -122,6 +122,7 @@ struct Completed {
     revisions: BTreeMap<ChunkCoord, u64>,
     simulation_revision: u64,
     eye: Vec3,
+    movement: save::MovementV1,
     #[cfg(feature = "profiling")]
     write_ms: f64,
 }
@@ -152,6 +153,9 @@ pub struct Persistence {
     saved_revisions: BTreeMap<ChunkCoord, u64>,
     saved_simulation: u64,
     saved_eye: Option<Vec3>,
+    saved_movement: Option<save::MovementV1>,
+    pub(super) reopened_mode: Option<super::player::MovementMode>,
+    pub(super) reopened_view: Option<save::MovementV1>,
     pub(super) reopened_eye: Option<Vec3>,
     initial_simulation: Option<RestoredSimulation>,
     initial_chunks: Vec<save::SavedChunk>,
@@ -165,6 +169,13 @@ impl Persistence {
         settings: WorldSettings,
     ) -> Result<Self, String> {
         let (content, mapping) = content(loaded);
+        let restored = opening
+            .recovered
+            .as_ref()
+            .map(|r| r.commit.player.movement())
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .flatten();
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
                 recovered
@@ -227,6 +238,17 @@ impl Persistence {
             saved_revisions,
             saved_simulation: 0,
             saved_eye: reopened_eye,
+            saved_movement: restored,
+            reopened_mode: restored
+                .map(|s| {
+                    if s.flight {
+                        super::player::MovementMode::Flight
+                    } else {
+                        super::player::MovementMode::Physics
+                    }
+                })
+                .or(reopened_eye.map(|_| super::player::MovementMode::Flight)),
+            reopened_view: restored,
             reopened_eye,
             initial_simulation,
             initial_chunks,
@@ -349,11 +371,13 @@ fn drive(
                 p.saved_revisions = done.revisions;
                 p.saved_simulation = done.simulation_revision;
                 p.saved_eye = Some(done.eye);
+                p.saved_movement = Some(done.movement);
                 status.detail = "Last save complete".into();
                 status.error = None;
                 if status.quitting
                     && p.saved_revisions == store.revisions
                     && done.eye == player.eye()
+                    && done.movement == player.saved_movement()
                     && p.saved_simulation == sim.revision
                 {
                     exit.write(AppExit::Success);
@@ -372,6 +396,7 @@ fn drive(
     }
     status.dirty = p.saved_revisions != store.revisions
         || p.saved_eye != Some(player.eye())
+        || p.saved_movement != Some(player.saved_movement())
         || p.saved_simulation != sim.revision;
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
@@ -438,6 +463,7 @@ fn drive(
     let revisions = store.revisions.clone();
     let simulation_revision = sim.revision;
     let eye = player.eye();
+    let movement = player.saved_movement();
     let writer = Arc::clone(p.writer.as_ref().expect("persistent"));
     let mapping = p.mapping.clone();
     let content = p.content.clone();
@@ -473,7 +499,10 @@ fn drive(
                 content,
                 player: save::Player {
                     eye_m: eye.to_array(),
-                    extensions: BTreeMap::new(),
+                    extensions: BTreeMap::from([(
+                        "movement_v1".into(),
+                        serde_json::to_value(movement).expect("finite movement"),
+                    )]),
                 },
                 chunks,
                 simulation,
@@ -491,6 +520,7 @@ fn drive(
             revisions,
             simulation_revision,
             eye,
+            movement,
             #[cfg(feature = "profiling")]
             write_ms: write_started.elapsed().as_secs_f64() * 1e3,
         }

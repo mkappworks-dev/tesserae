@@ -96,6 +96,7 @@ pub struct LoadedMods {
     pub remove_times: Vec<(MaterialId, std::time::Duration)>,
     pub mods: Vec<ModInstance>,
     pub game: bool,
+    pub movement: Option<tesserae_mods::MovementPolicy>,
     pub required: Vec<tesserae_core::save::RequiredMod>,
 }
 
@@ -111,6 +112,7 @@ impl Default for LoadedMods {
             remove_times: Vec::new(),
             mods: Vec::new(),
             game: false,
+            movement: None,
             required: Vec::new(),
         }
     }
@@ -325,6 +327,7 @@ fn load_with_opening(
                 loaded.world = applied.world;
                 loaded.view = applied.view;
                 loaded.game = true;
+                loaded.movement = applied.movement;
             }
             loaded.mods.push(instance);
         }
@@ -414,6 +417,17 @@ pub(super) fn plugin(app: &mut App) {
         if let Some(material) = catalogue.materials.iter_mut().find(|m| m.id == id) {
             material.remove_time = duration;
         }
+    }
+    if let Some(policy) = loaded.movement {
+        app.insert_resource(super::player::MovementPolicy {
+            flight: policy.allow_flight,
+            physics: policy.allow_physics,
+            initial: Some(if policy.start_in_flight {
+                super::player::MovementMode::Flight
+            } else {
+                super::player::MovementMode::Physics
+            }),
+        });
     }
     app.insert_resource(tables)
         .insert_resource(WorldParameters(params))

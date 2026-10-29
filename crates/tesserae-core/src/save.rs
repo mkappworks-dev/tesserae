@@ -371,11 +371,45 @@ pub struct Rescan {
     pub parked: Option<([i32; 3], [i32; 3])>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MovementV1 {
+    pub flight: bool,
+    #[serde(default)]
+    pub crouching: bool,
+    pub yaw: f32,
+    pub pitch: f32,
+}
+impl Player {
+    pub fn movement(&self) -> Result<Option<MovementV1>, Error> {
+        if self.extensions.keys().any(|key| key != "movement_v1") {
+            return Err(Error::Incompatible(
+                "unknown Player extensions require migration".into(),
+            ));
+        }
+        self.extensions
+            .get("movement_v1")
+            .map(|value| {
+                let state: MovementV1 = serde_json::from_value(value.clone())
+                    .map_err(|e| Error::Incompatible(e.to_string()))?;
+                if !state.yaw.is_finite()
+                    || !state.pitch.is_finite()
+                    || state.pitch.abs() > std::f32::consts::FRAC_PI_2
+                    || (state.flight && state.crouching)
+                {
+                    return Err(Error::Corrupt("invalid Player movement/view".into()));
+                }
+                Ok(state)
+            })
+            .transpose()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Player {
     pub eye_m: [f32; 3],
-    /// Reserved, independently versioned fields for later controller/view work.
+    /// Independently versioned controller/view fields.
     /// Unknown nonempty fields require explicit migration, never guessed modes.
     pub extensions: BTreeMap<String, serde_json::Value>,
 }
@@ -494,11 +528,7 @@ impl Commit {
         {
             return Err(Error::Corrupt("invalid World or Player coordinates".into()));
         }
-        if !self.player.extensions.is_empty() {
-            return Err(Error::Incompatible(
-                "unknown Player extensions require migration".into(),
-            ));
-        }
+        self.player.movement()?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;
         self.parameters.restore(&mapping)?;

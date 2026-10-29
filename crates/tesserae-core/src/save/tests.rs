@@ -551,3 +551,21 @@ fn interrupted_process_releases_writer_lock_and_recovers_previous_commit() {
         c
     );
 }
+
+#[test]
+fn pre_crouch_movement_defaults_to_standing_and_new_stance_round_trips() {
+    let mut player = Player {
+        eye_m: [0.0; 3],
+        extensions: BTreeMap::from([(
+            "movement_v1".into(),
+            serde_json::json!({"flight":false,"yaw":1.0,"pitch":0.0}),
+        )]),
+    };
+    assert!(!player.movement().unwrap().unwrap().crouching);
+    player.extensions.get_mut("movement_v1").unwrap()["crouching"] = true.into();
+    let bytes = serde_json::to_vec(&player).unwrap();
+    let restored: Player = serde_json::from_slice(&bytes).unwrap();
+    assert!(restored.movement().unwrap().unwrap().crouching);
+    player.extensions.get_mut("movement_v1").unwrap()["flight"] = true.into();
+    assert!(player.movement().is_err());
+}

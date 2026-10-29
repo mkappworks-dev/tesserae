@@ -1,16 +1,11 @@
-//! A fly camera: WASD to move, mouse to look, shift to sprint, `-` and `=` to
-//! change speed, R to return to the spawn point, Esc to release the cursor.
-//!
-//! Hand-rolled rather than a dependency so the Client's one piece of input
-//! handling stays small enough to read, and so it is already expressed in
-//! metres per second when the player controller replaces it.
+//! First-person look and semantic movement intents for the Server controller.
 
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::f32::consts::FRAC_PI_2;
 
 use super::actions::{Action, Actions};
-use crate::server::player::{FLY_SPEED_CEILING_MPS, RespawnIntent};
+use crate::server::player::{MovementIntent, RespawnIntent};
 
 /// Just inside ±90°, where the yaw/pitch basis degenerates.
 const PITCH_LIMIT: f32 = FRAC_PI_2 - 1e-3;
@@ -31,11 +26,11 @@ pub struct MainCamera;
 
 #[derive(Component)]
 pub struct FlyCamera {
+    pub movement_mode: crate::server::player::MovementMode,
     /// Metres per second, not Voxels per second. A speed in Voxels would be
     /// secretly calibrated to one Voxel size.
     /// See `docs/adr/0003-voxel-size-is-per-world.md`.
     pub speed: f32,
-    pub sprint_multiplier: f32,
     /// Radians of rotation per pixel of mouse travel.
     pub sensitivity: f32,
     pub yaw: f32,
@@ -45,8 +40,8 @@ pub struct FlyCamera {
 impl Default for FlyCamera {
     fn default() -> Self {
         FlyCamera {
+            movement_mode: default(),
             speed: 12.0,
-            sprint_multiplier: 5.0,
             sensitivity: 0.003,
             yaw: 0.0,
             pitch: 0.0,
@@ -252,26 +247,15 @@ pub(super) fn look(
     transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
 }
 
-/// Metres per second. Held to the Server's ceiling: it clamps a Player faster
-/// than that, so flying past it only rubber-bands.
-fn flight_speed(fly: &FlyCamera, sprinting: bool) -> f32 {
-    let speed = if sprinting {
-        fly.speed * fly.sprint_multiplier
-    } else {
-        fly.speed
-    };
-    speed.min(FLY_SPEED_CEILING_MPS)
-}
-
 fn fly(
     preferences: Res<super::profile::Preferences>,
     mut sprint: ResMut<Sprint>,
     ownership: Res<super::input::Ownership>,
     actions: Res<Actions>,
-    time: Res<Time>,
-    camera: Single<(&mut Transform, &FlyCamera)>,
+    mut intents: MessageWriter<MovementIntent>,
+    camera: Single<(&Transform, &FlyCamera)>,
 ) {
-    let (mut transform, fly) = camera.into_inner();
+    let (transform, fly) = camera.into_inner();
 
     let mut direction = Vec3::ZERO;
     for (key, axis) in [
@@ -300,8 +284,17 @@ fn fly(
     } else {
         actions.held(Action::Sprint)
     };
-    let speed = flight_speed(fly, sprinting);
-    transform.translation += direction.normalize_or_zero() * speed * time.delta_secs();
+    intents.write(MovementIntent {
+        cancelled: !ownership.gameplay() || actions.started(Action::Respawn),
+        direction,
+        speed_mps: fly.speed,
+        sprint: sprinting,
+        crouch: ownership.gameplay() && actions.held(Action::Descend),
+        yaw: fly.yaw,
+        pitch: fly.pitch,
+        jump: ownership.gameplay() && actions.started(Action::Ascend),
+        switch_mode: ownership.gameplay() && actions.started(Action::MovementMode),
+    });
 }
 
 fn sprint_hint(
@@ -323,11 +316,59 @@ mod tests {
     use super::*;
 
     #[test]
+    fn crouch_uses_the_remapped_descend_action_and_cancels_on_context_loss() {
+        use super::super::actions::{Binding, Bindings, Modifier, Trigger};
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .insert_resource(super::super::input::Ownership::playing())
+            .add_message::<MovementIntent>()
+            .add_systems(Update, fly);
+        app.world_mut()
+            .spawn((Transform::default(), FlyCamera::default()));
+        app.world_mut().resource_mut::<Bindings>().0.insert(
+            Action::Descend,
+            [
+                Some(Binding {
+                    trigger: Trigger::Key(KeyCode::KeyC),
+                    modifier: Modifier::None,
+                }),
+                None,
+            ],
+        );
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyC);
+        app.update();
+        let intent = app
+            .world_mut()
+            .resource_mut::<Messages<MovementIntent>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert!(intent.crouch);
+        assert_eq!(intent.direction, Vec3::NEG_Y);
+        app.world_mut()
+            .resource_mut::<super::super::input::Ownership>()
+            .owner = super::super::input::Owner::Catalogue;
+        app.update();
+        let intent = app
+            .world_mut()
+            .resource_mut::<Messages<MovementIntent>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert!(intent.cancelled);
+        assert!(!intent.crouch);
+        assert_eq!(intent.direction, Vec3::ZERO);
+    }
+
+    #[test]
     fn toggle_sprint_survives_a_stop_and_clears_on_menu_and_respawn() {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)
             .insert_resource(super::super::input::Ownership::playing())
             .init_resource::<Time>()
+            .add_message::<MovementIntent>()
             .add_systems(Update, fly);
         app.world_mut()
             .spawn((Transform::default(), FlyCamera::default()));
@@ -380,6 +421,7 @@ mod tests {
             .insert_resource(super::super::input::Ownership::playing())
             .init_resource::<Time>()
             .add_message::<RespawnIntent>()
+            .add_message::<MovementIntent>()
             .add_systems(
                 Update,
                 (
@@ -423,6 +465,15 @@ mod tests {
             Vec3::ZERO
         );
         assert!(app.world().resource::<Messages<RespawnIntent>>().is_empty());
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MovementIntent>>()
+                .drain()
+                .last()
+                .unwrap()
+                .direction,
+            Vec3::ZERO
+        );
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release(KeyCode::Tab);
@@ -443,6 +494,15 @@ mod tests {
             Vec3::ZERO
         );
         assert!(app.world().resource::<Messages<RespawnIntent>>().is_empty());
+        assert_eq!(
+            app.world_mut()
+                .resource_mut::<Messages<MovementIntent>>()
+                .drain()
+                .last()
+                .unwrap()
+                .direction,
+            Vec3::ZERO
+        );
         for key in [KeyCode::KeyW, KeyCode::KeyR] {
             app.world_mut()
                 .resource_mut::<ButtonInput<KeyCode>>()
@@ -458,7 +518,13 @@ mod tests {
                 .press(key);
         }
         app.update();
-        assert!(app.world().get::<Transform>(camera).unwrap().translation.z < 0.0);
+        let intent = app
+            .world_mut()
+            .resource_mut::<Messages<MovementIntent>>()
+            .drain()
+            .last()
+            .unwrap();
+        assert!(intent.direction.z < 0.0);
         assert_eq!(app.world().resource::<Messages<RespawnIntent>>().len(), 1);
     }
 
@@ -471,6 +537,7 @@ mod tests {
             .init_resource::<super::super::menu::Menu>()
             .insert_resource(super::super::input::Ownership::playing())
             .add_message::<RespawnIntent>()
+            .add_message::<MovementIntent>()
             .add_systems(Update, (super::super::input::resolve, reset).chain());
         let window = app
             .world_mut()
@@ -536,26 +603,6 @@ mod tests {
     }
 
     #[test]
-    fn flight_never_outruns_the_servers_ceiling() {
-        let mut fly = FlyCamera::default();
-        for speed in [*SPEED_RANGE.start(), 12.0, *SPEED_RANGE.end()] {
-            fly.speed = speed;
-            for sprinting in [false, true] {
-                assert!(flight_speed(&fly, sprinting) <= FLY_SPEED_CEILING_MPS);
-            }
-        }
-        fly.speed = 12.0;
-        assert_eq!(flight_speed(&fly, false), 12.0, "slow flight is untouched");
-        assert_eq!(
-            flight_speed(&fly, true),
-            60.0,
-            "and so is a sprint under it"
-        );
-        fly.speed = 20.0;
-        assert_eq!(flight_speed(&fly, true), FLY_SPEED_CEILING_MPS);
-    }
-
-    #[test]
     fn the_reset_key_asks_the_server_and_turns_the_camera_but_does_not_move_it() {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin);
@@ -563,6 +610,7 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .insert_resource(super::super::input::Ownership::playing())
             .add_message::<RespawnIntent>()
+            .add_message::<MovementIntent>()
             .add_systems(Update, reset);
         let home = Transform::from_xyz(0.0, 50.0, 0.0).looking_to(Vec3::NEG_Z, Vec3::Y);
         let away =

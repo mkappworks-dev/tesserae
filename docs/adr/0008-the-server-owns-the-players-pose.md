@@ -1,65 +1,72 @@
-# The Server owns the Player's pose, and an Edit is checked against it
+# The Server owns the Player's body and an Edit is checked against its Eye
 
-Three decisions about where a Player is, cheap now and expensive once a
-transport, a controller and lag compensation lean on them.
+**One Server Player holds authoritative position, movement mode, vertical
+velocity and grounded state.** Client messages contain direction, sprint, jump
+edges and an explicit mode-switch request; they contain no proposed position.
+The Server advances movement at the fixed 64 Hz simulation cadence. Rendering
+only presents published Eyes. No Client reads World storage for movement.
 
-**The Server holds a `Player` entity per person, and its Eye is the one pose an
-Edit is checked against.** An `EditIntent` carries a ray origin in metres, and
-before this the Server trusted it. Now `edit::receive` rejects an origin farther
-than `EDIT_ORIGIN_TOLERANCE_M` from the Player's Eye with `OriginTooFar`, on
-arrival and not when the Edit is applied: an intent can wait a second in
-`PendingEdits`, by when the Player has moved on from where the Client meant. An
-entity and not a resource, because the transport has one per connection and a
-singleton would be retrofitted with exactly the cost
-`docs/adr/0002-client-server-from-day-one.md` exists to avoid.
+**Movement mode is independent of view.** Noclip flight preserves adjustable
+0.5–64 m/s flight with fivefold sprint capped at 64 m/s. Physics uses a 0.6 m
+wide, 1.8 m tall AABB, an Eye 1.62 m above the feet, walking at 4.5 m/s,
+sprinting at 8 m/s, a grounded jump of 8 m/s, gravity of 24 m/s² and a terminal
+fall speed of 50 m/s. Core Shape sweeps resolve vertical motion before sliding.
+A grounded body can step up 0.55 m only with head clearance, horizontal progress
+and a supporting landing. All dimensions are metres, independent of Voxel size.
 
-**The Client reports a pose and the Server rate-limits it.**
-`PoseReport { seq, eye }` is plain data with no `Entity`, in metres
-(`docs/adr/0003-voxel-size-is-per-world.md`). It is dropped if not finite or not
-newer than the last, compared with wrapping arithmetic, so a report is
-idempotent and tolerates reordering on a channel that is not reliable. A Player
-has a budget of metres that refills at `PlayerLimits::max_speed_mps` and is
-capped at a quarter of a second's travel; a report farther than the budget moves
-the Player only that far and the Server answers with a `PoseCorrection` carrying
-where it is. The budget is not a per-report slack, which would be free speed per
-report. The return-to-spawn key is a `RespawnIntent` the Server answers the same
-way, because a Client that moved itself there would be a teleport. `Player`'s
-fields are private: a report or a respawn is the only route by which the Client
-moves one.
+**Unknown terrain blocks physics.** Collision reads current held level-0 solids,
+never coarse meshes or generated guesses. Missing Chunks are solid. An embedded
+body freezes until its volume is clear; there is no automatic relocation. Entry
+from flight rejects overlapping or unknown terrain with visible feedback. Each
+overlap/axis sweep visits at most 16,384 cells; queries exceeding that bound
+conservatively block. No movement jobs or second World-write path are
+introduced.
 
-**The Server streams around the Player, not a Client entity.**
-`StreamingAnchor`, a marker on the Client's camera, was the only pose the Server
-read that the Client owns, and it cannot exist once the Client is another
-process.
+**Game and Server policy govern modes.** The unreleased 0.3 World declaration
+adds optional movement permissions and an allowed initial mode. Non-Game World
+parameters remain forbidden. Older contract adapters supply no movement policy.
+The demo allows both modes and starts physics. Without Game policy, generated
+ground defaults physics and an empty World retains flight. The Server also
+checks policy while advancing an existing body, so a forbidden mode freezes.
 
-## Consequences
+**Reach and aim retain their existing guards.** Edit arrival checks its origin
+against the Server Eye with `EDIT_ORIGIN_TOLERANCE_M`; its ray is shortened by
+that origin's distance so the hit stays within `EDIT_REACH_M`. A queued Edit
+keeps its arrival decision. Respawn is a Server request that clears movement,
+vertical velocity and grounded state. Changing view cannot move the body.
 
-- **A pose is rate-limited, not true.** Flying is the only way to move, so the
-  cap is the camera's own ceiling (64 m/s) and a modified Client can fly at it
-  to anywhere and edit within reach. Gravity, collision and a walking speed are
-  the player controller's, and tighten `PlayerLimits` without changing a message
-  here (`.scratch/2026-10-12-server-edit-origin/issues/05-*`).
-- **Reach is `EDIT_REACH_M` from the Eye, exactly.** An intent whose origin is
-  `d` metres from the Eye gets a ray `d` shorter, fixed on arrival, so what it
-  strikes is within `EDIT_REACH_M` of the Eye whatever the tolerance. The
-  tolerance bounds how stale an origin may be and nothing else.
-- **A correction can arrive after the Client has moved on.** In process it is
-  applied the frame it is written. The Client ignores one older (by `seq`) than
-  one it has applied; reconciling the movement made since, which is client
-  prediction, waits for the controller.
-- **Latency is absorbed by the tolerance and the burst, not corrected.**
-  `EditIntent` and `PoseReport` are different message types and a transport that
-  batches several frames will reorder them. Rewinding the Player to the pose at
-  the intent's tick needs a clock shared with the Client, and is additive: a
-  tick on each message and a pose history on `Player`.
-- **One Player.** The systems take `Single<&Player>`; the transport replaces
-  that with a lookup from the sender's `Entity`.
+## Persistence and presentation
 
-## Durable Player entry
+The format-1 Player extension `movement_v1` stores mode and finite yaw/pitch
+beside the authoritative Eye. Missing extension means legacy flight, preserving
+existing saves' meaning. Unknown extensions still refuse loading; older engines
+refuse these new nonempty extensions rather than silently losing movement data.
+Velocity, grounded state, held input and jump edges restart empty. Reopening
+keeps the generated respawn point separate from the saved entry Eye.
 
-World saves store the current Server-owned Eye. Reopening publishes it as the
-entry Eye separately from the generated respawn point, so the spawn altitude is
-not applied twice and respawn retains its existing meaning. Pose sequence
-numbers and movement budgets restart with the connection. Client-only look
-orientation is not Server Player state; future movement/view data needs an
-explicit versioned extension. See [World persistence](../world-persistence.md).
+Save dirtiness and completion compare position, mode and view. Save & Quit
+freezes movement before taking its final snapshot. First-person orientation is
+restored without introducing camera offsets or a third-person camera.
+
+Capture fixtures send normal movement intents and explicitly select flight by
+default, or physics with `TESSERAE_FIXTURE_MOVEMENT=physics`. Permissions still
+apply. Network transport, prediction, lag compensation and character/camera
+presentation remain deferred.
+
+## Crouch and mode feedback
+
+The user added hold-to-crouch on the remappable Descend action (Ctrl by
+default). Physics crouching keeps the feet in place, lowers body height to 1.2 m
+and Eye height to 1.02 m, and limits movement to 2.25 m/s even with sprint
+enabled. Releasing the action stands only when the complete standing body has
+clear terrain; a low ceiling keeps the body crouched. Free flight retains
+descending. The optional `crouching` field in the unreleased `movement_v1`
+extension defaults to false for earlier saves. Actual stance is restored, so
+reopening beneath a ceiling cannot embed a standing body. Older builds reject
+the added closed field rather than silently dropping it. Flight cannot persist a
+crouched stance.
+
+Successful mode changes publish Server-confirmed feedback through the same
+noninteractive themed toast as settings notifications. Refusals use that shared
+presentation too. A new notice replaces the previous one and expires after 2.6
+s.

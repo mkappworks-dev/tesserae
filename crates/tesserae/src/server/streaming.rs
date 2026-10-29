@@ -439,7 +439,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_message::<LodMeshReady>()
         .add_message::<LodUnloaded>()
         .add_plugins(lod::plugin)
-        .add_systems(FixedUpdate, (stream, lod::stream_lod).chain());
+        .add_systems(
+            FixedUpdate,
+            (stream, lod::stream_lod).chain().in_set(Streaming),
+        );
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_systems(FixedFirst, crate::cost::tick_started)
         .add_systems(FixedLast, crate::cost::tick_ended);
@@ -466,6 +469,9 @@ pub(super) fn offset(center: ChunkCoord, delta: IVec3) -> ChunkCoord {
 pub(super) fn delta(from: ChunkCoord, to: ChunkCoord) -> IVec3 {
     IVec3::new(to.x - from.x, to.y - from.y, to.z - from.z)
 }
+
+#[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
+pub(super) struct Streaming;
 
 #[expect(
     clippy::too_many_arguments,

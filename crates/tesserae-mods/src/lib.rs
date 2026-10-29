@@ -24,7 +24,7 @@ mod trust;
 
 pub use adapt::Line;
 pub use bindings::exports::tesserae::mods::guest::{Registered, RegisteredId, WorldInfo};
-pub use bindings::tesserae::mods::content::Declaration;
+pub use bindings::tesserae::mods::content::{Declaration, MovementPolicy};
 pub use command::{
     BatchError, BatchReport, BoxCursor, Command, CommandBatch, Intent, MAX_FILL_VOXELS,
     MAX_VOXEL_INDEX, MAX_VOXELS_PER_CALL, Placement, Region, RegionError, Resolved, VoxelBox,

@@ -75,6 +75,7 @@ pub struct Applied {
     /// With no lake: [`resolve`] returns the one it names.
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
+    pub movement: Option<content::MovementPolicy>,
     pub behaviour: Behaviour,
 }
 
@@ -158,6 +159,19 @@ pub fn apply(
         registry,
     )?;
 
+    let movement = declaration.world.as_ref().and_then(|p| p.movement);
+    if let Some(p) = movement
+        && ((p.start_in_flight && !p.allow_flight) || (!p.start_in_flight && !p.allow_physics))
+    {
+        return Err(ModError::Params {
+            id: id(),
+            what: "movement",
+            source: ParamError {
+                field: "initial mode",
+                rule: "must be allowed",
+            },
+        });
+    }
     let ground = declaration.world.as_ref().and_then(|p| p.ground.clone());
     let (world, lake) = declaration.world.map(world_params).unzip();
     let lake = lake.flatten();
@@ -229,6 +243,7 @@ pub fn apply(
         appearance: declaration.appearance,
         world,
         view,
+        movement,
         behaviour: Behaviour {
             mod_id: id(),
             fluids: declaration.fluids,
