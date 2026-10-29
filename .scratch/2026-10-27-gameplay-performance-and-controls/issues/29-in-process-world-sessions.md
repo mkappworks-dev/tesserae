@@ -17,7 +17,9 @@ it fresh in the same window.
 
 Show the loading screen at once: move Mod loading and save validation behind
 the window, so opening a World never leaves the screen empty. Ticket 27
-moved this here (2026-10-29).
+moved this here (2026-10-29). The user asked (2026-10-29) for one window that
+never closes when a World opens, with a loading bar that follows the real
+stages: reading the save, loading the Game, then the first terrain.
 
 This is the design the spec's World-switch rule assumes: session-only undo,
 measurement and pending input are cleared, and old-World jobs or answers

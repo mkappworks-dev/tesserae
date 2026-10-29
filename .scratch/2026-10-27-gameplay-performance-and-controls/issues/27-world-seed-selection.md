@@ -1,6 +1,6 @@
 # 27: W0: World list, creation and seed selection
 
-Status: done
+Status: ready-for-agent
 Blocked by: none (06, 22, 23 and 24 are merged on main 96ea33e)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -149,6 +149,26 @@ local to the World screens so ticket 07 can generalize it. Sizes follow
 No Mod download manager, multi-Game install layout, in-process World
 switching or new terrain/biome algorithm.
 
+### Demo terrain that shows the seed (added 2026-10-29)
+
+Native review found Randomize working but invisible: the demo Game's 4 m
+relief, no caves and fixed stage made every seed look the same, and its lake
+level was tuned so the stage stays dry only at the engine's default seed.
+The user added two demo-content changes to this PR:
+
+- Raise the demo's relief to 24 m and turn caves on, with the lake level
+  derived from the relief (5/12 of it above sea level, the engine default).
+- Mods cannot read terrain (ADR-0001), so the demo levels its own stage
+  site blind: it removes fluid sources and fills ground up to a fixed
+  height across the stage's footprint, clears the air above it to the top
+  of the terrain band, and lifts the stage onto it. The site stays dry and
+  unburied at any seed. Spawn at the origin stays outside the site.
+- Site Commands respect the 32,768-Voxel fill and 65,536-Voxel batch caps
+  at every tested Voxel size by queueing over ticks; the scenarios still
+  start only on the finished build.
+- The profiling fixtures load the demo, so frame measurements before and
+  after this change are not comparable.
+
 ## Acceptance criteria
 
 - [x] Create → Open → Rename → reopen preserves UUID, seed, Voxel size, edits
@@ -179,6 +199,9 @@ switching or new terrain/biome algorithm.
       and Enter checks moved to ticket 07.)
 - [x] Return to World list reuses the guarded Save & Quit, including Retry,
       Return and confirmed unsafe exit.
+- [ ] Two demo Worlds with different seeds show visibly different terrain
+      around spawn, and at any seed the stage stands dry on level ground
+      with its scenarios running at 1, 0.5 and 0.25 m.
 
 ## Validation and authorization
 
