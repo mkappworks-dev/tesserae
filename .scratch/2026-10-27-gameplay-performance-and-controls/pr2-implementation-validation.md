@@ -282,3 +282,45 @@ Final validation outcome for the exit/shortcut refinements:
 
 The worktree changes are committed locally; nothing has been pushed, published
 or merged. No Server, WIT or Game sources were changed by these refinements.
+
+
+## Main reconciliation, hotbar restart fix and PR preparation (2026-10-29)
+
+The user authorized resolving main, rebasing this branch and opening a PR.
+Local main was clean but diverged by its planning commit `875c7d1`; rebasing it
+onto `origin/main` (`aa3c2b1`) produced `8db34f6`. This branch was then rebased
+onto reconciled main. The sole conflict was execution-plan documentation;
+resolution preserves the confirmed condensed plan and main's conditional
+performance gates. Implementation files had no rebase conflicts.
+
+The user then reported loss of hotbar changes after restarting. The explicitly
+authorized targeted fix is `3f340f9`: assigned slots, active slot, names and
+Orientation are saved atomically per root Game id in a separate hotbar file.
+The Server publishes only the stable Game id in the existing internal content
+catalogue. No WIT, Game, core, World-save or simulation implementation changed.
+Temporary outside-held selections remain transient. Invalid/future files stay
+untouched; failed writes preserve the last good file and report an error.
+Missing names resolve to empty without being discarded when other slots change.
+
+All 149 Client regressions pass. Three added persistence regressions use actual
+catalogue delivery, PostUpdate saving, fresh App instances and temporary files:
+restart/reordered ids/orientations, Game isolation/missing-content recovery,
+and malformed/future/invalid documents plus backup/write failure and recovery.
+The existing Server catalogue regression also verifies publication of Game id.
+
+The retained `cargo-ci-hotbar.sh` follows scripts/cargo-ci, reuses compatible
+guests and explicitly excludes exactly the previously documented Agenda test.
+That run passes 972 workspace tests, zero failed, with five ignored and one
+explicit exclusion. Formatting, all-target/all-feature Clippy, rustdoc,
+default-feature checks, benchmark compilation, boundaries and dependency
+checks passed. This is not a claim of unfiltered CI success; the existing
+persistence failure remains disclosed in the draft PR's checklist.
+
+Logs remain in `/tmp/tesserae-selection-review-uq4y8tkg/`, including
+`cargo-ci-hotbar.log`, `hotbar-tests.log` and `hotbar-native-build.log`.
+`hotbar-restart/` retains two offscreen native process captures, the shared
+saved-layout fixture, source `3f340f9`, binary/hash and environment manifests.
+Both launches show the same assigned slots and active fifth slot. The JSON is
+a seeded visual fixture; automated tests establish the actual write/restart
+behavior. No guest was rebuilt. Cargo used caffeinate, warnings denied and the
+requested shared target cache. PR publication is authorized; merge is not.
