@@ -79,7 +79,7 @@ is Client presentation; aim stays a Server answer.
       in first-person; no competing action fires.
 - [x] View mode and zoom survive restart through the user profile; an older
       profile defaults to first-person; the World save is unchanged.
-- [ ] ADR-0008 amended. Tests replay at 60/144/1000 render updates and
+- [x] ADR-0008 amended. Tests replay at 60/144/1000 render updates and
       1/0.5/0.25 m Voxels.
 - [ ] Captures reviewed by the user. A matched release first-person A/B
       against main shows no regression. A third-person P0 profiler run
@@ -156,3 +156,29 @@ checks it. Profile writes now add a counter to their temporary file name, as
 microsecond macOS clocks let parallel writers collide (a flaky settings test).
 A spawn-side overhang 0.7 m behind the demo start collapses the boom there by
 design; boom-collapse.png shows it.
+
+### Follow-up, 2026-10-29
+
+New replay tests:
+
+- A camera turning, pitching and zooming in a one-metre corridor with a floor
+  and a ceiling, at 60/144/1000 Hz and 1/0.5/0.25 m Voxels, never enters a face
+  in any frame.
+- Easing back out takes the same time at every update rate.
+- Camera-ray reach and Blocked corners hold at all three Voxel sizes.
+
+The corridor replay found a real bug. A sweep that ended exactly on a padded
+face let the next sweep, starting there, pass through it, so the boom could
+clip a wall beside the shoulder. Sweeps now stop 1 mm short.
+
+New native captures:
+
+- blocked-corner.png: 0.25 m Voxels, built by the new TESSERAE_SCREENSHOT_PILLAR
+  fixture through ordinary Place intents. The log reports aim_blocked=true, and
+  the crosshair is dimmed with no outline or ghost.
+- underwater.png: the camera is 0.9 m below a lake surface at full boom; water
+  does not block it. The engine has no underwater effect yet.
+
+scripts/profile-frames gains --view. The release A/B and the third-person run
+were refused as contended, as ticket 25 records. Open: user review of all
+captures, the A/B and the third-person profiler run, all on a quiet host.

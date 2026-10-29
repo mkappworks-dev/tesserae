@@ -110,3 +110,23 @@ Native offscreen captures (dev binary, 1920 x 1080, unchanged quality) are in
 flight-idle, fallback-empty-world and first-person. The sprint frame happens to
 catch the swing near vertical. User visual review and the matched release
 first-person A/B are still open, so the last criterion stays unticked.
+
+### Follow-up, 2026-10-29
+
+The figure now has a replay test: walking for 1.3 s at 60, 144 and 1000
+updates per second gives the same phase and swing. The figure has no Voxel-size
+dependence. Implementation is complete. One criterion is open, and it is not
+code: user review of the captures and the matched release first-person A/B.
+
+Release profiling binaries for main 96ea33e and this branch, each with its own
+demo build, are in /tmp/tesserae-pr6-review.TXrDxF/ab. Every interleaved run was
+refused as contended: the parallel controller and world-seed sessions kept
+starting cargo, rustc and a tesserae app. The refusals are in
+ab/refused-runs.log. No contended sample was kept, so no performance claim is
+made. Rerun once the host is quiet:
+
+scripts/profile-frames --binary ab/<main|branch>-release --profile release
+--features profiling --game ab/<main|branch>-dist --fixtures stationary
+flight -- <fresh dir>
+
+Interleave main and branch.

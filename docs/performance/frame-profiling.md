@@ -27,6 +27,10 @@ bench processes. This cannot reserve the host against unrelated external
 activity; inspect logs and reject contended rounds rather than deleting tail
 samples.
 
+`--view third` measures the over-the-shoulder camera; the default is
+first-person, and an engine without views ignores the option, so one runner
+serves an A/B against an older build.
+
 Use `--presented` for native presentation; default is 1920 x 1080 offscreen and
 works with a locked display. This is rendered throughput, not headless
 throughput or display latency. Requested `AutoNoVsync` is recorded;
