@@ -126,6 +126,12 @@ drift. Controller bindings, sensitivity, invert Y and deadzones are separately
 configurable without replacing keyboard/mouse preferences. Apply trigger
 hysteresis and cancellation on disconnect. Validate default mappings on real
 hardware before claiming support; injected tests are not physical validation.
+Controller grilling (2026-10-29) is recorded in ticket 07. The Server clamps
+movement direction to unit length instead of normalising it, so analog input
+scales speed and digital speeds stay the same. Rumble, brand glyph sets, an
+on-screen keyboard and split-screen are excluded. Pad defaults follow
+Minecraft Bedrock: B toggles crouch and LS click latches sprint. Optional
+repeat place/remove while held is a separate device-neutral ticket, 29.
 
 Touch owns pointer ids from start to end/cancel. Support simultaneous movement,
 look and explicit actions, with no gesture transfer from UI to gameplay.

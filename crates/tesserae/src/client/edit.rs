@@ -358,6 +358,12 @@ pub(super) fn select_held(
     let menu_open = menu.as_ref().is_some_and(|m| m.open);
     if menu_open || !ownership.gameplay() {
         *scrolled = 0.0;
+    } else {
+        use super::actions::Action::{NextSlot, PreviousSlot};
+        let by = i32::from(actions.started(NextSlot)) - i32::from(actions.started(PreviousSlot));
+        if by != 0 {
+            hotbar.step(by);
+        }
     }
     for event in &actions.axes.scroll {
         if menu_open || !ownership.gameplay() {
@@ -478,6 +484,9 @@ fn show_rejections(
 
 fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -> String {
     use super::actions::Action::*;
+    if labels.device == super::actions::Device::Pad {
+        return pad_hints(bindings, labels);
+    }
     let mut lines = Vec::new();
     for (action, verb) in [
         (Help, "controls"),
@@ -513,6 +522,38 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
             "[{}] diagnostics",
             bindings.label(Diagnostics, labels)
         ));
+    }
+    lines.join("\n")
+}
+
+/// Sticks carry movement and look, so only bound buttons are listed.
+fn pad_hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -> String {
+    use super::actions::Action::*;
+    let mut lines = vec![
+        "[Left stick] move".to_owned(),
+        "[Right stick] look".to_owned(),
+    ];
+    for (action, verb) in [
+        (Help, "controls"),
+        (Catalogue, "menu"),
+        (EmptyHand, "empty hand"),
+        (Sample, "pick block"),
+        (Turn, "turn"),
+        (Flip, "flip"),
+        (Shape, "Shape"),
+        (Ascend, "up / jump"),
+        (Descend, "down / crouch"),
+        (Sprint, "sprint"),
+        (MovementMode, "flight / physics"),
+        (PreviousSlot, "previous slot"),
+        (NextSlot, "next slot"),
+        (Undo, "undo"),
+        (Redo, "redo"),
+        (Respawn, "return to spawn"),
+    ] {
+        if bindings.pad[&action].iter().any(Option::is_some) {
+            lines.push(format!("[{}] {verb}", bindings.label(action, labels)));
+        }
     }
     lines.join("\n")
 }
@@ -979,6 +1020,32 @@ mod tests {
                 Some(Holding::Fire)
             );
         }
+    }
+
+    #[test]
+    fn shoulder_buttons_step_through_quick_slots_and_wrap() {
+        use bevy::input::gamepad::GamepadButton;
+        let mut app = app(CursorGrabMode::Locked);
+        frame(&mut app);
+        let mut press = |button| {
+            let mut pad = app
+                .world_mut()
+                .resource_mut::<super::super::pad::PadInput>();
+            pad.buttons.clear();
+            pad.buttons.release_all();
+            pad.buttons.press(button);
+            frame(&mut app);
+            let mut pad = app
+                .world_mut()
+                .resource_mut::<super::super::pad::PadInput>();
+            pad.buttons.clear();
+            pad.buttons.release_all();
+            frame(&mut app);
+            app.world().resource::<Hotbar>().selected
+        };
+        assert_eq!(press(GamepadButton::RightTrigger), 1);
+        assert_eq!(press(GamepadButton::LeftTrigger), 0);
+        assert_eq!(press(GamepadButton::LeftTrigger), 8);
     }
 
     /// A swipe arrives as many small deltas; they add up to a slot.

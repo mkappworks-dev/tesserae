@@ -1,5 +1,6 @@
-//! Stable actions and a single keyboard/mouse resolution pass.
+//! Stable actions and a single keyboard/mouse/controller resolution pass.
 use bevy::input::{
+    gamepad::GamepadButton,
     mouse::{AccumulatedMouseMotion, MouseScrollUnit, MouseWheel},
     touch::TouchPhase,
 };
@@ -37,6 +38,8 @@ pub(super) enum Action {
     Slot7,
     Slot8,
     Slot9,
+    PreviousSlot,
+    NextSlot,
     Undo,
     Redo,
     Catalogue,
@@ -50,11 +53,28 @@ pub(super) const SLOTS: [Action; 9] = [
     Slot1, Slot2, Slot3, Slot4, Slot5, Slot6, Slot7, Slot8, Slot9,
 ];
 
+/// Which binding set an input belongs to.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub(super) enum Device {
+    #[default]
+    KeyboardMouse,
+    Pad,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(super) enum Trigger {
     Key(KeyCode),
     Mouse(MouseButton),
+    Pad(GamepadButton),
+}
+impl Trigger {
+    pub fn device(self) -> Device {
+        match self {
+            Self::Key(_) | Self::Mouse(_) => Device::KeyboardMouse,
+            Self::Pad(_) => Device::Pad,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -92,6 +112,37 @@ impl Modifier {
     }
 }
 
+/// The physical input resources, for systems that read every device.
+pub(super) type Devices<'w> = (
+    Res<'w, ButtonInput<KeyCode>>,
+    Res<'w, ButtonInput<MouseButton>>,
+    Res<'w, super::pad::PadInput>,
+);
+
+/// Every physical input the resolver reads in one frame.
+#[derive(Clone, Copy)]
+pub(super) struct Inputs<'a> {
+    pub keys: &'a ButtonInput<KeyCode>,
+    pub mouse: &'a ButtonInput<MouseButton>,
+    pub pad: &'a ButtonInput<GamepadButton>,
+}
+impl Inputs<'_> {
+    pub fn pressed(&self, trigger: Trigger) -> bool {
+        match trigger {
+            Trigger::Key(key) => self.keys.pressed(key),
+            Trigger::Mouse(button) => self.mouse.pressed(button),
+            Trigger::Pad(button) => self.pad.pressed(button),
+        }
+    }
+    pub fn just_pressed(&self, trigger: Trigger) -> bool {
+        match trigger {
+            Trigger::Key(key) => self.keys.just_pressed(key),
+            Trigger::Mouse(button) => self.mouse.just_pressed(button),
+            Trigger::Pad(button) => self.pad.just_pressed(button),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(super) struct Binding {
     pub trigger: Trigger,
@@ -99,12 +150,9 @@ pub(super) struct Binding {
 }
 
 impl Binding {
-    pub fn active(&self, keys: &ButtonInput<KeyCode>, mouse: &ButtonInput<MouseButton>) -> bool {
-        let pressed = match self.trigger {
-            Trigger::Key(key) => keys.pressed(key),
-            Trigger::Mouse(button) => mouse.pressed(button),
-        };
-        pressed
+    pub fn active(&self, inputs: Inputs) -> bool {
+        let keys = inputs.keys;
+        inputs.pressed(self.trigger)
             && self.modifier.matches(
                 keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]),
                 keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]),
@@ -114,10 +162,69 @@ impl Binding {
     }
 }
 
+fn single(trigger: Trigger) -> [Option<Binding>; 2] {
+    [
+        Some(Binding {
+            trigger,
+            modifier: Modifier::None,
+        }),
+        None,
+    ]
+}
+
+/// Two alternatives per action for each device, so a controller binding never
+/// displaces a keyboard one. Every action has an entry in both maps.
 #[derive(Resource, Clone, PartialEq, Debug)]
-pub(super) struct Bindings(pub HashMap<Action, [Option<Binding>; 2]>);
-impl Default for Bindings {
-    fn default() -> Self {
+pub(super) struct Bindings {
+    pub keyboard: HashMap<Action, [Option<Binding>; 2]>,
+    pub pad: HashMap<Action, [Option<Binding>; 2]>,
+}
+impl Bindings {
+    pub fn map(&self, device: Device) -> &HashMap<Action, [Option<Binding>; 2]> {
+        match device {
+            Device::KeyboardMouse => &self.keyboard,
+            Device::Pad => &self.pad,
+        }
+    }
+    pub fn map_mut(&mut self, device: Device) -> &mut HashMap<Action, [Option<Binding>; 2]> {
+        match device {
+            Device::KeyboardMouse => &mut self.keyboard,
+            Device::Pad => &mut self.pad,
+        }
+    }
+    pub fn alternatives(&self, action: Action) -> impl Iterator<Item = Binding> + '_ {
+        [&self.keyboard, &self.pad]
+            .into_iter()
+            .filter_map(move |map| map.get(&action))
+            .flatten()
+            .flatten()
+            .copied()
+    }
+    pub fn pad_defaults() -> HashMap<Action, [Option<Binding>; 2]> {
+        let keyboard = Self::keyboard_defaults();
+        let mut pad: HashMap<_, _> = keyboard.keys().map(|&action| (action, [None; 2])).collect();
+        for (action, button) in [
+            (Ascend, GamepadButton::South),
+            (Descend, GamepadButton::East),
+            (Catalogue, GamepadButton::North),
+            (Shape, GamepadButton::West),
+            (Sprint, GamepadButton::LeftThumb),
+            (Sample, GamepadButton::RightThumb),
+            (Remove, GamepadButton::RightTrigger2),
+            (Place, GamepadButton::LeftTrigger2),
+            (PreviousSlot, GamepadButton::LeftTrigger),
+            (NextSlot, GamepadButton::RightTrigger),
+            (Turn, GamepadButton::DPadLeft),
+            (Flip, GamepadButton::DPadRight),
+            (EmptyHand, GamepadButton::DPadDown),
+            (Help, GamepadButton::Start),
+            (MovementMode, GamepadButton::Select),
+        ] {
+            pad.insert(action, single(Trigger::Pad(button)));
+        }
+        pad
+    }
+    fn keyboard_defaults() -> HashMap<Action, [Option<Binding>; 2]> {
         let mut bindings = HashMap::new();
         for (action, key) in [
             (Forward, KeyCode::KeyW),
@@ -144,29 +251,14 @@ impl Default for Bindings {
         .into_iter()
         .chain(SLOTS.into_iter().zip(super::edit::SLOT_KEYS))
         {
-            bindings.insert(
-                action,
-                [
-                    Some(Binding {
-                        trigger: Trigger::Key(key),
-                        modifier: Modifier::None,
-                    }),
-                    None,
-                ],
-            );
+            bindings.insert(action, single(Trigger::Key(key)));
         }
         for (action, button) in [(Remove, MouseButton::Left), (Place, MouseButton::Right)] {
-            bindings.insert(
-                action,
-                [
-                    Some(Binding {
-                        trigger: Trigger::Mouse(button),
-                        modifier: Modifier::None,
-                    }),
-                    None,
-                ],
-            );
+            bindings.insert(action, single(Trigger::Mouse(button)));
         }
+        // The wheel already steps through slots; these exist for the controller.
+        bindings.insert(PreviousSlot, [None; 2]);
+        bindings.insert(NextSlot, [None; 2]);
         bindings.get_mut(&Sprint).unwrap()[1] = Some(Binding {
             trigger: Trigger::Key(KeyCode::ShiftRight),
             modifier: Modifier::None,
@@ -198,7 +290,15 @@ impl Default for Bindings {
                 }),
             ],
         );
-        Self(bindings)
+        bindings
+    }
+}
+impl Default for Bindings {
+    fn default() -> Self {
+        Self {
+            keyboard: Self::keyboard_defaults(),
+            pad: Self::pad_defaults(),
+        }
     }
 }
 
@@ -208,6 +308,9 @@ pub(super) struct State {
     pub held: bool,
     pub released: bool,
     pub cancelled: bool,
+    /// Held through a controller binding, for behaviour that differs by hand
+    /// position: a pad latches what a keyboard holds.
+    pub from_pad: bool,
 }
 pub(super) const PIXELS_PER_NOTCH: f32 = 100.0;
 #[derive(Clone, Copy, Debug)]
@@ -217,7 +320,13 @@ pub(super) struct ScrollDelta {
 }
 #[derive(Default, Debug)]
 pub(super) struct Axes {
+    /// Mouse travel this frame, in pixels.
     pub look: Vec2,
+    /// Analog look deflection in [-1, 1], screen-oriented like `look` (+y is
+    /// down). A rate, so the camera scales it by elapsed time.
+    pub look_rate: Vec2,
+    /// Analog movement in [-1, 1]: +x is right, +y is forward.
+    pub movement: Vec2,
     pub scroll: Vec<ScrollDelta>,
 }
 #[derive(Resource, Default)]
@@ -254,21 +363,16 @@ impl Actions {
             ..default()
         };
     }
-    fn resolve(
-        &mut self,
-        bindings: &Bindings,
-        keys: &ButtonInput<KeyCode>,
-        mouse: &ButtonInput<MouseButton>,
-    ) {
+    fn resolve(&mut self, bindings: &Bindings, inputs: Inputs, cancel: bool) {
         self.prior_effective_held = self
             .states
             .iter()
             .filter_map(|(&action, state)| state.held.then_some(action))
             .collect();
-        self.reserved_cancel = keys.just_pressed(KeyCode::Escape);
-        let matches = |binding: Binding| binding.active(keys, mouse);
+        self.reserved_cancel = inputs.keys.just_pressed(KeyCode::Escape) || cancel;
+        let matches = |binding: Binding| binding.active(inputs);
         let consumed: HashSet<_> = bindings
-            .0
+            .keyboard
             .values()
             .flatten()
             .flatten()
@@ -276,27 +380,25 @@ impl Actions {
             .map(|binding| binding.trigger)
             .collect();
         // A history chord owns its modifier too, preventing vertical movement.
-        let history = [Undo, Redo].into_iter().any(|action| {
-            bindings.0.get(&action).is_some_and(|alternatives| {
-                alternatives
-                    .iter()
-                    .flatten()
-                    .any(|binding| matches(*binding))
-            })
-        });
-        for (&action, alternatives) in &bindings.0 {
-            let held = alternatives.iter().flatten().any(|binding| {
+        let history = [Undo, Redo]
+            .into_iter()
+            .any(|action| bindings.alternatives(action).any(matches));
+        let actions: HashSet<Action> = bindings
+            .keyboard
+            .keys()
+            .chain(bindings.pad.keys())
+            .copied()
+            .collect();
+        for action in actions {
+            let alternatives: Vec<_> = bindings.alternatives(action).collect();
+            let held = alternatives.iter().any(|binding| {
                 matches(*binding)
                     && (binding.modifier != Modifier::None || !consumed.contains(&binding.trigger))
             }) && !(action == Descend && history);
-            let just_pressed = |trigger| match trigger {
-                Trigger::Key(key) => keys.just_pressed(key),
-                Trigger::Mouse(button) => mouse.just_pressed(button),
-            };
-            let continuing = alternatives.iter().flatten().any(|binding| {
+            let continuing = alternatives.iter().any(|binding| {
                 matches(*binding)
                     && self.raw_triggers.contains(&binding.trigger)
-                    && !just_pressed(binding.trigger)
+                    && !inputs.just_pressed(binding.trigger)
             });
             let previous = self.raw_held.contains(&action);
             if held {
@@ -310,30 +412,42 @@ impl Actions {
                     started: held
                         && (!previous
                             || (!continuing
-                                && alternatives.iter().flatten().any(|binding| {
-                                    matches(*binding) && just_pressed(binding.trigger)
+                                && alternatives.iter().any(|binding| {
+                                    matches(*binding) && inputs.just_pressed(binding.trigger)
                                 }))),
                     held,
                     released: previous && !held,
                     cancelled: false,
+                    from_pad: held
+                        && alternatives.iter().any(|binding| {
+                            binding.trigger.device() == Device::Pad && matches(*binding)
+                        }),
                 },
             );
         }
-        self.raw_triggers = keys
+        self.raw_triggers = inputs
+            .keys
             .get_pressed()
             .copied()
             .map(Trigger::Key)
-            .chain(mouse.get_pressed().copied().map(Trigger::Mouse))
+            .chain(inputs.mouse.get_pressed().copied().map(Trigger::Mouse))
+            .chain(inputs.pad.get_pressed().copied().map(Trigger::Pad))
             .collect();
     }
 }
 
+/// How bindings read on screen: keyboard labels follow the active layout, and
+/// controller labels follow the last deliberately used device and its maker.
 #[derive(Resource, Default)]
-pub(super) struct Labels(pub HashMap<KeyCode, String>);
+pub(super) struct Labels {
+    keys: HashMap<KeyCode, String>,
+    pub device: Device,
+    pub sony: bool,
+}
 impl Labels {
     pub fn binding(&self, binding: Binding) -> String {
         let trigger = match binding.trigger {
-            Trigger::Key(key) => self.0.get(&key).cloned().unwrap_or_else(|| {
+            Trigger::Key(key) => self.keys.get(&key).cloned().unwrap_or_else(|| {
                 let name = format!("{key:?}");
                 name.strip_prefix("Key")
                     .or_else(|| name.strip_prefix("Digit"))
@@ -341,6 +455,7 @@ impl Labels {
                     .to_owned()
             }),
             Trigger::Mouse(button) => format!("{button:?} mouse"),
+            Trigger::Pad(button) => self.pad(button),
         };
         let modifier = match binding.modifier {
             Modifier::None => "",
@@ -355,11 +470,41 @@ impl Labels {
         };
         format!("{modifier}{trigger}")
     }
+    pub fn pad(&self, button: GamepadButton) -> String {
+        use GamepadButton::*;
+        let (xbox, playstation) = match button {
+            South => ("A", "Cross"),
+            East => ("B", "Circle"),
+            West => ("X", "Square"),
+            North => ("Y", "Triangle"),
+            LeftTrigger => ("LB", "L1"),
+            RightTrigger => ("RB", "R1"),
+            LeftTrigger2 => ("LT", "L2"),
+            RightTrigger2 => ("RT", "R2"),
+            Select => ("View", "Create"),
+            Start => ("Menu", "Options"),
+            Mode => ("Guide", "PS"),
+            LeftThumb => ("LS", "L3"),
+            RightThumb => ("RS", "R3"),
+            DPadUp => ("D-pad ↑", "D-pad ↑"),
+            DPadDown => ("D-pad ↓", "D-pad ↓"),
+            DPadLeft => ("D-pad ←", "D-pad ←"),
+            DPadRight => ("D-pad →", "D-pad →"),
+            C => ("C", "C"),
+            Z => ("Z", "Z"),
+            Other(code) => return format!("Button {code}"),
+        };
+        if self.sony { playstation } else { xbox }.to_owned()
+    }
 }
 impl Bindings {
+    /// Labels from the binding set of the last deliberately used device.
     pub fn label(&self, action: Action, labels: &Labels) -> String {
+        self.label_for(labels.device, action, labels)
+    }
+    pub fn label_for(&self, device: Device, action: Action, labels: &Labels) -> String {
         let alternatives: Vec<_> = self
-            .0
+            .map(device)
             .get(&action)
             .into_iter()
             .flatten()
@@ -379,7 +524,10 @@ fn labels(
 ) {
     for event in events.read() {
         if let bevy::input::keyboard::Key::Character(character) = &event.logical_key {
-            labels.0.insert(event.key_code, character.to_uppercase());
+            let label = character.to_uppercase();
+            if labels.keys.get(&event.key_code) != Some(&label) {
+                labels.keys.insert(event.key_code, label);
+            }
         }
     }
 }
@@ -390,19 +538,35 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(PreUpdate, labels.after(bevy::input::InputSystems));
     app.init_resource::<Bindings>()
         .init_resource::<Actions>()
+        .init_resource::<super::pad::PadInput>()
         .add_message::<MouseWheel>()
-        .add_systems(PreUpdate, collect.after(bevy::input::InputSystems));
+        .add_systems(
+            PreUpdate,
+            collect
+                .after(bevy::input::InputSystems)
+                .after(super::pad::read),
+        );
 }
 fn collect(
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    (keys, mouse, pad): (
+        Res<ButtonInput<KeyCode>>,
+        Res<ButtonInput<MouseButton>>,
+        Res<super::pad::PadInput>,
+    ),
     bindings: Res<Bindings>,
     mut actions: ResMut<Actions>,
     motion: Option<Res<AccumulatedMouseMotion>>,
     mut wheel: MessageReader<MouseWheel>,
 ) {
-    actions.resolve(&bindings, &keys, &mouse);
+    let inputs = Inputs {
+        keys: &keys,
+        mouse: &mouse,
+        pad: &pad.buttons,
+    };
+    actions.resolve(&bindings, inputs, pad.cancel);
     actions.axes.look = motion.map_or(Vec2::ZERO, |motion| motion.delta);
+    actions.axes.look_rate = pad.look;
+    actions.axes.movement = pad.movement;
     actions.axes.scroll.clear();
     actions
         .axes
@@ -421,13 +585,26 @@ pub(super) fn test_plugin(app: &mut App) {
     app.init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>();
     app.init_resource::<super::profile::Preferences>()
-        .init_resource::<super::camera::Sprint>();
+        .init_resource::<super::camera::Sprint>()
+        .init_resource::<super::camera::PadLatch>();
     plugin(app);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    static NO_PAD: std::sync::LazyLock<ButtonInput<GamepadButton>> =
+        std::sync::LazyLock::new(ButtonInput::default);
+    fn inputs<'a>(
+        keys: &'a ButtonInput<KeyCode>,
+        mouse: &'a ButtonInput<MouseButton>,
+    ) -> Inputs<'a> {
+        Inputs {
+            keys,
+            mouse,
+            pad: &NO_PAD,
+        }
+    }
     #[test]
     fn both_sides_and_both_default_redo_gestures_resolve_once() {
         let bindings = Bindings::default();
@@ -436,7 +613,7 @@ mod tests {
             keys.press(modifier);
             keys.press(KeyCode::KeyY);
             let mut actions = Actions::default();
-            actions.resolve(&bindings, &keys, &ButtonInput::default());
+            actions.resolve(&bindings, inputs(&keys, &ButtonInput::default()), false);
             assert!(actions.started(Redo));
             assert!(!actions.started(Undo));
             assert!(!actions.held(Descend));
@@ -453,7 +630,7 @@ mod tests {
                     keys.press(key);
                 }
                 let mut actions = Actions::default();
-                actions.resolve(&bindings, &keys, &ButtonInput::default());
+                actions.resolve(&bindings, inputs(&keys, &ButtonInput::default()), false);
                 assert!(actions.started(Redo));
                 assert!(!actions.started(Undo));
                 assert!(!actions.held(Descend));
@@ -464,11 +641,11 @@ mod tests {
     #[test]
     fn escape_remains_a_cancel_route_after_release_cursor_is_rebound() {
         let mut bindings = Bindings::default();
-        bindings.0.insert(ReleaseCursor, [None, None]);
+        bindings.keyboard.insert(ReleaseCursor, [None, None]);
         let mut actions = Actions::default();
         let mut keys = ButtonInput::default();
         keys.press(KeyCode::Escape);
-        actions.resolve(&bindings, &keys, &ButtonInput::default());
+        actions.resolve(&bindings, inputs(&keys, &ButtonInput::default()), false);
         assert!(actions.cancel_requested());
         actions.consume_cancel();
         assert!(!actions.cancel_requested());
@@ -481,19 +658,19 @@ mod tests {
         let mut keys = ButtonInput::default();
         let mouse = ButtonInput::default();
         keys.press(KeyCode::ShiftLeft);
-        actions.resolve(&bindings, &keys, &mouse);
+        actions.resolve(&bindings, inputs(&keys, &mouse), false);
         assert!(actions.started(Sprint));
         keys.clear();
         keys.press(KeyCode::ShiftRight);
-        actions.resolve(&bindings, &keys, &mouse);
+        actions.resolve(&bindings, inputs(&keys, &mouse), false);
         assert!(!actions.started(Sprint));
         keys.clear();
         keys.release(KeyCode::ShiftLeft);
-        actions.resolve(&bindings, &keys, &mouse);
+        actions.resolve(&bindings, inputs(&keys, &mouse), false);
         assert!(actions.held(Sprint));
         assert!(!actions.state(Sprint).released);
         keys.release(KeyCode::ShiftRight);
-        actions.resolve(&bindings, &keys, &mouse);
+        actions.resolve(&bindings, inputs(&keys, &mouse), false);
         assert!(actions.state(Sprint).released);
     }
 
@@ -517,7 +694,7 @@ mod tests {
             "Z"
         );
         assert_eq!(
-            bindings.0[&Action::Forward][0].unwrap().trigger,
+            bindings.keyboard[&Action::Forward][0].unwrap().trigger,
             Trigger::Key(KeyCode::KeyW)
         );
     }
@@ -547,7 +724,7 @@ mod tests {
                 if frame == hz / 2 {
                     keys.press(KeyCode::ShiftRight);
                 }
-                actions.resolve(&bindings, &keys, &mouse);
+                actions.resolve(&bindings, inputs(&keys, &mouse), false);
                 keys.clear();
                 undo += usize::from(actions.started(Undo));
                 redo += usize::from(actions.started(Redo));

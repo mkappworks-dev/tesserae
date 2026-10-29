@@ -109,7 +109,7 @@ struct MenuSlots;
 pub(super) struct CatalogueItem;
 #[derive(Component)]
 pub(super) struct TileState {
-    selected: bool,
+    pub(super) selected: bool,
 }
 #[derive(Component)]
 struct ShapePanel;
@@ -1164,19 +1164,28 @@ pub(super) fn drag_preview(
     }
 }
 
+type Tiles<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static Entry,
+        &'static TileState,
+        Has<CatalogueItem>,
+        &'static mut BackgroundColor,
+        &'static mut BorderColor,
+    ),
+>;
 pub(super) fn highlight_tiles(
     menu: Res<Menu>,
     pointer: Res<PointerState>,
     hotbar: Res<Hotbar>,
-    mut tiles: Query<(
-        &Entry,
-        &TileState,
-        Has<CatalogueItem>,
-        &mut BackgroundColor,
-        &mut BorderColor,
-    )>,
+    mut tiles: Tiles,
     mut inspectors: Query<(&Inspect, &mut Visibility)>,
+    focus: Option<Res<bevy::input_focus::InputFocus>>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
+    let focused = super::menu_ui::visible_focus(focus.as_deref(), visible.as_deref());
     for (inspect, mut visibility) in &mut inspectors {
         *visibility = if pointer.hovered == Some(Entry::Material(inspect.0)) {
             Visibility::Inherited
@@ -1184,13 +1193,13 @@ pub(super) fn highlight_tiles(
             Visibility::Hidden
         };
     }
-    for (entry, tile, catalogue_item, mut background, mut border) in &mut tiles {
+    for (entity, entry, tile, catalogue_item, mut background, mut border) in &mut tiles {
         let selected = if catalogue_item {
             matches_content(hotbar.held(), *entry)
         } else {
             tile.selected
         };
-        let hovered = menu.open && pointer.hovered == Some(*entry);
+        let hovered = menu.open && (pointer.hovered == Some(*entry) || focused == Some(entity));
         let colour = if selected {
             Color::srgb(0.084273, 0.117038, 0.092091)
         } else if hovered {

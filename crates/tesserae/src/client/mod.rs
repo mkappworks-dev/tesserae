@@ -20,6 +20,7 @@ mod menu;
 mod menu_ui;
 #[cfg(feature = "dev")]
 mod overlay;
+mod pad;
 mod palette;
 mod pick;
 mod pose;
@@ -44,6 +45,7 @@ pub fn plugin(app: &mut App) {
         menu_ui::plugin,
         actions::plugin,
         input::plugin,
+        pad::plugin,
     ));
     app.add_plugins((
         camera::plugin,

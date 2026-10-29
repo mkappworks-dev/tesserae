@@ -70,3 +70,13 @@ Successful mode changes publish Server-confirmed feedback through the same
 noninteractive themed toast as settings notifications. Refusals use that shared
 presentation too. A new notice replaces the previous one and expires after 2.6
 s.
+
+## Analog throttle
+
+A controller stick moves at partial speed. The movement direction's length,
+capped at 1, is a throttle on the speed the Server would otherwise choose; it
+never raises speed. Flight scales its velocity by it, and physics scales the
+horizontal speed after discarding the vertical part. The Client sends keyboard
+directions at unit length, so pitch and diagonals keep full speed as before. A
+controller's crouch toggle is Client input state: the intent still carries a
+held crouch, and the Server rules on stance exactly as for hold-to-crouch.

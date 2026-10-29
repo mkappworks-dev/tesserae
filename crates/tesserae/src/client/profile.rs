@@ -20,7 +20,32 @@ pub(crate) struct Preferences {
     pub scroll_sensitivity: f32,
     pub display_sync: bool,
     pub fps_cap: Option<u32>,
+    pub pad: PadPreferences,
 }
+/// Controller feel, kept apart from the mouse so neither overwrites the other.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct PadPreferences {
+    /// Multiplier on the default full-deflection turn rate.
+    pub look_sensitivity: f32,
+    pub invert_y: bool,
+    pub move_deadzone: f32,
+    pub look_deadzone: f32,
+    pub toggle_crouch: bool,
+}
+impl Default for PadPreferences {
+    fn default() -> Self {
+        Self {
+            look_sensitivity: 1.0,
+            invert_y: false,
+            move_deadzone: 0.15,
+            look_deadzone: 0.15,
+            toggle_crouch: true,
+        }
+    }
+}
+pub(super) const PAD_SENSITIVITY: std::ops::RangeInclusive<f32> = 0.25..=3.0;
+pub(super) const PAD_DEADZONE: std::ops::RangeInclusive<f32> = 0.05..=0.5;
 impl Default for Preferences {
     fn default() -> Self {
         Self {
@@ -32,6 +57,7 @@ impl Default for Preferences {
             scroll_sensitivity: 1.0,
             display_sync: true,
             fps_cap: None,
+            pad: PadPreferences::default(),
         }
     }
 }
@@ -40,6 +66,8 @@ struct Document {
     version: u32,
     #[serde(default)]
     bindings: HashMap<String, serde_json::Value>,
+    #[serde(default)]
+    pad_bindings: HashMap<String, serde_json::Value>,
     #[serde(default)]
     preferences: Preferences,
 }
@@ -100,35 +128,65 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         return Err(io::Error::other("unsupported user profile version"));
     }
     let p = &document.preferences;
+    let pad = &p.pad;
     if !p.sensitivity.is_finite()
         || !(0.0001..=0.1).contains(&p.sensitivity)
         || !p.scroll_sensitivity.is_finite()
         || !(0.1..=10.0).contains(&p.scroll_sensitivity)
         || p.fps_cap.is_some_and(|cap| !(15..=1000).contains(&cap))
+        || !PAD_SENSITIVITY.contains(&pad.look_sensitivity)
+        || !PAD_DEADZONE.contains(&pad.move_deadzone)
+        || !PAD_DEADZONE.contains(&pad.look_deadzone)
     {
         return Err(io::Error::other("invalid preference value"));
     }
+    use super::actions::Device;
     let mut bindings = Bindings::default();
+    for (device, entries) in [
+        (Device::KeyboardMouse, document.bindings),
+        (Device::Pad, document.pad_bindings),
+    ] {
+        merge(bindings.map_mut(device), device, entries)?;
+    }
+    Ok((bindings, document.preferences))
+}
+/// Loads one device's explicit bindings over its defaults. A new default never
+/// displaces an explicit binding; it is dropped instead.
+fn merge(
+    map: &mut HashMap<super::actions::Action, [Option<super::actions::Binding>; 2]>,
+    device: super::actions::Device,
+    entries: HashMap<String, serde_json::Value>,
+) -> io::Result<()> {
+    use super::actions::{Action, Trigger};
+    use bevy::input::gamepad::GamepadButton;
     let mut explicit = HashSet::new();
-    for (id, value) in document.bindings {
+    for (id, value) in entries {
         let Ok(action) = serde_json::from_value(serde_json::Value::String(id)) else {
             continue;
         };
         let alternatives = serde_json::from_value(value).map_err(io::Error::other)?;
-        bindings.0.insert(action, alternatives);
+        map.insert(action, alternatives);
         explicit.insert(action);
     }
-    use super::actions::{Action, Trigger};
     let mut seen: Vec<super::actions::Binding> = Vec::new();
-    let mut actions: Vec<_> = bindings.0.keys().copied().collect();
+    let mut actions: Vec<_> = map.keys().copied().collect();
     actions.sort_by_key(|action| (!explicit.contains(action), format!("{action:?}")));
     for action in actions {
-        for alternative in bindings.0.get_mut(&action).unwrap() {
+        for alternative in map.get_mut(&action).unwrap() {
             let Some(binding) = *alternative else {
                 continue;
             };
+            if binding.trigger.device() != device {
+                return Err(io::Error::other("binding in the wrong device section"));
+            }
             if binding.trigger == Trigger::Key(KeyCode::Escape) && action != Action::ReleaseCursor {
                 return Err(io::Error::other("Escape is reserved for cancellation"));
+            }
+            if binding.trigger == Trigger::Pad(GamepadButton::Mode)
+                || (device == super::actions::Device::Pad
+                    && binding.modifier != super::actions::Modifier::None)
+            {
+                return Err(io::Error::other("reserved controller binding"));
             }
             if seen.iter().any(|previous| {
                 previous.trigger == binding.trigger && previous.modifier.overlaps(binding.modifier)
@@ -142,24 +200,28 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
             }
         }
     }
-    Ok((bindings, document.preferences))
+    Ok(())
 }
 fn encode(bindings: &Bindings, preferences: &Preferences) -> io::Result<Vec<u8>> {
-    let mut entries = HashMap::new();
-    for (action, alternatives) in &bindings.0 {
-        let serde_json::Value::String(id) =
-            serde_json::to_value(action).map_err(io::Error::other)?
-        else {
-            unreachable!()
-        };
-        entries.insert(
-            id,
-            serde_json::to_value(alternatives).map_err(io::Error::other)?,
-        );
-    }
+    let entries = |map: &HashMap<_, _>| -> io::Result<HashMap<String, serde_json::Value>> {
+        let mut entries = HashMap::new();
+        for (action, alternatives) in map {
+            let serde_json::Value::String(id) =
+                serde_json::to_value(action).map_err(io::Error::other)?
+            else {
+                unreachable!()
+            };
+            entries.insert(
+                id,
+                serde_json::to_value(alternatives).map_err(io::Error::other)?,
+            );
+        }
+        Ok(entries)
+    };
     serde_json::to_vec_pretty(&Document {
         version: 1,
-        bindings: entries,
+        bindings: entries(&bindings.keyboard)?,
+        pad_bindings: entries(&bindings.pad)?,
         preferences: preferences.clone(),
     })
     .map_err(io::Error::other)
@@ -232,10 +294,10 @@ mod tests {
         document["preferences"]["invert_y"] = true.into();
         let (bindings, prefs) = decode(&serde_json::to_vec(&document).unwrap()).unwrap();
         assert!(prefs.invert_y);
-        assert!(bindings.0[&Action::Sample][0].is_none());
-        assert!(bindings.0[&Action::Sample][1].is_some());
+        assert!(bindings.keyboard[&Action::Sample][0].is_none());
+        assert!(bindings.keyboard[&Action::Sample][1].is_some());
         assert_eq!(
-            bindings.0[&Action::Forward][0].unwrap().trigger,
+            bindings.keyboard[&Action::Forward][0].unwrap().trigger,
             super::super::actions::Trigger::Key(KeyCode::KeyP)
         );
     }
@@ -245,16 +307,75 @@ mod tests {
         let bytes = br#"{"version":1,"bindings":{"future_action":null,"forward":[null,null]},"preferences":{"invert_y":true}}"#;
         let (bindings, prefs) = decode(bytes).unwrap();
         assert!(prefs.invert_y);
-        assert_eq!(bindings.0[&Action::Forward], [None, None]);
+        assert_eq!(bindings.keyboard[&Action::Forward], [None, None]);
         assert_eq!(
-            bindings.0[&Action::Place],
-            Bindings::default().0[&Action::Place]
+            bindings.keyboard[&Action::Place],
+            Bindings::default().keyboard[&Action::Place]
         );
         assert_eq!(
             decode(&encode(&bindings, &prefs).unwrap()).unwrap(),
             (bindings, prefs)
         );
     }
+    #[test]
+    fn controller_bindings_and_feel_never_touch_the_keyboard_profile() {
+        use super::super::actions::{Binding, Modifier, Trigger};
+        use bevy::input::gamepad::GamepadButton;
+        let defaults: serde_json::Value =
+            serde_json::from_slice(&encode(&Bindings::default(), &Preferences::default()).unwrap())
+                .unwrap();
+        let mut bindings = Bindings::default();
+        bindings.pad.insert(
+            Action::Remove,
+            [
+                Some(Binding {
+                    trigger: Trigger::Pad(GamepadButton::East),
+                    modifier: Modifier::None,
+                }),
+                None,
+            ],
+        );
+        bindings.pad.insert(Action::Descend, [None, None]);
+        let mut prefs = Preferences::default();
+        prefs.pad.invert_y = true;
+        prefs.pad.look_sensitivity = 2.0;
+        let bytes = encode(&bindings, &prefs).unwrap();
+        let written: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(written["bindings"], defaults["bindings"]);
+        let mut mouse_prefs = written["preferences"].clone();
+        mouse_prefs.as_object_mut().unwrap().remove("pad");
+        let mut default_mouse = defaults["preferences"].clone();
+        default_mouse.as_object_mut().unwrap().remove("pad");
+        assert_eq!(mouse_prefs, default_mouse);
+        assert_eq!(decode(&bytes).unwrap(), (bindings, prefs));
+    }
+
+    #[test]
+    fn a_profile_from_before_controllers_gains_pad_defaults() {
+        let bytes =
+            br#"{"version":1,"bindings":{"forward":[null,null]},"preferences":{"invert_y":true}}"#;
+        let (bindings, prefs) = decode(bytes).unwrap();
+        assert_eq!(bindings.keyboard[&Action::Forward], [None, None]);
+        assert_eq!(bindings.pad, Bindings::default().pad);
+        assert_eq!(prefs.pad, PadPreferences::default());
+        assert!(prefs.invert_y && !prefs.pad.invert_y);
+    }
+
+    #[test]
+    fn reserved_misplaced_and_out_of_range_controller_entries_are_refused() {
+        for bad in [
+            r#""pad_bindings":{"help":[{"trigger":{"pad":"Mode"},"modifier":"none"},null]}"#,
+            r#""pad_bindings":{"help":[{"trigger":{"key":"KeyH"},"modifier":"none"},null]}"#,
+            r#""bindings":{"help":[{"trigger":{"pad":"North"},"modifier":"none"},null]}"#,
+            r#""pad_bindings":{"help":[{"trigger":{"pad":"North"},"modifier":"shift"},null]}"#,
+            r#""preferences":{"pad":{"move_deadzone":0.9}}"#,
+            r#""preferences":{"pad":{"look_sensitivity":0.0}}"#,
+        ] {
+            let document = format!(r#"{{"version":1,{bad}}}"#);
+            assert!(decode(document.as_bytes()).is_err(), "{bad}");
+        }
+    }
+
     #[test]
     fn corrupt_and_failed_writes_preserve_the_last_file() {
         let root = std::env::temp_dir().join(format!(
