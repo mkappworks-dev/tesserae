@@ -67,9 +67,8 @@ pub fn plugin(app: &mut App) {
         removal::plugin,
         history::plugin,
         avatar::plugin,
-        loading::plugin,
     ));
-    app.add_plugins(view::plugin);
+    app.add_plugins((view::plugin, loading::plugin));
     app.add_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))
