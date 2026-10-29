@@ -50,11 +50,12 @@ bottlenecks; the broad noisy series cannot justify small gains.
 
 ## Unscheduled World list work
 
-Ticket 29 (W1, in-process World sessions, including a loading screen before
+Ticket 30 (W1, in-process World sessions, including a loading screen before
 Mod loading) is a needs-triage backlog item with no sequence slot. It
-touches nearly every Server and Client plugin, so schedule it after PRs 6,
-8 and 9. Ticket 31 (W0.1, window position and native fullscreen across a
-restart) is a small separate PR that may land before 29. Ticket 30 (G0,
+touches nearly every Server and Client plugin, so schedule it after PRs 6
+and 8. Ticket 32 (W0.1: window position and native fullscreen across a
+restart, the World screens' native keyboard check and their controller
+navigation) is a small separate PR that may land before 30. Ticket 31 (G0,
 multiple installed Games) is also unscheduled.
 
 ## Deferred product work

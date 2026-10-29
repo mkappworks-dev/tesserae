@@ -14,7 +14,7 @@ opens, renames and deletes Worlds. Opening or creating re-execs the process on
 the chosen World directory; the process boundary is what keeps old-World jobs
 out of the new World. The next process inherits window size, position and
 fullscreen, and shows a loading screen at once. In-process switching is the
-long-term target, ticket 29 (W1). `TESSERAE_WORLD_DIR`, `TESSERAE_EPHEMERAL`,
+long-term target, ticket 30 (W1). `TESSERAE_WORLD_DIR`, `TESSERAE_EPHEMERAL`,
 profile fixtures and screenshots bypass the list exactly as today and keep
 print-and-exit on failure.
 
@@ -33,7 +33,7 @@ print-and-exit on failure.
 - Trust store and checks: Engine host policy; the dialog is client UI.
 - Out of scope: Game-declared World options (game mode, difficulty) through
   future declarations; showing the seed in-World (Server policy, as
-  multiplayer servers may hide it); multiple installed Games, ticket 30.
+  multiplayer servers may hide it); multiple installed Games, ticket 31.
 
 ### Storage
 
@@ -142,9 +142,9 @@ error and leaves the files. No type-the-name step.
 
 Mouse and keyboard only: Tab/Shift-Tab focus, Enter activates, Escape is
 Back/Cancel. Name and seed fields use `Owner::TextEntry`. Tab handling stays
-local to the World screens so ticket 07 can generalize it. Sizes follow
-`UiScale`. Controller and touch journeys for these screens belong to tickets
-07 and 08–10.
+local to the World screens. Sizes follow `UiScale`. Controller journeys for
+these screens belong to ticket 32 (ticket 07 merged first) and touch to
+08–10.
 
 No Mod download manager, multi-Game install layout, in-process World
 switching or new terrain/biome algorithm.
@@ -192,7 +192,7 @@ The user added two demo-content changes to this PR:
       environment; Re-Create copies seed, Game and Voxel size.
 - [x] Re-exec keeps window size, and position once the window has moved; a
       World opened from the list shows a loading screen once its window
-      exists. (Narrowed 2026-10-29: the rest moved to tickets 29 and 31.)
+      exists. (Narrowed 2026-10-29: the rest moved to tickets 30 and 32.)
 - [x] Mouse and keyboard controls lay out at 1024×640 and 1920×1080 under
       `UiScale`; Escape and activation are covered by tests; native captures
       in one /tmp folder for user review. (Narrowed 2026-10-29: native Tab
@@ -218,12 +218,12 @@ Implementation, push, publication and merge need separate user instruction.
 Supersedes the earlier draft notes and the "accepted focus/touch/controller
 operations" criterion. Q1–Q18 set the first design; a comparison with
 Minecraft and Luanti then revised it. Re-exec stays for W0 with window
-carry-over, and in-process sessions move to ticket 29 (Q19). Signed seeds are
+carry-over, and in-process sessions move to ticket 30 (Q19). Signed seeds are
 accepted (Q20). Folders get readable names instead of UUIDs, plus Show World
 folder (Q21). Voxel size is exposed under More World options (Q22).
 Re-Create and the recovered-save banner are added (Q23). The ownership split
 and the writer-lock rule for Rename/Delete are adopted, and multi-Game
-installs move to ticket 30 (Q24).
+installs move to ticket 31 (Q24).
 
 ### Seams with parallel worktrees
 
@@ -252,6 +252,9 @@ runs are pending. No push, PR or merge.
 ### Criteria narrowed 2026-10-29
 
 The user chose to keep this ticket done and narrow the two open criteria.
-A loading screen before Mod loading moves to ticket 29, which restructures
+A loading screen before Mod loading moves to ticket 30, which restructures
 startup anyway. Position before the first move and native fullscreen move
-to ticket 31; the native Tab/Enter check moves to ticket 07 (PR 9).
+to ticket 32; the native Tab/Enter check went to ticket 07 at first, but
+PR 9 merged first, so it and the World screens' controller journeys moved
+to ticket 32 on rebase. Stubs 29–31 were renumbered 30–32 because main
+already used ticket 29.
