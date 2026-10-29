@@ -134,18 +134,6 @@ Edit; the Client applies a reply only if its hand selection has not changed. UI
 atlas images use premultiplied blending to preserve transparency. No preview
 reads World storage.
 
-The Game may declare a player figure in its World parameters: bones and cubes in
-the shape of Bedrock geometry, one 64 by 64 skin and per-state swing numbers,
-bounded at load. The Client poses it from the body state the Server publishes
-with each Eye and draws the engine's plain box when the Game declares none
-([ADR-0008](adr/0008-the-server-owns-the-players-pose.md)).
-
-Third-person is Client presentation. The camera sits over the shoulder and is
-kept out of terrain by sweeps against the drawn faces of Chunk meshes the Client
-was sent. The Server accepts a ray from that camera but judges reach and sight
-from the Eye, answering `Blocked` for what only the camera can see
-([ADR-0008](adr/0008-the-server-owns-the-players-pose.md)).
-
 The Server also supplies removal target identity and bounds. The Client draws a
 progress bar above it and sends a guarded removal after the Material's hold
 time. This is a gesture guard, not a network anti-cheat timer. The unreleased
@@ -161,6 +149,32 @@ simulation wake path. Successful replay publishes inverse or forward Mod edit
 events. New successful changes clear redo; refusals preserve history and World
 state. Simulation consequences elsewhere are not rewound. Multiplayer history
 ownership remains part of the network transport work.
+
+### The Player, its figure and the camera
+
+Movement and reach are the Server's, presentation is the Client's, and the Game
+only declares data once at load: no Mod code runs per tick for movement,
+animation or the camera
+([ADR-0008](adr/0008-the-server-owns-the-players-pose.md)).
+
+| Concern                                                  | The engine decides                                      | Data the Game declares                               | Where it runs                     |
+| -------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- | --------------------------------- |
+| Body: position, collision, gravity, jump, crouch, sprint | All of it, in metres                                    | —                                                    | Server                            |
+| Movement modes, flight and physics                       | The mechanics and the switch                            | `movement-policy`: allowed modes, initial mode       | Server enforces                   |
+| Body state for animation                                 | Measured from actual travel, published with each Eye    | —                                                    | Server publishes                  |
+| Figure shape and skin                                    | Bone/cube renderer; a plain box when none is declared   | `character-def`: bones, pivots, cubes, 64 by 64 skin | Client draws                      |
+| Animation                                                | Pose driver, state choice, head leading the body by 50° | Swing angle, rate and arm raise per state            | Client                            |
+| View mode and zoom                                       | All of it; 1.5 to 6 m, fixed shoulder offset            | —                                                    | Client, saved in the user profile |
+| Camera collision                                         | Sweeps against the Chunk meshes the Client was sent     | —                                                    | Client                            |
+| Aim, reach and `Blocked`                                 | All of it; 8 m from the Eye                             | —                                                    | Server                            |
+| Controls: view, zoom, wheel chords                       | All of it, remappable per user                          | —                                                    | Client                            |
+
+The Server owns whatever can change the World or reach into it. The Client owns
+what only changes the picture: the camera, the view, the zoom, the figure's pose
+and the crosshair, none of which can move the Player or add reach. A Game cannot
+yet force or forbid a view, change the zoom range or the reach, or run custom
+animations or cameras; any of those would arrive as declared data through the
+WIT contract, as the movement policy did.
 
 ## The three invariants this diagram exists to protect
 
