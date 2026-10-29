@@ -72,7 +72,8 @@ input is released. Respect both modifier sides and platform undo/redo.
 
 Preserve current defaults: hold removal, hold sprint, right place/ignite,
 X empty hand, middle/P sampling and fire > solid > source removal priority.
-Keep Server aim/history guards and one removal per activation.
+Keep Server aim/history guards and one removal per activation, except under
+the opt-in "Repeat while held" preference of ticket 29.
 
 Add optional behavior preferences:
 
@@ -131,7 +132,7 @@ movement direction to unit length instead of normalising it, so analog input
 scales speed and digital speeds stay the same. Rumble, brand glyph sets, an
 on-screen keyboard and split-screen are excluded. Pad defaults follow
 Minecraft Bedrock: B toggles crouch and LS click latches sprint. Optional
-repeat place/remove while held is a separate device-neutral ticket, 29.
+repeat place/remove while held is device-neutral ticket 29.
 
 Touch owns pointer ids from start to end/cancel. Support simultaneous movement,
 look and explicit actions, with no gesture transfer from UI to gameplay.
