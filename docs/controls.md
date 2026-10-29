@@ -68,6 +68,16 @@ Saves write and sync a temporary file, then atomically replace the destination.
 Save failure keeps the active preferences and draft distinct. Profiles contain
 no World data or Material ids.
 
+Assigned hotbar slots and the active slot are saved automatically per Game in
+`user-profile.hotbar.json` beside the controls profile (the overridden controls
+profile filename determines this filename too). Stable Material and Shape names
+and orientations survive registry reordering. Missing content appears empty; its
+saved name is retained when other slots change, so reinstalling content can
+restore it. Temporary outside-held content is not part of the saved layout.
+Invalid or unsupported hotbar files are retained untouched; save failures are
+reported and preserve the previous valid file. Hotbar storage is independent of
+the Behavior, Key bindings and Display draft and contains no World data.
+
 Normal play defaults to display sync. FPS caps and explicit uncapped rendering
 change presentation pacing only; they do not change quality, view distance or
 Server simulation rules. Capture fixtures retain their explicit uncapped policy

@@ -13,6 +13,7 @@ pub mod drawn_mask;
 pub mod edit;
 mod help;
 mod history;
+mod hotbar_store;
 mod input;
 mod material_textures;
 mod menu;
@@ -48,6 +49,7 @@ pub fn plugin(app: &mut App) {
         camera::plugin,
         chunk_view::plugin,
         edit::plugin,
+        hotbar_store::plugin,
         help::plugin,
         menu::plugin,
         aim::plugin,

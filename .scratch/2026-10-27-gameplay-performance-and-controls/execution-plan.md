@@ -4,7 +4,7 @@ Updated 2026-10-28. This adds execution guidance to the confirmed spec;
 feature scope, dependencies and acceptance criteria remain in spec.md and
 the numbered tickets. Numbers below identify sequence positions, not GitHub
 PR numbers. P0 merged as [PR 22](https://github.com/mkappworks-dev/tesserae/pull/22);
-positions 2–16 remain planned scopes.
+the condensed sequence below supersedes the earlier sixteen-position plan.
 
 Default: GPT-6.1 Terra (`gpt-6.1-terra`), Medium reasoning effort.
 Use GPT-6.1 Sol (`gpt-6.1-sol`) with High effort for the investigation,
@@ -25,8 +25,9 @@ The PR 1 session was launched with Sol High.
 | 9 | Controller | 07 | Terra | Medium |
 | 10 | Desktop touch | 08–10 | Terra | Medium |
 
-PR 2 is authorized for local implementation in this session. No push,
-publication, merge, parallel agents or automatic later sessions are authorized.
+PR 2 implementation is complete. The user's 2026-10-29 instruction authorizes
+reconciling local main, rebasing this branch, pushing it and opening a PR.
+No merge, parallel agents or automatic later sessions are authorized.
 
 ## Conditional experiment backlog
 

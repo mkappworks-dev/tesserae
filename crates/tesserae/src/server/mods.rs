@@ -405,6 +405,11 @@ pub(super) fn plugin(app: &mut App) {
         params.water.map(|lake| lake.material),
         params.ground.map(|ground| ground.rock),
     );
+    catalogue.game = loaded
+        .required
+        .iter()
+        .find(|m| m.game)
+        .map(|m| m.id.clone());
     for (id, duration) in loaded.remove_times {
         if let Some(material) = catalogue.materials.iter_mut().find(|m| m.id == id) {
             material.remove_time = duration;
@@ -461,6 +466,7 @@ pub(in crate::server) fn catalogue(
         })
         .collect();
     ContentCatalogue {
+        game: None,
         materials,
         shapes,
         lake,
@@ -735,6 +741,7 @@ mod tests {
     #[test]
     fn the_catalogue_names_the_demos_content_and_its_lake() {
         let catalogue = published_catalogue(super::runtime::tests::demo_loaded(1.0));
+        assert_eq!(catalogue.game.as_deref(), Some("demo"));
         let material = |name: &str| {
             catalogue
                 .materials

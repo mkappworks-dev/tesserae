@@ -15,6 +15,8 @@ pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
 /// reads nothing of the World (ADR-0002).
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct ContentCatalogue {
+    /// Stable root Game id, supplied by the Server.
+    pub game: Option<String>,
     /// Every registered Material, in id order.
     pub materials: Vec<CatalogueMaterial>,
     /// Every registered Shape, in id order.

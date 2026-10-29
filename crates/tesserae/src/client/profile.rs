@@ -164,7 +164,7 @@ fn encode(bindings: &Bindings, preferences: &Preferences) -> io::Result<Vec<u8>>
     })
     .map_err(io::Error::other)
 }
-fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let parent = path
         .parent()
         .ok_or_else(|| io::Error::other("profile needs a parent directory"))?;
@@ -191,7 +191,7 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
     result
 }
-fn user_path() -> PathBuf {
+pub(super) fn user_path() -> PathBuf {
     if let Some(path) = std::env::var_os("TESSERAE_USER_PROFILE") {
         return path.into();
     }

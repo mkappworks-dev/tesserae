@@ -314,13 +314,22 @@ fn spawn_hud(mut commands: Commands) {
     ));
 }
 
-fn receive_catalogue(
+pub(super) fn receive_catalogue(
     mut messages: MessageReader<ContentCatalogue>,
     mut catalogue: ResMut<Catalogue>,
     mut hotbar: ResMut<Hotbar>,
+    mut store: Option<ResMut<super::hotbar_store::Store>>,
 ) {
     for message in messages.read() {
+        if catalogue.0 == *message {
+            continue;
+        }
         hotbar.slots = Hotbar::defaults(message);
+        hotbar.selected = 0;
+        hotbar.outside = None;
+        if let Some(store) = store.as_mut() {
+            store.restore(message, &mut hotbar);
+        }
         catalogue.0 = message.clone();
     }
 }
@@ -637,6 +646,7 @@ mod tests {
         })
         .collect();
         ContentCatalogue {
+            game: None,
             materials,
             shapes,
             lake: None,
