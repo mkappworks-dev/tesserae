@@ -274,13 +274,13 @@ impl Agenda {
 
     pub fn restore(saved: &crate::save::Agenda, now: Step) -> Result<Self, crate::save::Error> {
         use crate::save::Error;
-        let invalid = || Error::Corrupt("invalid simulation Agenda".into());
+        let invalid = |why: &str| Error::Corrupt(format!("invalid simulation Agenda: {why}"));
         let cap = saved
             .capacity
             .checked_add(saved.reserve)
-            .ok_or_else(invalid)?;
+            .ok_or_else(|| invalid("capacity overflow"))?;
         if saved.wakes.len() > cap || saved.scan_per_step == 0 {
-            return Err(invalid());
+            return Err(invalid("too many wakes"));
         }
         let mut agenda = Self::new(Limits {
             capacity: saved.capacity,
@@ -288,9 +288,11 @@ impl Agenda {
             scan_per_step: saved.scan_per_step,
         });
         for &(at, remaining) in &saved.wakes {
-            let due = now.checked_add(remaining).ok_or_else(invalid)?;
+            let due = now
+                .checked_add(remaining)
+                .ok_or_else(|| invalid("wake overflow"))?;
             if agenda.due.insert(at, due).is_some() {
-                return Err(invalid());
+                return Err(invalid("duplicate wake"));
             }
             agenda.queue.insert((due, at));
         }
@@ -300,13 +302,22 @@ impl Agenda {
                     || chunk_of(min).0 != r.home
                     || chunk_of(max).0 != r.home
                 {
-                    return Err(invalid());
+                    return Err(invalid(&format!(
+                        "span {min:?}..{max:?} outside {:?}",
+                        r.home
+                    )));
                 }
                 Ok(Span { min, max })
             };
             let pass: Vec<_> = r.pass.iter().map(span).collect::<Result<_, _>>()?;
-            if r.span > pass.len() || (r.span < pass.len() && r.offset >= pass[r.span].len()) {
-                return Err(invalid());
+            // `offset == len` is live state: the cursor moves to the next span lazily.
+            if r.span > pass.len() || (r.span < pass.len() && r.offset > pass[r.span].len()) {
+                return Err(invalid(&format!(
+                    "cursor {}/{} past {} spans",
+                    r.span,
+                    r.offset,
+                    pass.len()
+                )));
             }
             let restored = Rescan {
                 pass,
@@ -316,7 +327,7 @@ impl Agenda {
                 parked: r.parked.as_ref().map(span).transpose()?,
             };
             if agenda.rescans.insert(r.home, restored).is_some() {
-                return Err(invalid());
+                return Err(invalid("duplicate rescan"));
             }
         }
         agenda.turn = saved.turn;
