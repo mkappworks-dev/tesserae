@@ -1,6 +1,6 @@
 # 26: V0: Independent first/third-person camera and aim
 
-Status: ready-for-agent
+Status: done
 Blocked by: 24 (done, merged as #26), 25
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -81,7 +81,7 @@ is Client presentation; aim stays a Server answer.
       profile defaults to first-person; the World save is unchanged.
 - [x] ADR-0008 amended. Tests replay at 60/144/1000 render updates and
       1/0.5/0.25 m Voxels.
-- [ ] Captures reviewed by the user. A matched release first-person A/B
+- [x] Captures reviewed by the user. A matched release first-person A/B
       against main shows no regression. A third-person P0 profiler run
       records the view mode.
 
@@ -192,3 +192,8 @@ Main-thread CPU p50 is 0.55-0.56 ms, the same as first-person on the branch.
 Render-thread CPU is lower than first-person, since the view looks at
 different geometry. The camera sweeps and the figure add no visible cost. Run:
 /tmp/tesserae-pr6-review.TXrDxF/ab/branch-third.
+
+### Done, 2026-10-29
+
+The user reviewed the captures and the interactive build and approved them.
+Every acceptance criterion is met. Push and PR were authorized.

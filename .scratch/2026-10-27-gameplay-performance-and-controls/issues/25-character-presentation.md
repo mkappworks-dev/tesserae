@@ -1,6 +1,6 @@
 # 25: A0: Basic Game-provided blocky character
 
-Status: ready-for-agent
+Status: done
 Blocked by: 24 (done, merged as #26)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -61,7 +61,7 @@ Mod-driven custom animations.
       standing, and the body snaps to look yaw while moving.
 - [x] First-person: no body, corner model unchanged. Third-person: corner
       model hidden.
-- [ ] Native captures reviewed by the user. A matched release first-person
+- [x] Native captures reviewed by the user. A matched release first-person
       A/B against main shows no regression.
 
 ## Validation and authorization
@@ -153,3 +153,8 @@ overlap. Main-thread CPU p50 is about 0.03 ms higher on the branch, which is
 plausibly the figure's pose and the view systems running in first-person. No
 regression beyond host variation is shown; a sub-3% cost cannot be ruled out.
 Runs: /tmp/tesserae-pr6-review.TXrDxF/ab/{main,branch}-{a,b}.
+
+### Done, 2026-10-29
+
+The user reviewed the captures and the interactive build and approved them.
+Every acceptance criterion is met. Push and PR were authorized.
