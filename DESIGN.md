@@ -371,7 +371,16 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 - Luanti is LGPL-2.1+: its ideas are usable, its code is not.
 - `games/demo/` and `assets/` are deliberately **not** BSL — see ADR-0004.
 
-## Build order
+## Road to version 1.0
+
+Version 1.0 is a single-player Game, shipped as Mods on the Engine, that someone
+can install, play for an hour, save, quit and resume, and then extend with a Mod
+of their own. Steps 1 to 27 below are one sequence in suggested delivery order,
+earliest first; a dependency is named where one exists. Network transport is not
+in 1.0: ADR-0002 keeps single player on the same Server and Client split, so
+multiplayer is a later transport swap, not a rewrite.
+
+### Steps 1 to 9: core engine
 
 1. `tesserae-core`: chunk storage + palette compression + greedy mesher, with a
    `criterion` bench on a worldgen-filled chunk. Headless, no window.
@@ -518,9 +527,64 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    in ticket 13 of `.scratch/2026-10-26-phase-8.2-no-built-in-content/`. See
    [ADR-0016](docs/adr/0016-only-air-is-built-in.md).
 
-9. Look-pack API, water shading, visual polish.
-10. Network transport. The `Player` and `MovementIntent` are its first
-    customers.
+9. Look-pack API, water shading, visual polish. Polish includes the sky and its
+   sun, a day/night cycle, and cave lighting that reads as dark and lit by
+   torches instead of flat ambient. Sky and time of day are World or Game
+   settings, not a function of the seed. Biomes are generator behaviour and
+   belong to step 15; they are listed there because they change what the sky and
+   fog should be.
+
+### Steps 10 to 27: engine systems and game content
+
+Each step has an Engine part, the mechanism, and a Game or Mod part, the data
+that uses it. The Engine part always comes first, crosses the WIT contract, and
+ships no content: ADR-0016 keeps air as the only built-in Material. The
+controls, movement, save, camera and input work already in flight is tracked in
+`.scratch/2026-10-27-gameplay-performance-and-controls` and is not repeated.
+
+| #   | Step                    | Engine adds                                                                        | Game or Mod supplies               | Depends on |
+| --- | ----------------------- | ---------------------------------------------------------------------------------- | ---------------------------------- | ---------- |
+| 10  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21) | Which tools exist and what they do | -          |
+| 11  | Chat and commands       | Command registry, parser, permissions                                              | The commands                       | -          |
+| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                     | Item definitions                   | -          |
+| 13  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19) | Stack sizes, item rules            | 10, 12     |
+| 14  | Crafting                | Recipe schema, station interaction, UI host                                        | Recipes, stations                  | 13         |
+| 15  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                       | Biomes, ores, biome caves          | -          |
+| 16  | Weather                 | Weather state and tick, particles, sky hooks                                       | Weather types, climate rules       | 15         |
+| 17  | Plants                  | Growth on the Server tick, placement rules, harvesting                             | Plant data                         | 15         |
+| 18  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                 | Numbers and rules                  | 13         |
+| 19  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport            | Behaviours, spawn tables           | 12, 15, 18 |
+| 20  | NPCs                    | Persistent identity, dialogue and trade plumbing                                   | NPC definitions, dialogue          | 13, 19     |
+| 21  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view         | Map style, markers                 | 15         |
+| 22  | Audio                   | Audio engine, Server-driven events, mixing                                         | Sound and music assets             | -          |
+| 23  | Structures              | Template format, deterministic placement by worldgen and tools                     | Templates                          | 15         |
+| 24  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)             | Machine parts, logic components    | 12, 23     |
+| 25  | Modding SDK             | Mod loading from a folder, reload loop, WIT versioning, contract frozen for 1.0    | Example Game                       | -          |
+| 26  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                | Content made with them             | 23, 25     |
+| 27  | Release hardening       | macOS bundle, first-run, save migration tests, diagnostics, CI budgets             | -                                  | all        |
+
+Notes:
+
+- **Step 15** feeds the sky and fog colours from step 9. A World pins its
+  generator version so a new biome never changes an existing World's terrain for
+  the same seed.
+- **Step 24** is the largest unknown in 1.0. Machines move as a unit, so they
+  need collision, lighting and meshing outside the Chunk grid, Server-owned
+  motion that composes with the Player's flight and physics movement, and a save
+  format for a body that straddles Chunks. Spike it before committing the scope.
+- **Step 25** is the gate for "ready for Mods".
+
+### After 1.0
+
+Not blocking 1.0, in rough order of value:
+
+- **Network transport and multiplayer sessions.** The transport (the `Player`
+  and `MovementIntent` are its first customers) plus lobbies, join and invite,
+  permissions and server administration.
+- **Dimensions.** More than one World layer in a session, with portals.
+- **Localization and an accessibility pass.** UI scaling, colour-blind options
+  and subtitles. Binding display names already carry locale keys.
+- **Mod browser.** Discovery and install of Mods from inside the Game.
 
 ## Open items
 

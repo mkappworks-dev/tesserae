@@ -8,7 +8,7 @@ Game in `games/demo/`, the starting point for writing your own.
 
 ## Status: early, and not usable for anything yet
 
-Step **8 of 10** in [DESIGN.md](DESIGN.md)'s build order. `cargo run` opens a
+Step **8 of 27** in [DESIGN.md](DESIGN.md)'s build order. `cargo run` opens a
 streamed, generated World you can fly around and edit; the demo Game adds
 flowing water, lava and fire to it.
 
