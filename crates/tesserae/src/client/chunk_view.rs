@@ -70,7 +70,6 @@ impl ChunkEntities {
     }
 }
 
-/// Whether any terrain has been drawn yet, for the loading screen.
 pub(super) fn terrain_arrived(entities: Option<Res<ChunkEntities>>) -> bool {
     entities.is_some_and(|e| !e.opaque.is_empty())
 }

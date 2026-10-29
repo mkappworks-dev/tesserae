@@ -83,19 +83,16 @@ fn world_parts(
     #[cfg(not(any(feature = "dev", feature = "profiling")))]
     let base = world::WorldSettings::default();
     let settings = opening.settings(base);
-    let name = opening.details.as_ref().map(|d| d.name.clone());
-    let wanted = opening
-        .details
-        .as_ref()
-        .filter(|d| d.pending)
-        .and_then(|d| d.game.clone());
+    let name = opening.display_name();
+    let wanted = opening.pending_game().cloned();
     let mut loaded = server::mods::load_world(&args.user, &settings, &opening)?;
-    // A skipped untrusted Game would otherwise silently create an Empty World.
+    // A skipped untrusted Game would otherwise silently create an Empty World,
+    // and a different installed Game would create the wrong one.
     if let Some(game) = wanted
-        && !loaded.game
+        && !loaded.required.iter().any(|m| m.game && m.id == game.id)
     {
         return Err(format!(
-            "Game `{}` could not be loaded; it may be missing or not trusted",
+            "Game `{}` could not be loaded; it may be missing, replaced or not trusted",
             game.id
         ));
     }

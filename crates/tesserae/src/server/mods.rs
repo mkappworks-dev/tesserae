@@ -9,6 +9,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use bevy::prelude::*;
+use tesserae_core::save::library::GameRef;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
@@ -80,6 +81,18 @@ impl LoadOptions {
     }
 }
 
+impl LoadOptions {
+    fn from_args(args: &[OsString]) -> Result<Option<Self>, String> {
+        Self::resolve(
+            args.iter().cloned(),
+            std::env::var_os("TESSERAE_MODS_DIR"),
+            std::env::var_os("TESSERAE_TRUST_MODS"),
+            tesserae_mods::default_mods_dir(),
+            dev_demo(),
+        )
+    }
+}
+
 /// Where `./scripts/build-guests` puts the demo, fixed at compile time because a `dev` binary
 /// runs from its own checkout whatever the working directory.
 fn dev_demo() -> Option<PathBuf> {
@@ -132,14 +145,7 @@ pub fn load_world(
     if !opening.loads_mods() {
         return Ok(LoadedMods::default());
     }
-    let Some(options) = LoadOptions::resolve(
-        args.iter().cloned(),
-        std::env::var_os("TESSERAE_MODS_DIR"),
-        std::env::var_os("TESSERAE_TRUST_MODS"),
-        tesserae_mods::default_mods_dir(),
-        dev_demo(),
-    )?
-    else {
+    let Some(options) = LoadOptions::from_args(args)? else {
         eprintln!("No Game: the demo is not built; run ./scripts/build-guests");
         return Ok(LoadedMods::default());
     };
@@ -165,12 +171,12 @@ pub struct Untrusted {
 /// What the World list can offer, found without running any Mod code.
 #[derive(Resource)]
 pub struct Installed {
-    /// The root Game's id and version, if the Mods folder has one.
-    pub game: Option<(String, String)>,
+    pub game: Option<GameRef>,
     pub untrusted: Vec<Untrusted>,
     /// Why the Mods folder could not be read; only an Empty World can be made.
     pub error: Option<String>,
-    trust_file: PathBuf,
+    /// `None` when nothing can be granted, as in tests.
+    trust_file: Option<PathBuf>,
 }
 
 impl Installed {
@@ -179,20 +185,23 @@ impl Installed {
             game: None,
             untrusted: Vec::new(),
             error,
-            trust_file: PathBuf::new(),
+            trust_file: None,
         }
     }
 
     #[cfg(test)]
     pub fn fake(game: Option<(&str, &str)>, untrusted: &[&str]) -> Self {
         Self {
-            game: game.map(|(id, version)| (id.into(), version.into())),
+            game: game.map(|(id, version)| GameRef {
+                id: id.into(),
+                version: version.into(),
+            }),
             untrusted: untrusted
                 .iter()
                 .map(|id| Untrusted {
                     prompt: format!("Mod: {id}"),
                     found: tesserae_mods::Found {
-                        manifest: toml_manifest(id),
+                        manifest: test_manifest(id),
                         dir: PathBuf::new(),
                         manifest_bytes: Vec::new(),
                     },
@@ -200,7 +209,7 @@ impl Installed {
                 })
                 .collect(),
             error: None,
-            trust_file: PathBuf::new(),
+            trust_file: None,
         }
     }
 
@@ -210,10 +219,10 @@ impl Installed {
             return Ok(());
         }
         let first = self.untrusted.remove(0);
-        if self.trust_file.as_os_str().is_empty() {
+        let Some(trust_file) = &self.trust_file else {
             return Ok(());
-        }
-        let mut trust = Trust::load(&self.trust_file);
+        };
+        let mut trust = Trust::load(trust_file);
         trust
             .grant_exact(&first.found, &first.sha256)
             .map_err(|e| e.to_string())
@@ -221,7 +230,7 @@ impl Installed {
 }
 
 #[cfg(test)]
-fn toml_manifest(id: &str) -> tesserae_mods::Manifest {
+fn test_manifest(id: &str) -> tesserae_mods::Manifest {
     tesserae_mods::Manifest {
         id: id.into(),
         version: "1".into(),
@@ -234,13 +243,7 @@ fn toml_manifest(id: &str) -> tesserae_mods::Manifest {
 }
 
 pub fn installed(args: &[OsString]) -> Installed {
-    let options = match LoadOptions::resolve(
-        args.iter().cloned(),
-        std::env::var_os("TESSERAE_MODS_DIR"),
-        std::env::var_os("TESSERAE_TRUST_MODS"),
-        tesserae_mods::default_mods_dir(),
-        dev_demo(),
-    ) {
+    let options = match LoadOptions::from_args(args) {
         Ok(Some(options)) => options,
         Ok(None) => return Installed::none(None),
         Err(e) => return Installed::none(Some(e)),
@@ -249,10 +252,10 @@ pub fn installed(args: &[OsString]) -> Installed {
         Ok(found) => found,
         Err(e) => return Installed::none(Some(e.to_string())),
     };
-    let game = found
-        .iter()
-        .find(|f| f.manifest.root)
-        .map(|f| (f.manifest.id.clone(), f.manifest.version.clone()));
+    let game = found.iter().find(|f| f.manifest.root).map(|f| GameRef {
+        id: f.manifest.id.clone(),
+        version: f.manifest.version.clone(),
+    });
     let mut untrusted = Vec::new();
     if options.trust == TrustMode::None {
         let trust = Trust::load(&options.trust_file);
@@ -279,7 +282,7 @@ pub fn installed(args: &[OsString]) -> Installed {
         game,
         untrusted,
         error: None,
-        trust_file: options.trust_file,
+        trust_file: Some(options.trust_file),
     }
 }
 

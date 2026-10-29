@@ -13,7 +13,6 @@ use super::menu_ui::{self as ui, Danger, Tone};
 use crate::launch::{Relaunch, Target};
 use crate::server::mods::Installed;
 
-/// The folder holding every World folder.
 #[derive(Resource, Clone)]
 pub struct WorldsDir(pub PathBuf);
 
@@ -65,6 +64,8 @@ enum Next {
 struct Form {
     name: String,
     seed: String,
+    /// Used when the seed is left blank, so it can be shown and copied first.
+    random_seed: u64,
     game: bool,
     voxel_size_m: f32,
     more: bool,
@@ -76,6 +77,7 @@ impl Default for Form {
         Self {
             name: String::new(),
             seed: String::new(),
+            random_seed: tesserae_core::seed::random(),
             game: true,
             voxel_size_m: 1.0,
             more: false,
@@ -84,13 +86,20 @@ impl Default for Form {
     }
 }
 
+#[derive(Clone, Debug)]
+struct Card {
+    title: String,
+    detail: String,
+    /// A refused open, which by contract wrote nothing.
+    save_untouched: bool,
+}
+
 #[derive(Resource)]
 struct Launcher {
     screen: Screen,
     entries: Vec<Entry>,
     selected: Option<PathBuf>,
-    /// Title and detail of the card at the top of the list.
-    card: Option<(String, String)>,
+    card: Option<Card>,
     form: Form,
     rename: String,
     problem: Option<String>,
@@ -108,6 +117,13 @@ impl Launcher {
         self.selected.as_deref().and_then(|p| self.entry(p))
     }
 
+    fn display_name(&self, path: &Path) -> String {
+        self.entry(path)
+            .and_then(Entry::name)
+            .map(str::to_owned)
+            .unwrap_or_else(|| folder(path))
+    }
+
     fn show(&mut self, screen: Screen) {
         self.screen = screen;
         self.problem = None;
@@ -117,7 +133,13 @@ impl Launcher {
     fn refresh(&mut self, worlds: &Path) {
         match library::list(worlds) {
             Ok(entries) => self.entries = entries,
-            Err(e) => self.card = Some(("Could not read your Worlds".into(), e.to_string())),
+            Err(e) => {
+                self.card = Some(Card {
+                    title: "Could not read your Worlds".into(),
+                    detail: e.to_string(),
+                    save_untouched: false,
+                });
+            }
         }
         if self.selected().is_none() {
             self.selected = self.entries.first().map(|e| e.path.clone());
@@ -186,14 +208,14 @@ fn review_capture(
     mut exit: MessageWriter<AppExit>,
     pending: Query<(), With<bevy::render::view::screenshot::Screenshot>>,
     failure: Option<Res<OpenFailure>>,
-    mut frame: Local<u32>,
-    mut seen: Local<bool>,
+    mut progress: Local<(u32, bool)>,
 ) {
     use bevy::render::view::screenshot::{Screenshot, save_to_disk};
     let shot = std::env::var_os("TESSERAE_LIST_SHOT");
     if shot.is_none() && std::env::var_os("TESSERAE_LIST_SCRIPT").is_none() {
         return;
     }
+    let (frame, seen) = &mut *progress;
     *frame += 1;
     // A restarted list after a failed open must not replay a create script.
     if *frame == 5 && failure.is_none() {
@@ -241,64 +263,6 @@ fn close_request(
     }
 }
 
-#[derive(Component)]
-struct Loading;
-
-/// Longest the loading screen waits for terrain, e.g. for an Empty World.
-const LOADING_TIMEOUT_S: f32 = 15.0;
-
-/// The in-World half: a loading screen over a World opened from the list.
-pub(super) fn entry_plugin(app: &mut App) {
-    app.add_systems(Startup, show_loading)
-        .add_systems(Update, hide_loading.run_if(any_with_component::<Loading>));
-}
-
-fn show_loading(mut commands: Commands, launched: Option<Res<crate::launch::Launched>>) {
-    let Some(name) = launched
-        .filter(|l| l.from_list)
-        .and_then(|l| l.world_name.clone())
-    else {
-        return;
-    };
-    commands
-        .spawn((
-            Loading,
-            GlobalZIndex(200),
-            BackgroundColor(ui::BG),
-            Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                ..default()
-            },
-        ))
-        .with_children(|card| {
-            ui::weighted_text(card, format!("Opening {name}…"), 19.0, 620, ui::INK);
-            ui::paragraph(card, "Loading the World.", 12.0, ui::MUTED);
-        });
-}
-
-fn hide_loading(
-    mut commands: Commands,
-    time: Res<Time<Real>>,
-    arrived: Option<Res<TerrainArrived>>,
-    screens: Query<Entity, With<Loading>>,
-) {
-    if arrived.is_some() || time.elapsed_secs() >= LOADING_TIMEOUT_S {
-        for screen in &screens {
-            commands.entity(screen).despawn();
-        }
-    }
-}
-
-/// Inserted by the Client once any terrain is drawn.
-#[derive(Resource)]
-pub(super) struct TerrainArrived;
-
 fn logic(app: &mut App) {
     app.init_resource::<Queue>()
         .init_resource::<Remover>()
@@ -327,20 +291,22 @@ fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Option<Res<Ope
     };
     launcher.refresh(&worlds.0);
     if let Some(failure) = failure {
-        let name = launcher
-            .entry(&failure.folder)
-            .and_then(Entry::name)
-            .map_or_else(|| folder_name(&failure.folder), str::to_owned);
-        launcher.card = Some((format!("Could not open {name}"), failure.reason.clone()));
+        launcher.card = Some(Card {
+            title: format!("Could not open {}", launcher.display_name(&failure.folder)),
+            detail: failure.reason.clone(),
+            save_untouched: true,
+        });
         launcher.selected = Some(failure.folder.clone());
     }
     commands.insert_resource(launcher);
 }
 
-fn folder_name(path: &Path) -> String {
+fn folder(path: &Path) -> String {
     path.file_name()
         .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
 }
+
+const UNNAMED: &str = "Unnamed";
 
 fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     if let Ok(act) = acts.get(event.entity) {
@@ -392,18 +358,26 @@ fn sync_fields(
         }
     }
     for mut text in &mut resolved {
-        let wanted = resolved_label(&launcher.form.seed);
+        let wanted = launcher.form.seed_label();
         if text.0 != wanted {
             text.0 = wanted;
         }
     }
 }
 
-fn resolved_label(seed: &str) -> String {
-    match tesserae_core::seed::resolve(seed) {
-        Ok(Some(seed)) => format!("Resolved seed: {seed}"),
-        Ok(None) => "Blank: a random seed is chosen".into(),
-        Err(e) => format!("Seed {e}"),
+impl Form {
+    fn seed(&self) -> Result<u64, String> {
+        tesserae_core::seed::resolve(&self.seed)
+            .map(|seed| seed.unwrap_or(self.random_seed))
+            .map_err(|e| format!("Seed {e}"))
+    }
+
+    fn seed_label(&self) -> String {
+        match self.seed() {
+            Ok(seed) if self.seed.trim().is_empty() => format!("Random seed: {seed}"),
+            Ok(seed) => format!("Resolved seed: {seed}"),
+            Err(e) => e,
+        }
     }
 }
 
@@ -455,10 +429,11 @@ fn handle(
                 l.form = Form {
                     name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
                     seed: details.seed.to_string(),
-                    game: details.game.is_some() && installed.game.is_some(),
+                    // Another installed Game would silently change the content.
+                    game: details.game.is_some() && details.game == installed.game,
                     voxel_size_m: details.voxel_size_m,
                     more: details.voxel_size_m != 1.0,
-                    problem: None,
+                    ..Form::default()
                 };
                 l.show(Screen::Create);
             }
@@ -486,7 +461,7 @@ fn handle(
                 }
             }
             Act::CopyResolved => {
-                if let Ok(Some(seed)) = tesserae_core::seed::resolve(&l.form.seed) {
+                if let Ok(seed) = l.form.seed() {
                     copy(&mut commands, clipboard.as_deref_mut(), seed);
                 }
             }
@@ -553,7 +528,7 @@ fn handle(
                 let Screen::Rename(path) = l.screen.clone() else {
                     continue;
                 };
-                let result = library::name(&l.rename)
+                let result = library::valid_name(&l.rename)
                     .map_err(|e| e.to_string())
                     .and_then(|name| library::rename(&path, &name).map_err(describe));
                 match result {
@@ -571,7 +546,7 @@ fn handle(
                 let Screen::Delete(path) = l.screen.clone() else {
                     continue;
                 };
-                let result = library::closed(&path)
+                let result = library::ensure_closed(&path)
                     .map_err(describe)
                     .and_then(|()| (remover.0)(&path));
                 match result {
@@ -597,10 +572,9 @@ fn describe(error: tesserae_core::save::Error) -> String {
     }
 }
 
-fn validate(form: &Form) -> Result<(String, Option<u64>), String> {
-    let name = library::name(&form.name).map_err(|e| e.to_string())?;
-    let seed = tesserae_core::seed::resolve(&form.seed).map_err(|e| format!("Seed {e}"))?;
-    Ok((name, seed))
+fn validate(form: &Form) -> Result<(String, u64), String> {
+    let name = library::valid_name(&form.name).map_err(|e| e.to_string())?;
+    Ok((name, form.seed()?))
 }
 
 fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut Relaunch) {
@@ -615,15 +589,8 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
     let now = library::now_unix_s();
     let sidecar = Sidecar {
         name: name.clone(),
-        game: installed
-            .game
-            .as_ref()
-            .filter(|_| l.form.game)
-            .map(|(id, version)| GameRef {
-                id: id.clone(),
-                version: version.clone(),
-            }),
-        seed: seed.unwrap_or_else(tesserae_core::seed::random),
+        game: installed.game.clone().filter(|_| l.form.game),
+        seed,
         voxel_size_m: l.form.voxel_size_m,
         created_unix_s: now,
         last_played_unix_s: now,
@@ -643,10 +610,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
 }
 
 fn open(l: &mut Launcher, relaunch: &mut Relaunch, path: PathBuf) {
-    let name = l
-        .entry(&path)
-        .and_then(Entry::name)
-        .map_or_else(|| folder_name(&path), str::to_owned);
+    let name = l.display_name(&path);
     relaunch.0 = Some(Target::World(path));
     l.show(Screen::Opening(name));
 }
@@ -723,10 +687,7 @@ fn render(
                 Screen::List => focus = list(root, &l),
                 Screen::Create => focus = form(root, &l, &installed),
                 Screen::Opening(name) => {
-                    centered(root, |card| {
-                        ui::weighted_text(card, format!("Opening {name}…"), 19.0, 620, ui::INK);
-                        ui::paragraph(card, "Loading the World.", 12.0, ui::MUTED);
-                    });
+                    centered(root, |card| super::loading::opening(card, name));
                 }
                 Screen::Rename(_) => focus = rename(root, &l),
                 Screen::Delete(path) => focus = delete(root, &l, path),
@@ -950,7 +911,12 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
             focus = Some(create);
         }
     });
-    if let Some((title, detail)) = &l.card {
+    if let Some(Card {
+        title,
+        detail,
+        save_untouched,
+    }) = &l.card
+    {
         root.spawn((
             BackgroundColor(ui::AMBER.with_alpha(0.06)),
             BorderColor::all(ui::AMBER.with_alpha(0.3)),
@@ -976,7 +942,9 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
             .with_children(|words| {
                 ui::weighted_text(words, title, 13.0, 620, ui::INK);
                 ui::paragraph(words, detail, 12.0, ui::AMBER);
-                ui::description(words, "Nothing was changed in its save.");
+                if *save_untouched {
+                    ui::description(words, "Nothing was changed in its save.");
+                }
             });
             ui::compact_button(card, "Dismiss", Act::Dismiss, false, 30.0, 11.0);
         });
@@ -1033,7 +1001,7 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
 }
 
 fn world_row(rows: &mut ChildSpawnerCommands, entry: &Entry, selected: bool) -> Entity {
-    let name = entry.name().map_or("Unnamed", |n| n);
+    let name = entry.name().unwrap_or(UNNAMED);
     let summary = match entry.details() {
         Some(d) if entry.incomplete() => {
             format!("{} · not created yet", game_label(d.game.as_ref()))
@@ -1077,7 +1045,7 @@ fn world_row(rows: &mut ChildSpawnerCommands, entry: &Entry, selected: bool) -> 
 
 fn details(side: &mut ChildSpawnerCommands, entry: &Entry) {
     panel(side, |p| {
-        ui::weighted_text(p, entry.name().map_or("Unnamed", |n| n), 19.0, 620, ui::INK);
+        ui::weighted_text(p, entry.name().unwrap_or(UNNAMED), 19.0, 620, ui::INK);
         ui::description(p, &format!("Folder: {}", entry.folder()));
         match (entry.details(), &entry.sidecar) {
             (Some(d), _) => {
@@ -1195,7 +1163,7 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
         ));
         label(col, "Game");
         row(col, 7.0, |r| {
-            if let Some((id, version)) = &installed.game {
+            if let Some(GameRef { id, version }) = &installed.game {
                 let tag = if installed.untrusted.is_empty() {
                     ""
                 } else {
@@ -1241,7 +1209,7 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
         row(col, 8.0, |r| {
             r.spawn((
                 Resolved,
-                Text::new(resolved_label(&f.seed)),
+                Text::new(f.seed_label()),
                 ui::font(12.0),
                 TextColor(ui::MUTED),
                 Pickable::IGNORE,
@@ -1305,9 +1273,7 @@ fn rename(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
 
 fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<Entity> {
     let entry = l.entry(path);
-    let name = entry
-        .and_then(Entry::name)
-        .map_or_else(|| folder_name(path), str::to_owned);
+    let name = l.display_name(path);
     let mut focus = None;
     centered(root, |card| {
         ui::weighted_text(card, format!("Delete {name}?"), 19.0, 620, ui::INK);
@@ -1612,7 +1578,7 @@ mod tests {
             reason: "corrupt World save: checksum mismatch".into(),
         });
         app.update();
-        let (title, detail) = launcher(&app).card.clone().unwrap();
+        let Card { title, detail, .. } = launcher(&app).card.clone().unwrap();
         assert_eq!(title, "Could not open Broken");
         assert!(detail.contains("checksum"));
         assert_eq!(launcher(&app).selected, Some(path.clone()));
@@ -1647,5 +1613,37 @@ mod tests {
         act(&mut app, Act::Quit);
         assert_eq!(exits(&app), 1);
         assert!(app.world().resource::<Relaunch>().0.is_none());
+    }
+
+    #[test]
+    fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(None, &[]));
+        app.update();
+        act(&mut app, Act::New);
+        let shown = app
+            .world_mut()
+            .query_filtered::<&Text, With<Resolved>>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        let random = launcher(&app).form.random_seed;
+        assert_eq!(shown, format!("Random seed: {random}"));
+        act(&mut app, Act::Create);
+        let Some(Target::World(path)) = app.world().resource::<Relaunch>().0.clone() else {
+            panic!("no restart into the World");
+        };
+        assert_eq!(library::read(&path).unwrap().unwrap().seed, random);
+    }
+
+    #[test]
+    fn recreate_never_swaps_in_a_different_installed_game() {
+        let worlds = Directory::new();
+        library::create(&worlds.0, &details("Demo world", true)).unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("other", "2.0.0")), &[]));
+        app.update();
+        act(&mut app, Act::ReCreate);
+        assert!(!launcher(&app).form.game);
     }
 }

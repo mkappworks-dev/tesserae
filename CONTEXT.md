@@ -42,6 +42,12 @@ Materials and Shapes.
 
 **World** — one save. Owns its Voxel size, its seed and its Chunks.
 
+**World list** — the first screen of a launch: every World folder, before any
+Game runs. Not a "menu" (the in-World catalogue and settings).
+
+**Empty World** — a World created with no Game. It loads no Mods, now or on
+reopen.
+
 **Voxel** — the atomic unit of world volume. Not "block", not "node".
 
 **Material** — what a Voxel is made of. Stone, water, oak. A row of game data:

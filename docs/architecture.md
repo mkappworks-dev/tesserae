@@ -274,3 +274,9 @@ pool serializes and writes snapshots; workers never read mutable World state.
 The Client receives save status and sends lifecycle intents. Mods observe
 new/open through WIT, and restored changes also feed coarse derivation. Details
 and limits: [World persistence](world-persistence.md).
+
+The World list (`client/worlds.rs`) runs in a process with no Server and no open
+World. It creates, renames and trashes only closed World folders, through core's
+`save::library`, which refuses any folder whose writer lock another process
+holds. Opening a World restarts the process, so the Server rule above holds for
+everything inside a World.

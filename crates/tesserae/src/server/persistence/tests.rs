@@ -771,3 +771,19 @@ fn an_empty_world_loads_no_mods() {
     let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
     drop(p);
 }
+
+#[test]
+fn unreadable_details_never_block_a_saved_world() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Scrambled", 6, 1.0)).unwrap();
+    let opening = Opening::from_folder(&path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    Rig::open(opening, settings).settled_save();
+    std::fs::write(path.join(library::SIDECAR), b"{not json").unwrap();
+    let reopened = Opening::from_folder(&path).unwrap();
+    assert_eq!(
+        reopened.id,
+        save::inspect(&path).unwrap().unwrap().commit.world
+    );
+    assert_eq!(reopened.settings(WorldSettings::default()).seed, 6);
+}

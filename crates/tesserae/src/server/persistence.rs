@@ -66,9 +66,27 @@ impl Opening {
     /// save is refused rather than silently becoming a new World.
     pub fn from_folder(directory: &Path) -> Result<Self, String> {
         let recovered = save::inspect(directory).map_err(|e| e.to_string())?;
-        let details = library::read(directory).map_err(|e| e.to_string())?;
+        // Commits are authoritative: unreadable details never block a saved World.
+        let details = match library::read(directory) {
+            Ok(details) => details,
+            Err(e) if recovered.is_some() => {
+                eprintln!("Ignoring unreadable World details: {e}");
+                None
+            }
+            Err(e) => return Err(e.to_string()),
+        };
         let id = match (&recovered, &details) {
-            (Some(r), _) => r.commit.world.clone(),
+            (Some(r), Some(d)) => {
+                if d.world != r.commit.world {
+                    eprintln!(
+                        "World details name {} but the save is {}; the save wins",
+                        d.world.as_str(),
+                        r.commit.world.as_str()
+                    );
+                }
+                r.commit.world.clone()
+            }
+            (Some(r), None) => r.commit.world.clone(),
             (None, Some(d)) if d.pending => d.world.clone(),
             (None, _) => return Err("this World has no save to open".into()),
         };
@@ -91,6 +109,24 @@ impl Opening {
             base.voxel_size = d.voxel_size_m;
         }
         base
+    }
+
+    /// The Game a not-yet-created World was asked for, which must then load.
+    pub fn pending_game(&self) -> Option<&library::GameRef> {
+        self.details
+            .as_ref()
+            .filter(|d| d.pending)
+            .and_then(|d| d.game.as_ref())
+    }
+
+    /// For the loading screen: the World's name, else its folder.
+    pub fn display_name(&self) -> Option<String> {
+        self.details.as_ref().map(|d| d.name.clone()).or_else(|| {
+            self.directory
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+        })
     }
 
     /// An Empty World loads no Mods, so installing a Game later cannot change
@@ -295,7 +331,7 @@ impl Persistence {
                 if !d.pending
                     && let Err(e) = library::write(&path, &d)
                 {
-                    warn!("could not update World details: {e}");
+                    eprintln!("Could not update World details: {e}");
                 }
                 (path, d)
             });

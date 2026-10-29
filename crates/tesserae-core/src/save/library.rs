@@ -51,7 +51,7 @@ impl std::fmt::Display for NameError {
     }
 }
 
-pub fn name(text: &str) -> Result<String, NameError> {
+pub fn valid_name(text: &str) -> Result<String, NameError> {
     let text = text.trim();
     if text.is_empty() {
         Ok(DEFAULT_NAME.into())
@@ -191,12 +191,13 @@ pub fn rename(dir: &Path, new_name: &str) -> Result<(), Error> {
 /// `Err(Busy)` while any process holds the World open. Releases at once, so
 /// a caller deleting the folder accepts a narrow race with a new opener,
 /// which then fails to find its World rather than corrupting it.
-pub fn closed(dir: &Path) -> Result<(), Error> {
+pub fn ensure_closed(dir: &Path) -> Result<(), Error> {
     super::lock(dir).map(drop)
 }
 
 /// Makes a new folder named after the World and writes its sidecar. The folder
-/// is never renamed afterwards; Rename changes only the sidecar.
+/// is never renamed afterwards; Rename changes only the sidecar. A copied
+/// folder keeps its UUID, which is harmless: nothing global is keyed by it.
 pub fn create(worlds: &Path, sidecar: &Sidecar) -> io::Result<PathBuf> {
     fs::create_dir_all(worlds)?;
     let taken: Vec<String> = fs::read_dir(worlds)?
@@ -366,10 +367,10 @@ mod tests {
 
     #[test]
     fn names_are_trimmed_bounded_and_default_when_blank() {
-        assert_eq!(name("  Ridge  "), Ok("Ridge".into()));
-        assert_eq!(name("   "), Ok(DEFAULT_NAME.into()));
-        assert_eq!(name(&"é".repeat(64)), Ok("é".repeat(64)));
-        assert_eq!(name(&"é".repeat(65)), Err(NameError::TooLong));
+        assert_eq!(valid_name("  Ridge  "), Ok("Ridge".into()));
+        assert_eq!(valid_name("   "), Ok(DEFAULT_NAME.into()));
+        assert_eq!(valid_name(&"é".repeat(64)), Ok("é".repeat(64)));
+        assert_eq!(valid_name(&"é".repeat(65)), Err(NameError::TooLong));
     }
 
     #[test]
@@ -443,9 +444,9 @@ mod tests {
         let _open = super::super::Writer::acquire(&path, &commit.world, &commit.content).unwrap();
         assert!(matches!(rename(&path, "Other"), Err(Error::Busy)));
         assert_eq!(read(&path).unwrap().unwrap().name, "Busy");
-        assert!(matches!(closed(&path), Err(Error::Busy)));
+        assert!(matches!(ensure_closed(&path), Err(Error::Busy)));
         drop(_open);
-        assert!(closed(&path).is_ok());
+        assert!(ensure_closed(&path).is_ok());
     }
 
     #[test]
