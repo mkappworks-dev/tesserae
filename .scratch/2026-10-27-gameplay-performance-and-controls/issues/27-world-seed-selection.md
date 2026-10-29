@@ -282,3 +282,9 @@ empty sky, and its seed did nothing. With no Game installed, Create is
 disabled and the list says to install one. Worlds already saved without a
 Game still open and load no Mods.
 
+### Empty hand on entry (2026-10-29)
+
+The user asked that joining any World, new or existing, starts with an
+empty hand, whatever was held when the last World closed. The per-Game
+shortcuts and selected slot are kept; a slot key or click picks one up.
+

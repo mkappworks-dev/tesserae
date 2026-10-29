@@ -160,6 +160,8 @@ cancels rather than deleting a shortcut. No further slot-operation UI is
 required by this completed ticket.
 
 Save arrangements per Game using stable Material/Shape names and Orientation.
+Every World opens empty-handed; the saved shortcuts and selected slot are
+kept, and a slot key or click picks one up (user decision 2026-10-29).
 Restore across restarts; missing content is visibly empty, not a different
 item at a reused id. Controls remain global per user. Temporary outside-held
 selection is not persisted. These shortcuts are not owned resource saves.
