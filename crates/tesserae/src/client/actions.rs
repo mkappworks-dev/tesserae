@@ -173,14 +173,15 @@ pub(super) struct Binding {
 
 impl Binding {
     pub fn active(&self, inputs: Inputs) -> bool {
-        let keys = inputs.keys;
-        inputs.pressed(self.trigger)
-            && self.modifier.matches(
-                keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]),
-                keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]),
-                keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
-                keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
-            )
+        inputs.pressed(self.trigger) && self.modifier_held(inputs.keys)
+    }
+    fn modifier_held(&self, keys: &ButtonInput<KeyCode>) -> bool {
+        self.modifier.matches(
+            keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]),
+            keys.any_pressed([KeyCode::SuperLeft, KeyCode::SuperRight]),
+            keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]),
+            keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]),
+        )
     }
 }
 
@@ -634,13 +635,17 @@ fn collect(
         wheel: actions.wheel,
     };
     actions.resolve(&bindings, inputs, pad.cancel);
-    // A bound wheel chord owns the wheel: it never also steps the quick slots.
+    // While a wheel chord's modifier is held it owns the wheel, including a
+    // trackpad's part notches between its presses, which would otherwise
+    // step the quick slots as it zooms.
     let chorded = bindings
         .keyboard
         .values()
         .flatten()
         .flatten()
-        .any(|binding| matches!(binding.trigger, Trigger::Wheel(_)) && binding.active(inputs));
+        .any(|binding| {
+            matches!(binding.trigger, Trigger::Wheel(_)) && binding.modifier_held(&keys)
+        });
     if chorded {
         actions.axes.scroll.clear();
     }
@@ -726,6 +731,10 @@ mod tests {
         let pixels = |app: &mut App, y, phase| wheel(app, y, MouseScrollUnit::Pixel, phase);
         pixels(&mut app, 60.0, TouchPhase::Started);
         assert!(!app.world().resource::<Actions>().started(ZoomIn));
+        assert!(
+            app.world().resource::<Actions>().axes.scroll.is_empty(),
+            "part of a notch is the chord's too, never the quick slots'"
+        );
         pixels(&mut app, 60.0, TouchPhase::Moved);
         assert!(app.world().resource::<Actions>().started(ZoomIn));
         // A new gesture drops what the last one left over.
