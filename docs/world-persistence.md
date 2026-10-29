@@ -12,7 +12,11 @@ fixtures also default to ephemeral unless given an explicit World directory. Use
 a fresh directory under `/tmp` for measurements, never a personal World.
 
 The menu's Save & Quit control and the window close action request a Server
-save. Saving is automatic; ordinary play shows only a temporary saving
+save. Normal close automatically finishes the final save and exits; it does not
+ask whether to save or discard. While finishing, a compact, noninteractive
+progress indicator replaces the previous quit-choice dialog. Repeated close
+requests cannot dismiss an outstanding save-failure or discard-confirmation
+prompt. Saving is automatic; ordinary play shows only a temporary saving
 indicator, with no persistent saved/unsaved panel. A failed quit leaves the
 World open, with Retry, Return to World, and a separately confirmed exit without
 saving. Ordinary autosave failures leave play running and retain changed Chunks

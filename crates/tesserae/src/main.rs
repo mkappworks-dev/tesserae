@@ -54,14 +54,7 @@ fn main() -> std::process::ExitCode {
         .insert_non_send(loaded)
         .add_plugins(
             DefaultPlugins
-                .set(WindowPlugin {
-                    close_when_requested: false,
-                    primary_window: Some(Window {
-                        title: "Tesserae".into(),
-                        ..default()
-                    }),
-                    ..default()
-                })
+                .set(window_plugin())
                 .set(task_pools())
                 .set(log_settings()),
         )
@@ -69,6 +62,17 @@ fn main() -> std::process::ExitCode {
         .add_plugins(dev_plugins)
         .run();
     std::process::ExitCode::SUCCESS
+}
+
+fn window_plugin() -> WindowPlugin {
+    WindowPlugin {
+        close_when_requested: false,
+        primary_window: Some(Window {
+            title: "Tesserae".into(),
+            ..default()
+        }),
+        ..default()
+    }
 }
 
 fn log_settings() -> bevy::log::LogPlugin {

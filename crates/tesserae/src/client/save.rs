@@ -53,14 +53,16 @@ fn close_request(
     mut requests: MessageReader<WindowCloseRequested>,
     mut actions: MessageWriter<SaveAction>,
     status: Res<SaveStatus>,
-    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    mut cursors: Query<(Entity, &mut CursorOptions), With<PrimaryWindow>>,
 ) {
-    if requests.read().next().is_some() {
-        requests.clear();
+    let requested = requests
+        .read()
+        .any(|request| cursors.contains(request.window));
+    if requested && !status.modal() {
         actions.write(SaveAction::SaveQuit);
     }
-    if status.modal() {
-        for mut cursor in &mut cursor {
+    if requested || status.modal() {
+        for (_, mut cursor) in &mut cursors {
             cursor.grab_mode = CursorGrabMode::None;
             cursor.visible = true;
         }
@@ -90,7 +92,7 @@ fn show(
     if wanted == View::Hidden {
         return;
     }
-    let modal = status.modal();
+    let modal = status.confirm_unsafe || status.quitting && status.error.is_some();
     commands
         .spawn((
             Panel,
@@ -176,7 +178,7 @@ fn show(
                     SaveAction::ConfirmUnsafe,
                 );
                 button("Cancel", SaveAction::CancelUnsafe);
-            } else if status.quitting {
+            } else if status.quitting && status.error.is_some() {
                 if !status.saving {
                     button("Retry Save & Quit", SaveAction::Retry);
                 }
@@ -273,7 +275,6 @@ mod tests {
                 },
             ))
             .id();
-        app.world_mut().resource_mut::<SaveStatus>().quitting = true;
         app.world_mut()
             .write_message(WindowCloseRequested { window });
         app.world_mut().run_system_once(close_request).unwrap();
@@ -290,5 +291,109 @@ mod tests {
             app.world().get::<CursorOptions>(window).unwrap().grab_mode,
             CursorGrabMode::None
         );
+    }
+
+    #[test]
+    fn successful_quit_has_only_noninteractive_progress_until_server_exit() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::window_plugin()))
+            .init_resource::<SaveStatus>()
+            .add_message::<SaveAction>()
+            .add_systems(PreUpdate, close_request)
+            .add_systems(Update, show);
+        let window = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .write_message(WindowCloseRequested { window });
+        app.update();
+        assert!(matches!(
+            app.world_mut()
+                .resource_mut::<Messages<SaveAction>>()
+                .drain()
+                .next(),
+            Some(SaveAction::SaveQuit)
+        ));
+        app.world_mut().resource_mut::<SaveStatus>().quitting = true;
+        for saving in [false, true] {
+            app.world_mut().resource_mut::<SaveStatus>().saving = saving;
+            app.update();
+            assert!(app.world().get::<Window>(window).is_some());
+            assert!(
+                app.world()
+                    .get::<bevy::window::ClosingWindow>(window)
+                    .is_none()
+            );
+            assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+            assert_eq!(
+                app.world_mut().query::<&Action>().iter(app.world()).count(),
+                0
+            );
+            let node = app
+                .world_mut()
+                .query_filtered::<&Node, With<Panel>>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(node.width, Val::Px(300.0));
+        }
+    }
+
+    #[test]
+    fn failed_quit_and_discard_confirmation_keep_the_real_window_plugin_alive() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::window_plugin()))
+            .insert_resource(SaveStatus {
+                quitting: true,
+                error: Some("disk full".into()),
+                ..default()
+            })
+            .add_message::<SaveAction>()
+            .add_observer(activate)
+            .add_systems(PreUpdate, close_request)
+            .add_systems(Update, show);
+        let window = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.update();
+        for confirm in [false, true] {
+            app.world_mut().resource_mut::<SaveStatus>().confirm_unsafe = confirm;
+            app.world_mut()
+                .write_message(WindowCloseRequested { window });
+            app.update();
+            app.update();
+            assert!(app.world().get::<Window>(window).is_some());
+            assert!(
+                app.world()
+                    .get::<bevy::window::ClosingWindow>(window)
+                    .is_none()
+            );
+            assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+            assert!(app.world().resource::<Messages<SaveAction>>().is_empty());
+            assert_eq!(
+                app.world_mut().query::<&Action>().iter(app.world()).count(),
+                if confirm { 2 } else { 3 }
+            );
+        }
+        let cancel = app
+            .world_mut()
+            .query::<(Entity, &Action)>()
+            .iter(app.world())
+            .find_map(|(entity, action)| {
+                matches!(action.0, SaveAction::CancelUnsafe).then_some(entity)
+            })
+            .unwrap();
+        app.world_mut().trigger(Activate { entity: cancel });
+        assert!(matches!(
+            app.world_mut()
+                .resource_mut::<Messages<SaveAction>>()
+                .drain()
+                .next(),
+            Some(SaveAction::CancelUnsafe)
+        ));
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
     }
 }
