@@ -7,7 +7,12 @@ pub(super) fn plugin(app: &mut App) {
 }
 fn feedback(mut messages: MessageReader<MovementFeedback>, mut commands: Commands) {
     if let Some(message) = messages.read().last() {
-        super::menu_ui::notify(&mut commands, message.0);
+        let tone = if message.refused() {
+            super::menu_ui::Tone::Alert
+        } else {
+            super::menu_ui::Tone::Change
+        };
+        super::menu_ui::notify(&mut commands, message.message(), tone);
     }
 }
 pub(super) fn apply_correction(
@@ -56,7 +61,7 @@ mod tests {
         app.add_message::<MovementFeedback>()
             .add_systems(Update, feedback);
         app.world_mut()
-            .write_message(MovementFeedback("Physics mode"));
+            .write_message(MovementFeedback::Switched(MovementMode::Physics));
         app.update();
         let messages: Vec<_> = app
             .world_mut()

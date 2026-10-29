@@ -258,9 +258,6 @@ impl Notice {
     }
 }
 
-#[derive(Component)]
-struct NoticeHud;
-
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Hotbar>()
         .init_resource::<Catalogue>()
@@ -275,7 +272,6 @@ pub(super) fn plugin(app: &mut App) {
                 // Present the authoritative Eye before constructing an Edit ray.
                 send_intents.after(super::pose::apply_correction),
                 show_rejections,
-                update_hud,
             )
                 .chain(),
         );
@@ -300,18 +296,6 @@ fn spawn_hud(mut commands: Commands) {
             font(22.0),
             TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
         ));
-    commands.spawn((
-        NoticeHud,
-        Text::default(),
-        font(14.0),
-        TextColor(Color::srgb(1.0, 0.7, 0.3)),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(16.0),
-            top: Val::Px(48.0),
-            ..default()
-        },
-    ));
 }
 
 pub(super) fn receive_catalogue(
@@ -467,19 +451,27 @@ pub(super) fn send_intents(
 }
 
 fn show_rejections(
+    mut commands: Commands,
     mut rejected: MessageReader<EditRejected>,
     mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
     time: Res<Time>,
 ) {
     for message in applied.read() {
-        notice.show(match message.0 {
+        let text = match message.0 {
             crate::server::undo::HistoryAction::Undo => "Undone",
             crate::server::undo::HistoryAction::Redo => "Redone",
-        });
+        };
+        notice.show(text);
+        super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
     }
     for message in rejected.read() {
         notice.show(message.reason.message());
+        super::menu_ui::notify(
+            &mut commands,
+            message.reason.message(),
+            super::menu_ui::Tone::Alert,
+        );
     }
     notice.tick(time.delta_secs());
 }
@@ -559,12 +551,6 @@ pub(super) fn hud_text(
         held.describe(catalogue),
         notice.text()
     )
-}
-
-fn update_hud(notice: Res<Notice>, mut notices: Query<&mut Text, With<NoticeHud>>) {
-    for mut text in &mut notices {
-        text.set_if_neq(Text::new(notice.text()));
-    }
 }
 
 #[cfg(test)]

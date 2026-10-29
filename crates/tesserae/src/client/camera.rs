@@ -71,8 +71,6 @@ pub struct CameraHome(pub Transform);
 /// else on screen says so, which reads as the mouse not working at all.
 #[derive(Component)]
 struct CursorHint;
-#[derive(Component)]
-struct SprintHint;
 #[derive(Resource, Default)]
 pub(super) struct Sprint(pub bool);
 
@@ -97,32 +95,10 @@ pub(super) fn plugin(app: &mut App) {
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
     app.add_systems(Startup, spawn_hint)
         .add_systems(Update, input.run_if(crate::server::persistence::playing))
-        .add_systems(
-            Update,
-            (
-                show_hint.after(super::input::resolve),
-                sprint_hint.after(fly),
-            ),
-        );
+        .add_systems(Update, show_hint.after(super::input::resolve));
 }
 
 fn spawn_hint(mut commands: Commands) {
-    commands.spawn((
-        SprintHint,
-        Visibility::Hidden,
-        Pickable::IGNORE,
-        Text::new("Sprint enabled"),
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(16.0),
-            left: Val::Percent(45.0),
-            ..default()
-        },
-        TextFont {
-            font_size: bevy::text::FontSize::Px(14.0),
-            ..default()
-        },
-    ));
     commands.spawn((
         CursorHint,
         Text::new("Click to look around\nEsc to release the cursor"),
@@ -248,6 +224,7 @@ pub(super) fn look(
 }
 
 fn fly(
+    mut commands: Commands,
     preferences: Res<super::profile::Preferences>,
     mut sprint: ResMut<Sprint>,
     ownership: Res<super::input::Ownership>,
@@ -275,6 +252,15 @@ fn fly(
         sprint.0 = false;
     } else if preferences.toggle_sprint && actions.started(Action::Sprint) {
         sprint.0 = !sprint.0;
+        super::menu_ui::notify(
+            &mut commands,
+            if sprint.0 {
+                "Sprint enabled"
+            } else {
+                "Sprint disabled"
+            },
+            super::menu_ui::Tone::Change,
+        );
     }
     if !preferences.toggle_sprint {
         sprint.0 = false;
@@ -295,20 +281,6 @@ fn fly(
         jump: ownership.gameplay() && actions.started(Action::Ascend),
         switch_mode: ownership.gameplay() && actions.started(Action::MovementMode),
     });
-}
-
-fn sprint_hint(
-    sprint: Res<Sprint>,
-    preferences: Res<super::profile::Preferences>,
-    mut hints: Query<&mut Visibility, With<SprintHint>>,
-) {
-    for mut hint in &mut hints {
-        hint.set_if_neq(if preferences.toggle_sprint && sprint.0 {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        });
-    }
 }
 
 #[cfg(test)]
@@ -380,6 +352,13 @@ mod tests {
             .press(KeyCode::ShiftRight);
         app.update();
         assert!(app.world().resource::<Sprint>().0);
+        let toasts: Vec<_> = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|text| text.0.clone())
+            .collect();
+        assert_eq!(toasts, ["Sprint enabled"]);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .release(KeyCode::ShiftRight);

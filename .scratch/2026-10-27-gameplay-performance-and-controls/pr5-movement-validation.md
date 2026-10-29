@@ -191,3 +191,17 @@ copies. physics-toast.png, free-flight-toast.png and crouch.png were
 recaptured at unchanged quality. The crouch capture now walks one second,
 not two, so the view stops before the demo build's wall: Physics, Eye
 y=28.02 m, 2.25 m travelled, matching the crouched height and speed.
+
+Toast follow-up at the user's request: notifications are borderless, sit at
+the top right and slide in from the right over 0.22 s, easing back out
+before they expire. Toggle sprint announces Sprint enabled / Sprint disabled
+as a toast, replacing the #24 top-centre Sprint enabled text. Toasts have
+two tones: changes (mode switches, sprint, undo/redo, settings applied) keep
+the green accent; alerts (refused mode switches, Server-declined edits,
+failed hotbar profile writes) use the amber the old edit notice used. That
+top-left notice text is removed; edit rejections now arrive as alert
+toasts. MovementFeedback is now a typed Server outcome, so the Client picks
+the tone without matching strings. Covered by tests for the slide curve,
+both accents, the sprint toast and the typed refusal. The physics-mode toast
+was recaptured at rest (physics-toast-slide.png); the alert tone and the
+slide motion itself are test-covered and still need an interactive look.

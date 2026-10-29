@@ -46,8 +46,25 @@ pub struct MovementIntent {
     pub pitch: f32,
     pub switch_mode: bool,
 }
-#[derive(Message, Clone, Copy, Debug)]
-pub struct MovementFeedback(pub &'static str);
+#[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MovementFeedback {
+    Switched(MovementMode),
+    Forbidden,
+    Obstructed,
+}
+impl MovementFeedback {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Switched(MovementMode::Physics) => "Physics mode",
+            Self::Switched(MovementMode::Flight) => "Free flight mode",
+            Self::Forbidden => "Movement mode forbidden by Server policy",
+            Self::Obstructed => "Physics requires a clear body in loaded terrain",
+        }
+    }
+    pub fn refused(self) -> bool {
+        !matches!(self, Self::Switched(_))
+    }
+}
 #[derive(Message, Clone, Copy, Debug)]
 pub struct PoseCorrection {
     pub mode: MovementMode,
@@ -342,22 +359,17 @@ pub(super) fn receive(
                 policy.physics
             };
             if !allowed {
-                feedback.write(MovementFeedback("Movement mode forbidden by Server policy"));
+                feedback.write(MovementFeedback::Forbidden);
             } else if next == MovementMode::Physics
                 && collide::overlaps(&*store, &tables, world.voxel_size, player.body())
             {
-                feedback.write(MovementFeedback(
-                    "Physics requires a clear body in loaded terrain",
-                ));
+                feedback.write(MovementFeedback::Obstructed);
             } else {
                 player.mode = next;
                 player.crouching = false;
                 player.velocity_y = 0.0;
                 player.grounded = false;
-                feedback.write(MovementFeedback(match next {
-                    MovementMode::Physics => "Physics mode",
-                    MovementMode::Flight => "Free flight mode",
-                }));
+                feedback.write(MovementFeedback::Switched(next));
             }
         }
     }
@@ -697,9 +709,8 @@ mod tests {
                 .resource_mut::<Messages<MovementFeedback>>()
                 .drain()
                 .next()
-                .unwrap()
-                .0,
-            "Movement mode forbidden by Server policy"
+                .unwrap(),
+            MovementFeedback::Forbidden
         );
     }
     #[test]
@@ -749,7 +760,7 @@ mod tests {
                 .world_mut()
                 .resource_mut::<Messages<MovementFeedback>>()
                 .drain()
-                .map(|message| message.0)
+                .map(|message| message.message())
                 .collect();
             assert_eq!(
                 feedback,

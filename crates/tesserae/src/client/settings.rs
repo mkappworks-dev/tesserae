@@ -711,7 +711,11 @@ pub(super) fn render(
         return;
     }
     if settings.notice == "Applied" {
-        super::menu_ui::notify(&mut commands, "Settings applied");
+        super::menu_ui::notify(
+            &mut commands,
+            "Settings applied",
+            super::menu_ui::Tone::Change,
+        );
         settings.notice.clear();
     }
     let Some((bindings, p)) = &settings.draft else {

@@ -203,7 +203,7 @@ fn save(
     }
     if let Some(error) = store.error.take() {
         warn!("{error}");
-        super::menu_ui::notify(&mut commands, &error);
+        super::menu_ui::notify(&mut commands, &error, super::menu_ui::Tone::Alert);
     }
 }
 

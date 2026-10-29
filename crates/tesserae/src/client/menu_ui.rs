@@ -12,6 +12,7 @@ pub(super) const BG: Color = Color::srgb(10.0 / 255.0, 10.0 / 255.0, 10.0 / 255.
 pub(super) const CARD: Color = Color::srgb(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0);
 pub(super) const EDGE: Color = Color::srgb(25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0);
 pub(super) const INK: Color = Color::srgb(245.0 / 255.0, 245.0 / 255.0, 245.0 / 255.0);
+pub(super) const AMBER: Color = Color::srgb(1.0, 0.7, 0.3);
 pub(super) const MUTED: Color = Color::srgb(129.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -1136,7 +1137,34 @@ fn button_label_colors(
 
 #[derive(Component)]
 struct Notification(Timer);
-pub(super) fn notify(commands: &mut Commands, message: &str) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Tone {
+    /// Something the Player asked for took effect.
+    Change,
+    /// Something was refused or failed.
+    Alert,
+}
+impl Tone {
+    fn accent(self) -> Color {
+        match self {
+            Self::Change => LEAF,
+            Self::Alert => AMBER,
+        }
+    }
+}
+const NOTICE_INSET_PX: f32 = 16.0;
+const NOTICE_SLIDE_S: f32 = 0.22;
+/// Past the widest card, so the slide starts fully off screen.
+const NOTICE_OFFSCREEN_PX: f32 = -460.0;
+
+/// The card's right offset: eases in from off screen, rests, then eases back out.
+fn notice_right_px(elapsed_s: f32, lifetime_s: f32) -> f32 {
+    let shown = (elapsed_s.min(lifetime_s - elapsed_s) / NOTICE_SLIDE_S).clamp(0.0, 1.0);
+    let eased = 1.0 - (1.0 - shown).powi(3);
+    NOTICE_OFFSCREEN_PX + (NOTICE_INSET_PX - NOTICE_OFFSCREEN_PX) * eased
+}
+pub(super) fn notify(commands: &mut Commands, message: &str, tone: Tone) {
+    let accent = tone.accent();
     commands.queue(|world: &mut World| {
         let previous: Vec<_> = world
             .query_filtered::<Entity, With<Notification>>()
@@ -1152,10 +1180,8 @@ pub(super) fn notify(commands: &mut Commands, message: &str) {
             GlobalZIndex(40),
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Percent(5.0),
-                right: Val::Percent(5.0),
-                top: Val::Px(89.0),
-                justify_content: JustifyContent::Center,
+                right: Val::Px(NOTICE_OFFSCREEN_PX),
+                top: Val::Px(NOTICE_INSET_PX),
                 ..default()
             },
             Pickable::IGNORE,
@@ -1186,7 +1212,7 @@ pub(super) fn notify(commands: &mut Commands, message: &str) {
                             border_radius: BorderRadius::all(Val::Px(4.0)),
                             ..default()
                         },
-                        BackgroundColor(LEAF.with_alpha(0.12)),
+                        BackgroundColor(accent.with_alpha(0.12)),
                         Pickable::IGNORE,
                     ))
                     .with_child((
@@ -1196,7 +1222,7 @@ pub(super) fn notify(commands: &mut Commands, message: &str) {
                             border_radius: BorderRadius::all(Val::Px(2.0)),
                             ..default()
                         },
-                        BackgroundColor(LEAF),
+                        BackgroundColor(accent),
                         Pickable::IGNORE,
                     ));
                 weighted_text(toast, message, 13.0, 600, INK);
@@ -1206,14 +1232,19 @@ pub(super) fn notify(commands: &mut Commands, message: &str) {
 fn age_notifications(
     mut commands: Commands,
     time: Option<Res<Time>>,
-    mut notifications: Query<(Entity, &mut Notification)>,
+    mut notifications: Query<(Entity, &mut Notification, &mut Node)>,
 ) {
     let Some(time) = time else {
         return;
     };
-    for (entity, mut notice) in &mut notifications {
+    for (entity, mut notice, mut node) in &mut notifications {
         if notice.0.tick(time.delta()).is_finished() {
             commands.entity(entity).despawn();
+        } else {
+            node.right = Val::Px(notice_right_px(
+                notice.0.elapsed_secs(),
+                notice.0.duration().as_secs_f32(),
+            ));
         }
     }
 }
@@ -1256,12 +1287,49 @@ fn dashed_border_colors(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn notifications_slide_in_from_the_right_and_back_out() {
+        use super::{NOTICE_INSET_PX, NOTICE_OFFSCREEN_PX, NOTICE_SLIDE_S, notice_right_px};
+        assert_eq!(notice_right_px(0.0, 2.6), NOTICE_OFFSCREEN_PX);
+        let entering = notice_right_px(NOTICE_SLIDE_S / 2.0, 2.6);
+        assert!(NOTICE_OFFSCREEN_PX < entering && entering < NOTICE_INSET_PX);
+        assert_eq!(notice_right_px(NOTICE_SLIDE_S, 2.6), NOTICE_INSET_PX);
+        assert_eq!(notice_right_px(1.3, 2.6), NOTICE_INSET_PX);
+        assert_eq!(notice_right_px(2.6, 2.6), NOTICE_OFFSCREEN_PX);
+    }
+
+    #[test]
+    fn alerts_and_changes_carry_distinct_accents() {
+        for (tone, accent) in [
+            (super::Tone::Change, super::LEAF),
+            (super::Tone::Alert, super::AMBER),
+        ] {
+            let mut app = App::new();
+            super::notify(&mut app.world_mut().commands(), "Notice", tone);
+            app.world_mut().flush();
+            assert!(
+                app.world_mut()
+                    .query::<&BackgroundColor>()
+                    .iter(app.world())
+                    .any(|color| color.0 == accent)
+            );
+        }
+    }
+
+    #[test]
     fn notifications_replace_previous_messages_and_expire() {
         let mut app = App::new();
         app.init_resource::<Time>()
             .add_systems(Update, super::age_notifications);
-        super::notify(&mut app.world_mut().commands(), "Physics mode");
-        super::notify(&mut app.world_mut().commands(), "Free flight mode");
+        super::notify(
+            &mut app.world_mut().commands(),
+            "Physics mode",
+            super::Tone::Change,
+        );
+        super::notify(
+            &mut app.world_mut().commands(),
+            "Free flight mode",
+            super::Tone::Change,
+        );
         app.world_mut().flush();
         assert_eq!(
             app.world_mut()
