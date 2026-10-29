@@ -518,9 +518,93 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    in ticket 13 of `.scratch/2026-10-26-phase-8.2-no-built-in-content/`. See
    [ADR-0016](docs/adr/0016-only-air-is-built-in.md).
 
-9. Look-pack API, water shading, visual polish.
+9. Look-pack API, water shading, visual polish. Polish includes the sky and its
+   sun, a day/night cycle, and cave lighting that reads as dark and lit by
+   torches instead of flat ambient. Sky and time of day are World or Game
+   settings, not a function of the seed. Biomes are generator behaviour and
+   belong to step 16; they are listed there because they change what the sky and
+   fog should be.
 10. Network transport. The `Player` and `MovementIntent` are its first
     customers.
+
+## Road to the first MVP
+
+The MVP is a single-player Game, shipped as Mods on the Engine, that someone can
+install, play for an hour, save, quit and resume, and then extend with a Mod of
+their own. Steps 1 to 9 plus the items below are the MVP. Network transport (10)
+is not: ADR-0002 keeps single player on the same Server and Client split, so
+multiplayer is a later transport swap, not a rewrite.
+
+These are Game or Mod concerns first. The Engine gains only the seams they need
+and everything crosses the WIT contract. Numbers are the suggested delivery
+order, earliest first; a dependency is named where one exists. The controls,
+movement, save, camera and input work already in flight is tracked in
+`.scratch/2026-10-27-gameplay-performance-and-controls` and is not repeated.
+
+11. **Use action and first tool.** The Server-authoritative "use" verb, tool
+    semantics and success or refusal feedback (tickets 20-21). It needs no
+    inventory, and everything below builds on it.
+12. **Chat and commands.** `/give`, `/time`, `/tp`, `/seed` and the like, as a
+    Mod-extensible command registry. Small, and it makes every later item
+    testable by hand.
+13. **Dropped items and pickup.** Items as Server-simulated Entities with
+    physical pickup. This introduces the Entity seam that mobs, NPCs and
+    machines reuse.
+14. **Inventory.** Survival stacks, consumption and persistence as Server-owned
+    transactions that compose with the bounded undo journal (tickets 18-19).
+    Creative selection stays as a mode. Depends on 11 and 13.
+15. **Crafting.** Data-declared recipes, crafting stations and the UI. Depends
+    on 14.
+16. **Biomes and richer worldgen.** Biomes, climate, ores and biome-aware caves
+    on the seeded generator. A World pins its generator version in the save so a
+    new biome never changes an existing World's terrain for the same seed.
+    Biomes feed the sky and fog colours from step 9.
+17. **Weather.** Rain, snow, wind and lightning, driven by biome climate and the
+    step 9 sky. Server-owned state, Client-only rendering. Depends on 16.
+18. **Plants.** Generated and placed vegetation, growth on the Server tick like
+    fluids, and harvesting. Depends on 16.
+19. **Survival loop.** Health, damage, hunger, death and respawn rules, and the
+    creative and survival modes. Depends on 14.
+20. **Mobs and animals.** Server-simulated Entities with data-declared behaviour
+    and per-biome spawning, with an interpolated Client presentation. The
+    replication shape is designed against step 10 even though the transport
+    ships later. Depends on 13, 16 and 19.
+21. **NPCs.** Identity, persistent state, dialogue and trade. Depends on 14
+    and 20.
+22. **Map, compass and waypoints.** The Client never reads World storage, so the
+    map is built from Server-provided summaries, not from Chunks. Depends on 16.
+23. **Audio.** Ambient sound, effects driven by Server events, and music, with
+    Game-supplied assets like textures. There is no audio plan yet.
+24. **Structures.** Data-declared multi-Voxel templates placed by worldgen with
+    deterministic seeding and by tools in play. Depends on 16.
+25. **Logic and machines.** Two parts, delivered in order. First, wiring,
+    switches and automation as Server-ticked data-declared components. Second,
+    machines: movable and flying contraptions that a Player can ride and steer.
+    A machine is a body of Voxels that moves as a unit, so it needs its own
+    collision, lighting and meshing outside the Chunk grid, Server-owned motion
+    that composes with the Player's flight and physics movement, and a save
+    format for a body that straddles Chunks. This is the largest unknown in the
+    MVP: spike it before committing the scope. Depends on 13 and 24.
+26. **Modding SDK and example Game.** A documented authoring kit: Mod loading
+    from a folder, a fast edit and reload loop, the WIT versioning and
+    compatibility policy, and a small example Mod. This is the gate for "ready
+    for Mods" and the WIT contract is frozen here for the MVP.
+27. **Creation tools.** A structure editor, a material and texture editor, and a
+    screenshot or replay mode, built on the SDK. Depends on 24 and 26.
+28. **Release hardening.** An app bundle for macOS, first-run flow, a save
+    migration policy checked by tests, logs and crash diagnostics without
+    telemetry, and frame-time and load-time budgets enforced in CI.
+
+### After the MVP
+
+Not blocking the MVP, in rough order of value:
+
+- **Multiplayer sessions.** Step 10's transport plus lobbies, join and invite,
+  permissions and server administration.
+- **Dimensions.** More than one World layer in a session, with portals.
+- **Localization and an accessibility pass.** UI scaling, colour-blind options
+  and subtitles. Binding display names already carry locale keys.
+- **Mod browser.** Discovery and install of Mods from inside the Game.
 
 ## Open items
 
