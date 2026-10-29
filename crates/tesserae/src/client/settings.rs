@@ -429,6 +429,10 @@ pub(super) fn capture(
     active: (Res<Bindings>, Res<Preferences>),
     mut actions: ResMut<super::actions::Actions>,
     save: Option<Res<crate::server::persistence::SaveStatus>>,
+    (ui, focus): (
+        Option<Res<super::input::UiInput>>,
+        Option<Res<bevy::input_focus::InputFocus>>,
+    ),
 ) {
     if save.is_some_and(|status| status.modal()) {
         if settings.capture.take().is_some() {
@@ -440,8 +444,11 @@ pub(super) fn capture(
     if !settings.open {
         return;
     }
-    let close_shortcut =
-        actions.started(Action::Catalogue) && !settings.modal() && !settings.capturing();
+    let close_shortcut = actions.started(Action::Catalogue)
+        && !settings.modal()
+        && !settings.capturing()
+        && !ui.is_some_and(|ui| ui.text_entry)
+        && !focus.is_some_and(|focus| focus.get().is_some());
     if actions.cancel_requested() || close_shortcut {
         actions.consume_cancel();
         settings.dirty = true;
@@ -1988,6 +1995,30 @@ mod tests {
         std::fs::remove_file(parent).unwrap();
     }
 
+    #[test]
+    fn tab_focus_navigation_does_not_request_a_menu_exit() {
+        use super::super::menu_ui::Tab;
+        for text_entry in [false, true] {
+            let mut app = app();
+            app.add_plugins(super::super::actions::test_plugin)
+                .insert_resource(super::super::input::UiInput {
+                    text_entry,
+                    ..default()
+                });
+            activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
+            activate_operation(&mut app, Operation::Invert);
+            let control = app.world_mut().spawn_empty().id();
+            app.world_mut()
+                .resource_mut::<bevy::input_focus::InputFocus>()
+                .set(control, bevy::input_focus::FocusCause::Navigated);
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(KeyCode::Tab);
+            app.update();
+            assert!(app.world().resource::<Settings>().open);
+            assert!(!app.world().resource::<Settings>().unsaved);
+        }
+    }
     #[test]
     fn dirty_settings_prompt_on_every_exit_and_save_before_closing() {
         use super::super::menu_ui::Tab;
