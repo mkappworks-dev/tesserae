@@ -134,6 +134,12 @@ Edit; the Client applies a reply only if its hand selection has not changed. UI
 atlas images use premultiplied blending to preserve transparency. No preview
 reads World storage.
 
+The Game may declare a player figure in its World parameters: bones and cubes in
+the shape of Bedrock geometry, one 64 by 64 skin and per-state swing numbers,
+bounded at load. The Client poses it from the body state the Server publishes
+with each Eye and draws the engine's plain box when the Game declares none
+([ADR-0008](adr/0008-the-server-owns-the-players-pose.md)).
+
 The Server also supplies removal target identity and bounds. The Client draws a
 progress bar above it and sends a guarded removal after the Material's hold
 time. This is a gesture guard, not a network anti-cheat timer. The unreleased

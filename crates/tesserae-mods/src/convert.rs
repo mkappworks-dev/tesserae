@@ -154,6 +154,7 @@ pub(crate) fn engine_world_params() -> content::WorldParams {
     debug_assert!(p.water.is_none());
     content::WorldParams {
         movement: None,
+        character: None,
         sea_level_m: p.sea_level_m,
         relief_m: p.relief_m,
         feature_size_m: p.feature_size_m,

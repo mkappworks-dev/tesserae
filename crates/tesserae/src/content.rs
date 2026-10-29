@@ -10,6 +10,10 @@ pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
 
+/// The Game's player figure, or `None` for the engine's plain box.
+#[derive(Message, Clone, Debug, Default, PartialEq)]
+pub struct CharacterModel(pub Option<std::sync::Arc<tesserae_mods::Character>>);
+
 /// What the registered content is called and what a player can do with it.
 /// Content only: it holds no Voxel, Chunk or Occupants, so a Client reading it
 /// reads nothing of the World (ADR-0002).

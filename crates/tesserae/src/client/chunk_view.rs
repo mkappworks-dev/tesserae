@@ -483,7 +483,10 @@ fn spawn_camera(
             // Propagation runs in `PostUpdate`; without this the first frame's pose
             // report and intent would carry the origin, not the camera.
             GlobalTransform::from(pose),
-            super::camera::FlyCamera::looking_along(direction),
+            super::camera::FlyCamera {
+                eye,
+                ..super::camera::FlyCamera::looking_along(direction)
+            },
             super::camera::CameraHome(pose),
         ))
         .id();

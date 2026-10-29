@@ -3,6 +3,7 @@
 
 mod actions;
 mod aim;
+mod avatar;
 mod blend_order;
 pub mod camera;
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -62,6 +63,7 @@ pub fn plugin(app: &mut App) {
         pick::plugin,
         removal::plugin,
         history::plugin,
+        avatar::plugin,
     ));
     #[cfg(feature = "dev")]
     app.add_plugins((

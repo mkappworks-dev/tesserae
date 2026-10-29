@@ -50,8 +50,7 @@ restored without introducing camera offsets or a third-person camera.
 
 Capture fixtures send normal movement intents and explicitly select flight by
 default, or physics with `TESSERAE_FIXTURE_MOVEMENT=physics`. Permissions still
-apply. Network transport, prediction, lag compensation and character/camera
-presentation remain deferred.
+apply. Network transport, prediction and lag compensation remain deferred.
 
 ## Crouch and mode feedback
 
@@ -80,3 +79,22 @@ horizontal speed after discarding the vertical part. The Client sends keyboard
 directions at unit length, so pitch and diagonals keep full speed as before. A
 controller's crouch toggle is Client input state: the intent still carries a
 held crouch, and the Server rules on stance exactly as for hold-to-crouch.
+
+## Character presentation
+
+The figure follows the body; it never moves it. Each published Eye carries what
+the body did over the last step: grounded, horizontal and vertical travel in m/s
+measured from the Eye's motion, stance and sprint. Travel rather than intent, so
+a body held against a wall stands still. The Client picks idle, walk, sprint,
+airborne or crouch from that alone, with no prediction, and its animation phase
+is Client time that feeds nothing back. Flight is always idle; only a physics
+body off the ground is airborne.
+
+The Game declares the figure in the unreleased 0.3 World parameters, in the
+shape of Bedrock geometry: bones with a role, a parent and a pivot, cubes in
+skin pixels with box-UV corners, one 64 by 64 skin, and per-state swing numbers.
+At most 16 bones and 16 cubes; anything out of range refuses the load. A World
+whose Game declares none, including an empty World, gets the engine's untextured
+box at the body's size. The head turns up to 50° ahead of a standing body before
+it follows, and a moving body faces the look. A crouch scales the figure to the
+crouched body's 1.2 m, since a box limb cannot kneel.

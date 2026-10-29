@@ -1,6 +1,6 @@
 const EDGE: usize = 16;
 
-fn noise(x: usize, y: usize, salt: usize) -> i16 {
+pub(crate) fn noise(x: usize, y: usize, salt: usize) -> i16 {
     let mut n = (x as u32).wrapping_mul(374_761_393)
         ^ (y as u32).wrapping_mul(668_265_263)
         ^ (salt as u32).wrapping_mul(1_274_126_177);
@@ -8,7 +8,7 @@ fn noise(x: usize, y: usize, salt: usize) -> i16 {
     ((n ^ (n >> 16)) & 255) as i16
 }
 
-fn tint(base: [u8; 3], amount: i16) -> [u8; 3] {
+pub(crate) fn tint(base: [u8; 3], amount: i16) -> [u8; 3] {
     base.map(|c| (c as i16 + amount).clamp(0, 255) as u8)
 }
 

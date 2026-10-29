@@ -16,7 +16,8 @@ use tesserae_mods::{
 };
 
 use crate::content::{
-    CatalogueMaterial, CatalogueShape, ContentCatalogue, MaterialPalette, MaterialTextures,
+    CatalogueMaterial, CatalogueShape, CharacterModel, ContentCatalogue, MaterialPalette,
+    MaterialTextures,
 };
 use crate::world::WorldSettings;
 
@@ -97,6 +98,7 @@ pub struct LoadedMods {
     pub mods: Vec<ModInstance>,
     pub game: bool,
     pub movement: Option<tesserae_mods::MovementPolicy>,
+    pub character: Option<tesserae_mods::Character>,
     pub required: Vec<tesserae_core::save::RequiredMod>,
 }
 
@@ -113,6 +115,7 @@ impl Default for LoadedMods {
             mods: Vec::new(),
             game: false,
             movement: None,
+            character: None,
             required: Vec::new(),
         }
     }
@@ -328,6 +331,7 @@ fn load_with_opening(
                 loaded.view = applied.view;
                 loaded.game = true;
                 loaded.movement = applied.movement;
+                loaded.character = applied.character;
             }
             loaded.mods.push(instance);
         }
@@ -435,12 +439,15 @@ pub(super) fn plugin(app: &mut App) {
         .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
         .add_plugins(runtime::plugin)
         .add_message::<MaterialTextures>()
+        .add_message::<CharacterModel>()
         .add_message::<MaterialPalette>()
         .add_message::<ContentCatalogue>();
     app.world_mut()
         .write_message(MaterialPalette(loaded.appearance));
     app.world_mut()
         .write_message(MaterialTextures(loaded.textures));
+    app.world_mut()
+        .write_message(CharacterModel(loaded.character.map(std::sync::Arc::new)));
     app.world_mut().write_message(catalogue);
 }
 

@@ -107,8 +107,79 @@ interface content {
         start-in-flight: bool,
     }
 
+    /// How the engine poses a character bone. Closed in 0.3.
+    enum bone-role {
+        /// Turns with the body and carries what hangs from it.
+        body,
+        /// Follows the look's pitch, and leads its yaw while standing.
+        head,
+        arm-left,
+        arm-right,
+        leg-left,
+        leg-right,
+        /// Moves only with its parent.
+        fixed,
+    }
+
+    /// One box of a character, in skin pixels; `pixel-m` gives their size.
+    /// The figure faces -z with +y up and its feet centred on the origin.
+    record character-cube {
+        /// The corner with the lowest coordinates, within 64 pixels of the
+        /// origin on every axis.
+        origin: tuple<f32, f32, f32>,
+        /// Whole pixels, 1 to 32 on each axis, so the box-UV layout is exact.
+        size: tuple<u8, u8, u8>,
+        /// The top-left corner of the cube's box-UV layout in the skin, laid
+        /// out as a Minecraft skin is: top and bottom in the first row, then
+        /// right, front, left and back. The whole layout must fit the skin.
+        uv: tuple<u8, u8>,
+    }
+
+    record character-bone {
+        /// `[a-z][a-z0-9_]{0,31}`, unique within the character.
+        name: string,
+        /// A bone declared before this one; `none` only for the first.
+        parent: option<string>,
+        role: bone-role,
+        /// What the bone rotates about, in pixels from the origin, within 64.
+        pivot: tuple<f32, f32, f32>,
+        cubes: list<character-cube>,
+    }
+
+    /// How limbs move in one state of the body.
+    record limb-motion {
+        /// Arms and legs swing this far either way, 0 to 90; each leg swings
+        /// against the arm on its side.
+        swing-deg: f32,
+        /// Full swings per second, 0 to 4.
+        rate-hz: f32,
+        /// Arms held this far forward, -90 to 180, around which they swing.
+        arm-raise-deg: f32,
+    }
+
+    /// The Game's player figure, which Bedrock geometry exported from
+    /// Blockbench maps onto. The Client draws it in third-person and poses it
+    /// from the Server's body state; it never decides movement. At most 16
+    /// bones and 16 cubes in all.
+    record character-def {
+        bones: list<character-bone>,
+        /// Metres per skin pixel, finite and from 0.001 to 0.25, so the figure
+        /// can match the body's 1.8 m.
+        pixel-m: f32,
+        /// 64 by 64 RGBA, sRGB with straight alpha: exactly 16384 bytes.
+        skin: list<u8>,
+        idle: limb-motion,
+        walk: limb-motion,
+        sprint: limb-motion,
+        /// Off the ground in physics. Flight uses `idle`.
+        airborne: limb-motion,
+        crouch: limb-motion,
+    }
+
     record world-params {
         movement: option<movement-policy>,
+        /// `none` draws the engine's plain box.
+        character: option<character-def>,
         sea-level-m: f32,
         relief-m: f32,
         feature-size-m: f32,
