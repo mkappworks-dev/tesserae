@@ -1,4 +1,4 @@
-# 31: W0.1: World list window and keyboard follow-ups
+# 31: W0.1: World list window follow-ups
 
 Status: needs-triage
 Blocked by: 27
@@ -15,13 +15,13 @@ Split from ticket 27's acceptance criteria on 2026-10-29.
   way or accept centring.
 - Carry macOS native fullscreen (the green button), which Bevy's
   `WindowMode` does not reflect.
-- Check by hand that Tab, Shift-Tab and Enter work on every World list
-  screen. No input automation was available when ticket 27 shipped.
+
+The native Tab/Enter check moved to ticket 07 (PR 9) on 2026-10-29. Ticket
+29 would remove this ticket's code, but is unscheduled, so these fixes stay
+here rather than wait for it.
 
 ## Acceptance criteria
 
 - [ ] A restart keeps an unmoved window's position, or the ticket records
       why centring is accepted.
 - [ ] A restart from native fullscreen stays fullscreen.
-- [ ] Tab, Shift-Tab and Enter are verified natively on the list, Create,
-      Rename, Delete and Trust screens.

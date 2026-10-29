@@ -312,7 +312,7 @@ threads are planned. Touch is not first by default.
 | 27 | W0: World list/create/seed UI | C2, S0, S1 |
 | 29 | W1: in-process World sessions | W0; needs triage |
 | 30 | G0: multiple Games, per-World Mods | W0; needs triage |
-| 31 | W0.1: window and keyboard follow-ups | W0; needs triage |
+| 31 | W0.1: window position and fullscreen | W0; needs triage |
 | 24 | M0: Server-owned flight/physics movement | C0 |
 | 25 | A0: Game character presentation | M0 |
 | 26 | V0: first/third-person view and aim | M0, A0 |

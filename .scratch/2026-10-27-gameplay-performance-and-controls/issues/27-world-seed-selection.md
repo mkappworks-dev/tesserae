@@ -176,7 +176,7 @@ switching or new terrain/biome algorithm.
 - [x] Mouse and keyboard controls lay out at 1024×640 and 1920×1080 under
       `UiScale`; Escape and activation are covered by tests; native captures
       in one /tmp folder for user review. (Narrowed 2026-10-29: native Tab
-      and Enter checks moved to ticket 31.)
+      and Enter checks moved to ticket 07.)
 - [x] Return to World list reuses the guarded Save & Quit, including Retry,
       Return and confirmed unsafe exit.
 
@@ -230,5 +230,5 @@ runs are pending. No push, PR or merge.
 
 The user chose to keep this ticket done and narrow the two open criteria.
 A loading screen before Mod loading moves to ticket 29, which restructures
-startup anyway. Position before the first move, native fullscreen and the
-native Tab/Enter check move to ticket 31.
+startup anyway. Position before the first move and native fullscreen move
+to ticket 31; the native Tab/Enter check moves to ticket 07 (PR 9).
