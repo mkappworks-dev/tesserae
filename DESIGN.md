@@ -584,8 +584,8 @@ movement, save, camera and input work already in flight is tracked in
     A machine is a body of Voxels that moves as a unit, so it needs its own
     collision, lighting and meshing outside the Chunk grid, Server-owned motion
     that composes with the Player's flight and physics movement, and a save
-    format for a body that straddles Chunks. This is the largest unknown in the
-    1.0: spike it before committing the scope. Depends on 12 and 23.
+    format for a body that straddles Chunks. This is the largest unknown in 1.0:
+    spike it before committing the scope. Depends on 12 and 23.
 25. **Modding SDK and example Game.** A documented authoring kit: Mod loading
     from a folder, a fast edit and reload loop, the WIT versioning and
     compatibility policy, and a small example Mod. This is the gate for "ready
