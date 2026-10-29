@@ -152,8 +152,8 @@ ceiling remains safe. Earlier movement_v1 records default to standing.
 
 Accepted Server mode switches publish Physics mode / Free flight mode.
 Refusals and confirmations use the shared menu notification component.
-Its styling uses existing CARD/EDGE/INK/LEAF colors and Aileron typography,
-with a compact rounded card and green accent. Only the latest notice stays
+Its styling uses existing CARD/INK/LEAF colors and Aileron typography,
+with a compact borderless rounded card and green icon accent. Only the latest notice stays
 visible, for 2.6 seconds; notifications do not capture input. Settings reuse
 the same styling. No catalogue/search/shortcut behavior was changed.
 

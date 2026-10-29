@@ -1163,20 +1163,12 @@ pub(super) fn notify(commands: &mut Commands, message: &str) {
         .with_children(|root| {
             root.spawn((
                 BackgroundColor(CARD),
-                BorderColor {
-                    left: LEAF,
-                    ..BorderColor::all(EDGE)
-                },
                 Node {
                     max_width: Val::Px(440.0),
                     min_height: Val::Px(44.0),
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(10.0),
                     padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
-                    border: UiRect {
-                        left: Val::Px(3.0),
-                        ..UiRect::all(Val::Px(1.0))
-                    },
                     border_radius: BorderRadius::all(Val::Px(6.0)),
                     ..default()
                 },
