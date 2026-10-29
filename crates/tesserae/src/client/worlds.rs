@@ -200,23 +200,49 @@ pub fn plugin(app: &mut App) {
 
 /// `TESSERAE_LIST_SCRIPT=new,more` and `TESSERAE_LIST_SHOT=out.png` drive one
 /// screen and capture it for review, then exit without starting a World.
+/// `TESSERAE_SCREENSHOT_OFFSCREEN` renders into an image, as the World capture
+/// does, because a locked display presents nothing and the capture is black.
 #[cfg(feature = "dev")]
 fn review_capture(
     mut commands: Commands,
     mut queue: ResMut<Queue>,
     mut relaunch: ResMut<Relaunch>,
     mut exit: MessageWriter<AppExit>,
-    pending: Query<(), With<bevy::render::view::screenshot::Screenshot>>,
-    failure: Option<Res<OpenFailure>>,
-    mut progress: Local<(u32, bool)>,
+    (pending, failure): (
+        Query<(), With<bevy::render::view::screenshot::Screenshot>>,
+        Option<Res<OpenFailure>>,
+    ),
+    (mut images, cameras): (ResMut<Assets<Image>>, Query<Entity, With<Camera2d>>),
+    mut progress: Local<(u32, bool, Option<Handle<Image>>)>,
 ) {
     use bevy::render::view::screenshot::{Screenshot, save_to_disk};
     let shot = std::env::var_os("TESSERAE_LIST_SHOT");
     if shot.is_none() && std::env::var_os("TESSERAE_LIST_SCRIPT").is_none() {
         return;
     }
-    let (frame, seen) = &mut *progress;
+    let (frame, seen, offscreen) = &mut *progress;
     *frame += 1;
+    if *frame == 1 && std::env::var_os("TESSERAE_SCREENSHOT_OFFSCREEN").is_some() {
+        let size = |name, fallback| {
+            std::env::var(name)
+                .ok()
+                .and_then(|n| n.parse::<u32>().ok())
+                .unwrap_or(fallback)
+        };
+        let handle = images.add(Image::new_target_texture(
+            size("TESSERAE_SCREENSHOT_WIDTH", 1280),
+            size("TESSERAE_SCREENSHOT_HEIGHT", 720),
+            bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+            None,
+        ));
+        for camera in &cameras {
+            commands.entity(camera).insert((
+                bevy::camera::RenderTarget::Image(handle.clone().into()),
+                IsDefaultUiCamera,
+            ));
+        }
+        *offscreen = Some(handle);
+    }
     // A restarted list after a failed open must not replay a create script.
     if *frame == 5 && failure.is_none() {
         let script = std::env::var("TESSERAE_LIST_SCRIPT").unwrap_or_default();
@@ -238,8 +264,12 @@ fn review_capture(
         return;
     };
     if *frame == 60 {
+        let screenshot = match offscreen {
+            Some(handle) => Screenshot::image(handle.clone()),
+            None => Screenshot::primary_window(),
+        };
         commands
-            .spawn(Screenshot::primary_window())
+            .spawn(screenshot)
             .observe(save_to_disk(PathBuf::from(shot)));
     }
     if *frame > 60 {
