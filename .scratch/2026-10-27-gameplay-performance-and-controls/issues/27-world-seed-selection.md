@@ -149,6 +149,12 @@ these screens belong to ticket 32 (ticket 07 merged first) and touch to
 No Mod download manager, multi-Game install layout, in-process World
 switching or new terrain/biome algorithm.
 
+### Toggle sprint by default (added 2026-10-29)
+
+The user asked for sprint to toggle by default. New profiles and profiles
+without a saved choice toggle; a profile that saved Hold keeps it, because
+the profile stores the user's explicit choice. Hold stays a preference.
+
 ### Demo terrain that shows the seed (added 2026-10-29)
 
 Native review found Randomize working but invisible: the demo Game's 4 m

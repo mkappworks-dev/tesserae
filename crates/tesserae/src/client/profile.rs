@@ -53,7 +53,7 @@ pub(super) const PAD_DEADZONE: std::ops::RangeInclusive<f32> = 0.05..=0.5;
 impl Default for Preferences {
     fn default() -> Self {
         Self {
-            toggle_sprint: false,
+            toggle_sprint: true,
             tap_remove: false,
             sensitivity: 0.003,
             invert_y: false,
@@ -362,6 +362,18 @@ mod tests {
         default_mouse.as_object_mut().unwrap().remove("pad");
         assert_eq!(mouse_prefs, default_mouse);
         assert_eq!(decode(&bytes).unwrap(), (bindings, prefs));
+    }
+
+    #[test]
+    fn sprint_toggles_by_default_but_a_saved_hold_choice_is_kept() {
+        let missing =
+            std::env::temp_dir().join(format!("tesserae-no-profile-{}", std::process::id()));
+        let (_, _, fresh) = Store::load(missing);
+        assert!(fresh.toggle_sprint);
+        let (_, unset) = decode(br#"{"version":1,"preferences":{"invert_y":true}}"#).unwrap();
+        assert!(unset.toggle_sprint);
+        let (_, held) = decode(br#"{"version":1,"preferences":{"toggle_sprint":false}}"#).unwrap();
+        assert!(!held.toggle_sprint);
     }
 
     #[test]

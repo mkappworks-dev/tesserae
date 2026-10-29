@@ -70,8 +70,10 @@ Warn on conflicts in overlapping contexts and offer replace or cancel;
 never silently fire competing actions. Capture starts after its opening
 input is released. Respect both modifier sides and platform undo/redo.
 
-Preserve current defaults: hold removal, hold sprint, right place/ignite,
-X empty hand, middle/P sampling and fire > solid > source removal priority.
+Preserve current defaults: hold removal, right place/ignite, X empty hand,
+middle/P sampling and fire > solid > source removal priority. Sprint toggles
+by default (user decision 2026-10-29, ticket 27); a saved Hold choice is
+kept, and Hold stays a preference.
 Keep Server aim/history guards and one removal per activation, except under
 the opt-in "Repeat while held" preference of ticket 29.
 
@@ -313,6 +315,7 @@ threads are planned. Touch is not first by default.
 | 30 | W1: in-process World sessions | W0; needs triage |
 | 31 | G0: multiple Games, per-World Mods | W0; needs triage |
 | 32 | W0.1: window, keyboard and controller follow-ups | W0, C3; needs triage |
+| 33 | water immersion: view and movement | M0; needs triage |
 | 24 | M0: Server-owned flight/physics movement | C0 |
 | 25 | A0: Game character presentation | M0 |
 | 26 | V0: first/third-person view and aim | M0, A0 |
