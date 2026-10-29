@@ -72,3 +72,10 @@ available; text entry owns X while search is focused. Settings close actions,
 including Cancel and Tab, prompt Save changes / Discard / Stay for dirty drafts.
 Save failure retains the prompt and draft. Reset/capture/search cancellation
 still consumes its own Escape first.
+
+
+Final shortcut/exit validation: all 146 Client tests pass. The complete suite
+still has the unchanged intermittent Agenda persistence failure; the other
+969 workspace tests pass when that one test is explicitly excluded. Full
+validation details and retained failed logs are in the implementation record.
+The UI implementation is complete; persistence is not claimed fixed.

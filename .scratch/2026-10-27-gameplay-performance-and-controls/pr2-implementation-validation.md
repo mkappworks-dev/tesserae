@@ -213,3 +213,72 @@ its guest rebuild with compatible-artifact checks/reuse and setting its working
 directory explicitly. Cargo used caffeinate, warnings denied and the requested
 shared target cache. The branch contains `origin/main` at `aa3c2b1`; nothing
 has been pushed, published or merged.
+
+
+## Direct selection and footer refinement (2026-10-29)
+
+The user's subsequent instruction supersedes the explicit Hold flow above.
+Implemented in local commit `eb27484`:
+
+- Selecting catalogue content holds it immediately and keeps the menu open.
+  Clicking it again or Clear selection empties the hand. Choosing a Shape
+  updates the held variation; closing the menu enables ordinary placement.
+- The quick-slot header reads Selected: Stone · Cube (using actual Material
+  and Shape names), or Nothing selected. Previewing other content does not
+  misreport the held selection. Slot contents are preserved by selection/clear.
+- Behavior, Key bindings and Display scroll through all remaining space above
+  the bottom divider. Restore defaults is a bordered button; reset confirmation
+  and draft-only semantics are unchanged.
+
+All 143 Client tests pass. Actual edit-schedule coverage verifies solids,
+fluids and fire, no edit from selection/clear while the menu remains open,
+correct rendered summaries, and placement of the selected Shape after closing.
+The approved HTML and controls documentation reflect the new interaction.
+
+Twelve offscreen captures and source/executable/font stamps are retained in
+`/tmp/tesserae-selection-review-uq4y8tkg/final/`. The review entry point is
+`/tmp/tesserae-selection-review-uq4y8tkg/native-review.html`.
+Previous captures remain retained at their earlier paths as historical evidence.
+Native review confirms the removal of Hold, the selection summary and Clear
+selection button, full-height scroll areas, and Restore defaults at 1280 × 900
+and the smaller views. Full CI passed at this batch (967 tests, five ignored),
+retained as `cargo-ci.log`.
+
+
+The follow-up `b5a86b9` adds the remappable Empty hand action in Catalogue
+(X by default), with a binding-derived footer hint alongside Clear selection.
+Actual resolver/edit-consumer tests ensure X does not clear while search owns
+input, and works after fresh activation. Cancel and the menu-close shortcut
+now join Back, Escape and Catalogue navigation in requesting Save changes /
+Discard / Stay. Actual operation and keyboard tests cover all three tabs and
+verify persisted settings before closing, while failed saves retain the prompt.
+Focused controls/search retain Tab navigation rather than triggering an exit.
+
+The known Agenda persistence failure recurred in `cargo-ci-final.log` before
+the final focus guard. It remains unchanged Server code and is not considered
+fixed by this UI pass. Final validation uses a recorded four-thread test limit;
+this concurrency choice is not evidence that the underlying issue is repaired.
+
+
+Final validation outcome for the exit/shortcut refinements:
+
+- All 146 Client tests passed, including the Tab focus guard in `71c11ed` and
+  the follow-up text-entry guard for a remapped Release cursor action.
+- Full CI is **not green**: the unchanged persistence test failed both at
+  default concurrency and with `RUST_TEST_THREADS=4`. It passed in isolation
+  (`persistence-isolated.log`). No claim of a persistence fix is made.
+- `remaining-checks.log` records 969 workspace tests passed, five existing
+  measurements ignored, and exactly that one persistence test explicitly
+  excluded. Benchmark compilation, boundaries and dependency checks passed.
+  The complete CI attempts also passed formatting, all-feature/all-target
+  Clippy, rustdoc and default-feature checks before reaching the test failure.
+- The final Client-only recheck and native build are retained as
+  `client-tests.log` and `native-build.log`. Final lint/check rechecks are in
+  `final-lint.log`. Compatible guests were reused throughout.
+- Final captures stamp `b5a86b9`; the later focus/text-entry guards change only
+  shortcut ownership, without changing their visuals. Earlier `eb27484`
+  captures remain in `pre-shortcut-and-exit-guard/`. A separate final native
+  executable snapshot, SHA and hash are retained at the review root.
+
+The worktree changes are committed locally; nothing has been pushed, published
+or merged. No Server, WIT or Game sources were changed by these refinements.

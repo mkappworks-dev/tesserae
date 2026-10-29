@@ -447,9 +447,11 @@ pub(super) fn capture(
     let close_shortcut = actions.started(Action::Catalogue)
         && !settings.modal()
         && !settings.capturing()
-        && !ui.is_some_and(|ui| ui.text_entry)
+        && !ui.as_ref().is_some_and(|ui| ui.text_entry)
         && !focus.is_some_and(|focus| focus.get().is_some());
-    if actions.cancel_requested() || close_shortcut {
+    let cancel_shortcut = actions.cancel_requested()
+        && (keys.just_pressed(KeyCode::Escape) || !ui.as_ref().is_some_and(|ui| ui.text_entry));
+    if cancel_shortcut || close_shortcut {
         actions.consume_cancel();
         settings.dirty = true;
         if settings.unsaved {
@@ -1998,7 +2000,11 @@ mod tests {
     #[test]
     fn tab_focus_navigation_does_not_request_a_menu_exit() {
         use super::super::menu_ui::Tab;
-        for text_entry in [false, true] {
+        for (text_entry, focused, key) in [
+            (false, true, KeyCode::Tab),
+            (true, false, KeyCode::Tab),
+            (true, false, KeyCode::KeyC),
+        ] {
             let mut app = app();
             app.add_plugins(super::super::actions::test_plugin)
                 .insert_resource(super::super::input::UiInput {
@@ -2008,12 +2014,24 @@ mod tests {
             activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
             activate_operation(&mut app, Operation::Invert);
             let control = app.world_mut().spawn_empty().id();
-            app.world_mut()
-                .resource_mut::<bevy::input_focus::InputFocus>()
-                .set(control, bevy::input_focus::FocusCause::Navigated);
+            if focused {
+                app.world_mut()
+                    .resource_mut::<bevy::input_focus::InputFocus>()
+                    .set(control, bevy::input_focus::FocusCause::Navigated);
+            }
+            app.world_mut().resource_mut::<Bindings>().0.insert(
+                Action::ReleaseCursor,
+                [
+                    Some(Binding {
+                        trigger: Trigger::Key(KeyCode::KeyC),
+                        modifier: Modifier::None,
+                    }),
+                    None,
+                ],
+            );
             app.world_mut()
                 .resource_mut::<ButtonInput<KeyCode>>()
-                .press(KeyCode::Tab);
+                .press(key);
             app.update();
             assert!(app.world().resource::<Settings>().open);
             assert!(!app.world().resource::<Settings>().unsaved);
