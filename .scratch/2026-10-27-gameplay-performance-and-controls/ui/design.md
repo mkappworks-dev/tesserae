@@ -1,6 +1,6 @@
 # Approved native menu reference
 
-Status: ready-for-agent
+Status: done
 
 The user approved leaf green, the five-tile Mosaic T logo, top-level Catalogue,
 Behavior, Key bindings and Display tabs, and search on applicable pages. The
@@ -33,3 +33,20 @@ Native validation must compare the same content viewport sizes, retain offscreen
 captures in a unique /tmp directory, cover focus and draft transitions and run
 the Client regressions plus workspace CI checks. No WIT or Game source changes,
 guest rebuilds, push, publication or merge belong to this UI pass.
+
+
+## Implementation evidence
+
+Implemented through `b1e7d02`. All 143 Client regressions passed; the full CI
+recheck passed 967 tests with zero failures and five existing measurements
+ignored. See `../pr2-implementation-validation.md` for the earlier intermittent
+persistence failure and complete check details.
+
+Twelve retained native offscreen captures, the executable, source stamp,
+font hashes and environment manifests are under
+`/tmp/tesserae-leaf-review-7udu289a/final/`. The review entry point is
+`/tmp/tesserae-leaf-review-7udu289a/native-review.html`. Fixed tile dimensions,
+five/six-column wrapping, all four pages, search and modal states were reviewed.
+The dark palette, leaf accent, Mosaic T, layout dimensions, Aileron family and
+icon shapes follow the updated reference. Native text rasterization and real
+Game previews differ from browser placeholder rendering.

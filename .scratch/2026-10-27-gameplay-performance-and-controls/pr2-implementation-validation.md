@@ -132,3 +132,84 @@ Rebase CI logs, wrapper and rebuilt guest hashes are retained in
 this rebase was validated with automated checks, without new native captures.
 The refined menu, logo and accent studies in that directory are design
 prototypes; the visual redesign has not been applied to the native UI.
+
+
+## Native menu implementation and Aileron (2026-10-29)
+
+This section supersedes the historical statement above that the approved menu
+was not implemented. Tickets 01–04 and 28 remain complete; this UI pass adds no
+later-ticket features.
+
+Local implementation batches:
+
+- `92126b4`: leaf-green top-level tabs and native search.
+- `bea3b90`: approved layout, typography and vector icon assets.
+- `7537a27`: actual Bevy hover subscriptions and binding presentation.
+- `1e33fea`: catalogue selection stays open, fixed-size wrapping cards, and
+  placeholder/count/spacing refinements.
+- `b1e7d02`: public-domain Aileron for menu, keys, values, HUD and save dialogs;
+  the reference embeds the same unchanged Regular, SemiBold and Bold faces.
+
+The user selected leaf green and the Mosaic T logo. Catalogue, Behavior,
+Key bindings and Display are top-level pages. I opens the last controls page;
+the old in-game information button and floating help panel are removed.
+Behavior includes an optional quick reference; diagnostics remain independent.
+Catalogue and bindings searches preserve text, focus, cursor and page state.
+Typing never activates gameplay actions. Draft, conflict, binding capture,
+reset confirmation and unsaved-exit dialogs retain the existing input owner
+and release-before-activation rules. Save modals retain ownership.
+
+Clicking catalogue content now pins its detail without closing the menu,
+changing the hand or grabbing the cursor. Explicit Hold returns to play;
+assignment stays in the menu. Real edit-schedule tests exercise solids, fluids
+and fire and verify no Edit intent from the selection click. Catalogue cards
+are 128 × 113 logical pixels with wrapping columns; native captures verify six
+columns at 1280 and five at 1024. Quick slots keep their separate fixed footer.
+
+All 143 Client tests passed after the final implementation, including actual
+search widgets, native styles, ownership transitions, ordering and cancellation,
+profile failures and 60/144/1000-update intent traces. The native dev executable
+also built successfully with warnings denied.
+
+The first final workspace CI run encountered an intermittent failure in
+`server::persistence::tests::edits_removals_fluid_fire_and_paused_timers_survive_eviction_and_restart`:
+`corrupt World save: invalid simulation Agenda`. The isolated test passed on
+recheck. Agenda and persistence implementation/test files are unchanged from
+`aa3c2b1` main. The failed run and isolated recheck are retained as
+`cargo-ci-aileron.log` and `persistence-recheck.log`; the failure is not claimed
+fixed by this UI work.
+
+The full CI recheck passed: 967 tests passed, zero failed, five existing
+measurements ignored. Rustfmt, Prettier, all-target/all-feature Clippy,
+rustdoc, default-feature checks, benchmark compilation, boundaries and
+advisory/license/source/banned-dependency checks passed. The complete log is
+`cargo-ci-aileron-recheck.log` in the current review directory.
+
+### Current native review evidence
+
+`/tmp/tesserae-leaf-review-7udu289a/final/` retains twelve offscreen captures,
+source revision `b1e7d02`, the executable snapshot/hash, font hashes, per-capture
+environment manifests, logs and review hashes. `native-review.html` and
+`review.md` at the directory root provide review entry points. Earlier passes
+remain retained in sibling directories, including `pre-aileron-and-catalogue`.
+The original pre-redesign artifacts remain at the historical path above.
+
+Captures cover Catalogue at 1280 × 900 and 1024 × 900, Material preview and
+search, Behavior, bindings and search, Display at 1280 × 900 and 1024 × 640,
+and binding capture, reset and unsaved-exit dialogs. Game-provided Materials,
+Shapes and textures remain real content rather than the reference's nine
+placeholder Materials. Native font rasterization and Game previews differ from
+browser rendering; no pixel-identity claim is made across those renderers.
+
+The designer's official Aileron archive and source-page copy are retained in
+`/tmp/tesserae-ui-ux-v4-leaf/`. Each selected font's embedded name table states
+“No Rights Reserved”; the designer links its public-domain dedication to CC0.
+The Liberation binaries and their OFL/author files were removed. Asset
+provenance and the approved design record reflect the replacement.
+
+No WIT or Game source changed during this UI pass, and no guest was rebuilt.
+The retained CI wrapper follows `scripts/cargo-ci` in order, replacing only
+its guest rebuild with compatible-artifact checks/reuse and setting its working
+directory explicitly. Cargo used caffeinate, warnings denied and the requested
+shared target cache. The branch contains `origin/main` at `aa3c2b1`; nothing
+has been pushed, published or merged.
