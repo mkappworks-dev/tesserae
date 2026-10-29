@@ -6036,6 +6036,7 @@ name = "tesserae-core"
 version = "0.0.0"
 dependencies = [
  "criterion",
+ "getrandom 0.4.3",
  "serde",
  "serde_json",
  "sha2",

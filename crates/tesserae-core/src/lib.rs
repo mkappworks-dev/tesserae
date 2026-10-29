@@ -20,6 +20,7 @@ pub mod noise;
 pub mod occupants;
 pub mod reaction;
 pub mod save;
+pub mod seed;
 pub mod shape;
 pub mod tables;
 pub mod testgen;
