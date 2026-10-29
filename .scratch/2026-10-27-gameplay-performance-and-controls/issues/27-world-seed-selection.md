@@ -1,6 +1,6 @@
 # 27: W0: World list, creation and seed selection
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (06, 22, 23 and 24 are merged on main 96ea33e)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -151,31 +151,31 @@ switching or new terrain/biome algorithm.
 
 ## Acceptance criteria
 
-- [ ] Create → Open → Rename → reopen preserves UUID, seed, Voxel size, edits
+- [x] Create → Open → Rename → reopen preserves UUID, seed, Voxel size, edits
       and Player state; Rename touches only the sidecar.
-- [ ] Seed conversion golden vectors: blank/random, unsigned and signed
+- [x] Seed conversion golden vectors: blank/random, unsigned and signed
       decimal, `u64::MAX`, `i64::MIN`, out-of-range rejection, words, Unicode.
       The canonical seed is shown and copyable.
-- [ ] `fbm2` boundary sweep (0, 1, `u32::MAX - n`, `u64::MAX`,
+- [x] `fbm2` boundary sweep (0, 1, `u32::MAX - n`, `u64::MAX`,
       fold-cancelling values) does not panic in debug; golden terrain digests
       for existing seeds are unchanged.
-- [ ] Two Worlds with the same name and seed get distinct UUIDs and folders;
+- [x] Two Worlds with the same name and seed get distinct UUIDs and folders;
       editing one never changes the other. Folder names are sanitized and
       suffixed on collision, including case-only collisions.
-- [ ] Corrupt, incompatible, missing-content, untrusted and locked Worlds land
+- [x] Corrupt, incompatible, missing-content, untrusted and locked Worlds land
       on the list with an explanation; their saves are byte-identical after.
       Recovery from an older commit shows the in-World banner.
-- [ ] Delete moves to the Trash after a Cancel-default confirmation; Rename
+- [x] Delete moves to the Trash after a Cancel-default confirmation; Rename
       and Delete are refused while the writer lock is held. An Incomplete
       World offers Retry and Delete.
-- [ ] Worlds created at 0.25 and 0.5 m reopen at that size regardless of
+- [x] Worlds created at 0.25 and 0.5 m reopen at that size regardless of
       environment; Re-Create copies seed, Game and Voxel size.
 - [ ] Re-exec keeps window size, position and fullscreen and shows the loading
       screen.
 - [ ] Mouse/keyboard (Tab, Enter, Escape, text entry) work at 1024×640 and
       1920×1080 under `UiScale`; native captures in one /tmp folder for user
       review.
-- [ ] Return to World list reuses the guarded Save & Quit, including Retry,
+- [x] Return to World list reuses the guarded Save & Quit, including Retry,
       Return and confirmed unsafe exit.
 
 ## Validation and authorization
@@ -210,3 +210,16 @@ installs move to ticket 30 (Q24).
 - Only this ticket should change `main.rs` startup order, window creation and
   `server/persistence.rs` `Opening`. Whichever branch merges second rebases;
   no pre-merging of the others' work.
+
+### Implementation 2026-10-29
+
+Implemented on `feat/world-seed-selection` (28a782f..48ba6d8); see
+[validation](../world-selection-validation.md). Full cargo-ci passed. The
+re-exec criterion stays open: size always carries, position only after the
+window has moved, native macOS fullscreen not at all, and the loading
+screen appears only once the World process has a window, after Mod
+loading. The keyboard criterion stays open too: tests drive Escape and
+activation, but Tab and Enter were not pressed natively, as no input
+automation is available. Return to World list, Copy and Show folder are
+covered by tests, not native clicks. User visual review and Windows/Linux runs are pending.
+No push, PR or merge.
