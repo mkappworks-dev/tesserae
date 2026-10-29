@@ -87,3 +87,29 @@ cleared, and a later `--world` launch logged the same UUID as reopened.
   each step is covered at its seam.
 - Windows/Linux runtime, Trash and file-manager behavior are not tested
   here. User visual review is pending.
+
+## Additions after the first review (2026-10-29)
+
+- Rebased onto main a2e2ac6. Stubs 29-31 were renumbered 30-32 because
+  main took ticket 29; ticket 07 had merged, so its World-screen keyboard
+  and controller work moved to ticket 32. No ADR or save migration clashed.
+- Demo terrain (ef0072f): 24 m relief, caves, lake at 5/12 of the relief;
+  the demo levels its stage site blind and lifts the stage onto it, queued
+  under the host's fill and batch caps. The contract test builds on real
+  generated terrain at 1, 0.5 and 0.25 m and checks the site is dry and
+  level. At 0.25 m the scheduler paces the waterfall, so the test checks
+  its source there. Native captures of two random seeds show different
+  terrain (/tmp/tesserae-w0-review/seeds).
+- Save fix (4b815a4): restore refused a rescan cursor at offset == len,
+  which the scanner reaches lazily; every autosave at that moment failed.
+  Regression test added; a fresh demo World then saved five times cleanly.
+- Toggle sprint by default (1de30a7); a saved Hold choice is kept.
+- SaveStatus is touched only when a notice waits (4c1075e).
+- Frame cost of the new demo, release+profiling, offscreen 1080p, same
+  engine binary, one series of three rounds per demo, host load ~6, not
+  interleaved: stationary frame p50/p95 6.15/8.34 ms (old demo) vs
+  8.42/11.42 ms (new); flight 6.16/7.89 vs 8.47/11.65. Server p95 rose
+  from 0.3 to 2.4 ms (fluid work), main p50 from ~1.7 to ~3.2 ms, render
+  CPU p50 from 2.9 to 3.6 ms. Artifacts in /tmp/tesserae-w0-review/ab.
+  Follow-up belongs to tech/streaming-performance.
+

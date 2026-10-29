@@ -1,6 +1,6 @@
 # 27: W0: World list, creation and seed selection
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (06, 22, 23 and 24 are merged on main 96ea33e)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -205,7 +205,7 @@ The user added two demo-content changes to this PR:
       and Enter checks moved to ticket 07.)
 - [x] Return to World list reuses the guarded Save & Quit, including Retry,
       Return and confirmed unsafe exit.
-- [ ] Two demo Worlds with different seeds show visibly different terrain
+- [x] Two demo Worlds with different seeds show visibly different terrain
       around spawn, and at any seed the stage stands dry on level ground
       with its scenarios running at 1, 0.5 and 0.25 m.
 
@@ -264,3 +264,13 @@ to ticket 32; the native Tab/Enter check went to ticket 07 at first, but
 PR 9 merged first, so it and the World screens' controller journeys moved
 to ticket 32 on rebase. Stubs 29–31 were renumbered 30–32 because main
 already used ticket 29.
+
+### Rebase, review fixes and frame cost (2026-10-29)
+
+Rebased onto main a2e2ac6 (PR 9 controller, MVP roadmap). The demo terrain,
+toggle-sprint default and a latent save fix (a rescan cursor at the end of
+its span was refused as a corrupt Agenda) landed here; see the validation
+note. The richer demo costs frame time: about 35-45% per frame in a release
+A/B on the same engine binary. Streaming and rendering work moved to the
+tech/streaming-performance session; the demo's fluid cost is item 8 there.
+
