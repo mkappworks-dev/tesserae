@@ -182,3 +182,13 @@ New native captures:
 scripts/profile-frames gains --view. The release A/B and the third-person run
 were refused as contended, as ticket 25 records. Open: user review of all
 captures, the A/B and the third-person profiler run, all on a quiet host.
+
+### Third-person profiler run, 2026-10-29
+
+scripts/profile-frames --view third ran uncontended on the release branch
+binary, right after the A/B in ticket 25. The fixture phase frame ms p50 is
+5.32-5.38 stationary and 5.33-5.34 flight, with p99 6.54-6.70 and 7.38-7.56.
+Main-thread CPU p50 is 0.55-0.56 ms, the same as first-person on the branch.
+Render-thread CPU is lower than first-person, since the view looks at
+different geometry. The camera sweeps and the figure add no visible cost. Run:
+/tmp/tesserae-pr6-review.TXrDxF/ab/branch-third.

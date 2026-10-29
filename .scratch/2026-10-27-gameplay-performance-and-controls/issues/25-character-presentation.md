@@ -130,3 +130,26 @@ scripts/profile-frames --binary ab/<main|branch>-release --profile release
 flight -- <fresh dir>
 
 Interleave main and branch.
+
+### Release A/B, 2026-10-29
+
+The host went quiet, so the A/B ran uncontended. Runs were interleaved: main,
+branch, main, branch. Each run is three rounds of the stationary and flight
+fixtures, 1920 x 1080 offscreen, unchanged quality. The branch binary is
+84fb86f (SHA-256 a77b6b01...f9a9). Main is 96ea33e (01432a07...7f90). Each used
+its own demo build. Logging-on fixture phase, frame ms p50 / p99:
+
+| series | stationary p50 | stationary p99 | flight p50 | flight p99 |
+| --- | --- | --- | --- | --- |
+| main a | 5.82-5.94 | 7.56-10.30 | 5.77-5.93 | 7.98-8.84 |
+| branch a | 6.02-6.08 | 7.67-7.79 | 6.03-6.04 | 8.30-9.26 |
+| main b | 6.03-6.07 | 7.75-7.87 | 5.96-6.03 | 8.32-8.38 |
+| branch b | 6.08-6.25 | 7.83-8.24 | 6.01-6.24 | 8.63-8.82 |
+
+The host drifted upward during the series: main's own runs moved by about
+0.17 ms between a and b. Branch a matches main b. Paired against its neighbour,
+the branch is 0-4% higher in median frame time, within that drift. p99 ranges
+overlap. Main-thread CPU p50 is about 0.03 ms higher on the branch, which is
+plausibly the figure's pose and the view systems running in first-person. No
+regression beyond host variation is shown; a sub-3% cost cannot be ruled out.
+Runs: /tmp/tesserae-pr6-review.TXrDxF/ab/{main,branch}-{a,b}.
