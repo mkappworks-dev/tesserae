@@ -1,47 +1,137 @@
 # 26: V0: Independent first/third-person camera and aim
 
-Status: needs-triage
-Blocked by: 24, 25
+Status: ready-for-agent
+Blocked by: 24 (done, merged as #26), 25
 
 Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: V0; keep this separate from other PR scopes.
+PR boundary: ships with ticket 25 as PR 6 (character and first/third-person
+cameras), as the second of two commits.
 
 ## What to build
 
-Support remappable first/rear-third switching independently of movement.
-Restore saved view; new demo Worlds default first-person. Third-person is a
-centred rear chase camera with zoom and wall avoidance, no selfie/cinematic
-mode. Keep ordinary wheel as slot selection and Alt+wheel as remappable
-third-person Zoom In/Out defaults.
-Crosshair picks a visible point but Server validates Player-Eye reach and
-occlusion. Invalid points show feedback, not fallback edits. Camera offset
-cannot move Player or grant reach. Obstacle queries preserve no-Client-storage.
+First-person and a rear over-the-shoulder third-person chase camera,
+independent of movement mode. No front/selfie or cinematic view. The camera
+is Client presentation; aim stays a Server answer.
+
+- View state: view mode and zoom are a per-user Client preference in the
+  user profile, next to the existing `Preferences` (a `serde(default)`
+  field; no profile version bump). Every World opens in the last-used view;
+  the first launch starts first-person. The Server does not know the view
+  mode, and nothing is added to the World save. Toggling never moves the
+  body. Third-person works in every World (ticket 25's fallback body).
+- Framing: a fixed right-shoulder offset of about 0.5 m right and 0.3 m up
+  from the Eye, then the boom back along the look direction. No shoulder
+  swap. A camera centred on the look line would put the avatar's head over
+  the crosshair target.
+- Zoom: boom length in metres, independent of Voxel size. Min 1.5 m, max 6
+  m, default 4 m, 0.5 m per step, clamped, no wrap. Pitch keeps the existing
+  ±89.9° clamp.
+- Wall avoidance on the Client: sweep a small sphere from the Eye to the
+  shoulder, then back along the boom. Sweep against the opaque and cutout
+  quads of the level-0 `ChunkMesh` layers the Client was sent, within reach
+  of the boom. Blended surfaces (water, glass) let the camera pass, so it can
+  go underwater. Unloaded terrain has nothing to clip into. No World storage
+  read and no protocol change. Pull in immediately; ease out slowly. Below
+  0.8 m, hide the avatar; view mode stays third-person and the corner model
+  stays hidden.
+- Aim: the Client sends the crosshair ray from the camera. In any mode, the
+  Server accepts an origin within the shoulder offset plus maximum boom plus
+  a small tolerance of the Eye. This replaces the 2 m
+  `EDIT_ORIGIN_TOLERANCE_M` bound, and the reach is no longer shortened by
+  the origin's distance from the Eye. The Server starts the trace at the
+  point on the ray nearest the Eye, so nothing between the camera and the
+  Player is picked. It requires the first hit to lie within `EDIT_REACH_M`
+  of the Eye, with an unoccluded Eye-to-hit segment. The camera offset never
+  adds reach. Sampling uses the same rules.
+- Blocked targets: the aim answer is `Blocked`. The Client shows no outline
+  or ghost and dims the crosshair. A Place or Remove on a blocked target
+  gives one alert toast per activation, never a fallback edit. Hold-removal
+  progress cancels when its target becomes blocked.
+- Input: a remappable View toggle, default F5, with no second default.
+  Plain wheel stays slot selection in both views. Remappable Zoom In/Out
+  default to Alt+wheel and work in third-person only. The Alt chord
+  consumes the wheel in both views, so it never changes the slot. Zoom
+  In/Out are also bindable to keys.
+- Respawn (R) and camera reset keep view mode and zoom.
+- Motion comfort: the toggle is an instant cut that preserves look direction.
+  No auto-rotation, bob, sway or sprint FOV change. The only smoothing is the
+  boom easing. No new comfort setting.
+- Docs: amend ADR-0008:
+  - Aim starts from the camera ray but is validated from the Eye.
+  - View mode is Client presentation, never saved with the World.
+  - Camera collision uses received meshes.
+
+  Add Client camera collision and the character declaration to
+  `docs/architecture.md`. Add **Boom** and **View mode** to CONTEXT.md.
 
 ## Acceptance criteria
 
-- [ ] Both views work in flight/physics without moving the Player on toggle.
-- [ ] Near-wall/narrow-space/zoom transitions avoid camera terrain clipping.
-- [ ] Crosshair/ghost/cues align and blocked targets never edit around corners.
-- [ ] Hotbar wheel and modifier zoom cannot trigger competing actions.
-- [ ] View restore and all device semantic actions are covered.
+- [ ] F5 toggles in flight and physics, in every World, without moving the
+      body.
+- [ ] Client sweeps against received meshes prevent terrain clipping near
+      walls, in a one-Voxel corridor, during fast turns and zoom
+      transitions, with no frame of lag. The camera passes into water. The
+      avatar hides below 0.8 m.
+- [ ] Aim uses the camera ray with Eye reach and occlusion. A blocked target
+      shows no outline, dims the crosshair, toasts on activation and never
+      edits around a corner. First-person aim is unchanged.
+- [ ] Wheel selects slots; Alt+wheel zooms in third-person and is swallowed
+      in first-person; no competing action fires.
+- [ ] View mode and zoom survive restart through the user profile; an older
+      profile defaults to first-person; the World save is unchanged.
+- [ ] ADR-0008 amended. Tests replay at 60/144/1000 render updates and
+      1/0.5/0.25 m Voxels.
+- [ ] Captures reviewed by the user. A matched release first-person A/B
+      against main shows no regression. A third-person P0 profiler run
+      records the view mode.
 
 ## Validation and authorization
 
 Use behavior/intent regressions and the spec's build/review requirements.
 Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
-Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+Add a `TESSERAE_SCREENSHOT_VIEW=third` fixture. Native captures stay in one
+unique /tmp folder until review, offscreen and at unchanged quality:
+
+- open field at default, min and max zoom
+- against a wall
+- one-Voxel corridor (boom collapse, avatar hidden)
+- underwater
+- crouch, jump and sprint poses
+- flight idle
+- a blocked corner target
+- the fallback body in an empty World
+- first-person with the corner model and no body
+
+Interactive feel of the toggle, shoulder framing and zoom remains a manual
+check.
+
+Scope and shared understanding were confirmed on 2026-10-29. Implementation
+needs the user's instruction to start. Push, publication and merge each
+need separate authorization.
 
 ## Comments
 
-### Added during grilling
+### Grilling, 2026-10-29
 
-The user requested this scope. Detailed decisions remain open; this ticket
-is not implementation-ready. Preserve Server/core/WIT boundaries and the
-existing build/profile hygiene. No push, publication or merge is authorized.
+Q1–Q22 were accepted, then reviewed against Minecraft, Luanti, Valheim and
+Enshrouded. Q23–Q28 were accepted and replace parts of the first round:
 
-### Reconciled after the completed interview
+- An over-the-shoulder offset replaces the centred camera.
+- Client mesh sweeps replace the Server boom answer.
+- A user-profile preference replaces Server view state and `view_v1`.
 
-The current spec and What to build section supersede historical draft
-alternatives above. Readiness awaits the final shared-understanding check.
+Minecraft and Luanti both run camera collision on the client and treat
+perspective as a client setting. Valheim and Enshrouded, built for
+third-person building, both use a shoulder offset.
+
+Seams with parallel work:
+
+- Ticket 27 (World seed selection): no overlap expected. This PR no longer
+  touches `server/persistence.rs` or the World save.
+- Ticket 07 (controller): View and Zoom In/Out are appended to the action
+  table. Ticket 07 owns their controller defaults; this PR adds no gamepad
+  bindings. Both branches touch the action table, default bindings and the
+  profile `Preferences`.
+- PR 8 (tickets 20–21): the measurement tool reuses this PR's camera-ray aim
+  validation and `Blocked` refusal. Whichever lands second adopts the
+  other's aim contract. No Use action is added here.

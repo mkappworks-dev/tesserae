@@ -235,27 +235,39 @@ answers cannot land in a newly opened World with coincident coordinates.
 One Server-owned Player supports noclip free flight and physics movement
 with gravity, Shape-aware collision, walking, sprinting and jumping. Use
 core collision in metres; a Client pose speed limit is not physical authority.
-Do not give Client systems World storage access for movement or camera rays.
+Do not give Client systems World storage access for movement or aim rays.
+Camera collision is presentation: the Client sweeps against the Chunk meshes
+it was sent, never World storage.
 
-New demo Worlds start physics/first-person; a no-Game empty World retains
-the existing free-flight fallback. Reopen restores saved Player
-position, movement mode and view. Free flight is an explicit mode switch;
+New demo Worlds start physics; a no-Game empty World retains the existing
+free-flight fallback. Reopen restores saved Player position, movement mode
+and orientation. View mode and zoom are a per-user Client preference in the
+user profile, not World save data; first launch starts first-person.
+Free flight is an explicit mode switch;
 refuse switching to physics while embedded in solid terrain, with feedback
 rather than an unexpected teleport. Mode permissions are Server/Game policy.
 
 Game supplies a simple blocky humanoid with idle/move/sprint/jump animations;
-Engine owns presentation mechanisms. Full body is visible in third-person.
+Engine owns presentation mechanisms and an untextured fallback body for
+Worlds whose Game declares none. Full body is visible in third-person.
 First-person hides it and retains the existing held model. Character creation,
 skins/cosmetic inventory and a new first-person arms system are deferred.
 
 First-person and rear third-person work independently of movement mode.
-Provide remappable view switching. Third-person is a centred rear chase
-camera with zoom and wall avoidance, not front/selfie or cinematic views.
+Provide remappable view switching. Third-person is a rear over-the-shoulder
+chase camera with zoom and wall avoidance, not front/selfie or cinematic
+views. A camera centred on the look line would put the avatar's head over
+the crosshair target.
 Crosshair selects the camera-visible point; Server validates reach and
 occlusion from the Player's Eye. Invalid/blocked points produce feedback,
 not a surprising fallback Edit. Camera offset cannot move the Player or grant
 extra reach. Normal wheel selects quick slots; remappable Zoom In/Out actions
 use Alt+wheel in third-person by default. No accidental control stealing.
+
+The 2026-10-29 character/camera grilling, and its review against Minecraft,
+Luanti, Valheim and Enshrouded, settled the detail in tickets 25 and 26. The
+Server does not know the view mode. Aim starts from the camera ray but is
+validated from the Eye.
 
 ## Architectural invariants
 
