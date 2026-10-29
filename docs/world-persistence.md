@@ -1,11 +1,36 @@
 # World persistence contract
 
-Tickets 22–23 share PR 4. The integrated Server opens a durable World by
-default. `TESSERAE_WORLD_DIR=/absolute/path` selects another World directory; an
-empty directory creates a distinct World, and an existing directory reopens its
-latest recoverable commit. The default lives beside the user Mods directory in
-`worlds/default`. Each process opens one World; switch by restarting with
-another directory. World list/create/rename/seed UI belongs to PR 7.
+Tickets 22–23 share PR 4. A launch opens the World list (ticket 27), which
+manages the folders under `worlds/` beside the user Mods directory.
+`TESSERAE_WORLD_DIR=/absolute/path` bypasses the list and opens that directory
+directly; an empty directory creates a distinct World, and an existing directory
+reopens its latest recoverable commit. Each process opens one World: the list
+switches by re-executing the binary with `--world <folder>`, so no job or answer
+from one World can land in another.
+
+## World list and folders
+
+Each World folder is named once from the World's name, sanitized for macOS,
+Linux and Windows and suffixed on a case-insensitive collision; it is never
+renamed. Identity stays the commits' UUID. A `world.json` sidecar holds display
+details only: name, Game, resolved seed, Voxel size, created and last-played
+times, the UUID and a `pending` flag. Commits stay authoritative. A missing or
+corrupt sidecar never hides a folder; Rename rebuilds it from the newest commit.
+The single pre-list `worlds/default` World is adopted as "Default World".
+
+Create writes the folder and a `pending` sidecar, then restarts on it. A folder
+without commits takes its UUID, seed and Voxel size from that sidecar and writes
+its first commit at once; any other folder without a save is refused rather than
+becoming a new World. Saved seed and Voxel size always win over the build
+defaults and `TESSERAE_VOXEL_SIZE_M`. Rename and Delete try the writer lock and
+refuse while any process holds the World open; Delete moves the folder to the OS
+Trash. An Empty World loads no Mods, now or on reopen.
+
+Seed text resolves in `tesserae_core::seed`: blank is random; unsigned decimal
+within `u64`, or `-` and decimal within `i64` as its two's complement, is the
+number; any other digits are rejected; anything else is the first 8 bytes of its
+SHA-256, big-endian. The generator folds the `u64` into a `u32`, so distinct
+seeds may share terrain.
 
 `TESSERAE_EPHEMERAL=1` explicitly disables persistence. Profiling and screenshot
 fixtures also default to ephemeral unless given an explicit World directory. Use
