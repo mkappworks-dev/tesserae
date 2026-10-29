@@ -298,6 +298,7 @@ pub(super) fn plugin(app: &mut App) {
                 watch_frames,
                 aim,
                 fly_forward,
+                pillar,
                 report,
                 shutter,
                 exit_when_written,
@@ -659,6 +660,56 @@ fn fly_forward(
     });
 }
 
+/// `TESSERAE_SCREENSHOT_PILLAR=1` stacks stone 1.1 m ahead of the Eye and 0.1 m
+/// right of it, through ordinary Place intents from the Eye, one per 0.2 s. With
+/// 0.25 m Voxels it hides the ground ahead from the Eye while the shoulder
+/// camera's crosshair line passes it, so the shutter shows a Blocked target.
+fn pillar(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    catalogue: Res<super::edit::Catalogue>,
+    world: Res<WorldSettings>,
+    camera: Single<&FlyCamera, With<MainCamera>>,
+    mut intents: MessageWriter<crate::server::edit::EditIntent>,
+    mut placed: Local<(u32, f32, Option<Vec3>)>,
+) {
+    const BLOCKS: u32 = 7;
+    let elapsed_s = capture.elapsed_s(&time);
+    if std::env::var_os("TESSERAE_SCREENSHOT_PILLAR").is_none()
+        || placed.0 >= BLOCKS
+        || capture
+            .frames
+            .fill_ended_s
+            .is_none_or(|start| elapsed_s < start + 0.5)
+        || elapsed_s < placed.1 + 0.2
+    {
+        return;
+    }
+    let Some(stone) = catalogue
+        .0
+        .materials
+        .iter()
+        .find(|material| material.name == "demo:stone")
+    else {
+        return;
+    };
+    let eye = camera.eye;
+    let size = world.voxel_size;
+    let base = *placed.2.get_or_insert_with(|| {
+        let at = ((eye + Vec3::new(0.1, -crate::server::player::EYE_HEIGHT, -1.1)) / size).floor();
+        at * size + Vec3::new(size / 2.0, 0.0, size / 2.0)
+    });
+    // Each Place strikes the top of the column so far and lands on it.
+    let top = base + Vec3::Y * size * placed.0 as f32;
+    intents.write(crate::server::edit::EditIntent {
+        action: crate::server::edit::EditAction::Place(tesserae_core::Voxel::cube(stone.id)),
+        origin: eye,
+        direction: top - eye,
+    });
+    placed.0 += 1;
+    placed.1 = elapsed_s;
+}
+
 /// The climb that adds `lift_m` over the flight, held to what the Server's speed
 /// ceiling leaves after the horizontal speed: faster and the Server clamps the
 /// Player back, so the picture is not from where it is said to be.
@@ -743,7 +794,7 @@ fn aim(
 /// Runs before `shutter` rather than inside it, so neither function carries the
 /// other's system parameters.
 fn report(
-    (time, capture): (Res<Time<Real>>, Res<Capture>),
+    (time, capture, target): (Res<Time<Real>>, Res<Capture>, Res<super::aim::Target>),
     stats: Res<StreamingStats>,
     camera: Single<(&Transform, &FlyCamera), With<MainCamera>>,
     preferences: Res<super::profile::Preferences>,
@@ -758,12 +809,13 @@ fn report(
     }
     info!(
         "capture movement_mode={:?}, authority=Server fixed64, view={:?}, zoom_m={}, \
-         eye={:?}, camera={:?}, quality=unchanged",
+         eye={:?}, camera={:?}, aim_blocked={}, quality=unchanged",
         movement.movement_mode,
         preferences.view,
         preferences.zoom_m,
         movement.eye,
         camera.translation,
+        target.0.blocked,
     );
     let ms = |s: f32| format!("{:.1}", s * 1000.0);
     let fill = capture

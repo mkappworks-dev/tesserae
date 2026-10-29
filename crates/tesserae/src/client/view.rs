@@ -26,6 +26,7 @@ const SHOULDER: Vec3 = Vec3::new(0.5, 0.3, 0.0);
 /// under the 0.18 m between the Eye and the top of the body, so a body
 /// touching a ceiling does not start inside it.
 const CAMERA_RADIUS_M: f32 = 0.1;
+const SKIN_M: f32 = 1e-3;
 /// Nearer than this the camera is inside the figure's head.
 const HIDE_FIGURE_BELOW_M: f32 = 0.8;
 /// Per second. Pulling in is immediate; easing back out is not, so a camera
@@ -212,6 +213,11 @@ impl Obstacles<'_, '_> {
                 }
             }
         }
+        if nearest < 1.0 {
+            // Stop short, so a sweep starting where this one ended starts
+            // outside the face rather than on it, where it would be ignored.
+            nearest = (nearest - SKIN_M / from.distance(to)).max(0.0);
+        }
         nearest
     }
 
@@ -347,6 +353,118 @@ mod tests {
         entity
     }
 
+    /// Drawn faces across the whole Chunk, each at `at` metres along `axis`,
+    /// in the one mesh a Chunk layer has.
+    fn faces(app: &mut App, faces: &[(usize, f32)]) {
+        let edge = app.world().resource::<WorldSettings>().cell_size();
+        let mut positions = Vec::new();
+        let mut indices = Vec::new();
+        for &(axis, at) in faces {
+            let corner = |u: f32, v: f32| {
+                let mut p = [0.0; 3];
+                p[axis] = at;
+                p[(axis + 1) % 3] = u;
+                p[(axis + 2) % 3] = v;
+                p
+            };
+            let base = positions.len() as u32;
+            positions.extend([
+                corner(0.0, 0.0),
+                corner(edge, 0.0),
+                corner(edge, edge),
+                corner(0.0, edge),
+            ]);
+            indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
+        }
+        let mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(indices));
+        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
+        let entity = app
+            .world_mut()
+            .spawn((Mesh3d(handle), Transform::default()))
+            .id();
+        app.world_mut()
+            .resource_mut::<ChunkEntities>()
+            .insert_opaque(ChunkCoord::new(0, 0, 0), entity);
+    }
+
+    /// A one-metre corridor closed at both ends, with a floor and a ceiling
+    /// over the body: turning, pitching and zooming at any update rate never
+    /// put the camera into a face, not even for one frame.
+    #[test]
+    fn a_turning_zooming_camera_never_enters_a_narrow_space_at_any_rate_or_voxel_size() {
+        let eye = Vec3::new(4.0, 4.0, 4.0);
+        let walls = [(0, 3.5), (0, 4.5), (2, 2.5), (2, 6.0), (1, 2.25), (1, 5.0)];
+        for size in [1.0, 0.5, 0.25] {
+            for hz in [60.0, 144.0, 1000.0] {
+                let mut app = app(View::ThirdPerson);
+                app.insert_resource(WorldSettings {
+                    voxel_size: size,
+                    ..default()
+                })
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_secs_f64(1.0 / hz),
+                ));
+                faces(&mut app, &walls);
+                let frames = (2.0 * hz) as usize;
+                for frame in 0..frames {
+                    let t = frame as f32 / hz as f32;
+                    let (yaw, pitch) = (std::f32::consts::PI * t, 1.2 * (5.0 * t).sin());
+                    app.world_mut().resource_mut::<Preferences>().zoom_m =
+                        if (t * 2.0) as i32 % 2 == 0 { 6.0 } else { 1.5 };
+                    {
+                        let mut camera = app
+                            .world_mut()
+                            .query::<(&mut Transform, &mut FlyCamera)>()
+                            .single_mut(app.world_mut())
+                            .unwrap();
+                        camera.1.eye = eye;
+                        camera.0.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
+                    }
+                    app.update();
+                    let at = camera(&mut app);
+                    let lo = Vec3::new(3.5, 2.25, 2.5) + CAMERA_RADIUS_M - 1e-3;
+                    let hi = Vec3::new(4.5, 5.0, 6.0) - CAMERA_RADIUS_M + 1e-3;
+                    assert!(
+                        at.cmpge(lo).all() && at.cmple(hi).all(),
+                        "{size} m, {hz} Hz, frame {frame}: camera at {at}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn easing_back_out_takes_the_same_time_at_any_update_rate() {
+        let booms: Vec<f32> = [60.0, 144.0, 1000.0]
+            .into_iter()
+            .map(|hz| {
+                let mut app = app(View::ThirdPerson);
+                app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_secs_f64(1.0 / hz),
+                ));
+                faces(&mut app, &[(2, EYE.z + 1.0)]);
+                app.update();
+                *app.world_mut().resource_mut::<ChunkEntities>() = default();
+                for _ in 0..(0.5 * hz) as usize {
+                    app.update();
+                }
+                camera(&mut app).z - EYE.z
+            })
+            .collect();
+        assert!(
+            booms[0] > 1.0 && booms[0] < DEFAULT_ZOOM_M - 0.1,
+            "{booms:?}"
+        );
+        for boom in &booms {
+            assert!((boom - booms[2]).abs() < 0.05, "{booms:?}");
+        }
+    }
+
     #[test]
     fn first_person_sits_at_the_eye_with_the_corner_model_and_no_figure() {
         let mut app = app(View::FirstPerson);
@@ -378,7 +496,10 @@ mod tests {
         let near = wall(&mut app, EYE.z + 2.0);
         app.update();
         let boom = camera(&mut app).z - EYE.z;
-        assert!((boom - (2.0 - CAMERA_RADIUS_M)).abs() < 1e-4, "{boom}");
+        assert!(
+            (boom - (2.0 - CAMERA_RADIUS_M - SKIN_M)).abs() < 1e-4,
+            "{boom}"
+        );
 
         app.world_mut().despawn(near);
         wall(&mut app, EYE.z + 0.6);

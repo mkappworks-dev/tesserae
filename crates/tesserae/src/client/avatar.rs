@@ -480,6 +480,43 @@ mod tests {
     }
 
     #[test]
+    fn the_figure_moves_the_same_at_any_update_rate() {
+        let poses: Vec<(f32, f32)> = [60.0, 144.0, 1000.0]
+            .into_iter()
+            .map(|hz| {
+                let mut app = app();
+                app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::from_secs_f64(1.0 / hz),
+                ));
+                app.world_mut()
+                    .write_message(CharacterModel(Some(Arc::new(figure()))));
+                app.update();
+                set_body(
+                    &mut app,
+                    BodyState {
+                        grounded: true,
+                        horizontal_mps: 4.5,
+                        ..default()
+                    },
+                );
+                for _ in 0..(1.3 * hz) as usize {
+                    app.update();
+                }
+                let avatar = app
+                    .world_mut()
+                    .query::<&Avatar>()
+                    .single(app.world())
+                    .unwrap();
+                (avatar.phase, avatar.swing)
+            })
+            .collect();
+        for (phase, swing) in &poses {
+            assert!((phase - poses[2].0).abs() < 0.05, "{poses:?}");
+            assert!((swing - poses[2].1).abs() < 0.01, "{poses:?}");
+        }
+    }
+
+    #[test]
     fn the_head_leads_the_standing_body_by_at_most_fifty_degrees() {
         let mut app = app();
         app.world_mut()

@@ -2823,6 +2823,77 @@ mod tests {
     }
 
     #[test]
+    fn camera_aim_keeps_eye_reach_and_corners_at_every_voxel_size() {
+        for size in [1.0, 0.5, 0.25] {
+            let chunks: Vec<_> = (0..4)
+                .map(|z| (ChunkCoord::new(0, 0, z), ground()))
+                .collect();
+            let sized = |chunks: &[(ChunkCoord, Chunk)]| {
+                let mut app = app_with(chunks);
+                app.insert_resource(WorldSettings {
+                    voxel_size: size,
+                    ..default()
+                });
+                let eye = DOWN_EYE * size;
+                set_eye(&mut app, eye);
+                (app, eye)
+            };
+            let top = |at: [i32; 3]| {
+                Vec3::new(at[0] as f32 + 0.5, at[1] as f32 + 1.0, at[2] as f32 + 0.5) * size
+            };
+            let cell = |metres: Vec3| (metres / size).floor().as_ivec3().to_array();
+
+            // Over the shoulder and behind: 5 m out is struck, 8 m out is past
+            // the Eye's reach however near the camera's line runs.
+            for (ahead_m, reached) in [(5.0, true), (8.0, false)] {
+                let (mut app, eye) = sized(&chunks);
+                let at = cell(Vec3::new(eye.x, 7.5 * size, eye.z + ahead_m));
+                let camera = eye + Vec3::new(0.5, 0.3, -4.0);
+                send_from_afar(
+                    &mut app,
+                    EditIntent {
+                        origin: camera,
+                        direction: top(at) - camera,
+                        action: EditAction::Remove,
+                    },
+                );
+                tick(&mut app);
+                assert_eq!(
+                    voxel_at(&app, at).is_air(),
+                    reached,
+                    "{size} m, {ahead_m} m"
+                );
+            }
+
+            // Three Voxels to the side, a wall the camera looks past hides the
+            // ground from the Eye.
+            let mut walled = chunks.clone();
+            for y in 9..12 {
+                walled[0].1.set(7, y, 5, stone());
+            }
+            for (chunks, blocked) in [(&chunks, false), (&walled, true)] {
+                let (mut app, eye) = sized(chunks);
+                let camera = eye + Vec3::X * 3.0 * size;
+                send_from_afar(
+                    &mut app,
+                    EditIntent {
+                        origin: camera,
+                        direction: Vec3::NEG_Y,
+                        action: EditAction::Remove,
+                    },
+                );
+                tick(&mut app);
+                assert_eq!(
+                    rejections(&mut app) == vec![RejectReason::Blocked],
+                    blocked,
+                    "{size} m"
+                );
+                assert_eq!(voxel_at(&app, [8, 7, 5]).is_air(), !blocked, "{size} m");
+            }
+        }
+    }
+
+    #[test]
     fn stale_far_and_non_finite_aim_reports_do_not_replace_the_latest() {
         let mut app = app_with(&[(origin(), ground())]);
         let report = AimReport {
