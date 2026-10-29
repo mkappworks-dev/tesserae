@@ -122,6 +122,10 @@ fn hide_list_return(
 }
 
 fn notice(mut commands: Commands, mut status: ResMut<SaveStatus>) {
+    // Bevy marks a resource changed on any mutable access, so only take when set.
+    if status.notice.is_none() {
+        return;
+    }
     if let Some(message) = status.notice.take() {
         super::menu_ui::notify_for(&mut commands, &message, super::menu_ui::Tone::Alert, 8.0);
     }
