@@ -19,10 +19,17 @@ and muted text `#818181`. Leaf is the sRGB mix `#10b981` at 76% with `#fe9a00`
 at 24%, approximately `#49b262`. Buttons use full selected borders; tabs use
 straight 2px underlines. A shared vector icon atlas prevents missing glyphs.
 
-Clicking a catalogue item pins its details and keeps the menu open without
-changing the hand. The explicit Hold action returns to play; assignment stays
-in the menu. Tiles have fixed 128 × 113 logical-pixel dimensions and wrap to fit
-the available width, superseding the reference's original three-column grid.
+Clicking a catalogue item holds it immediately while keeping the menu open.
+Clicking the selected item again or Clear selection empties the hand; there is
+no Hold button. Shape selection updates the held variation. Close the menu to
+place it. The quick-slot header displays the current Material and Shape, such
+as Selected: Stone · Cube, or Nothing selected. Assign to slot still updates a
+shortcut without changing its contents merely by selecting an item.
+Tiles have fixed 128 × 113 logical-pixel dimensions and wrap to fit the width.
+
+Behavior, Key bindings and Display scroll areas fill the available space down
+to the footer divider. Restore defaults is a regular bordered footer button;
+its confirmation and draft semantics are unchanged.
 
 Game-provided Materials, Shapes, textures and registry identity remain real
 content. The reference's nine colored placeholder Materials do not replace the

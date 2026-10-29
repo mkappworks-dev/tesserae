@@ -746,7 +746,7 @@ pub(super) fn render(
                 Node {
                     flex_direction: FlexDirection::Column,
                     flex_grow: 1.0,
-                    max_height: Val::Px(450.0),
+                    flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
                     padding: UiRect {
                         top: Val::Px(2.0),
@@ -1547,7 +1547,14 @@ fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                             color,
                         );
                     });
-                    ui::quiet_button(left, "Restore defaults", Operation::Reset, 10.0);
+                    ui::button(
+                        left,
+                        "Restore defaults",
+                        Operation::Reset,
+                        false,
+                        false,
+                        false,
+                    );
                 });
             footer
                 .spawn(Node {

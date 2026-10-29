@@ -1172,7 +1172,7 @@ mod tests {
         q.iter(app.world()).map(|t| t.0.clone()).collect()
     }
 
-    /// Select a catalogue item, then explicitly hold it for placement tests.
+    /// Select content in the menu, then close it to resume placement.
     fn choose(app: &mut App, entry: Entry) {
         let entity = if let Entry::Solid { shape, .. } = entry {
             app.world_mut()
@@ -1193,18 +1193,8 @@ mod tests {
         };
         app.world_mut().trigger(Activate { entity });
         frame(app);
-        if let Some(holding) = entry.holding() {
-            let hold = app
-                .world_mut()
-                .query::<(Entity, &menu::DetailAction)>()
-                .iter(app.world())
-                .find_map(|(entity, action)| {
-                    matches!(action, menu::DetailAction::Hold(value) if *value == holding)
-                        .then_some(entity)
-                })
-                .expect("Hold uses the selected catalogue item");
-            app.world_mut().trigger(Activate { entity: hold });
-            frame(app);
+        if entry.holding().is_some() {
+            key(app, KeyCode::Tab);
         }
     }
 
@@ -1352,7 +1342,7 @@ mod tests {
     }
 
     #[test]
-    fn catalogue_clicks_only_inspect_in_the_real_edit_schedule() {
+    fn catalogue_selection_and_clear_never_edit_until_the_menu_closes() {
         for entry in [
             Entry::Material(wood()),
             Entry::Fluid(demo_water()),
@@ -1375,11 +1365,9 @@ mod tests {
             assert!(app.world().resource::<menu::Menu>().open);
             assert_eq!(cursor(&mut app), CursorGrabMode::None);
             let hand = app.world().resource::<Hotbar>();
-            assert_eq!(hand.outside, before.outside);
+            assert_eq!(hand.outside, entry.holding());
             assert_eq!(hand.slots, before.slots);
             assert_eq!(hand.selected, before.selected);
-            assert!(app.world_mut().query::<&menu::DetailAction>().iter(app.world())
-                .any(|action| matches!(action, menu::DetailAction::Hold(value) if Some(*value) == entry.holding())));
             let cards: Vec<_> = app
                 .world_mut()
                 .query_filtered::<&Node, With<menu::CatalogueItem>>()
@@ -1391,6 +1379,48 @@ mod tests {
                     .iter()
                     .all(|node| node.width == Val::Px(128.0) && node.height == Val::Px(113.0))
             );
+            let expected = match entry {
+                Entry::Material(_) => "Selected: Wood · Cube",
+                Entry::Fluid(_) => "Selected: Water",
+                _ => "Selected: Fire",
+            };
+            assert!(texts(&mut app).iter().any(|text| text == expected));
+            let selected = app
+                .world_mut()
+                .query::<(Entity, &Entry)>()
+                .iter(app.world())
+                .find(|(_, value)| **value == entry)
+                .unwrap()
+                .0;
+            app.world_mut().trigger(Activate { entity: selected });
+            assert!(frame(&mut app).is_empty());
+            assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+            assert!(
+                texts(&mut app)
+                    .iter()
+                    .any(|text| text == "Nothing selected")
+            );
+            let selected = app
+                .world_mut()
+                .query::<(Entity, &Entry)>()
+                .iter(app.world())
+                .find(|(_, value)| **value == entry)
+                .unwrap()
+                .0;
+            app.world_mut().trigger(Activate { entity: selected });
+            assert!(frame(&mut app).is_empty());
+            let clear = app
+                .world_mut()
+                .query::<(Entity, &menu::DetailAction)>()
+                .iter(app.world())
+                .find_map(|(entity, action)| {
+                    matches!(action, menu::DetailAction::Clear).then_some(entity)
+                })
+                .unwrap();
+            app.world_mut().trigger(Activate { entity: clear });
+            assert!(frame(&mut app).is_empty());
+            assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+            assert!(app.world().resource::<menu::Menu>().open);
         }
     }
 

@@ -9,10 +9,14 @@ Catalogue searches Material names; Key bindings searches action names,
 categories and both assigned alternatives. Search queries stay with their page.
 **/** focuses search. Escape clears its text, then releases text focus, before
 it can close the menu. Typing in search never activates gameplay or menu
-shortcuts. Clicking a catalogue item pins its details and keeps the menu open,
-without changing the hand. Choose a Shape for a solid, then use **Hold** to
-return to play, or **Assign to slot** to update a shortcut. Catalogue tiles are
-128 × 113 logical pixels and wrap into as many columns as the window fits.
+shortcuts. Clicking a catalogue item selects it for placement while keeping the
+menu open. Clicking the selected item again, or **Clear selection**, empties the
+hand. Choose a Shape to hold that variation; close the menu to place it.
+**Assign to slot** updates a shortcut. The quick-slot header shows the current
+selection, such as **Selected: Stone · Cube**, or **Nothing selected**.
+Catalogue tiles are 128 × 113 logical pixels and wrap into as many columns as
+the window fits. Behavior, Key bindings and Display scroll through all the space
+above the footer divider; **Restore defaults** is a button in that footer.
 
 Each keyboard/mouse action has two alternatives. Behavior, binding and display
 changes share one draft across their pages. **Apply changes** saves and

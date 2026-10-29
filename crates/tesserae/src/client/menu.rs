@@ -118,7 +118,7 @@ pub(super) struct Inspect(MaterialId);
 #[derive(Component)]
 pub(super) enum DetailAction {
     Shape(ShapeId),
-    Hold(Holding),
+    Clear,
     Assign(Holding),
 }
 #[derive(Component)]
@@ -261,9 +261,18 @@ fn choose(
                 hotbar.slots[slot] = holding;
             } else {
                 hotbar.select(slot);
+                pointer.item = None;
+                pointer.shape = None;
+                menu.material = None;
             }
         }
         _ => {
+            hotbar.outside = Some(if matches_content(hotbar.held(), entry) {
+                Holding::Empty
+            } else {
+                entry.holding().unwrap()
+            });
+            pointer.shape = None;
             pointer.item = entry.holding();
             pointer.pinned = true;
             pointer.assigning = None;
@@ -277,10 +286,10 @@ fn choose(
 fn detail_action(
     event: On<Activate>,
     actions: Query<&DetailAction>,
-    mut menu: ResMut<Menu>,
+    menu: Res<Menu>,
     mut pointer: ResMut<PointerState>,
     mut hotbar: ResMut<Hotbar>,
-    mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    catalogue: Res<Catalogue>,
 ) {
     if !menu.open {
         return;
@@ -295,13 +304,15 @@ fn detail_action(
                 material,
                 orientation,
                 ..
-            }) = pointer.item
+            }) = selected_holding(&menu, &pointer, &hotbar, &catalogue.0)
             {
-                pointer.item = Some(Holding::Solid {
+                let holding = Holding::Solid {
                     material,
                     shape,
                     orientation,
-                });
+                };
+                pointer.item = Some(holding);
+                hotbar.outside = Some(holding);
             }
             pointer.pinned = true;
         }
@@ -309,13 +320,9 @@ fn detail_action(
             pointer.assigning = Some(holding);
             pointer.pinned = true;
         }
-        DetailAction::Hold(holding) => {
-            hotbar.outside = Some(holding);
-            menu.open = false;
-            for mut cursor in &mut cursors {
-                cursor.grab_mode = CursorGrabMode::Locked;
-                cursor.visible = false;
-            }
+        DetailAction::Clear => {
+            hotbar.outside = Some(Holding::Empty);
+            pointer.assigning = None;
         }
     }
 }
@@ -517,7 +524,7 @@ fn rebuild(
             scroll,
             &searches.catalogue,
             format!(
-                "Click to inspect | Drag or {}-{} to assign | {}: close | {}: release cursor",
+                "Click to select/clear | Drag or {}-{} to assign | {}: close | {}: release cursor",
                 bindings.label(super::actions::Action::Slot1, &labels),
                 bindings.label(super::actions::Action::Slot9, &labels),
                 bindings.label(super::actions::Action::Catalogue, &labels),
@@ -739,11 +746,11 @@ fn spawn_menu(
                         ui::text(
                             row,
                             if selection.1.is_some() {
-                                "Choose a destination slot"
+                                "Choose a destination slot".to_owned()
                             } else {
-                                "Your 9 shortcuts"
+                                selection_summary(hotbar.held(), catalogue)
                             },
-                            9.0,
+                            11.0,
                             ui::MUTED,
                         );
                     });
@@ -785,6 +792,37 @@ fn spawn_menu(
             });
         });
 }
+fn selection_summary(holding: Holding, catalogue: &ContentCatalogue) -> String {
+    use super::menu_ui::title;
+    match holding {
+        Holding::Empty => "Nothing selected".into(),
+        Holding::Solid {
+            material, shape, ..
+        } => format!(
+            "Selected: {} · {}",
+            title(
+                catalogue
+                    .material(material)
+                    .map_or("unknown", |m| m.name.as_str())
+            ),
+            title(
+                catalogue
+                    .shape(shape)
+                    .map_or("unknown", |s| s.name.as_str())
+            ),
+        ),
+        Holding::Fluid(material) => format!(
+            "Selected: {}",
+            title(
+                catalogue
+                    .material(material)
+                    .map_or("unknown", |m| m.name.as_str())
+            )
+        ),
+        Holding::Fire => "Selected: Fire".into(),
+    }
+}
+
 fn menu_choices(
     root: &mut ChildSpawnerCommands,
     hotbar: &Hotbar,
@@ -1058,23 +1096,6 @@ fn detail(
             ..default()
         })
         .with_children(|actions| {
-            let button = ui::button(
-                actions,
-                format!("Hold {}", ui::title(name)),
-                DetailAction::Hold(held),
-                false,
-                false,
-                true,
-            );
-            actions.commands().entity(button).insert(Node {
-                min_height: Val::Px(36.0),
-                border: UiRect::all(Val::Px(1.0)),
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
-                border_radius: BorderRadius::all(Val::Px(5.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            });
             ui::compact_button(
                 actions,
                 if assigning.is_some() {
@@ -1084,6 +1105,14 @@ fn detail(
                 },
                 DetailAction::Assign(held),
                 assigning.is_some(),
+                36.0,
+                11.0,
+            );
+            ui::compact_button(
+                actions,
+                "Clear selection",
+                DetailAction::Clear,
+                false,
                 36.0,
                 11.0,
             );
@@ -1137,6 +1166,7 @@ pub(super) fn drag_preview(
 pub(super) fn highlight_tiles(
     menu: Res<Menu>,
     pointer: Res<PointerState>,
+    hotbar: Res<Hotbar>,
     mut tiles: Query<(
         &Entry,
         &TileState,
@@ -1155,9 +1185,7 @@ pub(super) fn highlight_tiles(
     }
     for (entry, tile, catalogue_item, mut background, mut border) in &mut tiles {
         let selected = if catalogue_item {
-            pointer
-                .item
-                .map_or(tile.selected, |holding| matches_content(holding, *entry))
+            matches_content(hotbar.held(), *entry)
         } else {
             tile.selected
         };
@@ -1419,20 +1447,24 @@ mod tests {
     }
 
     #[test]
-    fn selecting_catalogue_content_preserves_the_hand_and_cursor_until_explicit_hold() {
+    fn selecting_catalogue_content_toggles_the_hand_without_closing_or_changing_slots() {
         for entry in [Entry::Material(23), Entry::Fluid(24), Entry::Fire] {
             let mut app = app();
             let before = app.world().resource::<Hotbar>().clone();
             let item = app.world_mut().spawn(entry).id();
             app.world_mut().trigger(Activate { entity: item });
             assert!(app.world().resource::<Menu>().open);
+            assert_eq!(app.world().resource::<Hotbar>().outside, entry.holding());
+            app.world_mut().trigger(Activate { entity: item });
+            assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+            app.world_mut().trigger(Activate { entity: item });
+            let clear = app.world_mut().spawn(DetailAction::Clear).id();
+            app.world_mut().trigger(Activate { entity: clear });
             let hand = app.world().resource::<Hotbar>();
-            assert_eq!(hand.outside, before.outside);
+            assert_eq!(hand.held(), Holding::Empty);
             assert_eq!(hand.slots, before.slots);
             assert_eq!(hand.selected, before.selected);
-            let pointer = app.world().resource::<PointerState>();
-            assert!(pointer.pinned);
-            assert_eq!(pointer.item, entry.holding());
+            assert!(app.world().resource::<Menu>().open);
             let cursor = app
                 .world_mut()
                 .query::<&CursorOptions>()
@@ -1440,28 +1472,7 @@ mod tests {
                 .unwrap();
             assert_eq!(cursor.grab_mode, CursorGrabMode::None);
             assert!(cursor.visible);
-            let hold = app
-                .world_mut()
-                .spawn(DetailAction::Hold(entry.holding().unwrap()))
-                .id();
-            app.world_mut().trigger(Activate { entity: hold });
-            assert!(!app.world().resource::<Menu>().open);
-            assert_eq!(app.world().resource::<Hotbar>().outside, entry.holding());
-            assert_eq!(app.world().resource::<Hotbar>().slots, before.slots);
-            let cursor = app
-                .world_mut()
-                .query::<&CursorOptions>()
-                .single(app.world())
-                .unwrap();
-            assert_eq!(cursor.grab_mode, CursorGrabMode::Locked);
-            assert!(!cursor.visible);
         }
-        let mut app = app();
-        let slot = app.world_mut().spawn(Entry::Slot(4)).id();
-        app.world_mut().trigger(Activate { entity: slot });
-        assert!(app.world().resource::<Menu>().open);
-        assert_eq!(app.world().resource::<Hotbar>().selected, 4);
-        assert_eq!(app.world().resource::<Hotbar>().outside, None);
     }
     #[test]
     fn dragging_assigns_and_swaps_without_quick_picking() {
