@@ -57,15 +57,10 @@ fn main() -> std::process::ExitCode {
     };
     #[cfg(feature = "profiling")]
     app.insert_resource(process_start);
+    let handoff = launch::Handoff::default();
+    app.insert_resource(handoff.clone());
     app.run();
-    let target = app
-        .world_mut()
-        .get_resource_mut::<launch::Relaunch>()
-        .and_then(|mut r| r.0.take());
-    let geometry = app
-        .world()
-        .get_resource::<launch::LastGeometry>()
-        .and_then(|g| g.0);
+    let (target, geometry) = handoff.take();
     match target {
         Some(target) => launch::relaunch(launch::next_args(&target, geometry, &args.user)),
         None => std::process::ExitCode::SUCCESS,

@@ -36,9 +36,9 @@ impl Default for Remover {
 
 /// The tested Voxel sizes (ADR-0003), with what each costs.
 const VOXEL_SIZES: [(f32, &str); 3] = [
-    (1.0, "1 m: the default"),
-    (0.5, "0.5 m: 2× finer detail, ½ view distance"),
-    (0.25, "0.25 m: 4× finer detail, ¼ view distance"),
+    (1.0, "1 m · default"),
+    (0.5, "0.5 m · 2× finer, half the view distance"),
+    (0.25, "0.25 m · 4× finer, a quarter of the view distance"),
 ];
 
 /// Frames the Opening screen is drawn before the process restarts.
@@ -172,6 +172,61 @@ pub fn plugin(app: &mut App) {
         bevy::input_focus::tab_navigation::TabNavigationPlugin,
     ));
     logic(app);
+    #[cfg(feature = "dev")]
+    app.add_systems(Update, review_capture.after(render));
+}
+
+/// `TESSERAE_LIST_SCRIPT=new,more` and `TESSERAE_LIST_SHOT=out.png` drive one
+/// screen and capture it for review, then exit without starting a World.
+#[cfg(feature = "dev")]
+fn review_capture(
+    mut commands: Commands,
+    mut queue: ResMut<Queue>,
+    mut relaunch: ResMut<Relaunch>,
+    mut exit: MessageWriter<AppExit>,
+    pending: Query<(), With<bevy::render::view::screenshot::Screenshot>>,
+    failure: Option<Res<OpenFailure>>,
+    mut frame: Local<u32>,
+    mut seen: Local<bool>,
+) {
+    use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+    let shot = std::env::var_os("TESSERAE_LIST_SHOT");
+    if shot.is_none() && std::env::var_os("TESSERAE_LIST_SCRIPT").is_none() {
+        return;
+    }
+    *frame += 1;
+    // A restarted list after a failed open must not replay a create script.
+    if *frame == 5 && failure.is_none() {
+        let script = std::env::var("TESSERAE_LIST_SCRIPT").unwrap_or_default();
+        for step in script.split(',').filter(|s| !s.is_empty()) {
+            queue.0.push(match step {
+                "new" => Act::New,
+                "more" => Act::More,
+                "rename" => Act::Rename,
+                "delete" => Act::Delete,
+                "recreate" => Act::ReCreate,
+                "open" => Act::Open,
+                "empty" => Act::Game(false),
+                "create" => Act::Create,
+                other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
+            });
+        }
+    }
+    let Some(shot) = shot else {
+        return;
+    };
+    if *frame == 60 {
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(PathBuf::from(shot)));
+    }
+    if *frame > 60 {
+        if pending.is_empty() && *seen {
+            relaunch.0 = None;
+            exit.write(AppExit::Success);
+        }
+        *seen |= !pending.is_empty();
+    }
 }
 
 /// The World list cannot exit by default: the window plugin leaves closing to us.
@@ -820,7 +875,7 @@ fn text_field(parent: &mut ChildSpawnerCommands, field: Field, value: &str, hint
                 border_radius: BorderRadius::all(Val::Px(6.0)),
                 padding: UiRect::axes(Val::Px(11.0), Val::Px(0.0)),
                 align_items: AlignItems::Center,
-                flex_grow: 1.0,
+                width: Val::Percent(100.0),
                 ..default()
             },
         ))
@@ -847,7 +902,9 @@ fn text_field(parent: &mut ChildSpawnerCommands, field: Field, value: &str, hint
                 ))
                 .id();
         });
-    ui::description(parent, hint);
+    if !hint.is_empty() {
+        ui::description(parent, hint);
+    }
     entity
 }
 
@@ -1100,18 +1157,35 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
         TabGroup::default(),
         Node {
             flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(14.0),
-            max_width: Val::Px(620.0),
+            row_gap: Val::Px(10.0),
+            max_width: Val::Px(720.0),
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
             overflow: Overflow::scroll_y(),
             ..default()
         },
     ))
     .with_children(|col| {
-        heading(
-            col,
-            "Create World",
-            "Name it, pick a Game and, if you like, a seed.",
-        );
+        // Beside the heading, so they stay visible in a short window.
+        col.spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|top| {
+            heading(
+                top,
+                "Create World",
+                "Name it, pick a Game and, if you like, a seed.",
+            );
+            row(top, 7.0, |r| {
+                ui::button(r, "Cancel", Act::Back, false, false, false);
+                ui::button(r, "Create World", Act::Create, false, false, true);
+            });
+        });
+        problem(col, f.problem.as_ref());
         label(col, "Name");
         focus = Some(text_field(
             col,
@@ -1156,20 +1230,14 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
             r.spawn(Node {
                 flex_grow: 1.0,
                 min_width: Val::Px(240.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
                 ..default()
             })
             .with_children(|c| {
-                text_field(
-                    c,
-                    Field::Seed,
-                    &f.seed,
-                    "A number or any words. Blank picks a random seed.",
-                );
+                text_field(c, Field::Seed, &f.seed, "");
             });
             ui::button(r, "Randomize", Act::Randomize, false, false, false);
         });
+        ui::description(col, "A number or any words. Blank picks a random seed.");
         row(col, 8.0, |r| {
             r.spawn((
                 Resolved,
@@ -1180,35 +1248,34 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
             ));
             ui::compact_button(r, "Copy", Act::CopyResolved, false, 26.0, 10.0);
         });
-        ui::quiet_button(
-            col,
-            if f.more {
-                "Hide World options"
-            } else {
-                "More World options"
-            },
-            Act::More,
-            12.0,
-        );
+        row(col, 0.0, |r| {
+            ui::quiet_button(
+                r,
+                if f.more {
+                    "Hide World options"
+                } else {
+                    "More World options"
+                },
+                Act::More,
+                12.0,
+            );
+        });
         if f.more {
             label(col, "Voxel size");
-            for (size, text) in VOXEL_SIZES {
-                ui::button(
-                    col,
-                    text,
-                    Act::Voxel(size),
-                    f.voxel_size_m == size,
-                    false,
-                    false,
-                );
-            }
+            row(col, 7.0, |r| {
+                for (size, text) in VOXEL_SIZES {
+                    ui::button(
+                        r,
+                        text,
+                        Act::Voxel(size),
+                        f.voxel_size_m == size,
+                        false,
+                        false,
+                    );
+                }
+            });
             ui::description(col, "Fixed once the World is created.");
         }
-        problem(col, f.problem.as_ref());
-        row(col, 7.0, |r| {
-            ui::button(r, "Cancel", Act::Back, false, false, false);
-            ui::button(r, "Create World", Act::Create, false, false, true);
-        });
     });
     focus
 }
@@ -1288,7 +1355,12 @@ fn trust(
             ui::MUTED,
         );
         if let Some(mod_) = installed.untrusted.first() {
-            ui::technical_text(card, &mod_.prompt, 11.0, ui::INK);
+            // The shared prompt ends with the terminal's [y/N] question.
+            let details = mod_
+                .prompt
+                .trim_end()
+                .trim_end_matches("Trust this exact build? [y/N]");
+            ui::technical_text(card, details.trim_end(), 11.0, ui::INK);
         }
         problem(card, l.problem.as_ref());
         row(card, 7.0, |r| {

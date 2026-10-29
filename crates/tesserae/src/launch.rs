@@ -4,6 +4,7 @@
 
 use std::ffi::OsString;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode, WindowPosition, WindowResolution};
@@ -74,7 +75,8 @@ pub enum Mode {
     Fullscreen,
 }
 
-/// Physical position and size, so the next process reopens where this one was.
+/// Physical position and logical size, so the next process reopens where this
+/// one was at any display scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Geometry {
     pub x: i32,
@@ -123,8 +125,8 @@ impl Geometry {
         Some(Self {
             x: at.x,
             y: at.y,
-            width: window.resolution.physical_width(),
-            height: window.resolution.physical_height(),
+            width: window.resolution.width().round() as u32,
+            height: window.resolution.height().round() as u32,
             mode: match window.mode {
                 WindowMode::Windowed => Mode::Windowed,
                 WindowMode::BorderlessFullscreen(_) => Mode::Borderless,
@@ -135,6 +137,7 @@ impl Geometry {
 
     pub fn apply(&self, window: &mut Window) {
         window.position = WindowPosition::At(IVec2::new(self.x, self.y));
+        // Without a scale factor yet, `new` sizes the window in logical pixels.
         window.resolution = WindowResolution::new(self.width, self.height);
         window.mode = match self.mode {
             Mode::Windowed => WindowMode::Windowed,
@@ -168,10 +171,28 @@ pub struct Launched {
 #[derive(Resource, Default)]
 pub struct LastGeometry(pub Option<Geometry>);
 
+/// `App::run` moves the App into the window runner, so nothing inside it is
+/// readable afterwards; the next process's target leaves through this.
+#[derive(Resource, Clone, Default)]
+pub struct Handoff(Arc<Mutex<(Option<Target>, Option<Geometry>)>>);
+
+impl Handoff {
+    pub fn take(&self) -> (Option<Target>, Option<Geometry>) {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+}
+
 pub fn plugin(app: &mut App) {
     app.init_resource::<Relaunch>()
         .init_resource::<LastGeometry>()
-        .add_systems(Last, track);
+        .init_resource::<Handoff>()
+        .add_systems(Last, (track, publish).chain());
+}
+
+fn publish(relaunch: Res<Relaunch>, last: Res<LastGeometry>, handoff: Res<Handoff>) {
+    if relaunch.is_changed() || last.is_changed() {
+        *handoff.0.lock().unwrap_or_else(|e| e.into_inner()) = (relaunch.0.clone(), last.0);
+    }
 }
 
 fn track(
@@ -310,5 +331,19 @@ mod tests {
         assert_eq!(reparsed.user, args(&["--mods", "/m"]));
         let back = parse(next_args(&Target::List, None, &[]), |_| false).unwrap();
         assert_eq!(back.launch, Launch::List);
+    }
+
+    #[test]
+    fn the_target_outlives_the_app_that_chose_it() {
+        let handoff = Handoff::default();
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(plugin);
+        app.insert_resource(handoff.clone());
+        app.update();
+        app.world_mut().resource_mut::<Relaunch>().0 = Some(Target::List);
+        app.update();
+        drop(app);
+        assert_eq!(handoff.take(), (Some(Target::List), None));
+        assert_eq!(handoff.take(), (None, None));
     }
 }
