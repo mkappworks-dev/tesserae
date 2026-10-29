@@ -1009,7 +1009,7 @@ fn detail(
                     margin: UiRect::top(Val::Px(5.0)),
                     ..default()
                 })
-                .with_children(|name_row| ui::mono(name_row, name, 10.0, ui::MUTED));
+                .with_children(|name_row| ui::technical_text(name_row, name, 10.0, ui::MUTED));
         });
     if let Holding::Solid { shape, .. } = held {
         parent

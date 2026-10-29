@@ -282,8 +282,6 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 fn spawn_hud(mut commands: Commands) {
-    // ASCII only: Bevy's embedded default font renders anything outside its
-    // FiraMono subset as tofu.
     let font = |size| TextFont {
         font_size: bevy::text::FontSize::Px(size),
         ..default()

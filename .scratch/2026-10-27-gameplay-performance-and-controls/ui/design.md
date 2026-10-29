@@ -8,13 +8,21 @@ latest instruction requires layout, typography, colors and icons to match the
 approved prototype. The HTML beside this record is the frozen reference; its
 accent study and logo comparison panels are review tools outside the product.
 
-The rendered dark reference uses Liberation Sans and Liberation Mono, background
-`#0a0a0a`, foreground `#f5f5f5`, cards `#111111`, borders `#191919` and muted text
-`#818181`. Leaf is the sRGB mix `#10b981` at 76% with `#fe9a00` at 24%, rendered
-as approximately `#49b262`. Buttons use full selected borders; tabs use straight
-2px underlines. The native UI bundles the reference fonts with their upstream
-license and uses a shared vector icon atlas so missing glyphs cannot substitute
-boxes.
+The user subsequently selected public-domain Aileron for every UI label. The
+reference embeds the same unchanged Regular, SemiBold and Bold files as the
+native menu. The default native Font asset is Aileron Regular for HUD text and
+save dialogs. This supersedes Liberation Sans/Mono in earlier review captures.
+There is no separate monospace family; keys and values use Aileron too.
+
+Background is `#0a0a0a`, foreground `#f5f5f5`, cards `#111111`, borders `#191919`
+and muted text `#818181`. Leaf is the sRGB mix `#10b981` at 76% with `#fe9a00`
+at 24%, approximately `#49b262`. Buttons use full selected borders; tabs use
+straight 2px underlines. A shared vector icon atlas prevents missing glyphs.
+
+Clicking a catalogue item pins its details and keeps the menu open without
+changing the hand. The explicit Hold action returns to play; assignment stays
+in the menu. Tiles have fixed 128 × 113 logical-pixel dimensions and wrap to fit
+the available width, superseding the reference's original three-column grid.
 
 Game-provided Materials, Shapes, textures and registry identity remain real
 content. The reference's nine colored placeholder Materials do not replace the

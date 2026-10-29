@@ -859,7 +859,7 @@ fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32) {
                 ScalarLabel(slider),
                 Text::new(format!("{value:.2}×")),
                 TextFont {
-                    font: bevy::text::FontSource::family("Liberation Mono"),
+                    font: bevy::text::FontSource::family("Aileron"),
                     ..ui::font(11.0)
                 },
                 TextColor(ui::INK),
@@ -1419,7 +1419,7 @@ fn bindings_page(
                                 binding_display(labels.binding(b))
                             })),
                             TextFont {
-                                font: bevy::text::FontSource::family("Liberation Mono"),
+                                font: bevy::text::FontSource::family("Aileron"),
                                 ..ui::font(10.0)
                             },
                             TextColor(if binding.is_some() {
@@ -1619,7 +1619,7 @@ fn modal(commands: &mut Commands, settings: &Settings) {
             if let Some((action,slot,_))=settings.capture {
                 ui::weighted_text(dialog,"Change binding",19.0,620,ui::INK);
                 ui::paragraph(dialog,format!("{} · {}",action_name(action),if slot==0{"Primary"}else{"Alternative"}),12.0,ui::MUTED);
-                dialog.spawn((BackgroundColor(Color::srgb(0.069,0.118,0.081)),BorderColor::all(ui::LEAF),Node {padding:UiRect::all(Val::Px(28.0)),margin:UiRect::vertical(Val::Px(5.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(6.0)),justify_content:JustifyContent::Center,..default()})).with_children(|well|ui::mono(well,"Press a key or mouse button",12.0,ui::LEAF));
+                dialog.spawn((BackgroundColor(Color::srgb(0.069,0.118,0.081)),BorderColor::all(ui::LEAF),Node {padding:UiRect::all(Val::Px(28.0)),margin:UiRect::vertical(Val::Px(5.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(6.0)),justify_content:JustifyContent::Center,..default()})).with_children(|well|ui::technical_text(well,"Press a key or mouse button",12.0,ui::LEAF));
                 ui::paragraph(dialog,"Esc cancels. The opening click is ignored.",12.0,ui::MUTED);
                 dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions|{ui::button(actions,"Cancel",Operation::Cancel,false,false,false);});
             }else {

@@ -22,8 +22,6 @@ fn spawn_readout(mut commands: Commands) {
         StreamingReadout,
         super::help::DebugPanel,
         Visibility::Hidden,
-        // ASCII only: Bevy's embedded default font is a FiraMono subset and
-        // renders anything outside it, a middle dot included, as tofu.
         Text::new("streaming"),
         TextFont {
             font_size: bevy::text::FontSize::Px(14.0),

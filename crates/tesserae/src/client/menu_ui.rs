@@ -92,7 +92,7 @@ pub(super) struct Styled {
 
 pub(super) fn font(size: f32) -> TextFont {
     TextFont {
-        font: bevy::text::FontSource::family("Liberation Sans"),
+        font: bevy::text::FontSource::family("Aileron"),
         font_size: bevy::text::FontSize::Px(size),
         ..default()
     }
@@ -620,7 +620,7 @@ fn search_row(root: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
                 SearchSlash,
                 Text::new("/"),
                 TextFont {
-                    font: bevy::text::FontSource::family("Liberation Mono"),
+                    font: bevy::text::FontSource::family("Aileron"),
                     ..font(11.0)
                 },
                 TextColor(MUTED),
@@ -690,16 +690,22 @@ fn make_logo(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
 }
 
 fn load_fonts(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
+    // Replace the default asset too, so HUD and save dialogs use the same face.
+    fonts
+        .insert(
+            bevy::asset::AssetId::default(),
+            Font::from_bytes(
+                include_bytes!("../../../../assets/fonts/Aileron-Regular.otf").to_vec(),
+            ),
+        )
+        .expect("the default Font asset can be replaced");
     commands.insert_resource(Fonts {
         _handles: vec![
             fonts.add(Font::from_bytes(
-                include_bytes!("../../../../assets/fonts/LiberationSans-Regular.ttf").to_vec(),
+                include_bytes!("../../../../assets/fonts/Aileron-SemiBold.otf").to_vec(),
             )),
             fonts.add(Font::from_bytes(
-                include_bytes!("../../../../assets/fonts/LiberationSans-Bold.ttf").to_vec(),
-            )),
-            fonts.add(Font::from_bytes(
-                include_bytes!("../../../../assets/fonts/LiberationMono-Regular.ttf").to_vec(),
+                include_bytes!("../../../../assets/fonts/Aileron-Bold.otf").to_vec(),
             )),
         ],
     });
@@ -1038,11 +1044,16 @@ pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str) {
         Pickable::IGNORE,
     ));
 }
-pub(super) fn mono(parent: &mut ChildSpawnerCommands, label: &str, size: f32, color: Color) {
+pub(super) fn technical_text(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    size: f32,
+    color: Color,
+) {
     parent.spawn((
         Text::new(label),
         TextFont {
-            font: bevy::text::FontSource::family("Liberation Mono"),
+            font: bevy::text::FontSource::family("Aileron"),
             ..font(size)
         },
         bevy::text::LineHeight::RelativeToFont(1.5),

@@ -40,12 +40,11 @@ with `embedded_asset!`, as `bevy_pbr`'s are, so they are watched by
 `embedded_watcher` rather than `file_watcher`. A shader that stops hot-reloading
 after being moved between the two is the expected form of this mistake.
 
-## Third-party UI fonts (2026-10-29)
+## Bundled UI fonts (2026-10-29)
 
-The CC0 rule applies to engine-authored media. Unmodified Liberation Sans and
-Liberation Mono are bundled under `assets/fonts/` to match the approved menu
-reference independently of installed system fonts. They retain upstream SIL Open
-Font License 1.1, copyright and author notices; they are not relicensed as CC0.
-The fonts are also embedded for deterministic UI startup. Release archives
-continue to ship the root assets directory and its license notices beside the
-binary.
+Aileron Regular, SemiBold and Bold are bundled unchanged under `assets/fonts/`
+and embedded for deterministic UI startup. The designer dedicates these fonts to
+the public domain under CC0, consistent with this directory's existing rule. The
+menu reference uses the same faces. The default Font asset is also replaced with
+Aileron Regular so HUD and save dialogs use the same family. See
+[asset provenance](../../assets/README.md#bundled-ui-fonts).

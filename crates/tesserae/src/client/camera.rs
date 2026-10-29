@@ -130,8 +130,6 @@ fn spawn_hint(mut commands: Commands) {
     ));
     commands.spawn((
         CursorHint,
-        // ASCII only: Bevy's embedded default font is a FiraMono subset and
-        // renders anything outside it, a middle dot included, as tofu.
         Text::new("Click to look around\nEsc to release the cursor"),
         TextFont {
             font_size: bevy::text::FontSize::Px(14.0),
