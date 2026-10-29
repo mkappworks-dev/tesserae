@@ -1,8 +1,7 @@
 # PR 9: controller input, navigation and settings
 
 Scope: ticket 07 only. Base: 96ea33eaf6fdea8d2c23f8c751852736c0394107.
-Branch/worktree: feat/controller. Local commit only; push, publication and
-merge are not authorized.
+Branch/worktree: feat/controller. Merged to main as PR #28 (a2e2ac6).
 
 ## Implemented
 

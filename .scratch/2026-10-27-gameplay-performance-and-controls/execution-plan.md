@@ -48,7 +48,10 @@ See [P0 validation](implementation-validation.md) for qualified measurements
 and evidence gates. Whole-schedule timings do not establish per-view or GPU
 bottlenecks; the broad noisy series cannot justify small gains.
 
-## Unscheduled World list work
+## Unscheduled work
+
+Ticket 29 (repeat place/remove while held) is ready-for-agent and unblocked
+now that ticket 07 merged as PR #28. It needs its own branch and slot.
 
 Ticket 30 (W1, in-process World sessions, including a loading screen before
 Mod loading) is a needs-triage backlog item with no sequence slot. It
