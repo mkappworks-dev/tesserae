@@ -76,6 +76,7 @@ pub struct Applied {
     pub world: Option<WorldgenParams>,
     pub view: Option<ViewParams>,
     pub movement: Option<content::MovementPolicy>,
+    pub character: Option<crate::character::Character>,
     pub behaviour: Behaviour,
 }
 
@@ -95,7 +96,7 @@ pub struct Behaviour {
 /// `registry` already hold, in declaration order. A load that fails is
 /// abandoned, so an `Err` can leave a partly registered Mod behind.
 pub fn apply(
-    declaration: Declaration,
+    mut declaration: Declaration,
     mod_id: &str,
     tables: &mut Tables,
     registry: &mut Registry,
@@ -159,6 +160,17 @@ pub fn apply(
         registry,
     )?;
 
+    let character = declaration
+        .world
+        .as_mut()
+        .and_then(|p| p.character.take())
+        .map(crate::character::validate)
+        .transpose()
+        .map_err(|source| ModError::Params {
+            id: id(),
+            what: "character",
+            source,
+        })?;
     let movement = declaration.world.as_ref().and_then(|p| p.movement);
     if let Some(p) = movement
         && ((p.start_in_flight && !p.allow_flight) || (!p.start_in_flight && !p.allow_physics))
@@ -244,6 +256,7 @@ pub fn apply(
         world,
         view,
         movement,
+        character,
         behaviour: Behaviour {
             mod_id: id(),
             fluids: declaration.fluids,

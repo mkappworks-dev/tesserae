@@ -30,6 +30,9 @@ pub struct MainCamera;
 #[derive(Component)]
 pub struct FlyCamera {
     pub movement_mode: crate::server::player::MovementMode,
+    /// Where the Server has the Player's Eye. The camera sits here in
+    /// first-person and behind it in third.
+    pub eye: Vec3,
     /// Metres per second, not Voxels per second. A speed in Voxels would be
     /// secretly calibrated to one Voxel size.
     /// See `docs/adr/0003-voxel-size-is-per-world.md`.
@@ -44,6 +47,7 @@ impl Default for FlyCamera {
     fn default() -> Self {
         FlyCamera {
             movement_mode: default(),
+            eye: Vec3::ZERO,
             speed: 12.0,
             sensitivity: 0.003,
             yaw: 0.0,

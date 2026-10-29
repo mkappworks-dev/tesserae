@@ -33,7 +33,10 @@ fn policy(preferences: Res<Preferences>, mut windows: Query<&mut Window>) {
     } else {
         PresentMode::AutoNoVsync
     };
+    // Only on a difference: any write to a Window reconfigures its surface.
     for mut window in &mut windows {
-        window.present_mode = mode;
+        if window.present_mode != mode {
+            window.present_mode = mode;
+        }
     }
 }

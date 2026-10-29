@@ -101,6 +101,8 @@ def main():
     parser.add_argument('--features', help='exact Cargo features used for this executable')
     parser.add_argument('--game', type=Path, default=ROOT / 'games/demo/dist')
     parser.add_argument('--presented', action='store_true')
+    # An engine without views ignores it, so one runner serves an A/B against main.
+    parser.add_argument('--view', choices=['first', 'third'], default='first')
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--fixtures', nargs='+',
                         choices=['active', 'stationary', 'flight', 'transparency'],
@@ -143,7 +145,7 @@ def main():
                      for p in sorted(args.game.rglob('*')) if p.is_file()},
             'host': subprocess.check_output(['uname', '-a'], text=True).strip(),
             'kind': 'rendered-presented' if args.presented else 'rendered-offscreen',
-            'seed': '0x7e55e2ae00000001', 'quality': 'unchanged',
+            'seed': '0x7e55e2ae00000001', 'quality': 'unchanged', 'view': args.view,
             'phase_boundaries_s': [0, 16, 20, 22, 32],
             'physical_target': 'window (see runtime metadata)' if args.presented else [1920, 1080],
         }
@@ -165,7 +167,7 @@ def main():
                                TESSERAE_SCREENSHOT=str(run.resolve() / 'capture.png'),
                                TESSERAE_SCREENSHOT_WIDTH='1920', TESSERAE_SCREENSHOT_HEIGHT='1080',
                                TESSERAE_SCREENSHOT_FLY_AFTER_S='20', TESSERAE_SCREENSHOT_FLY_S='12',
-                               TESSERAE_SCREENSHOT_SETTLE_S='1',
+                               TESSERAE_SCREENSHOT_SETTLE_S='1', TESSERAE_SCREENSHOT_VIEW=args.view,
                                TESSERAE_SCREENSHOT_SPEED_M_S='12' if case == 'flight' else '0')
                     if not args.presented:
                         env['TESSERAE_SCREENSHOT_OFFSCREEN'] = '1'

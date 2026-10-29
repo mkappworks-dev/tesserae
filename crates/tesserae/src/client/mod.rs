@@ -3,6 +3,7 @@
 
 mod actions;
 mod aim;
+mod avatar;
 mod blend_order;
 pub mod camera;
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -31,6 +32,7 @@ mod removal;
 mod save;
 mod settings;
 mod tile_preview;
+mod view;
 
 use bevy::prelude::*;
 
@@ -62,7 +64,9 @@ pub fn plugin(app: &mut App) {
         pick::plugin,
         removal::plugin,
         history::plugin,
+        avatar::plugin,
     ));
+    app.add_plugins(view::plugin);
     #[cfg(feature = "dev")]
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),

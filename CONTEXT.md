@@ -156,7 +156,15 @@ that person is. The Client sends movement intent; the Server advances the body
 and publishes its Eye. Movement mode and camera view are independent.
 
 **Eye** — the point in metres a Player sees and acts from. An Edit's ray starts
-near it. Not the feet and not a body.
+near it or at a third-person camera, but reach and sight are judged from the
+Eye. Not the feet and not a body.
+
+**View mode** — whether the Client draws from the Eye (first-person) or from
+behind the Player's shoulder (third-person). A user's preference, not World
+state, and never a source of movement or reach.
+
+**Boom** — how far behind the Player's shoulder a third-person camera sits, in
+metres. Drawn terrain shortens it; nothing lengthens an Edit's reach along it.
 
 **Edit** — a change to one Voxel, its solid or its source, applied by the
 Server. A Client sends an intent; it never makes an Edit.

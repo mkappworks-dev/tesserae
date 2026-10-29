@@ -8,8 +8,10 @@ use bevy::prelude::*;
 use tesserae_core::collide::{self, Aabb};
 
 pub const FLY_SPEED_CEILING_MPS: f32 = 64.0;
-const EYE_HEIGHT: f32 = 1.62;
-const CROUCH_EYE_HEIGHT: f32 = 1.02;
+pub const EYE_HEIGHT: f32 = 1.62;
+pub const CROUCH_EYE_HEIGHT: f32 = 1.02;
+pub const BODY_HEIGHT_M: f32 = 1.8;
+pub const CROUCH_BODY_HEIGHT_M: f32 = 1.2;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MovementMode {
@@ -70,6 +72,17 @@ pub struct PoseCorrection {
     pub mode: MovementMode,
     pub seq: u32,
     pub eye: Vec3,
+    pub body: BodyState,
+}
+/// What the body did over the last step, for the Client to pose a figure by.
+/// Presentation only: nothing here feeds back into movement.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BodyState {
+    pub grounded: bool,
+    pub horizontal_mps: f32,
+    pub vertical_mps: f32,
+    pub crouching: bool,
+    pub sprinting: bool,
 }
 #[derive(Message, Clone, Copy, Debug)]
 pub struct RespawnIntent;
@@ -86,6 +99,8 @@ pub struct Player {
     intent: MovementIntent,
     seq: u32,
     view: [f32; 2],
+    /// Measured from the Eye's travel, so a body held against a wall stands.
+    travel_mps: Vec3,
 }
 impl Player {
     fn new(eye: Vec3, mode: MovementMode) -> Self {
@@ -98,6 +113,7 @@ impl Player {
             intent: default(),
             seq: 0,
             view: [0.0; 2],
+            travel_mps: Vec3::ZERO,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -132,6 +148,15 @@ impl Player {
         p.crouching = saved.crouching;
         p
     }
+    pub fn body_state(&self) -> BodyState {
+        BodyState {
+            grounded: self.mode == MovementMode::Physics && self.grounded,
+            horizontal_mps: self.travel_mps.with_y(0.0).length(),
+            vertical_mps: self.travel_mps.y,
+            crouching: self.crouching,
+            sprinting: self.intent.sprint && !self.crouching,
+        }
+    }
     fn eye_height(&self) -> f32 {
         if self.crouching {
             CROUCH_EYE_HEIGHT
@@ -141,7 +166,11 @@ impl Player {
     }
     fn body(&self) -> Aabb {
         let eye_height = self.eye_height();
-        let height = if self.crouching { 1.2 } else { 1.8 };
+        let height = if self.crouching {
+            CROUCH_BODY_HEIGHT_M
+        } else {
+            BODY_HEIGHT_M
+        };
         Aabb::new(
             (self.eye - Vec3::new(0.3, eye_height, 0.3)).to_array(),
             (self.eye + Vec3::new(0.3, height - eye_height, 0.3)).to_array(),
@@ -159,13 +188,26 @@ impl Player {
         let feet = self.eye - Vec3::Y * self.eye_height();
         let standing = Aabb::new(
             (feet - Vec3::new(0.3, 0.0, 0.3)).to_array(),
-            (feet + Vec3::new(0.3, 1.8, 0.3)).to_array(),
+            (feet + Vec3::new(0.3, BODY_HEIGHT_M, 0.3)).to_array(),
         );
         if !self.intent.crouch && collide::overlaps(store, tables, size, standing) {
             return;
         }
         self.crouching = self.intent.crouch;
         self.eye = feet + Vec3::Y * self.eye_height();
+    }
+    fn advance(
+        &mut self,
+        store: &impl collide::VoxelVolume,
+        tables: &tesserae_core::Tables,
+        size: f32,
+        dt: f32,
+    ) {
+        let before = self.eye;
+        self.step(store, tables, size, dt);
+        if dt > 0.0 {
+            self.travel_mps = (self.eye - before) / dt;
+        }
     }
     fn step(
         &mut self,
@@ -395,6 +437,7 @@ fn publish(mut player: Single<&mut Player>, mut poses: MessageWriter<PoseCorrect
         mode: player.mode,
         seq: player.seq,
         eye: player.eye,
+        body: player.body_state(),
     });
 }
 fn simulate(
@@ -406,6 +449,7 @@ fn simulate(
     world: Res<WorldSettings>,
     time: Res<Time<Fixed>>,
 ) {
+    player.travel_mps = Vec3::ZERO;
     if status.is_some_and(|s| s.modal()) {
         player.intent = default();
         return;
@@ -417,7 +461,7 @@ fn simulate(
         player.velocity_y = 0.0;
         return;
     }
-    player.step(&*store, &tables, world.voxel_size, time.delta_secs());
+    player.advance(&*store, &tables, world.voxel_size, time.delta_secs());
 }
 
 #[cfg(test)]
@@ -524,6 +568,32 @@ mod tests {
             let pitched = Vec3::new(0.5, -0.866, 0.0);
             let walk = travel(MovementMode::Physics, pitched);
             assert!((walk - travel(MovementMode::Physics, Vec3::X)).abs() < 1e-4);
+        }
+    }
+    #[test]
+    fn the_published_body_reports_travel_not_intent() {
+        let t = tables();
+        for size in [1.0, 0.5, 0.25] {
+            let mut s = scene(size);
+            let mut p = player();
+            p.advance(&s, &t, size, 1.0 / 64.0);
+            p.intent.direction = Vec3::X;
+            p.intent.sprint = true;
+            p.advance(&s, &t, size, 1.0 / 64.0);
+            let body = p.body_state();
+            assert!(body.grounded && body.sprinting && !body.crouching);
+            assert!((body.horizontal_mps - 8.0).abs() < 0.01, "{body:?}");
+            s.wall = true;
+            for _ in 0..128 {
+                p.advance(&s, &t, size, 1.0 / 64.0);
+            }
+            assert!(p.body_state().horizontal_mps < 0.01, "held at the wall");
+            p.intent.jump = true;
+            p.advance(&s, &t, size, 1.0 / 64.0);
+            let body = p.body_state();
+            assert!(!body.grounded && body.vertical_mps > 0.0, "{body:?}");
+            p.mode = MovementMode::Flight;
+            assert!(!p.body_state().grounded, "flight is never grounded");
         }
     }
     #[test]

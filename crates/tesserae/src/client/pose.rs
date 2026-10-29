@@ -1,9 +1,13 @@
 //! Presents the Server-owned Eye; the Client never reports a position.
 use super::camera::FlyCamera;
-use crate::server::player::{MovementFeedback, PoseCorrection};
+use crate::server::player::{BodyState, MovementFeedback, PoseCorrection};
 use bevy::prelude::*;
+/// The latest body the Server published, for posing the figure.
+#[derive(Resource, Default)]
+pub(super) struct PublishedBody(pub BodyState);
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, (restore_view, apply_correction, feedback));
+    app.init_resource::<PublishedBody>()
+        .add_systems(Update, (restore_view, apply_correction, feedback));
 }
 fn feedback(mut messages: MessageReader<MovementFeedback>, mut commands: Commands) {
     if let Some(message) = messages.read().last() {
@@ -18,6 +22,7 @@ fn feedback(mut messages: MessageReader<MovementFeedback>, mut commands: Command
 pub(super) fn apply_correction(
     mut corrections: MessageReader<PoseCorrection>,
     camera: Single<(&mut Transform, &mut GlobalTransform, &mut FlyCamera)>,
+    mut body: ResMut<PublishedBody>,
     mut newest: Local<Option<u32>>,
 ) {
     // In order, and the last that is not older than one already applied is where
@@ -35,6 +40,8 @@ pub(super) fn apply_correction(
     };
     let (mut transform, mut global, mut fly) = camera.into_inner();
     fly.movement_mode = correction.mode;
+    fly.eye = correction.eye;
+    body.0 = correction.body;
     transform.translation = correction.eye;
     *global = GlobalTransform::from(*transform);
 }
@@ -94,6 +101,7 @@ mod tests {
             seq: 9,
             eye: Vec3::splat(4.0),
             mode: MovementMode::Physics,
+            body: default(),
         });
         app.update();
         assert_eq!(
@@ -107,6 +115,7 @@ mod tests {
             seq: 8,
             eye: Vec3::ZERO,
             mode: MovementMode::Flight,
+            body: default(),
         });
         app.update();
         assert_eq!(

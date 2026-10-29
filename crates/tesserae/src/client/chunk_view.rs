@@ -45,7 +45,7 @@ type LayerEntities = HashMap<(u32, ChunkCoord), Entity>;
 /// map per mesh layer. Render entities, not World state, so the Client owns this
 /// outright.
 #[derive(Resource, Default)]
-struct ChunkEntities {
+pub(super) struct ChunkEntities {
     opaque: LayerEntities,
     blended: LayerEntities,
     cutout: LayerEntities,
@@ -54,6 +54,20 @@ struct ChunkEntities {
     /// last ran when `drawn_changed`.
     delivered: HashSet<(u32, ChunkCoord)>,
     drawn_changed: bool,
+}
+
+impl ChunkEntities {
+    /// The level-0 layers a camera cannot pass through: water and glass are
+    /// blended and let it in.
+    pub(super) fn solid_at(&self, coord: ChunkCoord) -> impl Iterator<Item = Entity> + '_ {
+        [&self.opaque, &self.cutout]
+            .into_iter()
+            .filter_map(move |layer| layer.get(&(0, coord)).copied())
+    }
+    #[cfg(test)]
+    pub(super) fn insert_opaque(&mut self, coord: ChunkCoord, entity: Entity) {
+        self.opaque.insert((0, coord), entity);
+    }
 }
 
 /// A material per mesh layer, for every Chunk, as the Material index is a
@@ -483,7 +497,10 @@ fn spawn_camera(
             // Propagation runs in `PostUpdate`; without this the first frame's pose
             // report and intent would carry the origin, not the camera.
             GlobalTransform::from(pose),
-            super::camera::FlyCamera::looking_along(direction),
+            super::camera::FlyCamera {
+                eye,
+                ..super::camera::FlyCamera::looking_along(direction)
+            },
             super::camera::CameraHome(pose),
         ))
         .id();

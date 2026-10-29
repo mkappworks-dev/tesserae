@@ -3,6 +3,7 @@ wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod
 use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
+mod character;
 mod textures;
 
 use std::cell::RefCell;
@@ -152,6 +153,7 @@ impl Guest for Demo {
             allow_physics: true,
             start_in_flight: false,
         });
+        world.character = Some(character::character());
         world.relief_m = 4.0;
         // Under the lowest ground within 20 m of the stage at the engine's
         // default seed, 26 m, so lakes stand in valleys and the stage is dry.

@@ -150,6 +150,32 @@ events. New successful changes clear redo; refusals preserve history and World
 state. Simulation consequences elsewhere are not rewound. Multiplayer history
 ownership remains part of the network transport work.
 
+### The Player, its figure and the camera
+
+Movement and reach are the Server's, presentation is the Client's, and the Game
+only declares data once at load: no Mod code runs per tick for movement,
+animation or the camera
+([ADR-0008](adr/0008-the-server-owns-the-players-pose.md)).
+
+| Concern                                                  | The engine decides                                      | Data the Game declares                               | Where it runs                     |
+| -------------------------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------- | --------------------------------- |
+| Body: position, collision, gravity, jump, crouch, sprint | All of it, in metres                                    | —                                                    | Server                            |
+| Movement modes, flight and physics                       | The mechanics and the switch                            | `movement-policy`: allowed modes, initial mode       | Server enforces                   |
+| Body state for animation                                 | Measured from actual travel, published with each Eye    | —                                                    | Server publishes                  |
+| Figure shape and skin                                    | Bone/cube renderer; a plain box when none is declared   | `character-def`: bones, pivots, cubes, 64 by 64 skin | Client draws                      |
+| Animation                                                | Pose driver, state choice, head leading the body by 50° | Swing angle, rate and arm raise per state            | Client                            |
+| View mode and zoom                                       | All of it; 1.5 to 6 m, fixed shoulder offset            | —                                                    | Client, saved in the user profile |
+| Camera collision                                         | Sweeps against the Chunk meshes the Client was sent     | —                                                    | Client                            |
+| Aim, reach and `Blocked`                                 | All of it; 8 m from the Eye                             | —                                                    | Server                            |
+| Controls: view, zoom, wheel chords                       | All of it, remappable per user                          | —                                                    | Client                            |
+
+The Server owns whatever can change the World or reach into it. The Client owns
+what only changes the picture: the camera, the view, the zoom, the figure's pose
+and the crosshair, none of which can move the Player or add reach. A Game cannot
+yet force or forbid a view, change the zoom range or the reach, or run custom
+animations or cameras; any of those would arrive as declared data through the
+WIT contract, as the movement policy did.
+
 ## The three invariants this diagram exists to protect
 
 Each of these is a mistake that will not look wrong in review.

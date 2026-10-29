@@ -121,6 +121,7 @@ pub(super) fn resolve(
         keys: &keys,
         mouse: &mouse,
         pad: &pad.buttons,
+        wheel: actions.wheel,
     };
     // Every pad button, including those a menu withholds from actions, so one
     // held while a menu closes is still owned until it is released.
@@ -176,6 +177,7 @@ pub(super) fn resolve(
                             Trigger::Key(key) => !ownership.key(key),
                             Trigger::Mouse(button) => !ownership.button(button),
                             Trigger::Pad(button) => !ownership.pad(button),
+                            Trigger::Wheel(_) => false,
                         }
                 }))
         {
@@ -463,7 +465,12 @@ mod tests {
             mouse: &'a ButtonInput<MouseButton>,
             pad: &'a ButtonInput<GamepadButton>,
         ) -> super::super::actions::Inputs<'a> {
-            super::super::actions::Inputs { keys, mouse, pad }
+            super::super::actions::Inputs {
+                keys,
+                mouse,
+                pad,
+                wheel: default(),
+            }
         }
         ownership.resolve(Owner::Catalogue, inputs(&keys, &mouse, &pad));
         ownership.resolve(Owner::Gameplay, inputs(&keys, &mouse, &pad));

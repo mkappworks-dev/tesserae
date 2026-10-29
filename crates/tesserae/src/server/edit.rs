@@ -23,7 +23,7 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use tesserae_core::collide::{VoxelVolume, raycast_until};
+use tesserae_core::collide::{RayHit, VoxelVolume, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
     Burning, Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE,
@@ -41,18 +41,23 @@ use crate::world::{ChunkCoord, WorldSettings};
 /// Voxels would be calibrated to one Voxel size.
 /// `docs/adr/0003-voxel-size-is-per-world.md`.
 ///
-/// The ray is shortened by however far its claimed origin is from the Eye, so
-/// the tolerance below cannot add to this.
+/// Only the part of the ray within this of the Eye is traced, wherever the
+/// ray starts, so neither bound below can add to it.
 pub const EDIT_REACH_M: f32 = 8.0;
 
-/// How far an Edit's ray may start from the Player's Eye, in metres. An honest
-/// Client in the same process sends 0; over a wire it is the distance a Player
-/// moves while an intent travels, so a third of a second at a sprint. A constant
-/// until the controller has a speed to derive it from.
-///
-/// It bounds how stale an origin may be and not how far an Edit reaches, which is
-/// [`EDIT_REACH_M`] from the Eye however far inside this the origin is.
+/// How far a third-person camera sits from the Eye at most, in metres: the
+/// Client's shoulder offset and longest boom, rounded up. The Server does not
+/// know the view, so any ray may start this far off.
+pub const CAMERA_OFFSET_MAX_M: f32 = 7.0;
+
+/// How stale an origin may be, in metres, beyond [`CAMERA_OFFSET_MAX_M`]. An
+/// honest Client in the same process adds 0; over a wire it is the distance a
+/// Player moves while an intent travels, so a third of a second at a sprint. A
+/// constant until the controller has a speed to derive it from.
 pub const EDIT_ORIGIN_TOLERANCE_M: f32 = 2.0;
+
+/// How far an Edit's ray may start from the Eye, in metres.
+pub const EDIT_ORIGIN_BOUND_M: f32 = CAMERA_OFFSET_MAX_M + EDIT_ORIGIN_TOLERANCE_M;
 
 /// Edits applied per tick. Each costs a relight over at most the 15 Voxels light
 /// reaches, so this bounds a tick rather than protecting the budget; the mesh
@@ -134,10 +139,27 @@ pub struct AimTarget {
     pub outline: Option<AimBounds>,
     pub ghost: Option<Vec3>,
     pub removal: Option<AimRemoval>,
+    /// The camera sees a target the Eye cannot: nothing above is offered.
+    pub blocked: bool,
 }
 #[derive(Resource, Default)]
 struct AimState {
-    latest: Option<(AimReport, f32)>,
+    latest: Option<(AimReport, Reach)>,
+}
+
+/// The stretch of an Edit's ray the Server traces, judged against the Eye when
+/// the intent arrives.
+#[derive(Clone, Copy, Debug)]
+struct Reach {
+    /// Where the ray passes nearest the Eye, or its origin if it starts past
+    /// that point: what lies between a camera and the Player is never aimed at.
+    start: Vec3,
+    /// How far along the ray from `start` it stays within [`EDIT_REACH_M`] of
+    /// the Eye.
+    length_m: f32,
+    /// Set when `start` is off the Eye, where a camera may see past what the
+    /// Eye can.
+    eye: Option<Vec3>,
 }
 
 /// What the Client wants done: an action, and the ray it wants it done along, in
@@ -153,8 +175,11 @@ pub struct EditIntent {
 pub enum RejectReason {
     /// The ray struck nothing within [`EDIT_REACH_M`].
     OutOfReach,
-    /// The ray starts more than [`EDIT_ORIGIN_TOLERANCE_M`] from the Player.
+    /// The ray starts more than [`EDIT_ORIGIN_BOUND_M`] from the Player.
     OriginTooFar,
+    /// The camera sees the target, but something stands between it and the
+    /// Eye.
+    Blocked,
     NotLoaded,
     /// The place a Voxel would go already holds one.
     Occupied,
@@ -198,6 +223,7 @@ impl RejectReason {
         match self {
             RejectReason::OutOfReach => "nothing in reach",
             RejectReason::OriginTooFar => "too far from where the server has you",
+            RejectReason::Blocked => "something is in the way",
             RejectReason::NotLoaded => "that part of the world is not loaded",
             RejectReason::Occupied => "something is already there",
             RejectReason::UnknownMaterial => "unknown material",
@@ -250,9 +276,7 @@ pub struct EditRejected {
 struct Pending {
     intent: EditIntent,
     waited: u32,
-    /// [`EDIT_REACH_M`] less how far the origin was from the Eye on arrival, so
-    /// that whatever the ray strikes is within [`EDIT_REACH_M`] of the Eye.
-    reach_m: f32,
+    reach: Reach,
 }
 
 /// Intents received and not yet applied. Server-private: nothing outside this
@@ -331,8 +355,8 @@ fn pick_item(
         direction: request.direction,
         action: EditAction::Remove,
     };
-    let distance = vet_origin(&intent, eye).ok()?;
-    let (at, _) = resolve(store, tables, world, &intent, EDIT_REACH_M - distance).ok()?;
+    let reach = reach_from(&intent, eye).ok()?;
+    let (at, _) = resolve(store, tables, world, &intent, reach).ok()?;
     let here = store.occupants(at, &tables.fluids)?;
     if !here.solid.is_air() {
         Some(AimItem::Solid(here.solid))
@@ -358,8 +382,8 @@ fn receive_aim(
             direction: report.direction,
             action: EditAction::Remove,
         };
-        if let Ok(distance) = vet_origin(&intent, player.eye()) {
-            state.latest = Some((*report, EDIT_REACH_M - distance));
+        if let Ok(reach) = reach_from(&intent, player.eye()) {
+            state.latest = Some((*report, reach));
         }
     }
 }
@@ -383,17 +407,21 @@ fn aim_target(
     world: &WorldSettings,
     meshes: &MeshState,
     report: AimReport,
-    reach: f32,
+    reach: Reach,
 ) -> AimTarget {
     let intent = |action| EditIntent {
         action,
         origin: report.origin,
         direction: report.direction,
     };
-    let remove = resolve(store, tables, world, &intent(EditAction::Remove), reach).ok();
+    let remove = resolve(store, tables, world, &intent(EditAction::Remove), reach);
     let place = report
         .held
-        .and_then(|held| resolve(store, tables, world, &intent(held.action()), reach).ok());
+        .map(|held| resolve(store, tables, world, &intent(held.action()), reach));
+    let blocked = matches!(remove, Err(RejectReason::Blocked))
+        || matches!(place, Some(Err(RejectReason::Blocked)));
+    let remove = remove.ok();
+    let place = place.and_then(Result::ok);
     let outline_at = if report.held == Some(AimItem::Fire) {
         place.map(|(at, _)| at)
     } else {
@@ -423,6 +451,7 @@ fn aim_target(
         removal,
         outline,
         ghost,
+        blocked,
     }
 }
 
@@ -475,8 +504,8 @@ pub(in crate::server) fn receive(
     for intent in intents.read() {
         // Here and not in `apply_pending`: an intent can wait a second there, by
         // when the Player has moved on from where the Client meant.
-        let off_eye_m = match vet_origin(intent, player.eye()) {
-            Ok(distance) => distance,
+        let reach = match reach_from(intent, player.eye()) {
+            Ok(reach) => reach,
             Err(reason) => {
                 rejected.write(EditRejected { reason });
                 continue;
@@ -491,21 +520,67 @@ pub(in crate::server) fn receive(
         pending.0.push_back(Pending {
             intent: *intent,
             waited: 0,
-            reach_m: EDIT_REACH_M - off_eye_m,
+            reach,
         });
     }
 }
 
-/// How far the origin is from the Eye, if it is near enough.
-fn vet_origin(intent: &EditIntent, eye: Vec3) -> Result<f32, RejectReason> {
+/// The part of the intent's ray within [`EDIT_REACH_M`] of the Eye, if its
+/// origin is near enough to be a camera.
+fn reach_from(intent: &EditIntent, eye: Vec3) -> Result<Reach, RejectReason> {
     if !intent.origin.is_finite() || !intent.direction.is_finite() {
         return Err(RejectReason::OutOfReach);
     }
-    let distance = intent.origin.distance(eye);
-    if distance > EDIT_ORIGIN_TOLERANCE_M {
+    let off = intent.origin - eye;
+    if off.length() > EDIT_ORIGIN_BOUND_M {
         return Err(RejectReason::OriginTooFar);
     }
-    Ok(distance)
+    let direction = intent.direction.normalize_or_zero();
+    // The ray meets the sphere of reach about the Eye where
+    // |off + t * direction| = EDIT_REACH_M.
+    let b = off.dot(direction);
+    let discriminant = b * b - (off.length_squared() - EDIT_REACH_M * EDIT_REACH_M);
+    if direction == Vec3::ZERO || discriminant < 0.0 {
+        return Err(RejectReason::OutOfReach);
+    }
+    let enter = (-b).max(0.0);
+    let leave = -b + discriminant.sqrt();
+    if leave <= enter {
+        return Err(RejectReason::OutOfReach);
+    }
+    let start = intent.origin + direction * enter;
+    Ok(Reach {
+        start,
+        length_m: leave - enter,
+        eye: (start.distance(eye) > 1e-3).then_some(eye),
+    })
+}
+
+/// Whether the Eye sees the point the ray struck, through nothing solid but
+/// the Voxel struck.
+fn seen_from_eye(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    eye: Vec3,
+    struck: Vec3,
+    hit: RayHit,
+) -> bool {
+    // Nudged inside the struck box, so a sight line grazing a neighbour's
+    // edge on the way to a face does not count as that neighbour.
+    let inside =
+        struck - Vec3::from(FACE_STEPS[hit.face].map(|c| c as f32)) * world.voxel_size * 1e-3;
+    let sight = inside - eye;
+    raycast_until(
+        store,
+        tables,
+        world.voxel_size,
+        eye.to_array(),
+        sight.to_array(),
+        sight.length(),
+        |v| tables.materials.solid(v),
+    )
+    .is_none_or(|seen| seen.at == hit.at)
 }
 
 pub(in crate::server) fn apply_pending(
@@ -526,7 +601,7 @@ pub(in crate::server) fn apply_pending(
             break;
         };
         let outcome =
-            resolve(&store, &tables, &world, &p.intent, p.reach_m).and_then(|(at, change)| {
+            resolve(&store, &tables, &world, &p.intent, p.reach).and_then(|(at, change)| {
                 // The incremental relight and the bulk solve must not both write one
                 // Chunk, so an edit waits for its Chunk's light to settle.
                 if meshes.is_unlit(VoxelCoord::of(at).chunk) {
@@ -619,7 +694,7 @@ fn resolve(
     tables: &Tables,
     world: &WorldSettings,
     intent: &EditIntent,
-    reach_m: f32,
+    reach: Reach,
 ) -> Result<([i32; 3], Change), RejectReason> {
     if !intent.origin.is_finite() || !intent.direction.is_finite() {
         return Err(RejectReason::OutOfReach);
@@ -641,12 +716,18 @@ fn resolve(
         store,
         tables,
         world.voxel_size,
-        intent.origin.to_array(),
+        reach.start.to_array(),
         intent.direction.to_array(),
-        reach_m,
+        reach.length_m,
         stops,
     )
     .ok_or(RejectReason::OutOfReach)?;
+    if let Some(eye) = reach.eye {
+        let struck = reach.start + intent.direction.normalize() * hit.distance_m;
+        if !seen_from_eye(store, tables, world, eye, struck, hit) {
+            return Err(RejectReason::Blocked);
+        }
+    }
     if let EditAction::RemoveAt(expected) = intent.action
         && removal_target(store, tables, world, hit.at) != Some(expected)
     {
@@ -1453,6 +1534,11 @@ mod tests {
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone(), "nothing changed");
     }
 
+    /// A full reach from [`DOWN_EYE`], as an intent from the Eye itself gets.
+    fn at_eye() -> Reach {
+        reach_from(&down(EditAction::Remove), DOWN_EYE).unwrap()
+    }
+
     fn from(eye: Vec3) -> EditIntent {
         EditIntent {
             origin: eye,
@@ -1476,12 +1562,18 @@ mod tests {
     #[test]
     fn the_tolerance_is_inclusive_and_a_hair_past_it_is_not() {
         let mut app = app_with(&[(origin(), ground())]);
-        let at = DOWN_EYE + Vec3::Z * EDIT_ORIGIN_TOLERANCE_M;
-        send_from_afar(&mut app, from(at));
+        let below_eye = DOWN_EYE - Vec3::Y * 4.0;
+        let toward = |at: Vec3| EditIntent {
+            origin: at,
+            direction: below_eye - at,
+            ..down(EditAction::Remove)
+        };
+        let at = DOWN_EYE + Vec3::Z * EDIT_ORIGIN_BOUND_M;
+        send_from_afar(&mut app, toward(at));
         assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
         assert!(rejections(&mut app).is_empty());
 
-        send_from_afar(&mut app, from(at + Vec3::Z * 0.01));
+        send_from_afar(&mut app, toward(at + Vec3::Z * 0.01));
         assert_eq!(rejections(&mut app), vec![RejectReason::OriginTooFar]);
     }
 
@@ -2576,7 +2668,7 @@ mod tests {
                 app.world().resource::<WorldSettings>(),
                 app.world().resource::<MeshState>(),
                 report,
-                EDIT_REACH_M,
+                at_eye(),
             );
             let bounds = target.outline.unwrap();
             assert_eq!(bounds.min, Vec3::new(5.0, 7.0, 5.0));
@@ -2600,7 +2692,7 @@ mod tests {
                     held: Some(AimItem::Fire),
                     ..report
                 },
-                EDIT_REACH_M,
+                at_eye(),
             );
             assert_eq!(fire.ghost, None);
         }
@@ -2621,7 +2713,7 @@ mod tests {
                 app.world().resource::<WorldSettings>(),
                 app.world().resource::<MeshState>(),
                 AimReport { held, ..report },
-                EDIT_REACH_M,
+                at_eye(),
             )
         };
         assert!(target(&app, report.held).ghost.is_some());
@@ -2634,6 +2726,171 @@ mod tests {
         let fire = target(&app, Some(AimItem::Fire));
         assert!(fire.outline.is_some());
         assert_eq!(fire.ghost, None);
+    }
+
+    /// A ray from `camera` at the top of the ground Voxel `at`, with the Eye at
+    /// [`DOWN_EYE`].
+    fn camera_ray(camera: Vec3, at: [i32; 3]) -> EditIntent {
+        let top = Vec3::new(at[0] as f32 + 0.5, at[1] as f32 + 1.0, at[2] as f32 + 0.5);
+        EditIntent {
+            origin: camera,
+            direction: top - camera,
+            action: EditAction::Remove,
+        }
+    }
+
+    #[test]
+    fn a_camera_ray_reaches_only_as_far_as_the_eye_does() {
+        // Behind and over the right shoulder, as the third-person camera sits.
+        let camera = DOWN_EYE + Vec3::new(0.5, 0.3, 4.0);
+        let mut app = app_with(&[(origin(), ground())]);
+        // 5.7 m from the Eye; farther from the camera.
+        send_from_afar(&mut app, camera_ray(camera, [5, 7, 1]));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        assert!(voxel_at(&app, [5, 7, 1]).is_air());
+        // 8.06 m from the Eye: out of reach though the camera sees it plainly.
+        let mut app = app_with(&[(origin(), ground())]);
+        let facing = DOWN_EYE + Vec3::new(0.5, 0.3, -4.0);
+        send_from_afar(&mut app, camera_ray(facing, [5, 7, 12]));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), vec![RejectReason::OutOfReach]);
+        assert_eq!(voxel_at(&app, [5, 7, 12]), stone());
+    }
+
+    #[test]
+    fn what_stands_between_the_camera_and_the_player_is_not_aimed_at() {
+        let mut chunk = ground();
+        chunk.set(5, 11, 7, stone());
+        let mut app = app_with(&[(origin(), chunk)]);
+        send_from_afar(&mut app, camera_ray(Vec3::new(5.5, 12.0, 9.5), [5, 7, 1]));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        assert!(voxel_at(&app, [5, 7, 1]).is_air());
+        assert_eq!(voxel_at(&app, [5, 11, 7]), stone(), "behind the Player");
+    }
+
+    #[test]
+    fn a_target_the_camera_sees_around_a_corner_is_blocked_not_edited() {
+        // Three metres to the Eye's side, looking straight down past a wall
+        // that stands between the Eye and the ground the camera sees.
+        let camera = DOWN_EYE + Vec3::X * 3.0;
+        let report = AimReport {
+            seq: 1,
+            origin: camera,
+            direction: Vec3::NEG_Y,
+            held: Some(AimItem::Solid(stone())),
+        };
+        let mut walled = ground();
+        for y in 9..12 {
+            walled.set(7, y, 5, stone());
+        }
+        for (chunk, blocked) in [(ground(), false), (walled, true)] {
+            let mut app = app_with(&[(origin(), chunk)]);
+            let reach = reach_from(&camera_ray(camera, [8, 7, 5]), DOWN_EYE).unwrap();
+            let target = aim_target(
+                app.world().resource::<ChunkStore>(),
+                &watered(),
+                app.world().resource::<WorldSettings>(),
+                app.world().resource::<MeshState>(),
+                report,
+                reach,
+            );
+            assert_eq!(target.blocked, blocked);
+            assert_eq!(target.outline.is_none(), blocked);
+            assert_eq!(target.ghost.is_none(), blocked);
+            send_from_afar(
+                &mut app,
+                EditIntent {
+                    origin: camera,
+                    direction: Vec3::NEG_Y,
+                    action: EditAction::Remove,
+                },
+            );
+            tick(&mut app);
+            if blocked {
+                assert_eq!(rejections(&mut app), vec![RejectReason::Blocked]);
+                assert_eq!(
+                    voxel_at(&app, [8, 7, 5]),
+                    stone(),
+                    "never around the corner"
+                );
+            } else {
+                assert!(rejections(&mut app).is_empty());
+                assert!(voxel_at(&app, [8, 7, 5]).is_air());
+            }
+        }
+    }
+
+    #[test]
+    fn camera_aim_keeps_eye_reach_and_corners_at_every_voxel_size() {
+        for size in [1.0, 0.5, 0.25] {
+            let chunks: Vec<_> = (0..4)
+                .map(|z| (ChunkCoord::new(0, 0, z), ground()))
+                .collect();
+            let sized = |chunks: &[(ChunkCoord, Chunk)]| {
+                let mut app = app_with(chunks);
+                app.insert_resource(WorldSettings {
+                    voxel_size: size,
+                    ..default()
+                });
+                let eye = DOWN_EYE * size;
+                set_eye(&mut app, eye);
+                (app, eye)
+            };
+            let top = |at: [i32; 3]| {
+                Vec3::new(at[0] as f32 + 0.5, at[1] as f32 + 1.0, at[2] as f32 + 0.5) * size
+            };
+            let cell = |metres: Vec3| (metres / size).floor().as_ivec3().to_array();
+
+            // Over the shoulder and behind: 5 m out is struck, 8 m out is past
+            // the Eye's reach however near the camera's line runs.
+            for (ahead_m, reached) in [(5.0, true), (8.0, false)] {
+                let (mut app, eye) = sized(&chunks);
+                let at = cell(Vec3::new(eye.x, 7.5 * size, eye.z + ahead_m));
+                let camera = eye + Vec3::new(0.5, 0.3, -4.0);
+                send_from_afar(
+                    &mut app,
+                    EditIntent {
+                        origin: camera,
+                        direction: top(at) - camera,
+                        action: EditAction::Remove,
+                    },
+                );
+                tick(&mut app);
+                assert_eq!(
+                    voxel_at(&app, at).is_air(),
+                    reached,
+                    "{size} m, {ahead_m} m"
+                );
+            }
+
+            // Three Voxels to the side, a wall the camera looks past hides the
+            // ground from the Eye.
+            let mut walled = chunks.clone();
+            for y in 9..12 {
+                walled[0].1.set(7, y, 5, stone());
+            }
+            for (chunks, blocked) in [(&chunks, false), (&walled, true)] {
+                let (mut app, eye) = sized(chunks);
+                let camera = eye + Vec3::X * 3.0 * size;
+                send_from_afar(
+                    &mut app,
+                    EditIntent {
+                        origin: camera,
+                        direction: Vec3::NEG_Y,
+                        action: EditAction::Remove,
+                    },
+                );
+                tick(&mut app);
+                assert_eq!(
+                    rejections(&mut app) == vec![RejectReason::Blocked],
+                    blocked,
+                    "{size} m"
+                );
+                assert_eq!(voxel_at(&app, [8, 7, 5]).is_air(), !blocked, "{size} m");
+            }
+        }
     }
 
     #[test]
@@ -2651,7 +2908,7 @@ mod tests {
             AimReport { seq: 3, ..report },
             AimReport {
                 seq: 5,
-                origin: DOWN_EYE + Vec3::X * 3.0,
+                origin: DOWN_EYE + Vec3::X * (EDIT_ORIGIN_BOUND_M + 1.0),
                 ..report
             },
             AimReport {

@@ -34,6 +34,13 @@ consume their trigger before plain actions. History chords also suppress
 descent. Redo takes precedence over undo; empty hand suppresses sampling;
 placement, sampling, selection and history cancel pending removal.
 
+**F5** switches between first-person and an over-the-shoulder third-person view
+in either movement mode; it never moves the Player. **Alt+wheel** zooms the
+third-person camera from 1.5 to 6 m. Wheel directions can be bound like keys,
+with or without a modifier; a bound wheel chord owns the wheel, so it never also
+steps the quick slots, and plain wheel stays slot selection. The view and zoom
+are saved in the user profile, not in any World.
+
 Gameplay input is cancelled when ownership changes. Inputs held through a menu,
 focus change or device cancellation require release before activation. Pending
 sampling replies are discarded. The Server continues simulating while UI is open

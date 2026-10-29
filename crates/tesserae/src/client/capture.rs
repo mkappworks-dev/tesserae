@@ -198,6 +198,12 @@ fn percentile(sorted: &[f32], p: f32) -> Option<f32> {
 }
 
 impl Capture {
+    /// Whether the shutter is at most `lead_s` away.
+    fn before_shutter(&self, elapsed_s: f32, lead_s: f32) -> bool {
+        self.frames
+            .fill_ended_s
+            .is_some_and(|start| elapsed_s >= start + self.fly_for_s + self.settle_for_s - lead_s)
+    }
     fn elapsed_s(&self, time: &Time<Real>) -> f32 {
         self.origin.map_or_else(
             || time.elapsed_secs(),
@@ -275,28 +281,47 @@ pub(super) fn plugin(app: &mut App) {
             .before(super::removal::bar),
     );
     app.add_systems(PreUpdate, save_preview);
-    app.add_systems(Startup, uncap_frame_rate).add_systems(
-        Update,
-        (
-            render_offscreen.after(super::preview::camera).run_if(
-                |capture: Res<Capture>, target: Option<Res<Offscreen>>| {
-                    capture.offscreen && target.is_none()
-                },
-            ),
-            capture_holding,
-            menu_view
-                .after(super::menu::rebuild_bar)
-                .before(super::menu::drag_preview),
-            menu_drag.before(super::menu::drag_preview),
-            watch_frames,
-            aim,
-            fly_forward,
-            report,
-            shutter,
-            exit_when_written,
-        )
-            .chain(),
-    );
+    app.add_systems(Startup, (uncap_frame_rate, view_fixture))
+        .add_systems(
+            Update,
+            (
+                render_offscreen.after(super::preview::camera).run_if(
+                    |capture: Res<Capture>, target: Option<Res<Offscreen>>| {
+                        capture.offscreen && target.is_none()
+                    },
+                ),
+                capture_holding,
+                menu_view
+                    .after(super::menu::rebuild_bar)
+                    .before(super::menu::drag_preview),
+                menu_drag.before(super::menu::drag_preview),
+                watch_frames,
+                aim,
+                fly_forward,
+                pillar,
+                report,
+                shutter,
+                exit_when_written,
+            )
+                .chain(),
+        );
+}
+
+/// `TESSERAE_SCREENSHOT_VIEW=third` and `TESSERAE_SCREENSHOT_ZOOM_M` choose the
+/// view for this run only: nothing is written to the user profile.
+fn view_fixture(mut preferences: ResMut<super::profile::Preferences>) {
+    use super::view::{View, ZOOM_M};
+    preferences.view = match std::env::var("TESSERAE_SCREENSHOT_VIEW").as_deref() {
+        Ok("third") => View::ThirdPerson,
+        Ok("first") | Err(_) => View::FirstPerson,
+        Ok(other) => panic!("Unknown fixture view: {other}"),
+    };
+    if let Some(zoom) = std::env::var("TESSERAE_SCREENSHOT_ZOOM_M")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+    {
+        preferences.zoom_m = zoom.clamp(*ZOOM_M.start(), *ZOOM_M.end());
+    }
 }
 
 fn save_preview(
@@ -583,7 +608,7 @@ fn watch_frames(
 /// picture comes out black.
 fn fly_forward(
     time: Res<Time<Real>>,
-    mut switched: Local<bool>,
+    (mut switched, mut jumped): (Local<bool>, Local<bool>),
     mut intents: MessageWriter<crate::server::player::MovementIntent>,
     capture: Res<Capture>,
     camera: Single<(&Transform, &FlyCamera), With<MainCamera>>,
@@ -592,14 +617,25 @@ fn fly_forward(
     let crouch = std::env::var_os("TESSERAE_SCREENSHOT_CROUCH").is_some();
     let switch_mode = !*switched
         && std::env::var_os("TESSERAE_SCREENSHOT_SWITCH_MODE").is_some()
-        && capture.frames.fill_ended_s.is_some_and(|start| {
-            elapsed_s >= start + capture.fly_for_s + capture.settle_for_s - 0.7
-        });
+        && capture.before_shutter(elapsed_s, 0.7);
     *switched |= switch_mode;
-    if !capture.frames.flying(elapsed_s, capture.fly_for_s) {
+    // Timed so the shutter falls near the top of the jump.
+    let jump = !*jumped
+        && std::env::var_os("TESSERAE_SCREENSHOT_JUMP").is_some()
+        && capture.before_shutter(elapsed_s, 0.3);
+    *jumped |= jump;
+    let sprint = std::env::var_os("TESSERAE_SCREENSHOT_SPRINT").is_some();
+    // A walking or sprinting pose needs the body still moving at the shutter.
+    let keep_moving = std::env::var_os("TESSERAE_SCREENSHOT_KEEP_MOVING").is_some()
+        && capture
+            .frames
+            .fill_ended_s
+            .is_some_and(|start| elapsed_s >= start);
+    if !capture.frames.flying(elapsed_s, capture.fly_for_s) && !keep_moving {
         intents.write(crate::server::player::MovementIntent {
             crouch,
             switch_mode,
+            jump,
             yaw: camera.1.yaw,
             pitch: camera.1.pitch,
             ..default()
@@ -614,12 +650,64 @@ fn fly_forward(
     intents.write(crate::server::player::MovementIntent {
         crouch,
         switch_mode,
+        jump,
+        sprint,
         direction: velocity,
         speed_mps: velocity.length(),
         yaw: fly.yaw,
         pitch: fly.pitch,
         ..default()
     });
+}
+
+/// `TESSERAE_SCREENSHOT_PILLAR=1` stacks stone 1.1 m ahead of the Eye and 0.1 m
+/// right of it, through ordinary Place intents from the Eye, one per 0.2 s. With
+/// 0.25 m Voxels it hides the ground ahead from the Eye while the shoulder
+/// camera's crosshair line passes it, so the shutter shows a Blocked target.
+fn pillar(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    catalogue: Res<super::edit::Catalogue>,
+    world: Res<WorldSettings>,
+    camera: Single<&FlyCamera, With<MainCamera>>,
+    mut intents: MessageWriter<crate::server::edit::EditIntent>,
+    mut placed: Local<(u32, f32, Option<Vec3>)>,
+) {
+    const BLOCKS: u32 = 7;
+    let elapsed_s = capture.elapsed_s(&time);
+    if std::env::var_os("TESSERAE_SCREENSHOT_PILLAR").is_none()
+        || placed.0 >= BLOCKS
+        || capture
+            .frames
+            .fill_ended_s
+            .is_none_or(|start| elapsed_s < start + 0.5)
+        || elapsed_s < placed.1 + 0.2
+    {
+        return;
+    }
+    let Some(stone) = catalogue
+        .0
+        .materials
+        .iter()
+        .find(|material| material.name == "demo:stone")
+    else {
+        return;
+    };
+    let eye = camera.eye;
+    let size = world.voxel_size;
+    let base = *placed.2.get_or_insert_with(|| {
+        let at = ((eye + Vec3::new(0.1, -crate::server::player::EYE_HEIGHT, -1.1)) / size).floor();
+        at * size + Vec3::new(size / 2.0, 0.0, size / 2.0)
+    });
+    // Each Place strikes the top of the column so far and lands on it.
+    let top = base + Vec3::Y * size * placed.0 as f32;
+    intents.write(crate::server::edit::EditIntent {
+        action: crate::server::edit::EditAction::Place(tesserae_core::Voxel::cube(stone.id)),
+        origin: eye,
+        direction: top - eye,
+    });
+    placed.0 += 1;
+    placed.1 = elapsed_s;
 }
 
 /// The climb that adds `lift_m` over the flight, held to what the Server's speed
@@ -706,10 +794,10 @@ fn aim(
 /// Runs before `shutter` rather than inside it, so neither function carries the
 /// other's system parameters.
 fn report(
-    time: Res<Time<Real>>,
-    capture: Res<Capture>,
+    (time, capture, target): (Res<Time<Real>>, Res<Capture>, Res<super::aim::Target>),
     stats: Res<StreamingStats>,
     camera: Single<(&Transform, &FlyCamera), With<MainCamera>>,
+    preferences: Res<super::profile::Preferences>,
     drawn: Query<(&MeshTag, &Transform, &Mesh3d)>,
     meshes: Res<Assets<Mesh>>,
     world: Res<WorldSettings>,
@@ -720,8 +808,14 @@ fn report(
         return;
     }
     info!(
-        "capture movement_mode={:?}, authority=Server fixed64, view=first_person, quality=unchanged",
-        movement.movement_mode
+        "capture movement_mode={:?}, authority=Server fixed64, view={:?}, zoom_m={}, \
+         eye={:?}, camera={:?}, aim_blocked={}, quality=unchanged",
+        movement.movement_mode,
+        preferences.view,
+        preferences.zoom_m,
+        movement.eye,
+        camera.translation,
+        target.0.blocked,
     );
     let ms = |s: f32| format!("{:.1}", s * 1000.0);
     let fill = capture

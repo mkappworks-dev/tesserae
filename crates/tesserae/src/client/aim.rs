@@ -48,9 +48,25 @@ pub(super) fn plugin(app: &mut App) {
                 receive,
                 outline,
                 draw,
+                crosshair,
             )
                 .chain(),
         );
+}
+fn crosshair(
+    target: Res<Target>,
+    sent: Res<Sent>,
+    time: Res<Time>,
+    mut crosshair: Query<&mut TextColor, With<super::edit::Crosshair>>,
+) {
+    let alpha = if target.0.blocked && target.current(&sent, time.elapsed_secs_f64()) {
+        super::edit::BLOCKED_CROSSHAIR_ALPHA
+    } else {
+        super::edit::CROSSHAIR_ALPHA
+    };
+    for mut colour in &mut crosshair {
+        colour.set_if_neq(TextColor(Color::srgba(1.0, 1.0, 1.0, alpha)));
+    }
 }
 pub(super) fn report(
     camera: Single<&GlobalTransform, With<FlyCamera>>,
@@ -168,6 +184,7 @@ mod tests {
             seq: 3,
             outline: Some(bounds),
             ghost: None,
+            blocked: false,
         };
         app.world_mut().write_message(answer);
         app.update();

@@ -730,3 +730,113 @@ fn game_movement_policy_requires_an_allowed_initial_mode() {
         }
     }
 }
+
+fn figure() -> content::CharacterDef {
+    let still = content::LimbMotion {
+        swing_deg: 0.0,
+        rate_hz: 0.0,
+        arm_raise_deg: 0.0,
+    };
+    let cube = |origin, size, uv| content::CharacterCube { origin, size, uv };
+    content::CharacterDef {
+        bones: vec![
+            content::CharacterBone {
+                name: "body".into(),
+                parent: None,
+                role: content::BoneRole::Body,
+                pivot: (0.0, 12.0, 0.0),
+                cubes: vec![cube((-4.0, 12.0, -2.0), (8, 12, 4), (16, 16))],
+            },
+            content::CharacterBone {
+                name: "head".into(),
+                parent: Some("body".into()),
+                role: content::BoneRole::Head,
+                pivot: (0.0, 24.0, 0.0),
+                cubes: vec![cube((-4.0, 24.0, -4.0), (8, 8, 8), (0, 0))],
+            },
+        ],
+        pixel_m: 1.8 / 32.0,
+        skin: vec![0; crate::SKIN_BYTES],
+        idle: still,
+        walk: still,
+        sprint: still,
+        airborne: still,
+        crouch: still,
+    }
+}
+
+fn declare_figure(figure: content::CharacterDef, is_root: bool) -> Result<Applied, ModError> {
+    let mut d = declaring(&[], &[]);
+    let mut world = crate::convert::engine_world_params();
+    world.character = Some(figure);
+    d.world = Some(world);
+    let mut load = Load::new();
+    apply(d, "game", &mut load.tables, &mut load.registry, is_root)
+}
+
+#[test]
+fn a_game_character_is_validated_into_bones_that_name_earlier_parents() {
+    let character = declare_figure(figure(), true).unwrap().character.unwrap();
+    assert_eq!(character.bones.len(), 2);
+    assert_eq!(character.bones[0].parent, None);
+    assert_eq!(character.bones[1].parent, Some(0));
+    assert_eq!(character.bones[1].role, crate::Role::Head);
+    assert_eq!(character.bones[1].cubes[0].size, [8, 8, 8]);
+    assert!(
+        declare_figure(figure(), false).is_err(),
+        "only the Game declares World parameters"
+    );
+    let mut d = declaring(&[], &[]);
+    d.world = Some(crate::convert::engine_world_params());
+    let mut load = Load::new();
+    let none = apply(d, "game", &mut load.tables, &mut load.registry, true).unwrap();
+    assert_eq!(none.character, None);
+}
+
+#[test]
+fn character_bounds_are_refused_at_load() {
+    type Break = fn(&mut content::CharacterDef);
+    let cases: [(&str, Break); 14] = [
+        ("no bones", |f| f.bones.clear()),
+        ("seventeen bones", |f| {
+            for n in 0..15 {
+                let mut bone = f.bones[1].clone();
+                bone.name = format!("extra{n}");
+                bone.cubes.clear();
+                f.bones.push(bone);
+            }
+        }),
+        ("seventeen cubes", |f| {
+            let cube = f.bones[0].cubes[0];
+            f.bones[0].cubes.extend(std::iter::repeat_n(cube, 15));
+        }),
+        ("short skin", |f| f.skin.truncate(16383)),
+        ("tiny pixels", |f| f.pixel_m = 0.0),
+        ("nan pixels", |f| f.pixel_m = f32::NAN),
+        ("bad name", |f| f.bones[1].name = "Head".into()),
+        ("duplicate name", |f| f.bones[1].name = "body".into()),
+        ("unknown parent", |f| {
+            f.bones[1].parent = Some("neck".into())
+        }),
+        ("two roots", |f| f.bones[1].parent = None),
+        ("empty cube", |f| f.bones[0].cubes[0].size.1 = 0),
+        ("uv past the skin", |f| f.bones[0].cubes[0].uv = (41, 16)),
+        ("far pivot", |f| f.bones[0].pivot.0 = 65.0),
+        ("wild swing", |f| f.walk.swing_deg = 91.0),
+    ];
+    for (what, break_it) in cases {
+        let mut f = figure();
+        break_it(&mut f);
+        let error = declare_figure(f, true).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                ModError::Params {
+                    what: "character",
+                    ..
+                }
+            ),
+            "{what}: {error}"
+        );
+    }
+}

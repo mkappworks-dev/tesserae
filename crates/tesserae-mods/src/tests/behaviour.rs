@@ -403,6 +403,7 @@ fn a_0_1_declaration_comes_through_the_adapter_unchanged() {
 fn lake(level_m: f32, material: &str) -> content::WorldParams {
     content::WorldParams {
         movement: None,
+        character: None,
         water: Some(content::WaterParams {
             level_m,
             material: material.into(),

@@ -21,6 +21,10 @@ pub(crate) struct Preferences {
     pub display_sync: bool,
     pub fps_cap: Option<u32>,
     pub pad: PadPreferences,
+    /// The last view, restored in every World: a preference of the user's,
+    /// not the World's, so no save holds it.
+    pub view: super::view::View,
+    pub zoom_m: f32,
 }
 /// Controller feel, kept apart from the mouse so neither overwrites the other.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -58,6 +62,8 @@ impl Default for Preferences {
             display_sync: true,
             fps_cap: None,
             pad: PadPreferences::default(),
+            view: default(),
+            zoom_m: super::view::DEFAULT_ZOOM_M,
         }
     }
 }
@@ -137,6 +143,7 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         || !PAD_SENSITIVITY.contains(&pad.look_sensitivity)
         || !PAD_DEADZONE.contains(&pad.move_deadzone)
         || !PAD_DEADZONE.contains(&pad.look_deadzone)
+        || !super::view::ZOOM_M.contains(&p.zoom_m)
     {
         return Err(io::Error::other("invalid preference value"));
     }
@@ -231,11 +238,18 @@ pub(super) fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::other("profile needs a parent directory"))?;
     fs::create_dir_all(parent)?;
+    // macOS clocks tick in microseconds, so two writers in one process can
+    // read the same time; the counter keeps their temporary files apart.
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(io::Error::other)?
         .as_nanos();
-    let temporary = parent.join(format!(".profile-{}-{nonce}.tmp", std::process::id()));
+    let write = WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temporary = parent.join(format!(
+        ".profile-{}-{nonce}-{write}.tmp",
+        std::process::id()
+    ));
     let result = (|| {
         let mut file = OpenOptions::new()
             .write(true)
@@ -376,6 +390,24 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_view_round_trips_an_older_profile_starts_first_person_and_bad_zoom_is_refused() {
+        use super::super::view::View;
+        let prefs = Preferences {
+            view: View::ThirdPerson,
+            zoom_m: 2.5,
+            ..default()
+        };
+        let bytes = encode(&Bindings::default(), &prefs).unwrap();
+        assert_eq!(decode(&bytes).unwrap().1, prefs);
+        let older = br#"{"version":1,"preferences":{"invert_y":true}}"#;
+        let (_, older) = decode(older).unwrap();
+        assert_eq!((older.view, older.zoom_m), (View::FirstPerson, 4.0));
+        for zoom in ["1.4", "6.1", "-1"] {
+            let bytes = format!(r#"{{"version":1,"preferences":{{"zoom_m":{zoom}}}}}"#);
+            assert!(decode(bytes.as_bytes()).is_err(), "{zoom}");
+        }
+    }
     #[test]
     fn corrupt_and_failed_writes_preserve_the_last_file() {
         let root = std::env::temp_dir().join(format!(
