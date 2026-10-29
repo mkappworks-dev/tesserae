@@ -76,20 +76,24 @@ fn switch(
     if !ownership.gameplay() {
         return;
     }
-    let before = (preferences.view, preferences.zoom_m);
+    let mut view = preferences.view;
     if actions.started(Action::View) {
-        preferences.view = match preferences.view {
+        view = match view {
             View::FirstPerson => View::ThirdPerson,
             View::ThirdPerson => View::FirstPerson,
         };
     }
-    if preferences.view == View::ThirdPerson {
+    let mut zoom_m = preferences.zoom_m;
+    if view == View::ThirdPerson {
         let steps =
             actions.started(Action::ZoomOut) as i32 - actions.started(Action::ZoomIn) as i32;
-        preferences.zoom_m =
-            (preferences.zoom_m + steps as f32 * ZOOM_STEP_M).clamp(*ZOOM_M.start(), *ZOOM_M.end());
+        zoom_m = (zoom_m + steps as f32 * ZOOM_STEP_M).clamp(*ZOOM_M.start(), *ZOOM_M.end());
     }
-    if (preferences.view, preferences.zoom_m) != before {
+    // Written only on a change: display settings re-apply whenever the
+    // preferences change, which rebuilds the window's swapchain.
+    if (view, zoom_m) != (preferences.view, preferences.zoom_m) {
+        preferences.view = view;
+        preferences.zoom_m = zoom_m;
         pending.0 = Some(SAVE_AFTER_S);
     }
 }
@@ -515,6 +519,22 @@ mod tests {
             app.update();
         }
         assert!(camera(&mut app).abs_diff_eq(open, 1e-3));
+    }
+
+    #[test]
+    fn an_idle_third_person_frame_leaves_the_preferences_unchanged() {
+        let mut app = app(View::ThirdPerson);
+        app.update();
+        app.update();
+        let tick = app.world().read_change_tick();
+        app.update();
+        assert!(
+            !app.world()
+                .resource_ref::<Preferences>()
+                .last_changed()
+                .is_newer_than(tick, app.world().read_change_tick()),
+            "display settings re-apply on every change"
+        );
     }
 
     #[test]
