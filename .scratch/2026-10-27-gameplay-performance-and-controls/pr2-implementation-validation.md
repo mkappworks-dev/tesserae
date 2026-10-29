@@ -324,3 +324,42 @@ Both launches show the same assigned slots and active fifth slot. The JSON is
 a seeded visual fixture; automated tests establish the actual write/restart
 behavior. No guest was rebuilt. Cargo used caffeinate, warnings denied and the
 requested shared target cache. PR publication is authorized; merge is not.
+
+
+## Window-close flow and themed save dialogs (2026-10-29)
+
+The user reported that the close dialog vanished before an action could be
+chosen. The normal Server path already completes a final save and emits
+AppExit automatically. The Client incorrectly offered Return/Exit choices
+while that successful save was in progress. `c8367b3` removes those misleading
+choices: ordinary close has compact noninteractive progress; decisions are
+shown only for a save failure or explicit discard confirmation. Repeated
+primary-window close requests no longer rearm a pending quit/failure flow.
+The cursor releases on the initial close request for same-frame cancellation.
+
+`14875bb` applies the shared dark/leaf/Aileron theme, 390px dialog card,
+consistent borders, amber warnings and shared button primitives. Tab is modal;
+initial focus is Return to World for failures and Cancel for discard. Progress
+uses an opaque themed card rather than the old blue overlay. Autosave remains
+a 30-second/checkpoint policy; a final flush is still required on exit. Server
+save semantics and World format are unchanged.
+
+Four Client save-UI regressions pass, including two added tests using the same
+WindowPlugin configuration as main. They cover an initial close request,
+noninteractive progress, keeping Window alive through failures and discard
+confirmation, repeated close requests, actionable cancellation and safe focus.
+The full Client set passes 151 tests. The established CI wrapper passes 974
+workspace tests, five ignored, with exactly the previously documented Agenda
+persistence test excluded; full unfiltered CI is not claimed green. Formatting,
+Clippy, rustdoc, default-feature checks, benches, boundaries and dependency
+checks pass. No WIT/Game sources changed or guest artifacts were rebuilt.
+
+Current offscreen visual fixtures, source `14875bb`, native executable/hash,
+environment manifests and PNG hashes are retained under
+`/tmp/tesserae-window-close-pcyf3apg/themed/`. Saving, failure and discard images
+are capture-only SaveStatus fixtures after World fill; they verify presentation,
+not IO failure or an actual OS close gesture. Root PNGs retain the superseded
+unthemed pass. `review.html` and `review.md` are the review entry points. The CI
+log is `cargo-ci.log` there (copied from `cargo-ci-window-close-theme.log` in the
+previous validation directory). Existing Server regressions cover save failure,
+retry, return, confirmation and durable completion.

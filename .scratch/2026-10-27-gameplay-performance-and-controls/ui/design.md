@@ -79,3 +79,11 @@ still has the unchanged intermittent Agenda persistence failure; the other
 969 workspace tests pass when that one test is explicitly excluded. Full
 validation details and retained failed logs are in the implementation record.
 The UI implementation is complete; persistence is not claimed fixed.
+
+
+Save failure and discard confirmation now reuse the same dark palette, Aileron,
+390px card, rounded border and shared button primitives as settings dialogs.
+Leaf marks primary actions; amber is reserved for actual warnings. Safe initial
+focus and modal Tab grouping are verified. Ordinary close has only a compact
+save-progress card. Native visual fixtures are retained at
+`/tmp/tesserae-window-close-pcyf3apg/themed/` (source `14875bb`).
