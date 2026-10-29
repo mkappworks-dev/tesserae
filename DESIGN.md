@@ -371,7 +371,16 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
 - Luanti is LGPL-2.1+: its ideas are usable, its code is not.
 - `games/demo/` and `assets/` are deliberately **not** BSL — see ADR-0004.
 
-## Build order
+## Road to version 1.0
+
+Version 1.0 is a single-player Game, shipped as Mods on the Engine, that someone
+can install, play for an hour, save, quit and resume, and then extend with a Mod
+of their own. Steps 1 to 27 below are one sequence in suggested delivery order,
+earliest first; a dependency is named where one exists. Network transport is not
+in 1.0: ADR-0002 keeps single player on the same Server and Client split, so
+multiplayer is a later transport swap, not a rewrite.
+
+### Steps 1 to 9: the Engine
 
 1. `tesserae-core`: chunk storage + palette compression + greedy mesher, with a
    `criterion` bench on a worldgen-filled chunk. Headless, no window.
@@ -525,14 +534,7 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    belong to step 15; they are listed there because they change what the sky and
    fog should be.
 
-## Road to the first MVP
-
-The MVP is a single-player Game, shipped as Mods on the Engine, that someone can
-install, play for an hour, save, quit and resume, and then extend with a Mod of
-their own. The build order above (steps 1 to 9) and the items below are the MVP,
-numbered as one sequence. Network transport is not: ADR-0002 keeps single player
-on the same Server and Client split, so multiplayer is a later transport swap,
-not a rewrite.
+### Steps 10 to 27: Game and Mod content
 
 These are Game or Mod concerns first. The Engine gains only the seams they need
 and everything crosses the WIT contract. Numbers are the suggested delivery
@@ -583,20 +585,20 @@ movement, save, camera and input work already in flight is tracked in
     collision, lighting and meshing outside the Chunk grid, Server-owned motion
     that composes with the Player's flight and physics movement, and a save
     format for a body that straddles Chunks. This is the largest unknown in the
-    MVP: spike it before committing the scope. Depends on 12 and 23.
+    1.0: spike it before committing the scope. Depends on 12 and 23.
 25. **Modding SDK and example Game.** A documented authoring kit: Mod loading
     from a folder, a fast edit and reload loop, the WIT versioning and
     compatibility policy, and a small example Mod. This is the gate for "ready
-    for Mods" and the WIT contract is frozen here for the MVP.
+    for Mods" and the WIT contract is frozen here for 1.0.
 26. **Creation tools.** A structure editor, a material and texture editor, and a
     screenshot or replay mode, built on the SDK. Depends on 23 and 25.
 27. **Release hardening.** An app bundle for macOS, first-run flow, a save
     migration policy checked by tests, logs and crash diagnostics without
     telemetry, and frame-time and load-time budgets enforced in CI.
 
-### After the MVP
+### After 1.0
 
-Not blocking the MVP, in rough order of value:
+Not blocking 1.0, in rough order of value:
 
 - **Network transport and multiplayer sessions.** The transport (the `Player`
   and `MovementIntent` are its first customers) plus lobbies, join and invite,
