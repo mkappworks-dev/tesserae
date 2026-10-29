@@ -1,9 +1,9 @@
 # Desktop gameplay investigation and agreed design
 
-Status: shared plan confirmed; starting local P0 implementation.
+Status: shared plan confirmed; P0 merged; PR 2 is the next planned scope.
 
 Source baseline: `7907b6de57e337d6257fc5d345c27e098db0b6d1`.
-Workspace branch: `tech/gameplay-performance-and-controls-design`.
+Original research branch: `tech/gameplay-performance-and-controls-design`.
 
 - [Current spec](spec.md): reconciled decisions from Q1–Q49.
 - [Interview record](grilling.md): questions and accepted recommendations.
@@ -11,6 +11,9 @@ Workspace branch: `tech/gameplay-performance-and-controls-design`.
 - [Execution table](execution-plan.md): PR order, tickets, model and effort.
 - [Performance evidence](performance.md): measured results and limits.
 - [Reproduction](reproduce.md): exploratory profiling patch and scripts.
+- [P0 validation](implementation-validation.md): release evidence and limits.
+- [Current profiling guide](../../docs/performance/frame-profiling.md):
+  reproducible release fixtures and the sequential runner.
 - [Earlier PR proposals](pr-scopes.md): historical, superseded by the spec.
 
 ## Current scope
@@ -33,11 +36,21 @@ simulation, 30-second autosave/recovery, one flight/physics Player, a basic
 Game-provided blocky character and independent first/third-person views.
 The spec records exact cancellation, saving, input and camera behavior.
 
-The user confirmed the consolidated plan after the interview. Start P0
-(tickets 11–12) inline, one PR at a time, using separate branches/worktrees.
-No parallel coding agents or extra threads are planned. No branch or PR
-has been pushed or published. Earlier premature readiness was withdrawn;
-actual readiness triage now follows the confirmed spec.
+The user confirmed the consolidated plan after the interview. P0
+(tickets 11–12) merged as [PR 22](https://github.com/mkappworks-dev/tesserae/pull/22),
+commit b7997b025a4f31e959ed090e23469f7665820670. The next planned scope is
+PR 2, input ownership and semantic actions (tickets 01–02), in its own
+branch/worktree. No later implementation starts automatically.
+
+Tickets 13–16 are conditional experiment backlog, outside the numbered
+implementation sequence. P0 established instruments and a qualified
+baseline; it did not demonstrate a worthwhile gain from those candidates.
+None is implementation-ready or required before PR 2. Promote a candidate
+to an implementation PR only after its specific evidence gate passes;
+otherwise leave it deferred or close it without a code change.
+
+No parallel coding agents or extra threads are planned. Publication and
+merge authorization remain scoped to the work the user explicitly requests.
 
 ## Existing PR and architectural boundaries
 
@@ -56,6 +69,13 @@ ADR-0008/0011 through their own reviewed changes.
 
 Raw native captures, timings, traces, metadata and exploratory binaries are
 in /tmp/tesserae-gameplay-research-gRUJEoDZ, retained for review and outside
-git. Product-source profiling changes were restored and the normal dev
-executable rebuilt. No other session's measurement artifacts were modified.
+git. For that exploratory investigation, temporary profiling changes were
+restored and the normal dev executable rebuilt. No other session's
+measurement artifacts were modified.
 The Metal trace failed finalization/export and supplies no GPU timing.
+
+P0 native artifacts remain in /tmp/tesserae-p0-review-qbkdybeu. Its broad
+series is noisy functional coverage; the stable flight follow-up supplies
+the provisional baseline. Extraction/GPU/present elapsed remain unavailable.
+The profiling feature is now permanent opt-in instrumentation; no atlas,
+idle UI, per-view render or emitter relight optimization was implemented.

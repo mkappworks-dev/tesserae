@@ -112,10 +112,13 @@ fn outline(
     time: Res<Time>,
     menu: Res<Menu>,
     outlines: Query<(Entity, &Outline)>,
+    settings: Option<Res<super::settings::Settings>>,
 ) {
-    let wanted = (!menu.open && target.current(&sent, time.elapsed_secs_f64()))
-        .then_some(target.0.outline)
-        .flatten();
+    let wanted = (!menu.open
+        && !settings.is_some_and(|s| s.open)
+        && target.current(&sent, time.elapsed_secs_f64()))
+    .then_some(target.0.outline)
+    .flatten();
     if outlines.iter().next().map(|(_, o)| o.0) == wanted {
         return;
     }

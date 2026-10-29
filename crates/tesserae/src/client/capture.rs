@@ -259,13 +259,14 @@ pub(super) fn plugin(app: &mut App) {
         pending_seen: false,
         frames: FrameLog::default(),
     });
+    if std::env::var_os("TESSERAE_SCREENSHOT_SPRINT").is_some() {
+        app.insert_resource(super::camera::Sprint(true));
+    }
     if std::env::var_os("TESSERAE_SCREENSHOT_MENU").is_some() {
         app.insert_resource(super::menu::Menu::opened());
     }
     app.insert_resource(super::help::Panels {
-        help: std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some(),
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
-        ..default()
     });
     app.add_systems(
         Update,
@@ -273,6 +274,7 @@ pub(super) fn plugin(app: &mut App) {
             .after(super::removal::hold)
             .before(super::removal::bar),
     );
+    app.add_systems(PreUpdate, save_preview);
     app.add_systems(Startup, uncap_frame_rate).add_systems(
         Update,
         (
@@ -295,6 +297,33 @@ pub(super) fn plugin(app: &mut App) {
         )
             .chain(),
     );
+}
+
+fn save_preview(
+    capture: Res<Capture>,
+    mut status: ResMut<crate::server::persistence::SaveStatus>,
+    mut shown: Local<bool>,
+) {
+    if *shown || capture.frames.fill_ended_s.is_none() {
+        return;
+    }
+    let Ok(state) = std::env::var("TESSERAE_SCREENSHOT_SAVE_STATE") else {
+        return;
+    };
+    match state.as_str() {
+        "saving" => {
+            status.quitting = true;
+            status.saving = true;
+        }
+        "error" | "confirm" => {
+            status.quitting = true;
+            status.saving = false;
+            status.error = Some("Disk full (visual fixture)".into());
+            status.confirm_unsafe = state == "confirm";
+        }
+        _ => return,
+    }
+    *shown = true;
 }
 
 /// Presents without waiting for the display, unless `TESSERAE_SCREENSHOT_VSYNC`

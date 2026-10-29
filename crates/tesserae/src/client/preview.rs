@@ -212,15 +212,16 @@ fn model(
 }
 fn position(
     removal: Option<Res<super::removal::Progress>>,
-    menu: Res<Menu>,
+    (menu, settings): (Res<Menu>, Option<Res<super::settings::Settings>>),
     world: Res<WorldSettings>,
     hotbar: Res<Hotbar>,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
     mut ghost: Query<(&mut Transform, &mut Visibility), GhostOnly>,
     mut hand: Query<&mut Visibility, HandOnly>,
 ) {
+    let menu_open = menu.open || settings.is_some_and(|s| s.open);
     let cell = (!removal.is_some_and(|r| r.active())
-        && !menu.open
+        && !menu_open
         && target.current(&sent, time.elapsed_secs_f64())
         && hotbar.held() != Holding::Fire)
         .then_some(target.0.ghost)
@@ -237,7 +238,7 @@ fn position(
         }
     }
     for mut visibility in &mut hand {
-        *visibility = if menu.open {
+        *visibility = if menu_open {
             Visibility::Hidden
         } else {
             Visibility::Visible
@@ -341,6 +342,20 @@ mod tests {
         });
         app.update();
         assert_ne!(first, app.world().resource::<Model>().mesh);
+        app.init_resource::<super::super::settings::Settings>();
+        app.world_mut()
+            .resource_mut::<super::super::settings::Settings>()
+            .open = true;
+        app.update();
+        assert!(
+            app.world_mut()
+                .query_filtered::<&Visibility, Models>()
+                .iter(app.world())
+                .all(|v| *v == Visibility::Hidden)
+        );
+        app.world_mut()
+            .resource_mut::<super::super::settings::Settings>()
+            .open = false;
         app.world_mut().resource_mut::<Menu>().open = true;
         app.update();
         assert!(

@@ -1,10 +1,10 @@
 # 01: C0: Explicit input ownership
 
-Status: needs-triage
+Status: done
 Blocked by: none
 
 Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: C0; keep this separate from other PR scopes.
+PR boundary: combined PR 2 (tickets 01–04 and 28).
 
 ## What to build
 
@@ -18,18 +18,18 @@ simulate other devices or introduce Client World access.
 
 ## Acceptance criteria
 
-- [ ] UI focus prevents gameplay movement, respawn, Edits, history and samples.
-- [ ] Capture/close/regain-focus inputs never leak a destructive activation.
-- [ ] Held input cannot resume cancelled work; pending samples are discarded.
-- [ ] Exercise actual input consumers and same-frame ordering in regressions.
+- [x] UI focus prevents gameplay movement, respawn, Edits, history and samples.
+- [x] Capture/close/regain-focus inputs never leak a destructive activation.
+- [x] Held input cannot resume cancelled work; pending samples are discarded.
+- [x] Exercise actual input consumers and same-frame ordering in regressions.
 
 ## Validation and authorization
 
 Use behavior/intent regressions and the spec's build/review requirements.
 Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
 Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+All Q1–Q49 product choices and shared understanding are confirmed. Local
+implementation is authorized; push, publication and merge are not.
 
 ## Comments
 
@@ -47,3 +47,15 @@ Do not implement until the relevant decisions and readiness are established.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+### 2026-10-28: Agent Brief
+
+Implement as part of the confirmed combined PR 2, preserving the acceptance
+criteria above. Earlier readiness and separate-PR statements are superseded.
+
+### 2026-10-28: implementation complete
+
+Implemented and validated in the sequential local PR 2 batches. Evidence,
+artifact repair and retained native captures are recorded in
+[PR 2 validation](../pr2-implementation-validation.md). Visual fixtures are
+separate from timing/intent regressions. No push, publication or merge.

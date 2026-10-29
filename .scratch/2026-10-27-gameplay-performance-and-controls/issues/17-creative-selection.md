@@ -52,3 +52,14 @@ remain later work. Organization/persistence choices are in the next round.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+
+### 2026-10-29: targeted restart-persistence authorization
+
+The user reported that hotbar changes disappear after restarting and explicitly
+requested the fix while preparing PR 2. That authorizes only the restart
+persistence subset here: nine assigned slots, active slot, stable names and
+Orientation per Game, missing-content and failure handling. Temporary outside
+selection remains unsaved. This does not mark the rest of ticket 17 complete or
+authorize unrelated organization/inventory features. PR 2 includes this targeted
+fix alongside the previously authorized controls/UI work.

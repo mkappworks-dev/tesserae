@@ -1,0 +1,89 @@
+# Approved native menu reference
+
+Status: done
+
+The user approved leaf green, the five-tile Mosaic T logo, top-level Catalogue,
+Behavior, Key bindings and Display tabs, and search on applicable pages. The
+latest instruction requires layout, typography, colors and icons to match the
+approved prototype. The HTML beside this record is the frozen reference; its
+accent study and logo comparison panels are review tools outside the product.
+
+The user subsequently selected public-domain Aileron for every UI label. The
+reference embeds the same unchanged Regular, SemiBold and Bold files as the
+native menu. The default native Font asset is Aileron Regular for HUD text and
+save dialogs. This supersedes Liberation Sans/Mono in earlier review captures.
+There is no separate monospace family; keys and values use Aileron too.
+
+Background is `#0a0a0a`, foreground `#f5f5f5`, cards `#111111`, borders `#191919`
+and muted text `#818181`. Leaf is the sRGB mix `#10b981` at 76% with `#fe9a00`
+at 24%, approximately `#49b262`. Buttons use full selected borders; tabs use
+straight 2px underlines. A shared vector icon atlas prevents missing glyphs.
+
+Clicking a catalogue item holds it immediately while keeping the menu open.
+Clicking the selected item again or Clear selection empties the hand; there is
+no Hold button. Shape selection updates the held variation. Close the menu to
+place it. The quick-slot header displays the current Material and Shape, such
+as Selected: Stone · Cube, or Nothing selected. Assign to slot still updates a
+shortcut without changing its contents merely by selecting an item.
+Tiles have fixed 128 × 113 logical-pixel dimensions and wrap to fit the width.
+
+Behavior, Key bindings and Display scroll areas fill the available space down
+to the footer divider. Restore defaults is a regular bordered footer button;
+its confirmation and draft semantics are unchanged.
+
+Game-provided Materials, Shapes, textures and registry identity remain real
+content. The reference's nine colored placeholder Materials do not replace the
+Game's declarations. The saved-World Save & Quit action remains available in
+the Catalogue footer, styled with the same UI primitives.
+
+Native validation must compare the same content viewport sizes, retain offscreen
+captures in a unique /tmp directory, cover focus and draft transitions and run
+the Client regressions plus workspace CI checks. No WIT or Game source changes,
+guest rebuilds, push, publication or merge belong to this UI pass.
+
+
+## Implementation evidence
+
+Implemented through `b1e7d02`. All 143 Client regressions passed; the full CI
+recheck passed 967 tests with zero failures and five existing measurements
+ignored. See `../pr2-implementation-validation.md` for the earlier intermittent
+persistence failure and complete check details.
+
+Twelve retained native offscreen captures, the executable, source stamp,
+font hashes and environment manifests are under
+`/tmp/tesserae-leaf-review-7udu289a/final/`. The review entry point is
+`/tmp/tesserae-leaf-review-7udu289a/native-review.html`. Fixed tile dimensions,
+five/six-column wrapping, all four pages, search and modal states were reviewed.
+The dark palette, leaf accent, Mosaic T, layout dimensions, Aileron family and
+icon shapes follow the updated reference. Native text rasterization and real
+Game previews differ from browser placeholder rendering.
+
+
+The direct-selection/clear and footer refinement is implemented in `eb27484`.
+Its twelve native captures and review entry point are retained separately at
+`/tmp/tesserae-selection-review-uq4y8tkg/`; those supersede the earlier explicit
+Hold captures. All 143 Client tests passed, including real edit consumers and
+selection summaries.
+
+
+The Catalogue also supports the existing remappable Empty hand action (X by
+default), with its binding shown in the footer. Both button and shortcut remain
+available; text entry owns X while search is focused. Settings close actions,
+including Cancel and Tab, prompt Save changes / Discard / Stay for dirty drafts.
+Save failure retains the prompt and draft. Reset/capture/search cancellation
+still consumes its own Escape first.
+
+
+Final shortcut/exit validation: all 146 Client tests pass. The complete suite
+still has the unchanged intermittent Agenda persistence failure; the other
+969 workspace tests pass when that one test is explicitly excluded. Full
+validation details and retained failed logs are in the implementation record.
+The UI implementation is complete; persistence is not claimed fixed.
+
+
+Save failure and discard confirmation now reuse the same dark palette, Aileron,
+390px card, rounded border and shared button primitives as settings dialogs.
+Leaf marks primary actions; amber is reserved for actual warnings. Safe initial
+focus and modal Tab grouping are verified. Ordinary close has only a compact
+save-progress card. Native visual fixtures are retained at
+`/tmp/tesserae-window-close-pcyf3apg/themed/` (source `14875bb`).

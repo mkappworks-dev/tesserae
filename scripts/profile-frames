@@ -160,7 +160,7 @@ def main():
                     run.mkdir()
                     env = {k: v for k, v in os.environ.items()
                            if not k.startswith('TESSERAE_')}
-                    env.update(RUST_LOG='info', BEVY_ASSET_ROOT=str(ROOT), TESSERAE_MODS_DIR=str(args.game.resolve()),
+                    env.update(RUST_LOG='info,wgpu_core::device::resource=debug', BEVY_ASSET_ROOT=str(ROOT), TESSERAE_MODS_DIR=str(args.game.resolve()),
                                TESSERAE_TRUST_MODS='1', TESSERAE_PROFILE_FIXTURE=case,
                                TESSERAE_SCREENSHOT=str(run.resolve() / 'capture.png'),
                                TESSERAE_SCREENSHOT_WIDTH='1920', TESSERAE_SCREENSHOT_HEIGHT='1080',

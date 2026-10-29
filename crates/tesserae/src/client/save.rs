@@ -1,7 +1,7 @@
 //! Save controls send intents; only the Server sees persistence or World data.
 use crate::server::persistence::{SaveAction, SaveStatus};
 use bevy::prelude::*;
-use bevy::ui_widgets::{Activate, Button};
+use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowCloseRequested};
 
 #[derive(Component)]
@@ -10,29 +10,14 @@ struct Panel;
 struct Action(SaveAction);
 
 pub(super) fn quit_button(parent: &mut ChildSpawnerCommands) {
-    parent
-        .spawn((
-            Button,
-            Action(SaveAction::SaveQuit),
-            Node {
-                min_width: Val::Px(160.0),
-                min_height: Val::Px(44.0),
-                align_self: AlignSelf::FlexStart,
-                padding: UiRect::all(Val::Px(10.0)),
-                justify_content: JustifyContent::Center,
-                align_items: AlignItems::Center,
-                ..default()
-            },
-            BackgroundColor(Color::srgb(0.15, 0.22, 0.3)),
-        ))
-        .with_child((
-            Text::new("Save & Quit"),
-            TextFont {
-                font_size: bevy::text::FontSize::Px(16.0),
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
+    super::menu_ui::compact_button(
+        parent,
+        "Save & Quit",
+        Action(SaveAction::SaveQuit),
+        false,
+        24.0,
+        10.0,
+    );
 }
 
 #[derive(Clone, PartialEq)]
@@ -68,14 +53,16 @@ fn close_request(
     mut requests: MessageReader<WindowCloseRequested>,
     mut actions: MessageWriter<SaveAction>,
     status: Res<SaveStatus>,
-    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    mut cursors: Query<(Entity, &mut CursorOptions), With<PrimaryWindow>>,
 ) {
-    if requests.read().next().is_some() {
-        requests.clear();
+    let requested = requests
+        .read()
+        .any(|request| cursors.contains(request.window));
+    if requested && !status.modal() {
         actions.write(SaveAction::SaveQuit);
     }
-    if status.modal() {
-        for mut cursor in &mut cursor {
+    if requested || status.modal() {
+        for (_, mut cursor) in &mut cursors {
             cursor.grab_mode = CursorGrabMode::None;
             cursor.visible = true;
         }
@@ -105,7 +92,9 @@ fn show(
     if wanted == View::Hidden {
         return;
     }
-    let modal = status.modal();
+    use super::menu_ui as ui;
+    let modal = status.confirm_unsafe || status.quitting && status.error.is_some();
+    let mut initial_focus = None;
     commands
         .spawn((
             Panel,
@@ -115,10 +104,15 @@ fn show(
                 Pickable::default()
             },
             GlobalZIndex(100),
+            BackgroundColor(if modal {
+                ui::BG.with_alpha(0.85)
+            } else {
+                Color::NONE
+            }),
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(if modal { 0.0 } else { 12.0 }),
-                right: Val::Px(if modal { 0.0 } else { 12.0 }),
+                top: Val::Px(if modal { 0.0 } else { 20.0 }),
+                right: Val::Px(if modal { 0.0 } else { 20.0 }),
                 width: if modal {
                     Val::Percent(100.0)
                 } else {
@@ -129,80 +123,192 @@ fn show(
                 } else {
                     Val::Auto
                 },
-                flex_direction: FlexDirection::Column,
-                justify_content: JustifyContent::Center,
                 align_items: AlignItems::Center,
-                row_gap: Val::Px(10.0),
-                padding: UiRect::all(Val::Px(12.0)),
+                justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(
-                0.03,
-                0.05,
-                0.08,
-                if modal { 0.96 } else { 0.85 },
-            )),
         ))
-        .with_children(|panel| {
-            let detail = if status.confirm_unsafe {
-                "Exit without saving? Unsaved changes will be lost.".to_owned()
-            } else if let Some(error) = &status.error {
-                format!("World remains open. Save failed:\n{error}")
-            } else if status.saving {
-                "Saving World...".into()
-            } else {
-                "Finishing World save...".into()
-            };
-            panel.spawn((
-                Text::new(detail),
-                TextFont {
-                    font_size: bevy::text::FontSize::Px(16.0),
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ));
-            let mut button = |label: &str, action| {
-                panel
-                    .spawn((
-                        Button,
-                        Action(action),
-                        Node {
-                            min_width: Val::Px(180.0),
-                            min_height: Val::Px(44.0),
-                            padding: UiRect::all(Val::Px(10.0)),
-                            justify_content: JustifyContent::Center,
-                            align_items: AlignItems::Center,
-                            ..default()
+        .with_children(|shade| {
+            let dialog = shade
+                .spawn((
+                    BackgroundColor(ui::CARD),
+                    BorderColor::all(ui::EDGE),
+                    Node {
+                        width: if modal {
+                            Val::Px(390.0)
+                        } else {
+                            Val::Percent(100.0)
                         },
-                        BackgroundColor(Color::srgb(0.15, 0.22, 0.3)),
-                    ))
-                    .with_child((
-                        Text::new(label),
-                        TextFont {
-                            font_size: bevy::text::FontSize::Px(16.0),
-                            ..default()
-                        },
-                        Pickable::IGNORE,
-                    ));
-            };
-            if status.confirm_unsafe {
-                button(
-                    "Exit and discard unsaved changes",
-                    SaveAction::ConfirmUnsafe,
+                        max_width: Val::Percent(if modal { 92.0 } else { 100.0 }),
+                        padding: UiRect::all(Val::Px(if modal { 26.0 } else { 14.0 })),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(if modal { 10.0 } else { 8.0 })),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(10.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|dialog| {
+                    if status.confirm_unsafe {
+                        ui::weighted_text(dialog, "Exit without saving?", 19.0, 620, ui::INK);
+                        ui::paragraph(
+                            dialog,
+                            "Unsaved World changes will be lost. This cannot be undone.",
+                            12.0,
+                            Color::srgb(254.0 / 255.0, 154.0 / 255.0, 0.0),
+                        );
+                        dialog
+                            .spawn(Node {
+                                justify_content: JustifyContent::FlexEnd,
+                                column_gap: Val::Px(7.0),
+                                row_gap: Val::Px(7.0),
+                                flex_wrap: FlexWrap::Wrap,
+                                margin: UiRect::top(Val::Px(10.0)),
+                                ..default()
+                            })
+                            .with_children(|actions| {
+                                ui::button(
+                                    actions,
+                                    "Exit without saving",
+                                    Action(SaveAction::ConfirmUnsafe),
+                                    false,
+                                    false,
+                                    false,
+                                );
+                                initial_focus = Some(ui::button(
+                                    actions,
+                                    "Cancel",
+                                    Action(SaveAction::CancelUnsafe),
+                                    false,
+                                    false,
+                                    true,
+                                ));
+                            });
+                    } else if let Some(error) = &status.error {
+                        ui::weighted_text(
+                            dialog,
+                            "Could not save World",
+                            if modal { 19.0 } else { 14.0 },
+                            620,
+                            ui::INK,
+                        );
+                        ui::paragraph(
+                            dialog,
+                            "Your World is still open. Your latest changes have not been saved.",
+                            12.0,
+                            ui::MUTED,
+                        );
+                        dialog
+                            .spawn((
+                                BackgroundColor(Color::srgba(
+                                    254.0 / 255.0,
+                                    154.0 / 255.0,
+                                    0.0,
+                                    0.06,
+                                )),
+                                BorderColor::all(Color::srgba(
+                                    254.0 / 255.0,
+                                    154.0 / 255.0,
+                                    0.0,
+                                    0.3,
+                                )),
+                                Node {
+                                    padding: UiRect::all(Val::Px(12.0)),
+                                    border: UiRect::all(Val::Px(1.0)),
+                                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|well| {
+                                ui::paragraph(
+                                    well,
+                                    error,
+                                    12.0,
+                                    Color::srgb(254.0 / 255.0, 154.0 / 255.0, 0.0),
+                                )
+                            });
+                        dialog
+                            .spawn(Node {
+                                justify_content: JustifyContent::FlexEnd,
+                                column_gap: Val::Px(7.0),
+                                row_gap: Val::Px(7.0),
+                                flex_wrap: FlexWrap::Wrap,
+                                margin: UiRect::top(Val::Px(10.0)),
+                                ..default()
+                            })
+                            .with_children(|actions| {
+                                if status.quitting {
+                                    initial_focus = Some(ui::button(
+                                        actions,
+                                        "Return to World",
+                                        Action(SaveAction::Return),
+                                        false,
+                                        false,
+                                        false,
+                                    ));
+                                }
+                                let retry = ui::button(
+                                    actions,
+                                    if status.quitting {
+                                        "Retry Save & Quit"
+                                    } else {
+                                        "Retry save"
+                                    },
+                                    Action(SaveAction::Retry),
+                                    false,
+                                    false,
+                                    true,
+                                );
+                                if initial_focus.is_none() {
+                                    initial_focus = Some(retry);
+                                }
+                            });
+                        if status.quitting {
+                            dialog
+                                .spawn(Node {
+                                    justify_content: JustifyContent::FlexEnd,
+                                    ..default()
+                                })
+                                .with_children(|actions| {
+                                    ui::quiet_button(
+                                        actions,
+                                        "Exit without saving…",
+                                        Action(SaveAction::AskUnsafe),
+                                        11.0,
+                                    );
+                                });
+                        }
+                    } else {
+                        ui::weighted_text(
+                            dialog,
+                            if status.saving {
+                                "Saving World…"
+                            } else {
+                                "Finishing World save…"
+                            },
+                            12.0,
+                            500,
+                            ui::INK,
+                        );
+                    }
+                })
+                .id();
+            if modal {
+                shade.commands().entity(dialog).insert(
+                    bevy::input_focus::tab_navigation::TabGroup {
+                        modal: true,
+                        ..default()
+                    },
                 );
-                button("Cancel", SaveAction::CancelUnsafe);
-            } else if status.quitting {
-                if !status.saving {
-                    button("Retry Save & Quit", SaveAction::Retry);
-                }
-                button("Return to World", SaveAction::Return);
-                button("Exit without saving...", SaveAction::AskUnsafe);
-            } else {
-                if status.error.is_some() {
-                    button("Retry save", SaveAction::Retry);
-                }
             }
         });
+    if modal && let Some(entity) = initial_focus {
+        commands.queue(move |world: &mut World| {
+            if let Some(mut focus) = world.get_resource_mut::<bevy::input_focus::InputFocus>() {
+                focus.set(entity, bevy::input_focus::FocusCause::Auto);
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -288,7 +394,6 @@ mod tests {
                 },
             ))
             .id();
-        app.world_mut().resource_mut::<SaveStatus>().quitting = true;
         app.world_mut()
             .write_message(WindowCloseRequested { window });
         app.world_mut().run_system_once(close_request).unwrap();
@@ -305,5 +410,127 @@ mod tests {
             app.world().get::<CursorOptions>(window).unwrap().grab_mode,
             CursorGrabMode::None
         );
+    }
+
+    #[test]
+    fn successful_quit_has_only_noninteractive_progress_until_server_exit() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::window_plugin()))
+            .init_resource::<SaveStatus>()
+            .add_message::<SaveAction>()
+            .add_systems(PreUpdate, close_request)
+            .add_systems(Update, show);
+        let window = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut()
+            .write_message(WindowCloseRequested { window });
+        app.update();
+        assert!(matches!(
+            app.world_mut()
+                .resource_mut::<Messages<SaveAction>>()
+                .drain()
+                .next(),
+            Some(SaveAction::SaveQuit)
+        ));
+        app.world_mut().resource_mut::<SaveStatus>().quitting = true;
+        for saving in [false, true] {
+            app.world_mut().resource_mut::<SaveStatus>().saving = saving;
+            app.update();
+            assert!(app.world().get::<Window>(window).is_some());
+            assert!(
+                app.world()
+                    .get::<bevy::window::ClosingWindow>(window)
+                    .is_none()
+            );
+            assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+            assert_eq!(
+                app.world_mut().query::<&Action>().iter(app.world()).count(),
+                0
+            );
+            let node = app
+                .world_mut()
+                .query_filtered::<&Node, With<Panel>>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(node.width, Val::Px(300.0));
+        }
+    }
+
+    #[test]
+    fn failed_quit_and_discard_confirmation_keep_the_real_window_plugin_alive() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, crate::window_plugin()))
+            .insert_resource(SaveStatus {
+                quitting: true,
+                error: Some("disk full".into()),
+                ..default()
+            })
+            .add_message::<SaveAction>()
+            .init_resource::<bevy::input_focus::InputFocus>()
+            .add_observer(activate)
+            .add_systems(PreUpdate, close_request)
+            .add_systems(Update, show);
+        let window = app
+            .world_mut()
+            .query_filtered::<Entity, With<PrimaryWindow>>()
+            .single(app.world())
+            .unwrap();
+        app.update();
+        for confirm in [false, true] {
+            app.world_mut().resource_mut::<SaveStatus>().confirm_unsafe = confirm;
+            app.world_mut()
+                .write_message(WindowCloseRequested { window });
+            app.update();
+            app.update();
+            assert!(app.world().get::<Window>(window).is_some());
+            assert!(
+                app.world()
+                    .get::<bevy::window::ClosingWindow>(window)
+                    .is_none()
+            );
+            assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+            assert!(app.world().resource::<Messages<SaveAction>>().is_empty());
+            assert_eq!(
+                app.world_mut().query::<&Action>().iter(app.world()).count(),
+                if confirm { 2 } else { 3 }
+            );
+            let focus = app
+                .world()
+                .resource::<bevy::input_focus::InputFocus>()
+                .get()
+                .unwrap();
+            let action = app.world().get::<Action>(focus).unwrap();
+            assert!(if confirm {
+                matches!(action.0, SaveAction::CancelUnsafe)
+            } else {
+                matches!(action.0, SaveAction::Return)
+            });
+            assert!(
+                app.world_mut()
+                    .query::<&bevy::input_focus::tab_navigation::TabGroup>()
+                    .iter(app.world())
+                    .any(|group| group.modal)
+            );
+        }
+        let cancel = app
+            .world_mut()
+            .query::<(Entity, &Action)>()
+            .iter(app.world())
+            .find_map(|(entity, action)| {
+                matches!(action.0, SaveAction::CancelUnsafe).then_some(entity)
+            })
+            .unwrap();
+        app.world_mut().trigger(Activate { entity: cancel });
+        assert!(matches!(
+            app.world_mut()
+                .resource_mut::<Messages<SaveAction>>()
+                .drain()
+                .next(),
+            Some(SaveAction::CancelUnsafe)
+        ));
+        assert!(app.world().resource::<Messages<AppExit>>().is_empty());
     }
 }

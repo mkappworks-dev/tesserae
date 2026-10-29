@@ -1,12 +1,26 @@
 # 13: P1: Readiness-aware static atlas rendering
 
-Status: needs-triage
-Blocked by: 12
+Status: needs-info
+Blocked by: none
 
 Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: P1; keep this separate from other PR scopes.
+Candidate boundary: P1. A separate implementation PR requires the
+evidence gate to pass.
 
-## What to build
+## Evidence required before implementation
+
+P0 confirms that the atlas remains active, but does not isolate its
+frame cost or prove a worthwhile on-demand gain. Measure atlas work with
+a stable matched experiment and validate readiness/invalidation behavior.
+Reject a candidate whose gain is within measurement overhead or run
+variation, or whose output, tails or asset lifecycle regress.
+
+P0 (tickets 11–12) is complete. The missing dependency is evidence, not
+another product interview. This candidate is outside the committed PR
+sequence and does not block PR 2. Promote it to ready-for-agent only after
+the gate passes; otherwise defer or close it without implementation.
+
+## Candidate change after the evidence gate
 
 Validate the atlas cost using P0, then render only until dirty images,
 meshes/materials/pipelines are ready. Cache the completed image; invalidate
@@ -26,8 +40,10 @@ Retain the change only when measured benefit justifies its complexity.
 Use behavior/intent regressions and the spec's build/review requirements.
 Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
 Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+The shared product understanding is confirmed. This candidate remains
+unready because its measurement/equivalence gate is unresolved, not because
+approval or grilling is missing. This cleanup authorizes no optimization
+implementation, publication or merge.
 
 ## Comments
 
@@ -45,3 +61,9 @@ Do not implement until the relevant decisions and readiness are established.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+### 2026-10-28: post-P0 backlog cleanup
+
+P0 merged as PR 22. The current evidence gate and validation sections
+supersede historical readiness comments above. No measured gain from this
+candidate was established, so it remains conditional experiment backlog.

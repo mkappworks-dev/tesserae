@@ -54,20 +54,37 @@ fn main() -> std::process::ExitCode {
         .insert_non_send(loaded)
         .add_plugins(
             DefaultPlugins
-                .set(WindowPlugin {
-                    close_when_requested: false,
-                    primary_window: Some(Window {
-                        title: "Tesserae".into(),
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(task_pools()),
+                .set(window_plugin())
+                .set(task_pools())
+                .set(log_settings()),
         )
         .add_plugins((render::plugin, server::plugin, client::plugin))
         .add_plugins(dev_plugins)
         .run();
     std::process::ExitCode::SUCCESS
+}
+
+fn window_plugin() -> WindowPlugin {
+    WindowPlugin {
+        close_when_requested: false,
+        primary_window: Some(Window {
+            title: "Tesserae".into(),
+            ..default()
+        }),
+        ..default()
+    }
+}
+
+fn log_settings() -> bevy::log::LogPlugin {
+    #[cfg(feature = "profiling")]
+    if std::env::var_os("TESSERAE_PROFILE_CSV").is_some() {
+        return bevy::log::LogPlugin {
+            filter: "info,wgpu_core::device::resource=debug".into(),
+            custom_layer: profiling::surface_log_layer,
+            ..default()
+        };
+    }
+    bevy::log::LogPlugin::default()
 }
 
 /// Bevy's default pool sizes, except that a `dev` run can pin the async compute

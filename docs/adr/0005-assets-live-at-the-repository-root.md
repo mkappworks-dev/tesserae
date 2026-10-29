@@ -39,3 +39,12 @@ The engine's own shaders are not assets either — they are embedded in the bina
 with `embedded_asset!`, as `bevy_pbr`'s are, so they are watched by
 `embedded_watcher` rather than `file_watcher`. A shader that stops hot-reloading
 after being moved between the two is the expected form of this mistake.
+
+## Bundled UI fonts (2026-10-29)
+
+Aileron Regular, SemiBold and Bold are bundled unchanged under `assets/fonts/`
+and embedded for deterministic UI startup. The designer dedicates these fonts to
+the public domain under CC0, consistent with this directory's existing rule. The
+menu reference uses the same faces. The default Font asset is also replaced with
+Aileron Regular so HUD and save dialogs use the same family. See
+[asset provenance](../../assets/README.md#bundled-ui-fonts).
