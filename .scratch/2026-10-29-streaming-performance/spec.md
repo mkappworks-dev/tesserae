@@ -1,7 +1,7 @@
 # Streaming, LOD and rendering performance
 
-Status: grilled; awaiting your confirmation of shared understanding. Nothing
-is implemented, pushed or opened as a PR until you authorize it.
+Status: shared understanding confirmed 2026-10-30; ticket 01 authorized for
+local implementation. Push, PR and later tickets each need your approval.
 
 Source baseline: `main` at `446e984`. Decisions and their history:
 [grilling.md](grilling.md). Primary-source findings: [research.md](research.md).
