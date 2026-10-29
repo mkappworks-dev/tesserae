@@ -52,7 +52,7 @@ pub(super) fn closed(menu: Res<Menu>) -> bool {
 /// What choosing an entry does.
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub(super) enum Entry {
-    /// Quick-pick this solid as a cube.
+    /// Inspect this solid, initially as a cube.
     Material(MaterialId),
     Solid {
         material: MaterialId,
@@ -106,6 +106,8 @@ struct MenuSelection;
 #[derive(Component)]
 struct MenuSlots;
 #[derive(Component)]
+pub(super) struct CatalogueItem;
+#[derive(Component)]
 pub(super) struct TileState {
     selected: bool,
 }
@@ -132,6 +134,7 @@ pub(super) struct PointerState {
     drag: Option<Entry>,
     dragged: Option<Holding>,
     pinned: bool,
+    item: Option<Holding>,
     shape: Option<ShapeId>,
     assigning: Option<Holding>,
     cursor: Vec2,
@@ -143,7 +146,6 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<super::menu_ui::Searches>()
         .init_resource::<Swatches>()
         .init_resource::<PointerState>()
-        .init_resource::<crate::client::menu_ui::Searches>()
         .init_resource::<UiScale>()
         .add_observer(choose)
         .add_observer(inspect)
@@ -203,6 +205,7 @@ pub(super) fn toggle(
     pointer.drag = None;
     pointer.dragged = None;
     pointer.pinned = false;
+    pointer.item = None;
     pointer.shape = None;
     pointer.assigning = None;
     let open = tab && !menu.open;
@@ -242,7 +245,6 @@ fn choose(
     mut menu: ResMut<Menu>,
     mut hotbar: ResMut<Hotbar>,
     mut pointer: ResMut<PointerState>,
-    mut cursors: Query<&mut CursorOptions, With<PrimaryWindow>>,
 ) {
     if pointer.suppress_click {
         return;
@@ -262,11 +264,11 @@ fn choose(
             }
         }
         _ => {
-            hotbar.outside = entry.holding();
-            menu.open = false;
-            for mut cursor in &mut cursors {
-                cursor.grab_mode = CursorGrabMode::Locked;
-                cursor.visible = false;
+            pointer.item = entry.holding();
+            pointer.pinned = true;
+            pointer.assigning = None;
+            if let Entry::Material(material) | Entry::Solid { material, .. } = entry {
+                menu.material = Some(material);
             }
         }
     }
@@ -289,6 +291,18 @@ fn detail_action(
     match *action {
         DetailAction::Shape(shape) => {
             pointer.shape = Some(shape);
+            if let Some(Holding::Solid {
+                material,
+                orientation,
+                ..
+            }) = pointer.item
+            {
+                pointer.item = Some(Holding::Solid {
+                    material,
+                    shape,
+                    orientation,
+                });
+            }
             pointer.pinned = true;
         }
         DetailAction::Assign(holding) => {
@@ -311,6 +325,26 @@ fn selected_shape(pointer: &PointerState, hotbar: &Hotbar) -> ShapeId {
         _ => tesserae_core::SHAPE_FULL_CUBE,
     })
 }
+fn selected_holding(
+    menu: &Menu,
+    pointer: &PointerState,
+    hotbar: &Hotbar,
+    catalogue: &ContentCatalogue,
+) -> Option<Holding> {
+    pointer.item.or_else(|| {
+        if menu.material.is_none() && pointer.shape.is_none() && hotbar.held() != Holding::Empty {
+            return Some(hotbar.held());
+        }
+        menu.material(hotbar, catalogue)
+            .map(|material| Holding::solid(material, selected_shape(pointer, hotbar)))
+    })
+}
+fn matches_content(holding: Holding, entry: Entry) -> bool {
+    match (holding, entry) {
+        (Holding::Solid { material, .. }, Entry::Material(id)) => material == id,
+        _ => entry.holding() == Some(holding),
+    }
+}
 fn inspect(
     event: On<Activate>,
     entries: Query<&Inspect>,
@@ -323,6 +357,7 @@ fn inspect(
     if let Ok(inspect) = entries.get(event.entity) {
         menu.material = Some(inspect.0);
         pointer.pinned = true;
+        pointer.item = Some(Holding::solid(inspect.0, tesserae_core::SHAPE_FULL_CUBE));
         pointer.shape = Some(tesserae_core::SHAPE_FULL_CUBE);
     }
 }
@@ -337,6 +372,11 @@ fn hover(
     }
     if let Ok(&entry) = entries.get(event.entity) {
         state.hovered = Some(entry);
+        if !state.pinned
+            && let Some(holding) = entry.holding()
+        {
+            state.item = Some(holding);
+        }
         if let Entry::Material(material) | Entry::Solid { material, .. } = entry
             && !state.pinned
         {
@@ -458,6 +498,7 @@ fn rebuild(
         state.drag = None;
         state.dragged = None;
         state.pinned = false;
+        state.item = None;
         state.shape = None;
         state.assigning = None;
     }
@@ -468,8 +509,7 @@ fn rebuild(
         spawn_menu(
             &mut commands,
             (
-                menu.material(&hotbar, &catalogue.0),
-                selected_shape(&state, &hotbar),
+                selected_holding(&menu, &state, &hotbar, &catalogue.0),
                 state.assigning,
             ),
             &hotbar,
@@ -477,7 +517,7 @@ fn rebuild(
             scroll,
             &searches.catalogue,
             format!(
-                "Click to hold | Drag or {}-{} to assign | {}: close | {}: release cursor",
+                "Click to inspect | Drag or {}-{} to assign | {}: close | {}: release cursor",
                 bindings.label(super::actions::Action::Slot1, &labels),
                 bindings.label(super::actions::Action::Slot9, &labels),
                 bindings.label(super::actions::Action::Catalogue, &labels),
@@ -487,7 +527,7 @@ fn rebuild(
     }
 }
 
-type DetailSelection = (Option<MaterialId>, ShapeId, Option<Holding>);
+type DetailSelection = (Option<Holding>, Option<Holding>);
 fn rebuild_shapes(
     mut commands: Commands,
     menu: Res<Menu>,
@@ -500,10 +540,8 @@ fn rebuild_shapes(
     if pointer.drag.is_some() {
         return;
     }
-    let material = menu.material(&hotbar, &catalogue.0);
     let wanted = (
-        material,
-        selected_shape(&pointer, &hotbar),
+        selected_holding(&menu, &pointer, &hotbar, &catalogue.0),
         pointer.assigning,
     );
     if *shown == Some(wanted) && !catalogue.is_changed() {
@@ -515,7 +553,7 @@ fn rebuild_shapes(
             .entity(panel)
             .despawn_children()
             .with_children(|list| {
-                detail(list, material, wanted.1, wanted.2, &catalogue.0);
+                detail(list, wanted.0, wanted.1, &catalogue.0);
             });
     }
 }
@@ -612,7 +650,7 @@ fn font(size: f32) -> TextFont {
 
 fn spawn_menu(
     commands: &mut Commands,
-    selection: (Option<MaterialId>, ShapeId, Option<Holding>),
+    selection: DetailSelection,
     hotbar: &Hotbar,
     catalogue: &ContentCatalogue,
     scroll: Vec2,
@@ -675,9 +713,7 @@ fn spawn_menu(
                         ..default()
                     },
                 ))
-                .with_children(|panel| {
-                    detail(panel, selection.0, selection.1, selection.2, catalogue)
-                });
+                .with_children(|panel| detail(panel, selection.0, selection.1, catalogue));
             });
             root.spawn((
                 MenuSlots,
@@ -702,7 +738,7 @@ fn spawn_menu(
                         ui::eyebrow(row, "QUICK SLOTS");
                         ui::text(
                             row,
-                            if selection.2.is_some() {
+                            if selection.1.is_some() {
                                 "Choose a destination slot"
                             } else {
                                 "Your 9 shortcuts"
@@ -788,8 +824,7 @@ fn menu_choices(
     }
     root.spawn(Node {
         width: Val::Percent(100.0),
-        display: Display::Grid,
-        grid_template_columns: RepeatedGridTrack::flex(3, 1.0),
+        flex_wrap: FlexWrap::Wrap,
         column_gap: Val::Px(9.0),
         row_gap: Val::Px(9.0),
         align_content: AlignContent::Start,
@@ -802,7 +837,7 @@ fn menu_choices(
                 entry,
                 &ui::title(name),
                 entry.holding().unwrap(),
-                matches_item(hotbar.held(), entry),
+                matches_content(hotbar.held(), entry),
                 None,
             );
         }
@@ -818,13 +853,15 @@ fn menu_card(
 ) {
     use super::menu_ui as ui;
     let slot = number.is_some();
-    parent
+    let card = parent
         .spawn((
             Button,
             entry,
             TileState { selected },
             Node {
+                width: if slot { Val::Auto } else { Val::Px(128.0) },
                 height: Val::Px(if slot { 64.0 } else { 113.0 }),
+                flex_shrink: 0.0,
                 min_width: Val::Px(if slot { 44.0 } else { 0.0 }),
                 border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(if slot { 5.0 } else { 7.0 })),
@@ -895,20 +932,38 @@ fn menu_card(
                     Pickable::IGNORE,
                 ));
             }
-        });
+        })
+        .id();
+    if !slot {
+        parent.commands().entity(card).insert(CatalogueItem);
+    }
 }
 fn detail(
     parent: &mut ChildSpawnerCommands,
-    material: Option<MaterialId>,
-    shape: ShapeId,
+    held: Option<Holding>,
     assigning: Option<Holding>,
     catalogue: &ContentCatalogue,
 ) {
     use super::menu_ui as ui;
-    let Some(material) = material.and_then(|id| catalogue.material(id)) else {
+    let Some(held) = held.filter(|held| *held != Holding::Empty) else {
         return;
     };
-    let held = Holding::solid(material.id, shape);
+    let (kind, name) = match held {
+        Holding::Solid { material, .. } => (
+            "MATERIAL",
+            catalogue
+                .material(material)
+                .map_or("Unknown Material", |m| m.name.as_str()),
+        ),
+        Holding::Fluid(material) => (
+            "FLUID",
+            catalogue
+                .material(material)
+                .map_or("Unknown fluid", |m| m.name.as_str()),
+        ),
+        Holding::Fire => ("TOOL", "fire"),
+        Holding::Empty => unreachable!(),
+    };
     parent
         .spawn((
             BackgroundColor(Color::srgb(0.085, 0.085, 0.085)),
@@ -940,58 +995,60 @@ fn detail(
             ..default()
         })
         .with_children(|identity| {
-            ui::eyebrow(identity, "MATERIAL");
+            ui::eyebrow(identity, kind);
             identity
                 .spawn(Node {
                     margin: UiRect::top(Val::Px(6.0)),
                     ..default()
                 })
-                .with_children(|name| {
-                    ui::weighted_text(name, ui::title(&material.name), 19.0, 600, ui::INK)
+                .with_children(|title| {
+                    ui::weighted_text(title, ui::title(name), 19.0, 600, ui::INK)
                 });
             identity
                 .spawn(Node {
                     margin: UiRect::top(Val::Px(5.0)),
                     ..default()
                 })
-                .with_children(|name| ui::mono(name, &material.name, 10.0, ui::MUTED));
+                .with_children(|name_row| ui::mono(name_row, name, 10.0, ui::MUTED));
         });
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            min_height: Val::Px(0.0),
-            flex_shrink: 1.0,
-            row_gap: Val::Px(9.0),
-            ..default()
-        })
-        .with_children(|shapes| {
-            ui::eyebrow(shapes, "SHAPE");
-            shapes
-                .spawn((
-                    ScrollArea,
-                    Node {
-                        display: Display::Grid,
-                        grid_template_columns: RepeatedGridTrack::flex(2, 1.0),
-                        column_gap: Val::Px(5.0),
-                        row_gap: Val::Px(5.0),
-                        min_height: Val::Px(0.0),
-                        overflow: Overflow::scroll_y(),
-                        ..default()
-                    },
-                ))
-                .with_children(|choices| {
-                    for entry in &catalogue.shapes {
-                        ui::compact_button(
-                            choices,
-                            ui::title(&entry.name),
-                            DetailAction::Shape(entry.id),
-                            shape == entry.id,
-                            32.0,
-                            10.0,
-                        );
-                    }
-                });
-        });
+    if let Holding::Solid { shape, .. } = held {
+        parent
+            .spawn(Node {
+                flex_direction: FlexDirection::Column,
+                min_height: Val::Px(0.0),
+                flex_shrink: 1.0,
+                row_gap: Val::Px(9.0),
+                ..default()
+            })
+            .with_children(|shapes| {
+                ui::eyebrow(shapes, "SHAPE");
+                shapes
+                    .spawn((
+                        ScrollArea,
+                        Node {
+                            display: Display::Grid,
+                            grid_template_columns: RepeatedGridTrack::flex(2, 1.0),
+                            column_gap: Val::Px(5.0),
+                            row_gap: Val::Px(5.0),
+                            min_height: Val::Px(0.0),
+                            overflow: Overflow::scroll_y(),
+                            ..default()
+                        },
+                    ))
+                    .with_children(|choices| {
+                        for entry in &catalogue.shapes {
+                            ui::compact_button(
+                                choices,
+                                ui::title(&entry.name),
+                                DetailAction::Shape(entry.id),
+                                shape == entry.id,
+                                32.0,
+                                10.0,
+                            );
+                        }
+                    });
+            });
+    }
     parent
         .spawn(Node {
             margin: UiRect::top(Val::Auto),
@@ -1003,7 +1060,7 @@ fn detail(
         .with_children(|actions| {
             let button = ui::button(
                 actions,
-                format!("Hold {}", ui::title(&material.name)),
+                format!("Hold {}", ui::title(name)),
                 DetailAction::Hold(held),
                 false,
                 false,
@@ -1011,6 +1068,7 @@ fn detail(
             );
             actions.commands().entity(button).insert(Node {
                 min_height: Val::Px(36.0),
+                border: UiRect::all(Val::Px(1.0)),
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(7.0)),
                 border_radius: BorderRadius::all(Val::Px(5.0)),
                 align_items: AlignItems::Center,
@@ -1079,7 +1137,13 @@ pub(super) fn drag_preview(
 pub(super) fn highlight_tiles(
     menu: Res<Menu>,
     pointer: Res<PointerState>,
-    mut tiles: Query<(&Entry, &TileState, &mut BackgroundColor, &mut BorderColor)>,
+    mut tiles: Query<(
+        &Entry,
+        &TileState,
+        Has<CatalogueItem>,
+        &mut BackgroundColor,
+        &mut BorderColor,
+    )>,
     mut inspectors: Query<(&Inspect, &mut Visibility)>,
 ) {
     for (inspect, mut visibility) in &mut inspectors {
@@ -1089,16 +1153,23 @@ pub(super) fn highlight_tiles(
             Visibility::Hidden
         };
     }
-    for (entry, tile, mut background, mut border) in &mut tiles {
+    for (entry, tile, catalogue_item, mut background, mut border) in &mut tiles {
+        let selected = if catalogue_item {
+            pointer
+                .item
+                .map_or(tile.selected, |holding| matches_content(holding, *entry))
+        } else {
+            tile.selected
+        };
         let hovered = menu.open && pointer.hovered == Some(*entry);
-        let colour = if tile.selected {
+        let colour = if selected {
             Color::srgb(0.084273, 0.117038, 0.092091)
         } else if hovered {
             Color::srgb(0.09, 0.09, 0.09)
         } else {
             crate::client::menu_ui::CARD
         };
-        let edge = if tile.selected || hovered {
+        let edge = if selected || hovered {
             crate::client::menu_ui::LEAF
         } else {
             super::menu_ui::EDGE
@@ -1113,24 +1184,6 @@ pub(super) fn highlight_tiles(
     }
 }
 
-fn matches_item(held: Holding, entry: Entry) -> bool {
-    match (held, entry.holding()) {
-        (
-            Holding::Solid {
-                material: a,
-                shape: x,
-                ..
-            },
-            Some(Holding::Solid {
-                material: b,
-                shape: y,
-                ..
-            }),
-        ) => a == b && x == y,
-        (a, Some(b)) => a == b,
-        _ => false,
-    }
-}
 pub(super) fn tile(
     parent: &mut ChildSpawnerCommands,
     entry: Entry,
@@ -1366,18 +1419,44 @@ mod tests {
     }
 
     #[test]
-    fn picking_holds_outside_the_bar_and_closes_but_selecting_a_slot_keeps_the_menu_open() {
+    fn selecting_catalogue_content_preserves_the_hand_and_cursor_until_explicit_hold() {
+        for entry in [Entry::Material(23), Entry::Fluid(24), Entry::Fire] {
+            let mut app = app();
+            let before = app.world().resource::<Hotbar>().clone();
+            let item = app.world_mut().spawn(entry).id();
+            app.world_mut().trigger(Activate { entity: item });
+            assert!(app.world().resource::<Menu>().open);
+            let hand = app.world().resource::<Hotbar>();
+            assert_eq!(hand.outside, before.outside);
+            assert_eq!(hand.slots, before.slots);
+            assert_eq!(hand.selected, before.selected);
+            let pointer = app.world().resource::<PointerState>();
+            assert!(pointer.pinned);
+            assert_eq!(pointer.item, entry.holding());
+            let cursor = app
+                .world_mut()
+                .query::<&CursorOptions>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(cursor.grab_mode, CursorGrabMode::None);
+            assert!(cursor.visible);
+            let hold = app
+                .world_mut()
+                .spawn(DetailAction::Hold(entry.holding().unwrap()))
+                .id();
+            app.world_mut().trigger(Activate { entity: hold });
+            assert!(!app.world().resource::<Menu>().open);
+            assert_eq!(app.world().resource::<Hotbar>().outside, entry.holding());
+            assert_eq!(app.world().resource::<Hotbar>().slots, before.slots);
+            let cursor = app
+                .world_mut()
+                .query::<&CursorOptions>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(cursor.grab_mode, CursorGrabMode::Locked);
+            assert!(!cursor.visible);
+        }
         let mut app = app();
-        let item = app.world_mut().spawn(Entry::Material(23)).id();
-        let slots = app.world().resource::<Hotbar>().slots;
-        app.world_mut().trigger(Activate { entity: item });
-        assert_eq!(
-            app.world().resource::<Hotbar>().outside,
-            Some(Holding::solid(23, 0))
-        );
-        assert_eq!(app.world().resource::<Hotbar>().slots, slots);
-        assert!(!app.world().resource::<Menu>().open);
-        app.world_mut().resource_mut::<Menu>().open = true;
         let slot = app.world_mut().spawn(Entry::Slot(4)).id();
         app.world_mut().trigger(Activate { entity: slot });
         assert!(app.world().resource::<Menu>().open);

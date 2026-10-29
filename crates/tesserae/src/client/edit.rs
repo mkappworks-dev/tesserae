@@ -1174,22 +1174,17 @@ mod tests {
         q.iter(app.world()).map(|t| t.0.clone()).collect()
     }
 
-    /// What Bevy's button widget triggers when an entry is clicked.
+    /// Select a catalogue item, then explicitly hold it for placement tests.
     fn choose(app: &mut App, entry: Entry) {
-        let entity = if let Entry::Solid { material, shape } = entry {
-            let shape_button = app
-                .world_mut()
+        let entity = if let Entry::Solid { shape, .. } = entry {
+            app.world_mut()
                 .query::<(Entity, &menu::DetailAction)>()
                 .iter(app.world())
                 .find_map(|(entity, action)| {
-                    matches!(action,menu::DetailAction::Shape(id) if *id==shape).then_some(entity)
+                    matches!(action, menu::DetailAction::Shape(id) if *id == shape)
+                        .then_some(entity)
                 })
-                .expect("Shape offered");
-            app.world_mut().trigger(Activate {
-                entity: shape_button,
-            });
-            frame(app);
-            app.world_mut().query::<(Entity,&menu::DetailAction)>().iter(app.world()).find_map(|(entity,action)|matches!(action,menu::DetailAction::Hold(Holding::Solid {material:m,shape:s,..}) if *m==material&&*s==shape).then_some(entity)).expect("Hold button uses the selected Material and Shape")
+                .expect("Shape offered")
         } else {
             app.world_mut()
                 .query::<(Entity, &Entry)>()
@@ -1200,6 +1195,19 @@ mod tests {
         };
         app.world_mut().trigger(Activate { entity });
         frame(app);
+        if let Some(holding) = entry.holding() {
+            let hold = app
+                .world_mut()
+                .query::<(Entity, &menu::DetailAction)>()
+                .iter(app.world())
+                .find_map(|(entity, action)| {
+                    matches!(action, menu::DetailAction::Hold(value) if *value == holding)
+                        .then_some(entity)
+                })
+                .expect("Hold uses the selected catalogue item");
+            app.world_mut().trigger(Activate { entity: hold });
+            frame(app);
+        }
     }
 
     fn hover(app: &mut App, entry: Entry) {
@@ -1343,6 +1351,49 @@ mod tests {
         }
         let texts = texts(&mut app);
         assert!(!texts.iter().any(|t| t == "Fluids" || t == "Fire"));
+    }
+
+    #[test]
+    fn catalogue_clicks_only_inspect_in_the_real_edit_schedule() {
+        for entry in [
+            Entry::Material(wood()),
+            Entry::Fluid(demo_water()),
+            Entry::Fire,
+        ] {
+            let mut app = app(CursorGrabMode::Locked);
+            frame(&mut app);
+            key(&mut app, KeyCode::Tab);
+            let before = app.world().resource::<Hotbar>().clone();
+            let entity = app
+                .world_mut()
+                .query::<(Entity, &Entry)>()
+                .iter(app.world())
+                .find(|(_, value)| **value == entry)
+                .unwrap()
+                .0;
+            press(&mut app, MouseButton::Left);
+            app.world_mut().trigger(Activate { entity });
+            assert!(frame(&mut app).is_empty());
+            assert!(app.world().resource::<menu::Menu>().open);
+            assert_eq!(cursor(&mut app), CursorGrabMode::None);
+            let hand = app.world().resource::<Hotbar>();
+            assert_eq!(hand.outside, before.outside);
+            assert_eq!(hand.slots, before.slots);
+            assert_eq!(hand.selected, before.selected);
+            assert!(app.world_mut().query::<&menu::DetailAction>().iter(app.world())
+                .any(|action| matches!(action, menu::DetailAction::Hold(value) if Some(*value) == entry.holding())));
+            let cards: Vec<_> = app
+                .world_mut()
+                .query_filtered::<&Node, With<menu::CatalogueItem>>()
+                .iter(app.world())
+                .collect();
+            assert!(!cards.is_empty());
+            assert!(
+                cards
+                    .iter()
+                    .all(|node| node.width == Val::Px(128.0) && node.height == Val::Px(113.0))
+            );
+        }
     }
 
     #[test]

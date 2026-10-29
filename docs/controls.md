@@ -9,8 +9,10 @@ Catalogue searches Material names; Key bindings searches action names,
 categories and both assigned alternatives. Search queries stay with their page.
 **/** focuses search. Escape clears its text, then releases text focus, before
 it can close the menu. Typing in search never activates gameplay or menu
-shortcuts. Inspect a Material to pin its details, choose a Shape, then hold it
-or assign it to a quick slot without changing the selected hand.
+shortcuts. Clicking a catalogue item pins its details and keeps the menu open,
+without changing the hand. Choose a Shape for a solid, then use **Hold** to
+return to play, or **Assign to slot** to update a shortcut. Catalogue tiles are
+128 × 113 logical pixels and wrap into as many columns as the window fits.
 
 Each keyboard/mouse action has two alternatives. Behavior, binding and display
 changes share one draft across their pages. **Apply changes** saves and

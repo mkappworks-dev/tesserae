@@ -827,6 +827,15 @@ fn search_presentation(
                 "actions",
             )
         };
+        let label = if number == 1 {
+            if label == "materials" {
+                "material"
+            } else {
+                "action"
+            }
+        } else {
+            label
+        };
         text.set_if_neq(Text::new(format!("{number} {label}")));
     }
 }
@@ -1080,6 +1089,7 @@ type ButtonLabels<'w, 's> = Query<
         &'static ChildOf,
         Has<bevy::ui::InteractionDisabled>,
         Has<Quiet>,
+        Has<EmptyBinding>,
     ),
 >;
 fn button_label_colors(
@@ -1088,9 +1098,11 @@ fn button_label_colors(
     mut labels: Query<&mut TextColor>,
     mut images: Query<&mut ImageNode>,
 ) {
-    for (style, hovered, children, parent, disabled, quiet) in &buttons {
+    for (style, hovered, children, parent, disabled, quiet, empty) in &buttons {
         let color = if disabled {
             MUTED.with_alpha(0.55)
+        } else if empty {
+            MUTED
         } else if style.primary {
             BG
         } else if (quiet || style.tab && !style.selected) && !hovered.0 {

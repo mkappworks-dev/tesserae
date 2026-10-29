@@ -724,9 +724,9 @@ pub(super) fn render(
                 } else {
                     235.0
                 }),
-                bottom: Val::Px(18.0),
+                bottom: Val::Px(20.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(12.0),
+                row_gap: Val::Px(0.0),
                 ..default()
             },
         ))
@@ -1317,7 +1317,7 @@ fn bindings_page(
         ))
         .with_children(|filters| {
             for category in [Category::Movement, Category::Building, Category::Interface] {
-                ui::button(
+                let entity = ui::button(
                     filters,
                     category.label(),
                     Operation::Category(category),
@@ -1325,6 +1325,20 @@ fn bindings_page(
                     true,
                     false,
                 );
+                filters.commands().queue(move |world: &mut World| {
+                    let children: Vec<_> = world
+                        .get::<Children>(entity)
+                        .map(|children| children.iter().collect())
+                        .unwrap_or_default();
+                    for child in children {
+                        if let Some(mut font) = world.get_mut::<TextFont>(child) {
+                            font.font_size = bevy::text::FontSize::Px(11.0);
+                        }
+                    }
+                    if let Some(mut node) = world.get_mut::<Node>(entity) {
+                        node.min_height = Val::Px(38.0);
+                    }
+                });
             }
         });
     }
@@ -1768,6 +1782,10 @@ mod tests {
             .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<super::super::edit::Catalogue>()
             .init_resource::<super::super::edit::Notice>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Font>>()
+            .init_resource::<super::super::input::UiInput>()
+            .add_plugins(super::super::menu_ui::plugin)
             .add_systems(Update, render);
         activate_operation(&mut app, Operation::Navigate(Tab::Bindings));
         app.world_mut().resource_mut::<Searches>().bindings = "mouse".into();
@@ -1785,6 +1803,19 @@ mod tests {
             })
             .collect();
         assert_eq!(captures.len(), 6);
+        assert!(
+            app.world_mut()
+                .query::<(&Text, &TextColor)>()
+                .iter(app.world())
+                .filter(|(text, _)| text.0 == "Add binding")
+                .all(|(_, color)| color.0 == super::super::menu_ui::MUTED)
+        );
+        assert!(
+            app.world_mut()
+                .query::<&Text>()
+                .iter(app.world())
+                .any(|text| text.0 == "3 actions")
+        );
         assert!(
             captures.contains(&Action::Place)
                 && captures.contains(&Action::Remove)
