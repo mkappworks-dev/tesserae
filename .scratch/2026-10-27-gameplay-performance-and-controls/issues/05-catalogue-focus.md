@@ -1,48 +1,34 @@
-# 05: C2: Focus, selection and explicit assignment
+# 05: C2: Catalogue selection and assignment
 
-Status: needs-triage
-Blocked by: 02
+Status: done
 
-Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: C2; keep this separate from other PR scopes.
+Spec: [catalogue and readable UI](../spec.md#catalogue-and-readable-ui).
+Implementation: merged PR #24, main `4b86e43`.
 
-## What to build
+## Completed scope
 
-Add stable keyboard/controller focus and visible Hold/Assign to slot
-operations alongside existing mouse quick-hold, drag/drop and number keys.
-Explicit Material selection owns the Shape panel; passing the mouse over
-another tile cannot replace it. Hover still highlights/previews; focus
-selects the corresponding panel. Preserve source entities during drag.
-Restore focus from dialogs; expose reusable operations for touch/controller.
+Keep the existing catalogue selection and assignment workflow. Clicking a
+Material holds it while leaving Catalogue open; clicking it again or using
+Clear selection empties the hand. Choosing a Shape updates the held variation.
+Assign to slot, mouse drag/drop and number shortcuts organize the quick slots.
+An explicitly selected Material pins its Shape panel while the pointer passes
+other entries. Drag sources remain alive until their drag completes.
 
 ## Acceptance criteria
 
-- [ ] Choose Shape, hold, assign, swap and cancel without hover/drag.
-- [ ] Mouse shortcuts remain compatible and never click through to World edits.
-- [ ] Focus/selection and Shape panel stay stable through rebuilds.
-- [ ] Focus indicators and invalid feedback do not rely only on colour.
+- [x] Select a Material and Shape without closing Catalogue.
+- [x] Assign content through the existing visible action, drag/drop and numbers.
+- [x] Explicit Material selection keeps its Shape panel during other hovers.
+- [x] Drag/rebuild handling preserves the source until drag completion.
+- [x] Catalogue interactions do not click through to World edits.
 
-## Validation and authorization
+## Completion decision
 
-Use behavior/intent regressions and the spec's build/review requirements.
-Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
-Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+The user accepted the existing main behavior as complete and requested removal
+of the expanded PR 3 UI requirements after reverting that implementation.
+This narrowed scope is authoritative. No additional UI work remains in this
+ticket; do not reintroduce the rejected implementation as a follow-up task.
+Controller and desktop-touch work remains in its separately scoped tickets.
 
-## Comments
-
-### 2026-10-27: repository-based triage
-
-Draft scope/acceptance require grilling; do not begin implementation.
-
-### Readiness correction
-
-The user identified that the design had not been grilled. This ticket is a
-draft candidate; desktop-only is a platform constraint, not design approval.
-Do not implement until the relevant decisions and readiness are established.
-
-### Reconciled after the completed interview
-
-The current spec and What to build section supersede historical draft
-alternatives above. Readiness awaits the final shared-understanding check.
+Existing Client selection, assignment, drag and edit-intent regressions cover
+this behavior. See [final validation](../pr3-implementation-validation.md).

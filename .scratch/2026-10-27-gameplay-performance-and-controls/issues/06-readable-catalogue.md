@@ -1,50 +1,36 @@
-# 06: C2: Search, readable labels and responsive catalogue
+# 06: C2: Material search and readable catalogue
 
-Status: needs-triage
-Blocked by: 05
+Status: done
 
-Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: C2; keep this separate from other PR scopes.
+Spec: [catalogue and readable UI](../spec.md#catalogue-and-readable-ui).
+Implementation: merged PR #24, main `4b86e43`.
 
-## What to build
+## Completed scope
 
-Search Material/Shape names with All/Solids/Fluids/Fire and Mod filters.
-Remember browsing within the current World session; reset on another World.
-Use short tile names, full identity in details/tooltips and visible duplicate
-name disambiguation. Add UI/label sizing while preserving default appearance.
-Keep footer fixed with horizontal scrolling where needed, not clipped slots.
-Validate 1024x640 at 100%, and 1280x720/1920x1080 at 100/150/200% UI scale.
-Touch targets are at least 44 logical pixels with spacing.
+Use the existing Material-name search and approved menu presentation. Search
+text is retained when switching menu pages. Tiles show short Material names;
+the detail panel shows the full Material identity and named Shape choices.
+Cards wrap to the available width. Materials scroll above a fixed quick-slot
+footer, whose slot area supports horizontal scrolling when needed.
 
 ## Acceptance criteria
 
-- [ ] Text input never moves, respawns, edits or activates gameplay shortcuts.
-- [ ] All required controls/slots remain reachable in the size/scale matrix.
-- [ ] Long, duplicate, missing and empty content remain readable.
-- [ ] Browsing restores within a session and resets on another World.
-- [ ] Native review covers normal/small/enlarged layouts.
+- [x] Search filters declared Materials without changing their runtime ids.
+- [x] Search text never activates movement, respawn, edit or other gameplay
+      shortcuts.
+- [x] The search editor retains text and focus while filtering results.
+- [x] Empty results show a readable message and leave the quick slots available.
+- [x] Tiles use short names and details expose the full Material identity.
+- [x] Wrapping cards and a fixed, scrollable slot footer preserve the approved
+      main layout.
 
-## Validation and authorization
+## Completion decision
 
-Use behavior/intent regressions and the spec's build/review requirements.
-Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
-Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+The user accepted this existing behavior as complete and requested removal of
+unimplemented additions from the ticket. The main menu layout and settings
+remain the accepted presentation. This narrowed scope is authoritative; there
+are no further search, filter, sizing or browsing-lifecycle tasks in ticket 06.
+Do not reintroduce the reverted PR 3 UI as pending work.
 
-## Comments
-
-### 2026-10-27: repository-based triage
-
-Draft scope/acceptance require grilling; do not begin implementation.
-
-### Readiness correction
-
-The user identified that the design had not been grilled. This ticket is a
-draft candidate; desktop-only is a platform constraint, not design approval.
-Do not implement until the relevant decisions and readiness are established.
-
-### Reconciled after the completed interview
-
-The current spec and What to build section supersede historical draft
-alternatives above. Readiness awaits the final shared-understanding check.
+Existing search/editor/input-ownership and catalogue layout regressions cover
+this behavior. See [final validation](../pr3-implementation-validation.md).

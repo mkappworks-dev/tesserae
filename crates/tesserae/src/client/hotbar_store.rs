@@ -178,12 +178,13 @@ impl Store {
         self.document.games.insert(game, layout);
         let bytes = serde_json::to_vec_pretty(&self.document).map_err(io::Error::other)?;
         decode(&bytes)?;
-        self.observed = Some(snapshot);
         if let Ok(previous) = fs::read(&self.path) {
             decode(&previous)?;
             super::profile::atomic_write(&self.path.with_extension("json.bak"), &previous)?;
         }
-        super::profile::atomic_write(&self.path, &bytes)
+        super::profile::atomic_write(&self.path, &bytes)?;
+        self.observed = Some(snapshot);
+        Ok(())
     }
 }
 pub(super) fn plugin(app: &mut App) {
@@ -387,7 +388,6 @@ mod tests {
         app.update();
         assert_eq!(fs::read(dir.path()).unwrap(), previous);
         fs::remove_dir(obstruction).unwrap();
-        app.world_mut().resource_mut::<Hotbar>().selected = 3;
         app.update();
         assert_ne!(fs::read(dir.path()).unwrap(), previous);
         assert_eq!(
