@@ -75,7 +75,7 @@ pub fn fbm2(x: f32, z: f32, seed: u32, octaves: u32) -> f32 {
     let mut frequency = 1.0;
     let mut total = 0.0;
     for octave in 0..octaves {
-        value += noise2(x * frequency, z * frequency, seed + octave) * amplitude;
+        value += noise2(x * frequency, z * frequency, seed.wrapping_add(octave)) * amplitude;
         total += amplitude;
         amplitude *= 0.5;
         frequency *= 2.0;
@@ -293,6 +293,7 @@ mod tests {
 
     #[test]
     fn a_seed_near_the_top_of_u32_does_not_overflow() {
+        fbm2(1.5, 2.5, u32::MAX, 4);
         fbm3(1.5, 2.5, 3.5, u32::MAX, 4);
         fbm3_range([0.0; 3], [1.0; 3], u32::MAX, 4);
     }
