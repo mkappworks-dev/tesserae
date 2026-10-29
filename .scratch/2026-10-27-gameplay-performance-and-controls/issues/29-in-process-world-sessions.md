@@ -15,6 +15,10 @@ system, task and Mod instance to a World session, likely via Bevy `States`,
 so that leaving a World tears it down completely and opening another builds
 it fresh in the same window.
 
+Show the loading screen at once: move Mod loading and save validation behind
+the window, so opening a World never leaves the screen empty. Ticket 27
+moved this here (2026-10-29).
+
 This is the design the spec's World-switch rule assumes: session-only undo,
 measurement and pending input are cleared, and old-World jobs or answers
 cannot land in a newly opened World with coincident coordinates.

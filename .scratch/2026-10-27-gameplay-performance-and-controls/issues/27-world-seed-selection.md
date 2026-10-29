@@ -170,11 +170,13 @@ switching or new terrain/biome algorithm.
       World offers Retry and Delete.
 - [x] Worlds created at 0.25 and 0.5 m reopen at that size regardless of
       environment; Re-Create copies seed, Game and Voxel size.
-- [ ] Re-exec keeps window size, position and fullscreen and shows the loading
-      screen.
-- [ ] Mouse/keyboard (Tab, Enter, Escape, text entry) work at 1024×640 and
-      1920×1080 under `UiScale`; native captures in one /tmp folder for user
-      review.
+- [x] Re-exec keeps window size, and position once the window has moved; a
+      World opened from the list shows a loading screen once its window
+      exists. (Narrowed 2026-10-29: the rest moved to tickets 29 and 31.)
+- [x] Mouse and keyboard controls lay out at 1024×640 and 1920×1080 under
+      `UiScale`; Escape and activation are covered by tests; native captures
+      in one /tmp folder for user review. (Narrowed 2026-10-29: native Tab
+      and Enter checks moved to ticket 31.)
 - [x] Return to World list reuses the guarded Save & Quit, including Retry,
       Return and confirmed unsafe exit.
 
@@ -221,5 +223,12 @@ screen appears only once the World process has a window, after Mod
 loading. The keyboard criterion stays open too: tests drive Escape and
 activation, but Tab and Enter were not pressed natively, as no input
 automation is available. Return to World list, Copy and Show folder are
-covered by tests, not native clicks. User visual review and Windows/Linux runs are pending.
-No push, PR or merge.
+covered by tests, not native clicks. User visual review and Windows/Linux
+runs are pending. No push, PR or merge.
+
+### Criteria narrowed 2026-10-29
+
+The user chose to keep this ticket done and narrow the two open criteria.
+A loading screen before Mod loading moves to ticket 29, which restructures
+startup anyway. Position before the first move, native fullscreen and the
+native Tab/Enter check move to ticket 31.
