@@ -519,7 +519,8 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
    [ADR-0016](docs/adr/0016-only-air-is-built-in.md).
 
 9. Look-pack API, water shading, visual polish.
-10. Network transport. The `Player` and `PoseReport` are its first customers.
+10. Network transport. The `Player` and `MovementIntent` are its first
+    customers.
 
 ## Open items
 
@@ -642,13 +643,10 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   no difference. Generated lakes are rescanned once as their Chunks arrive,
   under the same Agenda quota as everything else, which is the likely reason the
   first fuel evaluations wait. No rule changes; a quota bounds work, not time.
-- **The Player's pose is rate-limited, not true.** The Server clamps a pose that
-  moves faster than `PlayerLimits` and tells the Client, but flying is the only
-  way to move, so a modified Client can still fly at the cap and edit within
-  reach of where it goes. A controller (gravity, collision, a walking speed),
-  tolerances derived from it, client prediction, and lag compensation (which
-  needs the transport's clock) are the follow-up. See ADR-0008 and
-  `.scratch/2026-10-12-server-edit-origin/issues/05-*`.
+- **The Server advances the Player's body.** Fixed-step flight and physics use
+  core Shape collision in metres. Unknown terrain blocks physics; embedded mode
+  entry is refused without relocation. Player position, mode and view persist.
+  Prediction and lag compensation remain transport follow-ups. See ADR-0008.
 - Forward vs deferred: measure once real scenes exist. Note it is now a real
   either/or — **SSR requires deferred, and GPU occlusion culling is documented
   as incompatible with deferred.** One or the other, not both.

@@ -7,7 +7,7 @@
 //! frame. The reverse direction can be dropped by a frame that runs no fixed
 //! tick, which is a second reason the Client only ever receives.
 //!
-//! Where a Player is, is the Server's too: the Client reports a pose and the
+//! Where a Player is, is the Server's too: the Client sends movement intent and the
 //! Server streams the World around, and checks Edits against, its own `Player`.
 //!
 //! See `docs/adr/0002-client-server-from-day-one.md`.

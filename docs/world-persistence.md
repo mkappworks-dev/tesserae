@@ -28,8 +28,8 @@ that cannot safely be evicted.
 identity independent of seed, a monotonic commit sequence, seed, Voxel size,
 named generation parameters, exact required Game/Mod builds, content names,
 current Player Eye, authoritative Chunks and simulation checkpoints. Global
-preferences and creative shortcuts are separate data. No inventory, movement,
-character or camera implementation is introduced.
+preferences and creative shortcuts are separate data. No inventory or character
+implementation is introduced.
 
 Changed Chunks are complete run-length encoded level-0 records, including Air.
 Traversal is x/y/z, z fastest. Material and Shape references are names,
@@ -47,11 +47,17 @@ checkpointing refuses an outstanding step. Timer checkpointing requires the
 Server first to gather timers owned by workers; calling it on only the idle
 Server timer collection would lose running work.
 
-Only the Player Eye exists on the Server today. Sequence numbers and pose refill
-budgets are session state. A closed extension map reserves independently
-versioned future Player data; nonempty unknown extensions refuse loading. The
-Client's current look direction is not Server-owned and is not persisted here.
-Future movement/view work must explicitly define and version its durable fields.
+The Player stores its authoritative Eye and a `movement_v1` extension with
+flight/physics mode, actual crouched stance and finite yaw/pitch. The optional
+`crouching` field defaults to false for earlier `movement_v1` saves. Missing
+extension explicitly restores legacy flight; velocity and held input are session
+state. Unknown extensions refuse loading. The base format stays 1: older engines
+already refuse nonempty extensions and cannot overwrite these saves. Save
+dirtiness and completion include the extension, including mode/view changes at a
+stationary Eye. Rebuilds of a required Game still change its exact build hash:
+existing commits with a different required build refuse loading and remain
+untouched. There is no automatic content migration. Movement policy is Game
+declaration data.
 
 Light, meshes, connections, coarse Chunks, Jobs and Lifetimes are derived and
 must be rebuilt. A saved revision is data identity, not a reusable Lifetime.

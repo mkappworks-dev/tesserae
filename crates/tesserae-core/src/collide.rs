@@ -60,6 +60,38 @@ pub struct Sweep {
 /// Far below the 1/16 of the smallest Voxel anyone will use.
 const EPS: f32 = 1e-5;
 
+fn cell_count(ranges: [std::ops::RangeInclusive<i32>; 3]) -> u64 {
+    ranges.iter().fold(1u64, |count, r| {
+        count.saturating_mul((*r.end() as i64 - *r.start() as i64 + 1).max(0) as u64)
+    })
+}
+
+/// Whether a body overlaps solid or unknown terrain (touching is allowed).
+pub fn overlaps(vol: &impl VoxelVolume, tables: &Tables, size: f32, body: Aabb) -> bool {
+    let over = tables.shapes.overhang();
+    let cells = |a: usize| {
+        ((body.min[a] / size).floor() as i32).saturating_sub(over[2 * a + 1] as i32)
+            ..=((body.max[a] / size).floor() as i32).saturating_add(over[2 * a] as i32)
+    };
+    if cell_count([cells(0), cells(1), cells(2)]) > 16_384 {
+        return true;
+    }
+    for z in cells(2) {
+        for y in cells(1) {
+            for x in cells(0) {
+                let cell = [x, y, z];
+                for b in obstacles(vol, tables, cell) {
+                    let (min, max) = in_metres(b, cell, size);
+                    if (0..3).all(|a| body.min[a] < max[a] - EPS && body.max[a] > min[a] + EPS) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Moves `aabb` by `delta`, one axis at a time, y then x then z, stopping each
 /// at the first collision box in the way.
 ///
@@ -123,10 +155,13 @@ fn clip(
     let cells = |a: usize| {
         let below = over[2 * a + 1] as i32;
         let above = over[2 * a] as i32;
-        ((lo[a] / voxel_size).floor() as i32 - below)
-            ..=((hi[a] / voxel_size).floor() as i32 + above)
+        ((lo[a] / voxel_size).floor() as i32).saturating_sub(below)
+            ..=((hi[a] / voxel_size).floor() as i32).saturating_add(above)
     };
 
+    if cell_count([cells(0), cells(1), cells(2)]) > 16_384 {
+        return 0.0;
+    }
     let mut allowed = d;
     for z in cells(2) {
         for y in cells(1) {
@@ -190,7 +225,7 @@ fn obstacles<'a>(vol: &impl VoxelVolume, tables: &'a Tables, cell: [i32; 3]) -> 
 /// A box in sixteenths of the Voxel at `cell`, as metres.
 fn in_metres(b: &CollisionBox, cell: [i32; 3], voxel_size: f32) -> ([f32; 3], [f32; 3]) {
     let unit = voxel_size / SUBDIV as f32;
-    let at = |a: usize, sixteenths: i8| (cell[a] * SUBDIV as i32 + sixteenths as i32) as f32 * unit;
+    let at = |a: usize, sixteenths: i8| (cell[a] as f32 * SUBDIV as f32 + sixteenths as f32) * unit;
     (
         std::array::from_fn(|a| at(a, b.min[a])),
         std::array::from_fn(|a| at(a, b.max[a])),
@@ -460,6 +495,38 @@ mod tests {
         let mut g = Grid::new();
         g.floor(0, cube()).floor(1, Voxel::cube(water));
         (g, tables)
+    }
+
+    #[test]
+    fn overlap_uses_shape_geometry_and_unknown_terrain_and_bounds_work() {
+        let mut g = Grid::new();
+        g.put([0, 0, 0], slab(POS_Y));
+        assert!(overlaps(
+            &g,
+            &with_materials(&table()),
+            1.0,
+            Aabb::new([0.1, 0.1, 0.1], [0.2, 0.2, 0.2])
+        ));
+        assert!(!overlaps(
+            &g,
+            &with_materials(&table()),
+            1.0,
+            Aabb::new([0.1, 0.5, 0.1], [0.2, 0.9, 0.2])
+        ));
+        assert!(overlaps(
+            &g,
+            &with_materials(&table()),
+            0.000001,
+            Aabb::new([0.0; 3], [1.0; 3])
+        ));
+        let stop = sweep(
+            &g,
+            &table(),
+            0.000001,
+            Aabb::new([0.0; 3], [1.0; 3]),
+            [1.0, 0.0, 0.0],
+        );
+        assert_eq!(stop.moved, [0.0; 3]);
     }
 
     #[test]

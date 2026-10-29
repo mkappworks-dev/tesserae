@@ -65,7 +65,6 @@ available. Official guidance recommends evaluating reasoning effort against
 quality, latency and cost rather than assuming more effort is always better:
 [Reasoning guide](https://developers.openai.com/api/docs/guides/reasoning).
 
-
 ## Catalogue worktree outcome
 
 The user requested reverting all PR 3 menu UI changes. Menu, settings,
@@ -78,3 +77,11 @@ hotbar failed-write retry correction remains as new source in PR #25.
 The user subsequently authorized consolidating the remaining changes into
 one commit, pushing the branch and opening a focused bug-fix PR. Merge is
 not authorized. See [current validation](pr3-implementation-validation.md).
+
+## PR 5 implementation
+
+The user's 2026-10-29 instruction authorizes ticket 24 in its existing
+worktree against merged controls #24 and persistence #23. Historical
+readiness gates are superseded. Scope and review evidence are recorded in
+[PR 5 validation](pr5-movement-validation.md). The user later authorized
+rebasing onto main, pushing and opening the PR. Merge is not authorized.

@@ -111,6 +111,7 @@ fn world(p: old::WorldParams, log: &LogHandle) -> content::WorldParams {
         );
     }
     content::WorldParams {
+        movement: None,
         sea_level_m: p.sea_level_m,
         relief_m: p.relief_m,
         feature_size_m: p.feature_size_m,

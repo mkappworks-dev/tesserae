@@ -152,8 +152,8 @@ a Chunk.
 player. Not a different Server.
 
 **Player** — what the Server holds for each person in the World, including where
-that person is. The Client reports a position; the Player is the Server's idea
-of it.
+that person is. The Client sends movement intent; the Server advances the body
+and publishes its Eye. Movement mode and camera view are independent.
 
 **Eye** — the point in metres a Player sees and acts from. An Edit's ray starts
 near it. Not the feet and not a body.

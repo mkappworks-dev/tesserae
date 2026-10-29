@@ -583,19 +583,43 @@ fn watch_frames(
 /// picture comes out black.
 fn fly_forward(
     time: Res<Time<Real>>,
-    movement_time: Res<Time>,
+    mut switched: Local<bool>,
+    mut intents: MessageWriter<crate::server::player::MovementIntent>,
     capture: Res<Capture>,
-    camera: Single<(&mut Transform, &FlyCamera), With<MainCamera>>,
+    camera: Single<(&Transform, &FlyCamera), With<MainCamera>>,
 ) {
     let elapsed_s = capture.elapsed_s(&time);
+    let crouch = std::env::var_os("TESSERAE_SCREENSHOT_CROUCH").is_some();
+    let switch_mode = !*switched
+        && std::env::var_os("TESSERAE_SCREENSHOT_SWITCH_MODE").is_some()
+        && capture.frames.fill_ended_s.is_some_and(|start| {
+            elapsed_s >= start + capture.fly_for_s + capture.settle_for_s - 0.7
+        });
+    *switched |= switch_mode;
     if !capture.frames.flying(elapsed_s, capture.fly_for_s) {
+        intents.write(crate::server::player::MovementIntent {
+            crouch,
+            switch_mode,
+            yaw: camera.1.yaw,
+            pitch: camera.1.pitch,
+            ..default()
+        });
         return;
     }
-    let (mut transform, fly) = camera.into_inner();
+    let (transform, fly) = camera.into_inner();
     let heading = transform.forward().with_y(0.0).normalize_or_zero();
     let speed = capture.speed_m_s.unwrap_or(fly.speed);
     let climb = climb_m_s(capture.lift_m, capture.fly_for_s, speed);
-    transform.translation += (heading * speed + Vec3::Y * climb) * movement_time.delta_secs();
+    let velocity = heading * speed + Vec3::Y * climb;
+    intents.write(crate::server::player::MovementIntent {
+        crouch,
+        switch_mode,
+        direction: velocity,
+        speed_mps: velocity.length(),
+        yaw: fly.yaw,
+        pitch: fly.pitch,
+        ..default()
+    });
 }
 
 /// The climb that adds `lift_m` over the flight, held to what the Server's speed
@@ -685,15 +709,20 @@ fn report(
     time: Res<Time<Real>>,
     capture: Res<Capture>,
     stats: Res<StreamingStats>,
-    camera: Single<&Transform, With<MainCamera>>,
+    camera: Single<(&Transform, &FlyCamera), With<MainCamera>>,
     drawn: Query<(&MeshTag, &Transform, &Mesh3d)>,
     meshes: Res<Assets<Mesh>>,
     world: Res<WorldSettings>,
 ) {
+    let (camera, movement) = camera.into_inner();
     let elapsed_s = capture.elapsed_s(&time);
     if !capture.due(elapsed_s) {
         return;
     }
+    info!(
+        "capture movement_mode={:?}, authority=Server fixed64, view=first_person, quality=unchanged",
+        movement.movement_mode
+    );
     let ms = |s: f32| format!("{:.1}", s * 1000.0);
     let fill = capture
         .frames

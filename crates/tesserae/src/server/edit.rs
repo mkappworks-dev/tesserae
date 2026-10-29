@@ -975,8 +975,8 @@ mod tests {
     use std::sync::{Arc, LazyLock};
     use tesserae_core::testgen::WATER_FLUID;
 
-    use super::super::player::{Player, PoseReport};
-    use crate::server::world_state::{SPAWN_EYE_ALTITUDE_M, SpawnPoint};
+    use super::super::player::Player;
+    use crate::server::world_state::SpawnPoint;
 
     /// The Server's default tables with the fixture water: those of `app_with`,
     /// and what a test reading water outside an App holds.
@@ -1503,7 +1503,7 @@ mod tests {
     /// with the constraint deleted. So this asks the schedule whether the pair is
     /// still ambiguous.
     #[test]
-    fn a_pose_report_is_taken_before_the_intents_of_its_frame() {
+    fn movement_input_is_taken_before_edit_intents() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .insert_resource(WorldSettings::default())
@@ -1526,7 +1526,7 @@ mod tests {
                         .map(|(key, _)| key)
                         .expect("scheduled")
                 };
-                let pose = key_of(Box::new(IntoSystem::into_system(player::receive_pose)));
+                let pose = key_of(Box::new(IntoSystem::into_system(player::receive)));
                 let edit = key_of(Box::new(IntoSystem::into_system(receive)));
                 schedule
                     .graph()
@@ -1535,38 +1535,6 @@ mod tests {
                     .any(|(a, b, _)| (*a, *b) == (pose, edit) || (*a, *b) == (edit, pose))
             });
         assert!(!ambiguous, "nothing says which of the two runs first");
-    }
-
-    #[test]
-    fn a_report_and_an_intent_from_one_frame_are_both_taken() {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            // Real time lets a slow frame run a tick that applies the edit.
-            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
-            .insert_resource(WorldSettings::default())
-            // The Player spawns 10 m from where the intent starts: too far for the
-            // intent alone, near enough for the report to bring it in budget.
-            .insert_resource(SpawnPoint::new(
-                DOWN_EYE + Vec3::new(10.0, -SPAWN_EYE_ALTITUDE_M, 0.0),
-            ))
-            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
-            .init_resource::<ChunkStore>()
-            .init_resource::<MeshState>()
-            .add_plugins((plugin, super::super::player::plugin));
-        app.world_mut()
-            .resource_mut::<ChunkStore>()
-            .insert(origin(), ground());
-        app.update();
-
-        app.world_mut().write_message(down(EditAction::Remove));
-        app.world_mut().write_message(PoseReport {
-            seq: 1,
-            eye: DOWN_EYE,
-        });
-        app.update();
-
-        assert_eq!(app.world().resource::<PendingEdits>().0.len(), 1);
-        assert!(rejections(&mut app).is_empty());
     }
 
     /// Straight down at the ground over (5, 5), from `origin_y`, with the Player's

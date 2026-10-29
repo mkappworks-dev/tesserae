@@ -100,7 +100,15 @@ interface content {
     /// Game may set them; the engine rejects non-finite or out-of-range values.
     /// Absent cave, smoothing, water and ground records mean none, not defaults.
     /// The engine's default has neither ground nor water; water requires ground.
+    /// Server-enforced movement permissions, independent of camera view.
+    record movement-policy {
+        allow-flight: bool,
+        allow-physics: bool,
+        start-in-flight: bool,
+    }
+
     record world-params {
+        movement: option<movement-policy>,
         sea-level-m: f32,
         relief-m: f32,
         feature-size-m: f32,

@@ -458,6 +458,10 @@ impl SpawnPoint {
         self.1.unwrap_or(self.0)
     }
 
+    pub(in crate::server) fn entry_eye_at_height(self, height: f32) -> Vec3 {
+        self.1.unwrap_or(self.0 + Vec3::Y * height)
+    }
+
     pub fn entry_eye(self) -> Vec3 {
         self.1.unwrap_or_else(|| self.eye())
     }

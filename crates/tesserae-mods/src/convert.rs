@@ -153,6 +153,7 @@ pub(crate) fn engine_world_params() -> content::WorldParams {
     // A lake would need its fluid's name, and the engine declares no fluid.
     debug_assert!(p.water.is_none());
     content::WorldParams {
+        movement: None,
         sea_level_m: p.sea_level_m,
         relief_m: p.relief_m,
         feature_size_m: p.feature_size_m,

@@ -618,10 +618,11 @@ pub(super) fn action_name(action: Action) -> &'static str {
         Backward => "Move backward",
         Left => "Move left",
         Right => "Move right",
-        Ascend => "Ascend",
-        Descend => "Descend",
+        Ascend => "Ascend / jump",
+        Descend => "Descend / crouch",
         Sprint => "Sprint",
         Respawn => "Respawn",
+        MovementMode => "Switch flight / physics",
         Faster => "Increase flight speed",
         Slower => "Decrease flight speed",
         Remove => "Remove",
@@ -652,7 +653,7 @@ pub(super) fn category(action: Action) -> &'static str {
     use Action::*;
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
-        | Slower => "Movement",
+        | Slower | MovementMode => "Movement",
         Place | Remove | Sample | EmptyHand | Shape | Turn | Flip => "Building",
         _ => "Interface",
     }
@@ -710,7 +711,11 @@ pub(super) fn render(
         return;
     }
     if settings.notice == "Applied" {
-        super::menu_ui::notify(&mut commands, "Settings applied");
+        super::menu_ui::notify(
+            &mut commands,
+            "Settings applied",
+            super::menu_ui::Tone::Change,
+        );
         settings.notice.clear();
     }
     let Some((bindings, p)) = &settings.draft else {

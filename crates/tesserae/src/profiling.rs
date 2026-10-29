@@ -222,7 +222,7 @@ fn save(
     );
     writeln!(
         meta,
-        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed=unavailable\npresent_elapsed=unavailable\nbackend_resolved_present_mode=see observed backend_surface_configuration records; unavailable when no surface is configured or logging is filtered\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=fixture capture free flight; virtual movement semantics\nview=first person\nquality=unchanged; no profiling quality switches",
+        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed=unavailable\npresent_elapsed=unavailable\nbackend_resolved_present_mode=see observed backend_surface_configuration records; unavailable when no surface is configured or logging is filtered\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=Server fixed-step intent fixture; actual mode in Player spawned log\nview=first person\nquality=unchanged; no profiling quality switches",
         settings.seed,
         settings.voxel_size,
         view.view_distance_m,
@@ -231,6 +231,11 @@ fn save(
         MAX_FRAMES,
         profile.rows.len() >= MAX_FRAMES,
         profile.rows.first().map_or(0.0, |r| r.start_s)
+    )?;
+    writeln!(
+        meta,
+        "movement_requested={}",
+        std::env::var("TESSERAE_FIXTURE_MOVEMENT").unwrap_or_else(|_| "flight".into())
     )?;
     writeln!(meta, "{}", profile.presentation)?;
     for configuration in profile.surfaces.0.lock().unwrap().iter() {

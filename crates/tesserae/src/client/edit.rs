@@ -4,7 +4,7 @@
 //! nothing else. The Client has no access to World state, not even to read it,
 //! so it cannot say which Voxel is under the crosshair and does not try: the
 //! Server finds that and decides whether the Edit happens. The ray starts where
-//! `pose::report_pose` has just said the Player's Eye is.
+//! the Server has published the Player's Eye.
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 //!
 //! A stopgap: a hotbar of nine slots and two keys for orientation are enough to
@@ -240,7 +240,7 @@ pub(super) struct Notice {
 }
 
 impl Notice {
-    fn show(&mut self, text: &'static str) {
+    pub(super) fn show(&mut self, text: &'static str) {
         self.shown = Some((text, NOTICE_SECS));
     }
 
@@ -258,9 +258,6 @@ impl Notice {
     }
 }
 
-#[derive(Component)]
-struct NoticeHud;
-
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Hotbar>()
         .init_resource::<Catalogue>()
@@ -272,10 +269,9 @@ pub(super) fn plugin(app: &mut App) {
             (
                 receive_catalogue,
                 select_held.after(super::input::resolve),
-                // The report and the intent read one `GlobalTransform`.
-                send_intents.after(super::pose::report_pose),
+                // Present the authoritative Eye before constructing an Edit ray.
+                send_intents.after(super::pose::apply_correction),
                 show_rejections,
-                update_hud,
             )
                 .chain(),
         );
@@ -300,18 +296,6 @@ fn spawn_hud(mut commands: Commands) {
             font(22.0),
             TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
         ));
-    commands.spawn((
-        NoticeHud,
-        Text::default(),
-        font(14.0),
-        TextColor(Color::srgb(1.0, 0.7, 0.3)),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(16.0),
-            top: Val::Px(48.0),
-            ..default()
-        },
-    ));
 }
 
 pub(super) fn receive_catalogue(
@@ -467,19 +451,27 @@ pub(super) fn send_intents(
 }
 
 fn show_rejections(
+    mut commands: Commands,
     mut rejected: MessageReader<EditRejected>,
     mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
     time: Res<Time>,
 ) {
     for message in applied.read() {
-        notice.show(match message.0 {
+        let text = match message.0 {
             crate::server::undo::HistoryAction::Undo => "Undone",
             crate::server::undo::HistoryAction::Redo => "Redone",
-        });
+        };
+        notice.show(text);
+        super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
     }
     for message in rejected.read() {
         notice.show(message.reason.message());
+        super::menu_ui::notify(
+            &mut commands,
+            message.reason.message(),
+            super::menu_ui::Tone::Alert,
+        );
     }
     notice.tick(time.delta_secs());
 }
@@ -561,12 +553,6 @@ pub(super) fn hud_text(
     )
 }
 
-fn update_hud(notice: Res<Notice>, mut notices: Query<&mut Text, With<NoticeHud>>) {
-    for mut text in &mut notices {
-        text.set_if_neq(Text::new(notice.text()));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::actions::PIXELS_PER_NOTCH;
@@ -575,7 +561,7 @@ mod tests {
     use crate::client::menu::{self, Entry};
     use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};
     use crate::server::edit::RejectReason;
-    use crate::server::player::{PoseCorrection, PoseReport};
+    use crate::server::player::{MovementFeedback, PoseCorrection};
     use bevy::input::mouse::AccumulatedMouseMotion;
     use bevy::input::{
         mouse::{MouseScrollUnit, MouseWheel},
@@ -696,7 +682,8 @@ mod tests {
             .add_message::<EditIntent>()
             .add_message::<EditRejected>()
             .add_message::<crate::server::undo::HistoryApplied>()
-            .add_message::<PoseReport>()
+            .add_message::<MovementFeedback>()
+            .add_message::<crate::server::player::RestoreView>()
             .add_message::<PoseCorrection>()
             .add_message::<MaterialPalette>()
             .add_plugins((crate::client::pose::plugin, menu::plugin))
@@ -705,7 +692,7 @@ mod tests {
                 (
                     receive_catalogue,
                     select_held,
-                    send_intents.after(crate::client::pose::report_pose),
+                    send_intents.after(crate::client::pose::apply_correction),
                     show_rejections,
                 )
                     .chain(),
@@ -800,36 +787,6 @@ mod tests {
             app.world().resource::<super::super::actions::Labels>(),
             app.world().resource::<super::super::profile::Preferences>(),
         )
-    }
-
-    #[test]
-    fn an_intent_starts_where_the_pose_report_sent_in_its_frame_says() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        // The first frame reported the camera where it was spawned.
-        app.world_mut()
-            .resource_mut::<Messages<PoseReport>>()
-            .clear();
-        let mut camera = app.world_mut().query::<&mut GlobalTransform>();
-        *camera.single_mut(app.world_mut()).unwrap() =
-            GlobalTransform::from(Transform::from_xyz(40.0, 9.0, -7.0));
-        press(&mut app, MouseButton::Right);
-
-        app.update();
-        let reports: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<PoseReport>>()
-            .drain()
-            .collect();
-        let intents: Vec<_> = app
-            .world_mut()
-            .resource_mut::<Messages<EditIntent>>()
-            .drain()
-            .collect();
-        assert_eq!(reports.len(), 1);
-        assert_eq!(intents.len(), 1);
-        assert_eq!(intents[0].origin, reports[0].eye);
-        assert_eq!(reports[0].eye, Vec3::new(40.0, 9.0, -7.0));
     }
 
     #[test]
