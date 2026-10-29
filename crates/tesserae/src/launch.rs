@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy::window::{MonitorSelection, PrimaryWindow, WindowMode, WindowPosition, WindowResolution};
+use tesserae_core::save::library::GameRef;
 
 const WORLD_ARG: &str = "--world";
 const WINDOW_ARG: &str = "--window";
@@ -245,6 +246,96 @@ pub fn relaunch(args: Vec<OsString>) -> std::process::ExitCode {
             eprintln!("Cannot restart Tesserae: {e}");
             std::process::ExitCode::FAILURE
         }
+    }
+}
+
+/// A Mod that would run without a recorded Trust grant for its exact bytes.
+pub struct Untrusted {
+    pub prompt: String,
+    pub found: tesserae_mods::Found,
+    pub sha256: String,
+}
+
+/// What the World list can offer, found without running any Mod code.
+#[derive(Resource)]
+pub struct Installed {
+    pub game: Option<GameRef>,
+    pub untrusted: Vec<Untrusted>,
+    /// Why the Mods folder could not be read; only an Empty World can be made.
+    pub error: Option<String>,
+    /// `None` when nothing can be granted, as in tests.
+    trust_file: Option<PathBuf>,
+}
+
+impl Installed {
+    pub fn new(game: Option<GameRef>, untrusted: Vec<Untrusted>, trust_file: PathBuf) -> Self {
+        Self {
+            game,
+            untrusted,
+            error: None,
+            trust_file: Some(trust_file),
+        }
+    }
+
+    pub fn none(error: Option<String>) -> Self {
+        Self {
+            game: None,
+            untrusted: Vec::new(),
+            error,
+            trust_file: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn fake(game: Option<(&str, &str)>, untrusted: &[&str]) -> Self {
+        Self {
+            game: game.map(|(id, version)| GameRef {
+                id: id.into(),
+                version: version.into(),
+            }),
+            untrusted: untrusted
+                .iter()
+                .map(|id| Untrusted {
+                    prompt: format!("Mod: {id}"),
+                    found: tesserae_mods::Found {
+                        manifest: test_manifest(id),
+                        dir: PathBuf::new(),
+                        manifest_bytes: Vec::new(),
+                    },
+                    sha256: String::new(),
+                })
+                .collect(),
+            error: None,
+            trust_file: None,
+        }
+    }
+
+    /// Records Trust for the first untrusted Mod's exact bytes.
+    pub fn grant_first(&mut self) -> Result<(), String> {
+        if self.untrusted.is_empty() {
+            return Ok(());
+        }
+        let first = self.untrusted.remove(0);
+        let Some(trust_file) = &self.trust_file else {
+            return Ok(());
+        };
+        let mut trust = tesserae_mods::Trust::load(trust_file);
+        trust
+            .grant_exact(&first.found, &first.sha256)
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+fn test_manifest(id: &str) -> tesserae_mods::Manifest {
+    tesserae_mods::Manifest {
+        id: id.into(),
+        version: "1".into(),
+        api: "0.3".into(),
+        root: false,
+        wasm: "m.wasm".into(),
+        depends: Vec::new(),
+        limits: Default::default(),
     }
 }
 

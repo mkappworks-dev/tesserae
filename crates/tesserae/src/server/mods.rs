@@ -8,6 +8,7 @@ use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::launch::Installed;
 use bevy::prelude::*;
 use tesserae_core::save::library::GameRef;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
@@ -161,88 +162,8 @@ pub fn load_world(
     )
 }
 
-/// A Mod that would run without a recorded Trust grant for its exact bytes.
-pub struct Untrusted {
-    pub prompt: String,
-    found: tesserae_mods::Found,
-    sha256: String,
-}
-
-/// What the World list can offer, found without running any Mod code.
-#[derive(Resource)]
-pub struct Installed {
-    pub game: Option<GameRef>,
-    pub untrusted: Vec<Untrusted>,
-    /// Why the Mods folder could not be read; only an Empty World can be made.
-    pub error: Option<String>,
-    /// `None` when nothing can be granted, as in tests.
-    trust_file: Option<PathBuf>,
-}
-
-impl Installed {
-    pub fn none(error: Option<String>) -> Self {
-        Self {
-            game: None,
-            untrusted: Vec::new(),
-            error,
-            trust_file: None,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn fake(game: Option<(&str, &str)>, untrusted: &[&str]) -> Self {
-        Self {
-            game: game.map(|(id, version)| GameRef {
-                id: id.into(),
-                version: version.into(),
-            }),
-            untrusted: untrusted
-                .iter()
-                .map(|id| Untrusted {
-                    prompt: format!("Mod: {id}"),
-                    found: tesserae_mods::Found {
-                        manifest: test_manifest(id),
-                        dir: PathBuf::new(),
-                        manifest_bytes: Vec::new(),
-                    },
-                    sha256: String::new(),
-                })
-                .collect(),
-            error: None,
-            trust_file: None,
-        }
-    }
-
-    /// Records Trust for the first untrusted Mod's exact bytes.
-    pub fn grant_first(&mut self) -> Result<(), String> {
-        if self.untrusted.is_empty() {
-            return Ok(());
-        }
-        let first = self.untrusted.remove(0);
-        let Some(trust_file) = &self.trust_file else {
-            return Ok(());
-        };
-        let mut trust = Trust::load(trust_file);
-        trust
-            .grant_exact(&first.found, &first.sha256)
-            .map_err(|e| e.to_string())
-    }
-}
-
-#[cfg(test)]
-fn test_manifest(id: &str) -> tesserae_mods::Manifest {
-    tesserae_mods::Manifest {
-        id: id.into(),
-        version: "1".into(),
-        api: "0.3".into(),
-        root: false,
-        wasm: "m.wasm".into(),
-        depends: Vec::new(),
-        limits: Default::default(),
-    }
-}
-
 pub fn installed(args: &[OsString]) -> Installed {
+    use crate::launch::Untrusted;
     let options = match LoadOptions::from_args(args) {
         Ok(Some(options)) => options,
         Ok(None) => return Installed::none(None),
@@ -278,12 +199,7 @@ pub fn installed(args: &[OsString]) -> Installed {
             }
         }
     }
-    Installed {
-        game,
-        untrusted,
-        error: None,
-        trust_file: Some(options.trust_file),
-    }
+    Installed::new(game, untrusted, options.trust_file)
 }
 
 fn load_prompted(

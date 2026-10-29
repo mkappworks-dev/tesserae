@@ -10,8 +10,8 @@ use bevy::ui_widgets::{Activate, TextInput};
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
 use super::menu_ui::{self as ui, Danger, Tone};
+use crate::launch::Installed;
 use crate::launch::{Relaunch, Target};
-use crate::server::mods::Installed;
 
 #[derive(Resource, Clone)]
 pub struct WorldsDir(pub PathBuf);
