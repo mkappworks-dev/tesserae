@@ -1,8 +1,8 @@
 use super::*;
 
-struct Directory(PathBuf);
+pub(super) struct Directory(pub(super) PathBuf);
 impl Directory {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let path = std::env::temp_dir().join(format!("tesserae-save-{}", uuid::Uuid::new_v4()));
         fs::create_dir(&path).unwrap();
         Self(path)
@@ -31,7 +31,7 @@ fn mapping(solid: u16, water: u16, shape: u8) -> Mapping {
     }
 }
 
-fn fixture() -> Commit {
+pub(super) fn fixture() -> Commit {
     let m = mapping(8, 9, 4);
     Commit {
         format: FORMAT_VERSION,

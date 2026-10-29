@@ -979,6 +979,70 @@ mod tests {
         }));
     }
 
+    /// FNV-1a over surface heights and one surface Chunk, so a pinned value is
+    /// stable across toolchains, unlike `DefaultHasher`.
+    fn terrain_digest(seed: u64) -> u64 {
+        let g = Worldgen::new(seed, 1.0, crate::testgen::world_params());
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        let mut eat = |word: u32| {
+            for byte in word.to_le_bytes() {
+                hash = (hash ^ byte as u64).wrapping_mul(0x0100_0000_01b3);
+            }
+        };
+        for i in 0..64 {
+            let m = i as f32 * 7.7 - 240.0;
+            eat(g.surface_height_m(m, m * 0.5).to_bits());
+        }
+        let chunk = g.chunk(0, 0, 0);
+        for x in 0..crate::CHUNK_SIZE {
+            for y in 0..crate::CHUNK_SIZE {
+                for z in 0..crate::CHUNK_SIZE {
+                    let v = chunk.get(x, y, z);
+                    eat(v.material() as u32
+                        | (v.shape() as u32) << 16
+                        | (v.orientation() as u32) << 24);
+                }
+            }
+        }
+        hash
+    }
+
+    #[test]
+    fn boundary_seeds_generate_without_overflow() {
+        for seed in [
+            0,
+            1,
+            u32::MAX as u64 - 3,
+            u32::MAX as u64,
+            0xffff_ffff_0000_0000,
+            0x0000_0001_0000_0001,
+            u64::MAX - 1,
+            u64::MAX,
+        ] {
+            terrain_digest(seed);
+        }
+    }
+
+    /// The u64 → u32 fold lets distinct seeds share terrain, which the spec allows.
+    #[test]
+    fn seeds_whose_halves_cancel_fold_to_the_same_world() {
+        assert_eq!(terrain_digest(0x0000_0001_0000_0001), terrain_digest(0));
+    }
+
+    /// Pinned before the `fbm2` overflow fix; any change here is a generator
+    /// version bump, because saved Worlds regenerate unchanged Chunks from seed.
+    #[test]
+    fn existing_seeds_keep_their_terrain() {
+        assert_eq!(
+            [0x7e55_e2ae_0000_0001, SEED, 1].map(terrain_digest),
+            [
+                15_198_775_482_155_333_751,
+                8_180_675_714_824_193_589,
+                847_418_896_653_193_282
+            ]
+        );
+    }
+
     #[test]
     fn both_early_outs_fire_and_a_straddling_chunk_takes_neither() {
         let g = terrain(1.0);

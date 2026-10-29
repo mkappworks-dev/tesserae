@@ -317,7 +317,7 @@ mod tests {
         assert_eq!(bar.slots[3], Holding::Fire);
         assert_eq!(bar.slots[4], Holding::Empty);
         assert_eq!(bar.selected, 2);
-        assert_eq!(bar.outside, None);
+        assert_eq!(bar.held(), Holding::Empty, "a World opens empty-handed");
         let before = bar.clone();
         restarted.world_mut().write_message(catalogue(11, 13, 8));
         restarted.update();
@@ -326,6 +326,27 @@ mod tests {
         assert!(bytes.contains("demo:wood") && bytes.contains("demo:step"));
         assert!(!bytes.contains("outside"));
     }
+    #[test]
+    fn every_world_opens_empty_handed_with_its_shortcuts_kept() {
+        let dir = Directory::new();
+        let mut fresh = app(dir.path(), catalogue(7, 9, 6));
+        assert_eq!(fresh.world().resource::<Hotbar>().held(), Holding::Empty);
+        {
+            let mut bar = fresh.world_mut().resource_mut::<Hotbar>();
+            bar.slots[2] = Holding::Fluid(9);
+            bar.select(2);
+            assert_eq!(bar.held(), Holding::Fluid(9));
+        }
+        fresh.update();
+        drop(fresh);
+        let mut reopened = app(dir.path(), catalogue(7, 9, 6));
+        let mut bar = reopened.world_mut().resource_mut::<Hotbar>();
+        assert_eq!(bar.held(), Holding::Empty);
+        assert_eq!((bar.selected, bar.slots[2]), (2, Holding::Fluid(9)));
+        bar.select(2);
+        assert_eq!(bar.held(), Holding::Fluid(9));
+    }
+
     #[test]
     fn layouts_are_per_game_and_missing_names_survive_changes_to_other_slots() {
         let dir = Directory::new();

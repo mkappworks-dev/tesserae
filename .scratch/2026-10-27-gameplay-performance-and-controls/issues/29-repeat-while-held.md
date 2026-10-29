@@ -1,7 +1,7 @@
 # 29: Optional repeat place/remove while held
 
 Status: ready-for-agent
-Blocked by: 07
+Blocked by: none (07 merged as PR #28)
 
 Spec: [reconciled desktop gameplay](../spec.md).
 PR boundary: its own PR, built on ticket 07; Client-only.

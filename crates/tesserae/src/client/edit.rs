@@ -318,10 +318,11 @@ pub(super) fn receive_catalogue(
         }
         hotbar.slots = Hotbar::defaults(message);
         hotbar.selected = 0;
-        hotbar.outside = None;
         if let Some(store) = store.as_mut() {
             store.restore(message, &mut hotbar);
         }
+        // Every World opens empty-handed; a slot key or click picks one up.
+        hotbar.outside = Some(Holding::Empty);
         catalogue.0 = message.clone();
     }
 }
@@ -850,6 +851,8 @@ mod tests {
         press(&mut app, MouseButton::Right);
         assert!(frame(&mut app).is_empty(), "the grabbing click");
 
+        // A World opens empty-handed; pick up the first shortcut.
+        app.world_mut().resource_mut::<Hotbar>().select(0);
         press(&mut app, MouseButton::Right);
         assert_eq!(frame(&mut app).len(), 1, "the next click is an Edit");
     }
@@ -1480,6 +1483,7 @@ mod tests {
                     .before(select_held),
             );
         frame(&mut app);
+        app.world_mut().resource_mut::<Hotbar>().select(0);
         key(&mut app, KeyCode::Tab);
         frame(&mut app);
         let held = app.world().resource::<Hotbar>().held();

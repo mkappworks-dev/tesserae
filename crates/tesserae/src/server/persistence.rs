@@ -1,11 +1,11 @@
 //! Server-owned World opening, checkpoints and save completion landing.
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures::check_ready};
-use tesserae_core::save::{self, Commit, Content, Generation, Mapping, WorldId, Writer};
+use tesserae_core::save::{self, Commit, Content, Generation, Mapping, WorldId, Writer, library};
 
 use super::fluids::FluidSim;
 use super::mods::LoadedMods;
@@ -13,10 +13,17 @@ use super::player::Player;
 use super::world_state::{ChunkStore, Lifetime};
 use crate::world::{ChunkCoord, WorldSettings};
 
+/// Beside the user Mods folder; every World folder lives here.
+pub fn worlds_dir() -> Option<PathBuf> {
+    tesserae_mods::default_mods_dir().map(|p| p.with_file_name("worlds"))
+}
+
 pub struct Opening {
     pub directory: Option<PathBuf>,
     pub id: WorldId,
     pub recovered: Option<save::Recovered>,
+    /// Present when the World was chosen from the World list.
+    pub details: Option<library::Sidecar>,
 }
 
 impl Opening {
@@ -32,8 +39,8 @@ impl Opening {
             None
         } else {
             Some(
-                tesserae_mods::default_mods_dir()
-                    .map(|p| p.with_file_name("worlds").join("default"))
+                worlds_dir()
+                    .map(|p| p.join("default"))
                     .ok_or("cannot resolve World directory; set TESSERAE_WORLD_DIR")?,
             )
         };
@@ -50,7 +57,86 @@ impl Opening {
             directory,
             id,
             recovered,
+            details: None,
         })
+    }
+
+    /// A World chosen from the World list. A folder whose first commit has not
+    /// landed takes its identity from its details; any other folder without a
+    /// save is refused rather than silently becoming a new World.
+    pub fn from_folder(directory: &Path) -> Result<Self, String> {
+        let recovered = save::inspect(directory).map_err(|e| e.to_string())?;
+        // Commits are authoritative: unreadable details never block a saved World.
+        let details = match library::read(directory) {
+            Ok(details) => details,
+            Err(e) if recovered.is_some() => {
+                eprintln!("Ignoring unreadable World details: {e}");
+                None
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        let id = match (&recovered, &details) {
+            (Some(r), Some(d)) => {
+                if d.world != r.commit.world {
+                    eprintln!(
+                        "World details name {} but the save is {}; the save wins",
+                        d.world.as_str(),
+                        r.commit.world.as_str()
+                    );
+                }
+                r.commit.world.clone()
+            }
+            (Some(r), None) => r.commit.world.clone(),
+            (None, Some(d)) if d.pending => d.world.clone(),
+            (None, _) => return Err("this World has no save to open".into()),
+        };
+        Ok(Self {
+            directory: Some(directory.to_owned()),
+            id,
+            recovered,
+            details,
+        })
+    }
+
+    /// Saved seed and Voxel size always win over the build's defaults and the
+    /// environment, so a World reopens at the size it was created with.
+    pub fn settings(&self, mut base: WorldSettings) -> WorldSettings {
+        if let Some(r) = &self.recovered {
+            base.seed = r.commit.seed;
+            base.voxel_size = r.commit.voxel_size_m;
+        } else if let Some(d) = &self.details {
+            base.seed = d.seed;
+            base.voxel_size = d.voxel_size_m;
+        }
+        base
+    }
+
+    /// The Game a not-yet-created World was asked for, which must then load.
+    pub fn pending_game(&self) -> Option<&library::GameRef> {
+        self.details
+            .as_ref()
+            .filter(|d| d.pending)
+            .and_then(|d| d.game.as_ref())
+    }
+
+    /// For the loading screen: the World's name, else its folder.
+    pub fn display_name(&self) -> Option<String> {
+        self.details.as_ref().map(|d| d.name.clone()).or_else(|| {
+            self.directory
+                .as_ref()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+        })
+    }
+
+    /// A World saved without a Game loads no Mods, so installing one later cannot change
+    /// its required content.
+    pub fn loads_mods(&self) -> bool {
+        match (&self.recovered, &self.details) {
+            (Some(r), _) => !r.commit.content.mods.is_empty(),
+            (None, Some(d)) => d.game.is_some(),
+            (None, None) => true,
+        }
     }
 
     pub fn info(&self, world: &WorldSettings) -> tesserae_mods::WorldInfo {
@@ -105,6 +191,8 @@ pub struct SaveStatus {
     pub dirty: bool,
     pub detail: String,
     pub error: Option<String>,
+    /// Shown once on entry, e.g. after recovering from a damaged newer save.
+    pub notice: Option<String>,
 }
 impl SaveStatus {
     pub fn modal(&self) -> bool {
@@ -123,6 +211,7 @@ struct Completed {
     simulation_revision: u64,
     eye: Vec3,
     movement: save::MovementV1,
+    details_completed: bool,
     #[cfg(feature = "profiling")]
     write_ms: f64,
 }
@@ -160,6 +249,8 @@ pub struct Persistence {
     initial_simulation: Option<RestoredSimulation>,
     initial_chunks: Vec<save::SavedChunk>,
     opening_detail: String,
+    details: Option<(PathBuf, library::Sidecar)>,
+    recovered_notice: Option<String>,
 }
 
 impl Persistence {
@@ -169,6 +260,11 @@ impl Persistence {
         settings: WorldSettings,
     ) -> Result<Self, String> {
         let (content, mapping) = content(loaded);
+        let recovered_notice = opening
+            .recovered
+            .as_ref()
+            .filter(|r| !r.skipped.is_empty())
+            .map(|_| "Opened an older save; a newer save was damaged".to_owned());
         let restored = opening
             .recovered
             .as_ref()
@@ -224,6 +320,21 @@ impl Persistence {
             .map_err(|e| e.to_string())?
             .map(|w| Arc::new(Mutex::new(w)));
         eprintln!("{detail}; World {}", opening.id.as_str());
+        let details = opening
+            .directory
+            .clone()
+            .zip(opening.details)
+            .map(|(path, mut d)| {
+                d.world = opening.id.clone();
+                d.last_played_unix_s = library::now_unix_s();
+                // Display data only: failing to record last-played never blocks play.
+                if !d.pending
+                    && let Err(e) = library::write(&path, &d)
+                {
+                    eprintln!("Could not update World details: {e}");
+                }
+                (path, d)
+            });
         Ok(Self {
             writer,
             id: opening.id,
@@ -253,6 +364,8 @@ impl Persistence {
             initial_simulation,
             initial_chunks,
             opening_detail: detail,
+            details,
+            recovered_notice,
         })
     }
 }
@@ -270,6 +383,7 @@ pub(super) fn plugin(app: &mut App) {
     } else {
         p.opening_detail.clone()
     };
+    app.world_mut().resource_mut::<SaveStatus>().notice = p.recovered_notice.take();
     let mut store = app.world_mut().resource_mut::<ChunkStore>();
     store.persistent = p.writer.is_some();
     store.checkpoint = store.persistent && p.reopened_eye.is_none();
@@ -372,6 +486,11 @@ fn drive(
                 p.saved_simulation = done.simulation_revision;
                 p.saved_eye = Some(done.eye);
                 p.saved_movement = Some(done.movement);
+                if done.details_completed
+                    && let Some((_, d)) = p.details.as_mut()
+                {
+                    d.pending = false;
+                }
                 status.detail = "Last save complete".into();
                 status.error = None;
                 if status.quitting
@@ -470,6 +589,7 @@ fn drive(
     let generation = p.generation.clone();
     let settings = p.settings;
     let id = p.id.clone();
+    let pending = p.details.clone().filter(|(_, d)| d.pending);
     #[cfg(feature = "profiling")]
     {
         profile.chunks = chunks.len();
@@ -514,7 +634,15 @@ fn drive(
             writer.write(&commit)
         })()
         .map_err(|e: save::Error| e.to_string());
+        let details_completed = result.is_ok()
+            && pending.is_some_and(|(path, mut d)| {
+                d.pending = false;
+                library::write(&path, &d)
+                    .inspect_err(|e| warn!("could not record World creation: {e}"))
+                    .is_ok()
+            });
         Completed {
+            details_completed,
             result,
             identities,
             revisions,

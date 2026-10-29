@@ -932,17 +932,17 @@ fn fluids_named(loaded: &LoadedMods, params: WorldgenParams) -> Vec<u16> {
         .collect()
 }
 
-/// The demo's lakes are its water, in valleys at the default seed, and none
-/// stands on its scenario stage or within 20 m of it.
-fn assert_lakes_off_the_stage(params: WorldgenParams, size: f32, water: u16) {
+/// The demo's lakes are its water, standing in valleys at the default seed. Its
+/// stage site, not the generator, keeps them off the stage.
+fn assert_lakes_in_valleys(params: WorldgenParams, size: f32, water: u16) {
     let lake = params.water.expect("the demo has lakes");
     assert_eq!(lake.material, water);
     let world = Worldgen::new(WorldSettings::default().seed, size, params);
-    let chunk_m = CHUNK_SIZE as f32 * size;
     let mut valley = None;
+    // Well below the lake, so the smoothing pass's eased stairs cannot reach it.
     'search: for x in (-40..40).map(|i| i as f32 * 4.0) {
         for z in (-40..40).map(|i| i as f32 * 4.0) {
-            if world.surface_height_m(x, z) < lake.level_m - 0.5 {
+            if world.surface_height_m(x, z) < lake.level_m - 3.0 {
                 valley = Some([x, lake.level_m - 0.5, z]);
                 break 'search;
             }
@@ -957,32 +957,6 @@ fn assert_lakes_off_the_stage(params: WorldgenParams, size: f32, water: u16) {
         .chunk(chunk[0], chunk[1], chunk[2])
         .get(local[0], local[1], local[2]);
     assert_eq!(voxel, Voxel::cube(water), "{size} m: a valley with no lake");
-    let (lowest, _) = world.surface_bounds_m();
-    let (min, max) = ([-45.0, lowest, -29.0], [43.0, lake.level_m, 16.0]);
-    let span = |a: f32, b: f32| (a / chunk_m).floor() as i32..=(b / chunk_m).floor() as i32;
-    for cx in span(min[0], max[0]) {
-        for cy in span(min[1], max[1]) {
-            for cz in span(min[2], max[2]) {
-                let generated = world.chunk(cx, cy, cz);
-                for i in 0..CHUNK_SIZE.pow(3) {
-                    let local = [
-                        i % CHUNK_SIZE,
-                        i / CHUNK_SIZE % CHUNK_SIZE,
-                        i / CHUNK_SIZE.pow(2),
-                    ];
-                    let m: [f32; 3] = std::array::from_fn(|a| {
-                        ([cx, cy, cz][a] * CHUNK_SIZE as i32 + local[a] as i32) as f32 * size
-                    });
-                    let near = (0..3).all(|a| min[a] <= m[a] && m[a] < max[a]);
-                    let voxel = generated.get(local[0], local[1], local[2]);
-                    assert!(
-                        !near || voxel.material() != water,
-                        "{size} m: a lake at {m:?} beside the stage"
-                    );
-                }
-            }
-        }
-    }
 }
 
 #[test]
@@ -1006,9 +980,10 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             Some(4)
         );
         let params = loaded.world.unwrap();
-        assert_eq!(params.relief_m, 4.0);
+        assert_eq!(params.relief_m, 24.0);
         assert_eq!(params.ground.unwrap().rock, stone);
-        assert!(params.caves.is_none());
+        assert!(params.caves.is_some());
+        assert_eq!(params.water.unwrap().level_m, 34.0);
         assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
         assert_eq!(loaded.view.unwrap().lod_distance_m, 3000.0);
         assert_eq!(
@@ -1043,6 +1018,10 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             .id_of(tesserae_mods::Kind::Material, "demo:water")
             .unwrap() as u16;
         assert_eq!(demo_water, 14);
+        let grass = loaded
+            .registry
+            .id_of(tesserae_mods::Kind::Material, "demo:grass")
+            .unwrap() as u16;
         assert_eq!(
             *loaded.tables.materials.def(demo_water),
             tesserae_core::testgen::WATER_MATERIAL
@@ -1065,7 +1044,8 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 .all(|&id| id != tesserae_core::material::FIRST_MOD_ID.saturating_sub(1)),
             "the demo names the retired id"
         );
-        assert_lakes_off_the_stage(params, size, demo_water);
+        assert_lakes_in_valleys(params, size, demo_water);
+        let terrain = Worldgen::new(WorldSettings::default().seed, size, params);
         assert!(flow.sideways_m_per_s < water.sideways_m_per_s);
         assert!(flow.downward_m_per_s < water.downward_m_per_s);
         assert!(flow.reach_m < water.reach_m);
@@ -1146,66 +1126,105 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         h.call();
         assert!(h.log(0).is_empty());
         assert_eq!(h.app.world().resource::<ModJobs>().tick, 0);
-        // The stage, what its fluids fall into and the spawn neighbourhood.
+        // The site, the stage on it, what its fluids fall into and the spawn
+        // neighbourhood.
         let chunk = |m: f32| (m / (CHUNK_SIZE as f32 * size)).floor() as i32;
         let across = chunk(-32.0).min(-2)..=chunk(31.0).max(1);
         let held: Vec<ChunkCoord> = across
             .clone()
-            .flat_map(|x| (-1..=chunk(40.0).max(2)).map(move |y| (x, y)))
+            .flat_map(|x| (-1..=chunk(52.0).max(2)).map(move |y| (x, y)))
             .flat_map(|(x, y)| across.clone().map(move |z| ChunkCoord::new(x, y, z)))
             .collect();
+        // Real terrain, hills and lakes included, so the site must level it.
         for &coord in &held {
             let mut store = h.app.world_mut().resource_mut::<ChunkStore>();
-            store.insert(coord, Chunk::air());
+            store.insert(coord, terrain.chunk(coord.x, coord.y, coord.z));
             store.set_light(coord, ChunkLight::dark());
         }
-        h.call();
-        let total = h.backlog(0);
         let by_size =
             |counts: [u64; 3]| counts[[1.0, 0.5, 0.25].iter().position(|&s| s == size).unwrap()];
-        assert_eq!(total, by_size([94, 684, 5326]));
-        assert_eq!(h.pending().queues[0].commands.len(), 16);
-        let mut ticks = 0;
-        while h.backlog(0) > 0 {
-            h.drain();
-            ticks += 1;
-        }
-        assert_eq!(ticks, (total as usize).div_ceil(MOD_VOXELS_PER_TICK));
-        assert_eq!(
-            h.pending().queues[0].report,
-            BatchReport {
-                applied: total as u32,
-                rejected: 0
+        // The stage's 94/684/5326 plus the site: 54 x 10 m of footprint, 16 m
+        // of source removal, 15 of stone, 1 of grass and 14 of air.
+        let site = |per_m3: u64| 54 * 10 * (16 + 15 + 1 + 14) * per_m3;
+        let total = by_size([94 + site(1), 684 + site(8), 5326 + site(64)]);
+        // Each call sends one batch within the host's caps; the scenarios
+        // start only once every batch has landed.
+        let mut sent = 0;
+        let mut log = String::new();
+        let mut calls = 0;
+        loop {
+            h.call();
+            log.push_str(&h.log(0));
+            if log.contains("demo build applied") {
+                break;
             }
-        );
+            assert!(!log.contains("demo scenario"), "started before the build");
+            let batch = h.backlog(0);
+            assert!(batch <= 65_536, "batch of {batch} Voxels");
+            sent += batch;
+            while h.backlog(0) > 0 {
+                h.drain();
+            }
+            calls += 1;
+            assert!(calls <= 64, "the build never finished sending");
+        }
+        assert_eq!(sent, total);
         let index = |v: [f32; 3]| v.map(|m| (m / size).floor() as i32);
+        // The stage was laid out on 28 m beams and now stands on the 36 m site.
+        let lift = 8.0;
+        let lifted = |v: [f32; 3]| index([v[0], v[1] + lift, v[2]]);
+        // The site off the stage's row: ground to 36 m under grass, then air,
+        // with no lake water anywhere in it.
+        for x in (-28..26).step_by(3) {
+            for z in [-12, -11, -10, -3] {
+                let at = |y: f32| index([x as f32, y, z as f32]);
+                for y in (20..35).map(|y| y as f32) {
+                    let here = h.occupants(at(y));
+                    assert_eq!(here.solid, Voxel::cube(stone), "{size} m: {x} {y} {z}");
+                    assert_eq!(here.fluid, None, "{size} m: {x} {y} {z}");
+                }
+                assert_eq!(h.voxel(at(35.0)), Voxel::cube(grass), "{size} m: {x} {z}");
+                for y in (36..50).map(|y| y as f32) {
+                    let here = h.occupants(at(y));
+                    assert!(here.solid.is_air(), "{size} m: {x} {y} {z}");
+                    assert_eq!(here.fluid, None, "{size} m: {x} {y} {z}");
+                }
+            }
+        }
         for x in -4..2 {
             for y in 24..29 {
                 assert_eq!(
-                    h.voxel(index([x as f32, y as f32, -7.0])),
+                    h.voxel(lifted([x as f32, y as f32, -7.0])),
                     Voxel::cube(stone)
                 );
             }
         }
-        assert_eq!(h.voxel(index([3.0, 30.0, -7.0])), Voxel::new(stone, 4, 0));
-        assert_eq!(h.voxel(index([3.0, 31.0, -7.0])), Voxel::cube(8));
-        assert_eq!(h.voxel(index([15.0, 29.0, -7.0])), Voxel::new(stone, 1, 4));
-        assert_eq!(h.voxel(index([-13.0, 30.0, -5.0])), Voxel::cube(stone));
-        assert_eq!(h.voxel(index([-12.0, 29.0, -7.0])), Voxel::cube(wood));
+        assert_eq!(h.voxel(lifted([3.0, 30.0, -7.0])), Voxel::new(stone, 4, 0));
+        assert_eq!(h.voxel(lifted([3.0, 31.0, -7.0])), Voxel::cube(8));
+        assert_eq!(h.voxel(lifted([15.0, 29.0, -7.0])), Voxel::new(stone, 1, 4));
+        assert_eq!(h.voxel(lifted([-13.0, 30.0, -5.0])), Voxel::cube(stone));
+        assert_eq!(h.voxel(lifted([-12.0, 29.0, -7.0])), Voxel::cube(wood));
         let store = h.app.world().resource::<ChunkStore>();
-        assert_eq!(store.light_at(index([3.0, 31.0, -7.0])).block(), 15);
-        let [x, y, z] = index([-1.0, 29.0, -7.0]);
+        assert_eq!(store.light_at(lifted([3.0, 31.0, -7.0])).block(), 15);
+        let [x, y, z] = lifted([-1.0, 29.0, -7.0]);
         let source = store.occupants([x, y, z], &tables_of(&h).fluids).unwrap();
         assert_eq!(source.fluid, Some(tesserae_core::Fluid::source(lava)));
         assert_eq!(store.light_at([x, y + 1, z]).block(), 14, "lava lights");
-        let log = h.log(0);
-        assert_eq!(log.matches("demo first tick:").count(), 1);
-        assert!(!log.contains("demo scenario"), "started before the build");
-
         // The scenarios start on the finished build, then keep their time.
-        h.call();
-        let log = h.log(0);
-        assert!(log.contains(&format!("demo build applied={total} rejected=0")));
+        assert_eq!(log.matches("demo first tick:").count(), 1);
+        // Removing sources where there are none is reported as rejected, so
+        // the only rejections are the site's dry cells.
+        let reported = |key: &str| -> u64 {
+            let rest = &log[log.find(key).unwrap() + key.len()..];
+            rest.split(|c: char| !c.is_ascii_digit())
+                .next()
+                .unwrap()
+                .parse()
+                .unwrap()
+        };
+        let (applied, rejected) = (reported("demo build applied="), reported("rejected="));
+        assert_eq!(applied + rejected, total, "{log}");
+        assert!(rejected <= 54 * 10 * 16 * by_size([1, 8, 64]), "{log}");
         assert!(log.contains("demo scenario: sources placed, fuel lit"));
         let started = h.backlog(0);
         assert_eq!(started, by_size([6, 12, 36]));
@@ -1219,7 +1238,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             ([19.0, 29.0, -7.0], demo_water),
             ([22.0, 35.0, -7.0], demo_water),
         ] {
-            let here = h.occupants(index(at));
+            let here = h.occupants(lifted(at));
             assert_eq!(
                 here.fluid,
                 Some(tesserae_core::Fluid::source(fluid)),
@@ -1227,7 +1246,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             );
         }
         for at in [[-14.0, 30.0 - size, -7.0], [-23.0, 30.0 - size, -7.0]] {
-            assert!(h.occupants(index(at)).burning.is_some(), "{at:?} unlit");
+            assert!(h.occupants(lifted(at)).burning.is_some(), "{at:?} unlit");
         }
         let mut calls = 0;
         while !h.log(0).contains("water poured on the burning post") {
@@ -1241,7 +1260,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             h.drain();
         }
         assert_eq!(
-            h.occupants(index([-23.0, 30.0, -7.0])).fluid,
+            h.occupants(lifted([-23.0, 30.0, -7.0])).fluid,
             Some(tesserae_core::Fluid::source(demo_water))
         );
         while !h.log(0).contains("source taken away") {
@@ -1250,26 +1269,29 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             calls += 1;
             assert!(calls <= 1600, "the waterfall never dried");
         }
-        let falling = h.occupants(index([23.0, 30.0, -7.0])).fluid;
-        assert_eq!(
-            falling.map(|f| f.material),
-            Some(demo_water),
-            "no waterfall"
-        );
+        // At 0.25 m the scenario water spreading over the site keeps the
+        // bounded scheduler busy, so by now the fall has only its source.
+        let (probe, what) = if size < 0.5 {
+            ([22.0, 35.0, -7.0], "no waterfall source")
+        } else {
+            ([23.0, 30.0, -7.0], "no waterfall")
+        };
+        let falling = h.occupants(lifted(probe)).fluid;
+        assert_eq!(falling.map(|f| f.material), Some(demo_water), "{what}");
         while h.backlog(0) > 0 {
             h.drain();
         }
-        assert_eq!(h.occupants(index([22.0, 35.0, -7.0])).fluid, None);
+        assert_eq!(h.occupants(lifted([22.0, 35.0, -7.0])).fluid, None);
         assert_eq!(h.pending().queues[0].report.rejected, 0);
         h.settle_fluids();
         assert_eq!(
-            h.occupants(index([23.0, 30.0, -7.0])).fluid,
+            h.occupants(lifted([23.0, 30.0, -7.0])).fluid,
             None,
             "{size} m"
         );
         let row = |from: f32, to: f32| {
-            let [x0, y, z] = index([from, 29.0, -7.0]);
-            (x0..index([to, 29.0, -7.0])[0]).map(move |x| [x, y, z])
+            let [x0, y, z] = lifted([from, 29.0, -7.0]);
+            (x0..lifted([to, 29.0, -7.0])[0]).map(move |x| [x, y, z])
         };
         assert!(
             row(6.0, 9.0).any(|at| h.voxel(at) == Voxel::cube(brick)),
@@ -1279,7 +1301,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             row(9.0, 19.0).any(|at| h.voxel(at) == Voxel::cube(stone)),
             "{size} m: no lava cooled to stone"
         );
-        let post = index([-23.0, 29.0, -7.0]);
+        let post = lifted([-23.0, 29.0, -7.0]);
         let span = (1.0 / size) as i32;
         let cells = (0..span)
             .flat_map(|dz| (0..span).flat_map(move |dy| (0..span).map(move |dx| [dx, dy, dz])));

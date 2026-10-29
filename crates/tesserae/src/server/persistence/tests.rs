@@ -21,6 +21,7 @@ impl Directory {
             directory: Some(self.0.clone()),
             id,
             recovered,
+            details: None,
         }
     }
 }
@@ -38,8 +39,9 @@ struct Rig {
 }
 impl Rig {
     fn new(dir: &Directory) -> Self {
-        let opening = dir.opening();
-        let settings = WorldSettings::default();
+        Self::open(dir.opening(), WorldSettings::default())
+    }
+    fn open(opening: Opening, settings: WorldSettings) -> Self {
         let mut loaded = crate::server::mods::demo_for_save(&opening, &settings);
         let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as u16;
         let (stone, water, wood) = (id("demo:stone"), id("demo:water"), id("demo:wood"));
@@ -602,4 +604,186 @@ fn authoritative_movement_and_view_survive_save_reopen_and_stale_completion() {
         .unwrap();
     assert_eq!(p.eye(), eye);
     assert_eq!(p.saved_movement(), latest);
+}
+
+fn folder_bytes(path: &std::path::Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let mut files: Vec<_> = std::fs::read_dir(path)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.file_name().is_some_and(|n| n != "writer.lock"))
+        .map(|p| (p.clone(), std::fs::read(&p).unwrap()))
+        .collect();
+    files.sort();
+    files
+}
+
+fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
+    library::Sidecar {
+        name: name.into(),
+        game: Some(library::GameRef {
+            id: "demo".into(),
+            version: "0.1.0".into(),
+        }),
+        seed,
+        voxel_size_m,
+        created_unix_s: 1,
+        last_played_unix_s: 1,
+        world: WorldId::new(),
+        pending: true,
+    }
+}
+
+#[test]
+fn a_new_world_takes_its_identity_and_settings_from_its_details() {
+    let worlds = Directory::new();
+    let created = details("Ridge", 99, 0.5);
+    let path = library::create(&worlds.0, &created).unwrap();
+    let opening = Opening::from_folder(&path).unwrap();
+    assert_eq!(opening.id, created.world);
+    assert!(opening.loads_mods());
+    let settings = opening.settings(WorldSettings::default());
+    assert_eq!((settings.seed, settings.voxel_size), (99, 0.5));
+    let mut rig = Rig::open(opening, settings);
+    rig.settled_save();
+    let commit = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(commit.world, created.world);
+    assert_eq!((commit.seed, commit.voxel_size_m), (99, 0.5));
+    let after = library::read(&path).unwrap().unwrap();
+    assert!(!after.pending);
+    assert!(after.last_played_unix_s > created.last_played_unix_s);
+    assert_eq!(after.name, "Ridge");
+}
+
+#[test]
+fn a_saved_voxel_size_wins_over_the_environment_on_reopen() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Fine", 5, 0.25)).unwrap();
+    let opening = Opening::from_folder(&path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    Rig::open(opening, settings).settled_save();
+    let reopened = Opening::from_folder(&path).unwrap();
+    let settings = reopened.settings(WorldSettings {
+        voxel_size: 1.0,
+        ..WorldSettings::default()
+    });
+    assert_eq!((settings.seed, settings.voxel_size), (5, 0.25));
+}
+
+#[test]
+fn same_name_and_seed_worlds_never_share_a_save() {
+    let worlds = Directory::new();
+    let a = library::create(&worlds.0, &details("Twin", 3, 1.0)).unwrap();
+    let b = library::create(&worlds.0, &details("Twin", 3, 1.0)).unwrap();
+    for path in [&a, &b] {
+        let opening = Opening::from_folder(path).unwrap();
+        let settings = opening.settings(WorldSettings::default());
+        Rig::open(opening, settings).settled_save();
+    }
+    let before = folder_bytes(&b);
+    let opening = Opening::from_folder(&a).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    let mut rig = Rig::open(opening, settings);
+    rig.insert();
+    rig.solid([4, 1, 4], rig.wood);
+    rig.settled_save();
+    assert_eq!(folder_bytes(&b), before);
+    assert_ne!(
+        save::inspect(&a).unwrap().unwrap().commit.world,
+        save::inspect(&b).unwrap().unwrap().commit.world
+    );
+}
+
+#[test]
+fn details_without_a_save_are_refused_not_recreated() {
+    let worlds = Directory::new();
+    let mut lost = details("Lost", 1, 1.0);
+    lost.pending = false;
+    let path = library::create(&worlds.0, &lost).unwrap();
+    let before = folder_bytes(&path);
+    assert!(Opening::from_folder(&path).is_err());
+    assert_eq!(folder_bytes(&path), before);
+}
+
+#[test]
+fn refused_opens_leave_every_file_unchanged() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Kept", 8, 1.0)).unwrap();
+    let opening = Opening::from_folder(&path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    Rig::open(opening, settings).settled_save();
+    let before = folder_bytes(&path);
+
+    let missing_content = Opening::from_folder(&path).unwrap();
+    let settings = missing_content.settings(WorldSettings::default());
+    assert!(Persistence::prepare(missing_content, &mut LoadedMods::default(), settings).is_err());
+    assert_eq!(folder_bytes(&path), before);
+
+    let holder = Opening::from_folder(&path).unwrap();
+    let settings = holder.settings(WorldSettings::default());
+    let open = Rig::open(holder, settings);
+    let locked = Opening::from_folder(&path).unwrap();
+    let settings = locked.settings(WorldSettings::default());
+    let mut loaded = crate::server::mods::demo_for_save(&locked, &settings);
+    assert!(Persistence::prepare(locked, &mut loaded, settings).is_err());
+    drop(open);
+    assert_eq!(folder_bytes(&path), before_touch(&before, &path));
+
+    for (file, _) in &before {
+        if file.extension().is_some_and(|e| e == "commit") {
+            std::fs::remove_file(file).unwrap();
+        }
+    }
+    std::fs::write(
+        path.join("00000000000000000099.commit"),
+        b"TESSAVE1 truncated",
+    )
+    .unwrap();
+    let corrupt = folder_bytes(&path);
+    assert!(Opening::from_folder(&path).is_err());
+    assert_eq!(folder_bytes(&path), corrupt);
+}
+
+/// The successful open in the middle legitimately updates last-played.
+fn before_touch(before: &[(PathBuf, Vec<u8>)], path: &std::path::Path) -> Vec<(PathBuf, Vec<u8>)> {
+    let sidecar = path.join(library::SIDECAR);
+    before
+        .iter()
+        .map(|(p, bytes)| {
+            if *p == sidecar {
+                (p.clone(), std::fs::read(p).unwrap())
+            } else {
+                (p.clone(), bytes.clone())
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn an_empty_world_loads_no_mods() {
+    let worlds = Directory::new();
+    let mut empty = details("Empty", 4, 1.0);
+    empty.game = None;
+    let path = library::create(&worlds.0, &empty).unwrap();
+    let opening = Opening::from_folder(&path).unwrap();
+    assert!(!opening.loads_mods());
+    let settings = opening.settings(WorldSettings::default());
+    let mut loaded = LoadedMods::default();
+    let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
+    drop(p);
+}
+
+#[test]
+fn unreadable_details_never_block_a_saved_world() {
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Scrambled", 6, 1.0)).unwrap();
+    let opening = Opening::from_folder(&path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    Rig::open(opening, settings).settled_save();
+    std::fs::write(path.join(library::SIDECAR), b"{not json").unwrap();
+    let reopened = Opening::from_folder(&path).unwrap();
+    assert_eq!(
+        reopened.id,
+        save::inspect(&path).unwrap().unwrap().commit.world
+    );
+    assert_eq!(reopened.settings(WorldSettings::default()).seed, 6);
 }

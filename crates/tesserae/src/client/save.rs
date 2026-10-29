@@ -8,16 +8,27 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowCloseRequ
 struct Panel;
 #[derive(Component)]
 struct Action(SaveAction);
+/// Saves like Save & Quit, then restarts on the World list.
+#[derive(Component)]
+struct ToList;
 
 pub(super) fn quit_button(parent: &mut ChildSpawnerCommands) {
-    super::menu_ui::compact_button(
-        parent,
-        "Save & Quit",
-        Action(SaveAction::SaveQuit),
-        false,
-        24.0,
-        10.0,
-    );
+    parent
+        .spawn(Node {
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|row| {
+            super::menu_ui::compact_button(row, "Return to World list", ToList, false, 24.0, 10.0);
+            super::menu_ui::compact_button(
+                row,
+                "Save & Quit",
+                Action(SaveAction::SaveQuit),
+                false,
+                24.0,
+                10.0,
+            );
+        });
 }
 
 #[derive(Clone, PartialEq)]
@@ -46,12 +57,13 @@ fn view(status: &SaveStatus) -> View {
 pub(super) fn plugin(app: &mut App) {
     app.add_observer(activate)
         .add_systems(PreUpdate, close_request)
-        .add_systems(Update, show);
+        .add_systems(Update, (show, notice, hide_list_return));
 }
 
 fn close_request(
     mut requests: MessageReader<WindowCloseRequested>,
     mut actions: MessageWriter<SaveAction>,
+    mut relaunch: Option<ResMut<crate::launch::Relaunch>>,
     status: Res<SaveStatus>,
     mut cursors: Query<(Entity, &mut CursorOptions), With<PrimaryWindow>>,
 ) {
@@ -59,6 +71,9 @@ fn close_request(
         .read()
         .any(|request| cursors.contains(request.window));
     if requested && !status.modal() {
+        if let Some(relaunch) = relaunch.as_mut() {
+            relaunch.0 = None;
+        }
         actions.write(SaveAction::SaveQuit);
     }
     if requested || status.modal() {
@@ -69,9 +84,50 @@ fn close_request(
     }
 }
 
-fn activate(event: On<Activate>, buttons: Query<&Action>, mut actions: MessageWriter<SaveAction>) {
-    if let Ok(action) = buttons.get(event.entity) {
+fn activate(
+    event: On<Activate>,
+    buttons: Query<&Action>,
+    to_list: Query<(), With<ToList>>,
+    mut relaunch: Option<ResMut<crate::launch::Relaunch>>,
+    mut actions: MessageWriter<SaveAction>,
+) {
+    let target = if to_list.contains(event.entity) {
+        actions.write(SaveAction::SaveQuit);
+        Some(crate::launch::Target::List)
+    } else if let Ok(action) = buttons.get(event.entity) {
         actions.write(action.0);
+        if !matches!(action.0, SaveAction::SaveQuit) {
+            return;
+        }
+        None
+    } else {
+        return;
+    };
+    if let Some(relaunch) = relaunch.as_mut() {
+        relaunch.0 = target;
+    }
+}
+
+/// Only a World opened from the list has a list to return to.
+fn hide_list_return(
+    launched: Option<Res<crate::launch::Launched>>,
+    mut buttons: Query<&mut Node, Added<ToList>>,
+) {
+    if launched.is_some_and(|l| l.from_list) {
+        return;
+    }
+    for mut node in &mut buttons {
+        node.display = Display::None;
+    }
+}
+
+fn notice(mut commands: Commands, mut status: ResMut<SaveStatus>) {
+    // Bevy marks a resource changed on any mutable access, so only take when set.
+    if status.notice.is_none() {
+        return;
+    }
+    if let Some(message) = status.notice.take() {
+        super::menu_ui::notify_for(&mut commands, &message, super::menu_ui::Tone::Alert, 8.0);
     }
 }
 
@@ -415,7 +471,7 @@ mod tests {
     #[test]
     fn successful_quit_has_only_noninteractive_progress_until_server_exit() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::window_plugin()))
+        app.add_plugins((MinimalPlugins, crate::window_plugin(None)))
             .init_resource::<SaveStatus>()
             .add_message::<SaveAction>()
             .add_systems(PreUpdate, close_request)
@@ -462,7 +518,7 @@ mod tests {
     #[test]
     fn failed_quit_and_discard_confirmation_keep_the_real_window_plugin_alive() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::window_plugin()))
+        app.add_plugins((MinimalPlugins, crate::window_plugin(None)))
             .insert_resource(SaveStatus {
                 quitting: true,
                 error: Some("disk full".into()),
@@ -532,5 +588,47 @@ mod tests {
             Some(SaveAction::CancelUnsafe)
         ));
         assert!(app.world().resource::<Messages<AppExit>>().is_empty());
+    }
+
+    #[test]
+    fn return_to_world_list_saves_like_quit_and_only_then_targets_the_list() {
+        use crate::launch::{Relaunch, Target};
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<SaveStatus>()
+            .init_resource::<Relaunch>()
+            .add_message::<SaveAction>()
+            .add_message::<WindowCloseRequested>()
+            .add_observer(activate);
+        let (to_list, quit) = {
+            let world = app.world_mut();
+            (
+                world.spawn(ToList).id(),
+                world.spawn(Action(SaveAction::SaveQuit)).id(),
+            )
+        };
+        let sent = |app: &mut App| {
+            app.world_mut()
+                .resource_mut::<Messages<SaveAction>>()
+                .drain()
+                .collect::<Vec<_>>()
+        };
+        app.world_mut().trigger(Activate { entity: to_list });
+        assert!(matches!(sent(&mut app)[..], [SaveAction::SaveQuit]));
+        assert_eq!(app.world().resource::<Relaunch>().0, Some(Target::List));
+
+        app.world_mut().trigger(Activate { entity: quit });
+        assert!(matches!(sent(&mut app)[..], [SaveAction::SaveQuit]));
+        assert_eq!(app.world().resource::<Relaunch>().0, None);
+
+        app.world_mut().trigger(Activate { entity: to_list });
+        let window = app
+            .world_mut()
+            .spawn((PrimaryWindow, CursorOptions::default()))
+            .id();
+        app.world_mut()
+            .write_message(WindowCloseRequested { window });
+        app.world_mut().run_system_once(close_request).unwrap();
+        assert_eq!(app.world().resource::<Relaunch>().0, None);
     }
 }

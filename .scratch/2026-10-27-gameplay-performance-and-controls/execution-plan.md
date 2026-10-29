@@ -48,6 +48,19 @@ See [P0 validation](implementation-validation.md) for qualified measurements
 and evidence gates. Whole-schedule timings do not establish per-view or GPU
 bottlenecks; the broad noisy series cannot justify small gains.
 
+## Unscheduled work
+
+Ticket 29 (repeat place/remove while held) is ready-for-agent and unblocked
+now that ticket 07 merged as PR #28. It needs its own branch and slot.
+
+Ticket 30 (W1, in-process World sessions, including a loading screen before
+Mod loading) is a needs-triage backlog item with no sequence slot. It
+touches nearly every Server and Client plugin, so schedule it after PRs 6
+and 8. Ticket 32 (W0.1: window position and native fullscreen across a
+restart, the World screens' native keyboard check and their controller
+navigation) is a small separate PR that may land before 30. Ticket 31 (G0,
+multiple installed Games) is also unscheduled.
+
 ## Deferred product work
 
 Tickets 18–19, owned inventory transactions and resource persistence, remain

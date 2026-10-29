@@ -619,16 +619,7 @@ impl Writer {
             ));
         }
         fs::create_dir_all(directory)?;
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(directory.join("writer.lock"))?;
-        lock.try_lock().map_err(|e| match e {
-            std::fs::TryLockError::WouldBlock => Error::Busy,
-            std::fs::TryLockError::Error(e) => Error::Io(e),
-        })?;
+        let lock = lock(directory)?;
         let mut writer = Self {
             directory: directory.to_owned(),
             _lock: lock,
@@ -725,6 +716,21 @@ impl Writer {
         }
         result
     }
+}
+
+/// The OS lock every process holding a World open owns until it exits.
+fn lock(directory: &Path) -> Result<File, Error> {
+    let lock = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(directory.join("writer.lock"))?;
+    lock.try_lock().map_err(|e| match e {
+        std::fs::TryLockError::WouldBlock => Error::Busy,
+        std::fs::TryLockError::Error(e) => Error::Io(e),
+    })?;
+    Ok(lock)
 }
 
 #[cfg(not(windows))]
@@ -899,6 +905,7 @@ impl DirtyState {
     }
 }
 
+pub mod library;
 #[cfg(test)]
 mod tests;
 

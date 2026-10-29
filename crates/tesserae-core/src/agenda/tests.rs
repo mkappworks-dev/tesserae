@@ -232,3 +232,31 @@ fn a_chunks_spans_stay_bounded() {
         assert!(rescan.next.iter().any(|s| s.contains_cell(cell)));
     }
 }
+
+/// The scanner moves to the next span lazily, so a checkpoint can catch the
+/// cursor exactly at the end of one; that state must save and reload.
+#[test]
+fn a_cursor_at_the_end_of_a_span_saves_and_resumes() {
+    let mut agenda = bounded(usize::MAX, 0, 4);
+    let first = Span {
+        min: [0, 0, 0],
+        max: [1, 1, 0],
+    };
+    let second = Span {
+        min: [8, 0, 0],
+        max: [9, 1, 0],
+    };
+    agenda.rescan(first);
+    agenda.rescan(second);
+    let taken = agenda.take_due(0);
+    assert_eq!(taken.cells.len(), 4);
+    agenda.end_step();
+    let saved = agenda.checkpoint(1).unwrap();
+    let mut restored = Agenda::restore(&saved, 1).unwrap();
+    let rest: BTreeSet<Cell> = drain(&mut restored, 1)
+        .into_iter()
+        .flat_map(|(_, cells)| cells)
+        .collect();
+    let expected: BTreeSet<Cell> = (0..4).map(|i| second.nth(i)).collect();
+    assert_eq!(rest, expected);
+}

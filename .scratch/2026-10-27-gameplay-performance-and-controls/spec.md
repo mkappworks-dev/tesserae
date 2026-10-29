@@ -70,8 +70,10 @@ Warn on conflicts in overlapping contexts and offer replace or cancel;
 never silently fire competing actions. Capture starts after its opening
 input is released. Respect both modifier sides and platform undo/redo.
 
-Preserve current defaults: hold removal, hold sprint, right place/ignite,
-X empty hand, middle/P sampling and fire > solid > source removal priority.
+Preserve current defaults: hold removal, right place/ignite, X empty hand,
+middle/P sampling and fire > solid > source removal priority. Sprint toggles
+by default (user decision 2026-10-29, ticket 27); a saved Hold choice is
+kept, and Hold stays a preference.
 Keep Server aim/history guards and one removal per activation, except under
 the opt-in "Repeat while held" preference of ticket 29.
 
@@ -158,6 +160,8 @@ cancels rather than deleting a shortcut. No further slot-operation UI is
 required by this completed ticket.
 
 Save arrangements per Game using stable Material/Shape names and Orientation.
+Every World opens empty-handed; the saved shortcuts and selected slot are
+kept, and a slot key or click picks one up (user decision 2026-10-29).
 Restore across restarts; missing content is visibly empty, not a different
 item at a reused id. Controls remain global per user. Temporary outside-held
 selection is not persisted. These shortcuts are not owned resource saves.
@@ -184,7 +188,8 @@ collections and unrestricted free-point drawing are deferred.
 ## World creation, seed and persistence
 
 Provide a World list with Create, Open and Rename. New World asks for name,
-installed Game (or empty World) and optional seed. Mod download/management
+installed Game and optional seed; with no Game installed, Create is disabled
+(user decision 2026-10-29, ticket 27: an empty World was only Air). Mod download/management
 is separate; keep explicit Trust checks before running Mod code.
 
 Blank seed chooses a random seed; Randomize can choose another. Accept
@@ -194,6 +199,13 @@ Game/content, generator version, parameters and Voxel size reproduce starting
 terrain; distinct seeds need not produce distinct terrain. Changing an
 existing World's seed in place is not supported. Different Worlds may share
 a name/seed without sharing save identity or overwriting each other.
+
+Ticket 27's 2026-10-29 grilling fixed the details: the list re-execs the
+process per World (in-process sessions are ticket 30), folders get readable
+names with a sidecar beside unchanged commits, Delete uses the OS Trash,
+Create offers the tested Voxel sizes under More World options, and the World
+screens are mouse/keyboard only until tickets 32 (controller) and 08–10
+(touch) add their journeys. Multiple installed Games are ticket 31.
 
 Use the current terrain generator initially; new biomes/terrain styles are
 separate work. Audit full-range seed arithmetic, including the known fbm2
@@ -303,6 +315,10 @@ threads are planned. Touch is not first by default.
 | 22 | S0: World save/lifecycle schema | agreed save policy |
 | 23 | S1: durable World/simulation changes | S0 |
 | 27 | W0: World list/create/seed UI | C2, S0, S1 |
+| 30 | W1: in-process World sessions | W0; needs triage |
+| 31 | G0: multiple Games, per-World Mods | W0; needs triage |
+| 32 | W0.1: window, keyboard and controller follow-ups | W0, C3; needs triage |
+| 33 | water immersion: view and movement | M0; needs triage |
 | 24 | M0: Server-owned flight/physics movement | C0 |
 | 25 | A0: Game character presentation | M0 |
 | 26 | V0: first/third-person view and aim | M0, A0 |

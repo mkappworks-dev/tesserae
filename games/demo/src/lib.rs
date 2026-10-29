@@ -7,6 +7,7 @@ mod character;
 mod textures;
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, GroundParams, HeatDef,
@@ -26,12 +27,15 @@ struct State {
     water: u16,
     mud: u16,
     wood: u16,
+    grass: u16,
     cube: u8,
     slab: u8,
     stair: u8,
     post: u8,
     fence: u8,
     stage: Stage,
+    /// Build Commands not yet sent: the host caps each batch's Voxels.
+    queued: VecDeque<Command>,
     /// Voxels the build's Commands cover, and how many of them have been
     /// reported applied or rejected, so the scenarios start on a finished build.
     issued: u64,
@@ -54,6 +58,28 @@ enum Stage {
 /// that the waterfall's source is taken away.
 const DOUSE_S: f32 = 4.0;
 const DRY_S: f32 = 24.0;
+
+/// Ground spans `SEA_LEVEL_M` to `SEA_LEVEL_M + RELIEF_M`; lakes stand at 5/12
+/// of the relief, the engine's default, so valleys hold water at any seed.
+const SEA_LEVEL_M: f32 = 24.0;
+const RELIEF_M: f32 = 24.0;
+const LAKE_M: f32 = SEA_LEVEL_M + RELIEF_M * 5.0 / 12.0;
+
+/// The stage site, levelled blind because a Mod cannot read terrain: ground
+/// from below the band up to `SITE_TOP_M`, above the lake, and air from there
+/// to above the band. The origin, where the Player spawns, stays outside it.
+const SITE_X_M: (f32, f32) = (-28.0, 26.0);
+const SITE_Z_M: (f32, f32) = (-12.0, -2.0);
+const SITE_FLOOR_M: f32 = SEA_LEVEL_M - 4.0;
+const SITE_TOP_M: f32 = LAKE_M + 2.0;
+const SITE_CLEAR_M: f32 = SEA_LEVEL_M + RELIEF_M + 2.0;
+/// How far the stage was raised from its old 28 m beams onto the site.
+const LIFT_M: f32 = SITE_TOP_M - 28.0;
+
+/// The host's caps on one `fill` and on one batch.
+const MAX_FILL_VOXELS: u64 = 32_768;
+const MAX_BATCH_VOXELS: u64 = 65_536;
+const MAX_BATCH_COMMANDS: usize = 1_024;
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
@@ -154,14 +180,12 @@ impl Guest for Demo {
             start_in_flight: false,
         });
         world.character = Some(character::character());
-        world.relief_m = 4.0;
-        // Under the lowest ground within 20 m of the stage at the engine's
-        // default seed, 26 m, so lakes stand in valleys and the stage is dry.
+        world.sea_level_m = SEA_LEVEL_M;
+        world.relief_m = RELIEF_M;
         world.water = Some(WaterParams {
-            level_m: 25.5,
+            level_m: LAKE_M,
             material: "demo:water".into(),
         });
-        world.caves = None;
         world.ground = Some(GroundParams {
             rock: "demo:stone".into(),
             soil: "demo:dirt".into(),
@@ -360,6 +384,7 @@ impl Guest for Demo {
             water: material("demo:water"),
             mud: material("demo:mud"),
             wood: material("demo:wood"),
+            grass: material("demo:grass"),
             cube: shape("core:cube"),
             slab: shape("core:slab"),
             stair: shape("core:stair"),
@@ -376,12 +401,15 @@ impl Guest for Demo {
             let elapsed_s = (ctx.tick.saturating_sub(state.started_tick)) as f32 * ctx.dt_s;
             match state.stage {
                 Stage::Unbuilt => {
-                    log("demo first tick: wall, lantern post, lava and the scenarios in metres");
-                    let build = build(state);
-                    state.issued = voxels(&build, state.size_m);
+                    log("demo first tick: site, wall, lantern post, lava and the scenarios in metres");
+                    let mut all = site(state);
+                    all.extend(lifted(build(state)));
+                    state.issued = voxels(&all, state.size_m);
+                    state.queued = all.into();
                     state.stage = Stage::Building;
-                    build
+                    next_batch(state)
                 }
+                Stage::Building if !state.queued.is_empty() => next_batch(state),
                 Stage::Building if state.applied + state.rejected >= state.issued => {
                     log(&format!(
                         "demo build applied={} rejected={}",
@@ -390,20 +418,23 @@ impl Guest for Demo {
                     log("demo scenario: sources placed, fuel lit");
                     state.stage = Stage::Running;
                     state.started_tick = ctx.tick;
-                    start(state)
+                    lifted(start(state))
                 }
                 Stage::Running if elapsed_s >= DOUSE_S => {
                     log("demo scenario: water poured on the burning post");
                     state.stage = Stage::Doused;
                     vec![Command::PlaceSources(SourceFill {
-                        region: cell(state, (-23.0, 30.0, -7.0)),
+                        region: cell(state, (-23.0, 30.0 + LIFT_M, -7.0)),
                         material: state.water,
                     })]
                 }
                 Stage::Doused if elapsed_s >= DRY_S => {
                     log("demo scenario: the waterfall's source taken away");
                     state.stage = Stage::Dried;
-                    vec![Command::RemoveSources(cell(state, (22.0, 35.0, -7.0)))]
+                    vec![Command::RemoveSources(cell(
+                        state,
+                        (22.0, 35.0 + LIFT_M, -7.0),
+                    ))]
                 }
                 _ => vec![],
             }
@@ -415,15 +446,114 @@ fn log(message: &str) {
     tesserae::mods::host::log(LogLevel::Info, message);
 }
 
+/// The stage below was laid out on 28 m beams; it now stands on the site.
+fn lifted(commands: Vec<Command>) -> Vec<Command> {
+    let up = |p: Vec3| point(p.x, p.y + LIFT_M, p.z);
+    let raise = |r: BoxM| BoxM {
+        min: up(r.min),
+        max: up(r.max),
+    };
+    commands
+        .into_iter()
+        .map(|command| match command {
+            Command::Fill(f) => Command::Fill(Fill {
+                region: raise(f.region),
+                voxel: f.voxel,
+            }),
+            Command::Place(placements) => Command::Place(
+                placements
+                    .into_iter()
+                    .map(|p| Placement {
+                        at: up(p.at),
+                        voxel: p.voxel,
+                    })
+                    .collect(),
+            ),
+            Command::PlaceSources(f) => Command::PlaceSources(SourceFill {
+                region: raise(f.region),
+                material: f.material,
+            }),
+            Command::RemoveSources(r) => Command::RemoveSources(raise(r)),
+            Command::Ignite(r) => Command::Ignite(raise(r)),
+            Command::Extinguish(r) => Command::Extinguish(raise(r)),
+        })
+        .collect()
+}
+
+/// Queued build Commands up to the host's batch caps, in order.
+fn next_batch(state: &mut State) -> Vec<Command> {
+    let mut batch = Vec::new();
+    let mut total = 0;
+    while let Some(next) = state.queued.front() {
+        let n = voxels(std::slice::from_ref(next), state.size_m);
+        if !batch.is_empty() && (total + n > MAX_BATCH_VOXELS || batch.len() == MAX_BATCH_COMMANDS)
+        {
+            break;
+        }
+        total += n;
+        batch.extend(state.queued.pop_front());
+    }
+    batch
+}
+
+/// `make` over `region` cut along x into pieces within the fill cap.
+fn split(region: BoxM, size: f32, make: impl Fn(BoxM) -> Command) -> Vec<Command> {
+    let across = |a: f32, b: f32| ((b / size).ceil() - (a / size).ceil()).max(1.0);
+    let column = across(region.min.y, region.max.y) * across(region.min.z, region.max.z);
+    let step = (MAX_FILL_VOXELS as f32 / column).floor().max(1.0) * size;
+    let mut pieces = Vec::new();
+    let mut x = region.min.x;
+    while x < region.max.x {
+        let end = (x + step).min(region.max.x);
+        pieces.push(make(BoxM {
+            min: point(x, region.min.y, region.min.z),
+            max: point(end, region.max.y, region.max.z),
+        }));
+        x = end;
+    }
+    pieces
+}
+
+/// Levels the stage site: no lake water in it, ground to `SITE_TOP_M` with
+/// grass on top, and nothing above.
+fn site(state: &State) -> Vec<Command> {
+    let s = state.size_m;
+    let (x, z) = (SITE_X_M, SITE_Z_M);
+    let band = |low: f32, high: f32| region((x.0, low, z.0), (x.1, high, z.1));
+    let fill = |voxel: Voxel| move |region| Command::Fill(Fill { region, voxel });
+    let solid = |material| Voxel {
+        material,
+        shape: state.cube,
+        orientation: 0,
+    };
+    let air = Voxel {
+        material: 0,
+        shape: state.cube,
+        orientation: 0,
+    };
+    let mut commands = split(band(SITE_FLOOR_M, SITE_TOP_M), s, Command::RemoveSources);
+    commands.extend(split(
+        band(SITE_FLOOR_M, SITE_TOP_M - 1.0),
+        s,
+        fill(solid(state.stone)),
+    ));
+    commands.extend(split(
+        band(SITE_TOP_M - 1.0, SITE_TOP_M),
+        s,
+        fill(solid(state.grass)),
+    ));
+    commands.extend(split(band(SITE_TOP_M, SITE_CLEAR_M), s, fill(air)));
+    commands
+}
+
 /// One Voxel's region at a point in metres, at any Voxel size.
 fn cell(state: &State, at: (f32, f32, f32)) -> BoxM {
     let s = state.size_m;
     region(at, (at.0 + s, at.1 + s, at.2 + s))
 }
 
-/// Every solid, built before any fluid moves or fuel burns. Without a terrain
-/// read, foundations start below the 24..28 m terrain band and the scenarios
-/// stand on beams at 28 m, clear of it.
+/// Every solid, built before any fluid moves or fuel burns, laid out on beams
+/// at 28 m; `lifted` stands it on the site.
 fn build(state: &State) -> Vec<Command> {
     let s = state.size_m;
     let voxel = |material, shape, orientation| Voxel {

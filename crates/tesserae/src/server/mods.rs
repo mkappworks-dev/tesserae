@@ -8,7 +8,9 @@ use std::ffi::OsString;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::launch::Installed;
 use bevy::prelude::*;
+use tesserae_core::save::library::GameRef;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
@@ -80,6 +82,18 @@ impl LoadOptions {
     }
 }
 
+impl LoadOptions {
+    fn from_args(args: &[OsString]) -> Result<Option<Self>, String> {
+        Self::resolve(
+            args.iter().cloned(),
+            std::env::var_os("TESSERAE_MODS_DIR"),
+            std::env::var_os("TESSERAE_TRUST_MODS"),
+            tesserae_mods::default_mods_dir(),
+            dev_demo(),
+        )
+    }
+}
+
 /// Where `./scripts/build-guests` puts the demo, fixed at compile time because a `dev` binary
 /// runs from its own checkout whatever the working directory.
 fn dev_demo() -> Option<PathBuf> {
@@ -124,18 +138,15 @@ impl Default for LoadedMods {
 #[derive(Resource)]
 pub(super) struct WorldParameters(pub WorldgenParams);
 
-pub fn load_from_env(
+pub fn load_world(
+    args: &[OsString],
     world: &WorldSettings,
     opening: &super::persistence::Opening,
 ) -> Result<LoadedMods, String> {
-    let Some(options) = LoadOptions::resolve(
-        std::env::args_os().skip(1),
-        std::env::var_os("TESSERAE_MODS_DIR"),
-        std::env::var_os("TESSERAE_TRUST_MODS"),
-        tesserae_mods::default_mods_dir(),
-        dev_demo(),
-    )?
-    else {
+    if !opening.loads_mods() {
+        return Ok(LoadedMods::default());
+    }
+    let Some(options) = LoadOptions::from_args(args)? else {
         eprintln!("No Game: the demo is not built; run ./scripts/build-guests");
         return Ok(LoadedMods::default());
     };
@@ -149,6 +160,46 @@ pub fn load_from_env(
         &mut stdin.lock(),
         &mut io::stderr().lock(),
     )
+}
+
+pub fn installed(args: &[OsString]) -> Installed {
+    use crate::launch::Untrusted;
+    let options = match LoadOptions::from_args(args) {
+        Ok(Some(options)) => options,
+        Ok(None) => return Installed::none(None),
+        Err(e) => return Installed::none(Some(e)),
+    };
+    let found = match discover(&options.directory).and_then(plan) {
+        Ok(found) => found,
+        Err(e) => return Installed::none(Some(e.to_string())),
+    };
+    let game = found.iter().find(|f| f.manifest.root).map(|f| GameRef {
+        id: f.manifest.id.clone(),
+        version: f.manifest.version.clone(),
+    });
+    let mut untrusted = Vec::new();
+    if options.trust == TrustMode::None {
+        let trust = Trust::load(&options.trust_file);
+        for f in found {
+            match trust.check(&f) {
+                Ok(Verdict::Trusted(_)) => {}
+                Ok(_) => match Trust::hash_of(&f) {
+                    Ok(sha256) => untrusted.push(Untrusted {
+                        prompt: tesserae_mods::trust_prompt(
+                            &f.manifest,
+                            tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits),
+                            &sha256,
+                        ),
+                        found: f,
+                        sha256,
+                    }),
+                    Err(e) => return Installed::none(Some(e.to_string())),
+                },
+                Err(e) => return Installed::none(Some(e.to_string())),
+            }
+        }
+    }
+    Installed::new(game, untrusted, options.trust_file)
 }
 
 fn load_prompted(

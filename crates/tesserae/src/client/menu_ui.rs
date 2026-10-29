@@ -64,7 +64,7 @@ pub(super) fn matches(query: &str, text: &str) -> bool {
 #[derive(Component)]
 struct Shell;
 #[derive(Resource)]
-struct Mosaic(Handle<Image>);
+pub(super) struct Mosaic(pub(super) Handle<Image>);
 #[derive(Resource)]
 struct Fonts {
     _handles: Vec<Handle<Font>>,
@@ -245,6 +245,38 @@ pub(super) fn plugin(app: &mut App) {
             (shell, style).chain().after(super::settings::render),
         );
 }
+/// What the World list needs from the menu chrome, without the in-World menu.
+pub(super) fn launcher_chrome(app: &mut App) {
+    app.init_resource::<InputFocus>()
+        .add_systems(Startup, (make_logo, load_fonts, make_icons))
+        .add_systems(
+            PostUpdate,
+            materialize_icons.before(bevy::ui::UiSystems::Layout),
+        )
+        .add_systems(
+            Update,
+            (style, button_label_colors, danger_colors, age_notifications).chain(),
+        );
+}
+
+/// A destructive action: amber label and border instead of the neutral ones.
+#[derive(Component)]
+pub(super) struct Danger;
+
+fn danger_colors(
+    mut buttons: Query<(&Children, &mut BorderColor), With<Danger>>,
+    mut labels: Query<&mut TextColor>,
+) {
+    for (children, mut border) in &mut buttons {
+        *border = BorderColor::all(AMBER.with_alpha(0.6));
+        for child in children {
+            if let Ok(mut text) = labels.get_mut(*child) {
+                text.0 = AMBER;
+            }
+        }
+    }
+}
+
 fn focus(
     focus: Res<InputFocus>,
     fields: Query<(), With<SearchField>>,
@@ -1192,6 +1224,9 @@ fn notice_right_px(elapsed_s: f32, lifetime_s: f32) -> f32 {
     NOTICE_OFFSCREEN_PX + (NOTICE_INSET_PX - NOTICE_OFFSCREEN_PX) * eased
 }
 pub(super) fn notify(commands: &mut Commands, message: &str, tone: Tone) {
+    notify_for(commands, message, tone, 2.6);
+}
+pub(super) fn notify_for(commands: &mut Commands, message: &str, tone: Tone, seconds: f32) {
     let accent = tone.accent();
     commands.queue(|world: &mut World| {
         let previous: Vec<_> = world
@@ -1204,7 +1239,7 @@ pub(super) fn notify(commands: &mut Commands, message: &str, tone: Tone) {
     });
     commands
         .spawn((
-            Notification(Timer::from_seconds(2.6, TimerMode::Once)),
+            Notification(Timer::from_seconds(seconds, TimerMode::Once)),
             GlobalZIndex(40),
             Node {
                 position_type: PositionType::Absolute,

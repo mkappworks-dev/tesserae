@@ -16,6 +16,7 @@ mod help;
 mod history;
 mod hotbar_store;
 mod input;
+mod loading;
 mod material_textures;
 mod menu;
 mod menu_ui;
@@ -33,6 +34,7 @@ mod save;
 mod settings;
 mod tile_preview;
 mod view;
+pub mod worlds;
 
 use bevy::prelude::*;
 
@@ -66,7 +68,13 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
-    app.add_plugins(view::plugin);
+    app.add_plugins((view::plugin, loading::plugin));
+    app.add_systems(
+        Update,
+        (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))
+            .run_if(chunk_view::terrain_arrived)
+            .run_if(not(resource_exists::<loading::TerrainArrived>)),
+    );
     #[cfg(feature = "dev")]
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
