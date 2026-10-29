@@ -1893,6 +1893,7 @@ fn binding_order(action: Action) -> usize {
         Descend,
         Sprint,
         Respawn,
+        MovementMode,
         Faster,
         Slower,
         Place,
@@ -2332,6 +2333,14 @@ mod tests {
         assert!(Store::load(path.clone()).2.invert_y);
         std::fs::remove_file(path).unwrap();
     }
+    #[test]
+    fn every_action_has_a_place_on_both_binding_pages() {
+        let bindings = Bindings::default();
+        for action in bindings.keyboard.keys().chain(bindings.pad.keys()) {
+            binding_order(*action);
+        }
+    }
+
     #[test]
     fn pad_capture_takes_only_pad_buttons_and_controller_reset_spares_the_keyboard() {
         use bevy::input::gamepad::GamepadButton;
