@@ -99,32 +99,24 @@ Instructions/cues reflect current bindings and behavior preferences.
 
 ## Catalogue and readable UI
 
-Preserve existing mouse quick-hold, drag/drop and number shortcuts. Add
-visible Hold and Assign to slot operations for keyboard/touch selections.
-Provide focus navigation, activation and cancellation without virtual mouse
-input. Restore focus after settings/dialogs. Hover/drag cannot be required.
+The user accepted the existing main catalogue/menu behavior as complete for
+tickets 05 and 06 after reverting the expanded PR 3 UI. Their narrowed ticket
+scopes supersede this section's earlier additional requirements. No further
+catalogue redesign or expanded search/sizing work is implied by these tickets.
 
-Search declared Material/Shape names. Filters are All, Solids, Fluids, Fire
-and Mod. New Game-authored categories are later content-contract work.
-Remember search, filters, scroll and selection within the same World session;
-opening another World resets them.
+Keep mouse quick-hold, visible Assign to slot, drag/drop and number shortcuts.
+Selecting content keeps Catalogue open; choosing a Shape updates the held
+variation. Clicking the held content again or Clear selection empties the hand.
+An explicit Material selection pins its Shape panel while other entries may
+still highlight on hover. Keep drag sources alive until completion.
 
-An explicit Material selection keeps its Shape panel while the pointer
-passes other tiles. Hover may highlight/preview without replacing it.
-Keyboard/controller focus selects the corresponding panel. Keep source
-entities stable during drag and focus stable across rebuilds.
-
-Show readable short names on tiles and full namespaced identity in focused
-details/tooltips. Visibly distinguish duplicate names from different Mods.
-Support UI scale and label sizing while preserving the default appearance.
-The quick-slot footer stays fixed; use horizontal scrolling rather than
-unreachable slots in narrow/enlarged layouts. Use text/icons as well as colour
-for validity, selection and refusals.
-
-Engineering validation matrix: 1024 x 640 logical at 100%, and 1280 x 720 /
-1920 x 1080 at 100/150/200% UI scale. Touch targets are at least 44 logical
-pixels with spacing. Keep all required actions reachable without clipping.
-Catalogue/settings leave Server simulation running. Pausing is separate work.
+Search declared Material names with the existing editor and empty-result
+feedback. Retain search text across menu pages, and keep typing isolated from
+gameplay input. Use the existing short tile labels, full Material identity in
+details and named Shape choices. Preserve wrapping cards, the fixed quick-slot
+footer and its horizontal scrolling. Catalogue/settings leave Server simulation
+running. Pausing is separate work. Controller and desktop-touch journeys remain
+in their separately planned scopes below.
 
 ## Desktop controller and touch
 
@@ -149,11 +141,13 @@ touch hardware is required for support acceptance.
 
 ## Creative organization and interaction
 
-The first inventory PR is unlimited creative selection/organization, not
-finite owned stacks. Keep nine shortcuts plus temporary outside selection;
-no bag grid or extra hotbar pages. Add explicit Clear slot and Swap actions.
-Clearing removes a shortcut, not content; X empties only the hand. Dropping
-a drag outside a valid slot cancels it rather than implicitly deleting it.
+The user accepted the existing creative shortcut workflow as complete for
+ticket 17. Its narrowed scope supersedes earlier additional organization-UI
+requirements. Keep nine shortcuts plus temporary outside selection, with no
+bag grid or extra pages. X and Clear selection empty only the hand. Existing
+assignment and drag/drop replace or swap shortcuts; an invalid outside drop
+cancels rather than deleting a shortcut. No further slot-operation UI is
+required by this completed ticket.
 
 Save arrangements per Game using stable Material/Shape names and Orientation.
 Restore across restarts; missing content is visibly empty, not a different
@@ -330,8 +324,9 @@ this Mac's injected input tests can satisfy.
   of timing quantization, never duplicate actions or transferred hold progress.
 - Test focus/menu/device changes, capture clicks, simultaneous inputs,
   cancellation, settings Apply/Cancel/conflicts/reset and corrupt profiles.
-- Exercise complete keyboard, controller and touch catalogue journeys,
-  long/missing/duplicate names, empty Game content and the UI size matrix.
+- Exercise the accepted catalogue selection/assignment, Material search and
+  retained main layout. Controller/touch journeys belong to their later
+  tickets; they do not reopen the completed catalogue scope.
 - Test save/load/evict/reopen, dirty-save races, partial writes/recovery,
   missing content, same-seed separate Worlds and random/edge seed inputs.
   Verify no startup construction overwrites a reopened edited demo World.

@@ -16,7 +16,7 @@ The PR 1 session was launched with Sol High.
 | --- | --- | --- | --- | --- |
 | 1 | Profiling and release benchmarks (merged as #22) | 11–12 | Sol | High |
 | 2 | Input, actions, controls and display settings | 01–04, 28 | Terra | Medium |
-| 3 | Catalogue accessibility, search and creative organization | 05–06, 17 | Terra | Medium |
+| 3 | Catalogue/creative scope completed against accepted main | 05–06, 17 | Terra | Medium |
 | 4 | Save schema, lifecycle and durable World state | 22–23 | Sol | High |
 | 5 | Flight and physics movement | 24 | Sol | High |
 | 6 | Character and first/third-person cameras | 25–26 | Terra | Medium |
@@ -64,3 +64,17 @@ The local T3 catalog confirms both models and Medium/High settings are
 available. Official guidance recommends evaluating reasoning effort against
 quality, latency and cost rather than assuming more effort is always better:
 [Reasoning guide](https://developers.openai.com/api/docs/guides/reasoning).
+
+
+## Catalogue worktree outcome
+
+The user requested reverting all PR 3 menu UI changes. Menu, settings,
+profile UI and input behavior match merged main `4b86e43`. The user then
+accepted that existing behavior as the completed scope of tickets 05, 06 and
+17. All three are marked done; their expanded, unimplemented requirements
+are removed rather than carried forward as pending work. Only a non-UI
+hotbar failed-write retry correction remains as new source in PR #25.
+
+The user subsequently authorized consolidating the remaining changes into
+one commit, pushing the branch and opening a focused bug-fix PR. Merge is
+not authorized. See [current validation](pr3-implementation-validation.md).

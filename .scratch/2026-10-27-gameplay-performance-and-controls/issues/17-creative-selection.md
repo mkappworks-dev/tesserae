@@ -1,65 +1,44 @@
-# 17: I0: Creative organization and per-Game shortcuts
+# 17: I0: Creative shortcuts and per-Game arrangements
 
-Status: needs-triage
-Blocked by: 03, 06
+Status: done
 
-Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: I0; keep this separate from other PR scopes.
+Spec: [creative organization](../spec.md#creative-organization-and-interaction).
+Implementation: merged PR #24, main `4b86e43`.
 
-## What to build
+## Completed scope
 
-Keep nine quick slots and temporary outside-held selection. Add explicit
-Clear/Swap; clearing removes a shortcut, X empties only the hand and invalid
-drag drops cancel. Save arrangements per Game using stable content/Shape
-names and Orientation; missing content is visibly empty. Do not save the
-temporary held selection or introduce bag pages, quantities or resources.
-Keep read-only sampling and current creative placement Server paths.
+Use nine quick slots plus a temporary outside-held selection. Catalogue clicks
+and read-only sampling can choose content without overwriting assigned slots.
+X and Clear selection empty only the hand. Existing assignment and drag/drop
+replace shortcuts; dragging one slot onto another swaps them. Invalid outside
+and cancelled drops leave the arrangement intact.
+
+Persist the nine slots and active slot per Game using stable Material/Shape
+names and Orientation. Missing content resolves to empty, never to unrelated
+content at a reused runtime id. Temporary outside-held selection is not saved.
+These are creative shortcuts, separate from global controls and World saves.
 
 ## Acceptance criteria
 
-- [ ] X/sample/outside selection preserve all assigned shortcuts.
-- [ ] Clear/swap/select/return journeys work with each supported input path.
-- [ ] Restart/content-order/missing-content cases never alias runtime ids.
-- [ ] No stacks, consumption, drops or physical pickup are introduced.
+- [x] Exactly nine quick slots and temporary outside selection are supported.
+- [x] X, Clear selection, sampling and outside selection preserve assigned
+      slots.
+- [x] Existing assignment, drag-swap and slot-selection journeys work.
+- [x] Invalid or cancelled outside drops do not delete shortcuts.
+- [x] Restart, reordered ids and missing content retain stable content identity
+      and Orientation per Game.
+- [x] Outside-held selection remains transient.
+- [x] Read-only sampling and Server placement retain their existing paths.
+- [x] No stacks, consumption, pickup or owned inventory is introduced.
 
-## Validation and authorization
+## Completion decision
 
-Use behavior/intent regressions and the spec's build/review requirements.
-Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
-Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+The user accepted the existing main behavior as complete and removed the
+additional organization UI from scope. This narrowed scope is authoritative;
+no new slot-operation controls remain pending in this ticket. Do not restore
+the reverted PR 3 UI as follow-up work.
 
-## Comments
-
-### 2026-10-27: repository-based triage
-
-Draft scope/acceptance require grilling; do not begin implementation.
-
-### Readiness correction
-
-The user identified that the design had not been grilled. This ticket is a
-draft candidate; desktop-only is a platform constraint, not design approval.
-Do not implement until the relevant decisions and readiness are established.
-
-### Grilling decision: creative organization first
-
-The user selected unlimited creative selection/quick-slot organization for
-the first inventory PR. Finite owned stacks, consumption and physical pickup
-remain later work. Organization/persistence choices are in the next round.
-
-### Reconciled after the completed interview
-
-The current spec and What to build section supersede historical draft
-alternatives above. Readiness awaits the final shared-understanding check.
-
-
-### 2026-10-29: targeted restart-persistence authorization
-
-The user reported that hotbar changes disappear after restarting and explicitly
-requested the fix while preparing PR 2. That authorizes only the restart
-persistence subset here: nine assigned slots, active slot, stable names and
-Orientation per Game, missing-content and failure handling. Temporary outside
-selection remains unsaved. This does not mark the rest of ticket 17 complete or
-authorize unrelated organization/inventory features. PR 2 includes this targeted
-fix alongside the previously authorized controls/UI work.
+PR #25 separately hardens failed hotbar writes so they can retry without a new
+layout edit. That fix does not change the accepted menu workflow or format.
+Existing restart/name/Orientation/Game-isolation and write-failure regressions
+are recorded in [final validation](../pr3-implementation-validation.md).
