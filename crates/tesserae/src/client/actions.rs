@@ -20,6 +20,9 @@ pub(super) enum Action {
     Sprint,
     Respawn,
     MovementMode,
+    View,
+    ZoomIn,
+    ZoomOut,
     Faster,
     Slower,
     Remove,
@@ -67,14 +70,28 @@ pub(super) enum Trigger {
     Key(KeyCode),
     Mouse(MouseButton),
     Pad(GamepadButton),
+    Wheel(Wheel),
 }
 impl Trigger {
     pub fn device(self) -> Device {
         match self {
-            Self::Key(_) | Self::Mouse(_) => Device::KeyboardMouse,
+            Self::Key(_) | Self::Mouse(_) | Self::Wheel(_) => Device::KeyboardMouse,
             Self::Pad(_) => Device::Pad,
         }
     }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum Wheel {
+    Up,
+    Down,
+}
+/// Which way the wheel turned a whole notch this frame. A wheel trigger is
+/// pressed for that frame only.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) struct WheelPress {
+    pub up: bool,
+    pub down: bool,
 }
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -125,6 +142,7 @@ pub(super) struct Inputs<'a> {
     pub keys: &'a ButtonInput<KeyCode>,
     pub mouse: &'a ButtonInput<MouseButton>,
     pub pad: &'a ButtonInput<GamepadButton>,
+    pub wheel: WheelPress,
 }
 impl Inputs<'_> {
     pub fn pressed(&self, trigger: Trigger) -> bool {
@@ -132,6 +150,8 @@ impl Inputs<'_> {
             Trigger::Key(key) => self.keys.pressed(key),
             Trigger::Mouse(button) => self.mouse.pressed(button),
             Trigger::Pad(button) => self.pad.pressed(button),
+            Trigger::Wheel(Wheel::Up) => self.wheel.up,
+            Trigger::Wheel(Wheel::Down) => self.wheel.down,
         }
     }
     pub fn just_pressed(&self, trigger: Trigger) -> bool {
@@ -139,6 +159,8 @@ impl Inputs<'_> {
             Trigger::Key(key) => self.keys.just_pressed(key),
             Trigger::Mouse(button) => self.mouse.just_pressed(button),
             Trigger::Pad(button) => self.pad.just_pressed(button),
+            // Each notch is a fresh press, even in consecutive frames.
+            Trigger::Wheel(_) => self.pressed(trigger),
         }
     }
 }
@@ -236,6 +258,7 @@ impl Bindings {
             (Sprint, KeyCode::ShiftLeft),
             (Respawn, KeyCode::KeyR),
             (MovementMode, KeyCode::KeyV),
+            (View, KeyCode::F5),
             (Faster, KeyCode::Equal),
             (Slower, KeyCode::Minus),
             (Sample, KeyCode::KeyP),
@@ -267,6 +290,18 @@ impl Bindings {
             trigger: Trigger::Mouse(MouseButton::Middle),
             modifier: Modifier::None,
         });
+        for (action, wheel) in [(ZoomIn, Wheel::Up), (ZoomOut, Wheel::Down)] {
+            bindings.insert(
+                action,
+                [
+                    Some(Binding {
+                        trigger: Trigger::Wheel(wheel),
+                        modifier: Modifier::Alt,
+                    }),
+                    None,
+                ],
+            );
+        }
         bindings.insert(
             Undo,
             [
@@ -337,6 +372,9 @@ pub(super) struct Actions {
     reserved_cancel: bool,
     prior_effective_held: HashSet<Action>,
     pub axes: Axes,
+    pub wheel: WheelPress,
+    /// A trackpad's part of a notch, kept until it makes a whole one.
+    wheel_carry: f32,
 }
 impl Actions {
     pub fn consume_cancel(&mut self) {
@@ -354,6 +392,20 @@ impl Actions {
     }
     pub fn held(&self, action: Action) -> bool {
         self.state(action).held
+    }
+    fn press_wheel(&mut self) -> WheelPress {
+        for delta in &self.axes.scroll {
+            if delta.started || delta.notches * self.wheel_carry < 0.0 {
+                self.wheel_carry = 0.0;
+            }
+            self.wheel_carry += delta.notches;
+        }
+        let whole = self.wheel_carry.trunc();
+        self.wheel_carry -= whole;
+        WheelPress {
+            up: whole > 0.0,
+            down: whole < 0.0,
+        }
     }
     pub fn cancel(&mut self, action: Action) {
         let previously_held = self.prior_effective_held.contains(&action);
@@ -456,6 +508,8 @@ impl Labels {
             }),
             Trigger::Mouse(button) => format!("{button:?} mouse"),
             Trigger::Pad(button) => self.pad(button),
+            Trigger::Wheel(Wheel::Up) => "Wheel up".into(),
+            Trigger::Wheel(Wheel::Down) => "Wheel down".into(),
         };
         let modifier = match binding.modifier {
             Modifier::None => "",
@@ -558,12 +612,6 @@ fn collect(
     motion: Option<Res<AccumulatedMouseMotion>>,
     mut wheel: MessageReader<MouseWheel>,
 ) {
-    let inputs = Inputs {
-        keys: &keys,
-        mouse: &mouse,
-        pad: &pad.buttons,
-    };
-    actions.resolve(&bindings, inputs, pad.cancel);
     actions.axes.look = motion.map_or(Vec2::ZERO, |motion| motion.delta);
     actions.axes.look_rate = pad.look;
     actions.axes.movement = pad.movement;
@@ -578,6 +626,24 @@ fn collect(
             },
             started: event.phase == TouchPhase::Started,
         }));
+    actions.wheel = actions.press_wheel();
+    let inputs = Inputs {
+        keys: &keys,
+        mouse: &mouse,
+        pad: &pad.buttons,
+        wheel: actions.wheel,
+    };
+    actions.resolve(&bindings, inputs, pad.cancel);
+    // A bound wheel chord owns the wheel: it never also steps the quick slots.
+    let chorded = bindings
+        .keyboard
+        .values()
+        .flatten()
+        .flatten()
+        .any(|binding| matches!(binding.trigger, Trigger::Wheel(_)) && binding.active(inputs));
+    if chorded {
+        actions.axes.scroll.clear();
+    }
 }
 
 #[cfg(test)]
@@ -603,8 +669,71 @@ mod tests {
             keys,
             mouse,
             pad: &NO_PAD,
+            wheel: WheelPress::default(),
         }
     }
+
+    fn wheel(app: &mut App, y: f32, unit: MouseScrollUnit, phase: TouchPhase) {
+        app.world_mut().write_message(MouseWheel {
+            unit,
+            x: 0.0,
+            y,
+            window: Entity::PLACEHOLDER,
+            phase,
+        });
+        app.update();
+    }
+
+    #[test]
+    fn an_alt_wheel_zooms_once_per_notch_and_never_also_steps_the_slots() {
+        let mut app = App::new();
+        app.add_plugins(test_plugin);
+        let line = |app: &mut App, y| wheel(app, y, MouseScrollUnit::Line, TouchPhase::Moved);
+        line(&mut app, 1.0);
+        let actions = app.world().resource::<Actions>();
+        assert!(
+            !actions.started(ZoomIn),
+            "a plain wheel is the quick slots'"
+        );
+        assert_eq!(actions.axes.scroll.len(), 1);
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::AltLeft);
+        for _ in 0..3 {
+            line(&mut app, 1.0);
+            let actions = app.world().resource::<Actions>();
+            assert!(actions.started(ZoomIn), "each notch, even back to back");
+            assert!(!actions.started(ZoomOut));
+            assert!(actions.axes.scroll.is_empty(), "the chord owns the wheel");
+        }
+        line(&mut app, -1.0);
+        assert!(app.world().resource::<Actions>().started(ZoomOut));
+        app.update();
+        assert!(
+            !app.world().resource::<Actions>().held(ZoomOut),
+            "a notch lasts a frame"
+        );
+    }
+
+    #[test]
+    fn a_trackpad_zooms_once_its_pixels_make_a_notch() {
+        let mut app = App::new();
+        app.add_plugins(test_plugin);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::AltRight);
+        let pixels = |app: &mut App, y, phase| wheel(app, y, MouseScrollUnit::Pixel, phase);
+        pixels(&mut app, 60.0, TouchPhase::Started);
+        assert!(!app.world().resource::<Actions>().started(ZoomIn));
+        pixels(&mut app, 60.0, TouchPhase::Moved);
+        assert!(app.world().resource::<Actions>().started(ZoomIn));
+        // A new gesture drops what the last one left over.
+        pixels(&mut app, 30.0, TouchPhase::Moved);
+        pixels(&mut app, 80.0, TouchPhase::Started);
+        assert!(!app.world().resource::<Actions>().started(ZoomIn));
+    }
+
     #[test]
     fn both_sides_and_both_default_redo_gestures_resolve_once() {
         let bindings = Bindings::default();

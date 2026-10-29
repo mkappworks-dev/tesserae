@@ -140,6 +140,12 @@ bounded at load. The Client poses it from the body state the Server publishes
 with each Eye and draws the engine's plain box when the Game declares none
 ([ADR-0008](adr/0008-the-server-owns-the-players-pose.md)).
 
+Third-person is Client presentation. The camera sits over the shoulder and is
+kept out of terrain by sweeps against the drawn faces of Chunk meshes the Client
+was sent. The Server accepts a ray from that camera but judges reach and sight
+from the Eye, answering `Blocked` for what only the camera can see
+([ADR-0008](adr/0008-the-server-owns-the-players-pose.md)).
+
 The Server also supplies removal target identity and bounds. The Client draws a
 progress bar above it and sends a guarded removal after the Material's hold
 time. This is a gesture guard, not a network anti-cheat timer. The unreleased

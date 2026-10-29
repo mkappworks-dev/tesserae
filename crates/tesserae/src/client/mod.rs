@@ -32,6 +32,7 @@ mod removal;
 mod save;
 mod settings;
 mod tile_preview;
+mod view;
 
 use bevy::prelude::*;
 
@@ -65,6 +66,7 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
+    app.add_plugins(view::plugin);
     #[cfg(feature = "dev")]
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),

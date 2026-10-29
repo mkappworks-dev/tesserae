@@ -66,18 +66,18 @@ is Client presentation; aim stays a Server answer.
 
 ## Acceptance criteria
 
-- [ ] F5 toggles in flight and physics, in every World, without moving the
+- [x] F5 toggles in flight and physics, in every World, without moving the
       body.
-- [ ] Client sweeps against received meshes prevent terrain clipping near
+- [x] Client sweeps against received meshes prevent terrain clipping near
       walls, in a one-Voxel corridor, during fast turns and zoom
       transitions, with no frame of lag. The camera passes into water. The
       avatar hides below 0.8 m.
-- [ ] Aim uses the camera ray with Eye reach and occlusion. A blocked target
+- [x] Aim uses the camera ray with Eye reach and occlusion. A blocked target
       shows no outline, dims the crosshair, toasts on activation and never
       edits around a corner. First-person aim is unchanged.
-- [ ] Wheel selects slots; Alt+wheel zooms in third-person and is swallowed
+- [x] Wheel selects slots; Alt+wheel zooms in third-person and is swallowed
       in first-person; no competing action fires.
-- [ ] View mode and zoom survive restart through the user profile; an older
+- [x] View mode and zoom survive restart through the user profile; an older
       profile defaults to first-person; the World save is unchanged.
 - [ ] ADR-0008 amended. Tests replay at 60/144/1000 render updates and
       1/0.5/0.25 m Voxels.
@@ -135,3 +135,24 @@ Seams with parallel work:
 - PR 8 (tickets 20–21): the measurement tool reuses this PR's camera-ray aim
   validation and `Blocked` refusal. Whichever lands second adopts the
   other's aim contract. No Use action is added here.
+
+### Local outcome, 2026-10-29
+
+Implemented in the second commit. Full scripts/cargo-ci passed: 992 tests,
+zero failures, six ignored. Tests cover camera-ray reach from the Eye, what
+lies between camera and Player, Blocked corners (refusal and aim answer), the
+origin bound, wheel chords and trackpad notches, view toggle/zoom/profile save,
+older and invalid profiles, and placement against a mesh wall with ease-out.
+
+Still open: ADR-0008 is amended, but the view/avatar tests do not yet replay at
+60/144/1000 render updates and 1/0.5/0.25 m Voxels; captures for underwater
+and a blocked corner target were not taken (both covered only by tests); user
+review, the release first-person A/B and the third-person P0 profiler run are
+outstanding. Captures and binary: /tmp/tesserae-pr6-review.TXrDxF.
+
+Adjacent fixes: the Controls list ordering lacked MovementMode on main, so the
+Movement tab panicked on unwrap; now every action has a place and a test
+checks it. Profile writes now add a counter to their temporary file name, as
+microsecond macOS clocks let parallel writers collide (a flaky settings test).
+A spawn-side overhang 0.7 m behind the demo start collapses the boom there by
+design; boom-collapse.png shows it.

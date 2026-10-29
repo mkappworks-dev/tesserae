@@ -29,11 +29,12 @@ The demo allows both modes and starts physics. Without Game policy, generated
 ground defaults physics and an empty World retains flight. The Server also
 checks policy while advancing an existing body, so a forbidden mode freezes.
 
-**Reach and aim retain their existing guards.** Edit arrival checks its origin
-against the Server Eye with `EDIT_ORIGIN_TOLERANCE_M`; its ray is shortened by
-that origin's distance so the hit stays within `EDIT_REACH_M`. A queued Edit
-keeps its arrival decision. Respawn is a Server request that clears movement,
-vertical velocity and grounded state. Changing view cannot move the body.
+**Reach and aim are judged from the Eye.** Edit arrival checks its origin
+against the Server Eye with `EDIT_ORIGIN_BOUND_M`, and only the part of the ray
+within `EDIT_REACH_M` of the Eye is traced (see Third-person view below). A
+queued Edit keeps its arrival decision. Respawn is a Server request that clears
+movement, vertical velocity and grounded state. Changing view cannot move the
+body.
 
 ## Persistence and presentation
 
@@ -44,9 +45,9 @@ refuse these new nonempty extensions rather than silently losing movement data.
 Velocity, grounded state, held input and jump edges restart empty. Reopening
 keeps the generated respawn point separate from the saved entry Eye.
 
-Save dirtiness and completion compare position, mode and view. Save & Quit
-freezes movement before taking its final snapshot. First-person orientation is
-restored without introducing camera offsets or a third-person camera.
+Save dirtiness and completion compare position, mode and orientation. Save &
+Quit freezes movement before taking its final snapshot. Orientation is restored;
+the view mode is not World state (see below).
 
 Capture fixtures send normal movement intents and explicitly select flight by
 default, or physics with `TESSERAE_FIXTURE_MOVEMENT=physics`. Permissions still
@@ -98,3 +99,29 @@ whose Game declares none, including an empty World, gets the engine's untextured
 box at the body's size. The head turns up to 50° ahead of a standing body before
 it follows, and a moving body faces the look. A crouch scales the figure to the
 crouched body's 1.2 m, since a box limb cannot kneel.
+
+## Third-person view and aim
+
+The view is Client presentation. The Server never learns whether the Client is
+in first- or third-person; the choice and the zoom are a user preference kept in
+the user profile, not in any World save. Toggling the view never moves the body.
+
+The third-person camera sits over the right shoulder, 0.5 m right and 0.3 m up
+in the camera's frame, then up to 6 m back along the look. On the look line
+itself the figure's head would cover the crosshair's target. The Client keeps
+the camera out of terrain by sweeping a 0.1 m sphere against the opaque and
+cutout faces of the level-0 Chunk meshes it was sent, never World storage: what
+it collides with is what is drawn, so water and glass let it through and
+unloaded terrain has nothing to clip. A wall pulls the camera in at once; it
+eases back out. Closer than 0.8 m it would be inside the head, so the figure is
+hidden.
+
+An Edit's ray may start at the camera: within `CAMERA_OFFSET_MAX_M` (7 m) plus
+the 2 m staleness tolerance of the Eye, whatever the view. The Server traces
+from where the ray passes nearest the Eye, so nothing between the camera and the
+Player is aimed at, and only for as long as the ray stays within `EDIT_REACH_M`
+of the Eye. When the trace starts off the Eye, the Server also casts from the
+Eye to the struck point: a solid in between refuses the Edit as `Blocked`, and
+the aim answer says so, so the Client draws no outline or ghost and dims the
+crosshair. The camera offset therefore never adds reach or sight around a
+corner. A first-person ray starts at the Eye and is traced as before.

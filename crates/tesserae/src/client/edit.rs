@@ -269,13 +269,20 @@ pub(super) fn plugin(app: &mut App) {
             (
                 receive_catalogue,
                 select_held.after(super::input::resolve),
-                // Present the authoritative Eye before constructing an Edit ray.
-                send_intents.after(super::pose::apply_correction),
+                // Place the camera at the authoritative Eye, or behind it, before
+                // constructing an Edit ray from it.
+                send_intents.after(super::view::place),
                 show_rejections,
             )
                 .chain(),
         );
 }
+
+#[derive(Component)]
+pub(super) struct Crosshair;
+pub(super) const CROSSHAIR_ALPHA: f32 = 0.8;
+/// While the Server reports the camera sees past what the Eye can.
+pub(super) const BLOCKED_CROSSHAIR_ALPHA: f32 = 0.3;
 
 fn spawn_hud(mut commands: Commands) {
     let font = |size| TextFont {
@@ -292,9 +299,10 @@ fn spawn_hud(mut commands: Commands) {
             ..default()
         })
         .with_child((
+            Crosshair,
             Text::new("+"),
             font(22.0),
-            TextColor(Color::srgba(1.0, 1.0, 1.0, 0.8)),
+            TextColor(Color::srgba(1.0, 1.0, 1.0, CROSSHAIR_ALPHA)),
         ));
 }
 

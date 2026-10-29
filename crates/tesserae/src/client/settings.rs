@@ -1,6 +1,6 @@
 //! Draft preferences become active only after a successful Apply.
 use super::{
-    actions::{Action, Binding, Bindings, Device, Modifier, Trigger},
+    actions::{Action, Binding, Bindings, Device, Modifier, Trigger, Wheel},
     profile::{Preferences, Store},
 };
 use bevy::{
@@ -534,7 +534,7 @@ pub(super) fn capture(
         return;
     }
     let binding = match device {
-        Device::KeyboardMouse => keyboard_binding(&keys, &mouse),
+        Device::KeyboardMouse => keyboard_binding(&keys, &mouse, actions.wheel),
         Device::Pad => {
             use bevy::input::gamepad::GamepadButton;
             let mut buttons: Vec<_> = pad
@@ -571,6 +571,7 @@ pub(super) fn capture(
 fn keyboard_binding(
     keys: &ButtonInput<KeyCode>,
     mouse: &ButtonInput<MouseButton>,
+    wheel: super::actions::WheelPress,
 ) -> Option<Binding> {
     let modifier_key = |key: KeyCode| {
         matches!(
@@ -591,6 +592,8 @@ fn keyboard_binding(
         .copied()
         .map(Trigger::Key)
         .chain(mouse.get_just_pressed().copied().map(Trigger::Mouse))
+        .chain(wheel.up.then_some(Trigger::Wheel(Wheel::Up)))
+        .chain(wheel.down.then_some(Trigger::Wheel(Wheel::Down)))
         .collect();
     if triggers.is_empty() {
         triggers.extend(
@@ -687,6 +690,9 @@ pub(super) fn action_name(action: Action) -> &'static str {
         Sprint => "Sprint",
         Respawn => "Respawn",
         MovementMode => "Switch flight / physics",
+        View => "Switch first / third person",
+        ZoomIn => "Third-person zoom in",
+        ZoomOut => "Third-person zoom out",
         Faster => "Increase flight speed",
         Slower => "Decrease flight speed",
         Remove => "Remove",
@@ -719,7 +725,7 @@ pub(super) fn category(action: Action) -> &'static str {
     use Action::*;
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
-        | Slower | MovementMode => "Movement",
+        | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
         Place | Remove | Sample | EmptyHand | Shape | Turn | Flip => "Building",
         _ => "Interface",
     }
@@ -1896,6 +1902,9 @@ fn binding_order(action: Action) -> usize {
         MovementMode,
         Faster,
         Slower,
+        View,
+        ZoomIn,
+        ZoomOut,
         Place,
         Remove,
         Sample,
@@ -1939,6 +1948,14 @@ fn binding_display(value: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_bindable_action_has_a_place_in_the_controls_list() {
+        for action in super::super::actions::Bindings::default().keyboard.keys() {
+            binding_order(*action);
+            assert!(!action_name(*action).is_empty());
+        }
+    }
     fn app() -> App {
         let mut app = App::new();
         app.init_resource::<super::super::actions::Actions>()

@@ -50,16 +50,16 @@ Mod-driven custom animations.
 
 ## Acceptance criteria
 
-- [ ] The Bedrock-shaped declaration (bones, pivots, cubes, box-UV, at most
+- [x] The Bedrock-shaped declaration (bones, pivots, cubes, box-UV, at most
       16 cubes, one skin of at most 64×64) is refused when out of bounds; no
       named character in Engine; guests/demo rebuilt.
-- [ ] A World without a declared character shows the Engine fallback box at
+- [x] A World without a declared character shows the Engine fallback box at
       the current body dimensions.
-- [ ] Poses follow the published body snapshot (idle, move, sprint,
+- [x] Poses follow the published body snapshot (idle, move, sprint,
       airborne, crouch), flight stays idle, and nothing drifts from authority.
-- [ ] Limbs rotate about their pivots; the head leads by at most 50° while
+- [x] Limbs rotate about their pivots; the head leads by at most 50° while
       standing, and the body snaps to look yaw while moving.
-- [ ] First-person: no body, corner model unchanged. Third-person: corner
+- [x] First-person: no body, corner model unchanged. Third-person: corner
       model hidden.
 - [ ] Native captures reviewed by the user. A matched release first-person
       A/B against main shows no regression.
@@ -96,3 +96,17 @@ Seams with parallel work:
   in-hand item or tool animation is added here.
 - The 0.3 World declaration gains a character record beside the movement
   policy. Any other branch extending that record rebases onto the other.
+
+### Local outcome, 2026-10-29
+
+Implemented in commit 2c759d7. Full scripts/cargo-ci passed on the final tree
+(with ticket 26): 992 tests, zero failures, six ignored measurements; log at
+/tmp/tesserae-pr6-review.TXrDxF/cargo-ci.log. Unit tests cover declaration
+bounds, the fallback box, state poses, head lead, crouch fit and box-UV
+winding.
+
+Native offscreen captures (dev binary, 1920 x 1080, unchanged quality) are in
+/tmp/tesserae-pr6-review.TXrDxF: third-default, walk, sprint, jump, crouch,
+flight-idle, fallback-empty-world and first-person. The sprint frame happens to
+catch the swing near vertical. User visual review and the matched release
+first-person A/B are still open, so the last criterion stays unticked.
