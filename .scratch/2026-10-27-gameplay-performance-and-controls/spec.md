@@ -195,6 +195,13 @@ terrain; distinct seeds need not produce distinct terrain. Changing an
 existing World's seed in place is not supported. Different Worlds may share
 a name/seed without sharing save identity or overwriting each other.
 
+Ticket 27's 2026-10-29 grilling fixed the details: the list re-execs the
+process per World (in-process sessions are ticket 29), folders get readable
+names with a sidecar beside unchanged commits, Delete uses the OS Trash,
+Create offers the tested Voxel sizes under More World options, and the World
+screens are mouse/keyboard only until tickets 07 and 08–10 add their
+journeys. Multiple installed Games are ticket 30.
+
 Use the current terrain generator initially; new biomes/terrain styles are
 separate work. Audit full-range seed arithmetic, including the known fbm2
 overflow boundary, before exposing unrestricted random/custom input. Keep
@@ -303,6 +310,8 @@ threads are planned. Touch is not first by default.
 | 22 | S0: World save/lifecycle schema | agreed save policy |
 | 23 | S1: durable World/simulation changes | S0 |
 | 27 | W0: World list/create/seed UI | C2, S0, S1 |
+| 29 | W1: in-process World sessions | W0; needs triage |
+| 30 | G0: multiple Games, per-World Mods | W0; needs triage |
 | 24 | M0: Server-owned flight/physics movement | C0 |
 | 25 | A0: Game character presentation | M0 |
 | 26 | V0: first/third-person view and aim | M0, A0 |

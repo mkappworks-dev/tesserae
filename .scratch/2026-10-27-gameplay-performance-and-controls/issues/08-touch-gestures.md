@@ -46,3 +46,9 @@ Do not implement until the relevant decisions and readiness are established.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+### World screens added by ticket 27 (2026-10-29)
+
+Ticket 27 ships the World list, Create, Rename, Delete and Trust dialogs for
+mouse and keyboard only, with Tab handling local to those screens. This
+ticket's journeys must cover them; ticket 27 no longer claims that support.
