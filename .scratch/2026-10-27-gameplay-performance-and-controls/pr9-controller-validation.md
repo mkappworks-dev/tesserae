@@ -52,8 +52,8 @@ merge are not authorized.
 
 ## Validation
 
-All injected-only. No physical controller was used; no support is claimed for
-any controller model.
+Headless tests are injected-only; physical results are in Hardware results
+below and are recorded separately.
 
 Headless tests drive Gamepad entities through Bevy's raw gamepad messages or
 PadInput directly. They cover: trigger hysteresis with one activation per
@@ -66,9 +66,10 @@ Hz within one 60 Hz frame; LB/RB slot stepping; pad capture and per-device
 reset; profile round-trip, pre-controller profiles and refused entries;
 Server analog throttle at 1, 0.5 and 0.25 m Voxels.
 
-Final scripts/cargo-ci passed: 991 tests, zero failures, six ignored
-measurements; formatting, all-feature Clippy, rustdoc, default-feature
-build, guests, headless/Mod boundaries and cargo-deny also passed.
+Final scripts/cargo-ci (after cadaf43) passed: 992 tests, zero failures,
+six ignored measurements; formatting, all-feature Clippy, rustdoc,
+default-feature build, guests, headless/Mod boundaries and cargo-deny also
+passed.
 
 Artifacts: /tmp/tesserae-controller-review.OjvT3b (cargo-ci.log).
 
@@ -79,3 +80,22 @@ Then confirm: default mapping, stick feel and deadzones, triggers, LB/RB slots,
 crouch/sprint latches, full catalogue select/Shape/Assign to slot and settings
 rebinding without mouse or keyboard, PlayStation labels on a DualSense,
 hot-plug mid-hold, and that Guide opens the macOS overlay without game input.
+
+## Hardware results
+
+Run by the user on 2026-10-29 with the dev binary from cadaf43 (SHA-256
+prefix 3d166f6a74c0efd6), macOS 27.2 (26B123), Apple M5. Controller
+families: Xbox, DualSense/DualShock, and Switch Pro/8BitDo, over both
+Bluetooth and USB. Exact models and gilrs mapping sources were not recorded.
+
+The user reported every checklist step passing. The first run panicked on
+opening the Controller page (binding_order lacked MovementMode, also broken
+on main's Key bindings page since #26); cadaf43 fixed it and the user re-ran
+the menu steps successfully.
+
+Support claim: those three families, wired and Bluetooth, on this macOS
+version, at family level only. Nintendo-layout pads show Xbox names by
+position, so their printed A/B are swapped relative to the label; dedicated
+Nintendo labels remain out of scope. Other platforms and models are
+unvalidated.
+

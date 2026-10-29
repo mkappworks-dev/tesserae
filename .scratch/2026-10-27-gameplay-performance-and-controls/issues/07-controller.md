@@ -1,6 +1,6 @@
 # 07: C3: Controller input, settings and validation
 
-Status: ready-for-human
+Status: done
 Blocked by: 02, 04, 06
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -167,7 +167,7 @@ get pad defaults in a follow-up rather than guessed here.
 
 ## Acceptance criteria
 
-- [ ] Play, catalogue select/Shape/Assign to slot, and settings including pad
+- [x] Play, catalogue select/Shape/Assign to slot, and settings including pad
       rebinding are completable with only a pad (no mouse, no typing).
 - [x] In-deadzone drift causes no movement, look or prompt switch; look rate
       is FPS-independent.
@@ -179,9 +179,9 @@ get pad defaults in a follow-up rather than guessed here.
       cannot be bound.
 - [x] Pad crouch toggle and sprint latch let the player crouch-bridge and
       sprint while steering look; neither changes keyboard behaviour.
-- [ ] Menus open with focus set, keep focus visible, and adjust sliders.
-- [ ] A DualSense shows PlayStation labels; other pads show Xbox labels.
-- [ ] Support is claimed only for pad models recorded in a physical
+- [x] Menus open with focus set, keep focus visible, and adjust sliders.
+- [x] A DualSense shows PlayStation labels; other pads show Xbox labels.
+- [x] Support is claimed only for pad models recorded in a physical
       validation note (model, connection, macOS version, mapping source);
       everything else is marked injected-only.
 
@@ -275,3 +275,12 @@ injected-only evidence. Ticked criteria rest on headless tests. The three
 unticked ones need a physical pad and a visual review, so the ticket waits on
 the user's hardware checklist. No support claim is made for any controller.
 No push, publication or merge.
+
+### 2026-10-29: hardware validation complete
+
+The user ran the hardware checklist on Xbox, DualSense/DualShock and
+Switch Pro/8BitDo pads over Bluetooth and USB, macOS 27.2, and reported all
+steps passing after cadaf43 fixed a Controller-page panic. Results and the
+family-level support claim are in the validation note. No push,
+publication or merge.
+
