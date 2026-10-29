@@ -1,8 +1,8 @@
 # PR 5: authoritative Player movement
 
 Scope: ticket 24 only. Base: 4b86e435f727efeef83cdd75c00aaf2f43276dd2.
-Branch/worktree: feat/player-flight-physics. Changes remain local; no push,
-PR publication, merge, subagent or later session was started.
+Branch/worktree: feat/player-flight-physics. The user authorized rebasing
+onto main, pushing and opening the PR. Merge is not authorized.
 
 ## Implemented
 
