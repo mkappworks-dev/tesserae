@@ -70,6 +70,11 @@ impl ChunkEntities {
     }
 }
 
+/// Whether any terrain has been drawn yet, for the loading screen.
+pub(super) fn terrain_arrived(entities: Option<Res<ChunkEntities>>) -> bool {
+    entities.is_some_and(|e| !e.opaque.is_empty())
+}
+
 /// A material per mesh layer, for every Chunk, as the Material index is a
 /// vertex attribute: they differ in alpha mode and in what the blended one is
 /// told the finer levels have drawn.

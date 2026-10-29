@@ -1,0 +1,1579 @@
+//! The World list: the first screen of a launch, before any Game runs. It only
+//! manages closed World folders; opening one restarts the process on it.
+
+use std::path::{Path, PathBuf};
+
+use bevy::input_focus::{FocusCause, InputFocus, tab_navigation::TabGroup};
+use bevy::prelude::*;
+use bevy::text::EditableText;
+use bevy::ui_widgets::{Activate, TextInput};
+use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
+
+use super::menu_ui::{self as ui, Danger, Tone};
+use crate::launch::{Relaunch, Target};
+use crate::server::mods::Installed;
+
+/// The folder holding every World folder.
+#[derive(Resource, Clone)]
+pub struct WorldsDir(pub PathBuf);
+
+/// Why the World this process was started for could not be opened.
+#[derive(Resource, Clone)]
+pub struct OpenFailure {
+    pub folder: PathBuf,
+    pub reason: String,
+}
+
+/// Moves a World folder out of the list; the OS Trash outside tests.
+#[derive(Resource, Clone, Copy)]
+pub struct Remover(pub fn(&Path) -> Result<(), String>);
+
+impl Default for Remover {
+    fn default() -> Self {
+        Self(|path| trash::delete(path).map_err(|e| e.to_string()))
+    }
+}
+
+/// The tested Voxel sizes (ADR-0003), with what each costs.
+const VOXEL_SIZES: [(f32, &str); 3] = [
+    (1.0, "1 m: the default"),
+    (0.5, "0.5 m: 2× finer detail, ½ view distance"),
+    (0.25, "0.25 m: 4× finer detail, ¼ view distance"),
+];
+
+/// Frames the Opening screen is drawn before the process restarts.
+const OPENING_FRAMES: u32 = 2;
+
+#[derive(Clone, Debug, PartialEq)]
+enum Screen {
+    List,
+    Create,
+    Rename(PathBuf),
+    Delete(PathBuf),
+    Trust(Next),
+    Opening(String),
+}
+
+/// What runs once every Mod it needs is trusted.
+#[derive(Clone, Debug, PartialEq)]
+enum Next {
+    Open(PathBuf),
+    Create,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Form {
+    name: String,
+    seed: String,
+    game: bool,
+    voxel_size_m: f32,
+    more: bool,
+    problem: Option<String>,
+}
+
+impl Default for Form {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            seed: String::new(),
+            game: true,
+            voxel_size_m: 1.0,
+            more: false,
+            problem: None,
+        }
+    }
+}
+
+#[derive(Resource)]
+struct Launcher {
+    screen: Screen,
+    entries: Vec<Entry>,
+    selected: Option<PathBuf>,
+    /// Title and detail of the card at the top of the list.
+    card: Option<(String, String)>,
+    form: Form,
+    rename: String,
+    problem: Option<String>,
+    /// Bumped whenever the screen must be rebuilt.
+    version: u64,
+    opening_frames: u32,
+}
+
+impl Launcher {
+    fn entry(&self, path: &Path) -> Option<&Entry> {
+        self.entries.iter().find(|e| e.path == path)
+    }
+
+    fn selected(&self) -> Option<&Entry> {
+        self.selected.as_deref().and_then(|p| self.entry(p))
+    }
+
+    fn show(&mut self, screen: Screen) {
+        self.screen = screen;
+        self.problem = None;
+        self.version += 1;
+    }
+
+    fn refresh(&mut self, worlds: &Path) {
+        match library::list(worlds) {
+            Ok(entries) => self.entries = entries,
+            Err(e) => self.card = Some(("Could not read your Worlds".into(), e.to_string())),
+        }
+        if self.selected().is_none() {
+            self.selected = self.entries.first().map(|e| e.path.clone());
+        }
+        self.version += 1;
+    }
+}
+
+#[derive(Component, Clone, Debug, PartialEq)]
+enum Act {
+    Select(PathBuf),
+    Open,
+    New,
+    ReCreate,
+    Rename,
+    Delete,
+    ShowFolder,
+    CopySeed,
+    Quit,
+    Back,
+    Create,
+    Randomize,
+    CopyResolved,
+    More,
+    Game(bool),
+    Voxel(f32),
+    SaveName,
+    ConfirmDelete,
+    Trust,
+    Dismiss,
+}
+
+#[derive(Resource, Default)]
+struct Queue(Vec<Act>);
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Name,
+    Seed,
+    Rename,
+}
+
+#[derive(Component)]
+struct Resolved;
+
+#[derive(Component)]
+struct Root;
+
+pub fn plugin(app: &mut App) {
+    app.add_plugins((
+        ui::launcher_chrome,
+        bevy::input_focus::tab_navigation::TabNavigationPlugin,
+    ));
+    logic(app);
+}
+
+/// The World list cannot exit by default: the window plugin leaves closing to us.
+fn close_request(
+    mut requests: MessageReader<bevy::window::WindowCloseRequested>,
+    mut relaunch: ResMut<Relaunch>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    if requests.read().count() > 0 {
+        relaunch.0 = None;
+        exit.write(AppExit::Success);
+    }
+}
+
+#[derive(Component)]
+struct Loading;
+
+/// Longest the loading screen waits for terrain, e.g. for an Empty World.
+const LOADING_TIMEOUT_S: f32 = 15.0;
+
+/// The in-World half: a loading screen over a World opened from the list.
+pub(super) fn entry_plugin(app: &mut App) {
+    app.add_systems(Startup, show_loading)
+        .add_systems(Update, hide_loading.run_if(any_with_component::<Loading>));
+}
+
+fn show_loading(mut commands: Commands, launched: Option<Res<crate::launch::Launched>>) {
+    let Some(name) = launched
+        .filter(|l| l.from_list)
+        .and_then(|l| l.world_name.clone())
+    else {
+        return;
+    };
+    commands
+        .spawn((
+            Loading,
+            GlobalZIndex(200),
+            BackgroundColor(ui::BG),
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                ..default()
+            },
+        ))
+        .with_children(|card| {
+            ui::weighted_text(card, format!("Opening {name}…"), 19.0, 620, ui::INK);
+            ui::paragraph(card, "Loading the World.", 12.0, ui::MUTED);
+        });
+}
+
+fn hide_loading(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    arrived: Option<Res<TerrainArrived>>,
+    screens: Query<Entity, With<Loading>>,
+) {
+    if arrived.is_some() || time.elapsed_secs() >= LOADING_TIMEOUT_S {
+        for screen in &screens {
+            commands.entity(screen).despawn();
+        }
+    }
+}
+
+/// Inserted by the Client once any terrain is drawn.
+#[derive(Resource)]
+pub(super) struct TerrainArrived;
+
+fn logic(app: &mut App) {
+    app.init_resource::<Queue>()
+        .init_resource::<Remover>()
+        .init_resource::<InputFocus>()
+        .add_observer(activate)
+        .add_systems(Startup, (camera, start))
+        .add_systems(PreUpdate, close_request)
+        .add_systems(Update, (keys, sync_fields, handle, render, opening).chain());
+}
+
+fn camera(mut commands: Commands) {
+    commands.spawn(Camera2d);
+}
+
+fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Option<Res<OpenFailure>>) {
+    let mut launcher = Launcher {
+        screen: Screen::List,
+        entries: Vec::new(),
+        selected: None,
+        card: None,
+        form: Form::default(),
+        rename: String::new(),
+        problem: None,
+        version: 0,
+        opening_frames: 0,
+    };
+    launcher.refresh(&worlds.0);
+    if let Some(failure) = failure {
+        let name = launcher
+            .entry(&failure.folder)
+            .and_then(Entry::name)
+            .map_or_else(|| folder_name(&failure.folder), str::to_owned);
+        launcher.card = Some((format!("Could not open {name}"), failure.reason.clone()));
+        launcher.selected = Some(failure.folder.clone());
+    }
+    commands.insert_resource(launcher);
+}
+
+fn folder_name(path: &Path) -> String {
+    path.file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+}
+
+fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
+    if let Ok(act) = acts.get(event.entity) {
+        queue.0.push(act.clone());
+    }
+}
+
+fn keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    launcher: Option<Res<Launcher>>,
+    focus: Res<InputFocus>,
+    fields: Query<&Field>,
+    mut queue: ResMut<Queue>,
+) {
+    let Some(launcher) = launcher else {
+        return;
+    };
+    if keys.just_pressed(KeyCode::Escape) {
+        queue.0.push(match launcher.screen {
+            Screen::List => Act::Dismiss,
+            _ => Act::Back,
+        });
+    }
+    // Enter in a text field submits its form; on buttons it activates them.
+    if keys.just_pressed(KeyCode::Enter)
+        && let Some(field) = focus.get().and_then(|e| fields.get(e).ok())
+    {
+        queue.0.push(match field {
+            Field::Name | Field::Seed => Act::Create,
+            Field::Rename => Act::SaveName,
+        });
+    }
+}
+
+fn sync_fields(
+    fields: Query<(&Field, &EditableText), Changed<EditableText>>,
+    launcher: Option<ResMut<Launcher>>,
+    mut resolved: Query<&mut Text, With<Resolved>>,
+) {
+    let Some(mut launcher) = launcher else {
+        return;
+    };
+    for (field, text) in &fields {
+        let value = text.value().to_string();
+        match field {
+            Field::Name => launcher.form.name = value,
+            Field::Seed => launcher.form.seed = value,
+            Field::Rename => launcher.rename = value,
+        }
+    }
+    for mut text in &mut resolved {
+        let wanted = resolved_label(&launcher.form.seed);
+        if text.0 != wanted {
+            text.0 = wanted;
+        }
+    }
+}
+
+fn resolved_label(seed: &str) -> String {
+    match tesserae_core::seed::resolve(seed) {
+        Ok(Some(seed)) => format!("Resolved seed: {seed}"),
+        Ok(None) => "Blank: a random seed is chosen".into(),
+        Err(e) => format!("Seed {e}"),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle(
+    mut commands: Commands,
+    mut queue: ResMut<Queue>,
+    launcher: Option<ResMut<Launcher>>,
+    mut installed: ResMut<Installed>,
+    worlds: Res<WorldsDir>,
+    remover: Res<Remover>,
+    mut relaunch: ResMut<Relaunch>,
+    mut exit: MessageWriter<AppExit>,
+    mut clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
+) {
+    let Some(mut l) = launcher else {
+        return;
+    };
+    for act in std::mem::take(&mut queue.0) {
+        match act {
+            Act::Select(path) => {
+                l.selected = Some(path);
+                l.version += 1;
+            }
+            Act::Open => {
+                let Some(entry) = l.selected() else {
+                    continue;
+                };
+                let path = entry.path.clone();
+                let needs_game = entry.details().is_none_or(|d| d.game.is_some());
+                if needs_game && !installed.untrusted.is_empty() {
+                    l.show(Screen::Trust(Next::Open(path)));
+                } else {
+                    open(&mut l, &mut relaunch, path);
+                }
+            }
+            Act::New => {
+                l.form = Form {
+                    game: installed.game.is_some(),
+                    ..Form::default()
+                };
+                l.show(Screen::Create);
+            }
+            Act::ReCreate => {
+                let Some(details) = l.selected().and_then(Entry::details).cloned() else {
+                    continue;
+                };
+                let copy = format!("{} (copy)", details.name);
+                l.form = Form {
+                    name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
+                    seed: details.seed.to_string(),
+                    game: details.game.is_some() && installed.game.is_some(),
+                    voxel_size_m: details.voxel_size_m,
+                    more: details.voxel_size_m != 1.0,
+                    problem: None,
+                };
+                l.show(Screen::Create);
+            }
+            Act::Rename => {
+                let Some(entry) = l.selected() else {
+                    continue;
+                };
+                let path = entry.path.clone();
+                l.rename = entry.name().unwrap_or_default().to_owned();
+                l.show(Screen::Rename(path));
+            }
+            Act::Delete => {
+                if let Some(path) = l.selected.clone() {
+                    l.show(Screen::Delete(path));
+                }
+            }
+            Act::ShowFolder => {
+                if let Some(path) = l.selected.clone() {
+                    reveal(&path);
+                }
+            }
+            Act::CopySeed => {
+                if let Some(seed) = l.selected().and_then(Entry::details).map(|d| d.seed) {
+                    copy(&mut commands, clipboard.as_deref_mut(), seed);
+                }
+            }
+            Act::CopyResolved => {
+                if let Ok(Some(seed)) = tesserae_core::seed::resolve(&l.form.seed) {
+                    copy(&mut commands, clipboard.as_deref_mut(), seed);
+                }
+            }
+            Act::Quit => {
+                relaunch.0 = None;
+                exit.write(AppExit::Success);
+            }
+            Act::Back => match l.screen {
+                Screen::Trust(Next::Create) => l.show(Screen::Create),
+                Screen::Opening(_) | Screen::List => {}
+                _ => l.show(Screen::List),
+            },
+            Act::Dismiss => {
+                if l.card.take().is_some() {
+                    l.version += 1;
+                }
+            }
+            Act::Randomize => {
+                l.form.seed = tesserae_core::seed::random().to_string();
+                l.version += 1;
+            }
+            Act::More => {
+                l.form.more = !l.form.more;
+                l.version += 1;
+            }
+            Act::Game(game) => {
+                l.form.game = game && installed.game.is_some();
+                l.version += 1;
+            }
+            Act::Voxel(size) => {
+                l.form.voxel_size_m = size;
+                l.version += 1;
+            }
+            Act::Create => {
+                if l.screen != Screen::Create {
+                    continue;
+                }
+                let needs_trust = l.form.game && !installed.untrusted.is_empty();
+                if needs_trust && validate(&l.form).is_ok() {
+                    l.show(Screen::Trust(Next::Create));
+                } else {
+                    create(&mut l, &installed, &worlds.0, &mut relaunch);
+                }
+            }
+            Act::Trust => {
+                let Screen::Trust(next) = l.screen.clone() else {
+                    continue;
+                };
+                if let Err(e) = installed.grant_first() {
+                    l.problem = Some(format!("Could not record Trust: {e}"));
+                    l.version += 1;
+                    continue;
+                }
+                if !installed.untrusted.is_empty() {
+                    l.version += 1;
+                    continue;
+                }
+                match next {
+                    Next::Open(path) => open(&mut l, &mut relaunch, path),
+                    Next::Create => create(&mut l, &installed, &worlds.0, &mut relaunch),
+                }
+            }
+            Act::SaveName => {
+                let Screen::Rename(path) = l.screen.clone() else {
+                    continue;
+                };
+                let result = library::name(&l.rename)
+                    .map_err(|e| e.to_string())
+                    .and_then(|name| library::rename(&path, &name).map_err(describe));
+                match result {
+                    Ok(()) => {
+                        l.show(Screen::List);
+                        l.refresh(&worlds.0);
+                    }
+                    Err(e) => {
+                        l.problem = Some(e);
+                        l.version += 1;
+                    }
+                }
+            }
+            Act::ConfirmDelete => {
+                let Screen::Delete(path) = l.screen.clone() else {
+                    continue;
+                };
+                let result = library::closed(&path)
+                    .map_err(describe)
+                    .and_then(|()| (remover.0)(&path));
+                match result {
+                    Ok(()) => {
+                        l.selected = None;
+                        l.show(Screen::List);
+                        l.refresh(&worlds.0);
+                    }
+                    Err(e) => {
+                        l.problem = Some(e);
+                        l.version += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn describe(error: tesserae_core::save::Error) -> String {
+    match error {
+        tesserae_core::save::Error::Busy => "This World is open in another Tesserae.".into(),
+        e => e.to_string(),
+    }
+}
+
+fn validate(form: &Form) -> Result<(String, Option<u64>), String> {
+    let name = library::name(&form.name).map_err(|e| e.to_string())?;
+    let seed = tesserae_core::seed::resolve(&form.seed).map_err(|e| format!("Seed {e}"))?;
+    Ok((name, seed))
+}
+
+fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut Relaunch) {
+    let (name, seed) = match validate(&l.form) {
+        Ok(valid) => valid,
+        Err(e) => {
+            l.form.problem = Some(e);
+            l.show(Screen::Create);
+            return;
+        }
+    };
+    let now = library::now_unix_s();
+    let sidecar = Sidecar {
+        name: name.clone(),
+        game: installed
+            .game
+            .as_ref()
+            .filter(|_| l.form.game)
+            .map(|(id, version)| GameRef {
+                id: id.clone(),
+                version: version.clone(),
+            }),
+        seed: seed.unwrap_or_else(tesserae_core::seed::random),
+        voxel_size_m: l.form.voxel_size_m,
+        created_unix_s: now,
+        last_played_unix_s: now,
+        world: tesserae_core::save::WorldId::new(),
+        pending: true,
+    };
+    match library::create(worlds, &sidecar) {
+        Ok(path) => {
+            relaunch.0 = Some(Target::World(path));
+            l.show(Screen::Opening(name));
+        }
+        Err(e) => {
+            l.form.problem = Some(format!("Could not create the World folder: {e}"));
+            l.show(Screen::Create);
+        }
+    }
+}
+
+fn open(l: &mut Launcher, relaunch: &mut Relaunch, path: PathBuf) {
+    let name = l
+        .entry(&path)
+        .and_then(Entry::name)
+        .map_or_else(|| folder_name(&path), str::to_owned);
+    relaunch.0 = Some(Target::World(path));
+    l.show(Screen::Opening(name));
+}
+
+fn copy(commands: &mut Commands, clipboard: Option<&mut bevy::clipboard::Clipboard>, seed: u64) {
+    let copied = clipboard.is_some_and(|c| c.set_text(seed.to_string()).is_ok());
+    if copied {
+        ui::notify(commands, "Seed copied", Tone::Change);
+    } else {
+        ui::notify(commands, "Could not copy the seed", Tone::Alert);
+    }
+}
+
+fn reveal(path: &Path) {
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(windows) {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    if let Err(e) = std::process::Command::new(program).arg(path).spawn() {
+        warn!("could not show {}: {e}", path.display());
+    }
+}
+
+/// Lets the Opening screen draw, then exits so `main` starts the World.
+fn opening(launcher: Option<ResMut<Launcher>>, mut exit: MessageWriter<AppExit>) {
+    let Some(mut l) = launcher else {
+        return;
+    };
+    if matches!(l.screen, Screen::Opening(_)) {
+        l.opening_frames += 1;
+        if l.opening_frames == OPENING_FRAMES {
+            exit.write(AppExit::Success);
+        }
+    }
+}
+
+fn render(
+    mut commands: Commands,
+    launcher: Option<Res<Launcher>>,
+    installed: Res<Installed>,
+    roots: Query<Entity, With<Root>>,
+    logo: Option<Res<ui::Mosaic>>,
+    mut built: Local<Option<u64>>,
+) {
+    let Some(l) = launcher else {
+        return;
+    };
+    if *built == Some(l.version) {
+        return;
+    }
+    *built = Some(l.version);
+    for root in &roots {
+        commands.entity(root).despawn();
+    }
+    let mut focus = None;
+    commands
+        .spawn((
+            Root,
+            BackgroundColor(ui::BG),
+            Node {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                padding: UiRect::axes(Val::Percent(5.0), Val::Px(20.0)),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        ))
+        .with_children(|root| {
+            header(root, logo.as_deref());
+            match &l.screen {
+                Screen::List => focus = list(root, &l),
+                Screen::Create => focus = form(root, &l, &installed),
+                Screen::Opening(name) => {
+                    centered(root, |card| {
+                        ui::weighted_text(card, format!("Opening {name}…"), 19.0, 620, ui::INK);
+                        ui::paragraph(card, "Loading the World.", 12.0, ui::MUTED);
+                    });
+                }
+                Screen::Rename(_) => focus = rename(root, &l),
+                Screen::Delete(path) => focus = delete(root, &l, path),
+                Screen::Trust(next) => focus = trust(root, &l, &installed, next),
+            }
+        });
+    if let Some(entity) = focus {
+        commands.queue(move |world: &mut World| {
+            if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
+                focus.set(entity, FocusCause::Auto);
+            }
+        });
+    }
+}
+
+fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
+    root.spawn((
+        Node {
+            height: Val::Px(56.0),
+            flex_shrink: 0.0,
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            border: UiRect::bottom(Val::Px(1.0)),
+            margin: UiRect::bottom(Val::Px(18.0)),
+            ..default()
+        },
+        BorderColor::all(ui::EDGE),
+    ))
+    .with_children(|row| {
+        row.spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            ..default()
+        })
+        .with_children(|brand| {
+            if let Some(logo) = logo {
+                brand.spawn((
+                    ImageNode::new(logo.0.clone()),
+                    Node {
+                        width: Val::Px(29.0),
+                        height: Val::Px(29.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
+            ui::weighted_text(brand, "Tesserae", 17.0, 650, ui::INK);
+        });
+        ui::compact_button(row, "Quit", Act::Quit, false, 32.0, 11.0);
+    });
+}
+
+fn heading(parent: &mut ChildSpawnerCommands, title: &str, subtitle: &str) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|t| {
+            ui::weighted_text(t, title, 25.0, 620, ui::INK);
+            ui::text(t, subtitle, 12.0, ui::MUTED);
+        });
+}
+
+fn row(
+    parent: &mut ChildSpawnerCommands,
+    gap: f32,
+    children: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    parent
+        .spawn(Node {
+            column_gap: Val::Px(gap),
+            row_gap: Val::Px(gap),
+            flex_wrap: FlexWrap::Wrap,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(children);
+}
+
+fn panel(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+    parent
+        .spawn((
+            BackgroundColor(ui::CARD),
+            BorderColor::all(ui::EDGE),
+            Node {
+                padding: UiRect::all(Val::Px(18.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(10.0),
+                ..default()
+            },
+        ))
+        .with_children(children);
+}
+
+fn centered(root: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+    root.spawn(Node {
+        flex_grow: 1.0,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        ..default()
+    })
+    .with_children(|center| {
+        center
+            .spawn((
+                TabGroup {
+                    modal: true,
+                    ..default()
+                },
+                BackgroundColor(ui::CARD),
+                BorderColor::all(ui::EDGE),
+                Node {
+                    width: Val::Px(440.0),
+                    max_width: Val::Percent(92.0),
+                    padding: UiRect::all(Val::Px(26.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(10.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(10.0),
+                    ..default()
+                },
+            ))
+            .with_children(children);
+    });
+}
+
+fn problem(parent: &mut ChildSpawnerCommands, message: Option<&String>) {
+    if let Some(message) = message {
+        ui::paragraph(parent, message.clone(), 12.0, ui::AMBER);
+    }
+}
+
+fn text_field(parent: &mut ChildSpawnerCommands, field: Field, value: &str, hint: &str) -> Entity {
+    let mut entity = Entity::PLACEHOLDER;
+    parent
+        .spawn((
+            BackgroundColor(ui::BG),
+            BorderColor::all(ui::EDGE),
+            Node {
+                min_width: Val::Px(0.0),
+                height: Val::Px(40.0),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                padding: UiRect::axes(Val::Px(11.0), Val::Px(0.0)),
+                align_items: AlignItems::Center,
+                flex_grow: 1.0,
+                ..default()
+            },
+        ))
+        .with_children(|frame| {
+            entity = frame
+                .spawn((
+                    field,
+                    TextInput,
+                    EditableText::new(value),
+                    bevy::input_focus::tab_navigation::TabIndex(0),
+                    ui::font(13.0),
+                    TextColor(ui::INK),
+                    bevy::text::TextCursorStyle {
+                        color: ui::LEAF,
+                        selection_color: ui::LEAF.with_alpha(0.3),
+                        ..default()
+                    },
+                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(20.0),
+                        ..default()
+                    },
+                ))
+                .id();
+        });
+    ui::description(parent, hint);
+    entity
+}
+
+fn label(parent: &mut ChildSpawnerCommands, value: &str) {
+    ui::weighted_text(parent, value, 12.0, 600, ui::INK);
+}
+
+fn relative(then_s: u64) -> String {
+    let ago = library::now_unix_s().saturating_sub(then_s);
+    match ago {
+        0..60 => "just now".into(),
+        60..3600 => format!("{} min ago", ago / 60),
+        3600..86_400 => format!("{} h ago", ago / 3600),
+        86_400..172_800 => "yesterday".into(),
+        _ => format!("{} days ago", ago / 86_400),
+    }
+}
+
+fn game_label(game: Option<&GameRef>) -> String {
+    game.map_or_else(
+        || "Empty World".into(),
+        |g| format!("{} {}", ui::title(&g.id), g.version),
+    )
+}
+
+fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
+    let mut focus = None;
+    root.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        flex_shrink: 0.0,
+        margin: UiRect::bottom(Val::Px(18.0)),
+        ..default()
+    })
+    .with_children(|top| {
+        heading(
+            top,
+            "Worlds",
+            "Pick up where you left off, or start somewhere new.",
+        );
+        let create = ui::button(top, "Create World", Act::New, false, false, true);
+        if l.entries.is_empty() {
+            focus = Some(create);
+        }
+    });
+    if let Some((title, detail)) = &l.card {
+        root.spawn((
+            BackgroundColor(ui::AMBER.with_alpha(0.06)),
+            BorderColor::all(ui::AMBER.with_alpha(0.3)),
+            Node {
+                padding: UiRect::all(Val::Px(14.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                margin: UiRect::bottom(Val::Px(14.0)),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|card| {
+            card.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                flex_shrink: 1.0,
+                ..default()
+            })
+            .with_children(|words| {
+                ui::weighted_text(words, title, 13.0, 620, ui::INK);
+                ui::paragraph(words, detail, 12.0, ui::AMBER);
+                ui::description(words, "Nothing was changed in its save.");
+            });
+            ui::compact_button(card, "Dismiss", Act::Dismiss, false, 30.0, 11.0);
+        });
+    }
+    if l.entries.is_empty() {
+        centered(root, |card| {
+            ui::weighted_text(card, "No Worlds yet", 19.0, 620, ui::INK);
+            ui::paragraph(
+                card,
+                "Create a World to start playing. You can choose its seed.",
+                12.0,
+                ui::MUTED,
+            );
+        });
+        return focus;
+    }
+    root.spawn(Node {
+        flex_grow: 1.0,
+        min_height: Val::Px(0.0),
+        column_gap: Val::Px(18.0),
+        ..default()
+    })
+    .with_children(|columns| {
+        columns
+            .spawn(Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                flex_basis: Val::Percent(55.0),
+                min_width: Val::Px(0.0),
+                overflow: Overflow::scroll_y(),
+                ..default()
+            })
+            .with_children(|rows| {
+                for entry in &l.entries {
+                    let selected = l.selected.as_deref() == Some(entry.path.as_path());
+                    let button = world_row(rows, entry, selected);
+                    if selected {
+                        focus = Some(button);
+                    }
+                }
+            });
+        if let Some(entry) = l.selected() {
+            columns
+                .spawn(Node {
+                    flex_basis: Val::Percent(45.0),
+                    flex_direction: FlexDirection::Column,
+                    min_width: Val::Px(0.0),
+                    ..default()
+                })
+                .with_children(|side| details(side, entry));
+        }
+    });
+    focus
+}
+
+fn world_row(rows: &mut ChildSpawnerCommands, entry: &Entry, selected: bool) -> Entity {
+    let name = entry.name().map_or("Unnamed", |n| n);
+    let summary = match entry.details() {
+        Some(d) if entry.incomplete() => {
+            format!("{} · not created yet", game_label(d.game.as_ref()))
+        }
+        Some(d) => format!(
+            "{} · seed {} · {}",
+            game_label(d.game.as_ref()),
+            d.seed,
+            relative(d.last_played_unix_s)
+        ),
+        None => format!("Folder {}", entry.folder()),
+    };
+    rows.spawn((
+        bevy::ui_widgets::Button,
+        bevy::input_focus::tab_navigation::TabIndex(0),
+        Act::Select(entry.path.clone()),
+        ui::Styled {
+            selected,
+            tab: false,
+            primary: false,
+        },
+        BackgroundColor(ui::CARD),
+        BorderColor::all(if selected { ui::LEAF } else { ui::EDGE }),
+        Node {
+            padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexStart,
+            row_gap: Val::Px(3.0),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
+    .with_children(|b| {
+        ui::weighted_text(b, name, 13.0, 600, ui::INK);
+        ui::text(b, summary, 11.0, ui::MUTED);
+    })
+    .id()
+}
+
+fn details(side: &mut ChildSpawnerCommands, entry: &Entry) {
+    panel(side, |p| {
+        ui::weighted_text(p, entry.name().map_or("Unnamed", |n| n), 19.0, 620, ui::INK);
+        ui::description(p, &format!("Folder: {}", entry.folder()));
+        match (entry.details(), &entry.sidecar) {
+            (Some(d), _) => {
+                ui::text(
+                    p,
+                    format!("Game: {}", game_label(d.game.as_ref())),
+                    12.0,
+                    ui::INK,
+                );
+                row(p, 8.0, |r| {
+                    ui::text(r, format!("Seed: {}", d.seed), 12.0, ui::INK);
+                    ui::compact_button(r, "Copy", Act::CopySeed, false, 26.0, 10.0);
+                });
+                ui::text(
+                    p,
+                    format!("Voxel size: {} m", d.voxel_size_m),
+                    12.0,
+                    ui::INK,
+                );
+                ui::description(
+                    p,
+                    &format!(
+                        "Created {} · last played {}",
+                        relative(d.created_unix_s),
+                        relative(d.last_played_unix_s)
+                    ),
+                );
+                if entry.incomplete() {
+                    ui::paragraph(
+                        p,
+                        "Creation did not finish. Retry to create it, or delete it.",
+                        12.0,
+                        ui::AMBER,
+                    );
+                }
+            }
+            (None, Err(reason)) => {
+                ui::paragraph(
+                    p,
+                    format!("Its details could not be read: {reason}"),
+                    12.0,
+                    ui::AMBER,
+                );
+                ui::description(p, "Rename repairs them from the save.");
+            }
+            (None, Ok(_)) => {
+                ui::description(
+                    p,
+                    "No details are recorded. Rename repairs them from the save.",
+                );
+            }
+        }
+        row(p, 7.0, |r| {
+            ui::button(
+                r,
+                if entry.incomplete() { "Retry" } else { "Open" },
+                Act::Open,
+                false,
+                false,
+                true,
+            );
+            if entry.details().is_some() && !entry.incomplete() {
+                ui::button(r, "Re-Create", Act::ReCreate, false, false, false);
+            }
+            ui::button(r, "Rename", Act::Rename, false, false, false);
+            ui::button(r, "Show folder", Act::ShowFolder, false, false, false);
+            let delete = ui::button(r, "Delete…", Act::Delete, false, false, false);
+            r.commands().entity(delete).insert(Danger);
+        });
+    });
+}
+
+fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
+    let f = &l.form;
+    let mut focus = None;
+    root.spawn((
+        TabGroup::default(),
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(14.0),
+            max_width: Val::Px(620.0),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    ))
+    .with_children(|col| {
+        heading(
+            col,
+            "Create World",
+            "Name it, pick a Game and, if you like, a seed.",
+        );
+        label(col, "Name");
+        focus = Some(text_field(
+            col,
+            Field::Name,
+            &f.name,
+            "Up to 64 characters. Blank uses \u{201c}New World\u{201d}.",
+        ));
+        label(col, "Game");
+        row(col, 7.0, |r| {
+            if let Some((id, version)) = &installed.game {
+                let tag = if installed.untrusted.is_empty() {
+                    ""
+                } else {
+                    " · needs Trust"
+                };
+                ui::button(
+                    r,
+                    format!("{} {version}{tag}", ui::title(id)),
+                    Act::Game(true),
+                    f.game,
+                    false,
+                    false,
+                );
+            }
+            ui::button(r, "Empty World", Act::Game(false), !f.game, false, false);
+        });
+        if let Some(error) = &installed.error {
+            ui::paragraph(
+                col,
+                format!("Installed Mods could not be read: {error}"),
+                12.0,
+                ui::AMBER,
+            );
+        } else if installed.game.is_none() {
+            ui::description(
+                col,
+                "No Game is installed, so only an Empty World can be made.",
+            );
+        }
+        label(col, "Seed");
+        row(col, 7.0, |r| {
+            r.spawn(Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(240.0),
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|c| {
+                text_field(
+                    c,
+                    Field::Seed,
+                    &f.seed,
+                    "A number or any words. Blank picks a random seed.",
+                );
+            });
+            ui::button(r, "Randomize", Act::Randomize, false, false, false);
+        });
+        row(col, 8.0, |r| {
+            r.spawn((
+                Resolved,
+                Text::new(resolved_label(&f.seed)),
+                ui::font(12.0),
+                TextColor(ui::MUTED),
+                Pickable::IGNORE,
+            ));
+            ui::compact_button(r, "Copy", Act::CopyResolved, false, 26.0, 10.0);
+        });
+        ui::quiet_button(
+            col,
+            if f.more {
+                "Hide World options"
+            } else {
+                "More World options"
+            },
+            Act::More,
+            12.0,
+        );
+        if f.more {
+            label(col, "Voxel size");
+            for (size, text) in VOXEL_SIZES {
+                ui::button(
+                    col,
+                    text,
+                    Act::Voxel(size),
+                    f.voxel_size_m == size,
+                    false,
+                    false,
+                );
+            }
+            ui::description(col, "Fixed once the World is created.");
+        }
+        problem(col, f.problem.as_ref());
+        row(col, 7.0, |r| {
+            ui::button(r, "Cancel", Act::Back, false, false, false);
+            ui::button(r, "Create World", Act::Create, false, false, true);
+        });
+    });
+    focus
+}
+
+fn rename(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
+    let mut focus = None;
+    centered(root, |card| {
+        ui::weighted_text(card, "Rename World", 19.0, 620, ui::INK);
+        ui::description(
+            card,
+            "Only the name changes; the folder and save stay as they are.",
+        );
+        focus = Some(text_field(
+            card,
+            Field::Rename,
+            &l.rename,
+            "Up to 64 characters.",
+        ));
+        problem(card, l.problem.as_ref());
+        row(card, 7.0, |r| {
+            ui::button(r, "Cancel", Act::Back, false, false, false);
+            ui::button(r, "Rename", Act::SaveName, false, false, true);
+        });
+    });
+    focus
+}
+
+fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<Entity> {
+    let entry = l.entry(path);
+    let name = entry
+        .and_then(Entry::name)
+        .map_or_else(|| folder_name(path), str::to_owned);
+    let mut focus = None;
+    centered(root, |card| {
+        ui::weighted_text(card, format!("Delete {name}?"), 19.0, 620, ui::INK);
+        if let Some(d) = entry.and_then(Entry::details) {
+            ui::text(
+                card,
+                format!(
+                    "{} · last played {}",
+                    game_label(d.game.as_ref()),
+                    relative(d.last_played_unix_s)
+                ),
+                12.0,
+                ui::MUTED,
+            );
+        }
+        ui::paragraph(
+            card,
+            "Its folder moves to the Trash. You can restore it from there.",
+            12.0,
+            ui::MUTED,
+        );
+        problem(card, l.problem.as_ref());
+        row(card, 7.0, |r| {
+            let delete = ui::button(r, "Delete", Act::ConfirmDelete, false, false, false);
+            r.commands().entity(delete).insert(Danger);
+            focus = Some(ui::button(r, "Cancel", Act::Back, false, false, true));
+        });
+    });
+    focus
+}
+
+fn trust(
+    root: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    next: &Next,
+) -> Option<Entity> {
+    let mut focus = None;
+    centered(root, |card| {
+        ui::weighted_text(card, "Trust this Mod?", 19.0, 620, ui::INK);
+        ui::paragraph(
+            card,
+            "It runs its own code. Trust it only if you know where it came from.",
+            12.0,
+            ui::MUTED,
+        );
+        if let Some(mod_) = installed.untrusted.first() {
+            ui::technical_text(card, &mod_.prompt, 11.0, ui::INK);
+        }
+        problem(card, l.problem.as_ref());
+        row(card, 7.0, |r| {
+            focus = Some(ui::button(r, "Cancel", Act::Back, false, false, false));
+            ui::button(
+                r,
+                match next {
+                    Next::Open(_) => "Trust and open",
+                    Next::Create => "Trust and create",
+                },
+                Act::Trust,
+                false,
+                false,
+                true,
+            );
+        });
+    });
+    focus
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::launch::Relaunch;
+    use bevy::ecs::message::Messages;
+    use tesserae_core::save::WorldId;
+
+    struct Directory(PathBuf);
+    impl Directory {
+        fn new() -> Self {
+            let path =
+                std::env::temp_dir().join(format!("tesserae-worlds-{}", WorldId::new().as_str()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Directory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn app(worlds: &Directory, installed: Installed) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<ButtonInput<KeyCode>>()
+            .add_message::<AppExit>()
+            .add_message::<bevy::window::WindowCloseRequested>()
+            .init_resource::<Relaunch>()
+            .insert_resource(installed)
+            .insert_resource(WorldsDir(worlds.0.clone()))
+            .insert_resource(Remover(|path| {
+                std::fs::remove_dir_all(path).map_err(|e| e.to_string())
+            }));
+        logic(&mut app);
+        app
+    }
+
+    fn launcher(app: &App) -> &Launcher {
+        app.world().resource::<Launcher>()
+    }
+
+    fn act(app: &mut App, act: Act) {
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &Act)>()
+            .iter(app.world())
+            .find_map(|(e, a)| (*a == act).then_some(e))
+            .unwrap_or_else(|| panic!("no {act:?} control on screen"));
+        app.world_mut().trigger(Activate { entity });
+        app.update();
+    }
+
+    fn type_into(app: &mut App, field: Field, value: &str) {
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &Field)>()
+            .iter(app.world())
+            .find_map(|(e, f)| (*f == field).then_some(e))
+            .unwrap();
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(EditableText::new(value));
+        app.update();
+    }
+
+    fn press(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(key);
+        keys.clear();
+    }
+
+    fn focused_act(app: &App) -> Option<Act> {
+        let focus = app.world().resource::<InputFocus>().get()?;
+        app.world().get::<Act>(focus).cloned()
+    }
+
+    fn exits(app: &App) -> usize {
+        app.world().resource::<Messages<AppExit>>().len()
+    }
+
+    fn details(name: &str, game: bool) -> Sidecar {
+        Sidecar {
+            name: name.into(),
+            game: game.then(|| GameRef {
+                id: "demo".into(),
+                version: "0.1.0".into(),
+            }),
+            seed: 42,
+            voxel_size_m: 0.5,
+            created_unix_s: 1,
+            last_played_unix_s: 1,
+            world: WorldId::new(),
+            pending: false,
+        }
+    }
+
+    #[test]
+    fn an_empty_list_focuses_create_and_creating_restarts_into_the_new_world() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.update();
+        app.update();
+        assert_eq!(focused_act(&app), Some(Act::New));
+        act(&mut app, Act::New);
+        type_into(&mut app, Field::Name, "  Ridge ");
+        type_into(&mut app, Field::Seed, "-1");
+        act(&mut app, Act::More);
+        act(&mut app, Act::Voxel(0.25));
+        act(&mut app, Act::Create);
+        let Some(Target::World(path)) = app.world().resource::<Relaunch>().0.clone() else {
+            panic!("no restart into the World");
+        };
+        let created = library::read(&path).unwrap().unwrap();
+        assert_eq!(created.name, "Ridge");
+        assert_eq!(created.seed, u64::MAX);
+        assert_eq!(created.voxel_size_m, 0.25);
+        assert_eq!(created.game.unwrap().id, "demo");
+        assert!(created.pending);
+        assert!(matches!(launcher(&app).screen, Screen::Opening(_)));
+        assert_eq!(exits(&app), 0, "the Opening screen draws first");
+        app.update();
+        app.update();
+        assert_eq!(exits(&app), 1);
+    }
+
+    #[test]
+    fn an_invalid_seed_or_name_keeps_the_form_and_writes_nothing() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(None, &[]));
+        app.update();
+        act(&mut app, Act::New);
+        type_into(&mut app, Field::Seed, "18446744073709551616");
+        act(&mut app, Act::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert!(launcher(&app).form.problem.is_some());
+        type_into(&mut app, Field::Seed, "");
+        type_into(&mut app, Field::Name, &"x".repeat(65));
+        act(&mut app, Act::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
+        assert!(app.world().resource::<Relaunch>().0.is_none());
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(launcher(&app).screen, Screen::List);
+    }
+
+    #[test]
+    fn delete_defaults_to_cancel_refuses_an_open_world_then_removes_it() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::Delete);
+        app.update();
+        assert_eq!(focused_act(&app), Some(Act::Back));
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(launcher(&app).screen, Screen::List);
+        assert!(path.exists());
+
+        let lock = std::fs::File::create(path.join("writer.lock")).unwrap();
+        lock.try_lock().unwrap();
+        act(&mut app, Act::Delete);
+        act(&mut app, Act::ConfirmDelete);
+        assert!(
+            launcher(&app)
+                .problem
+                .as_ref()
+                .unwrap()
+                .contains("another Tesserae")
+        );
+        assert!(path.exists());
+        drop(lock);
+        act(&mut app, Act::ConfirmDelete);
+        assert!(!path.exists());
+        assert_eq!(launcher(&app).screen, Screen::List);
+        assert!(launcher(&app).entries.is_empty());
+    }
+
+    #[test]
+    fn an_untrusted_game_asks_before_opening_and_cancel_runs_nothing() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        app.update();
+        act(&mut app, Act::Open);
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::Trust(Next::Open(path.clone()))
+        );
+        app.update();
+        assert_eq!(focused_act(&app), Some(Act::Back));
+        act(&mut app, Act::Back);
+        assert_eq!(launcher(&app).screen, Screen::List);
+        assert!(app.world().resource::<Relaunch>().0.is_none());
+        act(&mut app, Act::Open);
+        act(&mut app, Act::Trust);
+        assert_eq!(
+            app.world().resource::<Relaunch>().0,
+            Some(Target::World(path))
+        );
+        assert!(app.world().resource::<Installed>().untrusted.is_empty());
+    }
+
+    #[test]
+    fn an_empty_world_opens_without_asking_to_trust_the_game() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Plain", false)).unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        app.update();
+        act(&mut app, Act::Open);
+        assert_eq!(
+            app.world().resource::<Relaunch>().0,
+            Some(Target::World(path))
+        );
+    }
+
+    #[test]
+    fn a_failed_open_is_explained_on_the_list_without_touching_the_save() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Broken", true)).unwrap();
+        let before = std::fs::read(path.join(library::SIDECAR)).unwrap();
+        let mut app = app(&worlds, Installed::fake(None, &[]));
+        app.insert_resource(OpenFailure {
+            folder: path.clone(),
+            reason: "corrupt World save: checksum mismatch".into(),
+        });
+        app.update();
+        let (title, detail) = launcher(&app).card.clone().unwrap();
+        assert_eq!(title, "Could not open Broken");
+        assert!(detail.contains("checksum"));
+        assert_eq!(launcher(&app).selected, Some(path.clone()));
+        press(&mut app, KeyCode::Escape);
+        assert!(launcher(&app).card.is_none());
+        assert_eq!(std::fs::read(path.join(library::SIDECAR)).unwrap(), before);
+    }
+
+    #[test]
+    fn rename_changes_the_listed_name_and_recreate_copies_the_settings() {
+        let worlds = Directory::new();
+        library::create(&worlds.0, &details("Old", true)).unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::Rename);
+        type_into(&mut app, Field::Rename, "New name");
+        act(&mut app, Act::SaveName);
+        assert_eq!(launcher(&app).entries[0].name(), Some("New name"));
+        act(&mut app, Act::ReCreate);
+        let form = launcher(&app).form.clone();
+        assert_eq!(form.name, "New name (copy)");
+        assert_eq!(form.seed, "42");
+        assert_eq!(form.voxel_size_m, 0.5);
+        assert!(form.game && form.more);
+    }
+
+    #[test]
+    fn quit_exits_without_restarting() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(None, &[]));
+        app.update();
+        act(&mut app, Act::Quit);
+        assert_eq!(exits(&app), 1);
+        assert!(app.world().resource::<Relaunch>().0.is_none());
+    }
+}

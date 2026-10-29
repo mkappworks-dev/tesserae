@@ -4,6 +4,7 @@ mod client;
 mod content;
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod cost;
+mod launch;
 #[cfg(feature = "profiling")]
 mod profiling;
 mod render;
@@ -16,61 +17,155 @@ use bevy::prelude::*;
 fn main() -> std::process::ExitCode {
     #[cfg(feature = "profiling")]
     let process_start = profiling::ProcessStart(std::time::Instant::now());
-    #[cfg(any(feature = "dev", feature = "profiling"))]
-    let mut settings = world::WorldSettings::from_env(|name| std::env::var(name).ok());
-    #[cfg(not(any(feature = "dev", feature = "profiling")))]
-    let mut settings = world::WorldSettings::default();
-    let opening = match server::persistence::Opening::from_env() {
-        Ok(opening) => opening,
+    let args = match launch::parse(std::env::args_os().skip(1), |name| {
+        std::env::var_os(name).is_some()
+    }) {
+        Ok(args) => args,
         Err(error) => {
-            eprintln!("Cannot open World: {error}");
+            eprintln!("{error}");
             return std::process::ExitCode::FAILURE;
         }
     };
-    if let Some(recovered) = &opening.recovered {
-        settings.seed = recovered.commit.seed;
-        settings.voxel_size = recovered.commit.voxel_size_m;
-    }
-    let mut loaded = match server::mods::load_from_env(&settings, &opening) {
-        Ok(loaded) => loaded,
-        Err(error) => {
-            eprintln!("Cannot open World: {error}");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-    let persistence =
-        match server::persistence::Persistence::prepare(opening, &mut loaded, settings) {
-            Ok(persistence) => persistence,
-            Err(error) => {
-                eprintln!("Cannot open World: {error}");
-                return std::process::ExitCode::FAILURE;
+    let mut app = match &args.launch {
+        launch::Launch::List => list_app(&args, None),
+        launch::Launch::Direct => {
+            match server::persistence::Opening::from_env().and_then(|o| world_parts(o, &args)) {
+                Ok(parts) => world_app(parts, &args, false),
+                Err(error) => {
+                    eprintln!("Cannot open World: {error}");
+                    return std::process::ExitCode::FAILURE;
+                }
             }
-        };
-    let mut app = App::new();
-    app.insert_resource(persistence);
+        }
+        launch::Launch::World(folder) => {
+            match server::persistence::Opening::from_folder(folder)
+                .and_then(|o| world_parts(o, &args))
+            {
+                Ok(parts) => world_app(parts, &args, true),
+                Err(reason) => {
+                    eprintln!("Cannot open World: {reason}");
+                    list_app(
+                        &args,
+                        Some(client::worlds::OpenFailure {
+                            folder: folder.clone(),
+                            reason,
+                        }),
+                    )
+                }
+            }
+        }
+    };
     #[cfg(feature = "profiling")]
     app.insert_resource(process_start);
-    app.insert_resource(settings)
-        .insert_non_send(loaded)
+    app.run();
+    let target = app
+        .world_mut()
+        .get_resource_mut::<launch::Relaunch>()
+        .and_then(|mut r| r.0.take());
+    let geometry = app
+        .world()
+        .get_resource::<launch::LastGeometry>()
+        .and_then(|g| g.0);
+    match target {
+        Some(target) => launch::relaunch(launch::next_args(&target, geometry, &args.user)),
+        None => std::process::ExitCode::SUCCESS,
+    }
+}
+
+struct WorldParts {
+    settings: world::WorldSettings,
+    loaded: server::mods::LoadedMods,
+    persistence: server::persistence::Persistence,
+    name: Option<String>,
+}
+
+fn world_parts(
+    opening: server::persistence::Opening,
+    args: &launch::Args,
+) -> Result<WorldParts, String> {
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let base = world::WorldSettings::from_env(|name| std::env::var(name).ok());
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
+    let base = world::WorldSettings::default();
+    let settings = opening.settings(base);
+    let name = opening.details.as_ref().map(|d| d.name.clone());
+    let wanted = opening
+        .details
+        .as_ref()
+        .filter(|d| d.pending)
+        .and_then(|d| d.game.clone());
+    let mut loaded = server::mods::load_world(&args.user, &settings, &opening)?;
+    // A skipped untrusted Game would otherwise silently create an Empty World.
+    if let Some(game) = wanted
+        && !loaded.game
+    {
+        return Err(format!(
+            "Game `{}` could not be loaded; it may be missing or not trusted",
+            game.id
+        ));
+    }
+    let persistence = server::persistence::Persistence::prepare(opening, &mut loaded, settings)?;
+    Ok(WorldParts {
+        settings,
+        loaded,
+        persistence,
+        name,
+    })
+}
+
+fn world_app(parts: WorldParts, args: &launch::Args, from_list: bool) -> App {
+    let mut app = App::new();
+    app.insert_resource(parts.persistence)
+        .insert_resource(launch::Launched {
+            from_list,
+            world_name: parts.name,
+        })
+        .insert_resource(parts.settings)
+        .insert_non_send(parts.loaded)
         .add_plugins(
             DefaultPlugins
-                .set(window_plugin())
+                .set(window_plugin(args.window))
                 .set(task_pools())
                 .set(log_settings()),
         )
+        .add_plugins(launch::plugin)
         .add_plugins((render::plugin, server::plugin, client::plugin))
-        .add_plugins(dev_plugins)
-        .run();
-    std::process::ExitCode::SUCCESS
+        .add_plugins(dev_plugins);
+    app
 }
 
-fn window_plugin() -> WindowPlugin {
+fn list_app(args: &launch::Args, failure: Option<client::worlds::OpenFailure>) -> App {
+    let mut app = App::new();
+    let worlds = server::persistence::worlds_dir().unwrap_or_else(|| "worlds".into());
+    app.insert_resource(launch::Launched {
+        from_list: false,
+        world_name: None,
+    })
+    .insert_resource(server::mods::installed(&args.user))
+    .insert_resource(client::worlds::WorldsDir(worlds))
+    .add_plugins(
+        DefaultPlugins
+            .set(window_plugin(args.window))
+            .set(log_settings()),
+    )
+    .add_plugins((launch::plugin, client::worlds::plugin));
+    if let Some(failure) = failure {
+        app.insert_resource(failure);
+    }
+    app
+}
+
+fn window_plugin(geometry: Option<launch::Geometry>) -> WindowPlugin {
+    let mut window = Window {
+        title: "Tesserae".into(),
+        ..default()
+    };
+    if let Some(geometry) = geometry {
+        geometry.apply(&mut window);
+    }
     WindowPlugin {
         close_when_requested: false,
-        primary_window: Some(Window {
-            title: "Tesserae".into(),
-            ..default()
-        }),
+        primary_window: Some(window),
         ..default()
     }
 }

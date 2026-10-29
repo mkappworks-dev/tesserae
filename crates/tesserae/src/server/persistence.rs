@@ -13,6 +13,11 @@ use super::player::Player;
 use super::world_state::{ChunkStore, Lifetime};
 use crate::world::{ChunkCoord, WorldSettings};
 
+/// Beside the user Mods folder; every World folder lives here.
+pub fn worlds_dir() -> Option<PathBuf> {
+    tesserae_mods::default_mods_dir().map(|p| p.with_file_name("worlds"))
+}
+
 pub struct Opening {
     pub directory: Option<PathBuf>,
     pub id: WorldId,
@@ -34,8 +39,8 @@ impl Opening {
             None
         } else {
             Some(
-                tesserae_mods::default_mods_dir()
-                    .map(|p| p.with_file_name("worlds").join("default"))
+                worlds_dir()
+                    .map(|p| p.join("default"))
                     .ok_or("cannot resolve World directory; set TESSERAE_WORLD_DIR")?,
             )
         };

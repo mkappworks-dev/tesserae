@@ -124,12 +124,16 @@ impl Default for LoadedMods {
 #[derive(Resource)]
 pub(super) struct WorldParameters(pub WorldgenParams);
 
-pub fn load_from_env(
+pub fn load_world(
+    args: &[OsString],
     world: &WorldSettings,
     opening: &super::persistence::Opening,
 ) -> Result<LoadedMods, String> {
+    if !opening.loads_mods() {
+        return Ok(LoadedMods::default());
+    }
     let Some(options) = LoadOptions::resolve(
-        std::env::args_os().skip(1),
+        args.iter().cloned(),
         std::env::var_os("TESSERAE_MODS_DIR"),
         std::env::var_os("TESSERAE_TRUST_MODS"),
         tesserae_mods::default_mods_dir(),
@@ -149,6 +153,134 @@ pub fn load_from_env(
         &mut stdin.lock(),
         &mut io::stderr().lock(),
     )
+}
+
+/// A Mod that would run without a recorded Trust grant for its exact bytes.
+pub struct Untrusted {
+    pub prompt: String,
+    found: tesserae_mods::Found,
+    sha256: String,
+}
+
+/// What the World list can offer, found without running any Mod code.
+#[derive(Resource)]
+pub struct Installed {
+    /// The root Game's id and version, if the Mods folder has one.
+    pub game: Option<(String, String)>,
+    pub untrusted: Vec<Untrusted>,
+    /// Why the Mods folder could not be read; only an Empty World can be made.
+    pub error: Option<String>,
+    trust_file: PathBuf,
+}
+
+impl Installed {
+    pub fn none(error: Option<String>) -> Self {
+        Self {
+            game: None,
+            untrusted: Vec::new(),
+            error,
+            trust_file: PathBuf::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn fake(game: Option<(&str, &str)>, untrusted: &[&str]) -> Self {
+        Self {
+            game: game.map(|(id, version)| (id.into(), version.into())),
+            untrusted: untrusted
+                .iter()
+                .map(|id| Untrusted {
+                    prompt: format!("Mod: {id}"),
+                    found: tesserae_mods::Found {
+                        manifest: toml_manifest(id),
+                        dir: PathBuf::new(),
+                        manifest_bytes: Vec::new(),
+                    },
+                    sha256: String::new(),
+                })
+                .collect(),
+            error: None,
+            trust_file: PathBuf::new(),
+        }
+    }
+
+    /// Records Trust for the first untrusted Mod's exact bytes.
+    pub fn grant_first(&mut self) -> Result<(), String> {
+        if self.untrusted.is_empty() {
+            return Ok(());
+        }
+        let first = self.untrusted.remove(0);
+        if self.trust_file.as_os_str().is_empty() {
+            return Ok(());
+        }
+        let mut trust = Trust::load(&self.trust_file);
+        trust
+            .grant_exact(&first.found, &first.sha256)
+            .map_err(|e| e.to_string())
+    }
+}
+
+#[cfg(test)]
+fn toml_manifest(id: &str) -> tesserae_mods::Manifest {
+    tesserae_mods::Manifest {
+        id: id.into(),
+        version: "1".into(),
+        api: "0.3".into(),
+        root: false,
+        wasm: "m.wasm".into(),
+        depends: Vec::new(),
+        limits: Default::default(),
+    }
+}
+
+pub fn installed(args: &[OsString]) -> Installed {
+    let options = match LoadOptions::resolve(
+        args.iter().cloned(),
+        std::env::var_os("TESSERAE_MODS_DIR"),
+        std::env::var_os("TESSERAE_TRUST_MODS"),
+        tesserae_mods::default_mods_dir(),
+        dev_demo(),
+    ) {
+        Ok(Some(options)) => options,
+        Ok(None) => return Installed::none(None),
+        Err(e) => return Installed::none(Some(e)),
+    };
+    let found = match discover(&options.directory).and_then(plan) {
+        Ok(found) => found,
+        Err(e) => return Installed::none(Some(e.to_string())),
+    };
+    let game = found
+        .iter()
+        .find(|f| f.manifest.root)
+        .map(|f| (f.manifest.id.clone(), f.manifest.version.clone()));
+    let mut untrusted = Vec::new();
+    if options.trust == TrustMode::None {
+        let trust = Trust::load(&options.trust_file);
+        for f in found {
+            match trust.check(&f) {
+                Ok(Verdict::Trusted(_)) => {}
+                Ok(_) => match Trust::hash_of(&f) {
+                    Ok(sha256) => untrusted.push(Untrusted {
+                        prompt: tesserae_mods::trust_prompt(
+                            &f.manifest,
+                            tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits),
+                            &sha256,
+                        ),
+                        found: f,
+                        sha256,
+                    }),
+                    Err(e) => return Installed::none(Some(e.to_string())),
+                },
+                Err(e) => return Installed::none(Some(e.to_string())),
+            }
+        }
+    }
+    Installed {
+        game,
+        untrusted,
+        error: None,
+        trust_file: options.trust_file,
+    }
 }
 
 fn load_prompted(

@@ -33,6 +33,7 @@ mod save;
 mod settings;
 mod tile_preview;
 mod view;
+pub mod worlds;
 
 use bevy::prelude::*;
 
@@ -65,8 +66,15 @@ pub fn plugin(app: &mut App) {
         removal::plugin,
         history::plugin,
         avatar::plugin,
+        worlds::entry_plugin,
     ));
     app.add_plugins(view::plugin);
+    app.add_systems(
+        Update,
+        (|mut commands: Commands| commands.insert_resource(worlds::TerrainArrived))
+            .run_if(chunk_view::terrain_arrived)
+            .run_if(not(resource_exists::<worlds::TerrainArrived>)),
+    );
     #[cfg(feature = "dev")]
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
