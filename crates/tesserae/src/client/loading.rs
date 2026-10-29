@@ -8,7 +8,7 @@ use super::menu_ui as ui;
 #[derive(Component)]
 struct Loading;
 
-/// Longest the loading screen waits for terrain, e.g. for an Empty World.
+/// Longest the loading screen waits for terrain, e.g. for a World saved without a Game.
 const LOADING_TIMEOUT_S: f32 = 15.0;
 
 pub(super) fn plugin(app: &mut App) {

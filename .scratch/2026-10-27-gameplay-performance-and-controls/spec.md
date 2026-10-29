@@ -186,7 +186,8 @@ collections and unrestricted free-point drawing are deferred.
 ## World creation, seed and persistence
 
 Provide a World list with Create, Open and Rename. New World asks for name,
-installed Game (or empty World) and optional seed. Mod download/management
+installed Game and optional seed; with no Game installed, Create is disabled
+(user decision 2026-10-29, ticket 27: an empty World was only Air). Mod download/management
 is separate; keep explicit Trust checks before running Mod code.
 
 Blank seed chooses a random seed; Randomize can choose another. Accept

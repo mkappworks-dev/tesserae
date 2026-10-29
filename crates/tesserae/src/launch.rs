@@ -261,7 +261,7 @@ pub struct Untrusted {
 pub struct Installed {
     pub game: Option<GameRef>,
     pub untrusted: Vec<Untrusted>,
-    /// Why the Mods folder could not be read; only an Empty World can be made.
+    /// Why the Mods folder could not be read; nothing can be created.
     pub error: Option<String>,
     /// `None` when nothing can be granted, as in tests.
     trust_file: Option<PathBuf>,

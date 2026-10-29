@@ -86,7 +86,7 @@ fn world_parts(
     let name = opening.display_name();
     let wanted = opening.pending_game().cloned();
     let mut loaded = server::mods::load_world(&args.user, &settings, &opening)?;
-    // A skipped untrusted Game would otherwise silently create an Empty World,
+    // A skipped untrusted Game would otherwise silently create a World of Air,
     // and a different installed Game would create the wrong one.
     if let Some(game) = wanted
         && !loaded.required.iter().any(|m| m.game && m.id == game.id)

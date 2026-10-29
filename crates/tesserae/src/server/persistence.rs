@@ -129,7 +129,7 @@ impl Opening {
         })
     }
 
-    /// An Empty World loads no Mods, so installing a Game later cannot change
+    /// A World saved without a Game loads no Mods, so installing one later cannot change
     /// its required content.
     pub fn loads_mods(&self) -> bool {
         match (&self.recovered, &self.details) {

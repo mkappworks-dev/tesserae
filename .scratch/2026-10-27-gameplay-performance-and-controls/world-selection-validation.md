@@ -112,4 +112,9 @@ cleared, and a later `--world` launch logged the same UUID as reopened.
   from 0.3 to 2.4 ms (fluid work), main p50 from ~1.7 to ~3.2 ms, render
   CPU p50 from 2.9 to 3.6 ms. Artifacts in /tmp/tesserae-w0-review/ab.
   Follow-up belongs to tech/streaming-performance.
+- Empty World removed from Create (user decision): with no Game installed,
+  Create is disabled and the list says to install one. Worlds already
+  saved without a Game still open and load no Mods; the earlier Empty World
+  notes above describe that path. Re-Create is offered only for the
+  installed Game.
 

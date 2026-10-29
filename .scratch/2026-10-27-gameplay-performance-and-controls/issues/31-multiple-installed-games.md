@@ -12,7 +12,7 @@ Let several Games be installed at once and let each World choose its Game and
 the Mods enabled for it, as Luanti does (`games/<id>/`, per-World mod
 selection) and Minecraft does with per-World data packs. Today the Mods
 directory permits a single root (`ModError::SecondRoot`), so W0's Create form
-offers only that Game or Empty World.
+offers only that Game.
 
 ## Notes
 

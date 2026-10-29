@@ -69,11 +69,12 @@ lists as Incomplete with Retry and Delete; nothing is deleted automatically.
 
 - Names: trimmed, 1–64 characters, any Unicode, duplicates allowed. Blank
   defaults to "New World".
-- Game: the Mods directory's single root Game (manifest id and version) or
-  Empty World. No root: only Empty World, with a note. Discovery error (e.g.
-  `SecondRoot`): show it; only Empty World can be created.
-- Empty World loads no Mods: built-in registry, no-Game free-flight fallback,
-  empty required content. Non-root Mods are not loaded on their own.
+- Game: the Mods directory's single root Game (manifest id and version). No
+  root, or a discovery error (e.g. `SecondRoot`): Create is disabled and the
+  list says to install a Game. (Empty World was removed on 2026-10-29: the
+  Engine ships only Air, so it was empty sky with a seed that did nothing.)
+- A World saved without a Game (e.g. from before the World list) still opens
+  and loads no Mods.
 - Trust: an untrusted Game is tagged "needs Trust". Create/Open shows an
   in-UI Trust dialog with the existing `trust_prompt` text and hash before any
   Mod code runs: Trust and continue, or Cancel. It writes the same trust file;
@@ -127,7 +128,7 @@ unsafe exit. Window close keeps save-then-exit.
 
 ### List and Delete
 
-Sorted by last played, newest first; rows show name, Game or "Empty World",
+Sorted by last played, newest first; rows show name, Game (or "No Game"),
 seed and last played. No Worlds: Create is first. Actions: Open, Create,
 Re-Create, Rename, Delete, Show World folder (Finder or the platform file
 manager), Quit. Duplicate, backup and import are out of scope.
@@ -273,4 +274,11 @@ its span was refused as a corrupt Agenda) landed here; see the validation
 note. The richer demo costs frame time: about 35-45% per frame in a release
 A/B on the same engine binary. Streaming and rendering work moved to the
 tech/streaming-performance session; the demo's fluid cost is item 8 there.
+
+### Empty World removed (2026-10-29)
+
+The user removed Empty World from Create. With only Air built in, it was
+empty sky, and its seed did nothing. With no Game installed, Create is
+disabled and the list says to install one. Worlds already saved without a
+Game still open and load no Mods.
 

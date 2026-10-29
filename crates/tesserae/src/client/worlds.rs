@@ -66,7 +66,6 @@ struct Form {
     seed: String,
     /// Used when the seed is left blank, so it can be shown and copied first.
     random_seed: u64,
-    game: bool,
     voxel_size_m: f32,
     more: bool,
     problem: Option<String>,
@@ -78,7 +77,6 @@ impl Default for Form {
             name: String::new(),
             seed: String::new(),
             random_seed: tesserae_core::seed::random(),
-            game: true,
             voxel_size_m: 1.0,
             more: false,
             problem: None,
@@ -164,7 +162,6 @@ enum Act {
     Randomize,
     CopyResolved,
     More,
-    Game(bool),
     Voxel(f32),
     SaveName,
     ConfirmDelete,
@@ -254,7 +251,6 @@ fn review_capture(
                 "delete" => Act::Delete,
                 "recreate" => Act::ReCreate,
                 "open" => Act::Open,
-                "empty" => Act::Game(false),
                 "create" => Act::Create,
                 other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
             });
@@ -337,6 +333,7 @@ fn folder(path: &Path) -> String {
 }
 
 const UNNAMED: &str = "Unnamed";
+const NO_GAME: &str = "Install a Game in the Mods folder to create a World.";
 
 fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     if let Ok(act) = acts.get(event.entity) {
@@ -445,22 +442,24 @@ fn handle(
                 }
             }
             Act::New => {
-                l.form = Form {
-                    game: installed.game.is_some(),
-                    ..Form::default()
-                };
+                if installed.game.is_none() {
+                    continue;
+                }
+                l.form = Form::default();
                 l.show(Screen::Create);
             }
             Act::ReCreate => {
                 let Some(details) = l.selected().and_then(Entry::details).cloned() else {
                     continue;
                 };
+                // Another installed Game would silently change the content.
+                if details.game.is_none() || details.game != installed.game {
+                    continue;
+                }
                 let copy = format!("{} (copy)", details.name);
                 l.form = Form {
                     name: copy.chars().take(library::MAX_NAME_CHARS).collect(),
                     seed: details.seed.to_string(),
-                    // Another installed Game would silently change the content.
-                    game: details.game.is_some() && details.game == installed.game,
                     voxel_size_m: details.voxel_size_m,
                     more: details.voxel_size_m != 1.0,
                     ..Form::default()
@@ -517,10 +516,6 @@ fn handle(
                 l.form.more = !l.form.more;
                 l.version += 1;
             }
-            Act::Game(game) => {
-                l.form.game = game && installed.game.is_some();
-                l.version += 1;
-            }
             Act::Voxel(size) => {
                 l.form.voxel_size_m = size;
                 l.version += 1;
@@ -529,7 +524,7 @@ fn handle(
                 if l.screen != Screen::Create {
                     continue;
                 }
-                let needs_trust = l.form.game && !installed.untrusted.is_empty();
+                let needs_trust = !installed.untrusted.is_empty();
                 if needs_trust && validate(&l.form).is_ok() {
                     l.show(Screen::Trust(Next::Create));
                 } else {
@@ -608,6 +603,11 @@ fn validate(form: &Form) -> Result<(String, u64), String> {
 }
 
 fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut Relaunch) {
+    let Some(game) = installed.game.clone() else {
+        l.form.problem = Some(NO_GAME.into());
+        l.show(Screen::Create);
+        return;
+    };
     let (name, seed) = match validate(&l.form) {
         Ok(valid) => valid,
         Err(e) => {
@@ -619,7 +619,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
     let now = library::now_unix_s();
     let sidecar = Sidecar {
         name: name.clone(),
-        game: installed.game.clone().filter(|_| l.form.game),
+        game: Some(game),
         seed,
         voxel_size_m: l.form.voxel_size_m,
         created_unix_s: now,
@@ -714,7 +714,7 @@ fn render(
         .with_children(|root| {
             header(root, logo.as_deref());
             match &l.screen {
-                Screen::List => focus = list(root, &l),
+                Screen::List => focus = list(root, &l, &installed),
                 Screen::Create => focus = form(root, &l, &installed),
                 Screen::Opening(name) => {
                     centered(root, |card| super::loading::opening(card, name));
@@ -916,12 +916,12 @@ fn relative(then_s: u64) -> String {
 
 fn game_label(game: Option<&GameRef>) -> String {
     game.map_or_else(
-        || "Empty World".into(),
+        || "No Game".into(),
         |g| format!("{} {}", ui::title(&g.id), g.version),
     )
 }
 
-fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
+fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
     let mut focus = None;
     root.spawn(Node {
         justify_content: JustifyContent::SpaceBetween,
@@ -937,7 +937,11 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
             "Pick up where you left off, or start somewhere new.",
         );
         let create = ui::button(top, "Create World", Act::New, false, false, true);
-        if l.entries.is_empty() {
+        if installed.game.is_none() {
+            top.commands()
+                .entity(create)
+                .insert(bevy::ui::InteractionDisabled);
+        } else if l.entries.is_empty() {
             focus = Some(create);
         }
     });
@@ -979,12 +983,31 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
             ui::compact_button(card, "Dismiss", Act::Dismiss, false, 30.0, 11.0);
         });
     }
+    if installed.game.is_none() {
+        root.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(4.0),
+            margin: UiRect::bottom(Val::Px(14.0)),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|note| {
+            ui::paragraph(note, NO_GAME, 12.0, ui::AMBER);
+            if let Some(error) = &installed.error {
+                ui::description(note, &format!("Installed Mods could not be read: {error}"));
+            }
+        });
+    }
     if l.entries.is_empty() {
         centered(root, |card| {
             ui::weighted_text(card, "No Worlds yet", 19.0, 620, ui::INK);
             ui::paragraph(
                 card,
-                "Create a World to start playing. You can choose its seed.",
+                if installed.game.is_some() {
+                    "Create a World to start playing. You can choose its seed."
+                } else {
+                    NO_GAME
+                },
                 12.0,
                 ui::MUTED,
             );
@@ -1024,7 +1047,7 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
                     min_width: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|side| details(side, entry));
+                .with_children(|side| details(side, entry, installed.game.as_ref()));
         }
     });
     focus
@@ -1073,7 +1096,7 @@ fn world_row(rows: &mut ChildSpawnerCommands, entry: &Entry, selected: bool) -> 
     .id()
 }
 
-fn details(side: &mut ChildSpawnerCommands, entry: &Entry) {
+fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: Option<&GameRef>) {
     panel(side, |p| {
         ui::weighted_text(p, entry.name().unwrap_or(UNNAMED), 19.0, 620, ui::INK);
         ui::description(p, &format!("Folder: {}", entry.folder()));
@@ -1137,7 +1160,10 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry) {
                 false,
                 true,
             );
-            if entry.details().is_some() && !entry.incomplete() {
+            let same_game = entry
+                .details()
+                .is_some_and(|d| d.game.is_some() && d.game.as_ref() == installed);
+            if same_game && !entry.incomplete() {
                 ui::button(r, "Re-Create", Act::ReCreate, false, false, false);
             }
             ui::button(r, "Rename", Act::Rename, false, false, false);
@@ -1191,36 +1217,17 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
             &f.name,
             "Up to 64 characters. Blank uses \u{201c}New World\u{201d}.",
         ));
-        label(col, "Game");
-        row(col, 7.0, |r| {
-            if let Some(GameRef { id, version }) = &installed.game {
-                let tag = if installed.untrusted.is_empty() {
-                    ""
-                } else {
-                    " · needs Trust"
-                };
-                ui::button(
-                    r,
-                    format!("{} {version}{tag}", ui::title(id)),
-                    Act::Game(true),
-                    f.game,
-                    false,
-                    false,
-                );
-            }
-            ui::button(r, "Empty World", Act::Game(false), !f.game, false, false);
-        });
-        if let Some(error) = &installed.error {
-            ui::paragraph(
+        if let Some(GameRef { id, version }) = &installed.game {
+            let trust = if installed.untrusted.is_empty() {
+                ""
+            } else {
+                " · needs Trust"
+            };
+            ui::text(
                 col,
-                format!("Installed Mods could not be read: {error}"),
+                format!("Game: {} {version}{trust}", ui::title(id)),
                 12.0,
-                ui::AMBER,
-            );
-        } else if installed.game.is_none() {
-            ui::description(
-                col,
-                "No Game is installed, so only an Empty World can be made.",
+                ui::INK,
             );
         }
         label(col, "Seed");
@@ -1510,7 +1517,7 @@ mod tests {
     #[test]
     fn an_invalid_seed_or_name_keeps_the_form_and_writes_nothing() {
         let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(None, &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
         app.update();
         act(&mut app, Act::New);
         type_into(&mut app, Field::Seed, "18446744073709551616");
@@ -1585,7 +1592,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_world_opens_without_asking_to_trust_the_game() {
+    fn a_world_saved_without_a_game_opens_without_asking_for_trust() {
         let worlds = Directory::new();
         let path = library::create(&worlds.0, &details("Plain", false)).unwrap();
         let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
@@ -1632,7 +1639,7 @@ mod tests {
         assert_eq!(form.name, "New name (copy)");
         assert_eq!(form.seed, "42");
         assert_eq!(form.voxel_size_m, 0.5);
-        assert!(form.game && form.more);
+        assert!(form.more);
     }
 
     #[test]
@@ -1648,7 +1655,7 @@ mod tests {
     #[test]
     fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
         let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(None, &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
         app.update();
         act(&mut app, Act::New);
         let shown = app
@@ -1673,7 +1680,24 @@ mod tests {
         library::create(&worlds.0, &details("Demo world", true)).unwrap();
         let mut app = app(&worlds, Installed::fake(Some(("other", "2.0.0")), &[]));
         app.update();
-        act(&mut app, Act::ReCreate);
-        assert!(!launcher(&app).form.game);
+        let offered = app
+            .world_mut()
+            .query::<&Act>()
+            .iter(app.world())
+            .any(|a| *a == Act::ReCreate);
+        assert!(!offered, "Re-Create offered for another Game");
+    }
+
+    #[test]
+    fn with_no_game_installed_nothing_can_be_created() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(None, &[]));
+        app.update();
+        app.update();
+        assert_ne!(focused_act(&app), Some(Act::New));
+        act(&mut app, Act::New);
+        assert_eq!(launcher(&app).screen, Screen::List);
+        assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
+        assert!(app.world().resource::<Relaunch>().0.is_none());
     }
 }

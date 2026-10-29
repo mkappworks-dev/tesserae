@@ -26,7 +26,9 @@ its first commit at once; any other folder without a save is refused rather than
 becoming a new World. Saved seed and Voxel size always win over the build
 defaults and `TESSERAE_VOXEL_SIZE_M`. Rename and Delete try the writer lock and
 refuse while any process holds the World open; Delete moves the folder to the OS
-Trash. An Empty World loads no Mods, now or on reopen.
+Trash. Create requires an installed Game: the Engine ships only Air, so a World
+without one would be empty sky. A World saved without a Game, such as one
+created before the World list, still opens and loads no Mods.
 
 Seed text resolves in `tesserae_core::seed`: blank is random; unsigned decimal
 within `u64`, or `-` and decimal within `i64` as its two's complement, is the
