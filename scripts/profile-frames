@@ -43,12 +43,81 @@ def distribution(values):
     })
 
 
+def streaming(path, rows):
+    """Holes, GPU spans and worker time in the fixture phase, where recorded."""
+    fixture = [r for r in rows if r['phase'] == 'fixture']
+    if not fixture or 'rule_holes' not in fixture[0]:
+        return None
+    ids = {r['frame_id'] for r in fixture}
+    out = {
+        'rule_hole_frames': sum(int(r['rule_holes']) > 0 for r in fixture),
+        'fill_hole_frames': sum(int(r['fill_holes']) > 0 for r in fixture),
+        'rule_holes_max': max(int(r['rule_holes']) for r in fixture),
+        'fill_holes_max': max(int(r['fill_holes']) for r in fixture),
+        'chunk_entities': distribution([float(r['chunk_entities']) for r in fixture]),
+        'visible_meshes': {
+            key[len('visible_meshes_'):]: distribution([float(r[key]) for r in fixture])
+            for key in fixture[0] if key.startswith('visible_meshes_')},
+    }
+    gpu_path = path.with_suffix('.gpu.csv')
+    if gpu_path.exists():
+        marks = {}
+        for r in csv.DictReader(gpu_path.read_text().splitlines()):
+            if r['frame_id'] in ids and r['since_frame_start_ms']:
+                marks.setdefault(r['frame_id'], {})[r['marker']] = float(r['since_frame_start_ms'])
+        def span(a, b):
+            return distribution([m[b] - m[a] for m in marks.values() if a in m and b in m])
+        cameras = sorted({k.split(':')[0] for m in marks.values() for k in m if ':' in k})
+        out['gpu'] = {
+            'frames_with_end': len([m for m in marks.values() if 'frame_end' in m]),
+            'frames': len(ids), 'frame_ms': span('frame_start', 'frame_end'),
+            'views': {c: {
+                'view_ms': span(f'{c}:view_start', f'{c}:view_end'),
+                'prepass_ms': span(f'{c}:view_start', f'{c}:prepass_end'),
+                'shadow_and_setup_ms': span(f'{c}:prepass_end', f'{c}:main_start'),
+                'opaque_ms': span(f'{c}:main_start', f'{c}:opaque_end'),
+                'transparent_ms': span(f'{c}:opaque_end', f'{c}:main_end'),
+                'post_ms': span(f'{c}:main_end', f'{c}:view_end'),
+            } for c in cameras},
+        }
+    flow_path = path.with_suffix('.flow.csv')
+    if flow_path.exists():
+        flow = list(csv.DictReader(flow_path.read_text().splitlines()))
+        start, end = float(fixture[0]['start_s']), float(fixture[-1]['end_s'])
+        def at(t, level):
+            picked = [r for r in flow if int(r['level']) == level and float(r['t_s']) <= t]
+            return picked[-1] if picked else None
+        seconds = end - start
+        work = {}
+        for level in sorted({int(r['level']) for r in flow}):
+            a, b = at(start, level), at(end, level)
+            if not a or not b:
+                continue
+            work[level] = {
+                f'{stage}_worker_ms_per_s': (float(b[f'{stage}_cpu_ms']) - float(a[f'{stage}_cpu_ms'])) / seconds
+                for stage in ['generate', 'relight', 'mesh']}
+            for stage in ['generate', 'relight', 'mesh']:
+                work[level][f'{stage}_run'] = int(b[f'{stage}_run']) - int(a[f'{stage}_run'])
+                work[level][f'{stage}_waiting_max'] = max(
+                    int(r[f'{stage}_waiting']) for r in flow
+                    if int(r['level']) == level and start <= float(r['t_s']) <= end)
+            if level == 0:
+                work[level]['fluid_worker_ms_per_s'] = (
+                    float(b['fluid_cpu_ms']) - float(a['fluid_cpu_ms'])) / seconds
+        out['workers'] = work
+    return out
+
+
 def analyze(folder):
     result = {}
     audit = {}
+    streaming_summary = {}
     for path in sorted(folder.glob('*/frames.csv')):
         rows = list(csv.DictReader(path.read_text().splitlines()))
         assert [int(r['frame_id']) for r in rows] == list(range(len(rows)))
+        summary = streaming(path, rows)
+        if summary:
+            streaming_summary[path.parent.name] = summary
         result[path.parent.name] = {}
         for phase in ['startup', 'stationary', 'transition', 'fixture', 'settle']:
             selected = [r for r in rows if r['phase'] == phase]
@@ -81,6 +150,7 @@ def analyze(folder):
                     if by_id.get(r['frame_id']) == phase and r[key]
                 ])
     (folder / 'audit.json').write_text(json.dumps(audit, indent=2) + '\n')
+    (folder / 'streaming.json').write_text(json.dumps(streaming_summary, indent=2) + '\n')
     overhead = {}
     for path in sorted(folder.glob('*-on/native.log')):
         off = path.parent.with_name(path.parent.name[:-3] + '-off') / 'native.log'
