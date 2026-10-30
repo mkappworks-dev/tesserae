@@ -9,6 +9,7 @@ mod launch;
 mod profiling;
 mod render;
 mod server;
+mod session;
 mod world;
 
 use bevy::app::TaskPoolPlugin;
