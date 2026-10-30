@@ -143,36 +143,38 @@ tables and simulation retain no input timing. The Server compares target
 identity again before applying the removal.
 
 Layout mode (`client/layout.rs`) takes the placement actions while it is on:
-Place commits, Remove cancels and the quick-slot steps change the count. The
+Place commits, Remove cancels and the count keys change the active axis. The
 Client sends one layout intent and the aim ray; the Server resolves the anchor,
 expands the geometry from `tesserae_core::layout`, judges reach and sight once
 for the whole layout, then lands its cells through the Edit budget after single
-Edits. Its preview is the Server's answer, never World storage.
-In point to point, the Client takes each corner from the aimed cell the Server's
-preview answer reports and sends the two corners with the shape; the Server
-judges every cell of the span itself, so a corner grants nothing.
-A corner can also be set by holding Place on A and letting go on B; each corner
-is drawn as an outlined cell with the span's size beside it.
-A span is a flat rectangle from A to B on the plane they differ most in, given
-depth by C along the remaining dimension; C level with A keeps it flat.
-C needs no surface: it is read from where the view line passes B, so a height
-can be set in open sky.
-The preview draws each cell as a ghost of the block that would land, tinted
-where it would not. The Layout key opens the Layout menu (`client/layout_menu.rs`),
-a panel docked over the live game with its own input context: the cursor is
-released and the pad navigates it. Its lengths along X, Y and Z, the way each grows, and the
-gap apply as they are set and are saved when it closes.
+Edits. Its preview is the Server's answer, never World storage. In point to
+point, the Client takes each corner from the aimed cell the Server's preview
+answer reports and sends the two corners with the shape; the Server judges every
+cell of the span itself, so a corner grants nothing. A corner can also be set by
+holding Place on A and letting go on B; each corner is drawn as an outlined cell
+with the span's size beside it. A span is a flat rectangle from A to B on the
+plane they differ most in, given depth by C along the remaining dimension; C
+level with A keeps it flat. C needs no surface: it is read from where the view
+line passes B, so a height can be set in open sky. The preview draws each cell
+as a ghost of the block that would land, tinted where it would not; a box draws
+only its shell, so inner faces never fight for depth. The crosshair, outline,
+preview and removal are building only, shown while the hand holds something or
+Layout mode is on (`edit::building`). The Layout key opens the Layout menu
+(`client/layout_menu.rs`), a panel docked over the live game with its own input
+context: the cursor is released and the pad navigates it. Its lengths along X, Y
+and Z, the way each grows, and the gap apply as they are set and are saved when
+it closes.
 
 Undo/redo owns at most 128 groups, 1024 before/after Occupants entries in all,
 and 16 queued requests on the integrated Server. A single Edit is a group of
 one; a layout (one intent for a line, rectangle or box of at most 256 Voxels,
 expanded and judged by the Server per cell) is one group, replayed whole or not
-at all. It checks Chunk Lifetime, settled light and exact
-current Occupants before replaying through the normal change, light, mesh and
-simulation wake path. Successful replay publishes inverse or forward Mod edit
-events. New successful changes clear redo; refusals preserve history and World
-state. Simulation consequences elsewhere are not rewound. Multiplayer history
-ownership remains part of the network transport work.
+at all. It checks Chunk Lifetime, settled light and exact current Occupants
+before replaying through the normal change, light, mesh and simulation wake
+path. Successful replay publishes inverse or forward Mod edit events. New
+successful changes clear redo; refusals preserve history and World state.
+Simulation consequences elsewhere are not rewound. Multiplayer history ownership
+remains part of the network transport work.
 
 ### The Player, its figure and the camera
 

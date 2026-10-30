@@ -41,6 +41,17 @@ with or without a modifier; a bound wheel chord owns the wheel, so it never also
 steps the quick slots, and plain wheel stays slot selection. The view and zoom
 are saved in the user profile, not in any World.
 
+The crosshair, the targeted-Voxel outline, the placement preview and breaking
+are for building: they show only while the hand holds something (a block, a
+fluid, fire or a tool) or Layout mode is on. With an empty hand you only look.
+
+**L** opens and closes the Layout card, and Layout mode stays on while it is
+closed. Place commits a layout, Remove cancels it and the clear key
+(**Backspace**) leaves the mode. **]** and **[** change the count on the active
+axis, digits type it, **J** moves to the next axis and **T** reverses it. Point
+to point takes A, B, then C for depth; C needs no surface. These are remappable
+actions under Key bindings.
+
 Gameplay input is cancelled when ownership changes. Inputs held through a menu,
 focus change or device cancellation require release before activation. Pending
 sampling replies are discarded. The Server continues simulating while UI is open
