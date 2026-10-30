@@ -334,3 +334,25 @@ leave, and the Layout key should work as it does for the measuring tool.
   metres, and a leaf-edged box for the shape, what the aim would lay and the
   keys.
 
+## Amendment 2026-10-30 (7): A, B, then C
+
+Raised on review: point to point was built as two corners spanning a box, but
+what was meant is a flat rectangle from A and B, and a third point C for the
+depth. This replaces the shapeless two-corner rule of amendment (6).
+
+- Place sets A, Place sets B, and Place on C sets the depth and lays the
+  layout. Holding Place on A and letting go on B still sets B.
+- A and B span a flat rectangle on the plane they differ most in: the two
+  longest differences, a tie going to X, then Z, then Y. The rectangle is flat
+  in the remaining dimension, so a floor is flat in Y and a wall in X or Z.
+- C gives the depth along that dimension: how far C lies from A along it, and
+  to which side. Only that part of C is used. C level with A is no depth, so
+  the rectangle stays flat.
+- While B is unset the aim stands in for it, and while C is unset the aim
+  stands in for C, so the preview follows the cursor through each step.
+- A point that would pass the 256 Voxel cap is refused with a note, and
+  nothing is sent.
+- The ghost blocks are drawn a hair smaller than their cells, or the faces they
+  share with the ground and each other flicker. The Client keeps more aim
+  requests waiting for answers, so a fast turn does not drop them.
+

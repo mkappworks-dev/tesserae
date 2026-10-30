@@ -33,3 +33,11 @@ cells, amber once picked and white while the aim stands in for B, with a text
 label projected beside each. The size shows span extent in Voxels and metres
 and does not count the gap. The markers and labels were not seen on screen,
 only their logic is tested.
+
+### 2026-10-30: reworked to A, B, C
+
+Point to point is now a flat rectangle from A and B with a third point C for the
+depth, as the spec's amendment (7) says. C lays the layout, so a layout is
+three presses, or a drag then one. Corner C is drawn too, with the whole box's
+size beside it.
+

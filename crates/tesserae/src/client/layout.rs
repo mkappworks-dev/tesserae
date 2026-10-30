@@ -22,18 +22,19 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use tesserae_core::Voxel;
-use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS, layout_between};
+use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS, layout_span, span_normal};
 
 const DEFAULT_COUNTS: [u32; 3] = [4, 3, 2];
-/// Point to point has no shape: the corners span a box, and a dimension they
-/// share collapses, so one differing axis is a line and two a flat rectangle.
-const SPAN_AXES: u8 = 3;
+
 /// Voxels left empty between neighbours at most: past this the layout would
 /// stretch further than a Player's reach.
 pub(super) const MAX_GAP: u32 = 15;
 /// How long an answer may be drawn while the next is awaited.
 const ANSWER_SECS: f64 = 0.5;
-const HISTORY: usize = 16;
+/// Aim requests kept waiting for their answer. A frame that moves the aim sends
+/// one, so at a high frame rate dozens go out per Server tick, and an answer for
+/// one that has been forgotten is thrown away, freezing then jumping the preview.
+const HISTORY: usize = 256;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -235,7 +236,7 @@ impl LayoutMode {
             let span = self.points.first().map(|&a| Span {
                 a,
                 b: self.points.get(1).copied(),
-                axes: SPAN_AXES,
+                c: self.points.get(2).copied(),
             });
             return LayoutParams {
                 axes: [
@@ -370,21 +371,23 @@ pub(super) fn intercept(
 /// Place in point to point: the aimed cell becomes the next corner, and with
 /// both set it commits. A corner that makes the span pass the cap is refused.
 fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) {
-    if mode.points.len() == 2 {
-        mode.commit = true;
-        return;
-    }
     let Some(cell) = mode.aimed else {
         return;
     };
-    if let Some(&a) = mode.points.first()
-        && layout_between(a, cell, SPAN_AXES.into(), layout.gap).is_err()
-    {
+    let span = match mode.points[..] {
+        [] => Ok(Vec::new()),
+        [a] => layout_span(a, cell, None, layout.gap),
+        [a, b] => layout_span(a, b, Some(cell), layout.gap),
+        _ => return,
+    };
+    if span.is_err() {
         mode.refused = true;
         return;
     }
     mode.refused = false;
     mode.points.push(cell);
+    // The third corner gives the depth and lays the layout.
+    mode.commit = mode.points.len() == 3;
 }
 
 /// What a layout lays: the held solid.
@@ -518,6 +521,9 @@ pub(super) fn receive(
 const OUT_OF_REACH: Color = Color::srgba(1.0, 0.60, 0.0, 0.40);
 const BLOCKED: Color = Color::srgba(0.94, 0.27, 0.27, 0.50);
 
+/// How much of a Voxel each ghost leaves bare on every side.
+const GHOST_INSET: f32 = 0.01;
+
 #[derive(Component)]
 pub(super) struct LayoutGhost;
 
@@ -627,8 +633,11 @@ pub(super) fn ghosts(
     {
         match wanted.get(index) {
             Some(&(at, tint)) => {
-                transform.translation = at;
-                transform.scale = Vec3::splat(world.voxel_size);
+                // A hair smaller than its cell, or the faces it shares with the
+                // ground and its neighbours flicker against each other.
+                let inset = world.voxel_size * GHOST_INSET;
+                transform.translation = at + Vec3::splat(inset);
+                transform.scale = Vec3::splat(world.voxel_size - 2.0 * inset);
                 // A ghost outlives the block it was made for, so it takes the
                 // current mesh as well as the current look.
                 if mesh.0 != model.mesh {
@@ -657,9 +666,14 @@ struct Corner {
     provisional: bool,
 }
 
-/// How many Voxels a span covers along each axis, both corners included.
-fn span_counts(a: [i32; 3], b: [i32; 3]) -> [u32; 3] {
-    std::array::from_fn(|i| a[i].abs_diff(b[i]) + 1)
+/// How many Voxels the box between `a`, `b` and `c` covers along each world
+/// axis: `a` to `b` on the plane, and `a` to `c` on the dimension it is flat in.
+fn span_counts(a: [i32; 3], b: [i32; 3], c: Option<[i32; 3]>) -> [u32; 3] {
+    let flat = span_normal(a, b);
+    std::array::from_fn(|i| {
+        let to = if i == flat { c.unwrap_or(a) } else { b };
+        a[i].abs_diff(to[i]) + 1
+    })
 }
 
 /// The span's size in Voxels and in metres at this World's Voxel size.
@@ -671,7 +685,8 @@ fn size_text(counts: [u32; 3], voxel_size: f32) -> String {
     )
 }
 
-/// The corners to draw: A once picked, then B, or the aim standing in for B.
+/// The corners to draw: A once picked, then B and C, each the aim standing in
+/// until it is picked.
 fn corners_of(mode: &LayoutMode, layout: &LayoutPreferences, voxel_size: f32) -> Vec<Corner> {
     if !mode.on || layout.kind != Kind::Between {
         return Vec::new();
@@ -679,20 +694,33 @@ fn corners_of(mode: &LayoutMode, layout: &LayoutPreferences, voxel_size: f32) ->
     let Some(&a) = mode.points.first() else {
         return Vec::new();
     };
-    let mut handles = vec![Corner {
+    let aimed = mode.aimed;
+    let mut corners = vec![Corner {
         cell: a,
         label: "A".to_owned(),
         provisional: false,
     }];
-    let picked = mode.points.get(1).copied();
-    if let Some(b) = picked.or(mode.aimed.filter(|cell| *cell != a)) {
-        handles.push(Corner {
-            cell: b,
-            label: format!("B\n{}", size_text(span_counts(a, b), voxel_size)),
-            provisional: picked.is_none(),
-        });
+    let picked_b = mode.points.get(1).copied();
+    let Some(b) = picked_b.or(aimed.filter(|cell| *cell != a)) else {
+        return corners;
+    };
+    corners.push(Corner {
+        cell: b,
+        label: format!("B\n{}", size_text(span_counts(a, b, None), voxel_size)),
+        provisional: picked_b.is_none(),
+    });
+    // C only after B: the aim then gives the depth.
+    if picked_b.is_some() {
+        let picked_c = mode.points.get(2).copied();
+        if let Some(c) = picked_c.or(aimed) {
+            corners.push(Corner {
+                cell: c,
+                label: format!("C\n{}", size_text(span_counts(a, b, Some(c)), voxel_size)),
+                provisional: picked_c.is_none(),
+            });
+        }
     }
-    handles
+    corners
 }
 
 #[derive(Component)]
@@ -815,8 +843,8 @@ pub(super) fn summary(
     let step = match mode.points.len() {
         _ if !between => None,
         0 => Some("Place sets point A"),
-        1 => Some("Place sets point B"),
-        _ => Some("Place commits the layout"),
+        1 => Some("Place sets point B: the flat rectangle"),
+        _ => Some("Place sets point C: the depth, and lays it"),
     };
     let tallied = |answer: &LayoutAnswer| {
         if answer.refused == Some(RejectReason::BadLayout) {
@@ -854,7 +882,7 @@ pub(super) fn summary(
         match mode.points.len() {
             0 => format!("{place} set A, hold and drag to B · {remove} cancel{leave}"),
             1 => format!("{place} set B, or let go on B · {remove} step back{leave}"),
-            _ => format!("{place} commit · {remove} step back{leave}"),
+            _ => format!("{place} set C and lay it · {remove} step back{leave}"),
         }
     } else {
         format!(
@@ -1281,7 +1309,7 @@ mod tests {
     }
 
     #[test]
-    fn place_sets_a_then_b_then_commits_one_span_between_them() {
+    fn place_sets_a_then_b_then_c_and_c_lays_one_span() {
         let mut app = app();
         between(&mut app);
         aim(&mut app, Some([1, 2, 3]));
@@ -1289,19 +1317,44 @@ mod tests {
         assert_eq!(points(&app), [[1, 2, 3]]);
         aim(&mut app, Some([5, 2, 6]));
         assert!(click(&mut app, MouseButton::Right).is_empty());
-        assert_eq!(points(&app), [[1, 2, 3], [5, 2, 6]]);
-        let intent = commit(&mut app);
+        assert_eq!(
+            points(&app),
+            [[1, 2, 3], [5, 2, 6]],
+            "a flat rectangle so far"
+        );
+        // C sets the depth and lays the layout in the same press.
+        aim(&mut app, Some([1, 5, 3]));
+        let [intent] = click(&mut app, MouseButton::Right)[..] else {
+            panic!("one intent");
+        };
         assert_eq!(
             intent.layout.span,
             Some(Span {
                 a: [1, 2, 3],
                 b: Some([5, 2, 6]),
-                axes: 3
+                c: Some([1, 5, 3]),
             })
         );
         assert_eq!(intent.voxel, rock());
         assert!(points(&app).is_empty(), "ready for the next layout");
         assert!(mode(&app).on);
+    }
+
+    #[test]
+    fn c_level_with_a_keeps_the_rectangle_flat() {
+        let mut app = app();
+        between(&mut app);
+        for cell in [[0, 4, 0], [3, 4, 2], [9, 4, 9]] {
+            aim(&mut app, Some(cell));
+            click(&mut app, MouseButton::Right);
+        }
+        // The press on C lays it: the third intent carries a depth of one.
+        let span = {
+            app.world_mut().resource_mut::<LayoutMode>().points = vec![[0, 4, 0], [3, 4, 2]];
+            aim(&mut app, Some([9, 4, 9]));
+            commit(&mut app).layout.span.unwrap()
+        };
+        assert_eq!(span.c.unwrap()[1], 4, "same height as A");
     }
 
     #[test]
@@ -1361,6 +1414,11 @@ mod tests {
         click(&mut app, MouseButton::Right);
         assert_eq!(points(&app).len(), 2, "exactly the cap is allowed");
         assert!(!mode(&app).refused);
+        // Depth passes it: 16 by 16 is the whole cap, so one more layer is too many.
+        aim(&mut app, Some([0, 1, 0]));
+        assert!(click(&mut app, MouseButton::Right).is_empty());
+        assert_eq!(points(&app).len(), 2, "C is refused, nothing sent");
+        assert!(mode(&app).refused);
     }
 
     #[test]
@@ -1375,46 +1433,47 @@ mod tests {
     }
 
     #[test]
-    fn the_preview_asks_for_one_cell_then_a_span_to_the_aim_then_both_corners() {
+    fn the_preview_asks_for_one_cell_then_each_corner_in_turn() {
         let layout = LayoutPreferences {
             kind: Kind::Between,
-            form: Form::Box,
             ..default()
         };
         let mut mode = LayoutMode::default();
         let none = mode.params(&layout);
         assert_eq!((none.span, none.axes[0].map(|a| a.count)), (None, Some(1)));
         mode.points.push([1, 1, 1]);
-        let one = mode.params(&layout);
         assert_eq!(
-            one.span,
+            mode.params(&layout).span,
             Some(Span {
                 a: [1, 1, 1],
                 b: None,
-                axes: 3
+                c: None
             })
         );
-        mode.points.push([4, 4, 4]);
-        assert_eq!(mode.params(&layout).span.unwrap().b, Some([4, 4, 4]));
+        mode.points.push([4, 1, 4]);
+        let two = mode.params(&layout).span.unwrap();
+        assert_eq!((two.b, two.c), (Some([4, 1, 4]), None));
+        mode.points.push([1, 5, 1]);
+        assert_eq!(mode.params(&layout).span.unwrap().c, Some([1, 5, 1]));
     }
 
     #[test]
-    fn a_pad_sets_both_points_and_commits_with_no_typing() {
+    fn a_pad_sets_the_three_points_and_lays_them_with_no_typing() {
         let mut app = app();
-        {
-            let mut prefs = saved_mut(&mut app);
-            prefs.layout.kind = Kind::Between;
-        }
+        saved_mut(&mut app).layout.kind = Kind::Between;
         turn_on(&mut app);
-        aim(&mut app, Some([2, 0, 2]));
-        tap(&mut app, GamepadButton::LeftTrigger2);
-        aim(&mut app, Some([6, 0, 2]));
-        tap(&mut app, GamepadButton::LeftTrigger2);
-        let intent = commit_pad(&mut app);
-        assert_eq!(intent.layout.span.unwrap().b, Some([6, 0, 2]));
+        let mut sent = Vec::new();
+        for cell in [[2, 0, 2], [6, 0, 2], [2, 3, 2]] {
+            aim(&mut app, Some(cell));
+            sent = tap(&mut app, GamepadButton::LeftTrigger2);
+        }
+        let [intent] = sent[..] else {
+            panic!("the third press lays it");
+        };
+        let span = intent.layout.span.unwrap();
+        assert_eq!((span.b, span.c), (Some([6, 0, 2]), Some([2, 3, 2])));
         tap(&mut app, GamepadButton::RightTrigger2);
-        tap(&mut app, GamepadButton::RightTrigger2);
-        assert!(!mode(&app).on, "Remove steps back, then cancels");
+        assert!(!mode(&app).on, "Remove with nothing picked leaves");
     }
 
     fn ghost_app() -> App {
@@ -1497,7 +1556,11 @@ mod tests {
         let shown = ghosts_now(&mut app);
         assert_eq!(shown.len(), 3);
         for (cell, (at, visibility, _)) in cells.iter().zip(&shown) {
-            assert_eq!((*at, *visibility), (cell.0, Visibility::Visible));
+            assert!(
+                at.abs_diff_eq(cell.0 + Vec3::splat(GHOST_INSET), 1e-5),
+                "inset a hair into its cell: {at}"
+            );
+            assert_eq!(*visibility, Visibility::Visible);
         }
         let handles: std::collections::HashSet<_> = shown.iter().map(|g| g.2.id()).collect();
         assert_eq!(
@@ -1580,7 +1643,11 @@ mod tests {
             .filter(|g| g.1 == Visibility::Visible)
             .collect();
         assert_eq!(visible.len(), 1);
-        assert_eq!(visible[0].0, at(5.0));
+        assert!(
+            visible[0]
+                .0
+                .abs_diff_eq(at(5.0) + Vec3::splat(GHOST_INSET), 1e-5)
+        );
         app.world_mut().resource_mut::<LayoutMode>().on = false;
         assert!(
             ghosts_now(&mut app)
@@ -1602,7 +1669,8 @@ mod tests {
             .single(app.world())
             .unwrap()
             .scale;
-        assert_eq!(scale, Vec3::splat(0.5));
+        let expected = 0.5 - 2.0 * 0.5 * GHOST_INSET;
+        assert!(scale.abs_diff_eq(Vec3::splat(expected), 1e-5), "{scale}");
     }
 
     fn say(app: &mut App) -> String {
@@ -1744,7 +1812,7 @@ mod tests {
     }
 
     #[test]
-    fn the_handles_are_the_picked_corners_with_the_aim_standing_in_for_b() {
+    fn the_handles_are_the_picked_corners_with_the_aim_standing_in_for_the_next() {
         let layout = LayoutPreferences {
             kind: Kind::Between,
             ..default()
@@ -1752,25 +1820,34 @@ mod tests {
         let mut mode = LayoutMode::turned_on();
         assert!(corners_of(&mode, &layout, 1.0).is_empty(), "nothing picked");
         mode.points.push([0, 0, 0]);
-        mode.aimed = Some([4, 2, 3]);
+        mode.aimed = Some([4, 0, 3]);
         let shown = corners_of(&mode, &layout, 0.5);
         assert_eq!(shown.len(), 2);
         assert_eq!((shown[0].cell, shown[0].provisional), ([0, 0, 0], false));
-        assert_eq!((shown[1].cell, shown[1].provisional), ([4, 2, 3], true));
+        assert_eq!((shown[1].cell, shown[1].provisional), ([4, 0, 3], true));
         assert!(
-            shown[1].label.starts_with("B\n5 × 3 × 4 Voxels"),
-            "{}",
+            shown[1].label.starts_with("B\n5 × 1 × 4 Voxels"),
+            "a flat rectangle: {}",
             shown[1].label
         );
         assert!(
-            shown[1].label.ends_with("2.5 × 1.5 × 2.0 m"),
+            shown[1].label.ends_with("2.5 × 0.5 × 2.0 m"),
             "{}",
             shown[1].label
         );
-        mode.points.push([2, 0, 0]);
+        // With B picked the aim stands in for C, which gives the depth.
+        mode.points.push([4, 0, 3]);
+        mode.aimed = Some([0, 2, 0]);
         let shown = corners_of(&mode, &layout, 1.0);
-        assert!(!shown[1].provisional);
-        assert_eq!(shown[1].cell, [2, 0, 0]);
+        assert_eq!(shown.len(), 3);
+        assert!(!shown[1].provisional && shown[2].provisional);
+        assert!(
+            shown[2].label.starts_with("C\n5 × 3 × 4 Voxels"),
+            "{}",
+            shown[2].label
+        );
+        mode.points.push([0, 2, 0]);
+        assert!(!corners_of(&mode, &layout, 1.0)[2].provisional);
         let directions = LayoutPreferences::default();
         assert!(corners_of(&mode, &directions, 1.0).is_empty());
         mode.on = false;
@@ -1796,7 +1873,7 @@ mod tests {
         answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
         let said = say(&mut app);
         assert!(
-            said.contains("commit") && said.contains("step back"),
+            said.contains("set C and lay it") && said.contains("step back"),
             "{said}"
         );
     }

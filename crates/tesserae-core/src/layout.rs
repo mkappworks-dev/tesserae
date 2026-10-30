@@ -120,6 +120,54 @@ pub fn layout_between(
     })
 }
 
+/// The dimension a span is flat on: the one `a` and `b` differ least along, a
+/// tie going to Y, then Z, so a floor is flat in Y and a wall in X or Z.
+pub fn span_normal(a: [i32; 3], b: [i32; 3]) -> usize {
+    span_order(a, b)[2]
+}
+
+/// The dimensions from the longest difference to the shortest, a tie going to
+/// X, then Z, then Y.
+fn span_order(a: [i32; 3], b: [i32; 3]) -> [usize; 3] {
+    let delta: [u64; 3] =
+        std::array::from_fn(|i| (i64::from(b[i]) - i64::from(a[i])).unsigned_abs());
+    let mut order = [0usize, 2, 1];
+    order.sort_by_key(|&i| std::cmp::Reverse(delta[i]));
+    order
+}
+
+/// A flat rectangle from `a` to `b` on the plane they span, given depth by `c`:
+/// how far `c` lies from `a` along the dimension the rectangle is flat on, and
+/// towards which side. With no `c` it is one Voxel deep. The gap steps from `a`
+/// outwards on every dimension.
+pub fn layout_span(
+    a: [i32; 3],
+    b: [i32; 3],
+    c: Option<[i32; 3]>,
+    gap: u32,
+) -> Result<Vec<[i32; 3]>, LayoutError> {
+    let order = span_order(a, b);
+    let pitch = u64::from(gap) + 1;
+    let dims = [Dim::X, Dim::Y, Dim::Z];
+    let along = |from: [i32; 3], to: [i32; 3], i: usize| {
+        let delta = i64::from(to[i]) - i64::from(from[i]);
+        LayoutAxis {
+            dim: dims[i],
+            positive: delta >= 0,
+            count: (delta.unsigned_abs() / pitch + 1).min(u64::from(u32::MAX)) as u32,
+        }
+    };
+    layout_cells(&Layout {
+        anchor: a,
+        axes: vec![
+            along(a, b, order[0]),
+            along(a, b, order[1]),
+            along(a, c.unwrap_or(a), order[2]),
+        ],
+        gap,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -334,6 +382,56 @@ mod tests {
         assert_eq!(
             layout_between([0; 3], [1; 3], 0, 0),
             Err(LayoutError::AxisCount)
+        );
+    }
+
+    #[test]
+    fn a_and_b_make_a_flat_rectangle_on_their_plane_and_c_gives_it_depth() {
+        // A floor: B level with A, so it is flat in Y.
+        let floor = layout_span([0, 5, 0], [3, 5, 2], None, 0).unwrap();
+        assert_eq!(floor.len(), 4 * 3);
+        assert!(floor.iter().all(|c| c[1] == 5));
+        // C a few Voxels up gives the floor a height.
+        let boxed = layout_span([0, 5, 0], [3, 5, 2], Some([9, 8, 9]), 0).unwrap();
+        assert_eq!(
+            boxed.len(),
+            4 * 3 * 4,
+            "c's X and Z are not used, only its Y"
+        );
+        assert!(boxed.contains(&[3, 8, 2]) && boxed.contains(&[0, 5, 0]));
+    }
+
+    #[test]
+    fn c_below_or_level_with_the_plane_digs_down_or_stays_flat() {
+        let down = layout_span([0, 5, 0], [1, 5, 1], Some([0, 3, 0]), 0).unwrap();
+        assert_eq!(down.len(), 2 * 2 * 3);
+        assert!(down.contains(&[1, 3, 1]));
+        let flat = layout_span([0, 5, 0], [1, 5, 1], Some([7, 5, 7]), 0).unwrap();
+        assert_eq!(flat.len(), 4, "level with A is no depth");
+    }
+
+    #[test]
+    fn a_wall_is_flat_in_the_dimension_a_and_b_barely_differ_in() {
+        // B differs in Y and X, not Z: a wall in the XY plane.
+        assert_eq!(span_normal([0, 0, 0], [4, 3, 0]), 2);
+        let wall = layout_span([0, 0, 0], [4, 3, 0], Some([0, 0, 2]), 0).unwrap();
+        assert_eq!(wall.len(), 5 * 4 * 3);
+        assert!(wall.contains(&[4, 3, 2]));
+        // A tie between the shortest two goes to Y, so a floor stays a floor.
+        assert_eq!(span_normal([0, 0, 0], [4, 1, 1]), 1);
+    }
+
+    #[test]
+    fn the_span_gap_and_cap_follow_the_same_rules_as_any_layout() {
+        assert_eq!(layout_span([0, 0, 0], [4, 0, 0], None, 1).unwrap().len(), 3);
+        assert_eq!(
+            layout_span([0, 0, 0], [15, 0, 15], Some([0, 2, 0]), 0),
+            Err(LayoutError::TooManyVoxels),
+            "16 by 16 by 3"
+        );
+        assert_eq!(
+            layout_span([0, 0, 0], [15, 0, 15], None, 0).unwrap().len(),
+            MAX_LAYOUT_VOXELS
         );
     }
 }

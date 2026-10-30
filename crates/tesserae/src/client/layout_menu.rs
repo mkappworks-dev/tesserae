@@ -719,10 +719,10 @@ fn render(
                         inset(card, |panel| {
                             note(
                                 panel,
-                                "Click A then B, or hold Place on A and drag to B. \
-                                 The two corners span a box: one differing axis is a \
-                                 line, two a flat rectangle, three a box. Each corner \
-                                 must be within reach.",
+                                "Place A, then B for a flat rectangle between them, \
+                                 then C for its depth, and C lays it. Hold Place on A \
+                                 and drag to B if you like. C level with A keeps it \
+                                 flat. Each point must be within reach.",
                             );
                         });
                     }

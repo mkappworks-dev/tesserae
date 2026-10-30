@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use tesserae_core::collide::{Aabb, VoxelVolume, overlaps, raycast_until};
-use tesserae_core::layout::{Layout, LayoutAxis, LayoutError, layout_between, layout_cells};
+use tesserae_core::layout::{Layout, LayoutAxis, LayoutError, layout_cells, layout_span};
 use tesserae_core::{Tables, Voxel};
 
 use super::{
@@ -26,19 +26,19 @@ use crate::server::undo::{Entry, Journal};
 use crate::server::world_state::ChunkStore;
 use crate::world::WorldSettings;
 
-/// A layout between two corner cells, as many axes of the span as the shape
-/// has. The corners are claims, not grants: every cell is judged on its own.
+/// A flat rectangle from `a` to `b`, given depth by `c`. The corners are
+/// claims, not grants: every cell is judged on its own.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Span {
     pub a: [i32; 3],
     /// Unset while the Player is still choosing it: the aim stands in.
     pub b: Option<[i32; 3]>,
-    /// One for a line, two for a rectangle, three for a box.
-    pub axes: u8,
+    /// Unset until B is: the aim stands in, so the preview follows the depth.
+    pub c: Option<[i32; 3]>,
 }
 
 /// A layout's shape in Voxel counts: one to three axes, first fastest, grown
-/// from the aimed cell, or the cells between two corners when `span` is set.
+/// from the aimed cell, or the cells of a span when `span` is set.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct LayoutParams {
     pub axes: [Option<LayoutAxis>; 3],
@@ -49,9 +49,11 @@ pub struct LayoutParams {
 impl LayoutParams {
     fn cells(&self, anchor: [i32; 3]) -> Result<Vec<[i32; 3]>, LayoutError> {
         match self.span {
-            Some(span) => {
-                layout_between(span.a, span.b.unwrap_or(anchor), span.axes.into(), self.gap)
-            }
+            Some(span) => match span.b {
+                // A and the aim: a flat rectangle, still being drawn.
+                None => layout_span(span.a, anchor, None, self.gap),
+                Some(b) => layout_span(span.a, b, Some(span.c.unwrap_or(anchor)), self.gap),
+            },
             None => layout_cells(&Layout {
                 anchor,
                 axes: self.axes.iter().flatten().copied().collect(),
@@ -59,9 +61,10 @@ impl LayoutParams {
             }),
         }
     }
-    /// Whether the cells are asked of the aim: not when both corners are set.
+    /// Whether the cells are asked of the aim: not once all three corners are set.
     fn needs_anchor(&self) -> bool {
-        self.span.is_none_or(|span| span.b.is_none())
+        self.span
+            .is_none_or(|span| span.b.is_none() || span.c.is_none())
     }
 }
 
@@ -556,60 +559,75 @@ mod tests {
         assert_eq!(answer.cells[1].state, CellState::Placeable);
     }
 
-    fn between(a: [i32; 3], b: Option<[i32; 3]>, axes: u8, gap: u32) -> LayoutIntent {
+    fn between(a: [i32; 3], b: Option<[i32; 3]>, c: Option<[i32; 3]>, gap: u32) -> LayoutIntent {
         LayoutIntent {
             layout: LayoutParams {
                 axes: [None; 3],
                 gap,
-                span: Some(Span { a, b, axes }),
+                span: Some(Span { a, b, c }),
             },
             ..line(1)
         }
     }
 
-    #[test]
-    fn a_span_lands_between_its_corners_for_each_shape() {
-        for (axes, cells) in [(1u8, 5usize), (2, 5 * 4), (3, 5 * 4 * 2)] {
-            let mut app = app_with(&[(origin(), ground())]);
-            send(&mut app, between([5, 8, 5], Some([9, 9, 8]), axes, 0));
-            for _ in 0..4 {
-                tick(&mut app);
-            }
-            let mut solid = 0;
-            for y in 8..10 {
-                for z in 5..9 {
-                    for x in 5..10 {
-                        solid += usize::from(voxel_at(&app, [x, y, z]) == stone());
-                    }
+    /// Solid Voxels in the box x 5..10, y 8..12, z 5..9.
+    fn solid_in_the_box(app: &App) -> usize {
+        let mut solid = 0;
+        for y in 8..12 {
+            for z in 5..9 {
+                for x in 5..10 {
+                    solid += usize::from(voxel_at(app, [x, y, z]) == stone());
                 }
             }
-            assert_eq!(solid, cells, "{axes} axes");
-            assert!(rejections(&mut app).is_empty(), "{axes} axes");
+        }
+        solid
+    }
+
+    #[test]
+    fn a_and_b_lay_a_flat_rectangle_and_c_gives_it_depth() {
+        for (c, cells) in [([5, 8, 5], 5 * 4), ([5, 10, 5], 5 * 4 * 3)] {
+            let mut app = app_with(&[(origin(), ground())]);
+            send(&mut app, between([5, 8, 5], Some([9, 8, 8]), Some(c), 0));
+            for _ in 0..6 {
+                tick(&mut app);
+            }
+            assert_eq!(solid_in_the_box(&app), cells, "c at {c:?}");
+            assert!(rejections(&mut app).is_empty(), "c at {c:?}");
         }
     }
 
     #[test]
-    fn an_unset_b_is_the_aim_in_the_preview_and_the_corners_grant_nothing() {
+    fn the_preview_follows_the_aim_as_b_and_then_as_c() {
         let mut app = app_with(&[(origin(), ground())]);
         set_eye(&mut app, DOWN_EYE);
-        app.world_mut().write_message(LayoutAim {
-            seq: 1,
-            intent: between([2, 8, 5], None, 1, 0),
-        });
-        app.world_mut().run_system_once(receive_aim).unwrap();
-        app.world_mut().run_system_once(answer_aim).unwrap();
-        let answer = app
-            .world_mut()
+        let mut seq = 0;
+        let mut answer_for = |app: &mut App, intent| {
+            // Each aim is newer than the last, or the Server keeps the old one.
+            seq += 1;
+            app.world_mut().write_message(LayoutAim { seq, intent });
+            app.world_mut().run_system_once(receive_aim).unwrap();
+            app.world_mut().run_system_once(answer_aim).unwrap();
+            app.world_mut()
+                .resource_mut::<Messages<LayoutAnswer>>()
+                .drain()
+                .next()
+                .unwrap()
+        };
+        // B unset: A to the aim at (5, 8, 5), so x = 2 to 5 in a line.
+        let flat = answer_for(&mut app, between([2, 8, 5], None, None, 0));
+        assert_eq!(flat.cells.len(), 4);
+        assert_eq!(flat.cells[3].at, Vec3::new(5.0, 8.0, 5.0));
+        // C unset: the plane A to B is flat and the aim's height gives depth.
+        let deep = answer_for(&mut app, between([5, 8, 5], Some([8, 8, 6]), None, 0));
+        assert_eq!(deep.cells.len(), 4 * 2, "the aim is level with A: no depth");
+        app.world_mut()
             .resource_mut::<Messages<LayoutAnswer>>()
-            .drain()
-            .next()
-            .unwrap();
-        // The aim lands at (5, 8, 5), so the span runs x = 2 to 5.
-        assert_eq!(answer.cells.len(), 4);
-        assert_eq!(answer.cells[3].at, Vec3::new(5.0, 8.0, 5.0));
-
+            .clear();
         // Corners far past reach: the cells there are skipped, not placed.
-        send(&mut app, between([5, 8, 5], Some([30, 8, 5]), 1, 0));
+        send(
+            &mut app,
+            between([5, 8, 5], Some([30, 8, 5]), Some([5, 8, 5]), 0),
+        );
         tick(&mut app);
         assert_eq!(placed(&app), 8, "only what the Eye reaches");
         assert_eq!(rejections(&mut app), [RejectReason::LayoutPartial]);
@@ -637,7 +655,10 @@ mod tests {
     #[test]
     fn a_span_over_the_cap_is_refused_before_it_is_queued() {
         let mut app = app_with(&[(origin(), ground())]);
-        send(&mut app, between([0, 8, 0], Some([16, 8, 15]), 2, 0));
+        send(
+            &mut app,
+            between([0, 8, 0], Some([16, 8, 15]), Some([0, 8, 0]), 0),
+        );
         assert_eq!(rejections(&mut app), [RejectReason::BadLayout]);
         assert!(app.world().resource::<PendingEdits>().is_empty());
     }
@@ -645,7 +666,10 @@ mod tests {
     #[test]
     fn one_undo_takes_a_whole_span_back() {
         let mut app = app_with(&[(origin(), ground())]);
-        send(&mut app, between([5, 8, 5], Some([8, 8, 6]), 2, 0));
+        send(
+            &mut app,
+            between([5, 8, 5], Some([8, 8, 6]), Some([5, 8, 5]), 0),
+        );
         for _ in 0..2 {
             tick(&mut app);
         }
