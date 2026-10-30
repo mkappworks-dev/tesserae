@@ -18,10 +18,9 @@ register in `server/profile_fixture.rs` (the name list at line 16),
   - `sprint-flight`: noclip at 64 m/s along a fixed heading.
   - `sprint-walk`: physics at 8 m/s along a heading checked to stay on walkable
     ground, clear of cliffs and lakes, for the whole run.
-  - `dive`: noclip, 320 m above the surface at 22 s, straight down at 64 m/s to
-    2 m above the ground, then straight back up, inside the measured phase.
-    `capture.rs`'s `fly_forward` zeroes the heading's y, so this needs its own
-    vertical motion.
+  - `dive`: noclip, straight up 320 m at 64 m/s over 22-27 s, then straight
+    back down to the start over 27-32 s. `capture.rs`'s `fly_forward` zeroes
+    the heading's y, so this needs its own vertical motion.
   - `teleport`: a 2 km jump at 22 s, recording time to `streaming_settled`.
 - Per-frame columns:
   - queue length, dispatched and landed counts per stage (generate, relight,

@@ -88,9 +88,10 @@ are separate. `render.csv` records the render schedule from before
 ExtractCommands to after PostCleanup with the extracted main frame ID, including
 scheduling waits. It records that thread's CPU independently. Render and main
 may overlap. Never add their percentiles, per-view spans or nested spans to
-obtain frame elapsed. Extraction, GPU elapsed and presentation elapsed remain
-explicitly unavailable; the failed historical Metal trace supplies no timing
-evidence. Render export may omit the final in-flight render frame at shutdown.
+obtain frame elapsed. Extraction and presentation elapsed remain explicitly
+unavailable; the failed historical Metal trace supplies no timing evidence. GPU
+elapsed comes from `frames.gpu.csv`; see Streaming fixtures below. Render export
+may omit the final in-flight render frame at shutdown.
 
 The profiler buffers at most 250,000 frames plus 250,000 render rows, exports
 once at shutdown or the limit, and marks limit exhaustion. There is no per-frame
@@ -115,8 +116,8 @@ variation, with no regression in p99, streaming readiness or simulation
 progress. The historical 6.99 ms dev/offscreen median and 12.66 ms p99 are
 context, not a release gate; 1,000+ FPS remains a stretch investigation. Quality
 probes cannot count as equal-quality improvements. GPU/per-view optimizations
-remain blocked on valid attribution; static atlas/UI changes require equivalent
-output evidence.
+are attributed by `frames.gpu.csv` within the limits below; static atlas/UI
+changes require equivalent output evidence.
 
 Core algorithm comparisons retain phase-8.2 ticket 13's 115-row methodology:
 separate temporary targets and copied executable hashes, foreground QoS,
@@ -156,3 +157,48 @@ select counter changes to identify snapshots rather than treating each row as a
 new save. A worker result can appear on a later frame than its snapshot; check
 the retained commit files and native diagnostics for successful writes. These
 fields do not establish power-loss safety, GPU cost or present latency.
+
+## Streaming fixtures
+
+`--fixtures` also accepts four streaming fixtures, all on the demo's default
+seed and measured in the same 22–32 s phase:
+
+- `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
+  heading.
+- `sprint-walk`: physics sprint at 8 m/s along the default heading, which stays
+  on walkable ground for the whole run.
+- `dive`: noclip straight up 320 m over 22–27 s and straight back down over
+  27–32 s, both at 64 m/s, so both directions of a fast vertical move are
+  measured from the same ground.
+- `teleport`: the Server moves the Player 2 km along x at 22 s, keeping its
+  height above the generated ground; `streaming_settled` gives the time to
+  refill.
+
+Each run adds three files beside `frames.csv`, and the runner summarises them in
+`streaming.json`:
+
+- `frames.csv` gains `rule_holes` and `fill_holes` with per-level columns,
+  `chunk_entities` and `visible_meshes_camera<order>`. A hole is a Cell of a
+  level's mesh shell that intersects the Player camera's frustum, out to the LOD
+  reach, and that nothing draws: a _rule hole_ where some level delivered the
+  region but the draw rule in force discards it, a _fill hole_ where no level
+  delivered it. It is counted on the Client from what it was sent, never from
+  World storage. The rule in force is the metre cut; a Cell the cut's edge
+  crosses is split up to three levels finer, then tested at its centre. A hole
+  hidden behind nearer terrain still counts.
+- `frames.flow.csv` has one row per level per fixed tick: Chunks held and
+  meshed, and per stage (generate, relight, mesh) the Chunks waiting to
+  dispatch, in flight, and since the World opened the jobs run and their worker
+  thread CPU, plus fluid jobs run and their worker CPU. `streaming.json` reports
+  worker milliseconds per second over the measured phase.
+- `frames.gpu.csv` has GPU timestamps per frame: `frame_start`, `frame_end`, and
+  per camera order `view_start`, `prepass_end`, `main_start`, `opaque_end`,
+  `main_end` and `view_end`, in milliseconds since `frame_start`. Apple GPUs
+  sample timestamps only at encoder boundaries, so each marker is an empty
+  compute pass dispatching one workgroup between two of Bevy's passes. A marker
+  is ordered by the schedule: work the GPU overlaps across one is charged to
+  whichever side it ends on, systems outside Bevy's sets can fall on either side
+  of `view_start`, and `prepass_end` to `main_start` includes the shadow passes.
+  About 10% of frames return an earlier frame's value for the last markers;
+  those cells are left empty, and `streaming.json` reports how many frames have
+  a `frame_end`.
