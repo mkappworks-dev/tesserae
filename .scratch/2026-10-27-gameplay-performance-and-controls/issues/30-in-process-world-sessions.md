@@ -32,3 +32,6 @@ Server and Client use 17 `Startup` systems, about 329 resource inits and no
 `States`, and Bevy allows one window event loop per process. The refactor
 touches nearly every plugin, so schedule it when no parallel worktree is
 editing Server or Client plugins. Needs grilling before implementation.
+
+Ticket 32 carries the window position and fullscreen over re-exec; that code
+is what this ticket deletes, so keep 32 minimal rather than reusable.

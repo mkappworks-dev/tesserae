@@ -85,6 +85,28 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, reveal_focus.after(navigate));
 }
 
+/// The World list runs before any Game or profile exists, so it gets the same
+/// pad reading and focus navigation as the in-game menus with one standing
+/// modal owner instead of the full input stack.
+pub(super) fn launcher(app: &mut App) {
+    let mut ownership = Ownership::default();
+    ownership.owner = Owner::Modal;
+    app.insert_resource(ownership)
+        .init_resource::<PadInput>()
+        .init_resource::<super::actions::Labels>()
+        .init_resource::<super::profile::Preferences>()
+        .init_resource::<super::settings::Settings>()
+        .init_resource::<AutoNavigationConfig>()
+        .init_resource::<InputFocusVisible>()
+        .add_systems(
+            PreUpdate,
+            (trigger_hysteresis, read)
+                .chain()
+                .after(bevy::input::InputSystems),
+        )
+        .add_systems(Update, (navigate, reveal_focus).chain());
+}
+
 fn trigger_hysteresis(mut pads: Query<&mut GamepadSettings, Added<Gamepad>>) {
     for mut settings in &mut pads {
         let triggers = ButtonSettings::new(TRIGGER_PRESS, TRIGGER_RELEASE).unwrap();

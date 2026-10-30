@@ -325,8 +325,10 @@ fn restore(
     }
 }
 
+type ChangedPrimary = (With<PrimaryWindow>, Changed<Window>);
+
 fn track(
-    windows: Query<(Entity, &Window), (With<PrimaryWindow>, Changed<Window>)>,
+    windows: Query<(Entity, &Window), ChangedPrimary>,
     mut last: ResMut<LastGeometry>,
     _main_thread: NonSendMarker,
 ) {

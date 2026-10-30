@@ -190,6 +190,7 @@ pub fn plugin(app: &mut App) {
         ui::launcher_chrome,
         bevy::input_focus::tab_navigation::TabNavigationPlugin,
     ));
+    super::pad::launcher(app);
     logic(app);
     #[cfg(feature = "dev")]
     app.add_systems(Update, review_capture.after(render));
@@ -346,12 +347,13 @@ fn keys(
     launcher: Option<Res<Launcher>>,
     focus: Res<InputFocus>,
     fields: Query<&Field>,
+    pad: Option<Res<super::pad::PadInput>>,
     mut queue: ResMut<Queue>,
 ) {
     let Some(launcher) = launcher else {
         return;
     };
-    if keys.just_pressed(KeyCode::Escape) {
+    if keys.just_pressed(KeyCode::Escape) || pad.is_some_and(|pad| pad.cancel) {
         queue.0.push(match launcher.screen {
             Screen::List => Act::Dismiss,
             _ => Act::Back,
@@ -699,31 +701,34 @@ fn render(
         commands.entity(root).despawn();
     }
     let mut focus = None;
-    commands
-        .spawn((
-            Root,
-            BackgroundColor(ui::BG),
-            Node {
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                padding: UiRect::axes(Val::Percent(5.0), Val::Px(20.0)),
-                flex_direction: FlexDirection::Column,
-                ..default()
-            },
-        ))
-        .with_children(|root| {
-            header(root, logo.as_deref());
-            match &l.screen {
-                Screen::List => focus = list(root, &l, &installed),
-                Screen::Create => focus = form(root, &l, &installed),
-                Screen::Opening(name) => {
-                    centered(root, |card| super::loading::opening(card, name));
-                }
-                Screen::Rename(_) => focus = rename(root, &l),
-                Screen::Delete(path) => focus = delete(root, &l, path),
-                Screen::Trust(next) => focus = trust(root, &l, &installed, next),
+    let mut screen = commands.spawn((
+        Root,
+        BackgroundColor(ui::BG),
+        Node {
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            padding: UiRect::axes(Val::Percent(5.0), Val::Px(20.0)),
+            flex_direction: FlexDirection::Column,
+            ..default()
+        },
+    ));
+    // The list is the one screen with no group of its own, and Tab needs one.
+    if l.screen == Screen::List {
+        screen.insert(TabGroup::default());
+    }
+    screen.with_children(|root| {
+        header(root, logo.as_deref());
+        match &l.screen {
+            Screen::List => focus = list(root, &l, &installed),
+            Screen::Create => focus = form(root, &l, &installed),
+            Screen::Opening(name) => {
+                centered(root, false, |card| super::loading::opening(card, name));
             }
-        });
+            Screen::Rename(_) => focus = rename(root, &l),
+            Screen::Delete(path) => focus = delete(root, &l, path),
+            Screen::Trust(next) => focus = trust(root, &l, &installed, next),
+        }
+    });
     if let Some(entity) = focus {
         commands.queue(move |world: &mut World| {
             if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
@@ -816,7 +821,13 @@ fn panel(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpaw
         .with_children(children);
 }
 
-fn centered(root: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+/// A card in the middle of the screen. Only a dialog traps Tab and pad focus;
+/// the empty list's card has no controls, and trapping there strands Create.
+fn centered(
+    root: &mut ChildSpawnerCommands,
+    modal: bool,
+    children: impl FnOnce(&mut ChildSpawnerCommands),
+) {
     root.spawn(Node {
         flex_grow: 1.0,
         align_items: AlignItems::Center,
@@ -826,10 +837,7 @@ fn centered(root: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpa
     .with_children(|center| {
         center
             .spawn((
-                TabGroup {
-                    modal: true,
-                    ..default()
-                },
+                TabGroup { modal, ..default() },
                 BackgroundColor(ui::CARD),
                 BorderColor::all(ui::EDGE),
                 Node {
@@ -999,7 +1007,7 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
         });
     }
     if l.entries.is_empty() {
-        centered(root, |card| {
+        centered(root, false, |card| {
             ui::weighted_text(card, "No Worlds yet", 19.0, 620, ui::INK);
             ui::paragraph(
                 card,
@@ -1287,7 +1295,7 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
 
 fn rename(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
     let mut focus = None;
-    centered(root, |card| {
+    centered(root, true, |card| {
         ui::weighted_text(card, "Rename World", 19.0, 620, ui::INK);
         ui::description(
             card,
@@ -1312,7 +1320,7 @@ fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
     let entry = l.entry(path);
     let name = l.display_name(path);
     let mut focus = None;
-    centered(root, |card| {
+    centered(root, true, |card| {
         ui::weighted_text(card, format!("Delete {name}?"), 19.0, 620, ui::INK);
         if let Some(d) = entry.and_then(Entry::details) {
             ui::text(
@@ -1349,7 +1357,7 @@ fn trust(
     next: &Next,
 ) -> Option<Entity> {
     let mut focus = None;
-    centered(root, |card| {
+    centered(root, true, |card| {
         ui::weighted_text(card, "Trust this Mod?", 19.0, 620, ui::INK);
         ui::paragraph(
             card,
@@ -1699,5 +1707,329 @@ mod tests {
         assert_eq!(launcher(&app).screen, Screen::List);
         assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
         assert!(app.world().resource::<Relaunch>().0.is_none());
+    }
+
+    use bevy::input::gamepad::{
+        Gamepad, GamepadButton, RawGamepadButtonChangedEvent, RawGamepadEvent,
+    };
+    use bevy::input_focus::InputFocusVisible;
+    use bevy::ui::{ComputedNode, UiGlobalTransform};
+    use bevy::window::PrimaryWindow;
+
+    #[derive(Component)]
+    struct Placed;
+
+    /// A column of buttons in spawn order; the real layout engine does not run
+    /// headless, and focus navigation needs sizes and positions.
+    fn lay_out(
+        mut commands: Commands,
+        buttons: Query<Entity, (With<bevy::ui_widgets::Button>, Without<Placed>)>,
+    ) {
+        let mut fresh: Vec<Entity> = buttons.iter().collect();
+        fresh.sort();
+        for (i, entity) in fresh.into_iter().enumerate() {
+            commands.entity(entity).insert((
+                Placed,
+                ComputedNode {
+                    size: Vec2::new(200.0, 30.0),
+                    ..default()
+                },
+                UiGlobalTransform::from_translation(Vec2::new(100.0, 40.0 * i as f32)),
+                InheritedVisibility::VISIBLE,
+            ));
+        }
+    }
+
+    fn pad_app(worlds: &Directory, installed: Installed) -> (App, Entity) {
+        let mut app = app(worlds, installed);
+        app.add_plugins(bevy::input::InputPlugin);
+        app.world_mut().spawn((
+            PrimaryWindow,
+            Window {
+                focused: true,
+                ..default()
+            },
+        ));
+        crate::client::pad::launcher(&mut app);
+        app.add_systems(Update, lay_out.after(render));
+        let pad = app.world_mut().spawn(Gamepad::default()).id();
+        app.update();
+        app.update();
+        (app, pad)
+    }
+
+    fn pad_button(app: &mut App, pad: Entity, button: GamepadButton, value: f32) {
+        app.world_mut()
+            .write_message(RawGamepadEvent::Button(RawGamepadButtonChangedEvent::new(
+                pad, button, value,
+            )));
+        app.update();
+    }
+
+    fn tap(app: &mut App, pad: Entity, button: GamepadButton) {
+        pad_button(app, pad, button, 1.0);
+        pad_button(app, pad, button, 0.0);
+        app.update();
+    }
+
+    fn reach(app: &mut App, pad: Entity, target: Act) {
+        for button in [GamepadButton::DPadDown, GamepadButton::DPadUp] {
+            for _ in 0..40 {
+                if focused_act(app) == Some(target.clone()) {
+                    return;
+                }
+                tap(app, pad, button);
+            }
+        }
+        panic!("the controller never reached {target:?}");
+    }
+
+    #[test]
+    fn a_controller_alone_creates_a_world_without_typing() {
+        let worlds = Directory::new();
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        assert_eq!(focused_act(&app), Some(Act::New));
+        tap(&mut app, pad, GamepadButton::South);
+        assert_eq!(launcher(&app).screen, Screen::Create);
+        reach(&mut app, pad, Act::Randomize);
+        tap(&mut app, pad, GamepadButton::South);
+        assert!(!launcher(&app).form.seed.is_empty());
+        reach(&mut app, pad, Act::Create);
+        tap(&mut app, pad, GamepadButton::South);
+        let Some(Target::World(path)) = app.world().resource::<Relaunch>().0.clone() else {
+            panic!("no restart into the World");
+        };
+        assert_eq!(library::read(&path).unwrap().unwrap().name, "New World");
+        assert!(app.world().resource::<InputFocusVisible>().0);
+    }
+
+    #[test]
+    fn only_dialogs_trap_focus_so_the_empty_list_can_reach_create() {
+        let trapping = |app: &mut App| {
+            app.world_mut()
+                .query::<&TabGroup>()
+                .iter(app.world())
+                .filter(|group| group.modal)
+                .count()
+        };
+        let worlds = Directory::new();
+        let mut first = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        first.update();
+        first.update();
+        assert_eq!(trapping(&mut first), 0);
+
+        let worlds = Directory::new();
+        library::create(&worlds.0, &details("Doomed", true)).unwrap();
+        let mut listed = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        listed.update();
+        assert_eq!(trapping(&mut listed), 0);
+        act(&mut listed, Act::Delete);
+        listed.update();
+        assert_eq!(trapping(&mut listed), 1);
+    }
+
+    /// What Tab (`Next`) or Shift-Tab (`Previous`) visits from the first focus,
+    /// as controls and fields, until it wraps.
+    fn tab_stops(
+        app: &mut App,
+        action: bevy::input_focus::tab_navigation::NavAction,
+    ) -> Vec<String> {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::input_focus::tab_navigation::TabNavigation;
+        let name = |app: &App, entity: Entity| {
+            app.world()
+                .get::<Act>(entity)
+                .map(|act| format!("{act:?}"))
+                .or_else(|| {
+                    app.world().get::<Field>(entity).map(|f| match f {
+                        Field::Name => "Name".to_string(),
+                        Field::Seed => "Seed".to_string(),
+                        Field::Rename => "Rename".to_string(),
+                    })
+                })
+                .unwrap_or_else(|| "other".into())
+        };
+        // Visibility propagation does not run headless.
+        let hidden: Vec<Entity> = app
+            .world_mut()
+            .query_filtered::<Entity, With<InheritedVisibility>>()
+            .iter(app.world())
+            .collect();
+        for entity in hidden {
+            app.world_mut()
+                .entity_mut(entity)
+                .insert(InheritedVisibility::VISIBLE);
+        }
+        let first = app.world().resource::<InputFocus>().get();
+        let mut stops = Vec::new();
+        for _ in 0..40 {
+            let next = app
+                .world_mut()
+                .run_system_once(move |nav: TabNavigation, focus: Res<InputFocus>| {
+                    nav.navigate(&focus, action).ok()
+                })
+                .unwrap();
+            let Some(next) = next else {
+                break;
+            };
+            app.world_mut()
+                .resource_mut::<InputFocus>()
+                .set(next, FocusCause::Navigated);
+            stops.push(name(app, next));
+            if Some(next) == first {
+                break;
+            }
+        }
+        stops
+    }
+
+    #[test]
+    fn tab_and_shift_tab_reach_every_control_on_each_screen() {
+        use bevy::input_focus::tab_navigation::NavAction;
+        let worlds = Directory::new();
+        library::create(&worlds.0, &details("Mine", true)).unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        app.update();
+        app.update();
+        let screens: [(&str, Option<Act>, &[&str]); 5] = [
+            ("list", None, &["New", "Open", "Rename", "Delete", "Quit"]),
+            (
+                "create",
+                Some(Act::New),
+                &["Name", "Seed", "Randomize", "Create", "Back"],
+            ),
+            ("rename", Some(Act::Rename), &["Rename", "SaveName", "Back"]),
+            ("delete", Some(Act::Delete), &["Back", "ConfirmDelete"]),
+            ("trust", Some(Act::Open), &["Trust", "Back"]),
+        ];
+        for (screen, opener, expected) in screens {
+            if screen != "list" {
+                app.world_mut()
+                    .resource_mut::<Launcher>()
+                    .show(Screen::List);
+                app.update();
+            }
+            if let Some(opener) = opener {
+                act(&mut app, opener);
+                app.update();
+            }
+            for action in [NavAction::Next, NavAction::Previous] {
+                let stops = tab_stops(&mut app, action);
+                for want in expected {
+                    assert!(
+                        stops.iter().any(|s| s == want),
+                        "{screen} {action:?}: {want} missing from {stops:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn east_is_back_on_each_screen_and_dismisses_on_the_list() {
+        let worlds = Directory::new();
+        library::create(&worlds.0, &details("Keep", true)).unwrap();
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        for opener in [Act::New, Act::Rename, Act::Delete] {
+            reach(&mut app, pad, opener.clone());
+            tap(&mut app, pad, GamepadButton::South);
+            assert_ne!(launcher(&app).screen, Screen::List, "{opener:?}");
+            tap(&mut app, pad, GamepadButton::East);
+            assert_eq!(launcher(&app).screen, Screen::List, "{opener:?}");
+        }
+        tap(&mut app, pad, GamepadButton::East);
+        assert_eq!(launcher(&app).screen, Screen::List);
+    }
+
+    #[test]
+    fn a_controller_deletes_only_after_confirming_with_cancel_focused_first() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        reach(&mut app, pad, Act::Delete);
+        tap(&mut app, pad, GamepadButton::South);
+        assert_eq!(focused_act(&app), Some(Act::Back));
+        tap(&mut app, pad, GamepadButton::South);
+        assert_eq!(launcher(&app).screen, Screen::List);
+        assert!(path.exists());
+        reach(&mut app, pad, Act::Delete);
+        tap(&mut app, pad, GamepadButton::South);
+        reach(&mut app, pad, Act::ConfirmDelete);
+        tap(&mut app, pad, GamepadButton::South);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn the_press_that_opens_delete_does_not_also_answer_it() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        reach(&mut app, pad, Act::Delete);
+        pad_button(&mut app, pad, GamepadButton::South, 1.0);
+        for _ in 0..4 {
+            app.update();
+        }
+        assert!(matches!(launcher(&app).screen, Screen::Delete(_)));
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn a_button_already_down_when_the_list_appears_waits_for_release() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.add_plugins(bevy::input::InputPlugin);
+        app.world_mut().spawn((
+            PrimaryWindow,
+            Window {
+                focused: true,
+                ..default()
+            },
+        ));
+        crate::client::pad::launcher(&mut app);
+        app.add_systems(Update, lay_out.after(render));
+        let pad = app.world_mut().spawn(Gamepad::default()).id();
+        pad_button(&mut app, pad, GamepadButton::South, 1.0);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(launcher(&app).screen, Screen::List);
+        pad_button(&mut app, pad, GamepadButton::South, 0.0);
+        tap(&mut app, pad, GamepadButton::South);
+        assert_eq!(launcher(&app).screen, Screen::Create);
+    }
+
+    #[test]
+    fn an_unfocused_window_ignores_the_controller() {
+        let worlds = Directory::new();
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.world_mut()
+            .query::<&mut Window>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .focused = false;
+        tap(&mut app, pad, GamepadButton::South);
+        assert_eq!(launcher(&app).screen, Screen::List);
+    }
+
+    #[test]
+    fn a_controller_can_confirm_a_rename_and_grant_trust() {
+        let worlds = Directory::new();
+        library::create(&worlds.0, &details("Old", true)).unwrap();
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        reach(&mut app, pad, Act::Rename);
+        tap(&mut app, pad, GamepadButton::South);
+        reach(&mut app, pad, Act::SaveName);
+        tap(&mut app, pad, GamepadButton::South);
+        assert_eq!(launcher(&app).screen, Screen::List);
+        assert_eq!(launcher(&app).entries[0].name(), Some("Old"));
+        reach(&mut app, pad, Act::Open);
+        tap(&mut app, pad, GamepadButton::South);
+        assert!(matches!(launcher(&app).screen, Screen::Trust(_)));
+        reach(&mut app, pad, Act::Trust);
+        tap(&mut app, pad, GamepadButton::South);
+        assert!(matches!(
+            app.world().resource::<Relaunch>().0,
+            Some(Target::World(_))
+        ));
     }
 }
