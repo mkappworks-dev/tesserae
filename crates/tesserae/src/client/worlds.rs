@@ -330,9 +330,11 @@ fn standing_owner(mut ownership: ResMut<super::input::Ownership>) {
     ownership.owner = super::input::Owner::Modal;
 }
 
+type ListScreens = Or<(With<Root>, With<ListCamera>)>;
+
 fn leave(
     mut commands: Commands,
-    screens: Query<Entity, Or<(With<Root>, With<ListCamera>)>>,
+    screens: Query<Entity, ListScreens>,
     mut ownership: ResMut<super::input::Ownership>,
     mut last: ResMut<LastFailure>,
 ) {
