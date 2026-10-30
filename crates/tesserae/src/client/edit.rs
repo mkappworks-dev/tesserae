@@ -727,6 +727,25 @@ pub(super) fn hud_text(
 mod tests {
     use super::super::actions::PIXELS_PER_NOTCH;
     use super::*;
+
+    #[test]
+    fn the_next_world_starts_with_an_empty_hand() {
+        use crate::session::testing::{app, enter, leave};
+        let mut app = app();
+        app.add_plugins(plugin);
+        enter(&mut app);
+        {
+            let mut hotbar = app.world_mut().resource_mut::<Hotbar>();
+            hotbar.slots[0] = Holding::Fire;
+            hotbar.selected = 0;
+            hotbar.outside = Some(Holding::Fire);
+        }
+        leave(&mut app);
+        enter(&mut app);
+        let hotbar = app.world().resource::<Hotbar>();
+        assert!(hotbar.slots.iter().all(|slot| *slot == Holding::Empty));
+        assert_eq!(hotbar.outside, None);
+    }
     use crate::client::camera::look;
     use crate::client::menu::{self, Entry};
     use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};

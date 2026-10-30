@@ -25,7 +25,7 @@ const MAX_BACKLOG_VOXELS: u64 = 262_144;
 const MAX_EDIT_EVENTS: usize = 1_024;
 
 #[derive(Message, Debug)]
-pub(in crate::server) struct ModDisabled {
+pub struct ModDisabled {
     pub name: String,
     pub reason: String,
 }

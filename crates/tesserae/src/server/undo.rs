@@ -165,6 +165,31 @@ fn inverse(kind: EditKind) -> EditKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_undo_history_and_pending_edits_do_not_outlive_their_world() {
+        use crate::session::testing::{app, enter, leave};
+        let mut app = app();
+        app.add_plugins(super::super::edit::plugin);
+        enter(&mut app);
+        app.world_mut()
+            .resource_mut::<Journal>()
+            .requests
+            .push_back(HistoryAction::Undo);
+        leave(&mut app);
+        assert!(!app.world().contains_resource::<Journal>());
+        assert!(
+            !app.world()
+                .contains_resource::<super::super::edit::PendingEdits>()
+        );
+        enter(&mut app);
+        assert!(app.world().resource::<Journal>().requests.is_empty());
+        assert!(
+            app.world()
+                .resource::<super::super::edit::PendingEdits>()
+                .is_empty()
+        );
+    }
     #[test]
     fn entries_and_requests_are_bounded_and_fresh_edits_clear_redo() {
         use bevy::ecs::system::RunSystemOnce;

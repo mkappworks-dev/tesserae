@@ -16,7 +16,7 @@ mod help;
 mod history;
 mod hotbar_store;
 mod input;
-mod loading;
+pub(crate) mod loading;
 mod material_textures;
 mod menu;
 mod menu_ui;

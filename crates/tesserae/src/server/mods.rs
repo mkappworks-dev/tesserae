@@ -1,6 +1,7 @@
 //! Synchronous Mod loading, completed before the App and its World exist.
 
 pub(in crate::server) mod runtime;
+pub use runtime::ModDisabled;
 
 pub(in crate::server) use runtime::{Drain, EditHistory};
 

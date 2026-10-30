@@ -58,7 +58,7 @@ fn soak(world: &mut World) {
     }
     soak.frames += 1;
     let (frames, cycle) = (soak.frames, soak.cycle);
-    if state == AppState::Loading && frames == 20 {
+    if state == AppState::Loading && frames == 3 {
         shoot(world, format!("loading-{cycle}.png"));
     }
     if state == AppState::InWorld && frames == SETTLE_FRAMES - 10 {

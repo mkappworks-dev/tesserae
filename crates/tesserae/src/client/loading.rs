@@ -158,7 +158,7 @@ fn hide_loading(
 
 /// Inserted by the Client once any terrain is drawn.
 #[derive(Resource)]
-pub(super) struct TerrainArrived;
+pub(crate) struct TerrainArrived;
 
 #[cfg(test)]
 mod tests {

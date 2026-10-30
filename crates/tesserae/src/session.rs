@@ -295,6 +295,49 @@ fn back_to_list(mut next: ResMut<NextState<AppState>>) {
     next.set(AppState::List);
 }
 
+/// For tests of one plugin's session state: an app that can enter and leave
+/// Worlds, in which a system whose resources are absent is skipped.
+#[cfg(test)]
+pub(crate) mod testing {
+    use super::*;
+    use bevy::state::app::StatesPlugin;
+
+    pub fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin, plugin));
+        app.set_error_handler(bevy::ecs::error::ignore);
+        app.update();
+        app
+    }
+
+    fn go(app: &mut App, state: AppState) {
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(state);
+        app.update();
+    }
+
+    pub fn enter(app: &mut App) {
+        loading(app);
+        go(app, AppState::InWorld);
+    }
+
+    /// Stops after `Loading` begins, where a loader inserts what the session
+    /// is built from.
+    pub fn loading(app: &mut App) {
+        go(app, AppState::Loading);
+    }
+
+    pub fn open(app: &mut App) {
+        go(app, AppState::InWorld);
+    }
+
+    pub fn leave(app: &mut App) {
+        go(app, AppState::Closing);
+        app.update();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

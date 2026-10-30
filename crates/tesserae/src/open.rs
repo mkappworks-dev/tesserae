@@ -40,6 +40,8 @@ pub struct OpenRequest {
 pub struct Opened {
     pub from_list: bool,
     pub name: Option<String>,
+    folder: Option<PathBuf>,
+    direct: bool,
 }
 
 /// The stages the loading bar follows, in order. The last is the Client's
@@ -118,6 +120,12 @@ pub fn plugin(app: &mut App) {
                     .run_if(in_state(AppState::Loading))
                     .run_if(resource_exists::<Load>),
                 quit_while_loading.run_if(in_state(AppState::Loading)),
+                fault_before_terrain
+                    .run_if(in_state(AppState::InWorld))
+                    .run_if(resource_exists::<Opened>)
+                    .run_if(not(
+                        resource_exists::<crate::client::loading::TerrainArrived>,
+                    )),
             ),
         );
 }
@@ -149,6 +157,11 @@ fn begin(mut commands: Commands, request: Res<OpenRequest>, args: Res<UserArgs>)
     commands.insert_resource(Opened {
         from_list: request.from_list,
         name: request.name.clone(),
+        folder: match &request.what {
+            What::Folder(path) => Some(path.clone()),
+            What::Direct => None,
+        },
+        direct: request.what == What::Direct,
     });
     commands.insert_resource(Load {
         stage,
@@ -230,6 +243,35 @@ fn finish(
         }
     }
     commands.remove_resource::<Load>();
+}
+
+/// A Mod that traps while the World is still starting leaves nothing to play:
+/// back to the list, or out, with the reason. Once terrain is drawn a Mod that
+/// stops is only disabled.
+fn fault_before_terrain(
+    opened: Res<Opened>,
+    mut faults: MessageReader<crate::server::mods::ModDisabled>,
+    mut last: ResMut<LastFailure>,
+    mut next: ResMut<NextState<AppState>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Some(fault) = faults.read().next() else {
+        return;
+    };
+    let reason = format!(
+        "Mod `{}` stopped while the World was starting: {}",
+        fault.name, fault.reason
+    );
+    if opened.direct {
+        eprintln!("Cannot open World: {reason}");
+        exit.write(AppExit::error());
+        return;
+    }
+    last.0 = Some(OpenFailure {
+        folder: opened.folder.clone().unwrap_or_default(),
+        reason,
+    });
+    next.set(AppState::Closing);
 }
 
 /// Nothing is saved or locked yet, so closing the window just ends the app.
@@ -363,6 +405,8 @@ mod tests {
         app.insert_resource(Opened {
             from_list: false,
             name: None,
+            folder: None,
+            direct: true,
         })
         .insert_resource(Load {
             stage: Arc::default(),
@@ -397,5 +441,98 @@ mod tests {
             assert_eq!(Stage::from_u8(stage as u8), stage);
             assert!(!stage.label().is_empty());
         }
+    }
+
+    #[test]
+    fn a_game_that_is_missing_or_untrusted_is_refused_before_anything_is_written() {
+        use tesserae_core::save::library;
+        let (mods, worlds) = (Temp::new(), Temp::new());
+        let sidecar = library::Sidecar {
+            name: "Needs a Game".into(),
+            game: Some(library::GameRef {
+                id: "demo".into(),
+                version: "0.1.0".into(),
+            }),
+            seed: 8,
+            voxel_size_m: 1.0,
+            created_unix_s: 0,
+            last_played_unix_s: 0,
+            world: WorldId::new(),
+            pending: true,
+        };
+        let folder = library::create(&worlds.0, &sidecar).unwrap();
+        let before = snapshot(&folder);
+        let mut app = app(&mods);
+        open_failing(&mut app, &folder);
+
+        assert!(until(&mut app, AppState::List));
+        let failure = app.world().resource::<LastFailure>().0.as_ref().unwrap();
+        assert!(
+            failure.reason.contains("could not be loaded"),
+            "{}",
+            failure.reason
+        );
+        assert_eq!(snapshot(&folder), before);
+    }
+
+    #[test]
+    fn a_world_held_open_elsewhere_is_refused_and_still_openable_afterwards() {
+        use crate::server::persistence::{Opening, Persistence};
+        use tesserae_core::save::library;
+        let (mods, worlds) = (Temp::new(), Temp::new());
+        let sidecar = library::Sidecar {
+            name: "Held".into(),
+            game: None,
+            seed: 8,
+            voxel_size_m: 1.0,
+            created_unix_s: 0,
+            last_played_unix_s: 0,
+            world: WorldId::new(),
+            pending: true,
+        };
+        let folder = library::create(&worlds.0, &sidecar).unwrap();
+        let prepare = || {
+            let opening = Opening::from_folder(&folder).unwrap();
+            let settings = opening.settings(WorldSettings::default());
+            Persistence::prepare(opening, &mut Default::default(), settings)
+        };
+        let holder = prepare().unwrap();
+        let mut app = app(&mods);
+        open_failing(&mut app, &folder);
+
+        assert!(until(&mut app, AppState::List));
+        assert!(app.world().resource::<LastFailure>().0.is_some());
+        drop(holder);
+        assert!(prepare().is_ok(), "the refused open left no lock behind");
+    }
+
+    #[test]
+    fn a_mod_that_stops_before_the_first_terrain_ends_the_session_with_its_reason() {
+        let mods = Temp::new();
+        let mut app = app(&mods);
+        app.add_message::<crate::server::mods::ModDisabled>();
+        app.update();
+        app.insert_resource(OpenRequest {
+            what: What::Folder("/worlds/Trapped".into()),
+            name: None,
+            from_list: false,
+        });
+        crate::session::testing::loading(&mut app);
+        app.insert_resource(Opened {
+            from_list: false,
+            name: None,
+            folder: Some("/worlds/Trapped".into()),
+            direct: false,
+        });
+        crate::session::testing::open(&mut app);
+        app.world_mut()
+            .write_message(crate::server::mods::ModDisabled {
+                name: "demo".into(),
+                reason: "trapped".into(),
+            });
+        assert!(until(&mut app, AppState::List));
+        let failure = app.world().resource::<LastFailure>().0.as_ref().unwrap();
+        assert_eq!(failure.folder, PathBuf::from("/worlds/Trapped"));
+        assert!(failure.reason.contains("demo") && failure.reason.contains("trapped"));
     }
 }

@@ -264,6 +264,20 @@ fn panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_measurement_is_cleared_when_the_world_ends() {
+        use crate::session::testing::{app, enter, leave};
+        let mut app = app();
+        app.add_plugins(bevy::asset::AssetPlugin::default())
+            .add_plugins(plugin);
+        enter(&mut app);
+        app.world_mut().resource_mut::<Measurement>().pending = Some(corner(1.0, 2.0, 3.0));
+        leave(&mut app);
+        enter(&mut app);
+        let measurement = app.world().resource::<Measurement>();
+        assert!(measurement.pending.is_none() && measurement.done.is_none());
+    }
     use crate::content::{CatalogueTool, ContentCatalogue};
     use crate::server::tool::{ToolId, UseAim, UseRefusal};
 

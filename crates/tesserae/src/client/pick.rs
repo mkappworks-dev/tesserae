@@ -95,6 +95,18 @@ fn receive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pending_pick_is_dropped_when_the_world_ends() {
+        use crate::session::testing::{app, enter, leave};
+        let mut app = app();
+        app.add_plugins(plugin);
+        enter(&mut app);
+        app.world_mut().resource_mut::<Pending>().request = Some((3, Hotbar::default()));
+        leave(&mut app);
+        enter(&mut app);
+        assert!(app.world().resource::<Pending>().request.is_none());
+    }
     use tesserae_core::{Orientation, SHAPE_STAIR, Voxel};
     #[test]
     fn menu_entry_discards_a_sample_reply_in_the_same_frame() {
