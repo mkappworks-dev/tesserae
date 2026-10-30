@@ -416,3 +416,6 @@ Player needs to say what to build.
   the last one touched.
 - The Box preview draws only the shell of the volume, so the faces inside never
   fight for depth with the ghosts around them.
+- The ghosts of one tint are one merged mesh, at most three in all. Ghosts
+  blend, and blended entities are sorted one by one by distance, so cells drawn
+  as separate entities swapped order as the view moved and flickered.

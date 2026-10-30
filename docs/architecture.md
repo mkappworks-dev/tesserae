@@ -156,8 +156,9 @@ with the span's size beside it. A span is a flat rectangle from A to B on the
 plane they differ most in, given depth by C along the remaining dimension; C
 level with A keeps it flat. C needs no surface: it is read from where the view
 line passes B, so a height can be set in open sky. The preview draws each cell
-as a ghost of the block that would land, tinted where it would not; a box draws
-only its shell, so inner faces never fight for depth. The crosshair, outline,
+as a ghost of the block that would land, tinted where it would not; the cells of
+one tint are one merged mesh, so blended ghosts never re-sort against each other
+as the view moves, and a box draws only its shell. The crosshair, outline,
 preview and removal are building only, shown while the hand holds something or
 Layout mode is on (`edit::building`). The Layout key opens the Layout menu
 (`client/layout_menu.rs`), a panel docked over the live game with its own input

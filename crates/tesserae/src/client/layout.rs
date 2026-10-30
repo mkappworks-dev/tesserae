@@ -514,18 +514,24 @@ const BLOCKED: Color = Color::srgba(0.94, 0.27, 0.27, 0.50);
 /// How much of a Voxel each ghost leaves bare on every side.
 const GHOST_INSET: f32 = 0.01;
 
+/// A layout's ghost cells of one tint, merged into one mesh. Ghosts blend, and
+/// Bevy sorts blended entities one by one by distance; cells as separate
+/// entities swap order as the view moves and flicker, a single mesh does not.
 #[derive(Component)]
-pub(super) struct LayoutGhost;
+pub(super) struct LayoutGhost(usize);
 
-/// The model every ghost shares: the Voxel being laid, with the placeable look
-/// the single-placement ghost has, and two tints for the cells that will not
-/// land.
+/// The model every ghost is built from: the Voxel being laid, with the
+/// placeable look the single-placement ghost has, and two tints for the cells
+/// that will not land.
 #[derive(Resource, Default)]
 pub(super) struct GhostModel {
     holding: Option<Holding>,
-    mesh: Handle<Mesh>,
+    mesh: Option<Mesh>,
     /// Placeable, out of reach, blocked.
     materials: [Handle<StandardMaterial>; 3],
+    /// What the merged meshes were last built from, so they are rebuilt only
+    /// when it changes.
+    built: Option<(Vec<(Vec3, usize)>, f32)>,
 }
 
 /// What is laid out: the held solid.
@@ -534,8 +540,8 @@ fn layout_holding(hotbar: &Hotbar) -> Option<Holding> {
 }
 
 /// The cells that can be seen: those with an open face. A box's inner cells sit
-/// behind translucent ones whose faces they would show through, which looks
-/// like flicker as the view moves, so only its shell is drawn.
+/// behind translucent ones whose faces they would show through, so only its
+/// shell is drawn.
 fn shell(cells: Vec<(Vec3, usize)>, size: f32) -> Vec<(Vec3, usize)> {
     let key = |at: Vec3| at.to_array().map(|c| (c / size).round() as i32);
     let present: std::collections::HashSet<[i32; 3]> =
@@ -559,8 +565,26 @@ fn shell(cells: Vec<(Vec3, usize)>, size: f32) -> Vec<(Vec3, usize)> {
         .collect()
 }
 
-/// Draws each cell of the Server's preview as a ghost of the block that would
-/// land, tinted where it would not.
+/// One mesh of `model` at every cell of `tint`, each a hair smaller than its
+/// cell so the faces it shares with the ground do not fight.
+fn merged(model: &Mesh, cells: &[(Vec3, usize)], tint: usize, size: f32) -> Option<Mesh> {
+    let inset = size * GHOST_INSET;
+    let mut placed = cells.iter().filter(|(_, t)| *t == tint).map(|(at, _)| {
+        model.clone().transformed_by(Transform {
+            translation: *at + Vec3::splat(inset),
+            scale: Vec3::splat(size - 2.0 * inset),
+            ..default()
+        })
+    });
+    let mut mesh = placed.next()?;
+    for next in placed {
+        mesh.merge(&next).ok()?;
+    }
+    Some(mesh)
+}
+
+/// Draws the Server's preview as ghosts of the block that would land, tinted
+/// where it would not.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn ghosts(
     mut commands: Commands,
@@ -575,29 +599,26 @@ pub(super) fn ghosts(
         ResMut<Assets<Mesh>>,
         ResMut<Assets<StandardMaterial>>,
     ),
-    mut cells: Query<
-        (
-            &mut Transform,
-            &mut Mesh3d,
-            &mut MeshMaterial3d<StandardMaterial>,
-            &mut Visibility,
-        ),
-        With<LayoutGhost>,
-    >,
+    mut drawn: Query<(
+        &LayoutGhost,
+        &mut Mesh3d,
+        &mut MeshMaterial3d<StandardMaterial>,
+        &mut Visibility,
+    )>,
 ) {
     let holding = mode.on.then(|| layout_holding(&hotbar)).flatten();
     if model.holding != holding || (holding.is_some() && content.changed()) {
-        meshes.remove(model.mesh.id());
         for handle in &model.materials {
             materials.remove(handle.id());
         }
         model.holding = holding;
-        model.mesh = default();
+        model.mesh = None;
         model.materials = default();
+        model.built = None;
         if let Some(held) = holding
             && let Some(mesh) = super::preview::item_mesh(held, &content.catalogue.0)
         {
-            model.mesh = meshes.add(mesh);
+            model.mesh = Some(mesh);
             let base = content
                 .textures
                 .material(held, content.swatches.rgba(held), true);
@@ -612,7 +633,7 @@ pub(super) fn ghosts(
             ];
         }
     }
-    let wanted: Vec<(Vec3, usize)> = if model.mesh == Handle::default() {
+    let wanted: Vec<(Vec3, usize)> = if model.mesh.is_none() {
         Vec::new()
     } else {
         current(&mode, &preferences.layout, &hotbar, &camera)
@@ -633,43 +654,48 @@ pub(super) fn ghosts(
             })
             .unwrap_or_default()
     };
-    let wanted = shell(wanted, world.voxel_size);
-    let existing = cells.iter().count();
-    for _ in existing..wanted.len() {
+    let wanted = (shell(wanted, world.voxel_size), world.voxel_size);
+    let mut have = [false; 3];
+    for (ghost, ..) in &drawn {
+        have[ghost.0] = true;
+    }
+    for tint in (0..3).filter(|&tint| !have[tint]) {
         commands.spawn((
-            LayoutGhost,
+            LayoutGhost(tint),
             bevy::light::NotShadowCaster,
-            Mesh3d(model.mesh.clone()),
-            MeshMaterial3d(model.materials[0].clone()),
+            Mesh3d::default(),
+            MeshMaterial3d(model.materials[tint].clone()),
             Transform::default(),
             Visibility::Hidden,
         ));
     }
-    for (index, (mut transform, mut mesh, mut material, mut visibility)) in
-        cells.iter_mut().enumerate()
-    {
-        match wanted.get(index) {
-            Some(&(at, tint)) => {
-                // A hair smaller than its cell, or the faces it shares with the
-                // ground and its neighbours flicker against each other.
-                let inset = world.voxel_size * GHOST_INSET;
-                transform.translation = at + Vec3::splat(inset);
-                transform.scale = Vec3::splat(world.voxel_size - 2.0 * inset);
-                // A ghost outlives the block it was made for, so it takes the
-                // current mesh as well as the current look.
-                if mesh.0 != model.mesh {
-                    mesh.0 = model.mesh.clone();
-                }
-                let handle = &model.materials[tint];
-                if material.0 != *handle {
-                    material.0 = handle.clone();
-                }
-                visibility.set_if_neq(Visibility::Visible);
+    let rebuild = model.built.as_ref() != Some(&wanted);
+    for (ghost, mut mesh, mut material, mut visibility) in &mut drawn {
+        let tint = ghost.0;
+        if rebuild {
+            if mesh.0 != Handle::default() {
+                meshes.remove(mesh.0.id());
             }
-            None => {
-                visibility.set_if_neq(Visibility::Hidden);
-            }
+            let built = model
+                .mesh
+                .as_ref()
+                .and_then(|source| merged(source, &wanted.0, tint, wanted.1));
+            // A new handle, not an edit in place, so Bevy recomputes the bounds
+            // it culls by.
+            mesh.0 = built.map(|built| meshes.add(built)).unwrap_or_default();
         }
+        let handle = &model.materials[tint];
+        if material.0 != *handle {
+            material.0 = handle.clone();
+        }
+        visibility.set_if_neq(if mesh.0 == Handle::default() {
+            Visibility::Hidden
+        } else {
+            Visibility::Visible
+        });
+    }
+    if rebuild && drawn.iter().count() == 3 {
+        model.built = Some(wanted);
     }
 }
 
@@ -1587,16 +1613,81 @@ mod tests {
         ));
     }
 
-    fn ghosts_now(app: &mut App) -> Vec<(Vec3, Visibility, Handle<StandardMaterial>)> {
-        // One pass spawns what is missing and a second places it.
+    /// One drawn ghost: its tint, whether it shows, and its merged mesh's
+    /// vertex count and bounds.
+    #[derive(Debug)]
+    struct Drawn {
+        tint: usize,
+        visible: bool,
+        vertices: usize,
+        min: Vec3,
+        max: Vec3,
+        centroid: Vec3,
+    }
+
+    fn ghosts_now(app: &mut App) -> Vec<Drawn> {
+        // One pass spawns what is missing and a second fills it.
         for _ in 0..2 {
             app.world_mut().run_system_once(ghosts).unwrap();
         }
-        app.world_mut()
-            .query_filtered::<(&Transform, &Visibility, &MeshMaterial3d<StandardMaterial>), With<LayoutGhost>>()
+        let shown: Vec<_> = app
+            .world_mut()
+            .query::<(&LayoutGhost, &Visibility, &Mesh3d)>()
             .iter(app.world())
-            .map(|(t, v, m)| (t.translation, *v, m.0.clone()))
-            .collect()
+            .map(|(ghost, visibility, mesh)| (ghost.0, *visibility, mesh.0.clone()))
+            .collect();
+        let meshes = app.world().resource::<Assets<Mesh>>();
+        let mut drawn: Vec<_> = shown
+            .into_iter()
+            .map(|(tint, visibility, handle)| {
+                let positions: Vec<Vec3> = meshes
+                    .get(&handle)
+                    .and_then(|mesh| mesh.attribute(Mesh::ATTRIBUTE_POSITION))
+                    .and_then(|a| a.as_float3())
+                    .map(|p| p.iter().map(|&v| Vec3::from_array(v)).collect())
+                    .unwrap_or_default();
+                Drawn {
+                    tint,
+                    visible: visibility == Visibility::Visible,
+                    vertices: positions.len(),
+                    min: positions.iter().copied().fold(Vec3::INFINITY, Vec3::min),
+                    max: positions
+                        .iter()
+                        .copied()
+                        .fold(Vec3::NEG_INFINITY, Vec3::max),
+                    centroid: positions.iter().sum::<Vec3>() / positions.len().max(1) as f32,
+                }
+            })
+            .collect();
+        drawn.sort_by_key(|d| d.tint);
+        drawn
+    }
+
+    fn visible(app: &mut App) -> Vec<Drawn> {
+        ghosts_now(app).into_iter().filter(|d| d.visible).collect()
+    }
+
+    fn cube_vertices(app: &App) -> usize {
+        let held = app.world().resource::<Hotbar>().held();
+        let catalogue = &app.world().resource::<super::super::edit::Catalogue>().0;
+        super::super::preview::item_mesh(held, catalogue)
+            .unwrap()
+            .count_vertices()
+    }
+
+    #[test]
+    fn a_layout_is_one_mesh_per_tint_so_its_cells_never_sort_against_each_other() {
+        let mut app = ghost_app();
+        let mut cells: Vec<_> = (0..6)
+            .map(|x| (Vec3::new(x as f32, 0.0, 0.0), CellState::Placeable))
+            .collect();
+        cells.push((Vec3::new(9.0, 0.0, 0.0), CellState::Blocked));
+        answer_with(&mut app, &cells);
+        let shown = visible(&mut app);
+        let one = cube_vertices(&app);
+        assert_eq!(shown.len(), 2, "{shown:?}");
+        assert_eq!((shown[0].tint, shown[0].vertices), (0, 6 * one));
+        assert_eq!((shown[1].tint, shown[1].vertices), (2, one));
     }
 
     #[test]
@@ -1608,25 +1699,27 @@ mod tests {
             (Vec3::new(3.0, 2.0, 3.0), CellState::Blocked),
         ];
         answer_with(&mut app, &cells);
-        let shown = ghosts_now(&mut app);
+        let shown = visible(&mut app);
         assert_eq!(shown.len(), 3);
-        for (cell, (at, visibility, _)) in cells.iter().zip(&shown) {
+        for (tint, (cell, drawn)) in cells.iter().zip(&shown).enumerate() {
+            assert_eq!(drawn.tint, tint);
             assert!(
-                at.abs_diff_eq(cell.0 + Vec3::splat(GHOST_INSET), 1e-5),
-                "inset a hair into its cell: {at}"
+                drawn
+                    .min
+                    .abs_diff_eq(cell.0 + Vec3::splat(GHOST_INSET), 1e-5),
+                "inset a hair into its cell: {drawn:?}"
             );
-            assert_eq!(*visibility, Visibility::Visible);
         }
-        let handles: std::collections::HashSet<_> = shown.iter().map(|g| g.2.id()).collect();
+        let materials: std::collections::HashSet<_> = app
+            .world_mut()
+            .query_filtered::<&MeshMaterial3d<StandardMaterial>, With<LayoutGhost>>()
+            .iter(app.world())
+            .map(|m| m.0.id())
+            .collect();
         assert_eq!(
-            handles.len(),
+            materials.len(),
             3,
             "placeable, out of reach and blocked differ"
-        );
-        let model = app.world().resource::<GhostModel>();
-        assert_eq!(
-            shown[0].2, model.materials[0],
-            "the placeable look is the ghost's"
         );
     }
 
@@ -1637,16 +1730,7 @@ mod tests {
             .map(|x| (Vec3::new(x as f32, 0.0, 0.0), CellState::Placeable))
             .collect();
         answer_with(&mut app, &cells);
-        ghosts_now(&mut app);
-        let meshes = |app: &mut App| -> Vec<Handle<Mesh>> {
-            app.world_mut()
-                .query_filtered::<&Mesh3d, With<LayoutGhost>>()
-                .iter(app.world())
-                .map(|m| m.0.clone())
-                .collect()
-        };
-        let before = app.world().resource::<GhostModel>().mesh.clone();
-        assert!(meshes(&mut app).iter().all(|m| *m == before));
+        assert_eq!(visible(&mut app)[0].vertices, 6 * cube_vertices(&app));
         let rock = tesserae_core::testgen::fixtures().ground.rock;
         for held in [
             Holding::solid(rock, tesserae_core::SHAPE_STAIR),
@@ -1654,29 +1738,30 @@ mod tests {
         ] {
             app.world_mut().resource_mut::<Hotbar>().slots[0] = held;
             answer_with(&mut app, &cells);
-            ghosts_now(&mut app);
-            let now = app.world().resource::<GhostModel>().mesh.clone();
-            assert_ne!(now, before, "a new shape is a new mesh");
-            let shown = meshes(&mut app);
-            assert_eq!(shown.len(), 6);
-            assert!(
-                shown.iter().all(|m| *m == now),
-                "every ghost, not only new ones"
+            let shown = visible(&mut app);
+            assert_eq!(shown.len(), 1);
+            assert_eq!(
+                shown[0].vertices,
+                6 * cube_vertices(&app),
+                "every cell, the new shape"
             );
         }
-        // And a turn of the held stair, which is the same shape facing another way.
         let Holding::Solid { orientation, .. } = app.world().resource::<Hotbar>().slots[0] else {
             panic!("a solid");
         };
+        let before = visible(&mut app)[0].centroid;
         app.world_mut().resource_mut::<Hotbar>().slots[0] = Holding::Solid {
             material: rock,
             shape: tesserae_core::SHAPE_STAIR,
             orientation: orientation.turned(),
         };
         answer_with(&mut app, &cells);
-        ghosts_now(&mut app);
-        let now = app.world().resource::<GhostModel>().mesh.clone();
-        assert!(meshes(&mut app).iter().all(|m| *m == now));
+        let after = visible(&mut app);
+        assert_eq!(after[0].vertices, 6 * cube_vertices(&app));
+        assert!(
+            !after[0].centroid.abs_diff_eq(before, 1e-4),
+            "a turned stair is drawn turned"
+        );
     }
 
     #[test]
@@ -1690,25 +1775,19 @@ mod tests {
                 (at(1.0), CellState::Placeable),
             ],
         );
-        assert_eq!(ghosts_now(&mut app).len(), 2);
+        let one = cube_vertices(&app);
+        assert_eq!(visible(&mut app)[0].vertices, 2 * one);
         answer_with(&mut app, &[(at(5.0), CellState::Placeable)]);
-        let shown = ghosts_now(&mut app);
-        let visible: Vec<_> = shown
-            .iter()
-            .filter(|g| g.1 == Visibility::Visible)
-            .collect();
-        assert_eq!(visible.len(), 1);
+        let shown = visible(&mut app);
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].vertices, one);
         assert!(
-            visible[0]
-                .0
+            shown[0]
+                .min
                 .abs_diff_eq(at(5.0) + Vec3::splat(GHOST_INSET), 1e-5)
         );
         app.world_mut().resource_mut::<LayoutMode>().on = false;
-        assert!(
-            ghosts_now(&mut app)
-                .iter()
-                .all(|g| g.1 == Visibility::Hidden)
-        );
+        assert!(visible(&mut app).is_empty());
     }
 
     #[test]
@@ -1717,15 +1796,10 @@ mod tests {
         answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
         ghosts_now(&mut app);
         app.world_mut().resource_mut::<WorldSettings>().voxel_size = 0.5;
-        ghosts_now(&mut app);
-        let scale = app
-            .world_mut()
-            .query_filtered::<&Transform, With<LayoutGhost>>()
-            .single(app.world())
-            .unwrap()
-            .scale;
+        let shown = visible(&mut app);
+        let extent = shown[0].max - shown[0].min;
         let expected = 0.5 - 2.0 * 0.5 * GHOST_INSET;
-        assert!(scale.abs_diff_eq(Vec3::splat(expected), 1e-5), "{scale}");
+        assert!(extent.abs_diff_eq(Vec3::splat(expected), 1e-5), "{extent}");
     }
 
     fn say(app: &mut App) -> String {
