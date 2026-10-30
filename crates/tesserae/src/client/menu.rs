@@ -1225,8 +1225,10 @@ pub(super) fn highlight_tiles(
         } else {
             crate::client::menu_ui::CARD
         };
-        let edge = if selected || hovered {
-            crate::client::menu_ui::LEAF
+        let edge = if selected {
+            super::menu_ui::INK
+        } else if hovered {
+            super::menu_ui::MUTED
         } else {
             super::menu_ui::EDGE
         };
@@ -1238,6 +1240,21 @@ pub(super) fn highlight_tiles(
             *border = edge;
         }
     }
+}
+
+const TILE_NAME_CHARS: usize = 9;
+fn one_line(label: &str) -> String {
+    let name = label
+        .lines()
+        .map(super::menu_ui::title)
+        .collect::<Vec<_>>()
+        .join(" ");
+    if name.chars().count() <= TILE_NAME_CHARS {
+        return name;
+    }
+    let mut cut: String = name.chars().take(TILE_NAME_CHARS - 2).collect();
+    cut.push_str("..");
+    cut
 }
 
 pub(super) fn tile(
@@ -1270,13 +1287,13 @@ pub(super) fn tile(
                         height: Val::Px(size),
                         aspect_ratio: Some(1.0),
                         flex_shrink: 0.0,
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(5.0)),
+                        border: UiRect::all(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(6.0)),
                         ..default()
                     },
                     BackgroundColor(crate::client::menu_ui::CARD),
                     BorderColor::all(if highlighted {
-                        crate::client::menu_ui::LEAF
+                        crate::client::menu_ui::INK
                     } else {
                         crate::client::menu_ui::EDGE
                     }),
@@ -1295,6 +1312,25 @@ pub(super) fn tile(
                             Pickable::IGNORE,
                         ));
                     }
+                    square
+                        .spawn((
+                            Node {
+                                position_type: PositionType::Absolute,
+                                left: Val::Px(2.0),
+                                right: Val::Px(2.0),
+                                bottom: Val::Px(2.0),
+                                justify_content: JustifyContent::Center,
+                                ..default()
+                            },
+                            Pickable::IGNORE,
+                        ))
+                        .with_child((
+                            Text::new(one_line(label)),
+                            font(10.0),
+                            TextLayout::new(Justify::Center, bevy::text::LineBreak::NoWrap),
+                            ZIndex(1),
+                            Pickable::IGNORE,
+                        ));
                     if let Some(number) = number {
                         square.spawn((
                             Text::new(number.to_string()),
@@ -1310,24 +1346,6 @@ pub(super) fn tile(
                         ));
                     }
                 });
-            wrapper.spawn((
-                Text::new(
-                    label
-                        .lines()
-                        .map(super::menu_ui::title)
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                ),
-                font(10.0),
-                TextLayout::linebreak(bevy::text::LineBreak::WordOrCharacter),
-                Node {
-                    width: Val::Px(size),
-                    min_width: Val::Px(0.0),
-                    max_width: Val::Px(size),
-                    ..default()
-                },
-                Pickable::IGNORE,
-            ));
         });
 }
 
@@ -1667,7 +1685,7 @@ mod tests {
             app.update();
             assert_eq!(
                 *app.world().get::<BorderColor>(target).unwrap(),
-                BorderColor::all(crate::client::menu_ui::LEAF)
+                BorderColor::all(crate::client::menu_ui::MUTED)
             );
             app.world_mut().trigger(PointerDragDrop {
                 entity: target,
@@ -1772,7 +1790,7 @@ mod tests {
             }
             assert_eq!(
                 *app.world().get::<BorderColor>(slot).unwrap(),
-                BorderColor::all(crate::client::menu_ui::LEAF)
+                BorderColor::all(crate::client::menu_ui::INK)
             );
             app.world_mut().trigger(PointerOut {
                 entity: target,
