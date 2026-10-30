@@ -983,6 +983,20 @@ pub mod stats {
         /// Mean job time to generate, and to mesh, a Chunk of this level.
         pub generate: lod::measure::JobCost,
         pub mesh_job: lod::measure::JobCost,
+        pub flow: Flow,
+    }
+
+    /// Generate, relight and mesh work of one level; relight is level 0 only.
+    #[derive(Default, Clone, Copy, Debug)]
+    pub struct Flow {
+        /// Due and not dispatched: a Chunk of the load extent not held, a lit
+        /// Chunk whose light is out of date, a Chunk of the mesh shell whose mesh
+        /// is.
+        pub waiting: [usize; 3],
+        pub in_flight: [usize; 3],
+        /// Since the World opened: jobs run on a worker, and their worker CPU.
+        pub run: [u64; 3],
+        pub cpu_ms: [f64; 3],
     }
 
     #[derive(Resource, Default, Clone, Debug)]
@@ -1010,13 +1024,22 @@ pub mod stats {
         pub stale: [usize; 3],
         /// Indexed by level. Level 0 repeats `loaded` and `meshed`.
         pub levels: Vec<LevelStats>,
+        /// Fluid steps' jobs run and their worker CPU since the World opened:
+        /// they share the workers with streaming.
+        pub fluid_run: (u64, f64),
     }
+
+    /// Where [`StreamingStats`] is written, for a reader that must see this tick's.
+    #[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
+    pub struct Published;
 
     pub(super) fn plugin(app: &mut App) {
         app.init_session_resource::<StreamingStats>()
             .add_session_systems(
                 FixedPostUpdate,
-                publish_stats.run_if(crate::cost::collecting),
+                publish_stats
+                    .run_if(crate::cost::collecting)
+                    .in_set(Published),
             );
     }
 
@@ -1035,8 +1058,10 @@ pub mod stats {
         lod_store: Res<lod::LodStore>,
         lod_state: Res<lod::LodState>,
         lod_jobs: Res<lod::LodJobs>,
+        fluids: Option<Res<crate::server::fluids::FluidSim>>,
         player: Query<&Player>,
     ) {
+        let eye = player.single().map(Player::eye).ok();
         let center = player
             .single()
             .map(|player| world.chunk_at(player.eye()))
@@ -1063,16 +1088,81 @@ pub mod stats {
                     .iter()
                     .any(|&c| mesh.contains(delta(center, c)))
         });
+        let (generated, relit, meshed) = (jobs.generate.run(), jobs.relight.run(), jobs.mesh.run());
+        let level_zero = Flow {
+            waiting: center.map_or([0; 3], |center| {
+                [
+                    order
+                        .offsets
+                        .iter()
+                        .filter(|&&d| {
+                            let c = offset(center, d);
+                            !store.contains(c) && !jobs.generate.contains(c)
+                        })
+                        .count(),
+                    meshes.unlit.len(),
+                    meshes
+                        .dirty
+                        .iter()
+                        .filter(|&&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
+                        .count(),
+                ]
+            }),
+            in_flight: [
+                jobs.generate.in_flight(),
+                jobs.relight.in_flight(),
+                jobs.mesh.in_flight(),
+            ],
+            run: [generated.0, relit.0, meshed.0],
+            cpu_ms: [generated.1, relit.1, meshed.1],
+        };
         let mut levels = vec![LevelStats {
             held: store.coords().count(),
             meshed: meshes.delivered.len(),
             steady: rings.load.count(),
             shell: mesh.count(),
+            flow: level_zero,
             ..default()
         }];
+        let (lod_generating, lod_meshing) = (lod_jobs.generate.keys(), lod_jobs.mesh.keys());
+        let lod_in_flight = |keys: &[(u32, ChunkCoord)], level: u32| {
+            keys.iter().filter(|(l, _)| *l == level).count()
+        };
         levels.extend((1..level_count(&settings)).map(|level| {
             let rings = LevelRings::new(*settings, world.cell_size(), level);
+            let anchor = eye.map(|eye| world.chunk_at_level(eye, level));
+            let [generate_cpu, mesh_cpu] = lod_jobs.times.cpu_ms(level);
+            let flow = Flow {
+                waiting: anchor.map_or([0; 3], |anchor| {
+                    [
+                        rings
+                            .load
+                            .offsets()
+                            .into_iter()
+                            .filter(|&d| {
+                                let c = offset(anchor, d);
+                                !lod_store.contains(level, c)
+                                    && !lod_jobs.generate.contains((level, c))
+                            })
+                            .count(),
+                        0,
+                        lod_state.dirty_within(level, anchor, rings.mesh),
+                    ]
+                }),
+                in_flight: [
+                    lod_in_flight(&lod_generating, level),
+                    0,
+                    lod_in_flight(&lod_meshing, level),
+                ],
+                run: [
+                    lod_jobs.times.generate_cost(level).jobs,
+                    0,
+                    lod_jobs.times.mesh_cost(level).jobs,
+                ],
+                cpu_ms: [generate_cpu, 0.0, mesh_cpu],
+            };
             LevelStats {
+                flow,
                 held: lod_store.len(level),
                 meshed: lod_state.delivered_len(level),
                 steady: rings.load.count(),
@@ -1100,6 +1190,7 @@ pub mod stats {
                 jobs.mesh.stale(),
             ],
             levels,
+            fluid_run: fluids.map_or((0, 0.0), |f| f.jobs_run()),
         };
     }
 }

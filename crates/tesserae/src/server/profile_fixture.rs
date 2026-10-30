@@ -15,19 +15,32 @@ pub(super) fn plugin(app: &mut App) {
         return;
     };
     assert!(
-        ["stationary", "flight", "transparency", "active"].contains(&kind.as_str()),
+        BUILT.contains(&kind.as_str()) || MOVED.contains(&kind.as_str()),
         "Unknown profiling fixture"
     );
     app.on_session_start(install)
         .add_session_systems(FixedPostUpdate, build.run_if(resource_exists::<Fixture>));
+    if kind == "teleport" {
+        app.add_session_systems(FixedUpdate, teleport.before(super::streaming::Streaming));
+    }
 }
+
+const BUILT: [&str; 2] = ["transparency", "active"];
+const MOVED: [&str; 6] = [
+    "stationary",
+    "flight",
+    "sprint-flight",
+    "sprint-walk",
+    "dive",
+    "teleport",
+];
 
 fn install(world: &mut World) {
     let Ok(kind) = std::env::var("TESSERAE_PROFILE_FIXTURE") else {
         return;
     };
     world.insert_resource(ProfileFixtureStatus {
-        ready: kind == "stationary" || kind == "flight",
+        ready: MOVED.contains(&kind.as_str()),
         ..default()
     });
     if kind == "transparency" || kind == "active" {
@@ -51,6 +64,30 @@ pub struct ProfileFixtureStatus {
     pub ready: bool,
     pub ignitions: u64,
     pub fire_burning: bool,
+}
+
+/// When the teleport fixture jumps, at the start of the measured phase.
+const TELEPORT_AT_S: f64 = 22.0;
+/// How far it jumps: past every level-0 and level-1 ring, so the view refills.
+const TELEPORT_M: f32 = 2000.0;
+
+/// Moves the Player once, keeping the Eye's height above the generated ground.
+fn teleport(
+    start: Res<crate::profiling::ProcessStart>,
+    generator: Res<super::WorldGenerator>,
+    mut player: Single<&mut super::player::Player>,
+    mut done: Local<bool>,
+) {
+    if *done || start.0.elapsed().as_secs_f64() < TELEPORT_AT_S {
+        return;
+    }
+    *done = true;
+    let eye = player.eye();
+    let above_m = eye.y - generator.0.surface_height_m(eye.x, eye.z);
+    let to = eye + Vec3::X * TELEPORT_M;
+    let to = to.with_y(generator.0.surface_height_m(to.x, to.z) + above_m);
+    player.set_eye(to);
+    info!("profile_fixture teleport from={eye} to={to}");
 }
 
 fn ignition_round(seconds: f64) -> Option<u64> {

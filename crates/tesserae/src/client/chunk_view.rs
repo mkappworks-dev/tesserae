@@ -59,6 +59,11 @@ pub(super) struct ChunkEntities {
 }
 
 impl ChunkEntities {
+    #[cfg(feature = "profiling")]
+    pub(super) fn delivered(&self) -> &HashSet<(u32, ChunkCoord)> {
+        &self.delivered
+    }
+
     /// The level-0 layers a camera cannot pass through: water and glass are
     /// blended and let it in.
     pub(super) fn solid_at(&self, coord: ChunkCoord) -> impl Iterator<Item = Entity> + '_ {

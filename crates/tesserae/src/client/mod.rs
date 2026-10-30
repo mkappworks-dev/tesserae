@@ -14,6 +14,8 @@ pub mod drawn_mask;
 pub mod edit;
 mod help;
 mod history;
+#[cfg(feature = "profiling")]
+pub mod holes;
 mod hotbar_store;
 mod input;
 mod layout;
@@ -50,6 +52,8 @@ use crate::session::SessionApp;
 pub fn plugin(app: &mut App) {
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_plugins(capture::plugin);
+    #[cfg(feature = "profiling")]
+    app.add_plugins(holes::plugin);
     app.add_plugins((
         save::plugin,
         profile::plugin,

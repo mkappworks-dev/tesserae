@@ -3,10 +3,14 @@
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use crate::cost::{FrameCost, MainThreadCost};
+use crate::client::holes::{Holes, LEVELS};
+use crate::cost::{FrameCost, MainThreadCost, thread_cpu};
 use crate::server::{
     ProfileFixtureStatus, SimulationProfile,
-    streaming::{StreamingSettings, stats::StreamingStats},
+    streaming::{
+        StreamingSettings,
+        stats::{Flow, StreamingStats},
+    },
 };
 use crate::world::WorldSettings;
 use bevy::camera::RenderTarget;
@@ -16,6 +20,8 @@ use bevy::prelude::*;
 pub struct ProcessStart(pub Instant);
 
 const MAX_FRAMES: usize = 250_000;
+/// One per level per fixed tick: about 25 minutes at 64 Hz with six levels.
+const MAX_FLOW_ROWS: usize = 600_000;
 
 #[derive(Resource)]
 struct Profile {
@@ -25,10 +31,22 @@ struct Profile {
     path: std::path::PathBuf,
     rows: Vec<Row>,
     pending: Option<Row>,
+    flow: Vec<FlowRow>,
     saved: bool,
     render: RenderSamples,
     surfaces: SurfaceConfigurations,
     presentation: String,
+}
+
+/// Streaming work as the Server published it on one fixed tick, for one level.
+struct FlowRow {
+    frame_id: usize,
+    t_s: f64,
+    level: usize,
+    held: usize,
+    meshed: usize,
+    flow: Flow,
+    fluid_run: (u64, f64),
 }
 
 struct Row {
@@ -44,6 +62,7 @@ struct Row {
     shown: bool,
     settled: bool,
     focused: bool,
+    holes: Holes,
 }
 
 pub fn plugin(app: &mut App) {
@@ -81,6 +100,7 @@ pub fn plugin(app: &mut App) {
         path: path.into(),
         rows: Vec::with_capacity(MAX_FRAMES),
         pending: None,
+        flow: Vec::new(),
         saved: false,
         render,
         surfaces,
@@ -88,7 +108,30 @@ pub fn plugin(app: &mut App) {
     })
     .insert_resource(bevy::winit::WinitSettings::continuous())
     .add_systems(First, begin.after(crate::client::presentation::FramePacing))
-    .add_systems(Last, end);
+    .add_systems(Last, end)
+    .add_systems(
+        FixedPostUpdate,
+        sample_flow.after(crate::server::streaming::stats::Published),
+    );
+}
+
+fn sample_flow(mut profile: ResMut<Profile>, streaming: Res<StreamingStats>) {
+    if profile.saved || profile.flow.len() + streaming.levels.len() > MAX_FLOW_ROWS {
+        return;
+    }
+    let frame_id = profile.rows.len();
+    let t_s = profile.origin.elapsed().as_secs_f64();
+    for (level, stats) in streaming.levels.iter().enumerate() {
+        profile.flow.push(FlowRow {
+            frame_id,
+            t_s,
+            level,
+            held: stats.held,
+            meshed: stats.meshed,
+            flow: stats.flow,
+            fluid_run: streaming.fluid_run,
+        });
+    }
 }
 
 fn begin(mut profile: ResMut<Profile>, _thread: NonSend<std::rc::Rc<()>>) {
@@ -120,6 +163,7 @@ fn end(
         Option<Res<crate::client::profile::Preferences>>,
     ),
     (windows, cameras): (Query<&Window>, Query<(&Camera, &RenderTarget)>),
+    holes: Option<Res<Holes>>,
     mut exit: MessageReader<AppExit>,
 ) {
     if profile.saved {
@@ -148,6 +192,7 @@ fn end(
         shown: streaming.shown,
         settled: streaming.settled,
         focused: windows.iter().any(|w| w.focused),
+        holes: holes.as_deref().copied().unwrap_or_default(),
     });
     if profile.rows.len() >= MAX_FRAMES || exit.read().next().is_some() {
         // The incomplete final interval is excluded, never replaced with virtual time.
@@ -173,11 +218,14 @@ fn save(
     );
     writeln!(
         out,
-        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks"
+        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks,rule_holes,fill_holes{}",
+        (0..LEVELS)
+            .map(|l| format!(",rule_holes_l{l},fill_holes_l{l}"))
+            .collect::<String>()
     )?;
     for r in &profile.rows {
         let phase = phase(r.start_s);
-        writeln!(
+        write!(
             out,
             "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.id,
@@ -212,6 +260,16 @@ fn save(
             r.save.worker_ms,
             r.save.chunks
         )?;
+        write!(
+            out,
+            ",{},{}",
+            r.holes.rule.iter().sum::<u32>(),
+            r.holes.fill.iter().sum::<u32>()
+        )?;
+        for l in 0..LEVELS {
+            write!(out, ",{},{}", r.holes.rule[l], r.holes.fill[l])?;
+        }
+        writeln!(out)?;
     }
     out.flush()?;
     let mut meta = BufWriter::new(
@@ -279,7 +337,38 @@ fn save(
             cpu.map(|s| (s * 1e3).to_string()).unwrap_or_default()
         )?;
     }
-    render.flush()
+    render.flush()?;
+    let mut flow = BufWriter::new(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(profile.path.with_extension("flow.csv"))?,
+    );
+    write!(flow, "frame_id,t_s,level,held,meshed")?;
+    for stage in ["generate", "relight", "mesh"] {
+        write!(
+            flow,
+            ",{stage}_waiting,{stage}_in_flight,{stage}_run,{stage}_cpu_ms"
+        )?;
+    }
+    writeln!(flow, ",fluid_run,fluid_cpu_ms,limit_reached")?;
+    let limited = profile.flow.len() + 32 > MAX_FLOW_ROWS;
+    for r in &profile.flow {
+        write!(
+            flow,
+            "{},{},{},{},{}",
+            r.frame_id, r.t_s, r.level, r.held, r.meshed
+        )?;
+        for s in 0..3 {
+            write!(
+                flow,
+                ",{},{},{},{}",
+                r.flow.waiting[s], r.flow.in_flight[s], r.flow.run[s], r.flow.cpu_ms[s]
+            )?;
+        }
+        writeln!(flow, ",{},{},{limited}", r.fluid_run.0, r.fluid_run.1)?;
+    }
+    flow.flush()
 }
 
 fn phase(seconds: f64) -> &'static str {
@@ -290,21 +379,6 @@ fn phase(seconds: f64) -> &'static str {
         s if s < 32.0 => "fixture",
         _ => "settle",
     }
-}
-
-#[cfg(unix)]
-fn thread_cpu() -> Option<f64> {
-    let mut time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // The thread clock excludes waits and worker CPU; failure remains unavailable.
-    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
-    (result == 0).then_some(time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9)
-}
-#[cfg(not(unix))]
-fn thread_cpu() -> Option<f64> {
-    None
 }
 
 #[cfg(test)]
@@ -336,6 +410,7 @@ mod tests {
             cpu: None,
             path: std::path::PathBuf::new(),
             rows: Vec::new(),
+            flow: Vec::new(),
             saved: false,
             render: RenderSamples::default(),
             surfaces: SurfaceConfigurations::default(),
@@ -353,6 +428,7 @@ mod tests {
                 shown: false,
                 settled: false,
                 focused: false,
+                holes: Holes::default(),
             }),
         });
         app.add_systems(First, begin.after(crate::client::presentation::FramePacing));

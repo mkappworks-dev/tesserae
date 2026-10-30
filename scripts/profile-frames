@@ -13,6 +13,18 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ['active', 'stationary', 'flight', 'transparency',
+            'sprint-flight', 'sprint-walk', 'dive', 'teleport']
+# Per fixture, what moves the Eye; teleport's jump is the Server's, at 22 s.
+MOTION = {
+    'flight': dict(TESSERAE_SCREENSHOT_SPEED_M_S='12'),
+    'sprint-flight': dict(TESSERAE_SCREENSHOT_SPEED_M_S='64'),
+    'sprint-walk': dict(TESSERAE_FIXTURE_MOVEMENT='physics', TESSERAE_SCREENSHOT_SPRINT='1',
+                        TESSERAE_SCREENSHOT_SPEED_M_S='8'),
+    # Up 320 m over 22-27 s and back down over 27-32 s, both at 64 m/s.
+    'dive': dict(TESSERAE_SCREENSHOT_DIVE_M='320', TESSERAE_SCREENSHOT_FLY_AFTER_S='22',
+                 TESSERAE_SCREENSHOT_FLY_S='10'),
+}
 
 
 def digest(path):
@@ -104,8 +116,7 @@ def main():
     # An engine without views ignores it, so one runner serves an A/B against main.
     parser.add_argument('--view', choices=['first', 'third'], default='first')
     parser.add_argument('--repeats', type=int, default=3)
-    parser.add_argument('--fixtures', nargs='+',
-                        choices=['active', 'stationary', 'flight', 'transparency'],
+    parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
@@ -168,7 +179,8 @@ def main():
                                TESSERAE_SCREENSHOT_WIDTH='1920', TESSERAE_SCREENSHOT_HEIGHT='1080',
                                TESSERAE_SCREENSHOT_FLY_AFTER_S='20', TESSERAE_SCREENSHOT_FLY_S='12',
                                TESSERAE_SCREENSHOT_SETTLE_S='1', TESSERAE_SCREENSHOT_VIEW=args.view,
-                               TESSERAE_SCREENSHOT_SPEED_M_S='12' if case == 'flight' else '0')
+                               TESSERAE_SCREENSHOT_SPEED_M_S='0')
+                    env.update(MOTION.get(case, {}))
                     if not args.presented:
                         env['TESSERAE_SCREENSHOT_OFFSCREEN'] = '1'
                     if enabled:

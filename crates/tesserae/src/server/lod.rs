@@ -269,6 +269,18 @@ impl LodState {
         offsets
     }
 
+    /// Held Chunks of `level` inside `shell` around `anchor` whose mesh is out of
+    /// date and not in flight.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn dirty_within(&self, level: u32, anchor: ChunkCoord, shell: Shell) -> usize {
+        self.levels.get(level as usize - 1).map_or(0, |l| {
+            l.dirty
+                .iter()
+                .filter(|&&c| shell.contains(delta(anchor, c)))
+                .count()
+        })
+    }
+
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn delivered_len(&self, level: u32) -> usize {
         self.levels
@@ -390,6 +402,7 @@ pub(in crate::server) mod measure {
     #[derive(Default)]
     struct Spent {
         nanos: AtomicU64,
+        cpu_nanos: AtomicU64,
         jobs: AtomicU64,
         longest_nanos: AtomicU64,
     }
@@ -419,9 +432,13 @@ pub(in crate::server) mod measure {
                 return work();
             }
             let started = Instant::now();
+            let cpu = crate::cost::thread_cpu();
             let out = work();
             let spent = &self.0[level as usize][stage];
             let nanos = started.elapsed().as_nanos() as u64;
+            if let Some((a, b)) = cpu.zip(crate::cost::thread_cpu()) {
+                spent.cpu_nanos.fetch_add(((b - a) * 1e9) as u64, Relaxed);
+            }
             spent.nanos.fetch_add(nanos, Relaxed);
             spent.longest_nanos.fetch_max(nanos, Relaxed);
             spent.jobs.fetch_add(1, Relaxed);
@@ -434,6 +451,13 @@ pub(in crate::server) mod measure {
 
         pub fn mesh_cost(&self, level: u32) -> JobCost {
             self.cost(level, 1)
+        }
+
+        /// Worker thread CPU to generate, and to mesh, since the World opened.
+        pub fn cpu_ms(&self, level: u32) -> [f64; 2] {
+            self.0[level as usize]
+                .each_ref()
+                .map(|spent| spent.cpu_nanos.load(Relaxed) as f64 / 1e6)
         }
 
         fn cost(&self, level: u32, stage: usize) -> JobCost {

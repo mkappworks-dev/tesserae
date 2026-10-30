@@ -182,7 +182,7 @@ impl Player {
     pub(in crate::server) fn at(eye: Vec3) -> Self {
         Self::new(eye, MovementMode::Flight)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "profiling"))]
     pub(in crate::server) fn set_eye(&mut self, eye: Vec3) {
         self.eye = eye;
     }

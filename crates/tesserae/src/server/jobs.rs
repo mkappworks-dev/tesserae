@@ -43,6 +43,10 @@ pub(in crate::server) struct Stage<T, K = ChunkCoord> {
     /// Every job landed since the World opened, for the `dev` report.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     landed_total: usize,
+    /// Jobs run and their worker thread CPU in nanoseconds since the World
+    /// opened, every key together.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    run: std::sync::Arc<[std::sync::atomic::AtomicU64; 2]>,
     /// Results that finished and were thrown away at landing because what they
     /// were computed from had changed.
     #[cfg(any(test, feature = "dev", feature = "profiling"))]
@@ -68,6 +72,8 @@ impl<T, K> Default for Stage<T, K> {
             landed: 0,
             #[cfg(any(feature = "dev", feature = "profiling"))]
             landed_total: 0,
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            run: Default::default(),
             #[cfg(any(test, feature = "dev", feature = "profiling"))]
             stale: 0,
             #[cfg(test)]
@@ -96,6 +102,20 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
     /// hide it.
     pub fn spawn(&mut self, key: K, work: impl FnOnce() -> T + Send + 'static) {
         debug_assert!(!self.contains(key), "{key:?} already has a job in flight");
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let work = {
+            let run = std::sync::Arc::clone(&self.run);
+            move || {
+                use std::sync::atomic::Ordering::Relaxed;
+                let before = crate::cost::thread_cpu();
+                let out = work();
+                run[0].fetch_add(1, Relaxed);
+                if let Some((a, b)) = before.zip(crate::cost::thread_cpu()) {
+                    run[1].fetch_add(((b - a) * 1e9) as u64, Relaxed);
+                }
+                out
+            }
+        };
         #[cfg(not(test))]
         let pool = AsyncComputeTaskPool::get();
         #[cfg(test)]
@@ -187,6 +207,17 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub fn landed_total(&self) -> usize {
         self.landed_total
+    }
+
+    /// Jobs run, and their worker thread CPU in milliseconds, since the World
+    /// opened. The CPU is zero without the `profiling` thread clock.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn run(&self) -> (u64, f64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        (
+            self.run[0].load(Relaxed),
+            self.run[1].load(Relaxed) as f64 / 1e6,
+        )
     }
 
     /// Jobs dispatched and landed since the last [`Stage::reset_counts`].

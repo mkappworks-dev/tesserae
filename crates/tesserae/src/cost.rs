@@ -96,6 +96,21 @@ pub fn collecting() -> bool {
     })
 }
 
+/// This thread's CPU seconds; excludes waits. `None` where unsupported.
+#[cfg(all(unix, feature = "profiling"))]
+pub fn thread_cpu() -> Option<f64> {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+    (result == 0).then_some(time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9)
+}
+#[cfg(not(all(unix, feature = "profiling")))]
+pub fn thread_cpu() -> Option<f64> {
+    None
+}
+
 pub fn plugin(app: &mut App) {
     app.insert_resource(MainThreadCost {
         enabled: collecting(),
