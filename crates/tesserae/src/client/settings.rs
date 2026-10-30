@@ -104,6 +104,9 @@ pub(super) enum Operation {
     Invert,
     PadInvert,
     PadCrouch(bool),
+    TouchInvert,
+    TouchMirror(bool),
+    TouchSize(super::profile::TouchSize),
     ScrollDirection(bool),
     Sync(bool),
     Cap(Option<u32>),
@@ -439,11 +442,13 @@ fn activate(
                 Operation::ConfirmReset if controller => {
                     draft.pad = Bindings::default().pad;
                     p.pad = default();
+                    p.touch = default();
                 }
                 Operation::ConfirmReset => {
                     draft.keyboard = Bindings::default().keyboard;
                     *p = Preferences {
                         pad: p.pad.clone(),
+                        touch: p.touch.clone(),
                         ..default()
                     };
                 }
@@ -452,6 +457,9 @@ fn activate(
                 }
                 Operation::PadInvert => p.pad.invert_y = !p.pad.invert_y,
                 Operation::PadCrouch(value) => p.pad.toggle_crouch = value,
+                Operation::TouchInvert => p.touch.invert_y = !p.touch.invert_y,
+                Operation::TouchMirror(value) => p.touch.mirrored = value,
+                Operation::TouchSize(size) => p.touch.size = size,
                 Operation::Sprint(value) => p.toggle_sprint = value,
                 Operation::Removal(value) => p.tap_remove = value,
                 Operation::Repeat => p.repeat_held = !p.repeat_held,
@@ -897,6 +905,8 @@ pub(super) enum Scalar {
     Mouse,
     Scroll,
     PadLook,
+    TouchLook,
+    TouchOpacity,
     MoveDeadzone,
     LookDeadzone,
 }
@@ -904,19 +914,22 @@ impl Scalar {
     fn range(self) -> std::ops::RangeInclusive<f32> {
         match self {
             Self::Mouse | Self::Scroll => 0.25..=3.0,
-            Self::PadLook => super::profile::PAD_SENSITIVITY,
+            Self::PadLook | Self::TouchLook => super::profile::PAD_SENSITIVITY,
+            Self::TouchOpacity => super::profile::TOUCH_OPACITY,
             Self::MoveDeadzone | Self::LookDeadzone => super::profile::PAD_DEADZONE,
         }
     }
     fn step(self) -> f32 {
         match self {
-            Self::MoveDeadzone | Self::LookDeadzone => 0.01,
+            Self::MoveDeadzone | Self::LookDeadzone | Self::TouchOpacity => 0.01,
             _ => 0.05,
         }
     }
     fn display(self, value: f32) -> String {
         match self {
-            Self::MoveDeadzone | Self::LookDeadzone => format!("{:.0}%", value * 100.0),
+            Self::MoveDeadzone | Self::LookDeadzone | Self::TouchOpacity => {
+                format!("{:.0}%", value * 100.0)
+            }
             _ => format!("{value:.2}×"),
         }
     }
@@ -1022,6 +1035,8 @@ fn scalar_changed(
         Scalar::Mouse => preferences.sensitivity = value * 0.003,
         Scalar::Scroll => preferences.scroll_sensitivity = value,
         Scalar::PadLook => preferences.pad.look_sensitivity = value,
+        Scalar::TouchLook => preferences.touch.look_sensitivity = value,
+        Scalar::TouchOpacity => preferences.touch.opacity = value,
         Scalar::MoveDeadzone => preferences.pad.move_deadzone = value,
         Scalar::LookDeadzone => preferences.pad.look_deadzone = value,
     }
@@ -1678,6 +1693,73 @@ fn controller(
                     );
                 })
             },
+        );
+    });
+    group(list, "TOUCH", |card| {
+        let touch = &p.touch;
+        setting_row(
+            card,
+            "Look sensitivity",
+            "How far a drag on the look side turns the view.",
+            false,
+            |row| slider(row, Scalar::TouchLook, touch.look_sensitivity),
+        );
+        setting_row(
+            card,
+            "Invert vertical look",
+            "Reverse the touch look direction. Mouse look is separate.",
+            false,
+            |row| switch(row, touch.invert_y, Operation::TouchInvert),
+        );
+        setting_row(
+            card,
+            "Layout",
+            "Which hand moves. Mirroring also swaps Place and Remove.",
+            true,
+            |row| {
+                segment(row, |buttons| {
+                    option(
+                        buttons,
+                        "Normal",
+                        Operation::TouchMirror(false),
+                        !touch.mirrored,
+                    );
+                    option(
+                        buttons,
+                        "Mirrored",
+                        Operation::TouchMirror(true),
+                        touch.mirrored,
+                    );
+                })
+            },
+        );
+        setting_row(
+            card,
+            "Control size",
+            "Every control stays at least 44 pixels.",
+            true,
+            |row| {
+                segment(row, |buttons| {
+                    use super::profile::TouchSize::*;
+                    for (label, size) in
+                        [("Small", Small), ("Normal", Normal), ("Enlarged", Enlarged)]
+                    {
+                        option(
+                            buttons,
+                            label,
+                            Operation::TouchSize(size),
+                            touch.size == size,
+                        );
+                    }
+                })
+            },
+        );
+        setting_row(
+            card,
+            "Control opacity",
+            "How solid the on-screen controls are.",
+            false,
+            |row| slider(row, Scalar::TouchOpacity, touch.opacity),
         );
     });
     use bevy::input::gamepad::GamepadButton::{East, LeftTrigger, RightTrigger, South, Start};

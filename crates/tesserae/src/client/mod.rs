@@ -34,6 +34,7 @@ mod save;
 mod settings;
 mod tile_preview;
 mod tool;
+mod touch;
 mod underwater;
 mod view;
 pub mod worlds;
@@ -52,6 +53,7 @@ pub fn plugin(app: &mut App) {
         actions::plugin,
         input::plugin,
         pad::plugin,
+        touch::plugin,
     ));
     app.add_plugins((
         camera::plugin,

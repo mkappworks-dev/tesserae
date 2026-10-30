@@ -1,35 +1,68 @@
 # 09: C4: Touch overlay and preferences
 
-Status: needs-triage
+Status: done
 Blocked by: 08, 04
 
 Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: C4; keep this separate from other PR scopes.
+PR boundary: C4; one PR with ticket 08. If it grows too big, split the
+settings UI out, never 08 from 09.
 
 ## What to build
 
-Intentional touch reveals optional left-move/right-look controls and separate
-place/remove actions. Include access to vertical movement, slots, Shape/
-orientation, empty hand, sample, Use, view/mode and catalogue operations as
-those capabilities become available. Preserve tap/hold cancellation rules.
-Offer normal/mirrored presets, size and opacity; no freeform HUD editor.
-Mouse play does not retain a permanent overlay. Keep keyboard/mouse usable,
-44-pixel targets spaced and the Server target/progress cues unobscured.
+Intentional touch reveals the optional overlay; deliberate key, mouse or pad
+use hides it, so mouse play keeps no permanent overlay. Fixed explicit
+controls only; no pinch, double-tap or long-press-on-world gestures.
+
+- Left zone: virtual stick (move). Right zone: look.
+- Buttons: Place, Remove (hold), Use, Sample, Ascend, Descend, Sprint toggle,
+  slots, Shape/Turn/Flip, empty hand, view/mode and catalogue, as those
+  capabilities exist. Undo/Redo only where history is available.
+- A Menu button in a top corner, outside the thumb zones, opens the
+  pause/settings menu: the touch route to catalogue, settings and the World
+  list. Every screen has a close button (there is no Escape). Help and
+  diagnostics stay keyboard-only.
+
+Remove is hold-to-remove through the existing `Remove` action, progress and
+`tap_remove`/`repeat_held` preferences unchanged. Lifting or sliding off
+cancels. A button's active area is its drawn size. Place and Remove are
+separate buttons; Place is tap or hold under the same repeat rule.
+
+Catalogue and menus without hover or drag: tap selects an entry and shows
+what hover shows, a separate "Assign to slot" control picks the slot by tap.
+Lists scroll by one-finger drag with no inertia; a drag past 6 logical px
+cancels the tap, so scrolling never selects or assigns. Mouse hover and
+drag-assign are unchanged. The same applies to the World list, Create, Rename,
+Delete and Trust screens. Text entry uses the physical keyboard; no on-screen
+keyboard.
+
+Layout: logical px times `UiScale`. Targets at least 44 px with at least 8 px
+gaps. Default is stick bottom-left, look right, Place/Remove and primary
+buttons bottom-right in the lower third of each side. The centre stays clear
+for the crosshair and Server target/progress cues. No controls in the top 15%
+except Menu. Presets: normal and mirrored (mirroring swaps Place/Remove). Size:
+small, normal, enlarged. Opacity 30–100%. Touch look sensitivity and invert-Y
+sit in the same settings section. All respect Apply/Cancel/reset. No freeform
+HUD editor.
 
 ## Acceptance criteria
 
-- [ ] Play and catalogue operations require no hover or keyboard numbers.
-- [ ] Gestures never leak through overlay/UI transitions.
-- [ ] Preset/size/opacity settings respect Apply/Cancel and reset behavior.
-- [ ] Retain normal/small/enlarged native overlay captures for review.
+- [x] Play and catalogue operations require no hover or keyboard numbers.
+- [x] Catalogue assignment works by tap alone; scrolling never selects.
+- [x] A touch-only player can open the menu, change settings and leave play.
+- [x] Gestures never leak through overlay/UI transitions.
+- [x] Preset/size/opacity/look settings respect Apply/Cancel and reset
+      (they reuse the controller page's draft and reset path; no new test).
+- [x] Controls are at least 44 px with 8 px gaps at every size and scale.
+- [x] Retain normal/small/enlarged native overlay captures for review.
 
 ## Validation and authorization
 
 Use behavior/intent regressions and the spec's build/review requirements.
 Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
-Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+Native captures/measurements stay in one unique /tmp folder until review,
+uncommitted. All Q1–Q49 product choices and the 2026-10-30 touch grilling are
+confirmed. Local implementation is authorized; push, publication and merge are
+not. Physical support is claimed only after ticket 10.
 
 ## Comments
 
@@ -46,4 +79,34 @@ Do not implement until the relevant decisions and readiness are established.
 ### Reconciled after the completed interview
 
 The current spec and What to build section supersede historical draft
-alternatives above. Readiness awaits the final shared-understanding check.
+alternatives above.
+
+### 2026-10-30: grilled; Agent Brief
+
+Scope above is the confirmed result of the touch grilling. Implement with
+ticket 08 in one PR. Earlier readiness statements are superseded.
+
+### 2026-10-30: implemented
+
+Overlay, settings and list scrolling are in `client/touch.rs` and the
+controller settings page. Slot, orientation, view/mode, history, Items and
+Menu all have buttons; Remove and every control cancel on sliding off. Menu is
+`Action::Help` (it opens settings) and every window has its own close button.
+Catalogue tap-select and Assign to slot run through `Activate`, which picking
+raises for touch. A drag past 6 px on a list scrolls it and cancels the press.
+Normal, small and enlarged captures were reviewed in one /tmp folder
+(`TESSERAE_SCREENSHOT_TOUCH`, dev only). Their window and image sizes differ,
+so the clusters sit away from the right edge there. Whether picking and
+scrolling behave on a real touchscreen is ticket 10's to confirm. Controls
+are in the lower third at scale 1; at larger UI scales three rows cannot fit
+there.
+
+### 2026-10-30: unverified on hardware
+
+Marked done at the user's direction. Four ticks rest on code reading, not a
+test or a touchscreen: no hover or keyboard numbers needed, a touch-only
+player can open the menu and change settings and leave play, gestures never
+leak through UI transitions, and Apply/Cancel (it reuses the controller page's
+draft). Ticket 10 was closed without a hardware run, so none of them has been
+confirmed on a real touchscreen.
+

@@ -145,6 +145,7 @@ pub(super) struct Inputs<'a> {
     pub keys: &'a ButtonInput<KeyCode>,
     pub mouse: &'a ButtonInput<MouseButton>,
     pub pad: &'a ButtonInput<GamepadButton>,
+    pub touch: &'a ButtonInput<Action>,
     pub wheel: WheelPress,
 }
 impl Inputs<'_> {
@@ -451,10 +452,14 @@ impl Actions {
             .collect();
         for action in actions {
             let alternatives: Vec<_> = bindings.alternatives(action).collect();
-            let held = alternatives.iter().any(|binding| {
-                matches(*binding)
-                    && (binding.modifier != Modifier::None || !consumed.contains(&binding.trigger))
-            }) && !(action == Descend && history);
+            let touched = inputs.touch.pressed(action);
+            let held = (touched
+                || alternatives.iter().any(|binding| {
+                    matches(*binding)
+                        && (binding.modifier != Modifier::None
+                            || !consumed.contains(&binding.trigger))
+                }))
+                && !(action == Descend && history);
             let continuing = alternatives.iter().any(|binding| {
                 matches(*binding)
                     && self.raw_triggers.contains(&binding.trigger)
@@ -472,9 +477,10 @@ impl Actions {
                     started: held
                         && (!previous
                             || (!continuing
-                                && alternatives.iter().any(|binding| {
-                                    matches(*binding) && inputs.just_pressed(binding.trigger)
-                                }))),
+                                && (inputs.touch.just_pressed(action)
+                                    || alternatives.iter().any(|binding| {
+                                        matches(*binding) && inputs.just_pressed(binding.trigger)
+                                    })))),
                     held,
                     released: previous && !held,
                     cancelled: false,
@@ -503,6 +509,8 @@ pub(super) struct Labels {
     keys: HashMap<KeyCode, String>,
     pub device: Device,
     pub sony: bool,
+    /// Touch was used last, so prompts name the on-screen control.
+    pub touch: bool,
 }
 impl Labels {
     pub fn binding(&self, binding: Binding) -> String {
@@ -562,6 +570,10 @@ impl Labels {
 impl Bindings {
     /// Labels from the binding set of the last deliberately used device.
     pub fn label(&self, action: Action, labels: &Labels) -> String {
+        let control = super::touch::label(action);
+        if labels.touch && !control.is_empty() {
+            return format!("Tap {control}");
+        }
         self.label_for(labels.device, action, labels)
     }
     pub fn label_for(&self, device: Device, action: Action, labels: &Labels) -> String {
@@ -601,28 +613,45 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Bindings>()
         .init_resource::<Actions>()
         .init_resource::<super::pad::PadInput>()
+        .init_resource::<super::touch::TouchFrame>()
         .add_message::<MouseWheel>()
         .add_systems(
             PreUpdate,
             collect
                 .after(bevy::input::InputSystems)
-                .after(super::pad::read),
+                .after(super::pad::read)
+                .after(super::touch::read),
         );
 }
-fn collect(
-    (keys, mouse, pad): (
-        Res<ButtonInput<KeyCode>>,
-        Res<ButtonInput<MouseButton>>,
-        Res<super::pad::PadInput>,
-    ),
+pub(super) fn collect(
+    ((keys, mouse, pad), touch): (Devices, Res<super::touch::TouchFrame>),
+    preferences: Res<super::profile::Preferences>,
     bindings: Res<Bindings>,
     mut actions: ResMut<Actions>,
     motion: Option<Res<AccumulatedMouseMotion>>,
     mut wheel: MessageReader<MouseWheel>,
 ) {
-    actions.axes.look = motion.map_or(Vec2::ZERO, |motion| motion.delta);
+    let mouse = if touch.suppress_mouse {
+        &touch.idle_mouse
+    } else {
+        &mouse
+    };
+    let motion = motion.filter(|_| !touch.suppress_mouse);
+    // The mouse's invert setting is applied to all look later, so a different
+    // touch setting is applied here as a flip.
+    let flip = if preferences.touch.invert_y == preferences.invert_y {
+        1.0
+    } else {
+        -1.0
+    };
+    actions.axes.look = motion.map_or(Vec2::ZERO, |motion| motion.delta)
+        + touch.look * Vec2::new(1.0, flip) * preferences.touch.look_sensitivity;
     actions.axes.look_rate = pad.look;
-    actions.axes.movement = pad.movement;
+    actions.axes.movement = if touch.movement == Vec2::ZERO {
+        pad.movement
+    } else {
+        touch.movement
+    };
     actions.axes.scroll.clear();
     actions
         .axes
@@ -637,8 +666,9 @@ fn collect(
     actions.wheel = actions.press_wheel();
     let inputs = Inputs {
         keys: &keys,
-        mouse: &mouse,
+        mouse,
         pad: &pad.buttons,
+        touch: &touch.buttons,
         wheel: actions.wheel,
     };
     actions.resolve(&bindings, inputs, pad.cancel);
@@ -673,6 +703,8 @@ mod tests {
     use super::*;
     static NO_PAD: std::sync::LazyLock<ButtonInput<GamepadButton>> =
         std::sync::LazyLock::new(ButtonInput::default);
+    static NO_TOUCH: std::sync::LazyLock<ButtonInput<Action>> =
+        std::sync::LazyLock::new(ButtonInput::default);
     fn inputs<'a>(
         keys: &'a ButtonInput<KeyCode>,
         mouse: &'a ButtonInput<MouseButton>,
@@ -681,6 +713,7 @@ mod tests {
             keys,
             mouse,
             pad: &NO_PAD,
+            touch: &NO_TOUCH,
             wheel: WheelPress::default(),
         }
     }
