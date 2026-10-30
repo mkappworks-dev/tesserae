@@ -1,5 +1,7 @@
 //! Bounded, opt-in measurements. Frame intervals end at the next First;
 //! main schedule spans end at Last and exclude extraction and render work.
+mod gpu;
+
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
@@ -34,6 +36,7 @@ struct Profile {
     flow: Vec<FlowRow>,
     saved: bool,
     render: RenderSamples,
+    gpu: gpu::GpuSamples,
     surfaces: SurfaceConfigurations,
     presentation: String,
 }
@@ -83,6 +86,8 @@ pub fn plugin(app: &mut App) {
             .add_systems(Render, render_begin.before(RenderSystems::ExtractCommands))
             .add_systems(Render, render_end.after(RenderSystems::PostCleanup));
     }
+    let gpu = gpu::GpuSamples::default();
+    gpu::plugin(app, gpu.clone());
     app.init_resource::<ProfileFixtureStatus>();
     app.insert_non_send(std::rc::Rc::new(()));
     let surfaces = app
@@ -103,6 +108,7 @@ pub fn plugin(app: &mut App) {
         flow: Vec::new(),
         saved: false,
         render,
+        gpu,
         surfaces,
         presentation: String::new(),
     })
@@ -280,12 +286,17 @@ fn save(
     );
     writeln!(
         meta,
-        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed=unavailable\npresent_elapsed=unavailable\nbackend_resolved_present_mode=see observed backend_surface_configuration records; unavailable when no surface is configured or logging is filtered\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=Server fixed-step intent fixture; actual mode in Player spawned log\nview=first person\nquality=unchanged; no profiling quality switches",
+        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed={}\npresent_elapsed=unavailable\nbackend_resolved_present_mode=see observed backend_surface_configuration records; unavailable when no surface is configured or logging is filtered\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=Server fixed-step intent fixture; actual mode in Player spawned log\nview=first person\nquality=unchanged; no profiling quality switches",
         settings.seed,
         settings.voxel_size,
         view.view_distance_m,
         view.lod_distance_m,
         cfg!(feature = "dev"),
+        if profile.gpu.1.load(std::sync::atomic::Ordering::Relaxed) {
+            "gpu.csv: timestamps at empty compute pass boundaries between Bevy's passes"
+        } else {
+            "unavailable (no TIMESTAMP_QUERY)"
+        },
         MAX_FRAMES,
         profile.rows.len() >= MAX_FRAMES,
         profile.rows.first().map_or(0.0, |r| r.start_s)
@@ -368,7 +379,19 @@ fn save(
         }
         writeln!(flow, ",{},{},{limited}", r.fluid_run.0, r.fluid_run.1)?;
     }
-    flow.flush()
+    flow.flush()?;
+    let mut gpu = BufWriter::new(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(profile.path.with_extension("gpu.csv"))?,
+    );
+    writeln!(gpu, "frame_id,marker,since_frame_start_ms")?;
+    for (frame, marker, ms) in profile.gpu.0.lock().unwrap().iter() {
+        let ms = ms.map(|ms| ms.to_string()).unwrap_or_default();
+        writeln!(gpu, "{frame},{marker},{ms}")?;
+    }
+    gpu.flush()
 }
 
 fn phase(seconds: f64) -> &'static str {
@@ -413,6 +436,7 @@ mod tests {
             flow: Vec::new(),
             saved: false,
             render: RenderSamples::default(),
+            gpu: gpu::GpuSamples::default(),
             surfaces: SurfaceConfigurations::default(),
             presentation: String::new(),
             pending: Some(Row {
