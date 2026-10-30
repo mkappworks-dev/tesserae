@@ -618,12 +618,7 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 pub(super) fn collect(
-    (keys, mouse, pad, touch): (
-        Res<ButtonInput<KeyCode>>,
-        Res<ButtonInput<MouseButton>>,
-        Res<super::pad::PadInput>,
-        Res<super::touch::TouchFrame>,
-    ),
+    ((keys, mouse, pad), touch): (Devices, Res<super::touch::TouchFrame>),
     preferences: Res<super::profile::Preferences>,
     bindings: Res<Bindings>,
     mut actions: ResMut<Actions>,

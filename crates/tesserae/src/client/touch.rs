@@ -188,8 +188,7 @@ fn label(action: Action) -> &'static str {
 /// controls are rebuilt only when their layout inputs change.
 fn sync_overlay(
     mut commands: Commands,
-    frame: Res<TouchFrame>,
-    ownership: Res<Ownership>,
+    (frame, ownership): (Res<TouchFrame>, Res<Ownership>),
     (preferences, scale): (Res<super::profile::Preferences>, Res<UiScale>),
     window: Single<&Window, With<PrimaryWindow>>,
     overlay: Query<Entity, With<Overlay>>,
