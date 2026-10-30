@@ -860,7 +860,7 @@ mod tests {
     #[test]
     fn a_pad_cycles_the_axis_flips_it_and_changes_the_shape_without_the_keyboard() {
         let mut app = app();
-        tap(&mut app, GamepadButton::DPadUp);
+        tap(&mut app, GamepadButton::C);
         tap(&mut app, GamepadButton::DPadDown);
         tap(&mut app, GamepadButton::DPadLeft);
         tap(&mut app, GamepadButton::DPadRight);
