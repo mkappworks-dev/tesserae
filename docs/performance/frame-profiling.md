@@ -199,6 +199,6 @@ Each run adds three files beside `frames.csv`, and the runner summarises them in
   is ordered by the schedule: work the GPU overlaps across one is charged to
   whichever side it ends on, systems outside Bevy's sets can fall on either side
   of `view_start`, and `prepass_end` to `main_start` includes the shadow passes.
-  About 10% of frames return an earlier frame's value for the last markers;
+  About 20% of frames return an earlier frame's value for the last markers;
   those cells are left empty, and `streaming.json` reports how many frames have
   a `frame_end`.
