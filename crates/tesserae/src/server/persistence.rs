@@ -434,7 +434,7 @@ fn requests(
     mut status: ResMut<SaveStatus>,
     mut store: ResMut<ChunkStore>,
     persistence: Option<ResMut<Persistence>>,
-    mut exit: MessageWriter<AppExit>,
+    mut leave: crate::launch::Leave,
     mut edits: ResMut<super::edit::PendingEdits>,
     mut journal: ResMut<super::undo::Journal>,
 ) {
@@ -464,7 +464,7 @@ fn requests(
             }
             SaveAction::AskUnsafe => status.confirm_unsafe = true,
             SaveAction::ConfirmUnsafe if status.confirm_unsafe => {
-                exit.write(AppExit::Success);
+                leave.now();
             }
             SaveAction::CancelUnsafe => status.confirm_unsafe = false,
             _ => {}
@@ -478,7 +478,7 @@ fn drive(
     mut store: ResMut<ChunkStore>,
     mut sim: ResMut<FluidSim>,
     (player, time): (Query<&Player>, Res<Time<Real>>),
-    mut exit: MessageWriter<AppExit>,
+    mut leave: crate::launch::Leave,
     #[cfg(feature = "profiling")] mut profile: ResMut<SaveProfile>,
 ) {
     let Ok(player) = player.single() else {
@@ -521,7 +521,7 @@ fn drive(
                     && done.movement == player.saved_movement()
                     && p.saved_simulation == sim.revision
                 {
-                    exit.write(AppExit::Success);
+                    leave.now();
                 } else if status.quitting {
                     store.checkpoint = true;
                 }
@@ -565,7 +565,7 @@ fn drive(
         status.detail = "Temporary World - persistence disabled".into();
         store.checkpoint = false;
         if status.quitting {
-            exit.write(AppExit::Success);
+            leave.now();
         }
         return;
     }

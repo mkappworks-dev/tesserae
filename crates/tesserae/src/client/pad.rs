@@ -12,6 +12,8 @@ use bevy::input_focus::{
 };
 use bevy::math::CompassOctant;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::ui::{ComputedNode, InteractionDisabled, UiGlobalTransform};
 use bevy::ui_widgets::{
     Activate, Button, Slider, SliderRange, SliderStep, SliderValue, ValueChange,
@@ -70,7 +72,7 @@ pub(super) fn plugin(app: &mut App) {
                 .chain()
                 .after(bevy::input::InputSystems),
         )
-        .add_systems(
+        .add_session_systems(
             Update,
             (resume_play, hide_cursor)
                 .after(super::input::resolve)
@@ -85,8 +87,9 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, reveal_focus.after(navigate));
 }
 
-/// The World list has no Game or profile yet, so it runs the in-game menus' pad
-/// reading and focus navigation under one standing modal owner.
+/// The World list's pad handling in a test, under one standing modal owner;
+/// the app gets the same from `client::plugin` and the list's own `OnEnter`.
+#[cfg(test)]
 pub(super) fn launcher(app: &mut App) {
     let mut ownership = Ownership::default();
     ownership.owner = Owner::Modal;

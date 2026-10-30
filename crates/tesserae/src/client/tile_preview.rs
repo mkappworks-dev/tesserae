@@ -6,6 +6,7 @@ use super::{
     preview::item_mesh,
 };
 use crate::render::tile_icon::TileIcon;
+use crate::session::SessionApp;
 use bevy::{
     camera::{RenderTarget, ScalingMode, visibility::RenderLayers},
     core_pipeline::tonemapping::{DebandDither, Tonemapping},
@@ -32,10 +33,10 @@ struct Atlas {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Atlas>()
-        .init_resource::<Textures>()
+    app.init_session_state::<Atlas>()
+        .init_session_state::<Textures>()
         .init_resource::<Assets<TileIcon>>()
-        .add_systems(
+        .add_session_systems(
             Update,
             update
                 .after(super::menu::drag_preview)

@@ -7,6 +7,8 @@ use super::{
 use crate::server::edit::{AimBounds, AimItem, AimReport, AimTarget};
 use crate::server::tool::ToolId;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use std::collections::VecDeque;
 
 #[derive(Resource, Default)]
@@ -39,11 +41,11 @@ pub(super) struct Outline(pub(super) AimBounds);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Time>()
-        .init_resource::<Target>()
-        .init_resource::<Sent>()
-        .add_message::<AimReport>()
-        .add_message::<AimTarget>()
-        .add_systems(
+        .init_session_state::<Target>()
+        .init_session_state::<Sent>()
+        .add_session_message::<AimReport>()
+        .add_session_message::<AimTarget>()
+        .add_session_systems(
             Update,
             (
                 report.after(super::edit::send_intents),

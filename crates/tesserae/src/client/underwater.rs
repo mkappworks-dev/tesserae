@@ -8,6 +8,8 @@
 use bevy::ecs::system::SystemParam;
 use bevy::pbr::DistanceFog;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use std::collections::HashMap;
 use tesserae_core::MaterialId;
 use tesserae_core::immersion::FluidSurface;
@@ -60,7 +62,7 @@ fn fluid_fog(hue: [f32; 3], dimming: u8) -> DistanceFog {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Submersion>().add_systems(
+    app.init_session_state::<Submersion>().add_session_systems(
         Update,
         (track_hues, apply_submersion)
             .chain()

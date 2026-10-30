@@ -41,6 +41,8 @@ pub mod worlds;
 
 use bevy::prelude::*;
 
+use crate::session::SessionApp;
+
 pub fn plugin(app: &mut App) {
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_plugins(capture::plugin);
@@ -78,7 +80,7 @@ pub fn plugin(app: &mut App) {
         tool::plugin,
         underwater::plugin,
     ));
-    app.add_systems(
+    app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))
             .run_if(chunk_view::terrain_arrived)

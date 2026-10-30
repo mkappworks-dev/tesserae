@@ -7,6 +7,8 @@ use super::{
 };
 use crate::server::edit::{AimRemoval, EditAction, EditIntent};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 #[derive(Resource, Default)]
@@ -76,10 +78,10 @@ pub(super) struct Fill;
 struct PlaceHint;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Progress>()
-        .add_message::<crate::server::undo::HistoryAction>()
-        .add_systems(Startup, spawn)
-        .add_systems(
+    app.init_session_state::<Progress>()
+        .add_session_message::<crate::server::undo::HistoryAction>()
+        .add_session_systems(Startup, spawn)
+        .add_session_systems(
             Update,
             (
                 hold.after(super::aim::receive).after(super::input::resolve),
@@ -87,7 +89,7 @@ pub(super) fn plugin(app: &mut App) {
             )
                 .chain(),
         )
-        .add_systems(PostUpdate, place_hint);
+        .add_session_systems(PostUpdate, place_hint);
 }
 fn spawn(mut commands: Commands) {
     commands

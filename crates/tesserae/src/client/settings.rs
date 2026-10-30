@@ -3,6 +3,7 @@ use super::{
     actions::{Action, Binding, Bindings, Device, Modifier, Trigger, Wheel},
     profile::{Preferences, Store},
 };
+use crate::session::SessionApp;
 use bevy::{
     prelude::*,
     ui_widgets::{Activate, ScrollArea},
@@ -113,25 +114,25 @@ pub(super) enum Operation {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Settings>()
-        .init_resource::<super::menu::Menu>()
+    app.init_session_state::<Settings>()
+        .init_session_state::<super::menu::Menu>()
         .init_resource::<bevy::input_focus::InputFocus>()
         .add_observer(activate)
         .add_observer(scalar_changed)
-        .add_systems(
+        .add_session_systems(
             PreUpdate,
             capture_focus.before(bevy::input_focus::InputFocusSystems::Dispatch),
         )
-        .add_systems(Update, slider_visuals)
-        .add_systems(Startup, launch)
-        .add_systems(
+        .add_session_systems(Update, slider_visuals)
+        .add_session_systems(Startup, launch)
+        .add_session_systems(
             Update,
             open_shortcut
                 .after(super::menu::toggle)
                 .before(capture)
                 .before(super::input::resolve),
         )
-        .add_systems(
+        .add_session_systems(
             Update,
             (capture, render).chain().before(super::input::resolve),
         );

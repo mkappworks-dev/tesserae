@@ -10,6 +10,8 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::ImageSampler;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use std::f32::consts::{PI, TAU};
 use std::sync::Arc;
@@ -39,9 +41,9 @@ pub(super) struct Avatar {
 struct Limb(Role);
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<AvatarShown>()
-        .add_message::<CharacterModel>()
-        .add_systems(
+    app.init_session_state::<AvatarShown>()
+        .add_session_message::<CharacterModel>()
+        .add_session_systems(
             Update,
             (rebuild, pose).chain().after(super::pose::apply_correction),
         );

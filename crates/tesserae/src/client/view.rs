@@ -12,6 +12,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use serde::{Deserialize, Serialize};
 use std::ops::RangeInclusive;
 use std::sync::Arc;
@@ -52,9 +54,9 @@ pub(super) struct Boom(Option<f32>);
 struct PendingSave(Option<f32>);
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Boom>()
-        .init_resource::<PendingSave>()
-        .add_systems(
+    app.init_session_state::<Boom>()
+        .init_session_state::<PendingSave>()
+        .add_session_systems(
             Update,
             (
                 switch.after(super::input::resolve),

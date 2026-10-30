@@ -7,14 +7,16 @@
 
 use bevy::prelude::*;
 
+use crate::session::SessionApp;
+
 use crate::server::streaming::stats::StreamingStats;
 
 #[derive(Component)]
 struct StreamingReadout;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Startup, spawn_readout)
-        .add_systems(Update, update_readout);
+    app.add_session_systems(Startup, spawn_readout)
+        .add_session_systems(Update, update_readout);
 }
 
 fn spawn_readout(mut commands: Commands) {

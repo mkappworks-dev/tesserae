@@ -5,23 +5,30 @@ use std::path::{Path, PathBuf};
 
 use bevy::input_focus::{FocusCause, InputFocus, tab_navigation::TabGroup};
 use bevy::prelude::*;
+
+use crate::session::{AppState, has_state, in_list};
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, TextInput};
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
 use super::menu_ui::{self as ui, Danger, Tone};
 use crate::launch::Installed;
-use crate::launch::{Relaunch, Target};
+use crate::launch::{Switch, Target};
+use crate::open::{OpenRequest, What};
 
 #[derive(Resource, Clone)]
 pub struct WorldsDir(pub PathBuf);
 
-/// Why the World this process was started for could not be opened.
-#[derive(Resource, Clone)]
+/// Why the World that was asked for could not be opened.
+#[derive(Clone)]
 pub struct OpenFailure {
     pub folder: PathBuf,
     pub reason: String,
 }
+
+/// The list shows it once on entry and forgets it when left.
+#[derive(Resource, Default)]
+pub struct LastFailure(pub Option<OpenFailure>);
 
 /// Moves a World folder out of the list; the OS Trash outside tests.
 #[derive(Resource, Clone, Copy)]
@@ -40,7 +47,7 @@ const VOXEL_SIZES: [(f32, &str); 3] = [
     (0.25, "0.25 m · 4× finer, a quarter of the view distance"),
 ];
 
-/// Frames the Opening screen is drawn before the process restarts.
+/// Frames the Opening screen is drawn before the World loads.
 const OPENING_FRAMES: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -186,11 +193,7 @@ struct Resolved;
 struct Root;
 
 pub fn plugin(app: &mut App) {
-    app.add_plugins((
-        ui::launcher_chrome,
-        bevy::input_focus::tab_navigation::TabNavigationPlugin,
-    ));
-    super::pad::launcher(app);
+    app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
     logic(app);
     #[cfg(feature = "dev")]
     app.add_systems(Update, review_capture.after(render));
@@ -204,11 +207,11 @@ pub fn plugin(app: &mut App) {
 fn review_capture(
     mut commands: Commands,
     mut queue: ResMut<Queue>,
-    mut relaunch: ResMut<Relaunch>,
+    mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
     (pending, failure): (
         Query<(), With<bevy::render::view::screenshot::Screenshot>>,
-        Option<Res<OpenFailure>>,
+        Res<LastFailure>,
     ),
     (mut images, cameras): (ResMut<Assets<Image>>, Query<Entity, With<Camera2d>>),
     mut progress: Local<(u32, bool, Option<Handle<Image>>)>,
@@ -242,7 +245,7 @@ fn review_capture(
         *offscreen = Some(handle);
     }
     // A restarted list after a failed open must not replay a create script.
-    if *frame == 5 && failure.is_none() {
+    if *frame == 5 && failure.0.is_none() {
         let script = std::env::var("TESSERAE_LIST_SCRIPT").unwrap_or_default();
         for step in script.split(',').filter(|s| !s.is_empty()) {
             queue.0.push(match step {
@@ -281,7 +284,7 @@ fn review_capture(
 /// The World list cannot exit by default: the window plugin leaves closing to us.
 fn close_request(
     mut requests: MessageReader<bevy::window::WindowCloseRequested>,
-    mut relaunch: ResMut<Relaunch>,
+    mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
 ) {
     if requests.read().count() > 0 {
@@ -292,19 +295,56 @@ fn close_request(
 
 fn logic(app: &mut App) {
     app.init_resource::<Queue>()
+        .init_resource::<LastFailure>()
         .init_resource::<Remover>()
         .init_resource::<InputFocus>()
         .add_observer(activate)
-        .add_systems(Startup, (camera, start))
-        .add_systems(PreUpdate, close_request)
-        .add_systems(Update, (keys, sync_fields, handle, render, opening).chain());
+        .add_systems(PreUpdate, close_request.run_if(in_list))
+        .add_systems(
+            Update,
+            (keys, sync_fields, handle, render, opening)
+                .chain()
+                .run_if(in_list),
+        );
+    if has_state(app.world()) {
+        app.add_systems(
+            OnEnter(AppState::List),
+            (camera, start, standing_owner).chain(),
+        )
+        .add_systems(OnExit(AppState::List), leave);
+    } else {
+        app.add_systems(Startup, (camera, start));
+    }
 }
+
+#[derive(Component)]
+struct ListCamera;
 
 fn camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+    commands.spawn((Camera2d, ListCamera));
 }
 
-fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Option<Res<OpenFailure>>) {
+/// The list reads the pad and navigates focus as the in-game menus do, under
+/// one standing modal owner.
+fn standing_owner(mut ownership: ResMut<super::input::Ownership>) {
+    ownership.owner = super::input::Owner::Modal;
+}
+
+fn leave(
+    mut commands: Commands,
+    screens: Query<Entity, Or<(With<Root>, With<ListCamera>)>>,
+    mut ownership: ResMut<super::input::Ownership>,
+    mut last: ResMut<LastFailure>,
+) {
+    for screen in &screens {
+        commands.entity(screen).despawn();
+    }
+    commands.remove_resource::<Launcher>();
+    last.0 = None;
+    *ownership = super::input::Ownership::default();
+}
+
+fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Res<LastFailure>) {
     let mut launcher = Launcher {
         screen: Screen::List,
         entries: Vec::new(),
@@ -317,7 +357,7 @@ fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Option<Res<Ope
         opening_frames: 0,
     };
     launcher.refresh(&worlds.0);
-    if let Some(failure) = failure {
+    if let Some(failure) = &failure.0 {
         launcher.card = Some(Card {
             title: format!("Could not open {}", launcher.display_name(&failure.folder)),
             detail: failure.reason.clone(),
@@ -418,7 +458,7 @@ fn handle(
     mut installed: ResMut<Installed>,
     worlds: Res<WorldsDir>,
     remover: Res<Remover>,
-    mut relaunch: ResMut<Relaunch>,
+    mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
     mut clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
 ) {
@@ -604,7 +644,7 @@ fn validate(form: &Form) -> Result<(String, u64), String> {
     Ok((name, form.seed()?))
 }
 
-fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut Relaunch) {
+fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut Switch) {
     let Some(game) = installed.game.clone() else {
         l.form.problem = Some(NO_GAME.into());
         l.show(Screen::Create);
@@ -641,7 +681,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
     }
 }
 
-fn open(l: &mut Launcher, relaunch: &mut Relaunch, path: PathBuf) {
+fn open(l: &mut Launcher, relaunch: &mut Switch, path: PathBuf) {
     let name = l.display_name(&path);
     relaunch.0 = Some(Target::World(path));
     l.show(Screen::Opening(name));
@@ -669,16 +709,31 @@ fn reveal(path: &Path) {
     }
 }
 
-/// Lets the Opening screen draw, then exits so `main` starts the World.
-fn opening(launcher: Option<ResMut<Launcher>>, mut exit: MessageWriter<AppExit>) {
+/// Lets the Opening screen draw, then hands the World to the loader.
+fn opening(
+    mut commands: Commands,
+    launcher: Option<ResMut<Launcher>>,
+    mut switch: ResMut<Switch>,
+    next: Option<ResMut<NextState<AppState>>>,
+) {
     let Some(mut l) = launcher else {
         return;
     };
-    if matches!(l.screen, Screen::Opening(_)) {
-        l.opening_frames += 1;
-        if l.opening_frames == OPENING_FRAMES {
-            exit.write(AppExit::Success);
-        }
+    let Screen::Opening(name) = &l.screen else {
+        return;
+    };
+    let name = name.clone();
+    l.opening_frames += 1;
+    if l.opening_frames == OPENING_FRAMES
+        && let Some(mut next) = next
+        && let Some(Target::World(folder)) = switch.0.take()
+    {
+        commands.insert_resource(OpenRequest {
+            what: What::Folder(folder),
+            name: Some(name),
+            from_list: true,
+        });
+        next.set(AppState::Loading);
     }
 }
 
@@ -1395,7 +1450,7 @@ fn trust(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::launch::Relaunch;
+    use crate::launch::Switch;
     use bevy::ecs::message::Messages;
     use tesserae_core::save::WorldId;
 
@@ -1420,7 +1475,7 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .add_message::<AppExit>()
             .add_message::<bevy::window::WindowCloseRequested>()
-            .init_resource::<Relaunch>()
+            .init_resource::<Switch>()
             .insert_resource(installed)
             .insert_resource(WorldsDir(worlds.0.clone()))
             .insert_resource(Remover(|path| {
@@ -1494,9 +1549,14 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_list_focuses_create_and_creating_restarts_into_the_new_world() {
+    fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
         let worlds = Directory::new();
         let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.add_plugins(bevy::state::app::StatesPlugin)
+            .init_state::<AppState>();
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::List);
         app.update();
         app.update();
         assert_eq!(focused_act(&app), Some(Act::New));
@@ -1506,7 +1566,7 @@ mod tests {
         act(&mut app, Act::More);
         act(&mut app, Act::Voxel(0.25));
         act(&mut app, Act::Create);
-        let Some(Target::World(path)) = app.world().resource::<Relaunch>().0.clone() else {
+        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no restart into the World");
         };
         let created = library::read(&path).unwrap().unwrap();
@@ -1516,10 +1576,21 @@ mod tests {
         assert_eq!(created.game.unwrap().id, "demo");
         assert!(created.pending);
         assert!(matches!(launcher(&app).screen, Screen::Opening(_)));
-        assert_eq!(exits(&app), 0, "the Opening screen draws first");
-        app.update();
-        app.update();
-        assert_eq!(exits(&app), 1);
+        assert!(
+            app.world().get_resource::<OpenRequest>().is_none(),
+            "the Opening screen draws first"
+        );
+        for _ in 0..3 {
+            app.update();
+        }
+        let request = app.world().resource::<OpenRequest>();
+        assert_eq!(request.what, What::Folder(path));
+        assert_eq!(request.name.as_deref(), Some("Ridge"));
+        assert!(request.from_list);
+        assert_eq!(
+            *app.world().resource::<State<AppState>>().get(),
+            AppState::Loading
+        );
     }
 
     #[test]
@@ -1537,7 +1608,7 @@ mod tests {
         act(&mut app, Act::Create);
         assert_eq!(launcher(&app).screen, Screen::Create);
         assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
-        assert!(app.world().resource::<Relaunch>().0.is_none());
+        assert!(app.world().resource::<Switch>().0.is_none());
         press(&mut app, KeyCode::Escape);
         assert_eq!(launcher(&app).screen, Screen::List);
     }
@@ -1589,11 +1660,11 @@ mod tests {
         assert_eq!(focused_act(&app), Some(Act::Back));
         act(&mut app, Act::Back);
         assert_eq!(launcher(&app).screen, Screen::List);
-        assert!(app.world().resource::<Relaunch>().0.is_none());
+        assert!(app.world().resource::<Switch>().0.is_none());
         act(&mut app, Act::Open);
         act(&mut app, Act::Trust);
         assert_eq!(
-            app.world().resource::<Relaunch>().0,
+            app.world().resource::<Switch>().0,
             Some(Target::World(path))
         );
         assert!(app.world().resource::<Installed>().untrusted.is_empty());
@@ -1607,7 +1678,7 @@ mod tests {
         app.update();
         act(&mut app, Act::Open);
         assert_eq!(
-            app.world().resource::<Relaunch>().0,
+            app.world().resource::<Switch>().0,
             Some(Target::World(path))
         );
     }
@@ -1618,10 +1689,10 @@ mod tests {
         let path = library::create(&worlds.0, &details("Broken", true)).unwrap();
         let before = std::fs::read(path.join(library::SIDECAR)).unwrap();
         let mut app = app(&worlds, Installed::fake(None, &[]));
-        app.insert_resource(OpenFailure {
+        app.insert_resource(LastFailure(Some(OpenFailure {
             folder: path.clone(),
             reason: "corrupt World save: checksum mismatch".into(),
-        });
+        })));
         app.update();
         let Card { title, detail, .. } = launcher(&app).card.clone().unwrap();
         assert_eq!(title, "Could not open Broken");
@@ -1657,7 +1728,7 @@ mod tests {
         app.update();
         act(&mut app, Act::Quit);
         assert_eq!(exits(&app), 1);
-        assert!(app.world().resource::<Relaunch>().0.is_none());
+        assert!(app.world().resource::<Switch>().0.is_none());
     }
 
     #[test]
@@ -1676,7 +1747,7 @@ mod tests {
         let random = launcher(&app).form.random_seed;
         assert_eq!(shown, format!("Random seed: {random}"));
         act(&mut app, Act::Create);
-        let Some(Target::World(path)) = app.world().resource::<Relaunch>().0.clone() else {
+        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no restart into the World");
         };
         assert_eq!(library::read(&path).unwrap().unwrap().seed, random);
@@ -1706,7 +1777,7 @@ mod tests {
         act(&mut app, Act::New);
         assert_eq!(launcher(&app).screen, Screen::List);
         assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
-        assert!(app.world().resource::<Relaunch>().0.is_none());
+        assert!(app.world().resource::<Switch>().0.is_none());
     }
 
     use bevy::input::gamepad::{
@@ -1796,7 +1867,7 @@ mod tests {
         assert!(!launcher(&app).form.seed.is_empty());
         reach(&mut app, pad, Act::Create);
         tap(&mut app, pad, GamepadButton::South);
-        let Some(Target::World(path)) = app.world().resource::<Relaunch>().0.clone() else {
+        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no restart into the World");
         };
         assert_eq!(library::read(&path).unwrap().unwrap().name, "New World");
@@ -2028,7 +2099,7 @@ mod tests {
         reach(&mut app, pad, Act::Trust);
         tap(&mut app, pad, GamepadButton::South);
         assert!(matches!(
-            app.world().resource::<Relaunch>().0,
+            app.world().resource::<Switch>().0,
             Some(Target::World(_))
         ));
     }

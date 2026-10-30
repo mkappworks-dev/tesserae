@@ -8,6 +8,8 @@
 
 use bevy::gizmos::config::{GizmoConfigGroup, GizmoConfigStore};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 
 use super::aim::{Sent, Target};
@@ -84,10 +86,10 @@ fn see_through(mut store: ResMut<GizmoConfigStore>) {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Measurement>()
+    app.init_session_state::<Measurement>()
         .init_gizmo_group::<ToolGizmos>()
-        .add_systems(Startup, (spawn_panel, see_through))
-        .add_systems(
+        .add_session_systems(Startup, (spawn_panel, see_through))
+        .add_session_systems(
             Update,
             (
                 use_tool

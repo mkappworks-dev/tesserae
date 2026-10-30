@@ -12,6 +12,8 @@
 //! slot can hold comes from the Server's content catalogue.
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
 use tesserae_core::{
@@ -307,13 +309,13 @@ impl Notice {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Hotbar>()
-        .init_resource::<Catalogue>()
-        .init_resource::<Notice>()
-        .init_resource::<QuietUntil>()
-        .add_message::<crate::server::undo::HistoryApplied>()
-        .add_systems(Startup, spawn_hud)
-        .add_systems(
+    app.init_session_state::<Hotbar>()
+        .init_session_state::<Catalogue>()
+        .init_session_state::<Notice>()
+        .init_session_state::<QuietUntil>()
+        .add_session_message::<crate::server::undo::HistoryApplied>()
+        .add_session_systems(Startup, spawn_hud)
+        .add_session_systems(
             Update,
             (
                 receive_catalogue,

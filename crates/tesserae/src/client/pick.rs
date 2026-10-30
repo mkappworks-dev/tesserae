@@ -5,6 +5,7 @@ use super::{
     menu::Menu,
 };
 use crate::server::edit::{AimItem, PickIntent, PickedItem};
+use crate::session::SessionApp;
 use bevy::{
     prelude::*,
     window::{CursorGrabMode, CursorOptions, PrimaryWindow},
@@ -17,10 +18,10 @@ struct Pending {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Pending>()
-        .add_message::<PickIntent>()
-        .add_message::<PickedItem>()
-        .add_systems(
+    app.init_session_state::<Pending>()
+        .add_session_message::<PickIntent>()
+        .add_session_message::<PickedItem>()
+        .add_session_systems(
             Update,
             (send.after(super::edit::send_intents), receive).chain(),
         );

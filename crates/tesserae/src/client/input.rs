@@ -1,6 +1,8 @@
 //! Input ownership is settled before any gameplay consumer runs.
 use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::HashSet;
 
@@ -71,9 +73,9 @@ pub(super) struct UiInput {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<UiInput>()
-        .init_resource::<Ownership>()
-        .add_systems(
+    app.init_session_state::<UiInput>()
+        .init_session_state::<Ownership>()
+        .add_session_systems(
             Update,
             resolve
                 .after(super::menu::toggle)

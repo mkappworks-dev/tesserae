@@ -1,6 +1,8 @@
 //! Save controls send intents; only the Server sees persistence or World data.
 use crate::server::persistence::{SaveAction, SaveStatus};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowCloseRequested};
 
@@ -56,14 +58,14 @@ fn view(status: &SaveStatus) -> View {
 
 pub(super) fn plugin(app: &mut App) {
     app.add_observer(activate)
-        .add_systems(PreUpdate, close_request)
-        .add_systems(Update, (show, notice, hide_list_return));
+        .add_session_systems(PreUpdate, close_request)
+        .add_session_systems(Update, (show, notice, hide_list_return));
 }
 
 fn close_request(
     mut requests: MessageReader<WindowCloseRequested>,
     mut actions: MessageWriter<SaveAction>,
-    mut relaunch: Option<ResMut<crate::launch::Relaunch>>,
+    mut relaunch: Option<ResMut<crate::launch::Switch>>,
     status: Res<SaveStatus>,
     mut cursors: Query<(Entity, &mut CursorOptions), With<PrimaryWindow>>,
 ) {
@@ -88,7 +90,7 @@ fn activate(
     event: On<Activate>,
     buttons: Query<&Action>,
     to_list: Query<(), With<ToList>>,
-    mut relaunch: Option<ResMut<crate::launch::Relaunch>>,
+    mut relaunch: Option<ResMut<crate::launch::Switch>>,
     mut actions: MessageWriter<SaveAction>,
 ) {
     let target = if to_list.contains(event.entity) {
@@ -110,7 +112,7 @@ fn activate(
 
 /// Only a World opened from the list has a list to return to.
 fn hide_list_return(
-    launched: Option<Res<crate::launch::Launched>>,
+    launched: Option<Res<crate::open::Opened>>,
     mut buttons: Query<&mut Node, Added<ToList>>,
 ) {
     if launched.is_some_and(|l| l.from_list) {
@@ -473,7 +475,7 @@ mod tests {
     #[test]
     fn successful_quit_has_only_noninteractive_progress_until_server_exit() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::window_plugin(None)))
+        app.add_plugins((MinimalPlugins, crate::window_plugin()))
             .init_resource::<SaveStatus>()
             .add_message::<SaveAction>()
             .add_systems(PreUpdate, close_request)
@@ -520,7 +522,7 @@ mod tests {
     #[test]
     fn failed_quit_and_discard_confirmation_keep_the_real_window_plugin_alive() {
         let mut app = App::new();
-        app.add_plugins((MinimalPlugins, crate::window_plugin(None)))
+        app.add_plugins((MinimalPlugins, crate::window_plugin()))
             .insert_resource(SaveStatus {
                 quitting: true,
                 error: Some("disk full".into()),
@@ -594,11 +596,11 @@ mod tests {
 
     #[test]
     fn return_to_world_list_saves_like_quit_and_only_then_targets_the_list() {
-        use crate::launch::{Relaunch, Target};
+        use crate::launch::{Switch, Target};
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<SaveStatus>()
-            .init_resource::<Relaunch>()
+            .init_resource::<Switch>()
             .add_message::<SaveAction>()
             .add_message::<WindowCloseRequested>()
             .add_observer(activate);
@@ -617,11 +619,11 @@ mod tests {
         };
         app.world_mut().trigger(Activate { entity: to_list });
         assert!(matches!(sent(&mut app)[..], [SaveAction::SaveQuit]));
-        assert_eq!(app.world().resource::<Relaunch>().0, Some(Target::List));
+        assert_eq!(app.world().resource::<Switch>().0, Some(Target::List));
 
         app.world_mut().trigger(Activate { entity: quit });
         assert!(matches!(sent(&mut app)[..], [SaveAction::SaveQuit]));
-        assert_eq!(app.world().resource::<Relaunch>().0, None);
+        assert_eq!(app.world().resource::<Switch>().0, None);
 
         app.world_mut().trigger(Activate { entity: to_list });
         let window = app
@@ -631,6 +633,6 @@ mod tests {
         app.world_mut()
             .write_message(WindowCloseRequested { window });
         app.world_mut().run_system_once(close_request).unwrap();
-        assert_eq!(app.world().resource::<Relaunch>().0, None);
+        assert_eq!(app.world().resource::<Switch>().0, None);
     }
 }

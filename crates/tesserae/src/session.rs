@@ -1,4 +1,3 @@
-#![allow(dead_code)] // Wired into the app by the commits that follow.
 //! The process-wide state machine and the World session it brackets.
 //!
 //! One window and one `App` serve the World list and every World opened from
@@ -37,6 +36,11 @@ pub fn in_world(state: Option<Res<State<AppState>>>) -> bool {
     state.is_none_or(|s| *s.get() == AppState::InWorld)
 }
 
+/// Run condition for the World list's systems.
+pub fn in_list(state: Option<Res<State<AppState>>>) -> bool {
+    state.is_none_or(|s| *s.get() == AppState::List)
+}
+
 pub fn has_state(world: &World) -> bool {
     world.contains_resource::<State<AppState>>()
 }
@@ -62,6 +66,10 @@ pub struct SessionId(pub u64);
 struct Registry {
     install: Vec<fn(&mut World)>,
     init: Vec<fn(&mut World)>,
+    /// Resources that outlive a session because something outside it reads
+    /// them, e.g. the World list's input handling; each is replaced by a
+    /// fresh value instead of being removed.
+    reset: Vec<fn(&mut World)>,
     clear: Vec<fn(&mut World)>,
 }
 
@@ -97,6 +105,10 @@ pub trait SessionApp {
     ) -> &mut Self;
 
     fn init_session_resource<R: Resource + FromWorld>(&mut self) -> &mut Self;
+
+    /// A resource the World list also needs: it always exists, and a session
+    /// leaves it as freshly initialised as it found it.
+    fn init_session_state<R: Resource + FromWorld>(&mut self) -> &mut Self;
 
     /// For a resource whose value is derived from the environment rather than
     /// defaulted.
@@ -145,6 +157,20 @@ impl SessionApp for App {
             .push(|world| {
                 world.init_resource::<R>();
             });
+        self
+    }
+
+    fn init_session_state<R: Resource + FromWorld>(&mut self) -> &mut Self {
+        self.init_resource::<R>();
+        if has_state(self.world()) {
+            self.world_mut()
+                .resource_mut::<Registry>()
+                .reset
+                .push(|world| {
+                    let fresh = R::from_world(world);
+                    world.insert_resource(fresh);
+                });
+        }
         self
     }
 
@@ -220,7 +246,6 @@ fn survives(entity: EntityRef) -> bool {
     entity.contains::<Window>()
         || entity.contains::<bevy::window::Monitor>()
         || entity.contains::<Gamepad>()
-        || entity.contains::<Observer>()
         // Removed with its resource, which owns its lifetime.
         || entity.contains::<IsResource>()
 }
@@ -245,6 +270,9 @@ fn tear_down(world: &mut World) {
         // a removal on a dead entity, so the marker goes first.
         world.entity_mut(entity).remove::<IsResource>();
         world.despawn(entity);
+    }
+    for reset in world.resource::<Registry>().reset.clone() {
+        reset(world);
     }
     for clear in world.resource::<Registry>().clear.clone() {
         clear(world);
@@ -282,7 +310,7 @@ mod tests {
     struct Late;
 
     #[derive(Message)]
-    struct Mesh(u32);
+    struct Mesh;
 
     #[derive(Component)]
     struct Marker;
@@ -336,7 +364,7 @@ mod tests {
         let resources = app.world().iter_resources().count();
         let entities = app.world().iter_entities().count();
         go(&mut app, AppState::InWorld);
-        app.world_mut().write_message(Mesh(1));
+        app.world_mut().write_message(Mesh);
         app.update();
         go(&mut app, AppState::Closing);
         app.update();
