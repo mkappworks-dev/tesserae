@@ -201,9 +201,6 @@ pub(super) struct LayoutMode {
     pub(super) active: usize,
     /// The last increase was refused for passing the cap.
     refused: bool,
-    /// A Material chosen in the menu, laid in the held Shape. Not saved: a
-    /// profile holds no Game identifiers.
-    pub(super) material: Option<tesserae_core::MaterialId>,
     /// Point to point: the corners picked so far, at most two.
     points: Vec<[i32; 3]>,
     /// The cell the aim picks now, from the Server's latest fresh answer.
@@ -357,20 +354,15 @@ fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) {
     mode.points.push(cell);
 }
 
-/// What a layout lays: the held solid, in the menu's Material if one was
-/// chosen there.
-fn held_voxel(mode: &LayoutMode, hotbar: &Hotbar) -> Option<Voxel> {
+/// What a layout lays: the held solid.
+fn held_voxel(hotbar: &Hotbar) -> Option<Voxel> {
     match hotbar.held() {
         Holding::Solid {
             material,
             shape,
             orientation,
-        } => Some(Voxel::shaped(
-            mode.material.unwrap_or(material),
-            shape,
-            orientation,
-        )),
-        _ => mode.material.map(Voxel::cube),
+        } => Some(Voxel::shaped(material, shape, orientation)),
+        _ => None,
     }
 }
 
@@ -383,7 +375,7 @@ fn current(
     Some(LayoutIntent {
         origin: camera.translation(),
         direction: *camera.forward(),
-        voxel: held_voxel(mode, hotbar)?,
+        voxel: held_voxel(hotbar)?,
         layout: mode.params(layout),
     })
 }
@@ -490,7 +482,6 @@ pub(super) fn receive(
     }
 }
 
-const PLACEABLE: Color = Color::srgb(0.29, 0.70, 0.38);
 const OUT_OF_REACH: Color = Color::srgba(1.0, 0.60, 0.0, 0.40);
 const BLOCKED: Color = Color::srgba(0.94, 0.27, 0.27, 0.50);
 
@@ -508,22 +499,9 @@ pub(super) struct GhostModel {
     materials: [Handle<StandardMaterial>; 3],
 }
 
-/// What is laid out: the held solid, in the menu's Material if one was chosen.
-fn layout_holding(mode: &LayoutMode, hotbar: &Hotbar) -> Option<Holding> {
-    match hotbar.held() {
-        Holding::Solid {
-            material,
-            shape,
-            orientation,
-        } => Some(Holding::Solid {
-            material: mode.material.unwrap_or(material),
-            shape,
-            orientation,
-        }),
-        _ => mode
-            .material
-            .map(|material| Holding::solid(material, tesserae_core::SHAPE_FULL_CUBE)),
-    }
+/// What is laid out: the held solid.
+fn layout_holding(hotbar: &Hotbar) -> Option<Holding> {
+    matches!(hotbar.held(), Holding::Solid { .. }).then(|| hotbar.held())
 }
 
 /// Draws each cell of the Server's preview as a ghost of the block that would
@@ -551,7 +529,7 @@ pub(super) fn ghosts(
         With<LayoutGhost>,
     >,
 ) {
-    let holding = mode.on.then(|| layout_holding(&mode, &hotbar)).flatten();
+    let holding = mode.on.then(|| layout_holding(&hotbar)).flatten();
     if model.holding != holding || (holding.is_some() && content.changed()) {
         meshes.remove(model.mesh.id());
         for handle in &model.materials {
@@ -628,32 +606,6 @@ pub(super) fn ghosts(
     }
 }
 
-#[derive(Component)]
-pub(super) struct Readout;
-
-fn spawn_readout(mut commands: Commands) {
-    commands.spawn((
-        Readout,
-        Text::new(""),
-        TextFont {
-            font_size: bevy::text::FontSize::Px(14.0),
-            ..default()
-        },
-        TextColor(PLACEABLE),
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(16.0),
-            top: Val::Px(16.0),
-            padding: UiRect::all(Val::Px(8.0)),
-            border_radius: BorderRadius::all(Val::Px(6.0)),
-            ..default()
-        },
-        // Dark behind it, or it is lost against a bright sky.
-        BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.8)),
-        Visibility::Hidden,
-    ));
-}
-
 /// What a layout answer comes to, for the readout: placeable, out of reach,
 /// blocked.
 fn tally(answer: &LayoutAnswer) -> [usize; 3] {
@@ -665,26 +617,20 @@ fn tally(answer: &LayoutAnswer) -> [usize; 3] {
     ]
 }
 
-pub(super) fn readout(
-    (mode, preferences): (Res<LayoutMode>, Res<Preferences>),
-    hotbar: Res<Hotbar>,
-    camera: Single<&GlobalTransform, With<FlyCamera>>,
-    preview: Res<Preview>,
-    (bindings, labels): (Res<Bindings>, Res<Labels>),
-    time: Res<Time>,
-    mut text: Single<(&mut Text, &mut Visibility), With<Readout>>,
-) {
-    let (text, visibility) = &mut *text;
-    visibility.set_if_neq(if mode.on {
-        Visibility::Visible
-    } else {
-        Visibility::Hidden
-    });
-    if !mode.on {
-        return;
-    }
-    let layout = &preferences.layout;
-    let keys = |action| bindings.label(action, &labels);
+/// What the menu and the status card say: the shape, the next step, what the
+/// aim would lay, and the keys.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn summary(
+    mode: &LayoutMode,
+    layout: &LayoutPreferences,
+    hotbar: &Hotbar,
+    camera: &GlobalTransform,
+    preview: &Preview,
+    bindings: &Bindings,
+    labels: &Labels,
+    now: f64,
+) -> String {
+    let keys = |action| bindings.label(action, labels);
     let axes: Vec<String> = (0..layout.form.axes())
         .map(|i| {
             let marker = if i == mode.active && layout.form != Form::Line {
@@ -722,11 +668,11 @@ pub(super) fn readout(
         let [ok, far, blocked] = tally(answer);
         format!("{ok} will be placed, {far} out of reach, {blocked} blocked")
     };
-    let body = match held_voxel(&mode, &hotbar) {
+    let body = match held_voxel(hotbar) {
         None => "Hold a solid to lay it out".to_owned(),
         Some(_) => {
-            let answer = current(&mode, layout, &hotbar, &camera)
-                .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()));
+            let answer = current(mode, layout, hotbar, camera)
+                .and_then(|intent| preview.fresh(&intent, now));
             match (answer, step, mode.points.is_empty()) {
                 (None, ..) => "Aim at a surface".to_owned(),
                 (Some(_), Some(step), true) => step.to_owned(),
@@ -755,10 +701,7 @@ pub(super) fn readout(
     } else {
         String::new()
     };
-    let shown = format!("{head}\n{body}{cap}\n{hint}");
-    if text.0 != shown {
-        text.0 = shown;
-    }
+    format!("{head}\n{body}{cap}\n{hint}")
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -768,7 +711,6 @@ pub(super) fn plugin(app: &mut App) {
         .add_message::<LayoutIntent>()
         .add_message::<LayoutAim>()
         .add_message::<LayoutAnswer>()
-        .add_systems(Startup, spawn_readout)
         .add_systems(
             Update,
             (
@@ -776,7 +718,7 @@ pub(super) fn plugin(app: &mut App) {
                     .after(super::input::resolve)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (send, report, receive, track_aim, ghosts, readout)
+                (send, report, receive, track_aim, ghosts)
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -1401,15 +1343,10 @@ mod tests {
     }
 
     #[test]
-    fn a_menu_material_changes_the_ghost_model_and_the_voxel_size_scales_it() {
+    fn the_voxel_size_scales_the_ghosts() {
         let mut app = ghost_app();
         answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
         ghosts_now(&mut app);
-        let first = app.world().resource::<GhostModel>().mesh.clone();
-        app.world_mut().resource_mut::<LayoutMode>().material = Some(9);
-        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
-        ghosts_now(&mut app);
-        assert_ne!(first, app.world().resource::<GhostModel>().mesh);
         app.world_mut().resource_mut::<WorldSettings>().voxel_size = 0.5;
         ghosts_now(&mut app);
         let scale = app
@@ -1419,6 +1356,53 @@ mod tests {
             .unwrap()
             .scale;
         assert_eq!(scale, Vec3::splat(0.5));
+    }
+
+    fn say(app: &mut App) -> String {
+        let mut cameras = app.world_mut().query::<(&GlobalTransform, &FlyCamera)>();
+        let camera = *cameras.single(app.world()).unwrap().0;
+        summary(
+            mode(app),
+            &saved(app).clone(),
+            app.world().resource::<Hotbar>(),
+            &camera,
+            app.world().resource::<Preview>(),
+            app.world().resource::<Bindings>(),
+            &Labels::default(),
+            0.0,
+        )
+    }
+
+    #[test]
+    fn the_summary_says_the_shape_the_next_step_and_what_the_aim_would_lay() {
+        let mut app = ghost_app();
+        assert!(say(&mut app).contains("Aim at a surface"));
+        answer_with(
+            &mut app,
+            &[
+                (Vec3::ZERO, CellState::Placeable),
+                (Vec3::X, CellState::Placeable),
+                (Vec3::Y, CellState::OutOfReach),
+                (Vec3::Z, CellState::Blocked),
+            ],
+        );
+        let said = say(&mut app);
+        assert!(said.contains("Line 4 +X"), "{said}");
+        assert!(
+            said.contains("2 will be placed, 1 out of reach, 1 blocked"),
+            "{said}"
+        );
+        assert!(said.contains("count"), "the keys for the counts");
+        saved_mut(&mut app).layout.kind = Kind::Between;
+        let said = say(&mut app);
+        assert!(said.contains("from point to point"), "{said}");
+        app.world_mut()
+            .resource_mut::<LayoutMode>()
+            .points
+            .push([0; 3]);
+        // The aim is asked again with a corner set.
+        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
+        assert!(say(&mut app).contains("Place sets point B"));
     }
 
     #[test]

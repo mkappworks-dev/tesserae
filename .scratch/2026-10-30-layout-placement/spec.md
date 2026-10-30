@@ -269,3 +269,16 @@ what will be built.
 - The preview draws each cell as a ghost of the block that would land, in the
   held Material and Shape, with the single-placement ghost's look. A cell out
   of reach is tinted orange and a blocked one red.
+
+## Amendment 2026-10-30 (3): a compact card, no Material, no corner panel
+
+- The Material picker is gone: a layout lays the held block, and the Material
+  of the hand is the one way to choose it.
+- The menu is a compact card at the right edge, halfway down and only as tall
+  as its content, so it never covers the crosshair or the preview. It is not a
+  full-height strip.
+- The information the corner panel showed (shape, counts and directions, the
+  next step, what the aim would lay, the keys) is in the card. With the menu
+  closed and the mode on, the card stays as a small status card with that
+  text and no controls.
+

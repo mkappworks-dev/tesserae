@@ -6,7 +6,6 @@
 //! cursor is released and the pad navigates it, and gameplay input waits.
 use super::{
     actions::{Action, Actions},
-    edit::Catalogue,
     layout::{Direction, Form, Kind, LayoutMode, LayoutPreferences},
     menu_ui as ui,
     profile::{Preferences, Store},
@@ -16,10 +15,10 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use tesserae_core::MaterialId;
 use tesserae_core::layout::MAX_LAYOUT_VOXELS;
 
-const PANEL_WIDTH: f32 = 360.0;
+const CARD_WIDTH: f32 = 340.0;
+const STATUS_WIDTH: f32 = 300.0;
 
 #[derive(Resource, Default)]
 pub(super) struct LayoutMenu {
@@ -28,6 +27,8 @@ pub(super) struct LayoutMenu {
     typed: Option<(usize, String)>,
     notice: String,
     dirty: bool,
+    /// What the panel is now: the menu, the status card, or nothing.
+    shown: Option<bool>,
     /// The layout as it was when the menu opened, so closing saves only a change.
     opened_with: Option<LayoutPreferences>,
 }
@@ -51,13 +52,16 @@ enum Control {
     Type(usize),
     Count(usize, i32),
     Gap(i32),
-    Material(Option<MaterialId>),
     Close,
     Exit,
 }
 
 #[derive(Component)]
 struct Panel;
+
+/// The text that says what the layout is and what the aim would lay.
+#[derive(Component)]
+struct Info;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<LayoutMenu>()
@@ -68,7 +72,9 @@ pub(super) fn plugin(app: &mut App) {
                 toggle
                     .after(super::menu::toggle)
                     .before(super::input::resolve),
-                (type_count, render, persist).chain().after(toggle),
+                (type_count, render, update_info, persist)
+                    .chain()
+                    .after(toggle),
             ),
         );
 }
@@ -168,7 +174,6 @@ fn activate(
             }
         }
         Control::Gap(by) => layout.set_gap(by),
-        Control::Material(material) => mode.material = material,
         Control::Close | Control::Exit => {
             if control == Control::Exit {
                 mode.on = false;
@@ -314,6 +319,35 @@ fn count_description(layout: &LayoutPreferences, typed: Option<&str>) -> String 
     }
 }
 
+/// What each frame says about the layout, wherever the card is.
+#[allow(clippy::too_many_arguments)]
+fn update_info(
+    mode: Res<LayoutMode>,
+    preferences: Res<Preferences>,
+    hotbar: Res<super::edit::Hotbar>,
+    camera: Single<&GlobalTransform, With<super::camera::FlyCamera>>,
+    preview: Res<super::layout::Preview>,
+    (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
+    time: Res<Time>,
+    mut text: Query<&mut Text, With<Info>>,
+) {
+    let shown = super::layout::summary(
+        &mode,
+        &preferences.layout,
+        &hotbar,
+        &camera,
+        &preview,
+        &bindings,
+        &labels,
+        time.elapsed_secs_f64(),
+    );
+    for mut text in &mut text {
+        if text.0 != shown {
+            text.0 = shown.clone();
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn render(
     mut commands: Commands,
@@ -322,19 +356,23 @@ fn render(
     controls: Query<&Control>,
     preferences: Res<Preferences>,
     mode: Res<LayoutMode>,
-    (catalogue, world): (Res<Catalogue>, Res<WorldSettings>),
+    world: Res<WorldSettings>,
     focus: Res<InputFocus>,
 ) {
-    if !menu.open {
-        for panel in &panels {
-            commands.entity(panel).despawn();
-        }
-        return;
-    }
-    if !menu.dirty && !preferences.is_changed() && !panels.is_empty() {
+    let want = if menu.open {
+        Some(true)
+    } else if mode.on {
+        Some(false)
+    } else {
+        None
+    };
+    let rebuild =
+        want != menu.shown || (want == Some(true) && (menu.dirty || preferences.is_changed()));
+    if !rebuild {
         return;
     }
     menu.dirty = false;
+    menu.shown = want;
     let focused = focus
         .get()
         .and_then(|entity| controls.get(entity).ok())
@@ -342,132 +380,133 @@ fn render(
     for panel in &panels {
         commands.entity(panel).despawn();
     }
+    let Some(open) = want else {
+        return;
+    };
     let layout = &preferences.layout;
+    // A card as tall as its content, at the right edge and halfway down, so it
+    // never covers the crosshair or the preview.
     commands
         .spawn((
             Panel,
             Node {
                 position_type: PositionType::Absolute,
-                right: Val::Px(0.0),
+                right: Val::Px(16.0),
                 top: Val::Px(0.0),
                 bottom: Val::Px(0.0),
-                width: Val::Px(PANEL_WIDTH),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                padding: UiRect::all(Val::Px(16.0)),
-                border: UiRect::left(Val::Px(1.0)),
-                overflow: Overflow::scroll_y(),
+                justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(Color::srgba(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0, 0.94)),
-            BorderColor::all(ui::EDGE),
+            Pickable::IGNORE,
         ))
-        .with_children(|panel| {
-            panel
-                .spawn(Node {
-                    justify_content: JustifyContent::SpaceBetween,
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|header| {
-                    ui::text(header, "Layout", 16.0, ui::INK);
-                    button(header, "×", Control::Close, false);
-                });
-            ui::description(
-                panel,
-                "Place lays the layout in play. Remove cancels. Close to look around.",
-            );
-
-            ui::eyebrow(panel, "MODE");
-            row(panel, |r| {
-                for (kind, name) in [
-                    (Kind::Directions, "Direction and count"),
-                    (Kind::Between, "Point to point"),
-                ] {
-                    button(r, name, Control::Kind(kind), layout.kind == kind);
-                }
-            });
-            ui::eyebrow(panel, "SHAPE");
-            row(panel, |r| {
-                for (form, name) in [
-                    (Form::Line, "Line"),
-                    (Form::Rectangle, "Rectangle"),
-                    (Form::Box, "Box"),
-                ] {
-                    button(r, name, Control::Form(form), layout.form == form);
-                }
-            });
-            if layout.kind == Kind::Between {
-                ui::description(
-                    panel,
-                    "In play, Place sets point A, Place sets point B, then Place \
-                     commits. Remove steps back a point, then cancels. The shape \
-                     fills the span between them; each point must be within reach.",
-                );
-            } else {
-                for (axis, name) in ["First axis", "Second axis", "Third axis"]
-                    .into_iter()
-                    .enumerate()
-                    .take(layout.form.axes())
-                {
-                    ui::eyebrow(panel, &name.to_uppercase());
-                    row(panel, |r| {
-                        for direction in Direction::ALL {
-                            button(
-                                r,
-                                direction.label(),
-                                Control::Direction(axis, direction),
-                                layout.directions[axis] == direction,
-                            );
+        .with_children(|wrapper| {
+            wrapper
+                .spawn((
+                    Node {
+                        width: Val::Px(if open { CARD_WIDTH } else { STATUS_WIDTH }),
+                        max_height: Val::Percent(92.0),
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        padding: UiRect::all(Val::Px(14.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        overflow: Overflow::scroll_y(),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgba(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0, 0.94)),
+                    BorderColor::all(ui::EDGE),
+                ))
+                .with_children(|card| {
+                    card.spawn(Node {
+                        justify_content: JustifyContent::SpaceBetween,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    })
+                    .with_children(|header| {
+                        ui::text(header, "Layout", 16.0, ui::INK);
+                        if open {
+                            button(header, "×", Control::Close, false);
                         }
                     });
-                    row(panel, |r| {
-                        button(r, "Type", Control::Type(axis), mode.active == axis);
-                        button(r, "−", Control::Count(axis, -1), false);
-                        ui::text(r, layout.counts[axis].to_string(), 13.0, ui::INK);
-                        button(r, "+", Control::Count(axis, 1), false);
+                    let info = |card: &mut ChildSpawnerCommands| {
+                        card.spawn((
+                            Info,
+                            Text::new(""),
+                            ui::font(12.0),
+                            bevy::text::LineHeight::RelativeToFont(1.5),
+                            TextColor(ui::LEAF),
+                            Pickable::IGNORE,
+                        ));
+                    };
+                    if !open {
+                        info(card);
+                        return;
+                    }
+                    ui::eyebrow(card, "MODE");
+                    row(card, |r| {
+                        for (kind, name) in [
+                            (Kind::Directions, "Direction and count"),
+                            (Kind::Between, "Point to point"),
+                        ] {
+                            button(r, name, Control::Kind(kind), layout.kind == kind);
+                        }
                     });
-                    let typed = menu
-                        .typed
-                        .as_ref()
-                        .filter(|(typed_axis, _)| *typed_axis == axis)
-                        .map(|(_, digits)| digits.as_str());
-                    ui::description(panel, &count_description(layout, typed));
-                }
-            }
-            ui::eyebrow(panel, "GAP");
-            row(panel, |r| {
-                button(r, "−", Control::Gap(-1), false);
-                ui::text(r, layout.gap.to_string(), 13.0, ui::INK);
-                button(r, "+", Control::Gap(1), false);
-            });
-            ui::description(panel, &gap_description(layout.gap, world.voxel_size));
-            ui::eyebrow(panel, "MATERIAL");
-            row(panel, |r| {
-                button(
-                    r,
-                    "Held item",
-                    Control::Material(None),
-                    mode.material.is_none(),
-                );
-                for material in catalogue
-                    .0
-                    .materials
-                    .iter()
-                    .filter(|m| m.solid && m.fluid.is_none())
-                {
-                    button(
-                        r,
-                        &ui::title(&material.name),
-                        Control::Material(Some(material.id)),
-                        mode.material == Some(material.id),
-                    );
-                }
-            });
-            if !menu.notice.is_empty() {
-                ui::text(panel, menu.notice.clone(), 11.0, ui::AMBER);
-            }
-            button(panel, "Exit layout mode", Control::Exit, false);
+                    ui::eyebrow(card, "SHAPE");
+                    row(card, |r| {
+                        for (form, name) in [
+                            (Form::Line, "Line"),
+                            (Form::Rectangle, "Rectangle"),
+                            (Form::Box, "Box"),
+                        ] {
+                            button(r, name, Control::Form(form), layout.form == form);
+                        }
+                    });
+                    if layout.kind == Kind::Directions {
+                        for (axis, name) in ["First axis", "Second axis", "Third axis"]
+                            .into_iter()
+                            .enumerate()
+                            .take(layout.form.axes())
+                        {
+                            ui::eyebrow(card, &name.to_uppercase());
+                            row(card, |r| {
+                                for direction in Direction::ALL {
+                                    button(
+                                        r,
+                                        direction.label(),
+                                        Control::Direction(axis, direction),
+                                        layout.directions[axis] == direction,
+                                    );
+                                }
+                            });
+                            row(card, |r| {
+                                button(r, "Type", Control::Type(axis), mode.active == axis);
+                                button(r, "−", Control::Count(axis, -1), false);
+                                ui::text(r, layout.counts[axis].to_string(), 13.0, ui::INK);
+                                button(r, "+", Control::Count(axis, 1), false);
+                            });
+                            let typed = menu
+                                .typed
+                                .as_ref()
+                                .filter(|(typed_axis, _)| *typed_axis == axis)
+                                .map(|(_, digits)| digits.as_str());
+                            ui::description(card, &count_description(layout, typed));
+                        }
+                    }
+                    ui::eyebrow(card, "GAP");
+                    row(card, |r| {
+                        button(r, "−", Control::Gap(-1), false);
+                        ui::text(r, layout.gap.to_string(), 13.0, ui::INK);
+                        button(r, "+", Control::Gap(1), false);
+                    });
+                    ui::description(card, &gap_description(layout.gap, world.voxel_size));
+                    if !menu.notice.is_empty() {
+                        ui::text(card, menu.notice.clone(), 11.0, ui::AMBER);
+                    }
+                    ui::eyebrow(card, "NOW");
+                    info(card);
+                    button(card, "Exit layout mode", Control::Exit, false);
+                });
         });
     // The rebuilt panel keeps focus where it was, or starts at the top.
     let target = focused.unwrap_or(Control::Kind(layout.kind));
@@ -496,7 +535,6 @@ mod tests {
         app.init_resource::<LayoutMenu>()
             .init_resource::<LayoutMode>()
             .init_resource::<super::super::menu::Menu>()
-            .init_resource::<Catalogue>()
             .init_resource::<WorldSettings>()
             .init_resource::<InputFocus>()
             .init_resource::<super::super::input::Ownership>()
@@ -661,13 +699,9 @@ mod tests {
     }
 
     #[test]
-    fn a_menu_material_is_the_sessions_and_the_shape_change_keeps_the_active_axis_in_range() {
+    fn a_shape_change_keeps_the_active_axis_in_range() {
         let mut app = app();
         open(&mut app);
-        activate_control(&mut app, Control::Material(Some(9)));
-        assert_eq!(app.world().resource::<LayoutMode>().material, Some(9));
-        activate_control(&mut app, Control::Material(None));
-        assert_eq!(app.world().resource::<LayoutMode>().material, None);
         activate_control(&mut app, Control::Form(Form::Box));
         activate_control(&mut app, Control::Type(2));
         assert_eq!(app.world().resource::<LayoutMode>().active, 2);
@@ -748,18 +782,6 @@ mod tests {
             .init_resource::<Assets<Image>>()
             .init_resource::<Assets<Font>>()
             .add_plugins(super::super::menu_ui::plugin);
-        let material = |id, name: &str, solid, fluid| crate::content::CatalogueMaterial {
-            remove_time: std::time::Duration::ZERO,
-            id,
-            name: name.into(),
-            solid,
-            fluid,
-            burns: false,
-        };
-        app.world_mut().resource_mut::<Catalogue>().0.materials = vec![
-            material(8, "stone", true, None),
-            material(9, "water", false, Some(0)),
-        ];
         app
     }
 
@@ -773,8 +795,47 @@ mod tests {
             .collect()
     }
 
+    fn panels(app: &mut App) -> (usize, usize) {
+        let panels = app.world_mut().query::<&Panel>().iter(app.world()).count();
+        let infos = app.world_mut().query::<&Info>().iter(app.world()).count();
+        (panels, infos)
+    }
+
     #[test]
-    fn the_panel_goes_when_the_menu_closes_and_a_rebuild_keeps_focus_on_the_same_control() {
+    fn closed_with_the_mode_on_a_status_card_stays_with_no_controls_and_goes_with_the_mode() {
+        let mut app = render_app();
+        open(&mut app);
+        assert!(!controls(&mut app).is_empty());
+        press(&mut app, KeyCode::KeyL);
+        assert!(
+            controls(&mut app).is_empty(),
+            "the card has nothing to press"
+        );
+        assert_eq!(
+            panels(&mut app),
+            (1, 1),
+            "but it still says what the aim does"
+        );
+        press(&mut app, KeyCode::KeyL);
+        activate_control(&mut app, Control::Exit);
+        controls(&mut app);
+        assert_eq!(
+            panels(&mut app),
+            (0, 0),
+            "the mode is off, so nothing is shown"
+        );
+    }
+
+    #[test]
+    fn the_menu_holds_the_information_that_used_to_sit_in_the_corner() {
+        let mut app = render_app();
+        open(&mut app);
+        controls(&mut app);
+        assert_eq!(panels(&mut app), (1, 1));
+    }
+
+    #[test]
+    fn a_rebuild_keeps_focus_on_the_same_control_and_closing_takes_the_controls_away() {
         let mut app = render_app();
         open(&mut app);
         controls(&mut app);
@@ -794,11 +855,7 @@ mod tests {
         assert_ne!(focused, target, "the panel was rebuilt");
         assert_eq!(app.world().get::<Control>(focused), Some(&Control::Gap(1)));
         press(&mut app, KeyCode::KeyL);
-        controls(&mut app);
-        assert_eq!(
-            app.world_mut().query::<&Panel>().iter(app.world()).count(),
-            0
-        );
+        assert!(controls(&mut app).is_empty(), "closed, the controls go");
     }
 
     #[test]
@@ -819,8 +876,6 @@ mod tests {
             Control::Count(0, 1),
             Control::Gap(-1),
             Control::Gap(1),
-            Control::Material(None),
-            Control::Material(Some(8)),
             Control::Close,
             Control::Exit,
         ] {
@@ -830,7 +885,6 @@ mod tests {
             !shown.contains(&Control::Count(1, 1)),
             "a line has one axis"
         );
-        assert!(!shown.contains(&Control::Material(Some(9))), "no fluids");
         activate_control(&mut app, Control::Kind(Kind::Between));
         let shown = controls(&mut app);
         assert!(
