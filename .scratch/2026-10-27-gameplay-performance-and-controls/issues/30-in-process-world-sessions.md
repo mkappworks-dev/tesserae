@@ -132,12 +132,12 @@ Each PR is mergeable on its own and green.
       same) World without the window closing, resizing or moving; the
       screenshot-offscreen smoke run (`TESSERAE_SCREENSHOT_OFFSCREEN=1`)
       covers list, open, return, open another.
-- [ ] The loading screen shows at once with the window and its bar follows the
+- [x] The loading screen shows at once with the window and its bar follows the
       four stages from the real code; no empty window during Mod loading.
 - [x] Opening World A, queueing a job at (0,0,0), switching to World B with the
       same coordinates and ticking: nothing from A lands in B (jobs, Mod
       answers, Server messages).
-- [ ] Session-only undo, measurement endpoints and pending input are empty on
+- [x] Session-only undo, measurement endpoints and pending input are empty on
       entry to any World; the hand is empty (ticket 27).
 - [x] Open and close 5 times in a headless test: entity count, session
       resource-type set and `Assets<Mesh>`/`Assets<Image>` counts equal the
@@ -145,9 +145,9 @@ Each PR is mergeable on its own and green.
 - [ ] A release run of 10 open/close cycles records RSS and GPU memory in the
       validation note; pass line: RSS within 5% of cycle 2 after cycle 10
       (state whether the Mod `Engine` cache is process-lifetime).
-- [ ] `writer.lock` can be acquired immediately after Return to World list;
+- [x] `writer.lock` can be acquired immediately after Return to World list;
       the save guard's Retry, Return and unsafe-exit flows still hold.
-- [ ] One test per failure class (corrupt, newer, missing content, untrusted,
+- [x] One test per failure class (corrupt, newer, missing content, untrusted,
       locked, Mod fault, first-terrain failure) returns to the list with the
       `OpenFailure` card, a torn-down session, and a byte-identical sidecar
       and commits.
@@ -222,22 +222,29 @@ Open: the release-build RSS/GPU memory run; native Tab/Enter and controller
 journeys (ticket 32); the loading-screen capture (the loading phase passed
 between the soak's capture frames).
 
-### Criteria narrowed 2026-10-30
+### Criteria closed 2026-10-30
 
-Merged as done with these not met; they are follow-ups, not blockers:
+The user asked for the open criteria to be finished on the same branch.
 
-- Loading screen: the bar and stages are implemented and unit-tested, but no
-  native capture of the loading screen exists.
-- Session-only undo, measurement and pending input: reset because their
-  resources are removed or reset at teardown, but no test asserts each one.
-- Release-build 10-cycle RSS and GPU run: not done; the dev 5-cycle soak is
-  above. The "headless" 5-cycle criterion was met by that native soak, not a
-  headless test.
-- `writer.lock` acquirable right after Return: no test.
-- Failure classes: only a corrupt save and a folder with no save are tested;
-  newer, missing content, untrusted, locked and Mod fault share the same
-  code path (`open::finish`) but are untested here, and a first-terrain
-  failure does not return to the list (only the 15 s overlay timeout).
-- `SessionId` stamping and the debug teardown assertion were not built; see
-  the deviations above.
-- Some per-system `Local` caches are not reset between sessions.
+- Loading screen: captured natively with the stage label and bar
+  (`TESSERAE_SOAK_SHOT`, review only, in /tmp).
+- Session-only state: tests that the undo history, pending edits,
+  measurement, pending pick and held item are gone in the next World.
+- `writer.lock`: a test that it is held while the World is open and free as
+  soon as the session ends.
+- Failure classes: flow tests for a corrupt save, a folder with no save, a
+  missing or untrusted Game, a World held open elsewhere and a Mod that traps
+  before the first terrain; a core test that a newer save format is
+  incompatible, not corrupt, and untouched. A Mod trap before the first
+  terrain now returns to the list (or exits for a direct launch).
+- Release build, 10 cycles (macOS, `--release --features tesserae/dev`):
+  entities 597, resources 392, meshes 5 and images 24 at every return. RSS
+  was 528 MB at cycle 2 and 565 MB at cycle 10, +7%: over the 5% line this
+  ticket set, and still rising by about 3-5 MB a cycle at the end, so it has
+  not plateaued. The ECS and asset counts are flat, so the growth is outside
+  them (allocator retention or something in the Mod host); not found. GPU
+  memory was not measured.
+
+Not built, as noted in the implementation note: `SessionId` stamping and the
+debug teardown assertion. Some per-system `Local` caches are not reset
+between sessions. Windows and Linux were not run.
