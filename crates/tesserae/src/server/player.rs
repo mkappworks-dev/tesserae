@@ -16,6 +16,9 @@ pub const CROUCH_BODY_HEIGHT_M: f32 = 1.2;
 /// How far below the eye a fluid still counts, so a third-person boom that
 /// dips under a surface the eye is above still reads the water.
 pub const IMMERSION_REACH_M: f32 = 2.0;
+/// Metres, not Voxels: a respawn lifts the same distance at any Voxel size.
+const RESPAWN_LIFT_STEP_M: f32 = 0.25;
+const RESPAWN_LIFT_MAX_M: f32 = 16.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MovementMode {
@@ -57,6 +60,7 @@ pub enum MovementFeedback {
     Switched(MovementMode),
     Forbidden,
     Obstructed,
+    RespawnBlocked,
 }
 impl MovementFeedback {
     pub fn message(self) -> &'static str {
@@ -65,6 +69,7 @@ impl MovementFeedback {
             Self::Switched(MovementMode::Flight) => "Free flight mode",
             Self::Forbidden => "Movement mode forbidden by Server policy",
             Self::Obstructed => "Physics requires a clear body in loaded terrain",
+            Self::RespawnBlocked => "Respawn blocked: no clear space over the spawn",
         }
     }
     pub fn refused(self) -> bool {
@@ -134,6 +139,14 @@ impl Player {
             pitch: self.view[1],
         }
     }
+    /// The body a placed Voxel must not enter: a flying body is noclip.
+    pub(in crate::server) fn solid_body(&self) -> Option<Aabb> {
+        (self.mode == MovementMode::Physics).then(|| self.body())
+    }
+    #[cfg(test)]
+    pub(in crate::server) fn physics_at(eye: Vec3) -> Self {
+        Self::new(eye, MovementMode::Physics)
+    }
     #[cfg(test)]
     pub(in crate::server) fn at(eye: Vec3) -> Self {
         Self::new(eye, MovementMode::Flight)
@@ -172,7 +185,7 @@ impl Player {
             EYE_HEIGHT
         }
     }
-    fn body(&self) -> Aabb {
+    pub(in crate::server) fn body(&self) -> Aabb {
         let eye_height = self.eye_height();
         let height = if self.crouching {
             CROUCH_BODY_HEIGHT_M
@@ -369,6 +382,25 @@ fn spawn_player(
     );
     commands.spawn(player);
 }
+/// First standing position over `spawn` whose body is clear, so a Voxel placed
+/// at the spawn lifts the respawn rather than embedding it. `None` when the
+/// column is solid or unloaded up to the cap.
+fn clear_respawn_eye(
+    store: &impl collide::VoxelVolume,
+    tables: &tesserae_core::Tables,
+    size: f32,
+    spawn: Vec3,
+) -> Option<Vec3> {
+    (0..=(RESPAWN_LIFT_MAX_M / RESPAWN_LIFT_STEP_M) as u32).find_map(|step| {
+        let eye = spawn + Vec3::Y * (step as f32 * RESPAWN_LIFT_STEP_M + EYE_HEIGHT);
+        let feet = eye - Vec3::Y * EYE_HEIGHT;
+        let body = Aabb::new(
+            (feet - Vec3::new(0.3, 0.0, 0.3)).to_array(),
+            (feet + Vec3::new(0.3, BODY_HEIGHT_M, 0.3)).to_array(),
+        );
+        (!collide::overlaps(store, tables, size, body)).then_some(eye)
+    })
+}
 pub(super) fn receive(
     mut intents: MessageReader<MovementIntent>,
     mut respawn: MessageReader<RespawnIntent>,
@@ -428,11 +460,16 @@ pub(super) fn receive(
     }
     if respawn.read().next().is_some() {
         respawn.clear();
-        player.eye = if player.mode == MovementMode::Physics {
-            spawn.metres() + Vec3::Y * EYE_HEIGHT
+        if player.mode == MovementMode::Physics {
+            let Some(eye) = clear_respawn_eye(&*store, &tables, world.voxel_size, spawn.metres())
+            else {
+                feedback.write(MovementFeedback::RespawnBlocked);
+                return;
+            };
+            player.eye = eye;
         } else {
-            spawn.eye()
-        };
+            player.eye = spawn.eye();
+        }
         player.velocity_y = 0.0;
         player.intent = default();
         player.grounded = false;
@@ -883,6 +920,114 @@ mod tests {
                     "Free flight mode"
                 }]
             );
+        }
+    }
+
+    const SPAWN_XZ_M: f32 = 2.0;
+    const SPAWN_Y_M: f32 = 2.0;
+
+    /// A Player far from the spawn, which sits at (2, 2, 2) m in a Chunk of air
+    /// holding one solid slab per `slab` (min y, max y in metres) across it.
+    fn respawn_app(size: f32, mode: MovementMode, slab: Option<(f32, f32)>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldSettings {
+                voxel_size: size,
+                ..default()
+            })
+            .insert_resource(SpawnPoint::for_tests(Vec3::new(
+                SPAWN_XZ_M, SPAWN_Y_M, SPAWN_XZ_M,
+            )))
+            .init_resource::<ChunkStore>()
+            .insert_resource(ContentTables(std::sync::Arc::new(tables())))
+            .add_plugins(plugin);
+        app.update();
+        if let Some((low, high)) = slab {
+            let mut chunk = tesserae_core::Chunk::air();
+            let cells = |m: f32| (m / size).round() as usize;
+            for y in cells(low)..cells(high) {
+                for z in 0..32 {
+                    for x in 0..32 {
+                        chunk.set(x, y, z, Voxel::cube(8));
+                    }
+                }
+            }
+            app.world_mut()
+                .resource_mut::<ChunkStore>()
+                .insert(crate::world::ChunkCoord::new(0, 0, 0), chunk);
+        }
+        let mut query = app.world_mut().query::<&mut Player>();
+        {
+            let mut player = query.single_mut(app.world_mut()).unwrap();
+            player.mode = mode;
+            player.eye = Vec3::new(0.5, 0.5, 0.5);
+        }
+        app
+    }
+    fn respawn(app: &mut App) -> (Vec3, Vec<MovementFeedback>) {
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        let eye = app
+            .world_mut()
+            .query::<&Player>()
+            .single(app.world())
+            .unwrap()
+            .eye;
+        let feedback = app
+            .world_mut()
+            .resource_mut::<Messages<MovementFeedback>>()
+            .drain()
+            .collect();
+        (eye, feedback)
+    }
+    fn body_is_clear(app: &mut App, eye: Vec3) -> bool {
+        let mut player = Player::new(eye, MovementMode::Physics);
+        player.crouching = false;
+        let size = app.world().resource::<WorldSettings>().voxel_size;
+        !collide::overlaps(
+            app.world().resource::<ChunkStore>(),
+            &tables(),
+            size,
+            player.body(),
+        )
+    }
+    #[test]
+    fn a_physics_respawn_into_placed_voxels_lifts_to_a_clear_body() {
+        for size in [1.0, 0.5, 0.25] {
+            let mut app = respawn_app(size, MovementMode::Physics, Some((2.0, 3.0)));
+            let (eye, feedback) = respawn(&mut app);
+            assert!(body_is_clear(&mut app, eye), "{size}: embedded at {eye:?}");
+            assert!(eye.y >= 3.0 + EYE_HEIGHT - 0.001, "{size}: {eye:?}");
+            assert!(eye.y < 3.0 + EYE_HEIGHT + 0.3, "{size}: {eye:?}");
+            assert_eq!((eye.x, eye.z), (SPAWN_XZ_M, SPAWN_XZ_M), "{size}");
+            assert!(feedback.is_empty(), "{size}: {feedback:?}");
+        }
+    }
+    #[test]
+    fn a_physics_respawn_with_no_clear_spot_is_refused_and_leaves_the_eye() {
+        for size in [1.0, 0.5, 0.25] {
+            let mut app = respawn_app(size, MovementMode::Physics, None);
+            let (eye, feedback) = respawn(&mut app);
+            assert_eq!(eye, Vec3::splat(0.5), "{size}: unloaded Chunk");
+            assert_eq!(feedback, [MovementFeedback::RespawnBlocked], "{size}");
+        }
+    }
+    #[test]
+    fn respawn_into_open_air_and_flight_respawn_are_unchanged() {
+        for size in [1.0, 0.5, 0.25] {
+            let mut app = respawn_app(size, MovementMode::Physics, Some((0.0, 1.0)));
+            let (eye, feedback) = respawn(&mut app);
+            assert_eq!(
+                eye,
+                Vec3::new(SPAWN_XZ_M, SPAWN_Y_M + EYE_HEIGHT, SPAWN_XZ_M),
+                "{size}"
+            );
+            assert!(feedback.is_empty());
+            let mut app = respawn_app(size, MovementMode::Flight, Some((2.0, 3.0)));
+            let (eye, feedback) = respawn(&mut app);
+            let spawn = *app.world().resource::<SpawnPoint>();
+            assert_eq!(eye, spawn.eye(), "{size}");
+            assert!(feedback.is_empty());
         }
     }
 
