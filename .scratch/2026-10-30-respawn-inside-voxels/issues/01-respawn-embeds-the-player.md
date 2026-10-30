@@ -1,7 +1,10 @@
 # 01: Respawn embeds the Player in Voxels placed at the spawn
 
-Status: needs-triage
+Status: done
 Type: bug
+
+Triaged: lift to the nearest clear standing position (option 1); with none
+under the 16 m cap, refuse with `MovementFeedback::RespawnBlocked`.
 
 ## Report
 
@@ -77,22 +80,22 @@ Flight).
 
 ## Acceptance criteria
 
-- [ ] A Physics respawn with solid Voxels at the spawn never leaves the body
+- [x] A Physics respawn with solid Voxels at the spawn never leaves the body
       overlapping: the published Eye after the respawn has a clear standing body
       (`collide::overlaps` is false), or the respawn is refused with visible
       feedback and the Eye is unchanged. Which one is the triage decision above.
-- [ ] A Physics respawn into an unloaded spawn Chunk is not embedded either.
-- [ ] A Physics respawn into open air is unchanged: Eye at `spawn.metres()` plus
+- [x] A Physics respawn into an unloaded spawn Chunk is not embedded either.
+- [x] A Physics respawn into open air is unchanged: Eye at `spawn.metres()` plus
       `EYE_HEIGHT`, so no regression for the common case.
-- [ ] A Flight respawn is unchanged: Eye at `SpawnPoint::eye()`.
-- [ ] The Server alone chooses the position. `RespawnIntent` stays fieldless,
+- [x] A Flight respawn is unchanged: Eye at `SpawnPoint::eye()`.
+- [x] The Server alone chooses the position. `RespawnIntent` stays fieldless,
       the Client sends no position, and the Client change is limited to showing
       any new feedback (ADR-0002, ADR-0008).
-- [ ] All distances are metres and the result holds at voxel sizes 1.0, 0.5 and
+- [x] All distances are metres and the result holds at voxel sizes 1.0, 0.5 and
       0.25 (ADR-0003); the player.rs tests already loop over these.
-- [ ] Respawn still resets `velocity_y`, `intent`, `grounded` and `crouching`,
+- [x] Respawn still resets `velocity_y`, `intent`, `grounded` and `crouching`,
       and a respawn after the fix is followed by a normal `PoseCorrection`.
-- [ ] ADR-0008 and `docs/world-persistence.md` (respawn point wording) are
+- [x] ADR-0008 and `docs/world-persistence.md` (respawn point wording) are
       updated if the chosen option changes what they state.
 
 ## Tests

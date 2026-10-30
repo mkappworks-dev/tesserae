@@ -33,8 +33,11 @@ checks policy while advancing an existing body, so a forbidden mode freezes.
 against the Server Eye with `EDIT_ORIGIN_BOUND_M`, and only the part of the ray
 within `EDIT_REACH_M` of the Eye is traced (see Third-person view below). A
 queued Edit keeps its arrival decision. Respawn is a Server request that clears
-movement, vertical velocity and grounded state. Changing view cannot move the
-body.
+movement, vertical velocity and grounded state. A physics respawn lifts the body
+in 0.25 m steps, up to 16 m, to the first clear standing position over the spawn
+point; with none (solid or unloaded terrain) it is refused with feedback and the
+Eye stays. That is a placement the Server chooses on request, not relocation of
+a body already embedded. Changing view cannot move the body.
 
 ## Persistence and presentation
 
