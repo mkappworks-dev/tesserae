@@ -540,6 +540,7 @@ pub(super) fn ghosts(
     mut cells: Query<
         (
             &mut Transform,
+            &mut Mesh3d,
             &mut MeshMaterial3d<StandardMaterial>,
             &mut Visibility,
         ),
@@ -605,11 +606,18 @@ pub(super) fn ghosts(
             Visibility::Hidden,
         ));
     }
-    for (index, (mut transform, mut material, mut visibility)) in cells.iter_mut().enumerate() {
+    for (index, (mut transform, mut mesh, mut material, mut visibility)) in
+        cells.iter_mut().enumerate()
+    {
         match wanted.get(index) {
             Some(&(at, tint)) => {
                 transform.translation = at;
                 transform.scale = Vec3::splat(world.voxel_size);
+                // A ghost outlives the block it was made for, so it takes the
+                // current mesh as well as the current look.
+                if mesh.0 != model.mesh {
+                    mesh.0 = model.mesh.clone();
+                }
                 let handle = &model.materials[tint];
                 if material.0 != *handle {
                     material.0 = handle.clone();
@@ -1448,6 +1456,55 @@ mod tests {
             shown[0].2, model.materials[0],
             "the placeable look is the ghost's"
         );
+    }
+
+    #[test]
+    fn every_ghost_takes_the_new_block_when_the_held_shape_or_material_changes() {
+        let mut app = ghost_app();
+        let cells: Vec<_> = (0..6)
+            .map(|x| (Vec3::new(x as f32, 0.0, 0.0), CellState::Placeable))
+            .collect();
+        answer_with(&mut app, &cells);
+        ghosts_now(&mut app);
+        let meshes = |app: &mut App| -> Vec<Handle<Mesh>> {
+            app.world_mut()
+                .query_filtered::<&Mesh3d, With<LayoutGhost>>()
+                .iter(app.world())
+                .map(|m| m.0.clone())
+                .collect()
+        };
+        let before = app.world().resource::<GhostModel>().mesh.clone();
+        assert!(meshes(&mut app).iter().all(|m| *m == before));
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        for held in [
+            Holding::solid(rock, tesserae_core::SHAPE_STAIR),
+            Holding::solid(rock, tesserae_core::SHAPE_SLAB),
+        ] {
+            app.world_mut().resource_mut::<Hotbar>().slots[0] = held;
+            answer_with(&mut app, &cells);
+            ghosts_now(&mut app);
+            let now = app.world().resource::<GhostModel>().mesh.clone();
+            assert_ne!(now, before, "a new shape is a new mesh");
+            let shown = meshes(&mut app);
+            assert_eq!(shown.len(), 6);
+            assert!(
+                shown.iter().all(|m| *m == now),
+                "every ghost, not only new ones"
+            );
+        }
+        // And a turn of the held stair, which is the same shape facing another way.
+        let Holding::Solid { orientation, .. } = app.world().resource::<Hotbar>().slots[0] else {
+            panic!("a solid");
+        };
+        app.world_mut().resource_mut::<Hotbar>().slots[0] = Holding::Solid {
+            material: rock,
+            shape: tesserae_core::SHAPE_STAIR,
+            orientation: orientation.turned(),
+        };
+        answer_with(&mut app, &cells);
+        ghosts_now(&mut app);
+        let now = app.world().resource::<GhostModel>().mesh.clone();
+        assert!(meshes(&mut app).iter().all(|m| *m == now));
     }
 
     #[test]
