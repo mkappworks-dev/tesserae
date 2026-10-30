@@ -38,6 +38,7 @@ pub(super) struct LayoutMenu {
 
 impl LayoutMenu {
     /// Open from the first frame, for a capture of the panel.
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub(super) fn opened() -> Self {
         Self {
             open: true,

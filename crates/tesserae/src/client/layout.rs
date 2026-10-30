@@ -157,6 +157,7 @@ impl LayoutMode {
         self.dragging = false;
     }
     /// A mode already on, for a capture that shows the Layout menu.
+    #[cfg(any(test, feature = "dev", feature = "profiling"))]
     pub(super) fn turned_on() -> Self {
         Self {
             on: true,
