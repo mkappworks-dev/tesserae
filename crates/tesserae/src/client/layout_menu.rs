@@ -18,7 +18,7 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::layout::MAX_LAYOUT_VOXELS;
 
-const CARD_WIDTH: f32 = 380.0;
+const CARD_WIDTH: f32 = 370.0;
 const STATUS_WIDTH: f32 = 320.0;
 
 #[derive(Resource, Default)]
@@ -26,6 +26,8 @@ pub(super) struct LayoutMenu {
     pub(super) open: bool,
     /// Digits typed into an axis count, and which axis.
     typed: Option<(usize, String)>,
+    /// The Gap row is unfolded.
+    gap_open: bool,
     notice: String,
     dirty: bool,
     /// What the panel is now: the menu, the status card, or nothing.
@@ -50,9 +52,11 @@ enum Control {
     Kind(Kind),
     Form(Form),
     Direction(usize, Direction),
-    Type(usize),
+    /// Unfolds one axis and makes it the one the count keys act on.
+    Axis(usize),
     Count(usize, i32),
     Gap(i32),
+    GapToggle,
     Close,
 }
 
@@ -63,14 +67,23 @@ struct Panel;
 #[derive(Component)]
 struct Card;
 
-/// The lines that say what the layout is, what the aim would lay and which
-/// keys do what.
+/// The lines that say what the aim would lay, what to do next and which keys do
+/// what.
 #[derive(Component, Clone, Copy)]
 enum Info {
-    Head,
+    Count,
+    Size,
     Body,
     Hint,
 }
+
+/// A step of point to point on the progress line: A, B or C.
+#[derive(Component)]
+struct StepDot(usize);
+#[derive(Component)]
+struct StepLetter(usize);
+#[derive(Component)]
+struct StepLine(usize);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<LayoutMenu>()
@@ -178,10 +191,11 @@ fn activate(
             mode.active = mode.active.min(form.axes() - 1);
         }
         Control::Direction(axis, direction) => layout.set_direction(axis, direction),
-        Control::Type(axis) => {
+        Control::Axis(axis) => {
             mode.active = axis;
             menu.typed = None;
         }
+        Control::GapToggle => menu.gap_open = !menu.gap_open,
         Control::Count(axis, by) => {
             mode.active = axis;
             menu.typed = None;
@@ -309,7 +323,7 @@ fn weighted(size: f32, weight: u16) -> TextFont {
 fn section(parent: &mut ChildSpawnerCommands, title: &str) {
     parent
         .spawn(Node {
-            margin: UiRect::top(Val::Px(6.0)),
+            margin: UiRect::top(Val::Px(8.0)),
             ..default()
         })
         .with_children(|p| ui::eyebrow(p, title));
@@ -393,6 +407,93 @@ fn button(parent: &mut ChildSpawnerCommands, label: &str, control: Control, sele
     ui::compact_button(parent, label, control, selected, 28.0, 11.0);
 }
 
+/// A button of fixed width, for the compass and its neighbours.
+fn tile(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    control: Control,
+    selected: bool,
+    width: f32,
+) {
+    parent
+        .spawn((
+            bevy::ui_widgets::Button,
+            bevy::input_focus::tab_navigation::TabIndex(0),
+            control,
+            ui::Styled {
+                selected,
+                tab: false,
+                primary: false,
+            },
+            Node {
+                width: Val::Px(width),
+                height: Val::Px(28.0),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(ui::CARD),
+            BorderColor::all(if selected { ui::LEAF } else { ui::EDGE }),
+        ))
+        .with_child((
+            Text::new(label),
+            ui::font(11.0),
+            TextColor(if selected { ui::LEAF } else { ui::INK }),
+            Pickable::IGNORE,
+        ));
+}
+
+/// A row that is itself the button: it unfolds what is under it.
+fn fold_row(
+    parent: &mut ChildSpawnerCommands,
+    control: Control,
+    left: impl FnOnce(&mut ChildSpawnerCommands),
+    right: &str,
+) {
+    parent
+        .spawn((
+            bevy::ui_widgets::Button,
+            bevy::input_focus::tab_navigation::TabIndex(0),
+            control,
+            ui::Styled {
+                selected: false,
+                tab: false,
+                primary: false,
+            },
+            Node {
+                width: Val::Percent(100.0),
+                min_height: Val::Px(34.0),
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(6.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            BorderColor::all(ui::EDGE),
+        ))
+        .with_children(|row| {
+            row.spawn((
+                Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(7.0),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
+            .with_children(left);
+            row.spawn((
+                Text::new(right),
+                ui::font(11.0),
+                TextColor(ui::MUTED),
+                Pickable::IGNORE,
+            ));
+        });
+}
+
 /// A minus, the value and a plus.
 fn stepper(parent: &mut ChildSpawnerCommands, less: Control, value: String, more: Control) {
     parent
@@ -405,7 +506,7 @@ fn stepper(parent: &mut ChildSpawnerCommands, less: Control, value: String, more
             choice(stepper, "−", less, false);
             stepper
                 .spawn(Node {
-                    min_width: Val::Px(30.0),
+                    min_width: Val::Px(28.0),
                     justify_content: JustifyContent::Center,
                     ..default()
                 })
@@ -419,66 +520,6 @@ fn stepper(parent: &mut ChildSpawnerCommands, less: Control, value: String, more
         });
 }
 
-/// A label on the left with what it is set to, and its controls on the right.
-fn field(
-    parent: &mut ChildSpawnerCommands,
-    label: &str,
-    value: &str,
-    controls: impl FnOnce(&mut ChildSpawnerCommands),
-) {
-    parent
-        .spawn(Node {
-            justify_content: JustifyContent::SpaceBetween,
-            align_items: AlignItems::Center,
-            column_gap: Val::Px(8.0),
-            ..default()
-        })
-        .with_children(|row| {
-            row.spawn(Node {
-                flex_direction: FlexDirection::Column,
-                ..default()
-            })
-            .with_children(|text| {
-                text.spawn((
-                    Text::new(label),
-                    weighted(12.0, 600),
-                    TextColor(ui::INK),
-                    Pickable::IGNORE,
-                ));
-                text.spawn((
-                    Text::new(value),
-                    ui::font(11.0),
-                    TextColor(ui::MUTED),
-                    Pickable::IGNORE,
-                ));
-            });
-            row.spawn(Node {
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(8.0),
-                ..default()
-            })
-            .with_children(controls);
-        });
-}
-
-/// A recessed box grouping one axis's controls.
-fn inset(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
-    parent
-        .spawn((
-            Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(8.0),
-                padding: UiRect::all(Val::Px(10.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.025)),
-            BorderColor::all(ui::EDGE),
-        ))
-        .with_children(children);
-}
-
 fn note(parent: &mut ChildSpawnerCommands, text: &str) {
     parent.spawn((
         Text::new(text),
@@ -489,61 +530,347 @@ fn note(parent: &mut ChildSpawnerCommands, text: &str) {
     ));
 }
 
-/// What the layout is, what the aim would lay and which keys do what, set off
-/// by a leaf-coloured edge.
-fn info_panel(parent: &mut ChildSpawnerCommands) {
+/// The colour an axis wears: X amber, up and down leaf, Z blue.
+fn axis_colour(direction: Direction) -> Color {
+    use tesserae_core::layout::Dim;
+    match direction.dim() {
+        Dim::X => Color::srgb(1.0, 0.70, 0.30),
+        Dim::Y => ui::LEAF,
+        Dim::Z => Color::srgb(0.42, 0.66, 1.0),
+    }
+}
+
+fn dot(parent: &mut ChildSpawnerCommands, colour: Color) {
+    parent.spawn((
+        Node {
+            width: Val::Px(8.0),
+            height: Val::Px(8.0),
+            border_radius: BorderRadius::all(Val::Px(4.0)),
+            ..default()
+        },
+        BackgroundColor(colour),
+        Pickable::IGNORE,
+    ));
+}
+
+/// One axis, folded to a row or open to its compass.
+fn axis_block(
+    card: &mut ChildSpawnerCommands,
+    layout: &LayoutPreferences,
+    axis: usize,
+    open: bool,
+) {
+    let direction = layout.directions[axis];
+    let name = format!("{}  {}", axis + 1, direction.label());
+    if !open {
+        fold_row(
+            card,
+            Control::Axis(axis),
+            |left| {
+                dot(left, axis_colour(direction));
+                left.spawn((
+                    Text::new(name),
+                    weighted(12.0, 600),
+                    TextColor(ui::INK),
+                    Pickable::IGNORE,
+                ));
+            },
+            &format!("{}  >", layout.counts[axis]),
+        );
+        return;
+    }
+    card.spawn((
+        Node {
+            width: Val::Percent(100.0),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(10.0)),
+            row_gap: Val::Px(10.0),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(
+            73.0 / 255.0,
+            178.0 / 255.0,
+            98.0 / 255.0,
+            0.05,
+        )),
+        BorderColor::all(Color::srgba(73.0 / 255.0, 178.0 / 255.0, 98.0 / 255.0, 0.4)),
+    ))
+    .with_children(|block| {
+        block
+            .spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|head| {
+                head.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(7.0),
+                    ..default()
+                })
+                .with_children(|left| {
+                    dot(left, axis_colour(direction));
+                    left.spawn((
+                        Text::new(name),
+                        weighted(12.0, 600),
+                        TextColor(ui::INK),
+                        Pickable::IGNORE,
+                    ));
+                });
+                stepper(
+                    head,
+                    Control::Count(axis, -1),
+                    layout.counts[axis].to_string(),
+                    Control::Count(axis, 1),
+                );
+            });
+        block
+            .spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::FlexStart,
+                ..default()
+            })
+            .with_children(|pad| {
+                compass(pad, axis, direction);
+                // Up and down line up with the compass's top and bottom rows,
+                // in the corner the compass is not.
+                pad.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::SpaceBetween,
+                    height: Val::Px(COMPASS_HEIGHT),
+                    ..default()
+                })
+                .with_children(|column| {
+                    for vertical in [Direction::Up, Direction::Down] {
+                        tile(
+                            column,
+                            vertical.label(),
+                            Control::Direction(axis, vertical),
+                            direction == vertical,
+                            72.0,
+                        );
+                    }
+                });
+            });
+    });
+}
+
+const CELL: f32 = 28.0;
+const COMPASS_GAP: f32 = 3.0;
+const COMPASS_HEIGHT: f32 = CELL * 3.0 + COMPASS_GAP * 2.0;
+
+/// The four horizontal ways as a compass: −Z above, +Z below, −X and +X beside.
+fn compass(parent: &mut ChildSpawnerCommands, axis: usize, direction: Direction) {
+    let cell = |row: &mut ChildSpawnerCommands, which: Option<Direction>| match which {
+        Some(way) => tile(
+            row,
+            way.label(),
+            Control::Direction(axis, way),
+            direction == way,
+            CELL,
+        ),
+        None => {
+            row.spawn(Node {
+                width: Val::Px(CELL),
+                height: Val::Px(CELL),
+                ..default()
+            });
+        }
+    };
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(COMPASS_GAP),
+            ..default()
+        })
+        .with_children(|compass| {
+            for ways in [
+                [None, Some(Direction::NegZ), None],
+                [Some(Direction::NegX), None, Some(Direction::PosX)],
+                [None, Some(Direction::PosZ), None],
+            ] {
+                compass
+                    .spawn(Node {
+                        column_gap: Val::Px(COMPASS_GAP),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        for way in ways {
+                            cell(row, way);
+                        }
+                    });
+            }
+        });
+}
+
+/// The answer, first: how many Voxels, how big, and what to do next, with the
+/// A, B, C line under it in point to point.
+fn status_block(parent: &mut ChildSpawnerCommands, between: bool) {
     parent
         .spawn((
             Node {
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(4.0),
-                margin: UiRect::top(Val::Px(6.0)),
-                padding: UiRect {
-                    left: Val::Px(12.0),
-                    right: Val::Px(10.0),
-                    top: Val::Px(9.0),
-                    bottom: Val::Px(9.0),
-                },
-                border: UiRect::left(Val::Px(3.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
+                margin: UiRect::top(Val::Px(10.0)),
+                padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
             BackgroundColor(Color::srgba(
                 73.0 / 255.0,
                 178.0 / 255.0,
                 98.0 / 255.0,
-                0.07,
+                0.08,
             )),
-            BorderColor::all(ui::LEAF),
         ))
-        .with_children(|panel| {
-            for (part, font, color) in [
-                (Info::Head, weighted(13.0, 650), ui::LEAF),
+        .with_children(|block| {
+            block
+                .spawn(Node {
+                    align_items: AlignItems::Baseline,
+                    column_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|line| {
+                    line.spawn((
+                        Info::Count,
+                        Text::new("0"),
+                        weighted(30.0, 700),
+                        TextColor(ui::LEAF),
+                        Pickable::IGNORE,
+                    ));
+                    line.spawn((
+                        Text::new("Voxels"),
+                        weighted(13.0, 600),
+                        TextColor(ui::INK),
+                        Pickable::IGNORE,
+                    ));
+                });
+            for (part, font, colour) in [
+                (Info::Size, ui::font(12.0), ui::MUTED),
                 (Info::Body, ui::font(12.0), ui::INK),
-                (Info::Hint, ui::font(10.5), ui::MUTED),
             ] {
-                panel.spawn((
+                if part_is_body(&part) && between {
+                    steps(block);
+                }
+                block.spawn((
                     part,
                     Text::new(""),
                     font,
                     bevy::text::LineHeight::RelativeToFont(1.5),
-                    TextColor(color),
+                    TextColor(colour),
                     Pickable::IGNORE,
                 ));
             }
         });
 }
 
-fn count_description(layout: &LayoutPreferences, typed: Option<&str>) -> String {
-    let all = format!(
-        "{} Voxels in all. Most is {MAX_LAYOUT_VOXELS}.",
-        layout.total(layout.counts)
-    );
-    match typed {
-        Some(digits) => format!("Typing {digits}_ for this axis. {all}"),
-        None => all,
-    }
+fn part_is_body(part: &Info) -> bool {
+    matches!(part, Info::Body)
 }
+
+/// A, B and C joined by lines that fill in as the corners are picked.
+fn steps(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn(Node {
+            align_items: AlignItems::Center,
+            margin: UiRect::axes(Val::Px(0.0), Val::Px(8.0)),
+            ..default()
+        })
+        .with_children(|line| {
+            for (i, (letter, caption)) in [("A", "set"), ("B", "plane"), ("C", "depth")]
+                .into_iter()
+                .enumerate()
+            {
+                line.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    align_items: AlignItems::Center,
+                    row_gap: Val::Px(3.0),
+                    ..default()
+                })
+                .with_children(|step| {
+                    step.spawn((
+                        StepDot(i),
+                        Node {
+                            width: Val::Px(22.0),
+                            height: Val::Px(22.0),
+                            border: UiRect::all(Val::Px(2.0)),
+                            border_radius: BorderRadius::all(Val::Px(11.0)),
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::NONE),
+                        BorderColor::all(ui::MUTED),
+                        Pickable::IGNORE,
+                    ))
+                    .with_child((
+                        StepLetter(i),
+                        Text::new(letter),
+                        weighted(11.0, 700),
+                        TextColor(ui::MUTED),
+                        Pickable::IGNORE,
+                    ));
+                    step.spawn((
+                        Text::new(caption),
+                        ui::font(9.5),
+                        TextColor(ui::MUTED),
+                        Pickable::IGNORE,
+                    ));
+                });
+                if i < 2 {
+                    line.spawn((
+                        StepLine(i),
+                        Node {
+                            flex_grow: 1.0,
+                            height: Val::Px(2.0),
+                            margin: UiRect::bottom(Val::Px(14.0)),
+                            ..default()
+                        },
+                        BackgroundColor(ui::EDGE),
+                        Pickable::IGNORE,
+                    ));
+                }
+            }
+        });
+}
+
+/// The keys, under a rule, at the foot of the card.
+fn footer(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn(Node {
+            margin: UiRect::top(Val::Px(8.0)),
+            padding: UiRect::top(Val::Px(10.0)),
+            border: UiRect::top(Val::Px(1.0)),
+            ..default()
+        })
+        .with_children(|foot| {
+            foot.spawn((
+                Info::Hint,
+                Text::new(""),
+                ui::font(10.5),
+                bevy::text::LineHeight::RelativeToFont(1.5),
+                TextColor(ui::MUTED),
+                Pickable::IGNORE,
+            ));
+        });
+}
+
+/// The parts of the A, B, C line that change colour as corners are picked.
+type Steps<'w, 's> = (
+    Query<
+        'w,
+        's,
+        (
+            &'static StepDot,
+            &'static mut BackgroundColor,
+            &'static mut BorderColor,
+        ),
+    >,
+    Query<'w, 's, (&'static StepLetter, &'static mut TextColor)>,
+    Query<'w, 's, (&'static StepLine, &'static mut BackgroundColor), Without<StepDot>>,
+);
 
 /// What each frame says about the layout, wherever the card is.
 #[allow(clippy::too_many_arguments)]
@@ -553,9 +880,14 @@ fn update_info(
     hotbar: Res<super::edit::Hotbar>,
     camera: Single<&GlobalTransform, With<super::camera::FlyCamera>>,
     preview: Res<super::layout::Preview>,
-    (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
+    (bindings, labels, world): (
+        Res<super::actions::Bindings>,
+        Res<super::actions::Labels>,
+        Res<WorldSettings>,
+    ),
     time: Res<Time>,
     mut text: Query<(&Info, &mut Text)>,
+    (mut dots, mut letters, mut lines): Steps,
 ) {
     let said = super::layout::summary(
         &mode,
@@ -565,17 +897,39 @@ fn update_info(
         &preview,
         &bindings,
         &labels,
-        time.elapsed_secs_f64(),
+        (time.elapsed_secs_f64(), world.voxel_size),
     );
     for (part, mut text) in &mut text {
         let line = match part {
-            Info::Head => &said.head,
-            Info::Body => &said.body,
-            Info::Hint => &said.hint,
+            Info::Count => said.count.unwrap_or(0).to_string(),
+            Info::Size => said.size.clone(),
+            Info::Body => said.body.clone(),
+            Info::Hint => said.hint.clone(),
         };
-        if text.0 != *line {
-            text.0 = line.clone();
+        if text.0 != line {
+            text.0 = line;
         }
+    }
+    let picked = mode.points.len();
+    for (StepDot(i), mut fill, mut edge) in &mut dots {
+        let (done, active) = (picked > *i, picked == *i);
+        let colour = if done || active { ui::LEAF } else { ui::MUTED };
+        fill.set_if_neq(BackgroundColor(if done { ui::LEAF } else { Color::NONE }));
+        edge.set_if_neq(BorderColor::all(colour));
+    }
+    for (StepLetter(i), mut colour) in &mut letters {
+        colour.set_if_neq(TextColor(match picked.cmp(i) {
+            std::cmp::Ordering::Greater => ui::BG,
+            std::cmp::Ordering::Equal => ui::LEAF,
+            std::cmp::Ordering::Less => ui::MUTED,
+        }));
+    }
+    for (StepLine(i), mut fill) in &mut lines {
+        fill.set_if_neq(BackgroundColor(if picked > *i + 1 {
+            ui::LEAF
+        } else {
+            ui::EDGE
+        }));
     }
 }
 
@@ -620,6 +974,7 @@ fn render(
         return;
     };
     let layout = &preferences.layout;
+    let between = layout.kind == Kind::Between;
     // A card as tall as its content, at the right edge and halfway down, so it
     // never covers the crosshair or the preview.
     commands
@@ -646,7 +1001,7 @@ fn render(
                         width: Val::Px(if open { CARD_WIDTH } else { STATUS_WIDTH }),
                         max_height: Val::Percent(92.0),
                         flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(8.0),
+                        row_gap: Val::Px(6.0),
                         padding: UiRect::all(Val::Px(18.0)),
                         border: UiRect::all(Val::Px(1.0)),
                         border_radius: BorderRadius::all(Val::Px(12.0)),
@@ -658,87 +1013,89 @@ fn render(
                 ))
                 .with_children(|card| {
                     header(card, open, layout.kind);
+                    status_block(card, between);
                     if !open {
-                        info_panel(card);
+                        footer(card);
                         return;
                     }
-                    section(card, "HOW");
-                    segmented(card, |r| {
-                        for (kind, name) in [
-                            (Kind::Directions, "Direction and count"),
-                            (Kind::Between, "Point to point"),
-                        ] {
-                            choice(r, name, Control::Kind(kind), layout.kind == kind);
-                        }
-                    });
-                    if layout.kind == Kind::Directions {
-                        section(card, "SHAPE");
-                        segmented(card, |r| {
-                            for (form, name) in [
-                                (Form::Line, "Line"),
-                                (Form::Rectangle, "Rectangle"),
-                                (Form::Box, "Box"),
+                    section(card, "HOW AND SHAPE");
+                    card.spawn(Node {
+                        column_gap: Val::Px(8.0),
+                        row_gap: Val::Px(6.0),
+                        flex_wrap: FlexWrap::Wrap,
+                        ..default()
+                    })
+                    .with_children(|choices| {
+                        segmented(choices, |r| {
+                            for (kind, name) in [
+                                (Kind::Directions, "Direction and count"),
+                                (Kind::Between, "Point to point"),
                             ] {
-                                choice(r, name, Control::Form(form), layout.form == form);
+                                choice(r, name, Control::Kind(kind), layout.kind == kind);
                             }
                         });
-                        for (axis, name) in ["First axis", "Second axis", "Third axis"]
-                            .into_iter()
-                            .enumerate()
-                            .take(layout.form.axes())
-                        {
-                            inset(card, |panel| {
-                                field(panel, name, layout.directions[axis].label(), |r| {
-                                    choice(r, "Type", Control::Type(axis), mode.active == axis);
-                                    stepper(
-                                        r,
-                                        Control::Count(axis, -1),
-                                        layout.counts[axis].to_string(),
-                                        Control::Count(axis, 1),
-                                    );
-                                });
-                                segmented(panel, |r| {
-                                    for direction in Direction::ALL {
-                                        choice(
-                                            r,
-                                            direction.label(),
-                                            Control::Direction(axis, direction),
-                                            layout.directions[axis] == direction,
-                                        );
-                                    }
-                                });
-                                let typed = menu
-                                    .typed
-                                    .as_ref()
-                                    .filter(|(typed_axis, _)| *typed_axis == axis)
-                                    .map(|(_, digits)| digits.as_str());
-                                note(panel, &count_description(layout, typed));
+                        if !between {
+                            segmented(choices, |r| {
+                                for (form, name) in [
+                                    (Form::Line, "Line"),
+                                    (Form::Rectangle, "Rect"),
+                                    (Form::Box, "Box"),
+                                ] {
+                                    choice(r, name, Control::Form(form), layout.form == form);
+                                }
                             });
                         }
+                    });
+                    if between {
+                        note(
+                            card,
+                            "Place A, then B for a flat rectangle between them, then C for \
+                             its depth, and C lays it. Hold Place on A and drag to B if you \
+                             like. C level with A keeps it flat. Each point must be within \
+                             reach.",
+                        );
                     } else {
-                        inset(card, |panel| {
-                            note(
-                                panel,
-                                "Place A, then B for a flat rectangle between them, \
-                                 then C for its depth, and C lays it. Hold Place on A \
-                                 and drag to B if you like. C level with A keeps it \
-                                 flat. Each point must be within reach.",
-                            );
-                        });
+                        section(card, "AXES");
+                        let active = mode.active.min(layout.form.axes() - 1);
+                        for axis in 0..layout.form.axes() {
+                            axis_block(card, layout, axis, axis == active);
+                        }
                     }
                     section(card, "GAP");
-                    field(
+                    fold_row(
                         card,
-                        "Between Voxels",
-                        &format!("{:.1} m", layout.gap as f32 * world.voxel_size),
-                        |r| {
-                            stepper(r, Control::Gap(-1), layout.gap.to_string(), Control::Gap(1));
+                        Control::GapToggle,
+                        |left| {
+                            left.spawn((
+                                Text::new(format!("{} Voxels", layout.gap)),
+                                weighted(12.0, 600),
+                                TextColor(ui::INK),
+                                Pickable::IGNORE,
+                            ));
+                            left.spawn((
+                                Text::new(format!(
+                                    "{:.1} m between",
+                                    layout.gap as f32 * world.voxel_size
+                                )),
+                                ui::font(11.0),
+                                TextColor(ui::MUTED),
+                                Pickable::IGNORE,
+                            ));
                         },
+                        if menu.gap_open { "^" } else { ">" },
                     );
+                    if menu.gap_open {
+                        stepper(
+                            card,
+                            Control::Gap(-1),
+                            layout.gap.to_string(),
+                            Control::Gap(1),
+                        );
+                    }
                     if !menu.notice.is_empty() {
                         ui::text(card, menu.notice.clone(), 11.0, ui::AMBER);
                     }
-                    info_panel(card);
+                    footer(card);
                 });
         });
     // The rebuilt panel keeps focus where it was, or starts at the top.
@@ -937,7 +1294,7 @@ mod tests {
         let mut app = app();
         open(&mut app);
         activate_control(&mut app, Control::Form(Form::Box));
-        activate_control(&mut app, Control::Type(2));
+        activate_control(&mut app, Control::Axis(2));
         assert_eq!(app.world().resource::<LayoutMode>().active, 2);
         activate_control(&mut app, Control::Form(Form::Line));
         assert_eq!(app.world().resource::<LayoutMode>().active, 0);
@@ -976,7 +1333,7 @@ mod tests {
     fn digits_type_a_count_into_the_active_axis_and_the_cap_refuses_a_big_one() {
         let mut app = app();
         open(&mut app);
-        activate_control(&mut app, Control::Type(0));
+        activate_control(&mut app, Control::Axis(0));
         let key = |app: &mut App, key| {
             app.world_mut()
                 .resource_mut::<ButtonInput<KeyCode>>()
@@ -1059,7 +1416,7 @@ mod tests {
         );
         assert_eq!(
             panels(&mut app),
-            (1, 3),
+            (1, 4),
             "but it still says what the aim does"
         );
         app.world_mut().resource_mut::<LayoutMode>().on = false;
@@ -1076,7 +1433,7 @@ mod tests {
         let mut app = render_app();
         open(&mut app);
         controls(&mut app);
-        assert_eq!(panels(&mut app), (1, 3));
+        assert_eq!(panels(&mut app), (1, 4));
     }
 
     #[test]
@@ -1088,17 +1445,20 @@ mod tests {
             .world_mut()
             .query_filtered::<(Entity, &Control), With<bevy::ui_widgets::Button>>()
             .iter(app.world())
-            .find(|(_, control)| **control == Control::Gap(1))
+            .find(|(_, control)| **control == Control::Count(0, 1))
             .map(|(entity, _)| entity)
             .unwrap();
         app.world_mut()
             .resource_mut::<InputFocus>()
             .set(target, FocusCause::Auto);
-        activate_control(&mut app, Control::Gap(1));
+        activate_control(&mut app, Control::Count(0, 1));
         controls(&mut app);
         let focused = app.world().resource::<InputFocus>().get().unwrap();
         assert_ne!(focused, target, "the panel was rebuilt");
-        assert_eq!(app.world().get::<Control>(focused), Some(&Control::Gap(1)));
+        assert_eq!(
+            app.world().get::<Control>(focused),
+            Some(&Control::Count(0, 1))
+        );
         press(&mut app, KeyCode::KeyL);
         assert!(controls(&mut app).is_empty(), "closed, the controls go");
     }
@@ -1145,6 +1505,89 @@ mod tests {
     }
 
     #[test]
+    fn only_the_active_axis_is_open_and_choosing_another_folds_the_first() {
+        let mut app = render_app();
+        open(&mut app);
+        activate_control(&mut app, Control::Form(Form::Box));
+        let shown = controls(&mut app);
+        for open_axis in [
+            Control::Direction(0, Direction::NegZ),
+            Control::Direction(0, Direction::PosX),
+            Control::Direction(0, Direction::Up),
+            Control::Count(0, 1),
+        ] {
+            assert!(shown.contains(&open_axis), "{open_axis:?}");
+        }
+        assert!(
+            !shown.contains(&Control::Count(1, 1)),
+            "the second is folded"
+        );
+        assert!(shown.contains(&Control::Axis(1)) && shown.contains(&Control::Axis(2)));
+        assert!(
+            !shown.contains(&Control::Axis(0)),
+            "the open one is not a row"
+        );
+        activate_control(&mut app, Control::Axis(1));
+        let shown = controls(&mut app);
+        assert_eq!(app.world().resource::<LayoutMode>().active, 1);
+        assert!(shown.contains(&Control::Count(1, 1)) && shown.contains(&Control::Axis(0)));
+        assert!(
+            !shown.contains(&Control::Count(0, 1)),
+            "the first folded away"
+        );
+    }
+
+    #[test]
+    fn the_gap_is_folded_until_asked_for() {
+        let mut app = render_app();
+        open(&mut app);
+        let shown = controls(&mut app);
+        assert!(shown.contains(&Control::GapToggle));
+        assert!(!shown.contains(&Control::Gap(1)));
+        activate_control(&mut app, Control::GapToggle);
+        let shown = controls(&mut app);
+        assert!(shown.contains(&Control::Gap(1)) && shown.contains(&Control::Gap(-1)));
+        activate_control(&mut app, Control::GapToggle);
+        assert!(!controls(&mut app).contains(&Control::Gap(1)));
+    }
+
+    #[test]
+    fn the_a_b_c_line_fills_in_as_the_corners_are_picked() {
+        let mut app = render_app();
+        app.init_resource::<super::super::actions::Bindings>()
+            .init_resource::<super::super::layout::Preview>()
+            .init_resource::<Time>();
+        app.world_mut().spawn((
+            super::super::camera::FlyCamera::default(),
+            GlobalTransform::IDENTITY,
+        ));
+        app.world_mut().resource_mut::<Preferences>().layout.kind = Kind::Between;
+        open(&mut app);
+        controls(&mut app);
+        let fills = |app: &mut App| -> Vec<bool> {
+            app.world_mut().run_system_once(update_info).unwrap();
+            let mut dots = app.world_mut().query::<(&StepDot, &BackgroundColor)>();
+            let mut found: Vec<_> = dots
+                .iter(app.world())
+                .map(|(StepDot(i), fill)| (*i, fill.0 == ui::LEAF))
+                .collect();
+            found.sort();
+            found.into_iter().map(|(_, filled)| filled).collect()
+        };
+        assert_eq!(fills(&mut app), [false, false, false]);
+        app.world_mut()
+            .resource_mut::<LayoutMode>()
+            .points
+            .push([0; 3]);
+        assert_eq!(fills(&mut app), [true, false, false]);
+        app.world_mut()
+            .resource_mut::<LayoutMode>()
+            .points
+            .push([1; 3]);
+        assert_eq!(fills(&mut app), [true, true, false]);
+    }
+
+    #[test]
     fn the_panel_offers_every_control_for_the_shape_and_hides_those_the_mode_does_not_use() {
         let mut app = render_app();
         open(&mut app);
@@ -1157,11 +1600,9 @@ mod tests {
             Control::Form(Form::Box),
             Control::Direction(0, Direction::PosX),
             Control::Direction(0, Direction::Down),
-            Control::Type(0),
             Control::Count(0, -1),
             Control::Count(0, 1),
-            Control::Gap(-1),
-            Control::Gap(1),
+            Control::GapToggle,
             Control::Close,
         ] {
             assert!(shown.contains(&expected), "{expected:?}");
@@ -1183,7 +1624,7 @@ mod tests {
         );
         assert!(!shown.iter().any(|c| matches!(
             c,
-            Control::Direction(..) | Control::Count(..) | Control::Type(_)
+            Control::Direction(..) | Control::Count(..) | Control::Axis(_)
         )));
     }
 }

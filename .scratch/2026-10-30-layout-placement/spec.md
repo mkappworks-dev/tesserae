@@ -356,3 +356,25 @@ depth. This replaces the shapeless two-corner rule of amendment (6).
   share with the ground and each other flicker. The Client keeps more aim
   requests waiting for answers, so a fast turn does not drop them.
 
+## Amendment 2026-10-30 (8): the card, status first
+
+Settled from three mocked directions (a bottom bar, a side card with a
+direction pad, and a status-first card); the side card with the status block of
+the third was chosen.
+
+- The card opens with the answer: how many Voxels the aim would lay, their size
+  in Voxels and in metres, and what to do next. In point to point the A, B, C
+  line sits there and fills in as the corners are picked. The block has no
+  border, only a soft tint.
+- Direction and count shows one axis open at a time: its direction, a stepper,
+  a compass for the four horizontal ways and Up and Down in the right corner,
+  level with the compass's top and bottom rows. The other axes are one folded
+  row each, opened by choosing them. The open axis is the one the count keys
+  and typed digits act on; there is no "type a number" control.
+- Point to point shows no shape or axes, only its note, the way back and the
+  gap.
+- The gap is folded to one row until asked for.
+- The keys are one muted line at the foot, each named by its first binding.
+- The font has no arrows or triangles, so none are used; folded rows end in a
+  plain ">".
+

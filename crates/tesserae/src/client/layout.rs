@@ -80,14 +80,6 @@ pub(crate) enum Direction {
     NegZ,
 }
 impl Direction {
-    pub(super) const ALL: [Direction; 6] = [
-        Self::PosX,
-        Self::NegX,
-        Self::Up,
-        Self::Down,
-        Self::PosZ,
-        Self::NegZ,
-    ];
     pub(super) fn dim(self) -> Dim {
         match self {
             Self::PosX | Self::NegX => Dim::X,
@@ -676,6 +668,15 @@ fn span_counts(a: [i32; 3], b: [i32; 3], c: Option<[i32; 3]>) -> [u32; 3] {
     })
 }
 
+/// One line: the counts, then the same in metres.
+fn size_line(counts: [u32; 3], voxel_size: f32) -> String {
+    let metres = counts.map(|count| count as f32 * voxel_size);
+    format!(
+        "{} × {} × {} · {:.1} × {:.1} × {:.1} m",
+        counts[0], counts[1], counts[2], metres[0], metres[1], metres[2]
+    )
+}
+
 /// The span's size in Voxels and in metres at this World's Voxel size.
 fn size_text(counts: [u32; 3], voxel_size: f32) -> String {
     let metres = counts.map(|count| count as f32 * voxel_size);
@@ -807,15 +808,22 @@ fn tally(answer: &LayoutAnswer) -> [usize; 3] {
 /// What the menu and the status card say, in three parts that are set apart:
 /// the shape, the next step with what the aim would lay, and the keys.
 pub(super) struct Summary {
-    pub(super) head: String,
+    /// How many Voxels the aim would lay, once the Server has said.
+    pub(super) count: Option<usize>,
+    /// The span's size in Voxels and in metres.
+    pub(super) size: String,
     pub(super) body: String,
     pub(super) hint: String,
 }
 
+#[cfg(test)]
 impl Summary {
-    #[cfg(test)]
     pub(super) fn joined(&self) -> String {
-        format!("{}\n{}\n{}", self.head, self.body, self.hint)
+        let count = self.count.map_or("-".to_owned(), |count| count.to_string());
+        format!(
+            "{count} Voxels\n{}\n{}\n{}",
+            self.size, self.body, self.hint
+        )
     }
 }
 
@@ -828,18 +836,14 @@ pub(super) fn summary(
     preview: &Preview,
     bindings: &Bindings,
     labels: &Labels,
-    now: f64,
+    (now, voxel_size): (f64, f32),
 ) -> Summary {
-    let keys = |action| bindings.label(action, labels);
-    let between = layout.kind == Kind::Between;
-    let head = if between {
-        "Point to point".to_owned()
-    } else {
-        let axes: Vec<String> = (0..layout.form.axes())
-            .map(|i| format!("{} {}", layout.counts[i], layout.directions[i].label()))
-            .collect();
-        format!("{:?} · {}", layout.form, axes.join(" × "))
+    // The first binding only: a card has no room for every alternative.
+    let keys = |action| {
+        let all = bindings.label(action, labels);
+        all.split(" / ").next().unwrap_or_default().to_owned()
     };
+    let between = layout.kind == Kind::Between;
     let step = match mode.points.len() {
         _ if !between => None,
         0 => Some("Place sets point A"),
@@ -856,18 +860,38 @@ pub(super) fn summary(
         let [ok, far, blocked] = tally(answer);
         format!("{ok} will be placed, {far} out of reach, {blocked} blocked")
     };
+    let fresh =
+        current(mode, layout, hotbar, camera).and_then(|intent| preview.fresh(&intent, now));
+    let count = fresh
+        .filter(|answer| answer.refused.is_none())
+        .map(|answer| tally(answer)[0]);
+    let size = if between {
+        let c = mode.points.get(2).copied().or(mode.aimed);
+        match mode.points[..] {
+            [a] => mode.aimed.map(|b| span_counts(a, b, None)),
+            [a, b, ..] => Some(span_counts(a, b, c)),
+            [] => None,
+        }
+    } else {
+        let counts: [u32; 3] = std::array::from_fn(|i| {
+            if i < layout.form.axes() {
+                layout.counts[i]
+            } else {
+                1
+            }
+        });
+        Some(counts)
+    }
+    .map(|counts| size_line(counts, voxel_size))
+    .unwrap_or_default();
     let mut body = match held_voxel(hotbar) {
         None => "Hold a solid to lay it out".to_owned(),
-        Some(_) => {
-            let answer = current(mode, layout, hotbar, camera)
-                .and_then(|intent| preview.fresh(&intent, now));
-            match (answer, step, mode.points.is_empty()) {
-                (None, ..) => "Aim at a surface".to_owned(),
-                (Some(_), Some(step), true) => step.to_owned(),
-                (Some(answer), Some(step), false) => format!("{step}\n{}", tallied(answer)),
-                (Some(answer), None, _) => tallied(answer),
-            }
-        }
+        Some(_) => match (fresh, step, mode.points.is_empty()) {
+            (None, ..) => "Aim at a surface".to_owned(),
+            (Some(_), Some(step), true) => step.to_owned(),
+            (Some(answer), Some(step), false) => format!("{step}\n{}", tallied(answer)),
+            (Some(answer), None, _) => tallied(answer),
+        },
     };
     if mode.refused {
         body.push_str(&format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels"));
@@ -886,14 +910,19 @@ pub(super) fn summary(
         }
     } else {
         format!(
-            "{} place · {} cancel · {} / {} count{leave}",
+            "{} place · {} cancel · {} / {} or digits for the count{leave}",
             keys(Action::Place),
             keys(Action::Remove),
             keys(Action::LayoutMore),
             keys(Action::LayoutLess),
         )
     };
-    Summary { head, body, hint }
+    Summary {
+        count,
+        size,
+        body,
+        hint,
+    }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -1684,7 +1713,7 @@ mod tests {
             app.world().resource::<Preview>(),
             app.world().resource::<Bindings>(),
             &Labels::default(),
-            0.0,
+            (0.0, 1.0),
         )
         .joined()
     }
@@ -1703,15 +1732,17 @@ mod tests {
             ],
         );
         let said = say(&mut app);
-        assert!(said.contains("Line · 4 +X"), "{said}");
+        assert!(said.starts_with("2 Voxels\n4 × 1 × 1 · "), "{said}");
         assert!(
             said.contains("2 will be placed, 1 out of reach, 1 blocked"),
             "{said}"
         );
         assert!(said.contains("count"), "the keys for the counts");
         saved_mut(&mut app).layout.kind = Kind::Between;
+        // The aim is asked again in the new way.
+        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
         let said = say(&mut app);
-        assert!(said.starts_with("Point to point\n"), "{said}");
+        assert!(said.contains("Place sets point A"), "{said}");
         app.world_mut()
             .resource_mut::<LayoutMode>()
             .points
