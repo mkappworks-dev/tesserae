@@ -206,6 +206,8 @@ pub(super) struct LayoutMode {
     points: Vec<[i32; 3]>,
     /// The cell the aim picks now, from the Server's latest fresh answer.
     aimed: Option<[i32; 3]>,
+    /// Place went down on A and is still held: letting go on another cell sets B.
+    dragging: bool,
     commit: bool,
     was_grabbed: bool,
 }
@@ -272,6 +274,7 @@ pub(super) fn intercept(
     // the mode on: the Layout menu is one of them.
     if !ownership.gameplay() {
         mode.points.clear();
+        mode.dragging = false;
         return;
     }
     if !mode.on {
@@ -309,11 +312,24 @@ pub(super) fn intercept(
     if between {
         // Remove steps back a corner, then cancels.
         if actions.started(Action::Remove) {
+            mode.dragging = false;
             if mode.points.pop().is_none() {
                 mode.on = false;
             }
         } else if ready && actions.started(Action::Place) {
+            let first = mode.points.is_empty();
             pick_point(&mut mode, &layout);
+            mode.dragging = first && mode.points.len() == 1;
+        } else if mode.dragging && actions.state(Action::Place).released {
+            // Let go somewhere else and that is B; let go where it began and A
+            // alone is picked, the next press sets B.
+            mode.dragging = false;
+            if mode
+                .aimed
+                .is_some_and(|cell| mode.points.first() != Some(&cell))
+            {
+                pick_point(&mut mode, &layout);
+            }
         }
     } else if actions.started(Action::Remove) {
         mode.on = false;
@@ -607,6 +623,124 @@ pub(super) fn ghosts(
     }
 }
 
+/// A corner of a point-to-point layout, drawn in the world.
+#[derive(Clone, PartialEq, Debug)]
+struct Corner {
+    cell: [i32; 3],
+    /// What is written beside it.
+    label: String,
+    /// Not picked yet: the aim standing in for B.
+    provisional: bool,
+}
+
+/// How many Voxels a span covers along each axis, both corners included.
+fn span_counts(a: [i32; 3], b: [i32; 3]) -> [u32; 3] {
+    std::array::from_fn(|i| a[i].abs_diff(b[i]) + 1)
+}
+
+/// The span's size in Voxels and in metres at this World's Voxel size.
+fn size_text(counts: [u32; 3], voxel_size: f32) -> String {
+    let metres = counts.map(|count| count as f32 * voxel_size);
+    format!(
+        "{} × {} × {} Voxels\n{:.1} × {:.1} × {:.1} m",
+        counts[0], counts[1], counts[2], metres[0], metres[1], metres[2]
+    )
+}
+
+/// The corners to draw: A once picked, then B, or the aim standing in for B.
+fn corners_of(mode: &LayoutMode, layout: &LayoutPreferences, voxel_size: f32) -> Vec<Corner> {
+    if !mode.on || layout.kind != Kind::Between {
+        return Vec::new();
+    }
+    let Some(&a) = mode.points.first() else {
+        return Vec::new();
+    };
+    let mut handles = vec![Corner {
+        cell: a,
+        label: "A".to_owned(),
+        provisional: false,
+    }];
+    let picked = mode.points.get(1).copied();
+    if let Some(b) = picked.or(mode.aimed.filter(|cell| *cell != a)) {
+        handles.push(Corner {
+            cell: b,
+            label: format!("B\n{}", size_text(span_counts(a, b), voxel_size)),
+            provisional: picked.is_none(),
+        });
+    }
+    handles
+}
+
+#[derive(Component)]
+pub(super) struct HandleLabel;
+
+const HANDLE: Color = Color::srgb(1.0, 0.70, 0.30);
+const HANDLE_PROVISIONAL: Color = Color::srgb(0.95, 0.95, 0.95);
+
+/// Draws the picked corners as outlined cells with their names and the span's
+/// size beside them.
+pub(super) fn handles(
+    mut commands: Commands,
+    (mode, preferences): (Res<LayoutMode>, Res<Preferences>),
+    world: Res<WorldSettings>,
+    camera: Single<(&Camera, &GlobalTransform), With<FlyCamera>>,
+    mut labels: Query<(&mut Node, &mut Text, &mut Visibility), With<HandleLabel>>,
+    mut gizmos: Gizmos,
+) {
+    let handles = corners_of(&mode, &preferences.layout, world.voxel_size);
+    for _ in labels.iter().count()..2 {
+        commands.spawn((
+            HandleLabel,
+            Text::new(""),
+            super::menu_ui::font(12.0),
+            TextColor(HANDLE),
+            Node {
+                position_type: PositionType::Absolute,
+                padding: UiRect::all(Val::Px(4.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.8)),
+            Pickable::IGNORE,
+            Visibility::Hidden,
+        ));
+    }
+    let size = world.voxel_size;
+    let mut shown = handles.iter();
+    for (mut node, mut text, mut visibility) in &mut labels {
+        let Some(handle) = shown.next() else {
+            visibility.set_if_neq(Visibility::Hidden);
+            continue;
+        };
+        let centre = Vec3::from_array(handle.cell.map(|i| (i as f32 + 0.5) * size));
+        gizmos.primitive_3d(
+            &Cuboid::from_size(Vec3::splat(size * 1.04)),
+            Isometry3d::from_translation(centre),
+            if handle.provisional {
+                HANDLE_PROVISIONAL
+            } else {
+                HANDLE
+            },
+        );
+        match camera
+            .0
+            .world_to_viewport(camera.1, centre + Vec3::Y * size * 0.8)
+        {
+            Ok(at) => {
+                node.left = Val::Px(at.x);
+                node.top = Val::Px(at.y);
+                if text.0 != handle.label {
+                    text.0 = handle.label.clone();
+                }
+                visibility.set_if_neq(Visibility::Visible);
+            }
+            Err(_) => {
+                visibility.set_if_neq(Visibility::Hidden);
+            }
+        }
+    }
+}
+
 /// What a layout answer comes to, for the readout: placeable, out of reach,
 /// blocked.
 fn tally(answer: &LayoutAnswer) -> [usize; 3] {
@@ -683,11 +817,12 @@ pub(super) fn summary(
         }
     };
     let hint = if between {
-        format!(
-            "{} set a point · {} step back",
-            keys(Action::Place),
-            keys(Action::Remove)
-        )
+        let (place, remove) = (keys(Action::Place), keys(Action::Remove));
+        match mode.points.len() {
+            0 => format!("{place} set A, hold and drag to B · {remove} cancel"),
+            1 => format!("{place} set B, or let go on B · {remove} step back"),
+            _ => format!("{place} commit · {remove} step back"),
+        }
     } else {
         format!(
             "{} place · {} cancel · {} / {} count",
@@ -719,7 +854,7 @@ pub(super) fn plugin(app: &mut App) {
                     .after(super::input::resolve)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (send, report, receive, track_aim, ghosts)
+                (send, report, receive, track_aim, ghosts, handles)
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -1404,6 +1539,154 @@ mod tests {
         // The aim is asked again with a corner set.
         answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
         assert!(say(&mut app).contains("Place sets point B"));
+    }
+
+    fn press_place(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Right);
+        step(app);
+    }
+
+    fn release_place(app: &mut App) -> Vec<LayoutIntent> {
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Right);
+        let sent = step(app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        sent
+    }
+
+    #[test]
+    fn holding_place_on_a_and_letting_go_on_another_cell_sets_b() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([1, 0, 1]));
+        press_place(&mut app);
+        assert_eq!(points(&app), [[1, 0, 1]]);
+        assert!(mode(&app).dragging);
+        aim(&mut app, Some([5, 0, 4]));
+        assert!(release_place(&mut app).is_empty());
+        assert_eq!(points(&app), [[1, 0, 1], [5, 0, 4]]);
+        assert!(!mode(&app).dragging);
+        let intent = commit(&mut app);
+        assert_eq!(intent.layout.span.unwrap().b, Some([5, 0, 4]));
+    }
+
+    #[test]
+    fn a_press_that_never_moves_picks_a_alone_and_a_later_press_sets_b() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([1, 0, 1]));
+        press_place(&mut app);
+        release_place(&mut app);
+        assert_eq!(points(&app), [[1, 0, 1]], "let go where it began");
+        assert!(!mode(&app).dragging);
+        aim(&mut app, Some([4, 0, 1]));
+        click(&mut app, MouseButton::Right);
+        assert_eq!(
+            points(&app),
+            [[1, 0, 1], [4, 0, 1]],
+            "click, click still works"
+        );
+    }
+
+    #[test]
+    fn letting_go_on_nothing_or_past_the_cap_sets_no_b_and_remove_ends_the_drag() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([0, 0, 0]));
+        press_place(&mut app);
+        aim(&mut app, None);
+        release_place(&mut app);
+        assert_eq!(points(&app).len(), 1);
+        press_place(&mut app);
+        release_place(&mut app);
+        let mut app = app_with_a(&mut app);
+        aim(&mut app, Some([16, 0, 15]));
+        release_place(&mut app);
+        assert_eq!(points(&app).len(), 1, "17 by 16 passes the cap");
+        assert!(mode(&app).refused);
+    }
+
+    /// A fresh app with A picked at the origin and Place held.
+    fn app_with_a(_old: &mut App) -> App {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([0, 0, 0]));
+        press_place(&mut app);
+        app
+    }
+
+    #[test]
+    fn menus_and_focus_end_a_drag_and_never_set_b() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([0, 0, 0]));
+        press_place(&mut app);
+        app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Settings;
+        step(&mut app);
+        assert!(!mode(&app).dragging && points(&app).is_empty());
+    }
+
+    #[test]
+    fn the_handles_are_the_picked_corners_with_the_aim_standing_in_for_b() {
+        let layout = LayoutPreferences {
+            kind: Kind::Between,
+            ..default()
+        };
+        let mut mode = LayoutMode::turned_on();
+        assert!(corners_of(&mode, &layout, 1.0).is_empty(), "nothing picked");
+        mode.points.push([0, 0, 0]);
+        mode.aimed = Some([4, 2, 3]);
+        let shown = corners_of(&mode, &layout, 0.5);
+        assert_eq!(shown.len(), 2);
+        assert_eq!((shown[0].cell, shown[0].provisional), ([0, 0, 0], false));
+        assert_eq!((shown[1].cell, shown[1].provisional), ([4, 2, 3], true));
+        assert!(
+            shown[1].label.starts_with("B\n5 × 3 × 4 Voxels"),
+            "{}",
+            shown[1].label
+        );
+        assert!(
+            shown[1].label.ends_with("2.5 × 1.5 × 2.0 m"),
+            "{}",
+            shown[1].label
+        );
+        mode.points.push([2, 0, 0]);
+        let shown = corners_of(&mode, &layout, 1.0);
+        assert!(!shown[1].provisional);
+        assert_eq!(shown[1].cell, [2, 0, 0]);
+        let directions = LayoutPreferences::default();
+        assert!(corners_of(&mode, &directions, 1.0).is_empty());
+        mode.on = false;
+        assert!(corners_of(&mode, &layout, 1.0).is_empty());
+    }
+
+    #[test]
+    fn the_prompts_name_the_keys_for_the_current_step() {
+        let mut app = ghost_app();
+        saved_mut(&mut app).layout.kind = Kind::Between;
+        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
+        assert!(say(&mut app).contains("set A, hold and drag to B"));
+        app.world_mut()
+            .resource_mut::<LayoutMode>()
+            .points
+            .push([0; 3]);
+        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
+        assert!(say(&mut app).contains("set B, or let go on B"));
+        app.world_mut()
+            .resource_mut::<LayoutMode>()
+            .points
+            .push([1; 3]);
+        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
+        let said = say(&mut app);
+        assert!(
+            said.contains("commit") && said.contains("step back"),
+            "{said}"
+        );
     }
 
     #[test]
