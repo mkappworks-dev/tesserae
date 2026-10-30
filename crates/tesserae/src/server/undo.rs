@@ -13,6 +13,9 @@ use tesserae_mods::{EditEvent, EditKind};
 
 const LIMIT: usize = 128;
 const REQUEST_LIMIT: usize = 16;
+/// Voxels the journal holds across all groups, so layouts cannot make 128
+/// entries cost 128 times 256 records.
+const RECORDED_LIMIT: usize = 1024;
 
 #[derive(Message, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HistoryAction {
@@ -30,10 +33,13 @@ pub(super) struct Entry {
     pub after: Occupants,
     pub event: EditEvent,
 }
+/// The Voxels one Edit or one layout changed, undone and redone together.
+type Group = Vec<Entry>;
+
 #[derive(Resource, Default)]
 pub(super) struct Journal {
-    undo: VecDeque<Entry>,
-    redo: VecDeque<Entry>,
+    undo: VecDeque<Group>,
+    redo: VecDeque<Group>,
     requests: VecDeque<HistoryAction>,
 }
 impl Journal {
@@ -47,13 +53,22 @@ impl Journal {
     }
 
     pub(super) fn record(&mut self, entry: Entry) {
-        if entry.before == entry.after {
+        self.record_group(vec![entry]);
+    }
+
+    pub(super) fn record_group(&mut self, mut group: Group) {
+        group.retain(|entry| entry.before != entry.after);
+        if group.is_empty() {
             return;
         }
         if self.undo.len() == LIMIT {
             self.undo.pop_front();
         }
-        self.undo.push_back(entry);
+        self.undo.push_back(group);
+        while self.undo.iter().map(Vec::len).sum::<usize>() > RECORDED_LIMIT && self.undo.len() > 1
+        {
+            self.undo.pop_front();
+        }
         self.redo.clear();
     }
 }
@@ -84,12 +99,12 @@ pub(super) fn apply(
     let Some(action) = journal.requests.pop_front() else {
         return;
     };
-    let entry = match action {
+    let group = match action {
         HistoryAction::Undo => journal.undo.back(),
         HistoryAction::Redo => journal.redo.back(),
     }
-    .copied();
-    let Some(entry) = entry else {
+    .cloned();
+    let Some(group) = group else {
         rejected.write(EditRejected {
             reason: if action == HistoryAction::Undo {
                 RejectReason::NoUndo
@@ -102,21 +117,28 @@ pub(super) fn apply(
     let result = if !pending.is_empty() {
         Err(RejectReason::Busy)
     } else {
-        restore(&mut store, &mut meshes, &tables, entry, action)
+        restore(&mut store, &mut meshes, &tables, &group, action)
     };
     match result {
         Ok(()) => {
-            let mut event = entry.event;
+            // The Mods hear the changes in the order they were made, or in
+            // reverse when they are taken back.
+            let mut events: Vec<EditEvent> = group.iter().map(|entry| entry.event).collect();
             if action == HistoryAction::Undo {
-                std::mem::swap(&mut event.before, &mut event.after);
-                event.kind = inverse(event.kind);
+                events.reverse();
+                for event in &mut events {
+                    std::mem::swap(&mut event.before, &mut event.after);
+                    event.kind = inverse(event.kind);
+                }
                 journal.undo.pop_back();
-                journal.redo.push_back(entry);
+                journal.redo.push_back(group);
             } else {
                 journal.redo.pop_back();
-                journal.undo.push_back(entry);
+                journal.undo.push_back(group);
             }
-            history.record(event);
+            for event in events {
+                history.record(event);
+            }
             applied.write(HistoryApplied(action));
         }
         Err(reason) => {
@@ -124,30 +146,50 @@ pub(super) fn apply(
         }
     }
 }
+/// Replays a whole group or none of it: every cell is checked before the first
+/// is changed, and a change that fails midway is taken back.
 fn restore(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
     tables: &tesserae_core::Tables,
-    entry: Entry,
+    group: &[Entry],
     action: HistoryAction,
 ) -> Result<(), RejectReason> {
-    let chunk = VoxelCoord::of(entry.at).chunk;
-    let lifetime = store.lifetime(chunk).ok_or(RejectReason::NotLoaded)?;
-    if lifetime != entry.lifetime {
-        return Err(RejectReason::HistoryChanged);
-    }
-    if meshes.is_unlit(chunk) {
-        return Err(RejectReason::Busy);
-    }
-    let (expected, replacement) = if action == HistoryAction::Undo {
-        (entry.after, entry.before)
-    } else {
-        (entry.before, entry.after)
+    let undoing = action == HistoryAction::Undo;
+    let step = |entry: &Entry| {
+        if undoing {
+            (entry.after, entry.before)
+        } else {
+            (entry.before, entry.after)
+        }
     };
-    if store.occupants(entry.at, &tables.fluids) != Some(expected) {
-        return Err(RejectReason::HistoryChanged);
+    for entry in group {
+        let chunk = VoxelCoord::of(entry.at).chunk;
+        let lifetime = store.lifetime(chunk).ok_or(RejectReason::NotLoaded)?;
+        if lifetime != entry.lifetime {
+            return Err(RejectReason::HistoryChanged);
+        }
+        if meshes.is_unlit(chunk) {
+            return Err(RejectReason::Busy);
+        }
+        if store.occupants(entry.at, &tables.fluids) != Some(step(entry).0) {
+            return Err(RejectReason::HistoryChanged);
+        }
     }
-    edit::set_occupants(store, meshes, tables, entry.at, replacement)
+    let order: Vec<&Entry> = if undoing {
+        group.iter().rev().collect()
+    } else {
+        group.iter().collect()
+    };
+    for (done, entry) in order.iter().enumerate() {
+        if let Err(reason) = edit::set_occupants(store, meshes, tables, entry.at, step(entry).1) {
+            for undone in order[..done].iter().rev() {
+                let _ = edit::set_occupants(store, meshes, tables, undone.at, step(undone).0);
+            }
+            return Err(reason);
+        }
+    }
+    Ok(())
 }
 fn inverse(kind: EditKind) -> EditKind {
     match kind {
@@ -225,7 +267,7 @@ mod tests {
             journal.record(entry);
         }
         assert_eq!(journal.undo.len(), LIMIT);
-        journal.redo.push_back(entry);
+        journal.redo.push_back(vec![entry]);
         journal.record(entry);
         assert!(journal.redo.is_empty());
         let mut app = App::new();
@@ -247,5 +289,37 @@ mod tests {
                 .count(),
             4
         );
+    }
+
+    #[test]
+    fn the_journal_bounds_recorded_voxels_across_groups_and_drops_empty_ones() {
+        use tesserae_core::{Chunk, Voxel};
+        let mut store = ChunkStore::default();
+        let coord = VoxelCoord::of([0, 0, 0]).chunk;
+        store.insert(coord, Chunk::air());
+        let solid = |voxel| Occupants {
+            solid: voxel,
+            fluid: None,
+            burning: None,
+        };
+        let entry = |before: Voxel, after: Voxel| Entry {
+            at: [0, 0, 0],
+            lifetime: store.lifetime(coord).unwrap(),
+            before: solid(before),
+            after: solid(after),
+            event: EditEvent {
+                at: [0.0; 3],
+                before,
+                after,
+                kind: EditKind::Solid { before, after },
+            },
+        };
+        let mut journal = Journal::default();
+        journal.record_group(vec![entry(Voxel::AIR, Voxel::AIR); 4]);
+        assert!(journal.undo.is_empty(), "a group that changed nothing");
+        for _ in 0..RECORDED_LIMIT / 256 + 1 {
+            journal.record_group(vec![entry(Voxel::AIR, Voxel::cube(8)); 256]);
+        }
+        assert_eq!(journal.undo.len(), RECORDED_LIMIT / 256);
     }
 }

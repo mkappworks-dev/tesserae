@@ -142,8 +142,11 @@ to 60 seconds and defaulting to 350 ms, published in the content catalogue. Core
 tables and simulation retain no input timing. The Server compares target
 identity again before applying the removal.
 
-Undo/redo owns at most 128 before/after Occupants entries and 16 queued requests
-on the integrated Server. It checks Chunk Lifetime, settled light and exact
+Undo/redo owns at most 128 groups, 1024 before/after Occupants entries in all,
+and 16 queued requests on the integrated Server. A single Edit is a group of
+one; a layout (one intent for a line, rectangle or box of at most 256 Voxels,
+expanded and judged by the Server per cell) is one group, replayed whole or not
+at all. It checks Chunk Lifetime, settled light and exact
 current Occupants before replaying through the normal change, light, mesh and
 simulation wake path. Successful replay publishes inverse or forward Mod edit
 events. New successful changes clear redo; refusals preserve history and World

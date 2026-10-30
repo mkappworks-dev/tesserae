@@ -20,18 +20,22 @@
 //! queue only the Server can see; [`apply_pending`] drains that on the tick. The
 //! queue is also the shape a network transport will fill in build-order step 10.
 
+mod layout;
+
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
-use tesserae_core::collide::{RayHit, VoxelVolume, overlaps, raycast_until};
+use tesserae_core::collide::{Aabb, RayHit, VoxelVolume, overlaps, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
     Burning, Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE,
     Tables, Voxel, relight,
 };
 use tesserae_mods::{EditKind, Intent};
+
+pub use layout::{LayoutAim, LayoutAnswer, LayoutIntent};
 
 use super::ContentTables;
 use super::player::{self, Player};
@@ -223,6 +227,10 @@ pub enum RejectReason {
     NoRedo,
     HistoryChanged,
     TargetChanged,
+    /// A layout the core refuses: no axes, an empty axis, or over its cap.
+    BadLayout,
+    /// Some of a layout's Voxels were skipped; the rest were placed.
+    LayoutPartial,
 }
 
 impl RejectReason {
@@ -255,6 +263,8 @@ impl RejectReason {
             RejectReason::NoRedo => "nothing to redo",
             RejectReason::HistoryChanged => "that cell changed; cannot undo or redo it",
             RejectReason::TargetChanged => "removal target changed; hold again",
+            RejectReason::BadLayout => "that layout is not allowed",
+            RejectReason::LayoutPartial => "some Voxels of the layout were skipped",
         }
     }
 }
@@ -291,14 +301,15 @@ struct Pending {
 /// Intents received and not yet applied. Server-private: nothing outside this
 /// module can push to it, so the Client can only ask by message.
 #[derive(Resource, Default)]
-pub(in crate::server) struct PendingEdits(VecDeque<Pending>);
+pub(in crate::server) struct PendingEdits(VecDeque<Pending>, VecDeque<layout::PendingLayout>);
 
 impl PendingEdits {
     pub(super) fn clear(&mut self) {
         self.0.clear();
+        self.1.clear();
     }
     pub(in crate::server) fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.0.is_empty() && self.1.is_empty()
     }
 }
 
@@ -308,6 +319,10 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<super::undo::HistoryApplied>()
         .init_session_resource::<AimState>()
         .init_session_resource::<super::tool::Tools>()
+        .init_session_resource::<layout::LayoutAimState>()
+        .add_session_message::<LayoutIntent>()
+        .add_session_message::<LayoutAim>()
+        .add_session_message::<LayoutAnswer>()
         .add_session_message::<AimReport>()
         .add_session_message::<AimTarget>()
         .add_session_message::<PickIntent>()
@@ -319,7 +334,14 @@ pub(super) fn plugin(app: &mut App) {
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_session_systems(
             RunFixedMainLoop,
-            (receive, receive_aim, pick, super::undo::receive)
+            (
+                receive,
+                receive_aim,
+                layout::receive,
+                layout::receive_aim,
+                pick,
+                super::undo::receive,
+            )
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
                 .after(player::PlayerInput),
         )
@@ -333,6 +355,7 @@ pub(super) fn plugin(app: &mut App) {
                     .run_if(super::persistence::playing)
                     .before(super::mods::Drain),
                 answer_aim,
+                layout::answer_aim,
             )
                 .chain(),
         );
@@ -545,7 +568,7 @@ pub(in crate::server) fn receive(
                 continue;
             }
         };
-        if pending.0.len() >= MAX_PENDING {
+        if pending.0.len() + pending.1.len() >= MAX_PENDING {
             rejected.write(EditRejected {
                 reason: RejectReason::Busy,
             });
@@ -654,59 +677,18 @@ pub(in crate::server) fn apply_pending(
         };
         let outcome =
             resolve(&store, &tables, &world, &p.intent, p.reach).and_then(|(at, change)| {
-                // The incremental relight and the bulk solve must not both write one
-                // Chunk, so an edit waits for its Chunk's light to settle.
-                if meshes.is_unlit(VoxelCoord::of(at).chunk) {
-                    return Err(RejectReason::Busy);
-                }
-                if let (Change::Solid(voxel), Some(body)) = (change, body)
-                    && !voxel.is_air()
-                    && overlaps(&PlacedOnly { at, voxel }, &tables, world.voxel_size, body)
-                {
-                    return Err(RejectReason::InsidePlayer);
-                }
-                let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
-                let was = store
-                    .occupants(at, &tables.fluids)
-                    .ok_or(RejectReason::NotLoaded)?;
-                match change {
-                    Change::Solid(voxel) => set_voxel(&mut store, &mut meshes, &tables, at, voxel)?,
-                    Change::Occupants(occupants) => {
-                        set_occupants(&mut store, &mut meshes, &tables, at, occupants)?
-                    }
-                }
-                let after = store.voxel(at).expect("the edited Chunk is held");
-                let now = store
-                    .occupants(at, &tables.fluids)
-                    .expect("the edited Chunk is held");
-                let kind = match (p.intent.action, change, intent_fluid(&was, &now)) {
-                    (EditAction::Ignite, ..) => EditKind::Ignited(now.solid.material()),
-                    (EditAction::Remove | EditAction::RemoveAt(_), ..) if was.burning.is_some() => {
-                        EditKind::PutOut(now.solid.material())
-                    }
-                    (_, Change::Occupants(_), Some(kind)) => kind,
-                    _ => EditKind::Solid {
-                        before: was.solid,
-                        after: now.solid,
-                    },
-                };
-                let event = tesserae_mods::EditEvent {
-                    at: at.map(|i| i as f32 * world.voxel_size),
-                    kind,
-                    before,
-                    after,
-                };
-                history.record(event);
-                journal.record(super::undo::Entry {
+                land(
+                    &mut store,
+                    &mut meshes,
+                    &tables,
+                    &world,
+                    &mut history,
+                    body,
                     at,
-                    lifetime: store
-                        .lifetime(VoxelCoord::of(at).chunk)
-                        .expect("the edited Chunk is held"),
-                    before: was,
-                    after: now,
-                    event,
-                });
-                Ok(())
+                    change,
+                    p.intent.action,
+                )
+                .map(|entry| journal.record(entry))
             });
         match outcome {
             Ok(()) => applied += 1,
@@ -723,6 +705,87 @@ pub(in crate::server) fn apply_pending(
     // What waited goes ahead of what was not looked at, so order is kept.
     waiting.extend(pending.0.drain(..));
     pending.0 = waiting;
+    // Single Edits go first, so a large layout never starves them.
+    let PendingEdits(_, layouts) = &mut *pending;
+    layout::drain(
+        layouts,
+        EDITS_PER_TICK - applied,
+        &mut history,
+        &mut journal,
+        &mut store,
+        &mut meshes,
+        &mut rejected,
+        &tables,
+        &world,
+        body,
+    );
+}
+
+/// Applies one resolved change and reports it to Mods, returning the history
+/// entry for the caller to journal: alone for a single Edit, grouped for a
+/// layout.
+#[allow(clippy::too_many_arguments)]
+fn land(
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    world: &WorldSettings,
+    history: &mut super::mods::EditHistory,
+    body: Option<Aabb>,
+    at: [i32; 3],
+    change: Change,
+    action: EditAction,
+) -> Result<super::undo::Entry, RejectReason> {
+    // The incremental relight and the bulk solve must not both write one
+    // Chunk, so an edit waits for its Chunk's light to settle.
+    if meshes.is_unlit(VoxelCoord::of(at).chunk) {
+        return Err(RejectReason::Busy);
+    }
+    if let (Change::Solid(voxel), Some(body)) = (change, body)
+        && !voxel.is_air()
+        && overlaps(&PlacedOnly { at, voxel }, tables, world.voxel_size, body)
+    {
+        return Err(RejectReason::InsidePlayer);
+    }
+    let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
+    let was = store
+        .occupants(at, &tables.fluids)
+        .ok_or(RejectReason::NotLoaded)?;
+    match change {
+        Change::Solid(voxel) => set_voxel(store, meshes, tables, at, voxel)?,
+        Change::Occupants(occupants) => set_occupants(store, meshes, tables, at, occupants)?,
+    }
+    let after = store.voxel(at).expect("the edited Chunk is held");
+    let now = store
+        .occupants(at, &tables.fluids)
+        .expect("the edited Chunk is held");
+    let kind = match (action, change, intent_fluid(&was, &now)) {
+        (EditAction::Ignite, ..) => EditKind::Ignited(now.solid.material()),
+        (EditAction::Remove | EditAction::RemoveAt(_), ..) if was.burning.is_some() => {
+            EditKind::PutOut(now.solid.material())
+        }
+        (_, Change::Occupants(_), Some(kind)) => kind,
+        _ => EditKind::Solid {
+            before: was.solid,
+            after: now.solid,
+        },
+    };
+    let event = tesserae_mods::EditEvent {
+        at: at.map(|i| i as f32 * world.voxel_size),
+        kind,
+        before,
+        after,
+    };
+    history.record(event);
+    Ok(super::undo::Entry {
+        at,
+        lifetime: store
+            .lifetime(VoxelCoord::of(at).chunk)
+            .expect("the edited Chunk is held"),
+        before: was,
+        after: now,
+        event,
+    })
 }
 
 /// What a fluid-tool Edit meant, read from what it changed.
@@ -1163,7 +1226,7 @@ mod tests {
         WATERED.1
     }
 
-    fn stone() -> Voxel {
+    pub(super) fn stone() -> Voxel {
         Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
     }
 
@@ -1177,7 +1240,7 @@ mod tests {
 
     /// Chunk (0, 0, 0) with stone filling y = 0..8, so the surface is at 8 m, and
     /// air above it.
-    fn ground() -> Chunk {
+    pub(super) fn ground() -> Chunk {
         let mut chunk = Chunk::air();
         for y in 0..8 {
             for z in 0..CHUNK_SIZE {
@@ -1189,7 +1252,7 @@ mod tests {
         chunk
     }
 
-    fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
+    pub(super) fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
         app_with_tables(chunks, watered())
     }
 
@@ -1208,14 +1271,14 @@ mod tests {
         app
     }
 
-    fn origin() -> ChunkCoord {
+    pub(super) fn origin() -> ChunkCoord {
         ChunkCoord::new(0, 0, 0)
     }
 
-    const DOWN_EYE: Vec3 = Vec3::new(5.5, 12.0, 5.5);
+    pub(super) const DOWN_EYE: Vec3 = Vec3::new(5.5, 12.0, 5.5);
 
     /// A click straight down at the ground over (5, 5), from 4 m up.
-    fn down(action: EditAction) -> EditIntent {
+    pub(super) fn down(action: EditAction) -> EditIntent {
         EditIntent {
             action,
             origin: DOWN_EYE,
@@ -1223,11 +1286,11 @@ mod tests {
         }
     }
 
-    fn voxel_at(app: &App, at: [i32; 3]) -> Voxel {
+    pub(super) fn voxel_at(app: &App, at: [i32; 3]) -> Voxel {
         app.world().resource::<ChunkStore>().voxel(at).unwrap()
     }
 
-    fn rejections(app: &mut App) -> Vec<RejectReason> {
+    pub(super) fn rejections(app: &mut App) -> Vec<RejectReason> {
         app.world_mut()
             .resource_mut::<Messages<EditRejected>>()
             .drain()
@@ -1238,14 +1301,14 @@ mod tests {
     /// Delivers one intent as if the Player stood at its origin, so the tests
     /// that exercise `resolve` with arbitrary origins are not also testing the
     /// origin check; `send_from_afar` is the one that does.
-    fn send(app: &mut App, intent: EditIntent) {
+    pub(super) fn send(app: &mut App, intent: EditIntent) {
         if intent.origin.is_finite() {
             set_eye(app, intent.origin);
         }
         send_from_afar(app, intent);
     }
 
-    fn set_eye(app: &mut App, eye: Vec3) {
+    pub(super) fn set_eye(app: &mut App, eye: Vec3) {
         let mut players = app.world_mut().query::<&mut Player>();
         players.single_mut(app.world_mut()).unwrap().set_eye(eye);
     }
@@ -1261,7 +1324,7 @@ mod tests {
             .clear();
     }
 
-    fn tick(app: &mut App) {
+    pub(super) fn tick(app: &mut App) {
         app.world_mut().run_system_once(apply_pending).unwrap();
     }
 
@@ -3106,7 +3169,7 @@ mod tests {
         assert!(occupants_at(&app, [5, 7, 5]).solid.is_air());
         assert!(rejections(&mut app).is_empty());
     }
-    fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
+    pub(super) fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
         use super::super::undo;
         app.world_mut().write_message(action);
         app.world_mut().run_system_once(undo::receive).unwrap();
