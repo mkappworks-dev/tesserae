@@ -148,6 +148,9 @@ Client sends one layout intent and the aim ray; the Server resolves the anchor,
 expands the geometry from `tesserae_core::layout`, judges reach and sight once
 for the whole layout, then lands its cells through the Edit budget after single
 Edits. Its preview is the Server's answer, never World storage.
+In point to point, the Client takes each corner from the aimed cell the Server's
+preview answer reports and sends the two corners with the shape; the Server
+judges every cell of the span itself, so a corner grants nothing.
 The shape, counts, gap and six-way directions are user preferences set on the
 Layout page of the settings, which opens when the mode turns on, through the
 same draft and Apply as every other preference; a Material picked there is the

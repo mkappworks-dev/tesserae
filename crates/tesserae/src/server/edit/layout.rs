@@ -105,6 +105,9 @@ pub struct LayoutAnswer {
     pub cells: Vec<LayoutCell>,
     /// Why there is no layout to show: no anchor, or a shape the core refuses.
     pub refused: Option<RejectReason>,
+    /// The cell the aim picks, as a single Place would: what point to point
+    /// takes as a corner.
+    pub anchor: Option<[i32; 3]>,
 }
 
 #[derive(Resource, Default)]
@@ -203,10 +206,12 @@ pub(super) fn answer_aim(
     let Some((aim, reach, eye)) = state.latest else {
         return;
     };
+    let picked = anchor(&store, &tables, &world, &aim.intent, reach);
     let refused = |reason| LayoutAnswer {
         seq: aim.seq,
         cells: Vec::new(),
         refused: Some(reason),
+        anchor: picked.ok(),
     };
     let cells = expand(&store, &tables, &world, &aim.intent, reach);
     answers.write(match cells {
@@ -228,6 +233,7 @@ pub(super) fn answer_aim(
                 })
                 .collect(),
             refused: None,
+            anchor: picked.ok(),
         },
     });
 }
@@ -607,6 +613,25 @@ mod tests {
         tick(&mut app);
         assert_eq!(placed(&app), 8, "only what the Eye reaches");
         assert_eq!(rejections(&mut app), [RejectReason::LayoutPartial]);
+    }
+
+    #[test]
+    fn the_preview_reports_the_aimed_cell_for_point_to_point() {
+        let mut app = app_with(&[(origin(), ground())]);
+        set_eye(&mut app, DOWN_EYE);
+        app.world_mut().write_message(LayoutAim {
+            seq: 1,
+            intent: line(1),
+        });
+        app.world_mut().run_system_once(receive_aim).unwrap();
+        app.world_mut().run_system_once(answer_aim).unwrap();
+        let answer = app
+            .world_mut()
+            .resource_mut::<Messages<LayoutAnswer>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(answer.anchor, Some([5, 8, 5]));
     }
 
     #[test]

@@ -417,8 +417,9 @@ mod tests {
 
     #[test]
     fn layout_choices_round_trip_and_an_older_or_invalid_profile_is_handled() {
-        use super::super::layout::{Direction, Form};
+        use super::super::layout::{Direction, Form, Kind};
         let mut prefs = Preferences::default();
+        prefs.layout.kind = Kind::Between;
         prefs.layout.form = Form::Rectangle;
         prefs.layout.counts = [5, 2, 2];
         prefs.layout.gap = 2;

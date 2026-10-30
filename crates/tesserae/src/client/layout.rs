@@ -12,14 +12,16 @@ use super::{
     input::Ownership,
     profile::Preferences,
 };
-use crate::server::edit::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams};
+use crate::server::edit::{
+    CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, RejectReason, Span,
+};
 use crate::world::WorldSettings;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use tesserae_core::Voxel;
-use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS};
+use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS, layout_between};
 
 const DEFAULT_COUNTS: [u32; 3] = [4, 3, 2];
 /// Voxels left empty between neighbours at most: past this the layout would
@@ -37,6 +39,17 @@ pub(crate) enum Form {
     Rectangle,
     Box,
 }
+/// How a layout says where its Voxels go.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Kind {
+    /// From the aimed cell, in chosen directions, for a chosen count.
+    #[default]
+    Directions,
+    /// Between two corner cells the Player picks, like a measurement.
+    Between,
+}
+
 impl Form {
     pub(super) fn axes(self) -> usize {
         self as usize + 1
@@ -108,6 +121,7 @@ impl Direction {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct LayoutPreferences {
+    pub kind: Kind,
     pub form: Form,
     pub counts: [u32; 3],
     pub gap: u32,
@@ -117,6 +131,7 @@ pub(crate) struct LayoutPreferences {
 impl Default for LayoutPreferences {
     fn default() -> Self {
         Self {
+            kind: Kind::Directions,
             form: Form::Line,
             counts: DEFAULT_COUNTS,
             gap: 0,
@@ -194,11 +209,37 @@ pub(super) struct LayoutMode {
     pub(super) material: Option<tesserae_core::MaterialId>,
     /// The mode was just turned on and its menu is yet to open.
     pub(super) open_menu: bool,
+    /// Point to point: the corners picked so far, at most two.
+    points: Vec<[i32; 3]>,
+    /// The cell the aim picks now, from the Server's latest fresh answer.
+    aimed: Option<[i32; 3]>,
     commit: bool,
     was_grabbed: bool,
 }
 impl LayoutMode {
     fn params(&self, layout: &LayoutPreferences) -> LayoutParams {
+        if layout.kind == Kind::Between {
+            // With no corner yet the aim is asked for as one cell, to learn
+            // which cell it picks.
+            let span = self.points.first().map(|&a| Span {
+                a,
+                b: self.points.get(1).copied(),
+                axes: layout.form.axes() as u8,
+            });
+            return LayoutParams {
+                axes: [
+                    span.is_none().then_some(LayoutAxis {
+                        dim: Dim::X,
+                        positive: true,
+                        count: 1,
+                    }),
+                    None,
+                    None,
+                ],
+                gap: layout.gap,
+                span,
+            };
+        }
         LayoutParams {
             axes: std::array::from_fn(|i| {
                 (i < layout.form.axes()).then(|| LayoutAxis {
@@ -230,9 +271,11 @@ pub(super) fn intercept(
     // A menu, a lost focus or a device change never commits, but they leave
     // the mode on: the Layout menu is one of them.
     if !ownership.gameplay() {
+        mode.points.clear();
         return;
     }
     if actions.started(Action::Layout) {
+        mode.points.clear();
         mode.on = !mode.on;
         mode.open_menu = mode.on;
     }
@@ -261,10 +304,23 @@ pub(super) fn intercept(
     if actions.started(Action::LayoutActive) || pad_active {
         mode.active = (mode.active + 1) % layout.form.axes();
     }
-    if layout != preferences.layout {
-        preferences.layout = layout;
+    if layout.form != preferences.layout.form || layout.kind != preferences.layout.kind {
+        mode.points.clear();
     }
-    if actions.started(Action::Remove) {
+    let between = layout.kind == Kind::Between;
+    if layout != preferences.layout {
+        preferences.layout = layout.clone();
+    }
+    if between {
+        // Remove steps back a corner, then cancels.
+        if actions.started(Action::Remove) {
+            if mode.points.pop().is_none() {
+                mode.on = false;
+            }
+        } else if ready && actions.started(Action::Place) {
+            pick_point(&mut mode, &layout);
+        }
+    } else if actions.started(Action::Remove) {
         mode.on = false;
     } else if ready && actions.started(Action::Place) {
         mode.commit = true;
@@ -282,6 +338,26 @@ pub(super) fn intercept(
             actions.cancel(action);
         }
     }
+}
+
+/// Place in point to point: the aimed cell becomes the next corner, and with
+/// both set it commits. A corner that makes the span pass the cap is refused.
+fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) {
+    if mode.points.len() == 2 {
+        mode.commit = true;
+        return;
+    }
+    let Some(cell) = mode.aimed else {
+        return;
+    };
+    if let Some(&a) = mode.points.first()
+        && layout_between(a, cell, layout.form.axes(), layout.gap).is_err()
+    {
+        mode.refused = true;
+        return;
+    }
+    mode.refused = false;
+    mode.points.push(cell);
 }
 
 /// What a layout lays: the held solid, in the menu's Material if one was
@@ -327,6 +403,25 @@ pub(super) fn send(
     }
     if let Some(intent) = current(&mode, &preferences.layout, &hotbar, &camera) {
         intents.write(intent);
+    }
+    mode.points.clear();
+}
+
+/// Keeps the cell the aim picks, from the latest answer that still describes
+/// where the Player is looking.
+pub(super) fn track_aim(
+    mut mode: ResMut<LayoutMode>,
+    preferences: Res<Preferences>,
+    hotbar: Res<Hotbar>,
+    camera: Single<&GlobalTransform, With<FlyCamera>>,
+    preview: Res<Preview>,
+    time: Res<Time>,
+) {
+    let aimed = current(&mode, &preferences.layout, &hotbar, &camera)
+        .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()))
+        .and_then(|answer| answer.anchor);
+    if mode.aimed != aimed {
+        mode.aimed = aimed;
     }
 }
 
@@ -500,26 +595,56 @@ pub(super) fn readout(
             )
         })
         .collect();
-    let head = format!("Layout: {:?} {}", layout.form, axes.join(" x "));
+    let between = layout.kind == Kind::Between;
+    let head = if between {
+        format!("Layout: {:?} from point to point", layout.form)
+    } else {
+        format!("Layout: {:?} {}", layout.form, axes.join(" x "))
+    };
+    let step = match mode.points.len() {
+        _ if !between => None,
+        0 => Some("Place sets point A"),
+        1 => Some("Place sets point B"),
+        _ => Some("Place commits the layout"),
+    };
+    let tallied = |answer: &LayoutAnswer| {
+        if answer.refused == Some(RejectReason::BadLayout) {
+            return format!("That is over {MAX_LAYOUT_VOXELS} Voxels");
+        }
+        if answer.refused.is_some() {
+            return "Nothing to lay out there".to_owned();
+        }
+        let [ok, far, blocked] = tally(answer);
+        format!("{ok} will be placed, {far} out of reach, {blocked} blocked")
+    };
     let body = match held_voxel(&mode, &hotbar) {
         None => "Hold a solid to lay it out".to_owned(),
-        Some(_) => current(&mode, layout, &hotbar, &camera)
-            .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()))
-            .map_or("Aim at a surface".to_owned(), |answer| {
-                if answer.refused.is_some() {
-                    return "Nothing to lay out there".to_owned();
-                }
-                let [ok, far, blocked] = tally(answer);
-                format!("{ok} will be placed, {far} out of reach, {blocked} blocked")
-            }),
+        Some(_) => {
+            let answer = current(&mode, layout, &hotbar, &camera)
+                .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()));
+            match (answer, step, mode.points.is_empty()) {
+                (None, ..) => "Aim at a surface".to_owned(),
+                (Some(_), Some(step), true) => step.to_owned(),
+                (Some(answer), Some(step), false) => format!("{step}\n{}", tallied(answer)),
+                (Some(answer), None, _) => tallied(answer),
+            }
+        }
     };
-    let hint = format!(
-        "{} place · {} cancel · {} / {} count",
-        keys(Action::Place),
-        keys(Action::Remove),
-        keys(Action::LayoutMore),
-        keys(Action::LayoutLess),
-    );
+    let hint = if between {
+        format!(
+            "{} set a point · {} step back",
+            keys(Action::Place),
+            keys(Action::Remove)
+        )
+    } else {
+        format!(
+            "{} place · {} cancel · {} / {} count",
+            keys(Action::Place),
+            keys(Action::Remove),
+            keys(Action::LayoutMore),
+            keys(Action::LayoutLess),
+        )
+    };
     let cap = if mode.refused {
         format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels")
     } else {
@@ -545,7 +670,7 @@ pub(super) fn plugin(app: &mut App) {
                     .after(super::input::resolve)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (send, report, receive, draw, readout)
+                (send, report, receive, track_aim, draw, readout)
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -917,6 +1042,144 @@ mod tests {
         assert_eq!(saved(&app).form, Form::Line);
     }
 
+    fn between(app: &mut App) {
+        {
+            let mut prefs = saved_mut(app);
+            prefs.layout.kind = Kind::Between;
+            prefs.layout.form = Form::Rectangle;
+        }
+        key(app, KeyCode::KeyL);
+    }
+
+    fn aim(app: &mut App, cell: Option<[i32; 3]>) {
+        app.world_mut().resource_mut::<LayoutMode>().aimed = cell;
+    }
+
+    fn points(app: &App) -> Vec<[i32; 3]> {
+        mode(app).points.clone()
+    }
+
+    #[test]
+    fn place_sets_a_then_b_then_commits_one_span_between_them() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([1, 2, 3]));
+        assert!(click(&mut app, MouseButton::Right).is_empty());
+        assert_eq!(points(&app), [[1, 2, 3]]);
+        aim(&mut app, Some([5, 2, 6]));
+        assert!(click(&mut app, MouseButton::Right).is_empty());
+        assert_eq!(points(&app), [[1, 2, 3], [5, 2, 6]]);
+        let intent = commit(&mut app);
+        assert_eq!(
+            intent.layout.span,
+            Some(Span {
+                a: [1, 2, 3],
+                b: Some([5, 2, 6]),
+                axes: 2
+            })
+        );
+        assert_eq!(intent.voxel, rock());
+        assert!(points(&app).is_empty(), "ready for the next layout");
+        assert!(mode(&app).on);
+    }
+
+    #[test]
+    fn place_with_nothing_aimed_sets_no_point() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, None);
+        click(&mut app, MouseButton::Right);
+        assert!(points(&app).is_empty());
+    }
+
+    #[test]
+    fn remove_steps_back_a_point_and_then_cancels_the_mode() {
+        let mut app = app();
+        between(&mut app);
+        for cell in [[0, 0, 0], [3, 0, 3]] {
+            aim(&mut app, Some(cell));
+            click(&mut app, MouseButton::Right);
+        }
+        click(&mut app, MouseButton::Left);
+        assert_eq!(points(&app), [[0, 0, 0]]);
+        assert!(mode(&app).on);
+        click(&mut app, MouseButton::Left);
+        assert!(points(&app).is_empty());
+        assert!(mode(&app).on, "stepping back from A is still a step");
+        click(&mut app, MouseButton::Left);
+        assert!(!mode(&app).on);
+    }
+
+    #[test]
+    fn a_corner_that_passes_the_cap_is_refused_and_nothing_is_sent() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([0, 0, 0]));
+        click(&mut app, MouseButton::Right);
+        aim(&mut app, Some([16, 0, 15]));
+        assert!(click(&mut app, MouseButton::Right).is_empty());
+        assert_eq!(points(&app), [[0, 0, 0]]);
+        assert!(mode(&app).refused);
+        aim(&mut app, Some([15, 0, 15]));
+        click(&mut app, MouseButton::Right);
+        assert_eq!(points(&app).len(), 2, "exactly the cap is allowed");
+        assert!(!mode(&app).refused);
+    }
+
+    #[test]
+    fn a_menu_or_lost_focus_drops_the_points_and_never_commits() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([0, 0, 0]));
+        click(&mut app, MouseButton::Right);
+        app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Settings;
+        assert!(click(&mut app, MouseButton::Right).is_empty());
+        assert!(points(&app).is_empty());
+    }
+
+    #[test]
+    fn the_preview_asks_for_one_cell_then_a_span_to_the_aim_then_both_corners() {
+        let layout = LayoutPreferences {
+            kind: Kind::Between,
+            form: Form::Box,
+            ..default()
+        };
+        let mut mode = LayoutMode::default();
+        let none = mode.params(&layout);
+        assert_eq!((none.span, none.axes[0].map(|a| a.count)), (None, Some(1)));
+        mode.points.push([1, 1, 1]);
+        let one = mode.params(&layout);
+        assert_eq!(
+            one.span,
+            Some(Span {
+                a: [1, 1, 1],
+                b: None,
+                axes: 3
+            })
+        );
+        mode.points.push([4, 4, 4]);
+        assert_eq!(mode.params(&layout).span.unwrap().b, Some([4, 4, 4]));
+    }
+
+    #[test]
+    fn a_pad_sets_both_points_and_commits_with_no_typing() {
+        let mut app = app();
+        {
+            let mut prefs = saved_mut(&mut app);
+            prefs.layout.kind = Kind::Between;
+        }
+        tap(&mut app, GamepadButton::C);
+        aim(&mut app, Some([2, 0, 2]));
+        tap(&mut app, GamepadButton::LeftTrigger2);
+        aim(&mut app, Some([6, 0, 2]));
+        tap(&mut app, GamepadButton::LeftTrigger2);
+        let intent = commit_pad(&mut app);
+        assert_eq!(intent.layout.span.unwrap().b, Some([6, 0, 2]));
+        tap(&mut app, GamepadButton::RightTrigger2);
+        tap(&mut app, GamepadButton::RightTrigger2);
+        assert!(!mode(&app).on, "Remove steps back, then cancels");
+    }
+
     #[test]
     fn the_readout_tallies_each_state_of_the_answer() {
         use crate::server::edit::LayoutCell;
@@ -933,6 +1196,7 @@ mod tests {
                 cell(CellState::Blocked),
             ],
             refused: None,
+            anchor: None,
         };
         assert_eq!(tally(&answer), [2, 1, 1]);
     }

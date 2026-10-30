@@ -119,6 +119,7 @@ pub(super) enum Operation {
     ScrollDirection(bool),
     Sync(bool),
     Cap(Option<u32>),
+    LayoutKind(super::layout::Kind),
     LayoutForm(super::layout::Form),
     LayoutCount(usize, i32),
     LayoutGap(i32),
@@ -590,6 +591,7 @@ fn activate(
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,
                 Operation::Cap(value) => p.fps_cap = value,
+                Operation::LayoutKind(kind) => p.layout.kind = kind,
                 Operation::LayoutForm(form) => {
                     p.layout.form = form;
                     p.layout.fit();
@@ -1478,9 +1480,30 @@ fn layout_group(
         &super::layout::LayoutMode,
     ),
 ) {
-    use super::layout::Form;
+    use super::layout::{Form, Kind};
     use super::menu_ui as ui;
     let layout = &p.layout;
+    setting_row(
+        card,
+        "Mode",
+        "Say where the Voxels go by direction and count, or by two points.",
+        false,
+        |row| {
+            segment(row, |buttons| {
+                for (kind, name) in [
+                    (Kind::Directions, "Direction and count"),
+                    (Kind::Between, "Point to point"),
+                ] {
+                    option(
+                        buttons,
+                        name,
+                        Operation::LayoutKind(kind),
+                        layout.kind == kind,
+                    );
+                }
+            })
+        },
+    );
     setting_row(
         card,
         "Shape",
@@ -1503,10 +1526,22 @@ fn layout_group(
             })
         },
     );
+    if layout.kind == Kind::Between {
+        ui::description(
+            card,
+            "In play, Place sets point A, Place sets point B, then Place commits. \
+             Remove steps back a point, then cancels. The shape fills the span \
+             between the two points; each must be within reach.",
+        );
+    }
     for (axis, name) in ["First axis", "Second axis", "Third axis"]
         .into_iter()
         .enumerate()
-        .take(layout.form.axes())
+        .take(if layout.kind == Kind::Directions {
+            layout.form.axes()
+        } else {
+            0
+        })
     {
         setting_row(
             card,
@@ -2405,13 +2440,14 @@ mod tests {
     }
     #[test]
     fn layout_choices_stay_in_the_draft_until_applied_and_then_persist() {
-        use super::super::layout::{Direction, Form, LayoutPreferences};
+        use super::super::layout::{Direction, Form, Kind, LayoutPreferences};
         let mut app = app();
         activate_operation(
             &mut app,
             Operation::Navigate(super::super::menu_ui::Tab::Layout),
         );
         for operation in [
+            Operation::LayoutKind(Kind::Between),
             Operation::LayoutForm(Form::Box),
             Operation::LayoutCount(0, 2),
             Operation::LayoutGap(3),
@@ -2420,6 +2456,7 @@ mod tests {
             activate_operation(&mut app, operation);
         }
         let expected = LayoutPreferences {
+            kind: Kind::Between,
             form: Form::Box,
             counts: [6, 3, 2],
             gap: 3,
@@ -2568,6 +2605,45 @@ mod tests {
             !operations.iter().any(|name| name == "material Some(9)"),
             "a fluid is not a solid to lay"
         );
+    }
+
+    #[test]
+    fn point_to_point_hides_the_direction_and_count_rows() {
+        use super::super::menu_ui::{Searches, Tab};
+        let mut app = app();
+        app.init_resource::<super::super::actions::Labels>()
+            .init_resource::<Searches>()
+            .init_resource::<super::super::edit::Hotbar>()
+            .init_resource::<super::super::edit::Catalogue>()
+            .init_resource::<super::super::edit::Notice>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Font>>()
+            .init_resource::<super::super::input::UiInput>()
+            .add_plugins(super::super::menu_ui::plugin)
+            .add_systems(Update, render);
+        let names = |app: &mut App| -> Vec<&'static str> {
+            app.update();
+            app.world_mut()
+                .query::<&Operation>()
+                .iter(app.world())
+                .filter_map(|operation| match operation {
+                    Operation::LayoutDirection(..) => Some("direction"),
+                    Operation::LayoutCount(..) => Some("count"),
+                    Operation::LayoutKind(_) => Some("mode"),
+                    _ => None,
+                })
+                .collect()
+        };
+        activate_operation(&mut app, Operation::Navigate(Tab::Layout));
+        let shown = names(&mut app);
+        assert!(shown.contains(&"direction") && shown.contains(&"count"));
+        activate_operation(
+            &mut app,
+            Operation::LayoutKind(super::super::layout::Kind::Between),
+        );
+        let shown = names(&mut app);
+        assert!(!shown.contains(&"direction") && !shown.contains(&"count"));
+        assert!(shown.contains(&"mode"), "the way back stays");
     }
 
     #[test]

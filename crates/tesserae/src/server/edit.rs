@@ -37,7 +37,7 @@ use tesserae_mods::{EditKind, Intent};
 
 #[cfg(test)]
 pub use layout::LayoutCell;
-pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams};
+pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
 
 use super::ContentTables;
 use super::player::{self, Player};
