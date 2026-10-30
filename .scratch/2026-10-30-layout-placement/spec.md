@@ -419,3 +419,7 @@ Player needs to say what to build.
 - The ghosts of one tint are one merged mesh, at most three in all. Ghosts
   blend, and blended entities are sorted one by one by distance, so cells drawn
   as separate entities swapped order as the view moved and flickered.
+- Touching ghosts are drawn as one outer surface: a side a neighbour covers
+  whole is left out, and only the outside is inset. Faces between cells made
+  whatever was seen through them denser, so cells looked uneven. This replaces
+  drawing a box's shell cells.

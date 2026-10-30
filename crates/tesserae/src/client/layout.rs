@@ -539,43 +539,94 @@ fn layout_holding(hotbar: &Hotbar) -> Option<Holding> {
     matches!(hotbar.held(), Holding::Solid { .. }).then(|| hotbar.held())
 }
 
-/// The cells that can be seen: those with an open face. A box's inner cells sit
-/// behind translucent ones whose faces they would show through, so only its
-/// shell is drawn.
-fn shell(cells: Vec<(Vec3, usize)>, size: f32) -> Vec<(Vec3, usize)> {
+/// The six sides of a cell, as (axis, towards +).
+const SIDES: [(usize, bool); 6] = [
+    (0, false),
+    (0, true),
+    (1, false),
+    (1, true),
+    (2, false),
+    (2, true),
+];
+
+/// Which side of its unit cell each triangle of `model` lies flat on, if any,
+/// and which sides the model covers whole.
+fn sides_of(model: &Mesh) -> (Vec<Option<usize>>, [bool; 6]) {
+    let positions: Vec<Vec3> = model
+        .attribute(Mesh::ATTRIBUTE_POSITION)
+        .and_then(|a| a.as_float3())
+        .map(|p| p.iter().map(|&v| Vec3::from_array(v)).collect())
+        .unwrap_or_default();
+    let indices: Vec<usize> = model
+        .indices()
+        .map(|i| i.iter().collect())
+        .unwrap_or_default();
+    let mut area = [0.0f32; 6];
+    let sides = indices
+        .chunks(3)
+        .map(|t| {
+            let [p, q, r] = [positions[t[0]], positions[t[1]], positions[t[2]]];
+            let side = SIDES.iter().position(|&(axis, up)| {
+                let plane = if up { 1.0 } else { 0.0 };
+                [p, q, r].iter().all(|v| (v[axis] - plane).abs() < 1e-4)
+            })?;
+            area[side] += (q - p).cross(r - p).length() / 2.0;
+            Some(side)
+        })
+        .collect();
+    (sides, area.map(|a| a > 0.999))
+}
+
+/// One mesh of `model` at every cell of `tint`, drawn as the outside of all the
+/// cells together. Ghosts blend, so a face between two cells would darken
+/// whatever is seen through it and make some cells look denser than others. A
+/// side is left out where the neighbour covers it whole, and the outside is
+/// inset a hair so it does not fight the ground.
+fn merged(model: &Mesh, cells: &[(Vec3, usize)], tint: usize, size: f32) -> Option<Mesh> {
     let key = |at: Vec3| at.to_array().map(|c| (c / size).round() as i32);
     let present: std::collections::HashSet<[i32; 3]> =
         cells.iter().map(|(at, _)| key(*at)).collect();
-    const FACES: [[i32; 3]; 6] = [
-        [1, 0, 0],
-        [-1, 0, 0],
-        [0, 1, 0],
-        [0, -1, 0],
-        [0, 0, 1],
-        [0, 0, -1],
-    ];
-    cells
-        .into_iter()
-        .filter(|(at, _)| {
-            let [x, y, z] = key(*at);
-            !FACES
-                .iter()
-                .all(|d| present.contains(&[x + d[0], y + d[1], z + d[2]]))
-        })
-        .collect()
-}
-
-/// One mesh of `model` at every cell of `tint`, each a hair smaller than its
-/// cell so the faces it shares with the ground do not fight.
-fn merged(model: &Mesh, cells: &[(Vec3, usize)], tint: usize, size: f32) -> Option<Mesh> {
+    let (sides, full) = sides_of(model);
+    let indices: Vec<u32> = model
+        .indices()
+        .map(|i| i.iter().map(|i| i as u32).collect())
+        .unwrap_or_default();
     let inset = size * GHOST_INSET;
-    let mut placed = cells.iter().filter(|(_, t)| *t == tint).map(|(at, _)| {
-        model.clone().transformed_by(Transform {
-            translation: *at + Vec3::splat(inset),
-            scale: Vec3::splat(size - 2.0 * inset),
-            ..default()
-        })
-    });
+    let mut placed = cells
+        .iter()
+        .filter(|(_, t)| *t == tint)
+        .filter_map(|(at, _)| {
+            let cell = key(*at);
+            let joined = SIDES.map(|(axis, up)| {
+                let mut next = cell;
+                next[axis] += if up { 1 } else { -1 };
+                present.contains(&next)
+            });
+            let hidden = |side: usize| joined[side] && full[side ^ 1];
+            let kept: Vec<u32> = indices
+                .chunks(3)
+                .zip(&sides)
+                .filter(|(_, side)| !side.is_some_and(hidden))
+                .flat_map(|(triangle, _)| triangle.iter().copied())
+                .collect();
+            if kept.is_empty() {
+                return None;
+            }
+            let low =
+                Vec3::from_array(std::array::from_fn(
+                    |a| if joined[2 * a] { 0.0 } else { inset },
+                ));
+            let high = Vec3::from_array(std::array::from_fn(|a| {
+                if joined[2 * a + 1] { 0.0 } else { inset }
+            }));
+            let mut mesh = model.clone();
+            mesh.insert_indices(bevy::mesh::Indices::U32(kept));
+            Some(mesh.transformed_by(Transform {
+                translation: *at + low,
+                scale: Vec3::splat(size) - low - high,
+                ..default()
+            }))
+        });
     let mut mesh = placed.next()?;
     for next in placed {
         mesh.merge(&next).ok()?;
@@ -654,7 +705,7 @@ pub(super) fn ghosts(
             })
             .unwrap_or_default()
     };
-    let wanted = (shell(wanted, world.voxel_size), world.voxel_size);
+    let wanted = (wanted, world.voxel_size);
     let mut have = [false; 3];
     for (ghost, ..) in &drawn {
         have[ghost.0] = true;
@@ -1623,6 +1674,7 @@ mod tests {
         min: Vec3,
         max: Vec3,
         centroid: Vec3,
+        triangles: Vec<[Vec3; 3]>,
     }
 
     fn ghosts_now(app: &mut App) -> Vec<Drawn> {
@@ -1640,22 +1692,37 @@ mod tests {
         let mut drawn: Vec<_> = shown
             .into_iter()
             .map(|(tint, visibility, handle)| {
-                let positions: Vec<Vec3> = meshes
-                    .get(&handle)
+                let mesh = meshes.get(&handle);
+                let positions: Vec<Vec3> = mesh
                     .and_then(|mesh| mesh.attribute(Mesh::ATTRIBUTE_POSITION))
                     .and_then(|a| a.as_float3())
                     .map(|p| p.iter().map(|&v| Vec3::from_array(v)).collect())
                     .unwrap_or_default();
+                let triangles: Vec<[Vec3; 3]> = mesh
+                    .and_then(Mesh::indices)
+                    .map(|indices| {
+                        let indices: Vec<usize> = indices.iter().collect();
+                        indices
+                            .chunks(3)
+                            .map(|t| [positions[t[0]], positions[t[1]], positions[t[2]]])
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // Only what is drawn counts toward the bounds.
+                let vertices = positions.len();
+                let used: Vec<Vec3> = triangles.iter().flatten().copied().collect();
+                let positions = if used.is_empty() { positions } else { used };
                 Drawn {
                     tint,
                     visible: visibility == Visibility::Visible,
-                    vertices: positions.len(),
+                    vertices,
                     min: positions.iter().copied().fold(Vec3::INFINITY, Vec3::min),
                     max: positions
                         .iter()
                         .copied()
                         .fold(Vec3::NEG_INFINITY, Vec3::max),
                     centroid: positions.iter().sum::<Vec3>() / positions.len().max(1) as f32,
+                    triangles,
                 }
             })
             .collect();
@@ -1695,8 +1762,8 @@ mod tests {
         let mut app = ghost_app();
         let cells = [
             (Vec3::new(1.0, 2.0, 3.0), CellState::Placeable),
-            (Vec3::new(2.0, 2.0, 3.0), CellState::OutOfReach),
-            (Vec3::new(3.0, 2.0, 3.0), CellState::Blocked),
+            (Vec3::new(3.0, 2.0, 3.0), CellState::OutOfReach),
+            (Vec3::new(5.0, 2.0, 3.0), CellState::Blocked),
         ];
         answer_with(&mut app, &cells);
         let shown = visible(&mut app);
@@ -2079,41 +2146,90 @@ mod tests {
         assert_eq!(layout.shape_word(), "a box");
     }
 
-    #[test]
-    fn only_the_shell_of_a_box_is_drawn_and_a_gap_or_a_line_keeps_every_cell() {
-        let grid = |nx: i32, ny: i32, nz: i32, pitch: i32| -> Vec<(Vec3, usize)> {
-            let mut cells = Vec::new();
-            for x in 0..nx {
-                for y in 0..ny {
-                    for z in 0..nz {
-                        cells.push((
-                            Vec3::new((x * pitch) as f32, (y * pitch) as f32, (z * pitch) as f32),
-                            0,
-                        ));
-                    }
+    fn grid(nx: i32, ny: i32, nz: i32, pitch: f32) -> Vec<(Vec3, CellState)> {
+        let mut cells = Vec::new();
+        for x in 0..nx {
+            for y in 0..ny {
+                for z in 0..nz {
+                    let at = Vec3::new(x as f32, y as f32, z as f32) * pitch;
+                    cells.push((at, CellState::Placeable));
                 }
             }
-            cells
-        };
-        assert_eq!(
-            shell(grid(3, 3, 3, 1), 1.0).len(),
-            26,
-            "the middle is hidden"
-        );
-        assert_eq!(shell(grid(4, 4, 4, 1), 1.0).len(), 64 - 8);
-        assert_eq!(
-            shell(grid(3, 3, 3, 2), 1.0).len(),
-            27,
-            "a gap leaves them all"
-        );
-        assert_eq!(shell(grid(6, 1, 1, 1), 1.0).len(), 6, "a line");
-        assert_eq!(shell(grid(4, 3, 1, 1), 1.0).len(), 12, "a flat rectangle");
-        // At half-metre Voxels the cells are half a metre apart, still touching.
-        let mut half = grid(3, 3, 3, 1);
-        for (at, _) in &mut half {
-            *at *= 0.5;
         }
-        assert_eq!(shell(half, 0.5).len(), 26);
+        cells
+    }
+
+    fn cube_triangles(app: &App) -> usize {
+        let held = app.world().resource::<Hotbar>().held();
+        let catalogue = &app.world().resource::<super::super::edit::Catalogue>().0;
+        super::super::preview::item_mesh(held, catalogue)
+            .unwrap()
+            .indices()
+            .unwrap()
+            .len()
+            / 3
+    }
+
+    #[test]
+    fn touching_ghosts_draw_one_surface_so_every_cell_looks_the_same() {
+        let mut app = ghost_app();
+        answer_with(&mut app, &grid(2, 1, 1, 1.0));
+        let line = &visible(&mut app)[0];
+        let on_joint = |t: &[Vec3; 3]| t.iter().all(|v| (v.x - 1.0).abs() < 1e-4);
+        assert!(
+            !line.triangles.iter().any(on_joint),
+            "no face between the two"
+        );
+        assert!(
+            (line.min.x - GHOST_INSET).abs() < 1e-5,
+            "the outside is inset"
+        );
+        assert!((line.max.x - (2.0 - GHOST_INSET)).abs() < 1e-5);
+        assert!(
+            line.triangles
+                .iter()
+                .flatten()
+                .any(|v| (v.x - 1.0).abs() < 1e-5),
+            "the cells meet with no slit between them"
+        );
+        let per_face = cube_triangles(&app) / 6;
+        answer_with(&mut app, &grid(3, 3, 3, 1.0));
+        assert_eq!(
+            visible(&mut app)[0].triangles.len(),
+            6 * 9 * per_face,
+            "a box is its outside only"
+        );
+        answer_with(&mut app, &grid(3, 3, 3, 2.0));
+        assert_eq!(
+            visible(&mut app)[0].triangles.len(),
+            27 * cube_triangles(&app),
+            "a gap keeps every face"
+        );
+    }
+
+    #[test]
+    fn half_metre_ghosts_still_join() {
+        let mut app = ghost_app();
+        app.world_mut().resource_mut::<WorldSettings>().voxel_size = 0.5;
+        answer_with(&mut app, &grid(3, 3, 3, 0.5));
+        let per_face = cube_triangles(&app) / 6;
+        assert_eq!(visible(&mut app)[0].triangles.len(), 6 * 9 * per_face);
+    }
+
+    #[test]
+    fn a_blocked_cell_joins_its_placeable_neighbour() {
+        let mut app = ghost_app();
+        answer_with(
+            &mut app,
+            &[
+                (Vec3::ZERO, CellState::Placeable),
+                (Vec3::X, CellState::Blocked),
+            ],
+        );
+        let shown = visible(&mut app);
+        let per_face = cube_triangles(&app) / 6;
+        assert_eq!(shown.len(), 2);
+        assert!(shown.iter().all(|d| d.triangles.len() == 5 * per_face));
     }
 
     #[test]
