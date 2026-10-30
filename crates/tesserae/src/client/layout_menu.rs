@@ -10,6 +10,7 @@ use super::{
     menu_ui as ui,
     profile::{Preferences, Store},
 };
+use crate::session::SessionApp;
 use crate::world::WorldSettings;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -64,9 +65,9 @@ struct Panel;
 struct Info;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<LayoutMenu>()
+    app.init_session_state::<LayoutMenu>()
         .add_observer(activate)
-        .add_systems(
+        .add_session_systems(
             Update,
             (
                 toggle

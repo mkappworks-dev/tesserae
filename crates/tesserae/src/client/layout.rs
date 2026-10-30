@@ -15,6 +15,7 @@ use super::{
 use crate::server::edit::{
     CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, RejectReason, Span,
 };
+use crate::session::SessionApp;
 use crate::world::WorldSettings;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
@@ -705,13 +706,13 @@ pub(super) fn summary(
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<LayoutMode>()
-        .init_resource::<Preview>()
-        .init_resource::<GhostModel>()
-        .add_message::<LayoutIntent>()
-        .add_message::<LayoutAim>()
-        .add_message::<LayoutAnswer>()
-        .add_systems(
+    app.init_session_state::<LayoutMode>()
+        .init_session_state::<Preview>()
+        .init_session_state::<GhostModel>()
+        .add_session_message::<LayoutIntent>()
+        .add_session_message::<LayoutAim>()
+        .add_session_message::<LayoutAnswer>()
+        .add_session_systems(
             Update,
             (
                 intercept
