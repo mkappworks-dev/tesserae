@@ -20,9 +20,9 @@ pub struct FluidSurface {
 
 /// The fluid at the eye's cell, or the highest within `reach_m` below it.
 ///
-/// Stops at a solid or unheld cell, so a floor between the eye and a pool below
-/// hides the pool. Fluid in the voids of a solid is not read: the eye is in the
-/// open space beside it.
+/// Stops at a solid or unheld cell below the eye, so a floor between the eye and
+/// a pool below hides the pool. Fluid in the voids of a solid is not read: the
+/// eye is in the open space beside it.
 pub fn fluid_at(
     view: &impl CellView,
     tables: &Tables,
@@ -33,12 +33,21 @@ pub fn fluid_at(
     let [x, eye_y, z] = eye_m.map(|m| (m / size).floor() as i32);
     // One cell lower: a cell ending at the reach is wet up to its top.
     let lowest = ((eye_m[1] - reach_m) / size).floor() as i32 - 1;
-    let open = |y| {
+    let occupants = |y| {
         let (voxel, overlay) = view.stored([x, y, z])?;
-        let here = Occupants::of(voxel, overlay, &tables.fluids);
+        Some(Occupants::of(voxel, overlay, &tables.fluids))
+    };
+    let open = |y| {
+        let here = occupants(y)?;
         here.solid.is_air().then_some(here.fluid)
     };
+    // A noclip eye inside the bed still sees the lake above it, but only through
+    // rock within reach.
+    let highest = ((eye_m[1] + reach_m) / size).floor() as i32;
     let mut y = eye_y;
+    while y < highest && occupants(y).is_some_and(|here| !here.solid.is_air()) {
+        y += 1;
+    }
     let mut fluid = loop {
         match open(y)? {
             Some(fluid) => break fluid,
@@ -158,6 +167,33 @@ mod tests {
             .insert([0, 3, 0], (Voxel::cube(f.ground.rock), Overlay::NONE));
         let at = fluid_at(&cells, &f.tables, 1.0, [0.5, 4.5, 0.5], 4.0);
         assert_eq!(at, None);
+    }
+
+    #[test]
+    fn an_eye_clipped_into_the_bed_still_reads_the_lake_above() {
+        let f = fixtures();
+        let mut cells = lake(f.water, 2, 6, 10);
+        for y in 0..2 {
+            cells
+                .0
+                .insert([0, y, 0], (Voxel::cube(f.ground.rock), Overlay::NONE));
+        }
+        let at = |y| fluid_at(&cells, &f.tables, 1.0, [0.5, y, 0.5], 2.0);
+        assert_eq!(at(1.5).map(|s| s.surface_y_m), Some(6.0));
+        assert_eq!(at(0.5).map(|s| s.surface_y_m), Some(6.0));
+    }
+
+    #[test]
+    fn an_eye_deep_in_rock_under_a_lake_reads_dry() {
+        let f = fixtures();
+        let mut cells = lake(f.water, 5, 9, 12);
+        for y in 0..5 {
+            cells
+                .0
+                .insert([0, y, 0], (Voxel::cube(f.ground.rock), Overlay::NONE));
+        }
+        let at = fluid_at(&cells, &f.tables, 1.0, [0.5, 0.5, 0.5], 2.0);
+        assert_eq!(at, None, "the water is beyond the reach");
     }
 
     #[test]
