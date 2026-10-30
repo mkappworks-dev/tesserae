@@ -1,6 +1,6 @@
 # 29: Optional repeat place/remove while held
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (07 merged as PR #28)
 
 Spec: [reconciled desktop gameplay](../spec.md).
