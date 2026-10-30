@@ -1245,6 +1245,8 @@ pub(super) fn highlight_tiles(
 const TILE_NAME_CHARS: usize = 9;
 /// Keeps the preview clear of the name line with a small gap.
 const TILE_NAME_ROOM: f32 = 15.0;
+/// Taller than wide, so the model keeps its size above the name line.
+const TILE_EXTRA_HEIGHT: f32 = 10.0;
 fn one_line(label: &str) -> String {
     let name = label
         .lines()
@@ -1286,8 +1288,7 @@ pub(super) fn tile(
                     },
                     Node {
                         width: Val::Px(size),
-                        height: Val::Px(size),
-                        aspect_ratio: Some(1.0),
+                        height: Val::Px(size + TILE_EXTRA_HEIGHT),
                         flex_shrink: 0.0,
                         border: UiRect::all(Val::Px(2.0)),
                         border_radius: BorderRadius::all(Val::Px(6.0)),
@@ -1910,7 +1911,7 @@ mod tests {
             .world_mut()
             .query::<(&Entry, &Node)>()
             .iter(app.world())
-            .filter(|(_, node)| node.aspect_ratio == Some(1.0))
+            .filter(|(_, node)| node.height == Val::Px(64.0 + TILE_EXTRA_HEIGHT))
             .count();
         assert_eq!(squares, 10);
         app.world_mut().resource_mut::<Hotbar>().select(2);
@@ -1919,7 +1920,7 @@ mod tests {
             .world_mut()
             .query::<(&Entry, &Node)>()
             .iter(app.world())
-            .filter(|(_, node)| node.aspect_ratio == Some(1.0))
+            .filter(|(_, node)| node.height == Val::Px(64.0 + TILE_EXTRA_HEIGHT))
             .count();
         assert_eq!(squares, 9);
         app.init_resource::<super::super::settings::Settings>();
