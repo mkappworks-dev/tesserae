@@ -729,6 +729,11 @@ pub(super) fn action_name(action: Action) -> &'static str {
         NextSlot => "Next quick slot",
         Undo => "Undo",
         Redo => "Redo",
+        Layout => "Layout mode",
+        LayoutMore => "Layout: more Voxels",
+        LayoutLess => "Layout: fewer Voxels",
+        LayoutAlong => "Layout: change axis",
+        LayoutReverse => "Layout: reverse direction",
         Catalogue => "Open Catalogue",
         ReleaseCursor => "Release cursor",
         Help => "Open input settings",
@@ -740,9 +745,8 @@ pub(super) fn category(action: Action) -> &'static str {
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
-        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool => {
-            "Building"
-        }
+        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool
+        | Layout | LayoutMore | LayoutLess | LayoutAlong | LayoutReverse => "Building",
         _ => "Interface",
     }
 }
@@ -2013,6 +2017,11 @@ fn binding_order(action: Action) -> usize {
         CycleTool,
         Use,
         ClearTool,
+        Layout,
+        LayoutMore,
+        LayoutLess,
+        LayoutAlong,
+        LayoutReverse,
         Catalogue,
         Help,
         ReleaseCursor,

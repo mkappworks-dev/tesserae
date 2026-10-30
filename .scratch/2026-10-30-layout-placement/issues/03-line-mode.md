@@ -8,16 +8,28 @@ together, completable on a pad with no typing.
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** done
 
 Spec: [layout placement](../spec.md).
 
-- [ ] The preview comes from the Server's answer, never from World storage,
+- [x] The preview comes from the Server's answer, never from World storage,
       and hides on item change, large turns or Eye displacement.
-- [ ] Place sends exactly one layout intent; Remove and the toggle send none.
-- [ ] Menu, focus and device changes cancel a pending layout and never
+- [x] Place sends exactly one layout intent; Remove and the toggle send none.
+- [x] Menu, focus and device changes cancel a pending layout and never
       commit one.
-- [ ] Edits and previews are identical at 60/144/1000 Hz render updates.
-- [ ] Layout actions are remappable with conflict warnings; older profiles
+- [x] Edits and previews are identical at 60/144/1000 Hz render updates.
+- [x] Layout actions are remappable with conflict warnings; older profiles
       load with defaults.
-- [ ] Single placement is unchanged when Layout mode is off.
+- [x] Single placement is unchanged when Layout mode is off.
+
+## Comments
+
+### 2026-10-30: implemented
+
+Defaults: `L` toggles, `[` / `]` or Shift+wheel change the count, `B` cycles
+the axis and `T` reverses it. On a pad, LB/RB step the count while the mode is
+on, so Place (LT) commits and Remove (RT) cancels. Layout has no pad default:
+every button is taken, and main bound D-pad up to Use. Bind one in the
+settings to enter the mode from a pad; this needs a decision. A settings test
+that used D-pad up as a free button now uses C. Not run on a physical pad or
+reviewed visually.

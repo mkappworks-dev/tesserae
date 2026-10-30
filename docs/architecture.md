@@ -142,6 +142,13 @@ to 60 seconds and defaulting to 350 ms, published in the content catalogue. Core
 tables and simulation retain no input timing. The Server compares target
 identity again before applying the removal.
 
+Layout mode (`client/layout.rs`) takes the placement actions while it is on:
+Place commits, Remove cancels and the quick-slot steps change the count. The
+Client sends one layout intent and the aim ray; the Server resolves the anchor,
+expands the geometry from `tesserae_core::layout`, judges reach and sight once
+for the whole layout, then lands its cells through the Edit budget after single
+Edits. Its preview is the Server's answer, never World storage.
+
 Undo/redo owns at most 128 groups, 1024 before/after Occupants entries in all,
 and 16 queued requests on the integrated Server. A single Edit is a group of
 one; a layout (one intent for a line, rectangle or box of at most 256 Voxels,

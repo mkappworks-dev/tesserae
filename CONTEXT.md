@@ -190,6 +190,11 @@ and from Sample, which copies what is aimed at into the hand.
 **Measurement** — two corners a Tool's Use resolved, kept by the Client for the
 session. A corner is a vertex of the struck face of a Voxel's drawn Shape.
 
+**Layout** — a line, rectangle or box of Voxels a Player places with one intent:
+a count per axis, a gap in Voxels and a direction from an anchor. The Server
+expands it, judges each cell as it would a single Place, and records what it
+placed as one undo group. Not a Command, which is a Mod's request.
+
 **Command** — a Mod's request to fill a region or place Voxels at positions, to
 place or remove sources in a region, or to ignite or extinguish what is in one.
 

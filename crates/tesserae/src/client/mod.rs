@@ -16,6 +16,7 @@ mod help;
 mod history;
 mod hotbar_store;
 mod input;
+mod layout;
 pub(crate) mod loading;
 mod material_textures;
 mod menu;
@@ -81,6 +82,7 @@ pub fn plugin(app: &mut App) {
         loading::plugin,
         tool::plugin,
         underwater::plugin,
+        layout::plugin,
     ));
     app.add_session_systems(
         Update,

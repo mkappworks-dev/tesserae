@@ -48,6 +48,11 @@ pub(super) enum Action {
     NextSlot,
     Undo,
     Redo,
+    Layout,
+    LayoutMore,
+    LayoutLess,
+    LayoutAlong,
+    LayoutReverse,
     Catalogue,
     ReleaseCursor,
     Help,
@@ -279,6 +284,9 @@ impl Bindings {
             (ReleaseCursor, KeyCode::Escape),
             (Help, KeyCode::KeyI),
             (Diagnostics, KeyCode::F3),
+            (Layout, KeyCode::KeyL),
+            (LayoutAlong, KeyCode::KeyB),
+            (LayoutReverse, KeyCode::KeyT),
         ]
         .into_iter()
         .chain(SLOTS.into_iter().zip(super::edit::SLOT_KEYS))
@@ -308,6 +316,24 @@ impl Bindings {
                         modifier: Modifier::Alt,
                     }),
                     None,
+                ],
+            );
+        }
+        for (action, wheel, key) in [
+            (LayoutMore, Wheel::Up, KeyCode::BracketRight),
+            (LayoutLess, Wheel::Down, KeyCode::BracketLeft),
+        ] {
+            bindings.insert(
+                action,
+                [
+                    Some(Binding {
+                        trigger: Trigger::Wheel(wheel),
+                        modifier: Modifier::Shift,
+                    }),
+                    Some(Binding {
+                        trigger: Trigger::Key(key),
+                        modifier: Modifier::None,
+                    }),
                 ],
             );
         }

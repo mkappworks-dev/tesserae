@@ -45,7 +45,7 @@ impl LayoutParams {
 
 /// What the Client wants laid down: the ray that picks the anchor, as for a
 /// single Place, and the shape grown from it. Intent only.
-#[derive(Message, Clone, Copy, Debug)]
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
 pub struct LayoutIntent {
     pub origin: Vec3,
     pub direction: Vec3,
