@@ -239,11 +239,15 @@ The user asked for the open criteria to be finished on the same branch.
   terrain now returns to the list (or exits for a direct launch).
 - Release build, 10 cycles (macOS, `--release --features tesserae/dev`):
   entities 597, resources 392, meshes 5 and images 24 at every return. RSS
-  was 528 MB at cycle 2 and 565 MB at cycle 10, +7%: over the 5% line this
-  ticket set, and still rising by about 3-5 MB a cycle at the end, so it has
-  not plateaued. The ECS and asset counts are flat, so the growth is outside
-  them (allocator retention or something in the Mod host); not found. GPU
-  memory was not measured.
+  from cycle 2 to cycle 10 rose 7.0%, then 5.1%, 8.5% and 5.4% in three
+  more runs; the 5% line this ticket set is not met, so that criterion
+  stays unticked. The rise is about 3 MB a cycle and does not plateau.
+  `vmmap`: GPU memory (IOAccelerator) 26.8 to 28.2 MB between cycles 1 and 8;
+  malloc live bytes +3.8 MB and fragmentation +7.5 MB with the allocation
+  count flat. `malloc_history` diffs show the growth in wgpu buffers and
+  bind groups, Metal command-buffer pools and a bevy_ecs slab of wakers, not
+  in session code. Tried `malloc_zone_pressure_relief` after teardown: no
+  consistent gain, removed. Not fixed here.
 
 Not built, as noted in the implementation note: `SessionId` stamping and the
 debug teardown assertion. Some per-system `Local` caches are not reset

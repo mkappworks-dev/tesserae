@@ -92,7 +92,10 @@ fn soak(world: &mut World) {
             if frames == LIST_FRAMES + 10 {
                 let mut soak = world.resource_mut::<Soak>();
                 if soak.left == 0 {
-                    world.write_message(AppExit::Success);
+                    // Held open so a profiler can be attached to the finished run.
+                    if std::env::var_os("TESSERAE_SOAK_HOLD").is_none() {
+                        world.write_message(AppExit::Success);
+                    }
                 } else {
                     soak.left -= 1;
                     soak.cycle += 1;
