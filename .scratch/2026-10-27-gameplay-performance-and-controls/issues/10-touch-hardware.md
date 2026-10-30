@@ -1,6 +1,6 @@
 # 10: C4: Real desktop touch acceptance
 
-Status: ready-for-human
+Status: done
 Blocked by: 09
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -29,7 +29,7 @@ focus loss mid-hold; menu open mid-gesture; return to mouse and keyboard.
 - [ ] Actual contacts and synthetic mouse behavior match injected regressions.
 - [ ] No accidental/duplicate Edit across focus or gesture interruption.
 - [ ] Controls remain reachable/readable at the specified logical sizes.
-- [ ] Untested platforms/hardware remain explicitly unclaimed.
+- [x] Untested platforms/hardware remain explicitly unclaimed.
 - [ ] Until this passes, README, spec and tickets say touch is "implemented,
       not validated".
 
@@ -55,3 +55,12 @@ draft candidate; desktop-only is a platform constraint, not design approval.
 
 Scope above is the confirmed result of the touch grilling. Status is
 ready-for-human: it waits on ticket 09 and a user-supplied touchscreen.
+
+### 2026-10-30: closed without hardware
+
+Closed as done at the user's direction. No Windows or Linux touchscreen run
+was made, so the other acceptance criteria are not met and stay unticked.
+Touch is still "implemented, not validated": no physical contacts, emulated
+mouse behaviour or `MOUSE_GRACE_S` tuning has been recorded, and no platform
+is claimed as supported. Reopen this ticket when a touchscreen is available.
+
