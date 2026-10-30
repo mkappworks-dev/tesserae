@@ -479,8 +479,7 @@ impl Actions {
                             || (!continuing
                                 && (inputs.touch.just_pressed(action)
                                     || alternatives.iter().any(|binding| {
-                                        matches(*binding)
-                                            && inputs.just_pressed(binding.trigger)
+                                        matches(*binding) && inputs.just_pressed(binding.trigger)
                                     })))),
                     held,
                     released: previous && !held,

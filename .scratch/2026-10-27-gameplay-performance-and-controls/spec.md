@@ -149,6 +149,15 @@ layouts, size and opacity. A freeform HUD editor is deferred. Preserve the
 agreed tap/hold semantics and touch-safe catalogue operations. Native desktop
 touch hardware is required for support acceptance.
 
+Touch grilling (2026-10-30) is recorded in tickets 08–10. Touch is delivered
+only on Windows and Linux (winit 0.30 emits no touch events on macOS), so
+macOS is unclaimed and tests inject `TouchInput`. Touch has fixed, explicit
+controls and is not remappable; there is no tap-the-world action. Contacts keep
+one role from start to end/cancel and are cancelled by focus loss, menus and
+device switches. Synthetic mouse events are suppressed in our reader, with a
+grace period tuned on hardware. 08 and 09 are one PR; 10 is a human-run record
+and touch stays "implemented, not validated" until it passes.
+
 ## Creative organization and interaction
 
 The user accepted the existing creative shortcut workflow as complete for

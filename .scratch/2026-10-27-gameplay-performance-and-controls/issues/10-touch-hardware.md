@@ -1,18 +1,28 @@
 # 10: C4: Real desktop touch acceptance
 
-Status: needs-triage
+Status: ready-for-human
 Blocked by: 09
 
 Spec: [reconciled desktop gameplay](../spec.md).
-PR boundary: C4; keep this separate from other PR scopes.
+PR boundary: validation record only; no product code.
 
 ## What to build
 
 Run two-finger move/look, controls, holds, catalogue browse/assignment,
-interruptions, focus loss and mouse return on actual supported-desktop touch
-hardware. Record OS/device/scaling/event delivery and synthetic mouse
-behavior. Mobile emulation or this Mac without touch hardware is not a
-substitute. Record visual approval independently from physical validation.
+interruptions, focus loss and mouse return on a Windows or Linux machine with
+a real touchscreen, supplied by the user. macOS cannot produce touch events
+(winit 0.30), and mobile emulation or this Mac is no substitute.
+
+Record per run: OS and version, device, display scaling, X11 or Wayland,
+whether touch arrives as `TouchInput`, whether the OS also emits synthetic
+mouse events and when, and whether the grace constant from ticket 08 needed to
+change (adjust it only from this evidence). Record visual approval
+independently from physical validation.
+
+Journeys: move and look together; Place, Remove hold and repeat-while-held;
+Use and Sample; slots; tap-to-select and Assign to slot in the catalogue;
+World list screens; Menu button and close; palm or resting-hand accidents;
+focus loss mid-hold; menu open mid-gesture; return to mouse and keyboard.
 
 ## Acceptance criteria
 
@@ -20,14 +30,15 @@ substitute. Record visual approval independently from physical validation.
 - [ ] No accidental/duplicate Edit across focus or gesture interruption.
 - [ ] Controls remain reachable/readable at the specified logical sizes.
 - [ ] Untested platforms/hardware remain explicitly unclaimed.
+- [ ] Until this passes, README, spec and tickets say touch is "implemented,
+      not validated".
 
 ## Validation and authorization
 
 Use behavior/intent regressions and the spec's build/review requirements.
-Preserve shared Bevy artifacts, Server/core/WIT boundaries and count bounds.
 Native captures/measurements stay in one unique /tmp folder until review.
-All Q1–Q49 product choices are accepted, but final shared understanding is
-not yet confirmed. Do not implement, publish, push or merge from this status.
+Needs a human with the hardware; an agent cannot complete it. Publication and
+merge are not authorized from this status.
 
 ## Comments
 
@@ -39,9 +50,8 @@ Completion requires real desktop touch hardware and physical input evidence.
 
 The user identified that the design had not been grilled. This ticket is a
 draft candidate; desktop-only is a platform constraint, not design approval.
-Do not implement until the relevant decisions and readiness are established.
 
-### Reconciled after the completed interview
+### 2026-10-30: grilled
 
-The current spec and What to build section supersede historical draft
-alternatives above. Readiness awaits the final shared-understanding check.
+Scope above is the confirmed result of the touch grilling. Status is
+ready-for-human: it waits on ticket 09 and a user-supplied touchscreen.

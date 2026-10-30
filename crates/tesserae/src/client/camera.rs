@@ -135,6 +135,7 @@ fn show_hint(
     hint: Single<(&mut Visibility, &mut Text), With<CursorHint>>,
     bindings: Res<super::actions::Bindings>,
     labels: Res<super::actions::Labels>,
+    touch: Res<super::touch::TouchFrame>,
 ) {
     let wanted = if cursor.grab_mode == CursorGrabMode::None {
         Visibility::Inherited
@@ -145,7 +146,9 @@ fn show_hint(
     // re-laid out every frame.
     let (mut visibility, mut text) = hint.into_inner();
     visibility.set_if_neq(wanted);
-    text.set_if_neq(Text::new(if labels.device == super::actions::Device::Pad {
+    text.set_if_neq(Text::new(if touch.active {
+        "Touch the world to look around".to_owned()
+    } else if labels.device == super::actions::Device::Pad {
         format!(
             "Press {} to play",
             labels.pad(bevy::input::gamepad::GamepadButton::South)

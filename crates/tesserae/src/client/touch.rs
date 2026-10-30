@@ -103,7 +103,7 @@ pub(super) fn controls(size: Vec2, prefs: &TouchPreferences, ui_scale: f32) -> V
         (Shape, 2.0, 2.0),
     ];
     const SLOTS: [(Action, f32); 2] = [(PreviousSlot, 0.0), (NextSlot, 1.0)];
-    const TOP: [(Action, f32); 2] = [(ReleaseCursor, 0.0), (Catalogue, 1.0)];
+    const TOP: [(Action, f32); 2] = [(Help, 0.0), (Catalogue, 1.0)];
     let unit = TARGET_PX * ui_scale * size_factor(prefs.size);
     let (gap, margin) = (GAP_PX * ui_scale, MARGIN_PX * ui_scale);
     let step = unit + gap;
@@ -145,11 +145,123 @@ fn role_at(position: Vec2, size: Vec2, controls: &[(Action, Rect)], mirrored: bo
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<TouchFrame>().add_systems(
-        PreUpdate,
-        read.after(bevy::input::InputSystems)
-            .after(super::pad::read),
-    );
+    app.init_resource::<TouchFrame>()
+        .add_systems(
+            PreUpdate,
+            read.after(bevy::input::InputSystems)
+                .after(super::pad::read),
+        )
+        .add_systems(
+            Update,
+            sync_overlay
+                .after(super::input::resolve)
+                .run_if(crate::server::persistence::playing),
+        );
+}
+
+#[derive(Component)]
+struct Overlay;
+#[derive(Component)]
+struct Control(Action);
+
+fn label(action: Action) -> &'static str {
+    use Action::*;
+    match action {
+        Remove => "Remove",
+        Place => "Place",
+        Ascend => "Up",
+        Descend => "Down",
+        Use => "Use",
+        Sample => "Sample",
+        Sprint => "Sprint",
+        EmptyHand => "Hand",
+        Shape => "Shape",
+        PreviousSlot => "◀",
+        NextSlot => "▶",
+        Help => "Menu",
+        Catalogue => "Items",
+        _ => "",
+    }
+}
+
+/// Shown while touch is the device in use and the cursor is captured; the
+/// controls are rebuilt only when their layout inputs change.
+fn sync_overlay(
+    mut commands: Commands,
+    frame: Res<TouchFrame>,
+    ownership: Res<Ownership>,
+    (preferences, scale): (Res<super::profile::Preferences>, Res<UiScale>),
+    window: Single<&Window, With<PrimaryWindow>>,
+    overlay: Query<Entity, With<Overlay>>,
+    mut controls_ui: Query<(&Control, &mut BackgroundColor)>,
+    mut built: Local<Option<(Vec2, TouchPreferences, f32)>>,
+) {
+    let touch = &preferences.touch;
+    let shown = frame.active && ownership.owner == Owner::Gameplay;
+    let layout = (window.size(), touch.clone(), scale.0);
+    if !shown {
+        for entity in &overlay {
+            commands.entity(entity).despawn();
+        }
+        *built = None;
+        return;
+    }
+    if built.as_ref() != Some(&layout) {
+        for entity in &overlay {
+            commands.entity(entity).despawn();
+        }
+        let root = commands
+            .spawn((
+                Overlay,
+                Node {
+                    position_type: PositionType::Absolute,
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..default()
+                },
+                GlobalZIndex(8),
+                Pickable::IGNORE,
+            ))
+            .id();
+        for (action, rect) in controls(layout.0, touch, scale.0) {
+            let (min, size) = (rect.min / scale.0, rect.size() / scale.0);
+            commands.entity(root).with_child((
+                Control(action),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(min.x),
+                    top: Val::Px(min.y),
+                    width: Val::Px(size.x),
+                    height: Val::Px(size.y),
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    border_radius: BorderRadius::all(Val::Px(size.x / 4.0)),
+                    ..default()
+                },
+                BackgroundColor(Color::NONE),
+                Pickable::IGNORE,
+                children![(
+                    Text::new(label(action)),
+                    TextFont {
+                        font_size: bevy::text::FontSize::Px(13.0),
+                        ..default()
+                    },
+                    TextColor(Color::srgba(1.0, 1.0, 1.0, touch.opacity)),
+                    Pickable::IGNORE,
+                )],
+            ));
+        }
+        *built = Some(layout);
+    }
+    for (Control(action), mut background) in &mut controls_ui {
+        let alpha = touch.opacity
+            * if frame.buttons.pressed(*action) {
+                0.6
+            } else {
+                0.3
+            };
+        background.set_if_neq(BackgroundColor(Color::srgba(0.1, 0.1, 0.12, alpha)));
+    }
 }
 
 type Others<'w> = (
@@ -253,8 +365,8 @@ pub(super) fn read(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::actions::Actions;
+    use super::*;
 
     const WINDOW: Vec2 = Vec2::new(1280.0, 720.0);
 
@@ -316,7 +428,12 @@ mod tests {
         touch(&mut app, 7, TouchPhase::Started, place);
         app.update();
         assert!(state(&app, Action::Place).started);
-        touch(&mut app, 7, TouchPhase::Moved, place + Vec2::new(500.0, 0.0));
+        touch(
+            &mut app,
+            7,
+            TouchPhase::Moved,
+            place + Vec2::new(500.0, 0.0),
+        );
         app.update();
         let s = state(&app, Action::Place);
         assert!(s.held && !s.started, "sliding off keeps the control");
@@ -338,7 +455,11 @@ mod tests {
         app.update();
         let axes = &app.world().resource::<Actions>().axes;
         assert_eq!(axes.look, Vec2::new(30.0, 0.0));
-        assert!((axes.movement - Vec2::new(0.0, 1.0)).length() < 1e-4, "{:?}", axes.movement);
+        assert!(
+            (axes.movement - Vec2::new(0.0, 1.0)).length() < 1e-4,
+            "{:?}",
+            axes.movement
+        );
     }
 
     #[test]
@@ -361,7 +482,10 @@ mod tests {
             .unwrap()
             .focused = true;
         app.update();
-        assert!(!state(&app, Action::Remove).held, "a cancelled contact is not re-adopted");
+        assert!(
+            !state(&app, Action::Remove).held,
+            "a cancelled contact is not re-adopted"
+        );
     }
 
     #[test]
@@ -400,7 +524,10 @@ mod tests {
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Left);
         app.update();
-        assert!(!state(&app, Action::Remove).held, "the emulated release is ignored");
+        assert!(
+            !state(&app, Action::Remove).held,
+            "the emulated release is ignored"
+        );
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .release(MouseButton::Left);
@@ -420,10 +547,48 @@ mod tests {
         let mut cursor = app.world_mut().query::<&mut CursorOptions>();
         cursor.single_mut(app.world_mut()).unwrap().grab_mode = CursorGrabMode::None;
         app.update();
-        assert_eq!(app.world().resource::<Ownership>().owner, Owner::PointerFree);
+        assert_eq!(
+            app.world().resource::<Ownership>().owner,
+            Owner::PointerFree
+        );
         touch(&mut app, 1, TouchPhase::Started, Vec2::new(900.0, 300.0));
         app.update();
         app.update();
         assert_eq!(app.world().resource::<Ownership>().owner, Owner::Gameplay);
+    }
+
+    #[test]
+    fn a_reused_id_on_the_world_cannot_inherit_a_control() {
+        let mut app = app();
+        touch(&mut app, 1, TouchPhase::Started, centre(Action::Remove));
+        app.update();
+        touch(&mut app, 1, TouchPhase::Ended, centre(Action::Remove));
+        touch(&mut app, 1, TouchPhase::Started, Vec2::new(900.0, 300.0));
+        app.update();
+        assert!(!state(&app, Action::Remove).held);
+    }
+
+    #[test]
+    fn controls_stay_at_least_44_px_with_gaps_at_every_size_and_scale() {
+        for size in [TouchSize::Small, TouchSize::Normal, TouchSize::Enlarged] {
+            for mirrored in [false, true] {
+                for scale in [1.0, 1.5, 2.0] {
+                    let prefs = TouchPreferences {
+                        size,
+                        mirrored,
+                        ..default()
+                    };
+                    let all = controls(WINDOW, &prefs, scale);
+                    for (i, (action, rect)) in all.iter().enumerate() {
+                        assert!(rect.width() >= 44.0 && rect.height() >= 44.0, "{action:?}");
+                        assert!(rect.min.x >= 0.0 && rect.max.x <= WINDOW.x, "{action:?}");
+                        for (other, rect2) in &all[i + 1..] {
+                            let apart = rect.inflate(7.9).intersect(*rect2).is_empty();
+                            assert!(apart, "{action:?} crowds {other:?} at {scale} {size:?}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }
