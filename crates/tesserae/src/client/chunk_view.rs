@@ -64,6 +64,11 @@ impl ChunkEntities {
         &self.delivered
     }
 
+    #[cfg(feature = "profiling")]
+    pub(super) fn entity_count(&self) -> usize {
+        self.opaque.len() + self.blended.len() + self.cutout.len()
+    }
+
     /// The level-0 layers a camera cannot pass through: water and glass are
     /// blended and let it in.
     pub(super) fn solid_at(&self, coord: ChunkCoord) -> impl Iterator<Item = Entity> + '_ {

@@ -27,11 +27,12 @@ use crate::world::{ChunkCoord, WorldSettings};
 /// Past every level a World has at practical view distances.
 pub const LEVELS: usize = 8;
 
-/// This frame's holes, per level.
+/// This frame's holes, per level, and the Chunk mesh entities drawing it.
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct Holes {
     pub rule: [u32; LEVELS],
     pub fill: [u32; LEVELS],
+    pub chunk_entities: u32,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -131,17 +132,24 @@ fn children(c: ChunkCoord) -> impl Iterator<Item = ChunkCoord> {
     })
 }
 
+type PlayerCamera = (
+    &'static GlobalTransform,
+    &'static Projection,
+    &'static FlyCamera,
+);
+
 fn count(
     mut holes: ResMut<Holes>,
     entities: Option<Res<ChunkEntities>>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
-    camera: Option<Single<(&GlobalTransform, &Projection, &FlyCamera), With<MainCamera>>>,
+    camera: Option<Single<PlayerCamera, With<MainCamera>>>,
 ) {
     *holes = Holes::default();
     let (Some(entities), Some(camera)) = (entities, camera) else {
         return;
     };
+    holes.chunk_entities = entities.entity_count() as u32;
     let (transform, projection, fly) = camera.into_inner();
     let levels = level_count(&streaming).min(LEVELS as u32);
     let cuts = cuts(&streaming, world.cell_size());

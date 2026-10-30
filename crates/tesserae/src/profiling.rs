@@ -66,6 +66,37 @@ struct Row {
     settled: bool,
     focused: bool,
     holes: Holes,
+    /// Mesh entities each camera's visibility pass kept, by camera order.
+    visible: [u32; CAMERAS],
+}
+
+/// Camera orders recorded: the Player's and one per coarse level.
+const CAMERAS: usize = 8;
+
+#[derive(Resource, Default)]
+struct VisibleMeshes([u32; CAMERAS]);
+
+/// What this frame drew and failed to, and whether the app is closing.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Drawn<'w, 's> {
+    holes: Option<Res<'w, Holes>>,
+    visible: Res<'w, VisibleMeshes>,
+    exit: MessageReader<'w, 's, AppExit>,
+}
+
+fn count_visible(
+    mut visible: ResMut<VisibleMeshes>,
+    cameras: Query<(&Camera, &bevy::camera::visibility::VisibleEntities)>,
+) {
+    visible.0 = [0; CAMERAS];
+    for (camera, entities) in &cameras {
+        if let Some(count) = usize::try_from(camera.order)
+            .ok()
+            .and_then(|order| visible.0.get_mut(order))
+        {
+            *count = entities.len(std::any::TypeId::of::<Mesh3d>()) as u32;
+        }
+    }
 }
 
 pub fn plugin(app: &mut App) {
@@ -114,7 +145,8 @@ pub fn plugin(app: &mut App) {
     })
     .insert_resource(bevy::winit::WinitSettings::continuous())
     .add_systems(First, begin.after(crate::client::presentation::FramePacing))
-    .add_systems(Last, end)
+    .init_resource::<VisibleMeshes>()
+    .add_systems(Last, (count_visible, end).chain())
     .add_systems(
         FixedPostUpdate,
         sample_flow.after(crate::server::streaming::stats::Published),
@@ -169,8 +201,7 @@ fn end(
         Option<Res<crate::client::profile::Preferences>>,
     ),
     (windows, cameras): (Query<&Window>, Query<(&Camera, &RenderTarget)>),
-    holes: Option<Res<Holes>>,
-    mut exit: MessageReader<AppExit>,
+    mut drawn: Drawn,
 ) {
     if profile.saved {
         return;
@@ -198,9 +229,10 @@ fn end(
         shown: streaming.shown,
         settled: streaming.settled,
         focused: windows.iter().any(|w| w.focused),
-        holes: holes.as_deref().copied().unwrap_or_default(),
+        holes: drawn.holes.as_deref().copied().unwrap_or_default(),
+        visible: drawn.visible.0,
     });
-    if profile.rows.len() >= MAX_FRAMES || exit.read().next().is_some() {
+    if profile.rows.len() >= MAX_FRAMES || drawn.exit.read().next().is_some() {
         // The incomplete final interval is excluded, never replaced with virtual time.
         profile.saved = true;
         if let Err(error) = save(&profile, &settings, &view, &windows, &cameras) {
@@ -227,6 +259,8 @@ fn save(
         "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks,rule_holes,fill_holes{}",
         (0..LEVELS)
             .map(|l| format!(",rule_holes_l{l},fill_holes_l{l}"))
+            .chain(std::iter::once(",chunk_entities".to_string()))
+            .chain((0..CAMERAS).map(|c| format!(",visible_meshes_camera{c}")))
             .collect::<String>()
     )?;
     for r in &profile.rows {
@@ -274,6 +308,10 @@ fn save(
         )?;
         for l in 0..LEVELS {
             write!(out, ",{},{}", r.holes.rule[l], r.holes.fill[l])?;
+        }
+        write!(out, ",{}", r.holes.chunk_entities)?;
+        for count in r.visible {
+            write!(out, ",{count}")?;
         }
         writeln!(out)?;
     }
@@ -453,6 +491,7 @@ mod tests {
                 settled: false,
                 focused: false,
                 holes: Holes::default(),
+                visible: [0; CAMERAS],
             }),
         });
         app.add_systems(First, begin.after(crate::client::presentation::FramePacing));

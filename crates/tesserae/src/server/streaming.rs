@@ -983,11 +983,13 @@ pub mod stats {
         /// Mean job time to generate, and to mesh, a Chunk of this level.
         pub generate: lod::measure::JobCost,
         pub mesh_job: lod::measure::JobCost,
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
         pub flow: Flow,
     }
 
     /// Generate, relight and mesh work of one level; relight is level 0 only.
     #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
     pub struct Flow {
         /// Due and not dispatched: a Chunk of the load extent not held, a lit
         /// Chunk whose light is out of date, a Chunk of the mesh shell whose mesh
@@ -1026,6 +1028,7 @@ pub mod stats {
         pub levels: Vec<LevelStats>,
         /// Fluid steps' jobs run and their worker CPU since the World opened:
         /// they share the workers with streaming.
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
         pub fluid_run: (u64, f64),
     }
 
