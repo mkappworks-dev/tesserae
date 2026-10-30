@@ -17,6 +17,8 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::render::storage::ShaderBuffer;
 use tesserae_core::{ChunkMesh, MeshLayer};
 
@@ -100,10 +102,10 @@ impl IncomingMeshes<'_, '_> {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<ChunkEntities>()
-        .init_resource::<super::material_textures::Textures>()
-        .add_systems(Startup, (add_material, spawn_light))
-        .add_systems(PostStartup, spawn_camera);
+    app.init_session_state::<ChunkEntities>()
+        .init_session_state::<super::material_textures::Textures>()
+        .add_session_systems(Startup, (add_material, spawn_light))
+        .add_session_systems(PostStartup, spawn_camera);
     add_view_systems(app);
 }
 
@@ -113,8 +115,8 @@ pub(super) fn plugin(app: &mut App) {
 /// unload handled first would leave the mesh with nothing to despawn it; and
 /// what each level has drawn is published after both.
 fn add_view_systems(app: &mut App) {
-    app.init_resource::<super::material_textures::Textures>();
-    app.add_systems(
+    app.init_session_state::<super::material_textures::Textures>();
+    app.add_session_systems(
         Update,
         (
             update_textures.after(super::material_textures::receive),

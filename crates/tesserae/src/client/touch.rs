@@ -11,6 +11,8 @@ use bevy::picking::{
     pointer::{PointerAction, PointerId, PointerInput, PointerLocation},
 };
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::HashMap;
 
@@ -163,7 +165,7 @@ fn role_at(position: Vec2, size: Vec2, controls: &[(Action, Rect)], mirrored: bo
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<TouchFrame>()
+    app.init_session_state::<TouchFrame>()
         .add_systems(
             PreUpdate,
             read.after(bevy::input::InputSystems)
@@ -178,7 +180,7 @@ pub(super) fn plugin(app: &mut App) {
             )
                 .after(read),
         )
-        .add_systems(
+        .add_session_systems(
             Update,
             sync_overlay
                 .after(super::input::resolve)
@@ -338,7 +340,7 @@ fn sync_overlay(
         *built = None;
         return;
     }
-    if built.as_ref() != Some(&layout) {
+    if built.as_ref() != Some(&layout) || overlay.is_empty() {
         for entity in &overlay {
             commands.entity(entity).despawn();
         }

@@ -2,13 +2,16 @@
 use crate::server::undo::HistoryAction;
 use bevy::prelude::*;
 
+use crate::session::SessionApp;
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_message::<HistoryAction>().add_systems(
-        Update,
-        send.run_if(crate::server::persistence::playing)
-            .after(super::input::resolve)
-            .before(super::removal::hold),
-    );
+    app.add_session_message::<HistoryAction>()
+        .add_session_systems(
+            Update,
+            send.run_if(crate::server::persistence::playing)
+                .after(super::input::resolve)
+                .before(super::removal::hold),
+        );
 }
 fn send(
     ownership: Res<super::input::Ownership>,

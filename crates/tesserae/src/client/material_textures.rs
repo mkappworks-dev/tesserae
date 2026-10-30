@@ -8,6 +8,7 @@ use crate::render::{
     chunk_material::{ChunkMaterialExtension, FLAME_SLOT},
     texture_atlas::{EDGE, HEIGHT, ROWS, WIDTH},
 };
+use crate::session::SessionApp;
 use bevy::{
     asset::RenderAssetUsages,
     ecs::system::SystemParam,
@@ -105,9 +106,9 @@ impl Textures {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Textures>()
-        .add_message::<MaterialTextures>()
-        .add_systems(Update, receive.after(super::menu::receive_palette));
+    app.init_session_state::<Textures>()
+        .add_session_message::<MaterialTextures>()
+        .add_session_systems(Update, receive.after(super::menu::receive_palette));
 }
 
 fn image(pixels: Vec<u8>) -> Image {

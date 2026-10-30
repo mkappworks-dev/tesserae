@@ -34,6 +34,8 @@ use std::sync::Arc;
 
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
@@ -429,23 +431,23 @@ impl MeshState {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<StreamingSettings>()
-        .insert_resource(streaming_budget())
-        .init_resource::<LoadOrder>()
-        .init_resource::<MeshState>()
-        .init_resource::<Jobs>()
-        .add_message::<ChunkMeshReady>()
-        .add_message::<ChunkUnloaded>()
-        .add_message::<LodMeshReady>()
-        .add_message::<LodUnloaded>()
+    app.init_session_resource::<StreamingSettings>()
+        .init_session_resource_with(streaming_budget)
+        .init_session_resource::<LoadOrder>()
+        .init_session_resource::<MeshState>()
+        .init_session_resource::<Jobs>()
+        .add_session_message::<ChunkMeshReady>()
+        .add_session_message::<ChunkUnloaded>()
+        .add_session_message::<LodMeshReady>()
+        .add_session_message::<LodUnloaded>()
         .add_plugins(lod::plugin)
-        .add_systems(
+        .add_session_systems(
             FixedUpdate,
             (stream, lod::stream_lod).chain().in_set(Streaming),
         );
     #[cfg(any(feature = "dev", feature = "profiling"))]
-    app.add_systems(FixedFirst, crate::cost::tick_started)
-        .add_systems(FixedLast, crate::cost::tick_ended);
+    app.add_session_systems(FixedFirst, crate::cost::tick_started)
+        .add_session_systems(FixedLast, crate::cost::tick_ended);
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_plugins(stats::plugin);
 }
@@ -1011,10 +1013,11 @@ pub mod stats {
     }
 
     pub(super) fn plugin(app: &mut App) {
-        app.init_resource::<StreamingStats>().add_systems(
-            FixedPostUpdate,
-            publish_stats.run_if(crate::cost::collecting),
-        );
+        app.init_session_resource::<StreamingStats>()
+            .add_session_systems(
+                FixedPostUpdate,
+                publish_stats.run_if(crate::cost::collecting),
+            );
     }
 
     #[expect(

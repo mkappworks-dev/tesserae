@@ -2,6 +2,8 @@
 use super::edit::{Catalogue, Holding, Hotbar};
 use crate::content::ContentCatalogue;
 use bevy::prelude::*;
+
+use crate::session::{SessionApp, SessionTeardown};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io, path::PathBuf};
 use tesserae_core::Orientation;
@@ -191,7 +193,12 @@ impl Store {
 pub(super) fn plugin(app: &mut App) {
     let path = super::profile::user_path().with_extension("hotbar.json");
     app.insert_resource(Store::load(path))
-        .add_systems(PostUpdate, save);
+        .add_session_systems(PostUpdate, save)
+        // The next World's first frame must not read as the player emptying the bar.
+        .add_session_systems(SessionTeardown, |mut store: ResMut<Store>| {
+            store.observed = None;
+            store.game = None;
+        });
 }
 fn save(
     mut store: ResMut<Store>,
@@ -277,7 +284,7 @@ mod tests {
             .insert_resource(Store::load(path))
             .add_message::<ContentCatalogue>()
             .add_systems(Update, super::super::edit::receive_catalogue)
-            .add_systems(PostUpdate, save);
+            .add_session_systems(PostUpdate, save);
         app.world_mut().write_message(catalogue);
         app.update();
         app

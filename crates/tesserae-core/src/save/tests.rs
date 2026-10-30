@@ -569,3 +569,20 @@ fn pre_crouch_movement_defaults_to_standing_and_new_stance_round_trips() {
     player.extensions.get_mut("movement_v1").unwrap()["flight"] = true.into();
     assert!(player.movement().is_err());
 }
+
+#[test]
+fn a_newer_format_is_incompatible_not_corrupt_and_is_never_rolled_back_past() {
+    let d = Directory::new();
+    let c = fixture();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    writer.write(&c).unwrap();
+    drop(writer);
+    let body = serde_json::to_vec(&serde_json::json!({ "format": FORMAT_VERSION + 1 })).unwrap();
+    let mut bytes = MAGIC.to_vec();
+    bytes.extend_from_slice(&Sha256::digest(&body));
+    bytes.extend_from_slice(&body);
+    let newer = d.0.join("00000000000000000002.commit");
+    fs::write(&newer, &bytes).unwrap();
+    assert!(matches!(inspect(&d.0), Err(Error::Incompatible(_))));
+    assert_eq!(fs::read(&newer).unwrap(), bytes);
+}

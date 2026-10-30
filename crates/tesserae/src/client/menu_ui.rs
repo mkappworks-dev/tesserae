@@ -1,5 +1,6 @@
 //! Shared menu chrome; page bodies never replace the focused search widget.
 use super::settings::{Operation, Settings};
+use crate::session::SessionApp;
 use bevy::{
     input_focus::{FocusCause, InputFocus, InputFocusSystems, tab_navigation::TabIndex},
     prelude::*,
@@ -209,48 +210,7 @@ pub(super) fn button(
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Searches>()
-        .init_resource::<InputFocus>()
-        .add_observer(clear_search)
-        .add_systems(Startup, (make_logo, load_fonts, make_icons))
-        .add_systems(
-            PostUpdate,
-            materialize_icons.before(bevy::ui::UiSystems::Layout),
-        )
-        .add_systems(
-            Update,
-            (
-                search_presentation,
-                heading_status,
-                button_label_colors,
-                age_notifications,
-            )
-                .after(shell),
-        )
-        .add_systems(
-            PreUpdate,
-            focus
-                .after(InputFocusSystems::Dispatch)
-                .after(bevy::picking::PickingSystems::Last),
-        )
-        .add_systems(
-            Update,
-            (dashed_border_colors, danger_colors).after(button_label_colors),
-        )
-        .add_systems(
-            Update,
-            (search_keys, sync_search)
-                .chain()
-                .before(super::menu::toggle)
-                .before(super::settings::capture),
-        )
-        .add_systems(
-            Update,
-            (shell, style).chain().after(super::settings::render),
-        );
-}
-/// What the World list needs from the menu chrome, without the in-World menu.
-pub(super) fn launcher_chrome(app: &mut App) {
+    // The chrome the World list shares with the in-World menu.
     app.init_resource::<InputFocus>()
         .add_systems(Startup, (make_logo, load_fonts, make_icons))
         .add_systems(
@@ -259,8 +219,29 @@ pub(super) fn launcher_chrome(app: &mut App) {
         )
         .add_systems(
             Update,
-            (style, button_label_colors, danger_colors, age_notifications).chain(),
-        );
+            (style, button_label_colors, danger_colors)
+                .chain()
+                .after(super::settings::render),
+        )
+        .add_systems(Update, age_notifications.after(button_label_colors));
+    app.init_session_state::<Searches>()
+        .add_observer(clear_search)
+        .add_session_systems(Update, (search_presentation, heading_status).after(shell))
+        .add_session_systems(
+            PreUpdate,
+            focus
+                .after(InputFocusSystems::Dispatch)
+                .after(bevy::picking::PickingSystems::Last),
+        )
+        .add_session_systems(Update, dashed_border_colors.after(button_label_colors))
+        .add_session_systems(
+            Update,
+            (search_keys, sync_search)
+                .chain()
+                .before(super::menu::toggle)
+                .before(super::settings::capture),
+        )
+        .add_session_systems(Update, shell.before(style).after(super::settings::render));
 }
 
 /// A destructive action: red label and border instead of the neutral ones.

@@ -17,6 +17,8 @@ use std::sync::Arc;
 
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::lod::{
     Child, Coarse, UnderWater, Waterline, coarse_light_in, downsample_changed,
 };
@@ -463,12 +465,12 @@ pub(in crate::server) mod measure {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<LodStore>()
-        .init_resource::<LodState>()
-        .init_resource::<LodJobs>()
-        .insert_resource(lod_budget())
+    app.init_session_resource::<LodStore>()
+        .init_session_resource::<LodState>()
+        .init_session_resource::<LodJobs>()
+        .init_session_resource_with(lod_budget)
         // After `open_world`, whose generator the sources are derived from.
-        .add_systems(Startup, open_lod_generators.after(super::open_world));
+        .add_session_systems(Startup, open_lod_generators.after(super::open_world));
 }
 
 fn open_lod_generators(

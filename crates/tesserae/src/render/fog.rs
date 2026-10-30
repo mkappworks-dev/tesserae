@@ -13,6 +13,8 @@
 use bevy::pbr::{DistanceFog, FogFalloff};
 use bevy::prelude::*;
 
+use crate::session::SessionApp;
+
 use crate::server::streaming::StreamingSettings;
 
 /// Floor for the reach, so a World that draws nothing cannot divide by zero.
@@ -69,7 +71,7 @@ pub fn plugin(app: &mut App) {
     app.insert_resource(built_settings());
     let [r, g, b] = app.world().resource::<FogSettings>().sky;
     app.insert_resource(ClearColor(Color::srgb(r, g, b)));
-    app.add_systems(Update, follow_settings);
+    app.add_session_systems(Update, follow_settings);
 }
 
 /// Re-derives the clear colour and every camera's fog when [`FogSettings`] is

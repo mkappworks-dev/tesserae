@@ -10,6 +10,8 @@ use bevy::picking::events::{
 };
 use bevy::picking::pointer::PointerButton;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::ui_widgets::{Activate, Button, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::{MaterialId, ShapeId};
@@ -149,10 +151,10 @@ pub(super) struct PointerState {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Menu>()
-        .init_resource::<super::menu_ui::Searches>()
-        .init_resource::<Swatches>()
-        .init_resource::<PointerState>()
+    app.init_session_state::<Menu>()
+        .init_session_state::<super::menu_ui::Searches>()
+        .init_session_state::<Swatches>()
+        .init_session_state::<PointerState>()
         .init_resource::<UiScale>()
         .add_observer(choose)
         .add_observer(inspect)
@@ -164,7 +166,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(drag_move)
         .add_observer(drag_end)
         .add_observer(drop_on_slot)
-        .add_systems(
+        .add_session_systems(
             Update,
             (
                 // Before the edit path, so it sees the grab a close makes and

@@ -16,7 +16,7 @@ mod help;
 mod history;
 mod hotbar_store;
 mod input;
-mod loading;
+pub(crate) mod loading;
 mod material_textures;
 mod menu;
 mod menu_ui;
@@ -32,6 +32,8 @@ pub(crate) mod profile;
 mod removal;
 mod save;
 mod settings;
+#[cfg(feature = "dev")]
+mod soak;
 mod tile_preview;
 mod tool;
 mod touch;
@@ -40,6 +42,8 @@ mod view;
 pub mod worlds;
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 
 pub fn plugin(app: &mut App) {
     #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -78,7 +82,7 @@ pub fn plugin(app: &mut App) {
         tool::plugin,
         underwater::plugin,
     ));
-    app.add_systems(
+    app.add_session_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))
             .run_if(chunk_view::terrain_arrived)
@@ -88,5 +92,6 @@ pub fn plugin(app: &mut App) {
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
         overlay::plugin,
+        soak::plugin,
     ));
 }

@@ -23,6 +23,8 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::collide::{RayHit, VoxelVolume, overlaps, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
@@ -301,21 +303,21 @@ impl PendingEdits {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<super::undo::Journal>()
-        .add_message::<super::undo::HistoryAction>()
-        .add_message::<super::undo::HistoryApplied>()
-        .init_resource::<AimState>()
-        .init_resource::<super::tool::Tools>()
-        .add_message::<AimReport>()
-        .add_message::<AimTarget>()
-        .add_message::<PickIntent>()
-        .add_message::<PickedItem>()
-        .init_resource::<PendingEdits>()
-        .init_resource::<super::mods::EditHistory>()
-        .add_message::<EditIntent>()
-        .add_message::<EditRejected>()
+    app.init_session_resource::<super::undo::Journal>()
+        .add_session_message::<super::undo::HistoryAction>()
+        .add_session_message::<super::undo::HistoryApplied>()
+        .init_session_resource::<AimState>()
+        .init_session_resource::<super::tool::Tools>()
+        .add_session_message::<AimReport>()
+        .add_session_message::<AimTarget>()
+        .add_session_message::<PickIntent>()
+        .add_session_message::<PickedItem>()
+        .init_session_resource::<PendingEdits>()
+        .init_session_resource::<super::mods::EditHistory>()
+        .add_session_message::<EditIntent>()
+        .add_session_message::<EditRejected>()
         // Every frame, so a click is never lost to a frame that runs no tick.
-        .add_systems(
+        .add_session_systems(
             RunFixedMainLoop,
             (receive, receive_aim, pick, super::undo::receive)
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)
@@ -323,7 +325,7 @@ pub(super) fn plugin(app: &mut App) {
         )
         // Before `FixedUpdate`, where `streaming::stream` meshes, so the same
         // tick's `publish` sees the edit.
-        .add_systems(
+        .add_session_systems(
             FixedPreUpdate,
             (
                 apply_pending.run_if(super::persistence::playing),

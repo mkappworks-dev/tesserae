@@ -2,12 +2,14 @@
 use super::camera::FlyCamera;
 use crate::server::player::{BodyState, MovementFeedback, PoseCorrection};
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 /// The latest body the Server published, for posing the figure.
 #[derive(Resource, Default)]
 pub(super) struct PublishedBody(pub BodyState);
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<PublishedBody>()
-        .add_systems(Update, (restore_view, apply_correction, feedback));
+    app.init_session_state::<PublishedBody>()
+        .add_session_systems(Update, (restore_view, apply_correction, feedback));
 }
 fn feedback(mut messages: MessageReader<MovementFeedback>, mut commands: Commands) {
     if let Some(message) = messages.read().last() {

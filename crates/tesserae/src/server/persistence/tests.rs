@@ -787,3 +787,26 @@ fn unreadable_details_never_block_a_saved_world() {
     );
     assert_eq!(reopened.settings(WorldSettings::default()).seed, 6);
 }
+
+#[test]
+fn the_writer_lock_is_free_as_soon_as_the_session_ends() {
+    use crate::session::testing::{app, leave, loading, open};
+    let worlds = Directory::new();
+    let path = library::create(&worlds.0, &details("Locked", 8, 1.0)).unwrap();
+    let prepare = || {
+        let opening = Opening::from_folder(&path).unwrap();
+        let settings = opening.settings(WorldSettings::default());
+        let mut loaded = crate::server::mods::demo_for_save(&opening, &settings);
+        Persistence::prepare(opening, &mut loaded, settings)
+    };
+    let mut app = app();
+    app.init_session_resource::<ChunkStore>()
+        .add_plugins(super::plugin);
+    loading(&mut app);
+    app.insert_resource(prepare().unwrap());
+    open(&mut app);
+    assert!(prepare().is_err(), "held while the World is open");
+    leave(&mut app);
+    assert!(!app.world().contains_resource::<Persistence>());
+    assert!(prepare().is_ok(), "free at once after Return");
+}

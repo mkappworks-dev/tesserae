@@ -1,7 +1,7 @@
 # 31: G0: Multiple installed Games and per-World Mod sets
 
 Status: needs-triage
-Blocked by: 27
+Blocked by: 27, 30
 
 Spec: [reconciled desktop gameplay](../spec.md).
 PR boundary: G0; keep this separate from other PR scopes.

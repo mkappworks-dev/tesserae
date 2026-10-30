@@ -339,10 +339,11 @@ threads are planned. Touch is not first by default.
 | 22 | S0: World save/lifecycle schema | agreed save policy |
 | 23 | S1: durable World/simulation changes | S0 |
 | 27 | W0: World list/create/seed UI | C2, S0, S1 |
-| 30 | W1: in-process World sessions | W0; needs triage |
+| 30 | W1: in-process World sessions | W0; done |
 | 31 | G0: multiple Games, per-World Mods | W0; needs triage |
 | 32 | W0.1: window, keyboard and controller follow-ups | W0, C3; needs triage |
 | 33 | water immersion: view (A), movement (B) | M0, V0; ready |
+| 34 | W1.1: World session memory growth | W1; needs triage |
 | 24 | M0: Server-owned flight/physics movement | C0 |
 | 25 | A0: Game character presentation | M0 |
 | 26 | V0: first/third-person view and aim | M0, A0 |

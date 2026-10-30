@@ -1,6 +1,8 @@
 //! Diagnostics remain independent of the menu and its input settings.
 use bevy::prelude::*;
 
+use crate::session::SessionApp;
+
 #[derive(Resource, Default)]
 pub(super) struct Panels {
     pub(super) debug: bool,
@@ -9,8 +11,8 @@ pub(super) struct Panels {
 pub(super) struct DebugPanel;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Panels>()
-        .add_systems(Update, (toggle.after(super::input::resolve), show).chain());
+    app.init_session_state::<Panels>()
+        .add_session_systems(Update, (toggle.after(super::input::resolve), show).chain());
 }
 fn toggle(actions: Res<super::actions::Actions>, mut panels: ResMut<Panels>) {
     if actions.started(super::actions::Action::Diagnostics) {

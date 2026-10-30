@@ -11,6 +11,8 @@ use crate::world::WorldSettings;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use crate::session::SessionApp;
+
 const HAND_LAYER: usize = 31;
 type Models = Or<(With<Ghost>, With<Hand>)>;
 type GhostOnly = (With<Ghost>, Without<Hand>);
@@ -29,9 +31,9 @@ struct Model {
     hand: Handle<StandardMaterial>,
 }
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Model>()
-        .init_resource::<Textures>()
-        .add_systems(
+    app.init_session_state::<Model>()
+        .init_session_state::<Textures>()
+        .add_session_systems(
             Update,
             (camera, model, position)
                 .chain()

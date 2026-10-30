@@ -1,6 +1,8 @@
 //! First-person look and semantic movement intents for the Server controller.
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::f32::consts::FRAC_PI_2;
 
@@ -89,8 +91,9 @@ pub(super) struct PadLatch {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Sprint>().init_resource::<PadLatch>();
-    app.add_systems(
+    app.init_session_state::<Sprint>()
+        .init_session_state::<PadLatch>();
+    app.add_session_systems(
         Update,
         grab_cursor
             .run_if(crate::server::persistence::playing)
@@ -107,9 +110,9 @@ pub(super) fn plugin(app: &mut App) {
         .after(super::input::resolve);
     #[cfg(feature = "dev")]
     let input = input.run_if(|| std::env::var_os("TESSERAE_SCREENSHOT").is_none());
-    app.add_systems(Startup, spawn_hint)
-        .add_systems(Update, input.run_if(crate::server::persistence::playing))
-        .add_systems(Update, show_hint.after(super::input::resolve));
+    app.add_session_systems(Startup, spawn_hint)
+        .add_session_systems(Update, input.run_if(crate::server::persistence::playing))
+        .add_session_systems(Update, show_hint.after(super::input::resolve));
 }
 
 fn spawn_hint(mut commands: Commands) {

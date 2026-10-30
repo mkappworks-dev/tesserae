@@ -13,6 +13,8 @@
 use bevy::camera::RenderTarget;
 use bevy::mesh::MeshTag;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use bevy::tasks::AsyncComputeTaskPool;
@@ -274,28 +276,28 @@ pub(super) fn plugin(app: &mut App) {
     app.insert_resource(super::help::Panels {
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
     });
-    app.add_systems(
+    app.add_session_systems(
         Update,
         super::removal::capture_progress
             .after(super::removal::hold)
             .before(super::removal::bar),
     );
-    app.add_systems(PreUpdate, save_preview);
+    app.add_session_systems(PreUpdate, save_preview);
     if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
         app.insert_resource(TouchCapture(match size.as_str() {
             "small" => super::profile::TouchSize::Small,
             "enlarged" => super::profile::TouchSize::Enlarged,
             _ => super::profile::TouchSize::Normal,
         }))
-        .add_systems(
+        .add_session_systems(
             PreUpdate,
             show_touch_overlay
                 .after(super::touch::read)
                 .run_if(resource_exists::<TouchCapture>),
         );
     }
-    app.add_systems(Startup, (uncap_frame_rate, view_fixture))
-        .add_systems(
+    app.add_session_systems(Startup, (uncap_frame_rate, view_fixture))
+        .add_session_systems(
             Update,
             (
                 render_offscreen.after(super::preview::camera).run_if(
