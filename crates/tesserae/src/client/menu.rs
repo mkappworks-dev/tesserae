@@ -1243,6 +1243,8 @@ pub(super) fn highlight_tiles(
 }
 
 const TILE_NAME_CHARS: usize = 9;
+/// Keeps the preview clear of the name line with a small gap.
+const TILE_NAME_ROOM: f32 = 15.0;
 fn one_line(label: &str) -> String {
     let name = label
         .lines()
@@ -1304,8 +1306,10 @@ pub(super) fn tile(
                             super::tile_preview::TilePreview(holding),
                             Node {
                                 position_type: PositionType::Absolute,
-                                width: Val::Percent(100.0),
-                                height: Val::Percent(100.0),
+                                left: Val::Px(0.0),
+                                right: Val::Px(0.0),
+                                top: Val::Px(0.0),
+                                bottom: Val::Px(TILE_NAME_ROOM),
                                 ..default()
                             },
                             Visibility::Hidden,
