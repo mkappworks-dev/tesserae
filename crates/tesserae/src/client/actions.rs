@@ -53,6 +53,8 @@ pub(super) enum Action {
     LayoutLess,
     LayoutAlong,
     LayoutReverse,
+    LayoutShape,
+    LayoutActive,
     Catalogue,
     ReleaseCursor,
     Help,
@@ -287,6 +289,8 @@ impl Bindings {
             (Layout, KeyCode::KeyL),
             (LayoutAlong, KeyCode::KeyB),
             (LayoutReverse, KeyCode::KeyT),
+            (LayoutShape, KeyCode::KeyH),
+            (LayoutActive, KeyCode::KeyJ),
         ]
         .into_iter()
         .chain(SLOTS.into_iter().zip(super::edit::SLOT_KEYS))

@@ -19,18 +19,45 @@ use std::collections::VecDeque;
 use tesserae_core::Voxel;
 use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS};
 
-const DEFAULT_COUNT: u32 = 4;
+const DEFAULT_COUNTS: [u32; 3] = [4, 3, 2];
 /// How long an answer may be drawn while the next is awaited.
 const ANSWER_SECS: f64 = 0.5;
 const HISTORY: usize = 16;
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub(super) enum Form {
+    #[default]
+    Line,
+    Rectangle,
+    Box,
+}
+impl Form {
+    fn axes(self) -> usize {
+        self as usize + 1
+    }
+    fn next(self) -> Self {
+        match self {
+            Self::Line => Self::Rectangle,
+            Self::Rectangle => Self::Box,
+            Self::Box => Self::Line,
+        }
+    }
+}
+
+type Assignment = [(Dim, bool); 3];
+
 #[derive(Resource)]
 pub(super) struct LayoutMode {
     pub(super) on: bool,
-    count: u32,
-    /// Set once the Player picks an axis or a direction; until then the line
-    /// runs away from the camera along the nearer horizontal axis.
-    manual: Option<(Dim, bool)>,
+    form: Form,
+    counts: [u32; 3],
+    /// The axis the count and the reverse action act on.
+    active: usize,
+    /// Set once the Player rotates the axes or reverses one; until then they
+    /// follow the camera: away from it, across it, then up.
+    manual: Option<Assignment>,
+    /// The last increase was refused for passing the cap.
+    refused: bool,
     commit: bool,
     was_grabbed: bool,
 }
@@ -38,44 +65,75 @@ impl Default for LayoutMode {
     fn default() -> Self {
         Self {
             on: false,
-            count: DEFAULT_COUNT,
+            form: Form::Line,
+            counts: DEFAULT_COUNTS,
+            active: 0,
             manual: None,
+            refused: false,
             commit: false,
             was_grabbed: false,
         }
     }
 }
 impl LayoutMode {
-    fn direction(&self, forward: Vec3) -> (Dim, bool) {
-        self.manual
-            .unwrap_or(if forward.x.abs() >= forward.z.abs() {
+    fn assignment(&self, camera: &GlobalTransform) -> Assignment {
+        self.manual.unwrap_or_else(|| {
+            let (forward, right) = (*camera.forward(), *camera.right());
+            let (along, ahead) = if forward.x.abs() >= forward.z.abs() {
                 (Dim::X, forward.x >= 0.0)
             } else {
                 (Dim::Z, forward.z >= 0.0)
-            })
+            };
+            let (across, side) = if along == Dim::X {
+                (Dim::Z, right.z >= 0.0)
+            } else {
+                (Dim::X, right.x >= 0.0)
+            };
+            [(along, ahead), (across, side), (Dim::Y, true)]
+        })
     }
-    fn params(&self, forward: Vec3) -> LayoutParams {
-        let (dim, positive) = self.direction(forward);
+    fn params(&self, camera: &GlobalTransform) -> LayoutParams {
+        let assignment = self.assignment(camera);
         LayoutParams {
-            axes: [
-                Some(LayoutAxis {
-                    dim,
-                    positive,
-                    count: self.count,
-                }),
-                None,
-                None,
-            ],
+            axes: std::array::from_fn(|i| {
+                (i < self.form.axes()).then(|| LayoutAxis {
+                    dim: assignment[i].0,
+                    positive: assignment[i].1,
+                    count: self.counts[i],
+                })
+            }),
             gap: 0,
         }
     }
-}
-
-fn next(dim: Dim) -> Dim {
-    match dim {
-        Dim::X => Dim::Y,
-        Dim::Y => Dim::Z,
-        Dim::Z => Dim::X,
+    fn total(&self, counts: [u32; 3]) -> usize {
+        counts[..self.form.axes()]
+            .iter()
+            .map(|&c| c as usize)
+            .product()
+    }
+    /// Steps the active axis, refusing a count that passes the cap.
+    fn bump(&mut self, by: i32) {
+        if by == 0 {
+            return;
+        }
+        let mut counts = self.counts;
+        counts[self.active] =
+            (counts[self.active] as i32 + by).clamp(1, MAX_LAYOUT_VOXELS as i32) as u32;
+        if self.total(counts) > MAX_LAYOUT_VOXELS {
+            self.refused = true;
+        } else {
+            self.counts = counts;
+            self.refused = false;
+        }
+    }
+    /// Brings the counts back under the cap after the form grows, trimming the
+    /// largest first.
+    fn fit(&mut self) {
+        while self.total(self.counts) > MAX_LAYOUT_VOXELS {
+            let used = self.form.axes();
+            let widest = (0..used).max_by_key(|&i| self.counts[i]).unwrap();
+            self.counts[widest] -= 1;
+        }
     }
 }
 
@@ -91,7 +149,7 @@ fn dim_name(dim: Dim, positive: bool) -> &'static str {
 }
 
 /// Takes the placement actions while the mode is on and moves the mode's own
-/// state: toggle, count, axis, direction, cancel and commit.
+/// state: toggle, form, counts, axes, cancel and commit.
 pub(super) fn intercept(
     ownership: Res<Ownership>,
     mut actions: ResMut<Actions>,
@@ -115,16 +173,37 @@ pub(super) fn intercept(
     if !mode.on {
         return;
     }
+    // A pad has no spare buttons: while the mode is on its D-pad turns and
+    // flips, and its empty-hand button, steer the layout instead. A keyboard
+    // keeps those for the Shape and has its own keys.
+    let pad = |action| actions.started(action) && actions.state(action).from_pad;
+    let (pad_active, pad_reverse, pad_form) =
+        (pad(Action::Turn), pad(Action::Flip), pad(Action::EmptyHand));
     let more = actions.started(Action::LayoutMore) || actions.started(Action::NextSlot);
     let less = actions.started(Action::LayoutLess) || actions.started(Action::PreviousSlot);
-    mode.count = (mode.count as i32 + i32::from(more) - i32::from(less))
-        .clamp(1, MAX_LAYOUT_VOXELS as i32) as u32;
-    let (dim, positive) = mode.direction(*camera.forward());
-    if actions.started(Action::LayoutAlong) {
-        mode.manual = Some((next(dim), positive));
+    mode.bump(i32::from(more) - i32::from(less));
+    if actions.started(Action::LayoutShape) || pad_form {
+        mode.form = mode.form.next();
+        mode.active = mode.active.min(mode.form.axes() - 1);
+        mode.fit();
     }
-    if actions.started(Action::LayoutReverse) {
-        mode.manual = Some((dim, !positive));
+    if actions.started(Action::LayoutActive) || pad_active {
+        mode.active = (mode.active + 1) % mode.form.axes();
+    }
+    let mut assignment = mode.assignment(&camera);
+    let mut changed = false;
+    if actions.started(Action::LayoutAlong) {
+        let [a, b, c] = assignment;
+        assignment = [(b.0, a.1), (c.0, b.1), (a.0, c.1)];
+        changed = true;
+    }
+    if actions.started(Action::LayoutReverse) || pad_reverse {
+        let active = mode.active;
+        assignment[active].1 = !assignment[active].1;
+        changed = true;
+    }
+    if changed {
+        mode.manual = Some(assignment);
     }
     if actions.started(Action::Remove) {
         mode.on = false;
@@ -138,6 +217,15 @@ pub(super) fn intercept(
         Action::PreviousSlot,
     ] {
         actions.cancel(action);
+    }
+    for (action, taken) in [
+        (Action::Turn, pad_active),
+        (Action::Flip, pad_reverse),
+        (Action::EmptyHand, pad_form),
+    ] {
+        if taken {
+            actions.cancel(action);
+        }
     }
 }
 
@@ -157,7 +245,7 @@ fn current(mode: &LayoutMode, hotbar: &Hotbar, camera: &GlobalTransform) -> Opti
         origin: camera.translation(),
         direction: *camera.forward(),
         voxel: held_voxel(hotbar)?,
-        layout: mode.params(*camera.forward()),
+        layout: mode.params(camera),
     })
 }
 
@@ -324,13 +412,20 @@ pub(super) fn readout(
     if !mode.on {
         return;
     }
-    let (dim, positive) = mode.direction(*camera.forward());
+    let assignment = mode.assignment(&camera);
     let keys = |action| bindings.label(action, &labels);
-    let head = format!(
-        "Layout: {} Voxels toward {}",
-        mode.count,
-        dim_name(dim, positive)
-    );
+    let axes: Vec<String> = (0..mode.form.axes())
+        .map(|i| {
+            let (dim, positive) = assignment[i];
+            let marker = if i == mode.active && mode.form != Form::Line {
+                "*"
+            } else {
+                ""
+            };
+            format!("{}{} {}", marker, mode.counts[i], dim_name(dim, positive))
+        })
+        .collect();
+    let head = format!("Layout: {:?} {}", mode.form, axes.join(" x "));
     let body = match held_voxel(&hotbar) {
         None => "Hold a solid to lay it out".to_owned(),
         Some(_) => current(&mode, &hotbar, &camera)
@@ -350,7 +445,12 @@ pub(super) fn readout(
         keys(Action::LayoutMore),
         keys(Action::LayoutLess),
     );
-    let shown = format!("{head}\n{body}\n{hint}");
+    let cap = if mode.refused {
+        format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels")
+    } else {
+        String::new()
+    };
+    let shown = format!("{head}\n{body}{cap}\n{hint}");
     if text.0 != shown {
         text.0 = shown;
     }
@@ -500,7 +600,7 @@ mod tests {
             panic!("one intent");
         };
         assert_eq!(intent.voxel, rock());
-        assert_eq!(count(&intent), DEFAULT_COUNT);
+        assert_eq!(count(&intent), DEFAULT_COUNTS[0]);
         let axis = intent.layout.axes[0].unwrap();
         assert_eq!((axis.dim, axis.positive), (Dim::Z, false));
         assert_eq!(intent.direction, Vec3::NEG_Z);
@@ -536,14 +636,14 @@ mod tests {
         let mut app = app();
         key(&mut app, KeyCode::KeyL);
         key(&mut app, KeyCode::BracketRight);
-        assert_eq!(mode(&app).count, DEFAULT_COUNT + 1);
+        assert_eq!(mode(&app).counts[0], DEFAULT_COUNTS[0] + 1);
         for _ in 0..10 {
             key(&mut app, KeyCode::BracketLeft);
         }
-        assert_eq!(mode(&app).count, 1);
-        app.world_mut().resource_mut::<LayoutMode>().count = MAX_LAYOUT_VOXELS as u32;
+        assert_eq!(mode(&app).counts[0], 1);
+        app.world_mut().resource_mut::<LayoutMode>().counts[0] = MAX_LAYOUT_VOXELS as u32;
         key(&mut app, KeyCode::BracketRight);
-        assert_eq!(mode(&app).count, MAX_LAYOUT_VOXELS as u32);
+        assert_eq!(mode(&app).counts[0], MAX_LAYOUT_VOXELS as u32);
     }
 
     #[test]
@@ -618,13 +718,119 @@ mod tests {
         tap(&mut app, GamepadButton::RightTrigger);
         tap(&mut app, GamepadButton::RightTrigger);
         tap(&mut app, GamepadButton::LeftTrigger);
-        assert_eq!(mode(&app).count, DEFAULT_COUNT + 1);
+        assert_eq!(mode(&app).counts[0], DEFAULT_COUNTS[0] + 1);
         let [intent] = tap(&mut app, GamepadButton::LeftTrigger2)[..] else {
             panic!("one intent");
         };
-        assert_eq!(count(&intent), DEFAULT_COUNT + 1);
+        assert_eq!(count(&intent), DEFAULT_COUNTS[0] + 1);
         assert!(tap(&mut app, GamepadButton::RightTrigger2).is_empty());
         assert!(!mode(&app).on);
+    }
+
+    fn commit(app: &mut App) -> LayoutIntent {
+        let [intent] = click(app, MouseButton::Right)[..] else {
+            panic!("one intent");
+        };
+        intent
+    }
+
+    fn dims(intent: &LayoutIntent) -> Vec<(Dim, bool, u32)> {
+        intent
+            .layout
+            .axes
+            .iter()
+            .flatten()
+            .map(|axis| (axis.dim, axis.positive, axis.count))
+            .collect()
+    }
+
+    #[test]
+    fn the_shape_key_grows_a_line_into_a_rectangle_and_a_box_on_distinct_axes() {
+        let mut app = app();
+        key(&mut app, KeyCode::KeyL);
+        key(&mut app, KeyCode::KeyH);
+        assert_eq!(
+            dims(&commit(&mut app)),
+            [(Dim::Z, false, 4), (Dim::X, true, 3)]
+        );
+        key(&mut app, KeyCode::KeyH);
+        assert_eq!(
+            dims(&commit(&mut app)),
+            [(Dim::Z, false, 4), (Dim::X, true, 3), (Dim::Y, true, 2)]
+        );
+        key(&mut app, KeyCode::KeyH);
+        assert_eq!(dims(&commit(&mut app)).len(), 1, "back to a line");
+    }
+
+    #[test]
+    fn counts_act_on_the_active_axis_and_the_reverse_flips_only_that_axis() {
+        let mut app = app();
+        key(&mut app, KeyCode::KeyL);
+        key(&mut app, KeyCode::KeyH);
+        key(&mut app, KeyCode::KeyJ);
+        key(&mut app, KeyCode::BracketRight);
+        key(&mut app, KeyCode::KeyT);
+        assert_eq!(
+            dims(&commit(&mut app)),
+            [(Dim::Z, false, 4), (Dim::X, false, 4)]
+        );
+    }
+
+    #[test]
+    fn a_count_that_would_pass_the_cap_is_refused_and_the_form_trims_to_fit() {
+        let mut app = app();
+        key(&mut app, KeyCode::KeyL);
+        key(&mut app, KeyCode::KeyH);
+        {
+            let mut mode = app.world_mut().resource_mut::<LayoutMode>();
+            mode.counts = [16, 16, 2];
+            mode.active = 0;
+        }
+        key(&mut app, KeyCode::BracketRight);
+        let mode_now = mode(&app);
+        assert_eq!(mode_now.counts, [16, 16, 2]);
+        assert!(mode_now.refused);
+        key(&mut app, KeyCode::BracketLeft);
+        assert!(!mode(&app).refused);
+        key(&mut app, KeyCode::KeyH);
+        assert!(
+            mode(&app).total(mode(&app).counts) <= MAX_LAYOUT_VOXELS,
+            "a box fits"
+        );
+    }
+
+    #[test]
+    fn a_pad_cycles_the_axis_flips_it_and_changes_the_shape_without_the_keyboard() {
+        let mut app = app();
+        tap(&mut app, GamepadButton::DPadUp);
+        tap(&mut app, GamepadButton::DPadDown);
+        tap(&mut app, GamepadButton::DPadLeft);
+        tap(&mut app, GamepadButton::DPadRight);
+        assert_eq!(mode(&app).form, Form::Rectangle);
+        assert_eq!(mode(&app).active, 1);
+        assert_eq!(
+            dims(&commit_pad(&mut app)),
+            [(Dim::Z, false, 4), (Dim::X, false, 3)]
+        );
+    }
+
+    fn commit_pad(app: &mut App) -> LayoutIntent {
+        let [intent] = tap(app, GamepadButton::LeftTrigger2)[..] else {
+            panic!("one intent");
+        };
+        intent
+    }
+
+    #[test]
+    fn the_keyboard_keeps_orientation_and_empty_hand_while_the_mode_is_on() {
+        let mut app = app();
+        key(&mut app, KeyCode::KeyL);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::KeyQ);
+        step(&mut app);
+        assert!(app.world().resource::<Actions>().started(Action::Turn));
+        assert_eq!(mode(&app).form, Form::Line);
     }
 
     #[test]

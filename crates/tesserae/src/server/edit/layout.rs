@@ -567,6 +567,27 @@ mod tests {
     }
 
     #[test]
+    fn a_box_lands_every_cell_and_one_undo_takes_them_all_back() {
+        let mut app = app_with(&[(origin(), ground())]);
+        send(
+            &mut app,
+            intent([axis(Dim::X, 3), axis(Dim::Z, 2), axis(Dim::Y, 2)]),
+        );
+        tick(&mut app);
+        for x in 5..8 {
+            for y in 8..10 {
+                for z in 5..7 {
+                    assert_eq!(voxel_at(&app, [x, y, z]), stone(), "{x} {y} {z}");
+                }
+            }
+        }
+        assert!(rejections(&mut app).is_empty());
+        replay(&mut app, Undo);
+        assert_eq!(placed(&app), 0);
+        assert!(voxel_at(&app, [7, 9, 6]).is_air());
+    }
+
+    #[test]
     fn an_undo_is_refused_whole_when_one_cell_has_changed() {
         let mut app = app_with(&[(origin(), ground())]);
         send(&mut app, line(3));
