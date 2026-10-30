@@ -948,11 +948,12 @@ mod tests {
                 .resource_mut::<ChunkStore>()
                 .insert(crate::world::ChunkCoord::new(0, 0, 0), chunk);
         }
-        let mut player = app.world_mut().query::<&mut Player>();
-        let mut player = player.single_mut(app.world_mut()).unwrap();
-        player.mode = mode;
-        player.eye = Vec3::new(0.5, 0.5, 0.5);
-        drop(player);
+        let mut query = app.world_mut().query::<&mut Player>();
+        {
+            let mut player = query.single_mut(app.world_mut()).unwrap();
+            player.mode = mode;
+            player.eye = Vec3::new(0.5, 0.5, 0.5);
+        }
         app
     }
     fn respawn(app: &mut App) -> (Vec3, Vec<MovementFeedback>) {
@@ -976,7 +977,7 @@ mod tests {
         player.crouching = false;
         let size = app.world().resource::<WorldSettings>().voxel_size;
         !collide::overlaps(
-            &*app.world().resource::<ChunkStore>(),
+            app.world().resource::<ChunkStore>(),
             &tables(),
             size,
             player.body(),
