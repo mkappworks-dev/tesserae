@@ -4,6 +4,12 @@ use super::actions::Action;
 use super::input::{Owner, Ownership};
 use super::profile::{TouchPreferences, TouchSize};
 use bevy::input::touch::{TouchInput, TouchPhase};
+use bevy::picking::{
+    PickingSystems,
+    hover::HoverMap,
+    input::PointerInputSettings,
+    pointer::{PointerAction, PointerId, PointerInput, PointerLocation},
+};
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use std::collections::HashMap;
@@ -18,6 +24,8 @@ const STICK_RADIUS_PX: f32 = 64.0;
 const TARGET_PX: f32 = 44.0;
 const GAP_PX: f32 = 8.0;
 const MARGIN_PX: f32 = 16.0;
+/// Travel past which a drag on a list scrolls it and the tap is dropped.
+const SCROLL_SLOP_PX: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Role {
@@ -83,7 +91,7 @@ fn size_factor(size: TouchSize) -> f32 {
     match size {
         TouchSize::Small => 1.0,
         TouchSize::Normal => 1.25,
-        TouchSize::Enlarged => 1.6,
+        TouchSize::Enlarged => 1.5,
     }
 }
 
@@ -102,7 +110,17 @@ pub(super) fn controls(size: Vec2, prefs: &TouchPreferences, ui_scale: f32) -> V
         (EmptyHand, 1.0, 2.0),
         (Shape, 2.0, 2.0),
     ];
-    const SLOTS: [(Action, f32); 3] = [(PreviousSlot, 0.0), (NextSlot, 1.0), (Catalogue, 2.0)];
+    const SECOND: [(Action, f32, f32); 9] = [
+        (PreviousSlot, 0.0, 0.0),
+        (NextSlot, 1.0, 0.0),
+        (Catalogue, 2.0, 0.0),
+        (Turn, 0.0, 1.0),
+        (Flip, 1.0, 1.0),
+        (MovementMode, 2.0, 1.0),
+        (View, 0.0, 2.0),
+        (Undo, 1.0, 2.0),
+        (Redo, 2.0, 2.0),
+    ];
     const TOP: [(Action, f32); 1] = [(Help, 0.0)];
     let unit = TARGET_PX * ui_scale * size_factor(prefs.size);
     let (gap, margin) = (GAP_PX * ui_scale, MARGIN_PX * ui_scale);
@@ -123,9 +141,9 @@ pub(super) fn controls(size: Vec2, prefs: &TouchPreferences, ui_scale: f32) -> V
         .map(|&(action, column, row)| (action, rect(x(column, true), bottom(row))))
         .collect();
     controls.extend(
-        SLOTS
+        SECOND
             .iter()
-            .map(|&(action, column)| (action, rect(x(column, false), bottom(0.0)))),
+            .map(|&(action, column, row)| (action, rect(x(column, false), bottom(row)))),
     );
     controls.extend(
         TOP.iter()
@@ -152,6 +170,15 @@ pub(super) fn plugin(app: &mut App) {
                 .after(super::pad::read),
         )
         .add_systems(
+            PreUpdate,
+            (
+                gate_picking,
+                sync_labels,
+                scroll_lists.before(PickingSystems::ProcessInput),
+            )
+                .after(read),
+        )
+        .add_systems(
             Update,
             sync_overlay
                 .after(super::input::resolve)
@@ -159,12 +186,112 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
+/// Picking would otherwise act on the mouse event the OS emulates for a touch
+/// as well as on the touch itself.
+fn gate_picking(frame: Res<TouchFrame>, settings: Option<ResMut<PointerInputSettings>>) {
+    if let Some(mut settings) = settings
+        && settings.is_mouse_enabled == frame.suppress_mouse
+    {
+        settings.is_mouse_enabled = !frame.suppress_mouse;
+    }
+}
+
+fn sync_labels(frame: Res<TouchFrame>, mut labels: ResMut<super::actions::Labels>) {
+    if labels.touch != frame.active {
+        labels.touch = frame.active;
+    }
+}
+
+struct ListDrag {
+    last: Vec2,
+    travelled: f32,
+    scrolling: bool,
+}
+
+type Scrollers<'w, 's> = Query<'w, 's, (&'static mut ScrollPosition, &'static Node)>;
+
+/// Picking turns a touch into a press, so a drag on a list would otherwise
+/// click what it ends on. Past the slop the press is cancelled and the drag
+/// scrolls the nearest scrollable ancestor instead.
+fn scroll_lists(
+    mut messages: MessageReader<TouchInput>,
+    scale: Res<UiScale>,
+    (hover, parents): (Res<HoverMap>, Query<&ChildOf>),
+    (pointers, mut scrollers): (Query<(&PointerId, &PointerLocation)>, Scrollers),
+    mut inputs: MessageWriter<PointerInput>,
+    mut drags: Local<HashMap<u64, ListDrag>>,
+) {
+    for message in messages.read() {
+        match message.phase {
+            TouchPhase::Started => {
+                drags.insert(
+                    message.id,
+                    ListDrag {
+                        last: message.position,
+                        travelled: 0.0,
+                        scrolling: false,
+                    },
+                );
+            }
+            TouchPhase::Moved => {
+                let Some(drag) = drags.get_mut(&message.id) else {
+                    continue;
+                };
+                let delta = message.position - drag.last;
+                drag.last = message.position;
+                drag.travelled += delta.length();
+                if drag.travelled < SCROLL_SLOP_PX * scale.0 {
+                    continue;
+                }
+                let id = PointerId::Touch(message.id);
+                let scrollable = hover.get(&id).and_then(|hits| {
+                    hits.keys().find_map(|&hit| {
+                        std::iter::successors(Some(hit), |e| parents.get(*e).ok().map(|c| c.0))
+                            .find(|e| {
+                                scrollers.get(*e).is_ok_and(|(_, node)| {
+                                    node.overflow.x == OverflowAxis::Scroll
+                                        || node.overflow.y == OverflowAxis::Scroll
+                                })
+                            })
+                    })
+                });
+                let Some(list) = scrollable else {
+                    continue;
+                };
+                if !drag.scrolling {
+                    drag.scrolling = true;
+                    if let Some(location) = pointers
+                        .iter()
+                        .find_map(|(pointer, at)| (*pointer == id).then(|| at.location.clone()))
+                        .flatten()
+                    {
+                        inputs.write(PointerInput::new(id, location, PointerAction::Cancel));
+                    }
+                }
+                let Ok((mut position, node)) = scrollers.get_mut(list) else {
+                    continue;
+                };
+                let by = -delta / scale.0;
+                if node.overflow.x == OverflowAxis::Scroll {
+                    position.x = (position.x + by.x).max(0.0);
+                }
+                if node.overflow.y == OverflowAxis::Scroll {
+                    position.y = (position.y + by.y).max(0.0);
+                }
+            }
+            TouchPhase::Ended | TouchPhase::Canceled => {
+                drags.remove(&message.id);
+            }
+        }
+    }
+}
+
 #[derive(Component)]
 struct Overlay;
 #[derive(Component)]
 struct Control(Action);
 
-fn label(action: Action) -> &'static str {
+pub(super) fn label(action: Action) -> &'static str {
     use Action::*;
     match action {
         Remove => "Remove",
@@ -176,10 +303,16 @@ fn label(action: Action) -> &'static str {
         Sprint => "Sprint",
         EmptyHand => "Hand",
         Shape => "Shape",
-        PreviousSlot => "◀",
-        NextSlot => "▶",
+        PreviousSlot => "Prev",
+        NextSlot => "Next",
         Help => "Menu",
         Catalogue => "Items",
+        Turn => "Turn",
+        Flip => "Flip",
+        MovementMode => "Mode",
+        View => "View",
+        Undo => "Undo",
+        Redo => "Redo",
         _ => "",
     }
 }
@@ -347,6 +480,16 @@ pub(super) fn read(
                 } else {
                     contact.last = message.position;
                 }
+                // A control's active area is its drawn size, so the cue the
+                // player sees is the one that counts.
+                if let Role::Control(action) = contact.role
+                    && !controls
+                        .iter()
+                        .any(|(a, rect)| *a == action && rect.contains(message.position))
+                {
+                    frame.buttons.release(action);
+                    contact.role = Role::Ui;
+                }
             }
             TouchPhase::Ended | TouchPhase::Canceled => {
                 if let Some(Contact {
@@ -386,7 +529,9 @@ mod tests {
             .insert_resource(Ownership::playing())
             .add_systems(
                 PreUpdate,
-                read.after(bevy::input::InputSystems)
+                (read, sync_labels)
+                    .chain()
+                    .after(bevy::input::InputSystems)
                     .before(super::super::actions::collect),
             )
             .add_systems(Update, super::super::input::resolve);
@@ -431,19 +576,24 @@ mod tests {
         touch(&mut app, 7, TouchPhase::Started, place);
         app.update();
         assert!(state(&app, Action::Place).started);
+        touch(&mut app, 7, TouchPhase::Moved, place + Vec2::new(3.0, 0.0));
+        app.update();
+        let s = state(&app, Action::Place);
+        assert!(s.held && !s.started, "moving within the control keeps it");
         touch(
             &mut app,
             7,
             TouchPhase::Moved,
-            place + Vec2::new(500.0, 0.0),
+            place + Vec2::new(-500.0, 0.0),
         );
         app.update();
-        let s = state(&app, Action::Place);
-        assert!(s.held && !s.started, "sliding off keeps the control");
+        assert!(!state(&app, Action::Place).held, "sliding off cancels it");
+        touch(&mut app, 7, TouchPhase::Moved, place);
+        app.update();
+        assert!(!state(&app, Action::Place).held, "and it is not re-adopted");
         touch(&mut app, 7, TouchPhase::Ended, place);
         app.update();
-        let s = state(&app, Action::Place);
-        assert!(!s.held);
+        assert!(!state(&app, Action::Place).held);
     }
 
     #[test]
@@ -606,6 +756,150 @@ mod tests {
                             assert!(apart, "{action:?} crowds {other:?} at {scale} {size:?}");
                         }
                     }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fingers_beyond_four_or_unknown_ids_do_nothing() {
+        let mut app = app();
+        let held = [
+            Action::Remove,
+            Action::Place,
+            Action::Use,
+            Action::Sample,
+            Action::Sprint,
+        ];
+        for (id, action) in held.into_iter().enumerate() {
+            touch(&mut app, id as u64, TouchPhase::Started, centre(action));
+        }
+        touch(&mut app, 99, TouchPhase::Moved, centre(Action::Shape));
+        touch(&mut app, 98, TouchPhase::Ended, centre(Action::Shape));
+        app.update();
+        let held: Vec<_> = held.into_iter().map(|a| state(&app, a).held).collect();
+        assert_eq!(held, [true, true, true, true, false]);
+    }
+
+    #[test]
+    fn a_drag_turns_the_same_at_any_update_rate() {
+        let turn = |updates: u32| {
+            let mut app = app();
+            let start = Vec2::new(900.0, 300.0);
+            touch(&mut app, 1, TouchPhase::Started, start);
+            app.update();
+            let mut total = 0.0;
+            for step in 1..=updates {
+                let x = 120.0 * step as f32 / updates as f32;
+                touch(&mut app, 1, TouchPhase::Moved, start + Vec2::new(x, 0.0));
+                app.update();
+                total += app.world().resource::<Actions>().axes.look.x;
+            }
+            total
+        };
+        for updates in [60, 144, 1000] {
+            let total = turn(updates);
+            assert!((total - 120.0).abs() < 0.01, "{updates} updates: {total}");
+        }
+    }
+
+    #[test]
+    fn touch_prompts_name_the_on_screen_control() {
+        let mut app = app();
+        touch(&mut app, 1, TouchPhase::Started, Vec2::new(900.0, 300.0));
+        app.update();
+        app.update();
+        assert!(
+            app.world()
+                .resource::<super::super::actions::Labels>()
+                .touch
+        );
+    }
+
+    #[test]
+    fn touches_over_a_list_scroll_it_and_drop_the_tap() {
+        use bevy::camera::NormalizedRenderTarget;
+        use bevy::picking::pointer::Location;
+        let mut app = App::new();
+        app.add_message::<TouchInput>()
+            .add_message::<PointerInput>()
+            .insert_resource(UiScale(1.0))
+            .init_resource::<HoverMap>()
+            .init_resource::<bevy::picking::pointer::PointerMap>()
+            .add_systems(Update, scroll_lists);
+        let list = app
+            .world_mut()
+            .spawn((
+                Node {
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
+                ScrollPosition::default(),
+            ))
+            .id();
+        let entry = app.world_mut().spawn(ChildOf(list)).id();
+        let pointer = PointerId::Touch(1);
+        let at = Location {
+            target: NormalizedRenderTarget::None {
+                width: 1,
+                height: 1,
+            },
+            position: Vec2::ZERO,
+        };
+        app.world_mut().spawn((pointer, PointerLocation::new(at)));
+        app.world_mut().resource_mut::<HoverMap>().insert(
+            pointer,
+            [(
+                entry,
+                bevy::picking::backend::HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let start = Vec2::new(100.0, 300.0);
+        touch(&mut app, 1, TouchPhase::Started, start);
+        touch(&mut app, 1, TouchPhase::Moved, start + Vec2::new(0.0, -4.0));
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(list).unwrap().y, 0.0);
+        touch(
+            &mut app,
+            1,
+            TouchPhase::Moved,
+            start + Vec2::new(0.0, -40.0),
+        );
+        app.update();
+        assert_eq!(app.world().get::<ScrollPosition>(list).unwrap().y, 36.0);
+        let cancelled = app
+            .world_mut()
+            .resource_mut::<Messages<PointerInput>>()
+            .drain()
+            .filter(|input| matches!(input.action, PointerAction::Cancel))
+            .count();
+        assert_eq!(cancelled, 1);
+    }
+
+    #[test]
+    fn the_overlay_keeps_to_the_thumb_zones_and_off_the_centre() {
+        let centre_box = Rect::from_center_size(WINDOW / 2.0, WINDOW * 0.2);
+        for size in [TouchSize::Small, TouchSize::Normal, TouchSize::Enlarged] {
+            for mirrored in [false, true] {
+                let prefs = TouchPreferences {
+                    size,
+                    mirrored,
+                    ..default()
+                };
+                for (action, rect) in controls(WINDOW, &prefs, 1.0) {
+                    assert!(
+                        rect.intersect(centre_box).is_empty(),
+                        "{action:?} on the centre"
+                    );
+                    if action == Action::Help {
+                        continue;
+                    }
+                    assert!(
+                        rect.min.y >= WINDOW.y * 2.0 / 3.0,
+                        "{action:?} above the lower third"
+                    );
                 }
             }
         }

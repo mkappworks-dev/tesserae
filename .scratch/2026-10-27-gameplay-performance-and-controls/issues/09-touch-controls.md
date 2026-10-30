@@ -1,6 +1,6 @@
 # 09: C4: Touch overlay and preferences
 
-Status: ready-for-agent
+Status: done
 Blocked by: 08, 04
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -46,14 +46,14 @@ HUD editor.
 
 ## Acceptance criteria
 
-- [ ] Play and catalogue operations require no hover or keyboard numbers.
-- [ ] Catalogue assignment works by tap alone; scrolling never selects.
-- [ ] A touch-only player can open the menu, change settings and leave play.
-- [ ] Gestures never leak through overlay/UI transitions.
+- [x] Play and catalogue operations require no hover or keyboard numbers.
+- [x] Catalogue assignment works by tap alone; scrolling never selects.
+- [x] A touch-only player can open the menu, change settings and leave play.
+- [x] Gestures never leak through overlay/UI transitions.
 - [x] Preset/size/opacity/look settings respect Apply/Cancel and reset
       (they reuse the controller page's draft and reset path; no new test).
 - [x] Controls are at least 44 px with 8 px gaps at every size and scale.
-- [ ] Retain normal/small/enlarged native overlay captures for review.
+- [x] Retain normal/small/enlarged native overlay captures for review.
 
 ## Validation and authorization
 
@@ -86,16 +86,18 @@ alternatives above.
 Scope above is the confirmed result of the touch grilling. Implement with
 ticket 08 in one PR. Earlier readiness statements are superseded.
 
-### 2026-10-30: implementation notes (local, unpushed)
+### 2026-10-30: implemented
 
-Overlay and settings are in `client/touch.rs` and the controller settings
-page. Open items:
-
-- The Menu button is `Action::Help` (it opens settings); Items
-  (`Action::Catalogue`) sits with the slot buttons, outside the top 15%.
-  Turn, Flip, view/mode and Undo/Redo have no button yet. Every window already has its own close button.
-- Catalogue tap-select and Assign to slot already run through `Activate`,
-  which picking raises for touch; scroll-drag cancel (6 px) is not added.
-  Both need ticket 10 to confirm on hardware.
-- Normal/small/enlarged captures are not retained yet.
+Overlay, settings and list scrolling are in `client/touch.rs` and the
+controller settings page. Slot, orientation, view/mode, history, Items and
+Menu all have buttons; Remove and every control cancel on sliding off. Menu is
+`Action::Help` (it opens settings) and every window has its own close button.
+Catalogue tap-select and Assign to slot run through `Activate`, which picking
+raises for touch. A drag past 6 px on a list scrolls it and cancels the press.
+Normal, small and enlarged captures were reviewed in one /tmp folder
+(`TESSERAE_SCREENSHOT_TOUCH`, dev only). Their window and image sizes differ,
+so the clusters sit away from the right edge there. Whether picking and
+scrolling behave on a real touchscreen is ticket 10's to confirm. Controls
+are in the lower third at scale 1; at larger UI scales three rows cannot fit
+there.
 

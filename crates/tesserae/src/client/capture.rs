@@ -281,6 +281,19 @@ pub(super) fn plugin(app: &mut App) {
             .before(super::removal::bar),
     );
     app.add_systems(PreUpdate, save_preview);
+    if let Ok(size) = std::env::var("TESSERAE_SCREENSHOT_TOUCH") {
+        app.insert_resource(TouchCapture(match size.as_str() {
+            "small" => super::profile::TouchSize::Small,
+            "enlarged" => super::profile::TouchSize::Enlarged,
+            _ => super::profile::TouchSize::Normal,
+        }))
+        .add_systems(
+            PreUpdate,
+            show_touch_overlay
+                .after(super::touch::read)
+                .run_if(resource_exists::<TouchCapture>),
+        );
+    }
     app.add_systems(Startup, (uncap_frame_rate, view_fixture))
         .add_systems(
             Update,
@@ -410,6 +423,29 @@ fn render_offscreen(
         commands.entity(*main).insert(IsDefaultUiCamera);
     }
     commands.insert_resource(Offscreen(handle));
+}
+
+/// The overlay's size for a capture; touch is faked as the device in use.
+#[derive(Resource)]
+struct TouchCapture(super::profile::TouchSize);
+
+fn show_touch_overlay(
+    capture: Res<TouchCapture>,
+    mut frame: ResMut<super::touch::TouchFrame>,
+    mut preferences: ResMut<super::profile::Preferences>,
+    window: Single<
+        (&mut Window, &mut bevy::window::CursorOptions),
+        With<bevy::window::PrimaryWindow>,
+    >,
+) {
+    let (mut window, mut cursor) = window.into_inner();
+    // An offscreen capture window is never focused, which would hide the overlay.
+    window.focused = true;
+    cursor.grab_mode = bevy::window::CursorGrabMode::Locked;
+    frame.active = true;
+    if preferences.touch.size != capture.0 {
+        preferences.touch.size = capture.0;
+    }
 }
 
 fn menu_view(

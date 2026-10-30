@@ -509,6 +509,8 @@ pub(super) struct Labels {
     keys: HashMap<KeyCode, String>,
     pub device: Device,
     pub sony: bool,
+    /// Touch was used last, so prompts name the on-screen control.
+    pub touch: bool,
 }
 impl Labels {
     pub fn binding(&self, binding: Binding) -> String {
@@ -568,6 +570,10 @@ impl Labels {
 impl Bindings {
     /// Labels from the binding set of the last deliberately used device.
     pub fn label(&self, action: Action, labels: &Labels) -> String {
+        let control = super::touch::label(action);
+        if labels.touch && !control.is_empty() {
+            return format!("Tap {control}");
+        }
         self.label_for(labels.device, action, labels)
     }
     pub fn label_for(&self, device: Device, action: Action, labels: &Labels) -> String {

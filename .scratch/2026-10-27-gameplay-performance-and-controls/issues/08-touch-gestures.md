@@ -1,6 +1,6 @@
 # 08: C4: Touch pointer ownership and actions
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02, 06
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -56,7 +56,7 @@ or writes to raw mouse input.
 - [x] Touch plus synthetic mouse yields at most one intended action,
       including the final release; later real mouse input works.
 - [x] Focus loss, menu open and device switch cancel contacts with no Edit.
-- [ ] Injected-`TouchInput` regressions pass at 60/144/1000 updates.
+- [x] Injected-`TouchInput` regressions pass at 60/144/1000 updates.
 - [x] Touch play enters and leaves `Owner::Gameplay` without a locked cursor;
       mouse look stays gated on the lock.
 
@@ -97,17 +97,23 @@ ticket's journeys must cover them; ticket 27 no longer claims that support.
 Scope above is the confirmed result of the touch grilling. Implement with
 ticket 09 in one PR. Earlier readiness statements are superseded.
 
-### 2026-10-30: implementation notes (local, unpushed)
+### 2026-10-30: implemented
 
-Implemented in `client/touch.rs` with injected-`TouchInput` regressions.
-Deviations from the brief, for review:
+Implemented in `client/touch.rs`; injected-`TouchInput` regressions cover role
+ownership, reordered contacts, the four-contact bound, unknown ids, focus loss,
+menus, synthetic mouse (including a click emulated in a contact's first frame),
+resuming play and a drag turning the same at 60/144/1000 updates. Physical
+behaviour is ticket 10's. Differences from the brief:
 
 - Touch play locks and hides the cursor on the first touch (as the pad does on
-  South) instead of leaving it unlocked: six consumers gate on
+  South) rather than leaving it unlocked: six consumers gate on
   `CursorGrabMode::Locked`, so `input::resolve` needed no change.
-- Mouse suppression is time-only (ticket 10 tunes `MOUSE_GRACE_S`); the
-  "clearly different position" test is not implemented.
-- `Labels.device` has no Touch state; only the cursor hint reads the touch
-  frame. Contact count/role bounds and the 60/144/1000-update traces are not
-  separately tested: contacts are event-driven, not per-update.
+- Mouse suppression is time-only. A "different position" test cannot work with
+  the cursor locked, which has no position to compare.
+- Look is the drag distance, scaled by the touch sensitivity and the mouse's
+  radians per px, so it is frame-rate independent by construction; a px/s rate
+  would make a finger's travel depend on how fast it moves.
+- Picking's mouse input is switched off while suppressing, so a UI tap is not
+  also clicked by the emulated mouse. `Labels.touch` makes prompts read
+  "Tap Place".
 
