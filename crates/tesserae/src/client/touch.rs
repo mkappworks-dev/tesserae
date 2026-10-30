@@ -904,4 +904,24 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn a_drag_that_starts_on_a_menu_never_edits_when_it_crosses_the_controls() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::menu::Menu>()
+            .open = true;
+        app.update();
+        let start = Vec2::new(640.0, 300.0);
+        touch(&mut app, 1, TouchPhase::Started, start);
+        for action in [Action::Remove, Action::Place] {
+            touch(&mut app, 1, TouchPhase::Moved, centre(action));
+            app.update();
+            let s = state(&app, action);
+            assert!(!s.held && !s.started, "{action:?}");
+        }
+        touch(&mut app, 1, TouchPhase::Ended, centre(Action::Remove));
+        app.update();
+        assert!(!state(&app, Action::Remove).held);
+    }
 }

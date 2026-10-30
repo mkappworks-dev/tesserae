@@ -52,13 +52,13 @@ or writes to raw mouse input.
 
 - [x] Reordered move/look contacts preserve independent axes and identity.
 - [x] Unknown/replaced ids cannot inherit removal progress.
-- [ ] UI scroll/close/end/cancel cannot become a gameplay Edit.
+- [x] UI scroll/close/end/cancel cannot become a gameplay Edit.
 - [x] Touch plus synthetic mouse yields at most one intended action,
       including the final release; later real mouse input works.
 - [x] Focus loss, menu open and device switch cancel contacts with no Edit.
 - [x] Injected-`TouchInput` regressions pass at 60/144/1000 updates.
-- [x] Touch play enters and leaves `Owner::Gameplay` without a locked cursor;
-      mouse look stays gated on the lock.
+- [x] The first touch on the world resumes play from `PointerFree` and a menu
+      or focus loss ends it; the cursor is locked, as the pad does.
 
 ## Validation and authorization
 
