@@ -834,7 +834,7 @@ fn render(
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0, 0.97)),
+                    BackgroundColor(ui::BG),
                     BorderColor::all(ui::EDGE),
                 ))
                 .with_children(|card| {
