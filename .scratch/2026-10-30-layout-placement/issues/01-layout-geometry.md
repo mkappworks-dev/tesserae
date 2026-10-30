@@ -7,14 +7,14 @@ layout over 256 Voxels is refused. Server and Client will both call it.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 Spec: [layout placement](../spec.md).
 
-- [ ] Line, rectangle and box produce the expected ordered coordinates, for
+- [x] Line, rectangle and box produce the expected ordered coordinates, for
       every signed axis combination.
-- [ ] Gap 0 is adjacent; gap n leaves n Voxels between neighbours.
-- [ ] A layout above 256 Voxels is refused, at the boundary exactly 256 is
+- [x] Gap 0 is adjacent; gap n leaves n Voxels between neighbours.
+- [x] A layout above 256 Voxels is refused, at the boundary exactly 256 is
       accepted.
-- [ ] The result depends only on Voxel counts, never on Voxel size.
-- [ ] `tesserae-core` gains no Bevy or wgpu dependency.
+- [x] The result depends only on Voxel counts, never on Voxel size.
+- [x] `tesserae-core` gains no Bevy or wgpu dependency.

@@ -244,7 +244,8 @@ tesserae/
 │   │   │   ├── reaction.rs     fluid contact rules, canonical, as data      ▸ 8
 │   │   │   ├── combustion.rs   heat, fuel and residue, as data              ▸ 8
 │   │   │   ├── fire.rs         exposure, ignition, burning and residue      ▸ 8
-│   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
+│   │   │   ├── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
+│   │   │   └── layout.rs       line, rectangle, box → Voxel coordinates, ≤256
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
 │   │                       fluids.rs: flow, waterlogging, fire, rescans  ▸ 8
