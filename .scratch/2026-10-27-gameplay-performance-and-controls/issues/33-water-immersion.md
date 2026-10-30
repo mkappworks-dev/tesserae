@@ -1,6 +1,6 @@
 # 33: Water immersion: view and movement
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (ticket 24 and the third-person view, ticket 26, merged)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -106,17 +106,20 @@ PR A (view):
 
 PR B (movement):
 
-- [ ] Sink, float and swim-up work in metres at 60, 144 and 1000 render
+- [x] Sink, float and swim-up work in metres at 60, 144 and 1000 render
       rates and at several Voxel sizes.
-- [ ] Jump-out clears a ledge of about 1 m; a body never embeds and the
+- [x] Jump-out clears a ledge of about 1 m; a body never embeds and the
       mode-change refusals are unchanged.
-- [ ] A floating body (standing and crouched) has its eye at least 0.3 m
+- [x] A floating body (standing and crouched) has its eye at least 0.3 m
       above the surface and shows the dry look.
-- [ ] Descend (swim down) is reachable on keyboard, controller and touch
+- [x] Descend (swim down) is reachable on keyboard, controller and touch
       layouts; `swimming` reaches the figure.
-- [ ] Flight is unaffected.
-- [ ] Wet fraction is correct for slabs and waterlogged Shapes.
-- [ ] Behavior tests cover each rule above.
+      (Keyboard Ctrl and controller B are tested. No touch overlay exists in
+      the code yet; it binds `Action::Descend` like the others, so it sinks
+      with no further change.)
+- [x] Flight is unaffected.
+- [x] Wet fraction is correct for slabs and waterlogged Shapes.
+- [x] Behavior tests cover each rule above.
 
 ## Validation and authorization
 
@@ -158,3 +161,46 @@ capture and user visual review. Known edges: the look goes dry with no
 hysteresis when the signal leaves the 2 m reach; an eye inside a
 waterlogged Shape is not read (PR B, wet fraction). Fog range is
 40 m / (1 + dimming), at least 1.5 m: 13.3 m water, 2.5 m lava.
+
+### PR B local outcome, 2026-10-30
+
+Implemented on feat/water-swimming, not pushed. `server/player.rs::step`
+reads the wet fraction (feet to head, below the eye column's
+`fluid_at` surface) and applies buoyancy toward a float height that keeps the
+eye 0.4 m above the surface (f0 0.68 standing, 0.52 crouched), vertical drag
+10 /s, 0.6x horizontal speed at the float height, Jump-held swim-up and
+Crouch/Descend sink at 3 m/s, and jump-out lift of 7.5 m/s against a bank.
+`BodyState.swimming` drives the figure's rest pose. The Client repeats the
+Jump intent while swimming or airborne beside water, so no intent field
+was added.
+
+Deviations: jump-out lift is 7.5 m/s, not about 5, because 5 m/s at 24 m/s²
+rises 0.5 m and cannot clear a metre. Descend is the crouch intent, so a
+controller's toggled crouch sinks until toggled off.
+
+Waterlogged Shapes: `fluid_at` now reads a solid that holds fluid in its voids
+as fluid up to its wettest void (a dry solid still hides what is below it), so
+the eye's view and the body's wet fraction agree. This closes PR A's known
+edge for an eye inside a waterlogged Shape.
+
+Server cost, 2026-10-30 (host load about 28, so thread CPU, interleaved
+against a main binary carrying the same test, 6 rounds, 100k steps each,
+`movement_cost_sample`): per physics step, minimum ns main vs branch. Dry
+walk: 165 vs 179 at 1 m Voxels, 276 vs 291 at 0.5 m, 1052 vs 1030 at 0.25 m
+(the one-Voxel `fluid_at` column scan adds up to about 15 ns). Wet swim: 164
+vs 157, 265 vs 256, 987 vs 932. Per second at 64 Hz this is at most 70 µs, and
+the wet case does more work yet is no slower. No Client render work was added,
+so no Client frame sample was taken.
+
+Verified 2026-10-30: the floating eye clearance (0.4 m) is above the view's
+0.15 m hysteresis, so a floating body shows the dry look (`underwater.rs`
+test). An offscreen capture of the underwater view was not obtained: the dev
+fixture has no knob to put the camera inside a lake, and the dry capture
+looked unchanged.
+
+User check, 2026-10-30: the interactive feel of both PRs (float, swim, sink,
+climb-out, wading, flight, controller, third person, waterlogged slab) was
+tried in the demo lakes and accepted with the starting constants.
+
+Not done, and accepted as such: the offscreen underwater capture and PR A's
+Client frame A/B.

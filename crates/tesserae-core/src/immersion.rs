@@ -20,9 +20,9 @@ pub struct FluidSurface {
 
 /// The fluid at the eye's cell, or the highest within `reach_m` below it.
 ///
-/// Stops at a solid or unheld cell below the eye, so a floor between the eye and
-/// a pool below hides the pool. Fluid in the voids of a solid is not read: the
-/// eye is in the open space beside it.
+/// Stops at a dry solid or unheld cell below the eye, so a floor between the eye
+/// and a pool below hides the pool. A solid that holds fluid in its voids (a
+/// waterlogged Shape) is read as fluid to its highest wet void.
 pub fn fluid_at(
     view: &impl CellView,
     tables: &Tables,
@@ -39,7 +39,7 @@ pub fn fluid_at(
     };
     let open = |y| {
         let here = occupants(y)?;
-        here.solid.is_air().then_some(here.fluid)
+        (here.solid.is_air() || here.fluid.is_some()).then_some(here.fluid)
     };
     // A noclip eye inside the bed still sees the lake above it, but only through
     // rock within reach.
@@ -59,7 +59,11 @@ pub fn fluid_at(
         fluid = above;
         y += 1;
     }
-    let surface_y_m = (y as f32 + f32::from(fluid.surface) / f32::from(Fluid::FULL_SURFACE)) * size;
+    let wettest = fluid
+        .others
+        .iter()
+        .fold(fluid.surface, |m, l| m.max(l.surface));
+    let surface_y_m = (y as f32 + f32::from(wettest) / f32::from(Fluid::FULL_SURFACE)) * size;
     (surface_y_m >= eye_m[1] - reach_m).then_some(FluidSurface {
         material: fluid.material,
         surface_y_m,
@@ -201,5 +205,36 @@ mod tests {
         let f = fixtures();
         let cells = Cells::default();
         assert_eq!(fluid_at(&cells, &f.tables, 1.0, [0.5, 4.5, 0.5], 2.0), None);
+    }
+
+    #[test]
+    fn fluid_standing_in_the_voids_of_a_shape_is_read_to_its_surface() {
+        use crate::Orientation;
+        use crate::shape::SHAPE_SLAB;
+        let f = fixtures();
+        let slab = Voxel::shaped(f.ground.rock, SHAPE_SLAB, Orientation::IDENTITY);
+        let waterlogged = Overlay {
+            fluid: Some(Fluid::source(f.water)),
+            burning: None,
+        };
+        let mut cells = Cells::default();
+        cells.0.insert([0, 0, 0], (slab, waterlogged));
+        for y in 1..6 {
+            cells.0.insert([0, y, 0], (Voxel::AIR, Overlay::NONE));
+        }
+        let at = |cells: &Cells, y| fluid_at(cells, &f.tables, 1.0, [0.5, y, 0.5], 2.0);
+        assert_eq!(at(&cells, 1.5).map(|s| s.surface_y_m), Some(1.0));
+        assert_eq!(
+            at(&cells, 0.75).map(|s| s.surface_y_m),
+            Some(1.0),
+            "eye in the Shape"
+        );
+        assert_eq!(at(&cells, 3.6), None, "beyond the reach above the surface");
+        cells.0.insert([0, 0, 0], (slab, Overlay::NONE));
+        assert_eq!(
+            at(&cells, 1.5),
+            None,
+            "a dry floor still hides what is below it"
+        );
     }
 }
