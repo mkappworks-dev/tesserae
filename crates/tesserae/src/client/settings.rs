@@ -729,6 +729,11 @@ pub(super) fn action_name(action: Action) -> &'static str {
         NextSlot => "Next quick slot",
         Undo => "Undo",
         Redo => "Redo",
+        Layout => "Layout mode and menu",
+        LayoutMore => "Layout: more Voxels",
+        LayoutLess => "Layout: fewer Voxels",
+        LayoutReverse => "Layout: reverse the axis",
+        LayoutActive => "Layout: next axis",
         Catalogue => "Open Catalogue",
         ReleaseCursor => "Release cursor",
         Help => "Open input settings",
@@ -740,9 +745,8 @@ pub(super) fn category(action: Action) -> &'static str {
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
-        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool => {
-            "Building"
-        }
+        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool
+        | Layout | LayoutMore | LayoutLess | LayoutReverse | LayoutActive => "Building",
         _ => "Interface",
     }
 }
@@ -2013,6 +2017,11 @@ fn binding_order(action: Action) -> usize {
         CycleTool,
         Use,
         ClearTool,
+        Layout,
+        LayoutMore,
+        LayoutLess,
+        LayoutReverse,
+        LayoutActive,
         Catalogue,
         Help,
         ReleaseCursor,
@@ -2069,13 +2078,20 @@ mod tests {
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<super::super::pad::PadInput>()
             .insert_resource(Store {
+                // The clock ticks in microseconds on macOS, so two tests started
+                // together can read one time.
                 path: std::env::temp_dir().join(format!(
-                    "tesserae-settings-{}-{}.json",
+                    "tesserae-settings-{}-{}-{}.json",
                     std::process::id(),
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
-                        .as_nanos()
+                        .as_nanos(),
+                    {
+                        static TESTS: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        TESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    }
                 )),
                 error: None,
             })

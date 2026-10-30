@@ -177,6 +177,13 @@ impl Holding {
     }
 }
 
+/// Whether the Player is building: the hand holds a block, a fluid, fire or a
+/// tool, or Layout mode is on. With an empty hand the Player is free roaming,
+/// which shows no crosshair, outline or preview and breaks nothing.
+pub(super) fn building(hotbar: &Hotbar, layout: Option<&super::layout::LayoutMode>) -> bool {
+    hotbar.held() != Holding::Empty || layout.is_some_and(|layout| layout.on)
+}
+
 /// The nine slots and which one is held.
 #[derive(Resource, Clone, PartialEq, Debug)]
 pub(super) struct Hotbar {

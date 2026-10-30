@@ -273,6 +273,11 @@ pub(super) fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_SCREENSHOT_MENU").is_some() {
         app.insert_resource(super::menu::Menu::opened());
     }
+    // `TESSERAE_SCREENSHOT_LAYOUT` opens the Layout menu with the mode on.
+    if std::env::var_os("TESSERAE_SCREENSHOT_LAYOUT").is_some() {
+        app.insert_resource(super::layout::LayoutMode::turned_on())
+            .insert_resource(super::layout_menu::LayoutMenu::opened());
+    }
     app.insert_resource(super::help::Panels {
         debug: std::env::var_os("TESSERAE_SCREENSHOT_DEBUG").is_some(),
     });

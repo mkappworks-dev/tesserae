@@ -13,6 +13,7 @@ pub mod fire;
 pub mod flow;
 pub mod fluid;
 pub mod immersion;
+pub mod layout;
 pub mod light;
 pub mod lod;
 pub mod material;

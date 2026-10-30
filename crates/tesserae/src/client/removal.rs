@@ -140,7 +140,12 @@ fn spawn(mut commands: Commands) {
 }
 pub(super) fn hold(
     (actions, preferences, ownership, cursor, menu, hotbar, mut previous_hand): Controls,
-    (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
+    (target, sent, time, layout): (
+        Res<Target>,
+        Res<Sent>,
+        Res<Time>,
+        Option<Res<super::layout::LayoutMode>>,
+    ),
     catalogue: Res<Catalogue>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut progress: ResMut<Progress>,
@@ -175,6 +180,8 @@ pub(super) fn hold(
         || (repeating && progress.chain && hand_edited);
     if !ownership.gameplay()
         || hotbar.held().tool().is_some()
+        // Free roaming breaks nothing, so nothing is ever changed unseen.
+        || !super::edit::building(&hotbar, layout.as_deref())
         || state.cancelled
         || !ready
         || menu.open
@@ -400,20 +407,28 @@ mod tests {
             .spawn((FlyCamera::default(), GlobalTransform::IDENTITY));
         let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
         app.world_mut().resource_mut::<Sent>().last = Some(view);
+        app.world_mut()
+            .resource_mut::<super::super::edit::Hotbar>()
+            .slots = [super::super::edit::Holding::Fire; super::super::edit::SLOT_KEYS.len()];
         let mut answer = app.world_mut().resource_mut::<Target>();
         answer.0.removal = Some(target(0));
         answer.1 = Some(view);
+        // A registered system keeps its `Local` hand between steps.
+        let id = app.world_mut().register_system(hold);
+        app.insert_resource(HoldSystem(id));
         app
     }
+    #[derive(Resource)]
+    struct HoldSystem(bevy::ecs::system::SystemId);
     fn step(app: &mut App, seconds: f32) -> Vec<EditIntent> {
-        use bevy::ecs::system::RunSystemOnce;
         app.world_mut()
             .resource_mut::<Time>()
             .advance_by(std::time::Duration::from_secs_f32(seconds));
         let now = app.world().resource::<Time>().elapsed_secs_f64();
         app.world_mut().resource_mut::<Target>().2 = now;
         app.world_mut().run_schedule(PreUpdate);
-        app.world_mut().run_system_once(hold).unwrap();
+        let id = app.world().resource::<HoldSystem>().0;
+        app.world_mut().run_system(id).unwrap();
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .clear();
@@ -464,7 +479,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .release_all();
-        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Empty);
+        app.world_mut().resource_mut::<Hotbar>().outside = None;
         step(&mut app, 0.0);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()

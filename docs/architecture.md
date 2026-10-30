@@ -142,13 +142,41 @@ to 60 seconds and defaulting to 350 ms, published in the content catalogue. Core
 tables and simulation retain no input timing. The Server compares target
 identity again before applying the removal.
 
-Undo/redo owns at most 128 before/after Occupants entries and 16 queued requests
-on the integrated Server. It checks Chunk Lifetime, settled light and exact
-current Occupants before replaying through the normal change, light, mesh and
-simulation wake path. Successful replay publishes inverse or forward Mod edit
-events. New successful changes clear redo; refusals preserve history and World
-state. Simulation consequences elsewhere are not rewound. Multiplayer history
-ownership remains part of the network transport work.
+Layout mode (`client/layout.rs`) takes the placement actions while it is on:
+Place commits, Remove cancels and the count keys change the active axis. The
+Client sends one layout intent and the aim ray; the Server resolves the anchor,
+expands the geometry from `tesserae_core::layout`, judges reach and sight once
+for the whole layout, then lands its cells through the Edit budget after single
+Edits. Its preview is the Server's answer, never World storage. In point to
+point, the Client takes each corner from the aimed cell the Server's preview
+answer reports and sends the two corners with the shape; the Server judges every
+cell of the span itself, so a corner grants nothing. A corner can also be set by
+holding Place on A and letting go on B; each corner is drawn as an outlined cell
+with the span's size beside it. A span is a flat rectangle from A to B on the
+plane they differ most in, given depth by C along the remaining dimension; C
+level with A keeps it flat. C needs no surface: it is read from where the view
+line passes B, so a height can be set in open sky. The preview draws each cell
+as a ghost of the block that would land, tinted where it would not; the cells of
+one tint are one merged mesh, so blended ghosts never re-sort against each other
+as the view moves, and touching cells draw only their outer surface, so every
+cell looks the same. The crosshair, outline, preview and removal are building
+only, shown while the hand holds something or Layout mode is on
+(`edit::building`). The Layout key opens the Layout menu
+(`client/layout_menu.rs`), a panel docked over the live game with its own input
+context: the cursor is released and the pad navigates it. Its lengths along X, Y
+and Z, the way each grows, and the gap apply as they are set and are saved when
+it closes.
+
+Undo/redo owns at most 128 groups, 1024 before/after Occupants entries in all,
+and 16 queued requests on the integrated Server. A single Edit is a group of
+one; a layout (one intent for a line, rectangle or box of at most 256 Voxels,
+expanded and judged by the Server per cell) is one group, replayed whole or not
+at all. It checks Chunk Lifetime, settled light and exact current Occupants
+before replaying through the normal change, light, mesh and simulation wake
+path. Successful replay publishes inverse or forward Mod edit events. New
+successful changes clear redo; refusals preserve history and World state.
+Simulation consequences elsewhere are not rewound. Multiplayer history ownership
+remains part of the network transport work.
 
 ### The Player, its figure and the camera
 
@@ -244,7 +272,8 @@ tesserae/
 │   │   │   ├── reaction.rs     fluid contact rules, canonical, as data      ▸ 8
 │   │   │   ├── combustion.rs   heat, fuel and residue, as data              ▸ 8
 │   │   │   ├── fire.rs         exposure, ignition, burning and residue      ▸ 8
-│   │   │   └── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
+│   │   │   ├── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
+│   │   │   └── layout.rs       line, rectangle, box → Voxel coordinates, ≤256
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
 │   │                       fluids.rs: flow, waterlogging, fire, rescans  ▸ 8

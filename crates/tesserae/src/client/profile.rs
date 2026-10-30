@@ -27,6 +27,7 @@ pub(crate) struct Preferences {
     /// not the World's, so no save holds it.
     pub view: super::view::View,
     pub zoom_m: f32,
+    pub layout: super::layout::LayoutPreferences,
 }
 /// Controller feel, kept apart from the mouse so neither overwrites the other.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -98,6 +99,7 @@ impl Default for Preferences {
             touch: TouchPreferences::default(),
             view: default(),
             zoom_m: super::view::DEFAULT_ZOOM_M,
+            layout: default(),
         }
     }
 }
@@ -180,6 +182,7 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         || !PAD_SENSITIVITY.contains(&p.touch.look_sensitivity)
         || !TOUCH_OPACITY.contains(&p.touch.opacity)
         || !super::view::ZOOM_M.contains(&p.zoom_m)
+        || !p.layout.valid()
     {
         return Err(io::Error::other("invalid preference value"));
     }
@@ -410,6 +413,42 @@ mod tests {
         assert!(unset.toggle_sprint);
         let (_, held) = decode(br#"{"version":1,"preferences":{"toggle_sprint":false}}"#).unwrap();
         assert!(!held.toggle_sprint);
+    }
+
+    #[test]
+    fn layout_choices_round_trip_and_an_older_or_invalid_profile_is_handled() {
+        use super::super::layout::Kind;
+        let mut prefs = Preferences::default();
+        prefs.layout.kind = Kind::Between;
+        prefs.layout.lengths = [5, 2, 1];
+        prefs.layout.gap = 2;
+        prefs.layout.negative = [true, false, true];
+        let bytes = encode(&Bindings::default(), &prefs).unwrap();
+        assert_eq!(decode(&bytes).unwrap().1.layout, prefs.layout);
+
+        let mut document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        document["preferences"]
+            .as_object_mut()
+            .unwrap()
+            .remove("layout");
+        let older = serde_json::to_vec(&document).unwrap();
+        assert_eq!(decode(&older).unwrap().1.layout, Default::default());
+
+        // A layout saved when it was three ordered axes: the old fields are
+        // ignored and the new ones start from their defaults.
+        document["preferences"]["layout"] = serde_json::json!({
+            "kind": "directions", "form": "box", "counts": [4, 3, 2],
+            "directions": ["pos_x", "pos_z", "up"], "gap": 1,
+        });
+        let before = serde_json::to_vec(&document).unwrap();
+        let loaded = decode(&before).unwrap().1.layout;
+        assert_eq!((loaded.lengths, loaded.gap), ([4, 1, 1], 1));
+
+        document["preferences"]["layout"] = serde_json::json!({
+            "lengths": [10, 10, 10], "gap": 0,
+        });
+        let too_many = serde_json::to_vec(&document).unwrap();
+        assert!(decode(&too_many).is_err(), "a box over 256 Voxels");
     }
 
     #[test]

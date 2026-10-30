@@ -11,6 +11,7 @@ pub(super) enum Owner {
     Gameplay,
     PointerFree,
     Catalogue,
+    LayoutMenu,
     Settings,
     BindingCapture,
     TextEntry,
@@ -79,6 +80,7 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             resolve
                 .after(super::menu::toggle)
+                .after(super::layout_menu::toggle)
                 .after(super::camera::grab_cursor),
         );
 }
@@ -88,12 +90,13 @@ type Contexts<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, UiInput>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
+    Option<Res<'w, super::layout_menu::LayoutMenu>>,
 );
 
 pub(super) fn resolve(
     (keys, mouse, pad): super::actions::Devices,
     touch: Res<super::touch::TouchFrame>,
-    (menu, settings, ui, save): Contexts,
+    (menu, settings, ui, save, layout_menu): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -115,6 +118,8 @@ pub(super) fn resolve(
         Owner::Settings
     } else if menu.open {
         Owner::Catalogue
+    } else if layout_menu.is_some_and(|menu| menu.open) {
+        Owner::LayoutMenu
     } else if cursor.grab_mode == CursorGrabMode::Locked {
         Owner::Gameplay
     } else {
@@ -160,6 +165,7 @@ pub(super) fn resolve(
                 || matches!(
                     owner,
                     Owner::Unfocused
+                        | Owner::LayoutMenu
                         | Owner::Settings
                         | Owner::BindingCapture
                         | Owner::TextEntry
