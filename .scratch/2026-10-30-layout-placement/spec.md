@@ -1,6 +1,7 @@
 # Layout placement: lines, rectangles and boxes of Voxels
 
-Status: grilled with the user 2026-10-30; tickets 01-05 are ready-for-agent.
+Status: grilled with the user 2026-10-30; tickets 01-05 are done; tickets
+06-08 (the amendment below) are ready-for-agent.
 
 Source baseline: `446e984`. Separate from
 [ticket 29](../2026-10-27-gameplay-performance-and-controls/issues/29-repeat-while-held.md),
@@ -197,3 +198,55 @@ Server validates and applies it, and one undo reverses the whole layout.
   visible preview is the chosen answer rather than a longer reach.
 - Open for ticket 02: the exact Voxel bound on the history journal and whether
   a skipped-cell summary is one toast or a status line.
+
+## Amendment 2026-10-30: point to point and the Layout menu
+
+Raised on review of PR 36: a layout that grows a fixed count from the aimed
+cell, in a direction the camera picks, is not how a builder thinks. Two ways
+to say where Voxels go replace it, chosen in a menu that opens with the mode.
+
+### Behaviour
+
+- Pressing the Layout key turns the mode on and opens the **Layout menu**, an
+  overlay like the Catalogue: the cursor is released, and mouse, keyboard and
+  pad navigate it. The World stays drawn behind it so the preview shows.
+  Closing the menu returns to play with the mode still on; the Layout key turns
+  the mode off.
+- The menu holds a mode choice, the shape, and that mode's settings. The
+  Material picker and the gap move here from the Behavior page.
+- **Point to point.** In play, Place sets point A, Place sets point B, Place
+  commits; Remove steps back one point and then cancels. A and B are the cells
+  a single Place would pick, each within reach of the Eye, so the Player may
+  walk between them like the measuring tool. A and B are opposite corners of
+  an axis-aligned span, and the shape says how much of it fills:
+  a line takes the longest axis, a rectangle the two longest and is flat at
+  A's level on the third, a box all three. Ties prefer X, then Z, then up. The
+  gap steps from A towards B; a span over 256 Voxels is refused with feedback.
+- **Direction and count.** The camera no longer chooses a direction. For each
+  axis the shape uses, the menu sets one of six directions (+X, -X, up, down,
+  +Z, -Z, no two on one dimension) and a count by stepper, plus a typed number
+  on a keyboard; a pad needs no typing. The anchor is the aimed cell, and
+  Place commits.
+- The count and shape keys stay as shortcuts; the rotate-axes and reverse
+  keys go, since a direction is now picked outright.
+
+### Decisions
+
+- The Server still resolves and judges everything. A point-to-point intent
+  carries the two corner cells, which are claims only: every cell of the span
+  is judged for reach, sight and occupancy as before, and the 256 cap is
+  checked from the corners. This refines the rule that a cell list is never
+  trusted, since corners fix geometry and grant nothing.
+- The Client takes A and B from the Server's aim answer (the ghost cell), so
+  no new pick message is needed; the preview of the span while B is unset uses
+  the aimed cell as a provisional B.
+- The menu is a new input context beside the Catalogue and Settings. Typing a
+  number uses the existing text-entry context.
+- Layout preferences gain the mode and the six-way directions, and lose the
+  camera-relative reversals. An older profile with the old fields loads with
+  defaults for the new ones.
+
+### Out of scope
+
+- Three or four clicks to choose the plane (considered and declined); a key
+  to swap the flat axis can follow if the automatic choice proves wrong.
