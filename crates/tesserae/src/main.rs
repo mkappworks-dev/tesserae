@@ -108,6 +108,7 @@ fn world_parts(
 fn world_app(parts: WorldParts, args: &launch::Args, from_list: bool) -> App {
     let mut app = App::new();
     app.insert_resource(parts.persistence)
+        .insert_resource(launch::Saved(args.window))
         .insert_resource(launch::Launched {
             from_list,
             world_name: parts.name,
@@ -129,18 +130,19 @@ fn world_app(parts: WorldParts, args: &launch::Args, from_list: bool) -> App {
 fn list_app(args: &launch::Args, failure: Option<client::worlds::OpenFailure>) -> App {
     let mut app = App::new();
     let worlds = server::persistence::worlds_dir().unwrap_or_else(|| "worlds".into());
-    app.insert_resource(launch::Launched {
-        from_list: false,
-        world_name: None,
-    })
-    .insert_resource(server::mods::installed(&args.user))
-    .insert_resource(client::worlds::WorldsDir(worlds))
-    .add_plugins(
-        DefaultPlugins
-            .set(window_plugin(args.window))
-            .set(log_settings()),
-    )
-    .add_plugins((launch::plugin, client::worlds::plugin));
+    app.insert_resource(launch::Saved(args.window))
+        .insert_resource(launch::Launched {
+            from_list: false,
+            world_name: None,
+        })
+        .insert_resource(server::mods::installed(&args.user))
+        .insert_resource(client::worlds::WorldsDir(worlds))
+        .add_plugins(
+            DefaultPlugins
+                .set(window_plugin(args.window))
+                .set(log_settings()),
+        )
+        .add_plugins((launch::plugin, client::worlds::plugin));
     if let Some(failure) = failure {
         app.insert_resource(failure);
     }
