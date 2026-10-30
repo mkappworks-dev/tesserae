@@ -102,8 +102,8 @@ pub(super) fn controls(size: Vec2, prefs: &TouchPreferences, ui_scale: f32) -> V
         (EmptyHand, 1.0, 2.0),
         (Shape, 2.0, 2.0),
     ];
-    const SLOTS: [(Action, f32); 2] = [(PreviousSlot, 0.0), (NextSlot, 1.0)];
-    const TOP: [(Action, f32); 2] = [(Help, 0.0), (Catalogue, 1.0)];
+    const SLOTS: [(Action, f32); 3] = [(PreviousSlot, 0.0), (NextSlot, 1.0), (Catalogue, 2.0)];
+    const TOP: [(Action, f32); 1] = [(Help, 0.0)];
     let unit = TARGET_PX * ui_scale * size_factor(prefs.size);
     let (gap, margin) = (GAP_PX * ui_scale, MARGIN_PX * ui_scale);
     let step = unit + gap;
@@ -287,8 +287,12 @@ pub(super) fn read(
     frame.quiet_s = (frame.quiet_s - time.delta_secs()).max(0.0);
     let (window, mut cursor) = window.into_inner();
     let size = window.size();
+    let messages: Vec<_> = messages.read().cloned().collect();
+    // The OS emulates a click in the frame a contact starts, before any
+    // suppression is on, so that click cannot count as the mouse returning.
+    let starting = messages.iter().any(|m| m.phase == TouchPhase::Started);
     let deliberate_other = keys.get_just_pressed().next().is_some()
-        || (!frame.suppress_mouse && mouse.get_just_pressed().next().is_some())
+        || (!frame.suppress_mouse && !starting && mouse.get_just_pressed().next().is_some())
         || pad.buttons.get_just_pressed().next().is_some();
     if deliberate_other {
         frame.active = false;
@@ -299,7 +303,7 @@ pub(super) fn read(
     let touch = &preferences.touch;
     let controls = controls(size, touch, scale.0);
     let playable = window.focused && ownership.gameplay() && !deliberate_other;
-    for message in messages.read() {
+    for message in &messages {
         match message.phase {
             TouchPhase::Started => {
                 if frame.contacts.len() >= MAX_CONTACTS || frame.contacts.contains_key(&message.id)
@@ -554,6 +558,22 @@ mod tests {
         app.update();
         app.update();
         assert_eq!(app.world().resource::<Ownership>().owner, Owner::Gameplay);
+    }
+
+    #[test]
+    fn a_click_emulated_in_the_frame_a_touch_starts_does_not_cancel_it() {
+        let mut app = app();
+        let remove = centre(Action::Remove);
+        touch(&mut app, 1, TouchPhase::Started, remove);
+        app.world_mut()
+            .write_message(bevy::input::mouse::MouseButtonInput {
+                button: MouseButton::Left,
+                state: bevy::input::ButtonState::Pressed,
+                window: Entity::PLACEHOLDER,
+            });
+        app.update();
+        assert!(state(&app, Action::Remove).held);
+        assert!(app.world().resource::<TouchFrame>().active);
     }
 
     #[test]

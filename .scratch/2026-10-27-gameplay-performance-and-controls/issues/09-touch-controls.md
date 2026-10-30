@@ -91,8 +91,9 @@ ticket 08 in one PR. Earlier readiness statements are superseded.
 Overlay and settings are in `client/touch.rs` and the controller settings
 page. Open items:
 
-- The Menu button is `Action::Help` (it opens settings); Items is
-  `Action::Catalogue`. Every window already has its own close button.
+- The Menu button is `Action::Help` (it opens settings); Items
+  (`Action::Catalogue`) sits with the slot buttons, outside the top 15%.
+  Turn, Flip, view/mode and Undo/Redo have no button yet. Every window already has its own close button.
 - Catalogue tap-select and Assign to slot already run through `Activate`,
   which picking raises for touch; scroll-drag cancel (6 px) is not added.
   Both need ticket 10 to confirm on hardware.
