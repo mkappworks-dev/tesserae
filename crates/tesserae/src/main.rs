@@ -24,29 +24,26 @@ fn main() -> std::process::ExitCode {
     });
     let worlds = server::persistence::worlds_dir().unwrap_or_else(|| "worlds".into());
     let mut app = App::new();
-    app.insert_resource(match args.launch {
-        launch::Launch::Direct => open::Route::Direct,
-        launch::Launch::List => open::Route::List,
-    })
-    .insert_resource(open::UserArgs(args.user))
-    .init_resource::<launch::Switch>()
-    .insert_resource(client::worlds::WorldsDir(worlds))
-    .add_plugins(
-        DefaultPlugins
-            .set(window_plugin())
-            .set(task_pools())
-            .set(log_settings()),
-    )
-    // Before the plugins that register through it: they check for its state.
-    .add_plugins(session::plugin)
-    .add_plugins((
-        render::plugin,
-        server::plugin,
-        client::plugin,
-        client::worlds::plugin,
-        open::plugin,
-    ))
-    .add_plugins(dev_plugins);
+    app.insert_resource(args.launch)
+        .insert_resource(open::UserArgs(args.user))
+        .init_resource::<launch::Switch>()
+        .insert_resource(client::worlds::WorldsDir(worlds))
+        .add_plugins(
+            DefaultPlugins
+                .set(window_plugin())
+                .set(task_pools())
+                .set(log_settings()),
+        )
+        // Before the plugins that register through it: they check for its state.
+        .add_plugins(session::plugin)
+        .add_plugins((
+            render::plugin,
+            server::plugin,
+            client::plugin,
+            client::worlds::plugin,
+            open::plugin,
+        ))
+        .add_plugins(dev_plugins);
     #[cfg(feature = "profiling")]
     app.insert_resource(process_start);
     match app.run() {

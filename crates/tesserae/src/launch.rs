@@ -17,7 +17,8 @@ const DIRECT: [&str; 4] = [
     "TESSERAE_SCREENSHOT",
 ];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// Where the app goes after its first frame.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Launch {
     /// Opened from the environment; a failure prints and exits.
     Direct,

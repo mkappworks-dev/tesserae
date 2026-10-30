@@ -14,13 +14,6 @@ use crate::server;
 use crate::session::AppState;
 use crate::world::WorldSettings;
 
-/// Where the app goes after its first frame.
-#[derive(Resource, Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Route {
-    List,
-    Direct,
-}
-
 /// Arguments forwarded unchanged to Mod loading.
 #[derive(Resource)]
 pub struct UserArgs(pub Vec<OsString>);
@@ -129,9 +122,13 @@ pub fn plugin(app: &mut App) {
         );
 }
 
-fn route(mut commands: Commands, route: Option<Res<Route>>, mut next: ResMut<NextState<AppState>>) {
+fn route(
+    mut commands: Commands,
+    route: Option<Res<crate::launch::Launch>>,
+    mut next: ResMut<NextState<AppState>>,
+) {
     match route.as_deref() {
-        Some(Route::Direct) => {
+        Some(crate::launch::Launch::Direct) => {
             commands.insert_resource(OpenRequest {
                 what: What::Direct,
                 name: None,
@@ -141,7 +138,7 @@ fn route(mut commands: Commands, route: Option<Res<Route>>, mut next: ResMut<Nex
         }
         _ => next.set(AppState::List),
     }
-    commands.remove_resource::<Route>();
+    commands.remove_resource::<crate::launch::Launch>();
 }
 
 fn begin(mut commands: Commands, request: Res<OpenRequest>, args: Res<UserArgs>) {
