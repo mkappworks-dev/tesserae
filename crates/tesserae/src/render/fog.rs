@@ -75,7 +75,7 @@ pub fn plugin(app: &mut App) {
 /// Re-derives the clear colour and every camera's fog when [`FogSettings`] is
 /// changed after startup, so a Look pack that sets it at run time takes effect
 /// without respawning the cameras.
-fn follow_settings(
+pub(crate) fn follow_settings(
     settings: Res<FogSettings>,
     streaming: Res<StreamingSettings>,
     mut clear: ResMut<ClearColor>,
@@ -140,6 +140,13 @@ pub fn distance_fog(
         },
         ..default()
     }
+}
+
+/// What the shader fogs toward so that a surface fully fogged comes out as
+/// `seen` (sRGB): the tonemapper darkens the fog colour, see [`HAZE_FOG_SRGB`].
+pub fn fog_toward(seen: [f32; 3]) -> [f32; 3] {
+    let lift = |i: usize| f32::from(HAZE_FOG_SRGB[i] - HAZE_SKY_SRGB[i]) / 255.0;
+    [0, 1, 2].map(|i| (seen[i] + lift(i)).min(1.0))
 }
 
 /// The fog every terrain camera gets, or `None` for none at all. A zero

@@ -188,6 +188,10 @@ fn add_material(
     let blended = ChunkMaterial {
         base: StandardMaterial {
             alpha_mode: AlphaMode::Blend,
+            // The mesher hides water against water, so from inside a lake the
+            // surface's underside is the only water face there is.
+            double_sided: true,
+            cull_mode: None,
             ..opaque.base.clone()
         },
         extension: ChunkMaterialExtension {
@@ -2003,5 +2007,19 @@ mod tests {
 
         assert_eq!(drawn(&mut app), 1);
         assert!(entity_for(&app, kept).is_some());
+    }
+
+    #[test]
+    fn water_is_drawn_from_below_and_solid_terrain_is_not() {
+        let app = app();
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        let base = |handle| &materials.get(handle).unwrap().base;
+        assert!(base(&terrain.blended).double_sided);
+        assert_eq!(base(&terrain.blended).cull_mode, None);
+        for handle in [&terrain.opaque, &terrain.cutout] {
+            assert!(!base(handle).double_sided);
+            assert!(base(handle).cull_mode.is_some());
+        }
     }
 }
