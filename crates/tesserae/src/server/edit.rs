@@ -1330,7 +1330,7 @@ mod tests {
         app.world_mut().run_system_once(apply_pending).unwrap();
     }
 
-    fn physics_app(size: f32) -> App {
+    pub(super) fn physics_app(size: f32) -> App {
         let mut app = app_with(&[(origin(), ground())]);
         app.insert_resource(WorldSettings {
             voxel_size: size,

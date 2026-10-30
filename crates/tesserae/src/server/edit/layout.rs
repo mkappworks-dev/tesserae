@@ -487,6 +487,39 @@ mod tests {
     }
 
     #[test]
+    fn a_cell_inside_a_physics_body_is_skipped_in_the_preview_and_the_edit() {
+        let eye = Vec3::new(5.5, 9.62, 5.5);
+        let mut layout = line(3);
+        layout.origin = eye;
+        let mut app = super::super::tests::physics_app(1.0);
+        send(&mut app, layout);
+        tick(&mut app);
+        assert!(
+            voxel_at(&app, [5, 8, 5]).is_air(),
+            "where the Player stands"
+        );
+        assert_eq!(placed(&app), 2);
+        assert_eq!(rejections(&mut app), [RejectReason::LayoutPartial]);
+
+        let mut app = super::super::tests::physics_app(1.0);
+        set_eye(&mut app, eye);
+        app.world_mut().write_message(LayoutAim {
+            seq: 1,
+            intent: layout,
+        });
+        app.world_mut().run_system_once(receive_aim).unwrap();
+        app.world_mut().run_system_once(answer_aim).unwrap();
+        let answer = app
+            .world_mut()
+            .resource_mut::<Messages<LayoutAnswer>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(answer.cells[0].state, CellState::Blocked);
+        assert_eq!(answer.cells[1].state, CellState::Placeable);
+    }
+
+    #[test]
     fn cells_beyond_reach_of_the_eye_are_not_placed() {
         let mut app = app_with(&[(origin(), ground())]);
         send(&mut app, line(12));
