@@ -609,6 +609,8 @@ mod tests {
         water_m: f32,
         /// Solid ledge one Voxel wide at x >= 3, this high above the floor.
         ledge_m: f32,
+        /// The slab holds lake fluid in its voids.
+        waterlogged: bool,
     }
     /// A test volume holds Voxels only: no overlay, so fluid is a stored Voxel.
     macro_rules! cells_of_voxels {
@@ -642,7 +644,22 @@ mod tests {
             }
         }
     }
-    cells_of_voxels!(Scene);
+    impl tesserae_core::flow::CellView for Scene {
+        fn stored(&self, at: [i32; 3]) -> Option<(Voxel, tesserae_core::occupants::Overlay)> {
+            let voxel = self.voxel(at)?;
+            let on_slab = voxel.shape() == SHAPE_SLAB;
+            let fluid = (self.waterlogged && on_slab).then(|| {
+                tesserae_core::occupants::Fluid::source(tesserae_core::testgen::fixtures().water)
+            });
+            Some((
+                voxel,
+                tesserae_core::occupants::Overlay {
+                    fluid,
+                    burning: None,
+                },
+            ))
+        }
+    }
     fn tables() -> Tables {
         crate::server::fixture_tables()
     }
@@ -655,6 +672,7 @@ mod tests {
             slab: false,
             water_m: 0.0,
             ledge_m: 0.0,
+            waterlogged: false,
         }
     }
     fn lake(size: f32, depth_m: f32) -> Scene {
@@ -938,6 +956,27 @@ mod tests {
             };
             assert!((fraction(false, 0.0) - 1.0).abs() < 1e-5);
             assert!((fraction(true, 2.5) - 1.5 / 1.8).abs() < 1e-4, "{size}");
+        }
+    }
+    #[test]
+    fn a_waterlogged_slab_wets_the_body_standing_on_it_up_to_the_cell_top() {
+        let t = tables();
+        for size in [1.0, 0.5, 0.25] {
+            let s = Scene {
+                slab: true,
+                waterlogged: true,
+                ..scene(size)
+            };
+            let eye = Vec3::new(2.5, size / 2.0 + EYE_HEIGHT, 0.0);
+            let p = Player::new(eye, MovementMode::Physics);
+            let dry = Scene {
+                waterlogged: false,
+                ..scene(size)
+            };
+            assert_eq!(p.wet_fraction(&dry, &t, size), 0.0);
+            let expected = size / 2.0 / BODY_HEIGHT_M;
+            let wet = p.wet_fraction(&s, &t, size);
+            assert!((wet - expected).abs() < 1e-4, "{size}: {wet} vs {expected}");
         }
     }
     #[test]
@@ -1421,24 +1460,69 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "manual wall-time cost sample; run without concurrent builds or benchmarks"]
+    #[ignore = "manual CPU-time cost sample; run alone, interleaved against main"]
     fn movement_cost_sample() {
+        use tesserae_core::collide::VoxelVolume;
+        use tesserae_core::flow::CellView;
+        #[repr(C)]
+        struct Timespec {
+            sec: i64,
+            nsec: i64,
+        }
+        unsafe extern "C" {
+            fn clock_gettime(clock: u32, ts: *mut Timespec) -> i32;
+        }
+        // Thread CPU time, so a loaded host does not read as a slower step.
+        let cpu_ns = || {
+            let mut ts = Timespec { sec: 0, nsec: 0 };
+            // SAFETY: `ts` is a valid out-pointer for the call's duration.
+            unsafe { clock_gettime(16, &mut ts) };
+            ts.sec as f64 * 1e9 + ts.nsec as f64
+        };
+        struct Pool {
+            depth_cells: i32,
+        }
+        impl VoxelVolume for Pool {
+            fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
+                Some(if at[1] < 0 {
+                    Voxel::cube(8)
+                } else if at[1] < self.depth_cells {
+                    Voxel::cube(tesserae_core::testgen::fixtures().water)
+                } else {
+                    Voxel::AIR
+                })
+            }
+        }
+        impl CellView for Pool {
+            fn stored(&self, at: [i32; 3]) -> Option<(Voxel, tesserae_core::occupants::Overlay)> {
+                Some((self.voxel(at)?, tesserae_core::occupants::Overlay::NONE))
+            }
+        }
         let t = tables();
-        for size in [1.0, 0.5, 0.25] {
-            let mut s = scene(size);
-            s.wall = true;
-            for _ in 0..3 {
-                let mut p = player();
-                p.intent.direction = Vec3::X;
-                let start = std::time::Instant::now();
-                for _ in 0..100_000 {
-                    p.step(std::hint::black_box(&s), &t, size, 1.0 / 64.0);
-                    std::hint::black_box(&p);
+        for size in [1.0_f32, 0.5, 0.25] {
+            for (name, depth_m, jump) in [("dry-walk", 0.0, false), ("wet-swim", 4.0, true)] {
+                let pool = Pool {
+                    depth_cells: (depth_m / size) as i32,
+                };
+                for _ in 0..3 {
+                    let mut p = player();
+                    p.eye.y = if depth_m > 0.0 {
+                        depth_m + 0.41
+                    } else {
+                        EYE_HEIGHT + 0.01
+                    };
+                    p.intent.direction = Vec3::X;
+                    let start = cpu_ns();
+                    for _ in 0..100_000 {
+                        p.intent.jump = jump;
+                        p.step(std::hint::black_box(&pool), &t, size, 1.0 / 64.0);
+                        std::hint::black_box(&p);
+                    }
+                    eprintln!(
+                        "cost {name} size={size} cpu_ns_per_step={:.1}",
+                        (cpu_ns() - start) / 100_000.0
+                    );
                 }
-                eprintln!(
-                    "physics fixed64 shape-wall size={size} count=100000 wall_ns_per_step={:.1}",
-                    start.elapsed().as_nanos() as f64 / 100_000.0
-                );
             }
         }
     }

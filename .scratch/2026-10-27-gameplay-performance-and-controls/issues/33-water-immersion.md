@@ -115,8 +115,7 @@ PR B (movement):
 - [x] Descend (swim down) is reachable on keyboard, controller and touch
       layouts; `swimming` reaches the figure.
 - [x] Flight is unaffected.
-- [ ] Wet fraction is correct for slabs and waterlogged Shapes. (Slabs done;
-      the waterlogged-Shape half is open, see the PR B outcome.)
+- [x] Wet fraction is correct for slabs and waterlogged Shapes.
 - [x] Behavior tests cover each rule above.
 
 ## Validation and authorization
@@ -174,6 +173,21 @@ was added.
 
 Deviations: jump-out lift is 7.5 m/s, not about 5, because 5 m/s at 24 m/s²
 rises 0.5 m and cannot clear a metre. Descend is the crouch intent, so a
-controller's toggled crouch sinks until toggled off. Open: waterlogged Shapes
-are not read by the wet fraction (it inherits `fluid_at`'s rule that voids of
-a solid are not read); interactive tuning; the performance A/B.
+controller's toggled crouch sinks until toggled off.
+
+Waterlogged Shapes: `fluid_at` now reads a solid that holds fluid in its voids
+as fluid up to its wettest void (a dry solid still hides what is below it), so
+the eye's view and the body's wet fraction agree. This closes PR A's known
+edge for an eye inside a waterlogged Shape.
+
+Server cost, 2026-10-30 (host load about 28, so thread CPU, interleaved
+against a main binary carrying the same test, 6 rounds, 100k steps each,
+`movement_cost_sample`): per physics step, minimum ns main vs branch. Dry
+walk: 165 vs 179 at 1 m Voxels, 276 vs 291 at 0.5 m, 1052 vs 1030 at 0.25 m
+(the one-Voxel `fluid_at` column scan adds up to about 15 ns). Wet swim: 164
+vs 157, 265 vs 256, 987 vs 932. Per second at 64 Hz this is at most 70 µs, and
+the wet case does more work yet is no slower. No Client render work was added,
+so no Client frame sample was taken.
+
+Still manual: interactive feel tuning of the constants, the offscreen
+captures and the user visual review of both PRs.
