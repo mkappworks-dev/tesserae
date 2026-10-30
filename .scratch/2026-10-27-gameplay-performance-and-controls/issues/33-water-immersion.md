@@ -1,6 +1,6 @@
 # 33: Water immersion: view and movement
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (ticket 24 and the third-person view, ticket 26, merged)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -198,5 +198,9 @@ test). An offscreen capture of the underwater view was not obtained: the dev
 fixture has no knob to put the camera inside a lake, and the dry capture
 looked unchanged.
 
-Still manual: interactive feel tuning of the constants, the offscreen
-captures and the user visual review of both PRs.
+User check, 2026-10-30: the interactive feel of both PRs (float, swim, sink,
+climb-out, wading, flight, controller, third person, waterlogged slab) was
+tried in the demo lakes and accepted with the starting constants.
+
+Not done, and accepted as such: the offscreen underwater capture and PR A's
+Client frame A/B.
