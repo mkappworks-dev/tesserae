@@ -302,3 +302,18 @@ the request, not a copy of that game, and needs the user's check.
   lattice cells in a World with one Voxel size (ADR-0003), so a span always
   lands on whole Voxels.
 
+## Amendment 2026-10-30 (5): L opens and closes the menu, a tool key leaves
+
+Raised on review: an "Exit layout mode" button is not how a Player expects to
+leave, and the Layout key should work as it does for the measuring tool.
+
+- The Layout key opens the menu, turning the mode on. Pressed again it closes
+  the menu into play, the layout ready to place, and it opens again on each
+  press after that. It never leaves the mode.
+- The mode is left as the measuring tool is put away: the clear key (Backspace
+  by default), or Remove once no corner is picked (left click, RT). Neither
+  needs a button in the menu, and the menu has none.
+- The card names those keys in its prompts.
+- A card taller than the screen scrolls, with the wheel and with pad focus, and
+  keeps its place when a change rebuilds it.
+

@@ -280,6 +280,14 @@ pub(super) fn intercept(
     if !mode.on {
         return;
     }
+    // Put away as the measuring tool is, with the same key.
+    if actions.started(Action::ClearTool) {
+        mode.on = false;
+        mode.points.clear();
+        mode.dragging = false;
+        actions.cancel(Action::ClearTool);
+        return;
+    }
     // A pad has no spare buttons: while the mode is on its D-pad turn button
     // picks the axis and its empty-hand button the shape. A keyboard keeps
     // those for the Shape and has its own keys.
@@ -824,16 +832,21 @@ pub(super) fn summary(
             }
         }
     };
+    let leave = format!(
+        " · {} menu · {} leave",
+        keys(Action::Layout),
+        keys(Action::ClearTool)
+    );
     let hint = if between {
         let (place, remove) = (keys(Action::Place), keys(Action::Remove));
         match mode.points.len() {
-            0 => format!("{place} set A, hold and drag to B · {remove} cancel"),
-            1 => format!("{place} set B, or let go on B · {remove} step back"),
-            _ => format!("{place} commit · {remove} step back"),
+            0 => format!("{place} set A, hold and drag to B · {remove} cancel{leave}"),
+            1 => format!("{place} set B, or let go on B · {remove} step back{leave}"),
+            _ => format!("{place} commit · {remove} step back{leave}"),
         }
     } else {
         format!(
-            "{} place · {} cancel · {} / {} count",
+            "{} place · {} cancel · {} / {} count{leave}",
             keys(Action::Place),
             keys(Action::Remove),
             keys(Action::LayoutMore),
@@ -1059,6 +1072,24 @@ mod tests {
         let intent = commit(&mut app);
         assert_eq!(dims(&intent), [(Dim::Z, false, 4)]);
         assert!(intent.direction.dot(Vec3::Z) > 0.999);
+    }
+
+    #[test]
+    fn the_clear_key_puts_the_layout_away_as_it_does_the_measuring_tool() {
+        let mut app = app();
+        between(&mut app);
+        aim(&mut app, Some([1, 0, 1]));
+        click(&mut app, MouseButton::Right);
+        assert_eq!(points(&app).len(), 1);
+        key(&mut app, KeyCode::Backspace);
+        assert!(!mode(&app).on, "left with one key, no click");
+        assert!(points(&app).is_empty());
+        // With the mode off the key is left to what it ordinarily does.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Backspace);
+        step(&mut app);
+        assert!(app.world().resource::<Actions>().started(Action::ClearTool));
     }
 
     #[test]

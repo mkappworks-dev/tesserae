@@ -14,7 +14,7 @@ use crate::session::SessionApp;
 use crate::world::WorldSettings;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
-use bevy::ui_widgets::Activate;
+use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::layout::MAX_LAYOUT_VOXELS;
 
@@ -54,11 +54,14 @@ enum Control {
     Count(usize, i32),
     Gap(i32),
     Close,
-    Exit,
 }
 
 #[derive(Component)]
 struct Panel;
+
+/// The card itself, which scrolls when it is taller than the screen.
+#[derive(Component)]
+struct Card;
 
 /// The text that says what the layout is and what the aim would lay.
 #[derive(Component)]
@@ -87,8 +90,9 @@ type Blockers<'w> = (
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
 );
 
-/// The Layout key turns the mode on and opens the menu, and thereafter opens
-/// and closes it; Escape closes it.
+/// The Layout key opens the menu, turning the mode on, and closes it again into
+/// play with the layout ready to place. Escape closes it too. The mode is left
+/// with the clear key or Remove, as a tool is put away.
 pub(super) fn toggle(
     actions: Res<Actions>,
     mut menu: ResMut<LayoutMenu>,
@@ -175,10 +179,7 @@ fn activate(
             }
         }
         Control::Gap(by) => layout.set_gap(by),
-        Control::Close | Control::Exit => {
-            if control == Control::Exit {
-                mode.on = false;
-            }
+        Control::Close => {
             for mut cursor in &mut cursor {
                 close(&mut menu, &mut cursor, true);
             }
@@ -354,7 +355,7 @@ fn render(
     mut commands: Commands,
     mut menu: ResMut<LayoutMenu>,
     panels: Query<Entity, With<Panel>>,
-    controls: Query<&Control>,
+    (controls, cards): (Query<&Control>, Query<&ScrollPosition, With<Card>>),
     preferences: Res<Preferences>,
     mode: Res<LayoutMode>,
     world: Res<WorldSettings>,
@@ -372,6 +373,11 @@ fn render(
     if !rebuild {
         return;
     }
+    // A rebuild must not throw the Player back to the top of a long card.
+    let scroll = match (menu.shown, want) {
+        (Some(true), Some(true)) => cards.iter().next().map_or(Vec2::ZERO, |s| s.0),
+        _ => Vec2::ZERO,
+    };
     menu.dirty = false;
     menu.shown = want;
     let focused = focus
@@ -404,6 +410,9 @@ fn render(
         .with_children(|wrapper| {
             wrapper
                 .spawn((
+                    Card,
+                    ScrollArea,
+                    ScrollPosition(scroll),
                     Node {
                         width: Val::Px(if open { CARD_WIDTH } else { STATUS_WIDTH }),
                         max_height: Val::Percent(92.0),
@@ -506,7 +515,6 @@ fn render(
                     }
                     ui::eyebrow(card, "NOW");
                     info(card);
-                    button(card, "Exit layout mode", Control::Exit, false);
                 });
         });
     // The rebuilt panel keeps focus where it was, or starts at the top.
@@ -614,15 +622,16 @@ mod tests {
     }
 
     #[test]
-    fn the_key_again_closes_it_back_into_play_and_keeps_the_mode() {
+    fn the_key_opens_the_menu_and_again_closes_it_into_play_with_the_mode_still_on() {
         let mut app = app();
         open(&mut app);
         press(&mut app, KeyCode::KeyL);
         assert!(!menu(&app).open);
-        assert!(app.world().resource::<LayoutMode>().on);
+        assert!(app.world().resource::<LayoutMode>().on, "ready to place");
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
         press(&mut app, KeyCode::KeyL);
-        assert!(menu(&app).open, "and it opens again while the mode is on");
+        assert!(menu(&app).open, "and it opens again, mode on");
+        assert!(app.world().resource::<LayoutMode>().on);
     }
 
     #[test]
@@ -711,15 +720,12 @@ mod tests {
     }
 
     #[test]
-    fn close_goes_back_into_play_and_exit_also_turns_the_mode_off() {
+    fn the_close_control_goes_back_into_play_and_keeps_the_mode() {
         let mut app = app();
         open(&mut app);
         activate_control(&mut app, Control::Close);
         assert!(!menu(&app).open && app.world().resource::<LayoutMode>().on);
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
-        open_again(&mut app);
-        activate_control(&mut app, Control::Exit);
-        assert!(!menu(&app).open && !app.world().resource::<LayoutMode>().on);
     }
 
     fn open_again(app: &mut App) {
@@ -817,8 +823,7 @@ mod tests {
             (1, 1),
             "but it still says what the aim does"
         );
-        press(&mut app, KeyCode::KeyL);
-        activate_control(&mut app, Control::Exit);
+        app.world_mut().resource_mut::<LayoutMode>().on = false;
         controls(&mut app);
         assert_eq!(
             panels(&mut app),
@@ -860,6 +865,47 @@ mod tests {
     }
 
     #[test]
+    fn a_tall_card_scrolls_and_a_rebuild_keeps_its_place() {
+        use bevy::ui_widgets::ScrollArea;
+        let mut app = render_app();
+        open(&mut app);
+        controls(&mut app);
+        let card = |app: &mut App| {
+            let mut query = app
+                .world_mut()
+                .query_filtered::<(&Node, &ScrollPosition), (With<Card>, With<ScrollArea>)>();
+            let (node, scroll) = query.single(app.world()).expect("one scrolling card");
+            (node.overflow.y, node.max_height, scroll.0)
+        };
+        let (overflow, max_height, _) = card(&mut app);
+        assert_eq!(overflow, OverflowAxis::Scroll);
+        assert_eq!(
+            max_height,
+            Val::Percent(92.0),
+            "never taller than the screen"
+        );
+        app.world_mut()
+            .query_filtered::<&mut ScrollPosition, With<Card>>()
+            .single_mut(app.world_mut())
+            .unwrap()
+            .0 = Vec2::new(0.0, 140.0);
+        activate_control(&mut app, Control::Gap(1));
+        controls(&mut app);
+        assert_eq!(
+            card(&mut app).2,
+            Vec2::new(0.0, 140.0),
+            "not thrown back to the top"
+        );
+        press(&mut app, KeyCode::KeyL);
+        controls(&mut app);
+        assert_eq!(
+            card(&mut app).2,
+            Vec2::ZERO,
+            "the status card starts at its top"
+        );
+    }
+
+    #[test]
     fn the_panel_offers_every_control_for_the_shape_and_hides_those_the_mode_does_not_use() {
         let mut app = render_app();
         open(&mut app);
@@ -878,7 +924,6 @@ mod tests {
             Control::Gap(-1),
             Control::Gap(1),
             Control::Close,
-            Control::Exit,
         ] {
             assert!(shown.contains(&expected), "{expected:?}");
         }

@@ -33,3 +33,10 @@ on each change keeps focus on the same control. The ghosts reuse the held
 model's mesh and the single ghost's translucent material, rebuilt when the
 held block or the Material choice changes. The panel was checked from an
 offscreen capture, not on a physical pad.
+
+### 2026-10-30: key flow changed
+
+The Layout key now only opens and closes the menu, and the mode is left with
+the clear key or Remove; the menu's exit button is gone. See the spec's
+amendment (5).
+
