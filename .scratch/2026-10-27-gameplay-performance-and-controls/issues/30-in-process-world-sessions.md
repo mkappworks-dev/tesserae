@@ -247,7 +247,7 @@ The user asked for the open criteria to be finished on the same branch.
   count flat. `malloc_history` diffs show the growth in wgpu buffers and
   bind groups, Metal command-buffer pools and a bevy_ecs slab of wakers, not
   in session code. Tried `malloc_zone_pressure_relief` after teardown: no
-  consistent gain, removed. Not fixed here.
+  consistent gain, removed. Not fixed here; tracked as ticket 34.
 
 Not built, as noted in the implementation note: `SessionId` stamping and the
 debug teardown assertion. Some per-system `Local` caches are not reset
