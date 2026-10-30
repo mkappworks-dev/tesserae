@@ -108,6 +108,8 @@ pub struct AimReport {
     pub origin: Vec3,
     pub direction: Vec3,
     pub held: Option<AimItem>,
+    /// The tool in hand, which makes the answer carry a `use_aim`.
+    pub tool: Option<super::tool::ToolId>,
 }
 #[derive(Message, Clone, Copy, Debug)]
 pub struct PickIntent {
@@ -141,6 +143,8 @@ pub struct AimTarget {
     pub removal: Option<AimRemoval>,
     /// The camera sees a target the Eye cannot: nothing above is offered.
     pub blocked: bool,
+    /// What Use would do with the tool in hand, or why not; `None` with none.
+    pub use_aim: Option<super::tool::UseAim>,
 }
 #[derive(Resource, Default)]
 struct AimState {
@@ -298,6 +302,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_message::<super::undo::HistoryAction>()
         .add_message::<super::undo::HistoryApplied>()
         .init_resource::<AimState>()
+        .init_resource::<super::tool::Tools>()
         .add_message::<AimReport>()
         .add_message::<AimTarget>()
         .add_message::<PickIntent>()
@@ -393,11 +398,24 @@ fn answer_aim(
     store: Res<ChunkStore>,
     tables: Res<ContentTables>,
     world: Res<WorldSettings>,
-    meshes: Res<MeshState>,
+    (meshes, tools): (Res<MeshState>, Res<super::tool::Tools>),
+    player: Single<&Player>,
     mut targets: MessageWriter<AimTarget>,
 ) {
     if let Some((report, reach)) = state.latest {
-        targets.write(aim_target(&store, &tables, &world, &meshes, report, reach));
+        let mut target = aim_target(&store, &tables, &world, &meshes, report, reach);
+        target.use_aim = report.tool.map(|tool| {
+            super::tool::aim_use(
+                &store,
+                &tables,
+                &world,
+                &tools,
+                tool,
+                (report.origin, report.direction),
+                player.eye(),
+            )
+        });
+        targets.write(target);
     }
 }
 
@@ -452,7 +470,24 @@ fn aim_target(
         outline,
         ghost,
         blocked,
+        use_aim: None,
     }
+}
+
+/// The boxes a ray can strike in `voxel` at `at`, with its neighbours' arms.
+pub(in crate::server) fn drawn_boxes<'t>(
+    store: &ChunkStore,
+    tables: &'t Tables,
+    at: [i32; 3],
+    voxel: Voxel,
+) -> &'t [tesserae_core::NodeBox] {
+    let around = FACE_STEPS.map(|d| {
+        store
+            .voxel([at[0] + d[0], at[1] + d[1], at[2] + d[2]])
+            .unwrap_or(Voxel::AIR)
+    });
+    let connections = tables.shapes.connections(voxel, around);
+    tables.shapes.selection(voxel, connections)
 }
 
 fn removal_target(
@@ -467,13 +502,7 @@ fn removal_target(
     } else {
         here.solid
     };
-    let around = FACE_STEPS.map(|d| {
-        store
-            .voxel([at[0] + d[0], at[1] + d[1], at[2] + d[2]])
-            .unwrap_or(Voxel::AIR)
-    });
-    let connections = tables.shapes.connections(voxel, around);
-    let boxes = tables.shapes.selection(voxel, connections);
+    let boxes = drawn_boxes(store, tables, at, voxel);
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     for b in boxes {
@@ -688,6 +717,55 @@ enum Change {
     Occupants(Occupants),
 }
 
+fn trace(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    direction: Vec3,
+    reach: Reach,
+    fluid_tool: bool,
+) -> Result<(RayHit, Vec3), RejectReason> {
+    // A packed fluid Voxel is a source; flowing fluid is packed air.
+    let stops = |v: Voxel| {
+        tables.materials.solid(v) || (fluid_tool && tables.fluids.contains(v.material()))
+    };
+    let hit = raycast_until(
+        store,
+        tables,
+        world.voxel_size,
+        reach.start.to_array(),
+        direction.to_array(),
+        reach.length_m,
+        stops,
+    )
+    .ok_or(RejectReason::OutOfReach)?;
+    let struck = reach.start + direction.normalize() * hit.distance_m;
+    if let Some(eye) = reach.eye
+        && !seen_from_eye(store, tables, world, eye, struck, hit)
+    {
+        return Err(RejectReason::Blocked);
+    }
+    Ok((hit, struck))
+}
+
+/// What the Eye sees a ray strike, in solids only: the aim of a tool that
+/// touches nothing but what is there.
+pub(in crate::server) fn solid_hit(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    (origin, direction): (Vec3, Vec3),
+    eye: Vec3,
+) -> Result<(RayHit, Vec3), RejectReason> {
+    let intent = EditIntent {
+        action: EditAction::Remove,
+        origin,
+        direction,
+    };
+    let reach = reach_from(&intent, eye)?;
+    trace(store, tables, world, direction, reach, false)
+}
+
 /// Where an intent lands, and what goes there.
 fn resolve(
     store: &ChunkStore,
@@ -708,26 +786,7 @@ fn resolve(
     {
         return Err(RejectReason::NotAFluid);
     }
-    // A packed fluid Voxel is a source; flowing fluid is packed air.
-    let stops = |v: Voxel| {
-        tables.materials.solid(v) || (fluid_tool && tables.fluids.contains(v.material()))
-    };
-    let hit = raycast_until(
-        store,
-        tables,
-        world.voxel_size,
-        reach.start.to_array(),
-        intent.direction.to_array(),
-        reach.length_m,
-        stops,
-    )
-    .ok_or(RejectReason::OutOfReach)?;
-    if let Some(eye) = reach.eye {
-        let struck = reach.start + intent.direction.normalize() * hit.distance_m;
-        if !seen_from_eye(store, tables, world, eye, struck, hit) {
-            return Err(RejectReason::Blocked);
-        }
-    }
+    let (hit, _) = trace(store, tables, world, intent.direction, reach, fluid_tool)?;
     if let EditAction::RemoveAt(expected) = intent.action
         && removal_target(store, tables, world, hit.at) != Some(expected)
     {
@@ -2661,6 +2720,7 @@ mod tests {
                 origin: DOWN_EYE,
                 direction: Vec3::NEG_Y,
                 held: Some(AimItem::Solid(stone())),
+                tool: None,
             };
             let target = aim_target(
                 app.world().resource::<ChunkStore>(),
@@ -2705,6 +2765,7 @@ mod tests {
             origin: DOWN_EYE,
             direction: Vec3::NEG_Y,
             held: Some(AimItem::Solid(stone())),
+            tool: None,
         };
         let target = |app: &App, held| {
             aim_target(
@@ -2780,6 +2841,7 @@ mod tests {
             origin: camera,
             direction: Vec3::NEG_Y,
             held: Some(AimItem::Solid(stone())),
+            tool: None,
         };
         let mut walled = ground();
         for y in 9..12 {
@@ -2901,6 +2963,7 @@ mod tests {
             origin: DOWN_EYE,
             direction: Vec3::NEG_Y,
             held: None,
+            tool: None,
         };
         app.world_mut().write_message(report);
         app.world_mut().run_system_once(receive_aim).unwrap();

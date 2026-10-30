@@ -26,6 +26,29 @@ pub const MAX_NAME_BYTES: usize = 32;
 pub const MATERIAL_TEXTURE_EDGE: usize = 16;
 pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 3 * 4;
 
+pub const MAX_TOOLS_PER_MOD: usize = 8;
+
+/// What a tool does when used; mirrors the contract's closed `tool-kind`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ToolKind {
+    Measure,
+}
+
+/// A declared tool, named `<mod id>:<name>`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct ToolDef {
+    pub name: String,
+    pub kind: ToolKind,
+}
+
+impl From<content::ToolKind> for ToolKind {
+    fn from(kind: content::ToolKind) -> Self {
+        match kind {
+            content::ToolKind::Measure => ToolKind::Measure,
+        }
+    }
+}
+
 /// The Game's view distance and level-of-detail reach, in metres.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ViewParams {
@@ -77,6 +100,7 @@ pub struct Applied {
     pub view: Option<ViewParams>,
     pub movement: Option<content::MovementPolicy>,
     pub character: Option<crate::character::Character>,
+    pub tools: Vec<ToolDef>,
     pub behaviour: Behaviour,
 }
 
@@ -113,6 +137,7 @@ pub fn apply(
         for (set, field) in [
             (declaration.world.is_some(), "world"),
             (declaration.view.is_some(), "view"),
+            (!declaration.tools.is_empty(), "tools"),
         ] {
             if set {
                 return Err(ModError::NotAGame { id: id(), field });
@@ -120,18 +145,31 @@ pub fn apply(
         }
     }
 
-    for (what, count) in [
-        ("appearance", declaration.appearance.len()),
-        ("fluid", declaration.fluids.len()),
-        ("reaction", declaration.reactions.len()),
-        ("combustion", declaration.combustion.len()),
+    for (what, count, max) in [
+        (
+            "appearance",
+            declaration.appearance.len(),
+            MAX_BEHAVIOURS_PER_MOD,
+        ),
+        ("fluid", declaration.fluids.len(), MAX_BEHAVIOURS_PER_MOD),
+        (
+            "reaction",
+            declaration.reactions.len(),
+            MAX_BEHAVIOURS_PER_MOD,
+        ),
+        (
+            "combustion",
+            declaration.combustion.len(),
+            MAX_BEHAVIOURS_PER_MOD,
+        ),
+        ("tool", declaration.tools.len(), MAX_TOOLS_PER_MOD),
     ] {
-        if count > MAX_BEHAVIOURS_PER_MOD {
+        if count > max {
             return Err(ModError::TooManyRows {
                 id: id(),
                 what,
                 count,
-                max: MAX_BEHAVIOURS_PER_MOD,
+                max,
             });
         }
     }
@@ -210,6 +248,29 @@ pub fn apply(
         })?;
     }
 
+    let mut tools: Vec<ToolDef> = Vec::new();
+    for tool in &declaration.tools {
+        let bad = |rule| ModError::Params {
+            id: id(),
+            what: "tool",
+            source: ParamError {
+                field: "name",
+                rule,
+            },
+        };
+        if !valid_local(&tool.name) {
+            return Err(bad(NAME_RULE));
+        }
+        let name = format!("{mod_id}:{}", tool.name);
+        if tools.iter().any(|t| t.name == name) {
+            return Err(bad("must be unique among the Mod's tools"));
+        }
+        tools.push(ToolDef {
+            name,
+            kind: tool.kind.into(),
+        });
+    }
+
     let mut remove_times = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Material, row, &material.name)?;
@@ -257,6 +318,7 @@ pub fn apply(
         view,
         movement,
         character,
+        tools,
         behaviour: Behaviour {
             mod_id: id(),
             fluids: declaration.fluids,
@@ -535,11 +597,7 @@ fn check_count<'a>(
 
 /// `<mod id>:<local>`, for a local part of `[a-z][a-z0-9_]{0,31}`.
 fn qualified(mod_id: &str, kind: Kind, row: usize, local: &str) -> Result<String, ModError> {
-    let mut bytes = local.bytes();
-    let well_formed = local.len() <= MAX_NAME_BYTES
-        && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
-        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-    if well_formed {
+    if valid_local(local) {
         return Ok(format!("{mod_id}:{local}"));
     }
     Err(ModError::BadName {
@@ -550,7 +608,16 @@ fn qualified(mod_id: &str, kind: Kind, row: usize, local: &str) -> Result<String
         reason: if local.contains(':') {
             "a name is local to its Mod; the engine adds `<mod id>:`"
         } else {
-            "must be a lowercase letter then up to 31 lowercase letters, digits or `_`"
+            NAME_RULE
         },
     })
+}
+
+const NAME_RULE: &str = "must be a lowercase letter then up to 31 lowercase letters, digits or `_`";
+
+fn valid_local(local: &str) -> bool {
+    let mut bytes = local.bytes();
+    local.len() <= MAX_NAME_BYTES
+        && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }

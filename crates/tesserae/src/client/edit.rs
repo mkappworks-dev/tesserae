@@ -21,6 +21,7 @@ use tesserae_core::{
 use super::camera::FlyCamera;
 use crate::content::ContentCatalogue;
 use crate::server::edit::{EditAction, EditIntent, EditRejected};
+use crate::server::tool::ToolId;
 
 /// How long a rejection stays on screen.
 const NOTICE_SECS: f32 = 2.5;
@@ -48,10 +49,19 @@ pub(super) enum Holding {
     /// A source of this fluid.
     Fluid(MaterialId),
     Fire,
+    /// Edits are inert; Place and Remove are the tool's verbs (`tool.rs`).
+    Tool(ToolId),
     Empty,
 }
 
 impl Holding {
+    pub(super) fn tool(self) -> Option<ToolId> {
+        match self {
+            Holding::Tool(id) => Some(id),
+            _ => None,
+        }
+    }
+
     pub(super) fn solid(material: MaterialId, shape: ShapeId) -> Self {
         Holding::Solid {
             material,
@@ -73,7 +83,7 @@ impl Holding {
             ))),
             Holding::Fluid(material) => Some(EditAction::PlaceSource(material)),
             Holding::Fire => Some(EditAction::Ignite),
-            Holding::Empty => None,
+            Holding::Tool(_) | Holding::Empty => None,
         }
     }
 
@@ -82,6 +92,7 @@ impl Holding {
             Holding::Solid { .. } => ("place", "remove"),
             Holding::Fluid(_) => ("place source", "remove"),
             Holding::Fire => ("ignite", "remove"),
+            Holding::Tool(_) => ("clear point", "use tool"),
             Holding::Empty => ("nothing", "remove"),
         }
     }
@@ -110,6 +121,7 @@ impl Holding {
                 .map_or("unknown", |m| m.name.as_str())
                 .into(),
             Holding::Fire => "fire".into(),
+            Holding::Tool(tool) => catalogue.tool_label(tool).into(),
             Holding::Empty => "empty".into(),
         }
     }
@@ -149,6 +161,7 @@ impl Holding {
             }
             Holding::Fluid(id) => format!("{} source", material(id)),
             Holding::Fire => "fire".to_string(),
+            Holding::Tool(tool) => catalogue.tool_label(tool).to_string(),
             Holding::Empty => "empty".to_string(),
         }
     }
@@ -577,7 +590,8 @@ pub(super) fn hud_text(
 ) -> String {
     let held = hotbar.held();
     let (place, remove) = held.verbs();
-    let place = if held == Holding::Empty {
+    let tool = held.tool().is_some();
+    let place = if held == Holding::Empty || tool {
         place.to_owned()
     } else {
         format!("{place} {}", held.describe(catalogue))
@@ -595,8 +609,14 @@ pub(super) fn hud_text(
         "hold"
     };
     let hints = hints(bindings, labels);
+    // A tool's verbs are presses, not the hold or tap of removal.
+    let remove_binding = if tool {
+        remove_binding
+    } else {
+        format!("{mode} {remove_binding}")
+    };
     format!(
-        "{}: {}\n[{mode} {remove_binding}] {remove}\n[{place_binding}] {place}\n{hints}\n{}",
+        "{}: {}\n[{remove_binding}] {remove}\n[{place_binding}] {place}\n{hints}\n{}",
         hand,
         held.describe(catalogue),
         notice.text()
@@ -687,6 +707,7 @@ mod tests {
             shapes,
             lake: None,
             rock: Some(tesserae_core::testgen::fixtures().ground.rock),
+            tools: Vec::new(),
         }
     }
 
@@ -1283,6 +1304,44 @@ mod tests {
             .find(|m| m.name == name)
             .unwrap_or_else(|| panic!("{name}"))
             .id
+    }
+
+    #[test]
+    fn the_hud_names_a_tools_verbs_as_presses() {
+        let mut catalogue = demo();
+        catalogue.tools = vec![crate::content::CatalogueTool {
+            id: ToolId(0),
+            name: "demo:measure".into(),
+            kind: tesserae_mods::ToolKind::Measure,
+        }];
+        let mut app = app_with(CursorGrabMode::Locked, catalogue);
+        frame(&mut app);
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Tool(ToolId(0)));
+        let text = hud(&app);
+        assert!(text.contains("held: measure"), "{text}");
+        assert!(text.contains("[Left mouse] use tool"), "{text}");
+        assert!(text.contains("[Right mouse] clear point"), "{text}");
+        assert!(!text.contains("hold Left mouse"), "{text}");
+    }
+
+    #[test]
+    fn the_menu_offers_the_games_tools_and_choosing_one_puts_it_in_hand() {
+        let mut catalogue = demo();
+        catalogue.tools = vec![crate::content::CatalogueTool {
+            id: ToolId(0),
+            name: "demo:measure".into(),
+            kind: tesserae_mods::ToolKind::Measure,
+        }];
+        let mut app = app_with(CursorGrabMode::Locked, catalogue);
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        assert!(offered(&mut app).contains(&Entry::Tool(ToolId(0))));
+        assert_eq!(
+            Entry::Tool(ToolId(0)).holding(),
+            Some(Holding::Tool(ToolId(0)))
+        );
+        let without = app_with(CursorGrabMode::Locked, demo());
+        assert!(without.world().resource::<Catalogue>().0.tools.is_empty());
     }
 
     #[test]

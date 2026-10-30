@@ -702,6 +702,8 @@ pub(super) fn action_name(action: Action) -> &'static str {
         Shape => "Next Shape",
         Turn => "Turn Shape",
         Flip => "Flip Shape",
+        Use => "Use tool",
+        ClearTool => "Clear tool",
         Slot1 => "Quick slot 1",
         Slot2 => "Quick slot 2",
         Slot3 => "Quick slot 3",
@@ -726,7 +728,7 @@ pub(super) fn category(action: Action) -> &'static str {
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
-        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip => "Building",
+        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | Use | ClearTool => "Building",
         _ => "Interface",
     }
 }
@@ -1912,6 +1914,8 @@ fn binding_order(action: Action) -> usize {
         Turn,
         Flip,
         Shape,
+        Use,
+        ClearTool,
         Catalogue,
         Help,
         ReleaseCursor,
@@ -2396,14 +2400,14 @@ mod tests {
         press(&mut app, GamepadButton::Start);
         app.update();
         assert!(app.world().resource::<Settings>().capture.is_some());
-        press(&mut app, GamepadButton::DPadUp);
+        press(&mut app, GamepadButton::C);
         app.update();
         let settings = app.world().resource::<Settings>();
         assert!(settings.capture.is_none() && settings.conflict.is_none());
         let draft = &settings.draft.as_ref().unwrap().0;
         assert_eq!(
             draft.pad[&Action::Sample][1].unwrap().trigger,
-            Trigger::Pad(GamepadButton::DPadUp)
+            Trigger::Pad(GamepadButton::C)
         );
         assert!(draft.keyboard[&Action::Sample][0].is_none());
 
@@ -2412,6 +2416,37 @@ mod tests {
         let draft = &app.world().resource::<Settings>().draft.as_ref().unwrap().0;
         assert_eq!(draft.pad, Bindings::default().pad);
         assert!(draft.keyboard[&Action::Sample][0].is_none());
+    }
+
+    #[test]
+    fn use_and_clear_tool_take_part_in_conflict_warnings_and_are_listed() {
+        for (taken, owner) in [
+            (KeyCode::KeyG, Action::Use),
+            (KeyCode::Backspace, Action::ClearTool),
+        ] {
+            let mut app = app();
+            activate_operation(
+                &mut app,
+                Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+            );
+            activate_operation(
+                &mut app,
+                Operation::Capture(Device::KeyboardMouse, Action::Forward, 0),
+            );
+            app.update();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(taken);
+            app.update();
+            let settings = app.world().resource::<Settings>();
+            let (_, _, conflicts) = settings.conflict.as_ref().expect("a conflict");
+            assert!(
+                conflicts.iter().any(|(action, _)| *action == owner),
+                "{owner:?}"
+            );
+        }
+        assert_eq!(action_name(Action::Use), "Use tool");
+        assert_eq!(action_name(Action::ClearTool), "Clear tool");
     }
 
     #[test]

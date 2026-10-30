@@ -37,8 +37,8 @@ pub use command::{
 pub use context::{EditEvent, EditKind, TickContext};
 pub use declare::{
     Applied, Behaviour, DEFAULT_REMOVE_TIME, MATERIAL_TEXTURE_BYTES, MATERIAL_TEXTURE_EDGE,
-    MAX_BEHAVIOURS_PER_MOD, MAX_MATERIALS, MAX_NAME_BYTES, MAX_PER_MOD, MAX_SHAPES, ViewParams,
-    apply, resolve,
+    MAX_BEHAVIOURS_PER_MOD, MAX_MATERIALS, MAX_NAME_BYTES, MAX_PER_MOD, MAX_SHAPES,
+    MAX_TOOLS_PER_MOD, ToolDef, ToolKind, ViewParams, apply, resolve,
 };
 pub use error::ModError;
 pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};

@@ -176,6 +176,23 @@ yet force or forbid a view, change the zoom range or the reach, or run custom
 animations or cameras; any of those would arrive as declared data through the
 WIT contract, as the movement policy did.
 
+### Use and tools
+
+Use is a separate Server intent, not an Edit. A Client sends `UseIntent` (the
+crosshair ray, the Tool held and the target it was shown) and the Server answers
+with `UseOutcome`; the aim answer carries a `use_aim` while a Tool is held, so
+the preview can say before the press that it would be refused. Use changes no
+Voxel and never enters the undo journal, and a target that changed since it was
+shown is refused rather than re-aimed. The Server keeps no measurement: the
+Client holds the corners it was told, so no Client system reads World state.
+
+A Game declares its Tools once, as `tool-def` rows (a name and a closed kind) in
+the Declaration. The Server runs the kind in native code, so no Mod is called
+when a Tool is used and nothing crosses the contract per Use or per Voxel
+([ADR-0001](adr/0001-wasm-mod-boundary.md)). A later use of a Voxel, such as a
+door or a container, must also be declared data or a batched event, never a
+per-use Mod callback.
+
 ## The three invariants this diagram exists to protect
 
 Each of these is a mistake that will not look wrong in review.

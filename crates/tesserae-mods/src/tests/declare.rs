@@ -8,7 +8,10 @@ use tesserae_core::{
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::bindings::tesserae::mods::types;
-use crate::{Applied, Kind, ModError, Registry, RegistryMismatch, ViewParams, apply};
+use crate::{
+    Applied, Kind, MAX_TOOLS_PER_MOD, ModError, Registry, RegistryMismatch, ToolDef, ToolKind,
+    ViewParams, apply,
+};
 
 fn material(name: &str) -> content::MaterialDef {
     content::MaterialDef {
@@ -44,6 +47,7 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         fluids: Vec::new(),
         reactions: Vec::new(),
         combustion: Vec::new(),
+        tools: Vec::new(),
     }
 }
 
@@ -839,4 +843,86 @@ fn character_bounds_are_refused_at_load() {
             "{what}: {error}"
         );
     }
+}
+
+fn measure(name: &str) -> content::ToolDef {
+    content::ToolDef {
+        name: name.into(),
+        kind: content::ToolKind::Measure,
+    }
+}
+
+fn as_the_game(id: &str, d: Declaration) -> Result<Applied, ModError> {
+    apply(
+        d,
+        id,
+        &mut Tables::builtin(),
+        &mut Registry::builtin(),
+        true,
+    )
+}
+
+#[test]
+fn the_game_declares_tools_named_by_its_mod() {
+    let mut d = declaring(&[], &[]);
+    d.tools = vec![measure("ruler"), measure("tape")];
+    let applied = as_the_game("demo", d).unwrap();
+    assert_eq!(
+        applied.tools,
+        vec![
+            ToolDef {
+                name: "demo:ruler".into(),
+                kind: ToolKind::Measure
+            },
+            ToolDef {
+                name: "demo:tape".into(),
+                kind: ToolKind::Measure
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_mod_that_is_not_the_game_declares_no_tools() {
+    let mut d = declaring(&[], &[]);
+    d.tools = vec![measure("ruler")];
+    let mut load = Load::new();
+    assert!(matches!(
+        load.apply("content", d).unwrap_err(),
+        ModError::NotAGame { field: "tools", .. }
+    ));
+}
+
+#[test]
+fn tool_names_are_local_unique_and_bounded() {
+    for bad in ["", "Ruler", "demo:ruler", "9lives", &"x".repeat(33)] {
+        let mut d = declaring(&[], &[]);
+        d.tools = vec![measure(bad)];
+        assert!(
+            matches!(
+                as_the_game("demo", d).unwrap_err(),
+                ModError::Params { what: "tool", .. }
+            ),
+            "{bad:?}"
+        );
+    }
+    let mut d = declaring(&[], &[]);
+    d.tools = vec![measure("ruler"), measure("ruler")];
+    assert!(matches!(
+        as_the_game("demo", d).unwrap_err(),
+        ModError::Params { what: "tool", .. }
+    ));
+    let mut d = declaring(&[], &[]);
+    d.tools = (0..=MAX_TOOLS_PER_MOD)
+        .map(|i| measure(&format!("t{i}")))
+        .collect();
+    assert!(matches!(
+        as_the_game("demo", d).unwrap_err(),
+        ModError::TooManyRows {
+            what: "tool",
+            count: 9,
+            max: 8,
+            ..
+        }
+    ));
 }

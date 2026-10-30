@@ -164,6 +164,7 @@ pub(super) fn hold(
         || actions.started(Action::Redo)
         || tap_interrupted;
     if !ownership.gameplay()
+        || hotbar.held().tool().is_some()
         || state.cancelled
         || !ready
         || menu.open
@@ -365,7 +366,7 @@ mod tests {
         ));
         app.world_mut()
             .spawn((FlyCamera::default(), GlobalTransform::IDENTITY));
-        let view = (Vec3::ZERO, Vec3::NEG_Z, None);
+        let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
         app.world_mut().resource_mut::<Sent>().last = Some(view);
         let mut answer = app.world_mut().resource_mut::<Target>();
         answer.0.removal = Some(target(0));
@@ -414,6 +415,54 @@ mod tests {
             .press(MouseButton::Left);
         assert!(step(&mut app, 0.0).is_empty());
         assert_eq!(step(&mut app, 0.4).len(), 1);
+    }
+
+    #[test]
+    fn a_held_tool_makes_removal_inert_and_putting_it_away_restores_it() {
+        use super::super::edit::{Holding, Hotbar};
+        let mut app = app();
+        step(&mut app, 0.0);
+        app.world_mut().resource_mut::<Hotbar>().outside =
+            Some(Holding::Tool(crate::server::tool::ToolId(0)));
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        assert!(step(&mut app, 0.0).is_empty());
+        assert!(step(&mut app, 2.0).is_empty(), "the tool never removes");
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release_all();
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Empty);
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        assert!(step(&mut app, 0.0).is_empty());
+        assert_eq!(step(&mut app, 0.4).len(), 1);
+    }
+
+    #[test]
+    fn selecting_a_tool_cancels_a_pending_tap_removal() {
+        use super::super::edit::{Holding, Hotbar};
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .tap_remove = true;
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        step(&mut app, 0.0);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Left);
+        assert!(step(&mut app, 0.05).is_empty());
+        assert!(app.world().resource::<Progress>().active(), "pending");
+        app.world_mut().resource_mut::<Hotbar>().outside =
+            Some(Holding::Tool(crate::server::tool::ToolId(0)));
+        assert!(step(&mut app, 0.05).is_empty());
+        assert!(!app.world().resource::<Progress>().active());
+        assert!(step(&mut app, 1.0).is_empty(), "no automatic restart");
     }
 
     #[test]

@@ -86,6 +86,7 @@ fn empty() -> Declaration {
         fluids: vec![],
         reactions: vec![],
         combustion: vec![],
+        tools: vec![],
     }
 }
 
@@ -715,4 +716,21 @@ fn unknown_and_non_solid_ground_and_lakes_without_ground_fail_the_load() {
             .to_string()
             .contains("requires ground")
     );
+}
+
+#[test]
+fn an_older_line_declares_no_tools() {
+    use crate::bindings::v02::tesserae::mods::content as v02;
+    let old = v02::Declaration {
+        materials: vec![],
+        shapes: vec![],
+        appearance: vec![],
+        world: None,
+        view: None,
+        fluids: vec![],
+        reactions: vec![],
+        combustion: vec![],
+    };
+    let log = crate::log::LogBuffer::shared();
+    assert!(crate::adapt::v02::declaration(old, &log).tools.is_empty());
 }

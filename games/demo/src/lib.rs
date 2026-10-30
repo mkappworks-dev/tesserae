@@ -11,8 +11,8 @@ use std::collections::VecDeque;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, GroundParams, HeatDef,
-    MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ViewParams,
-    WaterParams,
+    MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ToolDef,
+    ToolKind, ViewParams, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -358,6 +358,10 @@ impl Guest for Demo {
                     seconds: 8.0,
                     residue: Some("demo:ash".into()),
                 }),
+            }],
+            tools: vec![ToolDef {
+                name: "measure".into(),
+                kind: ToolKind::Measure,
             }],
         }
     }
