@@ -6,12 +6,16 @@ use super::{
 use crate::world::WorldSettings;
 use bevy::prelude::*;
 use tesserae_core::collide::{self, Aabb};
+use tesserae_core::immersion::{FluidSurface, fluid_at};
 
 pub const FLY_SPEED_CEILING_MPS: f32 = 64.0;
 pub const EYE_HEIGHT: f32 = 1.62;
 pub const CROUCH_EYE_HEIGHT: f32 = 1.02;
 pub const BODY_HEIGHT_M: f32 = 1.8;
 pub const CROUCH_BODY_HEIGHT_M: f32 = 1.2;
+/// How far below the eye a fluid still counts, so a third-person boom that
+/// dips under a surface the eye is above still reads the water.
+pub const IMMERSION_REACH_M: f32 = 2.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MovementMode {
@@ -83,6 +87,7 @@ pub struct BodyState {
     pub vertical_mps: f32,
     pub crouching: bool,
     pub sprinting: bool,
+    pub immersion: Option<FluidSurface>,
 }
 #[derive(Message, Clone, Copy, Debug)]
 pub struct RespawnIntent;
@@ -101,6 +106,7 @@ pub struct Player {
     view: [f32; 2],
     /// Measured from the Eye's travel, so a body held against a wall stands.
     travel_mps: Vec3,
+    immersion: Option<FluidSurface>,
 }
 impl Player {
     fn new(eye: Vec3, mode: MovementMode) -> Self {
@@ -114,6 +120,7 @@ impl Player {
             seq: 0,
             view: [0.0; 2],
             travel_mps: Vec3::ZERO,
+            immersion: None,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -155,6 +162,7 @@ impl Player {
             vertical_mps: self.travel_mps.y,
             crouching: self.crouching,
             sprinting: self.intent.sprint && !self.crouching,
+            immersion: self.immersion,
         }
     }
     fn eye_height(&self) -> f32 {
@@ -452,16 +460,17 @@ fn simulate(
     player.travel_mps = Vec3::ZERO;
     if status.is_some_and(|s| s.modal()) {
         player.intent = default();
-        return;
-    }
-    if (player.mode == MovementMode::Flight && !policy.flight)
+    } else if (player.mode == MovementMode::Flight && !policy.flight)
         || (player.mode == MovementMode::Physics && !policy.physics)
     {
         player.intent = default();
         player.velocity_y = 0.0;
-        return;
+    } else {
+        player.advance(&*store, &tables, world.voxel_size, time.delta_secs());
     }
-    player.advance(&*store, &tables, world.voxel_size, time.delta_secs());
+    // On every path: a paused or refused Player still stands in a fluid.
+    let eye = player.eye.to_array();
+    player.immersion = fluid_at(&*store, &tables, world.voxel_size, eye, IMMERSION_REACH_M);
 }
 
 #[cfg(test)]
@@ -1015,6 +1024,56 @@ mod tests {
             p.intent = default();
             steps(&mut p, &s, 64);
             assert_eq!(p.eye.x, x);
+        }
+    }
+
+    #[test]
+    fn the_published_body_reports_the_fluid_at_the_eye_in_both_modes() {
+        let water = tesserae_core::testgen::fixtures().water;
+        for mode in [MovementMode::Flight, MovementMode::Physics] {
+            let mut app = App::new();
+            app.add_plugins(MinimalPlugins)
+                .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                    std::time::Duration::ZERO,
+                ))
+                .insert_resource(WorldSettings::default())
+                .insert_resource(SpawnPoint::for_tests(Vec3::ZERO))
+                .init_resource::<ChunkStore>()
+                .insert_resource(ContentTables(std::sync::Arc::new(tables())))
+                .add_plugins(plugin);
+            app.update();
+            let size = app.world().resource::<WorldSettings>().voxel_size;
+            let mut chunk = tesserae_core::Chunk::air();
+            for x in 0..32 {
+                for z in 0..32 {
+                    chunk.set(x, 0, z, Voxel::cube(8));
+                    for y in 1..10 {
+                        chunk.set(x, y, z, Voxel::cube(water));
+                    }
+                }
+            }
+            app.world_mut()
+                .resource_mut::<ChunkStore>()
+                .insert(crate::world::ChunkCoord::new(0, 0, 0), chunk);
+            let eye = Vec3::new(4.0, 5.0 * size, 4.0);
+            {
+                let mut q = app.world_mut().query::<&mut Player>();
+                let mut p = q.single_mut(app.world_mut()).unwrap();
+                p.eye = eye;
+                p.mode = mode;
+            }
+            app.world_mut()
+                .resource_mut::<Time<Fixed>>()
+                .advance_by(std::time::Duration::from_secs_f64(1.0 / 64.0));
+            app.world_mut().run_schedule(FixedUpdate);
+            let p = app
+                .world_mut()
+                .query::<&Player>()
+                .single(app.world())
+                .unwrap();
+            let found = p.body_state().immersion.expect("the eye is in the lake");
+            assert_eq!(found.material, water, "{mode:?}");
+            assert_eq!(found.surface_y_m, 10.0 * size, "{mode:?}");
         }
     }
 }

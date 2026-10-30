@@ -34,6 +34,7 @@ mod save;
 mod settings;
 mod tile_preview;
 mod tool;
+mod underwater;
 mod view;
 pub mod worlds;
 
@@ -69,7 +70,12 @@ pub fn plugin(app: &mut App) {
         history::plugin,
         avatar::plugin,
     ));
-    app.add_plugins((view::plugin, loading::plugin, tool::plugin));
+    app.add_plugins((
+        view::plugin,
+        loading::plugin,
+        tool::plugin,
+        underwater::plugin,
+    ));
     app.add_systems(
         Update,
         (|mut commands: Commands| commands.insert_resource(loading::TerrainArrived))

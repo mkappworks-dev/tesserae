@@ -333,7 +333,7 @@ threads are planned. Touch is not first by default.
 | 30 | W1: in-process World sessions | W0; needs triage |
 | 31 | G0: multiple Games, per-World Mods | W0; needs triage |
 | 32 | W0.1: window, keyboard and controller follow-ups | W0, C3; needs triage |
-| 33 | water immersion: view and movement | M0; needs triage |
+| 33 | water immersion: view (A), movement (B) | M0, V0; ready |
 | 24 | M0: Server-owned flight/physics movement | C0 |
 | 25 | A0: Game character presentation | M0 |
 | 26 | V0: first/third-person view and aim | M0, A0 |

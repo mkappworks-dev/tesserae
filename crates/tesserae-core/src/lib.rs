@@ -12,6 +12,7 @@ pub mod combustion;
 pub mod fire;
 pub mod flow;
 pub mod fluid;
+pub mod immersion;
 pub mod light;
 pub mod lod;
 pub mod material;
