@@ -106,17 +106,18 @@ PR A (view):
 
 PR B (movement):
 
-- [ ] Sink, float and swim-up work in metres at 60, 144 and 1000 render
+- [x] Sink, float and swim-up work in metres at 60, 144 and 1000 render
       rates and at several Voxel sizes.
-- [ ] Jump-out clears a ledge of about 1 m; a body never embeds and the
+- [x] Jump-out clears a ledge of about 1 m; a body never embeds and the
       mode-change refusals are unchanged.
-- [ ] A floating body (standing and crouched) has its eye at least 0.3 m
+- [x] A floating body (standing and crouched) has its eye at least 0.3 m
       above the surface and shows the dry look.
-- [ ] Descend (swim down) is reachable on keyboard, controller and touch
+- [x] Descend (swim down) is reachable on keyboard, controller and touch
       layouts; `swimming` reaches the figure.
-- [ ] Flight is unaffected.
-- [ ] Wet fraction is correct for slabs and waterlogged Shapes.
-- [ ] Behavior tests cover each rule above.
+- [x] Flight is unaffected.
+- [ ] Wet fraction is correct for slabs and waterlogged Shapes. (Slabs done;
+      the waterlogged-Shape half is open, see the PR B outcome.)
+- [x] Behavior tests cover each rule above.
 
 ## Validation and authorization
 
@@ -158,3 +159,21 @@ capture and user visual review. Known edges: the look goes dry with no
 hysteresis when the signal leaves the 2 m reach; an eye inside a
 waterlogged Shape is not read (PR B, wet fraction). Fog range is
 40 m / (1 + dimming), at least 1.5 m: 13.3 m water, 2.5 m lava.
+
+### PR B local outcome, 2026-10-30
+
+Implemented on feat/water-swimming, not pushed. `server/player.rs::step`
+reads the wet fraction (feet to head, below the eye column's
+`fluid_at` surface) and applies buoyancy toward a float height that keeps the
+eye 0.4 m above the surface (f0 0.68 standing, 0.52 crouched), vertical drag
+10 /s, 0.6x horizontal speed at the float height, Jump-held swim-up and
+Crouch/Descend sink at 3 m/s, and jump-out lift of 7.5 m/s against a bank.
+`BodyState.swimming` drives the figure's rest pose. The Client repeats the
+Jump intent while swimming or airborne beside water, so no intent field
+was added.
+
+Deviations: jump-out lift is 7.5 m/s, not about 5, because 5 m/s at 24 m/s²
+rises 0.5 m and cannot clear a metre. Descend is the crouch intent, so a
+controller's toggled crouch sinks until toggled off. Open: waterlogged Shapes
+are not read by the wet fraction (it inherits `fluid_at`'s rule that voids of
+a solid are not read); interactive tuning; the performance A/B.

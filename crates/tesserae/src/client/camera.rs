@@ -261,7 +261,10 @@ fn fly(
     mut commands: Commands,
     preferences: Res<super::profile::Preferences>,
     (mut sprint, mut latch): (ResMut<Sprint>, ResMut<PadLatch>),
-    ownership: Res<super::input::Ownership>,
+    (ownership, body): (
+        Res<super::input::Ownership>,
+        Res<super::pose::PublishedBody>,
+    ),
     actions: Res<Actions>,
     mut intents: MessageWriter<MovementIntent>,
     camera: Single<(&Transform, &FlyCamera)>,
@@ -319,6 +322,9 @@ fn fly(
     if playing && pad_crouch && descend.started && descend.from_pad {
         latch.crouch = !latch.crouch;
     }
+    // Held Jump is a swim stroke, and the lift out of the water carries on until
+    // the feet clear it; on land a hold must stay one hop per press.
+    let stroking = physics && (body.0.swimming || (body.0.immersion.is_some() && !body.0.grounded));
     let sprint_state = actions.state(Action::Sprint);
     if playing && sprint_state.started && sprint_state.from_pad {
         latch.sprint = true;
@@ -359,7 +365,8 @@ fn fly(
         crouch: playing && (held_descend || latch.crouch),
         yaw: fly.yaw,
         pitch: fly.pitch,
-        jump: playing && actions.started(Action::Ascend),
+        jump: playing
+            && (actions.started(Action::Ascend) || (stroking && actions.held(Action::Ascend))),
         switch_mode: playing && actions.started(Action::MovementMode),
     });
 }
@@ -374,6 +381,7 @@ mod tests {
         app.add_plugins(super::super::actions::test_plugin)
             .insert_resource(super::super::input::Ownership::playing())
             .add_message::<MovementIntent>()
+            .init_resource::<super::super::pose::PublishedBody>()
             .add_systems(Update, fly);
         app.world_mut().spawn((
             Transform::default(),
@@ -436,6 +444,56 @@ mod tests {
         assert!(held.crouch && held.direction == Vec3::NEG_Y);
         let released = frame(&mut app, &[], Vec2::ZERO);
         assert!(!released.crouch && released.direction == Vec3::ZERO);
+    }
+
+    #[test]
+    fn jump_held_repeats_while_swimming_or_airborne_by_water_and_hops_once_per_press_on_land() {
+        use crate::server::player::{BodyState, MovementMode};
+        use GamepadButton::South;
+        let mut app = pad_app(MovementMode::Physics);
+        assert!(frame(&mut app, &[South], Vec2::ZERO).jump);
+        assert!(!frame(&mut app, &[South], Vec2::ZERO).jump, "dry hold");
+        frame(&mut app, &[], Vec2::ZERO);
+        let fluid = Some(tesserae_core::immersion::FluidSurface {
+            material: 1,
+            surface_y_m: 0.0,
+            dimming: 1,
+        });
+        for (body, repeats) in [
+            (
+                BodyState {
+                    swimming: true,
+                    ..default()
+                },
+                true,
+            ),
+            (
+                BodyState {
+                    immersion: fluid,
+                    ..default()
+                },
+                true,
+            ),
+            (
+                BodyState {
+                    immersion: fluid,
+                    grounded: true,
+                    ..default()
+                },
+                false,
+            ),
+        ] {
+            app.world_mut()
+                .resource_mut::<super::super::pose::PublishedBody>()
+                .0 = body;
+            frame(&mut app, &[South], Vec2::ZERO);
+            assert_eq!(
+                frame(&mut app, &[South], Vec2::ZERO).jump,
+                repeats,
+                "{body:?}"
+            );
+            frame(&mut app, &[], Vec2::ZERO);
+        }
     }
 
     #[test]
@@ -507,6 +565,7 @@ mod tests {
         app.add_plugins(super::super::actions::test_plugin)
             .insert_resource(super::super::input::Ownership::playing())
             .add_message::<MovementIntent>()
+            .init_resource::<super::super::pose::PublishedBody>()
             .add_systems(Update, fly);
         app.world_mut()
             .spawn((Transform::default(), FlyCamera::default()));
@@ -554,6 +613,7 @@ mod tests {
             .insert_resource(super::super::input::Ownership::playing())
             .init_resource::<Time>()
             .add_message::<MovementIntent>()
+            .init_resource::<super::super::pose::PublishedBody>()
             .add_systems(Update, fly);
         app.world_mut()
             .spawn((Transform::default(), FlyCamera::default()));
@@ -612,6 +672,7 @@ mod tests {
             .init_resource::<super::super::menu::PointerState>()
             .insert_resource(super::super::input::Ownership::playing())
             .init_resource::<Time>()
+            .init_resource::<super::super::pose::PublishedBody>()
             .add_message::<RespawnIntent>()
             .add_message::<MovementIntent>()
             .add_systems(

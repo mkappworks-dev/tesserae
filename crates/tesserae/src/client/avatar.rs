@@ -206,7 +206,8 @@ fn wrap(angle: f32) -> f32 {
 
 /// What the body's state calls for. Flight never looks like a fall.
 fn motion(character: &Character, mode: MovementMode, body: BodyState) -> Motion {
-    if mode == MovementMode::Flight {
+    // A swimming body is not walking or falling; the figure holds its rest pose.
+    if mode == MovementMode::Flight || body.swimming {
         character.idle
     } else if !body.grounded {
         character.airborne
@@ -434,6 +435,26 @@ mod tests {
         assert!((transform.scale.y * BODY_HEIGHT_M - CROUCH_BODY_HEIGHT_M).abs() < 1e-4);
     }
 
+    #[test]
+    fn a_swimming_body_rests_instead_of_walking_or_falling() {
+        let mut app = app();
+        app.world_mut()
+            .write_message(CharacterModel(Some(Arc::new(figure()))));
+        set_body(
+            &mut app,
+            BodyState {
+                horizontal_mps: 2.7,
+                swimming: true,
+                ..default()
+            },
+        );
+        settle(&mut app);
+        for _ in 0..30 {
+            app.update();
+            let (_, angle) = limb(&mut app, Role::ArmRight).to_axis_angle();
+            assert!(angle < 1e-3, "no walking swing or airborne raise: {angle}");
+        }
+    }
     #[test]
     fn limbs_swing_walking_hold_in_the_air_and_rest_in_flight() {
         let mut app = app();

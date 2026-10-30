@@ -8,6 +8,7 @@ use bevy::prelude::*;
 
 use crate::session::SessionApp;
 use tesserae_core::collide::{self, Aabb};
+use tesserae_core::flow::CellView;
 use tesserae_core::immersion::{FluidSurface, fluid_at};
 
 pub const FLY_SPEED_CEILING_MPS: f32 = 64.0;
@@ -21,6 +22,26 @@ pub const IMMERSION_REACH_M: f32 = 2.0;
 /// Metres, not Voxels: a respawn lifts the same distance at any Voxel size.
 const RESPAWN_LIFT_STEP_M: f32 = 0.25;
 const RESPAWN_LIFT_MAX_M: f32 = 16.0;
+const GRAVITY_MPS2: f32 = 24.0;
+/// Eye height above the surface of a body floating at rest, clear of the view's
+/// 0.15 m hysteresis so a floating Player sees the dry look.
+const FLOAT_EYE_CLEARANCE_M: f32 = 0.4;
+/// Near critical damping for the buoyancy spring, so a dive or a fall settles
+/// without bobbing.
+const WATER_DRAG_PER_S: f32 = 10.0;
+/// Horizontal speed multiplier of a body wet to its float height or more; the one factor a per-fluid
+/// table field can later feed.
+const WATER_SPEED_FACTOR: f32 = 0.6;
+const SWIM_MPS: f32 = 3.0;
+const SWIM_RESPONSE_PER_S: f32 = 8.0;
+/// Wet share of the body from which it swims rather than wades.
+const SWIM_FRACTION: f32 = 0.5;
+/// A jump signal keeps swimming up this long, so a Client frame slower than
+/// the fixed step does not stutter the stroke.
+const SWIM_HOLD_S: f32 = 0.1;
+/// Lift while the head is out and the body is held against a bank. Gravity is
+/// 24 m/s², so 7.5 m/s is what carries the feet over a ledge a metre up.
+const JUMP_OUT_MPS: f32 = 7.5;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MovementMode {
@@ -94,6 +115,7 @@ pub struct BodyState {
     pub vertical_mps: f32,
     pub crouching: bool,
     pub sprinting: bool,
+    pub swimming: bool,
     pub immersion: Option<FluidSurface>,
 }
 #[derive(Message, Clone, Copy, Debug)]
@@ -114,6 +136,10 @@ pub struct Player {
     /// Measured from the Eye's travel, so a body held against a wall stands.
     travel_mps: Vec3,
     immersion: Option<FluidSurface>,
+    swimming: bool,
+    swim_hold_s: f32,
+    /// A horizontal axis was blocked on the last step.
+    against_bank: bool,
 }
 impl Player {
     fn new(eye: Vec3, mode: MovementMode) -> Self {
@@ -128,6 +154,9 @@ impl Player {
             view: [0.0; 2],
             travel_mps: Vec3::ZERO,
             immersion: None,
+            swimming: false,
+            swim_hold_s: 0.0,
+            against_bank: false,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -177,6 +206,7 @@ impl Player {
             vertical_mps: self.travel_mps.y,
             crouching: self.crouching,
             sprinting: self.intent.sprint && !self.crouching,
+            swimming: self.mode == MovementMode::Physics && self.swimming,
             immersion: self.immersion,
         }
     }
@@ -187,13 +217,16 @@ impl Player {
             EYE_HEIGHT
         }
     }
-    pub(in crate::server) fn body(&self) -> Aabb {
-        let eye_height = self.eye_height();
-        let height = if self.crouching {
+    fn body_height(&self) -> f32 {
+        if self.crouching {
             CROUCH_BODY_HEIGHT_M
         } else {
             BODY_HEIGHT_M
-        };
+        }
+    }
+    pub(in crate::server) fn body(&self) -> Aabb {
+        let eye_height = self.eye_height();
+        let height = self.body_height();
         Aabb::new(
             (self.eye - Vec3::new(0.3, eye_height, 0.3)).to_array(),
             (self.eye + Vec3::new(0.3, height - eye_height, 0.3)).to_array(),
@@ -219,9 +252,23 @@ impl Player {
         self.crouching = self.intent.crouch;
         self.eye = feet + Vec3::Y * self.eye_height();
     }
+    /// Share of the body, feet to head, below the fluid at the eye's column.
+    fn wet_fraction(
+        &self,
+        store: &impl CellView,
+        tables: &tesserae_core::Tables,
+        size: f32,
+    ) -> f32 {
+        let Some(fluid) = fluid_at(store, tables, size, self.eye.to_array(), IMMERSION_REACH_M)
+        else {
+            return 0.0;
+        };
+        let feet = self.eye.y - self.eye_height();
+        ((fluid.surface_y_m - feet) / self.body_height()).clamp(0.0, 1.0)
+    }
     fn advance(
         &mut self,
-        store: &impl collide::VoxelVolume,
+        store: &(impl collide::VoxelVolume + CellView),
         tables: &tesserae_core::Tables,
         size: f32,
         dt: f32,
@@ -234,7 +281,7 @@ impl Player {
     }
     fn step(
         &mut self,
-        store: &impl collide::VoxelVolume,
+        store: &(impl collide::VoxelVolume + CellView),
         tables: &tesserae_core::Tables,
         size: f32,
         dt: f32,
@@ -250,6 +297,7 @@ impl Player {
                 .min(FLY_SPEED_CEILING_MPS)
                 * dt;
             self.intent.jump = false;
+            self.swimming = false;
             return;
         }
         self.update_stance(store, tables, size);
@@ -260,11 +308,39 @@ impl Player {
             return;
         }
         direction.y = 0.0;
-        if self.intent.jump && self.grounded {
+        let wet = self.wet_fraction(store, tables, size);
+        self.swimming = wet >= SWIM_FRACTION;
+        if self.intent.jump {
+            self.swim_hold_s = SWIM_HOLD_S;
+        }
+        if self.intent.jump && self.grounded && !self.swimming {
             self.velocity_y = 8.0;
         }
         self.intent.jump = false;
-        self.velocity_y = (self.velocity_y - 24.0 * dt).max(-50.0);
+        self.swim_hold_s = (self.swim_hold_s - dt).max(0.0);
+        let stroke = self.swim_hold_s > 0.0;
+        let float = (self.eye_height() - FLOAT_EYE_CLEARANCE_M) / self.body_height();
+        let swim_target = if !self.swimming {
+            None
+        } else if self.intent.crouch {
+            Some(-SWIM_MPS)
+        } else if stroke && wet > float {
+            Some(SWIM_MPS)
+        } else {
+            None
+        };
+        if let Some(target) = swim_target {
+            self.velocity_y += (target - self.velocity_y) * (SWIM_RESPONSE_PER_S * dt).min(1.0);
+        } else if wet > 0.0 {
+            let accel = GRAVITY_MPS2 * (wet / float - 1.0) - WATER_DRAG_PER_S * self.velocity_y;
+            self.velocity_y += accel * dt;
+        } else {
+            self.velocity_y -= GRAVITY_MPS2 * dt;
+        }
+        if stroke && self.against_bank && wet > 0.0 && wet < 1.0 {
+            self.velocity_y = self.velocity_y.max(JUMP_OUT_MPS);
+        }
+        self.velocity_y = self.velocity_y.max(-50.0);
         let speed = if self.crouching {
             2.25
         } else if self.intent.sprint {
@@ -272,6 +348,7 @@ impl Player {
         } else {
             4.5
         };
+        let speed = speed * (1.0 - (1.0 - WATER_SPEED_FACTOR) * (wet / float).min(1.0));
         let horizontal = direction.normalize_or_zero() * throttle * speed * dt;
         let body = self.body();
         let mut moved = collide::sweep(
@@ -299,6 +376,7 @@ impl Player {
                 moved.blocked[1] = true;
             }
         }
+        self.against_bank = moved.blocked[0] || moved.blocked[2];
         self.grounded = moved.blocked[1] && self.velocity_y <= 0.0;
         if moved.blocked[1] {
             self.velocity_y = 0.0;
@@ -456,6 +534,8 @@ pub(super) fn receive(
                 player.crouching = false;
                 player.velocity_y = 0.0;
                 player.grounded = false;
+                player.swimming = false;
+                player.swim_hold_s = 0.0;
                 feedback.write(MovementFeedback::Switched(next));
             }
         }
@@ -476,6 +556,8 @@ pub(super) fn receive(
         player.intent = default();
         player.grounded = false;
         player.crouching = false;
+        player.swimming = false;
+        player.swim_hold_s = 0.0;
     }
 }
 fn publish(mut player: Single<&mut Player>, mut poses: MessageWriter<PoseCorrection>) {
@@ -523,10 +605,31 @@ mod tests {
         ceiling: bool,
         gap: bool,
         slab: bool,
+        /// Lake fluid from the floor up to this height in metres.
+        water_m: f32,
+        /// Solid ledge one Voxel wide at x >= 3, this high above the floor.
+        ledge_m: f32,
+    }
+    /// A test volume holds Voxels only: no overlay, so fluid is a stored Voxel.
+    macro_rules! cells_of_voxels {
+        ($($volume:ty),*) => {$(
+            impl tesserae_core::flow::CellView for $volume {
+                fn stored(&self, at: [i32; 3]) -> Option<(Voxel, tesserae_core::occupants::Overlay)> {
+                    Some((self.voxel(at)?, tesserae_core::occupants::Overlay::NONE))
+                }
+            }
+        )*};
     }
     impl VoxelVolume for Scene {
         fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
             let [x, y, _z] = at.map(|a| a as f32 * self.size);
+            if x >= 3.0 && (0.0..self.ledge_m).contains(&y) {
+                return Some(Voxel::cube(8));
+            }
+            let on_slab = self.slab && (2.0..3.0).contains(&x) && y == 0.0;
+            if !on_slab && y >= 0.0 && y < self.water_m {
+                return Some(Voxel::cube(tesserae_core::testgen::fixtures().water));
+            }
             if self.gap && x >= 3.0 {
                 return None;
             }
@@ -539,6 +642,7 @@ mod tests {
             }
         }
     }
+    cells_of_voxels!(Scene);
     fn tables() -> Tables {
         crate::server::fixture_tables()
     }
@@ -549,6 +653,14 @@ mod tests {
             ceiling: false,
             gap: false,
             slab: false,
+            water_m: 0.0,
+            ledge_m: 0.0,
+        }
+    }
+    fn lake(size: f32, depth_m: f32) -> Scene {
+        Scene {
+            water_m: depth_m,
+            ..scene(size)
         }
     }
     fn player() -> Player {
@@ -645,6 +757,190 @@ mod tests {
         }
     }
     #[test]
+    fn a_still_body_floats_with_its_eye_clear_of_the_surface_standing_and_crouched() {
+        for size in [1.0, 0.5, 0.25] {
+            for crouch in [false, true] {
+                // A low ceiling keeps the crouch: Descend would sink the body instead.
+                let (depth, ceiling) = if crouch { (1.0, true) } else { (4.0, false) };
+                let s = Scene {
+                    ceiling,
+                    ..lake(size, depth)
+                };
+                let mut p = player();
+                p.crouching = crouch;
+                p.eye.y = depth / 2.0 + p.eye_height();
+                steps(&mut p, &s, 64 * 8);
+                let clearance = p.eye.y - depth;
+                assert!(p.crouching == crouch);
+                assert!(clearance >= 0.3, "{size} crouch={crouch}: {clearance}");
+                assert!(clearance < 0.6, "{size} crouch={crouch}: {clearance}");
+                assert!(p.velocity_y.abs() < 0.01, "settled, not bobbing");
+            }
+        }
+    }
+    /// Settle a body floating on a lake `depth_m` deep.
+    fn floating(size: f32, depth_m: f32) -> (Player, Scene) {
+        let s = lake(size, depth_m);
+        let mut p = player();
+        p.eye.y = depth_m + 0.4;
+        steps(&mut p, &s, 64 * 4);
+        (p, s)
+    }
+    #[test]
+    fn a_fall_into_a_lake_is_slowed_by_drag_and_settles_floating() {
+        for size in [1.0, 0.5, 0.25] {
+            let s = lake(size, 4.0);
+            let mut p = player();
+            p.eye.y = 12.0 + EYE_HEIGHT;
+            let t = tables();
+            let mut speed_at_depth = None;
+            for _ in 0..64 * 8 {
+                p.step(&s, &t, size, 1.0 / 64.0);
+                if speed_at_depth.is_none() && p.eye.y - EYE_HEIGHT < 2.5 {
+                    speed_at_depth = Some(-p.velocity_y);
+                }
+            }
+            let entered = speed_at_depth.unwrap();
+            assert!(entered < 6.0, "{size}: still {entered} m/s 1.5 m down");
+            let clearance = p.eye.y - 4.0;
+            assert!((0.3..0.6).contains(&clearance), "{size}: {clearance}");
+        }
+    }
+    #[test]
+    fn jump_held_swims_up_at_about_three_metres_a_second_and_stops_at_the_float_height() {
+        for size in [1.0, 0.5, 0.25] {
+            let s = lake(size, 6.0);
+            let mut p = player();
+            steps(&mut p, &s, 1);
+            let mut peak = 0.0_f32;
+            for _ in 0..64 * 8 {
+                p.intent.jump = true;
+                steps(&mut p, &s, 1);
+                peak = peak.max(p.velocity_y);
+            }
+            assert!((2.8..3.2).contains(&peak), "{size}: {peak}");
+            let clearance = p.eye.y - 6.0;
+            assert!((0.3..0.9).contains(&clearance), "{size}: {clearance}");
+            assert!(p.velocity_y.abs() < 0.05, "settled at the surface");
+        }
+    }
+    #[test]
+    fn descend_sinks_at_about_three_metres_a_second_to_the_bed_and_releasing_floats_back() {
+        for size in [1.0, 0.5, 0.25] {
+            let (mut p, s) = floating(size, 6.0);
+            p.intent.crouch = true;
+            steps(&mut p, &s, 64);
+            assert!((p.velocity_y + 3.0).abs() < 0.1, "{size}: {}", p.velocity_y);
+            steps(&mut p, &s, 64 * 4);
+            assert!(p.grounded, "{size}: rests on the bed");
+            assert!(p.eye.y - p.eye_height() >= -0.001, "never below the bed");
+            p.intent.crouch = false;
+            steps(&mut p, &s, 64 * 8);
+            assert!((0.3..0.6).contains(&(p.eye.y - 6.0)), "{size}");
+        }
+    }
+    #[test]
+    fn a_swimmer_moves_at_about_six_tenths_of_walking_speed() {
+        for size in [1.0, 0.5, 0.25] {
+            let (mut p, s) = floating(size, 4.0);
+            let start = p.eye.x;
+            p.intent.direction = Vec3::X;
+            steps(&mut p, &s, 32);
+            let swum = (p.eye.x - start) / 0.5;
+            assert!((swum / 4.5 - 0.6).abs() < 0.02, "{size}: {swum} m/s");
+        }
+    }
+    #[test]
+    fn jump_held_against_a_bank_lifts_a_swimmer_onto_a_ledge_a_metre_above_the_water() {
+        for size in [1.0, 0.5, 0.25] {
+            let mut s = lake(size, 4.0);
+            s.ledge_m = 5.0;
+            let t = tables();
+            let mut p = player();
+            p.eye.y = 4.4;
+            p.intent.direction = Vec3::X;
+            for _ in 0..64 * 3 {
+                p.step(&s, &t, size, 1.0 / 64.0);
+            }
+            assert!(
+                p.eye.x < 2.75 && p.eye.y < 5.0,
+                "{size}: held back without a jump"
+            );
+            for _ in 0..64 * 3 {
+                // Held only until the feet clear the ledge, as a dry hold would hop on.
+                p.intent.jump = p.eye.y - p.eye_height() < 4.99;
+                p.step(&s, &t, size, 1.0 / 64.0);
+                assert!(
+                    !collide::overlaps(&s, &t, size, p.body()),
+                    "{size}: embedded"
+                );
+            }
+            assert!(p.grounded, "{size}: standing on the ledge");
+            assert!(p.eye.x > 3.0, "{size}: {:?}", p.eye);
+            assert!(
+                (p.eye.y - p.eye_height() - 5.0).abs() < 0.01,
+                "{size}: {:?}",
+                p.eye
+            );
+        }
+    }
+    #[test]
+    fn wading_to_the_knee_still_jumps_like_dry_land() {
+        for size in [0.5, 0.25] {
+            let s = lake(size, 0.5);
+            let mut p = player();
+            steps(&mut p, &s, 2);
+            assert!(!p.body_state().swimming);
+            p.intent.jump = true;
+            steps(&mut p, &s, 1);
+            assert!(p.velocity_y > 6.0, "{size}: {}", p.velocity_y);
+        }
+    }
+    #[test]
+    fn flight_ignores_water_and_never_swims() {
+        for size in [1.0, 0.5, 0.25] {
+            let travel = |s: &Scene| {
+                let mut p = Player::new(Vec3::new(0.0, 2.0, 0.0), MovementMode::Flight);
+                p.intent.direction = Vec3::new(1.0, -1.0, 0.0).normalize();
+                p.intent.speed_mps = 10.0;
+                steps(&mut p, s, 32);
+                assert!(!p.body_state().swimming);
+                p.eye
+            };
+            assert_eq!(travel(&lake(size, 4.0)), travel(&scene(size)));
+        }
+    }
+    #[test]
+    fn only_a_mostly_wet_body_reports_swimming() {
+        let (p, _) = floating(1.0, 4.0);
+        assert!(p.body_state().swimming);
+        let mut dry = player();
+        steps(&mut dry, &scene(1.0), 4);
+        assert!(!dry.body_state().swimming);
+        let mut flying = p;
+        flying.mode = MovementMode::Flight;
+        assert!(!flying.body_state().swimming);
+    }
+    #[test]
+    fn wet_fraction_counts_from_the_feet_so_a_slab_underfoot_dries_the_body() {
+        let t = tables();
+        for size in [1.0, 0.5, 0.25] {
+            let fraction = |slab: bool, x: f32| {
+                let s = Scene {
+                    slab,
+                    ..lake(size, 2.0)
+                };
+                let p = Player::new(
+                    Vec3::new(x, if slab && x > 2.0 { 0.5 } else { 0.0 } + EYE_HEIGHT, 0.0),
+                    MovementMode::Physics,
+                );
+                p.wet_fraction(&s, &t, size)
+            };
+            assert!((fraction(false, 0.0) - 1.0).abs() < 1e-5);
+            assert!((fraction(true, 2.5) - 1.5 / 1.8).abs() < 1e-4, "{size}");
+        }
+    }
+    #[test]
     fn slabs_step_up_without_passing_a_low_ceiling() {
         let mut s = scene(1.0);
         s.slab = true;
@@ -675,6 +971,7 @@ mod tests {
                 })
             }
         }
+        cells_of_voxels!(Stair);
         let mut p = player();
         p.eye.x = 0.5;
         let t = tables();
@@ -720,6 +1017,7 @@ mod tests {
                 })
             }
         }
+        cells_of_voxels!(Tunnel);
         let tables = tables();
         for size in [1.0, 0.5, 0.25] {
             let terrain = Tunnel(size);
@@ -812,6 +1110,72 @@ mod tests {
                 for fps in [144, 1000] {
                     assert!((trace(fps) - expected).length() < 0.21, "{physics} {fps}");
                 }
+            }
+        }
+    }
+    #[test]
+    fn swimming_in_metres_does_not_depend_on_the_render_rate_or_voxel_size() {
+        for size in [1.0, 0.5, 0.25] {
+            let trace = |fps: u64| {
+                let mut app = App::new();
+                app.add_plugins(MinimalPlugins)
+                    .insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+                        std::time::Duration::from_secs_f64(1.0 / fps as f64),
+                    ))
+                    .insert_resource(WorldSettings {
+                        voxel_size: size,
+                        ..default()
+                    })
+                    .insert_resource(SpawnPoint::for_tests(Vec3::ZERO))
+                    .init_resource::<ChunkStore>()
+                    .insert_resource(ContentTables(std::sync::Arc::new(tables())))
+                    .add_plugins(plugin);
+                app.update();
+                let lake_cells = (4.0 / size) as usize;
+                {
+                    let mut store = app.world_mut().resource_mut::<ChunkStore>();
+                    let mut chunk = tesserae_core::Chunk::air();
+                    let water = tesserae_core::testgen::fixtures().water;
+                    for z in 0..32 {
+                        for x in 0..32 {
+                            chunk.set(x, 0, z, Voxel::cube(8));
+                            for y in 1..=lake_cells {
+                                chunk.set(x, y, z, Voxel::cube(water));
+                            }
+                        }
+                    }
+                    store.insert(crate::world::ChunkCoord::new(0, 0, 0), chunk);
+                }
+                let mut q = app.world_mut().query::<&mut Player>();
+                {
+                    let mut p = q.single_mut(app.world_mut()).unwrap();
+                    p.eye = Vec3::new(2.0, 4.0 + size + 2.0, 2.0);
+                    p.mode = MovementMode::Physics;
+                }
+                let mut at_sink = 0.0;
+                for frame in 0..fps * 3 {
+                    if frame == fps * 3 / 2 {
+                        let mut p = q.single_mut(app.world_mut()).unwrap();
+                        at_sink = p.eye.y;
+                        p.intent.crouch = true;
+                    }
+                    app.update();
+                }
+                (at_sink, q.single_mut(app.world_mut()).unwrap().eye.y)
+            };
+            let (floated, sank) = trace(60);
+            assert!(
+                (floated - (4.0 + size + 0.4)).abs() < 0.4,
+                "{size}: {floated}"
+            );
+            assert!(
+                sank < floated - 0.5,
+                "{size}: descend sank {floated} -> {sank}"
+            );
+            for fps in [144, 1000] {
+                let (f, s) = trace(fps);
+                assert!((f - floated).abs() < 0.1, "{size} {fps}: {f} vs {floated}");
+                assert!((s - sank).abs() < 0.3, "{size} {fps}: {s} vs {sank}");
             }
         }
     }
@@ -1045,6 +1409,7 @@ mod tests {
                 })
             }
         }
+        cells_of_voxels!(Gap);
         let mut p = player();
         p.intent.direction = Vec3::X;
         let t = tables();
