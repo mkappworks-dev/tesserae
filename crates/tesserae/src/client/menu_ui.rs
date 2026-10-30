@@ -826,7 +826,7 @@ pub(super) fn compact_button(
                     if label == "×" { 12.0 } else { 16.0 },
                 );
             } else {
-                text(button, label, size, if selected { LEAF } else { INK });
+                text(button, label, size, INK);
             }
         })
         .id()
@@ -1143,7 +1143,6 @@ type ButtonLabels<'w, 's> = Query<
         &'static Styled,
         &'static bevy::picking::hover::Hovered,
         &'static Children,
-        &'static ChildOf,
         Has<bevy::ui::InteractionDisabled>,
         Has<Quiet>,
         Has<EmptyBinding>,
@@ -1151,11 +1150,10 @@ type ButtonLabels<'w, 's> = Query<
 >;
 fn button_label_colors(
     buttons: ButtonLabels,
-    segments: Query<(), With<Segment>>,
     mut labels: Query<&mut TextColor>,
     mut images: Query<&mut ImageNode>,
 ) {
-    for (style, hovered, children, parent, disabled, quiet, empty) in &buttons {
+    for (style, hovered, children, disabled, quiet, empty) in &buttons {
         let color = if disabled {
             MUTED.with_alpha(0.55)
         } else if empty {
@@ -1164,8 +1162,6 @@ fn button_label_colors(
             BG
         } else if (quiet || style.tab && !style.selected) && !hovered.0 {
             MUTED
-        } else if style.selected && !style.tab && !segments.contains(parent.parent()) {
-            LEAF
         } else {
             INK
         };

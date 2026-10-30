@@ -487,22 +487,11 @@ fn note(parent: &mut ChildSpawnerCommands, text: &str) {
 
 /// One world axis on one line: its letter and the way it grows, a plus or minus
 /// to say which side, and its count beside them.
-fn axis_line(
-    card: &mut ChildSpawnerCommands,
-    layout: &LayoutPreferences,
-    axis: usize,
-    active: bool,
-) {
+fn axis_line(card: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: usize) {
     let negative = layout.negative[axis];
     let used = layout.lengths[axis] > 1;
     // An axis of one is left out of the layout, so its line is quieter.
-    let letter = if active {
-        ui::LEAF
-    } else if used {
-        ui::INK
-    } else {
-        ui::MUTED
-    };
+    let letter = if used { ui::INK } else { ui::MUTED };
     card.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -513,7 +502,7 @@ fn axis_line(
             border_radius: BorderRadius::all(Val::Px(8.0)),
             ..default()
         },
-        BorderColor::all(if active { ui::LEAF } else { ui::EDGE }),
+        BorderColor::all(ui::EDGE),
     ))
     .with_children(|line| {
         line.spawn(Node {
@@ -875,7 +864,7 @@ fn render(
                     } else {
                         section(card, "COUNT AND DIRECTION");
                         for axis in 0..3 {
-                            axis_line(card, layout, axis, axis == mode.active.min(2));
+                            axis_line(card, layout, axis);
                         }
                     }
                     section(card, "GAP");

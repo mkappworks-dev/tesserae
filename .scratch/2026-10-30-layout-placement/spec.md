@@ -401,3 +401,18 @@ Player needs to say what to build.
 - A saved layout from before is not carried over: its fields are ignored and
   the layout starts from its defaults, the gap excepted.
 
+
+## Amendment 2026-10-30 (10): free roaming, border-only toggles
+
+- The crosshair, the targeted-Voxel outline, the placement preview and
+  breaking a Voxel belong to building, not to walking about. A Player is
+  building when the hand holds something (a block, a fluid, fire or a tool) or
+  the Layout mode is on. With an empty hand and no Layout mode there is no
+  crosshair, no outline and no preview, and the remove press does nothing.
+  Looking is unaffected.
+- A selected toggle or tab is marked by its border alone; its text keeps the
+  normal ink colour. This holds across the menus and the Layout card.
+- No axis line carries a highlight border. Which line the count keys act on is
+  the last one touched.
+- The Box preview draws only the shell of the volume, so the faces inside never
+  fight for depth with the ghosts around them.

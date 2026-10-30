@@ -533,6 +533,32 @@ fn layout_holding(hotbar: &Hotbar) -> Option<Holding> {
     matches!(hotbar.held(), Holding::Solid { .. }).then(|| hotbar.held())
 }
 
+/// The cells that can be seen: those with an open face. A box's inner cells sit
+/// behind translucent ones whose faces they would show through, which looks
+/// like flicker as the view moves, so only its shell is drawn.
+fn shell(cells: Vec<(Vec3, usize)>, size: f32) -> Vec<(Vec3, usize)> {
+    let key = |at: Vec3| at.to_array().map(|c| (c / size).round() as i32);
+    let present: std::collections::HashSet<[i32; 3]> =
+        cells.iter().map(|(at, _)| key(*at)).collect();
+    const FACES: [[i32; 3]; 6] = [
+        [1, 0, 0],
+        [-1, 0, 0],
+        [0, 1, 0],
+        [0, -1, 0],
+        [0, 0, 1],
+        [0, 0, -1],
+    ];
+    cells
+        .into_iter()
+        .filter(|(at, _)| {
+            let [x, y, z] = key(*at);
+            !FACES
+                .iter()
+                .all(|d| present.contains(&[x + d[0], y + d[1], z + d[2]]))
+        })
+        .collect()
+}
+
 /// Draws each cell of the Server's preview as a ghost of the block that would
 /// land, tinted where it would not.
 #[allow(clippy::too_many_arguments)]
@@ -607,6 +633,7 @@ pub(super) fn ghosts(
             })
             .unwrap_or_default()
     };
+    let wanted = shell(wanted, world.voxel_size);
     let existing = cells.iter().count();
     for _ in existing..wanted.len() {
         commands.spawn((
@@ -1976,6 +2003,43 @@ mod tests {
         assert_eq!(layout.shape_word(), "a wall");
         layout.lengths = [3, 2, 2];
         assert_eq!(layout.shape_word(), "a box");
+    }
+
+    #[test]
+    fn only_the_shell_of_a_box_is_drawn_and_a_gap_or_a_line_keeps_every_cell() {
+        let grid = |nx: i32, ny: i32, nz: i32, pitch: i32| -> Vec<(Vec3, usize)> {
+            let mut cells = Vec::new();
+            for x in 0..nx {
+                for y in 0..ny {
+                    for z in 0..nz {
+                        cells.push((
+                            Vec3::new((x * pitch) as f32, (y * pitch) as f32, (z * pitch) as f32),
+                            0,
+                        ));
+                    }
+                }
+            }
+            cells
+        };
+        assert_eq!(
+            shell(grid(3, 3, 3, 1), 1.0).len(),
+            26,
+            "the middle is hidden"
+        );
+        assert_eq!(shell(grid(4, 4, 4, 1), 1.0).len(), 64 - 8);
+        assert_eq!(
+            shell(grid(3, 3, 3, 2), 1.0).len(),
+            27,
+            "a gap leaves them all"
+        );
+        assert_eq!(shell(grid(6, 1, 1, 1), 1.0).len(), 6, "a line");
+        assert_eq!(shell(grid(4, 3, 1, 1), 1.0).len(), 12, "a flat rectangle");
+        // At half-metre Voxels the cells are half a metre apart, still touching.
+        let mut half = grid(3, 3, 3, 1);
+        for (at, _) in &mut half {
+            *at *= 0.5;
+        }
+        assert_eq!(shell(half, 0.5).len(), 26);
     }
 
     #[test]

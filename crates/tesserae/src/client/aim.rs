@@ -61,10 +61,13 @@ fn crosshair(
     target: Res<Target>,
     sent: Res<Sent>,
     time: Res<Time>,
+    (hotbar, layout): (Res<Hotbar>, Option<Res<super::layout::LayoutMode>>),
     mut crosshair: Query<&mut TextColor, With<super::edit::Crosshair>>,
 ) {
     let current = target.current(&sent, time.elapsed_secs_f64());
-    let alpha = if target.0.blocked && current {
+    let alpha = if !super::edit::building(&hotbar, layout.as_deref()) {
+        0.0
+    } else if target.0.blocked && current {
         super::edit::BLOCKED_CROSSHAIR_ALPHA
     } else {
         super::edit::CROSSHAIR_ALPHA
@@ -137,9 +140,14 @@ fn outline(
     time: Res<Time>,
     menu: Res<Menu>,
     outlines: Query<(Entity, &Outline)>,
-    settings: Option<Res<super::settings::Settings>>,
+    (settings, hotbar, layout): (
+        Option<Res<super::settings::Settings>>,
+        Res<Hotbar>,
+        Option<Res<super::layout::LayoutMode>>,
+    ),
 ) {
-    let wanted = (!menu.open
+    let wanted = (super::edit::building(&hotbar, layout.as_deref())
+        && !menu.open
         && !settings.is_some_and(|s| s.open)
         && target.current(&sent, time.elapsed_secs_f64()))
     .then_some(target.0.outline)
@@ -168,6 +176,12 @@ fn draw(outlines: Query<&Outline>, mut gizmos: Gizmos) {
 mod tests {
     use super::*;
 
+    fn holding_fire() -> Hotbar {
+        let mut hotbar = Hotbar::default();
+        hotbar.slots = [Holding::Fire; super::super::edit::SLOT_KEYS.len()];
+        hotbar
+    }
+
     #[test]
     fn the_crosshair_reddens_when_the_tool_in_hand_would_be_refused() {
         use crate::server::tool::UseRefusal;
@@ -175,6 +189,7 @@ mod tests {
         app.init_resource::<Time>()
             .init_resource::<Target>()
             .init_resource::<Sent>()
+            .insert_resource(holding_fire())
             .add_systems(Update, crosshair);
         let id = app
             .world_mut()
@@ -195,12 +210,50 @@ mod tests {
     }
 
     #[test]
+    fn free_roaming_shows_no_crosshair_or_outline_until_something_is_held() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Target>()
+            .init_resource::<Sent>()
+            .init_resource::<Menu>()
+            .init_resource::<Hotbar>()
+            .add_systems(Update, (crosshair, outline));
+        let id = app
+            .world_mut()
+            .spawn((super::super::edit::Crosshair, TextColor(Color::WHITE)))
+            .id();
+        let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
+        app.world_mut().resource_mut::<Sent>().last = Some(view);
+        let mut answer = app.world_mut().resource_mut::<Target>();
+        answer.1 = Some(view);
+        answer.0.outline = Some(AimBounds {
+            min: Vec3::ZERO,
+            max: Vec3::ONE,
+        });
+        app.update();
+        let alpha = |app: &App| app.world().get::<TextColor>(id).unwrap().0.to_srgba().alpha;
+        let outlines = |app: &mut App| {
+            app.world_mut()
+                .query::<&Outline>()
+                .iter(app.world())
+                .count()
+        };
+        assert_eq!(alpha(&app), 0.0);
+        assert_eq!(outlines(&mut app), 0);
+        *app.world_mut().resource_mut::<Hotbar>() = holding_fire();
+        app.update();
+        assert!(alpha(&app) > 0.0);
+        assert_eq!(outlines(&mut app), 1);
+    }
+
+    #[test]
     fn delayed_answers_stay_visible_while_moving_but_old_or_incompatible_answers_do_not() {
         let mut app = App::new();
         app.init_resource::<Time>()
             .init_resource::<Target>()
             .init_resource::<Sent>()
             .init_resource::<Menu>()
+            .insert_resource(holding_fire())
             .add_message::<AimTarget>()
             .add_systems(Update, (receive, outline).chain());
         let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
