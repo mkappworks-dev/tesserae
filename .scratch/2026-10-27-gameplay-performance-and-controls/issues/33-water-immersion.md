@@ -114,6 +114,9 @@ PR B (movement):
       above the surface and shows the dry look.
 - [x] Descend (swim down) is reachable on keyboard, controller and touch
       layouts; `swimming` reaches the figure.
+      (Keyboard Ctrl and controller B are tested. No touch overlay exists in
+      the code yet; it binds `Action::Descend` like the others, so it sinks
+      with no further change.)
 - [x] Flight is unaffected.
 - [x] Wet fraction is correct for slabs and waterlogged Shapes.
 - [x] Behavior tests cover each rule above.
@@ -188,6 +191,12 @@ walk: 165 vs 179 at 1 m Voxels, 276 vs 291 at 0.5 m, 1052 vs 1030 at 0.25 m
 vs 157, 265 vs 256, 987 vs 932. Per second at 64 Hz this is at most 70 µs, and
 the wet case does more work yet is no slower. No Client render work was added,
 so no Client frame sample was taken.
+
+Verified 2026-10-30: the floating eye clearance (0.4 m) is above the view's
+0.15 m hysteresis, so a floating body shows the dry look (`underwater.rs`
+test). An offscreen capture of the underwater view was not obtained: the dev
+fixture has no knob to put the camera inside a lake, and the dry capture
+looked unchanged.
 
 Still manual: interactive feel tuning of the constants, the offscreen
 captures and the user visual review of both PRs.

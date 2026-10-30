@@ -25,7 +25,7 @@ const RESPAWN_LIFT_MAX_M: f32 = 16.0;
 const GRAVITY_MPS2: f32 = 24.0;
 /// Eye height above the surface of a body floating at rest, clear of the view's
 /// 0.15 m hysteresis so a floating Player sees the dry look.
-const FLOAT_EYE_CLEARANCE_M: f32 = 0.4;
+pub const FLOAT_EYE_CLEARANCE_M: f32 = 0.4;
 /// Near critical damping for the buoyancy spring, so a dive or a fall settles
 /// without bobbing.
 const WATER_DRAG_PER_S: f32 = 10.0;

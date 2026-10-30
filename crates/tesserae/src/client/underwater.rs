@@ -185,6 +185,14 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_floating_body_sees_the_dry_look_even_after_a_dive() {
+        use crate::server::player::FLOAT_EYE_CLEARANCE_M;
+        assert!(!submerged(10.0 + FLOAT_EYE_CLEARANCE_M, water(10.0), true));
+        // The Server's floating test holds the eye at least this clear.
+        assert!(!submerged(10.0 + 0.3, water(10.0), true));
+    }
+
     use bevy::pbr::FogFalloff;
 
     const WATER: u16 = 14;
