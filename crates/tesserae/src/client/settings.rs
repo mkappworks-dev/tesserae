@@ -111,6 +111,11 @@ pub(super) enum Operation {
     ScrollDirection(bool),
     Sync(bool),
     Cap(Option<u32>),
+    LayoutForm(super::layout::Form),
+    LayoutCount(usize, i32),
+    LayoutGap(i32),
+    LayoutReverse(usize),
+    LayoutMaterial(Option<tesserae_core::MaterialId>),
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -291,10 +296,11 @@ fn activate(
     mut store: ResMut<Store>,
     mut bindings: ResMut<Bindings>,
     mut preferences: ResMut<Preferences>,
-    (save, mut menu, mut focus): (
+    (save, mut menu, mut focus, mut layout): (
         Option<Res<crate::server::persistence::SaveStatus>>,
         ResMut<super::menu::Menu>,
         ResMut<bevy::input_focus::InputFocus>,
+        ResMut<super::layout::LayoutMode>,
     ),
 ) {
     if save.is_some_and(|status| status.modal()) {
@@ -408,6 +414,9 @@ fn activate(
         Operation::CancelConflict => {
             settings.conflict = None;
         }
+        // Not drafted: the choice is the session's, and a profile holds no Game
+        // identifiers.
+        Operation::LayoutMaterial(material) => layout.material = material,
         Operation::Replace => {
             if let Some((action, proposed, conflicts)) = settings.conflict.take()
                 && let Some(device) = device_of(&proposed)
@@ -468,6 +477,15 @@ fn activate(
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,
                 Operation::Cap(value) => p.fps_cap = value,
+                Operation::LayoutForm(form) => {
+                    p.layout.form = form;
+                    p.layout.fit();
+                }
+                Operation::LayoutCount(axis, by) => {
+                    p.layout.bump(axis, by);
+                }
+                Operation::LayoutGap(by) => p.layout.set_gap(by),
+                Operation::LayoutReverse(axis) => p.layout.reversed[axis] ^= true,
                 _ => {}
             }
         }
@@ -763,6 +781,8 @@ type RenderContext<'w, 's> = (
         Res<'w, super::edit::Hotbar>,
         Res<'w, super::edit::Catalogue>,
         Res<'w, super::edit::Notice>,
+        Res<'w, crate::world::WorldSettings>,
+        Res<'w, super::layout::LayoutMode>,
     ),
     Query<'w, 's, (), (With<Scalar>, With<bevy::ui::Pressed>)>,
 );
@@ -876,7 +896,7 @@ pub(super) fn render(
                     &settings,
                     &labels,
                     &searches,
-                    (&context.0, &context.1, &context.2),
+                    (&context.0, &context.1, &context.2, &context.3, &context.4),
                 );
             });
             footer(root, changed);
@@ -895,6 +915,8 @@ fn page(
         &super::edit::Hotbar,
         &super::edit::Catalogue,
         &super::edit::Notice,
+        &crate::world::WorldSettings,
+        &super::layout::LayoutMode,
     ),
 ) {
     use super::menu_ui::Tab;
@@ -1193,6 +1215,8 @@ fn behavior(
         &super::edit::Hotbar,
         &super::edit::Catalogue,
         &super::edit::Notice,
+        &crate::world::WorldSettings,
+        &super::layout::LayoutMode,
     ),
 ) {
     group(list, "MOVEMENT & BUILDING", |card| {
@@ -1235,6 +1259,9 @@ fn behavior(
             true,
             |row| switch(row, p.repeat_held, Operation::Repeat),
         );
+    });
+    group(list, "LAYOUT", |card| {
+        layout_group(card, p, (context.1, context.3, context.4))
     });
     group(list, "MOUSE & QUICK SLOTS", |card| {
         setting_row(
@@ -1303,6 +1330,122 @@ fn behavior(
             super::menu_ui::MUTED,
         );
     }
+}
+
+/// The gap in Voxels and in metres, which is what it means at this World's
+/// Voxel size.
+fn gap_description(gap: u32, voxel_size: f32) -> String {
+    format!(
+        "{gap} Voxels, {:.1} m, between neighbours.",
+        gap as f32 * voxel_size
+    )
+}
+
+fn layout_group(
+    card: &mut ChildSpawnerCommands,
+    p: &Preferences,
+    (catalogue, world, mode): (
+        &super::edit::Catalogue,
+        &crate::world::WorldSettings,
+        &super::layout::LayoutMode,
+    ),
+) {
+    use super::layout::Form;
+    use super::menu_ui as ui;
+    let layout = &p.layout;
+    setting_row(
+        card,
+        "Shape",
+        "A line, a rectangle or a box of Voxels, laid out with one Place.",
+        false,
+        |row| {
+            segment(row, |buttons| {
+                for (form, name) in [
+                    (Form::Line, "Line"),
+                    (Form::Rectangle, "Rectangle"),
+                    (Form::Box, "Box"),
+                ] {
+                    option(
+                        buttons,
+                        name,
+                        Operation::LayoutForm(form),
+                        layout.form == form,
+                    );
+                }
+            })
+        },
+    );
+    for (axis, name) in ["Along", "Across", "Up"]
+        .into_iter()
+        .enumerate()
+        .take(layout.form.axes())
+    {
+        setting_row(
+            card,
+            name,
+            &format!(
+                "{} Voxels on this axis, {} in all. Most is {}.",
+                layout.counts[axis],
+                layout.total(layout.counts),
+                tesserae_core::layout::MAX_LAYOUT_VOXELS
+            ),
+            false,
+            |row| {
+                segment(row, |buttons| {
+                    option(buttons, "−", Operation::LayoutCount(axis, -1), false);
+                    ui::text(buttons, layout.counts[axis].to_string(), 12.0, ui::INK);
+                    option(buttons, "+", Operation::LayoutCount(axis, 1), false);
+                    option(
+                        buttons,
+                        "Reverse",
+                        Operation::LayoutReverse(axis),
+                        layout.reversed[axis],
+                    );
+                })
+            },
+        );
+    }
+    setting_row(
+        card,
+        "Gap",
+        &gap_description(layout.gap, world.voxel_size),
+        false,
+        |row| {
+            segment(row, |buttons| {
+                option(buttons, "−", Operation::LayoutGap(-1), false);
+                ui::text(buttons, layout.gap.to_string(), 12.0, ui::INK);
+                option(buttons, "+", Operation::LayoutGap(1), false);
+            })
+        },
+    );
+    card.spawn(Node {
+        flex_wrap: FlexWrap::Wrap,
+        column_gap: Val::Px(6.0),
+        row_gap: Val::Px(6.0),
+        padding: UiRect::axes(Val::Px(0.0), Val::Px(14.0)),
+        ..default()
+    })
+    .with_children(|materials| {
+        option(
+            materials,
+            "Held item",
+            Operation::LayoutMaterial(None),
+            mode.material.is_none(),
+        );
+        for material in catalogue
+            .0
+            .materials
+            .iter()
+            .filter(|m| m.solid && m.fluid.is_none())
+        {
+            option(
+                materials,
+                ui::title(&material.name),
+                Operation::LayoutMaterial(Some(material.id)),
+                mode.material == Some(material.id),
+            );
+        }
+    });
 }
 
 fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
@@ -2082,14 +2225,23 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<super::super::pad::PadInput>()
+            .init_resource::<super::super::layout::LayoutMode>()
+            .init_resource::<crate::world::WorldSettings>()
             .insert_resource(Store {
+                // The clock ticks in microseconds on macOS, so two tests started
+                // together can read one time.
                 path: std::env::temp_dir().join(format!(
-                    "tesserae-settings-{}-{}.json",
+                    "tesserae-settings-{}-{}-{}.json",
                     std::process::id(),
                     std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap()
-                        .as_nanos()
+                        .as_nanos(),
+                    {
+                        static TESTS: std::sync::atomic::AtomicU64 =
+                            std::sync::atomic::AtomicU64::new(0);
+                        TESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    }
                 )),
                 error: None,
             })
@@ -2107,6 +2259,201 @@ mod tests {
         let entity = app.world_mut().spawn(operation).id();
         app.world_mut().trigger(Activate { entity });
     }
+    #[test]
+    fn layout_choices_stay_in_the_draft_until_applied_and_then_persist() {
+        use super::super::layout::{Form, LayoutPreferences};
+        let mut app = app();
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
+        for operation in [
+            Operation::LayoutForm(Form::Box),
+            Operation::LayoutCount(0, 2),
+            Operation::LayoutGap(3),
+            Operation::LayoutReverse(1),
+        ] {
+            activate_operation(&mut app, operation);
+        }
+        let expected = LayoutPreferences {
+            form: Form::Box,
+            counts: [6, 3, 2],
+            gap: 3,
+            reversed: [false, true, false],
+        };
+        assert_eq!(
+            app.world().resource::<Preferences>().layout,
+            LayoutPreferences::default(),
+            "nothing is live before Apply"
+        );
+        assert_eq!(
+            app.world()
+                .resource::<Settings>()
+                .draft
+                .as_ref()
+                .unwrap()
+                .1
+                .layout,
+            expected
+        );
+        activate_operation(&mut app, Operation::Apply);
+        assert_eq!(app.world().resource::<Preferences>().layout, expected);
+        let (_, _, saved) = Store::load(app.world().resource::<Store>().path.clone());
+        assert_eq!(saved.layout, expected, "it survives a restart");
+    }
+
+    #[test]
+    fn cancelling_the_menu_keeps_the_saved_layout_and_commits_nothing() {
+        use super::super::layout::Form;
+        use crate::server::edit::LayoutIntent;
+        let mut app = app();
+        app.add_message::<LayoutIntent>();
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
+        activate_operation(&mut app, Operation::LayoutForm(Form::Rectangle));
+        activate_operation(&mut app, Operation::Cancel);
+        activate_operation(&mut app, Operation::Discard);
+        assert_eq!(
+            app.world().resource::<Preferences>().layout.form,
+            Form::Line
+        );
+        assert_eq!(app.world().resource::<Messages<LayoutIntent>>().len(), 0);
+    }
+
+    #[test]
+    fn a_count_that_passes_the_cap_is_refused_in_the_menu_too() {
+        use super::super::layout::Form;
+        let mut app = app();
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
+        activate_operation(&mut app, Operation::LayoutForm(Form::Rectangle));
+        for _ in 0..40 {
+            activate_operation(&mut app, Operation::LayoutCount(0, 1));
+            activate_operation(&mut app, Operation::LayoutCount(1, 1));
+        }
+        let layout = &app
+            .world()
+            .resource::<Settings>()
+            .draft
+            .as_ref()
+            .unwrap()
+            .1
+            .layout;
+        assert!(layout.total(layout.counts) <= tesserae_core::layout::MAX_LAYOUT_VOXELS);
+    }
+
+    #[test]
+    fn the_behavior_page_offers_every_layout_control_and_each_solid_material() {
+        use super::super::menu_ui::{Searches, Tab};
+        let mut app = app();
+        app.init_resource::<super::super::actions::Labels>()
+            .init_resource::<Searches>()
+            .init_resource::<super::super::edit::Hotbar>()
+            .init_resource::<super::super::edit::Catalogue>()
+            .init_resource::<super::super::edit::Notice>()
+            .init_resource::<Assets<Image>>()
+            .init_resource::<Assets<Font>>()
+            .init_resource::<super::super::input::UiInput>()
+            .add_plugins(super::super::menu_ui::plugin)
+            .add_systems(Update, render);
+        let material = |id, name: &str, solid, fluid| crate::content::CatalogueMaterial {
+            remove_time: std::time::Duration::ZERO,
+            id,
+            name: name.into(),
+            solid,
+            fluid,
+            burns: false,
+        };
+        app.world_mut()
+            .resource_mut::<super::super::edit::Catalogue>()
+            .0
+            .materials = vec![
+            material(8, "stone", true, None),
+            material(9, "water", false, Some(0)),
+        ];
+        activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
+        app.update();
+        let operations: Vec<_> = app
+            .world_mut()
+            .query::<&Operation>()
+            .iter(app.world())
+            .map(|operation| match operation {
+                Operation::LayoutForm(form) => format!("form {form:?}"),
+                Operation::LayoutCount(axis, by) => format!("count {axis} {by}"),
+                Operation::LayoutGap(by) => format!("gap {by}"),
+                Operation::LayoutReverse(axis) => format!("reverse {axis}"),
+                Operation::LayoutMaterial(material) => format!("material {material:?}"),
+                _ => String::new(),
+            })
+            .filter(|name| !name.is_empty())
+            .collect();
+        for expected in [
+            "form Line",
+            "form Rectangle",
+            "form Box",
+            "count 0 -1",
+            "count 0 1",
+            "reverse 0",
+            "gap -1",
+            "gap 1",
+            "material None",
+            "material Some(8)",
+        ] {
+            assert!(operations.iter().any(|name| name == expected), "{expected}");
+        }
+        assert!(
+            !operations.iter().any(|name| name == "count 1 1"),
+            "a line has one axis"
+        );
+        assert!(
+            !operations.iter().any(|name| name == "material Some(9)"),
+            "a fluid is not a solid to lay"
+        );
+    }
+
+    #[test]
+    fn the_gap_is_shown_in_metres_at_the_worlds_voxel_size() {
+        assert_eq!(
+            gap_description(0, 1.0),
+            "0 Voxels, 0.0 m, between neighbours."
+        );
+        assert_eq!(
+            gap_description(3, 0.5),
+            "3 Voxels, 1.5 m, between neighbours."
+        );
+        assert_eq!(
+            gap_description(2, 2.0),
+            "2 Voxels, 4.0 m, between neighbours."
+        );
+    }
+
+    #[test]
+    fn a_menu_material_is_the_sessions_and_replaces_the_held_one_only() {
+        let mut app = app();
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
+        activate_operation(&mut app, Operation::LayoutMaterial(Some(9)));
+        assert_eq!(
+            app.world()
+                .resource::<super::super::layout::LayoutMode>()
+                .material,
+            Some(9)
+        );
+        activate_operation(&mut app, Operation::LayoutMaterial(None));
+        assert_eq!(
+            app.world()
+                .resource::<super::super::layout::LayoutMode>()
+                .material,
+            None
+        );
+    }
+
     #[test]
     fn sensitivity_slider_changes_only_the_draft_and_keeps_its_drag_entity() {
         use bevy::ui_widgets::{SliderValue, ValueChange};

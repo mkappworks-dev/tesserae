@@ -10,29 +10,35 @@ use super::{
     camera::FlyCamera,
     edit::{Holding, Hotbar},
     input::Ownership,
+    profile::Preferences,
 };
 use crate::server::edit::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams};
 use crate::world::WorldSettings;
 use bevy::prelude::*;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use tesserae_core::Voxel;
 use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS};
 
 const DEFAULT_COUNTS: [u32; 3] = [4, 3, 2];
+/// Voxels left empty between neighbours at most: past this the layout would
+/// stretch further than a Player's reach.
+pub(super) const MAX_GAP: u32 = 15;
 /// How long an answer may be drawn while the next is awaited.
 const ANSWER_SECS: f64 = 0.5;
 const HISTORY: usize = 16;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub(super) enum Form {
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Form {
     #[default]
     Line,
     Rectangle,
     Box,
 }
 impl Form {
-    fn axes(self) -> usize {
+    pub(super) fn axes(self) -> usize {
         self as usize + 1
     }
     fn next(self) -> Self {
@@ -44,36 +50,85 @@ impl Form {
     }
 }
 
+/// What a layout is, kept across restarts: the shape, how many Voxels along
+/// each axis, the gap between them and which axes run against the camera's
+/// own choice. Counts and gap are Voxels, so they mean the same at any Voxel
+/// size; the menu shows the gap in metres.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct LayoutPreferences {
+    pub form: Form,
+    pub counts: [u32; 3],
+    pub gap: u32,
+    pub reversed: [bool; 3],
+}
+impl Default for LayoutPreferences {
+    fn default() -> Self {
+        Self {
+            form: Form::Line,
+            counts: DEFAULT_COUNTS,
+            gap: 0,
+            reversed: [false; 3],
+        }
+    }
+}
+impl LayoutPreferences {
+    pub(super) fn total(&self, counts: [u32; 3]) -> usize {
+        counts[..self.form.axes()]
+            .iter()
+            .map(|&c| c as usize)
+            .product()
+    }
+    pub(super) fn valid(&self) -> bool {
+        self.counts
+            .iter()
+            .all(|&c| (1..=MAX_LAYOUT_VOXELS as u32).contains(&c))
+            && self.gap <= MAX_GAP
+            && self.total(self.counts) <= MAX_LAYOUT_VOXELS
+    }
+    /// Steps one axis, refusing a count that passes the cap. Whether it was
+    /// refused.
+    pub(super) fn bump(&mut self, axis: usize, by: i32) -> bool {
+        let mut counts = self.counts;
+        counts[axis] = (counts[axis] as i32 + by).clamp(1, MAX_LAYOUT_VOXELS as i32) as u32;
+        if self.total(counts) > MAX_LAYOUT_VOXELS {
+            return true;
+        }
+        self.counts = counts;
+        false
+    }
+    /// Brings the counts back under the cap after the form grows, trimming the
+    /// largest first.
+    pub(super) fn fit(&mut self) {
+        while self.total(self.counts) > MAX_LAYOUT_VOXELS {
+            let widest = (0..self.form.axes())
+                .max_by_key(|&i| self.counts[i])
+                .unwrap();
+            self.counts[widest] -= 1;
+        }
+    }
+    pub(super) fn set_gap(&mut self, by: i32) {
+        self.gap = (self.gap as i32 + by).clamp(0, MAX_GAP as i32) as u32;
+    }
+}
+
 type Assignment = [(Dim, bool); 3];
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub(super) struct LayoutMode {
     pub(super) on: bool,
-    form: Form,
-    counts: [u32; 3],
     /// The axis the count and the reverse action act on.
     active: usize,
-    /// Set once the Player rotates the axes or reverses one; until then they
-    /// follow the camera: away from it, across it, then up.
+    /// Set once the Player rotates the axes; until then they follow the
+    /// camera: away from it, across it, then up.
     manual: Option<Assignment>,
     /// The last increase was refused for passing the cap.
     refused: bool,
+    /// A Material chosen in the menu, laid in the held Shape. Not saved: a
+    /// profile holds no Game identifiers.
+    pub(super) material: Option<tesserae_core::MaterialId>,
     commit: bool,
     was_grabbed: bool,
-}
-impl Default for LayoutMode {
-    fn default() -> Self {
-        Self {
-            on: false,
-            form: Form::Line,
-            counts: DEFAULT_COUNTS,
-            active: 0,
-            manual: None,
-            refused: false,
-            commit: false,
-            was_grabbed: false,
-        }
-    }
 }
 impl LayoutMode {
     fn assignment(&self, camera: &GlobalTransform) -> Assignment {
@@ -92,47 +147,26 @@ impl LayoutMode {
             [(along, ahead), (across, side), (Dim::Y, true)]
         })
     }
-    fn params(&self, camera: &GlobalTransform) -> LayoutParams {
-        let assignment = self.assignment(camera);
+    /// The axes as laid out: the camera's or the rotated choice, then the
+    /// saved reversals.
+    fn directions(&self, layout: &LayoutPreferences, camera: &GlobalTransform) -> Assignment {
+        let mut assignment = self.assignment(camera);
+        for (axis, reversed) in assignment.iter_mut().zip(layout.reversed) {
+            axis.1 ^= reversed;
+        }
+        assignment
+    }
+    fn params(&self, layout: &LayoutPreferences, camera: &GlobalTransform) -> LayoutParams {
+        let directions = self.directions(layout, camera);
         LayoutParams {
             axes: std::array::from_fn(|i| {
-                (i < self.form.axes()).then(|| LayoutAxis {
-                    dim: assignment[i].0,
-                    positive: assignment[i].1,
-                    count: self.counts[i],
+                (i < layout.form.axes()).then(|| LayoutAxis {
+                    dim: directions[i].0,
+                    positive: directions[i].1,
+                    count: layout.counts[i],
                 })
             }),
-            gap: 0,
-        }
-    }
-    fn total(&self, counts: [u32; 3]) -> usize {
-        counts[..self.form.axes()]
-            .iter()
-            .map(|&c| c as usize)
-            .product()
-    }
-    /// Steps the active axis, refusing a count that passes the cap.
-    fn bump(&mut self, by: i32) {
-        if by == 0 {
-            return;
-        }
-        let mut counts = self.counts;
-        counts[self.active] =
-            (counts[self.active] as i32 + by).clamp(1, MAX_LAYOUT_VOXELS as i32) as u32;
-        if self.total(counts) > MAX_LAYOUT_VOXELS {
-            self.refused = true;
-        } else {
-            self.counts = counts;
-            self.refused = false;
-        }
-    }
-    /// Brings the counts back under the cap after the form grows, trimming the
-    /// largest first.
-    fn fit(&mut self) {
-        while self.total(self.counts) > MAX_LAYOUT_VOXELS {
-            let used = self.form.axes();
-            let widest = (0..used).max_by_key(|&i| self.counts[i]).unwrap();
-            self.counts[widest] -= 1;
+            gap: layout.gap,
         }
     }
 }
@@ -154,6 +188,7 @@ pub(super) fn intercept(
     ownership: Res<Ownership>,
     mut actions: ResMut<Actions>,
     mut mode: ResMut<LayoutMode>,
+    mut preferences: ResMut<Preferences>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
 ) {
@@ -179,31 +214,33 @@ pub(super) fn intercept(
     let pad = |action| actions.started(action) && actions.state(action).from_pad;
     let (pad_active, pad_reverse, pad_form) =
         (pad(Action::Turn), pad(Action::Flip), pad(Action::EmptyHand));
+    // Written only on a change, so the profile is not marked changed by every
+    // frame the mode is on.
+    let mut layout = preferences.layout.clone();
     let more = actions.started(Action::LayoutMore) || actions.started(Action::NextSlot);
     let less = actions.started(Action::LayoutLess) || actions.started(Action::PreviousSlot);
-    mode.bump(i32::from(more) - i32::from(less));
+    let by = i32::from(more) - i32::from(less);
+    if by != 0 {
+        mode.refused = layout.bump(mode.active, by);
+    }
     if actions.started(Action::LayoutShape) || pad_form {
-        mode.form = mode.form.next();
-        mode.active = mode.active.min(mode.form.axes() - 1);
-        mode.fit();
+        layout.form = layout.form.next();
+        mode.active = mode.active.min(layout.form.axes() - 1);
+        layout.fit();
     }
     if actions.started(Action::LayoutActive) || pad_active {
-        mode.active = (mode.active + 1) % mode.form.axes();
+        mode.active = (mode.active + 1) % layout.form.axes();
     }
-    let mut assignment = mode.assignment(&camera);
-    let mut changed = false;
     if actions.started(Action::LayoutAlong) {
-        let [a, b, c] = assignment;
-        assignment = [(b.0, a.1), (c.0, b.1), (a.0, c.1)];
-        changed = true;
+        // Rotated from what the camera shows now, keeping each position's sense.
+        let [a, b, c] = mode.assignment(&camera);
+        mode.manual = Some([(b.0, a.1), (c.0, b.1), (a.0, c.1)]);
     }
     if actions.started(Action::LayoutReverse) || pad_reverse {
-        let active = mode.active;
-        assignment[active].1 = !assignment[active].1;
-        changed = true;
+        layout.reversed[mode.active] ^= true;
     }
-    if changed {
-        mode.manual = Some(assignment);
+    if layout != preferences.layout {
+        preferences.layout = layout;
     }
     if actions.started(Action::Remove) {
         mode.on = false;
@@ -229,28 +266,40 @@ pub(super) fn intercept(
     }
 }
 
-fn held_voxel(hotbar: &Hotbar) -> Option<Voxel> {
+/// What a layout lays: the held solid, in the menu's Material if one was
+/// chosen there.
+fn held_voxel(mode: &LayoutMode, hotbar: &Hotbar) -> Option<Voxel> {
     match hotbar.held() {
         Holding::Solid {
             material,
             shape,
             orientation,
-        } => Some(Voxel::shaped(material, shape, orientation)),
-        _ => None,
+        } => Some(Voxel::shaped(
+            mode.material.unwrap_or(material),
+            shape,
+            orientation,
+        )),
+        _ => mode.material.map(Voxel::cube),
     }
 }
 
-fn current(mode: &LayoutMode, hotbar: &Hotbar, camera: &GlobalTransform) -> Option<LayoutIntent> {
+fn current(
+    mode: &LayoutMode,
+    layout: &LayoutPreferences,
+    hotbar: &Hotbar,
+    camera: &GlobalTransform,
+) -> Option<LayoutIntent> {
     Some(LayoutIntent {
         origin: camera.translation(),
         direction: *camera.forward(),
-        voxel: held_voxel(hotbar)?,
-        layout: mode.params(camera),
+        voxel: held_voxel(mode, hotbar)?,
+        layout: mode.params(layout, camera),
     })
 }
 
 pub(super) fn send(
     mut mode: ResMut<LayoutMode>,
+    preferences: Res<Preferences>,
     hotbar: Res<Hotbar>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut intents: MessageWriter<LayoutIntent>,
@@ -258,7 +307,7 @@ pub(super) fn send(
     if !std::mem::take(&mut mode.commit) {
         return;
     }
-    if let Some(intent) = current(&mode, &hotbar, &camera) {
+    if let Some(intent) = current(&mode, &preferences.layout, &hotbar, &camera) {
         intents.write(intent);
     }
 }
@@ -285,12 +334,16 @@ impl Preview {
 
 pub(super) fn report(
     mode: Res<LayoutMode>,
+    preferences: Res<Preferences>,
     hotbar: Res<Hotbar>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     mut preview: ResMut<Preview>,
     mut reports: MessageWriter<LayoutAim>,
 ) {
-    let intent = mode.on.then(|| current(&mode, &hotbar, &camera)).flatten();
+    let intent = mode
+        .on
+        .then(|| current(&mode, &preferences.layout, &hotbar, &camera))
+        .flatten();
     if intent == preview.last {
         return;
     }
@@ -332,7 +385,7 @@ const OUT_OF_REACH: Color = Color::srgba(1.0, 0.60, 0.0, 0.7);
 const BLOCKED: Color = Color::srgba(0.94, 0.27, 0.27, 0.8);
 
 pub(super) fn draw(
-    mode: Res<LayoutMode>,
+    (mode, preferences): (Res<LayoutMode>, Res<Preferences>),
     hotbar: Res<Hotbar>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     preview: Res<Preview>,
@@ -343,7 +396,7 @@ pub(super) fn draw(
     if !mode.on {
         return;
     }
-    let Some(answer) = current(&mode, &hotbar, &camera)
+    let Some(answer) = current(&mode, &preferences.layout, &hotbar, &camera)
         .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()))
     else {
         return;
@@ -395,7 +448,7 @@ fn tally(answer: &LayoutAnswer) -> [usize; 3] {
 }
 
 pub(super) fn readout(
-    mode: Res<LayoutMode>,
+    (mode, preferences): (Res<LayoutMode>, Res<Preferences>),
     hotbar: Res<Hotbar>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     preview: Res<Preview>,
@@ -412,23 +465,24 @@ pub(super) fn readout(
     if !mode.on {
         return;
     }
-    let assignment = mode.assignment(&camera);
+    let layout = &preferences.layout;
+    let directions = mode.directions(layout, &camera);
     let keys = |action| bindings.label(action, &labels);
-    let axes: Vec<String> = (0..mode.form.axes())
+    let axes: Vec<String> = (0..layout.form.axes())
         .map(|i| {
-            let (dim, positive) = assignment[i];
-            let marker = if i == mode.active && mode.form != Form::Line {
+            let (dim, positive) = directions[i];
+            let marker = if i == mode.active && layout.form != Form::Line {
                 "*"
             } else {
                 ""
             };
-            format!("{}{} {}", marker, mode.counts[i], dim_name(dim, positive))
+            format!("{}{} {}", marker, layout.counts[i], dim_name(dim, positive))
         })
         .collect();
-    let head = format!("Layout: {:?} {}", mode.form, axes.join(" x "));
-    let body = match held_voxel(&hotbar) {
+    let head = format!("Layout: {:?} {}", layout.form, axes.join(" x "));
+    let body = match held_voxel(&mode, &hotbar) {
         None => "Hold a solid to lay it out".to_owned(),
-        Some(_) => current(&mode, &hotbar, &camera)
+        Some(_) => current(&mode, layout, &hotbar, &camera)
             .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()))
             .map_or("Aim at a surface".to_owned(), |answer| {
                 if answer.refused.is_some() {
@@ -587,6 +641,14 @@ mod tests {
         app.world().resource::<LayoutMode>()
     }
 
+    fn saved(app: &App) -> &LayoutPreferences {
+        &app.world().resource::<Preferences>().layout
+    }
+
+    fn saved_mut(app: &mut App) -> Mut<'_, Preferences> {
+        app.world_mut().resource_mut::<Preferences>()
+    }
+
     fn count(intent: &LayoutIntent) -> u32 {
         intent.layout.axes[0].unwrap().count
     }
@@ -636,14 +698,14 @@ mod tests {
         let mut app = app();
         key(&mut app, KeyCode::KeyL);
         key(&mut app, KeyCode::BracketRight);
-        assert_eq!(mode(&app).counts[0], DEFAULT_COUNTS[0] + 1);
+        assert_eq!(saved(&app).counts[0], DEFAULT_COUNTS[0] + 1);
         for _ in 0..10 {
             key(&mut app, KeyCode::BracketLeft);
         }
-        assert_eq!(mode(&app).counts[0], 1);
-        app.world_mut().resource_mut::<LayoutMode>().counts[0] = MAX_LAYOUT_VOXELS as u32;
+        assert_eq!(saved(&app).counts[0], 1);
+        saved_mut(&mut app).layout.counts[0] = MAX_LAYOUT_VOXELS as u32;
         key(&mut app, KeyCode::BracketRight);
-        assert_eq!(mode(&app).counts[0], MAX_LAYOUT_VOXELS as u32);
+        assert_eq!(saved(&app).counts[0], MAX_LAYOUT_VOXELS as u32);
     }
 
     #[test]
@@ -718,7 +780,7 @@ mod tests {
         tap(&mut app, GamepadButton::RightTrigger);
         tap(&mut app, GamepadButton::RightTrigger);
         tap(&mut app, GamepadButton::LeftTrigger);
-        assert_eq!(mode(&app).counts[0], DEFAULT_COUNTS[0] + 1);
+        assert_eq!(saved(&app).counts[0], DEFAULT_COUNTS[0] + 1);
         let [intent] = tap(&mut app, GamepadButton::LeftTrigger2)[..] else {
             panic!("one intent");
         };
@@ -781,20 +843,16 @@ mod tests {
         let mut app = app();
         key(&mut app, KeyCode::KeyL);
         key(&mut app, KeyCode::KeyH);
-        {
-            let mut mode = app.world_mut().resource_mut::<LayoutMode>();
-            mode.counts = [16, 16, 2];
-            mode.active = 0;
-        }
+        saved_mut(&mut app).layout.counts = [16, 16, 2];
+        app.world_mut().resource_mut::<LayoutMode>().active = 0;
         key(&mut app, KeyCode::BracketRight);
-        let mode_now = mode(&app);
-        assert_eq!(mode_now.counts, [16, 16, 2]);
-        assert!(mode_now.refused);
+        assert_eq!(saved(&app).counts, [16, 16, 2]);
+        assert!(mode(&app).refused);
         key(&mut app, KeyCode::BracketLeft);
         assert!(!mode(&app).refused);
         key(&mut app, KeyCode::KeyH);
         assert!(
-            mode(&app).total(mode(&app).counts) <= MAX_LAYOUT_VOXELS,
+            saved(&app).total(saved(&app).counts) <= MAX_LAYOUT_VOXELS,
             "a box fits"
         );
     }
@@ -806,7 +864,7 @@ mod tests {
         tap(&mut app, GamepadButton::DPadDown);
         tap(&mut app, GamepadButton::DPadLeft);
         tap(&mut app, GamepadButton::DPadRight);
-        assert_eq!(mode(&app).form, Form::Rectangle);
+        assert_eq!(saved(&app).form, Form::Rectangle);
         assert_eq!(mode(&app).active, 1);
         assert_eq!(
             dims(&commit_pad(&mut app)),
@@ -830,7 +888,7 @@ mod tests {
             .press(KeyCode::KeyQ);
         step(&mut app);
         assert!(app.world().resource::<Actions>().started(Action::Turn));
-        assert_eq!(mode(&app).form, Form::Line);
+        assert_eq!(saved(&app).form, Form::Line);
     }
 
     #[test]
