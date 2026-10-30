@@ -24,7 +24,7 @@ use std::collections::VecDeque;
 use tesserae_core::Voxel;
 use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS, layout_span, span_normal};
 
-const DEFAULT_COUNTS: [u32; 3] = [4, 3, 2];
+const DEFAULT_LENGTHS: [u32; 3] = [4, 1, 1];
 
 /// Voxels left empty between neighbours at most: past this the layout would
 /// stretch further than a Player's reach.
@@ -36,14 +36,6 @@ const ANSWER_SECS: f64 = 0.5;
 /// one that has been forgotten is thrown away, freezing then jumping the preview.
 const HISTORY: usize = 256;
 
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Form {
-    #[default]
-    Line,
-    Rectangle,
-    Box,
-}
 /// How a layout says where its Voxels go.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -55,139 +47,86 @@ pub(crate) enum Kind {
     Between,
 }
 
-impl Form {
-    pub(super) fn axes(self) -> usize {
-        self as usize + 1
-    }
-    fn next(self) -> Self {
-        match self {
-            Self::Line => Self::Rectangle,
-            Self::Rectangle => Self::Box,
-            Self::Box => Self::Line,
-        }
-    }
-}
-
-/// One of the six ways along the World's axes a layout axis can grow.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum Direction {
-    PosX,
-    NegX,
-    Up,
-    Down,
-    PosZ,
-    NegZ,
-}
-impl Direction {
-    pub(super) fn dim(self) -> Dim {
-        match self {
-            Self::PosX | Self::NegX => Dim::X,
-            Self::Up | Self::Down => Dim::Y,
-            Self::PosZ | Self::NegZ => Dim::Z,
-        }
-    }
-    pub(super) fn positive(self) -> bool {
-        matches!(self, Self::PosX | Self::Up | Self::PosZ)
-    }
-    fn of(dim: Dim, positive: bool) -> Self {
-        match (dim, positive) {
-            (Dim::X, true) => Self::PosX,
-            (Dim::X, false) => Self::NegX,
-            (Dim::Y, true) => Self::Up,
-            (Dim::Y, false) => Self::Down,
-            (Dim::Z, true) => Self::PosZ,
-            (Dim::Z, false) => Self::NegZ,
-        }
-    }
-    pub(super) fn label(self) -> &'static str {
-        match self {
-            Self::PosX => "+X",
-            Self::NegX => "−X",
-            Self::Up => "Up",
-            Self::Down => "Down",
-            Self::PosZ => "+Z",
-            Self::NegZ => "−Z",
-        }
-    }
-}
-
-/// A layout kept across restarts. Counts and gap are in Voxels so they mean the
+/// A layout kept across restarts. Lengths and gap are in Voxels so they mean the
 /// same at any Voxel size; the menu shows the gap in metres.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct LayoutPreferences {
     pub kind: Kind,
-    pub form: Form,
-    pub counts: [u32; 3],
+    /// Voxels along X, Y and Z. A length of 1 leaves that axis out, so one axis
+    /// above 1 is a line, two a flat rectangle and three a box.
+    pub lengths: [u32; 3],
+    /// Which of the three grow towards the negative side.
+    pub negative: [bool; 3],
     pub gap: u32,
-    /// One per axis, on three different dimensions.
-    pub directions: [Direction; 3],
 }
 impl Default for LayoutPreferences {
     fn default() -> Self {
         Self {
             kind: Kind::Directions,
-            form: Form::Line,
-            counts: DEFAULT_COUNTS,
+            lengths: DEFAULT_LENGTHS,
+            negative: [false; 3],
             gap: 0,
-            directions: [Direction::PosX, Direction::PosZ, Direction::Up],
         }
     }
 }
+/// The order the axes are laid in, first fastest: along X, then Z, then up, so a
+/// wall rises row by row.
+const BUILD_ORDER: [usize; 3] = [0, 2, 1];
+
+/// The letter of a world axis, as the card writes it.
+pub(super) const AXIS_NAMES: [&str; 3] = ["X", "Y", "Z"];
+
+/// What one way along a world axis is called: east and west along X, up and
+/// down along Y, south and north along Z.
+pub(super) fn way_name(axis: usize, negative: bool) -> &'static str {
+    match (axis, negative) {
+        (0, false) => "east",
+        (0, true) => "west",
+        (1, false) => "up",
+        (1, true) => "down",
+        (_, false) => "south",
+        (_, true) => "north",
+    }
+}
+
 impl LayoutPreferences {
-    pub(super) fn total(&self, counts: [u32; 3]) -> usize {
-        counts[..self.form.axes()]
-            .iter()
-            .map(|&c| c as usize)
-            .product()
+    pub(super) fn total(&self, lengths: [u32; 3]) -> usize {
+        lengths.iter().map(|&c| c as usize).product()
     }
     pub(super) fn valid(&self) -> bool {
-        self.counts
+        self.lengths
             .iter()
             .all(|&c| (1..=MAX_LAYOUT_VOXELS as u32).contains(&c))
             && self.gap <= MAX_GAP
-            && self.total(self.counts) <= MAX_LAYOUT_VOXELS
-            && (0..3).all(|i| (0..i).all(|j| self.directions[i].dim() != self.directions[j].dim()))
+            && self.total(self.lengths) <= MAX_LAYOUT_VOXELS
     }
     /// Steps one axis; true if the cap refused it.
     pub(super) fn bump(&mut self, axis: usize, by: i32) -> bool {
-        let count = (self.counts[axis] as i32 + by).max(1) as u32;
+        let count = (self.lengths[axis] as i32 + by).max(1) as u32;
         self.set_count(axis, count)
     }
     /// Sets one axis outright; true if the cap on all axes together refused it.
     pub(super) fn set_count(&mut self, axis: usize, count: u32) -> bool {
-        let mut counts = self.counts;
-        counts[axis] = count.clamp(1, MAX_LAYOUT_VOXELS as u32);
-        if self.total(counts) > MAX_LAYOUT_VOXELS {
+        let mut lengths = self.lengths;
+        lengths[axis] = count.clamp(1, MAX_LAYOUT_VOXELS as u32);
+        if self.total(lengths) > MAX_LAYOUT_VOXELS {
             return true;
         }
-        self.counts = counts;
+        self.lengths = lengths;
         false
-    }
-    /// Brings the counts back under the cap after the form grows, trimming the
-    /// largest first.
-    pub(super) fn fit(&mut self) {
-        while self.total(self.counts) > MAX_LAYOUT_VOXELS {
-            let widest = (0..self.form.axes())
-                .max_by_key(|&i| self.counts[i])
-                .unwrap();
-            self.counts[widest] -= 1;
-        }
-    }
-    /// Points an axis a new way. If another axis already runs on that
-    /// dimension the two trade dimensions, so no two ever share one.
-    pub(super) fn set_direction(&mut self, axis: usize, direction: Direction) {
-        let old = self.directions[axis];
-        if let Some(other) =
-            (0..3).find(|&j| j != axis && self.directions[j].dim() == direction.dim())
-        {
-            self.directions[other] = Direction::of(old.dim(), self.directions[other].positive());
-        }
-        self.directions[axis] = direction;
     }
     pub(super) fn set_gap(&mut self, by: i32) {
         self.gap = (self.gap as i32 + by).clamp(0, MAX_GAP as i32) as u32;
+    }
+    /// What the lengths make: a line, a flat rectangle, a wall or a box.
+    pub(super) fn shape_word(&self) -> &'static str {
+        match self.lengths.iter().filter(|&&length| length > 1).count() {
+            0 | 1 => "a line",
+            2 if self.lengths[1] == 1 => "a flat rectangle",
+            2 => "a wall",
+            _ => "a box",
+        }
     }
 }
 
@@ -202,6 +141,9 @@ pub(super) struct LayoutMode {
     pub(super) points: Vec<[i32; 3]>,
     /// The cell the aim picks now, from the Server's latest fresh answer.
     aimed: Option<[i32; 3]>,
+    /// The third corner, from where the view line passes B: the depth of the
+    /// box, which needs no surface to aim at.
+    pub(super) depth: Option<[i32; 3]>,
     /// Place went down on A and is still held: letting go on another cell sets B.
     dragging: bool,
     commit: bool,
@@ -228,7 +170,12 @@ impl LayoutMode {
             let span = self.points.first().map(|&a| Span {
                 a,
                 b: self.points.get(1).copied(),
-                c: self.points.get(2).copied(),
+                // While C is unset the view line stands in for it.
+                c: self
+                    .points
+                    .get(2)
+                    .copied()
+                    .or_else(|| self.depth.filter(|_| self.points.len() == 2)),
             });
             return LayoutParams {
                 axes: [
@@ -246,10 +193,11 @@ impl LayoutMode {
         }
         LayoutParams {
             axes: std::array::from_fn(|i| {
-                (i < layout.form.axes()).then(|| LayoutAxis {
-                    dim: layout.directions[i].dim(),
-                    positive: layout.directions[i].positive(),
-                    count: layout.counts[i],
+                let axis = BUILD_ORDER[i];
+                Some(LayoutAxis {
+                    dim: [Dim::X, Dim::Y, Dim::Z][axis],
+                    positive: !layout.negative[axis],
+                    count: layout.lengths[axis],
                 })
             }),
             gap: layout.gap,
@@ -289,10 +237,10 @@ pub(super) fn intercept(
         return;
     }
     // A pad has no spare buttons: while the mode is on its D-pad turn button
-    // picks the axis and its empty-hand button the shape. A keyboard keeps
-    // those for the Shape and has its own keys.
+    // picks the axis and its empty-hand button reverses it. A keyboard keeps
+    // those for the Shape and the hand, and has its own keys.
     let pad = |action| actions.started(action) && actions.state(action).from_pad;
-    let (pad_active, pad_form) = (pad(Action::Turn), pad(Action::EmptyHand));
+    let (pad_active, pad_reverse) = (pad(Action::Turn), pad(Action::EmptyHand));
     // Written only on a change, so the profile is not marked changed by every
     // frame the mode is on.
     let mut layout = preferences.layout.clone();
@@ -302,16 +250,14 @@ pub(super) fn intercept(
     if by != 0 {
         mode.refused = layout.bump(mode.active, by);
     }
-    // Point to point has no shape to change.
-    if (actions.started(Action::LayoutShape) || pad_form) && layout.kind == Kind::Directions {
-        layout.form = layout.form.next();
-        mode.active = mode.active.min(layout.form.axes() - 1);
-        layout.fit();
+    // Point to point has no axes to reverse.
+    if (actions.started(Action::LayoutReverse) || pad_reverse) && layout.kind == Kind::Directions {
+        layout.negative[mode.active] ^= true;
     }
     if actions.started(Action::LayoutActive) || pad_active {
-        mode.active = (mode.active + 1) % layout.form.axes();
+        mode.active = (mode.active + 1) % 3;
     }
-    if layout.form != preferences.layout.form || layout.kind != preferences.layout.kind {
+    if layout.kind != preferences.layout.kind {
         mode.points.clear();
     }
     let between = layout.kind == Kind::Between;
@@ -353,7 +299,7 @@ pub(super) fn intercept(
     ] {
         actions.cancel(action);
     }
-    for (action, taken) in [(Action::Turn, pad_active), (Action::EmptyHand, pad_form)] {
+    for (action, taken) in [(Action::Turn, pad_active), (Action::EmptyHand, pad_reverse)] {
         if taken {
             actions.cancel(action);
         }
@@ -363,7 +309,13 @@ pub(super) fn intercept(
 /// Place in point to point: the aimed cell becomes the next corner, and with
 /// both set it commits. A corner that makes the span pass the cap is refused.
 fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) {
-    let Some(cell) = mode.aimed else {
+    // C is where the view line passes B, in the sky or on a surface alike.
+    let picked = if mode.points.len() == 2 {
+        mode.depth
+    } else {
+        mode.aimed
+    };
+    let Some(cell) = picked else {
         return;
     };
     let span = match mode.points[..] {
@@ -424,6 +376,40 @@ pub(super) fn send(
     mode.points.clear();
 }
 
+/// The third corner of a box from the view line alone: the cell on the line
+/// through B along the dimension the rectangle is flat in, at the point nearest
+/// to where the Player is looking. It needs no surface, so C can be set in open
+/// sky. None when the view runs along that line.
+fn depth_cell(
+    origin: Vec3,
+    direction: Vec3,
+    a: [i32; 3],
+    b: [i32; 3],
+    voxel_size: f32,
+) -> Option<[i32; 3]> {
+    let normal = span_normal(a, b);
+    let through = Vec3::from_array(b.map(|i| (i as f32 + 0.5) * voxel_size));
+    let mut line = Vec3::ZERO;
+    line[normal] = 1.0;
+    let ray = direction.normalize_or_zero();
+    let (from_line, facing) = (origin - through, ray.dot(line));
+    let apart = 1.0 - facing * facing;
+    if apart < 1e-4 {
+        return None;
+    }
+    let (along_ray, along_line) = (ray.dot(from_line), line.dot(from_line));
+    // Both parameters of the nearest points of the two lines; the view line's
+    // must lie ahead of the Player.
+    let on_ray = (facing * along_line - along_ray) / apart;
+    let on_line = (along_line - facing * along_ray) / apart;
+    if on_ray <= 0.0 {
+        return None;
+    }
+    let mut cell = b;
+    cell[normal] = ((through[normal] + on_line) / voxel_size).floor() as i32;
+    Some(cell)
+}
+
 /// Keeps the cell the aim picks, from the latest answer that still describes
 /// where the Player is looking.
 pub(super) fn track_aim(
@@ -431,14 +417,26 @@ pub(super) fn track_aim(
     preferences: Res<Preferences>,
     hotbar: Res<Hotbar>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
-    preview: Res<Preview>,
-    time: Res<Time>,
+    (preview, world, time): (Res<Preview>, Res<WorldSettings>, Res<Time>),
 ) {
     let aimed = current(&mode, &preferences.layout, &hotbar, &camera)
         .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()))
         .and_then(|answer| answer.anchor);
     if mode.aimed != aimed {
         mode.aimed = aimed;
+    }
+    let depth = match (mode.on, preferences.layout.kind, &mode.points[..]) {
+        (true, Kind::Between, &[a, b]) => depth_cell(
+            camera.translation(),
+            *camera.forward(),
+            a,
+            b,
+            world.voxel_size,
+        ),
+        _ => None,
+    };
+    if mode.depth != depth {
+        mode.depth = depth;
     }
 }
 
@@ -713,7 +711,7 @@ fn corners_of(mode: &LayoutMode, layout: &LayoutPreferences, voxel_size: f32) ->
     // C only after B: the aim then gives the depth.
     if picked_b.is_some() {
         let picked_c = mode.points.get(2).copied();
-        if let Some(c) = picked_c.or(aimed) {
+        if let Some(c) = picked_c.or(mode.depth) {
             corners.push(Corner {
                 cell: c,
                 label: format!("C\n{}", size_text(span_counts(a, b, Some(c)), voxel_size)),
@@ -866,23 +864,23 @@ pub(super) fn summary(
         .filter(|answer| answer.refused.is_none())
         .map(|answer| tally(answer)[0]);
     let size = if between {
-        let c = mode.points.get(2).copied().or(mode.aimed);
+        let c = mode.points.get(2).copied().or(mode.depth);
         match mode.points[..] {
             [a] => mode.aimed.map(|b| span_counts(a, b, None)),
             [a, b, ..] => Some(span_counts(a, b, c)),
             [] => None,
         }
     } else {
-        let counts: [u32; 3] = std::array::from_fn(|i| {
-            if i < layout.form.axes() {
-                layout.counts[i]
-            } else {
-                1
-            }
-        });
-        Some(counts)
+        Some(layout.lengths)
     }
-    .map(|counts| size_line(counts, voxel_size))
+    .map(|counts| {
+        let line = size_line(counts, voxel_size);
+        if between {
+            line
+        } else {
+            format!("{line} · {}", layout.shape_word())
+        }
+    })
     .unwrap_or_default();
     let mut body = match held_voxel(hotbar) {
         None => "Hold a solid to lay it out".to_owned(),
@@ -1071,7 +1069,7 @@ mod tests {
             panic!("one intent");
         };
         assert_eq!(intent.voxel, rock());
-        assert_eq!(count(&intent), DEFAULT_COUNTS[0]);
+        assert_eq!(count(&intent), DEFAULT_LENGTHS[0]);
         let axis = intent.layout.axes[0].unwrap();
         assert_eq!((axis.dim, axis.positive), (Dim::X, true));
         assert_eq!(intent.direction, Vec3::NEG_Z);
@@ -1107,26 +1105,28 @@ mod tests {
         let mut app = app();
         turn_on(&mut app);
         key(&mut app, KeyCode::BracketRight);
-        assert_eq!(saved(&app).counts[0], DEFAULT_COUNTS[0] + 1);
+        assert_eq!(saved(&app).lengths[0], DEFAULT_LENGTHS[0] + 1);
         for _ in 0..10 {
             key(&mut app, KeyCode::BracketLeft);
         }
-        assert_eq!(saved(&app).counts[0], 1);
-        saved_mut(&mut app).layout.counts[0] = MAX_LAYOUT_VOXELS as u32;
+        assert_eq!(saved(&app).lengths[0], 1);
+        saved_mut(&mut app).layout.lengths[0] = MAX_LAYOUT_VOXELS as u32;
         key(&mut app, KeyCode::BracketRight);
-        assert_eq!(saved(&app).counts[0], MAX_LAYOUT_VOXELS as u32);
+        assert_eq!(saved(&app).lengths[0], MAX_LAYOUT_VOXELS as u32);
     }
 
     #[test]
-    fn the_saved_directions_decide_the_layout_and_the_camera_does_not() {
-        use super::super::layout::Direction;
+    fn the_saved_ways_decide_the_layout_and_the_camera_does_not() {
         let mut app = app();
         turn_on(&mut app);
-        saved_mut(&mut app).layout.directions = [Direction::NegZ, Direction::Down, Direction::PosX];
+        saved_mut(&mut app).layout.negative = [false, true, true];
         let intent = commit(&mut app);
-        assert_eq!(dims(&intent), [(Dim::Z, false, 4)]);
+        assert_eq!(
+            dims(&intent),
+            [(Dim::X, true, 4), (Dim::Z, false, 1), (Dim::Y, false, 1)]
+        );
         assert_eq!(intent.direction, Vec3::NEG_Z, "the camera looks down -Z");
-        // Turning to look the other way changes the ray, not the direction.
+        // Turning to look the other way changes the ray, not the ways.
         let mut cameras = app
             .world_mut()
             .query::<(&mut GlobalTransform, &FlyCamera)>();
@@ -1134,7 +1134,10 @@ mod tests {
             Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
         );
         let intent = commit(&mut app);
-        assert_eq!(dims(&intent), [(Dim::Z, false, 4)]);
+        assert_eq!(
+            dims(&intent),
+            [(Dim::X, true, 4), (Dim::Z, false, 1), (Dim::Y, false, 1)]
+        );
         assert!(intent.direction.dot(Vec3::Z) > 0.999);
     }
 
@@ -1211,11 +1214,11 @@ mod tests {
         tap(&mut app, GamepadButton::RightTrigger);
         tap(&mut app, GamepadButton::RightTrigger);
         tap(&mut app, GamepadButton::LeftTrigger);
-        assert_eq!(saved(&app).counts[0], DEFAULT_COUNTS[0] + 1);
+        assert_eq!(saved(&app).lengths[0], DEFAULT_LENGTHS[0] + 1);
         let [intent] = tap(&mut app, GamepadButton::LeftTrigger2)[..] else {
             panic!("one intent");
         };
-        assert_eq!(count(&intent), DEFAULT_COUNTS[0] + 1);
+        assert_eq!(count(&intent), DEFAULT_LENGTHS[0] + 1);
         assert!(tap(&mut app, GamepadButton::RightTrigger2).is_empty());
         assert!(!mode(&app).on);
     }
@@ -1238,66 +1241,61 @@ mod tests {
     }
 
     #[test]
-    fn the_shape_key_grows_a_line_into_a_rectangle_and_a_box_on_distinct_axes() {
+    fn the_reverse_key_flips_the_active_axis_and_the_axis_key_moves_on() {
         let mut app = app();
         turn_on(&mut app);
-        key(&mut app, KeyCode::KeyH);
-        assert_eq!(
-            dims(&commit(&mut app)),
-            [(Dim::X, true, 4), (Dim::Z, true, 3)]
-        );
-        key(&mut app, KeyCode::KeyH);
-        assert_eq!(
-            dims(&commit(&mut app)),
-            [(Dim::X, true, 4), (Dim::Z, true, 3), (Dim::Y, true, 2)]
-        );
-        key(&mut app, KeyCode::KeyH);
-        assert_eq!(dims(&commit(&mut app)).len(), 1, "back to a line");
+        key(&mut app, KeyCode::KeyT);
+        assert_eq!(saved(&app).negative, [true, false, false]);
+        assert_eq!(dims(&commit(&mut app))[0], (Dim::X, false, 4));
+        key(&mut app, KeyCode::KeyJ);
+        assert_eq!(mode(&app).active, 1);
+        key(&mut app, KeyCode::KeyT);
+        assert_eq!(saved(&app).negative, [true, true, false]);
+        key(&mut app, KeyCode::KeyJ);
+        key(&mut app, KeyCode::KeyJ);
+        assert_eq!(mode(&app).active, 0, "X, Y, Z and round again");
+        key(&mut app, KeyCode::KeyT);
+        assert_eq!(saved(&app).negative, [false, true, false]);
     }
 
     #[test]
-    fn counts_act_on_the_active_axis() {
+    fn counts_act_on_the_active_axis_and_one_above_one_adds_a_dimension() {
         let mut app = app();
         turn_on(&mut app);
-        key(&mut app, KeyCode::KeyH);
         key(&mut app, KeyCode::KeyJ);
         key(&mut app, KeyCode::BracketRight);
         assert_eq!(
             dims(&commit(&mut app)),
-            [(Dim::X, true, 4), (Dim::Z, true, 4)]
+            [(Dim::X, true, 4), (Dim::Z, true, 1), (Dim::Y, true, 2)],
+            "up by two: a wall"
         );
+        assert_eq!(saved(&app).shape_word(), "a wall");
     }
 
     #[test]
-    fn a_count_that_would_pass_the_cap_is_refused_and_the_form_trims_to_fit() {
+    fn a_count_that_would_pass_the_cap_is_refused() {
         let mut app = app();
         turn_on(&mut app);
-        key(&mut app, KeyCode::KeyH);
-        saved_mut(&mut app).layout.counts = [16, 16, 2];
-        app.world_mut().resource_mut::<LayoutMode>().active = 0;
+        saved_mut(&mut app).layout.lengths = [16, 16, 1];
         key(&mut app, KeyCode::BracketRight);
-        assert_eq!(saved(&app).counts, [16, 16, 2]);
+        assert_eq!(saved(&app).lengths, [16, 16, 1]);
         assert!(mode(&app).refused);
         key(&mut app, KeyCode::BracketLeft);
         assert!(!mode(&app).refused);
-        key(&mut app, KeyCode::KeyH);
-        assert!(
-            saved(&app).total(saved(&app).counts) <= MAX_LAYOUT_VOXELS,
-            "a box fits"
-        );
+        assert_eq!(saved(&app).lengths, [15, 16, 1]);
     }
 
     #[test]
-    fn a_pad_cycles_the_axis_and_changes_the_shape_without_the_keyboard() {
+    fn a_pad_picks_the_axis_and_reverses_it_without_the_keyboard() {
         let mut app = app();
         turn_on(&mut app);
-        tap(&mut app, GamepadButton::DPadDown);
         tap(&mut app, GamepadButton::DPadLeft);
-        assert_eq!(saved(&app).form, Form::Rectangle);
         assert_eq!(mode(&app).active, 1);
+        tap(&mut app, GamepadButton::DPadDown);
+        assert_eq!(saved(&app).negative, [false, true, false]);
         assert_eq!(
             dims(&commit_pad(&mut app)),
-            [(Dim::X, true, 4), (Dim::Z, true, 3)]
+            [(Dim::X, true, 4), (Dim::Z, true, 1), (Dim::Y, false, 1)]
         );
     }
 
@@ -1317,20 +1315,24 @@ mod tests {
             .press(KeyCode::KeyQ);
         step(&mut app);
         assert!(app.world().resource::<Actions>().started(Action::Turn));
-        assert_eq!(saved(&app).form, Form::Line);
+        assert_eq!(saved(&app).negative, [false; 3]);
     }
 
     fn between(app: &mut App) {
         {
             let mut prefs = saved_mut(app);
             prefs.layout.kind = Kind::Between;
-            prefs.layout.form = Form::Rectangle;
         }
         turn_on(app);
     }
 
     fn aim(app: &mut App, cell: Option<[i32; 3]>) {
         app.world_mut().resource_mut::<LayoutMode>().aimed = cell;
+    }
+
+    /// The cell the view line gives C, as the Server-free depth system would.
+    fn depth(app: &mut App, cell: Option<[i32; 3]>) {
+        app.world_mut().resource_mut::<LayoutMode>().depth = cell;
     }
 
     fn points(app: &App) -> Vec<[i32; 3]> {
@@ -1352,7 +1354,7 @@ mod tests {
             "a flat rectangle so far"
         );
         // C sets the depth and lays the layout in the same press.
-        aim(&mut app, Some([1, 5, 3]));
+        depth(&mut app, Some([1, 5, 3]));
         let [intent] = click(&mut app, MouseButton::Right)[..] else {
             panic!("one intent");
         };
@@ -1373,32 +1375,28 @@ mod tests {
     fn c_level_with_a_keeps_the_rectangle_flat() {
         let mut app = app();
         between(&mut app);
-        for cell in [[0, 4, 0], [3, 4, 2], [9, 4, 9]] {
+        for cell in [[0, 4, 0], [3, 4, 2]] {
             aim(&mut app, Some(cell));
             click(&mut app, MouseButton::Right);
         }
-        // The press on C lays it: the third intent carries a depth of one.
-        let span = {
-            app.world_mut().resource_mut::<LayoutMode>().points = vec![[0, 4, 0], [3, 4, 2]];
-            aim(&mut app, Some([9, 4, 9]));
-            commit(&mut app).layout.span.unwrap()
-        };
+        // The press on C lays it: C is level with A, so the depth is one.
+        depth(&mut app, Some([3, 4, 2]));
+        let span = commit(&mut app).layout.span.unwrap();
         assert_eq!(span.c.unwrap()[1], 4, "same height as A");
     }
 
     #[test]
-    fn point_to_point_has_no_shape_so_the_shape_key_does_nothing_there() {
+    fn point_to_point_has_no_axes_so_the_reverse_key_does_nothing_there() {
         let mut app = app();
         between(&mut app);
-        let before = saved(&app).form;
-        key(&mut app, KeyCode::KeyH);
-        assert_eq!(saved(&app).form, before);
+        key(&mut app, KeyCode::KeyT);
+        assert_eq!(saved(&app).negative, [false; 3]);
         saved_mut(&mut app).layout.kind = Kind::Directions;
-        key(&mut app, KeyCode::KeyH);
-        assert_ne!(
-            saved(&app).form,
-            before,
-            "but it still changes the shape elsewhere"
+        key(&mut app, KeyCode::KeyT);
+        assert_eq!(
+            saved(&app).negative,
+            [true, false, false],
+            "but it does elsewhere"
         );
     }
 
@@ -1444,7 +1442,7 @@ mod tests {
         assert_eq!(points(&app).len(), 2, "exactly the cap is allowed");
         assert!(!mode(&app).refused);
         // Depth passes it: 16 by 16 is the whole cap, so one more layer is too many.
-        aim(&mut app, Some([0, 1, 0]));
+        depth(&mut app, Some([15, 1, 15]));
         assert!(click(&mut app, MouseButton::Right).is_empty());
         assert_eq!(points(&app).len(), 2, "C is refused, nothing sent");
         assert!(mode(&app).refused);
@@ -1494,6 +1492,7 @@ mod tests {
         let mut sent = Vec::new();
         for cell in [[2, 0, 2], [6, 0, 2], [2, 3, 2]] {
             aim(&mut app, Some(cell));
+            depth(&mut app, Some(cell));
             sent = tap(&mut app, GamepadButton::LeftTrigger2);
         }
         let [intent] = sent[..] else {
@@ -1782,6 +1781,7 @@ mod tests {
         assert!(release_place(&mut app).is_empty());
         assert_eq!(points(&app), [[1, 0, 1], [5, 0, 4]]);
         assert!(!mode(&app).dragging);
+        depth(&mut app, Some([5, 0, 4]));
         let intent = commit(&mut app);
         assert_eq!(intent.layout.span.unwrap().b, Some([5, 0, 4]));
     }
@@ -1868,7 +1868,7 @@ mod tests {
         );
         // With B picked the aim stands in for C, which gives the depth.
         mode.points.push([4, 0, 3]);
-        mode.aimed = Some([0, 2, 0]);
+        mode.depth = Some([4, 2, 3]);
         let shown = corners_of(&mode, &layout, 1.0);
         assert_eq!(shown.len(), 3);
         assert!(!shown[1].provisional && shown[2].provisional);
@@ -1907,6 +1907,75 @@ mod tests {
             said.contains("set C and lay it") && said.contains("step back"),
             "{said}"
         );
+    }
+
+    #[test]
+    fn c_comes_from_the_view_line_in_open_sky_with_no_surface_to_hit() {
+        // A floor from (0,0,0) to (3,0,2): flat in Y, so C is a height. B's
+        // cell centre is (3.5, 0.5, 2.5).
+        let (a, b) = ([0, 0, 0], [3, 0, 2]);
+        // Looking from the side at the point four cells above B's centre.
+        let origin = Vec3::new(3.5, 1.5, 8.0);
+        let target = Vec3::new(3.5, 4.5, 2.5);
+        let cell = depth_cell(origin, target - origin, a, b, 1.0).unwrap();
+        assert_eq!(cell, [3, 4, 2], "the height is where the line passes");
+        // Looking lower gives a lower height, and below the floor digs down.
+        let low = depth_cell(origin, Vec3::new(3.5, 0.5, 2.5) - origin, a, b, 1.0).unwrap();
+        assert_eq!(low[1], 0);
+        let below = depth_cell(origin, Vec3::new(3.5, -2.5, 2.5) - origin, a, b, 1.0).unwrap();
+        assert_eq!(below[1], -3);
+        // At half-metre Voxels B's centre is at (1.75, 0.25, 1.25), and 4.5 m up
+        // from it is nine cells.
+        let (origin, target) = (Vec3::new(1.75, 1.5, 6.0), Vec3::new(1.75, 4.5, 1.25));
+        let half = depth_cell(origin, target - origin, a, b, 0.5).unwrap();
+        assert_eq!(half[1], 9, "nine half-metre cells");
+    }
+
+    #[test]
+    fn c_has_no_height_when_the_view_runs_along_the_line_or_away_from_it() {
+        let (a, b) = ([0, 0, 0], [3, 0, 2]);
+        let straight_up = Vec3::new(3.5, 1.0, 2.5);
+        assert_eq!(depth_cell(straight_up, Vec3::Y, a, b, 1.0), None);
+        // Looking away from the line: the nearest approach is behind the Player.
+        assert_eq!(
+            depth_cell(
+                Vec3::new(3.5, 1.5, 8.0),
+                Vec3::new(0.0, 0.2, 1.0),
+                a,
+                b,
+                1.0
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_wall_takes_its_depth_from_the_other_horizontal_axis() {
+        // B differs in X and Y, not Z: a wall, so C is a depth in Z.
+        let (a, b) = ([0, 0, 0], [4, 3, 0]);
+        let origin = Vec3::new(4.5, 1.5, 9.0);
+        let target = Vec3::new(4.5, 3.5, 5.5);
+        let cell = depth_cell(origin, target - origin, a, b, 1.0).unwrap();
+        assert_eq!(cell[2], 5, "five cells out from the wall");
+        assert_eq!((cell[0], cell[1]), (4, 3), "C keeps B's other coordinates");
+    }
+
+    #[test]
+    fn the_axes_are_named_by_the_way_they_grow() {
+        assert_eq!(way_name(0, false), "east");
+        assert_eq!(way_name(0, true), "west");
+        assert_eq!(way_name(1, false), "up");
+        assert_eq!(way_name(1, true), "down");
+        assert_eq!(way_name(2, false), "south");
+        assert_eq!(way_name(2, true), "north");
+        let mut layout = LayoutPreferences::default();
+        assert_eq!(layout.shape_word(), "a line");
+        layout.lengths = [3, 1, 4];
+        assert_eq!(layout.shape_word(), "a flat rectangle");
+        layout.lengths = [3, 2, 1];
+        assert_eq!(layout.shape_word(), "a wall");
+        layout.lengths = [3, 2, 2];
+        assert_eq!(layout.shape_word(), "a box");
     }
 
     #[test]

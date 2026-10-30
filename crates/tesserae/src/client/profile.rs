@@ -417,13 +417,12 @@ mod tests {
 
     #[test]
     fn layout_choices_round_trip_and_an_older_or_invalid_profile_is_handled() {
-        use super::super::layout::{Direction, Form, Kind};
+        use super::super::layout::Kind;
         let mut prefs = Preferences::default();
         prefs.layout.kind = Kind::Between;
-        prefs.layout.form = Form::Rectangle;
-        prefs.layout.counts = [5, 2, 2];
+        prefs.layout.lengths = [5, 2, 1];
         prefs.layout.gap = 2;
-        prefs.layout.directions = [Direction::NegX, Direction::Up, Direction::PosZ];
+        prefs.layout.negative = [true, false, true];
         let bytes = encode(&Bindings::default(), &prefs).unwrap();
         assert_eq!(decode(&bytes).unwrap().1.layout, prefs.layout);
 
@@ -435,19 +434,21 @@ mod tests {
         let older = serde_json::to_vec(&document).unwrap();
         assert_eq!(decode(&older).unwrap().1.layout, Default::default());
 
+        // A layout saved when it was three ordered axes: the old fields are
+        // ignored and the new ones start from their defaults.
         document["preferences"]["layout"] = serde_json::json!({
-            "form": "box", "counts": [10, 10, 10], "gap": 0,
-            "directions": ["pos_x", "pos_z", "up"],
+            "kind": "directions", "form": "box", "counts": [4, 3, 2],
+            "directions": ["pos_x", "pos_z", "up"], "gap": 1,
+        });
+        let before = serde_json::to_vec(&document).unwrap();
+        let loaded = decode(&before).unwrap().1.layout;
+        assert_eq!((loaded.lengths, loaded.gap), ([4, 1, 1], 1));
+
+        document["preferences"]["layout"] = serde_json::json!({
+            "lengths": [10, 10, 10], "gap": 0,
         });
         let too_many = serde_json::to_vec(&document).unwrap();
         assert!(decode(&too_many).is_err(), "a box over 256 Voxels");
-
-        document["preferences"]["layout"] = serde_json::json!({
-            "form": "line", "counts": [4, 3, 2], "gap": 0,
-            "directions": ["pos_x", "neg_x", "up"],
-        });
-        let shared = serde_json::to_vec(&document).unwrap();
-        assert!(decode(&shared).is_err(), "two axes on X");
     }
 
     #[test]

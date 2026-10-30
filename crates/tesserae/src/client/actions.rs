@@ -51,7 +51,7 @@ pub(super) enum Action {
     Layout,
     LayoutMore,
     LayoutLess,
-    LayoutShape,
+    LayoutReverse,
     LayoutActive,
     Catalogue,
     ReleaseCursor,
@@ -285,7 +285,7 @@ impl Bindings {
             (Help, KeyCode::KeyI),
             (Diagnostics, KeyCode::F3),
             (Layout, KeyCode::KeyL),
-            (LayoutShape, KeyCode::KeyH),
+            (LayoutReverse, KeyCode::KeyT),
             (LayoutActive, KeyCode::KeyJ),
         ]
         .into_iter()

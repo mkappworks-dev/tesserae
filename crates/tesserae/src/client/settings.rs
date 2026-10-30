@@ -732,7 +732,7 @@ pub(super) fn action_name(action: Action) -> &'static str {
         Layout => "Layout mode and menu",
         LayoutMore => "Layout: more Voxels",
         LayoutLess => "Layout: fewer Voxels",
-        LayoutShape => "Layout: line, rectangle or box",
+        LayoutReverse => "Layout: reverse the axis",
         LayoutActive => "Layout: next axis",
         Catalogue => "Open Catalogue",
         ReleaseCursor => "Release cursor",
@@ -746,7 +746,7 @@ pub(super) fn category(action: Action) -> &'static str {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
         Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool
-        | Layout | LayoutMore | LayoutLess | LayoutShape | LayoutActive => "Building",
+        | Layout | LayoutMore | LayoutLess | LayoutReverse | LayoutActive => "Building",
         _ => "Interface",
     }
 }
@@ -2020,7 +2020,7 @@ fn binding_order(action: Action) -> usize {
         Layout,
         LayoutMore,
         LayoutLess,
-        LayoutShape,
+        LayoutReverse,
         LayoutActive,
         Catalogue,
         Help,

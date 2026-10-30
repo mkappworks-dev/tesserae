@@ -155,12 +155,13 @@ A corner can also be set by holding Place on A and letting go on B; each corner
 is drawn as an outlined cell with the span's size beside it.
 A span is a flat rectangle from A to B on the plane they differ most in, given
 depth by C along the remaining dimension; C level with A keeps it flat.
+C needs no surface: it is read from where the view line passes B, so a height
+can be set in open sky.
 The preview draws each cell as a ghost of the block that would land, tinted
 where it would not. The Layout key opens the Layout menu (`client/layout_menu.rs`),
 a panel docked over the live game with its own input context: the cursor is
-released and the pad navigates it. Its shape, counts, gap and six-way directions
-apply as they are set and are saved when it closes; a Material picked there is
-the session's, since a profile holds no Game identifiers.
+released and the pad navigates it. Its lengths along X, Y and Z, the way each grows, and the
+gap apply as they are set and are saved when it closes.
 
 Undo/redo owns at most 128 groups, 1024 before/after Occupants entries in all,
 and 16 queued requests on the integrated Server. A single Edit is a group of

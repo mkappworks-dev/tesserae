@@ -378,3 +378,26 @@ the third was chosen.
 - The font has no arrows or triangles, so none are used; folded rows end in a
   plain ">".
 
+## Amendment 2026-10-30 (9): three axis lines, C from the view line
+
+Raised on review: a list of six directions and a shape choice is more than a
+Player needs to say what to build.
+
+- Direction and count is three fixed lines, X, Y and Z. Each has a length, a
+  plus and a minus for which side it grows towards, and beside the letter only
+  the name of the way chosen: east or west along X, up or down along Y, south
+  or north along Z. A length of 1 leaves the axis out, so one axis above 1 is
+  a line, two a flat rectangle or a wall, three a box. There is no shape
+  choice and no six-way direction pick; this replaces both.
+- The length keys and typed digits act on the line last touched. The reverse
+  key flips the active axis, the axis key moves X, Y, Z and round, and on a pad
+  the turn and empty-hand buttons do the same.
+- The status block is a soft dark wash, not green, with the Voxel count and its
+  word on one line, and the size line ends in what the lengths make.
+- In point to point, C no longer needs a surface under the aim. It is the cell
+  on the line through B along the dimension the rectangle is flat in, nearest
+  to where the Player is looking, so a height can be set in open sky. A view
+  that runs along that line, or away from it, sets nothing.
+- A saved layout from before is not carried over: its fields are ignored and
+  the layout starts from its defaults, the gap excepted.
+
