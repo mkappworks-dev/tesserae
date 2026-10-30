@@ -101,3 +101,12 @@ scrolling behave on a real touchscreen is ticket 10's to confirm. Controls
 are in the lower third at scale 1; at larger UI scales three rows cannot fit
 there.
 
+### 2026-10-30: unverified on hardware
+
+Marked done at the user's direction. Four ticks rest on code reading, not a
+test or a touchscreen: no hover or keyboard numbers needed, a touch-only
+player can open the menu and change settings and leave play, gestures never
+leak through UI transitions, and Apply/Cancel (it reuses the controller page's
+draft). Ticket 10 was closed without a hardware run, so none of them has been
+confirmed on a real touchscreen.
+
