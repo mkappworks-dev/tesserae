@@ -119,7 +119,14 @@ impl SessionApp for App {
         if !has_state(self.world()) {
             return self.add_systems(label, systems);
         }
-        if label == Startup.intern() {
+        let session_schedule = [
+            SessionSetup.intern(),
+            SessionReady.intern(),
+            SessionTeardown.intern(),
+        ];
+        if session_schedule.contains(&label) {
+            self.add_systems(label, systems)
+        } else if label == Startup.intern() {
             self.add_systems(SessionSetup, systems)
         } else if label == PostStartup.intern() {
             self.add_systems(SessionReady, systems)

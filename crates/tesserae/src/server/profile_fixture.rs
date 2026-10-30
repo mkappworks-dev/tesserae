@@ -6,6 +6,8 @@ use super::{
 };
 use crate::world::WorldSettings;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::{Occupants, RenderClass, Voxel};
 
 pub(super) fn plugin(app: &mut App) {
@@ -16,18 +18,25 @@ pub(super) fn plugin(app: &mut App) {
         ["stationary", "flight", "transparency", "active"].contains(&kind.as_str()),
         "Unknown profiling fixture"
     );
-    app.insert_resource(ProfileFixtureStatus {
+    app.on_session_start(install)
+        .add_session_systems(FixedPostUpdate, build.run_if(resource_exists::<Fixture>));
+}
+
+fn install(world: &mut World) {
+    let Ok(kind) = std::env::var("TESSERAE_PROFILE_FIXTURE") else {
+        return;
+    };
+    world.insert_resource(ProfileFixtureStatus {
         ready: kind == "stationary" || kind == "flight",
         ..default()
     });
     if kind == "transparency" || kind == "active" {
-        app.insert_resource(Fixture {
+        world.insert_resource(Fixture {
             kind,
             plan: Vec::new(),
             progress: builder::Progress::default(),
             ignition: None,
-        })
-        .add_systems(FixedPostUpdate, build);
+        });
     }
 }
 #[derive(Resource)]

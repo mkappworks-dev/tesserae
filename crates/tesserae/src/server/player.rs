@@ -5,6 +5,8 @@ use super::{
 };
 use crate::world::WorldSettings;
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::collide::{self, Aabb};
 use tesserae_core::immersion::{FluidSurface, fluid_at};
 
@@ -307,21 +309,21 @@ impl Player {
 #[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
 pub(super) struct PlayerInput;
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<MovementPolicy>()
-        .add_message::<RestoreView>()
-        .add_message::<MovementIntent>()
-        .add_message::<MovementFeedback>()
-        .add_message::<PoseCorrection>()
-        .add_message::<RespawnIntent>()
-        .add_systems(PostStartup, spawn_player)
-        .add_systems(
+    app.init_session_resource::<MovementPolicy>()
+        .add_session_message::<RestoreView>()
+        .add_session_message::<MovementIntent>()
+        .add_session_message::<MovementFeedback>()
+        .add_session_message::<PoseCorrection>()
+        .add_session_message::<RespawnIntent>()
+        .add_session_systems(PostStartup, spawn_player)
+        .add_session_systems(
             RunFixedMainLoop,
             receive
                 .in_set(PlayerInput)
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
         )
-        .add_systems(FixedUpdate, simulate.before(super::streaming::Streaming))
-        .add_systems(
+        .add_session_systems(FixedUpdate, simulate.before(super::streaming::Streaming))
+        .add_session_systems(
             RunFixedMainLoop,
             publish.in_set(RunFixedMainLoopSystems::AfterFixedMainLoop),
         );

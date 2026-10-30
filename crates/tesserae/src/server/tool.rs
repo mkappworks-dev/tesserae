@@ -9,6 +9,8 @@
 //! See `docs/adr/0002-client-server-from-day-one.md`.
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::collide::{RayHit, VoxelVolume};
 use tesserae_core::{NodeBox, Tables, Voxel};
 pub use tesserae_mods::ToolKind;
@@ -101,11 +103,11 @@ impl From<RejectReason> for UseRefusal {
 pub struct UseOutcome(pub Result<UseResult, UseRefusal>);
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_message::<UseIntent>()
-        .add_message::<UseOutcome>()
+    app.add_session_message::<UseIntent>()
+        .add_session_message::<UseOutcome>()
         // Every frame, like an Edit's receive: an answer is never lost to a
         // frame that runs no tick, and it touches no World state.
-        .add_systems(
+        .add_session_systems(
             RunFixedMainLoop,
             answer_use
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop)

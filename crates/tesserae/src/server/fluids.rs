@@ -61,6 +61,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::agenda::{Agenda, Limits, Span};
 use tesserae_core::collide::VoxelVolume;
 use tesserae_core::fire::{HeatScale, fuel_spans_around, wake_fuel_around};
@@ -548,13 +550,13 @@ fn publish_profile(sim: Res<FluidSim>, mut status: ResMut<SimulationProfile>) {
 pub(super) fn plugin(app: &mut App) {
     #[cfg(feature = "profiling")]
     if std::env::var_os("TESSERAE_PROFILE_CSV").is_some() {
-        app.init_resource::<SimulationProfile>()
-            .add_systems(FixedPostUpdate, publish_profile);
+        app.init_session_resource::<SimulationProfile>()
+            .add_session_systems(FixedPostUpdate, publish_profile);
     }
-    app.init_resource::<FluidSim>()
+    app.init_session_resource::<FluidSim>()
         // After everything that changes the World on this tick, so the step that
         // starts reads all of it, and before `FixedUpdate` meshes what lands.
-        .add_systems(
+        .add_session_systems(
             FixedPreUpdate,
             simulate
                 .after(edit::apply_pending)

@@ -26,6 +26,8 @@
 //! once.
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::mesh::{NEG_Y, POS_X, POS_Y};
 use tesserae_core::{GroundParams, RenderClass, ShapeId, Tables, WorldgenParams};
 use tesserae_core::{MaterialId, Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, Voxel};
@@ -93,13 +95,14 @@ impl Parts {
 
 pub(super) fn plugin(app: &mut App) {
     // After the tick's own streaming.
-    let reopened = app
-        .world()
-        .get_resource::<super::persistence::Persistence>()
-        .is_some_and(|p| p.reopened_eye.is_some());
-    if !reopened {
-        app.add_systems(FixedPostUpdate, build.run_if(super::persistence::playing));
-    }
+    app.add_session_systems(
+        FixedPostUpdate,
+        build.run_if(super::persistence::playing).run_if(
+            |p: Option<Res<super::persistence::Persistence>>| {
+                !p.is_some_and(|p| p.reopened_eye.is_some())
+            },
+        ),
+    );
 }
 
 fn build(

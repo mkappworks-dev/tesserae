@@ -38,6 +38,8 @@ pub mod world_state;
 use std::sync::Arc;
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
@@ -81,9 +83,9 @@ pub fn plugin(app: &mut App) {
     #[cfg(feature = "profiling")]
     app.add_plugins(profile_fixture::plugin);
     app.add_plugins(mods::plugin)
-        .init_resource::<world_state::ChunkStore>()
-        .init_resource::<ContentTables>()
-        .add_systems(Startup, open_world)
+        .init_session_resource::<world_state::ChunkStore>()
+        .init_session_resource::<ContentTables>()
+        .add_session_systems(Startup, open_world)
         .add_plugins((
             streaming::plugin,
             edit::plugin,

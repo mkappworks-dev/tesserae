@@ -11,6 +11,7 @@ use super::fluids::FluidSim;
 use super::mods::LoadedMods;
 use super::player::Player;
 use super::world_state::{ChunkStore, Lifetime};
+use crate::session::{SessionApp, SessionTeardown};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// Beside the user Mods folder; every World folder lives here.
@@ -372,19 +373,34 @@ impl Persistence {
 
 pub(super) fn plugin(app: &mut App) {
     #[cfg(feature = "profiling")]
-    app.init_resource::<SaveProfile>();
-    app.init_resource::<SaveStatus>()
-        .add_message::<SaveAction>();
-    let Some(mut p) = app.world_mut().remove_resource::<Persistence>() else {
+    app.init_session_resource::<SaveProfile>();
+    app.init_session_resource::<SaveStatus>()
+        .add_session_message::<SaveAction>()
+        .on_session_start(install)
+        .add_session_systems(FixedFirst, requests.run_if(resource_exists::<Persistence>))
+        .add_session_systems(
+            FixedPreUpdate,
+            drive
+                .after(super::fluids::simulate)
+                .run_if(resource_exists::<Persistence>),
+        )
+        .add_session_systems(SessionTeardown, finish_write);
+}
+
+/// A World without a `Persistence` (a test, or a plugin built alone) is
+/// simply never saved.
+fn install(world: &mut World) {
+    let Some(mut p) = world.remove_resource::<Persistence>() else {
         return;
     };
-    app.world_mut().resource_mut::<SaveStatus>().detail = if p.writer.is_none() {
+    let mut status = world.resource_mut::<SaveStatus>();
+    status.detail = if p.writer.is_none() {
         "Temporary World - persistence disabled".into()
     } else {
         p.opening_detail.clone()
     };
-    app.world_mut().resource_mut::<SaveStatus>().notice = p.recovered_notice.take();
-    let mut store = app.world_mut().resource_mut::<ChunkStore>();
+    status.notice = p.recovered_notice.take();
+    let mut store = world.resource_mut::<ChunkStore>();
     store.persistent = p.writer.is_some();
     store.checkpoint = store.persistent && p.reopened_eye.is_none();
     for saved in p.initial_chunks.drain(..) {
@@ -401,10 +417,16 @@ pub(super) fn plugin(app: &mut App) {
     if let Some((active, paused)) = p.initial_simulation.take() {
         simulation.restore(active, paused);
     }
-    app.insert_resource(simulation)
-        .insert_resource(p)
-        .add_systems(FixedFirst, requests)
-        .add_systems(FixedPreUpdate, drive.after(super::fluids::simulate));
+    world.insert_resource(simulation);
+    world.insert_resource(p);
+}
+
+/// The writer lock is released only when the last clone of the writer drops,
+/// and an in-flight write holds one.
+fn finish_write(mut persistence: Option<ResMut<Persistence>>) {
+    if let Some(task) = persistence.as_mut().and_then(|p| p.task.take()) {
+        bevy::tasks::block_on(task);
+    }
 }
 
 fn requests(

@@ -9,6 +9,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::launch::Installed;
+use crate::session::{SessionApp, SessionTeardown};
 use bevy::prelude::*;
 use tesserae_core::save::library::GameRef;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
@@ -445,14 +446,28 @@ fn load_with_opening(
     Ok(loaded)
 }
 
+/// Registers what every World shares; [`install`] then builds what this one
+/// needs from its Mods.
 pub(super) fn plugin(app: &mut App) {
-    let loaded = app
-        .world_mut()
-        .remove_non_send::<LoadedMods>()
-        .unwrap_or_default();
+    app.add_plugins(runtime::plugin)
+        .add_session_message::<MaterialTextures>()
+        .add_session_message::<CharacterModel>()
+        .add_session_message::<MaterialPalette>()
+        .add_session_message::<ContentCatalogue>()
+        .on_session_start(install)
+        .add_session_systems(SessionTeardown, release_mods);
+}
+
+/// Mod instances drop first, so no guest call outlives the World it ran in.
+fn release_mods(world: &mut World) {
+    world.remove_non_send::<LoadedMods>();
+    world.remove_resource::<runtime::ModJobs>();
+}
+
+fn install(world: &mut World) {
+    let loaded = world.remove_non_send::<LoadedMods>().unwrap_or_default();
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
-    let reopened = app
-        .world()
+    let reopened = world
         .get_resource::<super::persistence::Persistence>()
         .is_some_and(|p| p.reopened_eye.is_some());
     let params = if reopened {
@@ -487,7 +502,7 @@ pub(super) fn plugin(app: &mut App) {
         }
     }
     if let Some(policy) = loaded.movement {
-        app.insert_resource(super::player::MovementPolicy {
+        world.insert_resource(super::player::MovementPolicy {
             flight: policy.allow_flight,
             physics: policy.allow_physics,
             initial: Some(if policy.start_in_flight {
@@ -497,23 +512,15 @@ pub(super) fn plugin(app: &mut App) {
             }),
         });
     }
-    app.insert_resource(tables)
-        .insert_resource(super::tool::Tools(loaded.tools))
-        .insert_resource(WorldParameters(params))
-        .insert_resource(super::streaming::streaming_settings(loaded.view))
-        .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
-        .add_plugins(runtime::plugin)
-        .add_message::<MaterialTextures>()
-        .add_message::<CharacterModel>()
-        .add_message::<MaterialPalette>()
-        .add_message::<ContentCatalogue>();
-    app.world_mut()
-        .write_message(MaterialPalette(loaded.appearance));
-    app.world_mut()
-        .write_message(MaterialTextures(loaded.textures));
-    app.world_mut()
-        .write_message(CharacterModel(loaded.character.map(std::sync::Arc::new)));
-    app.world_mut().write_message(catalogue);
+    world.insert_resource(tables);
+    world.insert_resource(super::tool::Tools(loaded.tools));
+    world.insert_resource(WorldParameters(params));
+    world.insert_resource(super::streaming::streaming_settings(loaded.view));
+    world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
+    world.write_message(MaterialPalette(loaded.appearance));
+    world.write_message(MaterialTextures(loaded.textures));
+    world.write_message(CharacterModel(loaded.character.map(std::sync::Arc::new)));
+    world.write_message(catalogue);
 }
 
 pub(in crate::server) fn catalogue(

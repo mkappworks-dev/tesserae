@@ -4,6 +4,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use bevy::prelude::*;
+
+use crate::session::SessionApp;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::Voxel;
@@ -250,11 +252,11 @@ impl PendingCommands {
 }
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<EditHistory>()
-        .init_resource::<PendingCommands>()
-        .add_message::<ModDisabled>()
-        .add_systems(FixedPreUpdate, land.before(edit::apply_pending))
-        .add_systems(
+    app.init_session_resource::<EditHistory>()
+        .init_session_resource::<PendingCommands>()
+        .add_session_message::<ModDisabled>()
+        .add_session_systems(FixedPreUpdate, land.before(edit::apply_pending))
+        .add_session_systems(
             FixedPreUpdate,
             drain
                 .run_if(super::super::persistence::playing)
@@ -262,7 +264,7 @@ pub(super) fn plugin(app: &mut App) {
                 .after(land)
                 .in_set(Drain),
         )
-        .add_systems(
+        .add_session_systems(
             FixedPostUpdate,
             dispatch.run_if(super::super::persistence::playing),
         );
