@@ -1013,10 +1013,11 @@ pub mod stats {
     }
 
     pub(super) fn plugin(app: &mut App) {
-        app.init_session_resource::<StreamingStats>().add_session_systems(
-            FixedPostUpdate,
-            publish_stats.run_if(crate::cost::collecting),
-        );
+        app.init_session_resource::<StreamingStats>()
+            .add_session_systems(
+                FixedPostUpdate,
+                publish_stats.run_if(crate::cost::collecting),
+            );
     }
 
     #[expect(

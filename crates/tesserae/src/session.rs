@@ -404,4 +404,66 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Chunks>().0, [9]);
     }
+
+    #[derive(Resource, Default)]
+    struct Landed(Vec<u64>);
+
+    #[derive(Resource, Default)]
+    struct Running(Option<bevy::tasks::Task<u64>>);
+
+    #[derive(Resource, Clone)]
+    struct Gate(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+    #[test]
+    fn a_job_left_running_by_one_session_never_lands_in_the_next() {
+        use std::sync::atomic::Ordering;
+        let gate = Gate(Default::default());
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin, plugin))
+            .insert_resource(gate.clone())
+            .init_resource::<Landed>()
+            .init_session_resource::<Running>()
+            .add_session_systems(
+                Startup,
+                |mut running: ResMut<Running>, id: Res<SessionId>, gate: Res<Gate>| {
+                    let (id, gate) = (id.0, gate.clone());
+                    running.0 = Some(
+                        bevy::tasks::AsyncComputeTaskPool::get_or_init(Default::default).spawn(
+                            async move {
+                                while !gate.0.load(Ordering::Acquire) {
+                                    bevy::tasks::futures_lite::future::yield_now().await;
+                                }
+                                id
+                            },
+                        ),
+                    );
+                },
+            )
+            .add_session_systems(
+                Update,
+                |mut running: ResMut<Running>, mut landed: ResMut<Landed>| {
+                    if let Some(id) = running
+                        .0
+                        .as_mut()
+                        .and_then(bevy::tasks::futures::check_ready)
+                    {
+                        running.0 = None;
+                        landed.0.push(id);
+                    }
+                },
+            );
+        app.update();
+        go(&mut app, AppState::Loading);
+        go(&mut app, AppState::InWorld);
+        go(&mut app, AppState::Closing);
+        app.update();
+        go(&mut app, AppState::Loading);
+        go(&mut app, AppState::InWorld);
+        gate.0.store(true, Ordering::Release);
+        for _ in 0..200 {
+            app.update();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(app.world().resource::<Landed>().0, [2]);
+    }
 }

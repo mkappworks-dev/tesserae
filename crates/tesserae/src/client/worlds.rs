@@ -154,7 +154,7 @@ impl Launcher {
 }
 
 #[derive(Component, Clone, Debug, PartialEq)]
-enum Act {
+pub(super) enum Act {
     Select(PathBuf),
     Open,
     New,
@@ -177,7 +177,7 @@ enum Act {
 }
 
 #[derive(Resource, Default)]
-struct Queue(Vec<Act>);
+pub(super) struct Queue(pub(super) Vec<Act>);
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Field {
@@ -1567,7 +1567,7 @@ mod tests {
         act(&mut app, Act::Voxel(0.25));
         act(&mut app, Act::Create);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
-            panic!("no restart into the World");
+            panic!("no World to open");
         };
         let created = library::read(&path).unwrap().unwrap();
         assert_eq!(created.name, "Ridge");
@@ -1748,7 +1748,7 @@ mod tests {
         assert_eq!(shown, format!("Random seed: {random}"));
         act(&mut app, Act::Create);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
-            panic!("no restart into the World");
+            panic!("no World to open");
         };
         assert_eq!(library::read(&path).unwrap().unwrap().seed, random);
     }
@@ -1868,7 +1868,7 @@ mod tests {
         reach(&mut app, pad, Act::Create);
         tap(&mut app, pad, GamepadButton::South);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
-            panic!("no restart into the World");
+            panic!("no World to open");
         };
         assert_eq!(library::read(&path).unwrap().unwrap().name, "New World");
         assert!(app.world().resource::<InputFocusVisible>().0);

@@ -45,6 +45,10 @@ Materials and Shapes.
 **World list** — the first screen of a launch: every World folder, before any
 Game runs. Not a "menu" (the in-World catalogue and settings).
 
+**World session** — one opening of a World, from loading to Return to World
+list. The window and the app outlive it; everything it added to the ECS, its
+jobs and its Mod instances do not.
+
 **Voxel** — the atomic unit of world volume. Not "block", not "node".
 
 **Material** — what a Voxel is made of. Stone, water, oak. A row of game data:

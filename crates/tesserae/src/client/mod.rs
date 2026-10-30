@@ -32,6 +32,8 @@ pub(crate) mod profile;
 mod removal;
 mod save;
 mod settings;
+#[cfg(feature = "dev")]
+mod soak;
 mod tile_preview;
 mod tool;
 mod touch;
@@ -90,5 +92,6 @@ pub fn plugin(app: &mut App) {
     app.add_plugins((
         bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
         overlay::plugin,
+        soak::plugin,
     ));
 }

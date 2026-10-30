@@ -249,3 +249,156 @@ fn quit_while_loading(
 fn refresh_installed(mut commands: Commands, args: Res<UserArgs>) {
     commands.insert_resource(server::mods::installed(&args.0));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::state::app::StatesPlugin;
+    use tesserae_core::save::WorldId;
+
+    struct Temp(PathBuf);
+
+    impl Temp {
+        fn new() -> Self {
+            let path =
+                std::env::temp_dir().join(format!("tesserae-open-{}", WorldId::new().as_str()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for Temp {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn app(mods: &Temp) -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, StatesPlugin, crate::session::plugin, plugin))
+            .add_message::<AppExit>()
+            .add_message::<bevy::window::WindowCloseRequested>()
+            .insert_resource(UserArgs(vec!["--mods".into(), mods.0.clone().into()]));
+        app
+    }
+
+    fn state(app: &App) -> AppState {
+        *app.world().resource::<State<AppState>>().get()
+    }
+
+    /// Runs until the app is in `want`, giving the off-thread load time to finish.
+    fn until(app: &mut App, want: AppState) -> bool {
+        for _ in 0..600 {
+            app.update();
+            if state(app) == want {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        false
+    }
+
+    fn open_failing(app: &mut App, folder: &std::path::Path) {
+        app.update();
+        app.insert_resource(OpenRequest {
+            what: What::Folder(folder.to_owned()),
+            name: Some("Broken".into()),
+            from_list: true,
+        });
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Loading);
+    }
+
+    fn snapshot(folder: &std::path::Path) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut files: Vec<_> = std::fs::read_dir(folder)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .map(|p| (p.clone(), std::fs::read(p).unwrap()))
+            .collect();
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn a_world_that_cannot_be_opened_returns_to_the_list_with_the_reason() {
+        let (mods, worlds) = (Temp::new(), Temp::new());
+        let broken = worlds.0.join("Broken");
+        std::fs::create_dir(&broken).unwrap();
+        std::fs::write(
+            broken.join("00000000000000000099.commit"),
+            b"TESSAVE1 truncated",
+        )
+        .unwrap();
+        let before = snapshot(&broken);
+        let mut app = app(&mods);
+        open_failing(&mut app, &broken);
+
+        assert!(until(&mut app, AppState::List), "back on the list");
+        let failure = app.world().resource::<LastFailure>().0.as_ref().unwrap();
+        assert_eq!(failure.folder, broken);
+        assert!(!failure.reason.is_empty());
+        assert!(!app.world().contains_resource::<Load>());
+        assert!(!app.world().contains_resource::<Opened>());
+        assert_eq!(snapshot(&broken), before, "nothing was written");
+    }
+
+    #[test]
+    fn a_folder_with_no_save_is_refused_rather_than_becoming_a_world() {
+        let (mods, worlds) = (Temp::new(), Temp::new());
+        let empty = worlds.0.join("Empty");
+        std::fs::create_dir(&empty).unwrap();
+        let mut app = app(&mods);
+        open_failing(&mut app, &empty);
+
+        assert!(until(&mut app, AppState::List));
+        assert!(app.world().resource::<LastFailure>().0.is_some());
+        assert!(std::fs::read_dir(&empty).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn a_direct_launch_that_fails_exits_instead_of_showing_the_list() {
+        let mods = Temp::new();
+        let mut app = app(&mods);
+        app.update();
+        let task = AsyncComputeTaskPool::get_or_init(Default::default)
+            .spawn(async { Err::<Parts, _>("no such World".to_owned()) });
+        app.insert_resource(Opened {
+            from_list: false,
+            name: None,
+        })
+        .insert_resource(Load {
+            stage: Arc::default(),
+            task: Some(task),
+            direct: true,
+            folder: None,
+        });
+        app.world_mut()
+            .resource_mut::<NextState<AppState>>()
+            .set(AppState::Loading);
+        for _ in 0..200 {
+            app.update();
+            std::thread::sleep(std::time::Duration::from_millis(2));
+            if !app.world().resource::<Messages<AppExit>>().is_empty() {
+                break;
+            }
+        }
+        assert!(!app.world().resource::<Messages<AppExit>>().is_empty());
+        assert_ne!(state(&app), AppState::List);
+    }
+
+    #[test]
+    fn the_loading_stages_run_in_order_and_each_has_a_label() {
+        let stages = [
+            Stage::ReadingSave,
+            Stage::LoadingGame,
+            Stage::PreparingWorld,
+            Stage::FirstTerrain,
+        ];
+        assert!(stages.windows(2).all(|w| w[0] < w[1]));
+        for stage in stages {
+            assert_eq!(Stage::from_u8(stage as u8), stage);
+            assert!(!stage.label().is_empty());
+        }
+    }
+}
