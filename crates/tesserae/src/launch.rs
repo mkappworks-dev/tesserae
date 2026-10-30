@@ -219,10 +219,8 @@ impl Monitor {
     }
 }
 
-/// Keeps a saved window usable on today's displays: a top-left on no monitor
-/// (unplugged, resolution changed) drops to centring, and a size past the
-/// monitor it lands on shrinks to fit. Without any known monitor nothing is
-/// known to be wrong.
+/// Without any known monitor nothing is known to be wrong, so the geometry
+/// stays as saved.
 pub fn fit(geometry: Geometry, monitors: &[Monitor]) -> Geometry {
     let Some(first) = monitors.first() else {
         return geometry;
@@ -277,8 +275,13 @@ impl Handoff {
 }
 
 pub fn plugin(app: &mut App) {
+    // A fullscreen start has no windowed frame of its own to hand on.
+    let started_with = app
+        .world()
+        .get_resource::<Saved>()
+        .and_then(|saved| saved.0);
     app.init_resource::<Relaunch>()
-        .init_resource::<LastGeometry>()
+        .insert_resource(LastGeometry(started_with))
         .init_resource::<Handoff>()
         .init_resource::<Saved>()
         .add_systems(
@@ -330,6 +333,7 @@ type ChangedPrimary = (With<PrimaryWindow>, Changed<Window>);
 fn track(
     windows: Query<(Entity, &Window), ChangedPrimary>,
     mut last: ResMut<LastGeometry>,
+    // `Native::of` reads winit's thread-local windows, which only the main thread owns.
     _main_thread: NonSendMarker,
 ) {
     for (entity, window) in &windows {
@@ -752,8 +756,9 @@ mod tests {
 
     fn restoring(saved: Geometry, monitors: &[(i32, i32, u32, u32)]) -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins).add_plugins(plugin);
-        app.insert_resource(Saved(Some(saved)));
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(Saved(Some(saved)))
+            .add_plugins(plugin);
         let mut window = Window::default();
         saved.apply(&mut window);
         app.world_mut().spawn((PrimaryWindow, window));
@@ -769,6 +774,13 @@ mod tests {
             });
         }
         app
+    }
+
+    fn the_window_mut(app: &mut App) -> Mut<'_, Window> {
+        app.world_mut()
+            .query_filtered::<&mut Window, With<PrimaryWindow>>()
+            .single_mut(app.world_mut())
+            .unwrap()
     }
 
     fn the_window(app: &mut App) -> &Window {
@@ -817,6 +829,18 @@ mod tests {
         let window = the_window(&mut app);
         assert_eq!(window.position, WindowPosition::At(IVec2::new(100, 50)));
         assert_eq!(window.resolution.width(), 1280.0);
+    }
+
+    #[test]
+    fn a_process_started_fullscreen_still_hands_on_the_windowed_frame() {
+        let saved = Geometry {
+            mode: Mode::Borderless,
+            ..windowed(220, 90, 1280, 800)
+        };
+        let mut app = restoring(saved, &[(0, 0, 2560, 1440)]);
+        the_window_mut(&mut app).resolution = WindowResolution::new(2560, 1440);
+        app.update();
+        assert_eq!(app.world().resource::<LastGeometry>().0, Some(saved));
     }
 
     #[test]

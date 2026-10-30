@@ -85,9 +85,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, reveal_focus.after(navigate));
 }
 
-/// The World list runs before any Game or profile exists, so it gets the same
-/// pad reading and focus navigation as the in-game menus with one standing
-/// modal owner instead of the full input stack.
+/// The World list has no Game or profile yet, so it runs the in-game menus' pad
+/// reading and focus navigation under one standing modal owner.
 pub(super) fn launcher(app: &mut App) {
     let mut ownership = Ownership::default();
     ownership.owner = Owner::Modal;

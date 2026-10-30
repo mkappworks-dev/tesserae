@@ -164,3 +164,19 @@ on the five screens), a restart that keeps an unmoved window's position, a
 restart from native fullscreen, and the physical pad note. winit's macOS
 `Borderless` is the native `toggleFullScreen`, and the green button sets
 `Borderless` in winit's own state, so `fullscreen()` reflects it.
+
+Accepted limits, recorded as the ticket asked:
+
+- Where winit cannot report a position (`outer_position()` is `Err`, as on
+  Wayland) the window centres.
+- `restore` runs one frame after the window exists, so a fitted window jumps
+  once.
+- Rename cannot be edited by pad, only confirmed or cancelled; there is no
+  on-screen keyboard.
+- `fit` measures an unplaced window against the first monitor Bevy lists.
+- The list uses default pad deadzones, not the saved profile's, because no
+  profile exists there.
+
+Code review found the fullscreen windowed frame survived only one restart,
+since `LastGeometry` started empty; it now starts from the launch geometry.
+
