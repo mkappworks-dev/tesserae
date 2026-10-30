@@ -90,6 +90,7 @@ type Contexts<'w> = (
 
 pub(super) fn resolve(
     (keys, mouse, pad): super::actions::Devices,
+    touch: Res<super::touch::TouchFrame>,
     (menu, settings, ui, save): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
@@ -117,10 +118,16 @@ pub(super) fn resolve(
     } else {
         Owner::PointerFree
     };
+    let mouse = if touch.suppress_mouse {
+        &touch.idle_mouse
+    } else {
+        &*mouse
+    };
     let inputs = super::actions::Inputs {
         keys: &keys,
-        mouse: &mouse,
+        mouse,
         pad: &pad.buttons,
+        touch: &touch.buttons,
         wheel: actions.wheel,
     };
     // Every pad button, including those a menu withholds from actions, so one
@@ -179,7 +186,7 @@ pub(super) fn resolve(
                             Trigger::Pad(button) => !ownership.pad(button),
                             Trigger::Wheel(_) => false,
                         }
-                }))
+                }) && !inputs.touch.pressed(action))
         {
             actions.cancel(action);
         }
@@ -459,6 +466,8 @@ mod tests {
         let mut mouse = ButtonInput::default();
         keys.press(KeyCode::KeyR);
         mouse.press(MouseButton::Left);
+        static NO_TOUCH: std::sync::LazyLock<ButtonInput<super::super::actions::Action>> =
+            std::sync::LazyLock::new(ButtonInput::default);
         let pad = ButtonInput::default();
         fn inputs<'a>(
             keys: &'a ButtonInput<KeyCode>,
@@ -469,6 +478,7 @@ mod tests {
                 keys,
                 mouse,
                 pad,
+                touch: &NO_TOUCH,
                 wheel: default(),
             }
         }

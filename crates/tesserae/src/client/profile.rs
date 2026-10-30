@@ -22,6 +22,7 @@ pub(crate) struct Preferences {
     pub display_sync: bool,
     pub fps_cap: Option<u32>,
     pub pad: PadPreferences,
+    pub touch: TouchPreferences,
     /// The last view, restored in every World: a preference of the user's,
     /// not the World's, so no save holds it.
     pub view: super::view::View,
@@ -49,6 +50,36 @@ impl Default for PadPreferences {
         }
     }
 }
+/// Touch feel and overlay, kept apart from mouse and pad.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct TouchPreferences {
+    pub look_sensitivity: f32,
+    pub invert_y: bool,
+    pub mirrored: bool,
+    pub size: TouchSize,
+    pub opacity: f32,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum TouchSize {
+    Small,
+    #[default]
+    Normal,
+    Enlarged,
+}
+impl Default for TouchPreferences {
+    fn default() -> Self {
+        Self {
+            look_sensitivity: 1.0,
+            invert_y: false,
+            mirrored: false,
+            size: TouchSize::Normal,
+            opacity: 0.7,
+        }
+    }
+}
+pub(super) const TOUCH_OPACITY: std::ops::RangeInclusive<f32> = 0.3..=1.0;
 pub(super) const PAD_SENSITIVITY: std::ops::RangeInclusive<f32> = 0.25..=3.0;
 pub(super) const PAD_DEADZONE: std::ops::RangeInclusive<f32> = 0.05..=0.5;
 impl Default for Preferences {
@@ -64,6 +95,7 @@ impl Default for Preferences {
             display_sync: true,
             fps_cap: None,
             pad: PadPreferences::default(),
+            touch: TouchPreferences::default(),
             view: default(),
             zoom_m: super::view::DEFAULT_ZOOM_M,
         }
@@ -145,6 +177,8 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         || !PAD_SENSITIVITY.contains(&pad.look_sensitivity)
         || !PAD_DEADZONE.contains(&pad.move_deadzone)
         || !PAD_DEADZONE.contains(&pad.look_deadzone)
+        || !PAD_SENSITIVITY.contains(&p.touch.look_sensitivity)
+        || !TOUCH_OPACITY.contains(&p.touch.opacity)
         || !super::view::ZOOM_M.contains(&p.zoom_m)
     {
         return Err(io::Error::other("invalid preference value"));
