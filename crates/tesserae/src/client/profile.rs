@@ -14,6 +14,7 @@ use std::{
 pub(crate) struct Preferences {
     pub toggle_sprint: bool,
     pub tap_remove: bool,
+    pub repeat_held: bool,
     pub sensitivity: f32,
     pub invert_y: bool,
     pub reverse_scroll: bool,
@@ -55,6 +56,7 @@ impl Default for Preferences {
         Self {
             toggle_sprint: true,
             tap_remove: false,
+            repeat_held: false,
             sensitivity: 0.003,
             invert_y: false,
             reverse_scroll: false,
@@ -414,6 +416,7 @@ mod tests {
         assert_eq!(decode(&bytes).unwrap().1, prefs);
         let older = br#"{"version":1,"preferences":{"invert_y":true}}"#;
         let (_, older) = decode(older).unwrap();
+        assert!(!older.repeat_held, "a profile saved before the option");
         assert_eq!((older.view, older.zoom_m), (View::FirstPerson, 4.0));
         for zoom in ["1.4", "6.1", "-1"] {
             let bytes = format!(r#"{{"version":1,"preferences":{{"zoom_m":{zoom}}}}}"#);

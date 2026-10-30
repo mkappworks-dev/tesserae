@@ -26,6 +26,14 @@ use crate::server::tool::ToolId;
 /// How long a rejection stays on screen.
 const NOTICE_SECS: f32 = 2.5;
 
+/// A held Place sends its next intent this long after the press, then every
+/// [`REPEAT_EVERY_SECS`].
+const REPEAT_DELAY_SECS: f64 = 0.25;
+const REPEAT_EVERY_SECS: f64 = 0.2;
+/// The Server's refusal carries no intent, so a repeat's is told apart by when
+/// it arrives. Rejections reach the Client within a tick or two of the send.
+const REPEAT_SETTLE_SECS: f64 = 0.5;
+
 pub(super) const SLOT_KEYS: [KeyCode; 9] = [
     KeyCode::Digit1,
     KeyCode::Digit2,
@@ -302,6 +310,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Hotbar>()
         .init_resource::<Catalogue>()
         .init_resource::<Notice>()
+        .init_resource::<QuietUntil>()
         .add_message::<crate::server::undo::HistoryApplied>()
         .add_systems(Startup, spawn_hud)
         .add_systems(
@@ -472,30 +481,82 @@ pub(super) fn select_held(
     }
 }
 
+/// Until when a refusal is a repeat's, which is silent.
+#[derive(Resource, Default)]
+pub(super) struct QuietUntil(f64);
+
+#[derive(Default)]
+pub(super) struct Repeat {
+    held: f64,
+    sent: u32,
+    stopped: bool,
+    hand: Option<Hotbar>,
+}
+
 /// Right places immediately along the camera centre ray.
 ///
 /// The click that grabs the cursor is not also an Edit. That click is also the
 /// one that makes the cursor grabbed, so "grabbed now" is not enough: it has to
 /// have been grabbed on the frame before as well, and that holds whichever of
 /// this and `camera::grab_cursor` runs first within a frame.
+///
+/// With "Repeat while held", a held solid Place repeats on the clock, not the
+/// frame count, so the rate is the same at any refresh rate.
 pub(super) fn send_intents(
-    ownership: Res<super::input::Ownership>,
-    actions: Res<super::actions::Actions>,
+    (ownership, actions, preferences): (
+        Res<super::input::Ownership>,
+        Res<super::actions::Actions>,
+        Res<super::profile::Preferences>,
+    ),
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
-    hotbar: Res<Hotbar>,
-    mut intents: MessageWriter<EditIntent>,
-    mut was_grabbed: Local<bool>,
+    (hotbar, menu, time): (Res<Hotbar>, Option<Res<super::menu::Menu>>, Res<Time>),
+    (mut intents, mut quiet): (MessageWriter<EditIntent>, ResMut<QuietUntil>),
+    (mut was_grabbed, mut repeat): (Local<bool>, Local<Repeat>),
 ) {
+    use super::actions::Action;
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && std::mem::replace(&mut *was_grabbed, grabbed);
     *was_grabbed = grabbed;
+    let hand_changed = repeat
+        .hand
+        .replace(hotbar.clone())
+        .is_some_and(|hand| hand != *hotbar);
+    let place = actions.state(Action::Place);
+    let playing = ready && ownership.gameplay() && menu.is_none_or(|menu| !menu.open);
+    if !place.held || place.started {
+        repeat.held = 0.0;
+        repeat.sent = 0;
+        repeat.stopped = false;
+    } else if !playing
+        || place.cancelled
+        || hand_changed
+        || [Action::Sample, Action::Undo, Action::Redo]
+            .into_iter()
+            .any(|action| actions.started(action))
+    {
+        repeat.stopped = true;
+    }
     if !ready || !ownership.gameplay() {
         return;
     }
     let held = hotbar.held();
-    let action = if actions.started(super::actions::Action::Place) {
+    let action = if place.started {
         held.place()
+    } else if preferences.repeat_held && place.held && playing && !repeat.stopped {
+        repeat.held += time.delta_secs_f64();
+        let due = REPEAT_DELAY_SECS + REPEAT_EVERY_SECS * f64::from(repeat.sent);
+        let solid = held
+            .place()
+            .filter(|action| matches!(action, EditAction::Place(_)));
+        if repeat.held >= due && solid.is_some() {
+            // A stalled frame skips the repeats it missed rather than bursting.
+            repeat.sent = ((repeat.held - REPEAT_DELAY_SECS) / REPEAT_EVERY_SECS) as u32 + 1;
+            quiet.0 = time.elapsed_secs_f64() + REPEAT_SETTLE_SECS;
+            solid
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -514,6 +575,7 @@ fn show_rejections(
     mut rejected: MessageReader<EditRejected>,
     mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
+    quiet: Res<QuietUntil>,
     time: Res<Time>,
 ) {
     for message in applied.read() {
@@ -525,6 +587,9 @@ fn show_rejections(
         super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
     }
     for message in rejected.read() {
+        if time.elapsed_secs_f64() < quiet.0 {
+            continue;
+        }
         notice.show(message.reason.message());
         super::menu_ui::notify(
             &mut commands,
@@ -781,6 +846,7 @@ mod tests {
             .init_resource::<Hotbar>()
             .init_resource::<Catalogue>()
             .init_resource::<Notice>()
+            .init_resource::<QuietUntil>()
             .add_message::<MouseWheel>()
             .add_message::<ContentCatalogue>()
             .add_message::<EditIntent>()
@@ -838,6 +904,12 @@ mod tests {
     fn grab(app: &mut App, mode: CursorGrabMode) {
         let mut q = app.world_mut().query::<&mut CursorOptions>();
         q.single_mut(app.world_mut()).unwrap().grab_mode = mode;
+    }
+
+    fn press_key(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
     }
 
     fn press(app: &mut App, button: MouseButton) {
@@ -1011,6 +1083,161 @@ mod tests {
             "along the camera's ray"
         );
         assert!(sent[0].direction.abs_diff_eq(Vec3::NEG_Z, 1e-6));
+    }
+
+    /// A frame at a fixed rate with every button left as it was, so a hold can
+    /// be watched across many of them.
+    fn held_frame(app: &mut App) -> Vec<EditIntent> {
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear();
+        app.world_mut()
+            .resource_mut::<Messages<EditIntent>>()
+            .drain()
+            .collect()
+    }
+
+    fn at_rate(grab: CursorGrabMode, hz: u32) -> App {
+        let mut app = app(grab);
+        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
+            std::time::Duration::from_secs_f64(1.0 / f64::from(hz)),
+        ));
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .repeat_held = true;
+        frame(&mut app);
+        app
+    }
+
+    #[test]
+    fn a_held_place_repeats_after_a_quarter_second_then_every_fifth_at_any_rate() {
+        for hz in [60, 144, 1000] {
+            let mut app = at_rate(CursorGrabMode::Locked, hz);
+            key(&mut app, KeyCode::Digit3);
+            press(&mut app, MouseButton::Right);
+            let mut times = Vec::new();
+            for step in 0..=(hz * 95 / 100) {
+                if !held_frame(&mut app).is_empty() {
+                    times.push(f64::from(step) / f64::from(hz));
+                }
+            }
+            let slack = 1.0 / f64::from(hz) + 1e-6;
+            assert_eq!(times.len(), 5, "{hz} Hz: {times:?}");
+            assert_eq!(times[0], 0.0, "the press itself");
+            for (n, time) in times.iter().enumerate().skip(1) {
+                let due = 0.25 + 0.2 * (n - 1) as f64;
+                assert!(
+                    *time + 1e-6 >= due && *time <= due + slack,
+                    "{hz} Hz: {times:?}"
+                );
+            }
+        }
+    }
+
+    /// Holds Place for `seconds` at 100 Hz and counts the intents sent.
+    fn hold_for(app: &mut App, seconds: f32) -> usize {
+        (0..(seconds * 100.0) as u32)
+            .map(|_| held_frame(app).len())
+            .sum()
+    }
+
+    fn at_100hz(grab: CursorGrabMode, repeat: bool) -> App {
+        let mut app = at_rate(grab, 100);
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .repeat_held = repeat;
+        app
+    }
+
+    #[test]
+    fn fluids_and_fire_and_a_disabled_preference_place_once_per_press() {
+        for (slot, repeat) in [
+            (KeyCode::Digit8, true),
+            (KeyCode::Digit9, true),
+            (KeyCode::Digit3, false),
+        ] {
+            let mut app = at_100hz(CursorGrabMode::Locked, repeat);
+            key(&mut app, slot);
+            press(&mut app, MouseButton::Right);
+            assert_eq!(hold_for(&mut app, 1.5), 1, "{slot:?} repeat={repeat}");
+        }
+    }
+
+    #[test]
+    fn every_cancellation_route_stops_a_hold_until_a_fresh_press() {
+        type Route = (&'static str, fn(&mut App));
+        let routes: [Route; 8] = [
+            ("slot", |app| press_key(app, KeyCode::Digit4)),
+            ("empty hand", |app| press_key(app, KeyCode::KeyX)),
+            ("orientation", |app| press_key(app, KeyCode::KeyQ)),
+            ("shape", |app| press_key(app, KeyCode::KeyF)),
+            ("sample", |app| press_key(app, KeyCode::KeyP)),
+            ("undo", |app| {
+                press_key(app, KeyCode::ControlLeft);
+                press_key(app, KeyCode::KeyZ);
+            }),
+            ("menu", |app| press_key(app, KeyCode::Tab)),
+            ("cursor", |app| grab(app, CursorGrabMode::None)),
+        ];
+        for (name, interrupt) in routes {
+            let mut app = at_100hz(CursorGrabMode::Locked, true);
+            key(&mut app, KeyCode::Digit3);
+            press(&mut app, MouseButton::Right);
+            assert_eq!(
+                hold_for(&mut app, 0.3),
+                2,
+                "{name}: first press and one repeat"
+            );
+            interrupt(&mut app);
+            held_frame(&mut app);
+            grab(&mut app, CursorGrabMode::Locked);
+            assert_eq!(hold_for(&mut app, 1.5), 0, "{name} stops the chain");
+        }
+    }
+
+    #[test]
+    fn releasing_and_pressing_again_starts_a_fresh_chain() {
+        let mut app = at_100hz(CursorGrabMode::Locked, true);
+        key(&mut app, KeyCode::Digit3);
+        press(&mut app, MouseButton::Right);
+        assert_eq!(hold_for(&mut app, 0.3), 2);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .release(MouseButton::Right);
+        assert_eq!(hold_for(&mut app, 0.3), 0);
+        press(&mut app, MouseButton::Right);
+        assert_eq!(
+            hold_for(&mut app, 0.3),
+            2,
+            "press again, not a carried timer"
+        );
+    }
+
+    #[test]
+    fn a_repeat_s_refusal_is_silent_but_a_first_press_still_shows_it() {
+        let mut app = at_100hz(CursorGrabMode::Locked, true);
+        key(&mut app, KeyCode::Digit3);
+        press(&mut app, MouseButton::Right);
+        held_frame(&mut app);
+        app.world_mut().write_message(EditRejected {
+            reason: RejectReason::OutOfReach,
+        });
+        held_frame(&mut app);
+        assert_eq!(
+            app.world().resource::<Notice>().text(),
+            RejectReason::OutOfReach.message()
+        );
+        hold_for(&mut app, 0.3);
+        *app.world_mut().resource_mut::<Notice>() = Notice::default();
+        app.world_mut().write_message(EditRejected {
+            reason: RejectReason::OutOfReach,
+        });
+        held_frame(&mut app);
+        assert_eq!(app.world().resource::<Notice>().text(), "");
     }
 
     #[test]
