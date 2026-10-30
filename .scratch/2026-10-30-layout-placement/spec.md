@@ -282,3 +282,23 @@ what will be built.
   closed and the mode on, the card stays as a small status card with that
   text and no controls.
 
+## Amendment 2026-10-30 (4): closer to Lay of the Land's flow
+
+Asked for after comparing with Lay of the Land, whose placement tools were only
+known from its store pages (Steam app 2776090). What follows is our reading of
+the request, not a copy of that game, and needs the user's check.
+
+- **Shapes stay as they are** (line, rectangle, box). Cylinder, cone and other
+  round shapes are deferred.
+- **Drag to pick.** In point to point, pressing Place on a cell sets A and
+  holding it while the aim moves previews the span to the aim; releasing sets
+  B. Click, click, click still works. A press that never moves picks A only.
+- **Handles in the world.** A and B are drawn as markers on their cells, with
+  the span's size along each axis (in Voxels, and in metres) written beside it,
+  as the measuring tool shows its corners. They follow the preview.
+- **Key prompts in the card.** The card names each key by its current binding
+  for what it does now: set A, drag to B, commit, step back, cancel.
+- **Not adopted:** layouts that ignore the Voxel lattice. A layout is Voxels at
+  lattice cells in a World with one Voxel size (ADR-0003), so a span always
+  lands on whole Voxels.
+
