@@ -417,12 +417,12 @@ mod tests {
 
     #[test]
     fn layout_choices_round_trip_and_an_older_or_invalid_profile_is_handled() {
-        use super::super::layout::Form;
+        use super::super::layout::{Direction, Form};
         let mut prefs = Preferences::default();
         prefs.layout.form = Form::Rectangle;
         prefs.layout.counts = [5, 2, 2];
         prefs.layout.gap = 2;
-        prefs.layout.reversed = [true, false, false];
+        prefs.layout.directions = [Direction::NegX, Direction::Up, Direction::PosZ];
         let bytes = encode(&Bindings::default(), &prefs).unwrap();
         assert_eq!(decode(&bytes).unwrap().1.layout, prefs.layout);
 
@@ -436,10 +436,17 @@ mod tests {
 
         document["preferences"]["layout"] = serde_json::json!({
             "form": "box", "counts": [10, 10, 10], "gap": 0,
-            "reversed": [false, false, false],
+            "directions": ["pos_x", "pos_z", "up"],
         });
         let too_many = serde_json::to_vec(&document).unwrap();
         assert!(decode(&too_many).is_err(), "a box over 256 Voxels");
+
+        document["preferences"]["layout"] = serde_json::json!({
+            "form": "line", "counts": [4, 3, 2], "gap": 0,
+            "directions": ["pos_x", "neg_x", "up"],
+        });
+        let shared = serde_json::to_vec(&document).unwrap();
+        assert!(decode(&shared).is_err(), "two axes on X");
     }
 
     #[test]

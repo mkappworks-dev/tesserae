@@ -22,12 +22,20 @@ pub(super) struct Settings {
     resetting: bool,
     category: Category,
     notice: String,
+    /// Digits being typed into an axis count on the Layout page.
+    typed: Option<(usize, String)>,
     pub(super) dirty: bool,
     pub(super) tab: super::menu_ui::Tab,
     last_controls: super::menu_ui::Tab,
     pending: Option<super::menu_ui::Tab>,
 }
 impl Settings {
+    fn typed(&self, axis: usize) -> Option<&str> {
+        self.typed
+            .as_ref()
+            .filter(|(typed_axis, _)| *typed_axis == axis)
+            .map(|(_, digits)| digits.as_str())
+    }
     pub(super) fn binding_visible(
         &self,
         action: Action,
@@ -114,7 +122,8 @@ pub(super) enum Operation {
     LayoutForm(super::layout::Form),
     LayoutCount(usize, i32),
     LayoutGap(i32),
-    LayoutReverse(usize),
+    LayoutDirection(usize, super::layout::Direction),
+    LayoutActive(usize),
     LayoutMaterial(Option<tesserae_core::MaterialId>),
 }
 
@@ -129,6 +138,10 @@ pub(super) fn plugin(app: &mut App) {
             capture_focus.before(bevy::input_focus::InputFocusSystems::Dispatch),
         )
         .add_session_systems(Update, slider_visuals)
+        .add_session_systems(
+            Update,
+            (open_layout_menu.after(super::layout::intercept), type_count),
+        )
         .add_session_systems(Startup, launch)
         .add_session_systems(
             Update,
@@ -161,6 +174,7 @@ fn launch(
         || std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some()
     {
         settings.tab = match std::env::var("TESSERAE_SCREENSHOT_SETTINGS_TAB").as_deref() {
+            Ok("layout") => super::menu_ui::Tab::Layout,
             Ok("bindings") => super::menu_ui::Tab::Bindings,
             Ok("controller") => super::menu_ui::Tab::Controller,
             Ok("display") => super::menu_ui::Tab::Display,
@@ -215,6 +229,98 @@ fn open_shortcut(
     settings.notice = store.error.clone().unwrap_or_default();
     settings.tab = settings.last_controls;
     settings.draft = Some((bindings.clone(), preferences.clone()));
+    settings.dirty = true;
+    menu.open = false;
+    for mut cursor in &mut cursor {
+        cursor.grab_mode = bevy::window::CursorGrabMode::None;
+        cursor.visible = true;
+    }
+}
+
+const DIGITS: [(KeyCode, u32); 20] = [
+    (KeyCode::Digit0, 0),
+    (KeyCode::Digit1, 1),
+    (KeyCode::Digit2, 2),
+    (KeyCode::Digit3, 3),
+    (KeyCode::Digit4, 4),
+    (KeyCode::Digit5, 5),
+    (KeyCode::Digit6, 6),
+    (KeyCode::Digit7, 7),
+    (KeyCode::Digit8, 8),
+    (KeyCode::Digit9, 9),
+    (KeyCode::Numpad0, 0),
+    (KeyCode::Numpad1, 1),
+    (KeyCode::Numpad2, 2),
+    (KeyCode::Numpad3, 3),
+    (KeyCode::Numpad4, 4),
+    (KeyCode::Numpad5, 5),
+    (KeyCode::Numpad6, 6),
+    (KeyCode::Numpad7, 7),
+    (KeyCode::Numpad8, 8),
+    (KeyCode::Numpad9, 9),
+];
+
+/// Types a count into the Layout page's active axis: digits append, Backspace
+/// removes one and Enter ends it. A pad has the steppers instead.
+fn type_count(
+    keys: Res<ButtonInput<KeyCode>>,
+    mode: Res<super::layout::LayoutMode>,
+    mut settings: ResMut<Settings>,
+) {
+    if !settings.open || settings.tab != super::menu_ui::Tab::Layout || settings.capturing() {
+        return;
+    }
+    let Some(form) = settings.draft.as_ref().map(|(_, p)| p.layout.form) else {
+        return;
+    };
+    let axis = mode.active.min(form.axes() - 1);
+    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+        settings.typed = None;
+        settings.dirty = true;
+        return;
+    }
+    let mut digits = settings.typed(axis).unwrap_or_default().to_owned();
+    let mut changed = keys.just_pressed(KeyCode::Backspace) && digits.pop().is_some();
+    for (key, digit) in DIGITS {
+        if keys.just_pressed(key) && digits.len() < 3 {
+            digits.push(char::from_digit(digit, 10).expect("a digit"));
+            changed = true;
+        }
+    }
+    if !changed {
+        return;
+    }
+    settings.typed = Some((axis, digits.clone()));
+    settings.dirty = true;
+    settings.notice.clear();
+    if let Ok(count) = digits.parse::<u32>()
+        && count > 0
+        && let Some((_, p)) = settings.draft.as_mut()
+        && p.layout.set_count(axis, count)
+    {
+        settings.notice = format!(
+            "Most is {} Voxels in all.",
+            tesserae_core::layout::MAX_LAYOUT_VOXELS
+        );
+    }
+}
+
+/// Turning Layout mode on opens its menu, as the Help key opens the settings.
+fn open_layout_menu(
+    mut mode: ResMut<super::layout::LayoutMode>,
+    mut settings: ResMut<Settings>,
+    mut menu: ResMut<super::menu::Menu>,
+    (bindings, preferences, store): (Res<Bindings>, Res<Preferences>, Res<Store>),
+    mut cursor: Query<&mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
+) {
+    if !std::mem::take(&mut mode.open_menu) || settings.open {
+        return;
+    }
+    settings.open = true;
+    settings.notice = store.error.clone().unwrap_or_default();
+    settings.tab = super::menu_ui::Tab::Layout;
+    settings.draft = Some((bindings.clone(), preferences.clone()));
+    settings.typed = None;
     settings.dirty = true;
     menu.open = false;
     for mut cursor in &mut cursor {
@@ -356,7 +462,10 @@ fn activate(
                 }
                 settings.open = true;
                 settings.tab = tab;
-                if tab != super::menu_ui::Tab::Display {
+                if !matches!(
+                    tab,
+                    super::menu_ui::Tab::Display | super::menu_ui::Tab::Layout
+                ) {
                     settings.last_controls = tab;
                 }
                 menu.open = false;
@@ -417,6 +526,10 @@ fn activate(
         // Not drafted: the choice is the session's, and a profile holds no Game
         // identifiers.
         Operation::LayoutMaterial(material) => layout.material = material,
+        Operation::LayoutActive(axis) => {
+            layout.active = axis;
+            settings.typed = None;
+        }
         Operation::Replace => {
             if let Some((action, proposed, conflicts)) = settings.conflict.take()
                 && let Some(device) = device_of(&proposed)
@@ -485,7 +598,9 @@ fn activate(
                     p.layout.bump(axis, by);
                 }
                 Operation::LayoutGap(by) => p.layout.set_gap(by),
-                Operation::LayoutReverse(axis) => p.layout.reversed[axis] ^= true,
+                Operation::LayoutDirection(axis, direction) => {
+                    p.layout.set_direction(axis, direction)
+                }
                 _ => {}
             }
         }
@@ -750,8 +865,6 @@ pub(super) fn action_name(action: Action) -> &'static str {
         Layout => "Layout mode",
         LayoutMore => "Layout: more Voxels",
         LayoutLess => "Layout: fewer Voxels",
-        LayoutAlong => "Layout: change axis",
-        LayoutReverse => "Layout: reverse direction",
         LayoutShape => "Layout: line, rectangle or box",
         LayoutActive => "Layout: next axis",
         Catalogue => "Open Catalogue",
@@ -766,8 +879,7 @@ pub(super) fn category(action: Action) -> &'static str {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
         Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool
-        | Layout | LayoutMore | LayoutLess | LayoutAlong | LayoutReverse | LayoutShape
-        | LayoutActive => "Building",
+        | Layout | LayoutMore | LayoutLess | LayoutShape | LayoutActive => "Building",
         _ => "Interface",
     }
 }
@@ -793,7 +905,7 @@ pub(super) fn render(
     (labels, searches, active): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
-        Local<[Vec2; 4]>,
+        Local<[Vec2; 5]>,
         Local<Option<super::menu_ui::Tab>>,
         Local<String>,
     ),
@@ -808,6 +920,7 @@ pub(super) fn render(
             Tab::Behavior => 0,
             Tab::Bindings => 1,
             Tab::Controller => 3,
+            Tab::Layout => 4,
             _ => 2,
         };
         if let Some(scroll) = scrolls.iter().next() {
@@ -842,6 +955,7 @@ pub(super) fn render(
         Tab::Behavior => 0,
         Tab::Bindings => 1,
         Tab::Controller => 3,
+        Tab::Layout => 4,
         _ => 2,
     };
     commands
@@ -923,6 +1037,9 @@ fn page(
     let (bindings, p) = settings.draft.as_ref().unwrap();
     match settings.tab {
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
+        Tab::Layout => group(list, "LAYOUT", |card| {
+            layout_group(card, settings, p, (context.1, context.3, context.4))
+        }),
         Tab::Display => display(list, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
         Tab::Controller => controller(list, bindings, p, labels),
@@ -1260,9 +1377,6 @@ fn behavior(
             |row| switch(row, p.repeat_held, Operation::Repeat),
         );
     });
-    group(list, "LAYOUT", |card| {
-        layout_group(card, p, (context.1, context.3, context.4))
-    });
     group(list, "MOUSE & QUICK SLOTS", |card| {
         setting_row(
             card,
@@ -1341,8 +1455,22 @@ fn gap_description(gap: u32, voxel_size: f32) -> String {
     )
 }
 
+/// What a count row says: the total, the cap, and what is being typed.
+fn count_description(layout: &super::layout::LayoutPreferences, typed: Option<&str>) -> String {
+    let all = format!(
+        "{} Voxels in all. Most is {}.",
+        layout.total(layout.counts),
+        tesserae_core::layout::MAX_LAYOUT_VOXELS
+    );
+    match typed {
+        Some(digits) => format!("Typing {digits}_ for this axis. {all}"),
+        None => format!("{all} Choose Type, then enter a number."),
+    }
+}
+
 fn layout_group(
     card: &mut ChildSpawnerCommands,
+    settings: &Settings,
     p: &Preferences,
     (catalogue, world, mode): (
         &super::edit::Catalogue,
@@ -1375,32 +1503,45 @@ fn layout_group(
             })
         },
     );
-    for (axis, name) in ["Along", "Across", "Up"]
+    for (axis, name) in ["First axis", "Second axis", "Third axis"]
         .into_iter()
         .enumerate()
         .take(layout.form.axes())
     {
         setting_row(
             card,
-            name,
-            &format!(
-                "{} Voxels on this axis, {} in all. Most is {}.",
-                layout.counts[axis],
-                layout.total(layout.counts),
-                tesserae_core::layout::MAX_LAYOUT_VOXELS
-            ),
+            &format!("{name} direction"),
+            "One of the six ways along the World's axes; no two share an axis.",
             false,
             |row| {
                 segment(row, |buttons| {
+                    for direction in super::layout::Direction::ALL {
+                        option(
+                            buttons,
+                            direction.label(),
+                            Operation::LayoutDirection(axis, direction),
+                            layout.directions[axis] == direction,
+                        );
+                    }
+                })
+            },
+        );
+        setting_row(
+            card,
+            &format!("{name} count"),
+            &count_description(layout, settings.typed(axis)),
+            false,
+            |row| {
+                segment(row, |buttons| {
+                    option(
+                        buttons,
+                        "Type",
+                        Operation::LayoutActive(axis),
+                        mode.active == axis,
+                    );
                     option(buttons, "−", Operation::LayoutCount(axis, -1), false);
                     ui::text(buttons, layout.counts[axis].to_string(), 12.0, ui::INK);
                     option(buttons, "+", Operation::LayoutCount(axis, 1), false);
-                    option(
-                        buttons,
-                        "Reverse",
-                        Operation::LayoutReverse(axis),
-                        layout.reversed[axis],
-                    );
                 })
             },
         );
@@ -1417,6 +1558,11 @@ fn layout_group(
                 option(buttons, "+", Operation::LayoutGap(1), false);
             })
         },
+    );
+    ui::text(card, "Material", 13.0, ui::INK);
+    ui::description(
+        card,
+        "Lay the held Shape in this Material, or keep the held item. Not saved.",
     );
     card.spawn(Node {
         flex_wrap: FlexWrap::Wrap,
@@ -2166,8 +2312,6 @@ fn binding_order(action: Action) -> usize {
         Layout,
         LayoutMore,
         LayoutLess,
-        LayoutAlong,
-        LayoutReverse,
         LayoutShape,
         LayoutActive,
         Catalogue,
@@ -2261,17 +2405,17 @@ mod tests {
     }
     #[test]
     fn layout_choices_stay_in_the_draft_until_applied_and_then_persist() {
-        use super::super::layout::{Form, LayoutPreferences};
+        use super::super::layout::{Direction, Form, LayoutPreferences};
         let mut app = app();
         activate_operation(
             &mut app,
-            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+            Operation::Navigate(super::super::menu_ui::Tab::Layout),
         );
         for operation in [
             Operation::LayoutForm(Form::Box),
             Operation::LayoutCount(0, 2),
             Operation::LayoutGap(3),
-            Operation::LayoutReverse(1),
+            Operation::LayoutDirection(1, Direction::NegX),
         ] {
             activate_operation(&mut app, operation);
         }
@@ -2279,7 +2423,8 @@ mod tests {
             form: Form::Box,
             counts: [6, 3, 2],
             gap: 3,
-            reversed: [false, true, false],
+            // The second axis took X, so the first moved to Z.
+            directions: [Direction::PosZ, Direction::NegX, Direction::Up],
         };
         assert_eq!(
             app.world().resource::<Preferences>().layout,
@@ -2347,7 +2492,7 @@ mod tests {
     }
 
     #[test]
-    fn the_behavior_page_offers_every_layout_control_and_each_solid_material() {
+    fn the_layout_page_offers_every_control_and_each_solid_material() {
         use super::super::menu_ui::{Searches, Tab};
         let mut app = app();
         app.init_resource::<super::super::actions::Labels>()
@@ -2375,7 +2520,7 @@ mod tests {
             material(8, "stone", true, None),
             material(9, "water", false, Some(0)),
         ];
-        activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
+        activate_operation(&mut app, Operation::Navigate(Tab::Layout));
         app.update();
         let operations: Vec<_> = app
             .world_mut()
@@ -2385,7 +2530,10 @@ mod tests {
                 Operation::LayoutForm(form) => format!("form {form:?}"),
                 Operation::LayoutCount(axis, by) => format!("count {axis} {by}"),
                 Operation::LayoutGap(by) => format!("gap {by}"),
-                Operation::LayoutReverse(axis) => format!("reverse {axis}"),
+                Operation::LayoutDirection(axis, direction) => {
+                    format!("direction {axis} {}", direction.label())
+                }
+                Operation::LayoutActive(axis) => format!("active {axis}"),
                 Operation::LayoutMaterial(material) => format!("material {material:?}"),
                 _ => String::new(),
             })
@@ -2397,7 +2545,10 @@ mod tests {
             "form Box",
             "count 0 -1",
             "count 0 1",
-            "reverse 0",
+            "direction 0 +X",
+            "direction 0 Down",
+            "direction 0 -Z",
+            "active 0",
             "gap -1",
             "gap 1",
             "material None",
@@ -2410,8 +2561,115 @@ mod tests {
             "a line has one axis"
         );
         assert!(
+            !operations.iter().any(|name| name == "direction 1 +X"),
+            "nor a second direction"
+        );
+        assert!(
             !operations.iter().any(|name| name == "material Some(9)"),
             "a fluid is not a solid to lay"
+        );
+    }
+
+    #[test]
+    fn two_axes_never_share_a_dimension_whichever_direction_is_picked() {
+        use super::super::layout::{Direction, LayoutPreferences};
+        for axis in 0..3 {
+            for direction in Direction::ALL {
+                let mut layout = LayoutPreferences::default();
+                layout.set_direction(axis, direction);
+                assert_eq!(layout.directions[axis], direction);
+                assert!(layout.valid(), "{axis} {direction:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_typed_count_edits_the_active_axis_and_the_cap_refuses_a_big_one() {
+        let mut app = app();
+        app.add_systems(Update, type_count);
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Layout),
+        );
+        activate_operation(&mut app, Operation::LayoutActive(0));
+        let counts = |app: &App| {
+            app.world()
+                .resource::<Settings>()
+                .draft
+                .as_ref()
+                .unwrap()
+                .1
+                .layout
+                .counts
+        };
+        let press = |app: &mut App, key| {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+            app.update();
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(key);
+            keys.clear();
+        };
+        press(&mut app, KeyCode::Digit1);
+        press(&mut app, KeyCode::Digit2);
+        assert_eq!(counts(&app)[0], 12);
+        press(&mut app, KeyCode::Backspace);
+        assert_eq!(counts(&app)[0], 1);
+        press(&mut app, KeyCode::Enter);
+        // Two axes at 16 each fill the cap, so a typed 17 is refused.
+        activate_operation(
+            &mut app,
+            Operation::LayoutForm(super::super::layout::Form::Rectangle),
+        );
+        app.world_mut()
+            .resource_mut::<Settings>()
+            .draft
+            .as_mut()
+            .unwrap()
+            .1
+            .layout
+            .counts = [16, 16, 2];
+        press(&mut app, KeyCode::Digit1);
+        press(&mut app, KeyCode::Digit7);
+        assert_eq!(
+            counts(&app)[0],
+            1,
+            "17 by 16 passes the cap and is refused, leaving the 1 typed first"
+        );
+        assert!(!app.world().resource::<Settings>().notice.is_empty());
+    }
+
+    #[test]
+    fn turning_the_mode_on_opens_the_menu_on_the_layout_page_and_closing_it_keeps_the_mode() {
+        use super::super::layout::LayoutMode;
+        let mut app = app();
+        app.add_systems(Update, open_layout_menu);
+        app.world_mut().spawn((
+            Window::default(),
+            bevy::window::PrimaryWindow,
+            bevy::window::CursorOptions {
+                grab_mode: bevy::window::CursorGrabMode::Locked,
+                ..default()
+            },
+        ));
+        {
+            let mut mode = app.world_mut().resource_mut::<LayoutMode>();
+            mode.on = true;
+            mode.open_menu = true;
+        }
+        app.update();
+        let settings = app.world().resource::<Settings>();
+        assert!(settings.open);
+        assert_eq!(settings.tab, super::super::menu_ui::Tab::Layout);
+        activate_operation(&mut app, Operation::Back);
+        assert!(!app.world().resource::<Settings>().open);
+        assert!(app.world().resource::<LayoutMode>().on);
+        let mut cursors = app.world_mut().query::<&bevy::window::CursorOptions>();
+        assert_eq!(
+            cursors.single(app.world()).unwrap().grab_mode,
+            bevy::window::CursorGrabMode::None,
+            "the menu released the cursor"
         );
     }
 

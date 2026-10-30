@@ -148,6 +148,10 @@ Client sends one layout intent and the aim ray; the Server resolves the anchor,
 expands the geometry from `tesserae_core::layout`, judges reach and sight once
 for the whole layout, then lands its cells through the Edit budget after single
 Edits. Its preview is the Server's answer, never World storage.
+The shape, counts, gap and six-way directions are user preferences set on the
+Layout page of the settings, which opens when the mode turns on, through the
+same draft and Apply as every other preference; a Material picked there is the
+session's, since a profile holds no Game identifiers.
 
 Undo/redo owns at most 128 groups, 1024 before/after Occupants entries in all,
 and 16 queued requests on the integrated Server. A single Edit is a group of

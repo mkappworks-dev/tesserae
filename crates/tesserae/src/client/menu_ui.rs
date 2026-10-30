@@ -22,15 +22,17 @@ pub(super) enum Tab {
     Catalogue,
     #[default]
     Behavior,
+    Layout,
     Bindings,
     Controller,
     Display,
 }
 impl Tab {
     /// Page order in the header, which LB/RB also follow.
-    pub const ORDER: [Tab; 5] = [
+    pub const ORDER: [Tab; 6] = [
         Tab::Catalogue,
         Tab::Behavior,
+        Tab::Layout,
         Tab::Bindings,
         Tab::Controller,
         Tab::Display,
@@ -39,6 +41,7 @@ impl Tab {
         match self {
             Self::Catalogue => "Catalogue",
             Self::Behavior => "Behavior",
+            Self::Layout => "Layout",
             Self::Bindings => "Key bindings",
             Self::Controller => "Controller",
             Self::Display => "Display",
@@ -553,6 +556,7 @@ fn chrome(root: &mut ChildSpawnerCommands, tab: Tab, logo: &Handle<Image>) {
                     match tab {
                         Tab::Catalogue => "Materials and Shapes for your World.",
                         Tab::Behavior => "Tune how you move, look, and build.",
+                        Tab::Layout => "Lay out a line, rectangle or box of Voxels at once.",
                         Tab::Bindings => "Find an action and choose up to two bindings.",
                         Tab::Controller => "Tune the sticks and choose controller buttons.",
                         Tab::Display => "Choose frame pacing without changing visual quality.",

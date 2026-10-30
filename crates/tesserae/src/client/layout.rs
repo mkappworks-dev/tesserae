@@ -50,9 +50,60 @@ impl Form {
     }
 }
 
+/// One of the six ways along the World's axes a layout axis can grow.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum Direction {
+    PosX,
+    NegX,
+    Up,
+    Down,
+    PosZ,
+    NegZ,
+}
+impl Direction {
+    pub(super) const ALL: [Direction; 6] = [
+        Self::PosX,
+        Self::NegX,
+        Self::Up,
+        Self::Down,
+        Self::PosZ,
+        Self::NegZ,
+    ];
+    pub(super) fn dim(self) -> Dim {
+        match self {
+            Self::PosX | Self::NegX => Dim::X,
+            Self::Up | Self::Down => Dim::Y,
+            Self::PosZ | Self::NegZ => Dim::Z,
+        }
+    }
+    pub(super) fn positive(self) -> bool {
+        matches!(self, Self::PosX | Self::Up | Self::PosZ)
+    }
+    fn of(dim: Dim, positive: bool) -> Self {
+        match (dim, positive) {
+            (Dim::X, true) => Self::PosX,
+            (Dim::X, false) => Self::NegX,
+            (Dim::Y, true) => Self::Up,
+            (Dim::Y, false) => Self::Down,
+            (Dim::Z, true) => Self::PosZ,
+            (Dim::Z, false) => Self::NegZ,
+        }
+    }
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::PosX => "+X",
+            Self::NegX => "-X",
+            Self::Up => "Up",
+            Self::Down => "Down",
+            Self::PosZ => "+Z",
+            Self::NegZ => "-Z",
+        }
+    }
+}
+
 /// What a layout is, kept across restarts: the shape, how many Voxels along
-/// each axis, the gap between them and which axes run against the camera's
-/// own choice. Counts and gap are Voxels, so they mean the same at any Voxel
+/// each axis, which way each grows and the gap between Voxels. Counts and gap are Voxels, so they mean the same at any Voxel
 /// size; the menu shows the gap in metres.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -60,7 +111,8 @@ pub(crate) struct LayoutPreferences {
     pub form: Form,
     pub counts: [u32; 3],
     pub gap: u32,
-    pub reversed: [bool; 3],
+    /// One per axis, on three different dimensions.
+    pub directions: [Direction; 3],
 }
 impl Default for LayoutPreferences {
     fn default() -> Self {
@@ -68,7 +120,7 @@ impl Default for LayoutPreferences {
             form: Form::Line,
             counts: DEFAULT_COUNTS,
             gap: 0,
-            reversed: [false; 3],
+            directions: [Direction::PosX, Direction::PosZ, Direction::Up],
         }
     }
 }
@@ -85,12 +137,19 @@ impl LayoutPreferences {
             .all(|&c| (1..=MAX_LAYOUT_VOXELS as u32).contains(&c))
             && self.gap <= MAX_GAP
             && self.total(self.counts) <= MAX_LAYOUT_VOXELS
+            && (0..3).all(|i| (0..i).all(|j| self.directions[i].dim() != self.directions[j].dim()))
     }
     /// Steps one axis, refusing a count that passes the cap. Whether it was
     /// refused.
     pub(super) fn bump(&mut self, axis: usize, by: i32) -> bool {
+        let count = (self.counts[axis] as i32 + by).max(1) as u32;
+        self.set_count(axis, count)
+    }
+    /// Sets one axis's count outright, clamped to the cap on its own and
+    /// refused if all the axes together would pass it. Whether it was refused.
+    pub(super) fn set_count(&mut self, axis: usize, count: u32) -> bool {
         let mut counts = self.counts;
-        counts[axis] = (counts[axis] as i32 + by).clamp(1, MAX_LAYOUT_VOXELS as i32) as u32;
+        counts[axis] = count.clamp(1, MAX_LAYOUT_VOXELS as u32);
         if self.total(counts) > MAX_LAYOUT_VOXELS {
             return true;
         }
@@ -107,62 +166,44 @@ impl LayoutPreferences {
             self.counts[widest] -= 1;
         }
     }
+    /// Points an axis a new way. If another axis already runs on that
+    /// dimension the two trade dimensions, so no two ever share one.
+    pub(super) fn set_direction(&mut self, axis: usize, direction: Direction) {
+        let old = self.directions[axis];
+        if let Some(other) =
+            (0..3).find(|&j| j != axis && self.directions[j].dim() == direction.dim())
+        {
+            self.directions[other] = Direction::of(old.dim(), self.directions[other].positive());
+        }
+        self.directions[axis] = direction;
+    }
     pub(super) fn set_gap(&mut self, by: i32) {
         self.gap = (self.gap as i32 + by).clamp(0, MAX_GAP as i32) as u32;
     }
 }
 
-type Assignment = [(Dim, bool); 3];
-
 #[derive(Resource, Default)]
 pub(super) struct LayoutMode {
     pub(super) on: bool,
-    /// The axis the count and the reverse action act on.
-    active: usize,
-    /// Set once the Player rotates the axes; until then they follow the
-    /// camera: away from it, across it, then up.
-    manual: Option<Assignment>,
+    /// The axis the count keys act on.
+    pub(super) active: usize,
     /// The last increase was refused for passing the cap.
     refused: bool,
     /// A Material chosen in the menu, laid in the held Shape. Not saved: a
     /// profile holds no Game identifiers.
     pub(super) material: Option<tesserae_core::MaterialId>,
+    /// The mode was just turned on and its menu is yet to open.
+    pub(super) open_menu: bool,
     commit: bool,
     was_grabbed: bool,
 }
 impl LayoutMode {
-    fn assignment(&self, camera: &GlobalTransform) -> Assignment {
-        self.manual.unwrap_or_else(|| {
-            let (forward, right) = (*camera.forward(), *camera.right());
-            let (along, ahead) = if forward.x.abs() >= forward.z.abs() {
-                (Dim::X, forward.x >= 0.0)
-            } else {
-                (Dim::Z, forward.z >= 0.0)
-            };
-            let (across, side) = if along == Dim::X {
-                (Dim::Z, right.z >= 0.0)
-            } else {
-                (Dim::X, right.x >= 0.0)
-            };
-            [(along, ahead), (across, side), (Dim::Y, true)]
-        })
-    }
-    /// The axes as laid out: the camera's or the rotated choice, then the
-    /// saved reversals.
-    fn directions(&self, layout: &LayoutPreferences, camera: &GlobalTransform) -> Assignment {
-        let mut assignment = self.assignment(camera);
-        for (axis, reversed) in assignment.iter_mut().zip(layout.reversed) {
-            axis.1 ^= reversed;
-        }
-        assignment
-    }
-    fn params(&self, layout: &LayoutPreferences, camera: &GlobalTransform) -> LayoutParams {
-        let directions = self.directions(layout, camera);
+    fn params(&self, layout: &LayoutPreferences) -> LayoutParams {
         LayoutParams {
             axes: std::array::from_fn(|i| {
                 (i < layout.form.axes()).then(|| LayoutAxis {
-                    dim: directions[i].0,
-                    positive: directions[i].1,
+                    dim: layout.directions[i].dim(),
+                    positive: layout.directions[i].positive(),
                     count: layout.counts[i],
                 })
             }),
@@ -172,49 +213,37 @@ impl LayoutMode {
     }
 }
 
-fn dim_name(dim: Dim, positive: bool) -> &'static str {
-    match (dim, positive) {
-        (Dim::X, true) => "+X",
-        (Dim::X, false) => "-X",
-        (Dim::Y, true) => "up",
-        (Dim::Y, false) => "down",
-        (Dim::Z, true) => "+Z",
-        (Dim::Z, false) => "-Z",
-    }
-}
-
 /// Takes the placement actions while the mode is on and moves the mode's own
-/// state: toggle, form, counts, axes, cancel and commit.
+/// state: toggle, form, counts, the active axis, cancel and commit.
 pub(super) fn intercept(
     ownership: Res<Ownership>,
     mut actions: ResMut<Actions>,
     mut mode: ResMut<LayoutMode>,
     mut preferences: ResMut<Preferences>,
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
-    camera: Single<&GlobalTransform, With<FlyCamera>>,
 ) {
     // The click that grabs the cursor is not also a commit.
     let grabbed = cursor.grab_mode == CursorGrabMode::Locked;
     let ready = grabbed && mode.was_grabbed;
     mode.was_grabbed = grabbed;
     mode.commit = false;
+    // A menu, a lost focus or a device change never commits, but they leave
+    // the mode on: the Layout menu is one of them.
     if !ownership.gameplay() {
-        mode.on = false;
         return;
     }
     if actions.started(Action::Layout) {
         mode.on = !mode.on;
-        mode.manual = None;
+        mode.open_menu = mode.on;
     }
     if !mode.on {
         return;
     }
-    // A pad has no spare buttons: while the mode is on its D-pad turns and
-    // flips, and its empty-hand button, steer the layout instead. A keyboard
-    // keeps those for the Shape and has its own keys.
+    // A pad has no spare buttons: while the mode is on its D-pad turn button
+    // picks the axis and its empty-hand button the shape. A keyboard keeps
+    // those for the Shape and has its own keys.
     let pad = |action| actions.started(action) && actions.state(action).from_pad;
-    let (pad_active, pad_reverse, pad_form) =
-        (pad(Action::Turn), pad(Action::Flip), pad(Action::EmptyHand));
+    let (pad_active, pad_form) = (pad(Action::Turn), pad(Action::EmptyHand));
     // Written only on a change, so the profile is not marked changed by every
     // frame the mode is on.
     let mut layout = preferences.layout.clone();
@@ -232,14 +261,6 @@ pub(super) fn intercept(
     if actions.started(Action::LayoutActive) || pad_active {
         mode.active = (mode.active + 1) % layout.form.axes();
     }
-    if actions.started(Action::LayoutAlong) {
-        // Rotated from what the camera shows now, keeping each position's sense.
-        let [a, b, c] = mode.assignment(&camera);
-        mode.manual = Some([(b.0, a.1), (c.0, b.1), (a.0, c.1)]);
-    }
-    if actions.started(Action::LayoutReverse) || pad_reverse {
-        layout.reversed[mode.active] ^= true;
-    }
     if layout != preferences.layout {
         preferences.layout = layout;
     }
@@ -256,11 +277,7 @@ pub(super) fn intercept(
     ] {
         actions.cancel(action);
     }
-    for (action, taken) in [
-        (Action::Turn, pad_active),
-        (Action::Flip, pad_reverse),
-        (Action::EmptyHand, pad_form),
-    ] {
+    for (action, taken) in [(Action::Turn, pad_active), (Action::EmptyHand, pad_form)] {
         if taken {
             actions.cancel(action);
         }
@@ -294,7 +311,7 @@ fn current(
         origin: camera.translation(),
         direction: *camera.forward(),
         voxel: held_voxel(mode, hotbar)?,
-        layout: mode.params(layout, camera),
+        layout: mode.params(layout),
     })
 }
 
@@ -467,17 +484,20 @@ pub(super) fn readout(
         return;
     }
     let layout = &preferences.layout;
-    let directions = mode.directions(layout, &camera);
     let keys = |action| bindings.label(action, &labels);
     let axes: Vec<String> = (0..layout.form.axes())
         .map(|i| {
-            let (dim, positive) = directions[i];
             let marker = if i == mode.active && layout.form != Form::Line {
                 "*"
             } else {
                 ""
             };
-            format!("{}{} {}", marker, layout.counts[i], dim_name(dim, positive))
+            format!(
+                "{}{} {}",
+                marker,
+                layout.counts[i],
+                layout.directions[i].label()
+            )
         })
         .collect();
     let head = format!("Layout: {:?} {}", layout.form, axes.join(" x "));
@@ -665,7 +685,7 @@ mod tests {
         assert_eq!(intent.voxel, rock());
         assert_eq!(count(&intent), DEFAULT_COUNTS[0]);
         let axis = intent.layout.axes[0].unwrap();
-        assert_eq!((axis.dim, axis.positive), (Dim::Z, false));
+        assert_eq!((axis.dim, axis.positive), (Dim::X, true));
         assert_eq!(intent.direction, Vec3::NEG_Z);
         assert!(mode(&app).on, "the mode stays on for the next layout");
     }
@@ -710,21 +730,24 @@ mod tests {
     }
 
     #[test]
-    fn axis_and_direction_are_taken_over_from_the_camera_once_chosen() {
+    fn the_saved_directions_decide_the_layout_and_the_camera_does_not() {
+        use super::super::layout::Direction;
         let mut app = app();
         key(&mut app, KeyCode::KeyL);
-        key(&mut app, KeyCode::KeyT);
-        let [intent] = click(&mut app, MouseButton::Right)[..] else {
-            panic!("one intent");
-        };
-        let axis = intent.layout.axes[0].unwrap();
-        assert_eq!((axis.dim, axis.positive), (Dim::Z, true), "reversed");
-        key(&mut app, KeyCode::KeyB);
-        let [intent] = click(&mut app, MouseButton::Right)[..] else {
-            panic!("one intent");
-        };
-        let axis = intent.layout.axes[0].unwrap();
-        assert_eq!((axis.dim, axis.positive), (Dim::X, true), "next axis");
+        saved_mut(&mut app).layout.directions = [Direction::NegZ, Direction::Down, Direction::PosX];
+        let intent = commit(&mut app);
+        assert_eq!(dims(&intent), [(Dim::Z, false, 4)]);
+        assert_eq!(intent.direction, Vec3::NEG_Z, "the camera looks down -Z");
+        // Turning to look the other way changes the ray, not the direction.
+        let mut cameras = app
+            .world_mut()
+            .query::<(&mut GlobalTransform, &FlyCamera)>();
+        *cameras.single_mut(app.world_mut()).unwrap().0 = GlobalTransform::from(
+            Transform::from_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
+        );
+        let intent = commit(&mut app);
+        assert_eq!(dims(&intent), [(Dim::Z, false, 4)]);
+        assert!(intent.direction.dot(Vec3::Z) > 0.999);
     }
 
     #[test]
@@ -739,14 +762,18 @@ mod tests {
     }
 
     #[test]
-    fn leaving_gameplay_cancels_the_mode_and_a_return_does_not_commit() {
+    fn leaving_gameplay_keeps_the_mode_and_a_return_does_not_commit() {
         let mut app = app();
         key(&mut app, KeyCode::KeyL);
         app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Catalogue;
         step(&mut app);
-        assert!(!mode(&app).on);
+        assert!(mode(&app).on, "the Layout menu is one of these contexts");
+        assert!(
+            click(&mut app, MouseButton::Right).is_empty(),
+            "a Place in a menu is never a commit"
+        );
         app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Gameplay;
-        assert!(click(&mut app, MouseButton::Right).is_empty());
+        assert_eq!(click(&mut app, MouseButton::Right).len(), 1, "back in play");
     }
 
     #[test]
@@ -814,28 +841,27 @@ mod tests {
         key(&mut app, KeyCode::KeyH);
         assert_eq!(
             dims(&commit(&mut app)),
-            [(Dim::Z, false, 4), (Dim::X, true, 3)]
+            [(Dim::X, true, 4), (Dim::Z, true, 3)]
         );
         key(&mut app, KeyCode::KeyH);
         assert_eq!(
             dims(&commit(&mut app)),
-            [(Dim::Z, false, 4), (Dim::X, true, 3), (Dim::Y, true, 2)]
+            [(Dim::X, true, 4), (Dim::Z, true, 3), (Dim::Y, true, 2)]
         );
         key(&mut app, KeyCode::KeyH);
         assert_eq!(dims(&commit(&mut app)).len(), 1, "back to a line");
     }
 
     #[test]
-    fn counts_act_on_the_active_axis_and_the_reverse_flips_only_that_axis() {
+    fn counts_act_on_the_active_axis() {
         let mut app = app();
         key(&mut app, KeyCode::KeyL);
         key(&mut app, KeyCode::KeyH);
         key(&mut app, KeyCode::KeyJ);
         key(&mut app, KeyCode::BracketRight);
-        key(&mut app, KeyCode::KeyT);
         assert_eq!(
             dims(&commit(&mut app)),
-            [(Dim::Z, false, 4), (Dim::X, false, 4)]
+            [(Dim::X, true, 4), (Dim::Z, true, 4)]
         );
     }
 
@@ -859,17 +885,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pad_cycles_the_axis_flips_it_and_changes_the_shape_without_the_keyboard() {
+    fn a_pad_cycles_the_axis_and_changes_the_shape_without_the_keyboard() {
         let mut app = app();
         tap(&mut app, GamepadButton::C);
         tap(&mut app, GamepadButton::DPadDown);
         tap(&mut app, GamepadButton::DPadLeft);
-        tap(&mut app, GamepadButton::DPadRight);
         assert_eq!(saved(&app).form, Form::Rectangle);
         assert_eq!(mode(&app).active, 1);
         assert_eq!(
             dims(&commit_pad(&mut app)),
-            [(Dim::Z, false, 4), (Dim::X, false, 3)]
+            [(Dim::X, true, 4), (Dim::Z, true, 3)]
         );
     }
 

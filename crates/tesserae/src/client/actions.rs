@@ -51,8 +51,6 @@ pub(super) enum Action {
     Layout,
     LayoutMore,
     LayoutLess,
-    LayoutAlong,
-    LayoutReverse,
     LayoutShape,
     LayoutActive,
     Catalogue,
@@ -287,8 +285,6 @@ impl Bindings {
             (Help, KeyCode::KeyI),
             (Diagnostics, KeyCode::F3),
             (Layout, KeyCode::KeyL),
-            (LayoutAlong, KeyCode::KeyB),
-            (LayoutReverse, KeyCode::KeyT),
             (LayoutShape, KeyCode::KeyH),
             (LayoutActive, KeyCode::KeyJ),
         ]
