@@ -1,6 +1,6 @@
 # 34: W1.1: RSS grows about 3 MB per World session
 
-Status: needs-triage
+Status: ready-for-human
 Blocked by: 30
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -34,3 +34,51 @@ repeat on Windows and Linux. Needs a longer soak (30+ cycles) to tell a
 plateau from a leak before any fix.
 
 ## Comments
+
+### Measured and triaged 2026-10-31
+
+Numbers, method, scripts:
+[issue-34/research.md](../issue-34/research.md).
+Nothing was fixed; instrumentation is saved as a patch and reverted.
+
+- Reproduced on `feat/world-session-memory`: RSS cycle 2 to 10 rose 2.7%,
+  4.6%, 4.9% and 8.3% in four release runs, so the 5% line is noise at ten
+  cycles. 100 cycles: 519 to 628 MB, still about 1 MB a cycle from 40 to 100,
+  slowing but no plateau. Longer sessions (600 frames, not 120) raise it to
+  about 7 MB a cycle: it follows work done in a session.
+- Not session code: entities, resources, meshes and images flat; `leaks`
+  finds 0 leaks; the Rust live heap rises 0.07 MB a cycle (7.4 MB in 100).
+- About 85% of the malloc growth is memory malloc holds but nothing uses
+  (+110 MB zone-allocated beyond live, 100 cycles); `malloc_zone_pressure_
+  relief` frees 0. Live non-Rust malloc rises about 11 MB: Apple's FramePacing
+  and IOGPU command-buffer pools. wgpu keeps creating about 60 buffers and 120
+  bind groups a cycle that stay live (under 1 MB). IOAccelerator memory shows
+  no trend.
+- Mod memory is not the cause: a new wasmtime `Engine` per load (not cached;
+  `server/mods.rs:334`) drops cleanly, live bytes flat, RSS +10 to 12 MB once
+  and level by the tenth load.
+- A stale `demo.wasm` makes every open fail at `declare` and return to the
+  list; the soak still counts those cycles. Rebuild the demo before a soak.
+
+Recommendation: accept as a documented cost and close. There is no bounded
+fix in our code that moves the number: the growth is allocator retention
+around Apple's Metal pools. Replace ticket 30's RSS line with one that tests
+what we own, and record the cost in the validation note.
+
+Acceptance criteria if closed this way (small docs and test change, no
+teardown edit):
+
+- [ ] Ticket 30's criterion reads: entities, resources, meshes, images and
+      Rust live bytes within 1% of cycle 2 after cycle 10, from the soak
+      harness; RSS recorded, not gated.
+- [ ] Validation note states about 1 MB a cycle after cycle 40, no plateau
+      by 100 cycles, and that it is allocator retention plus Apple pools.
+
+Optional bounded PR, only if the user wants the 0.07 MB a cycle and the wgpu
+object climb chased: find what holds the extra buffers and bind groups (Bevy
+render world or wgpu-core) and whether they drop with their assets; accept if
+the `create_buffer` and `create_bind_group` live counts are flat between
+cycles 3 and 25 in `malloc_history`. Touch no job or Chunk teardown:
+`tech/streaming-performance` edits `server/jobs.rs`, `streaming.rs` and
+`client/chunk_view.rs`; re-baseline after it merges. Ticket 31 reworks only
+the discovery layout around `load_with_opening`; no Engine cache is needed.
