@@ -1,0 +1,213 @@
+diff --git a/crates/tesserae-mods/examples/t34_engine.rs b/crates/tesserae-mods/examples/t34_engine.rs
+new file mode 100644
+index 0000000..76a6c70
+--- /dev/null
++++ b/crates/tesserae-mods/examples/t34_engine.rs
+@@ -0,0 +1,62 @@
++// [DEBUG-t34] throwaway: Mod load and drop in a loop, outside Bevy.
++use std::path::PathBuf;
++use tesserae_mods::{ModHost, Trust, discover, plan};
++
++#[repr(C)]
++#[derive(Default)]
++struct Stats {
++    blocks: u32,
++    in_use: usize,
++    max: usize,
++    allocated: usize,
++}
++unsafe extern "C" {
++    fn malloc_zone_statistics(zone: *mut std::ffi::c_void, s: *mut Stats);
++}
++
++fn rss_mb() -> u64 {
++    let out = std::process::Command::new("ps")
++        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
++        .output()
++        .unwrap();
++    String::from_utf8(out.stdout).unwrap().trim().parse::<u64>().unwrap() / 1024
++}
++
++fn main() {
++    let mut args = std::env::args().skip(1);
++    let dir = PathBuf::from(args.next().unwrap());
++    let mode = args.next().unwrap();
++    let n: u32 = args.next().unwrap().parse().unwrap();
++    let trust_file = std::env::temp_dir().join(format!("t34-trust-{}.json", std::process::id()));
++    for i in 0..=n {
++        match mode.as_str() {
++            "engine" => drop(ModHost::new().unwrap()),
++            _ => {
++                let found = plan(discover(&dir).unwrap()).unwrap();
++                let mut trust = Trust::load(&trust_file);
++                for f in &found {
++                    trust.grant_for_run(f).unwrap();
++                }
++                let host = ModHost::new().unwrap();
++                let compiled = host.load(found, &trust).unwrap();
++                if mode == "full" {
++                    futures_lite::future::block_on(async {
++                        for c in &compiled {
++                            let inst = host.instantiate(c, 1).await.unwrap();
++                            let (inst, _decl) = inst.declare().await.unwrap();
++                            drop(inst);
++                        }
++                    });
++                }
++            }
++        }
++        let mut s = Stats::default();
++        unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut s) };
++        println!(
++            "{mode} {i} rss_mb={} in_use_mb={:.1} zone_mb={:.1}",
++            rss_mb(),
++            s.in_use as f64 / 1048576.0,
++            s.allocated as f64 / 1048576.0
++        );
++    }
++}
+diff --git a/crates/tesserae/src/client/soak.rs b/crates/tesserae/src/client/soak.rs
+index bddd653..3af566e 100644
+--- a/crates/tesserae/src/client/soak.rs
++++ b/crates/tesserae/src/client/soak.rs
+@@ -67,6 +67,13 @@ fn soak(world: &mut World) {
+     if state == AppState::List && frames == LIST_FRAMES - 5 {
+         shoot(world, format!("list-{cycle}.png"));
+     }
++    if state == AppState::InWorld
++        && std::env::var_os("T34_PERIODIC").is_some()
++        && frames % 600 == 0
++        && world.contains_resource::<TerrainArrived>()
++    {
++        t34::line(&format!("inworld{:06}", frames));
++    }
+     match state {
+         AppState::InWorld if frames % 240 == 0 && !world.contains_resource::<TerrainArrived>() => {
+             let status = world.get_resource::<crate::server::persistence::SaveStatus>();
+@@ -79,8 +86,11 @@ fn soak(world: &mut World) {
+             );
+         }
+         AppState::InWorld if world.contains_resource::<TerrainArrived>() => {
+-            if frames >= SETTLE_FRAMES {
++            if frames >= std::env::var("T34_SETTLE").ok().and_then(|n| n.parse().ok()).unwrap_or(SETTLE_FRAMES)
++                && std::env::var_os("T34_PERIODIC").is_none()
++            {
+                 world.resource_mut::<Soak>().frames = 0;
++                eprintln!("[DEBUG-t34] left a World after terrain, cycle {cycle}");
+                 world.resource_mut::<Switch>().0 = Some(Target::List);
+                 world.write_message(SaveAction::SaveQuit);
+             }
+@@ -126,4 +136,113 @@ fn report(world: &World) {
+         count(world.get_resource::<Assets<Image>>().map(|a| a.len())),
+         rss_kb / 1024,
+     );
++    t34::line(&format!("cycle{:03}", world.resource::<Soak>().cycle));
++}
++
++// [DEBUG-t34] temporary instrumentation, reverted before finishing.
++mod t34 {
++    use std::alloc::{GlobalAlloc, Layout, System};
++    use std::sync::atomic::{AtomicI64, AtomicU64, Ordering::Relaxed};
++
++    pub static LIVE: AtomicI64 = AtomicI64::new(0);
++    pub static COUNT: AtomicU64 = AtomicU64::new(0);
++
++    pub struct Counting;
++    unsafe impl GlobalAlloc for Counting {
++        unsafe fn alloc(&self, l: Layout) -> *mut u8 {
++            LIVE.fetch_add(l.size() as i64, Relaxed);
++            COUNT.fetch_add(1, Relaxed);
++            unsafe { System.alloc(l) }
++        }
++        unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
++            LIVE.fetch_sub(l.size() as i64, Relaxed);
++            unsafe { System.dealloc(p, l) }
++        }
++        unsafe fn alloc_zeroed(&self, l: Layout) -> *mut u8 {
++            LIVE.fetch_add(l.size() as i64, Relaxed);
++            COUNT.fetch_add(1, Relaxed);
++            unsafe { System.alloc_zeroed(l) }
++        }
++        unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 {
++            LIVE.fetch_add(n as i64 - l.size() as i64, Relaxed);
++            COUNT.fetch_add(1, Relaxed);
++            unsafe { System.realloc(p, l, n) }
++        }
++    }
++
++    #[repr(C)]
++    #[derive(Default)]
++    struct MallocStats {
++        blocks: u32,
++        in_use: usize,
++        max_in_use: usize,
++        allocated: usize,
++    }
++    unsafe extern "C" {
++        fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut MallocStats);
++        fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
++    }
++
++    pub fn rss_mb() -> u64 {
++        std::process::Command::new("ps")
++            .args(["-o", "rss=", "-p", &std::process::id().to_string()])
++            .output()
++            .ok()
++            .and_then(|o| String::from_utf8(o.stdout).ok())
++            .and_then(|s| s.trim().parse::<u64>().ok())
++            .unwrap_or(0)
++            / 1024
++    }
++
++    pub fn line(tag: &str) {
++        if std::env::var_os("T34_RELIEF").is_some() {
++            let before = rss_mb();
++            let freed = unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
++            eprintln!(
++                "[DEBUG-t34] {tag} relief rss_before_mb={before} rss_after_mb={} freed_mb={}",
++                rss_mb(),
++                freed / 1048576
++            );
++        }
++        let mut st = MallocStats::default();
++        unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut st) };
++        let mb = |b: usize| b as f64 / 1048576.0;
++        eprintln!(
++            "[DEBUG-t34] {tag} rust_live_mb={:.1} rust_allocs={} malloc_in_use_mb={:.1} malloc_zone_allocated_mb={:.1} blocks={}",
++            LIVE.load(Relaxed) as f64 / 1048576.0,
++            COUNT.load(Relaxed),
++            mb(st.in_use),
++            mb(st.allocated),
++            st.blocks,
++        );
++        if let Some(dir) = std::env::var_os("T34_OUT") {
++            let pid = std::process::id().to_string();
++            let dir = std::path::PathBuf::from(dir);
++            let heavy = std::env::var("T34_HEAP")
++                .is_ok_and(|list| list.split(',').any(|c| tag == format!("cycle{:03}", c.parse::<u32>().unwrap_or(9999))));
++            let mut tools = vec![("vmmap", vec!["-summary"]), ("footprint", vec![])];
++            if heavy {
++                tools.push(("heap", vec!["-sortBySize"]));
++                tools.push(("leaks", vec![]));
++                if std::env::var_os("MallocStackLogging").is_some() {
++                    tools.push(("malloc_history", vec!["PID", "-allBySize"]));
++                }
++            }
++            for (tool, args) in tools {
++                let mut cmd = std::process::Command::new(tool);
++                if args.contains(&"PID") {
++                    cmd.args(args.iter().map(|a| if *a == "PID" { pid.as_str() } else { a }));
++                } else {
++                    cmd.args(&args).arg(&pid);
++                }
++                let out = cmd.output();
++                if let Ok(out) = out {
++                    let _ = std::fs::write(dir.join(format!("{tool}-{tag}.txt")), out.stdout);
++                }
++            }
++        }
++    }
+ }
++
++#[global_allocator]
++static T34_ALLOC: t34::Counting = t34::Counting;
