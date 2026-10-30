@@ -16,6 +16,9 @@ pub(super) struct Progress {
     duration: f32,
     consumed: bool,
     tap: bool,
+    /// A removal completed in this hold under "Repeat while held".
+    chain: bool,
+    removed: Option<AimRemoval>,
     was_grabbed: bool,
 }
 impl Progress {
@@ -25,6 +28,10 @@ impl Progress {
     fn reset(&mut self) {
         self.target = None;
         self.elapsed = 0.0;
+    }
+    fn stop_chain(&mut self) {
+        self.chain = false;
+        self.removed = None;
     }
     fn advance(
         &mut self,
@@ -146,23 +153,24 @@ pub(super) fn hold(
     let state = actions.state(Action::Remove);
     let selection_changed = *previous_hand != *hotbar;
     *previous_hand = hotbar.clone();
-    let tap_interrupted = preferences.tap_remove
-        && (selection_changed
-            || [
-                Action::Sample,
-                Action::EmptyHand,
-                Action::Shape,
-                Action::Turn,
-                Action::Flip,
-                Action::Respawn,
-            ]
-            .into_iter()
-            .chain(SLOTS)
-            .any(|action| actions.started(action)));
+    let hand_edited = selection_changed
+        || [
+            Action::Sample,
+            Action::EmptyHand,
+            Action::Shape,
+            Action::Turn,
+            Action::Flip,
+            Action::Respawn,
+        ]
+        .into_iter()
+        .chain(SLOTS)
+        .any(|action| actions.started(action));
+    let repeating = preferences.repeat_held && !preferences.tap_remove;
     let interrupted = actions.held(Action::Place)
         || actions.started(Action::Undo)
         || actions.started(Action::Redo)
-        || tap_interrupted;
+        || (preferences.tap_remove && hand_edited)
+        || (repeating && progress.chain && hand_edited);
     if !ownership.gameplay()
         || hotbar.held().tool().is_some()
         || state.cancelled
@@ -172,6 +180,7 @@ pub(super) fn hold(
         || history_requested
     {
         progress.reset();
+        progress.stop_chain();
         progress.tap = false;
         progress.consumed = true;
         return;
@@ -195,6 +204,7 @@ pub(super) fn hold(
         progress.tap = false;
         if !state.held || state.released {
             progress.reset();
+            progress.stop_chain();
             progress.consumed = false;
             return;
         }
@@ -211,12 +221,32 @@ pub(super) fn hold(
         progress.consumed = true;
         return;
     }
+    if progress.chain {
+        if wanted.is_none() {
+            progress.reset();
+            progress.stop_chain();
+            progress.consumed = true;
+            return;
+        }
+        // The Server's answer can lag the removal, still naming the Voxel just
+        // taken; waiting for a different target keeps that from being re-sent.
+        if wanted == progress.removed {
+            progress.reset();
+            return;
+        }
+    }
     let duration = wanted
         .and_then(|r| catalogue.0.material(r.material))
         .map_or(tesserae_mods::DEFAULT_REMOVE_TIME, |m| m.remove_time)
         .as_secs_f32();
     if let Some(target) = progress.advance(wanted, duration, time.delta_secs()) {
         progress.tap = false;
+        if repeating {
+            progress.reset();
+            progress.consumed = false;
+            progress.chain = true;
+            progress.removed = Some(target);
+        }
         intents.write(EditIntent {
             action: EditAction::RemoveAt(target),
             origin: camera.translation(),
@@ -568,5 +598,189 @@ mod tests {
         assert_eq!(sent.len(), 1);
         assert_eq!(sent[0].action, EditAction::RemoveAt(target(0)));
         assert!(step(&mut app, 1.0).is_empty(), "one action per hold");
+    }
+
+    fn repeating() -> App {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .repeat_held = true;
+        step(&mut app, 0.0);
+        step(&mut app, 0.0);
+        app
+    }
+
+    /// Steps `seconds` at `hz`, answering each removal with the next Voxel
+    /// the way the Server's aim does, and returns when each intent was sent.
+    fn run(app: &mut App, hz: u32, seconds: f32) -> Vec<f32> {
+        let mut times = Vec::new();
+        let mut removed = 0;
+        for frame in 1..=(seconds * hz as f32) as u32 {
+            if !step(app, 1.0 / hz as f32).is_empty() {
+                removed += 1;
+                app.world_mut().resource_mut::<Target>().0.removal = Some(target(removed));
+                times.push(frame as f32 / hz as f32);
+            }
+        }
+        times
+    }
+
+    fn press_left(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+    }
+
+    #[test]
+    fn a_held_removal_restarts_with_its_full_duration_at_any_rate() {
+        let duration = tesserae_mods::DEFAULT_REMOVE_TIME.as_secs_f32();
+        let mut counts = Vec::new();
+        for hz in [60, 144, 1000] {
+            let mut app = repeating();
+            press_left(&mut app);
+            let times = run(&mut app, hz, 2.0);
+            let frame = 1.0 / hz as f32;
+            assert!(times[0] + 1e-4 >= duration, "{hz} Hz: {times:?}");
+            for pair in times.windows(2) {
+                assert!(pair[1] - pair[0] + 1e-4 >= duration, "{hz} Hz: {times:?}");
+                assert!(pair[1] - pair[0] <= duration + 2.0 * frame + 1e-4);
+            }
+            counts.push(times.len());
+        }
+        assert_eq!(counts, [5, 5, 5]);
+    }
+
+    #[test]
+    fn a_repeat_waits_for_a_new_target_and_never_reuses_the_removed_one() {
+        let mut app = repeating();
+        press_left(&mut app);
+        assert_eq!(step(&mut app, 0.1).len(), 0);
+        assert_eq!(step(&mut app, 0.4).len(), 1);
+        assert!(step(&mut app, 2.0).is_empty(), "the aim has not moved on");
+        app.world_mut().resource_mut::<Target>().0.removal = Some(target(1));
+        assert!(step(&mut app, 0.0).is_empty());
+        assert!(step(&mut app, 0.3).is_empty(), "no carried progress");
+        assert_eq!(step(&mut app, 0.1).len(), 1);
+    }
+
+    #[test]
+    fn it_is_off_by_default_and_in_timed_tap_mode() {
+        for tap in [false, true] {
+            let mut app = app();
+            {
+                let mut preferences = app
+                    .world_mut()
+                    .resource_mut::<super::super::profile::Preferences>();
+                preferences.tap_remove = tap;
+                preferences.repeat_held = tap;
+            }
+            step(&mut app, 0.0);
+            step(&mut app, 0.0);
+            press_left(&mut app);
+            step(&mut app, 0.0);
+            if tap {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<MouseButton>>()
+                    .release(MouseButton::Left);
+            }
+            assert_eq!(run(&mut app, 100, 3.0).len(), 1, "tap={tap}");
+        }
+    }
+
+    #[test]
+    fn every_cancellation_route_stops_the_chain_until_a_fresh_press() {
+        type Route = (&'static str, fn(&mut App));
+        let key = |app: &mut App, key| {
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(key);
+        };
+        let _ = key;
+        let routes: [Route; 12] = [
+            ("release", |app| {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<MouseButton>>()
+                    .release(MouseButton::Left);
+            }),
+            ("lost target", |app| {
+                app.world_mut().resource_mut::<Target>().0.removal = None;
+            }),
+            ("menu", |app| {
+                app.world_mut().resource_mut::<Menu>().open = true
+            }),
+            ("cursor", |app| {
+                let mut cursor = app.world_mut().query::<&mut CursorOptions>();
+                cursor.single_mut(app.world_mut()).unwrap().grab_mode = CursorGrabMode::None;
+            }),
+            ("focus", |app| {
+                app.world_mut()
+                    .insert_resource(super::super::input::Ownership::default());
+            }),
+            ("slot", |app| {
+                app.world_mut()
+                    .resource_mut::<super::super::edit::Hotbar>()
+                    .selected = 1;
+            }),
+            ("sample", |app| {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::KeyP);
+            }),
+            ("empty hand", |app| {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::KeyX);
+            }),
+            ("shape", |app| {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::KeyF);
+            }),
+            ("orientation", |app| {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<KeyCode>>()
+                    .press(KeyCode::KeyQ);
+            }),
+            ("undo", |app| {
+                let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                keys.press(KeyCode::ControlLeft);
+                keys.press(KeyCode::KeyZ);
+            }),
+            ("history", |app| {
+                app.world_mut()
+                    .write_message(crate::server::undo::HistoryAction::Undo);
+            }),
+        ];
+        for (name, interrupt) in routes {
+            let mut app = repeating();
+            press_left(&mut app);
+            assert_eq!(
+                run(&mut app, 100, 0.5).len(),
+                1,
+                "{name}: one removal first"
+            );
+            interrupt(&mut app);
+            step(&mut app, 0.01);
+            // `run_system_once` rereads a message until the buffer is cleared.
+            app.world_mut()
+                .resource_mut::<Messages<crate::server::undo::HistoryAction>>()
+                .clear();
+            // Whatever the route took away is given back; only the chain's
+            // own memory of being stopped can still hold it.
+            app.world_mut()
+                .insert_resource(super::super::input::Ownership::playing());
+            app.world_mut().resource_mut::<Menu>().open = false;
+            let mut cursor = app.world_mut().query::<&mut CursorOptions>();
+            cursor.single_mut(app.world_mut()).unwrap().grab_mode = CursorGrabMode::Locked;
+            app.world_mut().resource_mut::<Target>().0.removal = Some(target(9));
+            assert!(run(&mut app, 100, 2.0).is_empty(), "{name} stops the chain");
+            let mut buttons = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+            buttons.release_all();
+            buttons.clear();
+            step(&mut app, 0.0);
+            press_left(&mut app);
+            step(&mut app, 0.0);
+            assert_eq!(run(&mut app, 100, 0.5).len(), 1, "{name}: a fresh press");
+        }
     }
 }

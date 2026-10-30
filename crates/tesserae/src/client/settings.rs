@@ -100,6 +100,7 @@ pub(super) enum Operation {
     CancelConflict,
     Sprint(bool),
     Removal(bool),
+    Repeat,
     Invert,
     PadInvert,
     PadCrouch(bool),
@@ -453,6 +454,7 @@ fn activate(
                 Operation::PadCrouch(value) => p.pad.toggle_crouch = value,
                 Operation::Sprint(value) => p.toggle_sprint = value,
                 Operation::Removal(value) => p.tap_remove = value,
+                Operation::Repeat => p.repeat_held = !p.repeat_held,
                 Operation::Invert => p.invert_y = !p.invert_y,
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,
@@ -1202,6 +1204,13 @@ fn behavior(
                     option(buttons, "Timed tap", Operation::Removal(true), p.tap_remove);
                 })
             },
+        );
+        setting_row(
+            card,
+            "Repeat while held",
+            "Keep placing solids, and removing one target after another, while held. Timed tap removal stays one per tap.",
+            true,
+            |row| switch(row, p.repeat_held, Operation::Repeat),
         );
     });
     group(list, "MOUSE & QUICK SLOTS", |card| {
@@ -2333,6 +2342,22 @@ mod tests {
                 std::fs::remove_file(path).unwrap();
             }
         }
+    }
+    #[test]
+    fn repeat_while_held_is_off_by_default_and_applies_to_every_device() {
+        let mut app = app();
+        assert!(!app.world().resource::<Preferences>().repeat_held);
+        activate_operation(
+            &mut app,
+            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+        );
+        activate_operation(&mut app, Operation::Repeat);
+        assert!(!app.world().resource::<Preferences>().repeat_held);
+        activate_operation(&mut app, Operation::Apply);
+        assert!(app.world().resource::<Preferences>().repeat_held);
+        let path = app.world().resource::<Store>().path.clone();
+        assert!(Store::load(path.clone()).2.repeat_held);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn draft_apply_cancel_and_unsaved_exit_are_distinct() {

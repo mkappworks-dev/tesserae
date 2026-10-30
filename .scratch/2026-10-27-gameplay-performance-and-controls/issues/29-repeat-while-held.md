@@ -43,11 +43,11 @@ stays one per tap. With it off, behaviour is unchanged.
 
 ## Acceptance criteria
 
-- [ ] Edits per held second are identical at 60/144/1000 Hz render updates.
-- [ ] No repeat bypasses Material duration or transfers progress.
-- [ ] Fluids and fire never repeat; refused repeats raise no toasts.
-- [ ] Every cancellation route above stops the chain.
-- [ ] With the preference off, behaviour matches the existing tests exactly.
+- [x] Edits per held second are identical at 60/144/1000 Hz render updates.
+- [x] No repeat bypasses Material duration or transfers progress.
+- [x] Fluids and fire never repeat; refused repeats raise no toasts.
+- [x] Every cancellation route above stops the chain.
+- [x] With the preference off, behaviour matches the existing tests exactly.
 
 ## Validation and authorization
 
