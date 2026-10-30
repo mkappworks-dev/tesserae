@@ -171,6 +171,15 @@ there is no use-before-place or automatic fallback. Empty hand, sampling,
 pickup and use remain distinct. Finite stacks, consumption, physical pickup,
 durability and survival undo are later policies, not approved by this spec.
 
+Use is a separate Server intent with its own outcome and refusals; it never
+journals and never repeats while held. A tool is a hand state: holding one makes
+place, remove and undo/redo inert. With an empty hand or any non-tool hand Use
+is a quiet no-op. A Game declares tools once in the unreleased 0.3 declaration
+as data; the Server runs Use natively, with no host call (grilled 2026-10-30,
+tickets 20-21). Default keys: CycleTool `M`, which takes the next declared tool
+or puts it away (never listed in the Catalogue); Use `G` / pad `DPadUp`;
+ClearTool `Backspace`.
+
 ## Measurement tool
 
 The first tool is Game-declared read-only measurement, not mining or a fluid
@@ -184,6 +193,12 @@ Each endpoint must be selected within normal Edit reach; the Player can move
 between selections to measure a larger span. Keep one completed measurement
 for the World session, replaced by the next, with Clear/Cancel. Saved marker
 collections and unrestricted free-point drawing are deferred.
+
+Measure aims at solids only, through flowing fluid and fire. The Server stays
+stateless: the Client holds up to two endpoints, cleared by ClearTool or a
+World switch and never persisted. Metres are the source; Voxel units are
+derived. Endpoint markers and line show in both views, with a corner readout
+while the tool is held.
 
 ## World creation, seed and persistence
 

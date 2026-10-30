@@ -53,7 +53,7 @@ impl Textures {
         match held {
             Holding::Solid { material, .. } | Holding::Fluid(material) => Some(material as usize),
             Holding::Fire => Some(FLAME_SLOT),
-            Holding::Empty => None,
+            Holding::Tool(_) | Holding::Empty => None,
         }
     }
 

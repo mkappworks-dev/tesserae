@@ -223,7 +223,7 @@ fn show(
                                 ..default()
                             })
                             .with_children(|actions| {
-                                ui::button(
+                                let exit = ui::button(
                                     actions,
                                     "Exit without saving",
                                     Action(SaveAction::ConfirmUnsafe),
@@ -231,6 +231,7 @@ fn show(
                                     false,
                                     false,
                                 );
+                                actions.commands().entity(exit).insert(ui::Danger);
                                 initial_focus = Some(ui::button(
                                     actions,
                                     "Cancel",
@@ -326,12 +327,13 @@ fn show(
                                     ..default()
                                 })
                                 .with_children(|actions| {
-                                    ui::quiet_button(
+                                    let exit = ui::quiet_button(
                                         actions,
                                         "Exit without saving…",
                                         Action(SaveAction::AskUnsafe),
                                         11.0,
                                     );
+                                    actions.commands().entity(exit).insert(ui::Danger);
                                 });
                         }
                     } else {

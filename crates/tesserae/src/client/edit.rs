@@ -21,6 +21,7 @@ use tesserae_core::{
 use super::camera::FlyCamera;
 use crate::content::ContentCatalogue;
 use crate::server::edit::{EditAction, EditIntent, EditRejected};
+use crate::server::tool::ToolId;
 
 /// How long a rejection stays on screen.
 const NOTICE_SECS: f32 = 2.5;
@@ -48,10 +49,19 @@ pub(super) enum Holding {
     /// A source of this fluid.
     Fluid(MaterialId),
     Fire,
+    /// Edits are inert; Place and Remove are the tool's verbs (`tool.rs`).
+    Tool(ToolId),
     Empty,
 }
 
 impl Holding {
+    pub(super) fn tool(self) -> Option<ToolId> {
+        match self {
+            Holding::Tool(id) => Some(id),
+            _ => None,
+        }
+    }
+
     pub(super) fn solid(material: MaterialId, shape: ShapeId) -> Self {
         Holding::Solid {
             material,
@@ -73,7 +83,7 @@ impl Holding {
             ))),
             Holding::Fluid(material) => Some(EditAction::PlaceSource(material)),
             Holding::Fire => Some(EditAction::Ignite),
-            Holding::Empty => None,
+            Holding::Tool(_) | Holding::Empty => None,
         }
     }
 
@@ -82,6 +92,7 @@ impl Holding {
             Holding::Solid { .. } => ("place", "remove"),
             Holding::Fluid(_) => ("place source", "remove"),
             Holding::Fire => ("ignite", "remove"),
+            Holding::Tool(_) => ("clear point", "use tool"),
             Holding::Empty => ("nothing", "remove"),
         }
     }
@@ -110,6 +121,7 @@ impl Holding {
                 .map_or("unknown", |m| m.name.as_str())
                 .into(),
             Holding::Fire => "fire".into(),
+            Holding::Tool(tool) => catalogue.tool_label(tool).into(),
             Holding::Empty => "empty".into(),
         }
     }
@@ -149,6 +161,7 @@ impl Holding {
             }
             Holding::Fluid(id) => format!("{} source", material(id)),
             Holding::Fire => "fire".to_string(),
+            Holding::Tool(tool) => catalogue.tool_label(tool).to_string(),
             Holding::Empty => "empty".to_string(),
         }
     }
@@ -160,6 +173,9 @@ pub(super) struct Hotbar {
     pub(super) slots: [Holding; SLOT_KEYS.len()],
     pub(super) selected: usize,
     pub(super) outside: Option<Holding>,
+    /// What `outside` was before a tool replaced it, so putting the tool away
+    /// returns to an empty hand or a menu pick rather than the selected slot.
+    stowed: Option<Option<Holding>>,
 }
 
 impl Default for Hotbar {
@@ -168,6 +184,7 @@ impl Default for Hotbar {
             slots: [Holding::Empty; SLOT_KEYS.len()],
             selected: 0,
             outside: None,
+            stowed: None,
         }
     }
 }
@@ -216,6 +233,29 @@ impl Hotbar {
             held
         } else {
             &mut self.slots[self.selected]
+        }
+    }
+
+    /// The next tool in declared order; past the last, the previous hand.
+    fn cycle_tool(&mut self, tools: &[ToolId]) {
+        if tools.is_empty() {
+            return;
+        }
+        let next = match self.held().tool() {
+            Some(current) => tools
+                .iter()
+                .position(|t| *t == current)
+                .and_then(|i| tools.get(i + 1)),
+            None => tools.first(),
+        };
+        match next {
+            Some(&tool) => {
+                if self.held().tool().is_none() {
+                    self.stowed = Some(self.outside);
+                }
+                self.outside = Some(Holding::Tool(tool));
+            }
+            None => self.outside = self.stowed.take().flatten(),
         }
     }
 
@@ -394,6 +434,10 @@ pub(super) fn select_held(
         // Scrolling down, a negative y, moves along the bar.
         hotbar.step(-whole as i32);
     }
+    if actions.started(super::actions::Action::CycleTool) && !menu_open && ownership.gameplay() {
+        let tools: Vec<_> = catalogue.0.tools.iter().map(|t| t.id).collect();
+        hotbar.cycle_tool(&tools);
+    }
     if actions.started(super::actions::Action::EmptyHand) {
         hotbar.outside = Some(Holding::Empty);
         if let Some(pointer) = pointer.as_mut() {
@@ -500,6 +544,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
     for (action, verb) in [
         (Help, "controls"),
         (EmptyHand, "empty hand"),
+        (CycleTool, "tool"),
         (Undo, "undo"),
         (Redo, "redo"),
         (Sample, "pick block"),
@@ -546,6 +591,7 @@ fn pad_hints(bindings: &super::actions::Bindings, labels: &super::actions::Label
         (Help, "controls"),
         (Catalogue, "menu"),
         (EmptyHand, "empty hand"),
+        (CycleTool, "tool"),
         (Sample, "pick block"),
         (Turn, "turn"),
         (Flip, "flip"),
@@ -577,7 +623,8 @@ pub(super) fn hud_text(
 ) -> String {
     let held = hotbar.held();
     let (place, remove) = held.verbs();
-    let place = if held == Holding::Empty {
+    let tool = held.tool().is_some();
+    let place = if held == Holding::Empty || tool {
         place.to_owned()
     } else {
         format!("{place} {}", held.describe(catalogue))
@@ -595,8 +642,14 @@ pub(super) fn hud_text(
         "hold"
     };
     let hints = hints(bindings, labels);
+    // A tool's verbs are presses, not the hold or tap of removal.
+    let remove_binding = if tool {
+        remove_binding
+    } else {
+        format!("{mode} {remove_binding}")
+    };
     format!(
-        "{}: {}\n[{mode} {remove_binding}] {remove}\n[{place_binding}] {place}\n{hints}\n{}",
+        "{}: {}\n[{remove_binding}] {remove}\n[{place_binding}] {place}\n{hints}\n{}",
         hand,
         held.describe(catalogue),
         notice.text()
@@ -687,6 +740,7 @@ mod tests {
             shapes,
             lake: None,
             rock: Some(tesserae_core::testgen::fixtures().ground.rock),
+            tools: Vec::new(),
         }
     }
 
@@ -1283,6 +1337,88 @@ mod tests {
             .find(|m| m.name == name)
             .unwrap_or_else(|| panic!("{name}"))
             .id
+    }
+
+    #[test]
+    fn the_hud_names_a_tools_verbs_as_presses() {
+        let mut catalogue = demo();
+        catalogue.tools = vec![crate::content::CatalogueTool {
+            id: ToolId(0),
+            name: "demo:measure".into(),
+            kind: tesserae_mods::ToolKind::Measure,
+        }];
+        let mut app = app_with(CursorGrabMode::Locked, catalogue);
+        frame(&mut app);
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Tool(ToolId(0)));
+        let text = hud(&app);
+        assert!(text.contains("held: measure"), "{text}");
+        assert!(text.contains("[Left mouse] use tool"), "{text}");
+        assert!(text.contains("[Right mouse] clear point"), "{text}");
+        assert!(!text.contains("hold Left mouse"), "{text}");
+    }
+
+    fn with_measure(mut catalogue: ContentCatalogue) -> ContentCatalogue {
+        catalogue.tools = vec![crate::content::CatalogueTool {
+            id: ToolId(0),
+            name: "demo:measure".into(),
+            kind: tesserae_mods::ToolKind::Measure,
+        }];
+        catalogue
+    }
+
+    #[test]
+    fn the_menu_does_not_list_tools_even_when_the_game_declares_one() {
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        frame(&mut app);
+        key(&mut app, KeyCode::Tab);
+        assert!(!offered(&mut app).contains(&Entry::Tool(ToolId(0))));
+    }
+
+    #[test]
+    fn the_tool_key_takes_the_games_tool_and_a_second_press_puts_it_back() {
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        frame(&mut app);
+        app.world_mut().resource_mut::<Hotbar>().select(2);
+        let before = app.world().resource::<Hotbar>().held();
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(
+            app.world().resource::<Hotbar>().held(),
+            Holding::Tool(ToolId(0))
+        );
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(app.world().resource::<Hotbar>().held(), before);
+        assert_eq!(app.world().resource::<Hotbar>().selected, 2);
+    }
+
+    #[test]
+    fn putting_the_tool_away_restores_an_empty_hand() {
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        frame(&mut app);
+        key(&mut app, KeyCode::KeyX);
+        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+    }
+
+    #[test]
+    fn the_tool_key_does_nothing_in_a_game_without_tools() {
+        let mut app = app_with(CursorGrabMode::Locked, demo());
+        frame(&mut app);
+        let before = app.world().resource::<Hotbar>().clone();
+        key(&mut app, KeyCode::KeyM);
+        assert_eq!(*app.world().resource::<Hotbar>(), before);
+    }
+
+    #[test]
+    fn choosing_a_slot_or_the_empty_hand_puts_a_held_tool_away() {
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        frame(&mut app);
+        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::Digit3);
+        assert_eq!(app.world().resource::<Hotbar>().held().tool(), None);
+        key(&mut app, KeyCode::KeyM);
+        key(&mut app, KeyCode::KeyX);
+        assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
     }
 
     #[test]

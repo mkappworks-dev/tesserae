@@ -37,6 +37,11 @@ pub(super) struct Journal {
     requests: VecDeque<HistoryAction>,
 }
 impl Journal {
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.undo.is_empty() && self.redo.is_empty()
+    }
+
     pub(super) fn cancel_requests(&mut self) {
         self.requests.clear();
     }

@@ -172,6 +172,20 @@ metres. Drawn terrain shortens it; nothing lengthens an Edit's reach along it.
 **Edit** — a change to one Voxel, its solid or its source, applied by the
 Server. A Client sends an intent; it never makes an Edit.
 
+**Use** — a Player pressing a held Tool's action. Answered by the Server, never
+applied: it changes no Voxel and enters no history. Not an Edit, not Sample, and
+not Pickup.
+
+**Tool** — a thing a Player holds whose Use the Server runs, declared by the
+Game by name and kind. A hand state taken with its own key, not from the
+Catalogue: while one is held, Place and Remove are its verbs instead of Edits.
+
+**Pickup** — an item entering a Player's inventory. Not built; distinct from Use
+and from Sample, which copies what is aimed at into the hand.
+
+**Measurement** — two corners a Tool's Use resolved, kept by the Client for the
+session. A corner is a vertex of the struck face of a Voxel's drawn Shape.
+
 **Command** — a Mod's request to fill a region or place Voxels at positions, to
 place or remove sources in a region, or to ignite or extinguish what is in one.
 

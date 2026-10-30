@@ -28,6 +28,25 @@ pub struct ContentCatalogue {
     /// The fluid the Game's lakes are made of.
     pub lake: Option<MaterialId>,
     pub rock: Option<MaterialId>,
+    /// The Game's tools, in declared order.
+    pub tools: Vec<CatalogueTool>,
+}
+
+impl CatalogueTool {
+    /// The name without its Mod's id, for the Player to read.
+    pub fn label(&self) -> &str {
+        self.name
+            .split_once(':')
+            .map_or(&self.name, |(_, local)| local)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CatalogueTool {
+    pub id: crate::server::tool::ToolId,
+    /// `<mod id>:<name>`, the stable name a saved slot keeps.
+    pub name: String,
+    pub kind: tesserae_mods::ToolKind,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +74,14 @@ pub struct CatalogueShape {
 impl ContentCatalogue {
     pub fn material(&self, id: MaterialId) -> Option<&CatalogueMaterial> {
         self.materials.iter().find(|m| m.id == id)
+    }
+
+    pub fn tool_label(&self, id: crate::server::tool::ToolId) -> &str {
+        self.tool(id).map_or("unknown", CatalogueTool::label)
+    }
+
+    pub fn tool(&self, id: crate::server::tool::ToolId) -> Option<&CatalogueTool> {
+        self.tools.iter().find(|t| t.id == id)
     }
 
     pub fn shape(&self, id: ShapeId) -> Option<&CatalogueShape> {

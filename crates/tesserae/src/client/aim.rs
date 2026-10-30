@@ -5,6 +5,7 @@ use super::{
     menu::Menu,
 };
 use crate::server::edit::{AimBounds, AimItem, AimReport, AimTarget};
+use crate::server::tool::ToolId;
 use bevy::prelude::*;
 use std::collections::VecDeque;
 
@@ -14,13 +15,14 @@ pub(super) struct Target(
     pub(super) Option<AimView>,
     pub(super) f64,
 );
-type AimView = (Vec3, Vec3, Option<AimItem>);
+type AimView = (Vec3, Vec3, Option<AimItem>, Option<ToolId>);
 
 impl Target {
     pub(super) fn current(&self, sent: &Sent, now: f64) -> bool {
         self.1.zip(sent.last).is_some_and(|(answer, current)| {
             now - self.2 <= 0.2
                 && answer.2 == current.2
+                && answer.3 == current.3
                 && answer.0.distance_squared(current.0) <= 4.0
                 && answer.1.dot(current.1) >= 0.94
         })
@@ -59,13 +61,16 @@ fn crosshair(
     time: Res<Time>,
     mut crosshair: Query<&mut TextColor, With<super::edit::Crosshair>>,
 ) {
-    let alpha = if target.0.blocked && target.current(&sent, time.elapsed_secs_f64()) {
+    let current = target.current(&sent, time.elapsed_secs_f64());
+    let alpha = if target.0.blocked && current {
         super::edit::BLOCKED_CROSSHAIR_ALPHA
     } else {
         super::edit::CROSSHAIR_ALPHA
     };
+    let refused = current && target.0.use_aim.is_some_and(|aim| aim.is_err());
+    let (green, blue) = if refused { (0.4, 0.35) } else { (1.0, 1.0) };
     for mut colour in &mut crosshair {
-        colour.set_if_neq(TextColor(Color::srgba(1.0, 1.0, 1.0, alpha)));
+        colour.set_if_neq(TextColor(Color::srgba(1.0, green, blue, alpha)));
     }
 }
 pub(super) fn report(
@@ -86,9 +91,10 @@ pub(super) fn report(
         ))),
         Holding::Fluid(id) => Some(AimItem::Fluid(id)),
         Holding::Fire => Some(AimItem::Fire),
-        Holding::Empty => None,
+        Holding::Tool(_) | Holding::Empty => None,
     };
-    let current = (camera.translation(), *camera.forward(), held);
+    let tool = hotbar.held().tool();
+    let current = (camera.translation(), *camera.forward(), held, tool);
     if sent.last == Some(current) {
         return;
     }
@@ -104,6 +110,7 @@ pub(super) fn report(
         origin: current.0,
         direction: current.1,
         held,
+        tool,
     });
 }
 pub(super) fn receive(
@@ -160,6 +167,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_crosshair_reddens_when_the_tool_in_hand_would_be_refused() {
+        use crate::server::tool::UseRefusal;
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .init_resource::<Target>()
+            .init_resource::<Sent>()
+            .add_systems(Update, crosshair);
+        let id = app
+            .world_mut()
+            .spawn((super::super::edit::Crosshair, TextColor(Color::WHITE)))
+            .id();
+        let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
+        app.world_mut().resource_mut::<Sent>().last = Some(view);
+        let mut answer = app.world_mut().resource_mut::<Target>();
+        answer.1 = Some(view);
+        answer.0.use_aim = Some(Err(UseRefusal::OutOfReach));
+        app.update();
+        let colour = app.world().get::<TextColor>(id).unwrap().0.to_srgba();
+        assert!(colour.green < 0.5 && colour.blue < 0.5);
+        app.world_mut().resource_mut::<Target>().0.use_aim = None;
+        app.update();
+        let colour = app.world().get::<TextColor>(id).unwrap().0.to_srgba();
+        assert!(colour.green > 0.9 && colour.blue > 0.9);
+    }
+
+    #[test]
     fn delayed_answers_stay_visible_while_moving_but_old_or_incompatible_answers_do_not() {
         let mut app = App::new();
         app.init_resource::<Time>()
@@ -168,11 +201,11 @@ mod tests {
             .init_resource::<Menu>()
             .add_message::<AimTarget>()
             .add_systems(Update, (receive, outline).chain());
-        let view = (Vec3::ZERO, Vec3::NEG_Z, None);
+        let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
         {
             let mut sent = app.world_mut().resource_mut::<Sent>();
             sent.seq = 4;
-            sent.last = Some((Vec3::X * 0.1, Vec3::NEG_Z, None));
+            sent.last = Some((Vec3::X * 0.1, Vec3::NEG_Z, None, None));
             sent.history.extend([(2, view), (3, view), (4, view)]);
         }
         let bounds = AimBounds {
@@ -185,6 +218,7 @@ mod tests {
             outline: Some(bounds),
             ghost: None,
             blocked: false,
+            use_aim: None,
         };
         app.world_mut().write_message(answer);
         app.update();
@@ -255,7 +289,7 @@ mod tests {
         );
         app.world_mut().resource_mut::<Menu>().open = false;
         app.world_mut().resource_mut::<Sent>().last =
-            Some((Vec3::ZERO, Vec3::NEG_Z, Some(AimItem::Fire)));
+            Some((Vec3::ZERO, Vec3::NEG_Z, Some(AimItem::Fire), None));
         app.update();
         assert_eq!(
             app.world_mut()

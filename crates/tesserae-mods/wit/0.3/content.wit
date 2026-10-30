@@ -309,6 +309,22 @@ interface content {
         end: burn-end,
     }
 
+    /// What a tool does when used. Closed: a new kind needs new engine
+    /// mechanism, so it arrives with the contract line that adds it.
+    enum tool-kind {
+        /// Reads two corners and reports the distance between them. Edits
+        /// nothing.
+        measure,
+    }
+
+    /// A tool the Player can hold. The engine runs it; a Mod is never called
+    /// when it is used.
+    record tool-def {
+        /// Local to the Mod, like a Material's; the engine adds `<mod id>:`.
+        name: string,
+        kind: tool-kind,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -328,5 +344,8 @@ interface content {
         fluids: list<fluid-def>,
         reactions: list<reaction-def>,
         combustion: list<combustion-def>,
+        /// At most 8 rows, from the Game only: a `tools` from a Mod that is not
+        /// the Game is a load error, like `world` and `view`.
+        tools: list<tool-def>,
     }
 }

@@ -75,7 +75,7 @@ fn geometry(
             orientation,
         } => (material, shape, orientation.bits() as usize),
         Holding::Fluid(material) => (material, 0, 0),
-        Holding::Fire | Holding::Empty => return None,
+        Holding::Fire | Holding::Tool(_) | Holding::Empty => return None,
     };
     let quads = catalogue.shape(shape)?.geometry.get(orientation)?;
     Some(tesserae_core::mesh::mesh_shape(quads, material))
@@ -86,6 +86,9 @@ pub(super) fn item_mesh(
 ) -> Option<Mesh> {
     if held == Holding::Fire {
         return Some(fire_mesh());
+    }
+    if held.tool().is_some() {
+        return Some(tool_mesh());
     }
     let layer = geometry(held, catalogue)?;
     let mut mesh = super::chunk_mesh::chunk_mesh_to_mesh(&layer, 1.0);
@@ -122,6 +125,15 @@ pub(super) fn item_mesh(
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
     mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, shading);
     Some(mesh)
+}
+
+/// A plain bar, the same for every tool: a Game's own artwork for tools is
+/// later work, and this needs no atlas slot.
+fn tool_mesh() -> Mesh {
+    let mut mesh = Mesh::from(Cuboid::new(0.18, 1.0, 0.18)).translated_by(Vec3::splat(0.5));
+    let count = mesh.count_vertices();
+    mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, vec![[1.0f32; 4]; count]);
+    mesh
 }
 
 fn fire_mesh() -> Mesh {
@@ -319,7 +331,7 @@ mod tests {
             Transform::default(),
         ));
         app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::solid(rock, SHAPE_STAIR));
-        let view = (Vec3::ZERO, Vec3::NEG_Z, None);
+        let view = (Vec3::ZERO, Vec3::NEG_Z, None, None);
         app.world_mut().resource_mut::<Sent>().last = Some(view);
         {
             let mut target = app.world_mut().resource_mut::<Target>();

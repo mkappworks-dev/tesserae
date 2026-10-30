@@ -18,8 +18,8 @@ use tesserae_mods::{
 };
 
 use crate::content::{
-    CatalogueMaterial, CatalogueShape, CharacterModel, ContentCatalogue, MaterialPalette,
-    MaterialTextures,
+    CatalogueMaterial, CatalogueShape, CatalogueTool, CharacterModel, ContentCatalogue,
+    MaterialPalette, MaterialTextures,
 };
 use crate::world::WorldSettings;
 
@@ -113,6 +113,7 @@ pub struct LoadedMods {
     pub game: bool,
     pub movement: Option<tesserae_mods::MovementPolicy>,
     pub character: Option<tesserae_mods::Character>,
+    pub tools: Vec<tesserae_mods::ToolDef>,
     pub required: Vec<tesserae_core::save::RequiredMod>,
 }
 
@@ -130,6 +131,7 @@ impl Default for LoadedMods {
             game: false,
             movement: None,
             character: None,
+            tools: Vec::new(),
             required: Vec::new(),
         }
     }
@@ -383,6 +385,7 @@ fn load_with_opening(
                 loaded.game = true;
                 loaded.movement = applied.movement;
                 loaded.character = applied.character;
+                loaded.tools = applied.tools;
             }
             loaded.mods.push(instance);
         }
@@ -463,6 +466,16 @@ pub(super) fn plugin(app: &mut App) {
         params.water.map(|lake| lake.material),
         params.ground.map(|ground| ground.rock),
     );
+    catalogue.tools = loaded
+        .tools
+        .iter()
+        .enumerate()
+        .map(|(i, tool)| CatalogueTool {
+            id: super::tool::ToolId(i as u16),
+            name: tool.name.clone(),
+            kind: tool.kind,
+        })
+        .collect();
     catalogue.game = loaded
         .required
         .iter()
@@ -485,6 +498,7 @@ pub(super) fn plugin(app: &mut App) {
         });
     }
     app.insert_resource(tables)
+        .insert_resource(super::tool::Tools(loaded.tools))
         .insert_resource(WorldParameters(params))
         .insert_resource(super::streaming::streaming_settings(loaded.view))
         .insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods))
@@ -543,6 +557,7 @@ pub(in crate::server) fn catalogue(
         shapes,
         lake,
         rock,
+        tools: Vec::new(),
     }
 }
 
@@ -806,6 +821,20 @@ mod tests {
             .collect();
         assert_eq!(sent.len(), 1);
         sent.pop().unwrap()
+    }
+
+    #[test]
+    fn the_catalogue_lists_the_games_tools_in_declared_order() {
+        let catalogue = published_catalogue(super::runtime::tests::demo_loaded(1.0));
+        assert_eq!(
+            catalogue.tools,
+            vec![CatalogueTool {
+                id: crate::server::tool::ToolId(0),
+                name: "demo:measure".into(),
+                kind: tesserae_mods::ToolKind::Measure,
+            }]
+        );
+        assert!(published_catalogue(LoadedMods::default()).tools.is_empty());
     }
 
     /// Every registered name, with what the Client may do with it, and the

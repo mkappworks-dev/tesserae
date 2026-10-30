@@ -565,6 +565,14 @@ controls, movement, save, camera and input work already in flight is tracked in
 
 Notes:
 
+- **Step 10** is done for the first tool. Use is a Server intent of its own,
+  answered and never applied, that enters no history; a tool is a hand state, so
+  holding one makes Place and Remove its verbs and leaves undo and redo live. A
+  Game declares tools once, as a name and a closed kind in the unreleased 0.3
+  Declaration, and the Server runs the kind in native code, so no Mod is called
+  when a tool is used. The demo declares one, Measure: it reads two corners of
+  drawn Shapes in metres and Voxels and edits nothing. Taking a Voxel into an
+  inventory is step 12, and using a Voxel (a door, a container) is later work.
 - **Step 15** feeds the sky and fog colours from step 9. A World pins its
   generator version so a new biome never changes an existing World's terrain for
   the same seed.

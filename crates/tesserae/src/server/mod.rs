@@ -31,6 +31,7 @@ pub mod mods;
 pub mod persistence;
 pub mod player;
 pub mod streaming;
+pub mod tool;
 pub mod undo;
 pub mod world_state;
 
@@ -86,6 +87,7 @@ pub fn plugin(app: &mut App) {
         .add_plugins((
             streaming::plugin,
             edit::plugin,
+            tool::plugin,
             fluids::plugin,
             player::plugin,
         ));

@@ -702,6 +702,9 @@ pub(super) fn action_name(action: Action) -> &'static str {
         Shape => "Next Shape",
         Turn => "Turn Shape",
         Flip => "Flip Shape",
+        CycleTool => "Take tool",
+        Use => "Use tool",
+        ClearTool => "Clear tool",
         Slot1 => "Quick slot 1",
         Slot2 => "Quick slot 2",
         Slot3 => "Quick slot 3",
@@ -726,7 +729,9 @@ pub(super) fn category(action: Action) -> &'static str {
     match action {
         Forward | Backward | Left | Right | Ascend | Descend | Sprint | Respawn | Faster
         | Slower | MovementMode | View | ZoomIn | ZoomOut => "Movement",
-        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip => "Building",
+        Place | Remove | Sample | EmptyHand | Shape | Turn | Flip | CycleTool | Use | ClearTool => {
+            "Building"
+        }
         _ => "Interface",
     }
 }
@@ -1784,7 +1789,7 @@ fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                             color,
                         );
                     });
-                    ui::button(
+                    let reset = ui::button(
                         left,
                         "Restore defaults",
                         Operation::Reset,
@@ -1792,6 +1797,7 @@ fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                         false,
                         false,
                     );
+                    left.commands().entity(reset).insert(ui::Danger);
                 });
             footer
                 .spawn(Node {
@@ -1871,8 +1877,8 @@ fn modal(commands: &mut Commands, settings: &Settings) {
                 let (title,description)=if settings.unsaved {("Keep your changes?","You have unapplied behavior, binding or display changes.".into())}else if settings.resetting {("Restore defaults?","This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into())}else{let names=settings.conflict.as_ref().map(|(_,_,conflicts)|conflicts.iter().map(|(action,_)|action_name(*action)).collect::<Vec<_>>().join(", ")).unwrap_or_default();("Binding already in use",format!("This binding is assigned to {names}. Replace it?"))};
                 ui::weighted_text(dialog,title,19.0,620,ui::INK);ui::paragraph(dialog,description,12.0,ui::MUTED);
                 dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,column_gap:Val::Px(7.0),row_gap:Val::Px(7.0),flex_wrap:FlexWrap::Wrap,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions| {
-                    if settings.unsaved {first=Some(ui::button(actions,"Stay",Operation::Stay,false,false,false));ui::button(actions,"Discard",Operation::Discard,false,false,false);ui::button(actions,"Save changes",Operation::Apply,false,false,true);}
-                    else if settings.resetting {first=Some(ui::button(actions,"Cancel",Operation::CancelReset,false,false,false));ui::button(actions,"Restore defaults",Operation::ConfirmReset,false,false,true);}
+                    if settings.unsaved {first=Some(ui::button(actions,"Stay",Operation::Stay,false,false,false));let discard=ui::button(actions,"Discard",Operation::Discard,false,false,false);actions.commands().entity(discard).insert(ui::Danger);ui::button(actions,"Save changes",Operation::Apply,false,false,true);}
+                    else if settings.resetting {first=Some(ui::button(actions,"Cancel",Operation::CancelReset,false,false,false));let restore=ui::button(actions,"Restore defaults",Operation::ConfirmReset,false,false,true);actions.commands().entity(restore).insert(ui::Danger);}
                     else {first=Some(ui::button(actions,"Keep existing",Operation::CancelConflict,false,false,false));ui::button(actions,"Replace binding",Operation::Replace,false,false,true);}
                 });
             }
@@ -1912,6 +1918,9 @@ fn binding_order(action: Action) -> usize {
         Turn,
         Flip,
         Shape,
+        CycleTool,
+        Use,
+        ClearTool,
         Catalogue,
         Help,
         ReleaseCursor,
@@ -2396,14 +2405,14 @@ mod tests {
         press(&mut app, GamepadButton::Start);
         app.update();
         assert!(app.world().resource::<Settings>().capture.is_some());
-        press(&mut app, GamepadButton::DPadUp);
+        press(&mut app, GamepadButton::C);
         app.update();
         let settings = app.world().resource::<Settings>();
         assert!(settings.capture.is_none() && settings.conflict.is_none());
         let draft = &settings.draft.as_ref().unwrap().0;
         assert_eq!(
             draft.pad[&Action::Sample][1].unwrap().trigger,
-            Trigger::Pad(GamepadButton::DPadUp)
+            Trigger::Pad(GamepadButton::C)
         );
         assert!(draft.keyboard[&Action::Sample][0].is_none());
 
@@ -2412,6 +2421,39 @@ mod tests {
         let draft = &app.world().resource::<Settings>().draft.as_ref().unwrap().0;
         assert_eq!(draft.pad, Bindings::default().pad);
         assert!(draft.keyboard[&Action::Sample][0].is_none());
+    }
+
+    #[test]
+    fn the_tool_actions_take_part_in_conflict_warnings_and_are_listed() {
+        for (taken, owner) in [
+            (KeyCode::KeyM, Action::CycleTool),
+            (KeyCode::KeyG, Action::Use),
+            (KeyCode::Backspace, Action::ClearTool),
+        ] {
+            let mut app = app();
+            activate_operation(
+                &mut app,
+                Operation::Navigate(super::super::menu_ui::Tab::Behavior),
+            );
+            activate_operation(
+                &mut app,
+                Operation::Capture(Device::KeyboardMouse, Action::Forward, 0),
+            );
+            app.update();
+            app.world_mut()
+                .resource_mut::<ButtonInput<KeyCode>>()
+                .press(taken);
+            app.update();
+            let settings = app.world().resource::<Settings>();
+            let (_, _, conflicts) = settings.conflict.as_ref().expect("a conflict");
+            assert!(
+                conflicts.iter().any(|(action, _)| *action == owner),
+                "{owner:?}"
+            );
+        }
+        assert_eq!(action_name(Action::CycleTool), "Take tool");
+        assert_eq!(action_name(Action::Use), "Use tool");
+        assert_eq!(action_name(Action::ClearTool), "Clear tool");
     }
 
     #[test]

@@ -17,6 +17,7 @@ use tesserae_core::{MaterialId, ShapeId};
 use super::edit::{Catalogue, Holding, Hotbar};
 use crate::content::{ContentCatalogue, MaterialPalette};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
+use crate::server::tool::ToolId;
 
 #[derive(Resource, Default)]
 pub(super) struct Menu {
@@ -60,6 +61,7 @@ pub(super) enum Entry {
     },
     Fluid(MaterialId),
     Fire,
+    Tool(ToolId),
     /// Selects this hotbar slot.
     Slot(usize),
 }
@@ -70,6 +72,7 @@ impl Entry {
             Entry::Solid { material, shape } => Some(Holding::solid(material, shape)),
             Entry::Fluid(material) => Some(Holding::Fluid(material)),
             Entry::Fire => Some(Holding::Fire),
+            Entry::Tool(tool) => Some(Holding::Tool(tool)),
             Entry::Material(material) => {
                 Some(Holding::solid(material, tesserae_core::SHAPE_FULL_CUBE))
             }
@@ -82,6 +85,9 @@ impl Entry {
 #[derive(Resource)]
 pub(super) struct Swatches([Vec4; FLAME_SLOT + 1]);
 
+/// Tools have no Material to take a colour from.
+const TOOL_RGBA: Vec4 = Vec4::new(0.95, 0.76, 0.18, 1.0);
+
 impl Default for Swatches {
     fn default() -> Self {
         Swatches(ChunkMaterialExtension::default().palette)
@@ -93,6 +99,7 @@ impl Swatches {
         let slot = match holding {
             Holding::Solid { material, .. } | Holding::Fluid(material) => material as usize,
             Holding::Fire => FLAME_SLOT,
+            Holding::Tool(_) => return TOOL_RGBA,
             Holding::Empty => return Vec4::ZERO,
         };
         self.0.get(slot).copied().unwrap_or(Vec4::ONE)
@@ -635,6 +642,7 @@ pub(super) fn rebuild_bar(
                                 material, shape, ..
                             } => Entry::Solid { material, shape },
                             Holding::Fluid(material) => Entry::Fluid(material),
+                            Holding::Tool(tool) => Entry::Tool(tool),
                             _ => Entry::Fire,
                         };
                         tile(
@@ -821,6 +829,7 @@ fn selection_summary(holding: Holding, catalogue: &ContentCatalogue) -> String {
             )
         ),
         Holding::Fire => "Selected: Fire".into(),
+        Holding::Tool(tool) => format!("Selected: {}", title(catalogue.tool_label(tool))),
     }
 }
 
@@ -1001,6 +1010,7 @@ fn detail(
                 .map_or("Unknown fluid", |m| m.name.as_str()),
         ),
         Holding::Fire => ("TOOL", "fire"),
+        Holding::Tool(tool) => ("TOOL", catalogue.tool_label(tool)),
         Holding::Empty => unreachable!(),
     };
     parent

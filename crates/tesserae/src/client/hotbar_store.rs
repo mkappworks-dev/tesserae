@@ -31,6 +31,7 @@ impl Item {
         Ok(match holding {
             Holding::Empty => Self::Empty,
             Holding::Fire => Self::Fire,
+            Holding::Tool(_) => Self::Empty,
             Holding::Fluid(material) => Self::Fluid {
                 material: material_name(material)?,
             },
@@ -214,10 +215,8 @@ mod tests {
     struct Directory(PathBuf);
     impl Directory {
         fn new() -> Self {
-            let id = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos();
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let root =
                 std::env::temp_dir().join(format!("tesserae-hotbar-{}-{id}", std::process::id()));
             fs::create_dir_all(&root).unwrap();

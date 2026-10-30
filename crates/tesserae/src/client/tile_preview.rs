@@ -52,6 +52,7 @@ fn key(holding: Holding) -> (u8, u16, u8, u8) {
         } => (0, material, shape, orientation.bits()),
         Holding::Fluid(material) => (1, material, 0, 0),
         Holding::Fire => (2, 0, 0, 0),
+        Holding::Tool(tool) => (4, tool.0, 0, 0),
         Holding::Empty => (3, 0, 0, 0),
     }
 }
