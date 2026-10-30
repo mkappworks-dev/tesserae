@@ -37,7 +37,9 @@ movement, vertical velocity and grounded state. A physics respawn lifts the body
 in 0.25 m steps, up to 16 m, to the first clear standing position over the spawn
 point; with none (solid or unloaded terrain) it is refused with feedback and the
 Eye stays. That is a placement the Server chooses on request, not relocation of
-a body already embedded. Changing view cannot move the body.
+a body already embedded. A solid Voxel an Edit would place inside a physics body
+is rejected when the Edit is applied, because an embedded body freezes; a flying
+body is noclip and unaffected. Changing view cannot move the body.
 
 ## Persistence and presentation
 

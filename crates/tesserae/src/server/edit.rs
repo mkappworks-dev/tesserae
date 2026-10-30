@@ -23,7 +23,7 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use tesserae_core::collide::{RayHit, VoxelVolume, raycast_until};
+use tesserae_core::collide::{RayHit, VoxelVolume, overlaps, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
     Burning, Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE,
@@ -191,6 +191,8 @@ pub enum RejectReason {
     UnknownMaterial,
     UnknownShape,
     BadOrientation,
+    /// A solid Voxel that would land inside the Player's body.
+    InsidePlayer,
     /// A Place of air, which is a Break by another name.
     NoMaterial,
     /// The Chunk's shaped Voxels, in stairs, would pass [`MAX_SHAPED_PER_CHUNK`].
@@ -233,6 +235,7 @@ impl RejectReason {
             RejectReason::UnknownMaterial => "unknown material",
             RejectReason::UnknownShape => "unknown shape",
             RejectReason::BadOrientation => "invalid orientation",
+            RejectReason::InsidePlayer => "you are standing there",
             RejectReason::NoMaterial => "nothing to place",
             RejectReason::TooManyShaped => "too many shaped blocks in this chunk",
             RejectReason::NotSolid => "a fluid is not placed as a solid",
@@ -612,6 +615,22 @@ fn seen_from_eye(
     .is_none_or(|seen| seen.at == hit.at)
 }
 
+/// Air everywhere but one placed Voxel, so an overlap with it alone is asked of
+/// the body and terrain it already stands in does not count.
+struct PlacedOnly {
+    at: [i32; 3],
+    voxel: Voxel,
+}
+impl VoxelVolume for PlacedOnly {
+    fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
+        Some(if at == self.at {
+            self.voxel
+        } else {
+            Voxel::AIR
+        })
+    }
+}
+
 pub(in crate::server) fn apply_pending(
     mut pending: ResMut<PendingEdits>,
     (mut history, mut journal): (
@@ -622,7 +641,9 @@ pub(in crate::server) fn apply_pending(
     mut meshes: ResMut<MeshState>,
     mut rejected: MessageWriter<EditRejected>,
     (tables, world): (Res<ContentTables>, Res<WorldSettings>),
+    players: Query<&Player>,
 ) {
+    let body = players.single().ok().and_then(Player::solid_body);
     let mut applied = 0;
     let mut waiting = VecDeque::new();
     while applied < EDITS_PER_TICK {
@@ -635,6 +656,12 @@ pub(in crate::server) fn apply_pending(
                 // Chunk, so an edit waits for its Chunk's light to settle.
                 if meshes.is_unlit(VoxelCoord::of(at).chunk) {
                     return Err(RejectReason::Busy);
+                }
+                if let (Change::Solid(voxel), Some(body)) = (change, body)
+                    && !voxel.is_air()
+                    && overlaps(&PlacedOnly { at, voxel }, &tables, world.voxel_size, body)
+                {
+                    return Err(RejectReason::InsidePlayer);
                 }
                 let before = store.voxel(at).ok_or(RejectReason::NotLoaded)?;
                 let was = store
@@ -1234,6 +1261,83 @@ mod tests {
 
     fn tick(app: &mut App) {
         app.world_mut().run_system_once(apply_pending).unwrap();
+    }
+
+    fn physics_app(size: f32) -> App {
+        let mut app = app_with(&[(origin(), ground())]);
+        app.insert_resource(WorldSettings {
+            voxel_size: size,
+            ..default()
+        });
+        let mut players = app.world_mut().query::<&mut Player>();
+        *players.single_mut(app.world_mut()).unwrap() = Player::physics_at(Vec3::ZERO);
+        app
+    }
+
+    /// The Physics Player stands on the surface at `ground_m` over (5, 5) and
+    /// clicks straight down at their own feet.
+    fn at_own_feet(size: f32) -> ([i32; 3], EditIntent) {
+        let ground_m = 8.0 * size;
+        let eye = Vec3::new(5.5 * size, ground_m + 1.62, 5.5 * size);
+        let cell = [5, 8, 5];
+        (
+            cell,
+            EditIntent {
+                action: EditAction::Place(stone()),
+                origin: eye,
+                direction: Vec3::NEG_Y,
+            },
+        )
+    }
+
+    #[test]
+    fn a_solid_placed_inside_a_physics_body_is_refused_whatever_the_voxel_size() {
+        for size in [1.0, 0.5, 0.25] {
+            let mut app = physics_app(size);
+            let (cell, intent) = at_own_feet(size);
+            send(&mut app, intent);
+            tick(&mut app);
+            assert!(voxel_at(&app, cell).is_air(), "{size}");
+            assert_eq!(
+                rejections(&mut app),
+                vec![RejectReason::InsidePlayer],
+                "{size}"
+            );
+        }
+    }
+
+    #[test]
+    fn rapid_placements_queued_together_are_each_judged_against_the_body() {
+        let mut app = physics_app(1.0);
+        let (cell, intent) = at_own_feet(1.0);
+        for _ in 0..3 {
+            send(&mut app, intent);
+        }
+        tick(&mut app);
+        assert!(voxel_at(&app, cell).is_air());
+        assert_eq!(rejections(&mut app), vec![RejectReason::InsidePlayer; 3]);
+    }
+
+    #[test]
+    fn a_placement_clear_of_the_body_and_any_flight_placement_are_unchanged() {
+        let mut app = physics_app(1.0);
+        let eye = Vec3::new(5.5, 9.62, 5.5);
+        let aside = EditIntent {
+            action: EditAction::Place(stone()),
+            origin: eye,
+            direction: Vec3::new(2.0, -2.12, 0.0),
+        };
+        send(&mut app, aside);
+        tick(&mut app);
+        assert_eq!(voxel_at(&app, [7, 8, 5]), stone());
+        assert!(rejections(&mut app).is_empty());
+
+        let mut app = app_with(&[(origin(), ground())]);
+        let (cell, intent) = at_own_feet(1.0);
+        send(&mut app, intent);
+        tick(&mut app);
+        assert_eq!(voxel_at(&app, cell), stone(), "flight is noclip");
+        assert!(rejections(&mut app).is_empty());
     }
 
     #[test]

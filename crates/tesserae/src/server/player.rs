@@ -139,6 +139,14 @@ impl Player {
             pitch: self.view[1],
         }
     }
+    /// The body a placed Voxel must not enter: a flying body is noclip.
+    pub(in crate::server) fn solid_body(&self) -> Option<Aabb> {
+        (self.mode == MovementMode::Physics).then(|| self.body())
+    }
+    #[cfg(test)]
+    pub(in crate::server) fn physics_at(eye: Vec3) -> Self {
+        Self::new(eye, MovementMode::Physics)
+    }
     #[cfg(test)]
     pub(in crate::server) fn at(eye: Vec3) -> Self {
         Self::new(eye, MovementMode::Flight)
@@ -177,7 +185,7 @@ impl Player {
             EYE_HEIGHT
         }
     }
-    fn body(&self) -> Aabb {
+    pub(in crate::server) fn body(&self) -> Aabb {
         let eye_height = self.eye_height();
         let height = if self.crouching {
             CROUCH_BODY_HEIGHT_M
