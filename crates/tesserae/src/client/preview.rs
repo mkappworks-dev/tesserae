@@ -226,7 +226,11 @@ fn model(
 }
 fn position(
     removal: Option<Res<super::removal::Progress>>,
-    (menu, settings): (Res<Menu>, Option<Res<super::settings::Settings>>),
+    (menu, settings, layout): (
+        Res<Menu>,
+        Option<Res<super::settings::Settings>>,
+        Option<Res<super::layout::LayoutMode>>,
+    ),
     world: Res<WorldSettings>,
     hotbar: Res<Hotbar>,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
@@ -236,6 +240,7 @@ fn position(
     let menu_open = menu.open || settings.is_some_and(|s| s.open);
     let cell = (!removal.is_some_and(|r| r.active())
         && !menu_open
+        && !layout.is_some_and(|layout| layout.on)
         && target.current(&sent, time.elapsed_secs_f64())
         && hotbar.held() != Holding::Fire)
         .then_some(target.0.ghost)

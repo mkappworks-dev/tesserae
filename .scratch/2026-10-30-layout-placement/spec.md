@@ -250,3 +250,22 @@ to say where Voxels go replace it, chosen in a menu that opens with the mode.
 
 - Three or four clicks to choose the plane (considered and declined); a key
   to swap the flat axis can follow if the automatic choice proves wrong.
+
+## Amendment 2026-10-30 (2): the menu is an in-game overlay, the preview ghosts
+
+Raised on review of the first pass at the menu: a page in the settings is not
+the overlay the amendment above asked for, and an outline is not a preview of
+what will be built.
+
+- The Layout menu is a panel docked over the live game, not a page in the
+  settings. It has its own input context beside the Catalogue and the settings:
+  the cursor is released, the pad navigates it, gameplay input waits, and the
+  World stays drawn behind it so the preview shows.
+- Its choices apply as they are made and are saved when it closes. It has no
+  draft or Apply.
+- The Layout key opens it and turns the mode on; while the mode is on the key
+  opens and closes it. Escape closes it, leaving the cursor free as the
+  Catalogue does. Remove in play, and an Exit control, turn the mode off.
+- The preview draws each cell as a ghost of the block that would land, in the
+  held Material and Shape, with the single-placement ghost's look. A cell out
+  of reach is tinted orange and a blocked one red.

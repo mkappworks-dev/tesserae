@@ -211,9 +211,13 @@ pub(super) fn grab_cursor(
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     settings: Option<Res<super::settings::Settings>>,
     ui: Option<Res<super::input::UiInput>>,
+    layout_menu: Option<Res<super::layout_menu::LayoutMenu>>,
 ) {
     let mut cursor = cursor.into_inner();
-    if settings.is_some_and(|settings| settings.open) || ui.is_some_and(|ui| ui.text_entry) {
+    if settings.is_some_and(|settings| settings.open)
+        || ui.is_some_and(|ui| ui.text_entry)
+        || layout_menu.is_some_and(|menu| menu.open)
+    {
         cursor.grab_mode = CursorGrabMode::None;
         cursor.visible = true;
         return;

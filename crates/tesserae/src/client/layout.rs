@@ -204,8 +204,6 @@ pub(super) struct LayoutMode {
     /// A Material chosen in the menu, laid in the held Shape. Not saved: a
     /// profile holds no Game identifiers.
     pub(super) material: Option<tesserae_core::MaterialId>,
-    /// The mode was just turned on and its menu is yet to open.
-    pub(super) open_menu: bool,
     /// Point to point: the corners picked so far, at most two.
     points: Vec<[i32; 3]>,
     /// The cell the aim picks now, from the Server's latest fresh answer.
@@ -214,6 +212,13 @@ pub(super) struct LayoutMode {
     was_grabbed: bool,
 }
 impl LayoutMode {
+    /// A mode already on, for a capture that shows the Layout menu.
+    pub(super) fn turned_on() -> Self {
+        Self {
+            on: true,
+            ..default()
+        }
+    }
     fn params(&self, layout: &LayoutPreferences) -> LayoutParams {
         if layout.kind == Kind::Between {
             // With no corner yet the aim is asked for as one cell, to learn
@@ -270,11 +275,6 @@ pub(super) fn intercept(
     if !ownership.gameplay() {
         mode.points.clear();
         return;
-    }
-    if actions.started(Action::Layout) {
-        mode.points.clear();
-        mode.on = !mode.on;
-        mode.open_menu = mode.on;
     }
     if !mode.on {
         return;
@@ -491,36 +491,140 @@ pub(super) fn receive(
 }
 
 const PLACEABLE: Color = Color::srgb(0.29, 0.70, 0.38);
-const OUT_OF_REACH: Color = Color::srgba(1.0, 0.60, 0.0, 0.7);
-const BLOCKED: Color = Color::srgba(0.94, 0.27, 0.27, 0.8);
+const OUT_OF_REACH: Color = Color::srgba(1.0, 0.60, 0.0, 0.40);
+const BLOCKED: Color = Color::srgba(0.94, 0.27, 0.27, 0.50);
 
-pub(super) fn draw(
+#[derive(Component)]
+pub(super) struct LayoutGhost;
+
+/// The model every ghost shares: the Voxel being laid, with the placeable look
+/// the single-placement ghost has, and two tints for the cells that will not
+/// land.
+#[derive(Resource, Default)]
+pub(super) struct GhostModel {
+    holding: Option<Holding>,
+    mesh: Handle<Mesh>,
+    /// Placeable, out of reach, blocked.
+    materials: [Handle<StandardMaterial>; 3],
+}
+
+/// What is laid out: the held solid, in the menu's Material if one was chosen.
+fn layout_holding(mode: &LayoutMode, hotbar: &Hotbar) -> Option<Holding> {
+    match hotbar.held() {
+        Holding::Solid {
+            material,
+            shape,
+            orientation,
+        } => Some(Holding::Solid {
+            material: mode.material.unwrap_or(material),
+            shape,
+            orientation,
+        }),
+        _ => mode
+            .material
+            .map(|material| Holding::solid(material, tesserae_core::SHAPE_FULL_CUBE)),
+    }
+}
+
+/// Draws each cell of the Server's preview as a ghost of the block that would
+/// land, tinted where it would not.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn ghosts(
+    mut commands: Commands,
     (mode, preferences): (Res<LayoutMode>, Res<Preferences>),
     hotbar: Res<Hotbar>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     preview: Res<Preview>,
-    world: Res<WorldSettings>,
-    time: Res<Time>,
-    mut gizmos: Gizmos,
+    (world, time): (Res<WorldSettings>, Res<Time>),
+    content: super::material_textures::PreviewContent,
+    (mut model, mut meshes, mut materials): (
+        ResMut<GhostModel>,
+        ResMut<Assets<Mesh>>,
+        ResMut<Assets<StandardMaterial>>,
+    ),
+    mut cells: Query<
+        (
+            &mut Transform,
+            &mut MeshMaterial3d<StandardMaterial>,
+            &mut Visibility,
+        ),
+        With<LayoutGhost>,
+    >,
 ) {
-    if !mode.on {
-        return;
+    let holding = mode.on.then(|| layout_holding(&mode, &hotbar)).flatten();
+    if model.holding != holding || (holding.is_some() && content.changed()) {
+        meshes.remove(model.mesh.id());
+        for handle in &model.materials {
+            materials.remove(handle.id());
+        }
+        model.holding = holding;
+        model.mesh = default();
+        model.materials = default();
+        if let Some(held) = holding
+            && let Some(mesh) = super::preview::item_mesh(held, &content.catalogue.0)
+        {
+            model.mesh = meshes.add(mesh);
+            let base = content
+                .textures
+                .material(held, content.swatches.rgba(held), true);
+            let tinted = |color| StandardMaterial {
+                base_color: color,
+                ..base.clone()
+            };
+            model.materials = [
+                materials.add(base.clone()),
+                materials.add(tinted(OUT_OF_REACH)),
+                materials.add(tinted(BLOCKED)),
+            ];
+        }
     }
-    let Some(answer) = current(&mode, &preferences.layout, &hotbar, &camera)
-        .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()))
-    else {
-        return;
+    let wanted: Vec<(Vec3, usize)> = if model.mesh == Handle::default() {
+        Vec::new()
+    } else {
+        current(&mode, &preferences.layout, &hotbar, &camera)
+            .and_then(|intent| preview.fresh(&intent, time.elapsed_secs_f64()))
+            .map(|answer| {
+                answer
+                    .cells
+                    .iter()
+                    .map(|cell| {
+                        let tint = match cell.state {
+                            CellState::Placeable => 0,
+                            CellState::OutOfReach => 1,
+                            CellState::Blocked => 2,
+                        };
+                        (cell.at, tint)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     };
-    for cell in &answer.cells {
-        gizmos.primitive_3d(
-            &Cuboid::from_size(Vec3::splat(world.voxel_size * 0.98)),
-            Isometry3d::from_translation(cell.at + Vec3::splat(world.voxel_size * 0.5)),
-            match cell.state {
-                CellState::Placeable => PLACEABLE,
-                CellState::OutOfReach => OUT_OF_REACH,
-                CellState::Blocked => BLOCKED,
-            },
-        );
+    let existing = cells.iter().count();
+    for _ in existing..wanted.len() {
+        commands.spawn((
+            LayoutGhost,
+            bevy::light::NotShadowCaster,
+            Mesh3d(model.mesh.clone()),
+            MeshMaterial3d(model.materials[0].clone()),
+            Transform::default(),
+            Visibility::Hidden,
+        ));
+    }
+    for (index, (mut transform, mut material, mut visibility)) in cells.iter_mut().enumerate() {
+        match wanted.get(index) {
+            Some(&(at, tint)) => {
+                transform.translation = at;
+                transform.scale = Vec3::splat(world.voxel_size);
+                let handle = &model.materials[tint];
+                if material.0 != *handle {
+                    material.0 = handle.clone();
+                }
+                visibility.set_if_neq(Visibility::Visible);
+            }
+            None => {
+                visibility.set_if_neq(Visibility::Hidden);
+            }
+        }
     }
 }
 
@@ -540,8 +644,12 @@ fn spawn_readout(mut commands: Commands) {
             position_type: PositionType::Absolute,
             left: Val::Px(16.0),
             top: Val::Px(16.0),
+            padding: UiRect::all(Val::Px(8.0)),
+            border_radius: BorderRadius::all(Val::Px(6.0)),
             ..default()
         },
+        // Dark behind it, or it is lost against a bright sky.
+        BackgroundColor(Color::srgba(0.04, 0.04, 0.04, 0.8)),
         Visibility::Hidden,
     ));
 }
@@ -656,6 +764,7 @@ pub(super) fn readout(
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<LayoutMode>()
         .init_resource::<Preview>()
+        .init_resource::<GhostModel>()
         .add_message::<LayoutIntent>()
         .add_message::<LayoutAim>()
         .add_message::<LayoutAnswer>()
@@ -667,7 +776,7 @@ pub(super) fn plugin(app: &mut App) {
                     .after(super::input::resolve)
                     .before(super::removal::hold)
                     .before(super::edit::select_held),
-                (send, report, receive, track_aim, draw, readout)
+                (send, report, receive, track_aim, ghosts, readout)
                     .chain()
                     .after(super::view::place)
                     .after(intercept),
@@ -693,17 +802,6 @@ mod tests {
             .insert_resource(Ownership::playing())
             .init_resource::<Time>()
             .add_message::<LayoutIntent>();
-        // Every pad button the defaults use is taken, so the test binds one.
-        app.world_mut().resource_mut::<Bindings>().pad.insert(
-            Action::Layout,
-            [
-                Some(super::super::actions::Binding {
-                    trigger: super::super::actions::Trigger::Pad(GamepadButton::C),
-                    modifier: super::super::actions::Modifier::None,
-                }),
-                None,
-            ],
-        );
         let mut hotbar = Hotbar::default();
         hotbar.slots[0] = Holding::solid(8, tesserae_core::SHAPE_FULL_CUBE);
         app.insert_resource(hotbar);
@@ -780,6 +878,11 @@ mod tests {
         sent
     }
 
+    /// The Layout key belongs to the menu; the mode is simply on.
+    fn turn_on(app: &mut App) {
+        app.world_mut().resource_mut::<LayoutMode>().on = true;
+    }
+
     fn mode(app: &App) -> &LayoutMode {
         app.world().resource::<LayoutMode>()
     }
@@ -799,7 +902,7 @@ mod tests {
     #[test]
     fn place_commits_one_intent_with_the_held_voxel_and_the_line() {
         let mut app = app();
-        assert!(key(&mut app, KeyCode::KeyL).is_empty());
+        turn_on(&mut app);
         assert!(mode(&app).on);
         let [intent] = click(&mut app, MouseButton::Right)[..] else {
             panic!("one intent");
@@ -828,7 +931,7 @@ mod tests {
     #[test]
     fn with_the_mode_on_the_placement_actions_belong_to_the_layout() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Right);
@@ -839,7 +942,7 @@ mod tests {
     #[test]
     fn count_steps_by_keys_and_stays_within_one_and_the_cap() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         key(&mut app, KeyCode::BracketRight);
         assert_eq!(saved(&app).counts[0], DEFAULT_COUNTS[0] + 1);
         for _ in 0..10 {
@@ -855,7 +958,7 @@ mod tests {
     fn the_saved_directions_decide_the_layout_and_the_camera_does_not() {
         use super::super::layout::Direction;
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         saved_mut(&mut app).layout.directions = [Direction::NegZ, Direction::Down, Direction::PosX];
         let intent = commit(&mut app);
         assert_eq!(dims(&intent), [(Dim::Z, false, 4)]);
@@ -873,20 +976,17 @@ mod tests {
     }
 
     #[test]
-    fn remove_and_the_toggle_cancel_without_sending_anything() {
+    fn remove_cancels_without_sending_anything() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         assert!(click(&mut app, MouseButton::Left).is_empty());
-        assert!(!mode(&app).on);
-        key(&mut app, KeyCode::KeyL);
-        assert!(key(&mut app, KeyCode::KeyL).is_empty());
         assert!(!mode(&app).on);
     }
 
     #[test]
     fn leaving_gameplay_keeps_the_mode_and_a_return_does_not_commit() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Catalogue;
         step(&mut app);
         assert!(mode(&app).on, "the Layout menu is one of these contexts");
@@ -901,7 +1001,7 @@ mod tests {
     #[test]
     fn a_held_place_commits_once_however_many_frames_it_lasts() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Right);
@@ -925,7 +1025,7 @@ mod tests {
     #[test]
     fn a_pad_alone_enters_sizes_commits_and_cancels() {
         let mut app = app();
-        tap(&mut app, GamepadButton::C);
+        turn_on(&mut app);
         assert!(mode(&app).on);
         tap(&mut app, GamepadButton::RightTrigger);
         tap(&mut app, GamepadButton::RightTrigger);
@@ -959,7 +1059,7 @@ mod tests {
     #[test]
     fn the_shape_key_grows_a_line_into_a_rectangle_and_a_box_on_distinct_axes() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         key(&mut app, KeyCode::KeyH);
         assert_eq!(
             dims(&commit(&mut app)),
@@ -977,7 +1077,7 @@ mod tests {
     #[test]
     fn counts_act_on_the_active_axis() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         key(&mut app, KeyCode::KeyH);
         key(&mut app, KeyCode::KeyJ);
         key(&mut app, KeyCode::BracketRight);
@@ -990,7 +1090,7 @@ mod tests {
     #[test]
     fn a_count_that_would_pass_the_cap_is_refused_and_the_form_trims_to_fit() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         key(&mut app, KeyCode::KeyH);
         saved_mut(&mut app).layout.counts = [16, 16, 2];
         app.world_mut().resource_mut::<LayoutMode>().active = 0;
@@ -1009,7 +1109,7 @@ mod tests {
     #[test]
     fn a_pad_cycles_the_axis_and_changes_the_shape_without_the_keyboard() {
         let mut app = app();
-        tap(&mut app, GamepadButton::C);
+        turn_on(&mut app);
         tap(&mut app, GamepadButton::DPadDown);
         tap(&mut app, GamepadButton::DPadLeft);
         assert_eq!(saved(&app).form, Form::Rectangle);
@@ -1030,7 +1130,7 @@ mod tests {
     #[test]
     fn the_keyboard_keeps_orientation_and_empty_hand_while_the_mode_is_on() {
         let mut app = app();
-        key(&mut app, KeyCode::KeyL);
+        turn_on(&mut app);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::KeyQ);
@@ -1045,7 +1145,7 @@ mod tests {
             prefs.layout.kind = Kind::Between;
             prefs.layout.form = Form::Rectangle;
         }
-        key(app, KeyCode::KeyL);
+        turn_on(app);
     }
 
     fn aim(app: &mut App, cell: Option<[i32; 3]>) {
@@ -1165,7 +1265,7 @@ mod tests {
             let mut prefs = saved_mut(&mut app);
             prefs.layout.kind = Kind::Between;
         }
-        tap(&mut app, GamepadButton::C);
+        turn_on(&mut app);
         aim(&mut app, Some([2, 0, 2]));
         tap(&mut app, GamepadButton::LeftTrigger2);
         aim(&mut app, Some([6, 0, 2]));
@@ -1175,6 +1275,150 @@ mod tests {
         tap(&mut app, GamepadButton::RightTrigger2);
         tap(&mut app, GamepadButton::RightTrigger2);
         assert!(!mode(&app).on, "Remove steps back, then cancels");
+    }
+
+    fn ghost_app() -> App {
+        use crate::content::{CatalogueShape, ContentCatalogue};
+        let mut app = app();
+        let tables = crate::server::fixture_tables();
+        app.insert_resource(super::super::edit::Catalogue(ContentCatalogue {
+            shapes: (0..tables.shapes.len())
+                .map(|id| CatalogueShape {
+                    id: id as u8,
+                    name: format!("shape{id}"),
+                    turnable: id != 0,
+                    geometry: tables.shapes.preview_geometry(id as u8),
+                })
+                .collect(),
+            ..default()
+        }))
+        .init_resource::<super::super::menu::Swatches>()
+        .init_resource::<super::super::material_textures::Textures>()
+        .init_resource::<WorldSettings>()
+        .init_resource::<GhostModel>()
+        .init_resource::<Assets<Mesh>>()
+        .init_resource::<Assets<StandardMaterial>>();
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        app.world_mut().resource_mut::<Hotbar>().slots[0] =
+            Holding::solid(rock, tesserae_core::SHAPE_FULL_CUBE);
+        turn_on(&mut app);
+        app
+    }
+
+    /// Answers the current aim with `cells`, as the Server would.
+    fn answer_with(app: &mut App, cells: &[(Vec3, CellState)]) {
+        let intent = {
+            let mut cameras = app.world_mut().query::<(&GlobalTransform, &FlyCamera)>();
+            let camera = *cameras.single(app.world()).unwrap().0;
+            current(
+                mode(app),
+                &saved(app).clone(),
+                app.world().resource::<Hotbar>(),
+                &camera,
+            )
+            .unwrap()
+        };
+        app.world_mut().resource_mut::<Preview>().answer = Some((
+            LayoutAnswer {
+                seq: 1,
+                cells: cells
+                    .iter()
+                    .map(|&(at, state)| crate::server::edit::LayoutCell { at, state })
+                    .collect(),
+                refused: None,
+                anchor: None,
+            },
+            intent,
+            0.0,
+        ));
+    }
+
+    fn ghosts_now(app: &mut App) -> Vec<(Vec3, Visibility, Handle<StandardMaterial>)> {
+        // One pass spawns what is missing and a second places it.
+        for _ in 0..2 {
+            app.world_mut().run_system_once(ghosts).unwrap();
+        }
+        app.world_mut()
+            .query_filtered::<(&Transform, &Visibility, &MeshMaterial3d<StandardMaterial>), With<LayoutGhost>>()
+            .iter(app.world())
+            .map(|(t, v, m)| (t.translation, *v, m.0.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn each_cell_of_the_preview_is_a_ghost_block_tinted_by_what_will_happen() {
+        let mut app = ghost_app();
+        let cells = [
+            (Vec3::new(1.0, 2.0, 3.0), CellState::Placeable),
+            (Vec3::new(2.0, 2.0, 3.0), CellState::OutOfReach),
+            (Vec3::new(3.0, 2.0, 3.0), CellState::Blocked),
+        ];
+        answer_with(&mut app, &cells);
+        let shown = ghosts_now(&mut app);
+        assert_eq!(shown.len(), 3);
+        for (cell, (at, visibility, _)) in cells.iter().zip(&shown) {
+            assert_eq!((*at, *visibility), (cell.0, Visibility::Visible));
+        }
+        let handles: std::collections::HashSet<_> = shown.iter().map(|g| g.2.id()).collect();
+        assert_eq!(
+            handles.len(),
+            3,
+            "placeable, out of reach and blocked differ"
+        );
+        let model = app.world().resource::<GhostModel>();
+        assert_eq!(
+            shown[0].2, model.materials[0],
+            "the placeable look is the ghost's"
+        );
+    }
+
+    #[test]
+    fn ghosts_leave_when_the_preview_shrinks_or_the_mode_goes_off() {
+        let mut app = ghost_app();
+        let at = |x| Vec3::new(x, 0.0, 0.0);
+        answer_with(
+            &mut app,
+            &[
+                (at(0.0), CellState::Placeable),
+                (at(1.0), CellState::Placeable),
+            ],
+        );
+        assert_eq!(ghosts_now(&mut app).len(), 2);
+        answer_with(&mut app, &[(at(5.0), CellState::Placeable)]);
+        let shown = ghosts_now(&mut app);
+        let visible: Vec<_> = shown
+            .iter()
+            .filter(|g| g.1 == Visibility::Visible)
+            .collect();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(visible[0].0, at(5.0));
+        app.world_mut().resource_mut::<LayoutMode>().on = false;
+        assert!(
+            ghosts_now(&mut app)
+                .iter()
+                .all(|g| g.1 == Visibility::Hidden)
+        );
+    }
+
+    #[test]
+    fn a_menu_material_changes_the_ghost_model_and_the_voxel_size_scales_it() {
+        let mut app = ghost_app();
+        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
+        ghosts_now(&mut app);
+        let first = app.world().resource::<GhostModel>().mesh.clone();
+        app.world_mut().resource_mut::<LayoutMode>().material = Some(9);
+        answer_with(&mut app, &[(Vec3::ZERO, CellState::Placeable)]);
+        ghosts_now(&mut app);
+        assert_ne!(first, app.world().resource::<GhostModel>().mesh);
+        app.world_mut().resource_mut::<WorldSettings>().voxel_size = 0.5;
+        ghosts_now(&mut app);
+        let scale = app
+            .world_mut()
+            .query_filtered::<&Transform, With<LayoutGhost>>()
+            .single(app.world())
+            .unwrap()
+            .scale;
+        assert_eq!(scale, Vec3::splat(0.5));
     }
 
     #[test]

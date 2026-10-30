@@ -151,10 +151,12 @@ Edits. Its preview is the Server's answer, never World storage.
 In point to point, the Client takes each corner from the aimed cell the Server's
 preview answer reports and sends the two corners with the shape; the Server
 judges every cell of the span itself, so a corner grants nothing.
-The shape, counts, gap and six-way directions are user preferences set on the
-Layout page of the settings, which opens when the mode turns on, through the
-same draft and Apply as every other preference; a Material picked there is the
-session's, since a profile holds no Game identifiers.
+The preview draws each cell as a ghost of the block that would land, tinted
+where it would not. The Layout key opens the Layout menu (`client/layout_menu.rs`),
+a panel docked over the live game with its own input context: the cursor is
+released and the pad navigates it. Its shape, counts, gap and six-way directions
+apply as they are set and are saved when it closes; a Material picked there is
+the session's, since a profile holds no Game identifiers.
 
 Undo/redo owns at most 128 groups, 1024 before/after Occupants entries in all,
 and 16 queued requests on the integrated Server. A single Edit is a group of

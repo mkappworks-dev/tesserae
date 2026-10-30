@@ -144,7 +144,11 @@ fn deliberate(pad: &Gamepad, move_deadzone: f32, look_deadzone: f32) -> bool {
 fn ui_context(owner: Owner) -> bool {
     matches!(
         owner,
-        Owner::Catalogue | Owner::Settings | Owner::BindingCapture | Owner::Modal
+        Owner::Catalogue
+            | Owner::LayoutMenu
+            | Owner::Settings
+            | Owner::BindingCapture
+            | Owner::Modal
     )
 }
 
@@ -356,7 +360,10 @@ fn navigate(
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
     let owner = ownership.owner;
-    if !matches!(owner, Owner::Catalogue | Owner::Settings | Owner::Modal) {
+    if !matches!(
+        owner,
+        Owner::Catalogue | Owner::LayoutMenu | Owner::Settings | Owner::Modal
+    ) {
         *repeat = default();
         // Capture and dialogs keep the place, so focus returns to the row.
         if !ui_context(owner) {
@@ -479,7 +486,7 @@ fn navigate(
         - i32::from(pad.just_pressed(GamepadButton::LeftTrigger));
     if shift != 0 && modal.is_empty() {
         use super::menu_ui::Tab;
-        const ORDER: [Tab; 6] = Tab::ORDER;
+        const ORDER: [Tab; 5] = Tab::ORDER;
         let tab = if settings.open {
             settings.tab
         } else {

@@ -38,3 +38,10 @@ opaque, so the preview is not drawn behind it, and its choices take effect on
 Apply like every other setting. Typing a count means choosing Type on an axis
 and then entering digits; a pad uses the steppers. The page was checked from
 an offscreen capture, not on a physical pad.
+
+### 2026-10-30: superseded for the menu's home
+
+The Layout page in the settings was replaced by an in-game overlay in
+[ticket 09](09-layout-overlay-and-ghost-preview.md). Everything above about
+directions, counts, typing and the camera no longer choosing a direction still
+holds; the notes on the opaque overlay and Apply no longer do.

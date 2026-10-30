@@ -22,20 +22,12 @@ pub(super) struct Settings {
     resetting: bool,
     category: Category,
     notice: String,
-    /// Digits being typed into an axis count on the Layout page.
-    typed: Option<(usize, String)>,
     pub(super) dirty: bool,
     pub(super) tab: super::menu_ui::Tab,
     last_controls: super::menu_ui::Tab,
     pending: Option<super::menu_ui::Tab>,
 }
 impl Settings {
-    fn typed(&self, axis: usize) -> Option<&str> {
-        self.typed
-            .as_ref()
-            .filter(|(typed_axis, _)| *typed_axis == axis)
-            .map(|(_, digits)| digits.as_str())
-    }
     pub(super) fn binding_visible(
         &self,
         action: Action,
@@ -119,13 +111,6 @@ pub(super) enum Operation {
     ScrollDirection(bool),
     Sync(bool),
     Cap(Option<u32>),
-    LayoutKind(super::layout::Kind),
-    LayoutForm(super::layout::Form),
-    LayoutCount(usize, i32),
-    LayoutGap(i32),
-    LayoutDirection(usize, super::layout::Direction),
-    LayoutActive(usize),
-    LayoutMaterial(Option<tesserae_core::MaterialId>),
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -139,10 +124,6 @@ pub(super) fn plugin(app: &mut App) {
             capture_focus.before(bevy::input_focus::InputFocusSystems::Dispatch),
         )
         .add_session_systems(Update, slider_visuals)
-        .add_session_systems(
-            Update,
-            (open_layout_menu.after(super::layout::intercept), type_count),
-        )
         .add_session_systems(Startup, launch)
         .add_session_systems(
             Update,
@@ -175,7 +156,6 @@ fn launch(
         || std::env::var_os("TESSERAE_SCREENSHOT_HELP").is_some()
     {
         settings.tab = match std::env::var("TESSERAE_SCREENSHOT_SETTINGS_TAB").as_deref() {
-            Ok("layout") => super::menu_ui::Tab::Layout,
             Ok("bindings") => super::menu_ui::Tab::Bindings,
             Ok("controller") => super::menu_ui::Tab::Controller,
             Ok("display") => super::menu_ui::Tab::Display,
@@ -230,98 +210,6 @@ fn open_shortcut(
     settings.notice = store.error.clone().unwrap_or_default();
     settings.tab = settings.last_controls;
     settings.draft = Some((bindings.clone(), preferences.clone()));
-    settings.dirty = true;
-    menu.open = false;
-    for mut cursor in &mut cursor {
-        cursor.grab_mode = bevy::window::CursorGrabMode::None;
-        cursor.visible = true;
-    }
-}
-
-const DIGITS: [(KeyCode, u32); 20] = [
-    (KeyCode::Digit0, 0),
-    (KeyCode::Digit1, 1),
-    (KeyCode::Digit2, 2),
-    (KeyCode::Digit3, 3),
-    (KeyCode::Digit4, 4),
-    (KeyCode::Digit5, 5),
-    (KeyCode::Digit6, 6),
-    (KeyCode::Digit7, 7),
-    (KeyCode::Digit8, 8),
-    (KeyCode::Digit9, 9),
-    (KeyCode::Numpad0, 0),
-    (KeyCode::Numpad1, 1),
-    (KeyCode::Numpad2, 2),
-    (KeyCode::Numpad3, 3),
-    (KeyCode::Numpad4, 4),
-    (KeyCode::Numpad5, 5),
-    (KeyCode::Numpad6, 6),
-    (KeyCode::Numpad7, 7),
-    (KeyCode::Numpad8, 8),
-    (KeyCode::Numpad9, 9),
-];
-
-/// Types a count into the Layout page's active axis: digits append, Backspace
-/// removes one and Enter ends it. A pad has the steppers instead.
-fn type_count(
-    keys: Res<ButtonInput<KeyCode>>,
-    mode: Res<super::layout::LayoutMode>,
-    mut settings: ResMut<Settings>,
-) {
-    if !settings.open || settings.tab != super::menu_ui::Tab::Layout || settings.capturing() {
-        return;
-    }
-    let Some(form) = settings.draft.as_ref().map(|(_, p)| p.layout.form) else {
-        return;
-    };
-    let axis = mode.active.min(form.axes() - 1);
-    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
-        settings.typed = None;
-        settings.dirty = true;
-        return;
-    }
-    let mut digits = settings.typed(axis).unwrap_or_default().to_owned();
-    let mut changed = keys.just_pressed(KeyCode::Backspace) && digits.pop().is_some();
-    for (key, digit) in DIGITS {
-        if keys.just_pressed(key) && digits.len() < 3 {
-            digits.push(char::from_digit(digit, 10).expect("a digit"));
-            changed = true;
-        }
-    }
-    if !changed {
-        return;
-    }
-    settings.typed = Some((axis, digits.clone()));
-    settings.dirty = true;
-    settings.notice.clear();
-    if let Ok(count) = digits.parse::<u32>()
-        && count > 0
-        && let Some((_, p)) = settings.draft.as_mut()
-        && p.layout.set_count(axis, count)
-    {
-        settings.notice = format!(
-            "Most is {} Voxels in all.",
-            tesserae_core::layout::MAX_LAYOUT_VOXELS
-        );
-    }
-}
-
-/// Turning Layout mode on opens its menu, as the Help key opens the settings.
-fn open_layout_menu(
-    mut mode: ResMut<super::layout::LayoutMode>,
-    mut settings: ResMut<Settings>,
-    mut menu: ResMut<super::menu::Menu>,
-    (bindings, preferences, store): (Res<Bindings>, Res<Preferences>, Res<Store>),
-    mut cursor: Query<&mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
-) {
-    if !std::mem::take(&mut mode.open_menu) || settings.open {
-        return;
-    }
-    settings.open = true;
-    settings.notice = store.error.clone().unwrap_or_default();
-    settings.tab = super::menu_ui::Tab::Layout;
-    settings.draft = Some((bindings.clone(), preferences.clone()));
-    settings.typed = None;
     settings.dirty = true;
     menu.open = false;
     for mut cursor in &mut cursor {
@@ -403,11 +291,10 @@ fn activate(
     mut store: ResMut<Store>,
     mut bindings: ResMut<Bindings>,
     mut preferences: ResMut<Preferences>,
-    (save, mut menu, mut focus, mut layout): (
+    (save, mut menu, mut focus): (
         Option<Res<crate::server::persistence::SaveStatus>>,
         ResMut<super::menu::Menu>,
         ResMut<bevy::input_focus::InputFocus>,
-        ResMut<super::layout::LayoutMode>,
     ),
 ) {
     if save.is_some_and(|status| status.modal()) {
@@ -463,10 +350,7 @@ fn activate(
                 }
                 settings.open = true;
                 settings.tab = tab;
-                if !matches!(
-                    tab,
-                    super::menu_ui::Tab::Display | super::menu_ui::Tab::Layout
-                ) {
+                if tab != super::menu_ui::Tab::Display {
                     settings.last_controls = tab;
                 }
                 menu.open = false;
@@ -523,13 +407,6 @@ fn activate(
         }
         Operation::CancelConflict => {
             settings.conflict = None;
-        }
-        // Not drafted: the choice is the session's, and a profile holds no Game
-        // identifiers.
-        Operation::LayoutMaterial(material) => layout.material = material,
-        Operation::LayoutActive(axis) => {
-            layout.active = axis;
-            settings.typed = None;
         }
         Operation::Replace => {
             if let Some((action, proposed, conflicts)) = settings.conflict.take()
@@ -591,18 +468,6 @@ fn activate(
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,
                 Operation::Cap(value) => p.fps_cap = value,
-                Operation::LayoutKind(kind) => p.layout.kind = kind,
-                Operation::LayoutForm(form) => {
-                    p.layout.form = form;
-                    p.layout.fit();
-                }
-                Operation::LayoutCount(axis, by) => {
-                    p.layout.bump(axis, by);
-                }
-                Operation::LayoutGap(by) => p.layout.set_gap(by),
-                Operation::LayoutDirection(axis, direction) => {
-                    p.layout.set_direction(axis, direction)
-                }
                 _ => {}
             }
         }
@@ -864,7 +729,7 @@ pub(super) fn action_name(action: Action) -> &'static str {
         NextSlot => "Next quick slot",
         Undo => "Undo",
         Redo => "Redo",
-        Layout => "Layout mode",
+        Layout => "Layout mode and menu",
         LayoutMore => "Layout: more Voxels",
         LayoutLess => "Layout: fewer Voxels",
         LayoutShape => "Layout: line, rectangle or box",
@@ -895,8 +760,6 @@ type RenderContext<'w, 's> = (
         Res<'w, super::edit::Hotbar>,
         Res<'w, super::edit::Catalogue>,
         Res<'w, super::edit::Notice>,
-        Res<'w, crate::world::WorldSettings>,
-        Res<'w, super::layout::LayoutMode>,
     ),
     Query<'w, 's, (), (With<Scalar>, With<bevy::ui::Pressed>)>,
 );
@@ -907,7 +770,7 @@ pub(super) fn render(
     (labels, searches, active): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
-        Local<[Vec2; 5]>,
+        Local<[Vec2; 4]>,
         Local<Option<super::menu_ui::Tab>>,
         Local<String>,
     ),
@@ -922,7 +785,6 @@ pub(super) fn render(
             Tab::Behavior => 0,
             Tab::Bindings => 1,
             Tab::Controller => 3,
-            Tab::Layout => 4,
             _ => 2,
         };
         if let Some(scroll) = scrolls.iter().next() {
@@ -957,7 +819,6 @@ pub(super) fn render(
         Tab::Behavior => 0,
         Tab::Bindings => 1,
         Tab::Controller => 3,
-        Tab::Layout => 4,
         _ => 2,
     };
     commands
@@ -1012,7 +873,7 @@ pub(super) fn render(
                     &settings,
                     &labels,
                     &searches,
-                    (&context.0, &context.1, &context.2, &context.3, &context.4),
+                    (&context.0, &context.1, &context.2),
                 );
             });
             footer(root, changed);
@@ -1031,17 +892,12 @@ fn page(
         &super::edit::Hotbar,
         &super::edit::Catalogue,
         &super::edit::Notice,
-        &crate::world::WorldSettings,
-        &super::layout::LayoutMode,
     ),
 ) {
     use super::menu_ui::Tab;
     let (bindings, p) = settings.draft.as_ref().unwrap();
     match settings.tab {
         Tab::Behavior => behavior(list, settings, bindings, p, labels, context),
-        Tab::Layout => group(list, "LAYOUT", |card| {
-            layout_group(card, settings, p, (context.1, context.3, context.4))
-        }),
         Tab::Display => display(list, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
         Tab::Controller => controller(list, bindings, p, labels),
@@ -1334,8 +1190,6 @@ fn behavior(
         &super::edit::Hotbar,
         &super::edit::Catalogue,
         &super::edit::Notice,
-        &crate::world::WorldSettings,
-        &super::layout::LayoutMode,
     ),
 ) {
     group(list, "MOVEMENT & BUILDING", |card| {
@@ -1446,187 +1300,6 @@ fn behavior(
             super::menu_ui::MUTED,
         );
     }
-}
-
-/// The gap in Voxels and in metres, which is what it means at this World's
-/// Voxel size.
-fn gap_description(gap: u32, voxel_size: f32) -> String {
-    format!(
-        "{gap} Voxels, {:.1} m, between neighbours.",
-        gap as f32 * voxel_size
-    )
-}
-
-/// What a count row says: the total, the cap, and what is being typed.
-fn count_description(layout: &super::layout::LayoutPreferences, typed: Option<&str>) -> String {
-    let all = format!(
-        "{} Voxels in all. Most is {}.",
-        layout.total(layout.counts),
-        tesserae_core::layout::MAX_LAYOUT_VOXELS
-    );
-    match typed {
-        Some(digits) => format!("Typing {digits}_ for this axis. {all}"),
-        None => format!("{all} Choose Type, then enter a number."),
-    }
-}
-
-fn layout_group(
-    card: &mut ChildSpawnerCommands,
-    settings: &Settings,
-    p: &Preferences,
-    (catalogue, world, mode): (
-        &super::edit::Catalogue,
-        &crate::world::WorldSettings,
-        &super::layout::LayoutMode,
-    ),
-) {
-    use super::layout::{Form, Kind};
-    use super::menu_ui as ui;
-    let layout = &p.layout;
-    setting_row(
-        card,
-        "Mode",
-        "Say where the Voxels go by direction and count, or by two points.",
-        false,
-        |row| {
-            segment(row, |buttons| {
-                for (kind, name) in [
-                    (Kind::Directions, "Direction and count"),
-                    (Kind::Between, "Point to point"),
-                ] {
-                    option(
-                        buttons,
-                        name,
-                        Operation::LayoutKind(kind),
-                        layout.kind == kind,
-                    );
-                }
-            })
-        },
-    );
-    setting_row(
-        card,
-        "Shape",
-        "A line, a rectangle or a box of Voxels, laid out with one Place.",
-        false,
-        |row| {
-            segment(row, |buttons| {
-                for (form, name) in [
-                    (Form::Line, "Line"),
-                    (Form::Rectangle, "Rectangle"),
-                    (Form::Box, "Box"),
-                ] {
-                    option(
-                        buttons,
-                        name,
-                        Operation::LayoutForm(form),
-                        layout.form == form,
-                    );
-                }
-            })
-        },
-    );
-    if layout.kind == Kind::Between {
-        ui::description(
-            card,
-            "In play, Place sets point A, Place sets point B, then Place commits. \
-             Remove steps back a point, then cancels. The shape fills the span \
-             between the two points; each must be within reach.",
-        );
-    }
-    for (axis, name) in ["First axis", "Second axis", "Third axis"]
-        .into_iter()
-        .enumerate()
-        .take(if layout.kind == Kind::Directions {
-            layout.form.axes()
-        } else {
-            0
-        })
-    {
-        setting_row(
-            card,
-            &format!("{name} direction"),
-            "One of the six ways along the World's axes; no two share an axis.",
-            false,
-            |row| {
-                segment(row, |buttons| {
-                    for direction in super::layout::Direction::ALL {
-                        option(
-                            buttons,
-                            direction.label(),
-                            Operation::LayoutDirection(axis, direction),
-                            layout.directions[axis] == direction,
-                        );
-                    }
-                })
-            },
-        );
-        setting_row(
-            card,
-            &format!("{name} count"),
-            &count_description(layout, settings.typed(axis)),
-            false,
-            |row| {
-                segment(row, |buttons| {
-                    option(
-                        buttons,
-                        "Type",
-                        Operation::LayoutActive(axis),
-                        mode.active == axis,
-                    );
-                    option(buttons, "−", Operation::LayoutCount(axis, -1), false);
-                    ui::text(buttons, layout.counts[axis].to_string(), 12.0, ui::INK);
-                    option(buttons, "+", Operation::LayoutCount(axis, 1), false);
-                })
-            },
-        );
-    }
-    setting_row(
-        card,
-        "Gap",
-        &gap_description(layout.gap, world.voxel_size),
-        false,
-        |row| {
-            segment(row, |buttons| {
-                option(buttons, "−", Operation::LayoutGap(-1), false);
-                ui::text(buttons, layout.gap.to_string(), 12.0, ui::INK);
-                option(buttons, "+", Operation::LayoutGap(1), false);
-            })
-        },
-    );
-    ui::text(card, "Material", 13.0, ui::INK);
-    ui::description(
-        card,
-        "Lay the held Shape in this Material, or keep the held item. Not saved.",
-    );
-    card.spawn(Node {
-        flex_wrap: FlexWrap::Wrap,
-        column_gap: Val::Px(6.0),
-        row_gap: Val::Px(6.0),
-        padding: UiRect::axes(Val::Px(0.0), Val::Px(14.0)),
-        ..default()
-    })
-    .with_children(|materials| {
-        option(
-            materials,
-            "Held item",
-            Operation::LayoutMaterial(None),
-            mode.material.is_none(),
-        );
-        for material in catalogue
-            .0
-            .materials
-            .iter()
-            .filter(|m| m.solid && m.fluid.is_none())
-        {
-            option(
-                materials,
-                ui::title(&material.name),
-                Operation::LayoutMaterial(Some(material.id)),
-                mode.material == Some(material.id),
-            );
-        }
-    });
 }
 
 fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
@@ -2404,8 +2077,6 @@ mod tests {
             .init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<super::super::pad::PadInput>()
-            .init_resource::<super::super::layout::LayoutMode>()
-            .init_resource::<crate::world::WorldSettings>()
             .insert_resource(Store {
                 // The clock ticks in microseconds on macOS, so two tests started
                 // together can read one time.
@@ -2438,356 +2109,6 @@ mod tests {
         let entity = app.world_mut().spawn(operation).id();
         app.world_mut().trigger(Activate { entity });
     }
-    #[test]
-    fn layout_choices_stay_in_the_draft_until_applied_and_then_persist() {
-        use super::super::layout::{Direction, Form, Kind, LayoutPreferences};
-        let mut app = app();
-        activate_operation(
-            &mut app,
-            Operation::Navigate(super::super::menu_ui::Tab::Layout),
-        );
-        for operation in [
-            Operation::LayoutKind(Kind::Between),
-            Operation::LayoutForm(Form::Box),
-            Operation::LayoutCount(0, 2),
-            Operation::LayoutGap(3),
-            Operation::LayoutDirection(1, Direction::NegX),
-        ] {
-            activate_operation(&mut app, operation);
-        }
-        let expected = LayoutPreferences {
-            kind: Kind::Between,
-            form: Form::Box,
-            counts: [6, 3, 2],
-            gap: 3,
-            // The second axis took X, so the first moved to Z.
-            directions: [Direction::PosZ, Direction::NegX, Direction::Up],
-        };
-        assert_eq!(
-            app.world().resource::<Preferences>().layout,
-            LayoutPreferences::default(),
-            "nothing is live before Apply"
-        );
-        assert_eq!(
-            app.world()
-                .resource::<Settings>()
-                .draft
-                .as_ref()
-                .unwrap()
-                .1
-                .layout,
-            expected
-        );
-        activate_operation(&mut app, Operation::Apply);
-        assert_eq!(app.world().resource::<Preferences>().layout, expected);
-        let (_, _, saved) = Store::load(app.world().resource::<Store>().path.clone());
-        assert_eq!(saved.layout, expected, "it survives a restart");
-    }
-
-    #[test]
-    fn cancelling_the_menu_keeps_the_saved_layout_and_commits_nothing() {
-        use super::super::layout::Form;
-        use crate::server::edit::LayoutIntent;
-        let mut app = app();
-        app.add_message::<LayoutIntent>();
-        activate_operation(
-            &mut app,
-            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-        );
-        activate_operation(&mut app, Operation::LayoutForm(Form::Rectangle));
-        activate_operation(&mut app, Operation::Cancel);
-        activate_operation(&mut app, Operation::Discard);
-        assert_eq!(
-            app.world().resource::<Preferences>().layout.form,
-            Form::Line
-        );
-        assert_eq!(app.world().resource::<Messages<LayoutIntent>>().len(), 0);
-    }
-
-    #[test]
-    fn a_count_that_passes_the_cap_is_refused_in_the_menu_too() {
-        use super::super::layout::Form;
-        let mut app = app();
-        activate_operation(
-            &mut app,
-            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-        );
-        activate_operation(&mut app, Operation::LayoutForm(Form::Rectangle));
-        for _ in 0..40 {
-            activate_operation(&mut app, Operation::LayoutCount(0, 1));
-            activate_operation(&mut app, Operation::LayoutCount(1, 1));
-        }
-        let layout = &app
-            .world()
-            .resource::<Settings>()
-            .draft
-            .as_ref()
-            .unwrap()
-            .1
-            .layout;
-        assert!(layout.total(layout.counts) <= tesserae_core::layout::MAX_LAYOUT_VOXELS);
-    }
-
-    #[test]
-    fn the_layout_page_offers_every_control_and_each_solid_material() {
-        use super::super::menu_ui::{Searches, Tab};
-        let mut app = app();
-        app.init_resource::<super::super::actions::Labels>()
-            .init_resource::<Searches>()
-            .init_resource::<super::super::edit::Hotbar>()
-            .init_resource::<super::super::edit::Catalogue>()
-            .init_resource::<super::super::edit::Notice>()
-            .init_resource::<Assets<Image>>()
-            .init_resource::<Assets<Font>>()
-            .init_resource::<super::super::input::UiInput>()
-            .add_plugins(super::super::menu_ui::plugin)
-            .add_systems(Update, render);
-        let material = |id, name: &str, solid, fluid| crate::content::CatalogueMaterial {
-            remove_time: std::time::Duration::ZERO,
-            id,
-            name: name.into(),
-            solid,
-            fluid,
-            burns: false,
-        };
-        app.world_mut()
-            .resource_mut::<super::super::edit::Catalogue>()
-            .0
-            .materials = vec![
-            material(8, "stone", true, None),
-            material(9, "water", false, Some(0)),
-        ];
-        activate_operation(&mut app, Operation::Navigate(Tab::Layout));
-        app.update();
-        let operations: Vec<_> = app
-            .world_mut()
-            .query::<&Operation>()
-            .iter(app.world())
-            .map(|operation| match operation {
-                Operation::LayoutForm(form) => format!("form {form:?}"),
-                Operation::LayoutCount(axis, by) => format!("count {axis} {by}"),
-                Operation::LayoutGap(by) => format!("gap {by}"),
-                Operation::LayoutDirection(axis, direction) => {
-                    format!("direction {axis} {}", direction.label())
-                }
-                Operation::LayoutActive(axis) => format!("active {axis}"),
-                Operation::LayoutMaterial(material) => format!("material {material:?}"),
-                _ => String::new(),
-            })
-            .filter(|name| !name.is_empty())
-            .collect();
-        for expected in [
-            "form Line",
-            "form Rectangle",
-            "form Box",
-            "count 0 -1",
-            "count 0 1",
-            "direction 0 +X",
-            "direction 0 Down",
-            "direction 0 -Z",
-            "active 0",
-            "gap -1",
-            "gap 1",
-            "material None",
-            "material Some(8)",
-        ] {
-            assert!(operations.iter().any(|name| name == expected), "{expected}");
-        }
-        assert!(
-            !operations.iter().any(|name| name == "count 1 1"),
-            "a line has one axis"
-        );
-        assert!(
-            !operations.iter().any(|name| name == "direction 1 +X"),
-            "nor a second direction"
-        );
-        assert!(
-            !operations.iter().any(|name| name == "material Some(9)"),
-            "a fluid is not a solid to lay"
-        );
-    }
-
-    #[test]
-    fn point_to_point_hides_the_direction_and_count_rows() {
-        use super::super::menu_ui::{Searches, Tab};
-        let mut app = app();
-        app.init_resource::<super::super::actions::Labels>()
-            .init_resource::<Searches>()
-            .init_resource::<super::super::edit::Hotbar>()
-            .init_resource::<super::super::edit::Catalogue>()
-            .init_resource::<super::super::edit::Notice>()
-            .init_resource::<Assets<Image>>()
-            .init_resource::<Assets<Font>>()
-            .init_resource::<super::super::input::UiInput>()
-            .add_plugins(super::super::menu_ui::plugin)
-            .add_systems(Update, render);
-        let names = |app: &mut App| -> Vec<&'static str> {
-            app.update();
-            app.world_mut()
-                .query::<&Operation>()
-                .iter(app.world())
-                .filter_map(|operation| match operation {
-                    Operation::LayoutDirection(..) => Some("direction"),
-                    Operation::LayoutCount(..) => Some("count"),
-                    Operation::LayoutKind(_) => Some("mode"),
-                    _ => None,
-                })
-                .collect()
-        };
-        activate_operation(&mut app, Operation::Navigate(Tab::Layout));
-        let shown = names(&mut app);
-        assert!(shown.contains(&"direction") && shown.contains(&"count"));
-        activate_operation(
-            &mut app,
-            Operation::LayoutKind(super::super::layout::Kind::Between),
-        );
-        let shown = names(&mut app);
-        assert!(!shown.contains(&"direction") && !shown.contains(&"count"));
-        assert!(shown.contains(&"mode"), "the way back stays");
-    }
-
-    #[test]
-    fn two_axes_never_share_a_dimension_whichever_direction_is_picked() {
-        use super::super::layout::{Direction, LayoutPreferences};
-        for axis in 0..3 {
-            for direction in Direction::ALL {
-                let mut layout = LayoutPreferences::default();
-                layout.set_direction(axis, direction);
-                assert_eq!(layout.directions[axis], direction);
-                assert!(layout.valid(), "{axis} {direction:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn a_typed_count_edits_the_active_axis_and_the_cap_refuses_a_big_one() {
-        let mut app = app();
-        app.add_systems(Update, type_count);
-        activate_operation(
-            &mut app,
-            Operation::Navigate(super::super::menu_ui::Tab::Layout),
-        );
-        activate_operation(&mut app, Operation::LayoutActive(0));
-        let counts = |app: &App| {
-            app.world()
-                .resource::<Settings>()
-                .draft
-                .as_ref()
-                .unwrap()
-                .1
-                .layout
-                .counts
-        };
-        let press = |app: &mut App, key| {
-            app.world_mut()
-                .resource_mut::<ButtonInput<KeyCode>>()
-                .press(key);
-            app.update();
-            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
-            keys.release(key);
-            keys.clear();
-        };
-        press(&mut app, KeyCode::Digit1);
-        press(&mut app, KeyCode::Digit2);
-        assert_eq!(counts(&app)[0], 12);
-        press(&mut app, KeyCode::Backspace);
-        assert_eq!(counts(&app)[0], 1);
-        press(&mut app, KeyCode::Enter);
-        // Two axes at 16 each fill the cap, so a typed 17 is refused.
-        activate_operation(
-            &mut app,
-            Operation::LayoutForm(super::super::layout::Form::Rectangle),
-        );
-        app.world_mut()
-            .resource_mut::<Settings>()
-            .draft
-            .as_mut()
-            .unwrap()
-            .1
-            .layout
-            .counts = [16, 16, 2];
-        press(&mut app, KeyCode::Digit1);
-        press(&mut app, KeyCode::Digit7);
-        assert_eq!(
-            counts(&app)[0],
-            1,
-            "17 by 16 passes the cap and is refused, leaving the 1 typed first"
-        );
-        assert!(!app.world().resource::<Settings>().notice.is_empty());
-    }
-
-    #[test]
-    fn turning_the_mode_on_opens_the_menu_on_the_layout_page_and_closing_it_keeps_the_mode() {
-        use super::super::layout::LayoutMode;
-        let mut app = app();
-        app.add_systems(Update, open_layout_menu);
-        app.world_mut().spawn((
-            Window::default(),
-            bevy::window::PrimaryWindow,
-            bevy::window::CursorOptions {
-                grab_mode: bevy::window::CursorGrabMode::Locked,
-                ..default()
-            },
-        ));
-        {
-            let mut mode = app.world_mut().resource_mut::<LayoutMode>();
-            mode.on = true;
-            mode.open_menu = true;
-        }
-        app.update();
-        let settings = app.world().resource::<Settings>();
-        assert!(settings.open);
-        assert_eq!(settings.tab, super::super::menu_ui::Tab::Layout);
-        activate_operation(&mut app, Operation::Back);
-        assert!(!app.world().resource::<Settings>().open);
-        assert!(app.world().resource::<LayoutMode>().on);
-        let mut cursors = app.world_mut().query::<&bevy::window::CursorOptions>();
-        assert_eq!(
-            cursors.single(app.world()).unwrap().grab_mode,
-            bevy::window::CursorGrabMode::None,
-            "the menu released the cursor"
-        );
-    }
-
-    #[test]
-    fn the_gap_is_shown_in_metres_at_the_worlds_voxel_size() {
-        assert_eq!(
-            gap_description(0, 1.0),
-            "0 Voxels, 0.0 m, between neighbours."
-        );
-        assert_eq!(
-            gap_description(3, 0.5),
-            "3 Voxels, 1.5 m, between neighbours."
-        );
-        assert_eq!(
-            gap_description(2, 2.0),
-            "2 Voxels, 4.0 m, between neighbours."
-        );
-    }
-
-    #[test]
-    fn a_menu_material_is_the_sessions_and_replaces_the_held_one_only() {
-        let mut app = app();
-        activate_operation(
-            &mut app,
-            Operation::Navigate(super::super::menu_ui::Tab::Behavior),
-        );
-        activate_operation(&mut app, Operation::LayoutMaterial(Some(9)));
-        assert_eq!(
-            app.world()
-                .resource::<super::super::layout::LayoutMode>()
-                .material,
-            Some(9)
-        );
-        activate_operation(&mut app, Operation::LayoutMaterial(None));
-        assert_eq!(
-            app.world()
-                .resource::<super::super::layout::LayoutMode>()
-                .material,
-            None
-        );
-    }
-
     #[test]
     fn sensitivity_slider_changes_only_the_draft_and_keeps_its_drag_entity() {
         use bevy::ui_widgets::{SliderValue, ValueChange};

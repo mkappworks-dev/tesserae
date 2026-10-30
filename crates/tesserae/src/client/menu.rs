@@ -188,16 +188,22 @@ pub(super) fn plugin(app: &mut App) {
 /// Tab opens and closes; closing grabs the cursor for building. Escape closes
 /// and leaves the cursor free, as it does outside the menu, so the next click
 /// grabs it and edits nothing.
+/// The other contexts that can hold the input while the Catalogue key is read.
+type Overlays<'w> = (
+    Option<Res<'w, super::settings::Settings>>,
+    Option<Res<'w, super::input::UiInput>>,
+    Option<Res<'w, super::layout_menu::LayoutMenu>>,
+);
+
 pub(super) fn toggle(
     actions: Res<super::actions::Actions>,
     mut menu: ResMut<Menu>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     mut pointer: ResMut<PointerState>,
-    settings: Option<Res<super::settings::Settings>>,
     window: Single<&Window, With<PrimaryWindow>>,
-    ui: Option<Res<super::input::UiInput>>,
+    (settings, ui, layout_menu): Overlays,
 ) {
-    if ui.is_some_and(|ui| ui.text_entry) {
+    if ui.is_some_and(|ui| ui.text_entry) || layout_menu.is_some_and(|menu| menu.open) {
         return;
     }
     if !window.focused {
