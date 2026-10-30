@@ -88,6 +88,38 @@ pub fn layout_cells(layout: &Layout) -> Result<Vec<[i32; 3]>, LayoutError> {
         .collect())
 }
 
+/// The cells between two opposite corners, `axes` of the span's dimensions
+/// wide: the longest first, a tie going to X, then Z, then Y. A dimension not
+/// used stays at `a`'s coordinate, and the gap steps from `a` towards `b`, so
+/// `b` itself is covered only where a whole step reaches it.
+pub fn layout_between(
+    a: [i32; 3],
+    b: [i32; 3],
+    axes: usize,
+    gap: u32,
+) -> Result<Vec<[i32; 3]>, LayoutError> {
+    if !(1..=3).contains(&axes) {
+        return Err(LayoutError::AxisCount);
+    }
+    let delta: [i64; 3] = std::array::from_fn(|i| i64::from(b[i]) - i64::from(a[i]));
+    let mut order = [0usize, 2, 1];
+    order.sort_by_key(|&i| std::cmp::Reverse(delta[i].unsigned_abs()));
+    let pitch = u64::from(gap) + 1;
+    let dims = [Dim::X, Dim::Y, Dim::Z];
+    layout_cells(&Layout {
+        anchor: a,
+        axes: order[..axes]
+            .iter()
+            .map(|&i| LayoutAxis {
+                dim: dims[i],
+                positive: delta[i] >= 0,
+                count: (delta[i].unsigned_abs() / pitch + 1).min(u64::from(u32::MAX)) as u32,
+            })
+            .collect(),
+        gap,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,5 +258,82 @@ mod tests {
         layout.gap = u32::MAX;
         layout.anchor = [0, 0, 0];
         assert_eq!(layout_cells(&layout), Err(LayoutError::OutOfRange));
+    }
+
+    #[test]
+    fn a_line_between_corners_runs_the_longest_axis_and_keeps_the_rest_at_a() {
+        assert_eq!(
+            layout_between([1, 5, 2], [4, 6, 3], 1, 0).unwrap(),
+            [[1, 5, 2], [2, 5, 2], [3, 5, 2], [4, 5, 2]]
+        );
+        assert_eq!(
+            layout_between([0, 0, 0], [0, -2, 1], 1, 0).unwrap(),
+            [[0, 0, 0], [0, -1, 0], [0, -2, 0]],
+            "towards b, which is down here"
+        );
+    }
+
+    #[test]
+    fn a_rectangle_takes_the_two_longest_axes_and_is_flat_on_the_third() {
+        let cells = layout_between([0, 3, 0], [4, 5, 2], 2, 0).unwrap();
+        assert_eq!(cells.len(), 5 * 3);
+        assert!(cells.iter().all(|c| c[1] == 3), "flat at a's height");
+        assert!(cells.contains(&[4, 3, 2]) && cells.contains(&[0, 3, 0]));
+    }
+
+    #[test]
+    fn a_box_fills_every_cell_from_a_to_b_inclusive() {
+        let cells = layout_between([2, 2, 2], [0, 4, 3], 3, 0).unwrap();
+        assert_eq!(cells.len(), 3 * 3 * 2);
+        for x in 0..=2 {
+            for y in 2..=4 {
+                for z in 2..=3 {
+                    assert!(cells.contains(&[x, y, z]), "{x} {y} {z}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ties_go_to_x_then_z_then_up() {
+        let cells = layout_between([0, 0, 0], [2, 2, 2], 2, 0).unwrap();
+        assert_eq!(cells.len(), 9);
+        assert!(cells.iter().all(|c| c[1] == 0), "x and z, flat in y");
+        let cells = layout_between([0, 0, 0], [0, 2, 2], 2, 0).unwrap();
+        assert!(cells.iter().all(|c| c[0] == 0), "z and y when x is short");
+    }
+
+    #[test]
+    fn the_gap_steps_from_a_towards_b_and_stops_short_of_b_when_it_does_not_land() {
+        assert_eq!(
+            layout_between([0, 0, 0], [4, 0, 0], 1, 1).unwrap(),
+            [[0, 0, 0], [2, 0, 0], [4, 0, 0]]
+        );
+        assert_eq!(
+            layout_between([0, 0, 0], [5, 0, 0], 1, 1).unwrap(),
+            [[0, 0, 0], [2, 0, 0], [4, 0, 0]]
+        );
+    }
+
+    #[test]
+    fn one_point_is_one_cell_and_a_span_over_the_cap_is_refused() {
+        assert_eq!(layout_between([3, 3, 3], [3, 3, 3], 3, 0).unwrap().len(), 1);
+        assert_eq!(
+            layout_between([0, 0, 0], [16, 0, 15], 2, 0),
+            Err(LayoutError::TooManyVoxels),
+            "17 by 16"
+        );
+        assert_eq!(
+            layout_between([0, 0, 0], [15, 0, 15], 2, 0).unwrap().len(),
+            MAX_LAYOUT_VOXELS
+        );
+        assert_eq!(
+            layout_between([i32::MIN, 0, 0], [i32::MAX, 0, 0], 1, 0),
+            Err(LayoutError::TooManyVoxels)
+        );
+        assert_eq!(
+            layout_between([0; 3], [1; 3], 0, 0),
+            Err(LayoutError::AxisCount)
+        );
     }
 }

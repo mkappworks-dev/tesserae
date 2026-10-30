@@ -167,6 +167,7 @@ impl LayoutMode {
                 })
             }),
             gap: layout.gap,
+            span: None,
         }
     }
 }

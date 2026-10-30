@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 
 use bevy::prelude::*;
 use tesserae_core::collide::{Aabb, VoxelVolume, overlaps, raycast_until};
-use tesserae_core::layout::{Layout, LayoutAxis, LayoutError, layout_cells};
+use tesserae_core::layout::{Layout, LayoutAxis, LayoutError, layout_between, layout_cells};
 use tesserae_core::{Tables, Voxel};
 
 use super::{
@@ -26,20 +26,42 @@ use crate::server::undo::{Entry, Journal};
 use crate::server::world_state::ChunkStore;
 use crate::world::WorldSettings;
 
-/// A layout's shape in Voxel counts: one to three axes, first fastest.
+/// A layout between two corner cells, as many axes of the span as the shape
+/// has. The corners are claims, not grants: every cell is judged on its own.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Span {
+    pub a: [i32; 3],
+    /// Unset while the Player is still choosing it: the aim stands in.
+    pub b: Option<[i32; 3]>,
+    /// One for a line, two for a rectangle, three for a box.
+    pub axes: u8,
+}
+
+/// A layout's shape in Voxel counts: one to three axes, first fastest, grown
+/// from the aimed cell, or the cells between two corners when `span` is set.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct LayoutParams {
     pub axes: [Option<LayoutAxis>; 3],
     pub gap: u32,
+    pub span: Option<Span>,
 }
 
 impl LayoutParams {
     fn cells(&self, anchor: [i32; 3]) -> Result<Vec<[i32; 3]>, LayoutError> {
-        layout_cells(&Layout {
-            anchor,
-            axes: self.axes.iter().flatten().copied().collect(),
-            gap: self.gap,
-        })
+        match self.span {
+            Some(span) => {
+                layout_between(span.a, span.b.unwrap_or(anchor), span.axes.into(), self.gap)
+            }
+            None => layout_cells(&Layout {
+                anchor,
+                axes: self.axes.iter().flatten().copied().collect(),
+                gap: self.gap,
+            }),
+        }
+    }
+    /// Whether the cells are asked of the aim: not when both corners are set.
+    fn needs_anchor(&self) -> bool {
+        self.span.is_none_or(|span| span.b.is_none())
     }
 }
 
@@ -125,6 +147,7 @@ pub(super) fn receive(
                 continue;
             }
         };
+        // The cap and the shape are checked here, before anything is queued.
         if intent.layout.cells([0; 3]).is_err() {
             rejected.write(EditRejected {
                 reason: RejectReason::BadLayout,
@@ -185,12 +208,7 @@ pub(super) fn answer_aim(
         cells: Vec::new(),
         refused: Some(reason),
     };
-    let cells = anchor(&store, &tables, &world, &aim.intent, reach).and_then(|at| {
-        aim.intent
-            .layout
-            .cells(at)
-            .map_err(|_| RejectReason::BadLayout)
-    });
+    let cells = expand(&store, &tables, &world, &aim.intent, reach);
     answers.write(match cells {
         Err(reason) => refused(reason),
         Ok(cells) => LayoutAnswer {
@@ -212,6 +230,22 @@ pub(super) fn answer_aim(
             refused: None,
         },
     });
+}
+
+/// The cells a layout covers: from the aim, or between its corners.
+fn expand(
+    store: &ChunkStore,
+    tables: &Tables,
+    world: &WorldSettings,
+    intent: &LayoutIntent,
+    reach: Reach,
+) -> Result<Vec<[i32; 3]>, RejectReason> {
+    let at = if intent.layout.needs_anchor() {
+        anchor(store, tables, world, intent, reach)?
+    } else {
+        [0; 3]
+    };
+    intent.layout.cells(at).map_err(|_| RejectReason::BadLayout)
 }
 
 /// The cell the ray picks for the first Voxel: where a single Place would go.
@@ -319,14 +353,7 @@ pub(super) fn drain(
             break;
         };
         if layout.cells.is_none() {
-            let started =
-                anchor(store, tables, world, &layout.intent, layout.reach).and_then(|at| {
-                    layout
-                        .intent
-                        .layout
-                        .cells(at)
-                        .map_err(|_| RejectReason::BadLayout)
-                });
+            let started = expand(store, tables, world, &layout.intent, layout.reach);
             match started {
                 Ok(cells) => {
                     let mut kept = VecDeque::new();
@@ -431,7 +458,11 @@ mod tests {
             origin: DOWN_EYE,
             direction: Vec3::NEG_Y,
             voxel: stone(),
-            layout: LayoutParams { axes, gap: 0 },
+            layout: LayoutParams {
+                axes,
+                gap: 0,
+                span: None,
+            },
         }
     }
 
@@ -517,6 +548,85 @@ mod tests {
             .unwrap();
         assert_eq!(answer.cells[0].state, CellState::Blocked);
         assert_eq!(answer.cells[1].state, CellState::Placeable);
+    }
+
+    fn between(a: [i32; 3], b: Option<[i32; 3]>, axes: u8, gap: u32) -> LayoutIntent {
+        LayoutIntent {
+            layout: LayoutParams {
+                axes: [None; 3],
+                gap,
+                span: Some(Span { a, b, axes }),
+            },
+            ..line(1)
+        }
+    }
+
+    #[test]
+    fn a_span_lands_between_its_corners_for_each_shape() {
+        for (axes, cells) in [(1u8, 5usize), (2, 5 * 4), (3, 5 * 4 * 2)] {
+            let mut app = app_with(&[(origin(), ground())]);
+            send(&mut app, between([5, 8, 5], Some([9, 9, 8]), axes, 0));
+            for _ in 0..4 {
+                tick(&mut app);
+            }
+            let mut solid = 0;
+            for y in 8..10 {
+                for z in 5..9 {
+                    for x in 5..10 {
+                        solid += usize::from(voxel_at(&app, [x, y, z]) == stone());
+                    }
+                }
+            }
+            assert_eq!(solid, cells, "{axes} axes");
+            assert!(rejections(&mut app).is_empty(), "{axes} axes");
+        }
+    }
+
+    #[test]
+    fn an_unset_b_is_the_aim_in_the_preview_and_the_corners_grant_nothing() {
+        let mut app = app_with(&[(origin(), ground())]);
+        set_eye(&mut app, DOWN_EYE);
+        app.world_mut().write_message(LayoutAim {
+            seq: 1,
+            intent: between([2, 8, 5], None, 1, 0),
+        });
+        app.world_mut().run_system_once(receive_aim).unwrap();
+        app.world_mut().run_system_once(answer_aim).unwrap();
+        let answer = app
+            .world_mut()
+            .resource_mut::<Messages<LayoutAnswer>>()
+            .drain()
+            .next()
+            .unwrap();
+        // The aim lands at (5, 8, 5), so the span runs x = 2 to 5.
+        assert_eq!(answer.cells.len(), 4);
+        assert_eq!(answer.cells[3].at, Vec3::new(5.0, 8.0, 5.0));
+
+        // Corners far past reach: the cells there are skipped, not placed.
+        send(&mut app, between([5, 8, 5], Some([30, 8, 5]), 1, 0));
+        tick(&mut app);
+        assert_eq!(placed(&app), 8, "only what the Eye reaches");
+        assert_eq!(rejections(&mut app), [RejectReason::LayoutPartial]);
+    }
+
+    #[test]
+    fn a_span_over_the_cap_is_refused_before_it_is_queued() {
+        let mut app = app_with(&[(origin(), ground())]);
+        send(&mut app, between([0, 8, 0], Some([16, 8, 15]), 2, 0));
+        assert_eq!(rejections(&mut app), [RejectReason::BadLayout]);
+        assert!(app.world().resource::<PendingEdits>().is_empty());
+    }
+
+    #[test]
+    fn one_undo_takes_a_whole_span_back() {
+        let mut app = app_with(&[(origin(), ground())]);
+        send(&mut app, between([5, 8, 5], Some([8, 8, 6]), 2, 0));
+        for _ in 0..2 {
+            tick(&mut app);
+        }
+        assert_eq!(placed(&app), 8);
+        replay(&mut app, Undo);
+        assert_eq!(placed(&app), 0);
     }
 
     #[test]

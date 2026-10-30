@@ -8,15 +8,26 @@ a span too, with an unset B taken from the aim.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 Spec: [layout placement](../spec.md), amendment 2026-10-30.
 
-- [ ] A line spans the longest axis from A towards B, a rectangle the two
+- [x] A line spans the longest axis from A towards B, a rectangle the two
       longest and flat at A's level on the third, a box all three; ties prefer
       X, then Z, then up.
-- [ ] The gap steps from A towards B; a span over 256 Voxels is refused.
-- [ ] The Server judges every cell for reach, sight and occupancy; corners
+- [x] The gap steps from A towards B; a span over 256 Voxels is refused.
+- [x] The Server judges every cell for reach, sight and occupancy; corners
       grant nothing, and out-of-reach or blocked cells are skipped.
-- [ ] One undo reverses the whole span, atomically as before.
-- [ ] Directional layouts behave exactly as before.
+- [x] One undo reverses the whole span, atomically as before.
+- [x] Directional layouts behave exactly as before.
+
+## Comments
+
+### 2026-10-30: implemented
+
+The span rides on `LayoutParams` as an optional pair of corners with the
+shape's axis count, so one intent, one pending queue and one undo group serve
+both ways of saying where Voxels go. An unset B takes the aim, which is how
+the preview follows the cursor. The Client does not send spans yet; ticket 08
+does. After the rebase onto main, layout cells also stay out of a physics body
+through the shared landing code.
