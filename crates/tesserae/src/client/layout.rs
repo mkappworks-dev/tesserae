@@ -115,9 +115,8 @@ impl Direction {
     }
 }
 
-/// What a layout is, kept across restarts: the shape, how many Voxels along
-/// each axis, which way each grows and the gap between Voxels. Counts and gap are Voxels, so they mean the same at any Voxel
-/// size; the menu shows the gap in metres.
+/// A layout kept across restarts. Counts and gap are in Voxels so they mean the
+/// same at any Voxel size; the menu shows the gap in metres.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub(crate) struct LayoutPreferences {
@@ -154,14 +153,12 @@ impl LayoutPreferences {
             && self.total(self.counts) <= MAX_LAYOUT_VOXELS
             && (0..3).all(|i| (0..i).all(|j| self.directions[i].dim() != self.directions[j].dim()))
     }
-    /// Steps one axis, refusing a count that passes the cap. Whether it was
-    /// refused.
+    /// Steps one axis; true if the cap refused it.
     pub(super) fn bump(&mut self, axis: usize, by: i32) -> bool {
         let count = (self.counts[axis] as i32 + by).max(1) as u32;
         self.set_count(axis, count)
     }
-    /// Sets one axis's count outright, clamped to the cap on its own and
-    /// refused if all the axes together would pass it. Whether it was refused.
+    /// Sets one axis outright; true if the cap on all axes together refused it.
     pub(super) fn set_count(&mut self, axis: usize, count: u32) -> bool {
         let mut counts = self.counts;
         counts[axis] = count.clamp(1, MAX_LAYOUT_VOXELS as u32);
