@@ -153,6 +153,8 @@ preview answer reports and sends the two corners with the shape; the Server
 judges every cell of the span itself, so a corner grants nothing.
 A corner can also be set by holding Place on A and letting go on B; each corner
 is drawn as an outlined cell with the span's size beside it.
+A span is the box between its corners, so it has no shape of its own: a shared
+dimension collapses, giving a line or a flat rectangle.
 The preview draws each cell as a ghost of the block that would land, tinted
 where it would not. The Layout key opens the Layout menu (`client/layout_menu.rs`),
 a panel docked over the live game with its own input context: the cursor is

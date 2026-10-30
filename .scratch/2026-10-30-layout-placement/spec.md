@@ -317,3 +317,20 @@ leave, and the Layout key should work as it does for the measuring tool.
 - A card taller than the screen scrolls, with the wheel and with pad focus, and
   keeps its place when a change rebuilds it.
 
+## Amendment 2026-10-30 (6): no shape in point to point, leaving, a calmer card
+
+- Point to point has no shape. A and B are opposite corners of a box, and a
+  dimension they share collapses, so one differing axis is a line, two a flat
+  rectangle and three a box. Dragging in the direction wanted is the whole
+  choice. This replaces the rule that the shape picks the longest axes. The
+  shape control and the shape key do nothing there; Direction and count keeps
+  them.
+- The clear key (Backspace) leaves the mode from play and from the open menu,
+  and so does the cross in the menu's corner. The Layout key and Escape only
+  close the menu.
+- The card is set in the app's own type and colours: a title with a chip for
+  the way in use, option tracks as wide as their choices, one recessed group
+  per axis with its direction, count and a typed number, the gap shown in
+  metres, and a leaf-edged box for the shape, what the aim would lay and the
+  keys.
+

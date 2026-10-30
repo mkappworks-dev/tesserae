@@ -25,6 +25,9 @@ use tesserae_core::Voxel;
 use tesserae_core::layout::{Dim, LayoutAxis, MAX_LAYOUT_VOXELS, layout_between};
 
 const DEFAULT_COUNTS: [u32; 3] = [4, 3, 2];
+/// Point to point has no shape: the corners span a box, and a dimension they
+/// share collapses, so one differing axis is a line and two a flat rectangle.
+const SPAN_AXES: u8 = 3;
 /// Voxels left empty between neighbours at most: past this the layout would
 /// stretch further than a Player's reach.
 pub(super) const MAX_GAP: u32 = 15;
@@ -107,11 +110,11 @@ impl Direction {
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::PosX => "+X",
-            Self::NegX => "-X",
+            Self::NegX => "−X",
             Self::Up => "Up",
             Self::Down => "Down",
             Self::PosZ => "+Z",
-            Self::NegZ => "-Z",
+            Self::NegZ => "−Z",
         }
     }
 }
@@ -203,7 +206,7 @@ pub(super) struct LayoutMode {
     /// The last increase was refused for passing the cap.
     refused: bool,
     /// Point to point: the corners picked so far, at most two.
-    points: Vec<[i32; 3]>,
+    pub(super) points: Vec<[i32; 3]>,
     /// The cell the aim picks now, from the Server's latest fresh answer.
     aimed: Option<[i32; 3]>,
     /// Place went down on A and is still held: letting go on another cell sets B.
@@ -212,6 +215,12 @@ pub(super) struct LayoutMode {
     was_grabbed: bool,
 }
 impl LayoutMode {
+    /// Leaves the mode, dropping what was half picked.
+    pub(super) fn leave(&mut self) {
+        self.on = false;
+        self.points.clear();
+        self.dragging = false;
+    }
     /// A mode already on, for a capture that shows the Layout menu.
     pub(super) fn turned_on() -> Self {
         Self {
@@ -226,7 +235,7 @@ impl LayoutMode {
             let span = self.points.first().map(|&a| Span {
                 a,
                 b: self.points.get(1).copied(),
-                axes: layout.form.axes() as u8,
+                axes: SPAN_AXES,
             });
             return LayoutParams {
                 axes: [
@@ -282,9 +291,7 @@ pub(super) fn intercept(
     }
     // Put away as the measuring tool is, with the same key.
     if actions.started(Action::ClearTool) {
-        mode.on = false;
-        mode.points.clear();
-        mode.dragging = false;
+        mode.leave();
         actions.cancel(Action::ClearTool);
         return;
     }
@@ -302,7 +309,8 @@ pub(super) fn intercept(
     if by != 0 {
         mode.refused = layout.bump(mode.active, by);
     }
-    if actions.started(Action::LayoutShape) || pad_form {
+    // Point to point has no shape to change.
+    if (actions.started(Action::LayoutShape) || pad_form) && layout.kind == Kind::Directions {
         layout.form = layout.form.next();
         mode.active = mode.active.min(layout.form.axes() - 1);
         layout.fit();
@@ -370,7 +378,7 @@ fn pick_point(mode: &mut LayoutMode, layout: &LayoutPreferences) {
         return;
     };
     if let Some(&a) = mode.points.first()
-        && layout_between(a, cell, layout.form.axes(), layout.gap).is_err()
+        && layout_between(a, cell, SPAN_AXES.into(), layout.gap).is_err()
     {
         mode.refused = true;
         return;
@@ -768,8 +776,21 @@ fn tally(answer: &LayoutAnswer) -> [usize; 3] {
     ]
 }
 
-/// What the menu and the status card say: the shape, the next step, what the
-/// aim would lay, and the keys.
+/// What the menu and the status card say, in three parts that are set apart:
+/// the shape, the next step with what the aim would lay, and the keys.
+pub(super) struct Summary {
+    pub(super) head: String,
+    pub(super) body: String,
+    pub(super) hint: String,
+}
+
+impl Summary {
+    #[cfg(test)]
+    pub(super) fn joined(&self) -> String {
+        format!("{}\n{}\n{}", self.head, self.body, self.hint)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn summary(
     mode: &LayoutMode,
@@ -780,28 +801,16 @@ pub(super) fn summary(
     bindings: &Bindings,
     labels: &Labels,
     now: f64,
-) -> String {
+) -> Summary {
     let keys = |action| bindings.label(action, labels);
-    let axes: Vec<String> = (0..layout.form.axes())
-        .map(|i| {
-            let marker = if i == mode.active && layout.form != Form::Line {
-                "*"
-            } else {
-                ""
-            };
-            format!(
-                "{}{} {}",
-                marker,
-                layout.counts[i],
-                layout.directions[i].label()
-            )
-        })
-        .collect();
     let between = layout.kind == Kind::Between;
     let head = if between {
-        format!("Layout: {:?} from point to point", layout.form)
+        "Point to point".to_owned()
     } else {
-        format!("Layout: {:?} {}", layout.form, axes.join(" x "))
+        let axes: Vec<String> = (0..layout.form.axes())
+            .map(|i| format!("{} {}", layout.counts[i], layout.directions[i].label()))
+            .collect();
+        format!("{:?} · {}", layout.form, axes.join(" × "))
     };
     let step = match mode.points.len() {
         _ if !between => None,
@@ -819,7 +828,7 @@ pub(super) fn summary(
         let [ok, far, blocked] = tally(answer);
         format!("{ok} will be placed, {far} out of reach, {blocked} blocked")
     };
-    let body = match held_voxel(hotbar) {
+    let mut body = match held_voxel(hotbar) {
         None => "Hold a solid to lay it out".to_owned(),
         Some(_) => {
             let answer = current(mode, layout, hotbar, camera)
@@ -832,6 +841,9 @@ pub(super) fn summary(
             }
         }
     };
+    if mode.refused {
+        body.push_str(&format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels"));
+    }
     let leave = format!(
         " · {} menu · {} leave",
         keys(Action::Layout),
@@ -853,12 +865,7 @@ pub(super) fn summary(
             keys(Action::LayoutLess),
         )
     };
-    let cap = if mode.refused {
-        format!("\nMost is {MAX_LAYOUT_VOXELS} Voxels")
-    } else {
-        String::new()
-    };
-    format!("{head}\n{body}{cap}\n{hint}")
+    Summary { head, body, hint }
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -1289,12 +1296,28 @@ mod tests {
             Some(Span {
                 a: [1, 2, 3],
                 b: Some([5, 2, 6]),
-                axes: 2
+                axes: 3
             })
         );
         assert_eq!(intent.voxel, rock());
         assert!(points(&app).is_empty(), "ready for the next layout");
         assert!(mode(&app).on);
+    }
+
+    #[test]
+    fn point_to_point_has_no_shape_so_the_shape_key_does_nothing_there() {
+        let mut app = app();
+        between(&mut app);
+        let before = saved(&app).form;
+        key(&mut app, KeyCode::KeyH);
+        assert_eq!(saved(&app).form, before);
+        saved_mut(&mut app).layout.kind = Kind::Directions;
+        key(&mut app, KeyCode::KeyH);
+        assert_ne!(
+            saved(&app).form,
+            before,
+            "but it still changes the shape elsewhere"
+        );
     }
 
     #[test]
@@ -1595,6 +1618,7 @@ mod tests {
             &Labels::default(),
             0.0,
         )
+        .joined()
     }
 
     #[test]
@@ -1611,7 +1635,7 @@ mod tests {
             ],
         );
         let said = say(&mut app);
-        assert!(said.contains("Line 4 +X"), "{said}");
+        assert!(said.contains("Line · 4 +X"), "{said}");
         assert!(
             said.contains("2 will be placed, 1 out of reach, 1 blocked"),
             "{said}"
@@ -1619,7 +1643,7 @@ mod tests {
         assert!(said.contains("count"), "the keys for the counts");
         saved_mut(&mut app).layout.kind = Kind::Between;
         let said = say(&mut app);
-        assert!(said.contains("from point to point"), "{said}");
+        assert!(said.starts_with("Point to point\n"), "{said}");
         app.world_mut()
             .resource_mut::<LayoutMode>()
             .points

@@ -18,8 +18,8 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::layout::MAX_LAYOUT_VOXELS;
 
-const CARD_WIDTH: f32 = 340.0;
-const STATUS_WIDTH: f32 = 300.0;
+const CARD_WIDTH: f32 = 380.0;
+const STATUS_WIDTH: f32 = 320.0;
 
 #[derive(Resource, Default)]
 pub(super) struct LayoutMenu {
@@ -63,9 +63,14 @@ struct Panel;
 #[derive(Component)]
 struct Card;
 
-/// The text that says what the layout is and what the aim would lay.
-#[derive(Component)]
-struct Info;
+/// The lines that say what the layout is, what the aim would lay and which
+/// keys do what.
+#[derive(Component, Clone, Copy)]
+enum Info {
+    Head,
+    Body,
+    Hint,
+}
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<LayoutMenu>()
@@ -112,6 +117,12 @@ pub(super) fn toggle(
     }
     let key = actions.started(Action::Layout);
     let escape = menu.open && actions.cancel_requested();
+    // The clear key leaves the mode from the menu as it does from play.
+    if menu.open && mode.on && actions.started(Action::ClearTool) {
+        mode.leave();
+        close(&mut menu, &mut cursor, true);
+        return;
+    }
     if !key && !escape {
         return;
     }
@@ -180,6 +191,7 @@ fn activate(
         }
         Control::Gap(by) => layout.set_gap(by),
         Control::Close => {
+            mode.leave();
             for mut cursor in &mut cursor {
                 close(&mut menu, &mut cursor, true);
             }
@@ -287,27 +299,239 @@ fn persist(
     }
 }
 
-fn row(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+fn weighted(size: f32, weight: u16) -> TextFont {
+    TextFont {
+        weight: bevy::text::FontWeight(weight),
+        ..ui::font(size)
+    }
+}
+
+fn section(parent: &mut ChildSpawnerCommands, title: &str) {
     parent
         .spawn(Node {
-            flex_wrap: FlexWrap::Wrap,
-            column_gap: Val::Px(5.0),
-            row_gap: Val::Px(5.0),
-            align_items: AlignItems::Center,
+            margin: UiRect::top(Val::Px(6.0)),
             ..default()
         })
+        .with_children(|p| ui::eyebrow(p, title));
+}
+
+fn header(card: &mut ChildSpawnerCommands, open: bool, kind: Kind) {
+    card.spawn(Node {
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        ..default()
+    })
+    .with_children(|header| {
+        header
+            .spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            })
+            .with_children(|title| {
+                title.spawn((
+                    Text::new("Layout"),
+                    weighted(18.0, 650),
+                    TextColor(ui::INK),
+                    Pickable::IGNORE,
+                ));
+                // What the layout is set to, at a glance.
+                title
+                    .spawn((
+                        Node {
+                            padding: UiRect::axes(Val::Px(8.0), Val::Px(2.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            border_radius: BorderRadius::all(Val::Px(10.0)),
+                            ..default()
+                        },
+                        BorderColor::all(ui::LEAF),
+                        Pickable::IGNORE,
+                    ))
+                    .with_child((
+                        Text::new(match kind {
+                            Kind::Directions => "DIRECTION AND COUNT",
+                            Kind::Between => "POINT TO POINT",
+                        }),
+                        weighted(9.0, 650),
+                        bevy::text::LetterSpacing::Px(0.8),
+                        TextColor(ui::LEAF),
+                        Pickable::IGNORE,
+                    ));
+            });
+        if open {
+            button(header, "×", Control::Close, false);
+        }
+    });
+}
+
+/// A set of choices in one rounded track, the chosen one outlined.
+fn segmented(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+    parent
+        .spawn((
+            Node {
+                // As wide as its choices, not the card.
+                align_self: AlignSelf::FlexStart,
+                padding: UiRect::all(Val::Px(3.0)),
+                column_gap: Val::Px(2.0),
+                row_gap: Val::Px(2.0),
+                flex_wrap: FlexWrap::Wrap,
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(7.0)),
+                ..default()
+            },
+            BackgroundColor(ui::BG),
+            BorderColor::all(ui::EDGE),
+        ))
         .with_children(children);
+}
+
+fn choice(parent: &mut ChildSpawnerCommands, label: &str, control: Control, selected: bool) {
+    ui::compact_button(parent, label, control, selected, 26.0, 11.0);
 }
 
 fn button(parent: &mut ChildSpawnerCommands, label: &str, control: Control, selected: bool) {
     ui::compact_button(parent, label, control, selected, 28.0, 11.0);
 }
 
-fn gap_description(gap: u32, voxel_size: f32) -> String {
-    format!(
-        "{gap} Voxels, {:.1} m, between neighbours.",
-        gap as f32 * voxel_size
-    )
+/// A minus, the value and a plus.
+fn stepper(parent: &mut ChildSpawnerCommands, less: Control, value: String, more: Control) {
+    parent
+        .spawn(Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(6.0),
+            ..default()
+        })
+        .with_children(|stepper| {
+            choice(stepper, "−", less, false);
+            stepper
+                .spawn(Node {
+                    min_width: Val::Px(30.0),
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                })
+                .with_child((
+                    Text::new(value),
+                    weighted(14.0, 650),
+                    TextColor(ui::INK),
+                    Pickable::IGNORE,
+                ));
+            choice(stepper, "+", more, false);
+        });
+}
+
+/// A label on the left with what it is set to, and its controls on the right.
+fn field(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    value: &str,
+    controls: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    parent
+        .spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(8.0),
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn(Node {
+                flex_direction: FlexDirection::Column,
+                ..default()
+            })
+            .with_children(|text| {
+                text.spawn((
+                    Text::new(label),
+                    weighted(12.0, 600),
+                    TextColor(ui::INK),
+                    Pickable::IGNORE,
+                ));
+                text.spawn((
+                    Text::new(value),
+                    ui::font(11.0),
+                    TextColor(ui::MUTED),
+                    Pickable::IGNORE,
+                ));
+            });
+            row.spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(controls);
+        });
+}
+
+/// A recessed box grouping one axis's controls.
+fn inset(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(8.0),
+                padding: UiRect::all(Val::Px(10.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.025)),
+            BorderColor::all(ui::EDGE),
+        ))
+        .with_children(children);
+}
+
+fn note(parent: &mut ChildSpawnerCommands, text: &str) {
+    parent.spawn((
+        Text::new(text),
+        ui::font(11.0),
+        bevy::text::LineHeight::RelativeToFont(1.5),
+        TextColor(ui::MUTED),
+        Pickable::IGNORE,
+    ));
+}
+
+/// What the layout is, what the aim would lay and which keys do what, set off
+/// by a leaf-coloured edge.
+fn info_panel(parent: &mut ChildSpawnerCommands) {
+    parent
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(4.0),
+                margin: UiRect::top(Val::Px(6.0)),
+                padding: UiRect {
+                    left: Val::Px(12.0),
+                    right: Val::Px(10.0),
+                    top: Val::Px(9.0),
+                    bottom: Val::Px(9.0),
+                },
+                border: UiRect::left(Val::Px(3.0)),
+                border_radius: BorderRadius::all(Val::Px(6.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(
+                73.0 / 255.0,
+                178.0 / 255.0,
+                98.0 / 255.0,
+                0.07,
+            )),
+            BorderColor::all(ui::LEAF),
+        ))
+        .with_children(|panel| {
+            for (part, font, color) in [
+                (Info::Head, weighted(13.0, 650), ui::LEAF),
+                (Info::Body, ui::font(12.0), ui::INK),
+                (Info::Hint, ui::font(10.5), ui::MUTED),
+            ] {
+                panel.spawn((
+                    part,
+                    Text::new(""),
+                    font,
+                    bevy::text::LineHeight::RelativeToFont(1.5),
+                    TextColor(color),
+                    Pickable::IGNORE,
+                ));
+            }
+        });
 }
 
 fn count_description(layout: &LayoutPreferences, typed: Option<&str>) -> String {
@@ -331,9 +555,9 @@ fn update_info(
     preview: Res<super::layout::Preview>,
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     time: Res<Time>,
-    mut text: Query<&mut Text, With<Info>>,
+    mut text: Query<(&Info, &mut Text)>,
 ) {
-    let shown = super::layout::summary(
+    let said = super::layout::summary(
         &mode,
         &preferences.layout,
         &hotbar,
@@ -343,9 +567,14 @@ fn update_info(
         &labels,
         time.elapsed_secs_f64(),
     );
-    for mut text in &mut text {
-        if text.0 != shown {
-            text.0 = shown.clone();
+    for (part, mut text) in &mut text {
+        let line = match part {
+            Info::Head => &said.head,
+            Info::Body => &said.body,
+            Info::Hint => &said.hint,
+        };
+        if text.0 != *line {
+            text.0 = line.clone();
         }
     }
 }
@@ -418,103 +647,98 @@ fn render(
                         max_height: Val::Percent(92.0),
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(8.0),
-                        padding: UiRect::all(Val::Px(14.0)),
+                        padding: UiRect::all(Val::Px(18.0)),
                         border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(8.0)),
+                        border_radius: BorderRadius::all(Val::Px(12.0)),
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
-                    BackgroundColor(Color::srgba(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0, 0.94)),
+                    BackgroundColor(Color::srgba(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0, 0.97)),
                     BorderColor::all(ui::EDGE),
                 ))
                 .with_children(|card| {
-                    card.spawn(Node {
-                        justify_content: JustifyContent::SpaceBetween,
-                        align_items: AlignItems::Center,
-                        ..default()
-                    })
-                    .with_children(|header| {
-                        ui::text(header, "Layout", 16.0, ui::INK);
-                        if open {
-                            button(header, "×", Control::Close, false);
-                        }
-                    });
-                    let info = |card: &mut ChildSpawnerCommands| {
-                        card.spawn((
-                            Info,
-                            Text::new(""),
-                            ui::font(12.0),
-                            bevy::text::LineHeight::RelativeToFont(1.5),
-                            TextColor(ui::LEAF),
-                            Pickable::IGNORE,
-                        ));
-                    };
+                    header(card, open, layout.kind);
                     if !open {
-                        info(card);
+                        info_panel(card);
                         return;
                     }
-                    ui::eyebrow(card, "MODE");
-                    row(card, |r| {
+                    section(card, "HOW");
+                    segmented(card, |r| {
                         for (kind, name) in [
                             (Kind::Directions, "Direction and count"),
                             (Kind::Between, "Point to point"),
                         ] {
-                            button(r, name, Control::Kind(kind), layout.kind == kind);
-                        }
-                    });
-                    ui::eyebrow(card, "SHAPE");
-                    row(card, |r| {
-                        for (form, name) in [
-                            (Form::Line, "Line"),
-                            (Form::Rectangle, "Rectangle"),
-                            (Form::Box, "Box"),
-                        ] {
-                            button(r, name, Control::Form(form), layout.form == form);
+                            choice(r, name, Control::Kind(kind), layout.kind == kind);
                         }
                     });
                     if layout.kind == Kind::Directions {
+                        section(card, "SHAPE");
+                        segmented(card, |r| {
+                            for (form, name) in [
+                                (Form::Line, "Line"),
+                                (Form::Rectangle, "Rectangle"),
+                                (Form::Box, "Box"),
+                            ] {
+                                choice(r, name, Control::Form(form), layout.form == form);
+                            }
+                        });
                         for (axis, name) in ["First axis", "Second axis", "Third axis"]
                             .into_iter()
                             .enumerate()
                             .take(layout.form.axes())
                         {
-                            ui::eyebrow(card, &name.to_uppercase());
-                            row(card, |r| {
-                                for direction in Direction::ALL {
-                                    button(
+                            inset(card, |panel| {
+                                field(panel, name, layout.directions[axis].label(), |r| {
+                                    choice(r, "Type", Control::Type(axis), mode.active == axis);
+                                    stepper(
                                         r,
-                                        direction.label(),
-                                        Control::Direction(axis, direction),
-                                        layout.directions[axis] == direction,
+                                        Control::Count(axis, -1),
+                                        layout.counts[axis].to_string(),
+                                        Control::Count(axis, 1),
                                     );
-                                }
+                                });
+                                segmented(panel, |r| {
+                                    for direction in Direction::ALL {
+                                        choice(
+                                            r,
+                                            direction.label(),
+                                            Control::Direction(axis, direction),
+                                            layout.directions[axis] == direction,
+                                        );
+                                    }
+                                });
+                                let typed = menu
+                                    .typed
+                                    .as_ref()
+                                    .filter(|(typed_axis, _)| *typed_axis == axis)
+                                    .map(|(_, digits)| digits.as_str());
+                                note(panel, &count_description(layout, typed));
                             });
-                            row(card, |r| {
-                                button(r, "Type", Control::Type(axis), mode.active == axis);
-                                button(r, "−", Control::Count(axis, -1), false);
-                                ui::text(r, layout.counts[axis].to_string(), 13.0, ui::INK);
-                                button(r, "+", Control::Count(axis, 1), false);
-                            });
-                            let typed = menu
-                                .typed
-                                .as_ref()
-                                .filter(|(typed_axis, _)| *typed_axis == axis)
-                                .map(|(_, digits)| digits.as_str());
-                            ui::description(card, &count_description(layout, typed));
                         }
+                    } else {
+                        inset(card, |panel| {
+                            note(
+                                panel,
+                                "Click A then B, or hold Place on A and drag to B. \
+                                 The two corners span a box: one differing axis is a \
+                                 line, two a flat rectangle, three a box. Each corner \
+                                 must be within reach.",
+                            );
+                        });
                     }
-                    ui::eyebrow(card, "GAP");
-                    row(card, |r| {
-                        button(r, "−", Control::Gap(-1), false);
-                        ui::text(r, layout.gap.to_string(), 13.0, ui::INK);
-                        button(r, "+", Control::Gap(1), false);
-                    });
-                    ui::description(card, &gap_description(layout.gap, world.voxel_size));
+                    section(card, "GAP");
+                    field(
+                        card,
+                        "Between Voxels",
+                        &format!("{:.1} m", layout.gap as f32 * world.voxel_size),
+                        |r| {
+                            stepper(r, Control::Gap(-1), layout.gap.to_string(), Control::Gap(1));
+                        },
+                    );
                     if !menu.notice.is_empty() {
                         ui::text(card, menu.notice.clone(), 11.0, ui::AMBER);
                     }
-                    ui::eyebrow(card, "NOW");
-                    info(card);
+                    info_panel(card);
                 });
         });
     // The rebuilt panel keeps focus where it was, or starts at the top.
@@ -720,11 +944,26 @@ mod tests {
     }
 
     #[test]
-    fn the_close_control_goes_back_into_play_and_keeps_the_mode() {
+    fn the_close_cross_leaves_the_mode_like_the_clear_key_and_grabs_the_cursor() {
         let mut app = app();
         open(&mut app);
         activate_control(&mut app, Control::Close);
-        assert!(!menu(&app).open && app.world().resource::<LayoutMode>().on);
+        assert!(!menu(&app).open && !app.world().resource::<LayoutMode>().on);
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
+    #[test]
+    fn the_clear_key_leaves_the_mode_from_the_open_menu_and_drops_what_was_picked() {
+        let mut app = app();
+        open(&mut app);
+        app.world_mut()
+            .resource_mut::<LayoutMode>()
+            .points
+            .push([1, 2, 3]);
+        press(&mut app, KeyCode::Backspace);
+        let mode = app.world().resource::<LayoutMode>();
+        assert!(!menu(&app).open && !mode.on);
+        assert!(mode.points.is_empty());
         assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
     }
 
@@ -820,7 +1059,7 @@ mod tests {
         );
         assert_eq!(
             panels(&mut app),
-            (1, 1),
+            (1, 3),
             "but it still says what the aim does"
         );
         app.world_mut().resource_mut::<LayoutMode>().on = false;
@@ -837,7 +1076,7 @@ mod tests {
         let mut app = render_app();
         open(&mut app);
         controls(&mut app);
-        assert_eq!(panels(&mut app), (1, 1));
+        assert_eq!(panels(&mut app), (1, 3));
     }
 
     #[test]
@@ -931,8 +1170,13 @@ mod tests {
             !shown.contains(&Control::Count(1, 1)),
             "a line has one axis"
         );
+        assert!(shown.contains(&Control::Form(Form::Box)));
         activate_control(&mut app, Control::Kind(Kind::Between));
         let shown = controls(&mut app);
+        assert!(
+            !shown.iter().any(|c| matches!(c, Control::Form(_))),
+            "no shape to choose"
+        );
         assert!(
             shown.contains(&Control::Kind(Kind::Directions)),
             "the way back stays"
