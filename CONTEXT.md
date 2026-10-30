@@ -177,8 +177,8 @@ applied: it changes no Voxel and enters no history. Not an Edit, not Sample, and
 not Pickup.
 
 **Tool** — a thing a Player holds whose Use the Server runs, declared by the
-Game by name and kind. A hand state: while one is held, Place and Remove are its
-verbs instead of Edits.
+Game by name and kind. A hand state taken with its own key, not from the
+Catalogue: while one is held, Place and Remove are its verbs instead of Edits.
 
 **Pickup** — an item entering a Player's inventory. Not built; distinct from Use
 and from Sample, which copies what is aimed at into the hand.

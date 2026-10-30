@@ -172,12 +172,13 @@ pickup and use remain distinct. Finite stacks, consumption, physical pickup,
 durability and survival undo are later policies, not approved by this spec.
 
 Use is a separate Server intent with its own outcome and refusals; it never
-journals and never repeats while held. A tool is a hand state: holding one
-makes place, remove and undo/redo inert. With an empty hand or any non-tool
-hand Use is a quiet no-op. A Game declares tools once in the unreleased 0.3
-declaration as data; the Server runs Use natively, with no host call (grilled
-2026-10-30, tickets 20-21). Default keys: Use `G` / pad `DPadUp`; ClearTool
-`Backspace`.
+journals and never repeats while held. A tool is a hand state: holding one makes
+place, remove and undo/redo inert. With an empty hand or any non-tool hand Use
+is a quiet no-op. A Game declares tools once in the unreleased 0.3 declaration
+as data; the Server runs Use natively, with no host call (grilled 2026-10-30,
+tickets 20-21). Default keys: CycleTool `M`, which takes the next declared tool
+or puts it away (never listed in the Catalogue); Use `G` / pad `DPadUp`;
+ClearTool `Backspace`.
 
 ## Measurement tool
 

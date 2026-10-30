@@ -19,9 +19,6 @@ enum Item {
         material: String,
     },
     Fire,
-    Tool {
-        name: String,
-    },
 }
 impl Item {
     fn capture(holding: Holding, catalogue: &ContentCatalogue) -> io::Result<Self> {
@@ -34,12 +31,7 @@ impl Item {
         Ok(match holding {
             Holding::Empty => Self::Empty,
             Holding::Fire => Self::Fire,
-            Holding::Tool(tool) => Self::Tool {
-                name: catalogue
-                    .tool(tool)
-                    .map(|t| t.name.clone())
-                    .ok_or_else(|| io::Error::other("unknown hotbar tool"))?,
-            },
+            Holding::Tool(_) => Self::Empty,
             Holding::Fluid(material) => Self::Fluid {
                 material: material_name(material)?,
             },
@@ -85,11 +77,6 @@ impl Item {
                 .find(|m| &m.name == material && m.fluid.is_some())
                 .map_or(Holding::Empty, |m| Holding::Fluid(m.id)),
             Self::Fire if catalogue.anything_burns() => Holding::Fire,
-            Self::Tool { name } => catalogue
-                .tools
-                .iter()
-                .find(|t| &t.name == name)
-                .map_or(Holding::Empty, |t| Holding::Tool(t.id)),
             _ => Holding::Empty,
         }
     }
@@ -225,7 +212,6 @@ fn save(
 mod tests {
     use super::*;
     use crate::content::{CatalogueMaterial, CatalogueShape};
-    use crate::server::tool::ToolId;
     struct Directory(PathBuf);
     impl Directory {
         fn new() -> Self {
@@ -338,36 +324,6 @@ mod tests {
         let bytes = fs::read_to_string(dir.path()).unwrap();
         assert!(bytes.contains("demo:wood") && bytes.contains("demo:step"));
         assert!(!bytes.contains("outside"));
-    }
-    fn with_tool(id: u16, name: &str) -> ContentCatalogue {
-        ContentCatalogue {
-            tools: vec![crate::content::CatalogueTool {
-                id: ToolId(id),
-                name: name.into(),
-                kind: tesserae_mods::ToolKind::Measure,
-            }],
-            ..catalogue(7, 9, 6)
-        }
-    }
-    #[test]
-    fn a_tool_in_a_slot_is_kept_by_name_and_empty_when_the_game_lost_it() {
-        let dir = Directory::new();
-        let mut first = app(dir.path(), with_tool(0, "demo:measure"));
-        first.world_mut().resource_mut::<Hotbar>().slots[5] = Holding::Tool(ToolId(0));
-        first.update();
-        drop(first);
-        let again = app(dir.path(), with_tool(3, "demo:measure"));
-        assert_eq!(
-            again.world().resource::<Hotbar>().slots[5],
-            Holding::Tool(ToolId(3)),
-            "found by name, not by position"
-        );
-        drop(again);
-        let renamed = app(dir.path(), with_tool(0, "demo:tape"));
-        assert_eq!(
-            renamed.world().resource::<Hotbar>().slots[5],
-            Holding::Empty
-        );
     }
     #[test]
     fn every_world_opens_empty_handed_with_its_shortcuts_kept() {

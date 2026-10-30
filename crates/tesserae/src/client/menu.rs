@@ -860,12 +860,6 @@ fn menu_choices(
     if catalogue.anything_burns() {
         items.push((Entry::Fire, "fire"));
     }
-    items.extend(
-        catalogue
-            .tools
-            .iter()
-            .map(|tool| (Entry::Tool(tool.id), tool.label())),
-    );
     items.retain(|(_, name)| ui::matches(search, name));
     if items.is_empty() {
         ui::text(

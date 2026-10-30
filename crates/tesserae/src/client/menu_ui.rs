@@ -13,6 +13,7 @@ pub(super) const CARD: Color = Color::srgb(17.0 / 255.0, 17.0 / 255.0, 17.0 / 25
 pub(super) const EDGE: Color = Color::srgb(25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0);
 pub(super) const INK: Color = Color::srgb(245.0 / 255.0, 245.0 / 255.0, 245.0 / 255.0);
 pub(super) const AMBER: Color = Color::srgb(1.0, 0.7, 0.3);
+pub(super) const RED: Color = Color::srgb(0.95, 0.3, 0.3);
 pub(super) const MUTED: Color = Color::srgb(129.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
@@ -232,7 +233,10 @@ pub(super) fn plugin(app: &mut App) {
                 .after(InputFocusSystems::Dispatch)
                 .after(bevy::picking::PickingSystems::Last),
         )
-        .add_systems(Update, dashed_border_colors.after(button_label_colors))
+        .add_systems(
+            Update,
+            (dashed_border_colors, danger_colors).after(button_label_colors),
+        )
         .add_systems(
             Update,
             (search_keys, sync_search)
@@ -259,7 +263,7 @@ pub(super) fn launcher_chrome(app: &mut App) {
         );
 }
 
-/// A destructive action: amber label and border instead of the neutral ones.
+/// A destructive action: red label and border instead of the neutral ones.
 #[derive(Component)]
 pub(super) struct Danger;
 
@@ -268,10 +272,10 @@ fn danger_colors(
     mut labels: Query<&mut TextColor>,
 ) {
     for (children, mut border) in &mut buttons {
-        *border = BorderColor::all(AMBER.with_alpha(0.6));
+        *border = BorderColor::all(RED.with_alpha(0.6));
         for child in children {
             if let Ok(mut text) = labels.get_mut(*child) {
-                text.0 = AMBER;
+                text.0 = RED;
             }
         }
     }

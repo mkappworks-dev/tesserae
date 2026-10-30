@@ -62,7 +62,7 @@ reopening tickets 18-19.
   the World's `voxel_size`, derived, never the source). A hint line reads the
   current bindings, for example "G to place point, Backspace to clear".
 - First person shows a small content-only held model through the existing
-  held-model path and a hotbar tile. Third person adds no pose (a new arms
+  held-model path. Third person adds no pose (a new arms
   system stays deferred).
 
 ### Not included
@@ -88,8 +88,8 @@ transactions, resource consumption, touch adapters.
       (state hash and journal length unchanged).
 - [x] Replace, `ClearTool`, hand change, World-switch reset and rebinding all
       behave as above on keyboard and pad paths.
-- [x] A Game declaring no tool shows no Measure; a missing tool in a saved
-      slot shows empty.
+- [x] A Game declaring no tool offers no Measure: `CycleTool` does nothing.
+      Measure is taken with `CycleTool` (`M`), not from the Catalogue.
 
 ## Validation and authorization
 

@@ -57,8 +57,10 @@ implements generic mechanism; the Game names the content.
 
 ### Tools and hand state
 
-- A tool is a hand state, `Holding::Tool(ToolId)`, placed in a hotbar slot or
-  the outside-held selection through the catalogue like fire. Holding one
+- A tool is a hand state, `Holding::Tool(ToolId)`, taken with the rebindable
+  `CycleTool` action (default `M`, no pad default), not from the Catalogue or
+  a hotbar slot. Each press takes the next declared tool; past the last it
+  returns the previous hand (empty hand or selected slot). Holding one
   makes Edits inert: Place and Remove are the tool's verbs (above) and
   tap-remove is off. Undo/redo stay live, since a read-only tool cannot
   conflict with history and build-measure-fix is the natural loop. Selecting
@@ -68,9 +70,8 @@ implements generic mechanism; the Game names the content.
   to use": no toast, no Edit. There is no Use-on-Voxel in this PR.
 - Sample, empty hand, Use and physical pickup stay distinct verbs. Pickup (an
   item entering an inventory) waits for tickets 18-19.
-- A tool in a slot is saved with the per-Game shortcuts by stable tool name;
-  a missing or renamed tool shows as a visibly empty slot. The outside-held
-  selection is not persisted.
+- A tool is never stored in a slot or persisted; it is always taken afresh
+  with `CycleTool`, so a missing or renamed tool needs no recovery path.
 
 ### Mod contract
 
@@ -89,8 +90,9 @@ implements generic mechanism; the Game names the content.
 - A per-tool `reach-m`, clamped by the Server, is deferred (Luanti has a tool
   `range`, Minecraft a `block_interaction_range`). Tools use `EDIT_REACH_M`
   (8 m) for now.
-- A World whose Game declares no tool shows none in the catalogue, and Use
-  takes the "nothing to use" path. The Engine names no tool; the demo Game
+- A World whose Game declares no tool makes `CycleTool` a no-op, and Use takes
+  the "nothing to use" path. The content catalogue still carries the tools so
+  the Client can name them. The Engine names no tool; the demo Game
   declares "Measure" (ticket 21).
 
 ### Docs, same PR
@@ -181,19 +183,26 @@ Terraria. Applied: tool verbs on Place/Remove while a tool is held, undo/redo
 stay live, an open `UseResult` enum, a pre-press invalid tint, a recorded
 declaration-path check and a deferred per-tool reach.
 
+### 2026-10-30: tools leave the Catalogue
+
+The user asked for the tool on a key instead of in the Catalogue. Added
+`Action::CycleTool` (`M`). The Catalogue grid no longer lists tools and the
+hotbar store no longer persists them. The Server and Mod contract are
+unchanged.
+
 ### 2026-10-30: implementation complete
 
 Implemented on `feat/use-interaction` with tickets 21. Server: `server/tool.rs`
-(`UseIntent`, `UseOutcome`, `UseRefusal`, `Tools`, `use_aim` on the aim
-answer). Client: `client/tool.rs` and `Holding::Tool`, `Action::Use` and
-`Action::ClearTool`, tool entries in the Catalogue, a hotbar slot saved by
-name, removal inert while a tool is held, undo/redo left live. Contract:
-`tool-def` in the unreleased 0.3 `declaration`; the demo declares `measure`.
+(`UseIntent`, `UseOutcome`, `UseRefusal`, `Tools`, `use_aim` on the aim answer).
+Client: `client/tool.rs` and `Holding::Tool`, `Action::Use` and
+`Action::ClearTool`, the `CycleTool` action, removal inert while a tool is held,
+undo/redo left live. Contract: `tool-def` in the unreleased 0.3 `declaration`;
+the demo declares `measure`.
 Review (2026-10-30) added: a press on a stale aim answer is dropped rather
 than re-aimed; a `NotLoaded` refusal; gizmos drawn through terrain and the
 avatar. Deviations from the draft: the "unknown kind is rejected" criterion
 became name/count/Game-only validation, because a closed WIT enum has no
-unknown value; a tool is not placed in the default hotbar (nine slots are
-full), so a player takes it from the Catalogue. Not done by this ticket's
+unknown value; a tool is taken with a key rather than the Catalogue (see
+"tools leave the Catalogue"). Not done by this ticket's
 tests: native visual review of the crosshair tint and held model, and a
 physical controller check of `DPadUp`.
