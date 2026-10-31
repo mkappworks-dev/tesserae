@@ -82,3 +82,14 @@ cycles 3 and 25 in `malloc_history`. Touch no job or Chunk teardown:
 `tech/streaming-performance` edits `server/jobs.rs`, `streaming.rs` and
 `client/chunk_view.rs`; re-baseline after it merges. Ticket 31 reworks only
 the discovery layout around `load_with_opening`; no Engine cache is needed.
+
+### Optional bounded PR taken 2026-10-31
+
+You asked for it: find what holds the wgpu buffers and bind groups and
+release them at teardown. Spec:
+[world session GPU objects](../../2026-10-31-world-session-gpu-objects/spec.md).
+Branch `fix/world-session-gpu-objects`.
+
+- [ ] Live wgpu buffers and bind groups equal at cycles 3 and 25.
+- [ ] Rust live bytes flat across cycles.
+- [ ] Ticket updated with the holder, the fix and the numbers.
