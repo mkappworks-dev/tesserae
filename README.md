@@ -8,20 +8,24 @@ Game in `games/demo/`, the starting point for writing your own.
 
 ## Status: early, and not usable for anything yet
 
-Step **8 of 27** in [DESIGN.md](DESIGN.md)'s build order. `cargo run` opens a
-streamed, generated World you can fly around and edit; the demo Game adds
-flowing water, lava and fire to it.
+Steps **1 to 8 of 27** in [DESIGN.md](DESIGN.md)'s build order are done, and
+step 10 (use and a first tool) has started. `cargo run` opens a World list; a
+World is streamed and generated, and you can fly or walk around it, swim, edit
+it and save it. Keyboard and mouse, a gamepad and, on Windows and Linux, a
+touchscreen all play. The demo Game adds flowing water, lava and fire to it.
 
 | works today                                           | not written yet              |
 | ----------------------------------------------------- | ---------------------------- |
 | Palette-compressed 32³ Chunks, greedy mesher          | Look packs and water shading |
 | Worldgen with caves, Chunk streaming                  | Network play                 |
-| Client/server split, the Server in-process            | Saves                        |
+| Client/server split, the Server in-process            | Inventory, crafting, mobs    |
 | Per-Voxel light, PBR shading, shadow maps             |                              |
 | Shapes: stairs, slabs, fences, with collision         |                              |
 | LOD out to 4 km                                       |                              |
 | Sandboxed WASM Mods through a WIT contract            |                              |
 | Fluids that flow and waterlog Shapes, fuel that burns |                              |
+| Saved Worlds, World list, in-process World sessions   |                              |
+| Keyboard, gamepad and touch input, a first tool       |                              |
 
 The right-hand column is the roadmap, not a feature list. Nothing in it works.
 
