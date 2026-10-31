@@ -37,7 +37,9 @@ pub use light::{
 };
 pub use lod::{COVERED_SKY, CoarseLight, Surface, coarse_light, downsample};
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
-pub use mesh::{ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_chunk};
+pub use mesh::{
+    ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_chunk, mesh_chunk_with_seams,
+};
 pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,
 };

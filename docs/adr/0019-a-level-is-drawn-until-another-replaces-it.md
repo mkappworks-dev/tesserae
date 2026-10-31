@@ -52,3 +52,13 @@ once instead of all children together.
   overdrawing the one before, are gone. Level 0 is the only shadow caster. The
   one visual change: a coarse Chunk not yet refined can now hide finer terrain
   behind it, as any nearer surface would.
+- **A coarse level closes the edge of the finer one with seam walls.**
+  Downsampling rounds coarse ground up to a coarse Voxel or two above finer
+  ground, so where the finer region ends the coarse ground is solid on both
+  sides of the plane, has no face on it, and showed its inside once the finer
+  side was discarded. Every coarse mesh carries the faces its surface Voxels
+  would have on each plane a finer Chunk can end on, every half Chunk across x
+  and z; the coverage rule hides them wherever the finer level draws the Voxel
+  they belong to, and elsewhere they lie inside the ground. A skirt of finer
+  Voxels on the finer level's edge was tried first and closed nothing: finer
+  data never holds the coarse level's height. About 15% more coarse quads.

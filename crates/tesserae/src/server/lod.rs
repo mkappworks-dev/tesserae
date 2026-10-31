@@ -24,7 +24,7 @@ use tesserae_core::lod::{
 };
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, Tables, Voxel, Worldgen,
-    WorldgenParams, mesh_chunk,
+    WorldgenParams, mesh_chunk_with_seams,
 };
 
 use super::jobs::Stage;
@@ -649,7 +649,9 @@ fn mesh_coarse(
         )
     });
     let own = LitChunk::new(&center.chunk, &lit.center).with_overlay(&center.overlay);
-    let mut mesh = mesh_chunk(own, neighbors, tables);
+    // A finer Chunk spans half a coarse one, so the finer level's region ends
+    // on these planes.
+    let mut mesh = mesh_chunk_with_seams(own, neighbors, CHUNK_SIZE / 2, tables);
     if let Some(water) = water {
         let floor_m = (coord.y * CHUNK_SIZE as i32) as f32 * voxel_m;
         level_the_water(&mut mesh.blended, water, floor_m, voxel_m, &center.overlay);
@@ -1377,7 +1379,7 @@ mod tests {
     use crate::server::streaming::tests::{Harness, SETTLE_CEILING, UNLIMITED, same_mesh, small};
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::{CHUNK_SIZE, ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample};
+    use tesserae_core::{ChunkLight, SHAPE_STAIR, Tables, Voxel, downsample, mesh_chunk};
 
     static OPEN_SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
 
@@ -3064,8 +3066,12 @@ mod tests {
                     let (center, around) = chunks_around(coord, &source);
                     let neighbors: [Option<LitChunk>; 6] =
                         std::array::from_fn(|f| Some(LitChunk::new(&around[f].chunk, &OPEN_SKY)));
-                    let open =
-                        mesh_chunk(LitChunk::new(&center.chunk, &OPEN_SKY), neighbors, &tables);
+                    let open = mesh_chunk_with_seams(
+                        LitChunk::new(&center.chunk, &OPEN_SKY),
+                        neighbors,
+                        CHUNK_SIZE / 2,
+                        &tables,
+                    );
                     assert!(
                         same_mesh(&coarse_mesh(level, coord, &source), &open),
                         "level {level} {coord} is not lit as open sky"

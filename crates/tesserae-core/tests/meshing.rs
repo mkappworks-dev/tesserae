@@ -5,7 +5,7 @@ use tesserae_core::shape::{NodeBox, examples};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, ConnectDef, Connections, LitChunk, Neighborhood, Voxel,
-    greedy_mesh, mesh_chunk, testgen,
+    greedy_mesh, mesh_chunk, mesh_chunk_with_seams, testgen,
 };
 use tesserae_core::{
     Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Tables, Worldgen,
@@ -303,6 +303,184 @@ fn greedy_meshing_beats_the_naive_count_on_real_terrain() {
         "merged {} quads vs {naive} naive faces",
         mesh.quad_count()
     );
+}
+
+// `mesh_chunk_with_seams`: a coarse level's walls where a finer level may end.
+
+/// The planes a level-1 Chunk's finer Chunks meet on.
+const SEAM: usize = CHUNK_SIZE / 2;
+
+/// Rock filled below `height`, everywhere in the Chunk.
+fn ground_below(height: usize) -> Chunk {
+    let mut c = Chunk::air();
+    for y in 0..height {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                c.set(x, y, z, Voxel::cube(fixtures().ground.rock));
+            }
+        }
+    }
+    c
+}
+
+/// `sides` on the four sides, rock below and air above, as open ground has.
+fn open_ground(sides: &Chunk) -> [Option<LitChunk<'_>>; 6] {
+    static ROCK: OnceLock<Chunk> = OnceLock::new();
+    static AIR: OnceLock<Chunk> = OnceLock::new();
+    let mut neighbors = enclosed_by(sides);
+    neighbors[NEG_Y] =
+        Some(unlit(ROCK.get_or_init(|| {
+            Chunk::filled(Voxel::cube(fixtures().ground.rock))
+        })));
+    neighbors[POS_Y] = Some(unlit(AIR.get_or_init(Chunk::air)));
+    neighbors
+}
+
+/// Each quad `seamed` has past `plain`, as its normal, corners and light,
+/// after asserting that the rest is exactly `plain`: seams only append.
+fn seams_of(
+    plain: &tesserae_core::ChunkMesh,
+    seamed: &tesserae_core::ChunkMesh,
+) -> Vec<([f32; 3], [[f32; 3]; 4], u32)> {
+    let mut extra = Vec::new();
+    for (p, s) in [
+        (&plain.opaque, &seamed.opaque),
+        (&plain.cutout, &seamed.cutout),
+        (&plain.blended, &seamed.blended),
+    ] {
+        let n = p.positions.len();
+        assert_eq!(s.positions[..n], p.positions[..]);
+        assert_eq!(s.normals[..n], p.normals[..]);
+        assert_eq!(s.uvs[..n], p.uvs[..]);
+        assert_eq!(s.materials[..n], p.materials[..]);
+        assert_eq!(s.light[..n], p.light[..]);
+        assert_eq!(s.indices[..p.indices.len()], p.indices[..]);
+        for q in (n..s.positions.len()).step_by(4) {
+            let corners = [0, 1, 2, 3].map(|k| s.positions[q + k]);
+            extra.push((s.normals[q], corners, s.light[q]));
+        }
+    }
+    extra
+}
+
+fn span(values: [f32; 4]) -> f32 {
+    values.iter().copied().fold(f32::MIN, f32::max)
+        - values.iter().copied().fold(f32::MAX, f32::min)
+}
+
+#[test]
+fn seam_walls_stand_on_every_finer_plane_in_the_top_two_voxels_of_the_ground() {
+    let ground = ground_below(8);
+    let neighbors = open_ground(&ground);
+    let plain = mesh_chunk(unlit(&ground), neighbors, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&ground), neighbors, SEAM, tables());
+    let walls = seams_of(&plain, &seamed);
+    assert!(!walls.is_empty());
+    let mut area = 0.0;
+    for (normal, corners, _) in walls {
+        let d = normal.iter().position(|&c| c != 0.0).expect("axis-aligned");
+        assert_ne!(d, 1, "no seam across y");
+        assert!(
+            corners.iter().all(|c| c[d] % SEAM as f32 == 0.0),
+            "{corners:?}"
+        );
+        assert!(
+            corners.iter().all(|c| (6.0..=8.0).contains(&c[1])),
+            "{corners:?}"
+        );
+        let other = 2 - d;
+        area += span(corners.map(|c| c[1])) * span(corners.map(|c| c[other]));
+    }
+    // Two axes, three planes each: the Chunk's two faces looking out and the
+    // middle one looking both ways, two Voxels high all along.
+    assert_eq!(area, (2 * 4 * 2 * CHUNK_SIZE) as f32);
+}
+
+#[test]
+fn a_seam_wall_is_lit_by_the_open_air_over_the_ground_across() {
+    let ground = ground_below(8);
+    let mut light = ChunkLight::dark();
+    let sky = Light::new(MAX_LIGHT, 0);
+    for y in 8..CHUNK_SIZE {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                light.set(x, y, z, sky);
+            }
+        }
+    }
+    let mut neighbors = open_ground(&ground);
+    let lit = LitChunk::new(&ground, &light);
+    for face in [NEG_X, POS_X, NEG_Z, POS_Z] {
+        neighbors[face] = Some(lit);
+    }
+    let plain = mesh_chunk(lit, neighbors, tables());
+    let seamed = mesh_chunk_with_seams(lit, neighbors, SEAM, tables());
+    let walls = seams_of(&plain, &seamed);
+    assert!(!walls.is_empty());
+    for (_, _, packed) in walls {
+        assert_eq!(packed, sky.packed() as u32);
+    }
+}
+
+#[test]
+fn ground_deeper_than_two_voxels_under_the_surface_has_no_seam_wall() {
+    let rock = ground_below(CHUNK_SIZE);
+    let surface = ground_below(10);
+    let mut neighbors = enclosed_by(&rock);
+    neighbors[POS_Y] = Some(unlit(&surface));
+    let plain = mesh_chunk(unlit(&rock), neighbors, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&rock), neighbors, SEAM, tables());
+    // The middle planes only: above the top row of a side neighbour is a
+    // corner of the shell, which reads as air.
+    for (normal, corners, _) in seams_of(&plain, &seamed) {
+        let d = normal.iter().position(|&c| c != 0.0).expect("axis-aligned");
+        assert!(
+            corners.iter().all(|c| c[d] != SEAM as f32),
+            "a wall {corners:?} deep under the surface"
+        );
+    }
+}
+
+#[test]
+fn water_gets_no_seam_wall() {
+    let mut lake = Chunk::air();
+    for y in 0..8 {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                lake.set(x, y, z, Voxel::cube(water()));
+            }
+        }
+    }
+    let neighbors = open_ground(&lake);
+    let plain = mesh_chunk(unlit(&lake), neighbors, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&lake), neighbors, SEAM, tables());
+    assert!(seams_of(&plain, &seamed).is_empty());
+}
+
+#[test]
+fn on_real_terrain_seams_add_only_walls_on_their_planes() {
+    let ground = fixtures().ground;
+    let chunks: Vec<Chunk> = [
+        (0, 0, 0),
+        (-1, 0, 0),
+        (1, 0, 0),
+        (0, -1, 0),
+        (0, 1, 0),
+        (0, 0, -1),
+        (0, 0, 1),
+    ]
+    .map(|(x, y, z)| testgen::terrain_chunk(x, y, z, ground))
+    .into();
+    let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|f| Some(unlit(&chunks[f + 1])));
+    let plain = mesh_chunk(unlit(&chunks[0]), neighbors, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&chunks[0]), neighbors, SEAM, tables());
+    let walls = seams_of(&plain, &seamed);
+    assert!(!walls.is_empty(), "the terrain crosses a plane somewhere");
+    for (normal, corners, _) in walls {
+        let d = normal.iter().position(|&c| c != 0.0).expect("axis-aligned");
+        assert_ne!(d, 1);
+        assert!(corners.iter().all(|c| c[d] % SEAM as f32 == 0.0));
+    }
 }
 
 // `mesh_chunk`: the streaming entry point, which declines where it provably can.

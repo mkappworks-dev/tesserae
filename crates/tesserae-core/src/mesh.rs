@@ -470,12 +470,118 @@ pub fn mesh_chunk(
     neighbors: [Option<LitChunk<'_>>; 6],
     tables: &Tables,
 ) -> ChunkMesh {
+    mesh_chunk_with_seams(center, neighbors, 0, tables)
+}
+
+/// [`mesh_chunk`] for a coarse level, plus seam walls on every plane across x
+/// and z a multiple of `seam_every` Voxels from the Chunk's corner: the planes
+/// where a finer level's region can end. 0 adds none.
+///
+/// Coarse ground there stands up to a coarse Voxel or two above the finer
+/// ground beside it, which is how downsampling rounds, and with coarse ground
+/// on both sides of the plane neither has a face on it. Once the finer side is
+/// discarded, the step shows the inside of the coarse ground. A seam wall is
+/// that face, drawn anyway, on each Voxel whose neighbour across the plane is
+/// within two Voxels of open air above it; deeper ones would only ever be
+/// hidden. Elsewhere it lies just under the surface, inside the ground, and
+/// the renderer discards it where a finer level draws the Voxel it belongs to.
+///
+/// Not across y: a level's top or bottom meets the ground only for an Eye
+/// about that level's vertical extent above or below it.
+pub fn mesh_chunk_with_seams(
+    center: LitChunk<'_>,
+    neighbors: [Option<LitChunk<'_>>; 6],
+    seam_every: usize,
+    tables: &Tables,
+) -> ChunkMesh {
+    // A Chunk this declines has solid neighbours all round, so the only seam
+    // walls it loses are those under the diagonal neighbour's corner row.
     if !center.overlay.may_contain_fluid()
         && emits_no_faces(center.chunk, neighbors, &tables.materials)
     {
         return ChunkMesh::default();
     }
-    greedy_mesh(&Neighborhood::new(center, neighbors), tables)
+    let n = Neighborhood::new(center, neighbors);
+    let mut mesh = greedy_mesh(&n, tables);
+    if seam_every > 0 {
+        mesh_seams(&n, seam_every, tables, &mut mesh);
+    }
+    mesh
+}
+
+/// How far below open air the Voxel across a seam may be and still get a wall:
+/// the most downsampling raises coarse ground above finer ground on a cliff.
+const SEAM_DEPTH: i32 = 2;
+
+/// The seam walls of [`mesh_chunk_with_seams`], merged as pass 2's quads are.
+fn mesh_seams(n: &Neighborhood, every: usize, tables: &Tables, mesh: &mut ChunkMesh) {
+    let edge = CHUNK_SIZE as i32;
+    let mut pending = Vec::new();
+    for d in [0, 2] {
+        let (u, v) = ((d + 1) % 3, (d + 2) % 3);
+        for plane in (0..=edge).step_by(every) {
+            // The Voxel on the plane's far side looks back across it, and the
+            // one on its near side looks forward.
+            for (face, own) in [(d * 2, plane), (d * 2 + 1, plane - 1)] {
+                if !(0..edge).contains(&own) {
+                    continue;
+                }
+                let positive = face % 2 == 1;
+                let quad = ShapeQuad {
+                    face: face as u8,
+                    plane: if positive { SUBDIV as u8 } else { 0 },
+                    u0: 0,
+                    v0: 0,
+                    u1: SUBDIV as u8,
+                    v1: SUBDIV as u8,
+                };
+                for a in 0..edge {
+                    for b in 0..edge {
+                        let mut here = [0; 3];
+                        here[d] = own;
+                        here[u] = a;
+                        here[v] = b;
+                        let voxel = n.at(here[0], here[1], here[2]);
+                        if !voxel.is_full_cube() {
+                            continue;
+                        }
+                        let class = tables.materials.render(voxel);
+                        // Water levels with the finer level's, and two
+                        // surfaces of it would blend twice.
+                        if class == RenderClass::Blend {
+                            continue;
+                        }
+                        let mut across = here;
+                        across[d] += if positive { 1 } else { -1 };
+                        let [x, y, z] = across;
+                        // Where it does not cover the face, pass 1 drew it.
+                        if !covers(tables, n.at(x, y, z), face ^ 1, voxel) {
+                            continue;
+                        }
+                        // Lit by the open air over the ground across, which
+                        // the face looks into once that ground is not drawn.
+                        let open = (1..=SEAM_DEPTH)
+                            .take_while(|k| y + k <= edge)
+                            .find(|k| !n.at(x, y + k, z).is_full_cube());
+                        let Some(k) = open else {
+                            continue;
+                        };
+                        // Above a neighbour's top row is a corner of the
+                        // shell, which holds no light; the cell over this
+                        // Voxel's own column is in the shell above.
+                        let lit =
+                            if y + k < edge || (0..edge).contains(&x) && (0..edge).contains(&z) {
+                                n.light_at(x, y + k, z)
+                            } else {
+                                n.light_at(here[0], y + k, here[2])
+                            };
+                        pending.push(Pending::new(here, &quad, class, voxel.material(), lit));
+                    }
+                }
+            }
+        }
+    }
+    merge_shaped(&mut pending, mesh);
 }
 
 /// Whether `center` provably emits nothing, from `uniform()` alone.
