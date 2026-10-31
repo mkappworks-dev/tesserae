@@ -82,9 +82,7 @@ impl View<'_> {
                 continue;
             }
             something = true;
-            let discarded = (0..level)
-                .any(|finer| drawn_mask::drawn_at(self.words, finer, self.at(finer, point_m)));
-            if !discarded {
+            if !drawn_mask::finer_drawn_at(self.words, level, point_m) {
                 return Cover::Drawn;
             }
         }

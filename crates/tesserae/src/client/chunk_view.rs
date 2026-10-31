@@ -522,31 +522,34 @@ fn children(c: ChunkCoord) -> impl Iterator<Item = ChunkCoord> {
     })
 }
 
-/// Rewrites the materials' record of what each level draws, when it changed.
-/// Touching the materials too is what has their bind groups remade.
+/// Rewrites the record of what each level draws, when it changed. Padded to a
+/// power of two so its size, and with it the GPU buffer, rarely changes: Bevy
+/// writes a same-sized buffer in place and remakes the materials' bind groups
+/// only when it replaces one. Touching the materials instead would mark every
+/// Chunk mesh changed.
 fn publish_drawn(
     mut entities: ResMut<ChunkEntities>,
     terrain: Res<TerrainMaterial>,
     world: Res<WorldSettings>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut materials: ResMut<Assets<ChunkMaterial>>,
 ) {
     if !std::mem::take(&mut entities.drawn_changed) {
         return;
     }
-    let words = entities.mask.words(&world);
+    let mut words = entities.mask.words(&world);
+    words.resize(words.len().next_power_of_two().max(MIN_DRAWN_WORDS), 0);
     if let Some(mut buffer) = buffers.get_mut(&terrain.drawn) {
         buffer.clear();
         buffer.extend_from_slice(&words);
-    }
-    for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
-        let _ = materials.get_mut(handle);
     }
     #[cfg(feature = "profiling")]
     {
         entities.published = words;
     }
 }
+
+/// 16 KiB, so the mask grows past its buffer rarely.
+const MIN_DRAWN_WORDS: usize = 4096;
 
 fn spawn_light(
     mut commands: Commands,
@@ -1143,11 +1146,12 @@ mod tests {
             .resource::<Assets<ShaderBuffer>>()
             .get(&terrain.drawn)
             .unwrap();
-        crate::client::drawn_mask::drawn_at(
+        crate::client::drawn_mask::cover_at(
             buffer.cast_slice::<u32>().unwrap(),
             level,
             IVec3::new(coord.x, coord.y, coord.z),
-        )
+        ) & crate::client::drawn_mask::ALL
+            != 0
     }
 
     fn unload_coarse(app: &mut App, level: u32, coord: ChunkCoord) {
@@ -1173,7 +1177,7 @@ mod tests {
         // An empty mesh is the finer level's answer too.
         send_mesh(&mut app, children[7], tesserae_core::ChunkMesh::default());
         assert_eq!(entity_at(&app, 1, coarse), None, "released");
-        assert!(!mask_has(&app, 1, coarse), "in the same frame");
+        assert!(mask_has(&app, 1, coarse), "its children cover it");
     }
 
     #[test]
