@@ -9,7 +9,7 @@
 //! Contrast `crate::testgen`, which is tuned in Voxel indices on purpose: it
 //! feeds the benches a fixed surface and makes no World.
 
-use crate::chunk::{CHUNK_SIZE, Chunk};
+use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
@@ -575,7 +575,7 @@ impl Worldgen {
             })
             .map(|caves| (caves, self.reachable_blocks(caves, origin_m, top_m)));
 
-        let mut chunk = Chunk::air();
+        let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -615,6 +615,7 @@ impl Worldgen {
                 }
             }
         }
+        let mut chunk = chunk.build();
         if self.smoothing {
             self.smooth(&mut chunk, &surface_m, [cx, cy, cz], floor_m);
         }
