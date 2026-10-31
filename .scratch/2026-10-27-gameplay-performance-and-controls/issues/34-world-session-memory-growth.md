@@ -1,6 +1,6 @@
 # 34: W1.1: RSS grows about 3 MB per World session
 
-Status: ready-for-human
+Status: done
 Blocked by: 30
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -82,3 +82,10 @@ cycles 3 and 25 in `malloc_history`. Touch no job or Chunk teardown:
 `tech/streaming-performance` edits `server/jobs.rs`, `streaming.rs` and
 `client/chunk_view.rs`; re-baseline after it merges. Ticket 31 reworks only
 the discovery layout around `load_with_opening`; no Engine cache is needed.
+
+## Outcome
+
+Closed on 2026-10-31 at the user's instruction, accepting the recommendation:
+the growth is a documented cost and no teardown change was made. The two
+criteria above and the optional wgpu-object PR were not carried out, so ticket
+30's RSS line still reads as written.
