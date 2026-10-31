@@ -108,11 +108,43 @@ impl Default for LodBudget {
     }
 }
 
+/// Far levels made cheaper by changing what is drawn, for review captures only (ticket 06).
+/// From level `from` up, a coarse Chunk is generated at its own Voxel size instead of
+/// downsampled from eight children; `Columns` also drops the caves.
+#[cfg(any(feature = "dev", feature = "profiling", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::server) enum FarProbe {
+    Off,
+    Direct { from: u32 },
+    Columns { from: u32 },
+}
+
+#[cfg(any(feature = "dev", feature = "profiling", test))]
+impl FarProbe {
+    fn parse(probe: Option<&str>, from: Option<&str>) -> Result<Self, String> {
+        let from = match from {
+            None => 2,
+            Some(v) => match v.parse() {
+                Ok(level @ 1..) => level,
+                _ => return Err(format!("a starting level is 1 or more, got {v:?}")),
+            },
+        };
+        match probe {
+            None => Ok(FarProbe::Off),
+            Some("direct") => Ok(FarProbe::Direct { from }),
+            Some("columns") => Ok(FarProbe::Columns { from }),
+            Some(v) => Err(format!("a probe is direct or columns, got {v:?}")),
+        }
+    }
+}
+
 /// `sources[j]` makes level-j Chunks, so a level-k job clones `sources[k - 1]`. The outermost
 /// level is never anyone's child, so there is one fewer source than levels.
 #[derive(Resource)]
 pub(in crate::server) struct LodGenerators {
     sources: Vec<Worldgen>,
+    /// `direct[k - 1]` makes a level-k Chunk itself, where a [`FarProbe`] is on.
+    direct: Vec<Option<Worldgen>>,
 }
 
 impl LodGenerators {
@@ -132,7 +164,40 @@ impl LodGenerators {
                 }
             })
             .collect();
-        LodGenerators { sources }
+        LodGenerators {
+            sources,
+            direct: Vec::new(),
+        }
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling", test))]
+    pub fn with_probe(mut self, world: &WorldSettings, probe: FarProbe) -> Self {
+        let (from, caves) = match probe {
+            FarProbe::Off => return self,
+            FarProbe::Direct { from } => (from, true),
+            FarProbe::Columns { from } => (from, false),
+        };
+        let Some(level_zero) = self.sources.first() else {
+            return self;
+        };
+        let p = level_zero.params();
+        let params = WorldgenParams {
+            smoothing: None,
+            caves: p.caves.filter(|_| caves),
+            ..p
+        };
+        self.direct = (1..self.levels())
+            .map(|k| {
+                (k >= from).then(|| {
+                    Worldgen::new(world.seed, world.voxel_size * 2f32.powi(k as i32), params)
+                })
+            })
+            .collect();
+        self
+    }
+
+    fn direct(&self, level: u32) -> Option<&Worldgen> {
+        self.direct.get(Plan::index(level))?.as_ref()
     }
 
     /// How many levels there are, level 0 included.
@@ -505,11 +570,27 @@ fn open_lod_generators(
     settings: Res<StreamingSettings>,
     generator: Res<WorldGenerator>,
 ) {
-    commands.insert_resource(LodGenerators::new(
-        &world,
-        &generator,
-        level_count(&settings),
-    ));
+    let generators = LodGenerators::new(&world, &generator, level_count(&settings));
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let generators = {
+        let var = |name| std::env::var(name).ok();
+        match FarProbe::parse(
+            var("TESSERAE_FAR_PROBE").as_deref(),
+            var("TESSERAE_FAR_PROBE_FROM").as_deref(),
+        ) {
+            Ok(probe) => {
+                if probe != FarProbe::Off {
+                    warn!("far-level probe {probe:?}: coarse levels are not what ships");
+                }
+                generators.with_probe(&world, probe)
+            }
+            Err(e) => {
+                warn!("TESSERAE_FAR_PROBE ignored: {e}");
+                generators
+            }
+        }
+    };
+    commands.insert_resource(generators);
 }
 
 /// Child `i` of a coarse Chunk, in the lattice one level finer: octant `x + 2y + 4z`.
@@ -1272,6 +1353,13 @@ fn dispatch(
             Default::default()
         };
         let sources = (!persistent.is_empty()).then(|| generators.sources.clone());
+        // An Edit must still show, so a probe yields to any changed child.
+        let direct = generators
+            .direct(plan.level)
+            .filter(|_| {
+                sources.is_none() && held_children.iter().flatten().all(|h| h.changed.is_none())
+            })
+            .cloned();
         let source = generators.sources[Plan::index(plan.level)].clone();
         let waterline = if plan.level == 1 {
             waterline(&source)
@@ -1285,6 +1373,11 @@ fn dispatch(
             times.generated(level, || {
                 if let Some(sources) = sources {
                     generate_persistent(level, coord, &sources, &persistent, &tables)
+                } else if let Some(direct) = direct {
+                    Coarse {
+                        chunk: direct.chunk(coord.x, coord.y, coord.z),
+                        overlay: ChunkOverlay::none(),
+                    }
                 } else {
                     generate_coarse(&source, coord, &held_children, &tables, waterline)
                 }
@@ -1724,7 +1817,7 @@ mod tests {
 
     #[test]
     fn levels_one_two_and_three_are_the_downsample_of_their_generated_children() {
-        let mut h = harness();
+        let mut h = probed(FarProbe::Off);
         h.lod_settle();
         assert_holds_exactly_the_load_set(&h);
 
@@ -1836,6 +1929,128 @@ mod tests {
             .collect();
         let refs: [&Chunk; 8] = std::array::from_fn(|i| if i == at { chunk } else { &made[i] });
         downsample(refs, &crate::server::fixture_tables().shapes)
+    }
+
+    fn probed(probe: FarProbe) -> Harness {
+        let mut h = harness();
+        let level_zero = Worldgen::new(world().seed, 1.0, tesserae_core::testgen::world_params());
+        h.app.insert_resource(
+            LodGenerators::new(&world(), &level_zero, LEVELS).with_probe(&world(), probe),
+        );
+        h
+    }
+
+    #[test]
+    fn a_direct_probe_generates_its_levels_at_their_own_resolution_and_leaves_finer_ones() {
+        let mut h = probed(FarProbe::Direct { from: 2 });
+        h.lod_settle();
+        assert_holds_exactly_the_load_set(&h);
+        for coord in h.held(1) {
+            let held = h.lod_store().get(1, coord).unwrap();
+            assert!(
+                same_chunk(held, &expected(1, coord, None)),
+                "level 1 {coord}"
+            );
+        }
+        for level in 2..LEVELS {
+            let own = source(level);
+            let mut differs = 0;
+            for coord in h.held(level) {
+                let held = h.lod_store().get(level, coord).unwrap();
+                assert!(
+                    same_chunk(held, &own.chunk(coord.x, coord.y, coord.z)),
+                    "level {level} {coord}"
+                );
+                differs += usize::from(!same_chunk(held, &expected(level, coord, None)));
+            }
+            assert!(
+                differs > 0,
+                "level {level} matched the downsample everywhere"
+            );
+        }
+    }
+
+    /// Solid from the bottom up to one height and nothing solid above it, in every column.
+    fn is_columns(chunk: &Chunk, tables: &Tables) -> bool {
+        (0..CHUNK_SIZE).all(|z| {
+            (0..CHUNK_SIZE).all(|x| {
+                let solid = |y| tables.materials.solid(chunk.get(x, y, z));
+                (1..CHUNK_SIZE).all(|y| !solid(y) || solid(y - 1))
+            })
+        })
+    }
+
+    #[test]
+    fn a_columns_probe_draws_one_height_per_column_with_no_caves_from_its_level() {
+        let tables = crate::server::fixture_tables();
+        let mut direct = probed(FarProbe::Direct { from: 2 });
+        direct.lod_settle();
+        let caved = (2..LEVELS).any(|level| {
+            direct
+                .held(level)
+                .into_iter()
+                .any(|c| !is_columns(direct.lod_store().get(level, c).unwrap(), &tables))
+        });
+        assert!(
+            caved,
+            "the fixture has no cave for the columns probe to drop"
+        );
+
+        let mut h = probed(FarProbe::Columns { from: 2 });
+        h.lod_settle();
+        assert_holds_exactly_the_load_set(&h);
+        for coord in h.held(1) {
+            let held = h.lod_store().get(1, coord).unwrap();
+            assert!(
+                same_chunk(held, &expected(1, coord, None)),
+                "level 1 {coord}"
+            );
+        }
+        for level in 2..LEVELS {
+            let mut varied = 0;
+            for coord in h.held(level) {
+                let held = h.lod_store().get(level, coord).unwrap();
+                assert!(is_columns(held, &tables), "level {level} {coord}");
+                varied += usize::from(held.uniform().is_none());
+            }
+            assert!(varied > 0, "level {level} had no terrain");
+        }
+    }
+
+    #[test]
+    fn the_far_probe_is_off_unless_named_and_starts_at_level_two_unless_told() {
+        assert_eq!(FarProbe::parse(None, Some("1")), Ok(FarProbe::Off));
+        assert_eq!(
+            FarProbe::parse(Some("direct"), None),
+            Ok(FarProbe::Direct { from: 2 })
+        );
+        assert_eq!(
+            FarProbe::parse(Some("columns"), Some("3")),
+            Ok(FarProbe::Columns { from: 3 })
+        );
+        assert!(FarProbe::parse(Some("heightmap"), None).is_err());
+        assert!(FarProbe::parse(Some("direct"), Some("0")).is_err());
+        assert!(FarProbe::parse(Some("direct"), Some("far")).is_err());
+    }
+
+    #[test]
+    fn an_edit_under_a_probed_cover_still_shows() {
+        let mut h = probed(FarProbe::Direct { from: 1 });
+        h.settle();
+        h.lod_settle();
+        let chunk = h.quiet_chunk();
+        let covering = cover(chunk);
+        assert!(same_chunk(
+            &h.cover_arc(covering),
+            &source(1).chunk(covering.x, covering.y, covering.z)
+        ));
+
+        h.edit_block(chunk, [10, 10, 10], stone());
+        h.lod_settle();
+        assert!(same_chunk(
+            &h.cover_arc(covering),
+            &expected_cover(&h, chunk)
+        ));
     }
 
     #[test]
@@ -2166,7 +2381,16 @@ mod tests {
 
     #[test]
     fn at_quiescence_each_level_has_delivered_its_mesh_shell_and_every_mesh_is_fresh() {
-        let mut h = harness();
+        assert_settles_to_fresh_shells(harness());
+    }
+
+    #[test]
+    fn either_probe_still_delivers_every_mesh_shell_fresh() {
+        assert_settles_to_fresh_shells(probed(FarProbe::Direct { from: 2 }));
+        assert_settles_to_fresh_shells(probed(FarProbe::Columns { from: 2 }));
+    }
+
+    fn assert_settles_to_fresh_shells(mut h: Harness) {
         let (ready, unloaded) = h.lod_settle();
         assert!(unloaded.is_empty());
 

@@ -9,6 +9,10 @@
 //! A stage is split off by difference: the same Chunks generated without caves,
 //! then without smoothing too. The 2D height is timed by sampling the same
 //! columns `Worldgen::chunk` samples. The fill is what remains.
+//!
+//! A second table times ticket 06's far-level probes over the same jobs: the
+//! whole job as shipped, the coarse Chunk generated at its own Voxel size
+//! (`direct`), and that without caves (`columns`).
 
 use std::hint::black_box;
 use std::time::Duration;
@@ -59,6 +63,16 @@ fn source(level: u32, params: WorldgenParams) -> Worldgen {
         }
     };
     Worldgen::new(SEED, 2f32.powi(level as i32 - 1), params)
+}
+
+/// `LodGenerators::with_probe`: a level-k Chunk at its own Voxel size.
+fn probe(level: u32, params: WorldgenParams, caves: bool) -> Worldgen {
+    let params = WorldgenParams {
+        smoothing: None,
+        caves: params.caves.filter(|_| caves),
+        ..params
+    };
+    Worldgen::new(SEED, 2f32.powi(level as i32), params)
 }
 
 #[derive(Clone, Copy)]
@@ -247,6 +261,9 @@ struct Round {
     downsample: f64,
     finer: f64,
     margin: f64,
+    shipped: f64,
+    direct: f64,
+    columns: f64,
 }
 
 fn generate(source: &Worldgen, jobs: &[Job], want: Kind) -> f64 {
@@ -270,6 +287,15 @@ fn whole(source: &Worldgen, shapes: &ShapeTable, jobs: &[Job], region: Region) -
                 source.chunk(x, y, z)
             });
             black_box(downsample(std::array::from_fn(|i| &children[i]), shapes));
+        }
+    })
+}
+
+fn probed(source: &Worldgen, jobs: &[Job]) -> f64 {
+    cpu_ms(|| {
+        for job in jobs {
+            let [x, y, z] = job.coord;
+            black_box(source.chunk(x, y, z));
         }
     })
 }
@@ -325,6 +351,12 @@ fn round(level: u32, p: WorldgenParams, jobs: &[Job], children: &[[Chunk; 8]]) -
         }),
         finer: whole(&full, shapes, jobs, Region::Finer),
         margin: whole(&full, shapes, jobs, Region::Margin),
+        shipped: [Region::Finer, Region::Shell, Region::Margin]
+            .into_iter()
+            .map(|r| whole(&full, shapes, jobs, r))
+            .sum(),
+        direct: probed(&probe(level, p, true), jobs),
+        columns: probed(&probe(level, p, false), jobs),
     }
 }
 
@@ -415,6 +447,28 @@ fn main() {
             down,
             100.0 * m(|r| r.finer) / total,
             100.0 * m(|r| r.margin) / total,
+        );
+    }
+    println!(
+        "level jobs | ms: shipped direct columns | us/job: shipped direct columns | \
+         change: direct columns"
+    );
+    for (n, (level, jobs, _)) in levels.iter().enumerate() {
+        let m = |f: fn(&Round) -> f64| median(all[n].iter().map(f).collect());
+        let (shipped, direct, columns) = (m(|r| r.shipped), m(|r| r.direct), m(|r| r.columns));
+        let per_job = |ms: f64| 1e3 * ms / jobs.len() as f64;
+        let change = |ms: f64| 100.0 * (ms / shipped - 1.0);
+        println!(
+            "L{level} {:5} | {:7.1} {:6.1} {:6.1} | {:5.0} {:5.0} {:5.0} | {:+5.0}% {:+5.0}%",
+            jobs.len(),
+            shipped,
+            direct,
+            columns,
+            per_job(shipped),
+            per_job(direct),
+            per_job(columns),
+            change(direct),
+            change(columns),
         );
     }
 }
