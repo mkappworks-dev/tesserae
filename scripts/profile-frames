@@ -50,15 +50,18 @@ def streaming(path, rows):
         return None
     ids = {r['frame_id'] for r in fixture}
     out = {
-        'rule_hole_frames': sum(int(r['rule_holes']) > 0 for r in fixture),
-        'fill_hole_frames': sum(int(r['fill_holes']) > 0 for r in fixture),
-        'rule_holes_max': max(int(r['rule_holes']) for r in fixture),
-        'fill_holes_max': max(int(r['fill_holes']) for r in fixture),
         'chunk_entities': distribution([float(r['chunk_entities']) for r in fixture]),
         'visible_meshes': {
             key[len('visible_meshes_'):]: distribution([float(r[key]) for r in fixture])
             for key in fixture[0] if key.startswith('visible_meshes_')},
     }
+    # Counted only under --instruments holes.
+    if fixture[0]['rule_holes']:
+        out.update(
+            rule_hole_frames=sum(int(r['rule_holes']) > 0 for r in fixture),
+            fill_hole_frames=sum(int(r['fill_holes']) > 0 for r in fixture),
+            rule_holes_max=max(int(r['rule_holes']) for r in fixture),
+            fill_holes_max=max(int(r['fill_holes']) for r in fixture))
     gpu_path = path.with_suffix('.gpu.csv')
     if gpu_path.exists():
         marks = {}
@@ -188,6 +191,8 @@ def main():
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
+    # Each costs more than the overhead bound, so a timing series leaves them off.
+    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes'], default=[])
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
@@ -227,7 +232,7 @@ def main():
             'host': subprocess.check_output(['uname', '-a'], text=True).strip(),
             'kind': 'rendered-presented' if args.presented else 'rendered-offscreen',
             'seed': '0x7e55e2ae00000001', 'quality': 'unchanged', 'view': args.view,
-            'phase_boundaries_s': [0, 16, 20, 22, 32],
+            'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
             'physical_target': 'window (see runtime metadata)' if args.presented else [1920, 1080],
         }
         (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
@@ -255,6 +260,8 @@ def main():
                         env['TESSERAE_SCREENSHOT_OFFSCREEN'] = '1'
                     if enabled:
                         env['TESSERAE_PROFILE_CSV'] = str(run.resolve() / 'frames.csv')
+                        for name in args.instruments:
+                            env[f'TESSERAE_PROFILE_{name.upper()}'] = '1'
                     # Continuous updates must match with logging on and off.
                     env['TESSERAE_PROFILE_CONTINUOUS'] = '1'
                     print('Running', run.name, flush=True)

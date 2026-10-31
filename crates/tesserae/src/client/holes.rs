@@ -23,6 +23,7 @@ use super::camera::{FlyCamera, MainCamera};
 use super::chunk_view::ChunkEntities;
 use crate::server::streaming::StreamingSettings;
 use crate::server::{Cut, LevelRings, cuts, level_count};
+use crate::session::SessionApp;
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// Past every level a World has at practical view distances.
@@ -35,6 +36,9 @@ const SPLIT_LEVELS: u32 = 3;
 /// This frame's holes, per level, and the Chunk mesh entities drawing it.
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct Holes {
+    /// Whether the holes were counted: `TESSERAE_PROFILE_HOLES`, since the
+    /// count costs more than the profiler's overhead bound allows a timing run.
+    pub counted: bool,
     pub rule: [u32; LEVELS],
     pub fill: [u32; LEVELS],
     pub chunk_entities: u32,
@@ -44,7 +48,7 @@ pub(super) fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_PROFILE_CSV").is_none() {
         return;
     }
-    app.init_resource::<Holes>().add_systems(
+    app.init_resource::<Holes>().add_session_systems(
         PostUpdate,
         count.after(bevy::transform::TransformSystems::Propagate),
     );
@@ -177,6 +181,14 @@ fn children(c: ChunkCoord) -> impl Iterator<Item = ChunkCoord> {
     })
 }
 
+struct Counting(bool);
+
+impl Default for Counting {
+    fn default() -> Self {
+        Counting(std::env::var_os("TESSERAE_PROFILE_HOLES").is_some())
+    }
+}
+
 type PlayerCamera = (
     &'static GlobalTransform,
     &'static Projection,
@@ -184,6 +196,7 @@ type PlayerCamera = (
 );
 
 fn count(
+    counting: Local<Counting>,
     mut holes: ResMut<Holes>,
     entities: Option<Res<ChunkEntities>>,
     streaming: Res<StreamingSettings>,
@@ -195,6 +208,10 @@ fn count(
         return;
     };
     holes.chunk_entities = entities.entity_count() as u32;
+    if !counting.0 {
+        return;
+    }
+    holes.counted = true;
     let (transform, projection, fly) = camera.into_inner();
     let levels = level_count(&streaming).min(LEVELS as u32);
     let cuts = cuts(&streaming, world.cell_size());

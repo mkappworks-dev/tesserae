@@ -2,6 +2,8 @@
 //! main schedule spans end at Last and exclude extraction and render work.
 mod gpu;
 
+use crate::session::SessionApp;
+
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
@@ -118,7 +120,10 @@ pub fn plugin(app: &mut App) {
             .add_systems(Render, render_end.after(RenderSystems::PostCleanup));
     }
     let gpu = gpu::GpuSamples::default();
-    gpu::plugin(app, gpu.clone());
+    // Its marker passes cost more than the overhead bound allows a timing run.
+    if std::env::var_os("TESSERAE_PROFILE_GPU").is_some() {
+        gpu::plugin(app, gpu.clone());
+    }
     app.init_resource::<ProfileFixtureStatus>();
     app.insert_non_send(std::rc::Rc::new(()));
     let surfaces = app
@@ -144,13 +149,15 @@ pub fn plugin(app: &mut App) {
         presentation: String::new(),
     })
     .insert_resource(bevy::winit::WinitSettings::continuous())
-    .add_systems(First, begin.after(crate::client::presentation::FramePacing))
-    .init_resource::<VisibleMeshes>()
-    .add_systems(Last, (count_visible, end).chain())
-    .add_systems(
-        FixedPostUpdate,
-        sample_flow.after(crate::server::streaming::stats::Published),
-    );
+    .init_resource::<VisibleMeshes>();
+    // Frames are rows from the World session on; startup before it is in the
+    // metadata.
+    app.add_session_systems(First, begin.after(crate::client::presentation::FramePacing))
+        .add_session_systems(Last, (count_visible, end).chain())
+        .add_session_systems(
+            FixedPostUpdate,
+            sample_flow.after(crate::server::streaming::stats::Published),
+        );
 }
 
 fn sample_flow(mut profile: ResMut<Profile>, streaming: Res<StreamingStats>) {
@@ -300,14 +307,18 @@ fn save(
             r.save.worker_ms,
             r.save.chunks
         )?;
-        write!(
-            out,
-            ",{},{}",
-            r.holes.rule.iter().sum::<u32>(),
-            r.holes.fill.iter().sum::<u32>()
-        )?;
-        for l in 0..LEVELS {
-            write!(out, ",{},{}", r.holes.rule[l], r.holes.fill[l])?;
+        if r.holes.counted {
+            write!(
+                out,
+                ",{},{}",
+                r.holes.rule.iter().sum::<u32>(),
+                r.holes.fill.iter().sum::<u32>()
+            )?;
+            for l in 0..LEVELS {
+                write!(out, ",{},{}", r.holes.rule[l], r.holes.fill[l])?;
+            }
+        } else {
+            write!(out, "{}", ",".repeat(2 + 2 * LEVELS))?;
         }
         write!(out, ",{}", r.holes.chunk_entities)?;
         for count in r.visible {
@@ -330,7 +341,9 @@ fn save(
         view.view_distance_m,
         view.lod_distance_m,
         cfg!(feature = "dev"),
-        if profile.gpu.1.load(std::sync::atomic::Ordering::Relaxed) {
+        if std::env::var_os("TESSERAE_PROFILE_GPU").is_none() {
+            "off (TESSERAE_PROFILE_GPU unset)"
+        } else if profile.gpu.1.load(std::sync::atomic::Ordering::Relaxed) {
             "gpu.csv: timestamps at empty compute pass boundaries between Bevy's passes"
         } else {
             "unavailable (no TIMESTAMP_QUERY)"
@@ -418,6 +431,9 @@ fn save(
         writeln!(flow, ",{},{},{limited}", r.fluid_run.0, r.fluid_run.1)?;
     }
     flow.flush()?;
+    if std::env::var_os("TESSERAE_PROFILE_GPU").is_none() {
+        return Ok(());
+    }
     let mut gpu = BufWriter::new(
         std::fs::OpenOptions::new()
             .write(true)
