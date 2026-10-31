@@ -5,13 +5,10 @@
 //! `ChunkStore`'s mutators stay private to `crate::server`. See
 //! `docs/adr/0002-client-server-from-day-one.md`.
 //!
-//! Terrain is drawn by one camera per LOD level, all on one target: each level
-//! has its own render layer and its own depth, and a finer level's camera runs
-//! after a coarser one's, so wherever a finer level has geometry it shows over
-//! every coarser one. See `.scratch/2026-10-13-phase-6-lod/spec.md`, decision 8.
-//!
-//! A mesh the Server unloads stays drawn until other levels cover its region;
-//! see `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
+//! One camera draws every LOD level into one depth buffer. A coarse fragment is
+//! discarded wherever a finer level draws, and a mesh the Server unloads stays
+//! drawn until other levels cover its region; see
+//! `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -551,28 +548,16 @@ fn publish_drawn(
 /// 16 KiB, so the mask grows past its buffer rarely.
 const MIN_DRAWN_WORDS: usize = 4096;
 
-fn spawn_light(
-    mut commands: Commands,
-    mut ambient: ResMut<GlobalAmbientLight>,
-    settings: Res<StreamingSettings>,
-) {
-    let sun = Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y);
-    // A light's layers are also the shadow-caster mask for every view it lights,
-    // so one sun on every layer would put level 0 into the coarse cameras'
-    // cascades for nothing: two suns, one shadowed.
+fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) {
+    // A light's layers are also its shadow-caster mask, so level 0 alone
+    // casts: a coarse caster would shadow the finer ground it stands over.
     commands.spawn((
         DirectionalLight {
             shadow_maps_enabled: true,
             ..default()
         },
-        sun,
+        Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
         RenderLayers::layer(NEAR_LAYER),
-    ));
-    let coarse = (1..level_count(&settings).max(2)).map(|level| level as usize);
-    commands.spawn((
-        DirectionalLight::default(),
-        sun,
-        RenderLayers::from_layers(&coarse.collect::<Vec<_>>()),
     ));
 
     // The sky dome's radiance, no longer a flat fill: the chunk shader gates it
@@ -590,6 +575,11 @@ const VIEW_PITCH: f32 = -0.3;
 /// [`SpawnPoint`] exists. Ordering through the schedule rather than through an
 /// edge between two plugins' systems, which would have to be kept in step.
 ///
+/// One camera draws every level into one depth buffer: the coverage rule in
+/// `chunk_material.wesl` already discards a coarse fragment wherever a finer
+/// level draws, so depth alone decides the rest. See
+/// `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
+///
 /// [`SpawnPoint`]: crate::server::world_state::SpawnPoint
 fn spawn_camera(
     mut commands: Commands,
@@ -601,32 +591,22 @@ fn spawn_camera(
     let eye = spawn.entry_eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
     let pose = Transform::from_translation(eye).looking_to(direction, Vec3::Y);
+    let layers: Vec<usize> = (0..level_count(&streaming).max(1))
+        .map(|level| level as usize)
+        .collect();
 
-    // At least one, even with no coarse levels: the camera at the bottom of the
-    // stack is the one that clears, and the Player's camera never does.
-    let coarse_levels = level_count(&streaming).max(2) - 1;
-
-    // Built once and cloned onto every camera: the same fragment must fog the
-    // same whichever layer draws it.
-    let fog = fog::camera_fog(
-        fog::enabled(),
-        &fog_settings,
-        streaming.view_distance_m,
-        streaming.lod_distance_m,
-    );
-
-    let near = commands
+    let camera = commands
         .spawn((
             Camera3d::default(),
-            Camera {
-                order: coarse_levels as isize,
-                clear_color: ClearColorConfig::None,
+            Camera::default(),
+            RenderLayers::from_layers(&layers),
+            // Bevy's reverse-Z projection has no far plane; this one bounds
+            // frustum culling, which must reach the coarsest level.
+            Projection::Perspective(PerspectiveProjection {
+                far: streaming.lod_distance_m.max(streaming.view_distance_m) + world.cell_size(),
                 ..default()
-            },
-            RenderLayers::layer(NEAR_LAYER),
+            }),
             MainCamera,
-            // The UI must target the camera that runs last, or the coarse layers
-            // draw over it.
             IsDefaultUiCamera,
             pose,
             // Propagation runs in `PostUpdate`; without this the first frame's pose
@@ -639,46 +619,15 @@ fn spawn_camera(
             super::camera::CameraHome(pose),
         ))
         .id();
-    if let Some(fog) = &fog {
-        commands.entity(near).insert(fog.clone());
-    }
-
-    for level in 1..=coarse_levels {
-        let coarse = commands
-            .spawn((
-                Camera3d::default(),
-                Camera {
-                    // Coarsest first, so each finer level draws over the last.
-                    order: (coarse_levels - level) as isize,
-                    clear_color: if level == coarse_levels {
-                        ClearColorConfig::Default
-                    } else {
-                        ClearColorConfig::None
-                    },
-                    ..default()
-                },
-                layer_of(level),
-                // The Player's near plane: a coarse Chunk is drawn wherever no
-                // finer one is, however close to the Eye.
-                Projection::Perspective(PerspectiveProjection {
-                    far: streaming.lod_distance_m.max(streaming.view_distance_m)
-                        + world.cell_size(),
-                    ..default()
-                }),
-                // Identity under the near camera, so it cannot drift from it.
-                ChildOf(near),
-                GlobalTransform::from(pose),
-                CoarseCamera,
-            ))
-            .id();
-        if let Some(fog) = &fog {
-            commands.entity(coarse).insert(fog.clone());
-        }
+    if let Some(fog) = fog::camera_fog(
+        fog::enabled(),
+        &fog_settings,
+        streaming.view_distance_m,
+        streaming.lod_distance_m,
+    ) {
+        commands.entity(camera).insert(fog);
     }
 }
-
-#[derive(Component)]
-struct CoarseCamera;
 
 #[cfg(test)]
 mod tests {
@@ -716,71 +665,78 @@ mod tests {
         assert_ne!(global.translation(), Vec3::ZERO);
     }
 
-    /// Every coarse camera, finest level first.
-    fn coarse_cameras(app: &mut App) -> Vec<(Entity, Camera, RenderLayers, ChildOf, Transform)> {
-        let mut rows: Vec<_> = app
+    fn projection_of_main(app: &mut App) -> PerspectiveProjection {
+        let projection = app
             .world_mut()
-            .query_filtered::<(Entity, &Camera, &RenderLayers, &ChildOf, &Transform), With<CoarseCamera>>()
-            .iter(app.world())
-            .map(|(e, c, l, p, t)| (e, c.clone(), l.clone(), p.clone(), *t))
-            .collect();
-        rows.sort_by_key(|row| std::cmp::Reverse(row.1.order));
-        rows
+            .query_filtered::<&Projection, With<MainCamera>>()
+            .single(app.world())
+            .unwrap();
+        let Projection::Perspective(p) = projection else {
+            panic!("the camera is perspective");
+        };
+        p.clone()
     }
 
     #[test]
-    fn there_is_a_camera_for_each_coarse_level_under_the_main_camera_at_its_origin() {
-        let mut app = camera_app(Vec3::new(3.0, 4.0, 5.0), StreamingSettings::default());
-        let main = app
+    fn one_camera_draws_every_level_clears_the_target_and_owns_the_ui() {
+        let streaming = StreamingSettings::default();
+        let mut app = camera_app(Vec3::ZERO, streaming);
+        let cameras = app
             .world_mut()
-            .query_filtered::<Entity, With<MainCamera>>()
-            .single(app.world())
-            .unwrap();
-        let cameras = coarse_cameras(&mut app);
-        assert_eq!(
-            cameras.len() as u32,
-            level_count(&StreamingSettings::default()) - 1
-        );
-        let main_at = app
-            .world()
-            .get::<GlobalTransform>(main)
-            .unwrap()
-            .translation();
-        for (i, (entity, _, layers, parent, transform)) in cameras.iter().enumerate() {
-            assert_eq!(parent.parent(), main);
-            assert_eq!(*transform, Transform::IDENTITY);
-            assert_eq!(
-                app.world()
-                    .get::<GlobalTransform>(*entity)
-                    .unwrap()
-                    .translation(),
-                main_at
-            );
-            assert_eq!(*layers, RenderLayers::layer(i + 1), "one level a camera");
+            .query::<&Camera>()
+            .iter(app.world())
+            .count();
+        assert_eq!(cameras, 1);
+        let (camera, ui, layers) = {
+            let mut query = app
+                .world_mut()
+                .query_filtered::<(&Camera, Has<IsDefaultUiCamera>, &RenderLayers), With<MainCamera>>();
+            let (c, ui, l) = query.single(app.world()).unwrap();
+            (c.clone(), ui, l.clone())
+        };
+        assert!(ui);
+        assert!(matches!(camera.clear_color, ClearColorConfig::Default));
+        for level in 0..level_count(&streaming) {
+            assert!(layers.intersects(&layer_of(level)), "level {level}");
         }
     }
 
-    fn projection_of<F: bevy::ecs::query::QueryFilter>(
-        app: &mut App,
-    ) -> Vec<PerspectiveProjection> {
-        app.world_mut()
-            .query_filtered::<&Projection, F>()
-            .iter(app.world())
-            .map(|projection| {
-                let Projection::Perspective(p) = projection else {
-                    panic!("every camera is perspective");
-                };
-                p.clone()
-            })
-            .collect()
+    #[test]
+    fn the_projection_reaches_the_lod_distance_from_the_default_near_plane() {
+        let streaming = StreamingSettings::default();
+        let mut app = camera_app(Vec3::ZERO, streaming);
+        let cell = WorldSettings::default().cell_size();
+        let projection = projection_of_main(&mut app);
+        assert!(projection.far >= streaming.lod_distance_m + cell);
+        assert_eq!(projection.near, PerspectiveProjection::default().near);
     }
 
-    fn terrain_fogs(app: &mut App) -> Vec<Option<DistanceFog>> {
-        app.world_mut()
-            .query_filtered::<Option<&DistanceFog>, With<Camera3d>>()
-            .iter(app.world())
-            .map(|fog| fog.cloned())
-            .collect()
+    #[test]
+    fn a_world_with_no_coarse_levels_still_has_a_far_plane_past_its_view() {
+        let streaming = StreamingSettings {
+            lod_distance_m: 100.0,
+            ..default()
+        };
+        let mut app = camera_app(Vec3::ZERO, streaming);
+        assert!(projection_of_main(&mut app).far > streaming.view_distance_m);
+    }
+
+    #[test]
+    fn the_fog_is_derived_from_the_streaming_distances() {
+        let streaming = StreamingSettings::default();
+        let mut app = camera_app(Vec3::ZERO, streaming);
+        let want = fog::distance_fog(
+            &FogSettings::default(),
+            streaming.view_distance_m,
+            streaming.lod_distance_m,
+        );
+        let fog = app
+            .world_mut()
+            .query_filtered::<&DistanceFog, With<MainCamera>>()
+            .single(app.world())
+            .unwrap()
+            .clone();
+        assert_same_fog(&want, &fog);
     }
 
     fn assert_same_fog(a: &DistanceFog, b: &DistanceFog) {
@@ -800,109 +756,18 @@ mod tests {
     }
 
     #[test]
-    fn every_terrain_camera_has_the_same_distance_fog() {
-        let mut app = camera_app(Vec3::ZERO, StreamingSettings::default());
-        let fogs = terrain_fogs(&mut app);
-        assert_eq!(
-            fogs.len(),
-            level_count(&StreamingSettings::default()) as usize,
-            "the near camera and one per coarse level"
-        );
-        let first = fogs[0].as_ref().expect("the near camera is fogged");
-        for fog in &fogs {
-            assert_same_fog(first, fog.as_ref().expect("a camera has no fog"));
-        }
-    }
-
-    #[test]
-    fn the_fog_is_derived_from_the_streaming_distances() {
-        let streaming = StreamingSettings::default();
-        let mut app = camera_app(Vec3::ZERO, streaming);
-        let want = fog::distance_fog(
-            &FogSettings::default(),
-            streaming.view_distance_m,
-            streaming.lod_distance_m,
-        );
-        for fog in terrain_fogs(&mut app) {
-            assert_same_fog(&want, &fog.unwrap());
-        }
-    }
-
-    #[test]
-    fn the_coarse_projections_reach_the_lod_distance_and_start_at_the_players_near_plane() {
-        let streaming = StreamingSettings::default();
-        let mut app = camera_app(Vec3::ZERO, streaming);
-        let cell = WorldSettings::default().cell_size();
-        let near = projection_of::<With<MainCamera>>(&mut app).remove(0);
-        let coarse = projection_of::<With<CoarseCamera>>(&mut app);
-        assert!(!coarse.is_empty());
-        for far in coarse {
-            assert!(far.far >= streaming.lod_distance_m + cell);
-            assert_eq!(far.near, near.near);
-            assert_eq!(far.fov, near.fov, "a seam between the layers otherwise");
-        }
-    }
-
-    #[test]
-    fn a_world_with_no_coarse_levels_still_has_a_far_plane_past_its_view() {
-        let streaming = StreamingSettings {
-            lod_distance_m: 100.0,
-            ..default()
-        };
-        let mut app = camera_app(Vec3::ZERO, streaming);
-        let coarse = projection_of::<With<CoarseCamera>>(&mut app);
-        assert_eq!(coarse.len(), 1, "something has to clear the target");
-        assert!(coarse[0].far > streaming.view_distance_m);
-    }
-
-    #[test]
-    fn finer_levels_draw_over_coarser_ones_and_the_near_camera_over_all_and_owns_the_ui() {
-        let mut app = camera_app(Vec3::ZERO, StreamingSettings::default());
-        let (near, near_ui, near_layers) = {
-            let mut query = app
-                .world_mut()
-                .query_filtered::<(&Camera, Has<IsDefaultUiCamera>, &RenderLayers), With<MainCamera>>();
-            let (c, ui, l) = query.single(app.world()).unwrap();
-            (c.clone(), ui, l.clone())
-        };
-        assert_eq!(near_layers, RenderLayers::layer(0));
-        assert!(near_ui);
-        assert!(matches!(near.clear_color, ClearColorConfig::None));
-
-        let cameras = coarse_cameras(&mut app);
-        let mut above = near.order;
-        for (i, (entity, camera, _, _, _)) in cameras.iter().enumerate() {
-            assert!(camera.order < above, "level {}", i + 1);
-            above = camera.order;
-            assert!(!app.world().entity(*entity).contains::<IsDefaultUiCamera>());
-            let clears = matches!(camera.clear_color, ClearColorConfig::Default);
-            assert_eq!(clears, i + 1 == cameras.len(), "level {}", i + 1);
-        }
-    }
-
-    #[test]
-    fn the_shadowed_sun_lights_level_zero_only_and_the_other_every_coarse_level() {
-        let streaming = StreamingSettings::default();
+    fn one_sun_lights_every_level_and_only_level_zero_casts() {
         let mut app = App::new();
-        app.init_resource::<GlobalAmbientLight>()
-            .insert_resource(streaming);
+        app.init_resource::<GlobalAmbientLight>();
         app.world_mut().run_system_once(spawn_light).unwrap();
         let mut suns = app
             .world_mut()
-            .query::<(&DirectionalLight, &RenderLayers, &Transform)>();
+            .query::<(&DirectionalLight, &RenderLayers)>();
         let suns: Vec<_> = suns.iter(app.world()).collect();
-        assert_eq!(suns.len(), 2);
-        let (shadowed, plain): (Vec<_>, Vec<_>) = suns
-            .iter()
-            .partition(|(light, _, _)| light.shadow_maps_enabled);
-        let (_, near_layers, near_pose) = shadowed[0];
-        let (_, far_layers, far_pose) = plain[0];
-        assert_eq!(*near_layers, RenderLayers::layer(NEAR_LAYER));
-        assert_eq!(near_pose, far_pose, "one sun, lit twice");
-        assert!(!far_layers.intersects(&RenderLayers::layer(NEAR_LAYER)));
-        for level in 1..level_count(&streaming) {
-            assert!(far_layers.intersects(&RenderLayers::layer(level as usize)));
-        }
+        assert_eq!(suns.len(), 1, "a second sun would light coarse terrain twice");
+        let (sun, layers) = suns[0];
+        assert!(sun.shadow_maps_enabled);
+        assert_eq!(*layers, RenderLayers::layer(NEAR_LAYER));
     }
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need

@@ -46,6 +46,9 @@ once instead of all children together.
 - **Retained meshes cost memory and draws** until their region is covered. They
   are bounded by the coarsest level's mesh extent; a teleport releases the old
   ones as the new coarse levels arrive.
-- **Each level still has its own camera and depth.** A finer level draws over a
-  coarser one wherever both have geometry, so the coverage rule alone decides
-  what shows; one shared depth buffer is a later change.
+- **One camera and one depth buffer draw every level.** Because the coverage
+  rule already discards a coarse fragment wherever a finer level draws, depth
+  decides the rest, and the five coarse cameras, each clearing its own depth and
+  overdrawing the one before, are gone. Level 0 is the only shadow caster. The
+  one visual change: a coarse Chunk not yet refined can now hide finer terrain
+  behind it, as any nearer surface would.
