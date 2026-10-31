@@ -1855,15 +1855,19 @@ mod tests {
 
         // Dispatch is synchronous, so the first tick's count does not depend on how fast the
         // workers are, and nothing has landed yet to be capped.
+        // Everything is a hole, so the coarsest level goes first, in its priority order.
         h.lod_tick();
         assert_eq!(h.lod_jobs().generate.counts().0, 5);
-        let keys = h.lod_jobs().generate.keys();
-        assert!(keys.iter().all(|&(level, _)| level == 1), "{keys:?}");
-        let anchor = h.anchor_of(1);
-        let dist = |c: ChunkCoord| delta(anchor, c).length_squared();
-        let mut all: Vec<i32> = h.load_set(1).into_iter().map(dist).collect();
-        all.sort_unstable();
-        assert!(keys.iter().all(|&(_, c)| dist(c) <= all[4]));
+        let coarsest = LEVELS - 1;
+        let anchor = h.anchor_of(coarsest);
+        let first: HashSet<LodKey> = h.app.world().resource::<LodOrders>().load
+            [Plan::index(coarsest)]
+        .offsets()
+        .take(5)
+        .map(|d| (coarsest, offset(anchor, d)))
+        .collect();
+        let keys: HashSet<LodKey> = h.lod_jobs().generate.keys().into_iter().collect();
+        assert_eq!(keys, first);
 
         let started = std::time::Instant::now();
         for _ in 0..SETTLE_TICKS {

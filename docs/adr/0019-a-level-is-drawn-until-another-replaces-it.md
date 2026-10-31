@@ -4,20 +4,20 @@ Status: accepted.
 
 ## Context
 
-Every LOD level draws only part of the ground, and the Server streams each
-level on its own: it unloads a coarse Chunk once it falls inside the finer
-level's hole, whether or not the finer Chunks exist yet, and a level-0 Chunk
-once it leaves level 0's ring, whether or not level 1 has meshed there. The
-Client then cut every coarse fragment within a fixed metre radius of the Eye,
-delivered or not. Diving, climbing and teleporting showed the clear colour
-wherever one level had let go before the next arrived. See
+Every LOD level draws only part of the ground, and the Server streams each level
+on its own: it unloads a coarse Chunk once it falls inside the finer level's
+hole, whether or not the finer Chunks exist yet, and a level-0 Chunk once it
+leaves level 0's ring, whether or not level 1 has meshed there. The Client then
+cut every coarse fragment within a fixed metre radius of the Eye, delivered or
+not. Diving, climbing and teleporting showed the clear colour wherever one level
+had let go before the next arrived. See
 `.scratch/2026-10-29-streaming-performance/`.
 
 ## Decision
 
-**A level-k fragment is discarded wherever a finer level draws the Chunk at
-that point, and nowhere else.** Drawing a Chunk includes an empty mesh, which is
-the finer level's answer that the space is air. The Client keeps one bitset per
+**A level-k fragment is discarded wherever a finer level draws the Chunk at that
+point, and nowhere else.** Drawing a Chunk includes an empty mesh, which is the
+finer level's answer that the space is air. The Client keeps one bitset per
 level of the Chunks it draws (`client::drawn_mask`), and all three terrain
 materials read it.
 
