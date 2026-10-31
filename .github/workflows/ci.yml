@@ -165,10 +165,18 @@ jobs:
 
       # The workspace manifest builds dependencies at opt-level 3 so a local
       # debug run of a Bevy app is not an order of magnitude too slow. CI never
-      # runs the app — it runs 37 unit tests in well under a second — so that
-      # setting buys nothing here and costs a full LLVM pass over ~600 crates.
-      # The glob matches dependencies only, so our own crates keep
-      # [profile.dev]'s opt-level 1.
+      # runs the app — it runs about 1,300 unit tests — so that setting buys
+      # nothing here and costs a full LLVM pass over ~600 crates. The glob
+      # matches dependencies only, so our own crates keep [profile.dev]'s
+      # opt-level 1.
+      #
+      # Split so the run reports compile and execution time separately; the
+      # flags must match for the second step to reuse the first's build.
+      - name: Build tests
+        run: |
+          cargo test --workspace --locked --features tesserae/dev \
+            --config 'profile.dev.package."*".opt-level=0' --no-run
+
       - name: Run tests
         run: |
           cargo test --workspace --locked --features tesserae/dev \
