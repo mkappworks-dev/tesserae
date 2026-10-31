@@ -37,6 +37,20 @@ slowest tests into `::notice` annotations, which the API serves without auth
 where job logs and artifacts are not. The next change is chosen from those
 names.
 
+## Result of the second run
+
+Nextest took the job from 814s to 679s (Run tests 635s to 508s). The ten
+slowest tests, 35s to 191s each, are mostly `tesserae-core` property and
+brute-force meshing and LOD checks, plus server tests that call them. They are
+CPU-bound at `opt-level=1`.
+
+## Third step
+
+CI passes `--config 'profile.dev.package.tesserae-core.opt-level=3'` to the
+build, run and doctest steps. It is a CLI flag, so local builds keep
+`[profile.dev]`. The slow-test report becomes one annotation, since GitHub
+shows 10 per step and cut the earlier list.
+
 ## Not in this change
 
 Any speed-up. This change only makes the next run readable; the fix is chosen

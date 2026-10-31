@@ -171,7 +171,9 @@ jobs:
       # opt-level 1.
       #
       # Flags must match across the build, run and doctest steps so they share
-      # one set of fingerprints.
+      # one set of fingerprints. tesserae-core is the one workspace crate whose
+      # tests are CPU-bound (property and brute-force meshing and LOD checks),
+      # so it alone is optimised.
       - uses: taiki-e/install-action@v2
         with:
           tool: nextest
@@ -179,20 +181,24 @@ jobs:
       - name: Build tests
         run: |
           cargo nextest run --profile ci --workspace --locked --features tesserae/dev \
-            --config 'profile.dev.package."*".opt-level=0' --no-run
+            --config 'profile.dev.package."*".opt-level=0' \
+            --config 'profile.dev.package.tesserae-core.opt-level=3' --no-run
 
       - name: Run tests
         run: |
           cargo nextest run --profile ci --workspace --locked --features tesserae/dev \
-            --config 'profile.dev.package."*".opt-level=0'
+            --config 'profile.dev.package."*".opt-level=0' \
+            --config 'profile.dev.package.tesserae-core.opt-level=3'
 
       # nextest does not run doctests.
       - name: Run doctests
         run: |
           cargo test --doc --workspace --locked --features tesserae/dev \
-            --config 'profile.dev.package."*".opt-level=0'
+            --config 'profile.dev.package."*".opt-level=0' \
+            --config 'profile.dev.package.tesserae-core.opt-level=3'
 
-      # Job logs need auth to read; annotations do not.
+      # Job logs need auth to read; annotations do not. One annotation, because
+      # GitHub shows only 10 per step.
       - name: Report slowest tests
         if: always()
         run: |
@@ -202,8 +208,8 @@ jobs:
               (float(c.get("time", 0)), c.get("classname", "") + "::" + c.get("name", ""))
               for c in ET.parse("target/nextest/ci/junit.xml").iter("testcase")
           ]
-          for t, n in sorted(cases, reverse=True)[:25]:
-              print(f"::notice title=slow test::{t:.1f}s {n}")
+          lines = [f"{t:.1f}s {n}" for t, n in sorted(cases, reverse=True)[:25]]
+          print("::notice title=slowest tests::" + "%0A".join(lines))
           print(f"::notice title=test total::{sum(t for t, _ in cases):.0f}s over {len(cases)} tests")
           PY
 
