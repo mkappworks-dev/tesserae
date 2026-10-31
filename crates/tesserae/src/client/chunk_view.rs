@@ -633,6 +633,7 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
+    use tesserae_core::visibility::Connectivity;
     use tesserae_core::{Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk};
 
     fn watered() -> (Tables, MaterialId) {
@@ -1241,8 +1242,11 @@ mod tests {
     }
 
     fn send_mesh(app: &mut App, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
-        app.world_mut()
-            .write_message(ChunkMeshReady { coord, mesh });
+        app.world_mut().write_message(ChunkMeshReady {
+            coord,
+            mesh,
+            connectivity: Connectivity::ALL,
+        });
         app.update();
     }
 
@@ -1868,6 +1872,7 @@ mod tests {
         app.world_mut().write_message(ChunkMeshReady {
             coord,
             mesh: both_layers(),
+            connectivity: Connectivity::ALL,
         });
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.update();
@@ -2102,6 +2107,7 @@ mod tests {
         world.write_message(ChunkMeshReady {
             coord,
             mesh: geometry(),
+            connectivity: Connectivity::ALL,
         });
         world.write_message(ChunkUnloaded { coord });
         world.write_message(LodMeshReady {

@@ -37,9 +37,10 @@ use bevy::prelude::*;
 
 use crate::session::SessionApp;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
-use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
+use tesserae_core::visibility::Connectivity;
+use tesserae_core::{CHUNK_SIZE, Chunk, ChunkMesh, Tables};
 
-use super::jobs::{Border, Jobs, Solved, build_mesh, solve};
+use super::jobs::{Border, Jobs, Solved, build_mesh, generate, solve};
 use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
@@ -56,6 +57,9 @@ use crate::world::{ChunkCoord, WorldSettings};
 pub struct ChunkMeshReady {
     pub coord: ChunkCoord,
     pub mesh: ChunkMesh,
+    /// Which of the Chunk's faces see each other through it, for the Client's
+    /// visibility walk: the Client never reads the Voxels to work it out.
+    pub connectivity: Connectivity,
 }
 
 /// The Client should stop drawing this Chunk.
@@ -358,6 +362,10 @@ pub(in crate::server) struct MeshState {
     edited_chunks: HashSet<ChunkCoord>,
     /// Drained by `stream_lod`, which alone can see whether the cover exists.
     cover_changed: HashSet<ChunkCoord>,
+    /// Each held Chunk's connectivity, and the Voxels it was worked out from:
+    /// the Weak makes an Edit's `Arc::make_mut` move the Chunk, so a stale
+    /// entry never matches what the store holds.
+    connectivity: HashMap<ChunkCoord, (std::sync::Weak<Chunk>, Connectivity)>,
 }
 
 impl MeshState {
@@ -400,6 +408,18 @@ impl MeshState {
     pub(in crate::server) fn voxels_changed(&mut self, coord: ChunkCoord) {
         self.edited_chunks.insert(coord);
         self.cover_changed.insert(coord);
+    }
+
+    fn note_connectivity(&mut self, coord: ChunkCoord, chunk: &Arc<Chunk>, c: Connectivity) {
+        self.connectivity.insert(coord, (Arc::downgrade(chunk), c));
+    }
+
+    /// The connectivity of `chunk`, if it was worked out from those Voxels.
+    fn connectivity_of(&self, coord: ChunkCoord, chunk: &Arc<Chunk>) -> Option<Connectivity> {
+        self.connectivity
+            .get(&coord)
+            .filter(|(from, _)| std::ptr::eq(from.as_ptr(), Arc::as_ptr(chunk)))
+            .map(|&(_, c)| c)
     }
 
     pub(in crate::server) fn take_cover_changes(&mut self) -> Vec<ChunkCoord> {
@@ -584,6 +604,7 @@ fn stream(
         order,
         center,
         budget.in_flight.generate,
+        &tables.0,
     );
     if let Some((coord, snapshot, border)) = dispatch_relight(
         &store,
@@ -673,6 +694,7 @@ fn retire(
         }
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
+        meshes.connectivity.remove(&coord);
         // An unedited Chunk is what the generator makes again; only an edited one
         // leaves a ghost in its cover.
         if meshes.edited_chunks.remove(&coord) {
@@ -698,13 +720,20 @@ fn land_generated(
     let mut finished: Vec<ChunkCoord> = jobs.generate.finished().collect();
     finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
     for coord in finished.into_iter().take(budget) {
-        let Some(chunk) = jobs.generate.take(coord) else {
+        let Some(generated) = jobs.generate.take(coord) else {
             continue;
         };
         if store.contains(coord) || !evict.contains(delta(center, coord)) {
             continue;
         }
-        store.insert(coord, chunk);
+        store.insert(coord, generated.chunk);
+        // A Chunk restored from the archive is not what the job generated.
+        if let Some(held) = store
+            .shared(coord)
+            .filter(|_| !store.revisions.contains_key(&coord))
+        {
+            meshes.note_connectivity(coord, &held.chunk, generated.connectivity);
+        }
         if store.revisions.contains_key(&coord) {
             meshes.voxels_changed(coord);
         }
@@ -735,6 +764,7 @@ fn dispatch_generation(
     order: &LoadOrder,
     center: ChunkCoord,
     in_flight: usize,
+    tables: &Arc<Tables>,
 ) {
     let mut free = in_flight.saturating_sub(jobs.generate.in_flight());
     for &d in &order.offsets {
@@ -746,8 +776,9 @@ fn dispatch_generation(
             continue;
         }
         let worldgen = generator.0.clone();
+        let tables = Arc::clone(tables);
         jobs.generate
-            .spawn(coord, move || worldgen.chunk(coord.x, coord.y, coord.z));
+            .spawn(coord, move || generate(&worldgen, coord, &tables));
         free -= 1;
     }
 }
@@ -926,7 +957,14 @@ fn land_meshes(
         if meshes.dirty.contains(&coord) {
             jobs.mesh.note_stale();
         }
-        ready.write(ChunkMeshReady { coord, mesh: built });
+        meshes
+            .connectivity
+            .insert(coord, (built.from, built.connectivity));
+        ready.write(ChunkMeshReady {
+            coord,
+            mesh: built.mesh,
+            connectivity: built.connectivity,
+        });
         meshes.delivered.insert(coord);
     }
 }
@@ -983,9 +1021,10 @@ fn dispatch_meshes(
             .try_into()
             .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
+        let known = meshes.connectivity_of(coord, &own.chunk);
         let tables = Arc::clone(tables);
         jobs.mesh
-            .spawn(coord, move || build_mesh(&own, &around, &tables));
+            .spawn(coord, move || build_mesh(&own, &around, known, &tables));
         free -= 1;
     }
 }
@@ -1720,6 +1759,46 @@ pub(in crate::server) mod tests {
             assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
         }
         assert_eq!(ready.len(), 2, "nothing else was touched");
+    }
+
+    /// The Client walks these to cull and never reads World storage, so what
+    /// ships with a mesh has to be the Chunk as it stands, Edits included.
+    #[test]
+    fn every_mesh_carries_the_sight_lines_of_its_chunk_as_it_stands() {
+        use tesserae_core::visibility::connectivity;
+        let mut h = Harness::new(small(), UNLIMITED);
+        let (ready, _) = h.settle();
+        let tables = crate::server::fixture_tables();
+        let now = |h: &Harness, c| connectivity(h.store().get(c).unwrap(), &tables.materials);
+        assert!(!ready.is_empty());
+        for m in &ready {
+            assert_eq!(m.connectivity, now(&h, m.coord), "{}", m.coord);
+        }
+
+        let deep = ChunkCoord::new(0, -1, 0);
+        let before = now(&h, deep);
+        h.app
+            .world_mut()
+            .run_system_once(
+                |mut store: ResMut<ChunkStore>,
+                 mut meshes: ResMut<MeshState>,
+                 tables: Res<ContentTables>| {
+                    for x in 0..CHUNK_SIZE as i32 {
+                        edit::set_voxel(&mut store, &mut meshes, &tables, [x, -16, 16], Voxel::AIR)
+                            .expect("the Chunk is loaded");
+                    }
+                },
+            )
+            .unwrap();
+        let (ready, _) = h.settle();
+        let tunnel = ready
+            .iter()
+            .rev()
+            .find(|m| m.coord == deep)
+            .expect("the tunnelled Chunk is republished");
+        assert!(tunnel.connectivity.connects(NEG_X, POS_X));
+        assert_ne!(tunnel.connectivity, before);
+        assert_eq!(tunnel.connectivity, now(&h, deep));
     }
 
     #[test]
