@@ -1,6 +1,6 @@
 # Sequential PR execution
 
-Updated 2026-10-30 against main `ef6835d`. Feature scope, dependencies and
+Updated 2026-10-31 against main `ed4e6a2`. Feature scope, dependencies and
 acceptance criteria live in spec.md and the numbered tickets. Numbers below
 are sequence positions, not GitHub PR numbers; the GitHub number is in the
 last column.
@@ -29,20 +29,23 @@ ownership, concurrency or difficult state transitions.
 | 12  | Water immersion: view, then movement                | 33      | #34, #37  |
 | 13  | World list window and controller follow-ups         | 32      | #33       |
 | 14  | In-process World sessions                           | 30      | #39       |
+| 15  | Multiple installed Games and per-World Mod sets     | 31      | #41       |
 
 Also merged outside the ticket plan: #35 (lift a physics respawn out of
 Voxels) and #36 (CAD-style layout placement with live preview).
 
 ## Open
 
-| #   | Planned PR                                          | Tickets | Status       | Model, effort |
-| --- | --------------------------------------------------- | ------- | ------------ | ------------- |
-| 15  | Multiple installed Games and per-World Mod sets (G0) | 31     | needs-triage | Sonnet, High  |
-| 16  | World session memory growth (W1.1)                  | 34      | needs-triage | Sonnet, Medium |
+| #   | Planned PR                                | Tickets | Status          |
+| --- | ----------------------------------------- | ------- | --------------- |
+| 16  | World session memory growth (W1.1)        | 34      | ready-for-human |
 
-Ticket 31 needs a grill pass before code. Ticket 34 is blocked only by the
-now-merged ticket 30 and should be triaged first: it decides whether the
-roughly 3 MB per World session is a leak or an accepted cost.
+Ticket 34 was triaged in #40, which recommends accepting about 3 MB per World
+session as a documented cost and closing it. It waits on that decision.
+
+Pending validation on tickets marked done: ticket 10 (a real touchscreen),
+ticket 30 (the release RSS run over 10 open/close cycles) and ticket 32
+(native fullscreen, native keyboard navigation and a physical pad).
 
 ## Conditional experiment backlog
 
