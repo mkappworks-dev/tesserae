@@ -4,7 +4,7 @@ members = ["crates/tesserae", "crates/tesserae-core", "crates/tesserae-mods"]
 # A Game compiles to wasm32-wasip2, so a root `cargo build` must not try to build
 # it for the host, and so does a test guest of tesserae-mods. See
 # docs/adr/0004-demo-game-in-repo-real-game-out.md.
-exclude = ["games/demo", "crates/tesserae-mods/tests/guests"]
+exclude = ["games/demo", "games/meadow", "crates/tesserae-mods/tests/guests"]
 
 [workspace.package]
 version = "0.0.0"
