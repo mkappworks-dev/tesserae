@@ -153,8 +153,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
 
-      # tesserae-mods' tests load Mods compiled to WASM components.
+      # tesserae-mods' tests load Mods compiled to WASM components. Each guest is
+      # its own workspace root, so without a shared target dir wit-bindgen
+      # recompiles 22 times and rust-cache saves none of it.
       - name: Build test guests and demo Game
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/target/wasm-guests
         run: |
           rustup target add wasm32-wasip2
           ./scripts/build-guests
@@ -169,6 +173,22 @@ jobs:
         run: |
           cargo test --workspace --locked --features tesserae/dev \
             --config 'profile.dev.package."*".opt-level=0'
+
+  benches:
+    name: Benches
+    runs-on: ubuntu-latest
+    # Its own job: the opt-level 3 wasmtime build it needs shares nothing with
+    # Test's opt-level 0 one, so running it there only adds to the critical path.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
 
       # The mesher is the hot path; a bench that no longer compiles is a bench
       # nobody runs. This does not measure, it only builds.
