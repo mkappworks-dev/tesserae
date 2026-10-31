@@ -77,7 +77,11 @@ impl Aim {
         let apex = self.eye - self.look * APEX_BEHIND_M;
         let toward = ((min + max) * 0.5 - apex).normalize_or_zero();
         let in_view = near || toward.dot(self.look) >= CONE_HALF_ANGLE_DEG.to_radians().cos();
-        if in_view { distance * IN_VIEW } else { distance }
+        if in_view {
+            distance * IN_VIEW
+        } else {
+            distance
+        }
     }
 }
 
@@ -143,7 +147,11 @@ impl Order {
         let mut entered = HashMap::with_capacity(ring.offsets.len());
         self.entries.clear();
         for &d in ring.offsets {
-            let coord = ChunkCoord::new(ring.anchor.x + d.x, ring.anchor.y + d.y, ring.anchor.z + d.z);
+            let coord = ChunkCoord::new(
+                ring.anchor.x + d.x,
+                ring.anchor.y + d.y,
+                ring.anchor.z + d.z,
+            );
             let since = *self.entered.get(&coord).unwrap_or(&now_s);
             entered.insert(coord, since);
             let min = IVec3::new(coord.x, coord.y, coord.z).as_vec3() * ring.cell_m;
@@ -151,11 +159,13 @@ impl Order {
             // Divided by the level's scale, so a coarse Chunk ranks with the
             // level-0 Chunk that covers the same angle (Distant Horizons'
             // `distance / detailLevel`).
-            let priority = aim.score_m(min, ring.cell_m, ring.cap_m) / scale - AGE_CREDIT_M_PER_S * age_s;
+            let priority =
+                aim.score_m(min, ring.cell_m, ring.cap_m) / scale - AGE_CREDIT_M_PER_S * age_s;
             self.entries.push((priority, d));
         }
         self.entered = entered;
-        self.entries.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then_with(|| key(a.1).cmp(&key(b.1))));
+        self.entries
+            .sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then_with(|| key(a.1).cmp(&key(b.1))));
         true
     }
 

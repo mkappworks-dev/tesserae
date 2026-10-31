@@ -837,7 +837,15 @@ pub(in crate::server) struct LodOrders {
 }
 
 impl LodOrders {
-    fn update(&mut self, plans: &[Plan], state: &mut LodState, aim: &Aim, cell_m: f32, cap_m: f32, now_s: f64) {
+    fn update(
+        &mut self,
+        plans: &[Plan],
+        state: &mut LodState,
+        aim: &Aim,
+        cell_m: f32,
+        cap_m: f32,
+        now_s: f64,
+    ) {
         self.load.resize_with(plans.len(), Order::default);
         self.mesh.resize_with(plans.len(), Order::default);
         for (i, plan) in plans.iter().enumerate() {
@@ -846,18 +854,20 @@ impl LodOrders {
                 hole: None,
             });
             let mesh = state.offsets_for(plan.rings.mesh);
-            let ring = |offsets: &[IVec3]| Ring {
-                level: plan.level,
-                anchor: plan.anchor,
-                offsets,
-                cell_m: cell_m * 2f32.powi(plan.level as i32),
-                cap_m,
-            };
+            fn ring<'a>(plan: &Plan, offsets: &'a [IVec3], cell_m: f32, cap_m: f32) -> Ring<'a> {
+                Ring {
+                    level: plan.level,
+                    anchor: plan.anchor,
+                    offsets,
+                    cell_m: cell_m * 2f32.powi(plan.level as i32),
+                    cap_m,
+                }
+            }
             // A new order can put work the last scan passed over ahead of it.
-            if self.load[i].update(&ring(&load), aim, now_s) {
+            if self.load[i].update(&ring(plan, &load, cell_m, cap_m), aim, now_s) {
                 state.level_mut(plan.level).pending = true;
             }
-            if self.mesh[i].update(&ring(&mesh), aim, now_s) {
+            if self.mesh[i].update(&ring(plan, &mesh, cell_m, cap_m), aim, now_s) {
                 state.level_mut(plan.level).mesh_pending = true;
             }
         }
@@ -894,7 +904,10 @@ fn is_hole(
 
 /// Holes first, coarsest level first; then every level together in priority
 /// order. Each item is a plan's index and an offset from its anchor.
-fn walk<'a>(orders: &'a [Order], due: &'a [usize]) -> impl Iterator<Item = (bool, usize, IVec3)> + 'a {
+fn walk<'a>(
+    orders: &'a [Order],
+    due: &'a [usize],
+) -> impl Iterator<Item = (bool, usize, IVec3)> + 'a {
     let holes = due
         .iter()
         .rev()
@@ -987,8 +1000,12 @@ pub(in crate::server) fn stream_lod(
         let min = IVec3::new(coord.x, coord.y, coord.z).as_vec3() * cell_m;
         aim.score_m(min, cell_m, settings.view_distance_m) / 2f32.powi(level as i32)
     };
-    land(&plans, &mut store, &mut state, &mut jobs, &budget, &priority);
-    land_meshes(&plans, &mut state, &mut jobs, &mut ready, &budget, &priority);
+    land(
+        &plans, &mut store, &mut state, &mut jobs, &budget, &priority,
+    );
+    land_meshes(
+        &plans, &mut state, &mut jobs, &mut ready, &budget, &priority,
+    );
     dispatch(
         &plans,
         &chunks,
