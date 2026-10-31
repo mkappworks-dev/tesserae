@@ -106,6 +106,7 @@ struct Card {
 }
 
 /// The folders the list shows, in order; the soak run alternates between them.
+#[cfg(feature = "dev")]
 pub(super) fn listed(world: &World) -> Vec<PathBuf> {
     world
         .get_resource::<Launcher>()
