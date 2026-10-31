@@ -624,6 +624,7 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
             id: "demo".into(),
             version: "0.1.0".into(),
         }),
+        mods: Vec::new(),
         seed,
         voxel_size_m,
         created_unix_s: 1,
@@ -640,7 +641,14 @@ fn a_new_world_takes_its_identity_and_settings_from_its_details() {
     let path = library::create(&worlds.0, &created).unwrap();
     let opening = Opening::from_folder(&path).unwrap();
     assert_eq!(opening.id, created.world);
-    assert!(opening.loads_mods());
+    assert_eq!(
+        opening.selection(),
+        crate::server::mods::Selection::Named(vec![crate::server::mods::Wanted {
+            id: "demo".into(),
+            version: "0.1.0".into(),
+            game: true,
+        }])
+    );
     let settings = opening.settings(WorldSettings::default());
     assert_eq!((settings.seed, settings.voxel_size), (99, 0.5));
     let mut rig = Rig::open(opening, settings);
@@ -765,7 +773,7 @@ fn an_empty_world_loads_no_mods() {
     empty.game = None;
     let path = library::create(&worlds.0, &empty).unwrap();
     let opening = Opening::from_folder(&path).unwrap();
-    assert!(!opening.loads_mods());
+    assert_eq!(opening.selection(), crate::server::mods::Selection::Nothing);
     let settings = opening.settings(WorldSettings::default());
     let mut loaded = LoadedMods::default();
     let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();

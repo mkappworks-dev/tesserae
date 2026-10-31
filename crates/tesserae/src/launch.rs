@@ -87,20 +87,44 @@ pub struct Untrusted {
 /// What the World list can offer, found without running any Mod code.
 #[derive(Resource)]
 pub struct Installed {
+    /// The first installed Game, until the Create form lets a World choose.
     pub game: Option<GameRef>,
+    /// Trust still to grant for the set about to open; see [`Installed::prepare_trust`].
     pub untrusted: Vec<Untrusted>,
     /// Why the Mods folder could not be read; nothing can be created.
     pub error: Option<String>,
+    /// Every Game and Mod the scan found, `(id, version)`.
+    pub games: Vec<GameRef>,
+    pub mods: Vec<GameRef>,
+    /// Folders the scan refused, as one line each.
+    pub rejected: Vec<String>,
+    found: Vec<tesserae_mods::Found>,
+    check_trust: bool,
     /// `None` when nothing can be granted, as in tests.
     trust_file: Option<PathBuf>,
 }
 
 impl Installed {
-    pub fn new(game: Option<GameRef>, untrusted: Vec<Untrusted>, trust_file: PathBuf) -> Self {
+    pub fn new(scan: tesserae_mods::Scan, check_trust: bool, trust_file: PathBuf) -> Self {
+        let item = |f: &tesserae_mods::Found| GameRef {
+            id: f.manifest.id.clone(),
+            version: f.manifest.version.clone(),
+        };
+        let games: Vec<_> = scan.games.iter().map(item).collect();
+        let mods: Vec<_> = scan.mods.iter().map(item).collect();
         Self {
-            game,
-            untrusted,
+            game: games.first().cloned(),
+            untrusted: Vec::new(),
             error: None,
+            games,
+            mods,
+            rejected: scan
+                .rejected
+                .iter()
+                .map(|r| format!("{}: {}", r.dir.display(), r.reason))
+                .collect(),
+            found: scan.games.into_iter().chain(scan.mods).collect(),
+            check_trust,
             trust_file: Some(trust_file),
         }
     }
@@ -110,17 +134,24 @@ impl Installed {
             game: None,
             untrusted: Vec::new(),
             error,
+            games: Vec::new(),
+            mods: Vec::new(),
+            rejected: Vec::new(),
+            found: Vec::new(),
+            check_trust: false,
             trust_file: None,
         }
     }
 
     #[cfg(test)]
     pub fn fake(game: Option<(&str, &str)>, untrusted: &[&str]) -> Self {
+        let game = game.map(|(id, version)| GameRef {
+            id: id.into(),
+            version: version.into(),
+        });
         Self {
-            game: game.map(|(id, version)| GameRef {
-                id: id.into(),
-                version: version.into(),
-            }),
+            games: game.iter().cloned().collect(),
+            game,
             untrusted: untrusted
                 .iter()
                 .map(|id| Untrusted {
@@ -134,8 +165,73 @@ impl Installed {
                 })
                 .collect(),
             error: None,
+            mods: Vec::new(),
+            rejected: Vec::new(),
+            found: Vec::new(),
+            check_trust: false,
             trust_file: None,
         }
+    }
+
+    /// Finds which of `ids` lack a Trust grant for their exact bytes. Hashing waits until a World
+    /// is about to open so the scan stays cheap.
+    pub fn prepare_trust(&mut self, ids: &[String]) -> Result<(), String> {
+        if !self.check_trust {
+            return Ok(());
+        }
+        let trust_file = self.trust_file.as_ref().ok_or("no trust file")?;
+        let trust = tesserae_mods::Trust::load(trust_file);
+        self.untrusted.clear();
+        for f in self.found.iter().filter(|f| ids.contains(&f.manifest.id)) {
+            match trust.check(f).map_err(|e| e.to_string())? {
+                tesserae_mods::Verdict::Trusted(_) => {}
+                _ => {
+                    let sha256 = tesserae_mods::Trust::hash_of(f).map_err(|e| e.to_string())?;
+                    self.untrusted.push(Untrusted {
+                        prompt: tesserae_mods::trust_prompt(
+                            &f.manifest,
+                            tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits),
+                            &sha256,
+                        ),
+                        found: f.clone(),
+                        sha256,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The ids a World without a record would load: the first Game and every Mod.
+    pub fn default_ids(&self) -> Vec<String> {
+        self.game
+            .iter()
+            .chain(&self.mods)
+            .map(|r| r.id.clone())
+            .collect()
+    }
+
+    /// One line per Game or Mod a World recorded that is not installed at that version.
+    pub fn unmet(&self, sidecar: &tesserae_core::save::library::Sidecar) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut check = |kind: &str, id: &str, version: &str, have: &[GameRef]| match have
+            .iter()
+            .find(|r| r.id == id)
+        {
+            None => out.push(format!("{kind} `{id}` {version} is not installed")),
+            Some(r) if r.version != version => out.push(format!(
+                "{kind} `{id}` needs {version} but {} is installed",
+                r.version
+            )),
+            Some(_) => {}
+        };
+        if let Some(g) = &sidecar.game {
+            check("Game", &g.id, &g.version, &self.games);
+        }
+        for m in &sidecar.mods {
+            check("Mod", &m.id, &m.version, &self.mods);
+        }
+        out
     }
 
     /// Records Trust for the first untrusted Mod's exact bytes.

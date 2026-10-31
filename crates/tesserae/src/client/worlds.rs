@@ -479,6 +479,24 @@ fn handle(
                 };
                 let path = entry.path.clone();
                 let needs_game = entry.details().is_none_or(|d| d.game.is_some());
+                let ids = match entry.details() {
+                    Some(d) => {
+                        if !installed.unmet(d).is_empty() {
+                            continue;
+                        }
+                        d.game
+                            .iter()
+                            .map(|g| g.id.clone())
+                            .chain(d.mods.iter().map(|m| m.id.clone()))
+                            .collect()
+                    }
+                    None => installed.default_ids(),
+                };
+                if needs_game && let Err(e) = installed.prepare_trust(&ids) {
+                    l.problem = Some(format!("Could not check Trust: {e}"));
+                    l.version += 1;
+                    continue;
+                }
                 if needs_game && !installed.untrusted.is_empty() {
                     l.show(Screen::Trust(Next::Open(path)));
                 } else {
@@ -566,6 +584,12 @@ fn handle(
             }
             Act::Create => {
                 if l.screen != Screen::Create {
+                    continue;
+                }
+                let ids: Vec<_> = installed.game.iter().map(|g| g.id.clone()).collect();
+                if let Err(e) = installed.prepare_trust(&ids) {
+                    l.problem = Some(format!("Could not check Trust: {e}"));
+                    l.version += 1;
                     continue;
                 }
                 let needs_trust = !installed.untrusted.is_empty();
@@ -664,6 +688,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
     let sidecar = Sidecar {
         name: name.clone(),
         game: Some(game),
+        mods: Vec::new(),
         seed,
         voxel_size_m: l.form.voxel_size_m,
         created_unix_s: now,
@@ -1112,7 +1137,7 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
                     min_width: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|side| details(side, entry, installed.game.as_ref()));
+                .with_children(|side| details(side, entry, &installed));
         }
     });
     focus
@@ -1161,7 +1186,11 @@ fn world_row(rows: &mut ChildSpawnerCommands, entry: &Entry, selected: bool) -> 
     .id()
 }
 
-fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: Option<&GameRef>) {
+fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: &Installed) {
+    let unmet = entry
+        .details()
+        .map(|d| installed.unmet(d))
+        .unwrap_or_default();
     panel(side, |p| {
         ui::weighted_text(p, entry.name().unwrap_or(UNNAMED), 19.0, 620, ui::INK);
         ui::description(p, &format!("Folder: {}", entry.folder()));
@@ -1191,6 +1220,9 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: Option<&Ga
                         relative(d.last_played_unix_s)
                     ),
                 );
+                for line in &unmet {
+                    ui::paragraph(p, line, 12.0, ui::AMBER);
+                }
                 if entry.incomplete() {
                     ui::paragraph(
                         p,
@@ -1217,17 +1249,19 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: Option<&Ga
             }
         }
         row(p, 7.0, |r| {
-            ui::button(
-                r,
-                if entry.incomplete() { "Retry" } else { "Open" },
-                Act::Open,
-                false,
-                false,
-                true,
-            );
+            if unmet.is_empty() {
+                ui::button(
+                    r,
+                    if entry.incomplete() { "Retry" } else { "Open" },
+                    Act::Open,
+                    false,
+                    false,
+                    true,
+                );
+            }
             let same_game = entry
                 .details()
-                .is_some_and(|d| d.game.is_some() && d.game.as_ref() == installed);
+                .is_some_and(|d| d.game.is_some() && d.game == installed.game);
             if same_game && !entry.incomplete() {
                 ui::button(r, "Re-Create", Act::ReCreate, false, false, false);
             }
@@ -1541,6 +1575,7 @@ mod tests {
                 id: "demo".into(),
                 version: "0.1.0".into(),
             }),
+            mods: Vec::new(),
             seed: 42,
             voxel_size_m: 0.5,
             created_unix_s: 1,
@@ -1670,6 +1705,36 @@ mod tests {
             Some(Target::World(path))
         );
         assert!(app.world().resource::<Installed>().untrusted.is_empty());
+    }
+
+    #[test]
+    fn a_world_whose_mod_is_missing_or_reversioned_cannot_open() {
+        use tesserae_core::save::library::ModRef;
+        let worlds = Directory::new();
+        let mut needs = details("Needy", true);
+        needs.mods = vec![ModRef {
+            id: "lake".into(),
+            version: "1.0".into(),
+        }];
+        library::create(&worlds.0, &needs).unwrap();
+        let mut installed = Installed::fake(Some(("demo", "0.1.0")), &[]);
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.update();
+        assert!(app.world().resource::<Switch>().0.is_none());
+        assert_eq!(
+            app.world().resource::<Installed>().unmet(&needs),
+            vec!["Mod `lake` 1.0 is not installed".to_string()]
+        );
+        installed.mods = vec![GameRef {
+            id: "lake".into(),
+            version: "2.0".into(),
+        }];
+        assert_eq!(
+            installed.unmet(&needs),
+            vec!["Mod `lake` needs 1.0 but 2.0 is installed".to_string()]
+        );
+        installed.mods[0].version = "1.0".into();
+        assert!(installed.unmet(&needs).is_empty());
     }
 
     #[test]

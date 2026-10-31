@@ -453,6 +453,7 @@ mod tests {
                 id: "demo".into(),
                 version: "0.1.0".into(),
             }),
+            mods: Vec::new(),
             seed: 8,
             voxel_size_m: 1.0,
             created_unix_s: 0,
@@ -468,7 +469,9 @@ mod tests {
         assert!(until(&mut app, AppState::List));
         let failure = app.world().resource::<LastFailure>().0.as_ref().unwrap();
         assert!(
-            failure.reason.contains("could not be loaded"),
+            failure
+                .reason
+                .contains("Game `demo` 0.1.0 is not installed"),
             "{}",
             failure.reason
         );
@@ -483,6 +486,7 @@ mod tests {
         let sidecar = library::Sidecar {
             name: "Held".into(),
             game: None,
+            mods: Vec::new(),
             seed: 8,
             voxel_size_m: 1.0,
             created_unix_s: 0,
