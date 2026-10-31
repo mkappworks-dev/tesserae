@@ -24,6 +24,19 @@ whether compile or execution dominates, and the fix differs:
 2. The comment above the step said "37 unit tests in well under a second",
    which is stale. It now states what the step runs.
 
+## Result of the first run
+
+Run on `def44a5`: Build tests 107s, Run tests 635s of an 814s job. Execution
+dominates, and clippy in `Lint` takes 11s, so compiling twice is not the cost.
+
+## Second step
+
+`cargo-nextest` replaces `cargo test` for the unit tests, with `cargo test --doc`
+kept for doctests. A `ci` profile writes JUnit XML, and a step turns the 25
+slowest tests into `::notice` annotations, which the API serves without auth
+where job logs and artifacts are not. The next change is chosen from those
+names.
+
 ## Not in this change
 
 Any speed-up. This change only makes the next run readable; the fix is chosen
@@ -33,3 +46,4 @@ from its numbers.
 
 - The run reports separate durations for the build and the run step.
 - Those two numbers are recorded on the PR before any further change.
+- The run's annotations list the slowest tests.

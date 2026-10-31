@@ -170,17 +170,42 @@ jobs:
       # matches dependencies only, so our own crates keep [profile.dev]'s
       # opt-level 1.
       #
-      # Split so the run reports compile and execution time separately; the
-      # flags must match for the second step to reuse the first's build.
+      # Flags must match across the build, run and doctest steps so they share
+      # one set of fingerprints.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+
       - name: Build tests
         run: |
-          cargo test --workspace --locked --features tesserae/dev \
+          cargo nextest run --profile ci --workspace --locked --features tesserae/dev \
             --config 'profile.dev.package."*".opt-level=0' --no-run
 
       - name: Run tests
         run: |
-          cargo test --workspace --locked --features tesserae/dev \
+          cargo nextest run --profile ci --workspace --locked --features tesserae/dev \
             --config 'profile.dev.package."*".opt-level=0'
+
+      # nextest does not run doctests.
+      - name: Run doctests
+        run: |
+          cargo test --doc --workspace --locked --features tesserae/dev \
+            --config 'profile.dev.package."*".opt-level=0'
+
+      # Job logs need auth to read; annotations do not.
+      - name: Report slowest tests
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          cases = [
+              (float(c.get("time", 0)), c.get("classname", "") + "::" + c.get("name", ""))
+              for c in ET.parse("target/nextest/ci/junit.xml").iter("testcase")
+          ]
+          for t, n in sorted(cases, reverse=True)[:25]:
+              print(f"::notice title=slow test::{t:.1f}s {n}")
+          print(f"::notice title=test total::{sum(t for t, _ in cases):.0f}s over {len(cases)} tests")
+          PY
 
   benches:
     name: Benches
