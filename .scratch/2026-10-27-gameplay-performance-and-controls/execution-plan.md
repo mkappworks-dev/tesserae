@@ -37,7 +37,7 @@ Voxels) and #36 (CAD-style layout placement with live preview).
 
 ## Open
 
-None planned. Ticket 34 is closed (below).
+None planned.
 
 Pending validation on tickets marked done: ticket 10 (a real touchscreen),
 ticket 30 (the release RSS run over 10 open/close cycles) and ticket 32
