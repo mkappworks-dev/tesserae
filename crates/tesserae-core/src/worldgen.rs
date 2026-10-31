@@ -11,7 +11,7 @@
 
 use crate::chunk::{CHUNK_SIZE, Chunk};
 use crate::mesh::POS_Y;
-use crate::noise::{fbm2, fbm3, fbm3_range};
+use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -343,12 +343,18 @@ impl CaveField {
     }
 
     fn carves(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
+        self.carves_near(&mut Default::default(), x_m, y_m, z_m)
+    }
+
+    /// [`CaveField::carves`] for a run of nearby samples sharing `cache`.
+    fn carves_near(&self, cache: &mut [Fbm3Cache; 2], x_m: f32, y_m: f32, z_m: f32) -> bool {
         if y_m < self.floor_m {
             return false;
         }
         let k = self.inv_feature_size;
-        self.seeds.iter().all(|&s| {
-            (fbm3(x_m * k, y_m * k, z_m * k, s, self.octaves) - 0.5).abs() < self.half_width
+        self.seeds.iter().zip(cache).all(|(&s, cache)| {
+            (fbm3_cached(x_m * k, y_m * k, z_m * k, s, self.octaves, cache) - 0.5).abs()
+                < self.half_width
         })
     }
 
@@ -570,6 +576,7 @@ impl Worldgen {
             .map(|caves| (caves, self.reachable_blocks(caves, origin_m, top_m)));
 
         let mut chunk = Chunk::air();
+        let mut cave_cache = Default::default();
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
@@ -593,7 +600,7 @@ impl Worldgen {
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
                         && blocks[block_of(x, y, z)]
-                        && caves.carves(x_m, y_m, z_m)
+                        && caves.carves_near(&mut cave_cache, x_m, y_m, z_m)
                     {
                         continue;
                     }
@@ -741,11 +748,13 @@ impl Worldgen {
     /// sub-blocks a tunnel can reach.
     fn carve(&self, chunk: &mut Chunk, caves: &CaveField, origin_m: [f32; 3], top_m: f32) {
         let reachable = self.reachable_blocks(caves, origin_m, top_m);
+        let mut cache = Default::default();
         for z in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
                 for x in 0..CHUNK_SIZE {
                     if reachable[block_of(x, y, z)]
-                        && caves.carves(
+                        && caves.carves_near(
+                            &mut cache,
                             origin_m[0] + x as f32 * self.voxel_size,
                             origin_m[1] + y as f32 * self.voxel_size,
                             origin_m[2] + z as f32 * self.voxel_size,

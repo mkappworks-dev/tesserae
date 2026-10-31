@@ -368,7 +368,12 @@ fn main() {
     );
     for (n, (level, jobs, children)) in levels.iter().enumerate() {
         let m = |f: fn(&Round) -> f64| median(all[n].iter().map(f).collect());
-        let count = |k: Kind| jobs.iter().flat_map(|j| j.kinds).filter(|&x| x == k).count();
+        let count = |k: Kind| {
+            jobs.iter()
+                .flat_map(|j| j.kinds)
+                .filter(|&x| x == k)
+                .count()
+        };
         let regions = |r: Region| jobs.iter().filter(|j| j.region == r).count();
         let uniform = children
             .iter()
