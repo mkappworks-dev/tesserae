@@ -30,6 +30,7 @@ use tesserae_core::{
 use super::jobs::Stage;
 use super::lod_rings::{LevelRings, Shell, level_count};
 use super::player::Player;
+use super::priority::{Aim, Order, Ring};
 use super::streaming::{
     LodMeshReady, LodUnloaded, MeshState, StreamingSettings, delta, face_neighbors, offset,
 };
@@ -492,6 +493,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<LodStore>()
         .init_session_resource::<LodState>()
         .init_session_resource::<LodJobs>()
+        .init_session_resource::<LodOrders>()
         .init_session_resource_with(lod_budget)
         // After `open_world`, whose generator the sources are derived from.
         .add_session_systems(Startup, open_lod_generators.after(super::open_world));
@@ -826,6 +828,95 @@ impl Plan {
     }
 }
 
+/// Each coarse level's load extent and mesh shell in priority order
+/// (`server::priority`), index `level - 1`.
+#[derive(Resource, Default)]
+pub(in crate::server) struct LodOrders {
+    load: Vec<Order>,
+    mesh: Vec<Order>,
+}
+
+impl LodOrders {
+    fn update(&mut self, plans: &[Plan], state: &mut LodState, aim: &Aim, cell_m: f32, cap_m: f32, now_s: f64) {
+        self.load.resize_with(plans.len(), Order::default);
+        self.mesh.resize_with(plans.len(), Order::default);
+        for (i, plan) in plans.iter().enumerate() {
+            let load = state.offsets_for(Shell {
+                outer: plan.rings.load,
+                hole: None,
+            });
+            let mesh = state.offsets_for(plan.rings.mesh);
+            let ring = |offsets: &[IVec3]| Ring {
+                level: plan.level,
+                anchor: plan.anchor,
+                offsets,
+                cell_m: cell_m * 2f32.powi(plan.level as i32),
+                cap_m,
+            };
+            // A new order can put work the last scan passed over ahead of it.
+            if self.load[i].update(&ring(&load), aim, now_s) {
+                state.level_mut(plan.level).pending = true;
+            }
+            if self.mesh[i].update(&ring(&mesh), aim, now_s) {
+                state.level_mut(plan.level).mesh_pending = true;
+            }
+        }
+    }
+}
+
+/// Whether nothing has been sent for the region of `(level, coord)` at any
+/// level: its own, a coarser one, or the finer one below.
+fn is_hole(
+    plans: &[Plan],
+    state: &LodState,
+    level_zero: &MeshState,
+    (level, coord): LodKey,
+) -> bool {
+    let delivered = |l: u32, c: ChunkCoord| match l {
+        0 => level_zero.is_delivered(c),
+        l => state
+            .levels
+            .get(l as usize - 1)
+            .is_some_and(|lv| lv.delivered.contains(&c)),
+    };
+    if delivered(level, coord) {
+        return false;
+    }
+    let mut covering = coord;
+    for coarser in level + 1..=plans.len() as u32 {
+        covering = cover(covering);
+        if delivered(coarser, covering) {
+            return false;
+        }
+    }
+    !(0..8).any(|i| delivered(level - 1, child(coord, i)))
+}
+
+/// Holes first, coarsest level first; then every level together in priority
+/// order. Each item is a plan's index and an offset from its anchor.
+fn walk<'a>(orders: &'a [Order], due: &'a [usize]) -> impl Iterator<Item = (bool, usize, IVec3)> + 'a {
+    let holes = due
+        .iter()
+        .rev()
+        .flat_map(move |&i| orders[i].offsets().map(move |d| (true, i, d)));
+    let mut cursors = vec![0usize; orders.len()];
+    let rest = std::iter::from_fn(move || {
+        let best = due
+            .iter()
+            .copied()
+            .filter(|&i| cursors[i] < orders[i].entries.len())
+            .min_by(|&a, &b| {
+                orders[a].entries[cursors[a]]
+                    .0
+                    .total_cmp(&orders[b].entries[cursors[b]].0)
+            })?;
+        let d = orders[best].entries[cursors[best]].1;
+        cursors[best] += 1;
+        Some((false, best, d))
+    });
+    holes.chain(rest)
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "one tick, as `stream`; a SystemParam bundle would be a type used once"
@@ -844,6 +935,7 @@ pub(in crate::server) fn stream_lod(
     settings: Res<StreamingSettings>,
     budget: Res<LodBudget>,
     player: Query<&Player>,
+    (mut orders, time): (ResMut<LodOrders>, Option<Res<Time>>),
 ) {
     let levels = generators.levels();
     if levels <= 1 {
@@ -881,8 +973,22 @@ pub(in crate::server) fn stream_lod(
         .collect();
 
     retire(&plans, &mut store, &mut state, &mut jobs, &mut unloaded);
-    land(&plans, &mut store, &mut state, &mut jobs, &budget);
-    land_meshes(&plans, &mut state, &mut jobs, &mut ready, &budget);
+    let aim = Aim::of(player);
+    orders.update(
+        &plans,
+        &mut state,
+        &aim,
+        world.cell_size(),
+        settings.view_distance_m,
+        time.map_or(0.0, |t| t.elapsed_secs_f64()),
+    );
+    let priority = |(level, coord): LodKey| {
+        let cell_m = world.cell_size_at(level);
+        let min = IVec3::new(coord.x, coord.y, coord.z).as_vec3() * cell_m;
+        aim.score_m(min, cell_m, settings.view_distance_m) / 2f32.powi(level as i32)
+    };
+    land(&plans, &mut store, &mut state, &mut jobs, &budget, &priority);
+    land_meshes(&plans, &mut state, &mut jobs, &mut ready, &budget, &priority);
     dispatch(
         &plans,
         &chunks,
@@ -893,15 +999,18 @@ pub(in crate::server) fn stream_lod(
         &generators,
         &tables,
         &budget,
+        &orders.load,
     );
     dispatch_meshes(
         &plans,
         &store,
+        &meshes,
         &mut state,
         &mut jobs,
         &tables.0,
         &budget,
         &generators,
+        &orders.mesh,
     );
 }
 
@@ -984,11 +1093,10 @@ fn land(
     state: &mut LodState,
     jobs: &mut LodJobs,
     budget: &LodBudget,
+    priority: &dyn Fn(LodKey) -> f32,
 ) {
-    let anchor_of = |level: u32| plans[Plan::index(level)].anchor;
     let mut finished: Vec<LodKey> = jobs.generate.finished().collect();
-    finished
-        .sort_unstable_by_key(|&(level, c)| (level, delta(anchor_of(level), c).length_squared()));
+    finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
     for key in finished.into_iter().take(budget.landed_per_tick.generate) {
         let Some(coarse) = jobs.generate.take(key) else {
             continue;
@@ -1030,11 +1138,10 @@ fn land_meshes(
     jobs: &mut LodJobs,
     ready: &mut MessageWriter<LodMeshReady>,
     budget: &LodBudget,
+    priority: &dyn Fn(LodKey) -> f32,
 ) {
-    let anchor_of = |level: u32| plans[Plan::index(level)].anchor;
     let mut finished: Vec<LodKey> = jobs.mesh.finished().collect();
-    finished
-        .sort_unstable_by_key(|&(level, c)| (level, delta(anchor_of(level), c).length_squared()));
+    finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
     for key in finished.into_iter().take(budget.landed_per_tick.mesh) {
         let Some(mesh) = jobs.mesh.take(key) else {
             continue;
@@ -1074,97 +1181,96 @@ fn dispatch(
     generators: &LodGenerators,
     tables: &ContentTables,
     budget: &LodBudget,
+    orders: &[Order],
 ) {
     let mut free = budget
         .in_flight
         .generate
         .saturating_sub(jobs.generate.in_flight());
-    for plan in plans {
-        // A level left `pending` by the budget runs out of it here, and the ones after it are
-        // not scanned either.
-        if free == 0 {
-            break;
-        }
-        if !state.level_mut(plan.level).pending {
+    if free == 0 {
+        return;
+    }
+    // A level's scan is due after a landing, an anchor move or a new order.
+    // Cleared here and set again if the budget runs out first, so the work it
+    // left is found next tick without a landing.
+    let due: Vec<usize> = (0..plans.len())
+        .filter(|&i| std::mem::take(&mut state.level_mut(plans[i].level).pending))
+        .collect();
+    for (holes, i, d) in walk(orders, &due) {
+        let plan = &plans[i];
+        let coord = offset(plan.anchor, d);
+        let level = state.level_mut(plan.level);
+        let held = store.contains(plan.level, coord);
+        let stale = level.stale.contains(&coord);
+        if (held && !stale) || jobs.generate.contains((plan.level, coord)) {
             continue;
         }
-        // Generation has no hole: a mesh needs the Chunks under it too.
-        let offsets = state.offsets_for(Shell {
-            outer: plan.rings.load,
-            hole: None,
-        });
-        let level = state.level_mut(plan.level);
-        // Cleared first and set again if the budget runs out before the scan ends, so the work
-        // it left is found next tick without a landing.
-        level.pending = false;
-        for &d in offsets.iter() {
-            let coord = offset(plan.anchor, d);
-            let held = store.contains(plan.level, coord);
-            let stale = level.stale.contains(&coord);
-            if (held && !stale) || jobs.generate.contains((plan.level, coord)) {
-                continue;
-            }
-            if free == 0 {
-                level.pending = true;
-                break;
-            }
-            free -= 1;
-            level.stale.remove(&coord);
-            if held {
-                level.regenerating.insert(coord);
-            }
-            let held_children: [Option<Held>; 8] = if plan.level == 1 {
-                std::array::from_fn(|i| held_child(chunks, meshes, child(coord, i)))
-            } else {
-                Default::default()
-            };
-            let persistent: std::collections::BTreeMap<_, _> = if chunks.persistent {
-                chunks
-                    .revisions
-                    .keys()
-                    .filter_map(|&home| {
-                        let divisor = 1i32 << plan.level;
-                        if ChunkCoord::new(
-                            home.x.div_euclid(divisor),
-                            home.y.div_euclid(divisor),
-                            home.z.div_euclid(divisor),
-                        ) != coord
-                        {
-                            return None;
-                        }
-                        let (chunk, overlay) = chunks.saved_source(home)?;
-                        Some((
-                            home,
-                            Held {
-                                chunk,
-                                changed: Some(overlay),
-                            },
-                        ))
-                    })
-                    .collect()
-            } else {
-                Default::default()
-            };
-            let sources = (!persistent.is_empty()).then(|| generators.sources.clone());
-            let source = generators.sources[Plan::index(plan.level)].clone();
-            let waterline = if plan.level == 1 {
-                waterline(&source)
-            } else {
-                None
-            };
-            let tables = Arc::clone(&tables.0);
-            let times = jobs.times.clone();
-            let level = plan.level;
-            jobs.generate.spawn((level, coord), move || {
-                times.generated(level, || {
-                    if let Some(sources) = sources {
-                        generate_persistent(level, coord, &sources, &persistent, &tables)
-                    } else {
-                        generate_coarse(&source, coord, &held_children, &tables, waterline)
-                    }
-                })
-            });
+        if holes && !is_hole(plans, state, meshes, (plan.level, coord)) {
+            continue;
         }
+        if free == 0 {
+            for &i in &due {
+                state.level_mut(plans[i].level).pending = true;
+            }
+            return;
+        }
+        free -= 1;
+        let level = state.level_mut(plan.level);
+        level.stale.remove(&coord);
+        if held {
+            level.regenerating.insert(coord);
+        }
+        let held_children: [Option<Held>; 8] = if plan.level == 1 {
+            std::array::from_fn(|i| held_child(chunks, meshes, child(coord, i)))
+        } else {
+            Default::default()
+        };
+        let persistent: std::collections::BTreeMap<_, _> = if chunks.persistent {
+            chunks
+                .revisions
+                .keys()
+                .filter_map(|&home| {
+                    let divisor = 1i32 << plan.level;
+                    if ChunkCoord::new(
+                        home.x.div_euclid(divisor),
+                        home.y.div_euclid(divisor),
+                        home.z.div_euclid(divisor),
+                    ) != coord
+                    {
+                        return None;
+                    }
+                    let (chunk, overlay) = chunks.saved_source(home)?;
+                    Some((
+                        home,
+                        Held {
+                            chunk,
+                            changed: Some(overlay),
+                        },
+                    ))
+                })
+                .collect()
+        } else {
+            Default::default()
+        };
+        let sources = (!persistent.is_empty()).then(|| generators.sources.clone());
+        let source = generators.sources[Plan::index(plan.level)].clone();
+        let waterline = if plan.level == 1 {
+            waterline(&source)
+        } else {
+            None
+        };
+        let tables = Arc::clone(&tables.0);
+        let times = jobs.times.clone();
+        let level = plan.level;
+        jobs.generate.spawn((level, coord), move || {
+            times.generated(level, || {
+                if let Some(sources) = sources {
+                    generate_persistent(level, coord, &sources, &persistent, &tables)
+                } else {
+                    generate_coarse(&source, coord, &held_children, &tables, waterline)
+                }
+            })
+        });
     }
 }
 
@@ -1180,61 +1286,70 @@ fn held_child(chunks: &ChunkStore, meshes: &MeshState, coord: ChunkCoord) -> Opt
 
 /// Requires all six neighbours held. There is no light to settle, so unlike level 0 nothing
 /// else gates a mesh.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one stage of the tick; bundling them would invent a type used once"
+)]
 fn dispatch_meshes(
     plans: &[Plan],
     store: &LodStore,
+    level_zero: &MeshState,
     state: &mut LodState,
     jobs: &mut LodJobs,
     tables: &Arc<Tables>,
     budget: &LodBudget,
     generators: &LodGenerators,
+    orders: &[Order],
 ) {
     let mut free = budget.in_flight.mesh.saturating_sub(jobs.mesh.in_flight());
-    for plan in plans {
-        if free == 0 {
-            break;
-        }
-        if !state.level_mut(plan.level).mesh_pending {
+    if free == 0 {
+        return;
+    }
+    let due: Vec<usize> = (0..plans.len())
+        .filter(|&i| std::mem::take(&mut state.level_mut(plans[i].level).mesh_pending))
+        .collect();
+    for (holes, i, d) in walk(orders, &due) {
+        let plan = &plans[i];
+        let coord = offset(plan.anchor, d);
+        if !state.level_mut(plan.level).dirty.contains(&coord)
+            || jobs.mesh.contains((plan.level, coord))
+        {
             continue;
         }
-        let offsets = state.offsets_for(plan.rings.mesh);
-        let level = state.level_mut(plan.level);
-        level.mesh_pending = false;
-        for &d in offsets.iter() {
-            let coord = offset(plan.anchor, d);
-            if !level.dirty.contains(&coord) || jobs.mesh.contains((plan.level, coord)) {
-                continue;
-            }
-            let Some(own) = store.shown(plan.level, coord) else {
-                continue;
-            };
-            let around: Option<Vec<Shown>> = face_neighbors(coord)
-                .into_iter()
-                .map(|n| store.shown(plan.level, n))
-                .collect();
-            let Some(around) = around else {
-                continue;
-            };
-            let around: [Shown; 6] = around
-                .try_into()
-                .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
-            if free == 0 {
-                level.mesh_pending = true;
-                break;
-            }
-            free -= 1;
-            level.dirty.remove(&coord);
-            let tables = Arc::clone(tables);
-            let times = jobs.times.clone();
-            let level = plan.level;
-            let surface = generators.sources[Plan::index(level)].clone();
-            let voxel_m = plan.voxel_m;
-            jobs.mesh.spawn((level, coord), move || {
-                times.meshed(level, || {
-                    mesh_coarse(&surface, level, voxel_m, coord, &own, &around, &tables)
-                })
-            });
+        if holes && !is_hole(plans, state, level_zero, (plan.level, coord)) {
+            continue;
         }
+        let Some(own) = store.shown(plan.level, coord) else {
+            continue;
+        };
+        let around: Option<Vec<Shown>> = face_neighbors(coord)
+            .into_iter()
+            .map(|n| store.shown(plan.level, n))
+            .collect();
+        let Some(around) = around else {
+            continue;
+        };
+        let around: [Shown; 6] = around
+            .try_into()
+            .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
+        if free == 0 {
+            for &i in &due {
+                state.level_mut(plans[i].level).mesh_pending = true;
+            }
+            return;
+        }
+        free -= 1;
+        state.level_mut(plan.level).dirty.remove(&coord);
+        let tables = Arc::clone(tables);
+        let times = jobs.times.clone();
+        let level = plan.level;
+        let surface = generators.sources[Plan::index(level)].clone();
+        let voxel_m = plan.voxel_m;
+        jobs.mesh.spawn((level, coord), move || {
+            times.meshed(level, || {
+                mesh_coarse(&surface, level, voxel_m, coord, &own, &around, &tables)
+            })
+        });
     }
 }
 
