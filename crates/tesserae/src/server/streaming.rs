@@ -43,6 +43,7 @@ use super::jobs::{Border, Jobs, Solved, build_mesh, solve};
 use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
+use super::priority::{Aim, Order, Ring};
 use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -319,16 +320,19 @@ impl Rings {
     }
 }
 
-/// The load volume's offsets, sorted by distance, rebuilt only when the extent
-/// changes. Walking this from the anchor gives "nearest missing Chunk" without
-/// sorting a few thousand coordinates every tick.
+/// The load volume's offsets in priority order (`server::priority`), rebuilt
+/// only when the Eye's anchor, look or speed moves past a threshold, so a tick
+/// does not sort a few thousand coordinates.
 #[derive(Resource, Default)]
 struct LoadOrder {
     built_for: Option<Extent>,
+    /// The load extent, in no particular order.
+    extent: Vec<IVec3>,
+    priority: Order,
     offsets: Vec<IVec3>,
-    /// The same offsets, highest first. Sky light flows downwards, so solving a
-    /// Chunk before the one above it means solving it again when the one above
-    /// arrives; nearest-first is right for generation and wrong here.
+    /// The same offsets by column, each column top-down. Sky light flows
+    /// downwards, so solving a Chunk before the one above it means solving it
+    /// again when the one above arrives.
     descending: Vec<IVec3>,
 }
 
@@ -408,6 +412,12 @@ impl MeshState {
     #[cfg(any(test, feature = "dev", feature = "profiling"))]
     fn unlit_within(&self, center: ChunkCoord, load: Extent) -> bool {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
+    }
+
+    /// Whether the Client was sent this Chunk's mesh and has not been told to
+    /// drop it.
+    pub(in crate::server) fn is_delivered(&self, coord: ChunkCoord) -> bool {
+        self.delivered.contains(&coord)
     }
 
     pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
@@ -493,6 +503,7 @@ fn stream(
     settings: Res<StreamingSettings>,
     budget: Res<StreamingBudget>,
     player: Query<&Player>,
+    time: Option<Res<Time>>,
 ) {
     // The Server spawns exactly one. Streaming around an arbitrary one of
     // several would be worse than streaming around none.
@@ -503,11 +514,28 @@ fn stream(
     let rings = Rings::new(*settings, world.cell_size());
     let center = world.chunk_at(player.eye());
     if order.built_for != Some(rings.load) {
-        order.offsets = rings.load.offsets();
-        order.descending = order.offsets.clone();
-        order.descending.sort_by_key(|d| (-d.y, d.length_squared()));
+        order.extent = rings.load.offsets();
         order.built_for = Some(rings.load);
     }
+    let aim = Aim::of(player);
+    let order = &mut *order;
+    let ring = Ring {
+        level: 0,
+        anchor: center,
+        offsets: &order.extent,
+        cell_m: world.cell_size(),
+        cap_m: settings.view_distance_m,
+    };
+    let now_s = time.map_or(0.0, |t| t.elapsed_secs_f64());
+    if order.priority.update(&ring, &aim, now_s) {
+        order.offsets = order.priority.offsets().collect();
+        order.descending = order.priority.columns_top_down();
+    }
+    let cell_m = world.cell_size();
+    let priority = |c: ChunkCoord| {
+        let min = IVec3::new(c.x, c.y, c.z).as_vec3() * cell_m;
+        aim.score_m(min, cell_m, settings.view_distance_m)
+    };
 
     jobs.reset_counts();
     jobs.poll();
@@ -527,6 +555,7 @@ fn stream(
         center,
         rings.evict,
         budget.landed_per_tick.generate,
+        &priority,
     );
     land_relight(
         &mut store,
@@ -534,6 +563,7 @@ fn stream(
         &mut jobs,
         center,
         budget.landed_per_tick.relight,
+        &priority,
     );
     land_meshes(
         &mut meshes,
@@ -542,6 +572,7 @@ fn stream(
         center,
         rings.mesh,
         budget.landed_per_tick.mesh,
+        &priority,
     );
     dispatch_generation(
         &store,
@@ -659,9 +690,10 @@ fn land_generated(
     center: ChunkCoord,
     evict: Extent,
     budget: usize,
+    priority: &dyn Fn(ChunkCoord) -> f32,
 ) {
     let mut finished: Vec<ChunkCoord> = jobs.generate.finished().collect();
-    finished.sort_unstable_by_key(|&c| delta(center, c).length_squared());
+    finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
     for coord in finished.into_iter().take(budget) {
         let Some(chunk) = jobs.generate.take(coord) else {
             continue;
@@ -691,8 +723,8 @@ fn land_generated(
     }
 }
 
-/// Starts generation jobs for the nearest missing Chunks in the load extent,
-/// until `in_flight` are outstanding.
+/// Starts generation jobs for the missing Chunks of the load extent in priority
+/// order, until `in_flight` are outstanding.
 fn dispatch_generation(
     store: &ChunkStore,
     jobs: &mut Jobs,
@@ -717,7 +749,7 @@ fn dispatch_generation(
     }
 }
 
-/// Applies up to `budget` finished light solves, highest first.
+/// Applies up to `budget` finished light solves, in dispatch's order.
 ///
 /// The bulk path: a Chunk arriving starts dark, so every change here is an
 /// increase and re-solving from the current boundary converges. A Voxel
@@ -730,13 +762,17 @@ fn land_relight(
     jobs: &mut Jobs,
     center: ChunkCoord,
     budget: usize,
+    priority: &dyn Fn(ChunkCoord) -> f32,
 ) {
     // Same order as dispatch: a landing that darkens nothing above it first
     // would be solved again when the one above lands.
     let mut finished: Vec<ChunkCoord> = jobs.relight.finished().collect();
-    finished.sort_unstable_by_key(|&c| {
-        let d = delta(center, c);
-        (-d.y, d.length_squared())
+    let column = |c: ChunkCoord| priority(ChunkCoord::new(c.x, center.y, c.z));
+    finished.sort_unstable_by(|&a, &b| {
+        column(a)
+            .total_cmp(&column(b))
+            .then_with(|| (a.x, a.z).cmp(&(b.x, b.z)))
+            .then_with(|| b.y.cmp(&a.y))
     });
     for coord in finished.into_iter().take(budget) {
         let Some(solved) = jobs.relight.take(coord) else {
@@ -780,11 +816,11 @@ fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord
     }
 }
 
-/// Starts light solves for Chunks whose light is out of date, highest first,
-/// until `in_flight` are outstanding.
+/// Starts light solves for Chunks whose light is out of date, by column in
+/// priority order and each column top-down, until `in_flight` are outstanding.
 ///
-/// Highest first because sky light flows downwards: solving a Chunk before the
-/// one above it means solving it again when the one above lands.
+/// Top-down because sky light flows downwards: solving a Chunk before the one
+/// above it means solving it again when the one above lands.
 #[expect(
     clippy::too_many_arguments,
     reason = "one stage of the tick; bundling them would invent a type used once"
@@ -855,7 +891,8 @@ fn above_the_surface(generator: &WorldGenerator, world: &WorldSettings, coord: C
     floor_m > highest_m
 }
 
-/// Applies up to `budget` finished meshes, nearest first, and tells the Client.
+/// Applies up to `budget` finished meshes, in priority order, and tells the
+/// Client.
 ///
 /// A mesh lands only if its Chunk is still inside the `mesh` extent. That is
 /// also what keeps the module doc's eviction argument true for a job in flight:
@@ -873,9 +910,10 @@ fn land_meshes(
     center: ChunkCoord,
     mesh: Extent,
     budget: usize,
+    priority: &dyn Fn(ChunkCoord) -> f32,
 ) {
     let mut finished: Vec<ChunkCoord> = jobs.mesh.finished().collect();
-    finished.sort_unstable_by_key(|&c| delta(center, c).length_squared());
+    finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
     for coord in finished.into_iter().take(budget) {
         let Some(built) = jobs.mesh.take(coord) else {
             continue;
@@ -894,7 +932,7 @@ fn land_meshes(
     }
 }
 
-/// Starts mesh jobs for dirty Chunks inside the mesh extent, nearest first,
+/// Starts mesh jobs for dirty Chunks inside the mesh extent, in priority order,
 /// until `in_flight` are outstanding.
 ///
 /// Requires all six neighbours' Voxels **and** light: a boundary face is lit by
@@ -1405,6 +1443,7 @@ pub(in crate::server) mod tests {
                 .init_resource::<lod::LodStore>()
                 .init_resource::<lod::LodState>()
                 .init_resource::<lod::LodJobs>()
+                .init_resource::<lod::LodOrders>()
                 .init_resource::<lod::LodBudget>()
                 .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
                 .init_resource::<ChunkStore>()

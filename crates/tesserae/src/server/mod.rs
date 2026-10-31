@@ -27,6 +27,7 @@ mod gallery;
 mod jobs;
 mod lod;
 mod lod_rings;
+mod priority;
 pub mod mods;
 pub mod persistence;
 pub mod player;
