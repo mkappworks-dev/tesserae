@@ -18,6 +18,9 @@ Ground, World parameters, movement, character and tools come from the root Game
 alone; a Mod adds Materials, appearance and textures. The Engine still ships
 only Air ([ADR-0016](0016-only-air-is-built-in.md)).
 
+`TESSERAE_SOAK_ALTERNATE=1` with `TESSERAE_SOAK_CYCLES=n` (dev) opens the listed
+Worlds in turn, so two Games load and unload alternately.
+
 Rejected: loading every installed Mod into every World, which lets an unrelated
 install change a save, and side-by-side versions of one id, which need a
 compatibility field and a resolver this engine has no use for yet.

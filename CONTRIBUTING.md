@@ -301,13 +301,14 @@ rustup target add wasm32-wasip2   # once
 cargo dev
 ```
 
-Once the guests are built, `cargo dev` loads the demo from
-`games/demo/dist/games` on its own and trusts it for the run, with no prompt and
-no Trust record; before that it opens a World with no Game and logs that
-`./scripts/build-guests` must be run. A directory named by `--mods` or
-`TESSERAE_MODS_DIR` replaces the demo and goes through the normal Trust check;
-the Games are read from the `games` directory beside it, Mods from the directory
-itself. Only a `dev` build does this:
+Once the guests are built, `cargo dev` loads the Games in
+`games/demo/dist/games` on its own (the demo, and `meadow`, a plain second Game
+for trying side-by-side installs; pick one when creating a World) and trusts it
+for the run, with no prompt and no Trust record; before that it opens a World
+with no Game and logs that `./scripts/build-guests` must be run. A directory
+named by `--mods` or `TESSERAE_MODS_DIR` replaces the demo and goes through the
+normal Trust check; the Games are read from the `games` directory beside it,
+Mods from the directory itself. Only a `dev` build does this:
 `cargo run -p tesserae -- --mods games/demo/dist/mods` runs the same Game
 without the `dev` tools, with the full Trust check. In a `dev` build,
 `TESSERAE_VOXEL_SIZE_M` opens the World at 1.0 (the default), 0.5 or 0.25 m, and

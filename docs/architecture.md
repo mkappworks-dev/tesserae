@@ -254,6 +254,9 @@ tesserae/
 │                               0013 fluid and fire beside the Voxel
 │                               0014 bounded logical steps
 │                               0015 water is Game content
+│                               0016 only Air is built in
+│                               0017 Worlds open in-process as sessions
+│                               0018 Games and Mods install side by side
 ├── crates/
 │   ├── tesserae-core/          NO Bevy, NO wgpu — headless + benchmarkable
 │   │   ├── src/
@@ -306,6 +309,7 @@ tesserae/
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
 ├── games/demo/                 MIT WASI guest, only the WIT contract       ▸ 7
+├── games/meadow/               a plain second Game, for side-by-side installs
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
 └── USE-GRANT.md                the most important file in the repo
