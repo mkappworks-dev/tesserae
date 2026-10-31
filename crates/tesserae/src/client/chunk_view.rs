@@ -9,6 +9,9 @@
 //! has its own render layer and its own depth, and a finer level's camera runs
 //! after a coarser one's, so wherever a finer level has geometry it shows over
 //! every coarser one. See `.scratch/2026-10-13-phase-6-lod/spec.md`, decision 8.
+//!
+//! A mesh the Server unloads stays drawn until other levels cover its region;
+//! see `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
@@ -25,13 +28,13 @@ use tesserae_core::{ChunkMesh, MeshLayer};
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
-use crate::client::drawn_mask;
+use crate::client::drawn_mask::DrawnMask;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
 use crate::render::fog::{self, FogSettings};
 use crate::server::streaming::{
     ChunkMeshReady, ChunkUnloaded, LodMeshReady, LodUnloaded, StreamingSettings,
 };
-use crate::server::{cuts, level_count};
+use crate::server::{LevelRings, level_count};
 use crate::world::{ChunkCoord, WorldSettings};
 
 /// Level 0, the UI and everything that is not distant terrain.
@@ -52,16 +55,69 @@ pub(super) struct ChunkEntities {
     blended: LayerEntities,
     cutout: LayerEntities,
     /// Every `(level, coord)` sent a mesh, empty or not, and not unloaded since:
-    /// the space each level has answered for. Changed since `publish_drawn`
-    /// last ran when `drawn_changed`.
+    /// the space each level has answered for.
     delivered: HashSet<(u32, ChunkCoord)>,
+    /// Unloaded by the Server and still drawn, until `release` finds its region
+    /// covered.
+    retained: HashSet<(u32, ChunkCoord)>,
+    /// Delivered and retained together, as the shader reads them.
+    mask: DrawnMask,
+    /// Since `publish_drawn` last ran.
     drawn_changed: bool,
+    /// Something was delivered or unloaded since `release` last ran.
+    release_due: bool,
+    /// Each level's anchor when `release` last ran.
+    anchors: Vec<ChunkCoord>,
+    /// The words `publish_drawn` last wrote, for the hole count.
+    #[cfg(feature = "profiling")]
+    published: Vec<u32>,
 }
 
 impl ChunkEntities {
+    /// Whether the Chunk is drawn, delivered or retained.
+    pub(super) fn draws(&self, key: (u32, ChunkCoord)) -> bool {
+        self.delivered.contains(&key) || self.retained.contains(&key)
+    }
+
     #[cfg(feature = "profiling")]
-    pub(super) fn delivered(&self) -> &HashSet<(u32, ChunkCoord)> {
-        &self.delivered
+    pub(super) fn published(&self) -> &[u32] {
+        &self.published
+    }
+
+    fn deliver(&mut self, key: (u32, ChunkCoord)) {
+        self.retained.remove(&key);
+        if self.delivered.insert(key) {
+            self.mask.set(key, true);
+            self.drawn_changed = true;
+        }
+        self.release_due = true;
+    }
+
+    /// Kept drawn until `release` finds its region covered.
+    fn unload(&mut self, key: (u32, ChunkCoord)) {
+        if self.delivered.remove(&key) {
+            self.retained.insert(key);
+            self.release_due = true;
+        }
+    }
+
+    /// Whether some coarser level's delivered Chunk draws all of this one's
+    /// region.
+    fn under_delivered(&self, (level, coord): (u32, ChunkCoord), levels: u32) -> bool {
+        let mut covering = coord;
+        (level + 1..levels).any(|coarser| {
+            covering = parent(covering);
+            self.delivered.contains(&(coarser, covering))
+        })
+    }
+
+    /// Whether finer levels' delivered Chunks draw all of this one's region.
+    fn over_delivered(&self, (level, coord): (u32, ChunkCoord)) -> bool {
+        level > 0
+            && children(coord).all(|child| {
+                let key = (level - 1, child);
+                self.delivered.contains(&key) || self.over_delivered(key)
+            })
     }
 
     #[cfg(feature = "profiling")]
@@ -87,8 +143,8 @@ pub(super) fn terrain_arrived(entities: Option<Res<ChunkEntities>>) -> bool {
 }
 
 /// A material per mesh layer, for every Chunk, as the Material index is a
-/// vertex attribute: they differ in alpha mode and in what the blended one is
-/// told the finer levels have drawn.
+/// vertex attribute: they differ in alpha mode, and share the record of what
+/// each level draws.
 #[derive(Resource)]
 struct TerrainMaterial {
     opaque: Handle<ChunkMaterial>,
@@ -132,6 +188,7 @@ fn add_view_systems(app: &mut App) {
             update_textures.after(super::material_textures::receive),
             upload_meshes,
             drop_meshes,
+            release,
             sort_blended.run_if(blend_sort_on),
             publish_drawn,
         )
@@ -170,30 +227,21 @@ fn add_material(
     mut commands: Commands,
     mut materials: ResMut<Assets<ChunkMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
-    streaming: Res<StreamingSettings>,
-    world: Res<WorldSettings>,
     mut palette: MessageReader<crate::content::MaterialPalette>,
 ) {
     let mut extension = ChunkMaterialExtension::default();
     for message in palette.read() {
         extension.apply_palette(message);
     }
-    let nothing_drawn = || ShaderBuffer::new(vec![0u32], RenderAssetUsages::default());
-    let drawn = buffers.add(nothing_drawn());
+    let drawn = buffers.add(ShaderBuffer::new(vec![0u32], RenderAssetUsages::default()));
     let opaque = ChunkMaterial {
         base: StandardMaterial {
             perceptual_roughness: 0.95,
             ..default()
         },
         extension: ChunkMaterialExtension {
-            lod: LodParams::new(
-                debug_tint(),
-                &cuts(&streaming, world.cell_size())
-                    .iter()
-                    .map(|c| (c.radius_m, c.half_height_m))
-                    .collect::<Vec<_>>(),
-            ),
-            drawn: buffers.add(nothing_drawn()),
+            lod: LodParams { tint: debug_tint() },
+            drawn: drawn.clone(),
             ..extension
         },
     };
@@ -206,10 +254,7 @@ fn add_material(
             cull_mode: None,
             ..opaque.base.clone()
         },
-        extension: ChunkMaterialExtension {
-            drawn: drawn.clone(),
-            ..opaque.extension.clone()
-        },
+        extension: opaque.extension.clone(),
     };
     let cutout = ChunkMaterial {
         base: StandardMaterial {
@@ -336,7 +381,7 @@ fn upload_meshes(
     };
     for (level, coord, mesh) in incoming.read() {
         let key = (level, coord);
-        entities.drawn_changed |= entities.delivered.insert(key);
+        entities.deliver(key);
         let opaque = draw.show(
             &mut entities.opaque,
             &material.opaque,
@@ -387,35 +432,101 @@ fn upload_meshes(
 }
 
 fn drop_meshes(
-    mut commands: Commands,
     mut level0: MessageReader<ChunkUnloaded>,
     mut coarse: MessageReader<LodUnloaded>,
     mut entities: ResMut<ChunkEntities>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    existing: Query<&Mesh3d>,
 ) {
     let level0 = level0.read().map(|m| (0, m.coord));
     let coarse = coarse.read().map(|m| (m.level, m.coord));
+    for key in level0.chain(coarse) {
+        entities.unload(key);
+    }
+}
+
+/// Despawns each retained mesh whose region other levels now cover, or which
+/// lies outside every level's mesh extent around the camera. Its bit clears in
+/// the same frame, so nothing is drawn twice or not at all.
+fn release(
+    mut commands: Commands,
+    mut entities: ResMut<ChunkEntities>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    existing: Query<&Mesh3d>,
+    streaming: Res<StreamingSettings>,
+    world: Res<WorldSettings>,
+    camera: Query<&GlobalTransform, With<MainCamera>>,
+) {
+    let levels = level_count(&streaming);
+    let camera_m = camera.iter().next().map(GlobalTransform::translation);
+    let anchors: Vec<ChunkCoord> = camera_m
+        .map(|at| (0..levels).map(|l| world.chunk_at_level(at, l)).collect())
+        .unwrap_or_default();
     let entities = &mut *entities;
+    if entities.retained.is_empty()
+        || !(std::mem::take(&mut entities.release_due) || entities.anchors != anchors)
+    {
+        entities.anchors = anchors;
+        return;
+    }
+    let outside = |(level, coord): (u32, ChunkCoord)| {
+        !anchors.is_empty()
+            && (level..levels).all(|at| {
+                let covering = ancestor(coord, at - level);
+                let rings = LevelRings::new(*streaming, world.cell_size(), at);
+                let a = anchors[at as usize];
+                !rings.mesh.outer.contains(IVec3::new(
+                    covering.x - a.x,
+                    covering.y - a.y,
+                    covering.z - a.z,
+                ))
+            })
+    };
+    let released: Vec<_> = entities
+        .retained
+        .iter()
+        .copied()
+        .filter(|&key| {
+            entities.under_delivered(key, levels) || entities.over_delivered(key) || outside(key)
+        })
+        .collect();
     let mut draw = Draw {
         commands: &mut commands,
         meshes: &mut meshes,
         mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
     };
-    for key in level0.chain(coarse) {
+    for key in released {
         draw.hide(&mut entities.opaque, key);
         draw.hide(&mut entities.blended, key);
         draw.hide(&mut entities.cutout, key);
-        entities.drawn_changed |= entities.delivered.remove(&key);
+        entities.retained.remove(&key);
+        entities.mask.set(key, false);
+        entities.drawn_changed = true;
     }
+    entities.anchors = anchors;
 }
 
-/// Rewrites the blended material's record of what each level has drawn, when
-/// it changed. Touching the material too is what has its bind group remade.
+fn parent(c: ChunkCoord) -> ChunkCoord {
+    ancestor(c, 1)
+}
+
+fn ancestor(c: ChunkCoord, up: u32) -> ChunkCoord {
+    ChunkCoord::new(c.x >> up, c.y >> up, c.z >> up)
+}
+
+fn children(c: ChunkCoord) -> impl Iterator<Item = ChunkCoord> {
+    (0..8).map(move |i| {
+        ChunkCoord::new(
+            2 * c.x + (i & 1),
+            2 * c.y + (i >> 1 & 1),
+            2 * c.z + (i >> 2),
+        )
+    })
+}
+
+/// Rewrites the materials' record of what each level draws, when it changed.
+/// Touching the materials too is what has their bind groups remade.
 fn publish_drawn(
     mut entities: ResMut<ChunkEntities>,
     terrain: Res<TerrainMaterial>,
-    streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut materials: ResMut<Assets<ChunkMaterial>>,
@@ -423,12 +534,18 @@ fn publish_drawn(
     if !std::mem::take(&mut entities.drawn_changed) {
         return;
     }
-    let words = drawn_mask::encode(level_count(&streaming), &entities.delivered, &world);
+    let words = entities.mask.words(&world);
     if let Some(mut buffer) = buffers.get_mut(&terrain.drawn) {
         buffer.clear();
         buffer.extend_from_slice(&words);
     }
-    let _ = materials.get_mut(&terrain.blended);
+    for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+        let _ = materials.get_mut(handle);
+    }
+    #[cfg(feature = "profiling")]
+    {
+        entities.published = words;
+    }
 }
 
 fn spawn_light(
@@ -465,11 +582,6 @@ fn spawn_light(
 /// How far the view tips down. Framing is a Client decision; where the Eye
 /// starts is the Server's, so the Client's camera starts where the Player does.
 const VIEW_PITCH: f32 = -0.3;
-
-/// A coarse camera's near plane, as a fraction of the level-0 radius. The finer
-/// levels always cover what it clips, so a coarse peak cannot fill the view of
-/// an Eye hovering beside it.
-const COARSE_NEAR_FRACTION: f32 = 0.25;
 
 /// In `PostStartup`, so the Server's `Startup` commands have been applied and
 /// [`SpawnPoint`] exists. Ordering through the schedule rather than through an
@@ -543,8 +655,9 @@ fn spawn_camera(
                     ..default()
                 },
                 layer_of(level),
+                // The Player's near plane: a coarse Chunk is drawn wherever no
+                // finer one is, however close to the Eye.
                 Projection::Perspective(PerspectiveProjection {
-                    near: streaming.view_distance_m * COARSE_NEAR_FRACTION,
                     far: streaming.lod_distance_m.max(streaming.view_distance_m)
                         + world.cell_size(),
                     ..default()
@@ -713,7 +826,7 @@ mod tests {
     }
 
     #[test]
-    fn the_coarse_projections_reach_the_lod_distance_and_start_a_quarter_out() {
+    fn the_coarse_projections_reach_the_lod_distance_and_start_at_the_players_near_plane() {
         let streaming = StreamingSettings::default();
         let mut app = camera_app(Vec3::ZERO, streaming);
         let cell = WorldSettings::default().cell_size();
@@ -722,7 +835,7 @@ mod tests {
         assert!(!coarse.is_empty());
         for far in coarse {
             assert!(far.far >= streaming.lod_distance_m + cell);
-            assert_eq!(far.near, streaming.view_distance_m / 4.0);
+            assert_eq!(far.near, near.near);
             assert_eq!(far.fov, near.fov, "a seam between the layers otherwise");
         }
     }
@@ -889,38 +1002,40 @@ mod tests {
         }
     }
 
-    /// Whether the material cuts a level-`level` upward face at `point`, read
-    /// the way the shader reads it.
-    fn cuts_at(app: &App, blended: bool, level: u32, point: Vec3) -> bool {
-        cuts_facing(app, blended, level, point, Vec3::Y)
+    /// Whether the materials discard a level-`level` upward face at `point`,
+    /// read the way the shader reads it.
+    fn cuts_at(app: &App, level: u32, point: Vec3) -> bool {
+        cuts_facing(app, level, point, Vec3::Y)
     }
 
     /// `cuts_at` for a face of any orientation: the Chunk asked about is the one
     /// behind the face, so its normal decides which side of a boundary it is on.
-    fn cuts_facing(app: &App, blended: bool, level: u32, point: Vec3, normal: Vec3) -> bool {
+    /// All three materials read one buffer, so all three answer alike.
+    fn cuts_facing(app: &App, level: u32, point: Vec3, normal: Vec3) -> bool {
         let terrain = app.world().resource::<TerrainMaterial>();
-        let handle = if blended {
-            &terrain.blended
-        } else {
-            &terrain.opaque
-        };
-        let material = app
-            .world()
-            .resource::<Assets<ChunkMaterial>>()
-            .get(handle)
-            .unwrap();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+            assert_eq!(
+                materials.get(handle).unwrap().extension.drawn,
+                terrain.drawn,
+                "every material reads the one record"
+            );
+        }
         let buffer = app
             .world()
             .resource::<Assets<ShaderBuffer>>()
-            .get(&material.extension.drawn)
+            .get(&terrain.drawn)
             .unwrap();
-        crate::client::drawn_mask::contains(
+        crate::client::drawn_mask::finer_drawn(
             buffer.cast_slice::<u32>().unwrap(),
             level,
             point,
             normal,
         )
     }
+
+    /// Past every level's mesh extent, so nothing retained survives.
+    const FAR_M: Vec3 = Vec3::new(1.0e7, 0.0, 1.0e7);
 
     #[test]
     fn coarse_water_is_cut_exactly_where_the_finer_level_has_delivered_its_chunk() {
@@ -942,25 +1057,54 @@ mod tests {
             ChunkCoord::new(0, 1, 0),
             tesserae_core::ChunkMesh::default(),
         );
-        assert!(cuts_at(&app, true, 1, inside(a, 0)));
-        assert!(cuts_at(&app, true, 1, inside(c, 0)));
-        assert!(cuts_at(&app, true, 1, inside(ChunkCoord::new(0, 1, 0), 0)));
+        assert!(cuts_at(&app, 1, inside(a, 0)));
+        assert!(cuts_at(&app, 1, inside(c, 0)));
+        assert!(cuts_at(&app, 1, inside(ChunkCoord::new(0, 1, 0), 0)));
         assert!(
-            !cuts_at(&app, true, 1, inside(b, 0)),
+            !cuts_at(&app, 1, inside(b, 0)),
             "inside the window, not sent"
         );
         assert!(
-            !cuts_at(&app, true, 1, inside(ChunkCoord::new(9, 0, 0), 0)),
+            !cuts_at(&app, 1, inside(ChunkCoord::new(9, 0, 0), 0)),
             "outside it"
         );
 
+        put_eye(&mut app, FAR_M);
         app.world_mut().write_message(ChunkUnloaded { coord: a });
         app.update();
-        assert!(!cuts_at(&app, true, 1, inside(a, 0)), "unloaded");
+        assert!(!cuts_at(&app, 1, inside(a, 0)), "unloaded and released");
 
         send_coarse(&mut app, 1, a, geometry());
-        assert!(cuts_at(&app, true, 2, inside(a, 1)), "level 2 asks level 1");
-        assert!(!cuts_at(&app, true, 1, inside(a, 1) + Vec3::splat(40.0)));
+        assert!(cuts_at(&app, 2, inside(a, 1)), "level 2 asks level 1");
+        assert!(!cuts_at(&app, 1, inside(a, 1) + Vec3::splat(40.0)));
+    }
+
+    #[test]
+    fn coarse_water_is_discarded_where_any_finer_level_draws_and_only_there() {
+        let mut app = app();
+        let world = *app.world().resource::<WorldSettings>();
+        let inside = |coord: ChunkCoord| {
+            world.chunk_origin_at(coord, 0) + Vec3::splat(world.cell_size_at(0) / 2.0)
+        };
+        // Level 2's Chunk at the origin spans level-0 Chunks 0..4 on each axis;
+        // level 1 draws none of it.
+        send_coarse(&mut app, 2, ChunkCoord::new(0, 0, 0), blended_geometry());
+        let sent = [ChunkCoord::new(0, 0, 0), ChunkCoord::new(3, 1, 2)];
+        for coord in sent {
+            send_mesh(&mut app, coord, blended_geometry());
+        }
+        for x in 0..4 {
+            for y in 0..4 {
+                for z in 0..4 {
+                    let coord = ChunkCoord::new(x, y, z);
+                    assert_eq!(
+                        cuts_at(&app, 2, inside(coord)),
+                        sent.contains(&coord),
+                        "{coord:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// Ticket 17: `level_the_water` puts a coarse water surface at level 0's own
@@ -975,20 +1119,137 @@ mod tests {
         let boundary = world.chunk_origin_at(ChunkCoord::new(0, 1, 0), 0)
             + Vec3::new(cell_m / 2.0, 0.0, cell_m / 2.0);
         assert!(
-            cuts_facing(&app, true, 1, boundary, Vec3::Y),
+            cuts_facing(&app, 1, boundary, Vec3::Y),
             "an upward face there is the sent Chunk's own top"
         );
         assert!(
-            !cuts_facing(&app, true, 1, boundary, Vec3::NEG_Y),
+            !cuts_facing(&app, 1, boundary, Vec3::NEG_Y),
             "a downward face there belongs to the Chunk above, which was not sent"
         );
     }
 
     #[test]
-    fn the_opaque_material_cuts_nothing() {
+    fn level_zero_is_never_discarded() {
         let mut app = app();
         send_mesh(&mut app, ChunkCoord::new(0, 0, 0), geometry());
-        assert!(!cuts_at(&app, false, 1, Vec3::splat(16.0)));
+        assert!(cuts_at(&app, 1, Vec3::splat(16.0)));
+        assert!(!cuts_at(&app, 0, Vec3::splat(16.0)));
+    }
+
+    fn mask_has(app: &App, level: u32, coord: ChunkCoord) -> bool {
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let buffer = app
+            .world()
+            .resource::<Assets<ShaderBuffer>>()
+            .get(&terrain.drawn)
+            .unwrap();
+        crate::client::drawn_mask::drawn_at(
+            buffer.cast_slice::<u32>().unwrap(),
+            level,
+            IVec3::new(coord.x, coord.y, coord.z),
+        )
+    }
+
+    fn unload_coarse(app: &mut App, level: u32, coord: ChunkCoord) {
+        app.world_mut().write_message(LodUnloaded { level, coord });
+        app.update();
+    }
+
+    #[test]
+    fn a_coarse_chunk_the_server_unloads_is_drawn_until_all_eight_children_land() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        let coarse = ChunkCoord::new(0, 0, 0);
+        send_coarse(&mut app, 1, coarse, geometry());
+        unload_coarse(&mut app, 1, coarse);
+        assert!(entity_at(&app, 1, coarse).is_some(), "retained");
+        assert!(mask_has(&app, 1, coarse));
+
+        let children: Vec<_> = super::children(coarse).collect();
+        for &child in &children[..7] {
+            send_mesh(&mut app, child, geometry());
+        }
+        assert!(entity_at(&app, 1, coarse).is_some(), "one child is missing");
+        // An empty mesh is the finer level's answer too.
+        send_mesh(&mut app, children[7], tesserae_core::ChunkMesh::default());
+        assert_eq!(entity_at(&app, 1, coarse), None, "released");
+        assert!(!mask_has(&app, 1, coarse), "in the same frame");
+    }
+
+    #[test]
+    fn a_coarse_chunk_is_covered_by_children_that_are_themselves_covered() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        let coarse = ChunkCoord::new(0, 0, 0);
+        send_coarse(&mut app, 2, coarse, geometry());
+        unload_coarse(&mut app, 2, coarse);
+        let level_one: Vec<_> = super::children(coarse).collect();
+        for &child in &level_one[1..] {
+            send_coarse(&mut app, 1, child, geometry());
+        }
+        for grandchild in super::children(level_one[0]) {
+            assert!(entity_at(&app, 2, coarse).is_some());
+            send_mesh(&mut app, grandchild, geometry());
+        }
+        assert_eq!(entity_at(&app, 2, coarse), None);
+    }
+
+    #[test]
+    fn a_finer_chunk_the_server_unloads_is_drawn_until_a_coarser_one_covers_it() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        let fine = ChunkCoord::new(5, 0, -3);
+        send_mesh(&mut app, fine, geometry());
+        app.world_mut().write_message(ChunkUnloaded { coord: fine });
+        app.update();
+        assert!(entity_for(&app, fine).is_some(), "retained");
+        assert!(mask_has(&app, 0, fine));
+
+        send_coarse(&mut app, 2, ChunkCoord::new(1, 0, -1), geometry());
+        assert_eq!(entity_for(&app, fine), None, "its grandparent covers it");
+        assert!(!mask_has(&app, 0, fine), "in the same frame");
+        assert!(mask_has(&app, 2, ChunkCoord::new(1, 0, -1)));
+    }
+
+    #[test]
+    fn a_retained_chunk_sent_again_is_delivered_and_kept() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_coarse(&mut app, 1, coord, geometry());
+        unload_coarse(&mut app, 1, coord);
+        send_coarse(&mut app, 1, coord, geometry());
+        for child in super::children(coord) {
+            send_mesh(&mut app, child, geometry());
+        }
+        assert!(entity_at(&app, 1, coord).is_some(), "delivered, not retained");
+    }
+
+    #[test]
+    fn a_teleport_releases_every_retained_mesh() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        send_mesh(&mut app, ChunkCoord::new(0, 0, 0), both_layers());
+        send_coarse(&mut app, 1, ChunkCoord::new(4, 0, 0), both_layers());
+        send_coarse(&mut app, 3, ChunkCoord::new(0, 0, 1), geometry());
+        let world = app.world_mut();
+        world.write_message(ChunkUnloaded {
+            coord: ChunkCoord::new(0, 0, 0),
+        });
+        world.write_message(LodUnloaded {
+            level: 1,
+            coord: ChunkCoord::new(4, 0, 0),
+        });
+        world.write_message(LodUnloaded {
+            level: 3,
+            coord: ChunkCoord::new(0, 0, 1),
+        });
+        app.update();
+        assert_eq!(drawn(&mut app), 5, "nothing covers them yet");
+        put_eye(&mut app, FAR_M);
+        assert_eq!(drawn(&mut app), 0);
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
+        assert!(app.world().resource::<ChunkEntities>().retained.is_empty());
     }
 
     /// Two panes of glass one behind the other along z, in one Chunk.
@@ -1196,7 +1457,7 @@ mod tests {
             assert_eq!(
                 world.get::<RenderLayers>(blended),
                 Some(&layer_of(level)),
-                "the level's camera draws it, or the cut and the sun miss it"
+                "the level's camera draws it, or the mask and the sun miss it"
             );
         }
         // A coarse Voxel is bigger, so the same layer spans more metres.
@@ -1714,6 +1975,7 @@ mod tests {
     #[test]
     fn unloading_removes_both_entities_and_both_assets() {
         let mut app = app();
+        put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(0, 0, 0);
         send_mesh(&mut app, coord, both_layers());
         send_coarse(&mut app, 1, coord, both_layers());
@@ -1732,6 +1994,7 @@ mod tests {
     #[test]
     fn a_mesh_with_a_blended_layer_and_its_unload_in_one_frame_leave_nothing_drawn() {
         let mut app = app();
+        put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(0, 0, 0);
         app.world_mut().write_message(ChunkMeshReady {
             coord,
@@ -1782,28 +2045,6 @@ mod tests {
         for (f, c) in fine_positions.iter().zip(&coarse_positions) {
             assert_eq!(*c, f.map(|v| v * 4.0));
         }
-    }
-
-    #[test]
-    fn the_material_carries_each_levels_cut_in_its_own_slot() {
-        let lod = LodParams::new(
-            1,
-            &[
-                (0.0, 0.0),
-                (144.0, 94.0),
-                (290.0, 190.0),
-                (580.0, 380.0),
-                (1160.0, 760.0),
-            ],
-        );
-        assert_eq!(lod.tint, 1);
-        assert_eq!(lod.cut_radius_m[0], Vec4::new(0.0, 144.0, 290.0, 580.0));
-        assert_eq!(lod.cut_half_height_m[0], Vec4::new(0.0, 94.0, 190.0, 380.0));
-        assert_eq!(lod.cut_radius_m[1].x, 1160.0);
-        assert_eq!(
-            lod.cut_radius_m[1].y, 0.0,
-            "a level past the last is not cut"
-        );
     }
 
     #[test]
@@ -1931,6 +2172,7 @@ mod tests {
     #[test]
     fn unloading_despawns_and_frees_the_mesh() {
         let mut app = app();
+        put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(-3, 1, 4);
         send_mesh(&mut app, coord, geometry());
         let handle = app
@@ -1956,6 +2198,7 @@ mod tests {
     #[test]
     fn unloading_a_coarse_chunk_frees_it_and_leaves_the_other_levels_alone() {
         let mut app = app();
+        put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(-3, 1, 4);
         send_mesh(&mut app, coord, geometry());
         send_coarse(&mut app, 1, coord, geometry());
@@ -1984,6 +2227,7 @@ mod tests {
     #[test]
     fn a_mesh_and_its_unload_in_one_frame_leave_nothing_drawn() {
         let mut app = app();
+        put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(2, 0, -1);
         let world = app.world_mut();
         world.write_message(ChunkMeshReady {
@@ -2007,6 +2251,7 @@ mod tests {
     #[test]
     fn unloading_a_chunk_leaves_its_neighbours_alone() {
         let mut app = app();
+        put_eye(&mut app, FAR_M);
         let kept = ChunkCoord::new(0, 0, 0);
         let dropped = ChunkCoord::new(1, 0, 0);
         send_mesh(&mut app, kept, geometry());

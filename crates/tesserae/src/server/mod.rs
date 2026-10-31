@@ -44,8 +44,8 @@ use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
 #[cfg(feature = "profiling")]
-pub use lod_rings::{Cut, LevelRings};
-pub use lod_rings::{cuts, level_count};
+pub use lod_rings::LevelRings;
+pub use lod_rings::level_count;
 use world_state::SpawnPoint;
 
 /// Metres of clearance above the surface. In metres, not Voxels: a clearance of

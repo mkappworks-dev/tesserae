@@ -34,32 +34,11 @@ pub const PALETTE_LEN: usize = 64;
 pub const FLAME_SLOT: usize = PALETTE_LEN;
 
 /// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
-#[derive(Reflect, ShaderType, Debug, Clone, Copy)]
+#[derive(Reflect, ShaderType, Debug, Clone, Copy, Default)]
 pub struct LodParams {
     /// Non-zero tints each level above 0, to show the rings in a capture. A
     /// uniform, not a shader def, so it does not specialise a pipeline.
     pub tint: u32,
-    /// Per level, packed four to a `Vec4`. See `server::cuts` for why.
-    pub cut_radius_m: [Vec4; CUT_VECS],
-    pub cut_half_height_m: [Vec4; CUT_VECS],
-}
-
-/// Enough for every level the Server can have (32), four to a `Vec4`.
-pub const CUT_VECS: usize = 8;
-
-impl LodParams {
-    pub fn new(tint: u32, cuts: &[(f32, f32)]) -> Self {
-        let mut params = LodParams {
-            tint,
-            cut_radius_m: [Vec4::ZERO; CUT_VECS],
-            cut_half_height_m: [Vec4::ZERO; CUT_VECS],
-        };
-        for (level, &(radius, half_height)) in cuts.iter().take(CUT_VECS * 4).enumerate() {
-            params.cut_radius_m[level / 4][level % 4] = radius;
-            params.cut_half_height_m[level / 4][level % 4] = half_height;
-        }
-        params
-    }
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -70,8 +49,8 @@ pub struct ChunkMaterialExtension {
     pub palette: [Vec4; PALETTE_LEN + 1],
     #[uniform(101)]
     pub lod: LodParams,
-    /// The Chunks each level has drawn, in `client::drawn_mask`'s layout. A
-    /// buffer of one zero word cuts nothing, which is the opaque material's.
+    /// The Chunks each level draws, in `client::drawn_mask`'s layout. A buffer
+    /// of one zero word discards nothing.
     #[storage(102, read_only)]
     pub drawn: Handle<ShaderBuffer>,
     #[texture(103)]
@@ -100,7 +79,7 @@ impl Default for ChunkMaterialExtension {
         palette[FLAME_SLOT] = srgb(1.0, 0.86, 0.55);
         ChunkMaterialExtension {
             palette,
-            lod: LodParams::new(0, &[]),
+            lod: LodParams::default(),
             drawn: Handle::default(),
             texture: None,
             textured: UVec4::ZERO,

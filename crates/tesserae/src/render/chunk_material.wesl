@@ -7,7 +7,6 @@
 
 import bevy_pbr::render::{
     forward_io::{FragmentOutput, VertexOutput},
-    mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     pbr_types::{
@@ -31,8 +30,6 @@ var<uniform> palette: array<vec4<f32>, constants::CHUNK_PALETTE_SLOTS>;
 // Mirrors LodParams in chunk_material.rs.
 struct LodParams {
     tint: u32,
-    cut_radius_m: array<vec4<f32>, 8>,
-    cut_half_height_m: array<vec4<f32>, 8>,
 }
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(101)
@@ -47,15 +44,12 @@ var<storage, read> drawn: array<u32>;
 // error in a world-space coordinate and far short of leaving the Voxel.
 const BEHIND_A_FACE: f32 = 1.0 / 1024.0;
 
-// Whether the level below `level` has drawn the Chunk holding the face at
-// `point` facing `normal`. The Chunk asked about is the one behind the face,
-// because a face lies on the boundary of the Voxel it is the surface of: water
-// levelled onto a Chunk boundary by `level_the_water` would otherwise ask the
-// Chunk above it, which holds no water at all.
-fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
-    if level == 0u || level >= drawn[0] {
-        return false;
-    }
+// Whether `level` draws the Chunk holding the face at `point` facing `normal`.
+// The Chunk asked about is the one behind the face, because a face lies on the
+// boundary of the Voxel it is the surface of: water levelled onto a Chunk
+// boundary by `level_the_water` would otherwise ask the Chunk above it, which
+// holds no water at all.
+fn drawn_at(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
     let slot = 1u + 8u * level;
     let size = vec3<u32>(drawn[slot + 4u], drawn[slot + 5u], drawn[slot + 6u]);
     if min(size.x, min(size.y, size.z)) == 0u {
@@ -75,6 +69,17 @@ fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
     let l = vec3<u32>(local);
     let i = (l.z * size.y + l.y) * size.x + l.x;
     return (drawn[drawn[slot] + i / 32u] & (1u << (i % 32u))) != 0u;
+}
+
+// Whether a level finer than `level` draws the Chunk at `point`, which then
+// draws it instead.
+fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
+    for (var finer = 0u; finer < min(level, drawn[0]); finer++) {
+        if drawn_at(finer, point, normal) {
+            return true;
+        }
+    }
+    return false;
 }
 
 const TINT_STRENGTH: f32 = 0.55;
@@ -138,19 +143,7 @@ fn fragment(
     vertex_output.instance_index = in.instance_index;
 
     // Coarse geometry up to a Voxel above the real surface would stand over the
-    // finer silhouette, so cut it in metres from the Eye, but only at the heights
-    // the finer levels reach: above them nothing else covers the ground.
-    if in.level != 0u {
-        let level = min(in.level, 31u);
-        let from_eye = in.world_position.xyz - view.world_position;
-        if length(from_eye.xz) < lod.cut_radius_m[level / 4u][level % 4u]
-            && abs(from_eye.y) < lod.cut_half_height_m[level / 4u][level % 4u] {
-            discard;
-        }
-    }
-
-    // Where the finer level has drawn its Chunk, a blended coarse fragment would
-    // be a second layer of water. The opaque material's buffer cuts nothing.
+    // finer silhouette, and coarse water under finer water would be drawn twice.
     if finer_drawn(in.level, in.world_position.xyz, in.world_normal) {
         discard;
     }
