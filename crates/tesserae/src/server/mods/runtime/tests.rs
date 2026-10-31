@@ -58,8 +58,13 @@ fn loaded_guest(
             Err(e) => panic!("{e}"),
         }
     };
-    let mod_dir = dir.join(id);
-    std::fs::create_dir(&mod_dir).unwrap();
+    let folder = if manifest.contains("root = true") {
+        "games"
+    } else {
+        "mods"
+    };
+    let mod_dir = dir.join(folder).join(id);
+    std::fs::create_dir_all(&mod_dir).unwrap();
     std::fs::write(
         mod_dir.join("mod.toml"),
         format!(
@@ -73,7 +78,7 @@ fn loaded_guest(
     )
     .unwrap();
     let result = load(
-        &dir,
+        &dir.join("mods"),
         &dir.join("trust.json"),
         TrustMode::All,
         &WorldSettings {
@@ -909,7 +914,7 @@ pub(in crate::server) fn demo_loaded(size: f32) -> LoadedMods {
         }
     };
     let loaded = load(
-        &root.join("games/demo/dist"),
+        &root.join("games/demo/dist/mods"),
         &dir.join("trust.json"),
         TrustMode::All,
         &WorldSettings {
@@ -1640,13 +1645,13 @@ pub(in crate::server) fn demo_and_fluids(size: f32) -> LoadedMods {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    let demo = dir.join("demo");
-    let fluids = dir.join("fluids");
+    let demo = dir.join("games/demo");
+    let fluids = dir.join("mods/fluids");
     std::fs::create_dir_all(&demo).unwrap();
     std::fs::create_dir_all(&fluids).unwrap();
     for file in ["mod.toml", "demo.wasm"] {
         std::fs::copy(
-            root.join("games/demo/dist/demo").join(file),
+            root.join("games/demo/dist/games/demo").join(file),
             demo.join(file),
         )
         .unwrap();
@@ -1662,7 +1667,7 @@ pub(in crate::server) fn demo_and_fluids(size: f32) -> LoadedMods {
     )
     .unwrap();
     let loaded = load(
-        &dir,
+        &dir.join("mods"),
         &dir.join("trust.json"),
         TrustMode::All,
         &WorldSettings {

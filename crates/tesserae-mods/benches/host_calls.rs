@@ -17,8 +17,8 @@ use futures_lite::future::block_on;
 use tesserae_core::{Tables, Voxel};
 use tesserae_mods::{
     BatchReport, Command, Compiled, Declaration, Line, ModHost, ModInstance, ModLimits, Placement,
-    Registered, RegisteredId, Registry, TickContext, Trust, WorldInfo, apply, discover, plan,
-    validate, voxel_index,
+    Registered, RegisteredId, Registry, TickContext, Trust, WorldInfo, apply, plan, scan, validate,
+    voxel_index,
 };
 use wasmtime::component::{Component, HasSelf, Linker, ResourceTable};
 use wasmtime::{Config, Engine, Store};
@@ -69,7 +69,7 @@ impl Scratch {
             .unwrap();
             fs::copy(guest_wasm(id), dir.join("m.wasm")).unwrap();
         }
-        let found = plan(discover(&mods).unwrap()).unwrap();
+        let found = plan(scan(&mods).unwrap().mods).unwrap();
         let mut trust = Trust::load(self.0.join("trust.json"));
         for mod_ in &found {
             trust.grant(mod_).unwrap();

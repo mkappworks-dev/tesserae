@@ -282,11 +282,11 @@ throughput and presented/offscreen frame times are separate evidence.
 Install the guest target with `rustup target add wasm32-wasip2`, then run
 `./scripts/build-guests` from the repository root to build the independent test
 guests and MIT demo. The demo component and Manifest are copied to
-`games/demo/dist/demo/`, where `cargo dev` [runs it](#running-the-demo-game)
-with no flags, trusted for that run only. Any other directory, given with
-`--mods`, gets the normal Trust check: `--trust-all` for an explicit unattended
-grant, or omit it to review the terminal prompt. Guest edits need a rebuild and
-World reopen; runtime Mod reload is deferred.
+`games/demo/dist/games/demo/`, where `cargo dev`
+[runs it](#running-the-demo-game) with no flags, trusted for that run only. Any
+other directory, given with `--mods`, gets the normal Trust check: `--trust-all`
+for an explicit unattended grant, or omit it to review the terminal prompt.
+Guest edits need a rebuild and World reopen; runtime Mod reload is deferred.
 
 The host API is deliberately **batched**: region operations and a command queue,
 not per-voxel calls. Crossing the WASM boundary copies, so call frequency — not
@@ -301,13 +301,15 @@ rustup target add wasm32-wasip2   # once
 cargo dev
 ```
 
-Once the guests are built, `cargo dev` loads the demo from `games/demo/dist` on
-its own and trusts it for the run, with no prompt and no Trust record; before
-that it opens a World with no Game and logs that `./scripts/build-guests` must
-be run. A directory named by `--mods` or `TESSERAE_MODS_DIR` replaces the demo
-and goes through the normal Trust check. Only a `dev` build does this:
-`cargo run -p tesserae -- --mods games/demo/dist` runs the same Game without the
-`dev` tools, with the full Trust check. In a `dev` build,
+Once the guests are built, `cargo dev` loads the demo from
+`games/demo/dist/games` on its own and trusts it for the run, with no prompt and
+no Trust record; before that it opens a World with no Game and logs that
+`./scripts/build-guests` must be run. A directory named by `--mods` or
+`TESSERAE_MODS_DIR` replaces the demo and goes through the normal Trust check;
+the Games are read from the `games` directory beside it, Mods from the directory
+itself. Only a `dev` build does this:
+`cargo run -p tesserae -- --mods games/demo/dist/mods` runs the same Game
+without the `dev` tools, with the full Trust check. In a `dev` build,
 `TESSERAE_VOXEL_SIZE_M` opens the World at 1.0 (the default), 0.5 or 0.25 m, and
 the demo builds the same scenes in metres at each:
 

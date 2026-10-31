@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -149,52 +149,241 @@ fn valid_semver(version: &str) -> bool {
         })
 }
 
-/// One directory per Mod. A directory with no `mod.toml` is skipped with a warning.
-pub fn discover(mods_dir: &Path) -> Result<Vec<Found>, ModError> {
+/// The most entries read from one folder; a larger one is reported, not trusted to be small.
+pub const MAX_SCAN_ENTRIES: usize = 256;
+
+/// A folder that could not be used. It never hides the folders beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejected {
+    pub dir: PathBuf,
+    pub reason: String,
+}
+
+/// Everything installed, found by reading `mod.toml` files only: nothing is hashed, compiled
+/// or run, so an untrusted folder costs a manifest parse.
+#[derive(Debug, Default)]
+pub struct Scan {
+    pub games: Vec<Found>,
+    pub mods: Vec<Found>,
+    pub rejected: Vec<Rejected>,
+}
+
+impl Scan {
+    pub fn find(&self, id: &str) -> Option<&Found> {
+        self.games
+            .iter()
+            .chain(&self.mods)
+            .find(|f| f.manifest.id == id)
+    }
+}
+
+/// Games live in `games/`, beside the `mods/` directory.
+pub fn games_dir(mods_dir: &Path) -> PathBuf {
+    mods_dir.with_file_name("games")
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Role {
+    Game,
+    Mod,
+}
+
+fn rejected(dir: &Path, reason: String) -> Rejected {
+    eprintln!("skipping {}: {reason}", dir.display());
+    Rejected {
+        dir: dir.to_path_buf(),
+        reason,
+    }
+}
+
+/// `games/<id>/` and `mods/<id>/`, each holding one `mod.toml`. A folder that is unusable is a
+/// [`Rejected`] row; only an unreadable directory fails the scan.
+pub fn scan(mods_dir: &Path) -> Result<Scan, ModError> {
+    let mut scan = Scan::default();
+    let games = discover(&games_dir(mods_dir), Role::Game, &mut scan.rejected)?;
+    let mods = discover(mods_dir, Role::Mod, &mut scan.rejected)?;
+    let mut seen: BTreeMap<String, PathBuf> = BTreeMap::new();
+    for (found, into_games) in games
+        .into_iter()
+        .map(|f| (f, true))
+        .chain(mods.into_iter().map(|f| (f, false)))
+    {
+        if let Some(first) = seen.get(&found.manifest.id) {
+            scan.rejected.push(rejected(
+                &found.dir,
+                format!(
+                    "id `{}` is already declared by {}",
+                    found.manifest.id,
+                    first.display()
+                ),
+            ));
+            continue;
+        }
+        seen.insert(found.manifest.id.clone(), found.dir.clone());
+        if into_games {
+            scan.games.push(found);
+        } else {
+            scan.mods.push(found);
+        }
+    }
+    Ok(scan)
+}
+
+fn discover(dir: &Path, role: Role, rejects: &mut Vec<Rejected>) -> Result<Vec<Found>, ModError> {
     let io = |path: &Path, who: &str, source| ModError::Io {
         who: who.to_string(),
         path: path.to_path_buf(),
         source,
     };
-    let entries = match fs::read_dir(mods_dir) {
+    let who = if role == Role::Game {
+        "games directory"
+    } else {
+        "mods directory"
+    };
+    let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(io(mods_dir, "mods directory", e)),
+        Err(e) => return Err(io(dir, who, e)),
     };
-    let mut dirs = Vec::new();
+    let mut folders = Vec::new();
+    let mut read = 0;
     for entry in entries {
-        let entry = entry.map_err(|e| io(mods_dir, "mods directory", e))?;
-        let path = entry.path();
-        if path.is_dir() {
-            dirs.push(path);
+        if read == MAX_SCAN_ENTRIES {
+            rejects.push(rejected(
+                dir,
+                format!("more than {MAX_SCAN_ENTRIES} entries; the rest were ignored"),
+            ));
+            break;
+        }
+        read += 1;
+        let entry = entry.map_err(|e| io(dir, who, e))?;
+        let kind = entry.file_type().map_err(|e| io(dir, who, e))?;
+        if kind.is_symlink() {
+            rejects.push(rejected(&entry.path(), "is a symbolic link".into()));
+        } else if kind.is_dir() {
+            folders.push(entry.path());
         }
     }
-    dirs.sort();
+    folders.sort();
 
     let mut found = Vec::new();
-    for dir in dirs {
-        let name = dir
-            .file_name()
-            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
-        let manifest_path = dir.join("mod.toml");
-        let manifest_bytes = match fs::read(&manifest_path) {
-            Ok(bytes) => bytes,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                eprintln!("skipping {}: no mod.toml", dir.display());
-                continue;
-            }
-            Err(e) => return Err(io(&manifest_path, &name, e)),
-        };
-        let manifest = Manifest::parse(&name, &manifest_bytes)?;
-        let entry = Found {
-            manifest,
-            dir,
-            manifest_bytes,
-        };
-        entry.component_path()?;
-        found.push(entry);
+    for folder in folders {
+        match read_folder(&folder, role) {
+            Ok(Some(entry)) => found.push(entry),
+            Ok(None) => eprintln!("skipping {}: no mod.toml", folder.display()),
+            Err(reason) => rejects.push(rejected(&folder, reason)),
+        }
     }
     Ok(found)
+}
+
+/// `Ok(None)` for a folder with no `mod.toml`; `Err` is the reason it cannot be used.
+fn read_folder(folder: &Path, role: Role) -> Result<Option<Found>, String> {
+    let name = folder
+        .file_name()
+        .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let manifest_path = folder.join("mod.toml");
+    let manifest_bytes = match fs::read(&manifest_path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(ModError::Io {
+                who: name,
+                path: manifest_path,
+                source: e,
+            }
+            .to_string());
+        }
+    };
+    let manifest = Manifest::parse(&name, &manifest_bytes).map_err(|e| e.to_string())?;
+    match (role, manifest.root) {
+        (Role::Mod, true) => {
+            return Err(format!(
+                "mod `{}` sets `root = true`, so it is a Game: move it to the games folder",
+                manifest.id
+            ));
+        }
+        (Role::Game, false) => {
+            return Err(format!(
+                "`{}` is in the games folder but its mod.toml does not set `root = true`",
+                manifest.id
+            ));
+        }
+        _ => {}
+    }
+    let entry = Found {
+        manifest,
+        dir: folder.to_path_buf(),
+        manifest_bytes,
+    };
+    entry.component_path().map_err(|e| e.to_string())?;
+    Ok(Some(entry))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Migration {
+    Moved {
+        id: String,
+        from: PathBuf,
+        to: PathBuf,
+    },
+    Refused {
+        id: String,
+        from: PathBuf,
+        reason: String,
+    },
+}
+
+/// Before games had their own folder a Game sat in `mods/` with `root = true`. Moves each such
+/// folder to `games/<id>`; never overwrites, so a second run finds nothing to do.
+pub fn migrate_legacy_games(mods_dir: &Path) -> Vec<Migration> {
+    let Ok(entries) = fs::read_dir(mods_dir) else {
+        return Vec::new();
+    };
+    let mut folders: Vec<PathBuf> = entries
+        .filter_map(Result::ok)
+        .take(MAX_SCAN_ENTRIES)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.path())
+        .collect();
+    folders.sort();
+    let games = games_dir(mods_dir);
+    let mut outcomes = Vec::new();
+    for from in folders {
+        let Ok(bytes) = fs::read(from.join("mod.toml")) else {
+            continue;
+        };
+        let name = from
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let Ok(manifest) = Manifest::parse(&name, &bytes) else {
+            continue;
+        };
+        if !manifest.root {
+            continue;
+        }
+        let to = games.join(&manifest.id);
+        let moved = if to.exists() {
+            Err(format!("{} already exists", to.display()))
+        } else {
+            fs::create_dir_all(&games)
+                .and_then(|()| fs::rename(&from, &to))
+                .map_err(|e| e.to_string())
+        };
+        outcomes.push(match moved {
+            Ok(()) => Migration::Moved {
+                id: manifest.id,
+                from,
+                to,
+            },
+            Err(reason) => Migration::Refused {
+                id: manifest.id,
+                from,
+                reason,
+            },
+        });
+    }
+    outcomes
 }
 
 /// Load order: dependencies first, then by id, whatever order `found` is in.

@@ -59,9 +59,10 @@ cargo dev
 ```
 
 A `dev` build trusts the in-repo demo for the run without asking or recording
-anything. `--mods <dir>` or `TESSERAE_MODS_DIR` runs another directory instead,
-with the usual Trust check. A release build never picks the demo itself: its
-default is the user's own mods directory.
+anything. `--mods <dir>` or `TESSERAE_MODS_DIR` runs another Mods directory
+instead (its Games are the `games` directory beside it), with the usual Trust
+check. A release build never picks the demo itself: its default is the user's
+own mods directory.
 
 What the demo shows, and how to run it at another Voxel size, is in
 [CONTRIBUTING.md](CONTRIBUTING.md#running-the-demo-game).
