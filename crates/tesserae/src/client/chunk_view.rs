@@ -75,6 +75,7 @@ pub(super) struct ChunkEntities {
 
 impl ChunkEntities {
     /// Whether the Chunk is drawn, delivered or retained.
+    #[cfg(feature = "profiling")]
     pub(super) fn draws(&self, key: (u32, ChunkCoord)) -> bool {
         self.delivered.contains(&key) || self.retained.contains(&key)
     }
@@ -473,11 +474,10 @@ fn release(
                 let covering = ancestor(coord, at - level);
                 let rings = LevelRings::new(*streaming, world.cell_size(), at);
                 let a = anchors[at as usize];
-                !rings.mesh.outer.contains(IVec3::new(
-                    covering.x - a.x,
-                    covering.y - a.y,
-                    covering.z - a.z,
-                ))
+                let d = IVec3::new(covering.x - a.x, covering.y - a.y, covering.z - a.z);
+                let outer = rings.mesh.outer;
+                // `contains` squares the offset, which overflows a teleport away.
+                d.abs().max_element() > outer.horizontal.max(outer.vertical) || !outer.contains(d)
             })
     };
     let released: Vec<_> = entities
@@ -1222,7 +1222,10 @@ mod tests {
         for child in super::children(coord) {
             send_mesh(&mut app, child, geometry());
         }
-        assert!(entity_at(&app, 1, coord).is_some(), "delivered, not retained");
+        assert!(
+            entity_at(&app, 1, coord).is_some(),
+            "delivered, not retained"
+        );
     }
 
     #[test]
@@ -1911,6 +1914,7 @@ mod tests {
             "a replacement without leaves"
         );
         send_mesh(&mut app, coord, leaves());
+        put_eye(&mut app, FAR_M);
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.update();
         assert_eq!(drawn(&mut app), 0);

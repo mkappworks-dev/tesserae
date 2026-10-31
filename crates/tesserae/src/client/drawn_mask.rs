@@ -198,7 +198,10 @@ mod tests {
         mask.set((2, ChunkCoord::new(0, 0, 0)), true);
         mask.set((3, ChunkCoord::new(9, 9, 9)), true);
         let words = mask.words(&world());
-        assert!(!finer_drawn(&words, 1, inside, Vec3::Y), "level 2 is coarser");
+        assert!(
+            !finer_drawn(&words, 1, inside, Vec3::Y),
+            "level 2 is coarser"
+        );
         assert!(finer_drawn(&words, 3, inside, Vec3::Y));
     }
 }

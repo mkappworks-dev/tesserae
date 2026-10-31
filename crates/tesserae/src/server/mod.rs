@@ -43,7 +43,6 @@ use crate::session::SessionApp;
 use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
-#[cfg(feature = "profiling")]
 pub use lod_rings::LevelRings;
 pub use lod_rings::level_count;
 use world_state::SpawnPoint;
