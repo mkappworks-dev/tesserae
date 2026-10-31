@@ -4,12 +4,12 @@
 use super::actions::{Action, Actions};
 use super::avatar::AvatarShown;
 use super::camera::FlyCamera;
+use super::chunk_mesh;
 use super::chunk_view::ChunkEntities;
 use super::preview::HandCamera;
 use super::profile::{Preferences, Store};
 use crate::world::{ChunkCoord, WorldSettings};
 use bevy::ecs::system::SystemParam;
-use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 
@@ -201,17 +201,19 @@ impl Obstacles<'_, '_> {
                     let coord = ChunkCoord::new(x, y, z);
                     let entities: Vec<Entity> = self.chunks.solid_at(coord).collect();
                     for entity in entities {
-                        let Ok((mesh, transform)) = self.layers.get(entity) else {
+                        let Ok((mesh, &transform)) = self.layers.get(entity) else {
                             continue;
                         };
-                        let (handle, offset) = (mesh.0.clone(), transform.translation);
+                        let handle = mesh.0.clone();
                         let Some(boxes) = self.boxes(&handle) else {
                             continue;
                         };
                         for &(min, max) in boxes.iter() {
-                            if let Some(t) =
-                                enters(from, to, min + offset - pad, max + offset + pad)
-                            {
+                            let (min, max) = (
+                                transform.transform_point(min),
+                                transform.transform_point(max),
+                            );
+                            if let Some(t) = enters(from, to, min - pad, max + pad) {
                                 nearest = nearest.min(t);
                             }
                         }
@@ -243,22 +245,16 @@ impl Obstacles<'_, '_> {
     }
 }
 
-/// One box per greedy quad, from the six indices that draw it.
+/// One box per greedy quad, from the six indices that draw it, in Voxels.
 fn quad_boxes(mesh: &Mesh) -> Option<QuadBoxes> {
-    let Some(VertexAttributeValues::Float32x3(positions)) =
-        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-    else {
-        return None;
-    };
-    let Some(Indices::U32(indices)) = mesh.indices() else {
-        return None;
-    };
+    let layer = chunk_mesh::decoded(mesh)?;
     Some(
-        indices
+        layer
+            .indices
             .chunks(6)
             .map(|quad| {
                 quad.iter()
-                    .map(|&i| Vec3::from_array(positions[i as usize]))
+                    .map(|&i| Vec3::from_array(layer.positions[i as usize]))
                     .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
             })
             .collect(),
@@ -291,10 +287,8 @@ fn enters(from: Vec3, to: Vec3, min: Vec3, max: Vec3) -> Option<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::asset::RenderAssetUsages;
     use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
     use bevy::input::touch::TouchPhase;
-    use bevy::mesh::PrimitiveTopology;
 
     const EYE: Vec3 = Vec3::new(5.0, 5.0, 5.0);
 
@@ -334,20 +328,43 @@ mod tests {
 
     /// A drawn face across the whole Chunk, `z` metres into it.
     fn wall(app: &mut App, z: f32) -> Entity {
-        let mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        )
-        .with_inserted_attribute(
-            Mesh::ATTRIBUTE_POSITION,
-            vec![
-                [0.0, 0.0, z],
-                [32.0, 0.0, z],
-                [32.0, 32.0, z],
-                [0.0, 32.0, z],
-            ],
-        )
-        .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3]));
+        chunk_layer(app, &[(2, z)], 32.0)
+    }
+
+    /// Drawn faces across the whole Chunk, each at `at` metres along `axis`,
+    /// in the one mesh a Chunk layer has.
+    fn faces(app: &mut App, faces: &[(usize, f32)]) {
+        let edge = app.world().resource::<WorldSettings>().cell_size();
+        chunk_layer(app, faces, edge);
+    }
+
+    /// Faces `edge` metres square at a metre a Voxel, so the mesh is in metres.
+    fn chunk_layer(app: &mut App, faces: &[(usize, f32)], edge: f32) -> Entity {
+        let mut layer = tesserae_core::MeshLayer::default();
+        for &(axis, at) in faces {
+            let corner = |u: f32, v: f32| {
+                let mut p = [0.0; 3];
+                p[axis] = at;
+                p[(axis + 1) % 3] = u;
+                p[(axis + 2) % 3] = v;
+                p
+            };
+            let mut normal = [0.0; 3];
+            normal[axis] = 1.0;
+            let base = layer.positions.len() as u32;
+            layer.positions.extend([
+                corner(0.0, 0.0),
+                corner(edge, 0.0),
+                corner(edge, edge),
+                corner(0.0, edge),
+            ]);
+            layer.normals.extend([normal; 4]);
+            layer.uvs.extend([[0.0; 2]; 4]);
+            layer.materials.extend([1; 4]);
+            layer.light.extend([0; 4]);
+            layer.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
+        }
+        let mesh = chunk_mesh::chunk_mesh_to_mesh(&layer);
         let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
         let entity = app
             .world_mut()
@@ -357,45 +374,6 @@ mod tests {
             .resource_mut::<ChunkEntities>()
             .insert_opaque(ChunkCoord::new(0, 0, 0), entity);
         entity
-    }
-
-    /// Drawn faces across the whole Chunk, each at `at` metres along `axis`,
-    /// in the one mesh a Chunk layer has.
-    fn faces(app: &mut App, faces: &[(usize, f32)]) {
-        let edge = app.world().resource::<WorldSettings>().cell_size();
-        let mut positions = Vec::new();
-        let mut indices = Vec::new();
-        for &(axis, at) in faces {
-            let corner = |u: f32, v: f32| {
-                let mut p = [0.0; 3];
-                p[axis] = at;
-                p[(axis + 1) % 3] = u;
-                p[(axis + 2) % 3] = v;
-                p
-            };
-            let base = positions.len() as u32;
-            positions.extend([
-                corner(0.0, 0.0),
-                corner(edge, 0.0),
-                corner(edge, edge),
-                corner(0.0, edge),
-            ]);
-            indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
-        }
-        let mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        )
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_indices(Indices::U32(indices));
-        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
-        let entity = app
-            .world_mut()
-            .spawn((Mesh3d(handle), Transform::default()))
-            .id();
-        app.world_mut()
-            .resource_mut::<ChunkEntities>()
-            .insert_opaque(ChunkCoord::new(0, 0, 0), entity);
     }
 
     /// A one-metre corridor closed at both ends, with a floor and a ceiling
@@ -508,7 +486,7 @@ mod tests {
         );
 
         app.world_mut().despawn(near);
-        wall(&mut app, EYE.z + 0.6);
+        wall(&mut app, EYE.z + 0.625);
         app.update();
         assert!(!app.world().resource::<AvatarShown>().0, "inside the head");
 
