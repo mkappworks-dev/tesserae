@@ -558,23 +558,28 @@ fn mesh_seams(n: &Neighborhood, every: usize, tables: &Tables, mesh: &mut ChunkM
                         if !covers(tables, n.at(x, y, z), face ^ 1, voxel) {
                             continue;
                         }
-                        // Lit by the open air over the ground across, which
-                        // the face looks into once that ground is not drawn.
-                        let open = (1..=SEAM_DEPTH)
-                            .take_while(|k| y + k <= edge)
-                            .find(|k| !n.at(x, y + k, z).is_full_cube());
+                        // Above a neighbour's top row is a corner of the
+                        // shell, which is never filled and reads as dark air;
+                        // the cell over this Voxel's own column, in the shell
+                        // above, stands in for it.
+                        let over = |k: i32| {
+                            if y + k < edge || (0..edge).contains(&x) && (0..edge).contains(&z) {
+                                [x, y + k, z]
+                            } else {
+                                [here[0], y + k, here[2]]
+                            }
+                        };
+                        let open = (1..=SEAM_DEPTH).take_while(|k| y + k <= edge).find(|&k| {
+                            let [ox, oy, oz] = over(k);
+                            !n.at(ox, oy, oz).is_full_cube()
+                        });
                         let Some(k) = open else {
                             continue;
                         };
-                        // Above a neighbour's top row is a corner of the
-                        // shell, which holds no light; the cell over this
-                        // Voxel's own column is in the shell above.
-                        let lit =
-                            if y + k < edge || (0..edge).contains(&x) && (0..edge).contains(&z) {
-                                n.light_at(x, y + k, z)
-                            } else {
-                                n.light_at(here[0], y + k, here[2])
-                            };
+                        // Lit by the open air over the ground across, which
+                        // the face looks into once that ground is not drawn.
+                        let [ox, oy, oz] = over(k);
+                        let lit = n.light_at(ox, oy, oz);
                         pending.push(Pending::new(here, &quad, class, voxel.material(), lit));
                     }
                 }

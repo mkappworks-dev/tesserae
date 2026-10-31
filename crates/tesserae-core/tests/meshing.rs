@@ -430,15 +430,7 @@ fn ground_deeper_than_two_voxels_under_the_surface_has_no_seam_wall() {
     neighbors[POS_Y] = Some(unlit(&surface));
     let plain = mesh_chunk(unlit(&rock), neighbors, tables());
     let seamed = mesh_chunk_with_seams(unlit(&rock), neighbors, SEAM, tables());
-    // The middle planes only: above the top row of a side neighbour is a
-    // corner of the shell, which reads as air.
-    for (normal, corners, _) in seams_of(&plain, &seamed) {
-        let d = normal.iter().position(|&c| c != 0.0).expect("axis-aligned");
-        assert!(
-            corners.iter().all(|c| c[d] != SEAM as f32),
-            "a wall {corners:?} deep under the surface"
-        );
-    }
+    assert!(seams_of(&plain, &seamed).is_empty());
 }
 
 #[test]
