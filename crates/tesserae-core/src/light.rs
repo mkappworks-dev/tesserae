@@ -701,9 +701,12 @@ fn seed_from_border(
 /// channel passed in, `light_chunk/straddling` and `/flooded_air` were 50-100%
 /// slower. Measured, not reasoned.
 ///
-/// Terminates despite sky light not always dimming: the undimmed case only ever
-/// steps downwards, so it cannot cycle, and a cell can be raised at most
-/// [`MAX_LIGHT`] times.
+/// Drains the cells brightest first, one queue per level: whatever a cell
+/// raises is at most its own level, and at its own level only downwards, so by
+/// the time a level is drained nothing brighter is left to raise its cells
+/// again, and each cell spreads once. In arrival order a cell lit through a side
+/// face before the sky reached it spread twice. The least fixed point over the
+/// seeds is unique, so the order changes no level.
 fn flood<const SHAPED: bool, const CHANNEL: usize, const DIMMED: bool>(
     cells: &mut [Light],
     walls: &Walls<'_>,
@@ -715,63 +718,80 @@ fn flood<const SHAPED: bool, const CHANNEL: usize, const DIMMED: bool>(
     } else {
         Channel::Block
     };
-    let mut queue = seeds.to_vec();
-    let mut head = 0;
-    while head < queue.len() {
-        let [x, y, z] = queue[head];
-        head += 1;
-        let from = index(x as usize, y as usize, z as usize);
-        let level = cells[from].get(channel);
-        if level == 0 {
-            continue;
-        }
-        for face in FACES {
-            let t = transmitted(channel, level, face);
-            if t == 0 {
+    const _: () = assert!(CHUNK_VOLUME <= 1 << u16::BITS, "a cell index fits a u16");
+    let mut pending: [Vec<u16>; MAX_LIGHT as usize + 1] = Default::default();
+    for &[x, y, z] in seeds {
+        let i = index(x as usize, y as usize, z as usize);
+        pending[cells[i].get(channel) as usize].push(i as u16);
+    }
+    for level in (1..=MAX_LIGHT).rev() {
+        // First in, first out: full sky stepping down joins its own level, and
+        // drained in arrival order it goes a layer at a time, so a cell's
+        // neighbours in its layer are already at 15 and not first raised to 14.
+        let mut head = 0;
+        while let Some(&from) = pending[level as usize].get(head) {
+            head += 1;
+            let from = from as usize;
+            // Raised after it was queued, so it spread at the higher level.
+            if cells[from].get(channel) != level {
                 continue;
             }
-            let Some([nx, ny, nz]) = inside(x, y, z, face) else {
-                continue;
-            };
-            let ni = index(nx as usize, ny as usize, nz as usize);
-            let t = if DIMMED { t.saturating_sub(dim[ni]) } else { t };
-            let open = if SHAPED {
-                edge_open(blocked[from], blocked[ni], face)
-                    && !(walls.joint[from] != 0
-                        && walls.joint[ni] != 0
-                        && walls.tables.shapes.jointly_seals(
-                            walls.joint[from],
-                            face,
-                            walls.joint[ni],
-                        ))
-            } else {
-                blocked[ni] == 0
-            };
-            if !open || cells[ni].get(channel) >= t {
-                continue;
+            for face in FACES {
+                let t = transmitted(channel, level, face);
+                if t == 0 {
+                    continue;
+                }
+                let Some(ni) = step_inside(from, face) else {
+                    continue;
+                };
+                let t = if DIMMED { t.saturating_sub(dim[ni]) } else { t };
+                let open = if SHAPED {
+                    edge_open(blocked[from], blocked[ni], face)
+                        && !(walls.joint[from] != 0
+                            && walls.joint[ni] != 0
+                            && walls.tables.shapes.jointly_seals(
+                                walls.joint[from],
+                                face,
+                                walls.joint[ni],
+                            ))
+                } else {
+                    blocked[ni] == 0
+                };
+                if !open || cells[ni].get(channel) >= t {
+                    continue;
+                }
+                cells[ni] = cells[ni].with(channel, t);
+                pending[t as usize].push(ni as u16);
             }
-            cells[ni] = cells[ni].with(channel, t);
-            queue.push([nx, ny, nz]);
         }
     }
 }
 
-/// The neighbour across `face`, or `None` where it leaves the Chunk. Light
-/// arriving from outside is a seed, never a step.
-#[inline]
-fn inside(x: u8, y: u8, z: u8, face: usize) -> Option<[u8; 3]> {
-    // The flood's innermost line, six times per Voxel per channel. Rewriting it
-    // as a `match face` with a guard per arm reads as the faster shape and
-    // measured **2.6x slower** (`light_chunk/flooded_air`, 117 us to 311 us):
-    // this form has no data-dependent branch, so the three bounds tests fold
-    // into one, while the match branches per face. Left as it is on purpose.
-    let d = FACE_STEPS[face];
-    let n = [x as i32 + d[0], y as i32 + d[1], z as i32 + d[2]];
-    let edge = CHUNK_SIZE as i32;
-    if n.iter().any(|&c| c < 0 || c >= edge) {
+/// The index of the cell across `face` from cell `i`, or `None` where that
+/// leaves the Chunk. Light arriving from outside is a seed, never a step.
+///
+/// Tables indexed by `face`, not a `match`: a branch per face in this, the
+/// flood's innermost line, measured 2.6x slower on `light_chunk/flooded_air`.
+#[inline(always)]
+fn step_inside(i: usize, face: usize) -> Option<usize> {
+    const BITS: u32 = CHUNK_SIZE.trailing_zeros();
+    // Per face, in `chunk::index`'s layout (x, then z, then y): the shift that
+    // brings its axis to the low bits, the coordinate on that axis with no
+    // neighbour, and the index step to the neighbour.
+    const SHIFT: [u32; 6] = [0, 0, 2 * BITS, 2 * BITS, BITS, BITS];
+    const EDGE: [usize; 6] = [0, CHUNK_SIZE - 1, 0, CHUNK_SIZE - 1, 0, CHUNK_SIZE - 1];
+    const STEP: [isize; 6] = [
+        -1,
+        1,
+        -((CHUNK_SIZE * CHUNK_SIZE) as isize),
+        (CHUNK_SIZE * CHUNK_SIZE) as isize,
+        -(CHUNK_SIZE as isize),
+        CHUNK_SIZE as isize,
+    ];
+    if (i >> SHIFT[face]) & (CHUNK_SIZE - 1) == EDGE[face] {
         return None;
     }
-    Some([n[0] as u8, n[1] as u8, n[2] as u8])
+    Some(i.wrapping_add_signed(STEP[face]))
 }
 
 /// [`jointly_sealed`] across a Chunk boundary, for the neighbour's Voxel at
@@ -1195,6 +1215,34 @@ mod tests {
         }
         // Fifteen Voxels, not sixteen: x = 14 is the last lit one.
         assert_eq!(light.get(14, 5, 5).sky(), 0);
+    }
+
+    #[test]
+    fn a_cell_lit_through_two_faces_keeps_the_brighter_path() {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut chunk = Chunk::air();
+        for x in 0..CHUNK_SIZE {
+            for z in 0..CHUNK_SIZE {
+                if (x, z) != (16, 16) {
+                    chunk.set(x, LAST, z, rock);
+                }
+            }
+        }
+        let (sky, side) = (full_sky(), ChunkLight::filled(Light::new(10, 0)));
+        let mut border = sky_above(&sky);
+        border[NEG_X] = beside(&side);
+        let light = light_chunk(&chunk, border, tables());
+        for y in 0..LAST {
+            for z in 0..CHUNK_SIZE {
+                for x in 0..CHUNK_SIZE {
+                    let from_hole =
+                        MAX_LIGHT.saturating_sub((x.abs_diff(16) + z.abs_diff(16)) as u8);
+                    let from_side = 9u8.saturating_sub(x as u8);
+                    let expected = from_hole.max(from_side);
+                    assert_eq!(light.get(x, y, z).sky(), expected, "at {x},{y},{z}");
+                }
+            }
+        }
     }
 
     #[test]

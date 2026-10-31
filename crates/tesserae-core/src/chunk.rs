@@ -276,6 +276,87 @@ impl Chunk {
     }
 }
 
+/// What [`Chunk::air`] becomes after a run of [`Chunk::set`]s, recorded and
+/// packed once: the same palette order, index width and words, without the
+/// index arithmetic per write or a repack each time the palette outgrows its
+/// width.
+pub struct ChunkBuilder {
+    /// Each Voxel's palette slot; slot 0 is air.
+    slots: Vec<u16>,
+    palette: Vec<Voxel>,
+    /// Whether a write other than air has promoted the Chunk to a palette, as
+    /// it would `Chunk::air`.
+    promoted: bool,
+    last: (Voxel, u16),
+}
+
+impl Default for ChunkBuilder {
+    fn default() -> Self {
+        ChunkBuilder {
+            slots: vec![0; CHUNK_VOLUME],
+            palette: vec![Voxel::AIR],
+            promoted: false,
+            last: (Voxel::AIR, 0),
+        }
+    }
+}
+
+impl ChunkBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn set(&mut self, x: usize, y: usize, z: usize, voxel: Voxel) {
+        debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
+        if !self.promoted {
+            if voxel == Voxel::AIR {
+                return;
+            }
+            self.promoted = true;
+        }
+        let slot = if voxel == self.last.0 {
+            self.last.1
+        } else {
+            let slot = match self.palette.iter().position(|&p| p == voxel) {
+                Some(i) => i,
+                None => {
+                    self.palette.push(voxel);
+                    self.palette.len() - 1
+                }
+            };
+            // Truncated as `write_index` masks a slot past 16 bits.
+            self.last = (voxel, slot as u16);
+            slot as u16
+        };
+        self.slots[index(x, y, z)] = slot;
+    }
+
+    pub fn build(self) -> Chunk {
+        if !self.promoted {
+            return Chunk::air();
+        }
+        let bits = bits_for(self.palette.len());
+        let per_word = 64 / bits as usize;
+        let words = self
+            .slots
+            .chunks_exact(per_word)
+            .map(|run| {
+                run.iter().enumerate().fold(0u64, |word, (k, &slot)| {
+                    word | (slot as u64) << (k * bits as usize)
+                })
+            })
+            .collect();
+        Chunk {
+            storage: Palette::Indexed {
+                palette: self.palette,
+                bits,
+                words,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -303,6 +384,43 @@ mod tests {
                 }
             }
             assert_eq!((row[0], row[CHUNK_SIZE + 1]), (Voxel::AIR, Voxel::AIR));
+        }
+    }
+
+    /// The same writes, in the same order, through a builder and through
+    /// `set`: the same Chunk down to its palette order, index width and words.
+    #[test]
+    fn a_built_chunk_is_what_the_same_sets_make() {
+        let cases: [(&str, usize, u16, u64); 6] = [
+            ("nothing", 0, 4, 1),
+            ("only air", 500, 0, 2),
+            ("air then solid", 5000, 3, 3),
+            ("every width", 40_000, 18, 4),
+            ("past 256 kinds", 40_000, 300, 5),
+            ("dense", 32_768, 5, 6),
+        ];
+        for (what, writes, kinds, seed) in cases {
+            let mut set = Chunk::air();
+            let mut built = ChunkBuilder::new();
+            let mut state = seed;
+            for _ in 0..writes {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let i = (state >> 20) as usize % CHUNK_VOLUME;
+                let (x, z, y) = (
+                    i % CHUNK_SIZE,
+                    i / CHUNK_SIZE % CHUNK_SIZE,
+                    i / (CHUNK_SIZE * CHUNK_SIZE),
+                );
+                let v = match kinds {
+                    0 => Voxel::AIR,
+                    k => Voxel::cube((state >> 40) as u16 % (k + 1)),
+                };
+                set.set(x, y, z, v);
+                built.set(x, y, z, v);
+            }
+            assert_eq!(format!("{:?}", built.build()), format!("{set:?}"), "{what}");
         }
     }
 
