@@ -174,19 +174,20 @@ jobs:
       # one set of fingerprints. tesserae-core is the one workspace crate whose
       # tests are CPU-bound (property and brute-force meshing and LOD checks),
       # so it alone is optimised.
-      - uses: taiki-e/install-action@v2
+      - name: Install nextest
+        uses: taiki-e/install-action@v2
         with:
           tool: nextest
 
       - name: Build tests
         run: |
-          cargo nextest run --profile ci --workspace --locked --features tesserae/dev \
+          cargo nextest run --workspace --locked --features tesserae/dev \
             --config 'profile.dev.package."*".opt-level=0' \
             --config 'profile.dev.package.tesserae-core.opt-level=3' --no-run
 
       - name: Run tests
         run: |
-          cargo nextest run --profile ci --workspace --locked --features tesserae/dev \
+          cargo nextest run --workspace --locked --features tesserae/dev \
             --config 'profile.dev.package."*".opt-level=0' \
             --config 'profile.dev.package.tesserae-core.opt-level=3'
 
@@ -196,22 +197,6 @@ jobs:
           cargo test --doc --workspace --locked --features tesserae/dev \
             --config 'profile.dev.package."*".opt-level=0' \
             --config 'profile.dev.package.tesserae-core.opt-level=3'
-
-      # Job logs need auth to read; annotations do not. One annotation, because
-      # GitHub shows only 10 per step.
-      - name: Report slowest tests
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import xml.etree.ElementTree as ET
-          cases = [
-              (float(c.get("time", 0)), c.get("classname", "") + "::" + c.get("name", ""))
-              for c in ET.parse("target/nextest/ci/junit.xml").iter("testcase")
-          ]
-          lines = [f"{t:.1f}s {n}" for t, n in sorted(cases, reverse=True)[:25]]
-          print("::notice title=slowest tests::" + "%0A".join(lines))
-          print(f"::notice title=test total::{sum(t for t, _ in cases):.0f}s over {len(cases)} tests")
-          PY
 
   benches:
     name: Benches
