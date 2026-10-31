@@ -2,7 +2,7 @@
 
 A high-performance, moddable voxel engine. Rust, Bevy 0.20, macOS first.
 
-Read [CONTEXT.md](./CONTEXT.md) for vocabulary,
+Read [GLOSSARY.md](./GLOSSARY.md) for vocabulary,
 [docs/architecture.md](./docs/architecture.md) for the shape, and
 [DESIGN.md](./DESIGN.md) for decisions and the build order.
 
@@ -101,6 +101,6 @@ ticket's `Status:` line as `needs-triage`, `needs-info`, `ready-for-agent`,
 
 ### Domain docs
 
-Single-context: [`CONTEXT.md`](./CONTEXT.md) and [`docs/adr/`](./docs/adr/) at
+Single-context: [`GLOSSARY.md`](./GLOSSARY.md) and [`docs/adr/`](./docs/adr/) at
 the repo root. Before using either, read
 [`docs/agents/domain.md`](./docs/agents/domain.md).

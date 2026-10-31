@@ -108,8 +108,8 @@ benchmarkable. CI enforces it.
 
 ## Reading order
 
-- [CONTEXT.md](CONTEXT.md) — the glossary. Voxel, Material, Shape, Chunk, Cell.
-  These are the only names used in code, docs and the mod API.
+- [GLOSSARY.md](GLOSSARY.md) — the glossary. Voxel, Material, Shape, Chunk,
+  Cell. These are the only names used in code, docs and the mod API.
 - [docs/architecture.md](docs/architecture.md) — crate boundaries, a diagram,
   and the three invariants a change can break while looking correct.
 - [DESIGN.md](DESIGN.md) — every decision and why, including the ones rejected.

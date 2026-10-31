@@ -5,7 +5,7 @@ exploring the codebase.
 
 ## Before exploring, read these
 
-- **[`CONTEXT.md`](../../CONTEXT.md)** at the repo root — the glossary.
+- **[`GLOSSARY.md`](../../GLOSSARY.md)** at the repo root — the glossary.
 - **[`docs/adr/`](../adr/)** — read ADRs that touch the area you're about to
   work in.
 - **[`docs/architecture.md`](../architecture.md)** — crate boundaries and the
@@ -22,7 +22,7 @@ Single-context repo:
 
 ```
 /
-├── CONTEXT.md
+├── GLOSSARY.md
 ├── docs/adr/
 │   ├── 0001-wasm-mod-boundary.md
 │   ├── 0002-client-server-from-day-one.md
@@ -33,12 +33,12 @@ Single-context repo:
 ```
 
 The Cargo workspace has several crates, but they are one bounded context — a
-`CONTEXT-MAP.md` is not warranted.
+`GLOSSARY-MAP.md` is not warranted.
 
 ## Use the glossary's vocabulary
 
 When your output names a domain concept (an issue title, a refactor proposal, a
-hypothesis, a test name), use the term as defined in `CONTEXT.md`. Don't drift
+hypothesis, a test name), use the term as defined in `GLOSSARY.md`. Don't drift
 to synonyms the glossary explicitly avoids: it is **Voxel**, never "block" or
 "node"; **Material** and **Shape** are distinct and neither alone identifies a
 Voxel; **Chunk** is data and **Cell** is distance.

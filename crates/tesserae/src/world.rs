@@ -2,7 +2,7 @@
 //!
 //! What a World owns: its Voxel size, its seed and its Chunks. How far the
 //! Server streams is not in here — that is a runtime setting and lives with the
-//! Server, because it is not save data. See `CONTEXT.md`.
+//! Server, because it is not save data. See `GLOSSARY.md`.
 
 use bevy::prelude::*;
 use tesserae_core::CHUNK_SIZE;

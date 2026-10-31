@@ -115,7 +115,7 @@ enum Storage {
 /// One Chunk's light. A parallel array, not a palette entry.
 ///
 /// Light is a property of the position, not of the Voxel — a Voxel is
-/// `(Material, Shape, Orientation)` and nothing else, per `CONTEXT.md`. Folding
+/// `(Material, Shape, Orientation)` and nothing else, per `GLOSSARY.md`. Folding
 /// light into [`crate::Chunk`]'s palette would also invert its compression: a
 /// uniform stone Chunk with a light gradient across it is one palette entry
 /// today and would need one per distinct (Material, level) pair, so the Chunk

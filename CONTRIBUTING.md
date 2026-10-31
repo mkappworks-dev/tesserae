@@ -96,10 +96,10 @@ We follow a standard fork-and-branch workflow:
 5. **Push** your branch to your fork.
 6. **Open a pull request** against `main` in the upstream repository.
 
-Before you start on anything non-trivial, read [CONTEXT.md](CONTEXT.md) for the
-project's vocabulary and [docs/architecture.md](docs/architecture.md) for the
-crate boundaries. Three invariants in particular are easy to break while writing
-code that looks correct, and the PR template asks about each of them.
+Before you start on anything non-trivial, read [GLOSSARY.md](GLOSSARY.md) for
+the project's vocabulary and [docs/architecture.md](docs/architecture.md) for
+the crate boundaries. Three invariants in particular are easy to break while
+writing code that looks correct, and the PR template asks about each of them.
 
 ## Development Setup
 
@@ -343,7 +343,9 @@ the [`mattpocock-skills`](https://github.com/mattpocock/skills) plugin. Using
 Claude Code is optional; the files are plain markdown and can be written by
 hand.
 
-Install the plugin once:
+Install the plugin once, at the version the repo's docs were written against
+(1.3.1). Later versions have renamed files the skills read, so check the
+changelog before updating:
 
 ```bash
 claude plugin install mattpocock-skills@claude-plugins-official
@@ -351,18 +353,25 @@ claude plugin install mattpocock-skills@claude-plugins-official
 
 Then work through the chain:
 
-| Step | Command       | What it does                                                                      | Output                                         |
-| ---- | ------------- | --------------------------------------------------------------------------------- | ---------------------------------------------- |
-| 1    | `/to-spec`    | Turns the conversation into a spec                                                | `.scratch/<date>-<slug>/spec.md`               |
-| 2    | `/to-tickets` | Splits the spec into tickets, each listing the tickets that block it              | `.scratch/<date>-<slug>/issues/<NN>-<slug>.md` |
-| 3    | `/triage`     | Moves a ticket through the triage roles; use it on anything not already triaged   | `Status:` line updated                         |
-| 4    | `/implement`  | Builds from a ticket, test-first via `/tdd` where it can; does not ask for a plan | Code and tests                                 |
+| Step | Command            | What it does                                                                                                                                                                        | Output                                         |
+| ---- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| 0    | `/grill-with-docs` | Optional, for non-trivial work: interviews you in rounds of numbered questions, each with a recommended answer, and updates `GLOSSARY.md` and ADRs as decisions land                | Decisions, glossary and ADR edits              |
+| 1    | `/to-spec`         | Turns the conversation into a spec                                                                                                                                                  | `.scratch/<date>-<slug>/spec.md`               |
+| 2    | `/to-tickets`      | Splits the spec into tickets, each listing the tickets that block it                                                                                                                | `.scratch/<date>-<slug>/issues/<NN>-<slug>.md` |
+| 3    | `/triage`          | Moves a ticket through the triage roles; use it on anything not already triaged                                                                                                     | `Status:` line updated                         |
+| 4    | `/implement`       | Builds from a ticket, test-first via `/tdd` where it can; does not ask for a plan                                                                                                   | Code and tests                                 |
+| 4    | `/implement-spec`  | Alternative to step 4 when several tickets are unblocked at once: runs one subagent per ticket in its own worktree and merges onto one integration branch, then runs `/code-review` | Code and tests                                 |
+| 5    | `/code-review`     | Reviews the branch against the repo's standards and the spec; `/implement-spec` already runs it                                                                                     | Findings                                       |
+| 6    | `/retro`           | Optional, after a hard session: what to change in the agent's environment, not the code                                                                                             | Suggestions                                    |
 
 - `/to-spec` and `/to-tickets` output is already `ready-for-agent`. Run
   `/triage` on anything else: a bug, a rough idea, or a ticket with no
   `Status:`.
 - `/implement` takes only `ready-for-agent` tickets whose `Blocked by` tickets
   are all `done`.
+- `/implement-spec` does not replace tickets; it reads them as a task graph.
+  Without `/to-tickets` it has nothing to parallelise, so use `/implement`.
+- Write the PR body with the plugin's `pr` skill and the repo template.
 - Commit spec and ticket files with the branch that writes them, and set
   `Status: done` in the same commit that finishes a ticket.
 - Roles and file conventions:
