@@ -330,9 +330,9 @@ struct LoadOrder {
     extent: Vec<IVec3>,
     priority: Order,
     offsets: Vec<IVec3>,
-    /// The same offsets by column, each column top-down. Sky light flows
-    /// downwards, so solving a Chunk before the one above it means solving it
-    /// again when the one above arrives.
+    /// The same offsets highest layer first, each layer in priority order. Sky
+    /// light flows downwards, so solving a Chunk before the one above it means
+    /// solving it again when the one above arrives.
     descending: Vec<IVec3>,
 }
 
@@ -527,9 +527,13 @@ fn stream(
         cap_m: settings.view_distance_m,
     };
     let now_s = time.map_or(0.0, |t| t.elapsed_secs_f64());
-    if order.priority.update(&ring, &aim, now_s) {
-        order.offsets = order.priority.offsets().collect();
-        order.descending = order.priority.columns_top_down();
+    {
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let _rescoring = crate::cost::Rescoring::start();
+        if order.priority.update(&ring, &aim, now_s) {
+            order.offsets = order.priority.offsets().collect();
+            order.descending = order.priority.layers_top_down();
+        }
     }
     let cell_m = world.cell_size();
     let priority = |c: ChunkCoord| {
@@ -561,7 +565,6 @@ fn stream(
         &mut store,
         &mut meshes,
         &mut jobs,
-        center,
         budget.landed_per_tick.relight,
         &priority,
     );
@@ -760,19 +763,15 @@ fn land_relight(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
     jobs: &mut Jobs,
-    center: ChunkCoord,
     budget: usize,
     priority: &dyn Fn(ChunkCoord) -> f32,
 ) {
     // Same order as dispatch: a landing that darkens nothing above it first
     // would be solved again when the one above lands.
     let mut finished: Vec<ChunkCoord> = jobs.relight.finished().collect();
-    let column = |c: ChunkCoord| priority(ChunkCoord::new(c.x, center.y, c.z));
     finished.sort_unstable_by(|&a, &b| {
-        column(a)
-            .total_cmp(&column(b))
-            .then_with(|| (a.x, a.z).cmp(&(b.x, b.z)))
-            .then_with(|| b.y.cmp(&a.y))
+        b.y.cmp(&a.y)
+            .then_with(|| priority(a).total_cmp(&priority(b)))
     });
     for coord in finished.into_iter().take(budget) {
         let Some(solved) = jobs.relight.take(coord) else {
@@ -816,8 +815,8 @@ fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord
     }
 }
 
-/// Starts light solves for Chunks whose light is out of date, by column in
-/// priority order and each column top-down, until `in_flight` are outstanding.
+/// Starts light solves for Chunks whose light is out of date, highest layer
+/// first and each layer in priority order, until `in_flight` are outstanding.
 ///
 /// Top-down because sky light flows downwards: solving a Chunk before the one
 /// above it means solving it again when the one above lands.
@@ -2087,6 +2086,54 @@ pub(in crate::server) mod tests {
             let dense = expected.values().filter(|l| l.uniform().is_none()).count();
             assert!(dense > 0, "cap {cap}: no Chunk had a gradient to get wrong");
         }
+    }
+
+    /// Light solves run per generated Chunk while a fresh region fills, at the
+    /// default budget on a pool the size of the engine's, as after a teleport.
+    fn solves_per_chunk_filling_a_fresh_region() -> f32 {
+        let mut h = Harness::new(
+            StreamingSettings {
+                view_distance_m: 96.0,
+                vertical_distance_m: 64.0,
+                ..small()
+            },
+            StreamingBudget::default(),
+        );
+        let pool = Arc::new(TaskPoolBuilder::new().num_threads(3).build());
+        {
+            let mut jobs = h.jobs_mut();
+            jobs.generate.pool = Some(pool.clone());
+            jobs.relight.pool = Some(pool.clone());
+            jobs.mesh.pool = Some(pool);
+        }
+        let ground_m = h
+            .app
+            .world()
+            .resource::<WorldGenerator>()
+            .0
+            .surface_height_m(16.0, 16.0);
+        h.anchor_at(Vec3::new(16.0, ground_m + 2.0, 16.0));
+        let (mut generated, mut solves) = (0, 0);
+        let started = std::time::Instant::now();
+        loop {
+            let (ready, unloaded) = h.tick();
+            generated += h.jobs().generate.counts().1;
+            solves += h.jobs().relight.counts().0;
+            if ready.is_empty() && unloaded.is_empty() && h.quiet() {
+                return solves as f32 / generated as f32;
+            }
+            assert!(started.elapsed() < SETTLE_CEILING, "the fill never settled");
+            std::thread::sleep(std::time::Duration::from_secs_f64(1.0 / 64.0));
+        }
+    }
+
+    /// Here the pre-03 order, highest layer first by distance, measured 3.3 and
+    /// column by column 4.2; the bound leaves room for when the pool's jobs
+    /// finish.
+    #[test]
+    fn a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above() {
+        let solves = solves_per_chunk_filling_a_fresh_region();
+        assert!(solves <= 3.6, "{solves} solves per generated Chunk");
     }
 
     /// Where a lantern next to a Chunk boundary lights two Chunks, and what

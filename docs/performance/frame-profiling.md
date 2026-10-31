@@ -191,7 +191,8 @@ measurable over logging alone, which was itself about 3.7% of median.
   on the Client from what it was sent, never from World storage. The rule in
   force is the metre cut; a Cell the cut's edge crosses is split up to three
   levels finer, then tested at its centre. A hole hidden behind nearer terrain
-  still counts.
+  still counts. Last comes `rescore_ms`: main-thread time the Server's ticks in
+  that frame spent rebuilding dispatch orders (`server::priority`), every level.
 - `frames.flow.csv` has one row per level per fixed tick: Chunks held and
   meshed, and per stage (generate, relight, mesh) the Chunks waiting to
   dispatch, in flight, and since the World opened the jobs run and their worker

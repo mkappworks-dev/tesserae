@@ -174,23 +174,14 @@ impl Order {
         self.entries.iter().map(|&(_, d)| d)
     }
 
-    /// The same offsets by column, columns in priority order and each top-down,
-    /// since sky light flows downwards.
-    pub fn columns_top_down(&self) -> Vec<IVec3> {
-        let mut column: HashMap<(i32, i32), f32> = HashMap::default();
-        for &(priority, d) in &self.entries {
-            column
-                .entry((d.x, d.z))
-                .and_modify(|p: &mut f32| *p = p.min(priority))
-                .or_insert(priority);
-        }
-        let mut out: Vec<IVec3> = self.entries.iter().map(|&(_, d)| d).collect();
-        out.sort_by(|a, b| {
-            column[&(a.x, a.z)]
-                .total_cmp(&column[&(b.x, b.z)])
-                .then_with(|| (a.x, a.z).cmp(&(b.x, b.z)))
-                .then_with(|| b.y.cmp(&a.y))
-        });
+    /// The same offsets highest layer first, each layer in priority order,
+    /// since sky light flows downwards. Not column by column, which solved
+    /// each Chunk of a fresh region a third more often (the `streaming` test
+    /// that counts solves per generated Chunk).
+    pub fn layers_top_down(&self) -> Vec<IVec3> {
+        let mut out: Vec<IVec3> = self.offsets().collect();
+        // Stable, so each layer keeps the priority order.
+        out.sort_by_key(|d| -d.y);
         out
     }
 
@@ -331,16 +322,18 @@ mod tests {
     }
 
     #[test]
-    fn columns_are_solved_top_down_in_priority_order() {
+    fn layers_are_solved_top_down_each_in_priority_order() {
         let offsets = cube(2);
         let mut order = Order::default();
         order.update(&ring(&offsets), &aim(Vec3::NEG_Z, Vec3::ZERO), 0.0);
-        let columns = order.columns_top_down();
-        assert_eq!(columns.len(), offsets.len());
-        let first = columns[0];
-        assert_eq!(first.y, 2, "a column starts at its top");
-        let column: Vec<_> = columns.iter().take(5).collect();
-        assert!(column.iter().all(|d| (d.x, d.z) == (first.x, first.z)));
-        assert!(column.windows(2).all(|w| w[0].y > w[1].y));
+        let layers = order.layers_top_down();
+        assert_eq!(layers.len(), offsets.len());
+        assert!(layers.windows(2).all(|w| w[0].y >= w[1].y));
+        let at = |d: IVec3| layers.iter().position(|&o| o == d).unwrap();
+        assert!(
+            at(IVec3::new(0, 2, -2)) < at(IVec3::new(0, 2, 2)),
+            "what is ahead comes first within a layer"
+        );
+        assert!(at(IVec3::new(0, 2, 2)) < at(IVec3::new(0, 1, -1)));
     }
 }
