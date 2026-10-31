@@ -1,38 +1,52 @@
-# Sequential PR execution and model recommendations
+# Sequential PR execution
 
-Updated 2026-10-28. This adds execution guidance to the confirmed spec;
-feature scope, dependencies and acceptance criteria remain in spec.md and
-the numbered tickets. Numbers below identify sequence positions, not GitHub
-PR numbers. P0 merged as [PR 22](https://github.com/mkappworks-dev/tesserae/pull/22);
-the condensed sequence below supersedes the earlier sixteen-position plan.
+Updated 2026-10-31 against main `ed4e6a2`. Feature scope, dependencies and
+acceptance criteria live in spec.md and the numbered tickets. Numbers below
+are sequence positions, not GitHub PR numbers; the GitHub number is in the
+last column.
 
-Default: GPT-6.1 Terra (`gpt-6.1-terra`), Medium reasoning effort.
-Use GPT-6.1 Sol (`gpt-6.1-sol`) with High effort for the investigation,
-persistence and physics scopes marked below. These are starting-point
-recommendations based on task risk, not Tesserae model benchmark results.
-The PR 1 session was launched with Sol High.
+Model: Claude Sonnet 5.5 at Medium effort by default, High for the Server
+authority, persistence, physics and session-lifecycle scopes. These are
+starting points based on task risk, not Tesserae benchmark results. Raise
+effort only for a concrete problem: repeated failed fixes, ambiguous
+ownership, concurrency or difficult state transitions.
 
-| # | Planned PR | Tickets | Model | Effort |
-| --- | --- | --- | --- | --- |
-| 1 | Profiling and release benchmarks (merged as #22) | 11–12 | Sol | High |
-| 2 | Input, actions, controls and display settings | 01–04, 28 | Terra | Medium |
-| 3 | Catalogue/creative scope completed against accepted main | 05–06, 17 | Terra | Medium |
-| 4 | Save schema, lifecycle and durable World state | 22–23 | Sol | High |
-| 5 | Flight and physics movement | 24 | Sol | High |
-| 6 | Character and first/third-person cameras | 25–26 | Terra | Medium |
-| 7 | World selection and seeded creation | 27 | Terra | Medium |
-| 8 | Use interaction and corner measurement | 20–21 | Terra | Medium |
-| 9 | Controller | 07 | Terra | Medium |
-| 10 | Desktop touch | 08–10 | Terra | Medium |
+## Merged
 
-PR 2 implementation is complete. The user's 2026-10-29 instruction authorizes
-reconciling local main, rebasing this branch, pushing it and opening a PR.
-No merge, parallel agents or automatic later sessions are authorized.
+| #   | Planned PR                                          | Tickets | GitHub    |
+| --- | --------------------------------------------------- | ------- | --------- |
+| 1   | Profiling and release benchmarks                    | 11-12   | #22       |
+| 2   | Input, actions, controls and display settings       | 01-04, 28 | #24     |
+| 3   | Catalogue and creative scope, hotbar retry fix      | 05-06, 17 | #25     |
+| 4   | Save schema, lifecycle and durable World state      | 22-23   | #23       |
+| 5   | Flight and physics movement                         | 24      | #26       |
+| 6   | Character and third-person camera                   | 25-26   | #29       |
+| 7   | World list, creation and seed selection             | 27      | #30       |
+| 8   | Explicit Use and a first measuring tool             | 20-21   | #32       |
+| 9   | Controller                                          | 07      | #28       |
+| 10  | Desktop touch contacts and overlay                  | 08-10   | #38       |
+| 11  | Repeat place and remove while held                  | 29      | #31       |
+| 12  | Water immersion: view, then movement                | 33      | #34, #37  |
+| 13  | World list window and controller follow-ups         | 32      | #33       |
+| 14  | In-process World sessions                           | 30      | #39       |
+| 15  | Multiple installed Games and per-World Mod sets     | 31      | #41       |
+| 16  | World session memory growth, accepted as a cost     | 34      | #40       |
+
+Also merged outside the ticket plan: #35 (lift a physics respawn out of
+Voxels) and #36 (CAD-style layout placement with live preview).
+
+## Open
+
+None planned.
+
+Pending validation on tickets marked done: ticket 10 (a real touchscreen),
+ticket 30 (the release RSS run over 10 open/close cycles) and ticket 32
+(native fullscreen, native keyboard navigation and a physical pad).
 
 ## Conditional experiment backlog
 
 Tickets 13–16 are hypotheses, not scheduled implementation PRs. P0 did not
-establish worthwhile gains for any of them. They do not block PR 2, and no
+establish worthwhile gains for any of them. They block nothing, and no
 PR title or implementation commitment is reserved. Each ticket records the
 specific missing evidence. Use stable matched runs at unchanged quality,
 measure an effect above overhead/variation, and preserve output and tails.
@@ -48,53 +62,8 @@ See [P0 validation](implementation-validation.md) for qualified measurements
 and evidence gates. Whole-schedule timings do not establish per-view or GPU
 bottlenecks; the broad noisy series cannot justify small gains.
 
-## Unscheduled work
-
-Ticket 29 (repeat place/remove while held) is ready-for-agent and unblocked
-now that ticket 07 merged as PR #28. It needs its own branch and slot.
-
-Ticket 30 (W1, in-process World sessions, including a loading screen before
-Mod loading) is a needs-triage backlog item with no sequence slot. It
-touches nearly every Server and Client plugin, so schedule it after PRs 6
-and 8. Ticket 32 (W0.1: window position and native fullscreen across a
-restart, the World screens' native keyboard check and their controller
-navigation) is a small separate PR that may land before 30. Ticket 31 (G0,
-multiple installed Games) is also unscheduled.
-
 ## Deferred product work
 
 Tickets 18–19, owned inventory transactions and resource persistence, remain
-deferred. They are separate from the conditional performance experiments.
-
-For Terra Medium scopes, increase effort to High only when a concrete
-problem warrants it: repeated failed fixes, ambiguous ownership, concurrency
-or difficult state transitions. Reconsider the model if that still does not
-resolve the issue. Do not make Extra high, Max or Ultra the default.
-These recommendations do not change an active session's settings or
-require extra review agents.
-
-The local T3 catalog confirms both models and Medium/High settings are
-available. Official guidance recommends evaluating reasoning effort against
-quality, latency and cost rather than assuming more effort is always better:
-[Reasoning guide](https://developers.openai.com/api/docs/guides/reasoning).
-
-## Catalogue worktree outcome
-
-The user requested reverting all PR 3 menu UI changes. Menu, settings,
-profile UI and input behavior match merged main `4b86e43`. The user then
-accepted that existing behavior as the completed scope of tickets 05, 06 and
-17. All three are marked done; their expanded, unimplemented requirements
-are removed rather than carried forward as pending work. Only a non-UI
-hotbar failed-write retry correction remains as new source in PR #25.
-
-The user subsequently authorized consolidating the remaining changes into
-one commit, pushing the branch and opening a focused bug-fix PR. Merge is
-not authorized. See [current validation](pr3-implementation-validation.md).
-
-## PR 5 implementation
-
-The user's 2026-10-29 instruction authorizes ticket 24 in its existing
-worktree against merged controls #24 and persistence #23. Historical
-readiness gates are superseded. Scope and review evidence are recorded in
-[PR 5 validation](pr5-movement-validation.md). The user later authorized
-rebasing onto main, pushing and opening the PR. Merge is not authorized.
+deferred. They are separate from the conditional performance experiments and
+become DESIGN.md step 13 (Inventory).

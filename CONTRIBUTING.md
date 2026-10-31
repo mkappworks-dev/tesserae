@@ -407,9 +407,8 @@ docs: record the client-server split as ADR-0002
 Keep the subject line under 72 characters. Add a body for additional context
 when necessary.
 
-Comment policy: write a comment only for the _why_ the code can't show — a
-hidden constraint, an invariant, a workaround, a surprise. One line by default.
-Task and history context belongs in the commit message, where it stays true.
+Comments: see the policy in [CLAUDE.md](CLAUDE.md#comments). Task and history
+context belongs in the commit message, where it stays true.
 
 ## Pull Request Process
 

@@ -64,6 +64,68 @@ original target, and completes once. A second tap cancels it. Invalid aim, a
 lost or changed target, or another selection/edit/history action cancels it
 without restarting.
 
+**Use** (**G**, or D-pad up) asks the Server to use the aimed Voxel with a held
+tool. **M** cycles the declared tools, past the last returns the previous hand,
+and **Backspace** puts the tool away. While a tool is held, Place and Remove are
+the tool's verbs and Edits are inert; undo and redo stay live. One Use per
+press, never repeated while held, and a Use never enters the undo journal. A
+refusal raises the usual alert; success raises none. A tool is never stored in a
+slot or saved.
+
+**Repeat while held** is a Behavior preference, off by default. With it on, a
+held Remove starts a fresh timed removal on the next target after each one
+completes, and a held Place sends its first intent on press, then another every
+0.2 s after 0.25 s. Only solids repeat; fluids and fire never do. A refused
+repeat is silent. Releasing, losing the target, opening a menu or changing
+device, hand, Shape or orientation stops the chain.
+
+Underwater, a submerged camera swaps to a short-range fog and tint in the
+fluid's colour. In physics movement a body floats, sinks and swims in a fluid,
+and Jump held swims up; flight ignores water.
+
+## Controller
+
+A gamepad plays through the same actions as the keyboard. The sticks move and
+look; menus use fixed focus navigation with no virtual mouse. Pad bindings are a
+separate set in the same profile, two alternatives per action and no modifiers,
+and are checked for conflicts only against other pad bindings.
+
+| Input               | Default action                  |
+| ------------------- | ------------------------------- |
+| Left stick, click   | Move, Sprint (latched)          |
+| Right stick, click  | Look, Sample                    |
+| South (A), East (B) | Ascend, Descend (crouch toggle) |
+| North (Y), West (X) | Catalogue, Shape                |
+| Right trigger, left | Remove (hold), Place            |
+| Bumpers             | Previous, next quick slot       |
+| D-pad left, right   | Turn, Flip                      |
+| D-pad down, up      | Empty hand, Use                 |
+| Start, Select       | Help, Movement mode             |
+
+Pad look sensitivity, invert Y, both deadzones (0.15) and crouch toggle are pad
+preferences, separate from the mouse ones. The Guide button is never bound. Only
+the pad models recorded in the validation notes are claimed to work.
+
+## Touch
+
+Touch is for desktop touchscreens on Windows and Linux. winit never delivers
+touch events on macOS, so macOS is unclaimed. Each contact owns one role from
+start to end: Move, Look, a button, or UI. A contact that slides off a button
+still belongs to it, and extra contacts beyond four are ignored. Touch bindings
+are fixed and not remappable. Touching the world shows the overlay; deliberate
+key, mouse or pad use hides it. Mouse events that follow a touch within 0.3 s
+are treated as the OS's emulation of it and ignored.
+
+The overlay has a stick on the left, look on the right, and buttons for Place,
+Remove (hold), Use, Sample, Ascend, Descend, Sprint, slots, Shape, Turn, Flip,
+empty hand and view. A Menu button sits in a top corner. Targets are at least 44
+logical pixels with 8 pixel gaps. Touch preferences cover look sensitivity,
+invert Y, a mirrored layout, size (small, normal, enlarged) and opacity.
+Catalogue and menus work without hover or drag: tap selects and a separate
+**Assign to slot** control assigns. A drag past 6 pixels scrolls and never
+selects. Text entry uses the physical keyboard. Touch is implemented and tested
+with injected events but not yet validated on a real touchscreen.
+
 Mouse sensitivity, invert Y, scroll direction and scroll sensitivity are user
 preferences. Labels use observed logical keyboard events separately from the
 serialized physical key identifiers. Keys without an observed logical event use
