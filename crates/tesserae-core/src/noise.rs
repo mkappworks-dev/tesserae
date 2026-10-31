@@ -166,8 +166,11 @@ const CACHED_OCTAVES: usize = 4;
 /// corners is most of what a sample costs.
 #[derive(Clone, Copy, Default)]
 pub struct Fbm3Cache {
-    cells: [Option<(u32, [i32; 3], [f32; 8])>; CACHED_OCTAVES],
+    cells: [Option<CachedCell>; CACHED_OCTAVES],
 }
+
+/// A seed, a cell and the noise at its eight corners.
+type CachedCell = (u32, [i32; 3], [f32; 8]);
 
 /// [`fbm3`], bit for bit, reusing the corners of a cell the last sample of the
 /// same octave and seed fell in.
