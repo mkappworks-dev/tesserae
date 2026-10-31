@@ -1829,6 +1829,12 @@ mod tests {
         let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
         app.update();
         assert!(app.world().resource::<Switch>().0.is_none());
+        let has_open = app
+            .world_mut()
+            .query::<&Act>()
+            .iter(app.world())
+            .any(|a| *a == Act::Open);
+        assert!(!has_open, "Open is not offered while items are unmet");
         assert_eq!(
             app.world().resource::<Installed>().unmet(&needs),
             vec!["Mod `lake` 1.0 is not installed".to_string()]

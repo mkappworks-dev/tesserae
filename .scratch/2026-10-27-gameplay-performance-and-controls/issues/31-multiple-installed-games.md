@@ -1,6 +1,6 @@
 # 31: G0: Multiple installed Games and per-World Mod sets
 
-Status: done
+Status: ready-for-agent
 Blocked by: none (27 and 30 are done)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -97,7 +97,7 @@ existing World.
       intact.
 - [x] The Create form lists Games and Mods and is fully operable with
       keyboard, controller and touch.
-- [x] The soak harness (`TESSERAE_SOAK_CYCLES`) gains a mode that alternates
+- [ ] The soak harness (`TESSERAE_SOAK_CYCLES`) gains a mode that alternates
       two Games; counts do not grow, and RSS growth is no worse than ticket
       34's baseline.
 - [x] The 0.3 WIT contract, the manifest fields and ADR-0001's batched
