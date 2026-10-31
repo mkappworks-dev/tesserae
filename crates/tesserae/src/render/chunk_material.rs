@@ -115,7 +115,7 @@ impl MaterialExtension for ChunkMaterialExtension {
         // A packed Chunk mesh has none of `bevy_pbr`'s attributes, so the base
         // material's layout is empty and the packed one has to be declared
         // here. Spelling the set out is safe because this material is only
-        // ever used on meshes from `chunk_mesh_to_mesh`.
+        // ever used on meshes from `merged_mesh`.
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
             ATTRIBUTE_POSITION_FACE.at_shader_location(0),
             ATTRIBUTE_UV.at_shader_location(1),

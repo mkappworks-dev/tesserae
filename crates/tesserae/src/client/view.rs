@@ -4,7 +4,7 @@
 use super::actions::{Action, Actions};
 use super::avatar::AvatarShown;
 use super::camera::FlyCamera;
-use super::chunk_mesh;
+use super::chunk_mesh::{self, PackedLayer};
 use super::chunk_view::ChunkEntities;
 use super::preview::HandCamera;
 use super::profile::{Preferences, Store};
@@ -181,9 +181,9 @@ type QuadBoxes = Arc<[(Vec3, Vec3)]>;
 pub(super) struct Obstacles<'w, 's> {
     world: Res<'w, WorldSettings>,
     chunks: Res<'w, ChunkEntities>,
-    layers: Query<'w, 's, (&'static Mesh3d, &'static Transform), Without<FlyCamera>>,
-    meshes: Res<'w, Assets<Mesh>>,
-    cache: Local<'s, HashMap<AssetId<Mesh>, (bool, QuadBoxes)>>,
+    /// By the part's address. An entry holds its part, so the address cannot
+    /// be reused while it is cached.
+    cache: Local<'s, HashMap<usize, (bool, Arc<PackedLayer>, QuadBoxes)>>,
 }
 
 impl Obstacles<'_, '_> {
@@ -199,15 +199,12 @@ impl Obstacles<'_, '_> {
             for y in lo.y..=hi.y {
                 for z in lo.z..=hi.z {
                     let coord = ChunkCoord::new(x, y, z);
-                    let entities: Vec<Entity> = self.chunks.solid_at(coord).collect();
-                    for entity in entities {
-                        let Ok((mesh, &transform)) = self.layers.get(entity) else {
-                            continue;
-                        };
-                        let handle = mesh.0.clone();
-                        let Some(boxes) = self.boxes(&handle) else {
-                            continue;
-                        };
+                    let transform = Transform::from_translation(self.world.chunk_origin(coord))
+                        .with_scale(Vec3::splat(self.world.voxel_size_at(0)));
+                    let parts: Vec<Arc<PackedLayer>> =
+                        self.chunks.solid_at(coord).cloned().collect();
+                    for part in parts {
+                        let boxes = self.boxes(part);
                         for &(min, max) in boxes.iter() {
                             let (min, max) = (
                                 transform.transform_point(min),
@@ -229,36 +226,35 @@ impl Obstacles<'_, '_> {
         nearest
     }
 
-    fn boxes(&mut self, handle: &Handle<Mesh>) -> Option<QuadBoxes> {
-        let id = handle.id();
-        if let Some((used, boxes)) = self.cache.get_mut(&id) {
+    fn boxes(&mut self, part: Arc<PackedLayer>) -> QuadBoxes {
+        let at = Arc::as_ptr(&part) as usize;
+        if let Some((used, _, boxes)) = self.cache.get_mut(&at) {
             *used = true;
-            return Some(boxes.clone());
+            return boxes.clone();
         }
-        let boxes = quad_boxes(self.meshes.get(id)?)?;
-        self.cache.insert(id, (true, boxes.clone()));
-        Some(boxes)
+        let boxes = quad_boxes(&part);
+        self.cache.insert(at, (true, part, boxes.clone()));
+        boxes
     }
 
     fn forget_unused(&mut self) {
-        self.cache.retain(|_, (used, _)| std::mem::take(used));
+        self.cache.retain(|_, (used, _, _)| std::mem::take(used));
     }
 }
 
 /// One box per greedy quad, from the six indices that draw it, in Voxels.
-fn quad_boxes(mesh: &Mesh) -> Option<QuadBoxes> {
-    let layer = chunk_mesh::decoded(mesh)?;
-    Some(
-        layer
-            .indices
-            .chunks(6)
-            .map(|quad| {
-                quad.iter()
-                    .map(|&i| Vec3::from_array(layer.positions[i as usize]))
-                    .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
-            })
-            .collect(),
-    )
+fn quad_boxes(part: &PackedLayer) -> QuadBoxes {
+    part.indices
+        .chunks(6)
+        .map(|quad| {
+            quad.iter()
+                .map(|&i| {
+                    let p = part.position_face[i as usize];
+                    Vec3::new(p[0].into(), p[1].into(), p[2].into()) / chunk_mesh::STEPS
+                })
+                .fold((Vec3::MAX, Vec3::MIN), |(lo, hi), p| (lo.min(p), hi.max(p)))
+        })
+        .collect()
 }
 
 /// Where the segment enters the box, as a fraction of it, if it does from
@@ -327,8 +323,8 @@ mod tests {
     }
 
     /// A drawn face across the whole Chunk, `z` metres into it.
-    fn wall(app: &mut App, z: f32) -> Entity {
-        chunk_layer(app, &[(2, z)], 32.0)
+    fn wall(app: &mut App, z: f32) {
+        chunk_layer(app, &[(2, z)], 32.0);
     }
 
     /// Drawn faces across the whole Chunk, each at `at` metres along `axis`,
@@ -338,15 +334,17 @@ mod tests {
         chunk_layer(app, faces, edge);
     }
 
-    /// Faces `edge` metres square at a metre a Voxel, so the mesh is in metres.
-    fn chunk_layer(app: &mut App, faces: &[(usize, f32)], edge: f32) -> Entity {
+    /// Faces `edge` metres square, as the Chunk at the origin's only solid
+    /// layer, replacing any before it.
+    fn chunk_layer(app: &mut App, faces: &[(usize, f32)], edge: f32) {
+        let voxel_m = app.world().resource::<WorldSettings>().voxel_size_at(0);
         let mut layer = tesserae_core::MeshLayer::default();
         for &(axis, at) in faces {
             let corner = |u: f32, v: f32| {
                 let mut p = [0.0; 3];
-                p[axis] = at;
-                p[(axis + 1) % 3] = u;
-                p[(axis + 2) % 3] = v;
+                p[axis] = at / voxel_m;
+                p[(axis + 1) % 3] = u / voxel_m;
+                p[(axis + 2) % 3] = v / voxel_m;
                 p
             };
             let mut normal = [0.0; 3];
@@ -364,16 +362,9 @@ mod tests {
             layer.light.extend([0; 4]);
             layer.indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
         }
-        let mesh = chunk_mesh::chunk_mesh_to_mesh(&layer);
-        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
-        let entity = app
-            .world_mut()
-            .spawn((Mesh3d(handle), Transform::default()))
-            .id();
         app.world_mut()
             .resource_mut::<ChunkEntities>()
-            .insert_opaque(ChunkCoord::new(0, 0, 0), entity);
-        entity
+            .insert_opaque(ChunkCoord::new(0, 0, 0), chunk_mesh::pack(&layer));
     }
 
     /// A one-metre corridor closed at both ends, with a floor and a ceiling
@@ -477,7 +468,7 @@ mod tests {
             .unwrap();
         assert!(!hand.is_active, "no corner model in third-person");
 
-        let near = wall(&mut app, EYE.z + 2.0);
+        wall(&mut app, EYE.z + 2.0);
         app.update();
         let boom = camera(&mut app).z - EYE.z;
         assert!(
@@ -485,7 +476,6 @@ mod tests {
             "{boom}"
         );
 
-        app.world_mut().despawn(near);
         wall(&mut app, EYE.z + 0.625);
         app.update();
         assert!(!app.world().resource::<AvatarShown>().0, "inside the head");
