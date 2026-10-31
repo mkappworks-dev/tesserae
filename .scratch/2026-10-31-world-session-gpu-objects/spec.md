@@ -1,6 +1,6 @@
 # Release a World session's wgpu buffers and bind groups
 
-Status: ready-for-agent
+Status: done
 Ticket: [34](../2026-10-27-gameplay-performance-and-controls/issues/34-world-session-memory-growth.md),
 the optional bounded PR.
 
