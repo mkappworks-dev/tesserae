@@ -681,11 +681,7 @@ mod tests {
     fn one_camera_draws_every_level_clears_the_target_and_owns_the_ui() {
         let streaming = StreamingSettings::default();
         let mut app = camera_app(Vec3::ZERO, streaming);
-        let cameras = app
-            .world_mut()
-            .query::<&Camera>()
-            .iter(app.world())
-            .count();
+        let cameras = app.world_mut().query::<&Camera>().iter(app.world()).count();
         assert_eq!(cameras, 1);
         let (camera, ui, layers) = {
             let mut query = app
@@ -764,7 +760,11 @@ mod tests {
             .world_mut()
             .query::<(&DirectionalLight, &RenderLayers)>();
         let suns: Vec<_> = suns.iter(app.world()).collect();
-        assert_eq!(suns.len(), 1, "a second sun would light coarse terrain twice");
+        assert_eq!(
+            suns.len(),
+            1,
+            "a second sun would light coarse terrain twice"
+        );
         let (sun, layers) = suns[0];
         assert!(sun.shadow_maps_enabled);
         assert_eq!(*layers, RenderLayers::layer(NEAR_LAYER));
