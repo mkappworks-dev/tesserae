@@ -148,20 +148,32 @@ fn packed_octant(child: &Chunk, i: usize, shapes: &ShapeTable, out: &mut Chunk) 
         }
         return;
     }
+    // Row `dy + 2dz` of the 2x2 the current coarse row reads.
+    let mut rows = [[Voxel::AIR; CHUNK_SIZE]; 4];
     for z in 0..OCTANT {
         for y in 0..OCTANT {
+            for (k, row) in rows.iter_mut().enumerate() {
+                child.read_row(2 * y + (k & 1), 2 * z + (k >> 1), row);
+            }
             for x in 0..OCTANT {
-                let (lx, ly, lz) = (2 * x, 2 * y, 2 * z);
-                let mut tally = Tally::<8>::new();
-                for dz in 0..2 {
-                    for dy in 0..2 {
-                        for dx in 0..2 {
-                            let v = child.get(lx + dx, ly + dy, lz + dz);
-                            tally.add(v.material(), weight(shapes, v), dy as u8);
+                let lx = 2 * x;
+                let first = rows[0][lx];
+                let v = if rows.iter().all(|r| r[lx] == first && r[lx + 1] == first) {
+                    // What the tally makes of eight of one Voxel.
+                    if 8 * weight(shapes, first) >= SOLID_AT {
+                        Voxel::cube(first.material())
+                    } else {
+                        Voxel::AIR
+                    }
+                } else {
+                    let mut tally = Tally::<8>::new();
+                    for (k, row) in rows.iter().enumerate() {
+                        for v in [row[lx], row[lx + 1]] {
+                            tally.add(v.material(), weight(shapes, v), (k & 1) as u8);
                         }
                     }
-                }
-                let v = tally.finish();
+                    tally.finish()
+                };
                 if !v.is_air() {
                     out.set(ox + x, oy + y, oz + z, v);
                 }
