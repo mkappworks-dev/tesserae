@@ -173,6 +173,22 @@ impl Installed {
         }
     }
 
+    #[cfg(test)]
+    pub fn with_mod(mut self, id: &str, depends: &[&str]) -> Self {
+        self.mods.push(GameRef {
+            id: id.into(),
+            version: "1".into(),
+        });
+        let mut manifest = test_manifest(id);
+        manifest.depends = depends.iter().map(|d| d.to_string()).collect();
+        self.found.push(tesserae_mods::Found {
+            manifest,
+            dir: PathBuf::new(),
+            manifest_bytes: Vec::new(),
+        });
+        self
+    }
+
     /// Finds which of `ids` lack a Trust grant for their exact bytes. Hashing waits until a World
     /// is about to open so the scan stays cheap.
     pub fn prepare_trust(&mut self, ids: &[String]) -> Result<(), String> {
@@ -200,6 +216,53 @@ impl Installed {
             }
         }
         Ok(())
+    }
+
+    fn depends_of(&self, id: &str) -> &[String] {
+        self.found
+            .iter()
+            .find(|f| f.manifest.id == id)
+            .map_or(&[], |f| &f.manifest.depends)
+    }
+
+    /// Every Mod `picked` needs, itself included, with dependencies resolved transitively. Ids
+    /// that are the chosen Game or not installed Mods are left out; [`Installed::blocked`] reports
+    /// the latter.
+    pub fn closure(&self, picked: &std::collections::BTreeSet<String>) -> Vec<String> {
+        let mut out = std::collections::BTreeSet::new();
+        let mut todo: Vec<&str> = picked.iter().map(String::as_str).collect();
+        while let Some(id) = todo.pop() {
+            if self.mods.iter().any(|m| m.id == id) && out.insert(id.to_string()) {
+                todo.extend(self.depends_of(id).iter().map(String::as_str));
+            }
+        }
+        self.mods
+            .iter()
+            .filter(|m| out.contains(&m.id))
+            .map(|m| m.id.clone())
+            .collect()
+    }
+
+    /// Why a Mod cannot be used with `game`: a dependency that is neither that Game nor an
+    /// installed Mod.
+    pub fn blocked(&self, game: &str, id: &str) -> Option<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        let mut todo = vec![id];
+        while let Some(next) = todo.pop() {
+            if !seen.insert(next) {
+                continue;
+            }
+            for dep in self.depends_of(next) {
+                if dep == game {
+                    continue;
+                }
+                if !self.mods.iter().any(|m| &m.id == dep) {
+                    return Some(format!("needs `{dep}`, which is not installed"));
+                }
+                todo.push(dep);
+            }
+        }
+        None
     }
 
     /// The ids a World without a record would load: the first Game and every Mod.
@@ -266,6 +329,32 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_mods(deps: &[(&str, &[&str])]) -> Installed {
+        let mut installed = Installed::fake(Some(("demo", "0.1.0")), &[]);
+        for (id, depends) in deps {
+            installed = installed.with_mod(id, depends);
+        }
+        installed
+    }
+
+    #[test]
+    fn picking_a_mod_pulls_in_its_dependencies_in_install_order() {
+        let installed = with_mods(&[("a", &["b"]), ("b", &["c", "demo"]), ("c", &[]), ("d", &[])]);
+        let picked = ["a".to_string()].into();
+        assert_eq!(installed.closure(&picked), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn a_mod_with_a_missing_dependency_is_blocked_with_the_reason() {
+        let installed = with_mods(&[("a", &["b"]), ("b", &["ghost"]), ("ok", &["demo"])]);
+        assert_eq!(
+            installed.blocked("demo", "a").as_deref(),
+            Some("needs `ghost`, which is not installed")
+        );
+        assert_eq!(installed.blocked("demo", "ok"), None);
+        assert!(installed.blocked("other", "ok").is_some());
+    }
 
     fn args(list: &[&str]) -> Vec<OsString> {
         list.iter().map(OsString::from).collect()
