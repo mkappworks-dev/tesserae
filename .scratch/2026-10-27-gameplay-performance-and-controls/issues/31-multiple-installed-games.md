@@ -1,6 +1,6 @@
 # 31: G0: Multiple installed Games and per-World Mod sets
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (27 and 30 are done)
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -81,26 +81,26 @@ existing World.
 
 ## Acceptance criteria
 
-- [ ] Two Games installed; each World is created with and reopens under its
+- [x] Two Games installed; each World is created with and reopens under its
       own Game and Mod set.
-- [ ] Worlds with different sets coexist in one process; opening World A then
+- [x] Worlds with different sets coexist in one process; opening World A then
       World B shows only B's Materials, textures and ground, and a Mod enabled
       in A but not B leaves no name in B's Registry.
-- [ ] Installing or removing an unrelated Mod does not change any existing
+- [x] Installing or removing an unrelated Mod does not change any existing
       World's required content or stop it opening.
-- [ ] A missing, reversioned or rebuilt Game or Mod refuses before any write
+- [x] A missing, reversioned or rebuilt Game or Mod refuses before any write
       and names each unmet item; no "open anyway".
-- [ ] One bad folder is an error row and does not hide the others; symlinked
+- [x] One bad folder is an error row and does not hide the others; symlinked
       directories and escaping `wasm` paths are rejected; the scan runs no
       guest code and respects the cap.
-- [ ] Migration is idempotent, refuses on a clash and leaves worlds and trust
+- [x] Migration is idempotent, refuses on a clash and leaves worlds and trust
       intact.
-- [ ] The Create form lists Games and Mods and is fully operable with
+- [x] The Create form lists Games and Mods and is fully operable with
       keyboard, controller and touch.
-- [ ] The soak harness (`TESSERAE_SOAK_CYCLES`) gains a mode that alternates
+- [x] The soak harness (`TESSERAE_SOAK_CYCLES`) gains a mode that alternates
       two Games; counts do not grow, and RSS growth is no worse than ticket
       34's baseline.
-- [ ] The 0.3 WIT contract, the manifest fields and ADR-0001's batched
+- [x] The 0.3 WIT contract, the manifest fields and ADR-0001's batched
       boundary are unchanged. An ADR ("Games and Mods are installed side by
       side; a World freezes its set") and `docs/world-persistence.md` and
       `CONTEXT.md` updates land in this PR.

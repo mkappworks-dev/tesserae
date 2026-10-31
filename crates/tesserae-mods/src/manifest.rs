@@ -246,8 +246,7 @@ fn discover(dir: &Path, role: Role, rejects: &mut Vec<Rejected>) -> Result<Vec<F
         Err(e) => return Err(io(dir, who, e)),
     };
     let mut folders = Vec::new();
-    let mut read = 0;
-    for entry in entries {
+    for (read, entry) in entries.enumerate() {
         if read == MAX_SCAN_ENTRIES {
             rejects.push(rejected(
                 dir,
@@ -255,7 +254,6 @@ fn discover(dir: &Path, role: Role, rejects: &mut Vec<Rejected>) -> Result<Vec<F
             ));
             break;
         }
-        read += 1;
         let entry = entry.map_err(|e| io(dir, who, e))?;
         let kind = entry.file_type().map_err(|e| io(dir, who, e))?;
         if kind.is_symlink() {

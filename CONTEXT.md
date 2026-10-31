@@ -11,10 +11,12 @@ that are hard to reverse.
 **Engine** — Tesserae itself. Ships no gameplay.
 
 **Game** — a Mod whose manifest declares it a root. There is one loader and one
-format; a game is not a separate kind of thing.
+format; a game is not a separate kind of thing. Several are installed side by
+side under `games/`; a World uses exactly one.
 
 **Mod** — a unit of content loaded by the engine. Declares block behaviour,
-entities, recipes, worldgen parameters, assets.
+entities, recipes, worldgen parameters, assets. Installed under `mods/`; a World
+freezes the set chosen at Create, dependencies included.
 
 **Look pack** — a Mod that supplies rendering appearance only: materials and
 post-process settings. The equivalent of a Minecraft shaderpack.

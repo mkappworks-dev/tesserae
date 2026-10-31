@@ -105,6 +105,14 @@ struct Card {
     save_untouched: bool,
 }
 
+/// The folders the list shows, in order; the soak run alternates between them.
+pub(super) fn listed(world: &World) -> Vec<PathBuf> {
+    world
+        .get_resource::<Launcher>()
+        .map(|l| l.entries.iter().map(|e| e.path.clone()).collect())
+        .unwrap_or_default()
+}
+
 #[derive(Resource)]
 struct Launcher {
     screen: Screen,
@@ -1199,7 +1207,7 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
                     min_width: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|side| details(side, entry, &installed));
+                .with_children(|side| details(side, entry, installed));
         }
     });
     focus

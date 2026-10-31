@@ -14,11 +14,13 @@ Each World folder is named once from the World's name, sanitized for macOS,
 Linux and Windows and suffixed on a case-insensitive collision; it is never
 renamed. Identity stays the commits' UUID. A copied folder keeps that UUID,
 which is harmless: nothing global is keyed by it, and the list is keyed by path.
-A `world.json` sidecar holds display details only: name, Game, resolved seed,
-Voxel size, created and last-played times, the UUID and a `pending` flag.
-Commits stay authoritative. A missing or corrupt sidecar never hides a folder;
-Rename rebuilds it from the newest commit. The single pre-list `worlds/default`
-World is adopted as "Default World".
+A `world.json` sidecar holds display details only: name, Game, Mods (id and
+version), resolved seed, Voxel size, created and last-played times, the UUID and
+a `pending` flag. Commits stay authoritative, and their required content decides
+what loads: a missing or reversioned Game or Mod refuses the open before any
+write. A missing or corrupt sidecar never hides a folder; Rename rebuilds it
+from the newest commit. The single pre-list `worlds/default` World is adopted as
+"Default World".
 
 Create writes the folder and a `pending` sidecar, then restarts on it. A folder
 without commits takes its UUID, seed and Voxel size from that sidecar and writes
