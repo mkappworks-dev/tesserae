@@ -1,11 +1,18 @@
 ## Summary
 
-Brief description of what this PR does and why.
+<!-- The smallest visual that makes the change clear: pseudocode, a call tree,
+a file tree, Mermaid or a diff. One line of prose at most. -->
 
-## Changes
+## Evidence
 
--
--
+- **Before:** <failing test, output or screenshot>
+- **After:** <passing test, output or screenshot>
+
+## Merge Danger
+
+**Door:** <one-way or two-way>
+
+**Blast Radius:** <one word>
 
 ## Checklist
 
@@ -40,12 +47,12 @@ These break while looking correct. See
 ### When it applies
 
 - [ ] If `tesserae-core` changed, `cargo bench -p tesserae-core` was run and
-      before/after numbers are in the Summary
+      before/after numbers are in Evidence
 - [ ] If the chunk save format changed, its version was bumped and a migration
       path exists — saved worlds must still load
 - [ ] If a WIT interface changed, the contract version was bumped and the change
       is listed here; mods compile against the published contract only
-- [ ] If a domain term was added or redefined, [CONTEXT.md](../CONTEXT.md) was
+- [ ] If a domain term was added or redefined, [GLOSSARY.md](../GLOSSARY.md) was
       updated in this PR
 - [ ] If a hard-to-reverse decision was made, an ADR was added under
       [docs/adr/](../docs/adr/)

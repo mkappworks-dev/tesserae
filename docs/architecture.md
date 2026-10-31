@@ -237,7 +237,7 @@ Each of these is a mistake that will not look wrong in review.
 
 ```
 tesserae/
-├── CONTEXT.md                  glossary — the only names used anywhere
+├── GLOSSARY.md                  glossary — the only names used anywhere
 ├── DESIGN.md                   decisions, build order, open items
 ├── Cargo.toml                  workspace
 ├── docs/
