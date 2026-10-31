@@ -157,7 +157,18 @@ pub fn plugin(app: &mut App) {
         .add_session_systems(
             FixedPostUpdate,
             sample_flow.after(crate::server::streaming::stats::Published),
-        );
+        )
+        .add_session_systems(Startup, open_session);
+}
+
+/// `begin` runs in `First`, before the state moves into the World, so a
+/// reopened session's first frame would otherwise start at the previous
+/// session's last and hide the reopen inside one frame.
+fn open_session(mut profile: ResMut<Profile>) {
+    if !profile.rows.is_empty() {
+        profile.start = Instant::now();
+        profile.cpu = thread_cpu();
+    }
 }
 
 fn sample_flow(mut profile: ResMut<Profile>, streaming: Res<StreamingStats>) {
@@ -263,7 +274,7 @@ fn save(
     );
     writeln!(
         out,
-        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks,rule_holes,fill_holes{}",
+        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,fixture_moves,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks,rule_holes,fill_holes{}",
         (0..LEVELS)
             .map(|l| format!(",rule_holes_l{l},fill_holes_l{l}"))
             .chain(std::iter::once(",chunk_entities".to_string()))
@@ -274,7 +285,7 @@ fn save(
         let phase = phase(r.start_s);
         write!(
             out,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.id,
             r.start_s,
             r.start_s + r.interval_s,
@@ -302,6 +313,7 @@ fn save(
             r.fixture.ready,
             r.fixture.ignitions,
             r.fixture.fire_burning,
+            r.fixture.moves,
             r.save.snapshots,
             r.save.snapshot_ms,
             r.save.worker_ms,
@@ -518,6 +530,49 @@ mod tests {
         assert!(profile.rows[0].interval_s >= 0.75);
         assert_eq!(profile.rows[0].cpu_s, Some(0.01));
         assert_eq!(profile.rows[0].start_s, 1.25);
+    }
+
+    #[test]
+    fn a_reopened_session_starts_its_first_frame_when_it_opens() {
+        let mut app = App::new();
+        let long_ago = Instant::now() - std::time::Duration::from_secs(5);
+        let row = Row {
+            id: 0,
+            start_s: 0.0,
+            interval_s: 0.01,
+            wall_s: 0.01,
+            cpu_s: None,
+            cost: FrameCost::default(),
+            sim: SimulationProfile::default(),
+            save: crate::server::persistence::SaveProfile::default(),
+            fixture: ProfileFixtureStatus::default(),
+            shown: false,
+            settled: false,
+            focused: false,
+            holes: Holes::default(),
+            visible: [0; CAMERAS],
+        };
+        app.insert_resource(Profile {
+            origin: long_ago,
+            start: long_ago,
+            cpu: None,
+            path: std::path::PathBuf::new(),
+            rows: Vec::new(),
+            flow: Vec::new(),
+            saved: false,
+            render: RenderSamples::default(),
+            gpu: gpu::GpuSamples::default(),
+            surfaces: SurfaceConfigurations::default(),
+            presentation: String::new(),
+            pending: None,
+        });
+        app.add_systems(Update, open_session);
+        app.update();
+        // The first session's first frame keeps the startup stall.
+        assert_eq!(app.world().resource::<Profile>().start, long_ago);
+        app.world_mut().resource_mut::<Profile>().rows.push(row);
+        app.update();
+        assert!(app.world().resource::<Profile>().start.elapsed().as_secs_f64() < 1.0);
     }
 
     #[test]
