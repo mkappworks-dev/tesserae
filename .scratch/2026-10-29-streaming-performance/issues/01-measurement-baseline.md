@@ -49,9 +49,9 @@ register in `server/profile_fixture.rs` (the name list at line 16),
 
 - [ ] The baseline `dive` series reports rule holes, and a review capture of a
       hole frame shows the hole where the count places it.
-- [ ] Every new column stays within the profiler's overhead bound (3% of
+- [x] Every new column stays within the profiler's overhead bound (3% of
       median, 6% of p99). A column over it is opt-in and off in timing runs.
-- [ ] GPU time is attributed per pass. If it cannot be, this ticket stays open
+- [x] GPU time is attributed per pass. If it cannot be, this ticket stays open
       as `needs-info` for you, and 07, 08, 09 and 10 stay blocked.
 - [ ] The checkpoint names which sprint stalls and what dominates it.
 
@@ -117,3 +117,56 @@ per fixture).
 Proposed order, for your approval: 02 (no gaps), 03 (priority), 07 (cameras),
 04 (coarse generation, now with the hole-extent finding), then 14 only if the
 presented run shows the sprint stall; the rest unchanged.
+
+### 2026-10-31: rebased baseline and profiler overhead
+
+The branch was rebased onto `main` at `4247012` (#41). Two fixes first: since
+sessions (#39) the profiler's frame systems and the hole count ran before a
+World existed and panicked, and now run as session systems (`4aa94df`); and
+`LayoutMenu::opened` failed `cargo bench --no-run` (`5f3d2ad`, from #36). The
+b5637df series above predates seven merges and is superseded as the before
+side; its GPU attribution still stands.
+
+Overhead, from matched on/off rounds (legacy summary median, ms, 3 rounds of
+`stationary` and `sprint-flight`):
+
+| Logging            | stationary | sprint-flight | vs off     |
+| ------------------ | ---------- | ------------- | ---------- |
+| off                | 7.9        | 8.1           |            |
+| CSV only           | 8.2        | 8.4           | +3.7%      |
+| CSV and hole count | 8.1        | 8.0           | no more    |
+| CSV and GPU marks  | 9.6        | 9.4           | +16 to 21% |
+
+The GPU markers were the 19% in the b5637df on/off pairs. They and the hole
+count are now opt-in (`--instruments gpu holes`); timing series run with holes
+only. CSV logging alone sits just over 3% of median, a cost both sides of an A/B
+pay equally; p99 differences were not systematic in three rounds.
+
+New baseline: executable `3bf8f416...` (release, `profiling`, `4aa94df`),
+`main`'s demo dist, offscreen 1080p, 3 interleaved rounds, holes counted,
+`/tmp/claude-streaming-impl/baseline`. Fixture phase, ms:
+
+| Fixture       | p50 (runs)       | p95   | p99   | max  | >16.7 | >33 |
+| ------------- | ---------------- | ----- | ----- | ---- | ----- | --- |
+| stationary    | 8.30, 9.01, 8.09 | 11.31 | 12.80 | 26.4 | 5     | 0   |
+| flight        | 8.41, 8.26, 8.04 | 10.47 | 11.77 | 29.6 | 5     | 0   |
+| active        | 7.82, 8.11, 8.60 | 10.77 | 12.90 | 26.8 | 7     | 0   |
+| transparency  | 8.98, 8.61, 8.55 | 11.08 | 12.71 | 43.5 | 11    | 2   |
+| sprint-flight | 7.95, 8.74, 8.10 | 11.42 | 13.94 | 34.6 | 16    | 1   |
+| sprint-walk   | 8.07, 8.28, 8.39 | 11.58 | 13.80 | 40.7 | 9     | 1   |
+| dive          | 7.45, 7.20, 6.89 | 9.84  | 12.21 | 32.5 | 16    | 0   |
+| teleport      | 9.06, 8.10, 7.74 | 10.21 | 11.22 | 36.8 | 4     | 2   |
+
+- Only `teleport` has holes: 1,660 rule-hole and 52 fill-hole frames over the
+  three runs. Every other fixture, `dive` and both sprints included, has none
+  offscreen. Level 0 settles 0.75 to 0.91 s after the jump.
+- The first acceptance box is met on `teleport`, not `dive`: a capture 1.2 s
+  after the jump shows a band of clear colour at mid distance, and the count
+  places 147 rule-hole Cells in that frame. `dive` shows no hole to capture.
+- Workers in `sprint-flight`: 0.90 s of worker CPU per second, 0.66 s of it
+  level 0 and 0.58 s level-0 relight; that is over ticket 13's 50% trigger.
+  `stationary` spends 0.39 s per second on level 1, regenerating and meshing
+  around the lake's fluid.
+- Still owed: the presented run on the 144 Hz display, which needs you at the
+  Mac, and with it the last box.
+
