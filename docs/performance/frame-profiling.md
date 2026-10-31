@@ -14,7 +14,7 @@ caffeinate -i env RUSTFLAGS="-D warnings" cargo build --locked \
 # Point --game at an already built demo distribution. No WIT/Game changes here.
 # Use a fresh path: the runner refuses an existing output directory.
 scripts/profile-frames --binary "$CARGO_TARGET_DIR/release/tesserae" \
-  --profile release --features profiling --game /path/to/games/demo/dist \
+  --profile release --features profiling --game /path/to/games/demo/dist/mods \
   /tmp/tesserae-release-unique
 ```
 

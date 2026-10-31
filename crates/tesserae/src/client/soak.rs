@@ -1,11 +1,12 @@
 //! `TESSERAE_SOAK_CYCLES=n` returns to the World list and opens the first
 //! World again n times, logging what the ECS and the process hold at each
-//! return, for the leak check in the validation note.
+//! return, for the leak check in the validation note. With `TESSERAE_SOAK_ALTERNATE=1` it
+//! opens the listed Worlds in turn instead, so two Games load and unload alternately.
 
 use bevy::prelude::*;
 
 use super::loading::TerrainArrived;
-use super::worlds::{Act, Queue};
+use super::worlds::{Act, Queue, listed};
 use crate::launch::{Switch, Target};
 use crate::server::persistence::SaveAction;
 use crate::session::AppState;
@@ -100,6 +101,13 @@ fn soak(world: &mut World) {
                     soak.left -= 1;
                     soak.cycle += 1;
                     soak.frames = 0;
+                    if std::env::var_os("TESSERAE_SOAK_ALTERNATE").is_some() {
+                        let worlds = listed(world);
+                        if !worlds.is_empty() {
+                            let pick = worlds[cycle as usize % worlds.len()].clone();
+                            world.resource_mut::<Queue>().0.push(Act::Select(pick));
+                        }
+                    }
                     world.resource_mut::<Queue>().0.push(Act::Open);
                 }
             }

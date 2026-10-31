@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    Found, ManifestLimits, ModError, ModHost, ModLimits, Trust, Untrusted, Verdict, discover, plan,
+    Found, ManifestLimits, Migration, ModError, ModHost, ModLimits, Scan, Trust, Untrusted,
+    Verdict, migrate_legacy_games, plan, scan,
 };
 
 /// A scratch directory under the cargo target dir, unique per test and removed on drop.
@@ -27,6 +28,10 @@ impl Scratch {
         self.0.join("mods")
     }
 
+    fn games(&self) -> PathBuf {
+        self.0.join("games")
+    }
+
     fn mod_dir(&self, id: &str) -> PathBuf {
         let dir = self.mods().join(id);
         fs::create_dir_all(&dir).unwrap();
@@ -48,6 +53,17 @@ impl Scratch {
         self.write_mod(id, &manifest, Some(b"not really wasm"));
     }
 
+    /// A Game under `games/`, whatever its folder is called.
+    fn good_game(&self, folder: &str, id: &str) {
+        let dir = self.games().join(folder);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest = format!(
+            "id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"m.wasm\"\nroot = true\n"
+        );
+        fs::write(dir.join("mod.toml"), manifest).unwrap();
+        fs::write(dir.join("m.wasm"), b"not really wasm").unwrap();
+    }
+
     fn trust(&self) -> Trust {
         Trust::load(self.0.join("trust.json"))
     }
@@ -59,8 +75,32 @@ impl Drop for Scratch {
     }
 }
 
-fn err_text(result: Result<Vec<Found>, ModError>) -> String {
+/// Everything found, games first, or the first folder's reason: the strict reading these
+/// tests were written against.
+fn discover(mods: &Path) -> Result<Vec<Found>, String> {
+    let Scan {
+        games,
+        mods,
+        rejected,
+    } = scan(mods).map_err(|e| e.to_string())?;
+    match rejected.first() {
+        Some(first) => Err(first.reason.clone()),
+        None => Ok(games.into_iter().chain(mods).collect()),
+    }
+}
+
+fn err_text<T: std::fmt::Debug>(result: Result<T, impl std::fmt::Display>) -> String {
     result.expect_err("expected an error").to_string()
+}
+
+fn rejected(scan: &Scan) -> Vec<(String, &str)> {
+    scan.rejected
+        .iter()
+        .map(|r| {
+            let folder = r.dir.file_name().unwrap().to_string_lossy().into_owned();
+            (folder, r.reason.as_str())
+        })
+        .collect()
 }
 
 fn ids(found: &[Found]) -> Vec<&str> {
@@ -70,10 +110,11 @@ fn ids(found: &[Found]) -> Vec<&str> {
 #[test]
 fn good_mod_is_discovered() {
     let s = Scratch::new("good");
-    s.good("alpha", "root = true\ndepends = []");
+    s.good_game("alpha", "alpha");
+    s.good("beta", "depends = []");
     let found = discover(&s.mods()).unwrap();
-    assert_eq!(ids(&found), ["alpha"]);
-    assert!(found[0].manifest.root);
+    assert_eq!(ids(&found), ["alpha", "beta"]);
+    assert!(found[0].manifest.root && !found[1].manifest.root);
 }
 
 #[test]
@@ -168,8 +209,8 @@ fn plan_errors_name_the_mods() {
     );
 
     let s = Scratch::new("roots");
-    s.good("a", "root = true");
-    s.good("b", "root = true");
+    s.good_game("a", "a");
+    s.good_game("b", "b");
     let text = err_text(plan(discover(&s.mods()).unwrap()));
     assert!(text.contains("`a`") && text.contains("`b`"), "{text}");
 
@@ -180,10 +221,9 @@ fn plan_errors_name_the_mods() {
 
     let s = Scratch::new("dup");
     s.good("a", "");
-    let manifest = fs::read(s.mod_dir("a").join("mod.toml")).unwrap();
-    let other = s.mod_dir("other");
-    fs::write(other.join("mod.toml"), manifest).unwrap();
-    let text = err_text(plan(discover(&s.mods()).unwrap()));
+    let mut twice = discover(&s.mods()).unwrap();
+    twice.extend(twice.clone());
+    let text = err_text(plan(twice));
     assert!(text.contains("`a`") && text.contains("both"), "{text}");
 }
 
@@ -359,4 +399,177 @@ fn a_manifest_cannot_raise_a_limit() {
     let result = host.lowered_by(&lowered);
     assert_eq!(result.call_fuel, 10);
     assert_eq!(result.memory_bytes, host.memory_bytes);
+}
+
+#[test]
+fn several_games_and_mods_are_found_in_sibling_folders() {
+    let s = Scratch::new("many");
+    s.good_game("aurora", "aurora");
+    s.good_game("basalt", "basalt");
+    s.good("lamps", "");
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(ids(&found.games), ["aurora", "basalt"]);
+    assert_eq!(ids(&found.mods), ["lamps"]);
+    assert!(found.rejected.is_empty());
+}
+
+#[test]
+fn a_missing_games_or_mods_folder_is_empty() {
+    let s = Scratch::new("onlymods");
+    s.good("lamps", "");
+    let found = scan(&s.mods()).unwrap();
+    assert!(found.games.is_empty());
+    assert_eq!(ids(&found.mods), ["lamps"]);
+}
+
+#[test]
+fn a_root_under_mods_or_a_mod_under_games_is_rejected_with_where_it_belongs() {
+    let s = Scratch::new("misplaced");
+    s.good("rooted", "root = true");
+    s.good_game("plain", "plain");
+    let manifest = "id = \"plain\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"m.wasm\"\n";
+    fs::write(s.games().join("plain/mod.toml"), manifest).unwrap();
+    let found = scan(&s.mods()).unwrap();
+    assert!(found.games.is_empty() && found.mods.is_empty());
+    let rows = rejected(&found);
+    let reason = |folder: &str| rows.iter().find(|(f, _)| f == folder).unwrap().1;
+    assert!(reason("rooted").contains("games"), "{rows:?}");
+    assert!(reason("plain").contains("root = true"), "{rows:?}");
+}
+
+#[test]
+fn one_bad_folder_is_a_row_and_hides_nothing() {
+    let s = Scratch::new("onebad");
+    s.good_game("fine", "fine");
+    s.good("lamps", "");
+    s.write_mod("broken", "this is not toml [", None);
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(ids(&found.games), ["fine"]);
+    assert_eq!(ids(&found.mods), ["lamps"]);
+    let rows = rejected(&found);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, "broken");
+}
+
+#[test]
+fn one_id_names_one_thing_across_both_folders() {
+    let s = Scratch::new("sameid");
+    s.good_game("shared", "shared");
+    s.good("shared_copy", "");
+    let manifest = "id = \"shared\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"m.wasm\"\n";
+    fs::write(s.mods().join("shared_copy/mod.toml"), manifest).unwrap();
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(ids(&found.games), ["shared"]);
+    assert!(found.mods.is_empty());
+    let rows = rejected(&found);
+    assert_eq!(rows[0].0, "shared_copy");
+    assert!(rows[0].1.contains("shared"), "{rows:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_folder_is_rejected() {
+    let s = Scratch::new("linkdir");
+    s.good("real", "");
+    std::os::unix::fs::symlink(s.mods().join("real"), s.mods().join("alias")).unwrap();
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(ids(&found.mods), ["real"]);
+    let rows = rejected(&found);
+    assert_eq!(rows[0].0, "alias");
+    assert!(rows[0].1.contains("symbolic link"), "{rows:?}");
+}
+
+#[test]
+fn the_scan_reads_a_bounded_number_of_entries_and_says_so() {
+    let s = Scratch::new("cap");
+    for n in 0..crate::MAX_SCAN_ENTRIES + 4 {
+        fs::create_dir_all(s.mods().join(format!("m{n:04}"))).unwrap();
+    }
+    let found = scan(&s.mods()).unwrap();
+    let overflow = found
+        .rejected
+        .iter()
+        .find(|r| r.dir == s.mods())
+        .expect("an overflow row");
+    assert!(
+        overflow
+            .reason
+            .contains(&crate::MAX_SCAN_ENTRIES.to_string()),
+        "{}",
+        overflow.reason
+    );
+}
+
+#[test]
+fn a_scan_never_reads_the_component() {
+    let s = Scratch::new("noread");
+    s.write_mod(
+        "unread",
+        "id = \"unread\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"absent.wasm\"\n",
+        None,
+    );
+    assert_eq!(ids(&scan(&s.mods()).unwrap().mods), ["unread"]);
+}
+
+fn legacy_game(s: &Scratch, folder: &str, id: &str) {
+    s.good(folder, "root = true");
+    let manifest = format!(
+        "id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.1\"\nwasm = \"m.wasm\"\nroot = true\n"
+    );
+    fs::write(s.mods().join(folder).join("mod.toml"), manifest).unwrap();
+}
+
+#[test]
+fn migration_moves_a_legacy_root_into_games_once_and_leaves_the_rest() {
+    let s = Scratch::new("migrate");
+    legacy_game(&s, "old", "demo");
+    s.good("lamps", "");
+    let moved = migrate_legacy_games(&s.mods());
+    assert!(
+        matches!(moved.as_slice(), [Migration::Moved { id, .. }] if id == "demo"),
+        "{moved:?}"
+    );
+    assert!(s.games().join("demo/mod.toml").is_file());
+    assert!(!s.mods().join("old").exists());
+    assert!(s.mods().join("lamps/mod.toml").is_file());
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(ids(&found.games), ["demo"]);
+    assert!(found.rejected.is_empty());
+    assert!(migrate_legacy_games(&s.mods()).is_empty());
+}
+
+#[test]
+fn migration_refuses_to_overwrite_an_installed_game() {
+    let s = Scratch::new("migrate-clash");
+    s.good_game("demo", "demo");
+    legacy_game(&s, "old", "demo");
+    let moved = migrate_legacy_games(&s.mods());
+    assert!(
+        matches!(moved.as_slice(), [Migration::Refused { id, .. }] if id == "demo"),
+        "{moved:?}"
+    );
+    assert!(s.mods().join("old/mod.toml").is_file());
+    assert!(s.games().join("demo/m.wasm").is_file());
+}
+
+#[test]
+fn migration_keeps_a_games_trust_because_trust_follows_the_build_not_the_path() {
+    let s = Scratch::new("migrate-trust");
+    legacy_game(&s, "old", "demo");
+    let before = scan(&s.mods());
+    assert!(before.unwrap().games.is_empty());
+    let legacy = Found {
+        manifest: crate::Manifest::parse("old", &fs::read(s.mods().join("old/mod.toml")).unwrap())
+            .unwrap(),
+        dir: s.mods().join("old"),
+        manifest_bytes: fs::read(s.mods().join("old/mod.toml")).unwrap(),
+    };
+    let mut trust = s.trust();
+    trust.grant(&legacy).unwrap();
+    migrate_legacy_games(&s.mods());
+    let moved = only(scan(&s.mods()).unwrap().games);
+    assert!(matches!(
+        s.trust().check(&moved).unwrap(),
+        Verdict::Trusted(_)
+    ));
 }

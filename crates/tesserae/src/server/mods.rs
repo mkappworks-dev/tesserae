@@ -12,11 +12,10 @@ use std::path::{Path, PathBuf};
 use crate::launch::Installed;
 use crate::session::{SessionApp, SessionTeardown};
 use bevy::prelude::*;
-use tesserae_core::save::library::GameRef;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
-    Kind, ModHost, ModInstance, Registered, Registry, Trust, Verdict, ViewParams, WorldInfo, apply,
-    discover, plan, resolve,
+    Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
+    apply, games_dir, migrate_legacy_games, plan, resolve, scan,
 };
 
 use crate::content::{
@@ -67,7 +66,7 @@ impl LoadOptions {
         }
         let directory = match (directory, dev_demo) {
             (Some(directory), _) => directory,
-            (None, Some(demo)) if demo.is_dir() => {
+            (None, Some(demo)) if games_dir(&demo).is_dir() => {
                 trust = TrustMode::ThisRun;
                 demo
             }
@@ -96,11 +95,12 @@ impl LoadOptions {
     }
 }
 
-/// Where `./scripts/build-guests` puts the demo, fixed at compile time because a `dev` binary
-/// runs from its own checkout whatever the working directory.
+/// The empty Mods directory beside the `games/` that `./scripts/build-guests` puts the demo in,
+/// fixed at compile time because a `dev` binary runs from its own checkout whatever the working
+/// directory.
 fn dev_demo() -> Option<PathBuf> {
     cfg!(feature = "dev")
-        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist"))
+        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist/mods"))
 }
 
 pub struct LoadedMods {
@@ -142,14 +142,76 @@ impl Default for LoadedMods {
 #[derive(Resource)]
 pub(super) struct WorldParameters(pub WorldgenParams);
 
+/// One Game or Mod a World was made with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Wanted {
+    pub id: String,
+    pub version: String,
+    pub game: bool,
+}
+
+/// Which installed Games and Mods a World loads. Nothing else is read, so installing or
+/// removing an unrelated Mod cannot change a World's content.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Selection {
+    /// A World with no record to follow, such as an ephemeral one: the first Game and every Mod.
+    Everything,
+    /// A World saved without a Game: it is empty sky and loads no Mods.
+    Nothing,
+    Named(Vec<Wanted>),
+}
+
+impl Selection {
+    /// The installed items that satisfy it, or every one that does not, by id and version.
+    fn choose(&self, installed: Scan) -> Result<Vec<tesserae_mods::Found>, String> {
+        let wanted = match self {
+            Selection::Everything => {
+                return Ok(installed
+                    .games
+                    .into_iter()
+                    .take(1)
+                    .chain(installed.mods)
+                    .collect());
+            }
+            Selection::Nothing => return Ok(Vec::new()),
+            Selection::Named(wanted) => wanted,
+        };
+        let mut chosen = Vec::new();
+        let mut unmet = Vec::new();
+        for want in wanted {
+            let (kind, pool) = if want.game {
+                ("Game", &installed.games)
+            } else {
+                ("Mod", &installed.mods)
+            };
+            match pool.iter().find(|f| f.manifest.id == want.id) {
+                None => unmet.push(format!(
+                    "{kind} `{}` {} is not installed",
+                    want.id, want.version
+                )),
+                Some(f) if f.manifest.version != want.version => unmet.push(format!(
+                    "{kind} `{}` {} is needed but {} is installed",
+                    want.id, want.version, f.manifest.version
+                )),
+                Some(f) => chosen.push(f.clone()),
+            }
+        }
+        if unmet.is_empty() {
+            Ok(chosen)
+        } else {
+            Err(format!(
+                "This World needs content that is not installed: {}",
+                unmet.join("; ")
+            ))
+        }
+    }
+}
+
 pub fn load_world(
     args: &[OsString],
     world: &WorldSettings,
     opening: &super::persistence::Opening,
 ) -> Result<LoadedMods, String> {
-    if !opening.loads_mods() {
-        return Ok(LoadedMods::default());
-    }
     let Some(options) = LoadOptions::from_args(args)? else {
         eprintln!("No Game: the demo is not built; run ./scripts/build-guests");
         return Ok(LoadedMods::default());
@@ -167,43 +229,40 @@ pub fn load_world(
 }
 
 pub fn installed(args: &[OsString]) -> Installed {
-    use crate::launch::Untrusted;
     let options = match LoadOptions::from_args(args) {
         Ok(Some(options)) => options,
         Ok(None) => return Installed::none(None),
         Err(e) => return Installed::none(Some(e)),
     };
-    let found = match discover(&options.directory).and_then(plan) {
-        Ok(found) => found,
+    let installed = match prepare(&options) {
+        Ok(installed) => installed,
         Err(e) => return Installed::none(Some(e.to_string())),
     };
-    let game = found.iter().find(|f| f.manifest.root).map(|f| GameRef {
-        id: f.manifest.id.clone(),
-        version: f.manifest.version.clone(),
-    });
-    let mut untrusted = Vec::new();
-    if options.trust == TrustMode::None {
-        let trust = Trust::load(&options.trust_file);
-        for f in found {
-            match trust.check(&f) {
-                Ok(Verdict::Trusted(_)) => {}
-                Ok(_) => match Trust::hash_of(&f) {
-                    Ok(sha256) => untrusted.push(Untrusted {
-                        prompt: tesserae_mods::trust_prompt(
-                            &f.manifest,
-                            tesserae_mods::ModLimits::HOST.lowered_by(&f.manifest.limits),
-                            &sha256,
-                        ),
-                        found: f,
-                        sha256,
-                    }),
-                    Err(e) => return Installed::none(Some(e.to_string())),
-                },
-                Err(e) => return Installed::none(Some(e.to_string())),
+    Installed::new(
+        installed,
+        options.trust == TrustMode::None,
+        options.trust_file,
+    )
+}
+
+/// Moves a legacy root out of `mods/`, then lists what is installed. The dev demo is generated
+/// output, so it is never rearranged.
+fn prepare(options: &LoadOptions) -> Result<Scan, tesserae_mods::ModError> {
+    if options.trust != TrustMode::ThisRun {
+        for outcome in migrate_legacy_games(&options.directory) {
+            match outcome {
+                tesserae_mods::Migration::Moved { id, from, to } => eprintln!(
+                    "Moved Game `{id}` from {} to {}",
+                    from.display(),
+                    to.display()
+                ),
+                tesserae_mods::Migration::Refused { id, from, reason } => {
+                    eprintln!("Left Game `{id}` in {}: {reason}", from.display());
+                }
             }
         }
     }
-    Installed::new(game, untrusted, options.trust_file)
+    scan(&options.directory)
 }
 
 fn load_prompted(
@@ -216,55 +275,63 @@ fn load_prompted(
     output: &mut impl Write,
 ) -> Result<LoadedMods, String> {
     let (opening, world) = opening_world;
-    load_with_opening(opening, directory, trust_file, world, |found, trust| {
-        let id = &found.manifest.id;
-        if mode == TrustMode::ThisRun {
-            trust.grant_for_run(found).map_err(|e| e.to_string())?;
-            writeln!(output, "Trusting in-repo demo Mod `{id}` for this run")
+    let selection = opening.map_or(Selection::Everything, |o| o.selection());
+    load_with_opening(
+        &selection,
+        opening,
+        directory,
+        trust_file,
+        world,
+        |found, trust| {
+            let id = &found.manifest.id;
+            if mode == TrustMode::ThisRun {
+                trust.grant_for_run(found).map_err(|e| e.to_string())?;
+                writeln!(output, "Trusting in-repo demo Mod `{id}` for this run")
+                    .map_err(|e| e.to_string())?;
+                return Ok(true);
+            }
+            if matches!(
+                trust.check(found).map_err(|e| e.to_string())?,
+                Verdict::Trusted(_)
+            ) {
+                return Ok(true);
+            }
+            if mode != TrustMode::All && !terminal {
+                writeln!(output, "Skipped Mod `{id}`: stdin is not a terminal; use --trust-all or TESSERAE_TRUST_MODS=1 to grant Trust")
                 .map_err(|e| e.to_string())?;
-            return Ok(true);
-        }
-        if matches!(
-            trust.check(found).map_err(|e| e.to_string())?,
-            Verdict::Trusted(_)
-        ) {
-            return Ok(true);
-        }
-        if mode != TrustMode::All && !terminal {
-            writeln!(output, "Skipped Mod `{id}`: stdin is not a terminal; use --trust-all or TESSERAE_TRUST_MODS=1 to grant Trust")
-                .map_err(|e| e.to_string())?;
-            return Ok(false);
-        }
-        let hash = Trust::hash_of(found).map_err(|e| e.to_string())?;
-        let accepted = if mode == TrustMode::All {
-            writeln!(
-                output,
-                "Granting Trust to Mod `{id}` (--trust-all / TESSERAE_TRUST_MODS=1)"
-            )
-            .map_err(|e| e.to_string())?;
-            true
-        } else {
-            write!(
-                output,
-                "{}",
-                tesserae_mods::trust_prompt(
-                    &found.manifest,
-                    tesserae_mods::ModLimits::HOST.lowered_by(&found.manifest.limits),
-                    &hash,
+                return Ok(false);
+            }
+            let hash = Trust::hash_of(found).map_err(|e| e.to_string())?;
+            let accepted = if mode == TrustMode::All {
+                writeln!(
+                    output,
+                    "Granting Trust to Mod `{id}` (--trust-all / TESSERAE_TRUST_MODS=1)"
                 )
-            )
-            .map_err(|e| e.to_string())?;
-            output.flush().map_err(|e| e.to_string())?;
-            tesserae_mods::confirm_trust(reader).map_err(|e| e.to_string())?
-        };
-        if accepted {
-            trust.grant_exact(found, &hash).map_err(|e| e.to_string())?;
-            writeln!(output, "Trusted Mod `{id}`").map_err(|e| e.to_string())?;
-        } else {
-            writeln!(output, "Skipped Mod `{id}`").map_err(|e| e.to_string())?;
-        }
-        Ok(accepted)
-    })
+                .map_err(|e| e.to_string())?;
+                true
+            } else {
+                write!(
+                    output,
+                    "{}",
+                    tesserae_mods::trust_prompt(
+                        &found.manifest,
+                        tesserae_mods::ModLimits::HOST.lowered_by(&found.manifest.limits),
+                        &hash,
+                    )
+                )
+                .map_err(|e| e.to_string())?;
+                output.flush().map_err(|e| e.to_string())?;
+                tesserae_mods::confirm_trust(reader).map_err(|e| e.to_string())?
+            };
+            if accepted {
+                trust.grant_exact(found, &hash).map_err(|e| e.to_string())?;
+                writeln!(output, "Trusted Mod `{id}`").map_err(|e| e.to_string())?;
+            } else {
+                writeln!(output, "Skipped Mod `{id}`").map_err(|e| e.to_string())?;
+            }
+            Ok(accepted)
+        },
+    )
 }
 
 #[cfg(test)]
@@ -294,17 +361,26 @@ fn load_with(
     world: &WorldSettings,
     authorize: impl FnMut(&tesserae_mods::Found, &mut Trust) -> Result<bool, String>,
 ) -> Result<LoadedMods, String> {
-    load_with_opening(None, directory, trust_file, world, authorize)
+    load_with_opening(
+        &Selection::Everything,
+        None,
+        directory,
+        trust_file,
+        world,
+        authorize,
+    )
 }
 
 fn load_with_opening(
+    selection: &Selection,
     opening: Option<&super::persistence::Opening>,
     directory: &Path,
     trust_file: &Path,
     world: &WorldSettings,
     mut authorize: impl FnMut(&tesserae_mods::Found, &mut Trust) -> Result<bool, String>,
 ) -> Result<LoadedMods, String> {
-    let plan = plan(discover(directory).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let installed = scan(directory).map_err(|e| e.to_string())?;
+    let plan = plan(selection.choose(installed)?).map_err(|e| e.to_string())?;
     if plan.is_empty() {
         return Ok(LoadedMods::default());
     }
@@ -574,8 +650,9 @@ pub(super) fn demo_for_save(
     opening: &super::persistence::Opening,
     world: &WorldSettings,
 ) -> LoadedMods {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist/mods");
     load_with_opening(
+        &opening.selection(),
         Some(opening),
         &path,
         &path.join("unused-trust.json"),
@@ -618,7 +695,12 @@ mod tests {
             self.add_on("0.1", id, guest, extra);
         }
         fn add_on(&self, api: &str, id: &str, guest: &str, extra: &str) {
-            let dir = self.0.join("mods").join(id);
+            let folder = if extra.contains("root = true") {
+                "games"
+            } else {
+                "mods"
+            };
+            let dir = self.0.join(folder).join(id);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("mod.toml"), format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"{api}\"\nwasm = \"mod.wasm\"\n{extra}\n")).unwrap();
             fs::copy(
@@ -648,6 +730,125 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+
+    fn want(id: &str, version: &str, game: bool) -> Wanted {
+        Wanted {
+            id: id.into(),
+            version: version.into(),
+            game,
+        }
+    }
+
+    fn load_selected(s: &Scratch, selection: &Selection) -> Result<LoadedMods, String> {
+        let trust = s.0.join("trust.json");
+        load_with_opening(
+            selection,
+            None,
+            &s.0.join("mods"),
+            &trust,
+            &WorldSettings {
+                seed: 123,
+                voxel_size: 0.5,
+            },
+            |found, trust| {
+                trust.grant_for_run(found).map_err(|e| e.to_string())?;
+                Ok(true)
+            },
+        )
+    }
+
+    fn required_ids(loaded: &LoadedMods) -> Vec<&str> {
+        loaded.required.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_world_loads_exactly_the_game_and_mods_it_names() {
+        let s = Scratch::new();
+        s.add("world", "world-loader", "root = true");
+        s.add("zextra", "catalog", "");
+        s.add("hello", "hello", "");
+        let named = Selection::Named(vec![
+            want("world", "0.1.0", true),
+            want("zextra", "0.1.0", false),
+        ]);
+        let loaded = load_selected(&s, &named).unwrap();
+        assert_eq!(required_ids(&loaded), ["world", "zextra"]);
+        assert_eq!(
+            loaded.registry.id_of(Kind::Material, "world:paint"),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn installing_an_unrelated_mod_does_not_change_what_a_world_requires() {
+        let s = Scratch::new();
+        s.game();
+        let named = Selection::Named(vec![
+            want("world", "0.1.0", true),
+            want("zextra", "0.1.0", false),
+        ]);
+        let before = load_selected(&s, &named).unwrap().required;
+        s.add("hello", "hello", "");
+        let after = load_selected(&s, &named).unwrap().required;
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn two_installed_games_load_one_each_and_leave_the_other_unread() {
+        let s = Scratch::new();
+        s.game();
+        s.add("other", "hello", "root = true");
+        let first = load_selected(
+            &s,
+            &Selection::Named(vec![
+                want("world", "0.1.0", true),
+                want("zextra", "0.1.0", false),
+            ]),
+        )
+        .unwrap();
+        let second =
+            load_selected(&s, &Selection::Named(vec![want("other", "0.1.0", true)])).unwrap();
+        assert_eq!(required_ids(&first), ["world", "zextra"]);
+        assert_eq!(required_ids(&second), ["other"]);
+        assert!(
+            second
+                .registry
+                .id_of(Kind::Material, "world:paint")
+                .is_none()
+        );
+        assert!(second.registry.id_of(Kind::Material, "zextra:m0").is_none());
+    }
+
+    #[test]
+    fn a_missing_or_reversioned_item_is_refused_naming_each() {
+        let s = Scratch::new();
+        s.add("world", "world-loader", "root = true");
+        let named = Selection::Named(vec![
+            want("world", "9.9.9", true),
+            want("ghost", "1.2.3", false),
+        ]);
+        let error = load_selected(&s, &named).err().unwrap();
+        assert!(
+            error.contains("`world` 9.9.9") && error.contains("0.1.0"),
+            "{error}"
+        );
+        assert!(
+            error.contains("`ghost` 1.2.3") && error.contains("not installed"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_world_saved_without_a_game_loads_nothing() {
+        let s = Scratch::new();
+        s.game();
+        assert!(
+            load_selected(&s, &Selection::Nothing)
+                .unwrap()
+                .mods
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1005,6 +1206,7 @@ mod tests {
             "{error}"
         );
         fs::remove_dir_all(s.0.join("mods")).unwrap();
+        fs::remove_dir_all(s.0.join("games")).unwrap();
         s.add("not_game", "world-loader", "");
         let error = s.load(TrustMode::All).err().unwrap();
         assert!(
@@ -1114,8 +1316,9 @@ mod tests {
             s.add("dependency", "hello", "");
             s.add("consumer", "hello", "depends = [\"dependency\"]");
             if recorded {
-                let found = discover(&s.0.join("mods"))
+                let found = scan(&s.0.join("mods"))
                     .unwrap()
+                    .mods
                     .into_iter()
                     .find(|f| f.manifest.id == "consumer")
                     .unwrap();
@@ -1196,7 +1399,7 @@ mod tests {
     #[test]
     fn a_built_dev_demo_is_the_default_trusted_for_the_run_and_an_explicit_directory_wins() {
         let s = Scratch::new();
-        let demo = s.0.join("games/demo/dist");
+        let demo = s.0.join("games/demo/dist/mods");
         let options =
             |args: &[&str], env: Option<&str>, trust: Option<&str>, demo: Option<&Path>| {
                 LoadOptions::resolve(
@@ -1212,7 +1415,7 @@ mod tests {
         assert!(options(&[], None, None, Some(&demo)).is_none());
         assert!(options(&["--trust-all"], None, Some("1"), Some(&demo)).is_none());
 
-        fs::create_dir_all(&demo).unwrap();
+        fs::create_dir_all(games_dir(&demo)).unwrap();
         for (args, trust) in [(&[][..], None), (&["--trust-all"][..], Some("1"))] {
             let chosen = options(args, None, trust, Some(&demo)).unwrap();
             assert_eq!(chosen.directory, demo);
@@ -1237,7 +1440,7 @@ mod tests {
     #[test]
     fn only_a_dev_build_offers_the_in_repo_demo() {
         #[cfg(feature = "dev")]
-        assert!(dev_demo().unwrap().ends_with("games/demo/dist"));
+        assert!(dev_demo().unwrap().ends_with("games/demo/dist/mods"));
         #[cfg(not(feature = "dev"))]
         assert!(dev_demo().is_none());
     }

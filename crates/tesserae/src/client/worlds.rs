@@ -76,6 +76,10 @@ struct Form {
     voxel_size_m: f32,
     more: bool,
     problem: Option<String>,
+    /// The chosen Game's id; `None` until the form opens on an installed one.
+    game: Option<String>,
+    /// Mods ticked by hand; their dependencies are added when the World is created.
+    mods: std::collections::BTreeSet<String>,
 }
 
 impl Default for Form {
@@ -87,6 +91,8 @@ impl Default for Form {
             voxel_size_m: 1.0,
             more: false,
             problem: None,
+            game: None,
+            mods: Default::default(),
         }
     }
 }
@@ -97,6 +103,15 @@ struct Card {
     detail: String,
     /// A refused open, which by contract wrote nothing.
     save_untouched: bool,
+}
+
+/// The folders the list shows, in order; the soak run alternates between them.
+#[cfg(feature = "dev")]
+pub(super) fn listed(world: &World) -> Vec<PathBuf> {
+    world
+        .get_resource::<Launcher>()
+        .map(|l| l.entries.iter().map(|e| e.path.clone()).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Resource)]
@@ -170,6 +185,8 @@ pub(super) enum Act {
     CopyResolved,
     More,
     Voxel(f32),
+    PickGame(usize),
+    ToggleMod(usize),
     SaveName,
     ConfirmDelete,
     Trust,
@@ -479,6 +496,24 @@ fn handle(
                 };
                 let path = entry.path.clone();
                 let needs_game = entry.details().is_none_or(|d| d.game.is_some());
+                let ids = match entry.details() {
+                    Some(d) => {
+                        if !installed.unmet(d).is_empty() {
+                            continue;
+                        }
+                        d.game
+                            .iter()
+                            .map(|g| g.id.clone())
+                            .chain(d.mods.iter().map(|m| m.id.clone()))
+                            .collect()
+                    }
+                    None => installed.default_ids(),
+                };
+                if needs_game && let Err(e) = installed.prepare_trust(&ids) {
+                    l.problem = Some(format!("Could not check Trust: {e}"));
+                    l.version += 1;
+                    continue;
+                }
                 if needs_game && !installed.untrusted.is_empty() {
                     l.show(Screen::Trust(Next::Open(path)));
                 } else {
@@ -489,15 +524,18 @@ fn handle(
                 if installed.game.is_none() {
                     continue;
                 }
-                l.form = Form::default();
+                l.form = Form {
+                    game: installed.game.as_ref().map(|g| g.id.clone()),
+                    ..Form::default()
+                };
                 l.show(Screen::Create);
             }
             Act::ReCreate => {
                 let Some(details) = l.selected().and_then(Entry::details).cloned() else {
                     continue;
                 };
-                // Another installed Game would silently change the content.
-                if details.game.is_none() || details.game != installed.game {
+                // A different Game or Mod version would silently change the content.
+                if details.game.is_none() || !installed.unmet(&details).is_empty() {
                     continue;
                 }
                 let copy = format!("{} (copy)", details.name);
@@ -506,6 +544,8 @@ fn handle(
                     seed: details.seed.to_string(),
                     voxel_size_m: details.voxel_size_m,
                     more: details.voxel_size_m != 1.0,
+                    game: details.game.as_ref().map(|g| g.id.clone()),
+                    mods: details.mods.iter().map(|m| m.id.clone()).collect(),
                     ..Form::default()
                 };
                 l.show(Screen::Create);
@@ -560,12 +600,43 @@ fn handle(
                 l.form.more = !l.form.more;
                 l.version += 1;
             }
+            Act::PickGame(index) => {
+                let Some(game) = installed.games.get(index) else {
+                    continue;
+                };
+                l.form.game = Some(game.id.clone());
+                let id = game.id.clone();
+                l.form.mods.retain(|m| installed.blocked(&id, m).is_none());
+                l.version += 1;
+            }
+            Act::ToggleMod(index) => {
+                let (Some(game), Some(m)) = (l.form.game.clone(), installed.mods.get(index)) else {
+                    continue;
+                };
+                if installed.blocked(&game, &m.id).is_some() {
+                    continue;
+                }
+                if !l.form.mods.remove(&m.id) {
+                    let needed = installed.closure(&l.form.mods);
+                    // A dependency of another pick is locked on; ticking it by hand adds nothing.
+                    if !needed.contains(&m.id) {
+                        l.form.mods.insert(m.id.clone());
+                    }
+                }
+                l.version += 1;
+            }
             Act::Voxel(size) => {
                 l.form.voxel_size_m = size;
                 l.version += 1;
             }
             Act::Create => {
                 if l.screen != Screen::Create {
+                    continue;
+                }
+                let ids = chosen_ids(&l.form, &installed);
+                if let Err(e) = installed.prepare_trust(&ids) {
+                    l.problem = Some(format!("Could not check Trust: {e}"));
+                    l.version += 1;
                     continue;
                 }
                 let needs_trust = !installed.untrusted.is_empty();
@@ -646,12 +717,36 @@ fn validate(form: &Form) -> Result<(String, u64), String> {
     Ok((name, form.seed()?))
 }
 
+/// The Game and every Mod, dependencies included, a World made from this form would load.
+fn chosen_ids(form: &Form, installed: &Installed) -> Vec<String> {
+    form.game
+        .iter()
+        .cloned()
+        .chain(installed.closure(&form.mods))
+        .collect()
+}
+
 fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut Switch) {
-    let Some(game) = installed.game.clone() else {
+    let Some(game) = l
+        .form
+        .game
+        .as_ref()
+        .and_then(|id| installed.games.iter().find(|g| &g.id == id))
+        .cloned()
+    else {
         l.form.problem = Some(NO_GAME.into());
         l.show(Screen::Create);
         return;
     };
+    let mods: Vec<_> = installed
+        .closure(&l.form.mods)
+        .iter()
+        .filter_map(|id| installed.mods.iter().find(|m| &m.id == id))
+        .map(|m| library::ModRef {
+            id: m.id.clone(),
+            version: m.version.clone(),
+        })
+        .collect();
     let (name, seed) = match validate(&l.form) {
         Ok(valid) => valid,
         Err(e) => {
@@ -664,6 +759,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
     let sidecar = Sidecar {
         name: name.clone(),
         game: Some(game),
+        mods,
         seed,
         voxel_size_m: l.form.voxel_size_m,
         created_unix_s: now,
@@ -1112,7 +1208,7 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
                     min_width: Val::Px(0.0),
                     ..default()
                 })
-                .with_children(|side| details(side, entry, installed.game.as_ref()));
+                .with_children(|side| details(side, entry, installed));
         }
     });
     focus
@@ -1161,7 +1257,11 @@ fn world_row(rows: &mut ChildSpawnerCommands, entry: &Entry, selected: bool) -> 
     .id()
 }
 
-fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: Option<&GameRef>) {
+fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: &Installed) {
+    let unmet = entry
+        .details()
+        .map(|d| installed.unmet(d))
+        .unwrap_or_default();
     panel(side, |p| {
         ui::weighted_text(p, entry.name().unwrap_or(UNNAMED), 19.0, 620, ui::INK);
         ui::description(p, &format!("Folder: {}", entry.folder()));
@@ -1191,6 +1291,9 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: Option<&Ga
                         relative(d.last_played_unix_s)
                     ),
                 );
+                for line in &unmet {
+                    ui::paragraph(p, line, 12.0, ui::AMBER);
+                }
                 if entry.incomplete() {
                     ui::paragraph(
                         p,
@@ -1217,17 +1320,19 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: Option<&Ga
             }
         }
         row(p, 7.0, |r| {
-            ui::button(
-                r,
-                if entry.incomplete() { "Retry" } else { "Open" },
-                Act::Open,
-                false,
-                false,
-                true,
-            );
+            if unmet.is_empty() {
+                ui::button(
+                    r,
+                    if entry.incomplete() { "Retry" } else { "Open" },
+                    Act::Open,
+                    false,
+                    false,
+                    true,
+                );
+            }
             let same_game = entry
                 .details()
-                .is_some_and(|d| d.game.is_some() && d.game.as_ref() == installed);
+                .is_some_and(|d| d.game.is_some() && d.game == installed.game);
             if same_game && !entry.incomplete() {
                 ui::button(r, "Re-Create", Act::ReCreate, false, false, false);
             }
@@ -1282,19 +1387,7 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
             &f.name,
             "Up to 64 characters. Blank uses \u{201c}New World\u{201d}.",
         ));
-        if let Some(GameRef { id, version }) = &installed.game {
-            let trust = if installed.untrusted.is_empty() {
-                ""
-            } else {
-                " · needs Trust"
-            };
-            ui::text(
-                col,
-                format!("Game: {} {version}{trust}", ui::title(id)),
-                12.0,
-                ui::INK,
-            );
-        }
+        game_and_mods(col, f, installed);
         label(col, "Seed");
         row(col, 7.0, |r| {
             r.spawn(Node {
@@ -1348,6 +1441,56 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
         }
     });
     focus
+}
+
+fn game_and_mods(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) {
+    label(col, "Game");
+    for (i, g) in installed.games.iter().enumerate() {
+        let chosen = f.game.as_deref() == Some(g.id.as_str());
+        ui::button(
+            col,
+            format!("{} {}", ui::title(&g.id), g.version),
+            Act::PickGame(i),
+            chosen,
+            false,
+            false,
+        );
+    }
+    if !installed.untrusted.is_empty() {
+        ui::description(col, "Needs Trust before it opens.");
+    }
+    let Some(game) = f.game.as_deref() else {
+        return;
+    };
+    if !installed.mods.is_empty() {
+        label(col, "Mods");
+    }
+    let locked = installed.closure(&f.mods);
+    for (i, m) in installed.mods.iter().enumerate() {
+        let name = format!("{} {}", ui::title(&m.id), m.version);
+        if let Some(why) = installed.blocked(game, &m.id) {
+            ui::text(col, format!("{name} · unavailable: {why}"), 12.0, ui::MUTED);
+        } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
+            ui::text(
+                col,
+                format!("{name} · needed by another Mod"),
+                12.0,
+                ui::INK,
+            );
+        } else {
+            ui::button(
+                col,
+                name,
+                Act::ToggleMod(i),
+                f.mods.contains(&m.id),
+                false,
+                false,
+            );
+        }
+    }
+    for line in &installed.rejected {
+        ui::paragraph(col, format!("Skipped: {line}"), 12.0, ui::AMBER);
+    }
 }
 
 fn rename(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
@@ -1541,6 +1684,7 @@ mod tests {
                 id: "demo".into(),
                 version: "0.1.0".into(),
             }),
+            mods: Vec::new(),
             seed: 42,
             voxel_size_m: 0.5,
             created_unix_s: 1,
@@ -1670,6 +1814,42 @@ mod tests {
             Some(Target::World(path))
         );
         assert!(app.world().resource::<Installed>().untrusted.is_empty());
+    }
+
+    #[test]
+    fn a_world_whose_mod_is_missing_or_reversioned_cannot_open() {
+        use tesserae_core::save::library::ModRef;
+        let worlds = Directory::new();
+        let mut needs = details("Needy", true);
+        needs.mods = vec![ModRef {
+            id: "lake".into(),
+            version: "1.0".into(),
+        }];
+        library::create(&worlds.0, &needs).unwrap();
+        let mut installed = Installed::fake(Some(("demo", "0.1.0")), &[]);
+        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        app.update();
+        assert!(app.world().resource::<Switch>().0.is_none());
+        let has_open = app
+            .world_mut()
+            .query::<&Act>()
+            .iter(app.world())
+            .any(|a| *a == Act::Open);
+        assert!(!has_open, "Open is not offered while items are unmet");
+        assert_eq!(
+            app.world().resource::<Installed>().unmet(&needs),
+            vec!["Mod `lake` 1.0 is not installed".to_string()]
+        );
+        installed.mods = vec![GameRef {
+            id: "lake".into(),
+            version: "2.0".into(),
+        }];
+        assert_eq!(
+            installed.unmet(&needs),
+            vec!["Mod `lake` needs 1.0 but 2.0 is installed".to_string()]
+        );
+        installed.mods[0].version = "1.0".into();
+        assert!(installed.unmet(&needs).is_empty());
     }
 
     #[test]
@@ -1874,6 +2054,62 @@ mod tests {
         };
         assert_eq!(library::read(&path).unwrap().unwrap().name, "New World");
         assert!(app.world().resource::<InputFocusVisible>().0);
+    }
+
+    fn mod_installed() -> Installed {
+        Installed::fake(Some(("demo", "0.1.0")), &[])
+            .with_mod("lake", &["reeds"])
+            .with_mod("reeds", &[])
+            .with_mod("broken", &["ghost"])
+    }
+
+    #[test]
+    fn the_form_locks_dependencies_blocks_unsatisfiable_mods_and_records_the_set() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, mod_installed());
+        app.update();
+        act(&mut app, Act::New);
+        assert!(launcher(&app).form.mods.is_empty(), "Mods start unticked");
+        act(&mut app, Act::ToggleMod(0));
+        assert_eq!(launcher(&app).form.mods.len(), 1);
+        // reeds is needed by lake: shown locked, with nothing to toggle.
+        let toggles = |app: &mut App| {
+            app.world_mut()
+                .query::<&Act>()
+                .iter(app.world())
+                .filter(|a| matches!(a, Act::ToggleMod(_)))
+                .count()
+        };
+        assert_eq!(toggles(&mut app), 1);
+        // broken needs a Mod that is not installed, so it cannot be ticked at all.
+        app.world_mut()
+            .resource_mut::<Queue>()
+            .0
+            .push(Act::ToggleMod(2));
+        app.update();
+        assert_eq!(launcher(&app).form.mods.len(), 1);
+        act(&mut app, Act::Create);
+        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
+            panic!("no World to open");
+        };
+        let ids: Vec<_> = library::read(&path)
+            .unwrap()
+            .unwrap()
+            .mods
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, ["lake", "reeds"]);
+    }
+
+    #[test]
+    fn a_controller_reaches_a_mod_toggle_and_ticks_it() {
+        let worlds = Directory::new();
+        let (mut app, pad) = pad_app(&worlds, mod_installed());
+        tap(&mut app, pad, GamepadButton::South);
+        reach(&mut app, pad, Act::ToggleMod(1));
+        tap(&mut app, pad, GamepadButton::South);
+        assert!(launcher(&app).form.mods.contains("reeds"));
     }
 
     #[test]

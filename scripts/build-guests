@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds test guests to target/guests and the demo Game to games/demo/dist.
+# Builds test guests to target/guests and the demo Game to games/demo/dist/games/demo,
+# beside the plain `meadow` Game and an empty dist/mods, the layout `--mods games/demo/dist/mods` reads.
 #
 # Cargo may use a shared target directory; metadata locates the artifact
 # under either layout before the finished component is copied out.
@@ -24,8 +25,16 @@ done
 
 RUSTFLAGS= cargo build --manifest-path games/demo/Cargo.toml \
   --target wasm32-wasip2 --release --locked
-mkdir -p games/demo/dist/demo
+mkdir -p games/demo/dist/games/demo games/demo/dist/mods
 demo_target=$(cargo metadata --manifest-path games/demo/Cargo.toml --no-deps \
   --format-version 1 | jq -r .target_directory)
-cp "$demo_target/wasm32-wasip2/release/demo.wasm" games/demo/dist/demo/
-cp games/demo/mod.toml games/demo/dist/demo/
+cp "$demo_target/wasm32-wasip2/release/demo.wasm" games/demo/dist/games/demo/
+cp games/demo/mod.toml games/demo/dist/games/demo/
+
+RUSTFLAGS= cargo build --manifest-path games/meadow/Cargo.toml \
+  --target wasm32-wasip2 --release --locked
+mkdir -p games/demo/dist/games/meadow
+meadow_target=$(cargo metadata --manifest-path games/meadow/Cargo.toml --no-deps \
+  --format-version 1 | jq -r .target_directory)
+cp "$meadow_target/wasm32-wasip2/release/meadow.wasm" games/demo/dist/games/meadow/
+cp games/meadow/mod.toml games/demo/dist/games/meadow/

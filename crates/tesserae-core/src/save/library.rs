@@ -20,6 +20,14 @@ pub struct GameRef {
     pub version: String,
 }
 
+/// An enabled Mod that is not the Game.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModRef {
+    pub id: String,
+    pub version: String,
+}
+
 /// Display data only: commits stay authoritative for seed, Voxel size and
 /// content. `pending` marks a World whose first commit has not landed yet.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -27,6 +35,9 @@ pub struct GameRef {
 pub struct Sidecar {
     pub name: String,
     pub game: Option<GameRef>,
+    /// The Mods chosen at Create, dependencies included; absent in Worlds that predate them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mods: Vec<ModRef>,
     pub seed: u64,
     pub voxel_size_m: f32,
     pub created_unix_s: u64,
@@ -83,6 +94,16 @@ impl Sidecar {
                     id: m.id.clone(),
                     version: m.version.clone(),
                 }),
+            mods: commit
+                .content
+                .mods
+                .iter()
+                .filter(|m| !m.game)
+                .map(|m| ModRef {
+                    id: m.id.clone(),
+                    version: m.version.clone(),
+                })
+                .collect(),
             seed: commit.seed,
             voxel_size_m: commit.voxel_size_m,
             created_unix_s: now,
@@ -298,6 +319,7 @@ mod tests {
         Sidecar {
             name: name.into(),
             game: None,
+            mods: Vec::new(),
             seed: 7,
             voxel_size_m: 1.0,
             created_unix_s: 1,
@@ -309,6 +331,26 @@ mod tests {
 
     fn folder(path: &Path) -> String {
         path.file_name().unwrap().to_string_lossy().into_owned()
+    }
+
+    #[test]
+    fn the_chosen_mods_survive_a_round_trip_and_an_older_sidecar_has_none() {
+        let worlds = Directory::new();
+        let mut chosen = sidecar("Modded");
+        chosen.mods = vec![ModRef {
+            id: "lamps".into(),
+            version: "0.2.0".into(),
+        }];
+        let path = create(&worlds.0, &chosen).unwrap();
+        assert_eq!(read(&path).unwrap(), Some(chosen));
+
+        let plain = create(&worlds.0, &sidecar("Plain")).unwrap();
+        let text = fs::read_to_string(plain.join(SIDECAR)).unwrap();
+        assert!(
+            !text.contains("mods"),
+            "an empty set is not written: {text}"
+        );
+        assert!(read(&plain).unwrap().unwrap().mods.is_empty());
     }
 
     #[test]

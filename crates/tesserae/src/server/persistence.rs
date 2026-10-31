@@ -130,13 +130,46 @@ impl Opening {
         })
     }
 
-    /// A World saved without a Game loads no Mods, so installing one later cannot change
-    /// its required content.
-    pub fn loads_mods(&self) -> bool {
+    /// What this World loads: exactly what its commit requires, else what its details name.
+    /// A World saved without a Game loads nothing, so installing one later cannot change it.
+    pub fn selection(&self) -> super::mods::Selection {
+        use super::mods::{Selection, Wanted};
+        let named = |wanted: Vec<Wanted>| {
+            if wanted.is_empty() {
+                Selection::Nothing
+            } else {
+                Selection::Named(wanted)
+            }
+        };
         match (&self.recovered, &self.details) {
-            (Some(r), _) => !r.commit.content.mods.is_empty(),
-            (None, Some(d)) => d.game.is_some(),
-            (None, None) => true,
+            (Some(r), _) => named(
+                r.commit
+                    .content
+                    .mods
+                    .iter()
+                    .map(|m| Wanted {
+                        id: m.id.clone(),
+                        version: m.version.clone(),
+                        game: m.game,
+                    })
+                    .collect(),
+            ),
+            (None, Some(d)) => named(
+                d.game
+                    .iter()
+                    .map(|g| Wanted {
+                        id: g.id.clone(),
+                        version: g.version.clone(),
+                        game: true,
+                    })
+                    .chain(d.mods.iter().map(|m| Wanted {
+                        id: m.id.clone(),
+                        version: m.version.clone(),
+                        game: false,
+                    }))
+                    .collect(),
+            ),
+            (None, None) => Selection::Everything,
         }
     }
 

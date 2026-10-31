@@ -44,7 +44,10 @@ pub use error::ModError;
 pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};
 pub use loader::{Compiled, ModHost};
 pub use log::{LogDrain, LogHandle, LogLevel, LogLine};
-pub use manifest::{Found, Manifest, SUPPORTED_API, discover, plan};
+pub use manifest::{
+    Found, MAX_SCAN_ENTRIES, Manifest, Migration, Rejected, SUPPORTED_API, Scan, games_dir,
+    migrate_legacy_games, plan, scan,
+};
 pub use prompt::{confirm_trust, trust_prompt};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
