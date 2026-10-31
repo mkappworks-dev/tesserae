@@ -126,13 +126,9 @@ Business Source License 1.1, converting to **Apache-2.0 four years after each
 release**. BSL's only prohibition is production use, and Tesserae's Additional
 Use Grant gives that back for everything except reselling the engine itself.
 
-**You may build a game on Tesserae and sell it** — commercially, at any price,
-with no royalty, no revenue threshold and no reporting. You may ship your game's
-binaries, run servers, sell mods and look packs, modify the engine, and fork and
-redistribute this repository.
-
-[USE-GRANT.md](USE-GRANT.md) is the plain-English summary and the file to read
-first. [LICENSE](LICENSE) governs where the two differ.
+You may build a game on Tesserae and sell it. [USE-GRANT.md](USE-GRANT.md) is
+the plain-English summary of what else is allowed, and the file to read first.
+[LICENSE](LICENSE) governs where the two differ.
 
 > GitHub's sidebar shows a bare "View license" link rather than the licence
 > name, because the library it uses to detect licences does not carry BUSL. That

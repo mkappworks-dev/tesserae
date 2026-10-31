@@ -113,9 +113,8 @@ Tune one noise frequency in voxel units, or hardcode a one-voxel step height,
 and voxel size is permanently fixed — every number in the game becomes secretly
 calibrated to it.
 
-Cost of small voxels is non-linear: 0.25m is 64× the voxels per cubic metre, so
-an unchanged chunk budget covers a quarter of the distance. View distance in
-metres scales as 1/`voxel_size`.
+Small voxels cost non-linearly; the arithmetic is in
+[ADR-0003](docs/adr/0003-voxel-size-is-per-world.md).
 
 ## Shaped voxels
 

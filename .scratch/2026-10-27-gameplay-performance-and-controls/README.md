@@ -1,6 +1,6 @@
 # Desktop gameplay investigation and agreed design
 
-Status: shared plan confirmed; P0 merged; PR 2 is the next planned scope.
+Status: plan executed; see the execution table for what is merged and open.
 
 Source baseline: `7907b6de57e337d6257fc5d345c27e098db0b6d1`.
 Original research branch: `tech/gameplay-performance-and-controls-design`.
@@ -14,7 +14,6 @@ Original research branch: `tech/gameplay-performance-and-controls-design`.
 - [P0 validation](implementation-validation.md): release evidence and limits.
 - [Current profiling guide](../../docs/performance/frame-profiling.md):
   reproducible release fixtures and the sequential runner.
-- [Earlier PR proposals](pr-scopes.md): historical, superseded by the spec.
 
 ## Current scope
 
@@ -36,21 +35,15 @@ simulation, 30-second autosave/recovery, one flight/physics Player, a basic
 Game-provided blocky character and independent first/third-person views.
 The spec records exact cancellation, saving, input and camera behavior.
 
-The user confirmed the consolidated plan after the interview. P0
-(tickets 11–12) merged as [PR 22](https://github.com/mkappworks-dev/tesserae/pull/22),
-commit b7997b025a4f31e959ed090e23469f7665820670. The next planned scope is
-PR 2, input ownership and semantic actions (tickets 01–02), in its own
-branch/worktree. No later implementation starts automatically.
+The user confirmed the consolidated plan after the interview. PR order, GitHub
+numbers and open work are in [execution-plan.md](execution-plan.md).
 
 Tickets 13–16 are conditional experiment backlog, outside the numbered
 implementation sequence. P0 established instruments and a qualified
 baseline; it did not demonstrate a worthwhile gain from those candidates.
-None is implementation-ready or required before PR 2. Promote a candidate
-to an implementation PR only after its specific evidence gate passes;
-otherwise leave it deferred or close it without a code change.
-
-No parallel coding agents or extra threads are planned. Publication and
-merge authorization remain scoped to the work the user explicitly requests.
+None is implementation-ready. Promote a candidate to an implementation PR only
+after its specific evidence gate passes; otherwise leave it deferred or close it
+without a code change.
 
 ## Existing PR and architectural boundaries
 
