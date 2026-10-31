@@ -1,3 +1,15 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 70ee3fb..6920e3c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -6065,6 +6065,7 @@ dependencies = [
+  "tesserae-core",
+  "tesserae-mods",
+  "trash",
++ "wgpu",
+ ]
+ 
+ [[package]]
 diff --git a/crates/tesserae-mods/examples/t34_engine.rs b/crates/tesserae-mods/examples/t34_engine.rs
 new file mode 100644
 index 0000000..76a6c70
@@ -66,11 +78,21 @@ index 0000000..76a6c70
 +        );
 +    }
 +}
+diff --git a/crates/tesserae/Cargo.toml b/crates/tesserae/Cargo.toml
+index e2fcfb1..1624387 100644
+--- a/crates/tesserae/Cargo.toml
++++ b/crates/tesserae/Cargo.toml
+@@ -28,3 +28,5 @@ serde_json = "1"
+ tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
+ tesserae-mods = { path = "../tesserae-mods", version = "0.0.0" }
+ trash = "5"
++# [DEBUG-t34]
++wgpu = { version = "30.0.1", default-features = false, features = ["counters"] }
 diff --git a/crates/tesserae/src/client/soak.rs b/crates/tesserae/src/client/soak.rs
-index bddd653..3af566e 100644
+index fcef5ac..6def446 100644
 --- a/crates/tesserae/src/client/soak.rs
 +++ b/crates/tesserae/src/client/soak.rs
-@@ -67,6 +67,13 @@ fn soak(world: &mut World) {
+@@ -68,6 +68,13 @@ fn soak(world: &mut World) {
      if state == AppState::List && frames == LIST_FRAMES - 5 {
          shoot(world, format!("list-{cycle}.png"));
      }
@@ -84,7 +106,7 @@ index bddd653..3af566e 100644
      match state {
          AppState::InWorld if frames % 240 == 0 && !world.contains_resource::<TerrainArrived>() => {
              let status = world.get_resource::<crate::server::persistence::SaveStatus>();
-@@ -79,8 +86,11 @@ fn soak(world: &mut World) {
+@@ -80,8 +87,11 @@ fn soak(world: &mut World) {
              );
          }
          AppState::InWorld if world.contains_resource::<TerrainArrived>() => {
@@ -97,12 +119,29 @@ index bddd653..3af566e 100644
                  world.resource_mut::<Switch>().0 = Some(Target::List);
                  world.write_message(SaveAction::SaveQuit);
              }
-@@ -126,4 +136,113 @@ fn report(world: &World) {
+@@ -134,4 +144,130 @@ fn report(world: &World) {
          count(world.get_resource::<Assets<Image>>().map(|a| a.len())),
          rss_kb / 1024,
      );
 +    t34::line(&format!("cycle{:03}", world.resource::<Soak>().cycle));
-+}
++    if let Some(device) = world.get_resource::<bevy::render::renderer::RenderDevice>() {
++        let c = device.wgpu_device().get_internal_counters().hal;
++        eprintln!(
++            "[DEBUG-t34] cycle{:03} wgpu buffers={} bind_groups={} textures={} views={} samplers={} bgl={} render_pipelines={} compute_pipelines={} buffer_mb={:.1} texture_mb={:.1}",
++            world.resource::<Soak>().cycle,
++            c.buffers.read(),
++            c.bind_groups.read(),
++            c.textures.read(),
++            c.texture_views.read(),
++            c.samplers.read(),
++            c.bind_group_layouts.read(),
++            c.render_pipelines.read(),
++            c.compute_pipelines.read(),
++            c.buffer_memory.read() as f64 / 1048576.0,
++            c.texture_memory.read() as f64 / 1048576.0,
++        );
++    }
+ }
 +
 +// [DEBUG-t34] temporary instrumentation, reverted before finishing.
 +mod t34 {
@@ -185,10 +224,10 @@ index bddd653..3af566e 100644
 +            let dir = std::path::PathBuf::from(dir);
 +            let heavy = std::env::var("T34_HEAP")
 +                .is_ok_and(|list| list.split(',').any(|c| tag == format!("cycle{:03}", c.parse::<u32>().unwrap_or(9999))));
-+            let mut tools = vec![("vmmap", vec!["-summary"]), ("footprint", vec![])];
++            let mut tools = if std::env::var_os("T34_NOVMMAP").is_some() { vec![] } else { vec![("vmmap", vec!["-summary"]), ("footprint", vec![])] };
 +            if heavy {
 +                tools.push(("heap", vec!["-sortBySize"]));
-+                tools.push(("leaks", vec![]));
++                if std::env::var_os("T34_NOVMMAP").is_none() { tools.push(("leaks", vec![])); }
 +                if std::env::var_os("MallocStackLogging").is_some() {
 +                    tools.push(("malloc_history", vec!["PID", "-allBySize"]));
 +                }
@@ -207,7 +246,7 @@ index bddd653..3af566e 100644
 +            }
 +        }
 +    }
- }
++}
 +
 +#[global_allocator]
 +static T34_ALLOC: t34::Counting = t34::Counting;
