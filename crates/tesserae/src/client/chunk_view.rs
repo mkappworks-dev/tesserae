@@ -12,11 +12,11 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
-use bevy::ecs::system::SystemParam;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
+use bevy::tasks::{ComputeTaskPool, Task};
 
 use crate::session::SessionApp;
 use bevy::render::storage::ShaderBuffer;
@@ -26,6 +26,7 @@ use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
 use crate::client::drawn_mask::DrawnMask;
+use crate::client::in_flight::InFlight;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
 use crate::render::fog::{self, FogSettings};
 use crate::server::streaming::{
@@ -51,8 +52,8 @@ pub(super) struct ChunkEntities {
     opaque: LayerEntities,
     blended: LayerEntities,
     cutout: LayerEntities,
-    /// Every `(level, coord)` sent a mesh, empty or not, and not unloaded since:
-    /// the space each level has answered for.
+    /// Every `(level, coord)` a mesh has landed for, empty or not, and not
+    /// unloaded since: the space each level has answered for.
     delivered: HashSet<(u32, ChunkCoord)>,
     /// Unloaded by the Server and still drawn, until `release` finds its region
     /// covered.
@@ -151,18 +152,34 @@ struct TerrainMaterial {
     drawn: Handle<ShaderBuffer>,
 }
 
-#[derive(SystemParam)]
-struct IncomingMeshes<'w, 's> {
-    level0: MessageReader<'w, 's, ChunkMeshReady>,
-    coarse: MessageReader<'w, 's, LodMeshReady>,
+/// A Chunk's meshes, built off the main thread: a mesh layer with nothing to
+/// draw has none.
+struct Built {
+    opaque: Option<Mesh>,
+    blended: Option<Mesh>,
+    order: Option<BlendOrder>,
+    cutout: Option<Mesh>,
 }
 
-impl IncomingMeshes<'_, '_> {
-    fn read(&mut self) -> impl Iterator<Item = (u32, ChunkCoord, &ChunkMesh)> {
-        let level0 = self.level0.read().map(|m| (0, m.coord, &m.mesh));
-        let coarse = self.coarse.read().map(|m| (m.level, m.coord, &m.mesh));
-        level0.chain(coarse)
+impl Built {
+    fn new(mesh: &ChunkMesh, voxel_size: f32) -> Self {
+        let build =
+            |layer: &MeshLayer| (!layer.is_empty()).then(|| chunk_mesh_to_mesh(layer, voxel_size));
+        Self {
+            opaque: build(&mesh.opaque),
+            blended: build(&mesh.blended),
+            order: BlendOrder::new(&mesh.blended, voxel_size),
+            cutout: build(&mesh.cutout),
+        }
     }
+}
+
+/// The meshes the Server sent that are still being built.
+#[derive(Resource, Default)]
+struct Building {
+    in_flight: InFlight<(u32, ChunkCoord), Task<Built>>,
+    #[cfg(test)]
+    hold: std::sync::Arc<crate::server::Gate>,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -175,17 +192,19 @@ pub(super) fn plugin(app: &mut App) {
 
 /// One place for the per-frame chain, so the tests run the one the app does.
 ///
-/// Chained: the Server can send a mesh and its unload in one frame, and an
-/// unload handled first would leave the mesh with nothing to despawn it; and
-/// what each level has drawn is published after both.
+/// Chained: the Server can send a mesh and its unload in one frame, and the
+/// unload must cancel the mesh's build or a mesh landing after it would be
+/// drawn for good; and what each level has drawn is published after both.
 fn add_view_systems(app: &mut App) {
-    app.init_session_state::<super::material_textures::Textures>();
+    app.init_session_state::<super::material_textures::Textures>()
+        .init_session_state::<Building>();
     app.add_session_systems(
         Update,
         (
             update_textures.after(super::material_textures::receive),
-            upload_meshes,
+            receive_meshes,
             drop_meshes,
+            land_meshes,
             release,
             sort_blended.run_if(blend_sort_on),
             publish_drawn,
@@ -279,7 +298,7 @@ fn debug_tint() -> u32 {
     0
 }
 
-/// What `upload_meshes` and `drop_meshes` share: the pieces of a Client frame
+/// What `land_meshes` and `release` share: the pieces of a Client frame
 /// that spawn, replace and despawn a Chunk's entities.
 struct Draw<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
@@ -288,26 +307,24 @@ struct Draw<'a, 'w, 's> {
 }
 
 impl Draw<'_, '_, '_> {
-    /// Brings one layer's entity for `key` in line with `layer`: spawned,
+    /// Brings one layer's entity for `key` in line with `mesh`: spawned,
     /// replaced or, if the layer has nothing, despawned. The entity, if it
     /// draws something.
     fn show(
         &mut self,
         entities: &mut LayerEntities,
         material: &Handle<ChunkMaterial>,
-        layer: &MeshLayer,
+        mesh: Option<Mesh>,
         key: (u32, ChunkCoord),
         world: &WorldSettings,
         casts_shadows: bool,
     ) -> Option<Entity> {
-        if layer.is_empty() {
+        let Some(mesh) = mesh else {
             self.hide(entities, key);
             return None;
-        }
+        };
         let (level, coord) = key;
-        let handle = self
-            .meshes
-            .add(chunk_mesh_to_mesh(layer, world.voxel_size_at(level)));
+        let handle = self.meshes.add(mesh);
         match entities.get(&key) {
             // Replacing rather than despawning and respawning keeps the
             // entity id stable, and dropping the old handle is what stops a
@@ -355,9 +372,9 @@ impl Draw<'_, '_, '_> {
         reason = "a Bevy system; the extra parameter is the dev cost counter"
     )
 )]
-fn upload_meshes(
+fn land_meshes(
     mut commands: Commands,
-    mut incoming: IncomingMeshes,
+    mut building: ResMut<Building>,
     mut entities: ResMut<ChunkEntities>,
     mut meshes: ResMut<Assets<Mesh>>,
     material: Res<TerrainMaterial>,
@@ -377,13 +394,14 @@ fn upload_meshes(
         meshes: &mut meshes,
         mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
     };
-    for (level, coord, mesh) in incoming.read() {
-        let key = (level, coord);
+    for (key, built) in building.in_flight.landed() {
+        // Marked drawn as it lands, not as it is sent: a bit set for a mesh
+        // still building would discard the coarser level drawing its region.
         entities.deliver(key);
         let opaque = draw.show(
             &mut entities.opaque,
             &material.opaque,
-            &mesh.opaque,
+            built.opaque,
             key,
             &world,
             true,
@@ -391,7 +409,7 @@ fn upload_meshes(
         let blended = draw.show(
             &mut entities.blended,
             &material.blended,
-            &mesh.blended,
+            built.blended,
             key,
             &world,
             // The flood-fill already dims sky light under water and glass, so
@@ -401,14 +419,13 @@ fn upload_meshes(
         let cutout = draw.show(
             &mut entities.cutout,
             &material.cutout,
-            &mesh.cutout,
+            built.cutout,
             key,
             &world,
             true,
         );
         if let Some(entity) = blended {
-            let order = BlendOrder::new(&mesh.blended, world.voxel_size_at(level));
-            match order {
+            match built.order {
                 Some(order) => draw.commands.entity(entity).insert(order),
                 None => draw.commands.entity(entity).remove::<BlendOrder>(),
             };
@@ -429,14 +446,61 @@ fn upload_meshes(
     }
 }
 
+/// Takes the meshes rather than reading them, so each moves into its build
+/// uncopied: the Client is these messages' only reader.
+///
+/// On the compute pool, not the async one the Server's jobs fill, so a mesh is
+/// not queued behind a stream of generation.
+fn receive_meshes(
+    mut level0: ResMut<Messages<ChunkMeshReady>>,
+    mut coarse: ResMut<Messages<LodMeshReady>>,
+    mut building: ResMut<Building>,
+    world: Res<WorldSettings>,
+    #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
+        crate::cost::MainThreadCost,
+    >,
+) {
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let started = cost.enabled().then(std::time::Instant::now);
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let mut received = 0;
+    let pool = ComputeTaskPool::get();
+    let level0 = level0.drain().map(|m| (0, m.coord, m.mesh));
+    let coarse = coarse.drain().map(|m| (m.level, m.coord, m.mesh));
+    for (level, coord, mesh) in level0.chain(coarse) {
+        let voxel_size = world.voxel_size_at(level);
+        let build = async move { Built::new(&mesh, voxel_size) };
+        #[cfg(test)]
+        let build = {
+            let hold = std::sync::Arc::clone(&building.hold);
+            async move {
+                hold.passed().await;
+                build.await
+            }
+        };
+        building.in_flight.send((level, coord), pool.spawn(build));
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        {
+            received += 1;
+        }
+    }
+    // The meshes are counted as they land.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    if let Some(started) = started.filter(|_| received > 0) {
+        cost.uploaded(started.elapsed(), 0);
+    }
+}
+
 fn drop_meshes(
     mut level0: MessageReader<ChunkUnloaded>,
     mut coarse: MessageReader<LodUnloaded>,
     mut entities: ResMut<ChunkEntities>,
+    mut building: ResMut<Building>,
 ) {
     let level0 = level0.read().map(|m| (0, m.coord));
     let coarse = coarse.read().map(|m| (m.level, m.coord));
     for key in level0.chain(coarse) {
+        building.in_flight.cancel(key);
         entities.unload(key);
     }
 }
@@ -792,8 +856,8 @@ mod tests {
             .add_message::<crate::content::MaterialPalette>()
             .add_systems(Startup, add_material);
         add_view_systems(&mut app);
-        // `upload_meshes` takes the dev-only counter as a `ResMut`, so without
-        // it the system fails parameter validation instead of running.
+        // The mesh systems take the dev-only counter as a `ResMut`, so without
+        // it they fail parameter validation instead of running.
         #[cfg(any(feature = "dev", feature = "profiling"))]
         app.init_resource::<crate::cost::MainThreadCost>();
         if let Some(palette) = palette {
@@ -1245,13 +1309,111 @@ mod tests {
     fn send_mesh(app: &mut App, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
         app.world_mut()
             .write_message(ChunkMeshReady { coord, mesh });
-        app.update();
+        settle(app);
     }
 
     fn send_coarse(app: &mut App, level: u32, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
         app.world_mut()
             .write_message(LodMeshReady { level, coord, mesh });
+        settle(app);
+    }
+
+    /// Updates until every mesh in flight has landed.
+    fn settle(app: &mut App) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            app.update();
+            if app.world().resource::<Building>().in_flight.is_empty() {
+                return;
+            }
+            assert!(std::time::Instant::now() < deadline, "a build never ends");
+            std::thread::yield_now();
+        }
+    }
+
+    fn hold_builds(app: &App) -> std::sync::Arc<crate::server::Gate> {
+        let gate = std::sync::Arc::clone(&app.world().resource::<Building>().hold);
+        gate.hold();
+        gate
+    }
+
+    #[test]
+    fn a_mesh_in_flight_is_marked_drawn_in_the_frame_its_entity_lands() {
+        let mut app = app();
+        let coord = ChunkCoord::new(0, 0, 0);
+        let gate = hold_builds(&app);
+        app.world_mut().write_message(ChunkMeshReady {
+            coord,
+            mesh: geometry(),
+        });
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(entity_for(&app, coord), None);
+        assert!(
+            !mask_has(&app, 0, coord),
+            "a coarser level still draws here"
+        );
+
+        gate.release();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while entity_for(&app, coord).is_none() {
+            assert!(std::time::Instant::now() < deadline, "never landed");
+            app.update();
+            assert_eq!(mask_has(&app, 0, coord), entity_for(&app, coord).is_some());
+        }
+    }
+
+    /// Released when its children are drawn, not when they are sent: between
+    /// the two, nothing would draw its region.
+    #[test]
+    fn a_retained_coarse_chunk_is_drawn_until_its_children_land() {
+        let mut app = app();
+        put_eye(&mut app, Vec3::ZERO);
+        let coarse = ChunkCoord::new(0, 0, 0);
+        send_coarse(&mut app, 1, coarse, geometry());
+        unload_coarse(&mut app, 1, coarse);
+        let gate = hold_builds(&app);
+        for child in super::children(coarse) {
+            app.world_mut().write_message(ChunkMeshReady {
+                coord: child,
+                mesh: geometry(),
+            });
+        }
         app.update();
+        app.update();
+        assert!(entity_at(&app, 1, coarse).is_some());
+        assert!(mask_has(&app, 1, coarse));
+        assert!(super::children(coarse).all(|child| !mask_has(&app, 0, child)));
+
+        gate.release();
+        settle(&mut app);
+        assert_eq!(entity_at(&app, 1, coarse), None);
+        assert!(super::children(coarse).all(|child| mask_has(&app, 0, child)));
+    }
+
+    #[test]
+    fn a_mesh_still_in_flight_when_its_chunk_unloads_never_lands() {
+        let mut app = app();
+        put_eye(&mut app, FAR_M);
+        let coord = ChunkCoord::new(2, 0, -1);
+        let gate = hold_builds(&app);
+        app.world_mut().write_message(ChunkMeshReady {
+            coord,
+            mesh: geometry(),
+        });
+        app.update();
+        app.world_mut().write_message(ChunkUnloaded { coord });
+        app.update();
+
+        gate.release();
+        settle(&mut app);
+        for _ in 0..3 {
+            app.update();
+        }
+        assert_eq!(entity_for(&app, coord), None);
+        assert!(!mask_has(&app, 0, coord));
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 0);
     }
 
     fn entity_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
