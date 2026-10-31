@@ -305,9 +305,7 @@ impl Draw<'_, '_, '_> {
             return None;
         }
         let (level, coord) = key;
-        let handle = self
-            .meshes
-            .add(chunk_mesh_to_mesh(layer, world.voxel_size_at(level)));
+        let handle = self.meshes.add(chunk_mesh_to_mesh(layer));
         match entities.get(&key) {
             // Replacing rather than despawning and respawning keeps the
             // entity id stable, and dropping the old handle is what stops a
@@ -323,7 +321,8 @@ impl Draw<'_, '_, '_> {
                 let mut entity = self.commands.spawn((
                     Mesh3d(handle),
                     MeshMaterial3d(material.clone()),
-                    Transform::from_translation(world.chunk_origin_at(coord, level)),
+                    Transform::from_translation(world.chunk_origin_at(coord, level))
+                        .with_scale(Vec3::splat(world.voxel_size_at(level))),
                     coord,
                     MeshTag::new(level),
                     layer_of(level),
@@ -633,7 +632,6 @@ fn spawn_camera(
 mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
-    use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
     use tesserae_core::{Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk};
 
@@ -1281,15 +1279,20 @@ mod tests {
             .count()
     }
 
-    fn positions(app: &App, entity: Entity) -> Vec<[f32; 3]> {
+    fn decoded(app: &App, entity: Entity) -> MeshLayer {
         let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
         let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
-        let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            panic!("positions are Float32x3");
-        };
-        positions.clone()
+        crate::client::chunk_mesh::decoded(mesh).expect("a packed Chunk mesh")
+    }
+
+    /// In metres from the entity's origin.
+    fn positions(app: &App, entity: Entity) -> Vec<[f32; 3]> {
+        let scale = app.world().get::<Transform>(entity).unwrap().scale;
+        decoded(app, entity)
+            .positions
+            .iter()
+            .map(|p| (Vec3::from(*p) * scale).to_array())
+            .collect()
     }
 
     #[test]
@@ -1398,17 +1401,10 @@ mod tests {
 
     /// The blended mesh's quads in the order the GPU draws them.
     fn drawn_quads(app: &App, entity: Entity) -> Vec<DrawnQuad> {
-        let handle = &app.world().get::<Mesh3d>(entity).unwrap().0;
-        let mesh = app.world().resource::<Assets<Mesh>>().get(handle).unwrap();
         let positions = positions(app, entity);
-        let Some(VertexAttributeValues::Float32x3(normals)) =
-            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
-        else {
-            panic!("normals are Float32x3");
-        };
-        let Some(bevy::mesh::Indices::U32(indices)) = mesh.indices() else {
-            panic!("U32 indices");
-        };
+        let MeshLayer {
+            normals, indices, ..
+        } = decoded(app, entity);
         indices
             .chunks(6)
             .map(|quad| {

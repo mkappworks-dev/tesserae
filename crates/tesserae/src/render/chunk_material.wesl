@@ -147,7 +147,6 @@ fn fragment(
     vertex_output.position = in.clip_position;
     vertex_output.world_position = in.world_position;
     vertex_output.world_normal = in.world_normal;
-    vertex_output.uv = in.uv;
     vertex_output.instance_index = in.instance_index;
 
     // Coarse geometry up to a Voxel above the real surface would stand over the
