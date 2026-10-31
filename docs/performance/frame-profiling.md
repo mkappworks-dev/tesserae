@@ -174,31 +174,37 @@ seed and measured in the same 22–32 s phase:
   height above the generated ground; `streaming_settled` gives the time to
   refill.
 
-Each run adds three files beside `frames.csv`, and the runner summarises them in
-`streaming.json`:
+Each run adds up to three files beside `frames.csv`, and the runner summarises
+them in `streaming.json`. Two of the instruments are opt-in through
+`--instruments`, which sets `TESSERAE_PROFILE_HOLES` and `TESSERAE_PROFILE_GPU`
+for the logging-on runs: in matched on/off rounds the GPU markers added 16 to
+21% to the median frame, far over the bound, so a timing series leaves `gpu` off
+and attributes GPU time in a separate series. The hole count added nothing
+measurable over logging alone, which was itself about 3.7% of median.
 
-- `frames.csv` gains `rule_holes` and `fill_holes` with per-level columns,
-  `chunk_entities` and `visible_meshes_camera<order>`. A hole is a Cell of a
-  level's mesh shell that intersects the Player camera's frustum, out to the LOD
-  reach, and that nothing draws: a _rule hole_ where some level delivered the
-  region but the draw rule in force discards it, a _fill hole_ where no level
-  delivered it. It is counted on the Client from what it was sent, never from
-  World storage. The rule in force is the metre cut; a Cell the cut's edge
-  crosses is split up to three levels finer, then tested at its centre. A hole
-  hidden behind nearer terrain still counts.
+- `frames.csv` gains `rule_holes` and `fill_holes` with per-level columns (empty
+  unless `--instruments holes`), `chunk_entities` and
+  `visible_meshes_camera<order>`. A hole is a Cell of a level's mesh shell that
+  intersects the Player camera's frustum, out to the LOD reach, and that nothing
+  draws: a _rule hole_ where some level delivered the region but the draw rule
+  in force discards it, a _fill hole_ where no level delivered it. It is counted
+  on the Client from what it was sent, never from World storage. The rule in
+  force is the metre cut; a Cell the cut's edge crosses is split up to three
+  levels finer, then tested at its centre. A hole hidden behind nearer terrain
+  still counts.
 - `frames.flow.csv` has one row per level per fixed tick: Chunks held and
   meshed, and per stage (generate, relight, mesh) the Chunks waiting to
   dispatch, in flight, and since the World opened the jobs run and their worker
   thread CPU, plus fluid jobs run and their worker CPU. `streaming.json` reports
   worker milliseconds per second over the measured phase.
-- `frames.gpu.csv` has GPU timestamps per frame: `frame_start`, `frame_end`, and
-  per camera order `view_start`, `prepass_end`, `main_start`, `opaque_end`,
-  `main_end` and `view_end`, in milliseconds since `frame_start`. Apple GPUs
-  sample timestamps only at encoder boundaries, so each marker is an empty
-  compute pass dispatching one workgroup between two of Bevy's passes. A marker
-  is ordered by the schedule: work the GPU overlaps across one is charged to
-  whichever side it ends on, systems outside Bevy's sets can fall on either side
-  of `view_start`, and `prepass_end` to `main_start` includes the shadow passes.
-  About 20% of frames return an earlier frame's value for the last markers;
-  those cells are left empty, and `streaming.json` reports how many frames have
-  a `frame_end`.
+- `frames.gpu.csv`, under `--instruments gpu` only, has GPU timestamps per
+  frame: `frame_start`, `frame_end`, and per camera order `view_start`,
+  `prepass_end`, `main_start`, `opaque_end`, `main_end` and `view_end`, in
+  milliseconds since `frame_start`. Apple GPUs sample timestamps only at encoder
+  boundaries, so each marker is an empty compute pass dispatching one workgroup
+  between two of Bevy's passes. A marker is ordered by the schedule: work the
+  GPU overlaps across one is charged to whichever side it ends on, systems
+  outside Bevy's sets can fall on either side of `view_start`, and `prepass_end`
+  to `main_start` includes the shadow passes. About 20% of frames return an
+  earlier frame's value for the last markers; those cells are left empty, and
+  `streaming.json` reports how many frames have a `frame_end`.
