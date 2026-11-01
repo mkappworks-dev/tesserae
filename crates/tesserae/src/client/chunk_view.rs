@@ -12,6 +12,7 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
+use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
@@ -19,6 +20,7 @@ use bevy::prelude::*;
 use bevy::tasks::{ComputeTaskPool, Task};
 
 use crate::session::SessionApp;
+use bevy::render::occlusion_culling::OcclusionCulling;
 use bevy::render::storage::ShaderBuffer;
 use tesserae_core::{ChunkMesh, MeshLayer};
 
@@ -184,6 +186,7 @@ struct Building {
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<ChunkEntities>()
         .init_session_state::<super::material_textures::Textures>()
+        .insert_resource(CullOccluded(occlusion_switch()))
         .add_session_systems(Startup, (add_material, spawn_light))
         .add_session_systems(PostStartup, spawn_camera);
     add_view_systems(app);
@@ -237,6 +240,18 @@ fn blend_sort_on() -> bool {
 #[cfg(not(any(feature = "dev", feature = "profiling")))]
 fn blend_sort_on() -> bool {
     true
+}
+
+/// `TESSERAE_OCCLUSION=1` under `dev` or `profiling`, so one binary can be
+/// measured with occlusion culling on and off.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn occlusion_switch() -> bool {
+    std::env::var("TESSERAE_OCCLUSION").is_ok_and(|v| v == "1")
+}
+
+#[cfg(not(any(feature = "dev", feature = "profiling")))]
+fn occlusion_switch() -> bool {
+    false
 }
 
 fn add_material(
@@ -631,6 +646,11 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
     ambient.brightness = 900.0;
 }
 
+/// Whether the Player camera runs Bevy's two-phase occlusion culling, which
+/// needs a depth prepass.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct CullOccluded(pub bool);
+
 /// How far the view tips down. Framing is a Client decision; where the Eye
 /// starts is the Server's, so the Client's camera starts where the Player does.
 const VIEW_PITCH: f32 = -0.3;
@@ -640,7 +660,7 @@ const VIEW_PITCH: f32 = -0.3;
 /// edge between two plugins' systems, which would have to be kept in step.
 ///
 /// One camera draws every level into one depth buffer: the coverage rule in
-/// `chunk_material.wesl` already discards a coarse fragment wherever a finer
+/// `coverage.wesl` already discards a coarse fragment wherever a finer
 /// level draws, so depth alone decides the rest. See
 /// `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
 ///
@@ -651,6 +671,7 @@ fn spawn_camera(
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
     fog_settings: Res<FogSettings>,
+    cull: Res<CullOccluded>,
 ) {
     let eye = spawn.entry_eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
@@ -691,6 +712,11 @@ fn spawn_camera(
     ) {
         commands.entity(camera).insert(fog);
     }
+    if cull.0 {
+        commands
+            .entity(camera)
+            .insert((DepthPrepass, OcclusionCulling));
+    }
 }
 
 #[cfg(test)]
@@ -707,9 +733,14 @@ mod tests {
     }
 
     fn camera_app(eye: Vec3, streaming: StreamingSettings) -> App {
+        camera_app_culling(eye, streaming, CullOccluded(false))
+    }
+
+    fn camera_app_culling(eye: Vec3, streaming: StreamingSettings, cull: CullOccluded) -> App {
         let mut app = App::new();
         app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(eye))
             .insert_resource(streaming)
+            .insert_resource(cull)
             .init_resource::<FogSettings>()
             .init_resource::<WorldSettings>();
         app.world_mut().run_system_once(spawn_camera).unwrap();
@@ -758,6 +789,20 @@ mod tests {
         for level in 0..level_count(&streaming) {
             assert!(layers.intersects(&layer_of(level)), "level {level}");
         }
+    }
+
+    #[test]
+    fn occlusion_culling_and_its_depth_prepass_are_only_on_when_switched_on() {
+        let culling = |on: bool| {
+            let mut app =
+                camera_app_culling(Vec3::ZERO, StreamingSettings::default(), CullOccluded(on));
+            let mut query = app
+                .world_mut()
+                .query_filtered::<(Has<OcclusionCulling>, Has<DepthPrepass>), With<MainCamera>>();
+            query.single(app.world()).unwrap()
+        };
+        assert_eq!(culling(false), (false, false));
+        assert_eq!(culling(true), (true, true));
     }
 
     #[test]
