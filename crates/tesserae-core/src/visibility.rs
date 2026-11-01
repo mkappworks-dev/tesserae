@@ -78,7 +78,7 @@ fn flood(open: &[Row; ROWS]) -> Connectivity {
                 if seeds == 0 {
                     break;
                 }
-                let faces = region(open, &mut seen, &mut stack, i, seeds & seeds.wrapping_neg());
+                let faces = region(open, &mut seen, &mut stack, i, 1 << seeds.trailing_zeros());
                 out.0 |= joined(faces);
                 if out == Connectivity::ALL {
                     return out;
