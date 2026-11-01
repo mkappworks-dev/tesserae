@@ -48,10 +48,13 @@ impl Culling {
         let on = |var| {
             cfg!(any(feature = "dev", feature = "profiling")) && std::env::var_os(var).is_some()
         };
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let sight_cull = std::env::var("TESSERAE_SIGHT_CULL").ok();
+        #[cfg(not(any(feature = "dev", feature = "profiling")))]
+        let sight_cull: Option<String> = None;
         Culling {
-            cull: std::env::var("TESSERAE_SIGHT_CULL").is_ok_and(|v| v == "1" || v == "noshadow")
-                && cfg!(any(feature = "dev", feature = "profiling")),
-            shadowless: std::env::var("TESSERAE_SIGHT_CULL").is_ok_and(|v| v == "noshadow"),
+            cull: sight_cull.as_deref().is_some_and(|v| v == "1" || v == "noshadow"),
+            shadowless: sight_cull.as_deref() == Some("noshadow"),
             count: cfg!(feature = "profiling")
                 && on("TESSERAE_PROFILE_VISIBILITY")
                 && on("TESSERAE_PROFILE_CSV"),
