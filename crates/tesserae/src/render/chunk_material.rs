@@ -18,14 +18,12 @@ use bevy::render::render_resource::{
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use crate::client::chunk_mesh::{ATTRIBUTE_LIGHT, ATTRIBUTE_MATERIAL};
+use crate::client::chunk_mesh::{
+    ATTRIBUTE_MATERIAL_LIGHT, ATTRIBUTE_POSITION_FACE, ATTRIBUTE_UV, LIGHT_SHIFT, STEPS,
+};
 
 /// What to spawn in `MeshMaterial3d`.
 pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>;
-
-/// Locations 0 to 7 are `bevy_pbr`'s own vertex attributes.
-const MATERIAL_SHADER_LOCATION: u32 = 10;
-const LIGHT_SHADER_LOCATION: u32 = 11;
 
 /// Material ids with a colour of their own.
 pub const PALETTE_LEN: usize = 64;
@@ -115,16 +113,14 @@ impl MaterialExtension for ChunkMaterialExtension {
         layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // The base material's layout stops at `bevy_pbr`'s attributes, so the
-        // custom one has to be declared here or the vertex shader reads
-        // garbage. Spelling the set out is safe because this material is only
+        // A packed Chunk mesh has none of `bevy_pbr`'s attributes, so the base
+        // material's layout is empty and the packed one has to be declared
+        // here. Spelling the set out is safe because this material is only
         // ever used on meshes from `chunk_mesh_to_mesh`.
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            ATTRIBUTE_MATERIAL.at_shader_location(MATERIAL_SHADER_LOCATION),
-            ATTRIBUTE_LIGHT.at_shader_location(LIGHT_SHADER_LOCATION),
+            ATTRIBUTE_POSITION_FACE.at_shader_location(0),
+            ATTRIBUTE_UV.at_shader_location(1),
+            ATTRIBUTE_MATERIAL_LIGHT.at_shader_location(2),
         ])?];
 
         // Reach the shader as `constants::*`, so neither the uniform's length
@@ -134,6 +130,8 @@ impl MaterialExtension for ChunkMaterialExtension {
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
             ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
+            ShaderDefVal::UInt("CHUNK_VERTEX_STEPS".into(), STEPS as u32),
+            ShaderDefVal::UInt("CHUNK_LIGHT_SHIFT".into(), LIGHT_SHIFT),
             ShaderDefVal::UInt(
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,

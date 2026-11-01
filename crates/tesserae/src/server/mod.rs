@@ -36,6 +36,8 @@ pub mod tool;
 pub mod undo;
 pub mod world_state;
 
+#[cfg(test)]
+pub(crate) use jobs::Gate;
 use std::sync::Arc;
 
 use bevy::prelude::*;
