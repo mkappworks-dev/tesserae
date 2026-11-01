@@ -12,7 +12,7 @@ use bevy::prelude::*;
 use super::streaming::{Extent, StreamingSettings};
 
 /// Past this the doubling would overflow a Cell count long before it was useful.
-pub const MAX_LEVELS: u32 = 32;
+pub(super) const MAX_LEVELS: u32 = 32;
 
 /// The smallest `n` with `view_distance_m * 2^(n-1) >= lod_distance_m`.
 pub fn level_count(settings: &StreamingSettings) -> u32 {
