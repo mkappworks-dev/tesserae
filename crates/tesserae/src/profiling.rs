@@ -287,7 +287,7 @@ fn save(
             .chain((0..CAMERAS).map(|c| format!(",visible_meshes_camera{c}")))
             .chain(std::iter::once(",rescore_ms".to_string()))
             .chain(std::iter::once(
-                ",sight_drawn0,sight_culled0,sight_retained_hidden0,sight_quads0,sight_quads_culled0,sight_regions0,sight_regions_culled0,mesh_reach_run,mesh_reach_cpu_ms,mesh_unreach_run,mesh_unreach_cpu_ms".to_string()
+                ",sight_drawn0,sight_culled0,sight_retained_hidden0,mesh_reach_run,mesh_reach_cpu_ms,mesh_unreach_run,mesh_unreach_cpu_ms".to_string()
             ))
             .collect::<String>()
     )?;
@@ -349,19 +349,9 @@ fn save(
         write!(out, ",{}", r.cost.rescore_s * 1e3)?;
         if r.sight.counted {
             let s = r.sight;
-            write!(
-                out,
-                ",{},{},{},{},{},{},{}",
-                s.drawn,
-                s.culled,
-                s.retained_hidden,
-                s.quads,
-                s.quads_culled,
-                s.regions,
-                s.regions_culled
-            )?;
+            write!(out, ",{},{},{}", s.drawn, s.culled, s.retained_hidden)?;
         } else {
-            write!(out, ",,,,,,,")?;
+            write!(out, ",,,")?;
         }
         match r.mesh_reach {
             Some([(a, b), (c, d)]) => writeln!(out, ",{a},{b},{c},{d}")?,

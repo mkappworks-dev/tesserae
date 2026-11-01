@@ -1,6 +1,4 @@
-//! What the Client draws of the Chunks the Server has sent a mesh for: opaque
-//! and cutout layers merged by region (`chunk_region`), blended ones an entity
-//! per Chunk.
+//! What the Client draws: one entity per Chunk the Server has sent a mesh for.
 //!
 //! The Client has no access to World state at all — not even read access. It
 //! receives a finished `ChunkMesh` and a coordinate to drop, which is what lets
@@ -14,23 +12,19 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
-use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 use bevy::tasks::{ComputeTaskPool, Task};
-use std::sync::Arc;
 
 use crate::session::SessionApp;
-use bevy::render::occlusion_culling::OcclusionCulling;
 use bevy::render::storage::ShaderBuffer;
 use tesserae_core::{ChunkMesh, MeshLayer};
 
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
-use crate::client::chunk_mesh::{PackedLayer, chunk_mesh_to_mesh, pack};
-use crate::client::chunk_region::{Look, Regions, SHADOW_ONLY_LAYER};
+use crate::client::chunk_mesh::chunk_mesh_to_mesh;
 use crate::client::drawn_mask::DrawnMask;
 use crate::client::in_flight::InFlight;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
@@ -44,19 +38,20 @@ use crate::world::{ChunkCoord, WorldSettings};
 /// Level 0, the UI and everything that is not distant terrain.
 const NEAR_LAYER: usize = 0;
 
-pub(super) fn layer_of(level: u32) -> RenderLayers {
+fn layer_of(level: u32) -> RenderLayers {
     RenderLayers::layer(level as usize)
 }
 
 type LayerEntities = HashMap<(u32, ChunkCoord), Entity>;
 
-/// What draws each Chunk of each level, by the level's own lattice, per mesh
-/// layer. Render entities, not World state, so the Client owns this outright.
+/// The entities drawing each Chunk of each level, by the level's own lattice, one
+/// map per mesh layer. Render entities, not World state, so the Client owns this
+/// outright.
 #[derive(Resource, Default)]
 pub(super) struct ChunkEntities {
-    opaque: Regions,
+    opaque: LayerEntities,
     blended: LayerEntities,
-    cutout: Regions,
+    cutout: LayerEntities,
     /// Every `(level, coord)` a mesh has landed for, empty or not, and not
     /// unloaded since: the space each level has answered for.
     delivered: HashSet<(u32, ChunkCoord)>,
@@ -71,8 +66,6 @@ pub(super) struct ChunkEntities {
     release_due: bool,
     /// Each level's anchor when `release` last ran.
     anchors: Vec<ChunkCoord>,
-    /// Blended entities `cull` hid.
-    blended_hidden: HashSet<Entity>,
     /// The words `publish_drawn` last wrote, for the hole count.
     #[cfg(feature = "profiling")]
     published: Vec<u32>,
@@ -126,101 +119,33 @@ impl ChunkEntities {
             })
     }
 
-    /// Leaves each level-0 Chunk `seen` does not admit out of what is drawn,
-    /// and puts back each it does. Never a retained one: it stands in for
-    /// a hole until its region is covered.
-    fn cull(&mut self, seen: impl Fn(ChunkCoord) -> bool, commands: &mut Commands) {
-        let retained = &self.retained;
-        let hide = |coord: ChunkCoord| !seen(coord) && !retained.contains(&(0, coord));
-        for layer in [&mut self.opaque, &mut self.cutout] {
-            let coords: Vec<ChunkCoord> = layer.parts_at_level(0).collect();
-            for coord in coords {
-                layer.hide((0, coord), hide(coord));
-            }
-        }
-        let mut hidden = HashSet::new();
-        for (&(level, coord), &entity) in &self.blended {
-            if level != 0 {
-                continue;
-            }
-            let now = hide(coord);
-            if now != self.blended_hidden.contains(&entity) {
-                commands.entity(entity).insert(if now {
-                    Visibility::Hidden
-                } else {
-                    Visibility::Inherited
-                });
-            }
-            if now {
-                hidden.insert(entity);
-            }
-        }
-        self.blended_hidden = hidden;
-    }
-
-    /// Each level-0 Chunk that draws something, as its region draws it.
+    /// Each level-0 Chunk with geometry, and whether it is retained.
     #[cfg(feature = "profiling")]
-    pub(super) fn level_zero_drawn(&self) -> Vec<DrawnChunk> {
-        let mut coords: HashSet<ChunkCoord> = self
-            .blended
-            .keys()
-            .filter(|&&(level, _)| level == 0)
-            .map(|&(_, c)| c)
-            .collect();
-        let solid = [&self.opaque, &self.cutout];
-        for layer in solid {
-            coords.extend(layer.parts_at_level(0));
-        }
-        coords
+    pub(super) fn level_zero_drawn(&self) -> impl Iterator<Item = (ChunkCoord, bool)> + '_ {
+        let mut seen = HashSet::new();
+        [&self.opaque, &self.blended, &self.cutout]
             .into_iter()
-            .map(|coord| {
-                let key = (0, coord);
-                let parts: Vec<_> = solid.iter().filter_map(|l| l.part(key)).collect();
-                DrawnChunk {
-                    coord,
-                    retained: self.retained.contains(&key),
-                    region: (!parts.is_empty()).then(|| self.opaque.region_of_chunk(key)),
-                    blended: self.blended.contains_key(&key),
-                    quads: parts.iter().map(|p| p.indices.len() / 6).sum(),
-                }
-            })
-            .collect()
+            .flat_map(|layer| layer.keys())
+            .filter(move |&&(level, coord)| level == 0 && seen.insert(coord))
+            .map(|&key| (key.1, self.retained.contains(&key)))
     }
 
     #[cfg(feature = "profiling")]
     pub(super) fn entity_count(&self) -> usize {
-        self.opaque.entity_count() + self.blended.len() + self.cutout.entity_count()
+        self.opaque.len() + self.blended.len() + self.cutout.len()
     }
 
-    /// The level-0 layers a camera cannot pass through, in Voxels from the
-    /// Chunk's origin: water and glass are blended and let it in.
-    pub(super) fn solid_at(
-        &self,
-        coord: ChunkCoord,
-    ) -> impl Iterator<Item = &Arc<PackedLayer>> + '_ {
+    /// The level-0 layers a camera cannot pass through: water and glass are
+    /// blended and let it in.
+    pub(super) fn solid_at(&self, coord: ChunkCoord) -> impl Iterator<Item = Entity> + '_ {
         [&self.opaque, &self.cutout]
             .into_iter()
-            .filter_map(move |layer| layer.part((0, coord)))
+            .filter_map(move |layer| layer.get(&(0, coord)).copied())
     }
-
     #[cfg(test)]
-    pub(super) fn insert_opaque(&mut self, coord: ChunkCoord, layer: PackedLayer) {
-        self.opaque.insert_part((0, coord), layer);
+    pub(super) fn insert_opaque(&mut self, coord: ChunkCoord, entity: Entity) {
+        self.opaque.insert((0, coord), entity);
     }
-}
-
-/// A level-0 Chunk that draws something, for the visibility count.
-#[cfg(feature = "profiling")]
-pub(super) struct DrawnChunk {
-    pub coord: ChunkCoord,
-    pub retained: bool,
-    /// The region its opaque and cutout layers are drawn in, and the region's
-    /// edge in Chunks; `None` if it has only a blended layer.
-    pub region: Option<(ChunkCoord, i32)>,
-    /// Whether it has a blended entity of its own.
-    pub blended: bool,
-    /// Opaque and cutout quads.
-    pub quads: usize,
 }
 
 pub(super) fn terrain_arrived(entities: Option<Res<ChunkEntities>>) -> bool {
@@ -239,23 +164,22 @@ struct TerrainMaterial {
 }
 
 /// A Chunk's meshes, built off the main thread: a mesh layer with nothing to
-/// draw has none. Opaque and cutout are only packed: the main thread merges
-/// them into their regions as they land.
+/// draw has none.
 struct Built {
-    opaque: Option<PackedLayer>,
+    opaque: Option<Mesh>,
     blended: Option<Mesh>,
     order: Option<BlendOrder>,
-    cutout: Option<PackedLayer>,
+    cutout: Option<Mesh>,
 }
 
 impl Built {
     fn new(mesh: &ChunkMesh, voxel_size: f32) -> Self {
-        let packed = |layer: &MeshLayer| (!layer.is_empty()).then(|| pack(layer));
+        let build = |layer: &MeshLayer| (!layer.is_empty()).then(|| chunk_mesh_to_mesh(layer));
         Self {
-            opaque: packed(&mesh.opaque),
-            blended: (!mesh.blended.is_empty()).then(|| chunk_mesh_to_mesh(&mesh.blended)),
+            opaque: build(&mesh.opaque),
+            blended: build(&mesh.blended),
             order: BlendOrder::new(&mesh.blended, voxel_size),
-            cutout: packed(&mesh.cutout),
+            cutout: build(&mesh.cutout),
         }
     }
 }
@@ -271,8 +195,6 @@ struct Building {
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<ChunkEntities>()
         .init_session_state::<super::material_textures::Textures>()
-        .insert_resource(CullOccluded(occlusion_switch()))
-        .insert_resource(super::sight::Culling::from_env())
         .add_session_systems(Startup, (add_material, spawn_light))
         .add_session_systems(PostStartup, spawn_camera);
     add_view_systems(app);
@@ -294,10 +216,6 @@ fn add_view_systems(app: &mut App) {
             drop_meshes,
             land_meshes,
             release,
-            (super::sight::walk, cull)
-                .chain()
-                .run_if(super::sight::wanted),
-            assemble_regions,
             sort_blended.run_if(blend_sort_on),
             publish_drawn,
         )
@@ -330,18 +248,6 @@ fn blend_sort_on() -> bool {
 #[cfg(not(any(feature = "dev", feature = "profiling")))]
 fn blend_sort_on() -> bool {
     true
-}
-
-/// `TESSERAE_OCCLUSION=1` under `dev` or `profiling`, so one binary can be
-/// measured with occlusion culling on and off.
-#[cfg(any(feature = "dev", feature = "profiling"))]
-fn occlusion_switch() -> bool {
-    std::env::var("TESSERAE_OCCLUSION").is_ok_and(|v| v == "1")
-}
-
-#[cfg(not(any(feature = "dev", feature = "profiling")))]
-fn occlusion_switch() -> bool {
-    false
 }
 
 fn add_material(
@@ -402,8 +308,8 @@ fn debug_tint() -> u32 {
     0
 }
 
-/// What `land_meshes` and `release` share: the pieces of a Client frame that
-/// spawn, replace and despawn a Chunk's blended entity.
+/// What `land_meshes` and `release` share: the pieces of a Client frame
+/// that spawn, replace and despawn a Chunk's entities.
 struct Draw<'a, 'w, 's> {
     commands: &'a mut Commands<'w, 's>,
     meshes: &'a mut Assets<Mesh>,
@@ -503,8 +409,14 @@ fn land_meshes(
         // Marked drawn as it lands, not as it is sent: a bit set for a mesh
         // still building would discard the coarser level drawing its region.
         entities.deliver(key);
-        entities.opaque.set(key, built.opaque);
-        entities.cutout.set(key, built.cutout);
+        let opaque = draw.show(
+            &mut entities.opaque,
+            &material.opaque,
+            built.opaque,
+            key,
+            &world,
+            true,
+        );
         let blended = draw.show(
             &mut entities.blended,
             &material.blended,
@@ -515,6 +427,14 @@ fn land_meshes(
             // a shadow map treating them as solid would count it twice.
             false,
         );
+        let cutout = draw.show(
+            &mut entities.cutout,
+            &material.cutout,
+            built.cutout,
+            key,
+            &world,
+            true,
+        );
         if let Some(entity) = blended {
             match built.order {
                 Some(order) => draw.commands.entity(entity).insert(order),
@@ -523,8 +443,13 @@ fn land_meshes(
         }
         #[cfg(any(feature = "dev", feature = "profiling"))]
         {
-            uploaded += u32::from(blended.is_some());
+            uploaded += [opaque, blended, cutout]
+                .iter()
+                .map(|e| u32::from(e.is_some()))
+                .sum::<u32>();
         }
+        #[cfg(not(any(feature = "dev", feature = "profiling")))]
+        let _ = (opaque, cutout);
     }
     #[cfg(any(feature = "dev", feature = "profiling"))]
     if let Some(started) = started.filter(|_| uploaded > 0) {
@@ -541,8 +466,8 @@ fn receive_meshes(
     mut level0: ResMut<Messages<ChunkMeshReady>>,
     mut coarse: ResMut<Messages<LodMeshReady>>,
     mut building: ResMut<Building>,
-    mut culling: ResMut<super::sight::Culling>,
     world: Res<WorldSettings>,
+    #[cfg(feature = "profiling")] mut lines: Option<ResMut<super::sight::SightLines>>,
     #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
         crate::cost::MainThreadCost,
     >,
@@ -554,7 +479,10 @@ fn receive_meshes(
     let pool = ComputeTaskPool::get();
     // Drained, so the walk's connectivity is taken here or never.
     let level0 = level0.drain().map(|m| {
-        culling.saw(m.coord, m.connectivity);
+        #[cfg(feature = "profiling")]
+        if let Some(lines) = lines.as_mut() {
+            lines.saw(m.coord, m.connectivity);
+        }
         (0, m.coord, m.mesh)
     });
     let coarse = coarse.drain().map(|m| (m.level, m.coord, m.mesh));
@@ -587,10 +515,13 @@ fn drop_meshes(
     mut coarse: MessageReader<LodUnloaded>,
     mut entities: ResMut<ChunkEntities>,
     mut building: ResMut<Building>,
-    mut culling: ResMut<super::sight::Culling>,
+    #[cfg(feature = "profiling")] mut lines: Option<ResMut<super::sight::SightLines>>,
 ) {
     let level0 = level0.read().map(|m| {
-        culling.lost(m.coord);
+        #[cfg(feature = "profiling")]
+        if let Some(lines) = lines.as_mut() {
+            lines.lost(m.coord);
+        }
         (0, m.coord)
     });
     let coarse = coarse.read().map(|m| (m.level, m.coord));
@@ -650,73 +581,14 @@ fn release(
         mesh_of: &|entity| existing.get(entity).ok().map(|m| m.0.clone()),
     };
     for key in released {
-        entities.opaque.remove(key);
+        draw.hide(&mut entities.opaque, key);
         draw.hide(&mut entities.blended, key);
-        entities.cutout.remove(key);
+        draw.hide(&mut entities.cutout, key);
         entities.retained.remove(&key);
         entities.mask.set(key, false);
         entities.drawn_changed = true;
     }
     entities.anchors = anchors;
-}
-
-/// After `release`, so a released Chunk leaves its region's mesh in the frame
-/// its mask bit clears.
-/// `TESSERAE_SIGHT_CULL`: what the walk from the camera does not reach is
-/// left out of its region's next assembly.
-fn cull(
-    mut commands: Commands,
-    mut entities: ResMut<ChunkEntities>,
-    culling: Res<super::sight::Culling>,
-) {
-    if !culling.cull {
-        return;
-    }
-    let Some(visible) = &culling.visible else {
-        return;
-    };
-    entities.cull(|c| visible.contains([c.x, c.y, c.z]), &mut commands);
-}
-
-fn assemble_regions(
-    mut commands: Commands,
-    mut entities: ResMut<ChunkEntities>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    material: Res<TerrainMaterial>,
-    (world, culling): (Res<WorldSettings>, Res<super::sight::Culling>),
-    #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
-        crate::cost::MainThreadCost,
-    >,
-) {
-    #[cfg(any(feature = "dev", feature = "profiling"))]
-    let started = cost.enabled().then(std::time::Instant::now);
-    let entities = &mut *entities;
-    let solid = [
-        (&mut entities.opaque, &material.opaque),
-        (&mut entities.cutout, &material.cutout),
-    ];
-    #[cfg(any(feature = "dev", feature = "profiling"))]
-    let mut assembled = 0;
-    for (regions, material) in solid {
-        #[cfg(any(feature = "dev", feature = "profiling"))]
-        {
-            assembled += regions.due() as u32;
-        }
-        regions.assemble(
-            &mut commands,
-            &mut meshes,
-            &world,
-            Look {
-                material,
-                casts_shadows: true,
-                hidden_cast: !culling.shadowless,
-            },
-        );
-    }
-    #[cfg(any(feature = "dev", feature = "profiling"))]
-    if let Some(started) = started.filter(|_| assembled > 0) {
-        cost.uploaded(started.elapsed(), assembled);
-    }
 }
 
 /// Rewrites the record of what each level draws, when it changed. Padded to a
@@ -751,14 +623,13 @@ const MIN_DRAWN_WORDS: usize = 4096;
 fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) {
     // A light's layers are also its shadow-caster mask, so level 0 alone
     // casts: a coarse caster would shadow the finer ground it stands over.
-    // Level-0 Chunks culled from the camera cast from a layer of their own.
     commands.spawn((
         DirectionalLight {
             shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
-        RenderLayers::from_layers(&[NEAR_LAYER, SHADOW_ONLY_LAYER]),
+        RenderLayers::layer(NEAR_LAYER),
     ));
 
     // The sky dome's radiance, no longer a flat fill: the chunk shader gates it
@@ -767,11 +638,6 @@ fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) 
     // the same sky channel; see `render/chunk_material.wesl`.
     ambient.brightness = 900.0;
 }
-
-/// Whether the Player camera runs Bevy's two-phase occlusion culling, which
-/// needs a depth prepass.
-#[derive(Resource, Default, Clone, Copy)]
-pub struct CullOccluded(pub bool);
 
 /// How far the view tips down. Framing is a Client decision; where the Eye
 /// starts is the Server's, so the Client's camera starts where the Player does.
@@ -782,7 +648,7 @@ const VIEW_PITCH: f32 = -0.3;
 /// edge between two plugins' systems, which would have to be kept in step.
 ///
 /// One camera draws every level into one depth buffer: the coverage rule in
-/// `coverage.wesl` already discards a coarse fragment wherever a finer
+/// `chunk_material.wesl` already discards a coarse fragment wherever a finer
 /// level draws, so depth alone decides the rest. See
 /// `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`.
 ///
@@ -793,7 +659,6 @@ fn spawn_camera(
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
     fog_settings: Res<FogSettings>,
-    cull: Res<CullOccluded>,
 ) {
     let eye = spawn.entry_eye();
     let direction = Vec3::new(0.0, VIEW_PITCH, -1.0).normalize();
@@ -834,11 +699,6 @@ fn spawn_camera(
     ) {
         commands.entity(camera).insert(fog);
     }
-    if cull.0 {
-        commands
-            .entity(camera)
-            .insert((DepthPrepass, OcclusionCulling));
-    }
 }
 
 #[cfg(test)]
@@ -846,7 +706,6 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use tesserae_core::light::{Light, MAX_LIGHT};
-    use tesserae_core::visibility::Connectivity;
     use tesserae_core::{Chunk, ChunkLight, LitChunk, MaterialId, Tables, Voxel, mesh_chunk};
 
     fn watered() -> (Tables, MaterialId) {
@@ -856,14 +715,9 @@ mod tests {
     }
 
     fn camera_app(eye: Vec3, streaming: StreamingSettings) -> App {
-        camera_app_culling(eye, streaming, CullOccluded(false))
-    }
-
-    fn camera_app_culling(eye: Vec3, streaming: StreamingSettings, cull: CullOccluded) -> App {
         let mut app = App::new();
         app.insert_resource(crate::server::world_state::SpawnPoint::for_tests(eye))
             .insert_resource(streaming)
-            .insert_resource(cull)
             .init_resource::<FogSettings>()
             .init_resource::<WorldSettings>();
         app.world_mut().run_system_once(spawn_camera).unwrap();
@@ -912,20 +766,6 @@ mod tests {
         for level in 0..level_count(&streaming) {
             assert!(layers.intersects(&layer_of(level)), "level {level}");
         }
-    }
-
-    #[test]
-    fn occlusion_culling_and_its_depth_prepass_are_only_on_when_switched_on() {
-        let culling = |on: bool| {
-            let mut app =
-                camera_app_culling(Vec3::ZERO, StreamingSettings::default(), CullOccluded(on));
-            let mut query = app
-                .world_mut()
-                .query_filtered::<(Has<OcclusionCulling>, Has<DepthPrepass>), With<MainCamera>>();
-            query.single(app.world()).unwrap()
-        };
-        assert_eq!(culling(false), (false, false));
-        assert_eq!(culling(true), (true, true));
     }
 
     #[test]
@@ -998,10 +838,7 @@ mod tests {
         );
         let (sun, layers) = suns[0];
         assert!(sun.shadow_maps_enabled);
-        assert_eq!(
-            *layers,
-            RenderLayers::from_layers(&[NEAR_LAYER, SHADOW_ONLY_LAYER])
-        );
+        assert_eq!(*layers, RenderLayers::layer(NEAR_LAYER));
     }
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
@@ -1019,7 +856,6 @@ mod tests {
             .init_resource::<WorldSettings>()
             .init_resource::<StreamingSettings>()
             .init_resource::<ChunkEntities>()
-            .init_resource::<crate::client::sight::Culling>()
             .add_message::<ChunkMeshReady>()
             .add_message::<ChunkUnloaded>()
             .add_message::<LodMeshReady>()
@@ -1316,35 +1152,6 @@ mod tests {
     }
 
     #[test]
-    fn a_released_chunk_leaves_its_regions_mesh_in_the_frame_its_bit_clears() {
-        let mut app = app();
-        put_eye(&mut app, Vec3::ZERO);
-        let (retained, neighbour) = (ChunkCoord::new(0, 0, 0), ChunkCoord::new(1, 0, 0));
-        send_mesh(&mut app, retained, geometry());
-        send_mesh(&mut app, neighbour, geometry());
-        app.world_mut()
-            .write_message(ChunkUnloaded { coord: retained });
-        app.update();
-        let region = entity_for(&app, retained).expect("retained in its region");
-        let both = 2 * geometry().opaque.positions.len();
-        assert_eq!(world_positions(&app, region).len(), both);
-
-        send_coarse(&mut app, 2, ChunkCoord::new(0, 0, 0), geometry());
-        assert!(!mask_has(&app, 0, retained));
-        assert_eq!(entity_for(&app, retained), None);
-        assert!(mask_has(&app, 0, neighbour), "delivered, so not released");
-        assert_eq!(entity_for(&app, neighbour), Some(region));
-        let mut expected: Vec<[f32; 3]> = geometry()
-            .opaque
-            .positions
-            .iter()
-            .map(|p| (Vec3::X * 32.0 + Vec3::from(*p)).to_array())
-            .collect();
-        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(world_positions(&app, region), expected, "in the same frame");
-    }
-
-    #[test]
     fn a_retained_chunk_sent_again_is_delivered_and_kept() {
         let mut app = app();
         put_eye(&mut app, Vec3::ZERO);
@@ -1449,122 +1256,6 @@ mod tests {
         mesh
     }
 
-    #[test]
-    fn with_sight_culling_on_what_rock_hides_leaves_its_region_until_seen_or_retained() {
-        let mut app = app();
-        app.world_mut()
-            .resource_mut::<crate::client::sight::Culling>()
-            .cull = true;
-        let cell = app.world().resource::<WorldSettings>().cell_size();
-        put_eye(&mut app, Vec3::splat(cell / 2.0));
-        let send = |app: &mut App, x: i32, connectivity: Connectivity| {
-            app.world_mut().write_message(ChunkMeshReady {
-                coord: ChunkCoord::new(x, 0, 0),
-                mesh: geometry(),
-                connectivity,
-            });
-            settle(app);
-        };
-        // Rock fills x = 1; x = 2 and 3 share the region past it.
-        send(&mut app, 1, Connectivity::NONE);
-        send(&mut app, 2, Connectivity::ALL);
-        send(&mut app, 3, Connectivity::ALL);
-        let at = |x| ChunkCoord::new(x, 0, 0);
-        assert!(
-            entity_at(&app, 0, at(1)).is_some(),
-            "the rock's face is seen"
-        );
-        assert!(
-            entity_at(&app, 0, at(2)).is_none(),
-            "nothing past the rock is drawn"
-        );
-
-        app.world_mut()
-            .write_message(ChunkUnloaded { coord: at(3) });
-        settle(&mut app);
-        let region = entity_at(&app, 0, at(3)).expect("a retained Chunk is still drawn");
-        assert_eq!(
-            decoded(&app, region).positions.len(),
-            geometry().opaque.positions.len()
-        );
-
-        send(&mut app, 1, Connectivity::ALL);
-        assert!(
-            entity_at(&app, 0, at(2)).is_some(),
-            "seen once the rock opens"
-        );
-    }
-
-    /// A hill the camera cannot see behind a ridge still shadows ground it
-    /// can: its geometry moves to an entity only the sun's shadow views draw.
-    #[test]
-    fn a_chunk_culled_from_the_camera_still_casts_its_shadow() {
-        let mut app = app();
-        app.world_mut()
-            .resource_mut::<crate::client::sight::Culling>()
-            .cull = true;
-        let cell = app.world().resource::<WorldSettings>().cell_size();
-        put_eye(&mut app, Vec3::splat(cell / 2.0));
-        let send = |app: &mut App, x: i32, connectivity: Connectivity| {
-            app.world_mut().write_message(ChunkMeshReady {
-                coord: ChunkCoord::new(x, 0, 0),
-                mesh: geometry(),
-                connectivity,
-            });
-            settle(app);
-        };
-        // The ridge fills x = 1; the hill is x = 2 and 3, one region.
-        send(&mut app, 1, Connectivity::NONE);
-        send(&mut app, 2, Connectivity::ALL);
-        send(&mut app, 3, Connectivity::ALL);
-        let hill = (0, ChunkCoord::new(2, 0, 0));
-        let entities = app.world().resource::<ChunkEntities>();
-        assert!(
-            entities.opaque.entity(hill).is_none(),
-            "culled from the camera"
-        );
-        let caster = entities.opaque.shadow_entity(hill).expect("still a caster");
-
-        let world = app.world();
-        assert!(world.get::<NotShadowCaster>(caster).is_none());
-        let layers = world.get::<RenderLayers>(caster).unwrap();
-        let mut app_sun = App::new();
-        app_sun.init_resource::<GlobalAmbientLight>();
-        app_sun.world_mut().run_system_once(spawn_light).unwrap();
-        let sun = app_sun
-            .world_mut()
-            .query_filtered::<&RenderLayers, With<DirectionalLight>>()
-            .single(app_sun.world())
-            .unwrap()
-            .clone();
-        assert!(
-            sun.intersects(layers),
-            "the sun draws it into its shadow map"
-        );
-        let levels: Vec<usize> = (0..crate::server::MAX_LEVELS as usize).collect();
-        assert!(
-            !RenderLayers::from_layers(&levels).intersects(layers),
-            "no level's camera layer draws it"
-        );
-        let both = 2 * geometry().opaque.positions.len();
-        assert_eq!(
-            decoded(&app, caster).positions.len(),
-            both,
-            "the whole hill"
-        );
-
-        send(&mut app, 1, Connectivity::ALL);
-        let entities = app.world().resource::<ChunkEntities>();
-        assert!(
-            entities.opaque.entity(hill).is_some(),
-            "seen once the ridge opens"
-        );
-        assert!(
-            entities.opaque.shadow_entity(hill).is_none(),
-            "and cast from there"
-        );
-    }
-
     fn put_eye(app: &mut App, eye: Vec3) {
         let existing = app
             .world_mut()
@@ -1622,12 +1313,17 @@ mod tests {
         }
     }
 
-    fn send_mesh(app: &mut App, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
-        app.world_mut().write_message(ChunkMeshReady {
+    fn ready(coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) -> ChunkMeshReady {
+        ChunkMeshReady {
             coord,
             mesh,
-            connectivity: Connectivity::ALL,
-        });
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            connectivity: tesserae_core::visibility::Connectivity::ALL,
+        }
+    }
+
+    fn send_mesh(app: &mut App, coord: ChunkCoord, mesh: tesserae_core::ChunkMesh) {
+        app.world_mut().write_message(ready(coord, mesh));
         settle(app);
     }
 
@@ -1661,11 +1357,7 @@ mod tests {
         let mut app = app();
         let coord = ChunkCoord::new(0, 0, 0);
         let gate = hold_builds(&app);
-        app.world_mut().write_message(ChunkMeshReady {
-            coord,
-            mesh: geometry(),
-            connectivity: Connectivity::ALL,
-        });
+        app.world_mut().write_message(ready(coord, geometry()));
         for _ in 0..3 {
             app.update();
         }
@@ -1695,11 +1387,7 @@ mod tests {
         unload_coarse(&mut app, 1, coarse);
         let gate = hold_builds(&app);
         for child in coarse.children() {
-            app.world_mut().write_message(ChunkMeshReady {
-                coord: child,
-                mesh: geometry(),
-                connectivity: Connectivity::ALL,
-            });
+            app.world_mut().write_message(ready(child, geometry()));
         }
         app.update();
         app.update();
@@ -1719,11 +1407,7 @@ mod tests {
         put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(2, 0, -1);
         let gate = hold_builds(&app);
-        app.world_mut().write_message(ChunkMeshReady {
-            coord,
-            mesh: geometry(),
-            connectivity: Connectivity::ALL,
-        });
+        app.world_mut().write_message(ready(coord, geometry()));
         app.update();
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.update();
@@ -1742,7 +1426,8 @@ mod tests {
         app.world()
             .resource::<ChunkEntities>()
             .opaque
-            .entity((level, coord))
+            .get(&(level, coord))
+            .copied()
     }
 
     fn blended_at(app: &App, level: u32, coord: ChunkCoord) -> Option<Entity> {
@@ -1780,103 +1465,6 @@ mod tests {
             .collect()
     }
 
-    /// In world metres, sorted, so two meshes drawing the same points compare
-    /// equal whatever order they hold them in.
-    fn world_positions(app: &App, entity: Entity) -> Vec<[f32; 3]> {
-        let transform = *app.world().get::<Transform>(entity).unwrap();
-        let mut points: Vec<[f32; 3]> = decoded(app, entity)
-            .positions
-            .iter()
-            .map(|p| transform.transform_point(Vec3::from(*p)).to_array())
-            .collect();
-        points.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        points
-    }
-
-    #[test]
-    fn neighbouring_chunks_share_one_entity_and_each_keeps_its_own_geometry() {
-        let mut app = app();
-        let world = *app.world().resource::<WorldSettings>();
-        let together = [
-            ChunkCoord::new(0, 0, 0),
-            ChunkCoord::new(1, 0, 0),
-            ChunkCoord::new(1, 1, 1),
-        ];
-        // Below zero on x, so a region boundary lies between it and the others.
-        let apart = ChunkCoord::new(-1, 0, 0);
-        for coord in together.into_iter().chain([apart]) {
-            send_mesh(&mut app, coord, geometry());
-        }
-        assert_eq!(drawn(&mut app), 2);
-        let region = entity_for(&app, together[0]).unwrap();
-        for coord in together {
-            assert_eq!(entity_for(&app, coord), Some(region), "{coord:?}");
-        }
-        assert_ne!(entity_for(&app, apart), Some(region));
-
-        let voxel_m = world.voxel_size_at(0);
-        let mut expected: Vec<[f32; 3]> =
-            together
-                .iter()
-                .flat_map(|&coord| {
-                    geometry().opaque.positions.into_iter().map(move |p| {
-                        (world.chunk_origin(coord) + Vec3::from(p) * voxel_m).to_array()
-                    })
-                })
-                .collect();
-        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(world_positions(&app, region), expected);
-    }
-
-    /// The Mesh assets added or modified in `app`'s last frames, since the
-    /// last call.
-    fn rebuilt(app: &mut App) -> Vec<AssetId<Mesh>> {
-        app.world_mut()
-            .resource_mut::<Messages<AssetEvent<Mesh>>>()
-            .drain()
-            .filter_map(|event| match event {
-                AssetEvent::Added { id } | AssetEvent::Modified { id } => Some(id),
-                _ => None,
-            })
-            .collect()
-    }
-
-    fn mesh_of(app: &App, entity: Entity) -> AssetId<Mesh> {
-        app.world().get::<Mesh3d>(entity).unwrap().0.id()
-    }
-
-    #[test]
-    fn a_re_mesh_rebuilds_its_own_region_once_and_no_other() {
-        let mut app = app();
-        let (a, b) = (ChunkCoord::new(0, 0, 0), ChunkCoord::new(1, 0, 0));
-        let elsewhere = ChunkCoord::new(-1, 0, 0);
-        for coord in [a, b, elsewhere] {
-            send_mesh(&mut app, coord, geometry());
-            send_coarse(&mut app, 1, coord, geometry());
-        }
-        let region = mesh_of(&app, entity_for(&app, a).unwrap());
-        rebuilt(&mut app);
-
-        // Held until both are built, so they land in one frame whatever the
-        // pool's timing.
-        let gate = hold_builds(&app);
-        let world = app.world_mut();
-        for coord in [a, b] {
-            world.write_message(ChunkMeshReady {
-                coord,
-                mesh: geometry(),
-                connectivity: Connectivity::ALL,
-            });
-        }
-        app.update();
-        gate.release();
-        while !app.world().resource::<Building>().in_flight.all_finished() {
-            std::thread::yield_now();
-        }
-        app.update();
-        assert_eq!(rebuilt(&mut app), vec![region]);
-    }
-
     #[test]
     fn a_chunk_with_only_blended_geometry_is_drawn() {
         let mut app = app();
@@ -1885,12 +1473,12 @@ mod tests {
     }
 
     #[test]
-    fn a_chunk_with_both_layers_is_two_entities_and_a_neighbour_with_only_opaque_adds_none() {
+    fn a_chunk_with_both_layers_is_two_entities_and_one_with_only_opaque_is_one() {
         let mut app = app();
         send_mesh(&mut app, ChunkCoord::new(0, 0, 0), both_layers());
         assert_eq!(drawn(&mut app), 2);
         send_mesh(&mut app, ChunkCoord::new(1, 0, 0), geometry());
-        assert_eq!(drawn(&mut app), 2, "it joins its region's opaque entity");
+        assert_eq!(drawn(&mut app), 3, "no blended Voxel is still one entity");
     }
 
     #[test]
@@ -1904,28 +1492,18 @@ mod tests {
             let blended = blended_at(&app, level, coord).expect("a blended entity");
             assert_ne!(opaque, blended);
             let world = app.world();
-            let settings = world.resource::<WorldSettings>();
             assert_eq!(
                 world.get::<Transform>(blended),
-                Some(
-                    &Transform::from_translation(settings.chunk_origin_at(coord, level))
-                        .with_scale(Vec3::splat(settings.voxel_size_at(level)))
-                ),
+                world.get::<Transform>(opaque),
                 "level {level}"
             );
-            assert_eq!(
-                world.get::<Transform>(blended).unwrap().scale,
-                world.get::<Transform>(opaque).unwrap().scale
-            );
             assert_eq!(world.get::<ChunkCoord>(blended), Some(&coord));
-            for entity in [blended, opaque] {
-                assert_eq!(world.get::<MeshTag>(entity).unwrap().value, level);
-                assert_eq!(
-                    world.get::<RenderLayers>(entity),
-                    Some(&layer_of(level)),
-                    "the level's camera draws it, or the mask and the sun miss it"
-                );
-            }
+            assert_eq!(world.get::<MeshTag>(blended).unwrap().value, level);
+            assert_eq!(
+                world.get::<RenderLayers>(blended),
+                Some(&layer_of(level)),
+                "the level's camera draws it, or the mask and the sun miss it"
+            );
         }
         // A coarse Voxel is bigger, so the same layer spans more metres.
         let extent = |app: &App, entity| {
@@ -2334,7 +1912,8 @@ mod tests {
         app.world()
             .resource::<ChunkEntities>()
             .cutout
-            .entity((level, coord))
+            .get(&(level, coord))
+            .copied()
     }
 
     #[test]
@@ -2456,32 +2035,24 @@ mod tests {
         let mut app = app();
         put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(0, 0, 0);
-        app.world_mut().write_message(ChunkMeshReady {
-            coord,
-            mesh: both_layers(),
-            connectivity: Connectivity::ALL,
-        });
+        app.world_mut().write_message(ready(coord, both_layers()));
         app.world_mut().write_message(ChunkUnloaded { coord });
         app.update();
         assert_eq!(drawn(&mut app), 0);
     }
 
     #[test]
-    fn a_mesh_with_geometry_is_drawn_at_its_chunks_origin() {
+    fn a_mesh_with_geometry_spawns_one_chunk_entity_at_its_origin() {
         let mut app = app();
         let coord = ChunkCoord::new(2, 0, -1);
         send_mesh(&mut app, coord, geometry());
 
         let entity = entity_for(&app, coord).expect("an entity for the Chunk");
         assert_eq!(drawn(&mut app), 1);
-        let mut expected: Vec<[f32; 3]> = geometry()
-            .opaque
-            .positions
-            .iter()
-            .map(|p| (Vec3::new(64.0, 0.0, -32.0) + Vec3::from(*p)).to_array())
-            .collect();
-        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(world_positions(&app, entity), expected);
+        let world = *app.world().resource::<WorldSettings>();
+        let transform = app.world().get::<Transform>(entity).expect("a Transform");
+        assert_eq!(transform.translation, world.chunk_origin(coord));
+        assert_eq!(app.world().get::<ChunkCoord>(entity), Some(&coord));
     }
 
     #[test]
@@ -2495,24 +2066,21 @@ mod tests {
         let fine = entity_for(&app, coord).expect("level 0 is a different entity");
         assert_ne!(coarse, fine);
 
-        let at = |origin: Vec3, scale: f32| {
-            let mut points: Vec<[f32; 3]> = geometry()
-                .opaque
-                .positions
-                .iter()
-                .map(|p| (origin + Vec3::from(*p) * scale).to_array())
-                .collect();
-            points.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            points
-        };
+        let world = *app.world().resource::<WorldSettings>();
         assert_eq!(
-            world_positions(&app, coarse),
-            at(Vec3::new(128.0, -128.0, 256.0), 4.0)
+            app.world().get::<Transform>(coarse).unwrap().translation,
+            Vec3::new(128.0, -128.0, 256.0)
         );
         assert_eq!(
-            world_positions(&app, fine),
-            at(Vec3::new(32.0, -32.0, 64.0), 1.0)
+            app.world().get::<Transform>(coarse).unwrap().translation,
+            world.chunk_origin_at(coord, 2)
         );
+        let fine_positions = positions(&app, fine);
+        let coarse_positions = positions(&app, coarse);
+        assert_eq!(fine_positions.len(), coarse_positions.len());
+        for (f, c) in fine_positions.iter().zip(&coarse_positions) {
+            assert_eq!(*c, f.map(|v| v * 4.0));
+        }
     }
 
     #[test]
@@ -2539,57 +2107,45 @@ mod tests {
         }
     }
 
-    /// The first quad of `layer` and nothing else.
-    fn first_quad(layer: &MeshLayer) -> MeshLayer {
-        assert!(layer.indices[..6].iter().all(|&i| i < 4));
-        MeshLayer {
-            positions: layer.positions[..4].to_vec(),
-            normals: layer.normals[..4].to_vec(),
-            uvs: layer.uvs[..4].to_vec(),
-            materials: layer.materials[..4].to_vec(),
-            light: layer.light[..4].to_vec(),
-            indices: layer.indices[..6].to_vec(),
-        }
-    }
-
     #[test]
-    fn a_second_mesh_replaces_the_first_in_place() {
+    fn a_second_mesh_replaces_the_first_and_drops_its_asset() {
         let mut app = app();
         let coord = ChunkCoord::new(0, 0, 0);
         send_mesh(&mut app, coord, geometry());
-        let entity = entity_for(&app, coord).unwrap();
 
-        let smaller = first_quad(&geometry().opaque);
-        let mut expected = smaller.positions.clone();
-        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        send_mesh(
-            &mut app,
-            coord,
-            tesserae_core::ChunkMesh {
-                opaque: smaller,
-                ..default()
-            },
-        );
+        let entity = entity_for(&app, coord).unwrap();
+        let first = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+
+        send_mesh(&mut app, coord, geometry());
         assert_eq!(entity_for(&app, coord), Some(entity), "entity id moved");
         assert_eq!(drawn(&mut app), 1, "spawned a second entity");
-        assert_eq!(world_positions(&app, entity), expected);
+
+        let second = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
+        assert_ne!(second, first, "the mesh was not replaced");
         // The leak this guards: a few minutes of flying re-meshes the same
         // Chunk many times over.
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
+        assert!(
+            app.world().resource::<Assets<Mesh>>().get(&first).is_none(),
+            "the superseded Mesh asset is still loaded"
+        );
     }
 
     #[test]
-    fn a_second_coarse_mesh_replaces_the_first_in_place() {
+    fn a_second_coarse_mesh_replaces_the_first_and_drops_its_asset() {
         let mut app = app();
         let coord = ChunkCoord::new(4, 0, 1);
         send_coarse(&mut app, 1, coord, geometry());
         let entity = entity_at(&app, 1, coord).unwrap();
+        let first = app.world().get::<Mesh3d>(entity).unwrap().0.clone();
 
         send_coarse(&mut app, 1, coord, geometry());
 
         assert_eq!(entity_at(&app, 1, coord), Some(entity));
         assert_eq!(drawn(&mut app), 1);
-        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
+        assert!(
+            app.world().resource::<Assets<Mesh>>().get(&first).is_none(),
+            "the superseded coarse Mesh asset is still loaded"
+        );
     }
 
     #[test]
@@ -2710,11 +2266,7 @@ mod tests {
         put_eye(&mut app, FAR_M);
         let coord = ChunkCoord::new(2, 0, -1);
         let world = app.world_mut();
-        world.write_message(ChunkMeshReady {
-            coord,
-            mesh: geometry(),
-            connectivity: Connectivity::ALL,
-        });
+        world.write_message(ready(coord, geometry()));
         world.write_message(ChunkUnloaded { coord });
         world.write_message(LodMeshReady {
             level: 2,
@@ -2737,18 +2289,14 @@ mod tests {
         let dropped = ChunkCoord::new(1, 0, 0);
         send_mesh(&mut app, kept, geometry());
         send_mesh(&mut app, dropped, geometry());
-        let region = entity_for(&app, kept).unwrap();
+        assert_eq!(drawn(&mut app), 2);
 
         app.world_mut()
             .write_message(ChunkUnloaded { coord: dropped });
         app.update();
 
         assert_eq!(drawn(&mut app), 1);
-        assert_eq!(entity_for(&app, kept), Some(region));
-        assert_eq!(entity_for(&app, dropped), None);
-        let mut expected = geometry().opaque.positions;
-        expected.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert_eq!(world_positions(&app, region), expected);
+        assert!(entity_for(&app, kept).is_some());
     }
 
     #[test]

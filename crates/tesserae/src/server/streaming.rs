@@ -36,9 +36,12 @@ use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
+#[cfg(any(feature = "dev", feature = "profiling"))]
+use tesserae_core::Chunk;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+#[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::visibility::Connectivity;
-use tesserae_core::{CHUNK_SIZE, Chunk, ChunkMesh, Tables};
+use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
 use super::jobs::{Border, Jobs, Solved, build_mesh, generate, solve};
 use super::lod;
@@ -59,6 +62,9 @@ pub struct ChunkMeshReady {
     pub mesh: ChunkMesh,
     /// Which of the Chunk's faces see each other through it, for the Client's
     /// visibility walk: the Client never reads the Voxels to work it out.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    // Only the profiling walk reads it outside tests.
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code))]
     pub connectivity: Connectivity,
 }
 
@@ -371,6 +377,7 @@ pub(in crate::server) struct MeshState {
     /// Each held Chunk's connectivity, and the Voxels it was worked out from:
     /// the Weak makes an Edit's `Arc::make_mut` move the Chunk, so a stale
     /// entry never matches what the store holds.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     connectivity: HashMap<ChunkCoord, (std::sync::Weak<Chunk>, Connectivity)>,
     #[cfg(any(feature = "dev", feature = "profiling"))]
     pub(in crate::server) reach: MeshReach,
@@ -494,11 +501,13 @@ impl MeshState {
         self.cover_changed.insert(coord);
     }
 
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     fn note_connectivity(&mut self, coord: ChunkCoord, chunk: &Arc<Chunk>, c: Connectivity) {
         self.connectivity.insert(coord, (Arc::downgrade(chunk), c));
     }
 
     /// The connectivity of `chunk`, if it was worked out from those Voxels.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     fn connectivity_of(&self, coord: ChunkCoord, chunk: &Arc<Chunk>) -> Option<Connectivity> {
         self.connectivity
             .get(&coord)
@@ -782,6 +791,7 @@ fn retire(
         }
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         meshes.connectivity.remove(&coord);
         // An unedited Chunk is what the generator makes again; only an edited one
         // leaves a ghost in its cover.
@@ -816,6 +826,7 @@ fn land_generated(
         }
         store.insert(coord, generated.chunk);
         // A Chunk restored from the archive is not what the job generated.
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         if let Some(held) = store
             .shared(coord)
             .filter(|_| !store.revisions.contains_key(&coord))
@@ -1045,12 +1056,14 @@ fn land_meshes(
         if meshes.dirty.contains(&coord) {
             jobs.mesh.note_stale();
         }
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         meshes
             .connectivity
             .insert(coord, (built.from, built.connectivity));
         ready.write(ChunkMeshReady {
             coord,
             mesh: built.mesh,
+            #[cfg(any(feature = "dev", feature = "profiling"))]
             connectivity: built.connectivity,
         });
         meshes.delivered.insert(coord);
@@ -1113,9 +1126,14 @@ fn dispatch_meshes(
             .try_into()
             .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
-        let known = meshes.connectivity_of(coord, &own.chunk);
         let tables = Arc::clone(tables);
-        let work = move || build_mesh(&own, &around, known, &tables);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let work = {
+            let known = meshes.connectivity_of(coord, &own.chunk);
+            move || build_mesh(&own, &around, known, &tables)
+        };
+        #[cfg(not(any(feature = "dev", feature = "profiling")))]
+        let work = move || build_mesh(&own, &around, &tables);
         #[cfg(any(feature = "dev", feature = "profiling"))]
         if meshes.reach.on {
             let walk = reached.get_or_insert_with(|| reachable(store, meshes, center, load));
@@ -1869,8 +1887,9 @@ pub(in crate::server) mod tests {
         assert_eq!(ready.len(), 2, "nothing else was touched");
     }
 
-    /// The Client walks these to cull and never reads World storage, so what
-    /// ships with a mesh has to be the Chunk as it stands, Edits included.
+    /// The Client walks these and never reads World storage, so what ships
+    /// with a mesh has to be the Chunk as it stands, Edits included.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]
     fn every_mesh_carries_the_sight_lines_of_its_chunk_as_it_stands() {
         use tesserae_core::visibility::connectivity;

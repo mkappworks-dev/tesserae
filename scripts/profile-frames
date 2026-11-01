@@ -27,7 +27,7 @@ MOTION = {
     'dive': dict(TESSERAE_SCREENSHOT_DIVE_M='320', TESSERAE_SCREENSHOT_FLY_AFTER_S='22',
                  TESSERAE_SCREENSHOT_FLY_S='10'),
     # The Server puts the Eye in a cave; it turns through 360 degrees over 22-32 s.
-    # Looks under a ridge at floor the culled hill behind it shadows.
+    # Looks under a ridge at floor shadowed by a hill the sight walk does not enter.
     'hidden-hill': dict(TESSERAE_SCREENSHOT_YAW_DEG='-81.1', TESSERAE_SCREENSHOT_PITCH_DEG='-13.1'),
     'cave': dict(TESSERAE_SCREENSHOT_TURN_DEG='360', TESSERAE_SCREENSHOT_PITCH_DEG='0',
                  TESSERAE_SCREENSHOT_FLY_AFTER_S='22', TESSERAE_SCREENSHOT_FLY_S='10'),

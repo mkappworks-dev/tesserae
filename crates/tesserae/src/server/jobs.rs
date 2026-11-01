@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_cells};
+#[cfg(any(feature = "dev", feature = "profiling"))]
 use tesserae_core::visibility::{Connectivity, connectivity};
 use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk};
 
@@ -333,9 +334,11 @@ pub(in crate::server) fn solve(
     }
 }
 
-/// A generated Chunk and which of its faces see each other through it.
+/// A generated Chunk, and under `dev` or `profiling` which of its faces see
+/// each other through it.
 pub(in crate::server) struct Generated {
     pub chunk: Chunk,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub connectivity: Connectivity,
 }
 
@@ -346,17 +349,22 @@ pub(in crate::server) fn generate(
     tables: &Tables,
 ) -> Generated {
     let chunk = worldgen.chunk(coord.x, coord.y, coord.z);
-    let connectivity = connectivity(&chunk, &tables.materials);
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
+    let _ = tables;
     Generated {
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        connectivity: connectivity(&chunk, &tables.materials),
         chunk,
-        connectivity,
     }
 }
 
-/// A mesh and the connectivity of the Chunk it was built from.
+/// A mesh, and under `dev` or `profiling` the connectivity of the Chunk it was
+/// built from.
 pub(in crate::server) struct Built {
     pub mesh: ChunkMesh,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub connectivity: Connectivity,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     pub from: std::sync::Weak<Chunk>,
 }
 
@@ -365,13 +373,15 @@ pub(in crate::server) struct Built {
 pub(in crate::server) fn build_mesh(
     center: &Snapshot,
     around: &[Snapshot; 6],
-    known: Option<Connectivity>,
+    #[cfg(any(feature = "dev", feature = "profiling"))] known: Option<Connectivity>,
     tables: &Tables,
 ) -> Built {
     let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|face| Some(lit(&around[face])));
     Built {
         mesh: mesh_chunk(lit(center), neighbors, tables),
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         connectivity: known.unwrap_or_else(|| connectivity(&center.chunk, &tables.materials)),
+        #[cfg(any(feature = "dev", feature = "profiling"))]
         from: std::sync::Arc::downgrade(&center.chunk),
     }
 }

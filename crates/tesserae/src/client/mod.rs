@@ -9,7 +9,6 @@ pub mod camera;
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod capture;
 pub mod chunk_mesh;
-mod chunk_region;
 pub mod chunk_view;
 pub mod drawn_mask;
 pub mod edit;
@@ -38,6 +37,7 @@ pub(crate) mod profile;
 mod removal;
 mod save;
 mod settings;
+#[cfg(feature = "profiling")]
 pub mod sight;
 #[cfg(feature = "dev")]
 mod soak;

@@ -43,90 +43,52 @@ pub const STEPS: f32 = SUBDIV as f32;
 
 pub const LIGHT_SHIFT: u32 = 24;
 
-/// One Chunk's mesh layer packed, in Voxels from the Chunk's origin: what a
-/// region mesh is assembled from without packing its other Chunks again.
-#[derive(Default, Debug, PartialEq)]
-pub struct PackedLayer {
-    pub position_face: Vec<[i16; 4]>,
-    pub uvs: Vec<[u16; 2]>,
-    pub material_light: Vec<u32>,
-    pub indices: Vec<u32>,
-}
-
-pub fn pack(layer: &MeshLayer) -> PackedLayer {
+/// The mesh is in Voxels, not metres: the entity's `Transform` scales it by
+/// the level's Voxel size. The `Aabb` is explicit because Bevy can only derive
+/// one from a `Float32x3` position.
+pub fn chunk_mesh_to_mesh(layer: &MeshLayer) -> Mesh {
     // Unchecked per vertex: the mesher emits only whole sixteenths, from `NodeBox`es `register`
     // bounds, and `every_shape_and_fluid_level_decodes_to_the_meshers_own_vertices` holds it.
     let step = |c: f32| (c * STEPS) as i16;
-    PackedLayer {
-        position_face: layer
-            .positions
-            .iter()
-            .zip(&layer.normals)
-            .map(|(p, n)| [step(p[0]), step(p[1]), step(p[2]), face_of(*n)])
-            .collect(),
-        uvs: layer
-            .uvs
-            .iter()
-            .map(|uv| uv.map(|c| step(c) as u16))
-            .collect(),
-        material_light: layer
-            .materials
-            .iter()
-            .zip(&layer.light)
-            .map(|(&material, &light)| {
-                debug_assert!(material < 1 << LIGHT_SHIFT && light <= 0xff);
-                material | light << LIGHT_SHIFT
-            })
-            .collect(),
-        indices: layer.indices.clone(),
-    }
-}
+    let position_face: Vec<[i16; 4]> = layer
+        .positions
+        .iter()
+        .zip(&layer.normals)
+        .map(|(p, n)| [step(p[0]), step(p[1]), step(p[2]), face_of(*n)])
+        .collect();
+    let uvs: Vec<[u16; 2]> = layer
+        .uvs
+        .iter()
+        .map(|uv| uv.map(|c| step(c) as u16))
+        .collect();
+    let material_light: Vec<u32> = layer
+        .materials
+        .iter()
+        .zip(&layer.light)
+        .map(|(&material, &light)| {
+            debug_assert!(material < 1 << LIGHT_SHIFT && light <= 0xff);
+            material | light << LIGHT_SHIFT
+        })
+        .collect();
 
-/// The mesh is in Voxels, not metres: the entity's `Transform` scales it by
-/// the level's Voxel size.
-pub fn chunk_mesh_to_mesh(layer: &MeshLayer) -> Mesh {
-    merged_mesh([(IVec3::ZERO, &pack(layer))])
-}
-
-/// Several packed layers as one mesh, each moved by its offset in Voxels, in
-/// the order given. The `Aabb` is explicit because Bevy can only derive one
-/// from a `Float32x3` position.
-pub fn merged_mesh<'a>(parts: impl IntoIterator<Item = (IVec3, &'a PackedLayer)>) -> Mesh {
-    let mut out = PackedLayer::default();
-    for (offset, part) in parts {
-        let shift = (offset * SUBDIV as i32)
-            .to_array()
-            .map(|c| i16::try_from(c).expect("a region wider than the packed position's range"));
-        let base = out.position_face.len() as u32;
-        out.position_face.extend(
-            part.position_face
-                .iter()
-                .map(|p| [p[0] + shift[0], p[1] + shift[1], p[2] + shift[2], p[3]]),
-        );
-        out.uvs.extend_from_slice(&part.uvs);
-        out.material_light.extend_from_slice(&part.material_light);
-        out.indices.extend(part.indices.iter().map(|i| i + base));
-    }
-    let (min, max) = out
-        .position_face
+    let (min, max) = position_face
         .iter()
         .fold((IVec3::MAX, IVec3::MIN), |(lo, hi), p| {
             let p = IVec3::new(p[0].into(), p[1].into(), p[2].into());
             (lo.min(p), hi.max(p))
         });
-    let empty = out.position_face.is_empty();
     let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     )
     .with_inserted_attribute(
         ATTRIBUTE_POSITION_FACE,
-        VertexAttributeValues::Sint16x4(out.position_face),
+        VertexAttributeValues::Sint16x4(position_face),
     )
-    .with_inserted_attribute(ATTRIBUTE_UV, VertexAttributeValues::Uint16x2(out.uvs))
-    .with_inserted_attribute(ATTRIBUTE_MATERIAL_LIGHT, out.material_light)
-    .with_inserted_indices(Indices::U32(out.indices));
-    if !empty {
+    .with_inserted_attribute(ATTRIBUTE_UV, VertexAttributeValues::Uint16x2(uvs))
+    .with_inserted_attribute(ATTRIBUTE_MATERIAL_LIGHT, material_light)
+    .with_inserted_indices(Indices::U32(layer.indices.clone()));
+    if !layer.positions.is_empty() {
         mesh.final_aabb = Some(Aabb3d {
             min: (min.as_vec3() / STEPS).into(),
             max: (max.as_vec3() / STEPS).into(),
@@ -143,7 +105,6 @@ fn face_of(normal: [f32; 3]) -> i16 {
 
 /// What `chunk_vertex.wesl` reads back from a mesh [`chunk_mesh_to_mesh`]
 /// made, in Voxels: the layer it was made from.
-#[cfg(test)]
 pub fn decoded(mesh: &Mesh) -> Option<MeshLayer> {
     let (
         Some(VertexAttributeValues::Sint16x4(position_face)),
