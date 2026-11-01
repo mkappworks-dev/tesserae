@@ -131,7 +131,7 @@ pub(super) fn walk(
     };
     let mut visible: Option<Visited> = None;
     for &start in &starts {
-        let walked = sight(start, bounds, of, |_| true);
+        let walked = sight(start, bounds, of);
         match &mut visible {
             Some(v) => v.extend(&walked),
             None => visible = Some(walked),
@@ -277,7 +277,7 @@ mod tests {
                 Connectivity::ALL
             }
         };
-        sight([0; 3], Bounds::around([0; 3], [7, 2, 2]), of, |_| true)
+        sight([0; 3], Bounds::around([0; 3], [7, 2, 2]), of)
     }
 
     #[test]

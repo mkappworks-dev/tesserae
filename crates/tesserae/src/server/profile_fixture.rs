@@ -533,7 +533,7 @@ mod tests {
                     connectivity(chunk, &tables.materials)
                 })
         };
-        let walked = sight([0; 3], Bounds::around([0; 3], [4, 4, 4]), of, |_| true);
+        let walked = sight([0; 3], Bounds::around([0; 3], [4, 4, 4]), of);
         assert!(!walked.contains([2, 0, 0]), "the hill's Chunk is culled");
         assert!(walked.contains([2, -1, 0]), "the floor's Chunk is seen");
 
