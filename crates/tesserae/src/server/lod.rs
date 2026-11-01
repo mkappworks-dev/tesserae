@@ -1032,32 +1032,54 @@ impl LodOrders {
     }
 }
 
+/// Each level's Chunks with part of their region sent at some finer level. Index `level - 1`.
+/// Built from the sent Chunks once a scan, since asking a far level's `8^n` descendants would
+/// cost more per Chunk than that does in all.
+struct SentBelow(Vec<HashSet<ChunkCoord>>);
+
+impl SentBelow {
+    fn new(state: &LodState, level_zero: &MeshState, top: u32) -> Self {
+        let mut levels: Vec<HashSet<ChunkCoord>> = Vec::with_capacity(top as usize);
+        levels.push(level_zero.delivered().map(|c| c.parent()).collect());
+        for finer in 1..top {
+            let sent = state.levels.get(finer as usize - 1).into_iter();
+            let next = levels[finer as usize - 1]
+                .iter()
+                .chain(sent.flat_map(|l| &l.delivered))
+                .map(|c| c.parent())
+                .collect();
+            levels.push(next);
+        }
+        SentBelow(levels)
+    }
+
+    fn contains(&self, (level, coord): LodKey) -> bool {
+        self.0
+            .get(level as usize - 1)
+            .is_some_and(|s| s.contains(&coord))
+    }
+}
+
 /// Whether nothing has been sent for the region of `(level, coord)` at any
-/// level: its own, a coarser one, or the finer one below.
-fn is_hole(
-    plans: &[Plan],
-    state: &LodState,
-    level_zero: &MeshState,
-    (level, coord): LodKey,
-) -> bool {
-    let delivered = |l: u32, c: ChunkCoord| match l {
-        0 => level_zero.is_delivered(c),
-        l => state
+/// level: its own, a coarser one, or any finer one.
+fn is_hole(top: u32, state: &LodState, below: &SentBelow, (level, coord): LodKey) -> bool {
+    let delivered = |l: u32, c: ChunkCoord| {
+        state
             .levels
             .get(l as usize - 1)
-            .is_some_and(|lv| lv.delivered.contains(&c)),
+            .is_some_and(|lv| lv.delivered.contains(&c))
     };
-    if delivered(level, coord) {
+    if delivered(level, coord) || below.contains((level, coord)) {
         return false;
     }
     let mut covering = coord;
-    for coarser in level + 1..=plans.len() as u32 {
+    for coarser in level + 1..=top {
         covering = covering.parent();
         if delivered(coarser, covering) {
             return false;
         }
     }
-    !(0..8).any(|i| delivered(level - 1, coord.child(i)))
+    true
 }
 
 /// Holes first, coarsest level first; then every level together in priority
@@ -1402,6 +1424,7 @@ fn dispatch(
     let due: Vec<usize> = (0..plans.len())
         .filter(|&i| std::mem::take(&mut state.level_mut(plans[i].level).pending))
         .collect();
+    let mut below = None;
     for (holes, i, d) in walk(orders, &due) {
         let plan = &plans[i];
         let coord = offset(plan.anchor, d);
@@ -1411,8 +1434,12 @@ fn dispatch(
         if (held && !stale) || jobs.generate.contains((plan.level, coord)) {
             continue;
         }
-        if holes && !is_hole(plans, state, meshes, (plan.level, coord)) {
-            continue;
+        if holes {
+            let below =
+                below.get_or_insert_with(|| SentBelow::new(state, meshes, plans.len() as u32));
+            if !is_hole(plans.len() as u32, state, below, (plan.level, coord)) {
+                continue;
+            }
         }
         if free == 0 {
             for &i in &due {
@@ -1574,6 +1601,7 @@ fn dispatch_meshes(
     let due: Vec<usize> = (0..plans.len())
         .filter(|&i| std::mem::take(&mut state.level_mut(plans[i].level).mesh_pending))
         .collect();
+    let mut below = None;
     for (holes, i, d) in walk(orders, &due) {
         let plan = &plans[i];
         let coord = offset(plan.anchor, d);
@@ -1582,8 +1610,12 @@ fn dispatch_meshes(
         {
             continue;
         }
-        if holes && !is_hole(plans, state, level_zero, (plan.level, coord)) {
-            continue;
+        if holes {
+            let below =
+                below.get_or_insert_with(|| SentBelow::new(state, level_zero, plans.len() as u32));
+            if !is_hole(plans.len() as u32, state, below, (plan.level, coord)) {
+                continue;
+            }
         }
         let Some(own) = store.shown(plan.level, coord) else {
             continue;
@@ -1941,6 +1973,23 @@ mod tests {
         for level in 1..LEVELS {
             assert_eq!(h.held(level), h.load_set(level), "level {level}");
         }
+    }
+
+    #[test]
+    fn a_chunk_with_anything_sent_at_any_finer_level_is_not_a_hole() {
+        let far = ChunkCoord::new(-1, 0, 2);
+        let mut state = LodState::default();
+        state.level_mut(1).delivered.insert(far.child(3).child(5));
+        let mut level_zero = MeshState::default();
+        let deep = ChunkCoord::new(5, -3, 0);
+        level_zero.mark_delivered(deep.child(6).child(1).child(2));
+        let below = SentBelow::new(&state, &level_zero, 3);
+        let hole = |key| is_hole(3, &state, &below, key);
+        assert!(!hole((3, far)));
+        assert!(!hole((2, far.child(3))));
+        assert!(hole((2, far.child(4))));
+        assert!(!hole((3, deep)));
+        assert!(hole((3, ChunkCoord::new(0, 0, 2))));
     }
 
     #[test]

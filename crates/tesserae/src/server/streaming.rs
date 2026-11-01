@@ -512,10 +512,9 @@ impl MeshState {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
     }
 
-    /// Whether the Client was sent this Chunk's mesh and has not been told to
-    /// drop it.
-    pub(in crate::server) fn is_delivered(&self, coord: ChunkCoord) -> bool {
-        self.delivered.contains(&coord)
+    /// The Chunks whose mesh the Client was sent and has not been told to drop.
+    pub(in crate::server) fn delivered(&self) -> impl Iterator<Item = &ChunkCoord> {
+        self.delivered.iter()
     }
 
     pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
@@ -525,6 +524,11 @@ impl MeshState {
     #[cfg(test)]
     pub(in crate::server) fn is_dirty(&self, coord: ChunkCoord) -> bool {
         self.dirty.contains(&coord)
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn mark_delivered(&mut self, coord: ChunkCoord) {
+        self.delivered.insert(coord);
     }
 
     #[cfg(test)]
