@@ -30,7 +30,7 @@ use tesserae_core::{ChunkMesh, MeshLayer};
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::{PackedLayer, chunk_mesh_to_mesh, pack};
-use crate::client::chunk_region::{Look, Regions};
+use crate::client::chunk_region::{Look, Regions, SHADOW_ONLY_LAYER};
 use crate::client::drawn_mask::DrawnMask;
 use crate::client::in_flight::InFlight;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
@@ -768,13 +768,14 @@ const MIN_DRAWN_WORDS: usize = 4096;
 fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) {
     // A light's layers are also its shadow-caster mask, so level 0 alone
     // casts: a coarse caster would shadow the finer ground it stands over.
+    // Level-0 Chunks culled from the camera cast from a layer of their own.
     commands.spawn((
         DirectionalLight {
             shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
-        RenderLayers::layer(NEAR_LAYER),
+        RenderLayers::from_layers(&[NEAR_LAYER, SHADOW_ONLY_LAYER]),
     ));
 
     // The sky dome's radiance, no longer a flat fill: the chunk shader gates it
@@ -1014,7 +1015,10 @@ mod tests {
         );
         let (sun, layers) = suns[0];
         assert!(sun.shadow_maps_enabled);
-        assert_eq!(*layers, RenderLayers::layer(NEAR_LAYER));
+        assert_eq!(
+            *layers,
+            RenderLayers::from_layers(&[NEAR_LAYER, SHADOW_ONLY_LAYER])
+        );
     }
 
     /// `MinimalPlugins` rather than `DefaultPlugins`: these systems only need
@@ -1505,6 +1509,76 @@ mod tests {
         assert!(
             entity_at(&app, 0, at(2)).is_some(),
             "seen once the rock opens"
+        );
+    }
+
+    /// A hill the camera cannot see behind a ridge still shadows ground it
+    /// can: its geometry moves to an entity only the sun's shadow views draw.
+    #[test]
+    fn a_chunk_culled_from_the_camera_still_casts_its_shadow() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<crate::client::sight::Culling>()
+            .cull = true;
+        let cell = app.world().resource::<WorldSettings>().cell_size();
+        put_eye(&mut app, Vec3::splat(cell / 2.0));
+        let send = |app: &mut App, x: i32, connectivity: Connectivity| {
+            app.world_mut().write_message(ChunkMeshReady {
+                coord: ChunkCoord::new(x, 0, 0),
+                mesh: geometry(),
+                connectivity,
+            });
+            settle(app);
+        };
+        // The ridge fills x = 1; the hill is x = 2 and 3, one region.
+        send(&mut app, 1, Connectivity::NONE);
+        send(&mut app, 2, Connectivity::ALL);
+        send(&mut app, 3, Connectivity::ALL);
+        let hill = (0, ChunkCoord::new(2, 0, 0));
+        let entities = app.world().resource::<ChunkEntities>();
+        assert!(
+            entities.opaque.entity(hill).is_none(),
+            "culled from the camera"
+        );
+        let caster = entities.opaque.shadow_entity(hill).expect("still a caster");
+
+        let world = app.world();
+        assert!(world.get::<NotShadowCaster>(caster).is_none());
+        let layers = world.get::<RenderLayers>(caster).unwrap();
+        let mut app_sun = App::new();
+        app_sun.init_resource::<GlobalAmbientLight>();
+        app_sun.world_mut().run_system_once(spawn_light).unwrap();
+        let sun = app_sun
+            .world_mut()
+            .query_filtered::<&RenderLayers, With<DirectionalLight>>()
+            .single(app_sun.world())
+            .unwrap()
+            .clone();
+        assert!(
+            sun.intersects(layers),
+            "the sun draws it into its shadow map"
+        );
+        let levels: Vec<usize> = (0..crate::server::MAX_LEVELS as usize).collect();
+        assert!(
+            !RenderLayers::from_layers(&levels).intersects(layers),
+            "no level's camera layer draws it"
+        );
+        let both = 2 * geometry().opaque.positions.len();
+        assert_eq!(
+            decoded(&app, caster).positions.len(),
+            both,
+            "the whole hill"
+        );
+
+        send(&mut app, 1, Connectivity::ALL);
+        let entities = app.world().resource::<ChunkEntities>();
+        assert!(
+            entities.opaque.entity(hill).is_some(),
+            "seen once the ridge opens"
+        );
+        assert!(
+            entities.opaque.shadow_entity(hill).is_none(),
+            "and cast from there"
         );
     }
 

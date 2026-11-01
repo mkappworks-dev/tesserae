@@ -47,6 +47,7 @@ use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
 pub use lod_rings::LevelRings;
+pub use lod_rings::MAX_LEVELS;
 pub use lod_rings::level_count;
 use world_state::SpawnPoint;
 
