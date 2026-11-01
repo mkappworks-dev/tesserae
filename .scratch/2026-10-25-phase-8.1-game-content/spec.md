@@ -1,6 +1,6 @@
 # Step 8.1: water is Game content, and the player places anything declared
 
-Status: ready-for-agent
+Status: done
 
 Drafted 2026-10-25 from `feat/phase-8.1-game-content` (first named `feat/phase-8.1-water-is-game-content`) at 8f43e26
 (phase 8, PR #19, merged as 9992e8e). Approved by the user on 2026-10-25. A

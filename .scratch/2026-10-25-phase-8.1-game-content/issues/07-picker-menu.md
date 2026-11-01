@@ -1,6 +1,6 @@
 # 07: A menu picks anything declared into the hotbar
 
-Status: ready-for-human
+Status: done
 Blocked by: 06
 
 Spec: [decision 14](../spec.md).

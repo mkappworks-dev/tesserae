@@ -1,6 +1,6 @@
 # 09: Built-in water goes and id 7 is retired
 
-Status: ready-for-human
+Status: done
 Blocked by: 01, 02, 03, 04, 06, 08
 
 Spec: [decisions 1, 2, 3 and 9](../spec.md).

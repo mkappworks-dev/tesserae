@@ -1,7 +1,7 @@
 # Layout placement: lines, rectangles and boxes of Voxels
 
-Status: grilled with the user 2026-10-30; tickets 01-08 are done (06-08 are
-the amendment below).
+Status: done. Grilled with the user 2026-10-30; tickets 01-10 are done (06-10
+are the amendment below).
 
 Source baseline: `446e984`. Separate from
 [ticket 29](../2026-10-27-gameplay-performance-and-controls/issues/29-repeat-while-held.md),
