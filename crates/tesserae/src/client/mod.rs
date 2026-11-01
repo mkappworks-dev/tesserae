@@ -38,6 +38,7 @@ pub(crate) mod profile;
 mod removal;
 mod save;
 mod settings;
+pub mod sight;
 #[cfg(feature = "dev")]
 mod soak;
 mod tile_preview;
@@ -55,7 +56,7 @@ pub fn plugin(app: &mut App) {
     #[cfg(any(feature = "dev", feature = "profiling"))]
     app.add_plugins(capture::plugin);
     #[cfg(feature = "profiling")]
-    app.add_plugins(holes::plugin);
+    app.add_plugins((holes::plugin, sight::plugin));
     app.add_plugins((
         save::plugin,
         profile::plugin,

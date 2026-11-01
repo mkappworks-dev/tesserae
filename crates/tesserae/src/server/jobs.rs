@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_cells};
+use tesserae_core::visibility::{Connectivity, connectivity};
 use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk};
 
 use super::world_state::Snapshot;
@@ -332,14 +333,47 @@ pub(in crate::server) fn solve(
     }
 }
 
-/// Meshes one Chunk from a snapshot of it and its six face neighbours.
+/// A generated Chunk and which of its faces see each other through it.
+pub(in crate::server) struct Generated {
+    pub chunk: Chunk,
+    pub connectivity: Connectivity,
+}
+
+/// Generates one Chunk, and its connectivity while the worker holds it.
+pub(in crate::server) fn generate(
+    worldgen: &Worldgen,
+    coord: ChunkCoord,
+    tables: &Tables,
+) -> Generated {
+    let chunk = worldgen.chunk(coord.x, coord.y, coord.z);
+    let connectivity = connectivity(&chunk, &tables.materials);
+    Generated {
+        chunk,
+        connectivity,
+    }
+}
+
+/// A mesh and the connectivity of the Chunk it was built from.
+pub(in crate::server) struct Built {
+    pub mesh: ChunkMesh,
+    pub connectivity: Connectivity,
+    pub from: std::sync::Weak<Chunk>,
+}
+
+/// Meshes one Chunk from a snapshot of it and its six face neighbours. Its
+/// connectivity is worked out again only if `known` is not that Chunk's.
 pub(in crate::server) fn build_mesh(
     center: &Snapshot,
     around: &[Snapshot; 6],
+    known: Option<Connectivity>,
     tables: &Tables,
-) -> ChunkMesh {
+) -> Built {
     let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|face| Some(lit(&around[face])));
-    mesh_chunk(lit(center), neighbors, tables)
+    Built {
+        mesh: mesh_chunk(lit(center), neighbors, tables),
+        connectivity: known.unwrap_or_else(|| connectivity(&center.chunk, &tables.materials)),
+        from: std::sync::Arc::downgrade(&center.chunk),
+    }
 }
 
 fn lit(snapshot: &Snapshot) -> LitChunk<'_> {
@@ -349,11 +383,11 @@ fn lit(snapshot: &Snapshot) -> LitChunk<'_> {
 /// Every job in flight, by stage.
 #[derive(Resource, Default)]
 pub(in crate::server) struct Jobs {
-    pub generate: Stage<Chunk>,
+    pub generate: Stage<Generated>,
     // Landing for these arrives in later tickets; the stages exist so the type
     // the tests and the overlay read does not change shape three times.
     pub relight: Stage<Solved>,
-    pub mesh: Stage<ChunkMesh>,
+    pub mesh: Stage<Built>,
 }
 
 impl Jobs {

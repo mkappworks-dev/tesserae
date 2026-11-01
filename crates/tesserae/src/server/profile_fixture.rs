@@ -45,16 +45,20 @@ pub(super) fn plugin(app: &mut App) {
         }
         _ => {}
     }
+    if kind == "cave" {
+        app.add_session_systems(FixedUpdate, into_cave.before(super::streaming::Streaming));
+    }
 }
 
 const BUILT: [&str; 2] = ["transparency", "active"];
-const MOVED: [&str; 8] = [
+const MOVED: [&str; 9] = [
     "stationary",
     "flight",
     "sprint-flight",
     "sprint-walk",
     "dive",
     "teleport",
+    "cave",
     "restart",
     "revisit",
 ];
@@ -155,6 +159,109 @@ fn jump(
     player.set_eye(to);
     status.moves += 1;
     info!("profile_fixture teleport from={eye} to={to}");
+}
+
+/// How far from spawn the cave fixture looks for a cave.
+const CAVE_SEARCH_M: f32 = 128.0;
+/// Ground over the Eye, so it is in a cave and not a cave's mouth.
+const CAVE_COVER_M: f32 = 8.0;
+/// Rock farther than this along an axis counts as this far: past a tunnel's
+/// radius, more room says nothing more.
+const CAVE_ROOM_M: f32 = 4.0;
+
+/// Moves the Player into a cave near spawn on the first tick, before anything
+/// streams around spawn.
+fn into_cave(
+    generator: Res<super::WorldGenerator>,
+    mut player: Single<&mut super::player::Player>,
+    mut done: Local<bool>,
+) {
+    if std::mem::replace(&mut *done, true) {
+        return;
+    }
+    let from = player.eye();
+    let to = cave_eye(&generator.0, from).expect("Cave fixture requires a cave near spawn");
+    player.set_eye(to);
+    info!("profile_fixture cave from={from} to={to}");
+}
+
+/// The middle of a cave near `near_m`: among open Voxels with
+/// [`CAVE_COVER_M`] of ground over them, in the Chunk that holds the most of
+/// them, the one farthest from rock along the axes. Deterministic for a seed.
+fn cave_eye(g: &tesserae_core::Worldgen, near_m: Vec3) -> Option<Vec3> {
+    use tesserae_core::CHUNK_SIZE;
+    let size = CHUNK_SIZE as i32;
+    let voxel_m = g.voxel_size();
+    let cell_m = CHUNK_SIZE as f32 * voxel_m;
+    let floor_m = g.params().caves?.floor_m;
+    let reach = (CAVE_SEARCH_M / cell_m).ceil() as i32;
+    let (cx0, cz0) = (
+        (near_m.x / cell_m).floor() as i32,
+        (near_m.z / cell_m).floor() as i32,
+    );
+    let (_, highest_m) = g.surface_bounds_m();
+    let (lowest_cy, highest_cy) = (
+        (floor_m / cell_m).floor() as i32,
+        ((highest_m - CAVE_COVER_M) / cell_m).floor() as i32,
+    );
+    let index = |c: i32, i: usize| (c * size + i as i32) as f32 * voxel_m;
+    let mut best: Option<(usize, [i32; 3], [usize; 3])> = None;
+    for cz in cz0 - reach..=cz0 + reach {
+        for cx in cx0 - reach..=cx0 + reach {
+            let ground: Vec<f32> = (0..CHUNK_SIZE * CHUNK_SIZE)
+                .map(|i| {
+                    let (x, z) = (i % CHUNK_SIZE, i / CHUNK_SIZE);
+                    g.surface_height_m(index(cx, x) + voxel_m / 2.0, index(cz, z) + voxel_m / 2.0)
+                })
+                .collect();
+            for cy in lowest_cy..=highest_cy {
+                let chunk = g.chunk(cx, cy, cz);
+                if chunk.uniform().is_some() {
+                    continue;
+                }
+                let mut covered = Vec::new();
+                for z in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            let below_m = ground[z * CHUNK_SIZE + x] - index(cy, y);
+                            if below_m >= CAVE_COVER_M && chunk.get(x, y, z).is_air() {
+                                covered.push([x, y, z]);
+                            }
+                        }
+                    }
+                }
+                if best.as_ref().is_none_or(|b| covered.len() > b.0) {
+                    let room = |[x, y, z]: [usize; 3]| {
+                        let most = (CAVE_ROOM_M / voxel_m) as i32;
+                        (0..6)
+                            .map(|face| {
+                                let d = tesserae_core::mesh::FACE_STEPS[face];
+                                (1..=most)
+                                    .take_while(|k| {
+                                        let at = [
+                                            x as i32 + d[0] * k,
+                                            y as i32 + d[1] * k,
+                                            z as i32 + d[2] * k,
+                                        ];
+                                        at.iter().all(|&a| (0..size).contains(&a))
+                                            && chunk
+                                                .get(at[0] as usize, at[1] as usize, at[2] as usize)
+                                                .is_air()
+                                    })
+                                    .count()
+                            })
+                            .min()
+                            .unwrap_or(0)
+                    };
+                    if let Some(roomiest) = covered.iter().copied().max_by_key(|&v| room(v)) {
+                        best = Some((covered.len(), [cx, cy, cz], roomiest));
+                    }
+                }
+            }
+        }
+    }
+    let (_, [cx, cy, cz], [x, y, z]) = best?;
+    Some(Vec3::new(index(cx, x), index(cy, y), index(cz, z)) + voxel_m / 2.0)
 }
 
 /// Saves and leaves the World at the measured phase, through the same Save
@@ -324,6 +431,34 @@ fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_cave_eye_is_in_open_air_under_cover_with_room_to_turn() {
+        let g = tesserae_core::Worldgen::new(7, 1.0, tesserae_core::testgen::world_params());
+        let eye = cave_eye(&g, Vec3::ZERO).expect("a cave near the origin");
+        let size = tesserae_core::CHUNK_SIZE as i32;
+        let open = |p: Vec3| {
+            let v = p.floor().as_ivec3();
+            let c = v.div_euclid(IVec3::splat(size));
+            let i = v.rem_euclid(IVec3::splat(size)).as_uvec3();
+            g.chunk(c.x, c.y, c.z)
+                .get(i.x as usize, i.y as usize, i.z as usize)
+                .is_air()
+        };
+        assert!(open(eye));
+        assert!(g.surface_height_m(eye.x, eye.z) - eye.y >= CAVE_COVER_M);
+        for d in [
+            Vec3::X,
+            Vec3::NEG_X,
+            Vec3::Y,
+            Vec3::NEG_Y,
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ] {
+            assert!(open(eye + d * 2.0), "rock within 2 m along {d}");
+        }
+        assert!(eye.xz().length() <= CAVE_SEARCH_M + 32.0 * 1.5);
+    }
     #[test]
     fn fire_is_refreshed_inside_the_measurement_window() {
         assert_eq!(ignition_round(19.99), None);

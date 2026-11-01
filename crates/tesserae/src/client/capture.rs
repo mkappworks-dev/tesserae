@@ -57,6 +57,8 @@ struct Capture {
     lift_m: f32,
     /// Metres to climb and dive back; replaces the horizontal flight.
     dive_m: Option<f32>,
+    /// Degrees to turn the heading through over the flight, from where it is.
+    turn_deg: Option<f32>,
     /// Earliest time the flight may start, so two builds whose fills end at
     /// different times fly at the same time since launch.
     fly_after_s: f32,
@@ -267,6 +269,9 @@ pub(super) fn plugin(app: &mut App) {
         dive_m: std::env::var("TESSERAE_SCREENSHOT_DIVE_M")
             .ok()
             .and_then(|v| v.parse().ok()),
+        turn_deg: std::env::var("TESSERAE_SCREENSHOT_TURN_DEG")
+            .ok()
+            .and_then(|v| v.parse().ok()),
         offscreen: std::env::var_os("TESSERAE_SCREENSHOT_OFFSCREEN").is_some(),
         taken: false,
         pending_seen: false,
@@ -322,6 +327,7 @@ pub(super) fn plugin(app: &mut App) {
                 menu_drag.before(super::menu::drag_preview),
                 watch_frames,
                 aim,
+                turn.before(fly_forward),
                 fly_forward,
                 pillar,
                 report,
@@ -763,6 +769,29 @@ fn pillar(
     placed.1 = elapsed_s;
 }
 
+/// `TESSERAE_SCREENSHOT_TURN_DEG`: the heading turns at a steady rate through
+/// that many degrees over the flight, and holds after it.
+fn turn(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    camera: Single<(&mut Transform, &mut FlyCamera), With<MainCamera>>,
+    mut from: Local<Option<f32>>,
+) {
+    let (Some(turn_deg), Some(start)) = (capture.turn_deg, capture.frames.fill_ended_s) else {
+        return;
+    };
+    let flown_s = capture.elapsed_s(&time) - start;
+    let (mut transform, mut fly) = camera.into_inner();
+    let from = *from.get_or_insert(fly.yaw);
+    fly.yaw = from + turned_rad(turn_deg, capture.fly_for_s, flown_s);
+    transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
+}
+
+fn turned_rad(turn_deg: f32, fly_for_s: f32, flown_s: f32) -> f32 {
+    let done = (flown_s / fly_for_s.max(f32::EPSILON)).clamp(0.0, 1.0);
+    (turn_deg * done).to_radians()
+}
+
 /// `TESSERAE_SCREENSHOT_DIVE_M`: straight up `dive_m` over the first half of the
 /// flight and straight back down over the second, so both directions of a fast
 /// vertical move are measured from the same ground.
@@ -1098,6 +1127,14 @@ mod tests {
         assert_eq!(log.flight.len(), 2);
         let flight = log.flight_summary().expect("frames were recorded");
         assert_eq!(flight.worst_s, 0.020);
+    }
+
+    #[test]
+    fn a_turn_sweeps_its_angle_steadily_over_the_flight_and_holds_after() {
+        assert_eq!(turned_rad(360.0, 10.0, -1.0), 0.0);
+        assert_eq!(turned_rad(360.0, 10.0, 2.5), 90f32.to_radians());
+        assert_eq!(turned_rad(360.0, 10.0, 10.0), 360f32.to_radians());
+        assert_eq!(turned_rad(360.0, 10.0, 15.0), 360f32.to_radians());
     }
 
     #[test]

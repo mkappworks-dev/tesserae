@@ -26,6 +26,7 @@ pub mod seed;
 pub mod shape;
 pub mod tables;
 pub mod testgen;
+pub mod visibility;
 pub mod voxel;
 pub mod worldgen;
 
