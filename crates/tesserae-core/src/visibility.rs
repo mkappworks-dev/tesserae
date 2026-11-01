@@ -4,7 +4,7 @@
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ROWS};
 use crate::material::{MaterialTable, Occlusion};
-use crate::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use crate::voxel::Voxel;
 
 const N: usize = CHUNK_SIZE;
@@ -163,6 +163,134 @@ fn joined(faces: u8) -> u16 {
     bits
 }
 
+/// A box of Chunk coordinates, both corners inclusive, that a walk stays in.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Bounds {
+    pub min: [i32; 3],
+    pub max: [i32; 3],
+}
+
+impl Bounds {
+    /// The box `radius` Chunks each way from `center`, per axis.
+    pub fn around(center: [i32; 3], radius: [i32; 3]) -> Self {
+        Bounds {
+            min: std::array::from_fn(|a| center[a] - radius[a]),
+            max: std::array::from_fn(|a| center[a] + radius[a]),
+        }
+    }
+
+    fn index(&self, c: [i32; 3]) -> Option<usize> {
+        let mut at = 0;
+        for a in (0..3).rev() {
+            if !(self.min[a]..=self.max[a]).contains(&c[a]) {
+                return None;
+            }
+            at = at * (self.max[a] - self.min[a] + 1) as usize + (c[a] - self.min[a]) as usize;
+        }
+        Some(at)
+    }
+
+    fn volume(&self) -> usize {
+        (0..3)
+            .map(|a| (self.max[a] - self.min[a] + 1).max(0) as usize)
+            .product()
+    }
+}
+
+/// The Chunks a walk entered.
+pub struct Visited {
+    bounds: Bounds,
+    seen: Vec<u8>,
+}
+
+impl Visited {
+    pub fn contains(&self, c: [i32; 3]) -> bool {
+        self.bounds.index(c).is_some_and(|i| self.seen[i] != 0)
+    }
+
+    pub fn len(&self) -> usize {
+        self.seen.iter().filter(|&&s| s != 0).count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+fn step(c: [i32; 3], face: usize) -> [i32; 3] {
+    let d = FACE_STEPS[face];
+    [c[0] + d[0], c[1] + d[1], c[2] + d[2]]
+}
+
+/// Every Chunk an eye at `start` could move to through open space, face to
+/// face: a sealed cave is not in it. `of` answers for every Chunk in `bounds`,
+/// [`Connectivity::ALL`] for one it does not know, so nothing unknown seals.
+pub fn reach(start: [i32; 3], bounds: Bounds, of: impl Fn([i32; 3]) -> Connectivity) -> Visited {
+    // A bit per face a Chunk has been entered through; bit 6 for the start.
+    let mut seen = vec![0u8; bounds.volume()];
+    let Some(i) = bounds.index(start) else {
+        return Visited { bounds, seen };
+    };
+    seen[i] = 1 << 6;
+    let mut queue = vec![(start, None::<usize>)];
+    while let Some((at, entered)) = queue.pop() {
+        let c = of(at);
+        for exit in 0..6 {
+            if entered.is_some_and(|f| !c.connects(f, exit)) {
+                continue;
+            }
+            let next = step(at, exit);
+            let entry = exit ^ 1;
+            let Some(j) = bounds.index(next) else {
+                continue;
+            };
+            if seen[j] & 1 << entry == 0 {
+                seen[j] |= 1 << entry;
+                queue.push((next, Some(entry)));
+            }
+        }
+    }
+    Visited { bounds, seen }
+}
+
+/// Minecraft's walk from the camera's Chunk: breadth first, each Chunk once,
+/// leaving one only through a face its connectivity joins to the face it was
+/// entered through, never stepping back against a direction already taken,
+/// and only into Chunks `shown` admits (the frustum). What it never enters is
+/// hidden. Conservative only up to the one entry per Chunk it keeps: a corner
+/// that sight bends around twice is culled, as in Minecraft.
+pub fn sight(
+    start: [i32; 3],
+    bounds: Bounds,
+    of: impl Fn([i32; 3]) -> Connectivity,
+    shown: impl Fn([i32; 3]) -> bool,
+) -> Visited {
+    let mut seen = vec![0u8; bounds.volume()];
+    let Some(i) = bounds.index(start) else {
+        return Visited { bounds, seen };
+    };
+    seen[i] = 1;
+    let mut queue = std::collections::VecDeque::from([(start, None::<usize>, 0u8)]);
+    while let Some((at, entered, taken)) = queue.pop_front() {
+        let c = of(at);
+        for exit in 0..6 {
+            if taken & 1 << (exit ^ 1) != 0 || entered.is_some_and(|f| !c.connects(f, exit)) {
+                continue;
+            }
+            let next = step(at, exit);
+            let Some(j) = bounds.index(next) else {
+                continue;
+            };
+            if seen[j] != 0 || !shown(next) {
+                continue;
+            }
+            seen[j] = 1;
+            queue.push_back((next, Some(exit ^ 1), taken | 1 << exit));
+        }
+    }
+    Visited { bounds, seen }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -300,5 +428,108 @@ mod tests {
             }
             assert_eq!(of(&chunk), Connectivity::ALL, "{wall:?}");
         }
+    }
+
+    /// A world of Chunks: `open` everywhere except where `walls` says.
+    fn world(walls: &[([i32; 3], Connectivity)]) -> impl Fn([i32; 3]) -> Connectivity + '_ {
+        move |c| {
+            walls
+                .iter()
+                .find(|(at, _)| *at == c)
+                .map_or(Connectivity::ALL, |&(_, k)| k)
+        }
+    }
+
+    fn tunnel(a: usize, b: usize) -> Connectivity {
+        Connectivity(pair(a, b))
+    }
+
+    const R: Bounds = Bounds {
+        min: [-4, -4, -4],
+        max: [4, 4, 4],
+    };
+
+    #[test]
+    fn open_space_reaches_and_sees_the_whole_box() {
+        let all = |_| true;
+        assert_eq!(reach([0; 3], R, world(&[])).len(), 9 * 9 * 9);
+        assert_eq!(sight([0; 3], R, world(&[]), all).len(), 9 * 9 * 9);
+    }
+
+    #[test]
+    fn a_sealed_cave_is_out_of_reach_and_its_shell_is_not() {
+        // A cave at the origin, every Chunk around it solid rock.
+        let mut walls = vec![([0, 0, 0], Connectivity::ALL)];
+        for face in 0..6 {
+            walls.push((step([0; 3], face), Connectivity::NONE));
+        }
+        let from_outside = reach([3, 0, 0], R, world(&walls));
+        assert!(!from_outside.contains([0, 0, 0]));
+        assert!(from_outside.contains([1, 0, 0]), "the rock it would mesh");
+        let from_inside = reach([0, 0, 0], R, world(&walls));
+        assert_eq!(from_inside.len(), 7);
+    }
+
+    #[test]
+    fn reach_follows_a_tunnel_round_a_bend_that_sight_cannot() {
+        // Up from the start, along x, and back down: a U the eye cannot see
+        // round but could fly through.
+        let mut walls = vec![([1, 0, 0], Connectivity::NONE)];
+        for y in -4..=4 {
+            for z in -4..=4 {
+                for x in -4..=4 {
+                    let c = [x, y, z];
+                    if !matches!(c, [0 | 1 | 2, 0 | 1, 0]) {
+                        walls.push((c, Connectivity::NONE));
+                    }
+                }
+            }
+        }
+        walls.push(([0, 0, 0], tunnel(POS_Y, NEG_Y)));
+        walls.push(([0, 1, 0], tunnel(NEG_Y, POS_X)));
+        walls.push(([1, 1, 0], tunnel(NEG_X, POS_X)));
+        walls.push(([2, 1, 0], tunnel(NEG_X, NEG_Y)));
+        walls.push(([2, 0, 0], tunnel(POS_Y, NEG_X)));
+        assert!(reach([0; 3], R, world(&walls)).contains([2, 0, 0]));
+        let seen = sight([0; 3], R, world(&walls), |_| true);
+        assert!(seen.contains([2, 1, 0]));
+        assert!(!seen.contains([2, 0, 0]), "seen only by looking back down");
+    }
+
+    #[test]
+    fn sight_stops_at_the_first_wall_and_sees_the_wall() {
+        let walls = [([2, 0, 0], Connectivity::NONE)];
+        let seen = sight(
+            [0; 3],
+            Bounds::around([0; 3], [4, 0, 0]),
+            world(&walls),
+            |_| true,
+        );
+        assert!(seen.contains([2, 0, 0]));
+        assert!(!seen.contains([3, 0, 0]));
+    }
+
+    #[test]
+    fn sight_leaves_a_chunk_only_where_its_entry_face_leads() {
+        // Entered from -x, the tunnel leads on to +x and nowhere else.
+        let walls = [([1, 0, 0], tunnel(NEG_X, POS_X))];
+        let line = Bounds::around([0; 3], [3, 0, 0]);
+        let seen = sight([0; 3], line, world(&walls), |_| true);
+        assert!(seen.contains([3, 0, 0]));
+        let plane = Bounds {
+            min: [0, 0, 0],
+            max: [3, 1, 0],
+        };
+        let only_through = |c: [i32; 3]| c[1] == 0 || c[0] == 1;
+        let seen = sight([0; 3], plane, world(&walls), only_through);
+        assert!(!seen.contains([1, 1, 0]), "the tunnel does not lead up");
+    }
+
+    #[test]
+    fn sight_enters_nothing_outside_the_frustum() {
+        let ahead = |c: [i32; 3]| c[2] <= 0;
+        let seen = sight([0; 3], R, world(&[]), ahead);
+        assert!(seen.contains([0, 0, -4]));
+        assert!(!seen.contains([0, 0, 1]));
     }
 }
