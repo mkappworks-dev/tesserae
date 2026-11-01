@@ -40,3 +40,41 @@ new.
 ## Validation and authorization
 
 frame-profiling.md. Local work only; no push or PR without approval.
+
+## Comments
+
+### 2026-10-31: relight goes layer by layer
+
+Branch `tech/streaming-priority-relight`. The ACs on teleport settle, frame
+p50/p99 and re-score cost wait for the final combined series; Status unchanged.
+
+- Cause: the column order. Relight now dispatches and lands highest layer
+  first, each layer by score (`Order::layers_top_down`, replacing
+  `columns_top_down`). This departs from "Relight orders columns by score and
+  stays top-down within a column" above.
+- Test, written first:
+  `a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above`
+  fills a fresh region (96 m view, 64 m vertical, default budget, 3-thread
+  pool) and counts relight solves per generated Chunk. Column order 4.25
+  (red), the pre-03 order (`-y`, then distance) 3.32, layer order 3.34. Bound
+  3.6.
+- Engine, before the plan changed to one final series, so not the verdict:
+  teleport, 3 interleaved rounds, one binary with an env switch
+  (`/tmp/claude-streaming-impl/ab03r-exp`).
+
+  | Order                    | Settle s | Relight / gen0 | Fill frames |
+  | ------------------------ | -------- | -------------- | ----------- |
+  | `bin-07` (pre-03)        | 0.66     | 4.84           | 0, 16, 26   |
+  | column (as merged)       | 1.13     | 7.13           | 0, 0, 0     |
+  | layer (this change)      | 0.73     | 4.23           | 0, 0, 0     |
+  | score bands of 2 Cells   | 1.79     | 10.95          | 0, 0, 0     |
+
+  Medians. Layer's ranges did not overlap `bin-07`'s on settle (0.72-0.74
+  against 0.62-0.67). The rest of the gap is level-0 generation draining later
+  (0.28-0.30 s after the jump against 0.14-0.23), not relight.
+- Not taken: holding a Chunk's solve until its six neighbours are held or
+  outside `load`. Harness 2.84 with layer order, 3.66 with column. Not run in
+  the engine, and it can hold a mesh back on a Chunk two Cells away.
+- Re-score cost: `frames.csv` gains `rescore_ms` (profiling and dev builds):
+  main-thread time the frame's Server ticks spent rebuilding dispatch orders,
+  every level. Read it from the final series.

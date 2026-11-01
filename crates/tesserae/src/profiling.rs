@@ -279,6 +279,7 @@ fn save(
             .map(|l| format!(",rule_holes_l{l},fill_holes_l{l}"))
             .chain(std::iter::once(",chunk_entities".to_string()))
             .chain((0..CAMERAS).map(|c| format!(",visible_meshes_camera{c}")))
+            .chain(std::iter::once(",rescore_ms".to_string()))
             .collect::<String>()
     )?;
     for r in &profile.rows {
@@ -336,7 +337,7 @@ fn save(
         for count in r.visible {
             write!(out, ",{count}")?;
         }
-        writeln!(out)?;
+        writeln!(out, ",{}", r.cost.rescore_s * 1e3)?;
     }
     out.flush()?;
     let mut meta = BufWriter::new(

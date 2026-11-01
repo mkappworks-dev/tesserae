@@ -246,7 +246,7 @@ fn scramble_yields(key: impl Hash) -> u64 {
 /// Keeps the jobs of a stage from starting until released.
 #[cfg(test)]
 #[derive(Default)]
-pub(in crate::server) struct Gate {
+pub(crate) struct Gate {
     held: std::sync::atomic::AtomicBool,
     waiting: std::sync::Mutex<Vec<std::task::Waker>>,
 }
@@ -265,7 +265,7 @@ impl Gate {
     }
 
     /// Ready once the gate is open.
-    async fn passed(&self) {
+    pub(crate) async fn passed(&self) {
         std::future::poll_fn(|cx| {
             let mut waiting = self.waiting.lock().expect("not poisoned");
             // Checked under the lock `release` takes, so a release between the
