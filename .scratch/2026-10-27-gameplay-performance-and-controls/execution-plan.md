@@ -66,4 +66,4 @@ bottlenecks; the broad noisy series cannot justify small gains.
 
 Tickets 18–19, owned inventory transactions and resource persistence, remain
 deferred. They are separate from the conditional performance experiments and
-become DESIGN.md step 13 (Inventory).
+become DESIGN.md step 16 (Inventory).

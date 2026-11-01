@@ -68,7 +68,7 @@ neighbour's light, and the meshes waiting on it, by at most four solves.
 - Equal bounds are part of an equal setup: two Worlds with different landing
   bounds are different simulations, not two schedules of one.
 - A quota bounds work, not wall time. The measured budgets and their caveats are
-  in [DESIGN.md](../../DESIGN.md#build-order), step 8.
+  in [DESIGN.md](../../DESIGN.md#road-to-version-10), step 8.
 - Every new kind of simulation joins the kernel, the Agenda and the landing
   rules; a second scheduler or a second write path is the mistake to look for.
 - Player Edits and the fair Mod queues run before the step each tick and are
