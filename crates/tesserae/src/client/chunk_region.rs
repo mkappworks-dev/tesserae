@@ -35,6 +35,7 @@ use crate::world::{ChunkCoord, WorldSettings};
 const DEFAULT_SHIFT: u32 = 1;
 
 /// 32 Chunks an edge is 1024 Voxels; the next power of two is past the range.
+#[cfg(any(feature = "dev", feature = "profiling", test))]
 const MAX_SHIFT: u32 = 5;
 
 /// `TESSERAE_REGION_CHUNKS=1` under `dev` or `profiling` draws a Chunk per

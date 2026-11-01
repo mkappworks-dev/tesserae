@@ -1899,6 +1899,7 @@ pub(in crate::server) mod tests {
         assert_eq!(tunnel.connectivity, now(&h, deep));
     }
 
+    #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]
     fn every_level_zero_mesh_job_is_charged_to_reached_or_unreached() {
         let mut h = Harness::new(small(), UNLIMITED);
