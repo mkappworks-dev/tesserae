@@ -83,3 +83,9 @@ sprint-int = sprint-flight on bin-int2), against `review/*-int`: at most 35
 pixels differ, along one hairline that is pale in the reference and grass
 here; no slit in any. Counts and margin sweeps:
 `/tmp/claude-streaming-impl/seam-cost/`.
+
+2026-11-01 (integration): level 3 takes a margin of two, not one. With one, a
+missed opening on one terrain was hidden only because a kept run covered it;
+two gives up some of level 3's cut (11-22% -> 4-9%) for no luck in it. Level
+2 keeps one, level 1 stays exact. A far probe (ticket 06) has no children to
+read, so its Chunks keep every seam wall.

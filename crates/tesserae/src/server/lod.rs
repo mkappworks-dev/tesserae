@@ -697,11 +697,13 @@ pub(in crate::server) fn generate_coarse(
 /// Level 1's children are level 0's own Chunks. Above it they are made at the finer level's
 /// Voxel size but not downsampled as that level is, so their ground stands a finer Voxel or two
 /// off its own: a margin of one missed no opening at levels 2 and 3 over four demo-like
-/// terrains, and at 4 and 5 every margin that did saved under 3% of the walls.
+/// terrains, but at level 3 on one only because a kept run covered the miss, so 3 takes two.
+/// At 4 and 5 every margin that missed nothing saved under 3% of the walls.
 fn seam_margin(level: u32) -> Option<SeamMargin> {
     match level {
         1 => Some(SeamMargin::EXACT),
-        2 | 3 => Some(SeamMargin { above: 1, aside: 1 }),
+        2 => Some(SeamMargin { above: 1, aside: 1 }),
+        3 => Some(SeamMargin { above: 2, aside: 2 }),
         _ => None,
     }
 }
@@ -1448,6 +1450,8 @@ fn dispatch(
                     Coarse {
                         chunk: direct.chunk(coord.x, coord.y, coord.z),
                         overlay: ChunkOverlay::none(),
+                        // No children to read openings from, so every seam wall stays.
+                        openings: SeamOpenings::everywhere(),
                     }
                 } else {
                     generate_coarse(
