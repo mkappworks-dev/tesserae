@@ -126,3 +126,39 @@ fixture (frame p50/p99, GPU attribution, regions rebuilt), and a popping
 review of the turning `cave` capture. For your decision: the frustum walk culls
 three to five times more at the surface (first table), at a walk and region
 rebuilds on every frame of a turn.
+
+### 2026-11-01: culled Chunks keep their shadows
+
+You chose to keep shadows. Effect gate still pending the final series.
+
+- How: a region's culled members go into a second mesh on render layer 32
+  (`SHADOW_ONLY_LAYER`, past every level's), which the sun's layers include
+  and the camera's do not. Shadow views draw every member; the camera's main
+  and prepass views draw only what the walk reaches.
+- Cost: shadow geometry is what it was without culling, plus one draw per
+  cascade for each region with a culled member. A change in the culled set
+  rebuilds two meshes of a region instead of one. Nothing is stored twice.
+- Not taken: keeping culled members in the region and discarding them by a
+  per-Chunk bit in the main and prepass shaders. Their vertices would still be
+  shaded and rasterised there, which is the work culling exists to remove.
+- Test: `a_chunk_culled_from_the_camera_still_casts_its_shadow`. A Chunk
+  behind a sealed one leaves the camera's region mesh and lands, whole, in a
+  caster on a layer the sun draws and no level's camera layer does, without
+  `NotShadowCaster`; when the ridge opens, it moves back.
+- `hidden-hill` fixture: in the sky over spawn, a ridge (a full plane of the
+  Chunk east of the Eye's), a hill behind it and a floor under the hill's
+  Chunk, seen under the ridge's lower edge. The walk culls the hill's Chunk,
+  and its shadow falls on the floor in view
+  (`the_hidden_hill_is_culled_and_shadows_floor_the_eye_sees` checks both
+  from the plan). `TESSERAE_SIGHT_CULL=noshadow` culls without the shadow
+  meshes, as a control.
+- Captures (`bin-12-e149d58`, `shot.sh`, culling off against on):
+  - `hidden-hill`: 0 pixels differ. The control loses the hill's shadow on
+    the floor: 3,546 pixels differ by more than 24 levels.
+  - `cave`: 0 pixels differ.
+  - `stationary`: 1,622 pixels differ by at most 14 levels, at a cave mouth
+    and the horizon. Two unculled runs differ by up to 54 there, with 16 in
+    the cave mouth, so this is run-to-run, not shadow.
+- The walk culls 3.7% of `hidden-hill`'s 27 drawn Chunks and one region of
+  eleven: the hill's.
+
