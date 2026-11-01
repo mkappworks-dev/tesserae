@@ -67,6 +67,8 @@ pub(super) struct Regions {
     regions: HashMap<Key, Region>,
     /// Regions whose members changed since `assemble` last ran.
     dirty: HashSet<Key>,
+    /// Chunks a visibility walk does not reach, left out of their region.
+    hidden: HashSet<Key>,
 }
 
 impl Default for Regions {
@@ -76,6 +78,7 @@ impl Default for Regions {
             parts: default(),
             regions: default(),
             dirty: default(),
+            hidden: default(),
         }
     }
 }
@@ -122,6 +125,19 @@ impl Regions {
         self.dirty.insert(region);
     }
 
+    /// Leaves the Chunk out of its region, or puts it back, from the region's
+    /// next assembly on.
+    pub(super) fn hide(&mut self, key: Key, hidden: bool) {
+        let changed = if hidden {
+            self.hidden.insert(key)
+        } else {
+            self.hidden.remove(&key)
+        };
+        if changed && self.parts.contains_key(&key) {
+            self.dirty.insert(self.region_of(key));
+        }
+    }
+
     /// The entity drawing the Chunk's layer, once its region is assembled.
     #[cfg(test)]
     pub(super) fn entity(&self, key: Key) -> Option<Entity> {
@@ -135,7 +151,6 @@ impl Regions {
     /// The region drawing the Chunk, by the region lattice, and its edge in
     /// Chunks.
     /// The Chunks of `level` this layer holds a part for.
-    #[cfg(feature = "profiling")]
     pub(super) fn parts_at_level(&self, level: u32) -> impl Iterator<Item = ChunkCoord> + '_ {
         self.parts
             .keys()
@@ -197,8 +212,17 @@ impl Regions {
                 continue;
             }
             let (level, at) = key;
+            let hidden = &self.hidden;
+            let shown = |coord: &&ChunkCoord| !hidden.contains(&(level, **coord));
+            if !region.members.iter().any(|c| shown(&c)) {
+                if let Some((entity, mesh)) = region.drawn.take() {
+                    meshes.remove(&mesh);
+                    commands.entity(entity).despawn();
+                }
+                continue;
+            }
             let base = IVec3::new(at.x, at.y, at.z) * edge;
-            let parts = region.members.iter().map(|&coord| {
+            let parts = region.members.iter().filter(shown).map(|&coord| {
                 let offset = (IVec3::new(coord.x, coord.y, coord.z) - base) * CHUNK_SIZE as i32;
                 (offset, &*self.parts[&(level, coord)])
             });

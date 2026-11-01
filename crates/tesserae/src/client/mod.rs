@@ -38,7 +38,6 @@ pub(crate) mod profile;
 mod removal;
 mod save;
 mod settings;
-#[cfg(feature = "profiling")]
 pub mod sight;
 #[cfg(feature = "dev")]
 mod soak;

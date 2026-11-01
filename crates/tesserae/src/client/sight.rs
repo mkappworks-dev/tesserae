@@ -1,20 +1,139 @@
-//! What a visibility walk from the camera would cull, counted per frame for the
-//! profiler under `TESSERAE_PROFILE_VISIBILITY`. Nothing is culled. The walk
-//! reads the connectivity each `ChunkMeshReady` carries, never World storage
-//! (`docs/adr/0002-client-server-from-day-one.md`). Ticket 12 of
+//! Which level-0 Chunks a walk from the camera sees, from the connectivity
+//! each `ChunkMeshReady` carries, never World storage
+//! (`docs/adr/0002-client-server-from-day-one.md`). `TESSERAE_SIGHT_CULL=1`
+//! under `dev` or `profiling` leaves the rest out of what is drawn;
+//! `TESSERAE_PROFILE_VISIBILITY` counts what that would remove. Ticket 12 of
 //! `.scratch/2026-10-29-streaming-performance/`.
 
+#[cfg(feature = "profiling")]
 use bevy::camera::primitives::{Aabb, Frustum};
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+#[cfg(feature = "profiling")]
 use bevy::shape::ViewFrustum;
 use tesserae_core::visibility::{Bounds, Connectivity, Visited, sight};
 
 use super::camera::MainCamera;
+#[cfg(feature = "profiling")]
 use super::chunk_view::{ChunkEntities, DrawnChunk};
-use crate::server::streaming::{ChunkMeshReady, ChunkUnloaded, Rings, StreamingSettings};
+use crate::server::streaming::{Rings, StreamingSettings};
+#[cfg(feature = "profiling")]
 use crate::session::SessionApp;
 use crate::world::{ChunkCoord, WorldSettings};
+
+/// Within this of a Chunk, the camera walks from that Chunk too: a camera
+/// transform a frame behind cannot then cull a Chunk it has just come to
+/// see. A frame of a 64 m/s sprint at 30 fps is about 2 m.
+const MARGIN_M: f32 = 4.0;
+
+/// The connectivity the Client was sent and the last walk over it.
+#[derive(Resource, Default)]
+pub(super) struct Culling {
+    /// Whether to leave unseen Chunks out of what is drawn.
+    pub cull: bool,
+    /// Whether to count what that would remove.
+    pub count: bool,
+    lines: HashMap<ChunkCoord, Connectivity>,
+    /// The Chunks the last walk started from.
+    starts: Vec<[i32; 3]>,
+    stale: bool,
+    pub visible: Option<Visited>,
+}
+
+impl Culling {
+    pub(super) fn from_env() -> Self {
+        let on = |var| {
+            cfg!(any(feature = "dev", feature = "profiling")) && std::env::var_os(var).is_some()
+        };
+        Culling {
+            cull: std::env::var("TESSERAE_SIGHT_CULL").is_ok_and(|v| v == "1")
+                && cfg!(any(feature = "dev", feature = "profiling")),
+            count: cfg!(feature = "profiling")
+                && on("TESSERAE_PROFILE_VISIBILITY")
+                && on("TESSERAE_PROFILE_CSV"),
+            ..default()
+        }
+    }
+}
+
+impl Culling {
+    /// A level-0 mesh arrived with this connectivity.
+    pub(super) fn saw(&mut self, coord: ChunkCoord, connectivity: Connectivity) {
+        if self.cull || self.count {
+            self.stale |= self.lines.insert(coord, connectivity) != Some(connectivity);
+        }
+    }
+
+    /// The Server unloaded a level-0 Chunk; unknown counts as open.
+    pub(super) fn lost(&mut self, coord: ChunkCoord) {
+        self.stale |= self.lines.remove(&coord).is_some();
+    }
+}
+
+pub(super) fn wanted(culling: Res<Culling>) -> bool {
+    culling.cull || culling.count
+}
+
+/// The Chunks within [`MARGIN_M`] of the camera, which a walk starts from.
+fn starts(camera_m: Vec3, cell_m: f32) -> Vec<[i32; 3]> {
+    let span = |a: f32| {
+        (((a - MARGIN_M) / cell_m).floor() as i32)..=(((a + MARGIN_M) / cell_m).floor() as i32)
+    };
+    let mut out = Vec::new();
+    for z in span(camera_m.z) {
+        for y in span(camera_m.y) {
+            for x in span(camera_m.x) {
+                out.push([x, y, z]);
+            }
+        }
+    }
+    out
+}
+
+/// Walks again from the camera when the connectivity sent or the Chunks the
+/// camera is near changed. Without the frustum, which Bevy
+/// culls by already, so turning on the spot changes nothing here.
+pub(super) fn walk(
+    mut culling: ResMut<Culling>,
+    streaming: Res<StreamingSettings>,
+    world: Res<WorldSettings>,
+    camera: Query<&GlobalTransform, With<MainCamera>>,
+) {
+    let culling = &mut *culling;
+    let Some(camera_m) = camera.iter().next().map(GlobalTransform::translation) else {
+        culling.visible = None;
+        return;
+    };
+    let cell_m = world.cell_size();
+    let starts = starts(camera_m, cell_m);
+    if !culling.stale && culling.visible.is_some() && starts == culling.starts {
+        return;
+    }
+    let at = world.chunk_at(camera_m);
+    let keep = Rings::new(*streaming, cell_m).keep;
+    let bounds = Bounds::around(
+        [at.x, at.y, at.z],
+        [keep.horizontal + 1, keep.vertical + 1, keep.horizontal + 1],
+    );
+    let lines = &culling.lines;
+    let of = |[x, y, z]: [i32; 3]| {
+        lines
+            .get(&ChunkCoord::new(x, y, z))
+            .copied()
+            .unwrap_or(Connectivity::ALL)
+    };
+    let mut visible: Option<Visited> = None;
+    for &start in &starts {
+        let walked = sight(start, bounds, of, |_| true);
+        match &mut visible {
+            Some(v) => v.extend(&walked),
+            None => visible = Some(walked),
+        }
+    }
+    culling.visible = visible;
+    culling.starts = starts;
+    culling.stale = false;
+}
 
 /// This frame's level-0 draws, as ticket 09's regions make them, and what a
 /// walk from the camera would remove from them.
@@ -23,6 +142,7 @@ use crate::world::{ChunkCoord, WorldSettings};
 /// for a blended layer) is in the frustum. A Chunk the walk does not enter
 /// would be left out of its region's next assembly; a region none of whose
 /// Chunks it enters would not be drawn at all.
+#[cfg(feature = "profiling")]
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct Sight {
     pub counted: bool,
@@ -40,49 +160,30 @@ pub struct Sight {
     pub regions_culled: u32,
 }
 
-/// The connectivity of every level-0 Chunk the Client holds a mesh for.
-#[derive(Resource, Default)]
-struct SightLines(HashMap<ChunkCoord, Connectivity>);
-
+#[cfg(feature = "profiling")]
 pub(super) fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_PROFILE_CSV").is_none()
         || std::env::var_os("TESSERAE_PROFILE_VISIBILITY").is_none()
     {
         return;
     }
-    app.init_resource::<Sight>()
-        .init_session_resource::<SightLines>()
-        .add_session_systems(Update, receive)
-        .add_session_systems(
-            PostUpdate,
-            count.after(bevy::transform::TransformSystems::Propagate),
-        );
+    app.init_resource::<Sight>().add_session_systems(
+        PostUpdate,
+        count.after(bevy::transform::TransformSystems::Propagate),
+    );
 }
 
-/// Meshes before unloads, as `chunk_view` takes them.
-fn receive(
-    mut lines: ResMut<SightLines>,
-    mut ready: MessageReader<ChunkMeshReady>,
-    mut unloaded: MessageReader<ChunkUnloaded>,
-) {
-    for m in ready.read() {
-        lines.0.insert(m.coord, m.connectivity);
-    }
-    for m in unloaded.read() {
-        lines.0.remove(&m.coord);
-    }
-}
-
+#[cfg(feature = "profiling")]
 fn count(
     mut out: ResMut<Sight>,
-    lines: Res<SightLines>,
+    culling: Res<Culling>,
     entities: Option<Res<ChunkEntities>>,
     streaming: Res<StreamingSettings>,
     world: Res<WorldSettings>,
     camera: Option<Single<(&GlobalTransform, &Projection), With<MainCamera>>>,
 ) {
     *out = Sight::default();
-    let (Some(entities), Some(camera)) = (entities, camera) else {
+    let (Some(entities), Some(camera), Some(walked)) = (entities, camera, &culling.visible) else {
         return;
     };
     let (transform, projection) = camera.into_inner();
@@ -98,25 +199,11 @@ fn count(
         let min = Vec3::new(x as f32, y as f32, z as f32) * cell_m;
         frustum.intersects_obb_identity(&Aabb::from_min_max(min, min + cell_m * edge as f32))
     };
-    let shown = |c: [i32; 3]| box_shown(c, 1);
-    let at = world.chunk_at(transform.translation());
-    let keep = Rings::new(*streaming, cell_m).keep;
-    let bounds = Bounds::around(
-        [at.x, at.y, at.z],
-        [keep.horizontal + 1, keep.vertical + 1, keep.horizontal + 1],
-    );
-    let of = |[x, y, z]: [i32; 3]| {
-        lines
-            .0
-            .get(&ChunkCoord::new(x, y, z))
-            .copied()
-            .unwrap_or(Connectivity::ALL)
-    };
-    let walked = sight([at.x, at.y, at.z], bounds, of, shown);
-    *out = tally(&walked, &entities.level_zero_drawn(), box_shown);
+    *out = tally(walked, &entities.level_zero_drawn(), box_shown);
 }
 
 /// `box_shown` answers for a box of `edge` Chunks from its least corner.
+#[cfg(feature = "profiling")]
 fn tally(
     walked: &Visited,
     drawn: &[DrawnChunk],
@@ -159,7 +246,7 @@ fn tally(
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "profiling"))]
 mod tests {
     use super::*;
 

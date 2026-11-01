@@ -215,6 +215,14 @@ impl Visited {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Adds what `other` entered, which walked the same `bounds`.
+    pub fn extend(&mut self, other: &Visited) {
+        assert_eq!(self.bounds, other.bounds, "walks of different boxes");
+        for (a, b) in self.seen.iter_mut().zip(&other.seen) {
+            *a |= b;
+        }
+    }
 }
 
 fn step(c: [i32; 3], face: usize) -> [i32; 3] {

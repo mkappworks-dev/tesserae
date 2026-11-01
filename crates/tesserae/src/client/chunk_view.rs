@@ -71,6 +71,8 @@ pub(super) struct ChunkEntities {
     release_due: bool,
     /// Each level's anchor when `release` last ran.
     anchors: Vec<ChunkCoord>,
+    /// Blended entities `cull` hid.
+    blended_hidden: HashSet<Entity>,
     /// The words `publish_drawn` last wrote, for the hole count.
     #[cfg(feature = "profiling")]
     published: Vec<u32>,
@@ -122,6 +124,38 @@ impl ChunkEntities {
                 let key = (level - 1, child);
                 self.delivered.contains(&key) || self.over_delivered(key)
             })
+    }
+
+    /// Leaves each level-0 Chunk `seen` does not admit out of what is drawn,
+    /// and puts back each it does. Never a retained one: it stands in for
+    /// a hole until its region is covered.
+    fn cull(&mut self, seen: impl Fn(ChunkCoord) -> bool, commands: &mut Commands) {
+        let retained = &self.retained;
+        let hide = |coord: ChunkCoord| !seen(coord) && !retained.contains(&(0, coord));
+        for layer in [&mut self.opaque, &mut self.cutout] {
+            let coords: Vec<ChunkCoord> = layer.parts_at_level(0).collect();
+            for coord in coords {
+                layer.hide((0, coord), hide(coord));
+            }
+        }
+        let mut hidden = HashSet::new();
+        for (&(level, coord), &entity) in &self.blended {
+            if level != 0 {
+                continue;
+            }
+            let now = hide(coord);
+            if now != self.blended_hidden.contains(&entity) {
+                commands.entity(entity).insert(if now {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                });
+            }
+            if now {
+                hidden.insert(entity);
+            }
+        }
+        self.blended_hidden = hidden;
     }
 
     /// Each level-0 Chunk that draws something, as 09's regions draw it.
@@ -238,6 +272,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<ChunkEntities>()
         .init_session_state::<super::material_textures::Textures>()
         .insert_resource(CullOccluded(occlusion_switch()))
+        .insert_resource(super::sight::Culling::from_env())
         .add_session_systems(Startup, (add_material, spawn_light))
         .add_session_systems(PostStartup, spawn_camera);
     add_view_systems(app);
@@ -259,6 +294,9 @@ fn add_view_systems(app: &mut App) {
             drop_meshes,
             land_meshes,
             release,
+            (super::sight::walk, cull)
+                .chain()
+                .run_if(super::sight::wanted),
             assemble_regions,
             sort_blended.run_if(blend_sort_on),
             publish_drawn,
@@ -499,10 +537,18 @@ fn land_meshes(
 ///
 /// On the compute pool, not the async one the Server's jobs fill, so a mesh is
 /// not queued behind a stream of generation.
+#[cfg_attr(
+    any(feature = "dev", feature = "profiling"),
+    expect(
+        clippy::too_many_arguments,
+        reason = "a Bevy system; the extra parameter is the dev cost counter"
+    )
+)]
 fn receive_meshes(
     mut level0: ResMut<Messages<ChunkMeshReady>>,
     mut coarse: ResMut<Messages<LodMeshReady>>,
     mut building: ResMut<Building>,
+    mut culling: ResMut<super::sight::Culling>,
     world: Res<WorldSettings>,
     #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
         crate::cost::MainThreadCost,
@@ -513,7 +559,11 @@ fn receive_meshes(
     #[cfg(any(feature = "dev", feature = "profiling"))]
     let mut received = 0;
     let pool = ComputeTaskPool::get();
-    let level0 = level0.drain().map(|m| (0, m.coord, m.mesh));
+    // Drained, so the walk's connectivity is taken here or never.
+    let level0 = level0.drain().map(|m| {
+        culling.saw(m.coord, m.connectivity);
+        (0, m.coord, m.mesh)
+    });
     let coarse = coarse.drain().map(|m| (m.level, m.coord, m.mesh));
     for (level, coord, mesh) in level0.chain(coarse) {
         let voxel_size = world.voxel_size_at(level);
@@ -544,8 +594,12 @@ fn drop_meshes(
     mut coarse: MessageReader<LodUnloaded>,
     mut entities: ResMut<ChunkEntities>,
     mut building: ResMut<Building>,
+    mut culling: ResMut<super::sight::Culling>,
 ) {
-    let level0 = level0.read().map(|m| (0, m.coord));
+    let level0 = level0.read().map(|m| {
+        culling.lost(m.coord);
+        (0, m.coord)
+    });
     let coarse = coarse.read().map(|m| (m.level, m.coord));
     for key in level0.chain(coarse) {
         building.in_flight.cancel(key);
@@ -615,6 +669,22 @@ fn release(
 
 /// After `release`, so a released Chunk leaves its region's mesh in the frame
 /// its mask bit clears.
+/// `TESSERAE_SIGHT_CULL`: what the walk from the camera does not reach is
+/// left out of its region's next assembly.
+fn cull(
+    mut commands: Commands,
+    mut entities: ResMut<ChunkEntities>,
+    culling: Res<super::sight::Culling>,
+) {
+    if !culling.cull {
+        return;
+    }
+    let Some(visible) = &culling.visible else {
+        return;
+    };
+    entities.cull(|c| visible.contains([c.x, c.y, c.z]), &mut commands);
+}
+
 fn assemble_regions(
     mut commands: Commands,
     mut entities: ResMut<ChunkEntities>,
@@ -969,6 +1039,7 @@ mod tests {
             .init_resource::<WorldSettings>()
             .init_resource::<StreamingSettings>()
             .init_resource::<ChunkEntities>()
+            .init_resource::<crate::client::sight::Culling>()
             .add_message::<ChunkMeshReady>()
             .add_message::<ChunkUnloaded>()
             .add_message::<LodMeshReady>()
@@ -1396,6 +1467,52 @@ mod tests {
         );
         assert_eq!(mesh.blended.quad_count(), 2, "the fixture is two pools");
         mesh
+    }
+
+    #[test]
+    fn with_sight_culling_on_what_rock_hides_leaves_its_region_until_seen_or_retained() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<crate::client::sight::Culling>()
+            .cull = true;
+        let cell = app.world().resource::<WorldSettings>().cell_size();
+        put_eye(&mut app, Vec3::splat(cell / 2.0));
+        let send = |app: &mut App, x: i32, connectivity: Connectivity| {
+            app.world_mut().write_message(ChunkMeshReady {
+                coord: ChunkCoord::new(x, 0, 0),
+                mesh: geometry(),
+                connectivity,
+            });
+            settle(app);
+        };
+        // Rock fills x = 1; x = 2 and 3 share the region past it.
+        send(&mut app, 1, Connectivity::NONE);
+        send(&mut app, 2, Connectivity::ALL);
+        send(&mut app, 3, Connectivity::ALL);
+        let at = |x| ChunkCoord::new(x, 0, 0);
+        assert!(
+            entity_at(&app, 0, at(1)).is_some(),
+            "the rock's face is seen"
+        );
+        assert!(
+            entity_at(&app, 0, at(2)).is_none(),
+            "nothing past the rock is drawn"
+        );
+
+        app.world_mut()
+            .write_message(ChunkUnloaded { coord: at(3) });
+        settle(&mut app);
+        let region = entity_at(&app, 0, at(3)).expect("a retained Chunk is still drawn");
+        assert_eq!(
+            decoded(&app, region).positions.len(),
+            geometry().opaque.positions.len()
+        );
+
+        send(&mut app, 1, Connectivity::ALL);
+        assert!(
+            entity_at(&app, 0, at(2)).is_some(),
+            "seen once the rock opens"
+        );
     }
 
     fn put_eye(app: &mut App, eye: Vec3) {
