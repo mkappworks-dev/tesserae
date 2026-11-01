@@ -151,6 +151,10 @@ pub struct StageCounts {
 /// against 1.1 s, 7.2 s and 22 ms before. Doubling the async compute threads
 /// made things worse, not better: at 6 the worst tick was 12.7 ms, because the
 /// workers took cores the render and ECS threads needed; 4 was within noise of 3.
+/// Rechecked 2026-11-01, `profiling` release, two interleaved rounds: 2 to 5
+/// threads against the default left frame time, settle and fill-hole frames
+/// within noise in both sprints, `dive` and `teleport`; at 5 the workers spent
+/// about a sixth more CPU on the same `sprint-flight`. Defaults unchanged.
 ///
 /// The cap times the cost of a Chunk, over the workers, is how far behind the
 /// anchor a priority can lag. With caves a surface Chunk a tunnel crosses costs
@@ -176,6 +180,8 @@ pub struct StageCounts {
 /// `wait_for_settled_light` holds a mesh back until its neighbourhood has no
 /// light solve pending. Off, a Chunk shows 0.2-0.4 s sooner but is built 2.2
 /// times as often (2427 meshes against 1111), each one a delivery and an upload.
+/// In the 2026-11-01 release series, off moved neither frame time nor the settle
+/// after `teleport` (0.76-0.78 s against 0.78-0.80 s), so it stays on.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct StreamingBudget {
     /// Jobs allowed in flight, per stage.

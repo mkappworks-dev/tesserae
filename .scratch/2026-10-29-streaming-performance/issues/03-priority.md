@@ -1,6 +1,6 @@
 # 03: Dispatch by view and direction of travel
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [streaming performance](../spec.md).
@@ -78,3 +78,28 @@ p50/p99 and re-score cost wait for the final combined series; Status unchanged.
 - Re-score cost: `frames.csv` gains `rescore_ms` (profiling and dev builds):
   main-thread time the frame's Server ticks spent rebuilding dispatch orders,
   every level. Read it from the final series.
+
+### 2026-11-01: final series; done
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Re-scoring at the tip: 0.007 ms a frame on average; frames that re-score take
+  0.012 ms at p50, 0.41 at p99, 1.10 at most. 241 of 47,998 frames go over 0.2
+  ms, the 1 s re-sorts. A tick costs well under 0.2 ms; the spikes are recorded
+  here.
+- Fill-hole frames: `teleport` 16-18 at `b01`, 0 from `b03` on. `sprint-flight`
+  and `dive` already had none at `b01`, and still have none.
+- Settle after `teleport`: `b03` 1.23-1.25 s against `b07` 0.78-0.89 (the
+  column-order regression); layer order `b03r` 0.73-0.74; tip 0.78-0.80; `b01`
+  0.80-0.84. No regression at the tip.
+- Relight solves per level-0 Chunk, `teleport`: `b01` 4.23-4.36, `b03`
+  7.37-7.55, `b03r` 5.08, tip 3.97-4.26.
+- Frame p50: `teleport` 4.89 -> 5.12 ms from `b07` to `b03`, ranges apart, 4.7%;
+  other fixtures within ranges. The tip is 4.72.
+- Review decisions (2026-11-01): layer order accepted as the relight fix; the 1
+  s re-sort stays (without it the age credit never reorders a stationary queue);
+  the 1 m/s speed floor stays.

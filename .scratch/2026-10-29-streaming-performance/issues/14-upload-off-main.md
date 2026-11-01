@@ -1,6 +1,6 @@
 # 14: Upload meshes off the main thread
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [streaming performance](../spec.md).
@@ -60,3 +60,19 @@ rule-hole frame count wait for the orchestrator's final series; Status stays.
 
 Cost: a mesh, an edit's included, usually lands a frame after it arrives
 rather than in the same frame.
+
+### 2026-11-01: final series; done
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Main-thread upload `b13` -> `b14`: `sprint-flight` 2.9-3.2 -> 1.4-1.7 ms/s,
+  `sprint-walk` 6.3-6.8 -> 1.5-2.1; upload p99 0.25 -> 0.09 ms. Ranges apart,
+  50-75%.
+- Frame p50 does not regress (`sprint-walk` 5.21 -> 5.04 ms); rule-hole frames
+  0.
+- 09's region assembly brought upload back to 6-12 ms/s; 09 is reverted, so 14's
+  result stands.

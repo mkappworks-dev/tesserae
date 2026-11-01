@@ -1,6 +1,6 @@
 # 11: Tune the workers
 
-Status: ready-for-agent
+Status: done
 Blocked by: 03, 04
 
 Spec: [streaming performance](../spec.md).
@@ -29,3 +29,23 @@ optimize fluid here.
 ## Validation and authorization
 
 frame-profiling.md. Local work only; no push or PR without approval.
+
+### 2026-11-01: final series; no change adopted
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Arms at the tip with `TESSERAE_ASYNC_THREADS` 2 to 5 against Bevy's default,
+  in both sprints, `dive` and `teleport`. Frame p50 within 0.1 ms of the tip in
+  `sprint-flight`, `dive` and `teleport`. In `sprint-walk` every count beat the
+  tip by 5-6%, including the one equal to the default, so that is the tip's run,
+  not the count.
+- Settle after `teleport` 0.78-0.81 s for every count; fill-hole frames 0. At 5
+  threads workers spent about a sixth more CPU on the same `sprint-flight`.
+- `wait_for_settled_light` off (`TESSERAE_SETTLE_GATE=0`): no change in frame
+  time or settle (0.76-0.78 s against 0.78-0.80).
+- No change passes the gate, so none is adopted; no new pool. `StreamingBudget`
+  and `LodBudget` docs record the result.

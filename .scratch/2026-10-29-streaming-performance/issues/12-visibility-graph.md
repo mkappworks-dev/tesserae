@@ -1,6 +1,6 @@
 # 12: Count what a visibility graph would cull or defer
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 03
 
 Spec: [streaming performance](../spec.md).
@@ -162,3 +162,16 @@ You chose to keep shadows. Effect gate still pending the final series.
 - The walk culls 3.7% of `hidden-hill`'s 27 drawn Chunks and one region of
   eleven: the hill's.
 
+### 2026-11-01: final series; culling not adopted
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- `TESSERAE_SIGHT_CULL=1` at the tip: `cave` frame p50 3.62 ms against 3.60,
+  drawn meshes 109 against 114; `stationary` 4.57 against 4.54. No effect, so
+  culling is not adopted.
+- The client cull path is removed. Connectivity and its counts stay as a `dev`
+  and `profiling` instrument; release builds do no connectivity work.

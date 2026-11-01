@@ -1,6 +1,6 @@
 # 09: Batch opaque and cutout
 
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 08
 
 Spec: [streaming performance](../spec.md).
@@ -92,3 +92,26 @@ bit changes. The captures above predate that merge.
 
 The effect gate is decided by the final review series, which can run edges 1,
 2 and 4 from one binary. Status unchanged.
+
+### 2026-11-01: final series; fails the gate, reverted
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Entities and drawn meshes halve: `sprint-flight` 1,436 -> 707 and 330 -> 187
+  (`b14` -> `b09`).
+- Render thread CPU unchanged: `sprint-flight` 1.38-1.45 ms at both,
+  `sprint-walk` 1.37-1.47 against 1.40-1.48. Frame p50 flat to worse: `active`
+  5.21 -> 5.52 ms, ranges apart; the rest within ranges.
+- Main-thread upload rises 3-5x, because regions are assembled on the main
+  thread: `sprint-flight` 1.4-1.7 -> 5.6-6.1 ms/s, `stationary` 2.1-2.3 ->
+  9.8-12.3. That undoes 14.
+- At the tip, regions of 1 Chunk were as fast as 2 and uploaded half as much; 4
+  uploaded 2.5x more.
+- Decision (you, 2026-11-01): wontfix; region batching reverted, so the
+  follow-up for off-main region assembly is not needed. The seam-wall trim made
+  on this code is kept: captures `b09` against `b07s` expose no sky-coloured
+  pixel in any fixture.

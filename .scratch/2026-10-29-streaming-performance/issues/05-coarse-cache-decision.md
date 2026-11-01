@@ -1,6 +1,6 @@
 # 05: Decide whether to cache coarse levels on disk
 
-Status: ready-for-human
+Status: wontfix
 Blocked by: 04
 
 Spec: [streaming performance](../spec.md).
@@ -128,3 +128,21 @@ the share trips it. Two numbers to weigh before building it:
 
 Smoke runs, not the review series; the gate's numbers come from the final
 series. Status stays `ready-for-human`.
+
+### 2026-11-01: final series; no cache
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Measured at the tip, after 16, two runs each. `restart` settles 0.75-0.76 s
+  after the reopen (0.28-0.29 s frameless gap), under 3 s.
+- Coarse generation share of worker CPU until `streaming_settled`: `restart`
+  13-14%, `revisit` out 12-13% and back 23%, unsaved `teleport` 11%. Until
+  coarse generation caught up: 33-34%, 31-32% and 31-32%.
+- Read until settled, the gate fails everywhere. Read until caught up, it passes
+  by 1-4 points, but an Ephemeral `teleport` pays the same 31%, so a cache would
+  save about 2 points over a World with nothing saved.
+- Decision (you, 2026-11-01): no cache. ADR-0011 unchanged.

@@ -1,6 +1,6 @@
 # 10: Experiment with Bevy's occlusion culling
 
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 07
 
 Spec: [streaming performance](../spec.md).
@@ -62,3 +62,18 @@ and render CPU time in every fixture.
   and with culling 15.35 ms; the prepass without Chunks ran 5.18 ms. A GPU
   capture (`--instruments gpu`) would name the pass.
 - Status unchanged: the effect gate is pending the final review series.
+
+### 2026-11-01: GPU pair; fails, removed
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- One `--instruments gpu` pair at the tip (`/tmp/claude-streaming-impl/gpu10`,
+  two rounds): `TESSERAE_OCCLUSION=1` takes frame p50 from 4.68 to 17.69 ms in
+  `stationary` and 4.78 to 17.41 in `sprint-flight`; frames over 16.7 ms from
+  0-1 to 750-780 a run.
+- Wontfix. The switch, the prepass coverage cut and the occlusion wiring are
+  removed.

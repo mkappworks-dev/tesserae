@@ -1,6 +1,6 @@
 # 01: Streaming fixtures, attribution and baseline
 
-Status: ready-for-agent
+Status: ready-for-human
 Blocked by: none
 
 Spec: [streaming performance](../spec.md).
@@ -170,3 +170,16 @@ New baseline: executable `3bf8f416...` (release, `profiling`, `4aa94df`),
 - Still owed: the presented run on the 144 Hz display, which needs you at the
   Mac, and with it the last box.
 
+### 2026-11-01: final series; only the presented run remains
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- The final series reran every fixture at `b01` (`86d1def`), for 02 to 14 to
+  compare against. Rule-hole frames: `teleport` 588 and 599 a run, every other
+  fixture 0.
+- Owed: the presented run on the 144 Hz display, which needs you at the unlocked
+  Mac.

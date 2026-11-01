@@ -1,6 +1,6 @@
 # 08: Pack the Chunk vertex
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [streaming performance](../spec.md).
@@ -90,3 +90,20 @@ boundaries, so this attributes direction, not size.
 Every fixture improves, none by the 5% the effect gate asks. The gate is
 decided by the combined interleaved review series that runs once every ticket
 is implemented; status stays `ready-for-agent` until then.
+
+### 2026-11-01: final series; done
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Frame p50 `bseam` -> `b08` (GPU-bound offscreen, so GPU vertex time shows
+  here): `active` 5.59 -> 5.09 ms and `transparency` 6.11 -> 5.70, ranges apart,
+  9% and 7%; `stationary` -4%, `flight` -7% with ranges touching, the rest -2 to
+  -4%.
+- Drawn meshes per frame equal to `bseam` in every fixture (291, 292, 297, 354,
+  330, 378, 175, 286-288), so frustum culling still culls.
+- Review: the exactness check moves from a per-vertex `debug_assert` to one
+  check per Shape table (review-fixes branch).

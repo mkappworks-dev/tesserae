@@ -58,7 +58,9 @@ pub(in crate::server) struct LodCounts {
 /// Measured on an M5, `dev` build, 2026-10-13: the defaults delay level 0 by 0.3 s (1.66 s
 /// against 1.33 s) and fill the levels in 11 s. Larger caps fill sooner and delay level 0 more
 /// (256 / 512: 3.1 s and 3.61 s). A second pool does not remove that cost, it is CPU time on
-/// the same cores. The landing caps are not what binds.
+/// the same cores. The landing caps are not what binds. Rechecked 2026-11-01 with 2 to 5
+/// async threads, `profiling` release: no thread count moved level 0's settle or the frame
+/// beyond noise, so the caps stay.
 #[derive(Resource, Clone, Copy, Debug)]
 pub(in crate::server) struct LodBudget {
     pub in_flight: LodCounts,

@@ -1,6 +1,6 @@
 # 02: Draw a level until its replacement lands
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [streaming performance](../spec.md).
@@ -40,3 +40,23 @@ PR boundary: own branch `tech/streaming-no-gaps`.
 ## Validation and authorization
 
 frame-profiling.md. Local work only; no push or PR without approval.
+
+### 2026-11-01: final series; done, p50 cost accepted
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Rule-hole frames: `teleport` 588 and 599 a run at `b01`, 0 at `b02` and in
+  every fixture at every later binary.
+- Retained meshes are released on `teleport`: Chunk entities 1,272 at both `b01`
+  and `b02`.
+- Frame p50 regresses 5-10% against `b01` in 6 of 8 fixtures, ranges apart:
+  `active` 8.16 -> 8.81 ms, `transparency` 8.79 -> 9.42, `flight` 8.08 -> 8.64,
+  `sprint-walk` 8.13 -> 8.91, `teleport` 7.82 -> 8.33. p99 within 0.6 ms. That
+  fails "p50 does not regress"; you accepted it on 2026-11-01 as the cost of
+  drawing no gaps.
+- The tip is 40-50% under `b01` in every fixture (`stationary` 7.92 -> 4.54 ms,
+  `dive` 6.82 -> 3.32).

@@ -1,6 +1,6 @@
 # 07: One depth buffer instead of six cameras
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01, 02
 
 Spec: [streaming performance](../spec.md).
@@ -89,3 +89,18 @@ missed opening on one terrain was hidden only because a kept run covered it;
 two gives up some of level 3's cut (11-22% -> 4-9%) for no luck in it. Level
 2 keeps one, level 1 stays exact. A far probe (ticket 06) has no children to
 read, so its Chunks keep every seam wall.
+
+### 2026-11-01: final series; done
+
+Final series `/tmp/claude-streaming-impl/final`: release `profiling` builds,
+offscreen, two interleaved rounds (cut from three), one binary per merge in
+order (`bNN` is the integration branch just after ticket NN), the tip `075ff52`,
+and the tip with one switch changed. Medians of the two runs; a range is the two
+runs, low-high.
+
+- Frame p50 `b02` -> `b07`, ranges apart everywhere: `stationary` 8.39 -> 4.85
+  ms, `active` 8.81 -> 5.16, `transparency` 9.42 -> 5.67, `flight` 8.64 -> 5.34,
+  `sprint-flight` 8.43 -> 5.01, `dive` 6.93 -> 3.80, `teleport` 8.33 -> 4.89:
+  40-45%. p99 10.6-12.3 -> 6.1-7.7 ms.
+- Rule-hole frames 0 in every fixture. Depth captures at 1 km and 2.5 km: see
+  the seam-wall comment above.
