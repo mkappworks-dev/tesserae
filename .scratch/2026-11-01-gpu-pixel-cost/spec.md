@@ -30,7 +30,8 @@ present.
 
 Measure first, then cut the cost per pixel, cheapest exact cut first:
 
-1. Move to Bevy 0.20.1 so every measurement in this spec runs on one Bevy.
+1. Check that Bevy 0.20.1, already on `main`, does not move the tip's image
+   or timing, so every measurement in this spec runs on one Bevy.
 2. Attribute GPU time per pass at 1440p, presented and offscreen, and test the
    candidate causes one at a time with diagnostic switches.
 3. If the coverage discard is a cost: draw without it wherever it cuts
@@ -80,23 +81,20 @@ Then check the target presented and offscreen.
     draws.
 16. As the developer, I want the Bevy patch release in before the baseline,
     so that before and after differ only by our changes.
-17. As the maintainer, I want the `ruzstd` advisory ignore gone once Bevy no
-    longer needs it, so that the policy file holds no stale exception.
-18. As the maintainer, I want the profiler's GPU markers kept out of timing
+17. As the maintainer, I want the profiler's GPU markers kept out of timing
     series, so that their own 16 to 21% cost is not read as the engine's.
-19. As the maintainer, I want presented runs requested only where offscreen
+18. As the maintainer, I want presented runs requested only where offscreen
     cannot answer, so that your time at the Mac is spent once per checkpoint.
-20. As a Mod author, I want nothing in the WIT contract or my Declarations to
+19. As a Mod author, I want nothing in the WIT contract or my Declarations to
     change, so that this work is invisible to Mods.
 
 ## Implementation Decisions
 
-- **Bevy 0.20.1 first.** The latest release, 2026-10-28: ten commits on
-  0.20.0, wgpu stays 30.0.1. It moves `ruzstd` to `^0.9`, which resolves to
-  0.9.1 and clears RUSTSEC-2026-0344, so the `deny.toml` ignore and its open
-  ticket (`.scratch/2026-10-13-ruzstd-advisory/`) close with it. Our direct
-  `wgpu` pin stays on Bevy's own version. A 0.21 does not exist yet; moving to
-  it is a separate spec.
+- **Bevy 0.20.1 is already on `main`** (#49, 2026-10-28 release: ten commits
+  on 0.20.0, wgpu stays 30.0.1). It also cleared the `ruzstd` advisory ignore.
+  Ticket 01 only checks that it leaves the tip's image and timing alone, and
+  raises the `bevy` requirement in `crates/tesserae/Cargo.toml` from 0.20.0 to
+  0.20.1. A 0.21 does not exist yet; moving to it is a separate spec.
 - **Attribution names the work.** GPU markers (`--instruments gpu`) split the
   frame into prepass, shadows and setup, opaque, transparent and post, plus
   the GPU span of the whole frame. The markers cost 16 to 21% of median, so
@@ -224,14 +222,15 @@ readiness or simulation progress. Ticket 07 checks the targets.
 - **The demo Game distribution** is the one 01's presented run used, under
   the `tech+streaming-performance-impl` worktree, pinned by the runner's
   hashes.
-- **Branches.** This branch carries the spec, the tickets and ticket 01. Later
+- **Branches.** This branch carries the spec, the tickets and ticket 01's
+  result. Later
   tickets get their own `tech/gpu-<slug>` branches unless you say otherwise.
 
 ## Tickets
 
 | #  | Ticket                                      | Blocked by     |
 | -- | ------------------------------------------- | -------------- |
-| 01 | Move to Bevy 0.20.1                         | none           |
+| 01 | Check Bevy 0.20.1 against the tip           | none           |
 | 02 | Attribute GPU time at 1440p                 | 01             |
 | 03 | Discard only where the coverage rule cuts   | 02             |
 | 04 | Cut partly covered coarse faces at upload   | 03             |
