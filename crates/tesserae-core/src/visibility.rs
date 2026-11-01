@@ -487,7 +487,7 @@ mod tests {
             for z in -4..=4 {
                 for x in -4..=4 {
                     let c = [x, y, z];
-                    if !matches!(c, [0 | 1 | 2, 0 | 1, 0]) {
+                    if !matches!(c, [0..=2, 0..=1, 0]) {
                         walls.push((c, Connectivity::NONE));
                     }
                 }

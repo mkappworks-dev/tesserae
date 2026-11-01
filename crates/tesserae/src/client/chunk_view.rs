@@ -537,13 +537,6 @@ fn land_meshes(
 ///
 /// On the compute pool, not the async one the Server's jobs fill, so a mesh is
 /// not queued behind a stream of generation.
-#[cfg_attr(
-    any(feature = "dev", feature = "profiling"),
-    expect(
-        clippy::too_many_arguments,
-        reason = "a Bevy system; the extra parameter is the dev cost counter"
-    )
-)]
 fn receive_meshes(
     mut level0: ResMut<Messages<ChunkMeshReady>>,
     mut coarse: ResMut<Messages<LodMeshReady>>,
@@ -1807,6 +1800,9 @@ mod tests {
         let region = mesh_of(&app, entity_for(&app, a).unwrap());
         rebuilt(&mut app);
 
+        // Held until both are built, so they land in one frame whatever the
+        // pool's timing.
+        let gate = hold_builds(&app);
         let world = app.world_mut();
         for coord in [a, b] {
             world.write_message(ChunkMeshReady {
@@ -1814,6 +1810,11 @@ mod tests {
                 mesh: geometry(),
                 connectivity: Connectivity::ALL,
             });
+        }
+        app.update();
+        gate.release();
+        while !app.world().resource::<Building>().in_flight.all_finished() {
+            std::thread::yield_now();
         }
         app.update();
         assert_eq!(rebuilt(&mut app), vec![region]);

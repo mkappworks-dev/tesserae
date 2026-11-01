@@ -583,6 +583,8 @@ mod tests {
             focused: false,
             holes: Holes::default(),
             visible: [0; CAMERAS],
+            sight: Sight::default(),
+            mesh_reach: None,
         };
         app.insert_resource(Profile {
             origin: long_ago,

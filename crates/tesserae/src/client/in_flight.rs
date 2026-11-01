@@ -52,6 +52,17 @@ impl<K: Copy + Eq + Hash, F: Future + Unpin> InFlight<K, F> {
 }
 
 #[cfg(test)]
+impl<K, T> InFlight<K, bevy::tasks::Task<T>> {
+    /// Whether every build has finished, so the next landing takes them all.
+    pub(super) fn all_finished(&self) -> bool {
+        self.queues
+            .values()
+            .flatten()
+            .all(bevy::tasks::Task::is_finished)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::Cell;
