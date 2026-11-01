@@ -35,3 +35,51 @@ correct.
 
 Meets `spawn_camera` in `client/chunk_view.rs` and `client/camera.rs` as #29
 left it. Local work only; no push or PR without approval.
+
+## Comments
+
+### 2026-11-01: seam walls kept only where the finer ground leaves them open
+
+Branch `tech/streaming-seam-cost`. Effect gate pending the final review series.
+
+Built: each coarse Chunk carries `SeamOpenings`, read from its eight children
+at generation (`seam_openings`, tesserae-core): which Voxels against a seam
+plane have finer Voxels against it that are not opaque cubes. A seam wall
+stands only there, and a hidden wall between two open ones in a row is kept so
+the run stays one quad (it is inside the ground either way). Level 1's
+children are level 0's own Chunks, so it is exact. Levels 2 and 3 read
+children made at the finer Voxel size but not downsampled as that level is, so
+they look one finer Voxel up and aside. Levels 4 and 5 keep every wall: every
+margin that lost no opening there saved under 3%.
+
+Wall quads, demo-like terrain (relief 24 m, lake at 34 m), mesh shells around
+one Eye, old -> new, and as a share of the level's other coarse quads:
+
+| level | base quads | walls before | walls after | share       |
+| ----- | ---------- | ------------ | ----------- | ----------- |
+| 1     | 76282      | 8465         | 3126        | 11.1->4.1%  |
+| 2     | 69865      | 9610         | 7720        | 13.8->11.0% |
+| 3     | 65899      | 6850         | 6115        | 10.4->9.3%  |
+| 4     | 49719      | 6642         | 6642        | 13.4%       |
+| 5     | 24309      | 2134         | 2134        | 8.8%        |
+| all   | 286074     | 33701        | 25737       | 11.8->9.0%  |
+
+Over four terrains (two seeds, relief 24 and 48 m) no wall the finer level's
+data leaves open was lost at levels 1-3; `seams.rs` keeps that as a test.
+Other ideas, measured on the same terrain: 96% of level 1's exposed walls are
+in the depth-1 row, but `SEAM_DEPTH` 1 everywhere loses 120-830 exposed cells
+per level, and no coarse-only slope rule predicted which. Light never split a
+wall merge. The Material key does (dropping it cuts 20-45% of walls), kept
+because the lower row would show grass where dirt is. About 44% of the walls
+face away from the Eye's anchor at mesh time; dropping them needs a re-mesh as
+the Eye crosses a Chunk, and they cost vertices only (back faces are culled).
+
+Cost: `seam_openings` takes 0.07 ms per surface coarse Chunk against 1.13 ms
+for its worldgen and downsample (levels 1-3 only).
+
+Captures under `/tmp/claude-streaming-impl/review/seamcost/` (stationary,
+teleport, far1k = lift 90 pitch -5, far2k = lift 120 pitch -2.7, sprint and
+sprint-int = sprint-flight on bin-int2), against `review/*-int`: at most 35
+pixels differ, along one hairline that is pale in the reference and grass
+here; no slit in any. Counts and margin sweeps:
+`/tmp/claude-streaming-impl/seam-cost/`.
