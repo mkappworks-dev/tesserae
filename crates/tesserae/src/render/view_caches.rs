@@ -3,10 +3,9 @@
 //! `prepare_preprocess_bind_groups` inserts into `BinUnpackingBindGroups` and
 //! `UniformAllocationBindGroups` for every live view each frame and never
 //! removes a key (bevy_pbr 0.20 `render/gpu_preprocess.rs`), so each camera and
-//! shadow cascade a World session spawned kept its bind groups, and through
-//! them the buffers they bind, until the process ended: about 40 buffers and
-//! 16 bind groups a session. See ticket 34 of
-//! `.scratch/2026-10-27-gameplay-performance-and-controls/`.
+//! shadow cascade a World session spawns would keep its bind groups, and through
+//! them the buffers they bind, until the process ends: about 40 buffers and 16
+//! bind groups a session.
 
 use bevy::pbr::{
     BinUnpackingBindGroups, UniformAllocationBindGroups, prepare_preprocess_bind_groups,

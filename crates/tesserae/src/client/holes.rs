@@ -7,8 +7,7 @@
 //! draws its Chunk (delivered or retained, an empty mesh included) and no finer
 //! level's bit in the mask the shader reads discards it. Otherwise it is a
 //! *rule hole* when some level draws its Chunk but the mask discards it, and a
-//! *fill hole* when no level does. See
-//! `.scratch/2026-10-29-streaming-performance/`.
+//! *fill hole* when no level does.
 //!
 //! The rule in force is `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`,
 //! read from the published mask words, so a mask out of step with the drawn
@@ -96,11 +95,9 @@ impl View<'_> {
         let samples: Vec<Vec3> = if level == 0 {
             vec![min + cell_m / 2.0]
         } else {
-            (0..8)
-                .map(|i| {
-                    let corner = Vec3::new((i & 1) as f32, (i >> 1 & 1) as f32, (i >> 2) as f32);
-                    min + (corner * 2.0 + 1.0) * cell_m / 4.0
-                })
+            coord
+                .children()
+                .map(|c| (IVec3::new(c.x, c.y, c.z).as_vec3() + 0.5) * cell_m / 2.0)
                 .collect()
         };
         let covers: Vec<Cover> = samples.into_iter().map(|p| self.point(p)).collect();
@@ -224,16 +221,6 @@ mod tests {
         ChunkCoord::new(0, 0, 0)
     }
 
-    fn children(c: ChunkCoord) -> impl Iterator<Item = ChunkCoord> {
-        (0..8).map(move |i| {
-            ChunkCoord::new(
-                2 * c.x + (i & 1),
-                2 * c.y + (i >> 1 & 1),
-                2 * c.z + (i >> 2),
-            )
-        })
-    }
-
     #[test]
     fn nothing_drawn_is_a_fill_hole() {
         assert_eq!(Owned::new(&[]).at(0, origin()), Cover::Fill);
@@ -249,7 +236,7 @@ mod tests {
 
     #[test]
     fn a_coarse_chunk_is_drawn_by_its_children_and_its_own_mesh_together() {
-        let mut drawn: Vec<_> = children(origin()).map(|c| (0, c)).collect();
+        let mut drawn: Vec<_> = origin().children().map(|c| (0, c)).collect();
         drawn.pop();
         assert_eq!(Owned::new(&drawn).at(1, origin()), Cover::Fill);
         drawn.push((1, origin()));

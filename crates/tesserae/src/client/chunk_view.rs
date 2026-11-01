@@ -112,7 +112,7 @@ impl ChunkEntities {
     fn under_delivered(&self, (level, coord): (u32, ChunkCoord), levels: u32) -> bool {
         let mut covering = coord;
         (level + 1..levels).any(|coarser| {
-            covering = parent(covering);
+            covering = covering.parent();
             self.delivered.contains(&(coarser, covering))
         })
     }
@@ -120,7 +120,7 @@ impl ChunkEntities {
     /// Whether finer levels' delivered Chunks draw all of this one's region.
     fn over_delivered(&self, (level, coord): (u32, ChunkCoord)) -> bool {
         level > 0
-            && children(coord).all(|child| {
+            && coord.children().all(|child| {
                 let key = (level - 1, child);
                 self.delivered.contains(&key) || self.over_delivered(key)
             })
@@ -158,7 +158,7 @@ impl ChunkEntities {
         self.blended_hidden = hidden;
     }
 
-    /// Each level-0 Chunk that draws something, as 09's regions draw it.
+    /// Each level-0 Chunk that draws something, as its region draws it.
     #[cfg(feature = "profiling")]
     pub(super) fn level_zero_drawn(&self) -> Vec<DrawnChunk> {
         let mut coords: HashSet<ChunkCoord> = self
@@ -627,7 +627,7 @@ fn release(
     let outside = |(level, coord): (u32, ChunkCoord)| {
         !anchors.is_empty()
             && (level..levels).all(|at| {
-                let covering = ancestor(coord, at - level);
+                let covering = coord.ancestor(at - level);
                 let rings = LevelRings::new(*streaming, world.cell_size(), at);
                 let a = anchors[at as usize];
                 let d = IVec3::new(covering.x - a.x, covering.y - a.y, covering.z - a.z);
@@ -717,24 +717,6 @@ fn assemble_regions(
     if let Some(started) = started.filter(|_| assembled > 0) {
         cost.uploaded(started.elapsed(), assembled);
     }
-}
-
-fn parent(c: ChunkCoord) -> ChunkCoord {
-    ancestor(c, 1)
-}
-
-fn ancestor(c: ChunkCoord, up: u32) -> ChunkCoord {
-    ChunkCoord::new(c.x >> up, c.y >> up, c.z >> up)
-}
-
-fn children(c: ChunkCoord) -> impl Iterator<Item = ChunkCoord> {
-    (0..8).map(move |i| {
-        ChunkCoord::new(
-            2 * c.x + (i & 1),
-            2 * c.y + (i >> 1 & 1),
-            2 * c.z + (i >> 2),
-        )
-    })
 }
 
 /// Rewrites the record of what each level draws, when it changed. Padded to a
@@ -1287,7 +1269,7 @@ mod tests {
         assert!(entity_at(&app, 1, coarse).is_some(), "retained");
         assert!(mask_has(&app, 1, coarse));
 
-        let children: Vec<_> = super::children(coarse).collect();
+        let children: Vec<_> = coarse.children().collect();
         for &child in &children[..7] {
             send_mesh(&mut app, child, geometry());
         }
@@ -1305,11 +1287,11 @@ mod tests {
         let coarse = ChunkCoord::new(0, 0, 0);
         send_coarse(&mut app, 2, coarse, geometry());
         unload_coarse(&mut app, 2, coarse);
-        let level_one: Vec<_> = super::children(coarse).collect();
+        let level_one: Vec<_> = coarse.children().collect();
         for &child in &level_one[1..] {
             send_coarse(&mut app, 1, child, geometry());
         }
-        for grandchild in super::children(level_one[0]) {
+        for grandchild in level_one[0].children() {
             assert!(entity_at(&app, 2, coarse).is_some());
             send_mesh(&mut app, grandchild, geometry());
         }
@@ -1370,7 +1352,7 @@ mod tests {
         send_coarse(&mut app, 1, coord, geometry());
         unload_coarse(&mut app, 1, coord);
         send_coarse(&mut app, 1, coord, geometry());
-        for child in super::children(coord) {
+        for child in coord.children() {
             send_mesh(&mut app, child, geometry());
         }
         assert!(
@@ -1712,7 +1694,7 @@ mod tests {
         send_coarse(&mut app, 1, coarse, geometry());
         unload_coarse(&mut app, 1, coarse);
         let gate = hold_builds(&app);
-        for child in super::children(coarse) {
+        for child in coarse.children() {
             app.world_mut().write_message(ChunkMeshReady {
                 coord: child,
                 mesh: geometry(),
@@ -1723,12 +1705,12 @@ mod tests {
         app.update();
         assert!(entity_at(&app, 1, coarse).is_some());
         assert!(mask_has(&app, 1, coarse));
-        assert!(super::children(coarse).all(|child| !mask_has(&app, 0, child)));
+        assert!(coarse.children().all(|child| !mask_has(&app, 0, child)));
 
         gate.release();
         settle(&mut app);
         assert_eq!(entity_at(&app, 1, coarse), None);
-        assert!(super::children(coarse).all(|child| mask_has(&app, 0, child)));
+        assert!(coarse.children().all(|child| mask_has(&app, 0, child)));
     }
 
     #[test]

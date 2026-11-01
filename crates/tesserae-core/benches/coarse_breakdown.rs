@@ -10,7 +10,7 @@
 //! then without smoothing too. The 2D height is timed by sampling the same
 //! columns `Worldgen::chunk` samples. The fill is what remains.
 //!
-//! A second table times ticket 06's far-level probes over the same jobs: the
+//! A second table times the far-level probes over the same jobs: the
 //! whole job as shipped, the coarse Chunk generated at its own Voxel size
 //! (`direct`), and that without caves (`columns`).
 

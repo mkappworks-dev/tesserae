@@ -4,8 +4,7 @@
 //! (`docs/adr/0008-the-server-owns-the-players-pose.md`).
 //!
 //! Hidden work is reordered, never skipped: every Chunk of a ring is still in
-//! the order, and an age credit lifts one that has waited. See ticket 03 of
-//! `.scratch/2026-10-29-streaming-performance/`.
+//! the order, and an age credit lifts one that has waited.
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;

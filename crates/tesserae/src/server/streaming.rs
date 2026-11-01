@@ -518,10 +518,9 @@ impl MeshState {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
     }
 
-    /// Whether the Client was sent this Chunk's mesh and has not been told to
-    /// drop it.
-    pub(in crate::server) fn is_delivered(&self, coord: ChunkCoord) -> bool {
-        self.delivered.contains(&coord)
+    /// The Chunks whose mesh the Client was sent and has not been told to drop.
+    pub(in crate::server) fn delivered(&self) -> impl Iterator<Item = &ChunkCoord> {
+        self.delivered.iter()
     }
 
     pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
@@ -531,6 +530,11 @@ impl MeshState {
     #[cfg(test)]
     pub(in crate::server) fn is_dirty(&self, coord: ChunkCoord) -> bool {
         self.dirty.contains(&coord)
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn mark_delivered(&mut self, coord: ChunkCoord) {
+        self.delivered.insert(coord);
     }
 
     #[cfg(test)]
@@ -1698,7 +1702,7 @@ pub(in crate::server) mod tests {
 
     /// The Server tick's streaming half, level 0 then the coarse levels, on a
     /// schedule a measurement runs by itself.
-    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[cfg(feature = "dev")]
     pub(in crate::server) fn add_stream_systems(
         app: &mut App,
         schedule: impl bevy::ecs::schedule::ScheduleLabel,
@@ -2322,9 +2326,8 @@ pub(in crate::server) mod tests {
         }
     }
 
-    /// Here the pre-03 order, highest layer first by distance, measured 3.3 and
-    /// column by column 4.2; the bound leaves room for when the pool's jobs
-    /// finish.
+    /// Ordered highest layer first by distance this measures 3.3, and column by
+    /// column 4.2; the bound leaves room for when the pool's jobs finish.
     #[test]
     fn a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above() {
         let solves = solves_per_chunk_filling_a_fresh_region();

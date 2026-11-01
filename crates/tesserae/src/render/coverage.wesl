@@ -11,8 +11,13 @@ var<storage, read> drawn: array<u32>;
 // error in a world-space coordinate and far short of leaving the Voxel.
 const BEHIND_A_FACE: f32 = 1.0 / 1024.0;
 
+// `drawn_mask::SOME` and `drawn_mask::ALL`, which a test holds equal.
+const SOME: u32 = 1u;
+const ALL: u32 = 2u;
+
 // The cover bits of the level-`level` Chunk holding the face at `point` facing
-// `normal`: 1, its own level or a finer one draws part of it; 2, all of it.
+// `normal`: `SOME`, its own level or a finer one draws part of it; `ALL`, all
+// of it.
 // The Chunk asked about is the one behind the face, because a face lies on the
 // boundary of the Voxel it is the surface of: water levelled onto a Chunk
 // boundary by `level_the_water` would otherwise ask the Chunk above it, which
@@ -36,7 +41,7 @@ fn cover_at(level: u32, point: vec3<f32>, normal: vec3<f32>) -> u32 {
     }
     let l = vec3<u32>(local);
     let i = (l.z * size.y + l.y) * size.x + l.x;
-    return (drawn[drawn[slot] + i / 16u] >> ((i % 16u) * 2u)) & 3u;
+    return (drawn[drawn[slot] + i / 16u] >> ((i % 16u) * 2u)) & (SOME | ALL);
 }
 
 // Whether a level finer than `level` draws the Chunk at `point`, which then
@@ -50,7 +55,7 @@ fn finer_drawn(level: u32, point: vec3<f32>, normal: vec3<f32>) -> bool {
         if cover == 0u {
             return false;
         }
-        if (cover & 2u) != 0u {
+        if (cover & ALL) != 0u {
             return true;
         }
     }

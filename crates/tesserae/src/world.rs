@@ -20,6 +20,30 @@ impl ChunkCoord {
     pub const fn new(x: i32, y: i32, z: i32) -> Self {
         ChunkCoord { x, y, z }
     }
+
+    /// The Chunk one level coarser whose region holds this one's.
+    pub const fn parent(self) -> Self {
+        self.ancestor(1)
+    }
+
+    /// The Chunk `up` levels coarser whose region holds this one's.
+    pub const fn ancestor(self, up: u32) -> Self {
+        ChunkCoord::new(self.x >> up, self.y >> up, self.z >> up)
+    }
+
+    /// Child `i` one level finer: octant `x + 2y + 4z`.
+    pub const fn child(self, i: usize) -> Self {
+        ChunkCoord::new(
+            2 * self.x + (i & 1) as i32,
+            2 * self.y + (i >> 1 & 1) as i32,
+            2 * self.z + (i >> 2) as i32,
+        )
+    }
+
+    /// The eight Chunks one level finer, in octant order.
+    pub fn children(self) -> impl Iterator<Item = ChunkCoord> {
+        (0..8).map(move |i| self.child(i))
+    }
 }
 
 impl std::fmt::Display for ChunkCoord {
@@ -135,6 +159,18 @@ impl WorldSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_children_of_a_chunk_are_its_octants_and_it_is_their_parent() {
+        let parent = ChunkCoord::new(-3, 2, 5);
+        for (i, c) in parent.children().enumerate() {
+            assert_eq!(c, parent.child(i));
+            let d = (c.x - 2 * parent.x, c.y - 2 * parent.y, c.z - 2 * parent.z);
+            assert_eq!(d, ((i & 1) as i32, (i >> 1 & 1) as i32, (i >> 2) as i32));
+            assert_eq!(c.parent(), parent);
+            assert_eq!(c.child(7).ancestor(2), parent);
+        }
+    }
 
     #[cfg(any(feature = "dev", feature = "profiling"))]
     #[test]

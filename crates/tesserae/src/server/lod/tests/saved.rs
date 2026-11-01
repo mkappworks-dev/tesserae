@@ -23,7 +23,7 @@ fn covers(chunk: ChunkCoord) -> Vec<LodKey> {
     let mut covering = chunk;
     (1..LEVELS)
         .map(|level| {
-            covering = cover(covering);
+            covering = covering.parent();
             (level, covering)
         })
         .collect()

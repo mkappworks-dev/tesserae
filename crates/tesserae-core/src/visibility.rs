@@ -263,16 +263,11 @@ pub fn reach(start: [i32; 3], bounds: Bounds, of: impl Fn([i32; 3]) -> Connectiv
 
 /// Minecraft's walk from the camera's Chunk: breadth first, each Chunk once,
 /// leaving one only through a face its connectivity joins to the face it was
-/// entered through, never stepping back against a direction already taken,
-/// and only into Chunks `shown` admits (the frustum). What it never enters is
-/// hidden. Conservative only up to the one entry per Chunk it keeps: a corner
-/// that sight bends around twice is culled, as in Minecraft.
-pub fn sight(
-    start: [i32; 3],
-    bounds: Bounds,
-    of: impl Fn([i32; 3]) -> Connectivity,
-    shown: impl Fn([i32; 3]) -> bool,
-) -> Visited {
+/// entered through, and never stepping back against a direction already
+/// taken. What it never enters is hidden. Conservative only up to the one
+/// entry per Chunk it keeps: a corner that sight bends around twice is culled,
+/// as in Minecraft.
+pub fn sight(start: [i32; 3], bounds: Bounds, of: impl Fn([i32; 3]) -> Connectivity) -> Visited {
     let mut seen = vec![0u8; bounds.volume()];
     let Some(i) = bounds.index(start) else {
         return Visited { bounds, seen };
@@ -289,7 +284,7 @@ pub fn sight(
             let Some(j) = bounds.index(next) else {
                 continue;
             };
-            if seen[j] != 0 || !shown(next) {
+            if seen[j] != 0 {
                 continue;
             }
             seen[j] = 1;
@@ -459,9 +454,8 @@ mod tests {
 
     #[test]
     fn open_space_reaches_and_sees_the_whole_box() {
-        let all = |_| true;
         assert_eq!(reach([0; 3], R, world(&[])).len(), 9 * 9 * 9);
-        assert_eq!(sight([0; 3], R, world(&[]), all).len(), 9 * 9 * 9);
+        assert_eq!(sight([0; 3], R, world(&[])).len(), 9 * 9 * 9);
     }
 
     #[test]
@@ -499,7 +493,7 @@ mod tests {
         walls.push(([2, 1, 0], tunnel(NEG_X, NEG_Y)));
         walls.push(([2, 0, 0], tunnel(POS_Y, NEG_X)));
         assert!(reach([0; 3], R, world(&walls)).contains([2, 0, 0]));
-        let seen = sight([0; 3], R, world(&walls), |_| true);
+        let seen = sight([0; 3], R, world(&walls));
         assert!(seen.contains([2, 1, 0]));
         assert!(!seen.contains([2, 0, 0]), "seen only by looking back down");
     }
@@ -507,12 +501,7 @@ mod tests {
     #[test]
     fn sight_stops_at_the_first_wall_and_sees_the_wall() {
         let walls = [([2, 0, 0], Connectivity::NONE)];
-        let seen = sight(
-            [0; 3],
-            Bounds::around([0; 3], [4, 0, 0]),
-            world(&walls),
-            |_| true,
-        );
+        let seen = sight([0; 3], Bounds::around([0; 3], [4, 0, 0]), world(&walls));
         assert!(seen.contains([2, 0, 0]));
         assert!(!seen.contains([3, 0, 0]));
     }
@@ -520,24 +509,20 @@ mod tests {
     #[test]
     fn sight_leaves_a_chunk_only_where_its_entry_face_leads() {
         // Entered from -x, the tunnel leads on to +x and nowhere else.
-        let walls = [([1, 0, 0], tunnel(NEG_X, POS_X))];
+        let mut walls = vec![([1, 0, 0], tunnel(NEG_X, POS_X))];
         let line = Bounds::around([0; 3], [3, 0, 0]);
-        let seen = sight([0; 3], line, world(&walls), |_| true);
+        let seen = sight([0; 3], line, world(&walls));
         assert!(seen.contains([3, 0, 0]));
+        // Rock beside the Chunk above the tunnel, so only the tunnel could lead there.
+        walls.extend([
+            ([0, 1, 0], Connectivity::NONE),
+            ([2, 1, 0], Connectivity::NONE),
+        ]);
         let plane = Bounds {
             min: [0, 0, 0],
             max: [3, 1, 0],
         };
-        let only_through = |c: [i32; 3]| c[1] == 0 || c[0] == 1;
-        let seen = sight([0; 3], plane, world(&walls), only_through);
+        let seen = sight([0; 3], plane, world(&walls));
         assert!(!seen.contains([1, 1, 0]), "the tunnel does not lead up");
-    }
-
-    #[test]
-    fn sight_enters_nothing_outside_the_frustum() {
-        let ahead = |c: [i32; 3]| c[2] <= 0;
-        let seen = sight([0; 3], R, world(&[]), ahead);
-        assert!(seen.contains([0, 0, -4]));
-        assert!(!seen.contains([0, 0, 1]));
     }
 }
