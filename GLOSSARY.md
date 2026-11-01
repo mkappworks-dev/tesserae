@@ -145,7 +145,9 @@ and the colour of the sky behind the terrain are two values, not one.
 
 **Downsample** — producing a coarse Chunk's Voxels from the eight finer Chunks
 it covers: the dominant Material by volume, solid if half the volume is. At
-level 1 fluid weighs the volume it fills.
+level 1 fluid weighs the volume it fills. From level 3 up only where an Edit or
+saved change reaches; elsewhere those levels are generated at their own Voxel
+size, one height per column (ADR-0011).
 
 **World generation** — producing a Chunk's contents from a seed and a position.
 Never produces a mesh.

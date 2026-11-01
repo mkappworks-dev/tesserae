@@ -95,3 +95,25 @@ affected ancestors. Fluid/fire Overlays are carried through the same volume vote
 at those levels; natural thin-feature loss remains. Coarse Chunks are still
 derived data and never saved or edited. Ephemeral Worlds retain the original
 generator-only policy above level 1.
+
+## Columns from level 3
+
+Amended 2026-11-01, from the streaming-performance spec's ticket 06. From level
+3 up, a coarse Chunk no Edit or saved change reaches is not the downsample of
+eight generated children: it is `Worldgen::chunk` at its own Voxel size, with no
+caves and no smoothing, its surface and lake lowered by half a Voxel so each
+Voxel is asked about its middle as the downsample's vote does. That is one
+height and the ground Materials per column. It is still a pure function of the
+seed and the parameters, so everything above about coarse levels being derived
+holds.
+
+- **Why.** It costs about a thirtieth of the downsample's worker CPU per coarse
+  Chunk (3 to 4 us against 88 to 113), and in review captures at 256 m, 1 km and
+  2.5 km on the default seed no cave was visible past level 2 and the picture
+  was no worse.
+- **What it loses.** A cave mouth or overhang beyond level 2, about 640 m in the
+  demo, is not drawn. Levels 1 and 2 keep the downsample and its caves.
+- **What does not change.** A job whose children hold an Edit or a saved change
+  still takes the downsample at every level, so a change shows wherever it did.
+  A level-3-up Chunk made this way keeps every seam wall, having no finer
+  children to read openings from.
