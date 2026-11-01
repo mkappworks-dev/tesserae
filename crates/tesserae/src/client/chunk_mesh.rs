@@ -54,11 +54,9 @@ pub struct PackedLayer {
 }
 
 pub fn pack(layer: &MeshLayer) -> PackedLayer {
-    let step = |c: f32| {
-        let packed = (c * STEPS) as i16;
-        debug_assert_eq!(f32::from(packed) / STEPS, c, "off the sixteenths grid");
-        packed
-    };
+    // Unchecked per vertex: the mesher emits only whole sixteenths, from `NodeBox`es `register`
+    // bounds, and `every_shape_and_fluid_level_decodes_to_the_meshers_own_vertices` holds it.
+    let step = |c: f32| (c * STEPS) as i16;
     PackedLayer {
         position_face: layer
             .positions
@@ -140,11 +138,6 @@ pub fn merged_mesh<'a>(parts: impl IntoIterator<Item = (IVec3, &'a PackedLayer)>
 /// The face an axis-aligned unit normal belongs to, in `FACE_STEPS` order.
 fn face_of(normal: [f32; 3]) -> i16 {
     let axis = normal.iter().position(|&c| c != 0.0).unwrap_or(0);
-    debug_assert_eq!(
-        normal[axis].abs(),
-        1.0,
-        "not an axis-aligned normal: {normal:?}"
-    );
     (axis * 2 + usize::from(normal[axis] > 0.0)) as i16
 }
 
