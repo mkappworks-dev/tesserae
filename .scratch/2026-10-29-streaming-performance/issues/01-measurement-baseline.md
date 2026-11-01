@@ -1,6 +1,6 @@
 # 01: Streaming fixtures, attribution and baseline
 
-Status: ready-for-human
+Status: done
 Blocked by: none
 
 Spec: [streaming performance](../spec.md).
@@ -183,3 +183,35 @@ runs, low-high.
   fixture 0.
 - Owed: the presented run on the 144 Hz display, which needs you at the unlocked
   Mac.
+
+### 2026-11-01: presented run on the 144 Hz display
+
+Run by you at the unlocked Mac: `scripts/profile-frames --presented`, three
+repeats with the profiler on and off, `stationary` and both sprints, 01's binary
+`86d1def` (`/tmp/claude-streaming-impl/presented-b01`) then the tip `df93f3b`
+(`presented-tip`). The window filled the external display: a 2560 x 1440 surface
+at 144 Hz, `Immediate` present, 1.78 times the pixels of the offscreen 1920 x
+1080 series, so it is not pooled with it. Milliseconds, range over the three
+profiled runs.
+
+| Fixture         | 01 p50    | 01 p95    | 01 > 33 | tip p50  | tip p95   | tip > 33 |
+| --------------- | --------- | --------- | ------- | -------- | --------- | -------- |
+| `stationary`    | 12.5-16.0 | 20.6-23.8 | 0-10    | 8.8-9.3  | 15.5-17.4 | 0        |
+| `sprint-flight` | 15.6-16.7 | 18.8-24.6 | 0       | 6.8-9.5  | 14.8-18.2 | 0        |
+| `sprint-walk`   | 12.6-16.6 | 18.4-25.0 | 0-8     | 8.6-16.6 | 15.7-17.1 | 0        |
+
+- No rule-hole or fill-hole frames in any run.
+- The sprint stall, presented: at 01 both sprints spend 119-258 frames a run
+  over 16.7 ms; at the tip 18-75, except the 60 Hz run below (235), and no frame
+  over 33 ms in any fixture.
+- What dominates the slow frames: not the CPU. In frames over 16.7 ms the main
+  thread spends 0.6-0.7 ms, the render thread 2.7-3.3 ms at 01 and 1.3-1.5 ms at
+  the tip, the Server 0.3-2 ms and mesh upload under 0.1 ms. The rest is the GPU
+  and presentation at 2560 x 1440.
+- The tip's third `sprint-walk` run sat at 16.6-17 ms for most frames (p50
+  16.61, p95 17.12): a 60 Hz cadence the other two runs and every other fixture
+  do not show. Likely the window lost its 144 Hz pacing for that run; recorded,
+  not explained.
+- Presented, the tip does not reach the 6.9 ms stretch at this resolution (p50
+  about 9 ms); offscreen at 1080p it does (15). A smaller render target or
+  GPU-side work would be the next ticket if presented 144 Hz is wanted.
