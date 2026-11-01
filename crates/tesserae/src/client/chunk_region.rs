@@ -21,9 +21,9 @@ use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
-use tesserae_core::{CHUNK_SIZE, MeshLayer};
+use tesserae_core::CHUNK_SIZE;
 
-use crate::client::chunk_mesh::{PackedLayer, merged_mesh, pack};
+use crate::client::chunk_mesh::{PackedLayer, merged_mesh};
 use crate::client::chunk_view::layer_of;
 use crate::render::chunk_material::ChunkMaterial;
 use crate::world::{ChunkCoord, WorldSettings};
@@ -95,13 +95,13 @@ impl Regions {
         )
     }
 
-    /// The Chunk's layer is now `layer`; an empty one removes it.
-    pub(super) fn set(&mut self, key: Key, layer: &MeshLayer) {
-        if layer.is_empty() {
+    /// The Chunk's layer is now `layer`; none removes it.
+    pub(super) fn set(&mut self, key: Key, layer: Option<PackedLayer>) {
+        let Some(layer) = layer else {
             self.remove(key);
             return;
-        }
-        self.parts.insert(key, Arc::new(pack(layer)));
+        };
+        self.parts.insert(key, Arc::new(layer));
         let region = self.region_of(key);
         self.regions
             .entry(region)
@@ -217,7 +217,8 @@ impl Regions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::chunk_mesh::decoded;
+    use crate::client::chunk_mesh::{decoded, pack};
+    use tesserae_core::MeshLayer;
 
     #[test]
     fn the_far_corner_of_the_widest_region_packs_exactly() {

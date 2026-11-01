@@ -85,5 +85,10 @@ time: GPU frame p50 5.11 ms at edge 1 against 5.53 ms at edge 4
 culling a region whole draws more geometry. Hence the edge of 2. Main-thread
 assembly runs 0.04-0.07 ms a frame on average while sprinting.
 
+Merged with 14 (meshes built off the main thread): the compute pool now packs
+the opaque and cutout layers, and a Chunk joins its region as its build lands,
+so only the region assembly stays on the main thread, in the frame the mask
+bit changes. The captures above predate that merge.
+
 The effect gate is decided by the final review series, which can run edges 1,
 2 and 4 from one binary. Status unchanged.

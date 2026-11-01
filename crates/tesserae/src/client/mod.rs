@@ -18,6 +18,7 @@ mod history;
 #[cfg(feature = "profiling")]
 pub mod holes;
 mod hotbar_store;
+mod in_flight;
 mod input;
 mod layout;
 mod layout_menu;
