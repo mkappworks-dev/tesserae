@@ -17,6 +17,7 @@
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::mesh::MeshTag;
 use bevy::platform::collections::{HashMap, HashSet};
@@ -58,6 +59,9 @@ type Key = (u32, ChunkCoord);
 #[derive(Default)]
 struct Region {
     drawn: Option<(Entity, Handle<Mesh>)>,
+    /// The hidden members, drawn only into the sun's shadow maps: culled
+    /// from the camera is not culled from the light.
+    shadow: Option<(Entity, Handle<Mesh>)>,
     members: BTreeSet<ChunkCoord>,
 }
 
@@ -88,6 +92,8 @@ impl Default for Regions {
 pub(super) struct Look<'a> {
     pub material: &'a Handle<ChunkMaterial>,
     pub casts_shadows: bool,
+    /// Whether hidden members still cast; false only for a review control.
+    pub hidden_cast: bool,
 }
 
 impl Regions {
@@ -164,6 +170,16 @@ impl Regions {
         (self.region_of(key).1, 1 << self.shift)
     }
 
+    /// The entity drawing the Chunk's region into shadow maps only.
+    #[cfg(test)]
+    pub(super) fn shadow_entity(&self, key: Key) -> Option<Entity> {
+        if !self.parts.contains_key(&key) {
+            return None;
+        }
+        let (entity, _) = self.regions.get(&self.region_of(key))?.shadow.as_ref()?;
+        Some(*entity)
+    }
+
     /// The Chunk's own layer, packed, in Voxels from its origin.
     pub(super) fn part(&self, key: Key) -> Option<&Arc<PackedLayer>> {
         self.parts.get(&key)
@@ -171,7 +187,10 @@ impl Regions {
 
     #[cfg(feature = "profiling")]
     pub(super) fn entity_count(&self) -> usize {
-        self.regions.values().filter(|r| r.drawn.is_some()).count()
+        self.regions
+            .values()
+            .map(|r| usize::from(r.drawn.is_some()) + usize::from(r.shadow.is_some()))
+            .sum()
     }
 
     /// Regions `assemble` would rebuild now.
@@ -204,51 +223,88 @@ impl Regions {
             let Some(region) = self.regions.get_mut(&key) else {
                 continue;
             };
-            if region.members.is_empty() {
-                if let Some((entity, mesh)) = region.drawn.take() {
-                    meshes.remove(&mesh);
-                    commands.entity(entity).despawn();
-                }
-                self.regions.remove(&key);
-                continue;
-            }
             let (level, at) = key;
-            let hidden = &self.hidden;
-            let shown = |coord: &&ChunkCoord| !hidden.contains(&(level, **coord));
-            if !region.members.iter().any(|c| shown(&c)) {
-                if let Some((entity, mesh)) = region.drawn.take() {
-                    meshes.remove(&mesh);
-                    commands.entity(entity).despawn();
-                }
-                continue;
-            }
             let base = IVec3::new(at.x, at.y, at.z) * edge;
-            let parts = region.members.iter().filter(shown).map(|&coord| {
-                let offset = (IVec3::new(coord.x, coord.y, coord.z) - base) * CHUNK_SIZE as i32;
-                (offset, &*self.parts[&(level, coord)])
-            });
-            let mesh = merged_mesh(parts);
-            match &region.drawn {
-                Some((_, handle)) => {
-                    meshes
-                        .insert(handle.id(), mesh)
-                        .expect("a region's own handle is live");
+            let hidden = &self.hidden;
+            let parts = &self.parts;
+            let (shown, culled): (Vec<ChunkCoord>, Vec<ChunkCoord>) = region
+                .members
+                .iter()
+                .partition(|&&coord| !hidden.contains(&(level, coord)));
+            let mesh_of = |members: &[ChunkCoord]| {
+                (!members.is_empty()).then(|| {
+                    merged_mesh(members.iter().map(|&coord| {
+                        let offset =
+                            (IVec3::new(coord.x, coord.y, coord.z) - base) * CHUNK_SIZE as i32;
+                        (offset, &*parts[&(level, coord)])
+                    }))
+                })
+            };
+            let spawn = Spawn {
+                origin: world.chunk_origin_at(ChunkCoord::new(base.x, base.y, base.z), level),
+                scale: world.voxel_size_at(level),
+                level,
+                material: look.material,
+            };
+            let main = (layer_of(level), !look.casts_shadows);
+            spawn.place(&mut region.drawn, mesh_of(&shown), main, commands, meshes);
+            let shadow = mesh_of(&culled).filter(|_| look.casts_shadows && look.hidden_cast);
+            let shadow_only = (RenderLayers::layer(SHADOW_ONLY_LAYER), false);
+            spawn.place(&mut region.shadow, shadow, shadow_only, commands, meshes);
+            if region.members.is_empty() {
+                self.regions.remove(&key);
+            }
+        }
+    }
+}
+
+/// The render layer only the sun draws: its shadow views take it, and no camera
+/// does. Past every level's own layer.
+pub(super) const SHADOW_ONLY_LAYER: usize = crate::server::MAX_LEVELS as usize;
+
+/// What a region's entities share besides their mesh.
+struct Spawn<'a> {
+    origin: Vec3,
+    scale: f32,
+    level: u32,
+    material: &'a Handle<ChunkMaterial>,
+}
+
+impl Spawn<'_> {
+    /// Brings `slot` in line with `mesh`: replaced in place, spawned on
+    /// `layers`, or despawned with its asset when there is no mesh.
+    fn place(
+        &self,
+        slot: &mut Option<(Entity, Handle<Mesh>)>,
+        mesh: Option<Mesh>,
+        (layers, no_shadow): (RenderLayers, bool),
+        commands: &mut Commands,
+        meshes: &mut Assets<Mesh>,
+    ) {
+        match (mesh, &*slot) {
+            (Some(mesh), Some((_, handle))) => {
+                meshes
+                    .insert(handle.id(), mesh)
+                    .expect("a region's own handle is live");
+            }
+            (Some(mesh), None) => {
+                let handle = meshes.add(mesh);
+                let mut entity = commands.spawn((
+                    Mesh3d(handle.clone()),
+                    MeshMaterial3d(self.material.clone()),
+                    Transform::from_translation(self.origin).with_scale(Vec3::splat(self.scale)),
+                    MeshTag::new(self.level),
+                    layers,
+                ));
+                if no_shadow {
+                    entity.insert(NotShadowCaster);
                 }
-                None => {
-                    let handle = meshes.add(mesh);
-                    let origin = ChunkCoord::new(base.x, base.y, base.z);
-                    let mut entity = commands.spawn((
-                        Mesh3d(handle.clone()),
-                        MeshMaterial3d(look.material.clone()),
-                        Transform::from_translation(world.chunk_origin_at(origin, level))
-                            .with_scale(Vec3::splat(world.voxel_size_at(level))),
-                        MeshTag::new(level),
-                        layer_of(level),
-                    ));
-                    if !look.casts_shadows {
-                        entity.insert(NotShadowCaster);
-                    }
-                    region.drawn = Some((entity.id(), handle));
+                *slot = Some((entity.id(), handle));
+            }
+            (None, _) => {
+                if let Some((entity, handle)) = slot.take() {
+                    meshes.remove(&handle);
+                    commands.entity(entity).despawn();
                 }
             }
         }

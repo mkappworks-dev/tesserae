@@ -161,7 +161,7 @@ fields do not establish power-loss safety, GPU cost or present latency.
 
 ## Streaming fixtures
 
-`--fixtures` also accepts seven streaming fixtures, all on the demo's default
+`--fixtures` also accepts eight streaming fixtures, all on the demo's default
 seed and measured in the same 22–32 s phase:
 
 - `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
@@ -177,6 +177,10 @@ seed and measured in the same 22–32 s phase:
 - `cave`: the Server puts the Eye in a cave within 128 m of spawn on its first
   tick, under at least 8 m of ground, and the camera turns through 360 degrees
   level with the horizon over 22–32 s.
+- `hidden-hill`: built, not moved. The Server stands the Eye two Cells above the
+  highest ground over spawn and builds a ridge, a hill behind it and a floor the
+  hill shadows, so that `TESSERAE_SIGHT_CULL` culls the hill while its shadow
+  lies on floor in view. It checks that culled Chunks still cast.
 - `revisit`: the same jump on a Persistent World, then back to the start as soon
   as the far side has settled, so the return refills ground the World held a
   moment ago.
