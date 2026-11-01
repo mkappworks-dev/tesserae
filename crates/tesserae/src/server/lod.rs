@@ -22,6 +22,8 @@ use crate::session::SessionApp;
 use tesserae_core::lod::{
     Child, Coarse, UnderWater, Waterline, coarse_light_in, downsample_changed,
 };
+#[cfg(any(feature = "dev", feature = "profiling", test))]
+use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, Tables, Voxel, Worldgen,
     WorldgenParams, mesh_chunk_with_seams,
@@ -181,15 +183,27 @@ impl LodGenerators {
             return self;
         };
         let p = level_zero.params();
-        let params = WorldgenParams {
-            smoothing: None,
-            caves: p.caves.filter(|_| caves),
-            ..p
-        };
         self.direct = (1..self.levels())
             .map(|k| {
                 (k >= from).then(|| {
-                    Worldgen::new(world.seed, world.voxel_size * 2f32.powi(k as i32), params)
+                    let voxel_m = world.voxel_size * 2f32.powi(k as i32);
+                    // The generator asks about a Voxel's floor, so a Voxel the ground barely
+                    // enters is ground and a shallow lake drains. Lowering the surface and the
+                    // lake by half a Voxel asks about its middle, as the downsample's vote does;
+                    // `next_up` gives the lake its ties, as the vote does (the demo's lake sits
+                    // on a level-3 Voxel's middle).
+                    let half = voxel_m / 2.0;
+                    let params = WorldgenParams {
+                        smoothing: None,
+                        caves: p.caves.filter(|_| caves),
+                        sea_level_m: p.sea_level_m - half,
+                        water: p.water.map(|w| WaterParams {
+                            level_m: (w.level_m - half).next_up(),
+                            ..w
+                        }),
+                        ..p
+                    };
+                    Worldgen::new(world.seed, voxel_m, params)
                 })
             })
             .collect();
@@ -1953,7 +1967,18 @@ mod tests {
             );
         }
         for level in 2..LEVELS {
-            let own = source(level);
+            // Sampled at each Voxel's middle height: half a level-k Voxel up.
+            let voxel_m = 2f32.powi(level as i32);
+            let p = tesserae_core::testgen::world_params();
+            let own = Worldgen::new(
+                world().seed,
+                voxel_m,
+                WorldgenParams {
+                    smoothing: None,
+                    sea_level_m: p.sea_level_m - voxel_m / 2.0,
+                    ..p
+                },
+            );
             let mut differs = 0;
             for coord in h.held(level) {
                 let held = h.lod_store().get(level, coord).unwrap();
@@ -1978,6 +2003,55 @@ mod tests {
                 (1..CHUNK_SIZE).all(|y| !solid(y) || solid(y - 1))
             })
         })
+    }
+
+    fn water_at(h: &Harness, level: u32) -> usize {
+        let water = Voxel::cube(tesserae_core::testgen::fixtures().water);
+        h.held(level)
+            .into_iter()
+            .map(|c| {
+                let chunk = h.lod_store().get(level, c).unwrap();
+                match chunk.uniform() {
+                    Some(v) => usize::from(v == water) * CHUNK_SIZE.pow(3),
+                    None => (0..CHUNK_SIZE.pow(3))
+                        .filter(|i| {
+                            let (x, y, z) = (
+                                i % CHUNK_SIZE,
+                                i / CHUNK_SIZE % CHUNK_SIZE,
+                                i / CHUNK_SIZE.pow(2),
+                            );
+                            chunk.get(x, y, z) == water
+                        })
+                        .count(),
+                }
+            })
+            .sum()
+    }
+
+    #[test]
+    fn a_direct_probe_drains_none_of_the_lakes_the_downsample_shows() {
+        let params = tesserae_core::testgen::world_params()
+            .with_default_lake(tesserae_core::testgen::fixtures().water);
+        let lake = |probe| {
+            let mut h = Harness::with_world(lod_settings(), UNLIMITED, world(), params);
+            h.app.insert_resource(unlimited());
+            let level_zero = Worldgen::new(world().seed, 1.0, params);
+            h.app.insert_resource(
+                LodGenerators::new(&world(), &level_zero, LEVELS).with_probe(&world(), probe),
+            );
+            h.lod_settle();
+            h
+        };
+        let (shipped, direct) = (lake(FarProbe::Off), lake(FarProbe::Direct { from: 2 }));
+        for level in 2..LEVELS {
+            let (want, got) = (water_at(&shipped, level), water_at(&direct, level));
+            assert!(want > 0, "level {level} has no lake");
+            // More is allowed: the vote gives a tie between water and air to either.
+            assert!(
+                got as f64 >= 0.8 * want as f64,
+                "level {level}: {got} water Voxels against {want}"
+            );
+        }
     }
 
     #[test]

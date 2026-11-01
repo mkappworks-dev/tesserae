@@ -65,14 +65,22 @@ fn source(level: u32, params: WorldgenParams) -> Worldgen {
     Worldgen::new(SEED, 2f32.powi(level as i32 - 1), params)
 }
 
-/// `LodGenerators::with_probe`: a level-k Chunk at its own Voxel size.
+/// `LodGenerators::with_probe`: a level-k Chunk at its own Voxel size, asked
+/// about each Voxel's middle height.
 fn probe(level: u32, params: WorldgenParams, caves: bool) -> Worldgen {
+    let voxel_m = 2f32.powi(level as i32);
+    let half = voxel_m / 2.0;
     let params = WorldgenParams {
         smoothing: None,
         caves: params.caves.filter(|_| caves),
+        sea_level_m: params.sea_level_m - half,
+        water: params.water.map(|w| WaterParams {
+            level_m: (w.level_m - half).next_up(),
+            ..w
+        }),
         ..params
     };
-    Worldgen::new(SEED, 2f32.powi(level as i32), params)
+    Worldgen::new(SEED, voxel_m, params)
 }
 
 #[derive(Clone, Copy)]
