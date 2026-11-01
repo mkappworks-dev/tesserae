@@ -145,8 +145,9 @@ remain mandatory.
 
 Persistent fixtures append `save_snapshots`, `save_snapshot_ms`,
 `save_worker_ms` and `save_chunks` to the raw frame rows. An explicit disposable
-`TESSERAE_WORLD_DIR` enables saves for a capture; fixtures otherwise remain
-ephemeral. `TESSERAE_EPHEMERAL=1` always disables persistence.
+`TESSERAE_WORLD_DIR` enables saves for a capture; `restart` and `revisit`
+require one, and other fixtures otherwise remain ephemeral.
+`TESSERAE_EPHEMERAL=1` always disables persistence.
 
 The snapshot counter increments when the Server dispatches an immutable save.
 Snapshot milliseconds measure its capture work on the Server, already included
@@ -160,8 +161,8 @@ fields do not establish power-loss safety, GPU cost or present latency.
 
 ## Streaming fixtures
 
-`--fixtures` also accepts four streaming fixtures, all on the demo's default
-seed and measured in the same 22–32 s phase:
+`--fixtures` also accepts six streaming fixtures, all on the demo's default seed
+and measured in the same 22–32 s phase:
 
 - `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
   heading.
@@ -173,6 +174,36 @@ seed and measured in the same 22–32 s phase:
 - `teleport`: the Server moves the Player 2 km along x at 22 s, keeping its
   height above the generated ground; `streaming_settled` gives the time to
   refill.
+- `revisit`: the same jump on a Persistent World, then back to the start as soon
+  as the far side has settled, so the return refills ground the World held a
+  moment ago.
+- `restart`: at 22 s the World saves and quits the way a player's Save and quit
+  does, then reopens from its save in the same process, as the World list would.
+  The reopen's GPU pipelines are already compiled, so it measures the World
+  opening and refilling, not a cold launch.
+
+`restart` and `revisit` need a `TESSERAE_WORLD_DIR` that does not exist yet and
+refuse to start otherwise; the runner gives each run a `world` folder inside its
+own. `frames.csv`'s `fixture_moves` counts the jumps and reopens so far, and for
+each one `streaming.json`'s `moves` reports:
+
+- `settle_s`: from the move's first frame to the first `streaming_settled` frame
+  after an unsettled one, since stats published before a jump still read
+  settled. `blank_s` is the time before that first frame with no frame at all:
+  the save, teardown and load of a reopen, zero for a jump.
+- `worker_cpu_ms` per level and stage, `fluid_cpu_ms` and
+  `coarse_generate_share` (levels 1 and up's generation over all of it) from the
+  move until settled. `streaming_settled` is level 0's, and level 0 has the
+  workers first, so coarse levels have barely started by then.
+- `coarse_generated`: the same, until the first fixed tick at which no coarse
+  level has a Chunk of its load extent waiting to generate, with its time in
+  `s`; empty when that did not happen before the next move. A stationary Eye
+  still regenerates a few coarse Chunks a second, so this waits for the load
+  extent, not for idle workers.
+
+Frame times run from the profiler's start, about 0.1 s after the process clock
+the fixtures move by, so a move falls just before 22 s in `frames.csv`;
+`settle_s` is measured from the move's own frame.
 
 Each run adds up to three files beside `frames.csv`, and the runner summarises
 them in `streaming.json`. Two of the instruments are opt-in through
