@@ -88,7 +88,11 @@ fn level_digest(seed: u64, level: u32, caves: bool) -> String {
             }
         }
     }
-    format!("{:x}", digest.finalize())
+    digest
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 #[test]
