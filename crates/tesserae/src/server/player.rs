@@ -162,6 +162,14 @@ impl Player {
     pub fn eye(&self) -> Vec3 {
         self.eye
     }
+    /// The Eye's measured velocity over the last step.
+    pub fn travel_mps(&self) -> Vec3 {
+        self.travel_mps
+    }
+    /// Where the Client last said the Player looks, as a unit vector.
+    pub fn look(&self) -> Vec3 {
+        Quat::from_euler(EulerRot::YXZ, self.view[0], self.view[1], 0.0) * Vec3::NEG_Z
+    }
     pub fn saved_movement(&self) -> tesserae_core::save::MovementV1 {
         tesserae_core::save::MovementV1 {
             flight: self.mode == MovementMode::Flight,
@@ -182,7 +190,7 @@ impl Player {
     pub(in crate::server) fn at(eye: Vec3) -> Self {
         Self::new(eye, MovementMode::Flight)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "profiling"))]
     pub(in crate::server) fn set_eye(&mut self, eye: Vec3) {
         self.eye = eye;
     }

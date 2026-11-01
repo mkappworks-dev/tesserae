@@ -36,13 +36,18 @@ use bevy::platform::collections::{HashMap, HashSet};
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
+#[cfg(any(feature = "dev", feature = "profiling"))]
+use tesserae_core::Chunk;
 use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
+#[cfg(any(feature = "dev", feature = "profiling"))]
+use tesserae_core::visibility::Connectivity;
 use tesserae_core::{CHUNK_SIZE, ChunkMesh, Tables};
 
-use super::jobs::{Border, Jobs, Solved, build_mesh, solve};
+use super::jobs::{Border, Jobs, Solved, build_mesh, generate, solve};
 use super::lod;
 use super::lod_rings::LevelRings;
 use super::player::Player;
+use super::priority::{Aim, Order, Ring};
 use super::world_state::{ChunkStore, Snapshot};
 use super::{ContentTables, WorldGenerator};
 use crate::world::{ChunkCoord, WorldSettings};
@@ -55,6 +60,12 @@ use crate::world::{ChunkCoord, WorldSettings};
 pub struct ChunkMeshReady {
     pub coord: ChunkCoord,
     pub mesh: ChunkMesh,
+    /// Which of the Chunk's faces see each other through it, for the Client's
+    /// visibility walk: the Client never reads the Voxels to work it out.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    // Only the profiling walk reads it outside tests.
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code))]
+    pub connectivity: Connectivity,
 }
 
 /// The Client should stop drawing this Chunk.
@@ -146,6 +157,10 @@ pub struct StageCounts {
 /// against 1.1 s, 7.2 s and 22 ms before. Doubling the async compute threads
 /// made things worse, not better: at 6 the worst tick was 12.7 ms, because the
 /// workers took cores the render and ECS threads needed; 4 was within noise of 3.
+/// Rechecked 2026-11-01, `profiling` release, two interleaved rounds: 2 to 5
+/// threads against the default left frame time, settle and fill-hole frames
+/// within noise in both sprints, `dive` and `teleport`; at 5 the workers spent
+/// about a sixth more CPU on the same `sprint-flight`. Defaults unchanged.
 ///
 /// The cap times the cost of a Chunk, over the workers, is how far behind the
 /// anchor a priority can lag. With caves a surface Chunk a tunnel crosses costs
@@ -171,6 +186,8 @@ pub struct StageCounts {
 /// `wait_for_settled_light` holds a mesh back until its neighbourhood has no
 /// light solve pending. Off, a Chunk shows 0.2-0.4 s sooner but is built 2.2
 /// times as often (2427 meshes against 1111), each one a delivery and an upload.
+/// In the 2026-11-01 release series, off moved neither frame time nor the settle
+/// after `teleport` (0.76-0.78 s against 0.78-0.80 s), so it stays on.
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct StreamingBudget {
     /// Jobs allowed in flight, per stage.
@@ -319,16 +336,19 @@ impl Rings {
     }
 }
 
-/// The load volume's offsets, sorted by distance, rebuilt only when the extent
-/// changes. Walking this from the anchor gives "nearest missing Chunk" without
-/// sorting a few thousand coordinates every tick.
+/// The load volume's offsets in priority order (`server::priority`), rebuilt
+/// only when the Eye's anchor, look or speed moves past a threshold, so a tick
+/// does not sort a few thousand coordinates.
 #[derive(Resource, Default)]
 struct LoadOrder {
     built_for: Option<Extent>,
+    /// The load extent, in no particular order.
+    extent: Vec<IVec3>,
+    priority: Order,
     offsets: Vec<IVec3>,
-    /// The same offsets, highest first. Sky light flows downwards, so solving a
-    /// Chunk before the one above it means solving it again when the one above
-    /// arrives; nearest-first is right for generation and wrong here.
+    /// The same offsets highest layer first, each layer in priority order. Sky
+    /// light flows downwards, so solving a Chunk before the one above it means
+    /// solving it again when the one above arrives.
     descending: Vec<IVec3>,
 }
 
@@ -354,6 +374,89 @@ pub(in crate::server) struct MeshState {
     edited_chunks: HashSet<ChunkCoord>,
     /// Drained by `stream_lod`, which alone can see whether the cover exists.
     cover_changed: HashSet<ChunkCoord>,
+    /// Each held Chunk's connectivity, and the Voxels it was worked out from:
+    /// the Weak makes an Edit's `Arc::make_mut` move the Chunk, so a stale
+    /// entry never matches what the store holds.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    connectivity: HashMap<ChunkCoord, (std::sync::Weak<Chunk>, Connectivity)>,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub(in crate::server) reach: MeshReach,
+}
+
+/// Level-0 mesh jobs and their worker CPU, split by whether a walk from the
+/// Eye through open space reaches the Chunk: what moving the unreachable ones
+/// to the back of the order would defer. `TESSERAE_PROFILE_VISIBILITY` only,
+/// as the walk runs on the tick.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+#[derive(Clone)]
+pub(in crate::server) struct MeshReach {
+    pub on: bool,
+    /// Reached jobs and nanoseconds, then unreached ones.
+    split: Arc<[std::sync::atomic::AtomicU64; 4]>,
+}
+
+#[cfg(any(feature = "dev", feature = "profiling"))]
+impl Default for MeshReach {
+    fn default() -> Self {
+        MeshReach {
+            on: std::env::var_os("TESSERAE_PROFILE_VISIBILITY").is_some(),
+            split: Arc::default(),
+        }
+    }
+}
+
+#[cfg(any(feature = "dev", feature = "profiling"))]
+impl MeshReach {
+    /// `[(jobs, cpu ms) reached, (jobs, cpu ms) not]` since the World opened.
+    pub fn totals(&self) -> [(u64, f64); 2] {
+        use std::sync::atomic::Ordering::Relaxed;
+        let at = |i: usize| self.split[i].load(Relaxed);
+        [(at(0), at(1) as f64 / 1e6), (at(2), at(3) as f64 / 1e6)]
+    }
+
+    /// `work`, charging its thread CPU to the reached or the unreached side.
+    fn charge<T, W: FnOnce() -> T + Send + 'static>(
+        &self,
+        reached: bool,
+        work: W,
+    ) -> impl FnOnce() -> T + Send + 'static + use<T, W> {
+        let split = Arc::clone(&self.split);
+        let side = if reached { 0 } else { 2 };
+        move || {
+            use std::sync::atomic::Ordering::Relaxed;
+            let before = crate::cost::thread_cpu();
+            let out = work();
+            split[side].fetch_add(1, Relaxed);
+            if let Some((a, b)) = before.zip(crate::cost::thread_cpu()) {
+                split[side + 1].fetch_add(((b - a) * 1e9) as u64, Relaxed);
+            }
+            out
+        }
+    }
+}
+
+/// The Chunks of `load` a walk from `center` through open space enters, from
+/// the connectivity each held Chunk was generated or meshed with. One without
+/// any counts as open.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn reachable(
+    store: &ChunkStore,
+    meshes: &MeshState,
+    center: ChunkCoord,
+    load: Extent,
+) -> tesserae_core::visibility::Visited {
+    let c = [center.x, center.y, center.z];
+    let bounds = tesserae_core::visibility::Bounds::around(
+        c,
+        [load.horizontal, load.vertical, load.horizontal],
+    );
+    tesserae_core::visibility::reach(c, bounds, |[x, y, z]| {
+        let coord = ChunkCoord::new(x, y, z);
+        store
+            .shared(coord)
+            .and_then(|held| meshes.connectivity_of(coord, &held.chunk))
+            .unwrap_or(Connectivity::ALL)
+    })
 }
 
 impl MeshState {
@@ -398,6 +501,20 @@ impl MeshState {
         self.cover_changed.insert(coord);
     }
 
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    fn note_connectivity(&mut self, coord: ChunkCoord, chunk: &Arc<Chunk>, c: Connectivity) {
+        self.connectivity.insert(coord, (Arc::downgrade(chunk), c));
+    }
+
+    /// The connectivity of `chunk`, if it was worked out from those Voxels.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    fn connectivity_of(&self, coord: ChunkCoord, chunk: &Arc<Chunk>) -> Option<Connectivity> {
+        self.connectivity
+            .get(&coord)
+            .filter(|(from, _)| std::ptr::eq(from.as_ptr(), Arc::as_ptr(chunk)))
+            .map(|&(_, c)| c)
+    }
+
     pub(in crate::server) fn take_cover_changes(&mut self) -> Vec<ChunkCoord> {
         self.cover_changed.drain().collect()
     }
@@ -410,6 +527,11 @@ impl MeshState {
         self.unlit.iter().any(|&c| load.contains(delta(center, c)))
     }
 
+    /// The Chunks whose mesh the Client was sent and has not been told to drop.
+    pub(in crate::server) fn delivered(&self) -> impl Iterator<Item = &ChunkCoord> {
+        self.delivered.iter()
+    }
+
     pub(in crate::server) fn is_edited(&self, coord: ChunkCoord) -> bool {
         self.edited_chunks.contains(&coord)
     }
@@ -417,6 +539,11 @@ impl MeshState {
     #[cfg(test)]
     pub(in crate::server) fn is_dirty(&self, coord: ChunkCoord) -> bool {
         self.dirty.contains(&coord)
+    }
+
+    #[cfg(test)]
+    pub(in crate::server) fn mark_delivered(&mut self, coord: ChunkCoord) {
+        self.delivered.insert(coord);
     }
 
     #[cfg(test)]
@@ -493,6 +620,7 @@ fn stream(
     settings: Res<StreamingSettings>,
     budget: Res<StreamingBudget>,
     player: Query<&Player>,
+    time: Option<Res<Time>>,
 ) {
     // The Server spawns exactly one. Streaming around an arbitrary one of
     // several would be worse than streaming around none.
@@ -503,11 +631,32 @@ fn stream(
     let rings = Rings::new(*settings, world.cell_size());
     let center = world.chunk_at(player.eye());
     if order.built_for != Some(rings.load) {
-        order.offsets = rings.load.offsets();
-        order.descending = order.offsets.clone();
-        order.descending.sort_by_key(|d| (-d.y, d.length_squared()));
+        order.extent = rings.load.offsets();
         order.built_for = Some(rings.load);
     }
+    let aim = Aim::of(player);
+    let order = &mut *order;
+    let ring = Ring {
+        level: 0,
+        anchor: center,
+        offsets: &order.extent,
+        cell_m: world.cell_size(),
+        cap_m: settings.view_distance_m,
+    };
+    let now_s = time.map_or(0.0, |t| t.elapsed_secs_f64());
+    {
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let _rescoring = crate::cost::Rescoring::start();
+        if order.priority.update(&ring, &aim, now_s) {
+            order.offsets = order.priority.offsets().collect();
+            order.descending = order.priority.layers_top_down();
+        }
+    }
+    let cell_m = world.cell_size();
+    let priority = |c: ChunkCoord| {
+        let min = IVec3::new(c.x, c.y, c.z).as_vec3() * cell_m;
+        aim.score_m(min, cell_m, settings.view_distance_m)
+    };
 
     jobs.reset_counts();
     jobs.poll();
@@ -527,13 +676,14 @@ fn stream(
         center,
         rings.evict,
         budget.landed_per_tick.generate,
+        &priority,
     );
     land_relight(
         &mut store,
         &mut meshes,
         &mut jobs,
-        center,
         budget.landed_per_tick.relight,
+        &priority,
     );
     land_meshes(
         &mut meshes,
@@ -542,21 +692,23 @@ fn stream(
         center,
         rings.mesh,
         budget.landed_per_tick.mesh,
+        &priority,
     );
     dispatch_generation(
         &store,
         &mut jobs,
         &generator,
-        &order,
+        order,
         center,
         budget.in_flight.generate,
+        &tables.0,
     );
     if let Some((coord, snapshot, border)) = dispatch_relight(
         &store,
         &mut meshes,
         &mut jobs,
         &generator,
-        &order,
+        order,
         &world,
         center,
         budget.in_flight.relight,
@@ -569,9 +721,9 @@ fn stream(
         &store,
         &mut meshes,
         &mut jobs,
-        &order,
+        order,
         center,
-        rings.mesh,
+        (rings.mesh, rings.load),
         budget.in_flight.mesh,
         budget.wait_for_settled_light,
         &tables.0,
@@ -639,6 +791,8 @@ fn retire(
         }
         meshes.dirty.remove(&coord);
         meshes.unlit.remove(&coord);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        meshes.connectivity.remove(&coord);
         // An unedited Chunk is what the generator makes again; only an edited one
         // leaves a ghost in its cover.
         if meshes.edited_chunks.remove(&coord) {
@@ -659,17 +813,26 @@ fn land_generated(
     center: ChunkCoord,
     evict: Extent,
     budget: usize,
+    priority: &dyn Fn(ChunkCoord) -> f32,
 ) {
     let mut finished: Vec<ChunkCoord> = jobs.generate.finished().collect();
-    finished.sort_unstable_by_key(|&c| delta(center, c).length_squared());
+    finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
     for coord in finished.into_iter().take(budget) {
-        let Some(chunk) = jobs.generate.take(coord) else {
+        let Some(generated) = jobs.generate.take(coord) else {
             continue;
         };
         if store.contains(coord) || !evict.contains(delta(center, coord)) {
             continue;
         }
-        store.insert(coord, chunk);
+        store.insert(coord, generated.chunk);
+        // A Chunk restored from the archive is not what the job generated.
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        if let Some(held) = store
+            .shared(coord)
+            .filter(|_| !store.revisions.contains_key(&coord))
+        {
+            meshes.note_connectivity(coord, &held.chunk, generated.connectivity);
+        }
         if store.revisions.contains_key(&coord) {
             meshes.voxels_changed(coord);
         }
@@ -691,8 +854,8 @@ fn land_generated(
     }
 }
 
-/// Starts generation jobs for the nearest missing Chunks in the load extent,
-/// until `in_flight` are outstanding.
+/// Starts generation jobs for the missing Chunks of the load extent in priority
+/// order, until `in_flight` are outstanding.
 fn dispatch_generation(
     store: &ChunkStore,
     jobs: &mut Jobs,
@@ -700,6 +863,7 @@ fn dispatch_generation(
     order: &LoadOrder,
     center: ChunkCoord,
     in_flight: usize,
+    tables: &Arc<Tables>,
 ) {
     let mut free = in_flight.saturating_sub(jobs.generate.in_flight());
     for &d in &order.offsets {
@@ -711,13 +875,14 @@ fn dispatch_generation(
             continue;
         }
         let worldgen = generator.0.clone();
+        let tables = Arc::clone(tables);
         jobs.generate
-            .spawn(coord, move || worldgen.chunk(coord.x, coord.y, coord.z));
+            .spawn(coord, move || generate(&worldgen, coord, &tables));
         free -= 1;
     }
 }
 
-/// Applies up to `budget` finished light solves, highest first.
+/// Applies up to `budget` finished light solves, in dispatch's order.
 ///
 /// The bulk path: a Chunk arriving starts dark, so every change here is an
 /// increase and re-solving from the current boundary converges. A Voxel
@@ -728,15 +893,15 @@ fn land_relight(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
     jobs: &mut Jobs,
-    center: ChunkCoord,
     budget: usize,
+    priority: &dyn Fn(ChunkCoord) -> f32,
 ) {
     // Same order as dispatch: a landing that darkens nothing above it first
     // would be solved again when the one above lands.
     let mut finished: Vec<ChunkCoord> = jobs.relight.finished().collect();
-    finished.sort_unstable_by_key(|&c| {
-        let d = delta(center, c);
-        (-d.y, d.length_squared())
+    finished.sort_unstable_by(|&a, &b| {
+        b.y.cmp(&a.y)
+            .then_with(|| priority(a).total_cmp(&priority(b)))
     });
     for coord in finished.into_iter().take(budget) {
         let Some(solved) = jobs.relight.take(coord) else {
@@ -780,11 +945,11 @@ fn apply_solve(store: &mut ChunkStore, meshes: &mut MeshState, coord: ChunkCoord
     }
 }
 
-/// Starts light solves for Chunks whose light is out of date, highest first,
-/// until `in_flight` are outstanding.
+/// Starts light solves for Chunks whose light is out of date, highest layer
+/// first and each layer in priority order, until `in_flight` are outstanding.
 ///
-/// Highest first because sky light flows downwards: solving a Chunk before the
-/// one above it means solving it again when the one above lands.
+/// Top-down because sky light flows downwards: solving a Chunk before the one
+/// above it means solving it again when the one above lands.
 #[expect(
     clippy::too_many_arguments,
     reason = "one stage of the tick; bundling them would invent a type used once"
@@ -855,7 +1020,8 @@ fn above_the_surface(generator: &WorldGenerator, world: &WorldSettings, coord: C
     floor_m > highest_m
 }
 
-/// Applies up to `budget` finished meshes, nearest first, and tells the Client.
+/// Applies up to `budget` finished meshes, in priority order, and tells the
+/// Client.
 ///
 /// A mesh lands only if its Chunk is still inside the `mesh` extent. That is
 /// also what keeps the module doc's eviction argument true for a job in flight:
@@ -873,9 +1039,10 @@ fn land_meshes(
     center: ChunkCoord,
     mesh: Extent,
     budget: usize,
+    priority: &dyn Fn(ChunkCoord) -> f32,
 ) {
     let mut finished: Vec<ChunkCoord> = jobs.mesh.finished().collect();
-    finished.sort_unstable_by_key(|&c| delta(center, c).length_squared());
+    finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
     for coord in finished.into_iter().take(budget) {
         let Some(built) = jobs.mesh.take(coord) else {
             continue;
@@ -889,12 +1056,21 @@ fn land_meshes(
         if meshes.dirty.contains(&coord) {
             jobs.mesh.note_stale();
         }
-        ready.write(ChunkMeshReady { coord, mesh: built });
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        meshes
+            .connectivity
+            .insert(coord, (built.from, built.connectivity));
+        ready.write(ChunkMeshReady {
+            coord,
+            mesh: built.mesh,
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            connectivity: built.connectivity,
+        });
         meshes.delivered.insert(coord);
     }
 }
 
-/// Starts mesh jobs for dirty Chunks inside the mesh extent, nearest first,
+/// Starts mesh jobs for dirty Chunks inside the mesh extent, in priority order,
 /// until `in_flight` are outstanding.
 ///
 /// Requires all six neighbours' Voxels **and** light: a boundary face is lit by
@@ -913,11 +1089,15 @@ fn dispatch_meshes(
     jobs: &mut Jobs,
     order: &LoadOrder,
     center: ChunkCoord,
-    mesh: Extent,
+    (mesh, load): (Extent, Extent),
     in_flight: usize,
     wait_for_settled_light: bool,
     tables: &Arc<Tables>,
 ) {
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
+    let _ = load;
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let mut reached = None;
     let mut free = in_flight.saturating_sub(jobs.mesh.in_flight());
     for &d in &order.offsets {
         if free == 0 {
@@ -947,8 +1127,24 @@ fn dispatch_meshes(
             .unwrap_or_else(|_| unreachable!("six neighbours were collected"));
         meshes.dirty.remove(&coord);
         let tables = Arc::clone(tables);
-        jobs.mesh
-            .spawn(coord, move || build_mesh(&own, &around, &tables));
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let work = {
+            let known = meshes.connectivity_of(coord, &own.chunk);
+            move || build_mesh(&own, &around, known, &tables)
+        };
+        #[cfg(not(any(feature = "dev", feature = "profiling")))]
+        let work = move || build_mesh(&own, &around, &tables);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        if meshes.reach.on {
+            let walk = reached.get_or_insert_with(|| reachable(store, meshes, center, load));
+            let work = meshes
+                .reach
+                .charge(walk.contains([coord.x, coord.y, coord.z]), work);
+            jobs.mesh.spawn(coord, work);
+            free -= 1;
+            continue;
+        }
+        jobs.mesh.spawn(coord, work);
         free -= 1;
     }
 }
@@ -983,6 +1179,22 @@ pub mod stats {
         /// Mean job time to generate, and to mesh, a Chunk of this level.
         pub generate: lod::measure::JobCost,
         pub mesh_job: lod::measure::JobCost,
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+        pub flow: Flow,
+    }
+
+    /// Generate, relight and mesh work of one level; relight is level 0 only.
+    #[derive(Default, Clone, Copy, Debug)]
+    #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+    pub struct Flow {
+        /// Due and not dispatched: a Chunk of the load extent not held, a lit
+        /// Chunk whose light is out of date, a Chunk of the mesh shell whose mesh
+        /// is.
+        pub waiting: [usize; 3],
+        pub in_flight: [usize; 3],
+        /// Since the World opened: jobs run on a worker, and their worker CPU.
+        pub run: [u64; 3],
+        pub cpu_ms: [f64; 3],
     }
 
     #[derive(Resource, Default, Clone, Debug)]
@@ -1010,13 +1222,28 @@ pub mod stats {
         pub stale: [usize; 3],
         /// Indexed by level. Level 0 repeats `loaded` and `meshed`.
         pub levels: Vec<LevelStats>,
+        /// Fluid steps' jobs run and their worker CPU since the World opened:
+        /// they share the workers with streaming.
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+        pub fluid_run: (u64, f64),
+        /// Level-0 mesh jobs and worker CPU ms that a walk from the Eye
+        /// reached, then those it did not, since the World opened. `None`
+        /// unless `TESSERAE_PROFILE_VISIBILITY` is set.
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+        pub mesh_reach: Option<[(u64, f64); 2]>,
     }
+
+    /// Where [`StreamingStats`] is written, for a reader that must see this tick's.
+    #[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
+    pub struct Published;
 
     pub(super) fn plugin(app: &mut App) {
         app.init_session_resource::<StreamingStats>()
             .add_session_systems(
                 FixedPostUpdate,
-                publish_stats.run_if(crate::cost::collecting),
+                publish_stats
+                    .run_if(crate::cost::collecting)
+                    .in_set(Published),
             );
     }
 
@@ -1035,8 +1262,10 @@ pub mod stats {
         lod_store: Res<lod::LodStore>,
         lod_state: Res<lod::LodState>,
         lod_jobs: Res<lod::LodJobs>,
+        fluids: Option<Res<crate::server::fluids::FluidSim>>,
         player: Query<&Player>,
     ) {
+        let eye = player.single().map(Player::eye).ok();
         let center = player
             .single()
             .map(|player| world.chunk_at(player.eye()))
@@ -1063,16 +1292,81 @@ pub mod stats {
                     .iter()
                     .any(|&c| mesh.contains(delta(center, c)))
         });
+        let (generated, relit, meshed) = (jobs.generate.run(), jobs.relight.run(), jobs.mesh.run());
+        let level_zero = Flow {
+            waiting: center.map_or([0; 3], |center| {
+                [
+                    order
+                        .offsets
+                        .iter()
+                        .filter(|&&d| {
+                            let c = offset(center, d);
+                            !store.contains(c) && !jobs.generate.contains(c)
+                        })
+                        .count(),
+                    meshes.unlit.len(),
+                    meshes
+                        .dirty
+                        .iter()
+                        .filter(|&&c| mesh.contains(delta(center, c)) && !jobs.mesh.contains(c))
+                        .count(),
+                ]
+            }),
+            in_flight: [
+                jobs.generate.in_flight(),
+                jobs.relight.in_flight(),
+                jobs.mesh.in_flight(),
+            ],
+            run: [generated.0, relit.0, meshed.0],
+            cpu_ms: [generated.1, relit.1, meshed.1],
+        };
         let mut levels = vec![LevelStats {
             held: store.coords().count(),
             meshed: meshes.delivered.len(),
             steady: rings.load.count(),
             shell: mesh.count(),
+            flow: level_zero,
             ..default()
         }];
+        let (lod_generating, lod_meshing) = (lod_jobs.generate.keys(), lod_jobs.mesh.keys());
+        let lod_in_flight = |keys: &[(u32, ChunkCoord)], level: u32| {
+            keys.iter().filter(|(l, _)| *l == level).count()
+        };
         levels.extend((1..level_count(&settings)).map(|level| {
             let rings = LevelRings::new(*settings, world.cell_size(), level);
+            let anchor = eye.map(|eye| world.chunk_at_level(eye, level));
+            let [generate_cpu, mesh_cpu] = lod_jobs.times.cpu_ms(level);
+            let flow = Flow {
+                waiting: anchor.map_or([0; 3], |anchor| {
+                    [
+                        rings
+                            .load
+                            .offsets()
+                            .into_iter()
+                            .filter(|&d| {
+                                let c = offset(anchor, d);
+                                !lod_store.contains(level, c)
+                                    && !lod_jobs.generate.contains((level, c))
+                            })
+                            .count(),
+                        0,
+                        lod_state.dirty_within(level, anchor, rings.mesh),
+                    ]
+                }),
+                in_flight: [
+                    lod_in_flight(&lod_generating, level),
+                    0,
+                    lod_in_flight(&lod_meshing, level),
+                ],
+                run: [
+                    lod_jobs.times.generate_cost(level).jobs,
+                    0,
+                    lod_jobs.times.mesh_cost(level).jobs,
+                ],
+                cpu_ms: [generate_cpu, 0.0, mesh_cpu],
+            };
             LevelStats {
+                flow,
                 held: lod_store.len(level),
                 meshed: lod_state.delivered_len(level),
                 steady: rings.load.count(),
@@ -1100,6 +1394,8 @@ pub mod stats {
                 jobs.mesh.stale(),
             ],
             levels,
+            fluid_run: fluids.map_or((0, 0.0), |f| f.jobs_run()),
+            mesh_reach: meshes.reach.on.then(|| meshes.reach.totals()),
         };
     }
 }
@@ -1311,6 +1607,7 @@ pub(in crate::server) mod tests {
                 .init_resource::<lod::LodStore>()
                 .init_resource::<lod::LodState>()
                 .init_resource::<lod::LodJobs>()
+                .init_resource::<lod::LodOrders>()
                 .init_resource::<lod::LodBudget>()
                 .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
                 .init_resource::<ChunkStore>()
@@ -1423,7 +1720,7 @@ pub(in crate::server) mod tests {
 
     /// The Server tick's streaming half, level 0 then the coarse levels, on a
     /// schedule a measurement runs by itself.
-    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[cfg(feature = "dev")]
     pub(in crate::server) fn add_stream_systems(
         app: &mut App,
         schedule: impl bevy::ecs::schedule::ScheduleLabel,
@@ -1588,6 +1885,59 @@ pub(in crate::server) mod tests {
             assert!(same_mesh(&republished.mesh, &fresh), "{coord} is stale");
         }
         assert_eq!(ready.len(), 2, "nothing else was touched");
+    }
+
+    /// The Client walks these and never reads World storage, so what ships
+    /// with a mesh has to be the Chunk as it stands, Edits included.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn every_mesh_carries_the_sight_lines_of_its_chunk_as_it_stands() {
+        use tesserae_core::visibility::connectivity;
+        let mut h = Harness::new(small(), UNLIMITED);
+        let (ready, _) = h.settle();
+        let tables = crate::server::fixture_tables();
+        let now = |h: &Harness, c| connectivity(h.store().get(c).unwrap(), &tables.materials);
+        assert!(!ready.is_empty());
+        for m in &ready {
+            assert_eq!(m.connectivity, now(&h, m.coord), "{}", m.coord);
+        }
+
+        let deep = ChunkCoord::new(0, -1, 0);
+        let before = now(&h, deep);
+        h.app
+            .world_mut()
+            .run_system_once(
+                |mut store: ResMut<ChunkStore>,
+                 mut meshes: ResMut<MeshState>,
+                 tables: Res<ContentTables>| {
+                    for x in 0..CHUNK_SIZE as i32 {
+                        edit::set_voxel(&mut store, &mut meshes, &tables, [x, -16, 16], Voxel::AIR)
+                            .expect("the Chunk is loaded");
+                    }
+                },
+            )
+            .unwrap();
+        let (ready, _) = h.settle();
+        let tunnel = ready
+            .iter()
+            .rev()
+            .find(|m| m.coord == deep)
+            .expect("the tunnelled Chunk is republished");
+        assert!(tunnel.connectivity.connects(NEG_X, POS_X));
+        assert_ne!(tunnel.connectivity, before);
+        assert_eq!(tunnel.connectivity, now(&h, deep));
+    }
+
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[test]
+    fn every_level_zero_mesh_job_is_charged_to_reached_or_unreached() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.app.world_mut().resource_mut::<MeshState>().reach.on = true;
+        h.settle();
+        let [(reached, _), (unreached, _)] = h.app.world().resource::<MeshState>().reach.totals();
+        let (run, _) = h.jobs().mesh.run();
+        assert!(run > 0);
+        assert_eq!(reached + unreached, run);
     }
 
     #[test]
@@ -1954,6 +2304,53 @@ pub(in crate::server) mod tests {
             let dense = expected.values().filter(|l| l.uniform().is_none()).count();
             assert!(dense > 0, "cap {cap}: no Chunk had a gradient to get wrong");
         }
+    }
+
+    /// Light solves run per generated Chunk while a fresh region fills, at the
+    /// default budget on a pool the size of the engine's, as after a teleport.
+    fn solves_per_chunk_filling_a_fresh_region() -> f32 {
+        let mut h = Harness::new(
+            StreamingSettings {
+                view_distance_m: 96.0,
+                vertical_distance_m: 64.0,
+                ..small()
+            },
+            StreamingBudget::default(),
+        );
+        let pool = Arc::new(TaskPoolBuilder::new().num_threads(3).build());
+        {
+            let mut jobs = h.jobs_mut();
+            jobs.generate.pool = Some(pool.clone());
+            jobs.relight.pool = Some(pool.clone());
+            jobs.mesh.pool = Some(pool);
+        }
+        let ground_m = h
+            .app
+            .world()
+            .resource::<WorldGenerator>()
+            .0
+            .surface_height_m(16.0, 16.0);
+        h.anchor_at(Vec3::new(16.0, ground_m + 2.0, 16.0));
+        let (mut generated, mut solves) = (0, 0);
+        let started = std::time::Instant::now();
+        loop {
+            let (ready, unloaded) = h.tick();
+            generated += h.jobs().generate.counts().1;
+            solves += h.jobs().relight.counts().0;
+            if ready.is_empty() && unloaded.is_empty() && h.quiet() {
+                return solves as f32 / generated as f32;
+            }
+            assert!(started.elapsed() < SETTLE_CEILING, "the fill never settled");
+            std::thread::sleep(std::time::Duration::from_secs_f64(1.0 / 64.0));
+        }
+    }
+
+    /// Ordered highest layer first by distance this measures 3.3, and column by
+    /// column 4.2; the bound leaves room for when the pool's jobs finish.
+    #[test]
+    fn a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above() {
+        let solves = solves_per_chunk_filling_a_fresh_region();
+        assert!(solves <= 3.6, "{solves} solves per generated Chunk");
     }
 
     /// Where a lantern next to a Chunk boundary lights two Chunks, and what

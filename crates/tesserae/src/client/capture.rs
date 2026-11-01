@@ -55,6 +55,10 @@ struct Capture {
     /// other heading leaves it.
     yaw_deg: Option<f32>,
     lift_m: f32,
+    /// Metres to climb and dive back; replaces the horizontal flight.
+    dive_m: Option<f32>,
+    /// Degrees to turn the heading through over the flight, from where it is.
+    turn_deg: Option<f32>,
     /// Earliest time the flight may start, so two builds whose fills end at
     /// different times fly at the same time since launch.
     fly_after_s: f32,
@@ -262,6 +266,12 @@ pub(super) fn plugin(app: &mut App) {
             .ok()
             .and_then(|v| v.parse().ok()),
         lift_m: seconds("TESSERAE_SCREENSHOT_LIFT_M", 0.0),
+        dive_m: std::env::var("TESSERAE_SCREENSHOT_DIVE_M")
+            .ok()
+            .and_then(|v| v.parse().ok()),
+        turn_deg: std::env::var("TESSERAE_SCREENSHOT_TURN_DEG")
+            .ok()
+            .and_then(|v| v.parse().ok()),
         offscreen: std::env::var_os("TESSERAE_SCREENSHOT_OFFSCREEN").is_some(),
         taken: false,
         pending_seen: false,
@@ -317,6 +327,7 @@ pub(super) fn plugin(app: &mut App) {
                 menu_drag.before(super::menu::drag_preview),
                 watch_frames,
                 aim,
+                turn.before(fly_forward),
                 fly_forward,
                 pillar,
                 report,
@@ -686,10 +697,15 @@ fn fly_forward(
         return;
     }
     let (transform, fly) = camera.into_inner();
-    let heading = transform.forward().with_y(0.0).normalize_or_zero();
-    let speed = capture.speed_m_s.unwrap_or(fly.speed);
-    let climb = climb_m_s(capture.lift_m, capture.fly_for_s, speed);
-    let velocity = heading * speed + Vec3::Y * climb;
+    let velocity = match (capture.dive_m, capture.frames.fill_ended_s) {
+        (Some(dive_m), Some(start)) => dive_velocity(dive_m, capture.fly_for_s, elapsed_s - start),
+        _ => {
+            let heading = transform.forward().with_y(0.0).normalize_or_zero();
+            let speed = capture.speed_m_s.unwrap_or(fly.speed);
+            let climb = climb_m_s(capture.lift_m, capture.fly_for_s, speed);
+            heading * speed + Vec3::Y * climb
+        }
+    };
     intents.write(crate::server::player::MovementIntent {
         crouch,
         switch_mode,
@@ -751,6 +767,38 @@ fn pillar(
     });
     placed.0 += 1;
     placed.1 = elapsed_s;
+}
+
+/// `TESSERAE_SCREENSHOT_TURN_DEG`: the heading turns at a steady rate through
+/// that many degrees over the flight, and holds after it.
+fn turn(
+    time: Res<Time<Real>>,
+    capture: Res<Capture>,
+    camera: Single<(&mut Transform, &mut FlyCamera), With<MainCamera>>,
+    mut from: Local<Option<f32>>,
+) {
+    let (Some(turn_deg), Some(start)) = (capture.turn_deg, capture.frames.fill_ended_s) else {
+        return;
+    };
+    let flown_s = capture.elapsed_s(&time) - start;
+    let (mut transform, mut fly) = camera.into_inner();
+    let from = *from.get_or_insert(fly.yaw);
+    fly.yaw = from + turned_rad(turn_deg, capture.fly_for_s, flown_s);
+    transform.rotation = Quat::from_euler(EulerRot::YXZ, fly.yaw, fly.pitch, 0.0);
+}
+
+fn turned_rad(turn_deg: f32, fly_for_s: f32, flown_s: f32) -> f32 {
+    let done = (flown_s / fly_for_s.max(f32::EPSILON)).clamp(0.0, 1.0);
+    (turn_deg * done).to_radians()
+}
+
+/// `TESSERAE_SCREENSHOT_DIVE_M`: straight up `dive_m` over the first half of the
+/// flight and straight back down over the second, so both directions of a fast
+/// vertical move are measured from the same ground.
+fn dive_velocity(dive_m: f32, fly_for_s: f32, flown_s: f32) -> Vec3 {
+    let half_s = (fly_for_s / 2.0).max(f32::EPSILON);
+    let speed = (dive_m / half_s).min(FLY_SPEED_CEILING_MPS);
+    Vec3::Y * if flown_s < half_s { speed } else { -speed }
 }
 
 /// The climb that adds `lift_m` over the flight, held to what the Server's speed
@@ -1079,6 +1127,25 @@ mod tests {
         assert_eq!(log.flight.len(), 2);
         let flight = log.flight_summary().expect("frames were recorded");
         assert_eq!(flight.worst_s, 0.020);
+    }
+
+    #[test]
+    fn a_turn_sweeps_its_angle_steadily_over_the_flight_and_holds_after() {
+        assert_eq!(turned_rad(360.0, 10.0, -1.0), 0.0);
+        assert_eq!(turned_rad(360.0, 10.0, 2.5), 90f32.to_radians());
+        assert_eq!(turned_rad(360.0, 10.0, 10.0), 360f32.to_radians());
+        assert_eq!(turned_rad(360.0, 10.0, 15.0), 360f32.to_radians());
+    }
+
+    #[test]
+    fn a_dive_climbs_for_the_first_half_and_comes_back_down_for_the_second() {
+        assert_eq!(dive_velocity(320.0, 10.0, 0.0), Vec3::Y * 64.0);
+        assert_eq!(dive_velocity(320.0, 10.0, 4.99), Vec3::Y * 64.0);
+        assert_eq!(dive_velocity(320.0, 10.0, 5.0), Vec3::Y * -64.0);
+        assert_eq!(
+            dive_velocity(1000.0, 10.0, 0.0),
+            Vec3::Y * FLY_SPEED_CEILING_MPS
+        );
     }
 
     #[test]

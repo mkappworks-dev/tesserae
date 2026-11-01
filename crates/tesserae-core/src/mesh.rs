@@ -59,9 +59,12 @@ pub struct LitChunk<'a> {
     pub light: &'a ChunkLight,
     /// Fluid beside the Voxels, which has geometry of its own.
     pub overlay: &'a ChunkOverlay,
+    /// Read only by [`mesh_chunk_with_seams`].
+    pub openings: &'a SeamOpenings,
 }
 
 static DRY: ChunkOverlay = ChunkOverlay::none();
+static EVERYWHERE: SeamOpenings = SeamOpenings::everywhere();
 
 impl<'a> LitChunk<'a> {
     pub fn new(chunk: &'a Chunk, light: &'a ChunkLight) -> Self {
@@ -69,11 +72,72 @@ impl<'a> LitChunk<'a> {
             chunk,
             light,
             overlay: &DRY,
+            openings: &EVERYWHERE,
         }
     }
 
     pub fn with_overlay(self, overlay: &'a ChunkOverlay) -> Self {
         LitChunk { overlay, ..self }
+    }
+
+    pub fn with_openings(self, openings: &'a SeamOpenings) -> Self {
+        LitChunk { openings, ..self }
+    }
+}
+
+/// A seam plane every half Chunk: where a finer Chunk, half a coarse one, can end.
+pub(crate) const SEAM_EVERY: usize = CHUNK_SIZE / 2;
+
+/// The Voxels of a Chunk against a seam plane, along the axis across it.
+pub(crate) const SEAM_LAYERS: [usize; 4] = [0, SEAM_EVERY - 1, SEAM_EVERY, CHUNK_SIZE - 1];
+
+const _: () = assert!(
+    CHUNK_SIZE == u32::BITS as usize,
+    "a row of openings is one u32"
+);
+
+/// Where a coarse Chunk's finer ground leaves a Voxel's side open on a seam
+/// plane: the Voxels against a plane across x or z whose finer Voxels against
+/// it are not all opaque cubes. Only there can a seam wall across the plane be
+/// seen, once the finer level ends on it and draws that ground in its place.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct SeamOpenings {
+    /// By axis (x, z), layer of [`SEAM_LAYERS`] and y; a bit per Voxel along
+    /// the other horizontal axis.
+    rows: [u32; 2 * SEAM_LAYERS.len() * CHUNK_SIZE],
+}
+
+impl SeamOpenings {
+    /// What a Chunk without finer ground to read has: every wall is kept.
+    pub const fn everywhere() -> Self {
+        SeamOpenings {
+            rows: [u32::MAX; 2 * SEAM_LAYERS.len() * CHUNK_SIZE],
+        }
+    }
+
+    pub const fn nowhere() -> Self {
+        SeamOpenings {
+            rows: [0; 2 * SEAM_LAYERS.len() * CHUNK_SIZE],
+        }
+    }
+
+    /// `axis` is 0 for x or 2 for z; `cell` must lie against a seam plane
+    /// across it.
+    pub fn set_open(&mut self, axis: usize, cell: [usize; 3]) {
+        let (row, bit) = Self::slot(axis, cell).expect("a Voxel against a seam plane");
+        self.rows[row] |= bit;
+    }
+
+    /// False for a Voxel against no seam plane across `axis`.
+    pub fn is_open(&self, axis: usize, cell: [usize; 3]) -> bool {
+        Self::slot(axis, cell).is_some_and(|(row, bit)| self.rows[row] & bit != 0)
+    }
+
+    fn slot(axis: usize, cell: [usize; 3]) -> Option<(usize, u32)> {
+        debug_assert!(axis == 0 || axis == 2);
+        let layer = SEAM_LAYERS.iter().position(|&l| l == cell[axis])?;
+        let row = (axis / 2 * SEAM_LAYERS.len() + layer) * CHUNK_SIZE + cell[1];
+        Some((row, 1 << cell[2 - axis]))
     }
 }
 
@@ -470,12 +534,180 @@ pub fn mesh_chunk(
     neighbors: [Option<LitChunk<'_>>; 6],
     tables: &Tables,
 ) -> ChunkMesh {
+    mesh_with(center, neighbors, tables, false)
+}
+
+/// [`mesh_chunk`] for a coarse level, plus seam walls on every plane across x
+/// and z half a Chunk apart: the planes where a finer level's region can end.
+///
+/// Coarse ground there stands up to a coarse Voxel or two above the finer
+/// ground beside it, which is how downsampling rounds, and with coarse ground
+/// on both sides of the plane neither has a face on it. Once the finer side is
+/// discarded, the step shows the inside of the coarse ground. A seam wall is
+/// that face, drawn anyway, on each Voxel whose neighbour across the plane is
+/// within two Voxels of open air above it, deeper ones being hidden, and is
+/// open on the plane in its Chunk's [`SeamOpenings`]. Elsewhere it lies just
+/// under the surface, inside the ground, and the renderer discards it where a
+/// finer level draws the Voxel it belongs to.
+///
+/// Not across y: a level's top or bottom meets the ground only for an Eye
+/// about that level's vertical extent above or below it.
+pub fn mesh_chunk_with_seams(
+    center: LitChunk<'_>,
+    neighbors: [Option<LitChunk<'_>>; 6],
+    tables: &Tables,
+) -> ChunkMesh {
+    mesh_with(center, neighbors, tables, true)
+}
+
+fn mesh_with(
+    center: LitChunk<'_>,
+    neighbors: [Option<LitChunk<'_>>; 6],
+    tables: &Tables,
+    seams: bool,
+) -> ChunkMesh {
+    // A Chunk this declines has solid neighbours all round, so the only seam
+    // walls it loses are those under the diagonal neighbour's corner row.
     if !center.overlay.may_contain_fluid()
         && emits_no_faces(center.chunk, neighbors, &tables.materials)
     {
         return ChunkMesh::default();
     }
-    greedy_mesh(&Neighborhood::new(center, neighbors), tables)
+    let n = Neighborhood::new(center, neighbors);
+    let mut mesh = greedy_mesh(&n, tables);
+    if seams {
+        mesh_seams(&n, (center, neighbors), tables, &mut mesh);
+    }
+    mesh
+}
+
+/// How far below open air the Voxel across a seam may be and still get a wall:
+/// the most downsampling raises coarse ground above finer ground on a cliff.
+const SEAM_DEPTH: i32 = 2;
+
+/// The seam walls of [`mesh_chunk_with_seams`], merged as pass 2's quads are.
+fn mesh_seams(
+    n: &Neighborhood,
+    (center, neighbors): (LitChunk<'_>, [Option<LitChunk<'_>>; 6]),
+    tables: &Tables,
+    mesh: &mut ChunkMesh,
+) {
+    let edge = CHUNK_SIZE as i32;
+    let mut pending = Vec::new();
+    let mut row: [Option<(Pending, bool)>; CHUNK_SIZE] = [None; CHUNK_SIZE];
+    for d in [0, 2] {
+        let w_axis = 2 - d;
+        for plane in (0..=edge).step_by(SEAM_EVERY) {
+            // The Voxel on the plane's far side looks back across it, and the
+            // one on its near side looks forward.
+            for (face, own) in [(d * 2, plane), (d * 2 + 1, plane - 1)] {
+                if !(0..edge).contains(&own) {
+                    continue;
+                }
+                let positive = face % 2 == 1;
+                let quad = ShapeQuad {
+                    face: face as u8,
+                    plane: if positive { SUBDIV as u8 } else { 0 },
+                    u0: 0,
+                    v0: 0,
+                    u1: SUBDIV as u8,
+                    v1: SUBDIV as u8,
+                };
+                for row_y in 0..edge {
+                    for (w, slot) in row.iter_mut().enumerate() {
+                        let mut here = [0; 3];
+                        here[d] = own;
+                        here[1] = row_y;
+                        here[w_axis] = w as i32;
+                        *slot = None;
+                        let voxel = n.at(here[0], here[1], here[2]);
+                        if !voxel.is_full_cube() {
+                            continue;
+                        }
+                        let class = tables.materials.render(voxel);
+                        // Water levels with the finer level's, and two
+                        // surfaces of it would blend twice.
+                        if class == RenderClass::Blend {
+                            continue;
+                        }
+                        let mut across = here;
+                        across[d] += if positive { 1 } else { -1 };
+                        let [x, y, z] = across;
+                        // Where it does not cover the face, pass 1 drew it.
+                        if !covers(tables, n.at(x, y, z), face ^ 1, voxel) {
+                            continue;
+                        }
+                        // Above a neighbour's top row is a corner of the
+                        // shell, which is never filled and reads as dark air;
+                        // the cell over this Voxel's own column, in the shell
+                        // above, stands in for it.
+                        let over = |k: i32| {
+                            if y + k < edge || (0..edge).contains(&x) && (0..edge).contains(&z) {
+                                [x, y + k, z]
+                            } else {
+                                [here[0], y + k, here[2]]
+                            }
+                        };
+                        let open = (1..=SEAM_DEPTH).take_while(|k| y + k <= edge).find(|&k| {
+                            let [ox, oy, oz] = over(k);
+                            !n.at(ox, oy, oz).is_full_cube()
+                        });
+                        let Some(k) = open else {
+                            continue;
+                        };
+                        // Lit by the open air over the ground across, which
+                        // the face looks into once that ground is not drawn.
+                        let [ox, oy, oz] = over(k);
+                        let lit = n.light_at(ox, oy, oz);
+                        let wall = Pending::new(here, &quad, class, voxel.material(), lit);
+                        let seen = opening_across(center, neighbors, d, across);
+                        *slot = Some((wall, seen));
+                    }
+                    keep_spans(&row, &mut pending);
+                }
+            }
+        }
+    }
+    merge_shaped(&mut pending, mesh);
+}
+
+/// Pushes, of each run of walls in `row` that could merge, those from the
+/// first that can be seen to the last: one hidden between two seen ones is
+/// inside the ground either way, and keeping it joins the two into one quad.
+fn keep_spans(row: &[Option<(Pending, bool)>], pending: &mut Vec<Pending>) {
+    let mut w = 0;
+    while let Some(start) = (w..row.len()).find(|&i| row[i].is_some()) {
+        let group = row[start].map(|(p, _)| p.group);
+        let end = (start..row.len())
+            .find(|&i| row[i].map(|(p, _)| p.group) != group)
+            .unwrap_or(row.len());
+        let seen = |i: &usize| row[*i].is_some_and(|(_, seen)| seen);
+        if let (Some(first), Some(last)) = ((start..end).find(seen), (start..end).rev().find(seen))
+        {
+            pending.extend(row[first..=last].iter().flatten().map(|&(p, _)| p));
+        }
+        w = end;
+    }
+}
+
+/// Whether the Voxel at `cell`, in or just beside `center` across `axis`, is
+/// open on its seam plane.
+fn opening_across(
+    center: LitChunk<'_>,
+    neighbors: [Option<LitChunk<'_>>; 6],
+    axis: usize,
+    mut cell: [i32; 3],
+) -> bool {
+    let edge = CHUNK_SIZE as i32;
+    let owner = if cell[axis] < 0 {
+        neighbors[axis * 2]
+    } else if cell[axis] >= edge {
+        neighbors[axis * 2 + 1]
+    } else {
+        Some(center)
+    };
+    cell[axis] = cell[axis].rem_euclid(edge);
+    owner.is_some_and(|o| o.openings.is_open(axis, cell.map(|c| c as usize)))
 }
 
 /// Whether `center` provably emits nothing, from `uniform()` alone.

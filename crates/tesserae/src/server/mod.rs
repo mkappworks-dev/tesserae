@@ -30,11 +30,14 @@ mod lod_rings;
 pub mod mods;
 pub mod persistence;
 pub mod player;
+mod priority;
 pub mod streaming;
 pub mod tool;
 pub mod undo;
 pub mod world_state;
 
+#[cfg(test)]
+pub(crate) use jobs::Gate;
 use std::sync::Arc;
 
 use bevy::prelude::*;
@@ -43,7 +46,8 @@ use crate::session::SessionApp;
 use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
-pub use lod_rings::{cuts, level_count};
+pub use lod_rings::LevelRings;
+pub use lod_rings::level_count;
 use world_state::SpawnPoint;
 
 /// Metres of clearance above the surface. In metres, not Voxels: a clearance of

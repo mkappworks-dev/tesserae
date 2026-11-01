@@ -13,6 +13,25 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ['active', 'stationary', 'flight', 'transparency',
+            'sprint-flight', 'sprint-walk', 'dive', 'teleport', 'cave', 'hidden-hill', 'restart', 'revisit']
+# Saved to a fresh World folder inside each run's own folder.
+PERSISTENT = ['restart', 'revisit']
+# Per fixture, what moves the Eye; teleport's jump is the Server's, at 22 s.
+MOTION = {
+    'flight': dict(TESSERAE_SCREENSHOT_SPEED_M_S='12'),
+    'sprint-flight': dict(TESSERAE_SCREENSHOT_SPEED_M_S='64'),
+    'sprint-walk': dict(TESSERAE_FIXTURE_MOVEMENT='physics', TESSERAE_SCREENSHOT_SPRINT='1',
+                        TESSERAE_SCREENSHOT_SPEED_M_S='8'),
+    # Up 320 m over 22-27 s and back down over 27-32 s, both at 64 m/s.
+    'dive': dict(TESSERAE_SCREENSHOT_DIVE_M='320', TESSERAE_SCREENSHOT_FLY_AFTER_S='22',
+                 TESSERAE_SCREENSHOT_FLY_S='10'),
+    # The Server puts the Eye in a cave; it turns through 360 degrees over 22-32 s.
+    # Looks under a ridge at floor shadowed by a hill the sight walk does not enter.
+    'hidden-hill': dict(TESSERAE_SCREENSHOT_YAW_DEG='-81.1', TESSERAE_SCREENSHOT_PITCH_DEG='-13.1'),
+    'cave': dict(TESSERAE_SCREENSHOT_TURN_DEG='360', TESSERAE_SCREENSHOT_PITCH_DEG='0',
+                 TESSERAE_SCREENSHOT_FLY_AFTER_S='22', TESSERAE_SCREENSHOT_FLY_S='10'),
+}
 
 
 def digest(path):
@@ -31,12 +50,155 @@ def distribution(values):
     })
 
 
+STAGES = ['generate', 'relight', 'mesh']
+
+
+def work(flow, start, end):
+    """Worker CPU per level and stage from `start` to the last flow tick at or
+    before `end`, and coarse generation's share of it."""
+    def last(level, t):
+        picked = [r for r in flow if int(r['level']) == level and float(r['t_s']) <= t]
+        return picked[-1] if picked else None
+    def counters(r):
+        return {k: float(r[f'{k}_cpu_ms']) for k in STAGES + ['fluid']} if r else None
+    levels, fluid = {}, 0.0
+    for level in sorted({int(r['level']) for r in flow}):
+        before, after = counters(last(level, start - 1e-9)), counters(last(level, end))
+        if not after:
+            continue
+        # Counters run since the World opened, so a reopened World starts them at zero.
+        if not before or any(after[k] < before[k] for k in after):
+            before = dict.fromkeys(after, 0.0)
+        levels[str(level)] = {k: after[k] - before[k] for k in STAGES}
+        if level == 0:
+            fluid = after['fluid'] - before['fluid']
+    total = sum(sum(w.values()) for w in levels.values()) + fluid
+    coarse = sum(w['generate'] for level, w in levels.items() if level != '0')
+    return dict(worker_cpu_ms=levels, fluid_cpu_ms=fluid,
+                coarse_generate_share=coarse / total if total else None)
+
+
+def coarse_generated(flow, start, end):
+    """First flow tick in [start, end] at which every coarse level's load extent
+    is held or in flight, after one at which some of it was not."""
+    ticks = {}
+    for r in flow:
+        if int(r['level']) > 0 and start <= float(r['t_s']) <= end:
+            ticks.setdefault(float(r['t_s']), []).append(int(r['generate_waiting']))
+    waited = False
+    for t, waiting in sorted(ticks.items()):
+        waited |= any(waiting)
+        if waited and not any(waiting):
+            return t
+    return None
+
+
+def moves(rows, flow):
+    """Per fixture move (a jump, or the restart's reopen): how long after its
+    first frame streaming settled, the frameless gap before that frame, and
+    worker CPU per level and stage from the move until settled; then the same
+    until coarse generation caught up, which `streaming_settled` does not wait
+    for."""
+    out = []
+    for move in sorted({int(r['fixture_moves']) for r in rows} - {0}):
+        first = next(i for i, r in enumerate(rows) if int(r['fixture_moves']) == move)
+        leg = [r for r in rows[first:] if int(r['fixture_moves']) == move]
+        start, end = float(leg[0]['start_s']), float(leg[-1]['end_s'])
+        # Stats published before a jump still read settled.
+        unsettled = next((i for i, r in enumerate(leg) if r['streaming_settled'] != 'true'), None)
+        settled = None if unsettled is None else next(
+            (r for r in leg[unsettled:] if r['streaming_settled'] == 'true'), None)
+        entry = dict(move=move, settle_s=float(settled['start_s']) - start if settled else None,
+                     blank_s=start - float(rows[first - 1]['end_s']) if first else 0.0)
+        if settled and flow:
+            entry.update(work(flow, start, float(settled['end_s'])))
+        if flow:
+            t = coarse_generated(flow, start, end)
+            entry['coarse_generated'] = t and dict(s=t - start, **work(flow, start, t))
+        out.append(entry)
+    return out
+
+
+def streaming(path, rows):
+    """Holes, GPU spans and worker time in the fixture phase, where recorded."""
+    fixture = [r for r in rows if r['phase'] == 'fixture']
+    if not fixture or 'rule_holes' not in fixture[0]:
+        return None
+    ids = {r['frame_id'] for r in fixture}
+    out = {
+        'chunk_entities': distribution([float(r['chunk_entities']) for r in fixture]),
+        'visible_meshes': {
+            key[len('visible_meshes_'):]: distribution([float(r[key]) for r in fixture])
+            for key in fixture[0] if key.startswith('visible_meshes_')},
+    }
+    # Counted only under --instruments holes.
+    if fixture[0]['rule_holes']:
+        out.update(
+            rule_hole_frames=sum(int(r['rule_holes']) > 0 for r in fixture),
+            fill_hole_frames=sum(int(r['fill_holes']) > 0 for r in fixture),
+            rule_holes_max=max(int(r['rule_holes']) for r in fixture),
+            fill_holes_max=max(int(r['fill_holes']) for r in fixture))
+    gpu_path = path.with_suffix('.gpu.csv')
+    if gpu_path.exists():
+        marks = {}
+        for r in csv.DictReader(gpu_path.read_text().splitlines()):
+            if r['frame_id'] in ids and r['since_frame_start_ms']:
+                marks.setdefault(r['frame_id'], {})[r['marker']] = float(r['since_frame_start_ms'])
+        def span(a, b):
+            return distribution([m[b] - m[a] for m in marks.values() if a in m and b in m])
+        cameras = sorted({k.split(':')[0] for m in marks.values() for k in m if ':' in k})
+        out['gpu'] = {
+            'frames_with_end': len([m for m in marks.values() if 'frame_end' in m]),
+            'frames': len(ids), 'frame_ms': span('frame_start', 'frame_end'),
+            'views': {c: {
+                'view_ms': span(f'{c}:view_start', f'{c}:view_end'),
+                'prepass_ms': span(f'{c}:view_start', f'{c}:prepass_end'),
+                'shadow_and_setup_ms': span(f'{c}:prepass_end', f'{c}:main_start'),
+                'opaque_ms': span(f'{c}:main_start', f'{c}:opaque_end'),
+                'transparent_ms': span(f'{c}:opaque_end', f'{c}:main_end'),
+                'post_ms': span(f'{c}:main_end', f'{c}:view_end'),
+            } for c in cameras},
+        }
+    flow_path = path.with_suffix('.flow.csv')
+    if flow_path.exists():
+        flow = list(csv.DictReader(flow_path.read_text().splitlines()))
+        start, end = float(fixture[0]['start_s']), float(fixture[-1]['end_s'])
+        def at(t, level):
+            picked = [r for r in flow if int(r['level']) == level and float(r['t_s']) <= t]
+            return picked[-1] if picked else None
+        seconds = end - start
+        work = {}
+        for level in sorted({int(r['level']) for r in flow}):
+            a, b = at(start, level), at(end, level)
+            if not a or not b:
+                continue
+            work[level] = {
+                f'{stage}_worker_ms_per_s': (float(b[f'{stage}_cpu_ms']) - float(a[f'{stage}_cpu_ms'])) / seconds
+                for stage in ['generate', 'relight', 'mesh']}
+            for stage in ['generate', 'relight', 'mesh']:
+                work[level][f'{stage}_run'] = int(b[f'{stage}_run']) - int(a[f'{stage}_run'])
+                work[level][f'{stage}_waiting_max'] = max(
+                    int(r[f'{stage}_waiting']) for r in flow
+                    if int(r['level']) == level and start <= float(r['t_s']) <= end)
+            if level == 0:
+                work[level]['fluid_worker_ms_per_s'] = (
+                    float(b['fluid_cpu_ms']) - float(a['fluid_cpu_ms'])) / seconds
+        out['workers'] = work
+    if 'fixture_moves' in rows[0]:
+        out['moves'] = moves(rows, flow if flow_path.exists() else [])
+    return out
+
+
 def analyze(folder):
     result = {}
     audit = {}
+    streaming_summary = {}
     for path in sorted(folder.glob('*/frames.csv')):
         rows = list(csv.DictReader(path.read_text().splitlines()))
         assert [int(r['frame_id']) for r in rows] == list(range(len(rows)))
+        summary = streaming(path, rows)
+        if summary:
+            streaming_summary[path.parent.name] = summary
         result[path.parent.name] = {}
         for phase in ['startup', 'stationary', 'transition', 'fixture', 'settle']:
             selected = [r for r in rows if r['phase'] == phase]
@@ -69,6 +231,7 @@ def analyze(folder):
                     if by_id.get(r['frame_id']) == phase and r[key]
                 ])
     (folder / 'audit.json').write_text(json.dumps(audit, indent=2) + '\n')
+    (folder / 'streaming.json').write_text(json.dumps(streaming_summary, indent=2) + '\n')
     overhead = {}
     for path in sorted(folder.glob('*-on/native.log')):
         off = path.parent.with_name(path.parent.name[:-3] + '-off') / 'native.log'
@@ -104,9 +267,10 @@ def main():
     # An engine without views ignores it, so one runner serves an A/B against main.
     parser.add_argument('--view', choices=['first', 'third'], default='first')
     parser.add_argument('--repeats', type=int, default=3)
-    parser.add_argument('--fixtures', nargs='+',
-                        choices=['active', 'stationary', 'flight', 'transparency'],
+    parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
+    # Each costs more than the overhead bound, so a timing series leaves them off.
+    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility'], default=[])
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
@@ -146,7 +310,7 @@ def main():
             'host': subprocess.check_output(['uname', '-a'], text=True).strip(),
             'kind': 'rendered-presented' if args.presented else 'rendered-offscreen',
             'seed': '0x7e55e2ae00000001', 'quality': 'unchanged', 'view': args.view,
-            'phase_boundaries_s': [0, 16, 20, 22, 32],
+            'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
             'physical_target': 'window (see runtime metadata)' if args.presented else [1920, 1080],
         }
         (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
@@ -168,11 +332,16 @@ def main():
                                TESSERAE_SCREENSHOT_WIDTH='1920', TESSERAE_SCREENSHOT_HEIGHT='1080',
                                TESSERAE_SCREENSHOT_FLY_AFTER_S='20', TESSERAE_SCREENSHOT_FLY_S='12',
                                TESSERAE_SCREENSHOT_SETTLE_S='1', TESSERAE_SCREENSHOT_VIEW=args.view,
-                               TESSERAE_SCREENSHOT_SPEED_M_S='12' if case == 'flight' else '0')
+                               TESSERAE_SCREENSHOT_SPEED_M_S='0')
+                    env.update(MOTION.get(case, {}))
+                    if case in PERSISTENT:
+                        env['TESSERAE_WORLD_DIR'] = str(run.resolve() / 'world')
                     if not args.presented:
                         env['TESSERAE_SCREENSHOT_OFFSCREEN'] = '1'
                     if enabled:
                         env['TESSERAE_PROFILE_CSV'] = str(run.resolve() / 'frames.csv')
+                        for name in args.instruments:
+                            env[f'TESSERAE_PROFILE_{name.upper()}'] = '1'
                     # Continuous updates must match with logging on and off.
                     env['TESSERAE_PROFILE_CONTINUOUS'] = '1'
                     print('Running', run.name, flush=True)

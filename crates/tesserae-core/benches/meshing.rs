@@ -746,6 +746,35 @@ fn streamed_mesher(c: &mut Criterion) {
     group.finish();
 }
 
+/// The 15 face-pair bits on the Chunks `mesh_chunk` measures, to hold against
+/// those rows: the mesh job recomputes them after an Edit.
+fn connectivity(c: &mut Criterion) {
+    use tesserae_core::visibility::connectivity;
+    let materials = &tables().materials;
+    let mut group = c.benchmark_group("connectivity");
+    let (g, straddling, _, _) = worldgen();
+    let straddling = g.chunk(0, straddling, 0);
+    group.bench_function("straddling", |b| {
+        b.iter(|| black_box(connectivity(black_box(&straddling), materials)))
+    });
+    let (wet, at) = shore();
+    let shore = wet.chunk(at.0, at.1, at.2);
+    group.bench_function("shore", |b| {
+        b.iter(|| black_box(connectivity(black_box(&shore), materials)))
+    });
+    let g = caved();
+    let cave = cave_fixtures(&g);
+    let crossed = g.chunk(cave.crossed.0, cave.crossed.1, cave.crossed.2);
+    group.bench_function("cave_crossed", |b| {
+        b.iter(|| black_box(connectivity(black_box(&crossed), materials)))
+    });
+    let mouth = g.chunk(cave.mouth.0, cave.mouth.1, cave.mouth.2);
+    group.bench_function("cave_mouth", |b| {
+        b.iter(|| black_box(connectivity(black_box(&mouth), materials)))
+    });
+    group.finish();
+}
+
 fn neighborhood(c: &mut Criterion) {
     let fixture_ground = fixtures().ground;
     let terrain = testgen::terrain_chunk(0, 0, 0, fixture_ground);
@@ -946,6 +975,7 @@ criterion_group!(
     shapes_table,
     mesher,
     streamed_mesher,
+    connectivity,
     neighborhood,
     generation,
     lighting

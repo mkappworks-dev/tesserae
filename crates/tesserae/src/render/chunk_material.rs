@@ -17,14 +17,12 @@ use bevy::render::render_resource::{
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use crate::client::chunk_mesh::{ATTRIBUTE_LIGHT, ATTRIBUTE_MATERIAL};
+use crate::client::chunk_mesh::{
+    ATTRIBUTE_MATERIAL_LIGHT, ATTRIBUTE_POSITION_FACE, ATTRIBUTE_UV, LIGHT_SHIFT, STEPS,
+};
 
 /// What to spawn in `MeshMaterial3d`.
 pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>;
-
-/// Locations 0 to 7 are `bevy_pbr`'s own vertex attributes.
-const MATERIAL_SHADER_LOCATION: u32 = 10;
-const LIGHT_SHADER_LOCATION: u32 = 11;
 
 /// Material ids with a colour of their own.
 pub const PALETTE_LEN: usize = 64;
@@ -34,32 +32,11 @@ pub const PALETTE_LEN: usize = 64;
 pub const FLAME_SLOT: usize = PALETTE_LEN;
 
 /// Mirrors `LodParams` in `chunk_material.wesl`; the two layouts must stay in step.
-#[derive(Reflect, ShaderType, Debug, Clone, Copy)]
+#[derive(Reflect, ShaderType, Debug, Clone, Copy, Default)]
 pub struct LodParams {
     /// Non-zero tints each level above 0, to show the rings in a capture. A
     /// uniform, not a shader def, so it does not specialise a pipeline.
     pub tint: u32,
-    /// Per level, packed four to a `Vec4`. See `server::cuts` for why.
-    pub cut_radius_m: [Vec4; CUT_VECS],
-    pub cut_half_height_m: [Vec4; CUT_VECS],
-}
-
-/// Enough for every level the Server can have (32), four to a `Vec4`.
-pub const CUT_VECS: usize = 8;
-
-impl LodParams {
-    pub fn new(tint: u32, cuts: &[(f32, f32)]) -> Self {
-        let mut params = LodParams {
-            tint,
-            cut_radius_m: [Vec4::ZERO; CUT_VECS],
-            cut_half_height_m: [Vec4::ZERO; CUT_VECS],
-        };
-        for (level, &(radius, half_height)) in cuts.iter().take(CUT_VECS * 4).enumerate() {
-            params.cut_radius_m[level / 4][level % 4] = radius;
-            params.cut_half_height_m[level / 4][level % 4] = half_height;
-        }
-        params
-    }
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -70,8 +47,8 @@ pub struct ChunkMaterialExtension {
     pub palette: [Vec4; PALETTE_LEN + 1],
     #[uniform(101)]
     pub lod: LodParams,
-    /// The Chunks each level has drawn, in `client::drawn_mask`'s layout. A
-    /// buffer of one zero word cuts nothing, which is the opaque material's.
+    /// The Chunks each level draws, in `client::drawn_mask`'s layout. A buffer
+    /// of one zero word discards nothing.
     #[storage(102, read_only)]
     pub drawn: Handle<ShaderBuffer>,
     #[texture(103)]
@@ -100,7 +77,7 @@ impl Default for ChunkMaterialExtension {
         palette[FLAME_SLOT] = srgb(1.0, 0.86, 0.55);
         ChunkMaterialExtension {
             palette,
-            lod: LodParams::new(0, &[]),
+            lod: LodParams::default(),
             drawn: Handle::default(),
             texture: None,
             textured: UVec4::ZERO,
@@ -135,16 +112,14 @@ impl MaterialExtension for ChunkMaterialExtension {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // The base material's layout stops at `bevy_pbr`'s attributes, so the
-        // custom one has to be declared here or the vertex shader reads
-        // garbage. Spelling the set out is safe because this material is only
+        // A packed Chunk mesh has none of `bevy_pbr`'s attributes, so the base
+        // material's layout is empty and the packed one has to be declared
+        // here. Spelling the set out is safe because this material is only
         // ever used on meshes from `chunk_mesh_to_mesh`.
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            ATTRIBUTE_MATERIAL.at_shader_location(MATERIAL_SHADER_LOCATION),
-            ATTRIBUTE_LIGHT.at_shader_location(LIGHT_SHADER_LOCATION),
+            ATTRIBUTE_POSITION_FACE.at_shader_location(0),
+            ATTRIBUTE_UV.at_shader_location(1),
+            ATTRIBUTE_MATERIAL_LIGHT.at_shader_location(2),
         ])?];
 
         // Reach the shader as `constants::*`, so neither the uniform's length
@@ -154,6 +129,8 @@ impl MaterialExtension for ChunkMaterialExtension {
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
             ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
+            ShaderDefVal::UInt("CHUNK_VERTEX_STEPS".into(), STEPS as u32),
+            ShaderDefVal::UInt("CHUNK_LIGHT_SHIFT".into(), LIGHT_SHIFT),
             ShaderDefVal::UInt(
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,

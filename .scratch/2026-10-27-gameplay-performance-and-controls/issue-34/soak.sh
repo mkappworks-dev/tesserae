@@ -5,6 +5,9 @@
 #
 #   soak.sh <cycles> <tesserae-binary> <demo-dist-dir> [periodic]
 #
+# <demo-dist-dir> is `games/demo/dist`: its `games/` and `mods/` are copied
+# side by side, as the engine installs them.
+#
 # `periodic` holds one session open and samples it every 600 frames instead of
 # cycling, to separate growth per cycle from growth per frame in a World.
 # Prints the run directory (unique under /tmp) as its last line.
@@ -12,10 +15,11 @@ set -euo pipefail
 cycles=$1 bin=$2 dist=$3 mode=${4:-cycle}
 
 run=$(mktemp -d /tmp/t34-run.XXXXXX)
-mkdir -p "$run/home" "$run/out" "$run/mods"
-cp -R "$dist"/. "$run/mods/"
+mkdir -p "$run/home" "$run/out" "$run/dist"
+cp -R "$dist"/. "$run/dist/"
+mkdir -p "$run/dist/mods"
 
-export HOME="$run/home" TESSERAE_MODS_DIR="$run/mods" TESSERAE_TRUST_MODS=1
+export HOME="$run/home" TESSERAE_MODS_DIR="$run/dist/mods" TESSERAE_TRUST_MODS=1
 # T34_WINDOWED=1 renders into the real window (needs an unlocked screen).
 [ -n "${T34_WINDOWED:-}" ] || export TESSERAE_SCREENSHOT_OFFSCREEN=1
 export BEVY_ASSET_ROOT="${BEVY_ASSET_ROOT:-.}"

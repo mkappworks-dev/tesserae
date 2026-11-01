@@ -15,6 +15,8 @@ use bevy::prelude::*;
 use bevy::tasks::futures::check_ready;
 use bevy::tasks::{AsyncComputeTaskPool, Task};
 use tesserae_core::light::{Light, MAX_LIGHT, light_cells};
+#[cfg(any(feature = "dev", feature = "profiling"))]
+use tesserae_core::visibility::{Connectivity, connectivity};
 use tesserae_core::{Chunk, ChunkLight, ChunkMesh, LitChunk, Tables, Worldgen, mesh_chunk};
 
 use super::world_state::Snapshot;
@@ -43,6 +45,10 @@ pub(in crate::server) struct Stage<T, K = ChunkCoord> {
     /// Every job landed since the World opened, for the `dev` report.
     #[cfg(any(feature = "dev", feature = "profiling"))]
     landed_total: usize,
+    /// Jobs run and their worker thread CPU in nanoseconds since the World
+    /// opened, every key together.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    run: std::sync::Arc<[std::sync::atomic::AtomicU64; 2]>,
     /// Results that finished and were thrown away at landing because what they
     /// were computed from had changed.
     #[cfg(any(test, feature = "dev", feature = "profiling"))]
@@ -68,6 +74,8 @@ impl<T, K> Default for Stage<T, K> {
             landed: 0,
             #[cfg(any(feature = "dev", feature = "profiling"))]
             landed_total: 0,
+            #[cfg(any(feature = "dev", feature = "profiling"))]
+            run: Default::default(),
             #[cfg(any(test, feature = "dev", feature = "profiling"))]
             stale: 0,
             #[cfg(test)]
@@ -96,6 +104,20 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
     /// hide it.
     pub fn spawn(&mut self, key: K, work: impl FnOnce() -> T + Send + 'static) {
         debug_assert!(!self.contains(key), "{key:?} already has a job in flight");
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let work = {
+            let run = std::sync::Arc::clone(&self.run);
+            move || {
+                use std::sync::atomic::Ordering::Relaxed;
+                let before = crate::cost::thread_cpu();
+                let out = work();
+                run[0].fetch_add(1, Relaxed);
+                if let Some((a, b)) = before.zip(crate::cost::thread_cpu()) {
+                    run[1].fetch_add(((b - a) * 1e9) as u64, Relaxed);
+                }
+                out
+            }
+        };
         #[cfg(not(test))]
         let pool = AsyncComputeTaskPool::get();
         #[cfg(test)]
@@ -189,6 +211,17 @@ impl<T: Send + 'static, K: Copy + Eq + Hash + Debug> Stage<T, K> {
         self.landed_total
     }
 
+    /// Jobs run, and their worker thread CPU in milliseconds, since the World
+    /// opened. The CPU is zero without the `profiling` thread clock.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn run(&self) -> (u64, f64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        (
+            self.run[0].load(Relaxed),
+            self.run[1].load(Relaxed) as f64 / 1e6,
+        )
+    }
+
     /// Jobs dispatched and landed since the last [`Stage::reset_counts`].
     #[cfg(test)]
     pub fn counts(&self) -> (usize, usize) {
@@ -215,7 +248,7 @@ fn scramble_yields(key: impl Hash) -> u64 {
 /// Keeps the jobs of a stage from starting until released.
 #[cfg(test)]
 #[derive(Default)]
-pub(in crate::server) struct Gate {
+pub(crate) struct Gate {
     held: std::sync::atomic::AtomicBool,
     waiting: std::sync::Mutex<Vec<std::task::Waker>>,
 }
@@ -234,7 +267,7 @@ impl Gate {
     }
 
     /// Ready once the gate is open.
-    async fn passed(&self) {
+    pub(crate) async fn passed(&self) {
         std::future::poll_fn(|cx| {
             let mut waiting = self.waiting.lock().expect("not poisoned");
             // Checked under the lock `release` takes, so a release between the
@@ -301,14 +334,56 @@ pub(in crate::server) fn solve(
     }
 }
 
-/// Meshes one Chunk from a snapshot of it and its six face neighbours.
+/// A generated Chunk, and under `dev` or `profiling` which of its faces see
+/// each other through it.
+pub(in crate::server) struct Generated {
+    pub chunk: Chunk,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub connectivity: Connectivity,
+}
+
+/// Generates one Chunk, and its connectivity while the worker holds it.
+pub(in crate::server) fn generate(
+    worldgen: &Worldgen,
+    coord: ChunkCoord,
+    tables: &Tables,
+) -> Generated {
+    let chunk = worldgen.chunk(coord.x, coord.y, coord.z);
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
+    let _ = tables;
+    Generated {
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        connectivity: connectivity(&chunk, &tables.materials),
+        chunk,
+    }
+}
+
+/// A mesh, and under `dev` or `profiling` the connectivity of the Chunk it was
+/// built from.
+pub(in crate::server) struct Built {
+    pub mesh: ChunkMesh,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub connectivity: Connectivity,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub from: std::sync::Weak<Chunk>,
+}
+
+/// Meshes one Chunk from a snapshot of it and its six face neighbours. Its
+/// connectivity is worked out again only if `known` is not that Chunk's.
 pub(in crate::server) fn build_mesh(
     center: &Snapshot,
     around: &[Snapshot; 6],
+    #[cfg(any(feature = "dev", feature = "profiling"))] known: Option<Connectivity>,
     tables: &Tables,
-) -> ChunkMesh {
+) -> Built {
     let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|face| Some(lit(&around[face])));
-    mesh_chunk(lit(center), neighbors, tables)
+    Built {
+        mesh: mesh_chunk(lit(center), neighbors, tables),
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        connectivity: known.unwrap_or_else(|| connectivity(&center.chunk, &tables.materials)),
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        from: std::sync::Arc::downgrade(&center.chunk),
+    }
 }
 
 fn lit(snapshot: &Snapshot) -> LitChunk<'_> {
@@ -318,11 +393,11 @@ fn lit(snapshot: &Snapshot) -> LitChunk<'_> {
 /// Every job in flight, by stage.
 #[derive(Resource, Default)]
 pub(in crate::server) struct Jobs {
-    pub generate: Stage<Chunk>,
+    pub generate: Stage<Generated>,
     // Landing for these arrives in later tickets; the stages exist so the type
     // the tests and the overlay read does not change shape three times.
     pub relight: Stage<Solved>,
-    pub mesh: Stage<ChunkMesh>,
+    pub mesh: Stage<Built>,
 }
 
 impl Jobs {

@@ -26,6 +26,7 @@ pub mod seed;
 pub mod shape;
 pub mod tables;
 pub mod testgen;
+pub mod visibility;
 pub mod voxel;
 pub mod worldgen;
 
@@ -35,9 +36,14 @@ pub use fluid::{FluidDef, FluidError, FluidTable};
 pub use light::{
     Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_cells, light_chunk, relight,
 };
-pub use lod::{COVERED_SKY, CoarseLight, Surface, coarse_light, downsample};
+pub use lod::{
+    COVERED_SKY, CoarseLight, SeamMargin, Surface, coarse_light, downsample, seam_openings,
+};
 pub use material::{MaterialDef, MaterialError, MaterialTable, Occlusion, RenderClass};
-pub use mesh::{ChunkMesh, LitChunk, MeshLayer, Neighborhood, greedy_mesh, mesh_chunk};
+pub use mesh::{
+    ChunkMesh, LitChunk, MeshLayer, Neighborhood, SeamOpenings, greedy_mesh, mesh_chunk,
+    mesh_chunk_with_seams,
+};
 pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,
 };

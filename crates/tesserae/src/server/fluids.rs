@@ -404,6 +404,12 @@ impl FluidSim {
         self.emitters_per_step = emitters_per_step;
     }
 
+    /// Jobs run and their worker CPU in milliseconds since the World opened.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub fn jobs_run(&self) -> (u64, f64) {
+        self.job.run()
+    }
+
     #[cfg(test)]
     pub fn job(&mut self) -> &mut Stage<Advance, usize> {
         &mut self.job

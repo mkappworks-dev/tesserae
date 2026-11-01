@@ -9,6 +9,10 @@ pub const CHUNK_SIZE: usize = 32;
 
 pub const CHUNK_VOLUME: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
 
+/// Rows along x, for [`Chunk::rows_where`]: one `u32` each.
+pub const ROWS: usize = CHUNK_SIZE * CHUNK_SIZE;
+const _: () = assert!(CHUNK_SIZE == u32::BITS as usize);
+
 /// `x` is contiguous. The mesher's inner loop walks x, and the padded
 /// neighbourhood it builds assumes the same order. `pub(crate)` so
 /// [`crate::light`]'s parallel per-Chunk array indexes identically rather than
@@ -56,7 +60,7 @@ fn write_index(words: &mut [u64], bits: u8, i: usize, value: usize) {
 /// One value per Voxel of a Chunk, palette-compressed. The Voxels themselves
 /// and the fluid overlay beside them share this, so the bit packing exists
 /// once.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Palette<T> {
     /// Every Voxel identical. The common case for air and for solid stone, and
     /// the reason a 4km view distance is affordable at all.
@@ -148,6 +152,66 @@ impl<T: Copy + PartialEq> Palette<T> {
         write_index(words, *bits, i, slot);
     }
 
+    /// One bit per value, set where `pick` holds, as a `u32` per row along x
+    /// in [`index`] order. `pick` is asked once per palette entry.
+    pub fn rows_where(&self, pick: impl Fn(T) -> bool, out: &mut [u32; ROWS]) {
+        match self {
+            Palette::Uniform(v) => out.fill(if pick(*v) { u32::MAX } else { 0 }),
+            Palette::Indexed {
+                palette,
+                bits,
+                words,
+            } => {
+                let picked: Vec<u32> = palette.iter().map(|&v| u32::from(pick(v))).collect();
+                let bits = *bits as usize;
+                if bits == 1 {
+                    let (zero, one) = (
+                        picked[0].wrapping_neg(),
+                        picked.get(1).map_or(0, |p| p.wrapping_neg()),
+                    );
+                    for (r, row) in out.iter_mut().enumerate() {
+                        let set = (words[r / 2] >> (r % 2 * 32)) as u32;
+                        *row = set & one | !set & zero;
+                    }
+                    return;
+                }
+                if bits == 16 {
+                    for (r, row) in out.iter_mut().enumerate() {
+                        let mut set = 0;
+                        for x in 0..CHUNK_SIZE {
+                            set |= picked[read_index(words, 16, r * CHUNK_SIZE + x)] << x;
+                        }
+                        *row = set;
+                    }
+                    return;
+                }
+                // A byte holds `8 / bits` whole indices, so one lookup answers
+                // them all; asking per Voxel cost two thirds of a visibility
+                // graph's time.
+                let per_byte = 8 / bits;
+                let mask = (1 << bits) - 1;
+                let mut table = [0u32; 256];
+                for (byte, out) in table.iter_mut().enumerate() {
+                    for k in 0..per_byte {
+                        let i = byte >> (k * bits) & mask;
+                        *out |= picked.get(i).copied().unwrap_or(0) << k;
+                    }
+                }
+                for (row, run) in out.iter_mut().zip(words.chunks_exact(bits / 2)) {
+                    let mut set = 0;
+                    let mut at = 0;
+                    for word in run {
+                        for byte in word.to_le_bytes() {
+                            set |= table[byte as usize] << at;
+                            at += per_byte;
+                        }
+                    }
+                    *row = set;
+                }
+            }
+        }
+    }
+
     pub fn uniform(&self) -> Option<T> {
         match self {
             Palette::Uniform(v) => Some(*v),
@@ -229,9 +293,21 @@ impl Chunk {
         self.storage.set(index(x, y, z), voxel);
     }
 
+    /// Bit `x` of row `y * CHUNK_SIZE + z` set where `pick` holds of the Voxel
+    /// at `(x, y, z)`. `pick` is asked once per distinct Voxel, not per Voxel.
+    pub fn rows_where(&self, pick: impl Fn(Voxel) -> bool, out: &mut [u32; ROWS]) {
+        self.storage.rows_where(pick, out);
+    }
+
     /// `Some` when every Voxel is identical. Lets callers skip a Chunk entirely.
     pub fn uniform(&self) -> Option<Voxel> {
         self.storage.uniform()
+    }
+
+    /// Equal packing means equal Voxels, but equal Voxels can be packed
+    /// differently, so `false` proves nothing. Cheaper than comparing Voxels.
+    pub fn same_packing(&self, other: &Chunk) -> bool {
+        self.storage == other.storage
     }
 
     /// Every distinct Voxel the Chunk holds, and possibly some it no longer
@@ -276,9 +352,120 @@ impl Chunk {
     }
 }
 
+/// What [`Chunk::air`] becomes after a run of [`Chunk::set`]s, recorded and
+/// packed once: the same palette order, index width and words, without the
+/// index arithmetic per write or a repack each time the palette outgrows its
+/// width.
+pub struct ChunkBuilder {
+    /// Each Voxel's palette slot; slot 0 is air.
+    slots: Vec<u16>,
+    palette: Vec<Voxel>,
+    /// Whether a write other than air has promoted the Chunk to a palette, as
+    /// it would `Chunk::air`.
+    promoted: bool,
+    last: (Voxel, u16),
+}
+
+impl Default for ChunkBuilder {
+    fn default() -> Self {
+        ChunkBuilder {
+            slots: vec![0; CHUNK_VOLUME],
+            palette: vec![Voxel::AIR],
+            promoted: false,
+            last: (Voxel::AIR, 0),
+        }
+    }
+}
+
+impl ChunkBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[inline]
+    pub fn set(&mut self, x: usize, y: usize, z: usize, voxel: Voxel) {
+        debug_assert!(x < CHUNK_SIZE && y < CHUNK_SIZE && z < CHUNK_SIZE);
+        if !self.promoted {
+            if voxel == Voxel::AIR {
+                return;
+            }
+            self.promoted = true;
+        }
+        let slot = if voxel == self.last.0 {
+            self.last.1
+        } else {
+            let slot = match self.palette.iter().position(|&p| p == voxel) {
+                Some(i) => i,
+                None => {
+                    self.palette.push(voxel);
+                    self.palette.len() - 1
+                }
+            };
+            // Truncated as `write_index` masks a slot past 16 bits.
+            self.last = (voxel, slot as u16);
+            slot as u16
+        };
+        self.slots[index(x, y, z)] = slot;
+    }
+
+    pub fn build(self) -> Chunk {
+        if !self.promoted {
+            return Chunk::air();
+        }
+        let bits = bits_for(self.palette.len());
+        let per_word = 64 / bits as usize;
+        let words = self
+            .slots
+            .chunks_exact(per_word)
+            .map(|run| {
+                run.iter().enumerate().fold(0u64, |word, (k, &slot)| {
+                    word | (slot as u64) << (k * bits as usize)
+                })
+            })
+            .collect();
+        Chunk {
+            storage: Palette::Indexed {
+                palette: self.palette,
+                bits,
+                words,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn row_bits_match_asking_each_voxel_at_every_index_width() {
+        for kinds in [1u16, 2, 3, 5, 17, 300] {
+            let mut chunk = Chunk::air();
+            for i in 0..CHUNK_VOLUME {
+                let (x, z, y) = (
+                    i % CHUNK_SIZE,
+                    i / CHUNK_SIZE % CHUNK_SIZE,
+                    i / (CHUNK_SIZE * CHUNK_SIZE),
+                );
+                chunk.set(x, y, z, Voxel::cube((i * 7919 % kinds as usize) as u16));
+            }
+            let pick = |v: Voxel| v.material() % 3 == 1;
+            let mut rows = [0; ROWS];
+            chunk.rows_where(pick, &mut rows);
+            for y in 0..CHUNK_SIZE {
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let bit = rows[y * CHUNK_SIZE + z] >> x & 1 == 1;
+                        assert_eq!(
+                            bit,
+                            pick(chunk.get(x, y, z)),
+                            "{kinds} kinds at {x},{y},{z}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     /// A row read equals its Voxels read one at a time at every index width.
     #[test]
@@ -303,6 +490,43 @@ mod tests {
                 }
             }
             assert_eq!((row[0], row[CHUNK_SIZE + 1]), (Voxel::AIR, Voxel::AIR));
+        }
+    }
+
+    /// The same writes, in the same order, through a builder and through
+    /// `set`: the same Chunk down to its palette order, index width and words.
+    #[test]
+    fn a_built_chunk_is_what_the_same_sets_make() {
+        let cases: [(&str, usize, u16, u64); 6] = [
+            ("nothing", 0, 4, 1),
+            ("only air", 500, 0, 2),
+            ("air then solid", 5000, 3, 3),
+            ("every width", 40_000, 18, 4),
+            ("past 256 kinds", 40_000, 300, 5),
+            ("dense", 32_768, 5, 6),
+        ];
+        for (what, writes, kinds, seed) in cases {
+            let mut set = Chunk::air();
+            let mut built = ChunkBuilder::new();
+            let mut state = seed;
+            for _ in 0..writes {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let i = (state >> 20) as usize % CHUNK_VOLUME;
+                let (x, z, y) = (
+                    i % CHUNK_SIZE,
+                    i / CHUNK_SIZE % CHUNK_SIZE,
+                    i / (CHUNK_SIZE * CHUNK_SIZE),
+                );
+                let v = match kinds {
+                    0 => Voxel::AIR,
+                    k => Voxel::cube((state >> 40) as u16 % (k + 1)),
+                };
+                set.set(x, y, z, v);
+                built.set(x, y, z, v);
+            }
+            assert_eq!(format!("{:?}", built.build()), format!("{set:?}"), "{what}");
         }
     }
 

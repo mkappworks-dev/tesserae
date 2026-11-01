@@ -22,6 +22,10 @@ harness = false
 name = "fluids"
 harness = false
 
+[[bench]]
+name = "coarse_breakdown"
+harness = false
+
 [dependencies]
 getrandom = "0.4"
 serde = { version = "1", features = ["derive"] }

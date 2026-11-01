@@ -7,6 +7,7 @@
 //! the Client turning a delivered mesh into a Bevy mesh, and the Client
 //! re-sorting a blended mesh as the Eye moves.
 
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
 use bevy::prelude::*;
@@ -32,6 +33,11 @@ pub struct FrameCost {
     pub uploads: u32,
     pub sort_s: f32,
     pub sorts: u32,
+    #[cfg_attr(
+        not(feature = "profiling"),
+        expect(dead_code, reason = "only the profiling CSV reads it")
+    )]
+    pub rescore_s: f32,
 }
 
 impl MainThreadCost {
@@ -63,17 +69,40 @@ impl MainThreadCost {
             uploads: self.uploads,
             sort_s: self.sort_s,
             sorts: self.sorts,
+            rescore_s: RESCORE_NS.load(Relaxed) as f32 * 1e-9,
         }
     }
 
     pub fn take_frame(&mut self) -> FrameCost {
-        let frame = self.frame();
+        let frame = FrameCost {
+            rescore_s: RESCORE_NS.swap(0, Relaxed) as f32 * 1e-9,
+            ..self.frame()
+        };
         *self = MainThreadCost {
             started: self.started,
             enabled: self.enabled,
             ..default()
         };
         frame
+    }
+}
+
+/// Main-thread nanoseconds the Server spent rebuilding priority orders. A
+/// static because the systems that rebuild them hold no `MainThreadCost`.
+static RESCORE_NS: AtomicU64 = AtomicU64::new(0);
+
+/// Adds the time until it drops to the frame's re-scoring cost.
+pub struct Rescoring(Instant);
+
+impl Rescoring {
+    pub fn start() -> Self {
+        Rescoring(Instant::now())
+    }
+}
+
+impl Drop for Rescoring {
+    fn drop(&mut self) {
+        RESCORE_NS.fetch_add(self.0.elapsed().as_nanos() as u64, Relaxed);
     }
 }
 
@@ -94,6 +123,21 @@ pub fn collecting() -> bool {
             || std::env::var_os("TESSERAE_PROFILE_CSV").is_some()
             || std::env::var_os("TESSERAE_SCREENSHOT").is_some()
     })
+}
+
+/// This thread's CPU seconds; excludes waits. `None` where unsupported.
+#[cfg(all(unix, feature = "profiling"))]
+pub fn thread_cpu() -> Option<f64> {
+    let mut time = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+    (result == 0).then_some(time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9)
+}
+#[cfg(not(all(unix, feature = "profiling")))]
+pub fn thread_cpu() -> Option<f64> {
+    None
 }
 
 pub fn plugin(app: &mut App) {

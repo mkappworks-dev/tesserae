@@ -87,18 +87,35 @@ pub fn fbm2(x: f32, z: f32, seed: u32, octaves: u32) -> f32 {
 /// of each axis.
 #[inline]
 pub fn noise3(x: f32, y: f32, z: f32, seed: u32) -> f32 {
+    noise3_from(x, y, z, |cell| corners(cell, seed))
+}
+
+/// The cell's eight lattice values, corner `dx + 2dy + 4dz`.
+#[inline]
+fn corners([xi, yi, zi]: [i32; 3], seed: u32) -> [f32; 8] {
+    std::array::from_fn(|k| {
+        lattice3(
+            xi + (k & 1) as i32,
+            yi + (k >> 1 & 1) as i32,
+            zi + (k >> 2) as i32,
+            seed,
+        )
+    })
+}
+
+/// [`noise3`] with the corner values supplied, so a cached and an uncached
+/// sample share one interpolation and cannot differ in a bit.
+#[inline]
+fn noise3_from(x: f32, y: f32, z: f32, corners: impl FnOnce([i32; 3]) -> [f32; 8]) -> f32 {
     let (x0, y0, z0) = (x.floor(), y.floor(), z.floor());
     let (tx, ty, tz) = (x - x0, y - y0, z - z0);
     let sx = tx * tx * (3.0 - 2.0 * tx);
     let sy = ty * ty * (3.0 - 2.0 * ty);
     let sz = tz * tz * (3.0 - 2.0 * tz);
-    let (xi, yi, zi) = (x0 as i32, y0 as i32, z0 as i32);
-    let edge = |dy: i32, dz: i32| {
-        let a = lattice3(xi, yi + dy, zi + dz, seed);
-        a + (lattice3(xi + 1, yi + dy, zi + dz, seed) - a) * sx
-    };
-    let (n00, n10) = (edge(0, 0), edge(1, 0));
-    let (n01, n11) = (edge(0, 1), edge(1, 1));
+    let c = corners([x0 as i32, y0 as i32, z0 as i32]);
+    let edge = |k: usize| c[k] + (c[k + 1] - c[k]) * sx;
+    let (n00, n10) = (edge(0), edge(2));
+    let (n01, n11) = (edge(4), edge(6));
     let n0 = n00 + (n10 - n00) * sy;
     let n1 = n01 + (n11 - n01) * sy;
     n0 + (n1 - n0) * sz
@@ -107,12 +124,27 @@ pub fn noise3(x: f32, y: f32, z: f32, seed: u32) -> f32 {
 /// [`fbm2`] in three dimensions: same octave scheme, same `[0, 1)` bound.
 #[inline]
 pub fn fbm3(x: f32, y: f32, z: f32, seed: u32, octaves: u32) -> f32 {
+    fbm3_with(x, y, z, seed, octaves, |_, x, y, z, seed| {
+        noise3(x, y, z, seed)
+    })
+}
+
+#[inline]
+fn fbm3_with(
+    x: f32,
+    y: f32,
+    z: f32,
+    seed: u32,
+    octaves: u32,
+    mut noise: impl FnMut(usize, f32, f32, f32, u32) -> f32,
+) -> f32 {
     let mut value = 0.0;
     let mut amplitude = 1.0;
     let mut frequency = 1.0;
     let mut total = 0.0;
     for octave in 0..octaves {
-        value += noise3(
+        value += noise(
+            octave as usize,
             x * frequency,
             y * frequency,
             z * frequency,
@@ -123,6 +155,40 @@ pub fn fbm3(x: f32, y: f32, z: f32, seed: u32, octaves: u32) -> f32 {
         frequency *= 2.0;
     }
     if total == 0.0 { 0.0 } else { value / total }
+}
+
+/// Octaves [`Fbm3Cache`] remembers a cell for; any past them are hashed every
+/// time, which changes the cost and never the answer.
+const CACHED_OCTAVES: usize = 4;
+
+/// The cell each octave of [`fbm3_cached`] last sampled, with its corners.
+/// Neighbouring Voxels mostly fall in the same cell, and hashing its eight
+/// corners is most of what a sample costs.
+#[derive(Clone, Copy, Default)]
+pub struct Fbm3Cache {
+    cells: [Option<CachedCell>; CACHED_OCTAVES],
+}
+
+/// A seed, a cell and the noise at its eight corners.
+type CachedCell = (u32, [i32; 3], [f32; 8]);
+
+/// [`fbm3`], bit for bit, reusing the corners of a cell the last sample of the
+/// same octave and seed fell in.
+#[inline]
+pub fn fbm3_cached(x: f32, y: f32, z: f32, seed: u32, octaves: u32, cache: &mut Fbm3Cache) -> f32 {
+    fbm3_with(x, y, z, seed, octaves, |octave, x, y, z, seed| {
+        let Some(slot) = cache.cells.get_mut(octave) else {
+            return noise3(x, y, z, seed);
+        };
+        noise3_from(x, y, z, |cell| match *slot {
+            Some((s, at, c)) if s == seed && at == cell => c,
+            _ => {
+                let c = corners(cell, seed);
+                *slot = Some((seed, cell, c));
+                c
+            }
+        })
+    })
 }
 
 /// Slack on [`fbm3_range`], absorbing the rounding in `a + (b - a) * s` that
@@ -354,6 +420,36 @@ mod tests {
             mean < 0.4,
             "mean range width {mean} over a quarter-cell box"
         );
+    }
+
+    /// Walks of samples that stay in a cell, step across one and jump back,
+    /// as a Chunk's rows do, with more octaves than the cache holds.
+    #[test]
+    fn a_cached_sample_is_bit_identical_to_an_uncached_one() {
+        for i in 0..200u32 {
+            let mut cache = Fbm3Cache::default();
+            let octaves = 1 + i % 10;
+            let start = [unit(i, 1), unit(i, 2), unit(i, 3)].map(|v| (v - 0.5) * 80.0);
+            let step = unit(i, 4) * 0.4;
+            for j in 0..300u32 {
+                let p = if j % 37 == 0 {
+                    [unit(j, 5), unit(j, 6), unit(j, 7)].map(|v| (v - 0.5) * 80.0)
+                } else {
+                    [
+                        start[0] + j as f32 * step,
+                        start[1] - j as f32 * step * 0.5,
+                        start[2],
+                    ]
+                };
+                let want = fbm3(p[0], p[1], p[2], i, octaves);
+                let got = fbm3_cached(p[0], p[1], p[2], i, octaves, &mut cache);
+                assert_eq!(
+                    got.to_bits(),
+                    want.to_bits(),
+                    "{p:?} seed {i}, {octaves} octaves"
+                );
+            }
+        }
     }
 
     #[test]

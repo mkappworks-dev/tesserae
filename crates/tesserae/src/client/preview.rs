@@ -8,7 +8,9 @@ use super::{
 };
 use crate::render::{chunk_material::FLAME_SLOT, texture_atlas};
 use crate::world::WorldSettings;
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::RenderLayers;
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
@@ -93,7 +95,13 @@ pub(super) fn item_mesh(
         return Some(tool_mesh());
     }
     let layer = geometry(held, catalogue)?;
-    let mut mesh = super::chunk_mesh::chunk_mesh_to_mesh(&layer, 1.0);
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, layer.positions.clone())
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, layer.normals.clone())
+    .with_inserted_indices(Indices::U32(layer.indices.clone()));
     let shading: Vec<[f32; 4]> = layer
         .normals
         .iter()
@@ -139,10 +147,6 @@ fn tool_mesh() -> Mesh {
 }
 
 fn fire_mesh() -> Mesh {
-    use bevy::{
-        asset::RenderAssetUsages,
-        mesh::{Indices, PrimitiveTopology},
-    };
     let positions = vec![
         [0.1, 0.0, 0.5],
         [0.9, 0.0, 0.5],

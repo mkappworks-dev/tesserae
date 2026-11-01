@@ -88,9 +88,10 @@ are separate. `render.csv` records the render schedule from before
 ExtractCommands to after PostCleanup with the extracted main frame ID, including
 scheduling waits. It records that thread's CPU independently. Render and main
 may overlap. Never add their percentiles, per-view spans or nested spans to
-obtain frame elapsed. Extraction, GPU elapsed and presentation elapsed remain
-explicitly unavailable; the failed historical Metal trace supplies no timing
-evidence. Render export may omit the final in-flight render frame at shutdown.
+obtain frame elapsed. Extraction and presentation elapsed remain explicitly
+unavailable; the failed historical Metal trace supplies no timing evidence. GPU
+elapsed comes from `frames.gpu.csv`; see Streaming fixtures below. Render export
+may omit the final in-flight render frame at shutdown.
 
 The profiler buffers at most 250,000 frames plus 250,000 render rows, exports
 once at shutdown or the limit, and marks limit exhaustion. There is no per-frame
@@ -115,8 +116,8 @@ variation, with no regression in p99, streaming readiness or simulation
 progress. The historical 6.99 ms dev/offscreen median and 12.66 ms p99 are
 context, not a release gate; 1,000+ FPS remains a stretch investigation. Quality
 probes cannot count as equal-quality improvements. GPU/per-view optimizations
-remain blocked on valid attribution; static atlas/UI changes require equivalent
-output evidence.
+are attributed by `frames.gpu.csv` within the limits below; static atlas/UI
+changes require equivalent output evidence.
 
 Core algorithm comparisons retain phase-8.2 ticket 13's 115-row methodology:
 separate temporary targets and copied executable hashes, foreground QoS,
@@ -144,8 +145,9 @@ remain mandatory.
 
 Persistent fixtures append `save_snapshots`, `save_snapshot_ms`,
 `save_worker_ms` and `save_chunks` to the raw frame rows. An explicit disposable
-`TESSERAE_WORLD_DIR` enables saves for a capture; fixtures otherwise remain
-ephemeral. `TESSERAE_EPHEMERAL=1` always disables persistence.
+`TESSERAE_WORLD_DIR` enables saves for a capture; `restart` and `revisit`
+require one, and other fixtures otherwise remain ephemeral.
+`TESSERAE_EPHEMERAL=1` always disables persistence.
 
 The snapshot counter increments when the Server dispatches an immutable save.
 Snapshot milliseconds measure its capture work on the Server, already included
@@ -156,3 +158,101 @@ select counter changes to identify snapshots rather than treating each row as a
 new save. A worker result can appear on a later frame than its snapshot; check
 the retained commit files and native diagnostics for successful writes. These
 fields do not establish power-loss safety, GPU cost or present latency.
+
+## Streaming fixtures
+
+`--fixtures` also accepts eight streaming fixtures, all on the demo's default
+seed and measured in the same 22–32 s phase:
+
+- `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
+  heading.
+- `sprint-walk`: physics sprint at 8 m/s along the default heading, which stays
+  on walkable ground for the whole run.
+- `dive`: noclip straight up 320 m over 22–27 s and straight back down over
+  27–32 s, both at 64 m/s, so both directions of a fast vertical move are
+  measured from the same ground.
+- `teleport`: the Server moves the Player 2 km along x at 22 s, keeping its
+  height above the generated ground; `streaming_settled` gives the time to
+  refill.
+- `cave`: the Server puts the Eye in a cave within 128 m of spawn on its first
+  tick, under at least 8 m of ground, and the camera turns through 360 degrees
+  level with the horizon over 22–32 s.
+- `hidden-hill`: built, not moved. The Server stands the Eye two Cells above the
+  highest ground over spawn and builds a ridge, a hill behind it and a floor the
+  hill shadows, so that the sight walk does not enter the hill's Chunk while its
+  shadow lies on floor in view.
+- `revisit`: the same jump on a Persistent World, then back to the start as soon
+  as the far side has settled, so the return refills ground the World held a
+  moment ago.
+- `restart`: at 22 s the World saves and quits the way a player's Save and quit
+  does, then reopens from its save in the same process, as the World list would.
+  The reopen's GPU pipelines are already compiled, so it measures the World
+  opening and refilling, not a cold launch.
+
+`restart` and `revisit` need a `TESSERAE_WORLD_DIR` that does not exist yet and
+refuse to start otherwise; the runner gives each run a `world` folder inside its
+own. `frames.csv`'s `fixture_moves` counts the jumps and reopens so far, and for
+each one `streaming.json`'s `moves` reports:
+
+- `settle_s`: from the move's first frame to the first `streaming_settled` frame
+  after an unsettled one, since stats published before a jump still read
+  settled. `blank_s` is the time before that first frame with no frame at all:
+  the save, teardown and load of a reopen, zero for a jump.
+- `worker_cpu_ms` per level and stage, `fluid_cpu_ms` and
+  `coarse_generate_share` (levels 1 and up's generation over all of it) from the
+  move until settled. `streaming_settled` is level 0's, and level 0 has the
+  workers first, so coarse levels have barely started by then.
+- `coarse_generated`: the same, until the first fixed tick at which no coarse
+  level has a Chunk of its load extent waiting to generate, with its time in
+  `s`; empty when that did not happen before the next move. A stationary Eye
+  still regenerates a few coarse Chunks a second, so this waits for the load
+  extent, not for idle workers.
+
+Frame times run from the profiler's start, about 0.1 s after the process clock
+the fixtures move by, so a move falls just before 22 s in `frames.csv`;
+`settle_s` is measured from the move's own frame.
+
+Each run adds up to three files beside `frames.csv`, and the runner summarises
+them in `streaming.json`. Two of the instruments are opt-in through
+`--instruments`, which sets `TESSERAE_PROFILE_HOLES` and `TESSERAE_PROFILE_GPU`
+for the logging-on runs: in matched on/off rounds the GPU markers added 16 to
+21% to the median frame, far over the bound, so a timing series leaves `gpu` off
+and attributes GPU time in a separate series. The hole count added nothing
+measurable over logging alone, which was itself about 3.7% of median.
+
+- `frames.csv` gains `rule_holes` and `fill_holes` with per-level columns (empty
+  unless `--instruments holes`), `chunk_entities` and
+  `visible_meshes_camera<order>`. A hole is a Cell of a level's mesh shell that
+  intersects the Player camera's frustum, out to the LOD reach, and that nothing
+  draws: a _rule hole_ where some level delivered the region but the draw rule
+  in force discards it, a _fill hole_ where no level delivered it. It is counted
+  on the Client from what it was sent, never from World storage. The rule in
+  force is the metre cut; a Cell the cut's edge crosses is split up to three
+  levels finer, then tested at its centre. A hole hidden behind nearer terrain
+  still counts. Then comes `rescore_ms`: main-thread time the Server's ticks in
+  that frame spent rebuilding dispatch orders (`server::priority`), every level.
+  Last, empty unless `--instruments visibility`, come two walks over each
+  Chunk's face-to-face connectivity, which nothing yet culls or reorders by:
+  `sight_drawn0` is the level-0 Chunks with geometry in the frustum;
+  `sight_culled0` is those a walk from the camera's Chunk does not enter and
+  `sight_retained_hidden0` the retained ones among them, which culling would
+  still draw. `mesh_reach_run`, `mesh_reach_cpu_ms`, `mesh_unreach_run` and
+  `mesh_unreach_cpu_ms` split level-0 mesh jobs and their worker CPU since the
+  World opened by whether a walk from the Eye through open space reaches the
+  Chunk. The Server walk runs on the tick, so leave it out of a timing series.
+- `frames.flow.csv` has one row per level per fixed tick: Chunks held and
+  meshed, and per stage (generate, relight, mesh) the Chunks waiting to
+  dispatch, in flight, and since the World opened the jobs run and their worker
+  thread CPU, plus fluid jobs run and their worker CPU. `streaming.json` reports
+  worker milliseconds per second over the measured phase.
+- `frames.gpu.csv`, under `--instruments gpu` only, has GPU timestamps per
+  frame: `frame_start`, `frame_end`, and per camera order `view_start`,
+  `prepass_end`, `main_start`, `opaque_end`, `main_end` and `view_end`, in
+  milliseconds since `frame_start`. Apple GPUs sample timestamps only at encoder
+  boundaries, so each marker is an empty compute pass dispatching one workgroup
+  between two of Bevy's passes. A marker is ordered by the schedule: work the
+  GPU overlaps across one is charged to whichever side it ends on, systems
+  outside Bevy's sets can fall on either side of `view_start`, and `prepass_end`
+  to `main_start` includes the shadow passes. About 20% of frames return an
+  earlier frame's value for the last markers; those cells are left empty, and
+  `streaming.json` reports how many frames have a `frame_end`.

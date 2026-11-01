@@ -1,12 +1,21 @@
 //! Bounded, opt-in measurements. Frame intervals end at the next First;
 //! main schedule spans end at Last and exclude extraction and render work.
+mod gpu;
+
+use crate::session::SessionApp;
+
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
-use crate::cost::{FrameCost, MainThreadCost};
+use crate::client::holes::{Holes, LEVELS};
+use crate::client::sight::Sight;
+use crate::cost::{FrameCost, MainThreadCost, thread_cpu};
 use crate::server::{
     ProfileFixtureStatus, SimulationProfile,
-    streaming::{StreamingSettings, stats::StreamingStats},
+    streaming::{
+        StreamingSettings,
+        stats::{Flow, StreamingStats},
+    },
 };
 use crate::world::WorldSettings;
 use bevy::camera::RenderTarget;
@@ -16,6 +25,8 @@ use bevy::prelude::*;
 pub struct ProcessStart(pub Instant);
 
 const MAX_FRAMES: usize = 250_000;
+/// One per level per fixed tick: about 25 minutes at 64 Hz with six levels.
+const MAX_FLOW_ROWS: usize = 600_000;
 
 #[derive(Resource)]
 struct Profile {
@@ -25,10 +36,23 @@ struct Profile {
     path: std::path::PathBuf,
     rows: Vec<Row>,
     pending: Option<Row>,
+    flow: Vec<FlowRow>,
     saved: bool,
     render: RenderSamples,
+    gpu: gpu::GpuSamples,
     surfaces: SurfaceConfigurations,
     presentation: String,
+}
+
+/// Streaming work as the Server published it on one fixed tick, for one level.
+struct FlowRow {
+    frame_id: usize,
+    t_s: f64,
+    level: usize,
+    held: usize,
+    meshed: usize,
+    flow: Flow,
+    fluid_run: (u64, f64),
 }
 
 struct Row {
@@ -44,6 +68,41 @@ struct Row {
     shown: bool,
     settled: bool,
     focused: bool,
+    holes: Holes,
+    /// Mesh entities each camera's visibility pass kept, by camera order.
+    visible: [u32; CAMERAS],
+    sight: Sight,
+    mesh_reach: Option<[(u64, f64); 2]>,
+}
+
+/// Camera orders recorded: the Player's and one per coarse level.
+const CAMERAS: usize = 8;
+
+#[derive(Resource, Default)]
+struct VisibleMeshes([u32; CAMERAS]);
+
+/// What this frame drew and failed to, and whether the app is closing.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Drawn<'w, 's> {
+    holes: Option<Res<'w, Holes>>,
+    sight: Option<Res<'w, Sight>>,
+    visible: Res<'w, VisibleMeshes>,
+    exit: MessageReader<'w, 's, AppExit>,
+}
+
+fn count_visible(
+    mut visible: ResMut<VisibleMeshes>,
+    cameras: Query<(&Camera, &bevy::camera::visibility::VisibleEntities)>,
+) {
+    visible.0 = [0; CAMERAS];
+    for (camera, entities) in &cameras {
+        if let Some(count) = usize::try_from(camera.order)
+            .ok()
+            .and_then(|order| visible.0.get_mut(order))
+        {
+            *count = entities.len(std::any::TypeId::of::<Mesh3d>()) as u32;
+        }
+    }
 }
 
 pub fn plugin(app: &mut App) {
@@ -64,6 +123,11 @@ pub fn plugin(app: &mut App) {
             .add_systems(Render, render_begin.before(RenderSystems::ExtractCommands))
             .add_systems(Render, render_end.after(RenderSystems::PostCleanup));
     }
+    let gpu = gpu::GpuSamples::default();
+    // Its marker passes cost more than the overhead bound allows a timing run.
+    if std::env::var_os("TESSERAE_PROFILE_GPU").is_some() {
+        gpu::plugin(app, gpu.clone());
+    }
     app.init_resource::<ProfileFixtureStatus>();
     app.insert_non_send(std::rc::Rc::new(()));
     let surfaces = app
@@ -81,14 +145,53 @@ pub fn plugin(app: &mut App) {
         path: path.into(),
         rows: Vec::with_capacity(MAX_FRAMES),
         pending: None,
+        flow: Vec::new(),
         saved: false,
         render,
+        gpu,
         surfaces,
         presentation: String::new(),
     })
     .insert_resource(bevy::winit::WinitSettings::continuous())
-    .add_systems(First, begin.after(crate::client::presentation::FramePacing))
-    .add_systems(Last, end);
+    .init_resource::<VisibleMeshes>();
+    // Frames are rows from the World session on; startup before it is in the
+    // metadata.
+    app.add_session_systems(First, begin.after(crate::client::presentation::FramePacing))
+        .add_session_systems(Last, (count_visible, end).chain())
+        .add_session_systems(
+            FixedPostUpdate,
+            sample_flow.after(crate::server::streaming::stats::Published),
+        )
+        .add_session_systems(Startup, open_session);
+}
+
+/// `begin` runs in `First`, before the state moves into the World, so a
+/// reopened session's first frame would otherwise start at the previous
+/// session's last and hide the reopen inside one frame.
+fn open_session(mut profile: ResMut<Profile>) {
+    if !profile.rows.is_empty() {
+        profile.start = Instant::now();
+        profile.cpu = thread_cpu();
+    }
+}
+
+fn sample_flow(mut profile: ResMut<Profile>, streaming: Res<StreamingStats>) {
+    if profile.saved || profile.flow.len() + streaming.levels.len() > MAX_FLOW_ROWS {
+        return;
+    }
+    let frame_id = profile.rows.len();
+    let t_s = profile.origin.elapsed().as_secs_f64();
+    for (level, stats) in streaming.levels.iter().enumerate() {
+        profile.flow.push(FlowRow {
+            frame_id,
+            t_s,
+            level,
+            held: stats.held,
+            meshed: stats.meshed,
+            flow: stats.flow,
+            fluid_run: streaming.fluid_run,
+        });
+    }
 }
 
 fn begin(mut profile: ResMut<Profile>, _thread: NonSend<std::rc::Rc<()>>) {
@@ -120,7 +223,7 @@ fn end(
         Option<Res<crate::client::profile::Preferences>>,
     ),
     (windows, cameras): (Query<&Window>, Query<(&Camera, &RenderTarget)>),
-    mut exit: MessageReader<AppExit>,
+    mut drawn: Drawn,
 ) {
     if profile.saved {
         return;
@@ -148,8 +251,12 @@ fn end(
         shown: streaming.shown,
         settled: streaming.settled,
         focused: windows.iter().any(|w| w.focused),
+        holes: drawn.holes.as_deref().copied().unwrap_or_default(),
+        visible: drawn.visible.0,
+        sight: drawn.sight.as_deref().copied().unwrap_or_default(),
+        mesh_reach: streaming.mesh_reach,
     });
-    if profile.rows.len() >= MAX_FRAMES || exit.read().next().is_some() {
+    if profile.rows.len() >= MAX_FRAMES || drawn.exit.read().next().is_some() {
         // The incomplete final interval is excluded, never replaced with virtual time.
         profile.saved = true;
         if let Err(error) = save(&profile, &settings, &view, &windows, &cameras) {
@@ -173,13 +280,22 @@ fn save(
     );
     writeln!(
         out,
-        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks"
+        "frame_id,start_s,end_s,phase,frame_ms,main_wall_ms,main_cpu_ms,server_wall_ms,longest_tick_ms,upload_wall_ms,uploads,sort_wall_ms,sorts,streaming_shown,streaming_settled,simulation_step,simulation_idle,simulation_running,awaiting,suspended,timers,landed,deferred,focused,fixture_ready,fixture_ignitions,fixture_fire_burning,fixture_moves,save_snapshots,save_snapshot_ms,save_worker_ms,save_chunks,rule_holes,fill_holes{}",
+        (0..LEVELS)
+            .map(|l| format!(",rule_holes_l{l},fill_holes_l{l}"))
+            .chain(std::iter::once(",chunk_entities".to_string()))
+            .chain((0..CAMERAS).map(|c| format!(",visible_meshes_camera{c}")))
+            .chain(std::iter::once(",rescore_ms".to_string()))
+            .chain(std::iter::once(
+                ",sight_drawn0,sight_culled0,sight_retained_hidden0,mesh_reach_run,mesh_reach_cpu_ms,mesh_unreach_run,mesh_unreach_cpu_ms".to_string()
+            ))
+            .collect::<String>()
     )?;
     for r in &profile.rows {
         let phase = phase(r.start_s);
-        writeln!(
+        write!(
             out,
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.id,
             r.start_s,
             r.start_s + r.interval_s,
@@ -207,11 +323,40 @@ fn save(
             r.fixture.ready,
             r.fixture.ignitions,
             r.fixture.fire_burning,
+            r.fixture.moves,
             r.save.snapshots,
             r.save.snapshot_ms,
             r.save.worker_ms,
             r.save.chunks
         )?;
+        if r.holes.counted {
+            write!(
+                out,
+                ",{},{}",
+                r.holes.rule.iter().sum::<u32>(),
+                r.holes.fill.iter().sum::<u32>()
+            )?;
+            for l in 0..LEVELS {
+                write!(out, ",{},{}", r.holes.rule[l], r.holes.fill[l])?;
+            }
+        } else {
+            write!(out, "{}", ",".repeat(2 + 2 * LEVELS))?;
+        }
+        write!(out, ",{}", r.holes.chunk_entities)?;
+        for count in r.visible {
+            write!(out, ",{count}")?;
+        }
+        write!(out, ",{}", r.cost.rescore_s * 1e3)?;
+        if r.sight.counted {
+            let s = r.sight;
+            write!(out, ",{},{},{}", s.drawn, s.culled, s.retained_hidden)?;
+        } else {
+            write!(out, ",,,")?;
+        }
+        match r.mesh_reach {
+            Some([(a, b), (c, d)]) => writeln!(out, ",{a},{b},{c},{d}")?,
+            None => writeln!(out, ",,,,")?,
+        }
     }
     out.flush()?;
     let mut meta = BufWriter::new(
@@ -222,12 +367,19 @@ fn save(
     );
     writeln!(
         meta,
-        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed=unavailable\npresent_elapsed=unavailable\nbackend_resolved_present_mode=see observed backend_surface_configuration records; unavailable when no surface is configured or logging is filtered\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=Server fixed-step intent fixture; actual mode in Player spawned log\nview=first person\nquality=unchanged; no profiling quality switches",
+        "schema=1\nseed={}\nvoxel_size_m={}\nnear_m={}\nlod_m={}\nprofiling=true\ndev={}\nclock=Instant monotonic; main CPU=thread clock\nmain_span=First to Last; excludes extract/render\nextract=unavailable (no whole-extraction boundary)\nrender_thread_cpu=render.csv thread clock\ngpu_elapsed={}\npresent_elapsed=unavailable\nbackend_resolved_present_mode=see observed backend_surface_configuration records; unavailable when no surface is configured or logging is filtered\nmax_frames={}\nlimit_reached={}\nincomplete_final_interval=excluded\nstartup_before_first_First_s={}\nmovement=Server fixed-step intent fixture; actual mode in Player spawned log\nview=first person\nquality=unchanged; no profiling quality switches",
         settings.seed,
         settings.voxel_size,
         view.view_distance_m,
         view.lod_distance_m,
         cfg!(feature = "dev"),
+        if std::env::var_os("TESSERAE_PROFILE_GPU").is_none() {
+            "off (TESSERAE_PROFILE_GPU unset)"
+        } else if profile.gpu.1.load(std::sync::atomic::Ordering::Relaxed) {
+            "gpu.csv: timestamps at empty compute pass boundaries between Bevy's passes"
+        } else {
+            "unavailable (no TIMESTAMP_QUERY)"
+        },
         MAX_FRAMES,
         profile.rows.len() >= MAX_FRAMES,
         profile.rows.first().map_or(0.0, |r| r.start_s)
@@ -279,7 +431,53 @@ fn save(
             cpu.map(|s| (s * 1e3).to_string()).unwrap_or_default()
         )?;
     }
-    render.flush()
+    render.flush()?;
+    let mut flow = BufWriter::new(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(profile.path.with_extension("flow.csv"))?,
+    );
+    write!(flow, "frame_id,t_s,level,held,meshed")?;
+    for stage in ["generate", "relight", "mesh"] {
+        write!(
+            flow,
+            ",{stage}_waiting,{stage}_in_flight,{stage}_run,{stage}_cpu_ms"
+        )?;
+    }
+    writeln!(flow, ",fluid_run,fluid_cpu_ms,limit_reached")?;
+    let limited = profile.flow.len() + 32 > MAX_FLOW_ROWS;
+    for r in &profile.flow {
+        write!(
+            flow,
+            "{},{},{},{},{}",
+            r.frame_id, r.t_s, r.level, r.held, r.meshed
+        )?;
+        for s in 0..3 {
+            write!(
+                flow,
+                ",{},{},{},{}",
+                r.flow.waiting[s], r.flow.in_flight[s], r.flow.run[s], r.flow.cpu_ms[s]
+            )?;
+        }
+        writeln!(flow, ",{},{},{limited}", r.fluid_run.0, r.fluid_run.1)?;
+    }
+    flow.flush()?;
+    if std::env::var_os("TESSERAE_PROFILE_GPU").is_none() {
+        return Ok(());
+    }
+    let mut gpu = BufWriter::new(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(profile.path.with_extension("gpu.csv"))?,
+    );
+    writeln!(gpu, "frame_id,marker,since_frame_start_ms")?;
+    for (frame, marker, ms) in profile.gpu.0.lock().unwrap().iter() {
+        let ms = ms.map(|ms| ms.to_string()).unwrap_or_default();
+        writeln!(gpu, "{frame},{marker},{ms}")?;
+    }
+    gpu.flush()
 }
 
 fn phase(seconds: f64) -> &'static str {
@@ -290,21 +488,6 @@ fn phase(seconds: f64) -> &'static str {
         s if s < 32.0 => "fixture",
         _ => "settle",
     }
-}
-
-#[cfg(unix)]
-fn thread_cpu() -> Option<f64> {
-    let mut time = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // The thread clock excludes waits and worker CPU; failure remains unavailable.
-    let result = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
-    (result == 0).then_some(time.tv_sec as f64 + time.tv_nsec as f64 * 1e-9)
-}
-#[cfg(not(unix))]
-fn thread_cpu() -> Option<f64> {
-    None
 }
 
 #[cfg(test)]
@@ -336,8 +519,10 @@ mod tests {
             cpu: None,
             path: std::path::PathBuf::new(),
             rows: Vec::new(),
+            flow: Vec::new(),
             saved: false,
             render: RenderSamples::default(),
+            gpu: gpu::GpuSamples::default(),
             surfaces: SurfaceConfigurations::default(),
             presentation: String::new(),
             pending: Some(Row {
@@ -353,6 +538,10 @@ mod tests {
                 shown: false,
                 settled: false,
                 focused: false,
+                holes: Holes::default(),
+                visible: [0; CAMERAS],
+                sight: Sight::default(),
+                mesh_reach: None,
             }),
         });
         app.add_systems(First, begin.after(crate::client::presentation::FramePacing));
@@ -363,6 +552,58 @@ mod tests {
         assert!(profile.rows[0].interval_s >= 0.75);
         assert_eq!(profile.rows[0].cpu_s, Some(0.01));
         assert_eq!(profile.rows[0].start_s, 1.25);
+    }
+
+    #[test]
+    fn a_reopened_session_starts_its_first_frame_when_it_opens() {
+        let mut app = App::new();
+        let long_ago = Instant::now() - std::time::Duration::from_secs(5);
+        let row = Row {
+            id: 0,
+            start_s: 0.0,
+            interval_s: 0.01,
+            wall_s: 0.01,
+            cpu_s: None,
+            cost: FrameCost::default(),
+            sim: SimulationProfile::default(),
+            save: crate::server::persistence::SaveProfile::default(),
+            fixture: ProfileFixtureStatus::default(),
+            shown: false,
+            settled: false,
+            focused: false,
+            holes: Holes::default(),
+            visible: [0; CAMERAS],
+            sight: Sight::default(),
+            mesh_reach: None,
+        };
+        app.insert_resource(Profile {
+            origin: long_ago,
+            start: long_ago,
+            cpu: None,
+            path: std::path::PathBuf::new(),
+            rows: Vec::new(),
+            flow: Vec::new(),
+            saved: false,
+            render: RenderSamples::default(),
+            gpu: gpu::GpuSamples::default(),
+            surfaces: SurfaceConfigurations::default(),
+            presentation: String::new(),
+            pending: None,
+        });
+        app.add_systems(Update, open_session);
+        app.update();
+        // The first session's first frame keeps the startup stall.
+        assert_eq!(app.world().resource::<Profile>().start, long_ago);
+        app.world_mut().resource_mut::<Profile>().rows.push(row);
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Profile>()
+                .start
+                .elapsed()
+                .as_secs_f64()
+                < 1.0
+        );
     }
 
     #[test]
