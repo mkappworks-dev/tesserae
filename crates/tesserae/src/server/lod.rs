@@ -648,23 +648,6 @@ fn open_lod_generators(
     commands.insert_resource(generators);
 }
 
-/// Child `i` of a coarse Chunk, in the lattice one level finer: octant `x + 2y + 4z`.
-fn child(coord: ChunkCoord, i: usize) -> ChunkCoord {
-    ChunkCoord::new(
-        2 * coord.x + (i & 1) as i32,
-        2 * coord.y + (i >> 1 & 1) as i32,
-        2 * coord.z + (i >> 2) as i32,
-    )
-}
-
-fn cover(coord: ChunkCoord) -> ChunkCoord {
-    ChunkCoord::new(
-        coord.x.div_euclid(2),
-        coord.y.div_euclid(2),
-        coord.z.div_euclid(2),
-    )
-}
-
 /// A level-0 Chunk the Server holds, as a level-1 job reads it: with its overlay if anything
 /// changed it, since an unchanged one is exactly what the generator makes.
 #[derive(Clone)]
@@ -686,7 +669,7 @@ pub(in crate::server) fn generate_coarse(
 ) -> Coarse {
     let made: [Option<Chunk>; 8] = std::array::from_fn(|i| {
         held[i].is_none().then(|| {
-            let c = child(coord, i);
+            let c = coord.child(i);
             source.chunk(c.x, c.y, c.z)
         })
     });
@@ -737,7 +720,7 @@ fn generate_persistent(
     tables: &Tables,
 ) -> Coarse {
     let children = std::array::from_fn(|i| {
-        let child = child(coord, i);
+        let child = coord.child(i);
         if level == 1 {
             return saved.get(&child).cloned();
         }
@@ -1069,12 +1052,12 @@ fn is_hole(
     }
     let mut covering = coord;
     for coarser in level + 1..=plans.len() as u32 {
-        covering = cover(covering);
+        covering = covering.parent();
         if delivered(coarser, covering) {
             return false;
         }
     }
-    !(0..8).any(|i| delivered(level - 1, child(coord, i)))
+    !(0..8).any(|i| delivered(level - 1, coord.child(i)))
 }
 
 /// Holes first, coarsest level first; then every level together in priority
@@ -1144,7 +1127,7 @@ pub(in crate::server) fn stream_lod(
     // ADR-0011: an unsaved World's levels above 1 read the generator alone.
     let reach = if chunks.persistent { levels } else { 2 };
     for coord in changed {
-        mark_cover(&store, &mut state, &jobs, (1, cover(coord)), reach);
+        mark_cover(&store, &mut state, &jobs, (1, coord.parent()), reach);
     }
 
     let plans: Vec<Plan> = (1..levels)
@@ -1316,7 +1299,7 @@ fn land(
             });
         store.insert(level, coord, coarse);
         if changed {
-            mark_cover(store, state, jobs, (level + 1, cover(coord)), reach);
+            mark_cover(store, state, jobs, (level + 1, coord.parent()), reach);
         }
         let lv = state.level_mut(level);
         lv.dirty.insert(coord);
@@ -1347,7 +1330,7 @@ fn mark_cover(
             return;
         }
         level += 1;
-        covering = cover(covering);
+        covering = covering.parent();
     }
 }
 
@@ -1444,7 +1427,7 @@ fn dispatch(
             level.regenerating.insert(coord);
         }
         let held_children: [Option<Held>; 8] = if plan.level == 1 {
-            std::array::from_fn(|i| held_child(chunks, meshes, child(coord, i)))
+            std::array::from_fn(|i| held_child(chunks, meshes, coord.child(i)))
         } else {
             Default::default()
         };
@@ -1873,7 +1856,7 @@ mod tests {
                 .coords()
                 .filter(|c| (-1..=0).contains(&c.x))
                 .filter(|&c| self.store().get(c).unwrap().uniform() == Some(Voxel::AIR))
-                .filter(|&c| shell.contains(&cover(c)))
+                .filter(|&c| shell.contains(&c.parent()))
                 .collect();
             found.sort_by_key(|c| (c.y, c.z));
             *found.last().expect("an empty Chunk under the Eye")
@@ -1887,7 +1870,7 @@ mod tests {
     fn octant(chunk: ChunkCoord) -> usize {
         let bit = |v: i32| v.rem_euclid(2) as usize;
         let i = bit(chunk.x) + 2 * bit(chunk.y) + 4 * bit(chunk.z);
-        assert_eq!(child(cover(chunk), i), chunk);
+        assert_eq!(chunk.parent().child(i), chunk);
         i
     }
 
@@ -1897,7 +1880,7 @@ mod tests {
 
     fn expected_cover(h: &Harness, chunk: ChunkCoord) -> Chunk {
         let held = h.store().get(chunk).expect("held");
-        expected(1, cover(chunk), Some((octant(chunk), held)))
+        expected(1, chunk.parent(), Some((octant(chunk), held)))
     }
 
     fn latest(ready: Vec<LodMeshReady>) -> HashMap<LodKey, ChunkMesh> {
@@ -1943,7 +1926,7 @@ mod tests {
         let source = source(level - 1);
         let made: Vec<Chunk> = (0..8)
             .map(|i| {
-                let c = child(coord, i);
+                let c = coord.child(i);
                 source.chunk(c.x, c.y, c.z)
             })
             .collect();
@@ -1957,16 +1940,6 @@ mod tests {
     fn assert_holds_exactly_the_load_set(h: &Harness) {
         for level in 1..LEVELS {
             assert_eq!(h.held(level), h.load_set(level), "level {level}");
-        }
-    }
-
-    #[test]
-    fn the_children_of_a_chunk_are_its_octants() {
-        let parent = ChunkCoord::new(-3, 2, 5);
-        for i in 0..8 {
-            let c = child(parent, i);
-            let d = (c.x - 2 * parent.x, c.y - 2 * parent.y, c.z - 2 * parent.z);
-            assert_eq!(d, ((i & 1) as i32, (i >> 1 & 1) as i32, (i >> 2) as i32));
         }
     }
 
@@ -2014,9 +1987,9 @@ mod tests {
         assert!(held_children > 0);
         h.lod_settle();
 
-        let covers_held = |coord: ChunkCoord| (0..8).any(|i| h.store().contains(child(coord, i)));
+        let covers_held = |coord: ChunkCoord| coord.children().any(|c| h.store().contains(c));
         let covers_absent =
-            |coord: ChunkCoord| (0..8).any(|i| !h.store().contains(child(coord, i)));
+            |coord: ChunkCoord| coord.children().any(|c| !h.store().contains(c));
         assert!(h.held(1).into_iter().any(covers_held));
         assert!(h.held(1).into_iter().any(covers_absent));
         for coord in h.held(1) {
@@ -2035,7 +2008,7 @@ mod tests {
         let mut h = harness();
         let lantern = Chunk::filled(Voxel::cube(tesserae_core::testgen::fixtures().lantern));
         let origin = ChunkCoord::new(0, 0, 0);
-        let edited = child(origin, 5);
+        let edited = origin.child(5);
         assert_eq!(edited, ChunkCoord::new(1, 0, 1));
         h.app
             .world_mut()
@@ -2059,7 +2032,7 @@ mod tests {
         let source = source(0);
         let coord = ChunkCoord::new(2, -1, 3);
         let made = |i: usize| {
-            let c = child(coord, i);
+            let c = coord.child(i);
             source.chunk(c.x, c.y, c.z)
         };
         let run = |held: &[Option<Held>; 8]| {
@@ -2102,7 +2075,7 @@ mod tests {
     fn expected_with(source: &Worldgen, coord: ChunkCoord, at: usize, chunk: &Chunk) -> Chunk {
         let made: Vec<Chunk> = (0..8)
             .map(|i| {
-                let c = child(coord, i);
+                let c = coord.child(i);
                 source.chunk(c.x, c.y, c.z)
             })
             .collect();
@@ -2325,7 +2298,7 @@ mod tests {
         h.settle();
         h.lod_settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
         assert!(same_chunk(
             &h.cover_arc(covering),
             &source(1).chunk(covering.x, covering.y, covering.z)
@@ -2549,7 +2522,7 @@ mod tests {
         h.app
             .world_mut()
             .resource_mut::<ChunkStore>()
-            .insert(child(coord, 7), lantern.clone());
+            .insert(coord.child(7), lantern.clone());
         h.app
             .world_mut()
             .resource_mut::<LodState>()
@@ -2838,7 +2811,7 @@ mod tests {
         h.app
             .world_mut()
             .resource_mut::<ChunkStore>()
-            .insert(child(ChunkCoord::new(0, 0, 0), 3), stairs);
+            .insert(ChunkCoord::new(0, 0, 0).child(3), stairs);
 
         let (ready, _) = h.lod_settle();
         let mut level_one = 0;
@@ -3155,7 +3128,7 @@ mod tests {
         h.settle();
         h.lod_settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
         let before = h.cover_arc(covering);
         let side = CHUNK_SIZE as i32;
         let min = [
@@ -3196,7 +3169,7 @@ mod tests {
         h.settle();
         h.lod_settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
         let before = h.cover_arc(covering);
 
         h.edit_block(chunk, [10, 10, 10], stone());
@@ -3218,7 +3191,7 @@ mod tests {
         let mut h = harness();
         h.settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
 
         h.edit_block(chunk, [10, 10, 10], stone());
         let (_, _, dispatched) = h.lod_settle_counting();
@@ -3236,7 +3209,7 @@ mod tests {
         let mut h = harness();
         h.settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
 
         h.lod_tick();
         assert!(
@@ -3260,7 +3233,7 @@ mod tests {
         h.settle();
         h.lod_settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
 
         h.edit_block(chunk, [10, 10, 10], stone());
         h.lod_tick();
@@ -3287,7 +3260,7 @@ mod tests {
         h.settle();
         h.lod_settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
         h.edit_block(chunk, [10, 10, 10], stone());
         h.lod_settle();
         let with_edit = h.cover_arc(covering);
@@ -3340,7 +3313,7 @@ mod tests {
         h.settle();
         h.lod_settle();
         let chunk = h.quiet_chunk();
-        let covering = cover(chunk);
+        let covering = chunk.parent();
 
         let mut delivered = 0;
         let started = std::time::Instant::now();

@@ -112,17 +112,17 @@ impl Harness {
 /// The cover of `chunk` as level 1 should derive it: that held Chunk read with
 /// its overlay, every other child generated.
 fn expected_changed(h: &Harness, chunk: ChunkCoord) -> Coarse {
-    let covering = cover(chunk);
+    let covering = chunk.parent();
     let source = source(0);
     let made: Vec<Chunk> = (0..8)
         .map(|i| {
-            let c = child(covering, i);
+            let c = covering.child(i);
             source.chunk(c.x, c.y, c.z)
         })
         .collect();
     let store = h.store();
     let children: [Child; 8] = std::array::from_fn(|i| {
-        if child(covering, i) == chunk {
+        if covering.child(i) == chunk {
             Child::Changed(store.get(chunk).unwrap(), store.overlay(chunk).unwrap())
         } else {
             Child::Packed(&made[i])
@@ -184,7 +184,7 @@ fn held_fluid_and_fire_reach_the_level_one_cover_and_its_mesh() {
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
-    let covering = cover(chunk);
+    let covering = chunk.parent();
     let above = h.above_level_one();
 
     h.occupy(chunk, [8, 8, 8], [10, 2, 4], solid(stone()));
@@ -244,7 +244,7 @@ fn a_fluid_only_change_reaches_the_cover_and_eviction_takes_it_out() {
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
-    let covering = cover(chunk);
+    let covering = chunk.parent();
     let packed = h.store().get(chunk).unwrap().clone();
 
     for surface in [16, 8] {
@@ -287,7 +287,7 @@ fn flow_the_simulation_lands_reaches_the_cover_once_it_settles() {
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
-    let covering = cover(chunk);
+    let covering = chunk.parent();
     // On an odd row, so the stream fills the lower half of its coarse Voxel: one
     // sharing a coarse Voxel with its floor loses it to the stone.
     h.occupy(chunk, [0, 9, 0], [32, 1, 32], solid(stone()));
@@ -358,7 +358,7 @@ fn water_changing_under_a_cover_every_tick_is_still_redrawn_and_settles() {
     h.settle();
     h.lod_settle();
     let chunk = h.quiet_chunk();
-    let covering = cover(chunk);
+    let covering = chunk.parent();
     {
         let mut jobs = h.app.world_mut().resource_mut::<LodJobs>();
         jobs.generate.hold.hold();
