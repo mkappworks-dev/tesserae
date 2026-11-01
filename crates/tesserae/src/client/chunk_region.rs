@@ -91,6 +91,8 @@ impl Default for Regions {
 pub(super) struct Look<'a> {
     pub material: &'a Handle<ChunkMaterial>,
     pub casts_shadows: bool,
+    /// Whether hidden members still cast; false only for a review control.
+    pub hidden_cast: bool,
 }
 
 impl Regions {
@@ -245,7 +247,7 @@ impl Regions {
             };
             let main = (layer_of(level), !look.casts_shadows);
             spawn.place(&mut region.drawn, mesh_of(&shown), main, commands, meshes);
-            let shadow = mesh_of(&culled).filter(|_| look.casts_shadows);
+            let shadow = mesh_of(&culled).filter(|_| look.casts_shadows && look.hidden_cast);
             let shadow_only = (RenderLayers::layer(SHADOW_ONLY_LAYER), false);
             spawn.place(&mut region.shadow, shadow, shadow_only, commands, meshes);
             if region.members.is_empty() {

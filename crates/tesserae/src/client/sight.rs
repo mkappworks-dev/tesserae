@@ -1,7 +1,8 @@
 //! Which level-0 Chunks a walk from the camera sees, from the connectivity
 //! each `ChunkMeshReady` carries, never World storage
 //! (`docs/adr/0002-client-server-from-day-one.md`). `TESSERAE_SIGHT_CULL=1`
-//! under `dev` or `profiling` leaves the rest out of what is drawn;
+//! under `dev` or `profiling` leaves the rest out of what the camera draws,
+//! though not out of the sun's shadow maps;
 //! `TESSERAE_PROFILE_VISIBILITY` counts what that would remove. Ticket 12 of
 //! `.scratch/2026-10-29-streaming-performance/`.
 
@@ -31,6 +32,9 @@ const MARGIN_M: f32 = 4.0;
 pub(super) struct Culling {
     /// Whether to leave unseen Chunks out of what is drawn.
     pub cull: bool,
+    /// `TESSERAE_SIGHT_CULL=noshadow`: culled Chunks cast no shadow either, as
+    /// before they did. A control for review captures only.
+    pub shadowless: bool,
     /// Whether to count what that would remove.
     pub count: bool,
     lines: HashMap<ChunkCoord, Connectivity>,
@@ -46,8 +50,9 @@ impl Culling {
             cfg!(any(feature = "dev", feature = "profiling")) && std::env::var_os(var).is_some()
         };
         Culling {
-            cull: std::env::var("TESSERAE_SIGHT_CULL").is_ok_and(|v| v == "1")
+            cull: std::env::var("TESSERAE_SIGHT_CULL").is_ok_and(|v| v == "1" || v == "noshadow")
                 && cfg!(any(feature = "dev", feature = "profiling")),
+            shadowless: std::env::var("TESSERAE_SIGHT_CULL").is_ok_and(|v| v == "noshadow"),
             count: cfg!(feature = "profiling")
                 && on("TESSERAE_PROFILE_VISIBILITY")
                 && on("TESSERAE_PROFILE_CSV"),

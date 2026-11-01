@@ -48,9 +48,12 @@ pub(super) fn plugin(app: &mut App) {
     if kind == "cave" {
         app.add_session_systems(FixedUpdate, into_cave.before(super::streaming::Streaming));
     }
+    if kind == "hidden-hill" {
+        app.add_session_systems(FixedUpdate, into_sky.before(super::streaming::Streaming));
+    }
 }
 
-const BUILT: [&str; 2] = ["transparency", "active"];
+const BUILT: [&str; 3] = ["transparency", "active", "hidden-hill"];
 const MOVED: [&str; 9] = [
     "stationary",
     "flight",
@@ -78,7 +81,7 @@ fn install(world: &mut World) {
         moves,
         ..default()
     });
-    if kind == "transparency" || kind == "active" {
+    if BUILT.contains(&kind.as_str()) {
         world.insert_resource(Fixture {
             kind,
             plan: Vec::new(),
@@ -333,6 +336,73 @@ impl Trip {
     }
 }
 
+/// Where the hidden-hill fixture stands the Eye in its base Chunk, in metres
+/// from the Chunk's corner: farther than the sight walk's margin from every
+/// face, so the walk starts from this Chunk alone.
+const HILL_EYE_M: Vec3 = Vec3::new(16.0, 6.0, 16.0);
+
+/// The hidden-hill fixture's base Chunk, in Voxels: over spawn, two Cells
+/// above the highest ground, so nothing but its own geometry shadows it.
+fn sky_base(world: &WorldSettings, generator: &tesserae_core::Worldgen, spawn_m: Vec3) -> IVec3 {
+    let cell_m = world.cell_size();
+    let (_, highest_m) = generator.surface_bounds_m();
+    let chunk = IVec3::new(
+        (spawn_m.x / cell_m).floor() as i32,
+        (highest_m / cell_m).ceil() as i32 + 2,
+        (spawn_m.z / cell_m).floor() as i32,
+    );
+    chunk * tesserae_core::CHUNK_SIZE as i32
+}
+
+/// Moves the Player to the hidden-hill fixture's Eye on the first tick.
+fn into_sky(
+    generator: Res<super::WorldGenerator>,
+    world: Res<WorldSettings>,
+    spawn: Res<SpawnPoint>,
+    mut player: Single<&mut super::player::Player>,
+    mut done: Local<bool>,
+) {
+    if std::mem::replace(&mut *done, true) {
+        return;
+    }
+    let base = sky_base(&world, &generator.0, spawn.metres());
+    let to = base.as_vec3() * world.voxel_size + HILL_EYE_M;
+    player.set_eye(to);
+    info!("profile_fixture hidden-hill eye={to}");
+}
+
+/// A ridge, a hill behind it and a floor in view, in Voxels from the base
+/// Chunk `b` the Eye stands in, at 1 m Voxels:
+///
+/// - the ridge fills the plane x = 62 of the Chunk east of the Eye's, so no
+///   walk from the Eye enters the Chunk east of that one, which holds the
+///   hill (x 66-74, y 4-12, z 8-16) and is culled;
+/// - the floor (y = -7) lies under the hill's Chunk, reached by walking down
+///   and east, and seen from the Eye under the ridge's lower edge;
+/// - the sun, from +x, +y, +z, puts the hill's shadow on the floor at x 64-70.
+fn hidden_hill_plan(b: IVec3, stone: Voxel) -> Vec<([i32; 3], Voxel)> {
+    let mut plan = Vec::new();
+    let mut put = |x: i32, y: i32, z: i32| plan.push(((b + IVec3::new(x, y, z)).to_array(), stone));
+    for y in 0..32 {
+        for z in 0..32 {
+            put(62, y, z);
+        }
+    }
+    for x in 64..96 {
+        for z in 0..32 {
+            put(x, -7, z);
+        }
+    }
+    for x in 66..74 {
+        for y in 4..12 {
+            for z in 8..16 {
+                put(x, y, z);
+            }
+        }
+    }
+    plan
+}
+
 fn ignition_round(seconds: f64) -> Option<u64> {
     (20.0..32.0)
         .contains(&seconds)
@@ -342,12 +412,20 @@ fn ignition_round(seconds: f64) -> Option<u64> {
 fn build(
     (mut fixture, mut status): (ResMut<Fixture>, ResMut<ProfileFixtureStatus>),
     start: Res<crate::profiling::ProcessStart>,
-    world: Res<WorldSettings>,
+    (world, generator): (Res<WorldSettings>, Res<super::WorldGenerator>),
     spawn: Res<SpawnPoint>,
     tables: Res<ContentTables>,
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
 ) {
+    if fixture.plan.is_empty() && fixture.kind == "hidden-hill" {
+        let stone = (8..tables.materials.len())
+            .map(|id| Voxel::cube(id as u16))
+            .find(|&v| tables.materials.solid(v) && tables.materials.is_opaque(v))
+            .expect("Fixture requires a declared opaque solid");
+        let base = sky_base(&world, &generator.0, spawn.metres());
+        fixture.plan = hidden_hill_plan(base, stone);
+    }
     if fixture.plan.is_empty() {
         let material = (8..tables.materials.len())
             .map(|id| id as u16)
@@ -431,6 +509,58 @@ fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hidden_hill_is_culled_and_shadows_floor_the_eye_sees() {
+        use tesserae_core::visibility::{Bounds, connectivity, sight};
+        let tables = crate::server::fixture_tables();
+        let stone = Voxel::cube(tesserae_core::testgen::fixtures().ground.rock);
+        let plan = hidden_hill_plan(IVec3::ZERO, stone);
+        let size = tesserae_core::CHUNK_SIZE as i32;
+        let mut chunks: std::collections::HashMap<IVec3, tesserae_core::Chunk> = default();
+        for &(at, voxel) in &plan {
+            let at = IVec3::from_array(at);
+            let i = at.rem_euclid(IVec3::splat(size)).as_uvec3();
+            chunks
+                .entry(at.div_euclid(IVec3::splat(size)))
+                .or_insert_with(tesserae_core::Chunk::air)
+                .set(i.x as usize, i.y as usize, i.z as usize, voxel);
+        }
+        let of = |c: [i32; 3]| {
+            chunks
+                .get(&IVec3::from_array(c))
+                .map_or(tesserae_core::visibility::Connectivity::ALL, |chunk| {
+                    connectivity(chunk, &tables.materials)
+                })
+        };
+        let walked = sight([0; 3], Bounds::around([0; 3], [4, 4, 4]), of, |_| true);
+        assert!(!walked.contains([2, 0, 0]), "the hill's Chunk is culled");
+        assert!(walked.contains([2, -1, 0]), "the floor's Chunk is seen");
+
+        // A floor point the Eye sees under the ridge, whose sun ray meets the
+        // hill and not the ridge.
+        let solid: std::collections::HashSet<[i32; 3]> = plan.iter().map(|&(at, _)| at).collect();
+        let hits = |from: Vec3, to: Vec3, skip: &dyn Fn([i32; 3]) -> bool| {
+            (1..2000).any(|k| {
+                let p = from + (to - from) * (k as f32 / 2000.0);
+                let v = p.floor().as_ivec3().to_array();
+                solid.contains(&v) && !skip(v)
+            })
+        };
+        let sun = Vec3::new(1.0, 2.2, 0.8).normalize();
+        let hill = |v: [i32; 3]| (66..74).contains(&v[0]) && (4..12).contains(&v[1]);
+        let shadowed_in_view = (64..96)
+            .flat_map(|x| (0..32).map(move |z| (x, z)))
+            .any(|(x, z)| {
+                let floor = Vec3::new(x as f32 + 0.5, -6.0, z as f32 + 0.5);
+                let seen = !hits(HILL_EYE_M, floor + Vec3::Y * 0.01, &|v| v[1] == -7);
+                let towards_sun = floor + sun * 40.0;
+                let by_hill = hits(floor + Vec3::Y * 0.01, towards_sun, &|v| !hill(v));
+                let by_other = hits(floor + Vec3::Y * 0.01, towards_sun, &hill);
+                seen && by_hill && !by_other
+            });
+        assert!(shadowed_in_view);
+    }
 
     #[test]
     fn the_cave_eye_is_in_open_air_under_cover_with_room_to_turn() {

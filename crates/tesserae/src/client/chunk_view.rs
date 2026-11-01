@@ -683,7 +683,7 @@ fn assemble_regions(
     mut entities: ResMut<ChunkEntities>,
     mut meshes: ResMut<Assets<Mesh>>,
     material: Res<TerrainMaterial>,
-    world: Res<WorldSettings>,
+    (world, culling): (Res<WorldSettings>, Res<super::sight::Culling>),
     #[cfg(any(feature = "dev", feature = "profiling"))] mut cost: ResMut<
         crate::cost::MainThreadCost,
     >,
@@ -709,6 +709,7 @@ fn assemble_regions(
             Look {
                 material,
                 casts_shadows: true,
+                hidden_cast: !culling.shadowless,
             },
         );
     }
