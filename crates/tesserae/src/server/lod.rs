@@ -2037,8 +2037,7 @@ mod tests {
         h.lod_settle();
 
         let covers_held = |coord: ChunkCoord| coord.children().any(|c| h.store().contains(c));
-        let covers_absent =
-            |coord: ChunkCoord| coord.children().any(|c| !h.store().contains(c));
+        let covers_absent = |coord: ChunkCoord| coord.children().any(|c| !h.store().contains(c));
         assert!(h.held(1).into_iter().any(covers_held));
         assert!(h.held(1).into_iter().any(covers_absent));
         for coord in h.held(1) {

@@ -264,13 +264,10 @@ pub fn reach(start: [i32; 3], bounds: Bounds, of: impl Fn([i32; 3]) -> Connectiv
 /// Minecraft's walk from the camera's Chunk: breadth first, each Chunk once,
 /// leaving one only through a face its connectivity joins to the face it was
 /// entered through, and never stepping back against a direction already
-/// taken. What it never enters is hidden. Conservative only up to the one entry per Chunk it keeps: a corner
-/// that sight bends around twice is culled, as in Minecraft.
-pub fn sight(
-    start: [i32; 3],
-    bounds: Bounds,
-    of: impl Fn([i32; 3]) -> Connectivity,
-) -> Visited {
+/// taken. What it never enters is hidden. Conservative only up to the one
+/// entry per Chunk it keeps: a corner that sight bends around twice is culled,
+/// as in Minecraft.
+pub fn sight(start: [i32; 3], bounds: Bounds, of: impl Fn([i32; 3]) -> Connectivity) -> Visited {
     let mut seen = vec![0u8; bounds.volume()];
     let Some(i) = bounds.index(start) else {
         return Visited { bounds, seen };
@@ -517,7 +514,10 @@ mod tests {
         let seen = sight([0; 3], line, world(&walls));
         assert!(seen.contains([3, 0, 0]));
         // Rock beside the Chunk above the tunnel, so only the tunnel could lead there.
-        walls.extend([([0, 1, 0], Connectivity::NONE), ([2, 1, 0], Connectivity::NONE)]);
+        walls.extend([
+            ([0, 1, 0], Connectivity::NONE),
+            ([2, 1, 0], Connectivity::NONE),
+        ]);
         let plane = Bounds {
             min: [0, 0, 0],
             max: [3, 1, 0],

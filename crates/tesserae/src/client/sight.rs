@@ -53,7 +53,9 @@ impl Culling {
         #[cfg(not(any(feature = "dev", feature = "profiling")))]
         let sight_cull: Option<String> = None;
         Culling {
-            cull: sight_cull.as_deref().is_some_and(|v| v == "1" || v == "noshadow"),
+            cull: sight_cull
+                .as_deref()
+                .is_some_and(|v| v == "1" || v == "noshadow"),
             shadowless: sight_cull.as_deref() == Some("noshadow"),
             count: cfg!(feature = "profiling")
                 && on("TESSERAE_PROFILE_VISIBILITY")
