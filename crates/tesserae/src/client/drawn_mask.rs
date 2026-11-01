@@ -254,6 +254,15 @@ mod tests {
         WorldSettings::default()
     }
 
+    #[test]
+    fn the_shader_reads_the_same_cover_bits() {
+        let shader = include_str!("../render/coverage.wesl");
+        for (name, bit) in [("SOME", SOME), ("ALL", ALL)] {
+            let line = format!("const {name}: u32 = {bit}u;");
+            assert!(shader.contains(&line), "coverage.wesl lacks `{line}`");
+        }
+    }
+
     fn key(level: u32, x: i32, y: i32, z: i32) -> (u32, ChunkCoord) {
         (level, ChunkCoord::new(x, y, z))
     }
