@@ -49,6 +49,11 @@ and render CPU time in every fixture.
   one distant patch. Lift90: the climb is frame-rate dependent (eye 149.92 vs
   149.81 m), so the whole view shifts. A single end capture cannot show
   popping in flight; the final series' captures should look for it.
+- After merging the integration tip (packed vertex), `bin-10-merged`,
+  `merged-stationary-{0,1,0b,1b}`: off is pixel-identical across runs; on
+  varies by 109 pixels between its own runs, all under the lake surface
+  where translucent water shows submerged faces. On vs off: 95 and 14
+  pixels, inside that spread. Worth a look in the final captures.
 - Expect it to fail the effect gate. Single runs, not an A/B, frame p50 off
   -> on: stationary 5.03 -> 15.94 ms, sprint-flight 4.92 -> 16.07, lift90
   3.60 -> 15.53. Render thread CPU barely moves (1.4 -> 1.7 ms) while the
