@@ -1,6 +1,6 @@
 # Defer meshing Chunks the Eye cannot reach
 
-Status: wontfix, proposed 2026-11-01 for your confirmation.
+Status: wontfix.
 
 Source: `tech/streaming-integration` at `fff9788`, not yet merged to `main`.
 Evidence: tickets 12 and 15 of
@@ -107,7 +107,7 @@ Any of these, measured as above:
 
 | #  | Ticket                                    | Blocked | Status          |
 | -- | ----------------------------------------- | ------- | --------------- |
-| 01 | Say why connectivity stays profiling-only | none    | ready-for-agent |
+| 01 | Say why connectivity stays profiling-only | none    | done            |
 | 02 | Connectivity and `reach` in release       | reopen  | wontfix         |
 | 03 | Hold level-0 meshes of unreached Chunks   | 02      | wontfix         |
 

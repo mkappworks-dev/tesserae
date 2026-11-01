@@ -232,7 +232,7 @@ measurable over logging alone, which was itself about 3.7% of median.
   still counts. Then comes `rescore_ms`: main-thread time the Server's ticks in
   that frame spent rebuilding dispatch orders (`server::priority`), every level.
   Last, empty unless `--instruments visibility`, come two walks over each
-  Chunk's face-to-face connectivity, which nothing yet culls or reorders by:
+  Chunk's face-to-face connectivity, which nothing culls or reorders by:
   `sight_drawn0` is the level-0 Chunks with geometry in the frustum;
   `sight_culled0` is those a walk from the camera's Chunk does not enter and
   `sight_retained_hidden0` the retained ones among them, which culling would

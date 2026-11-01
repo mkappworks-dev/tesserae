@@ -1,6 +1,6 @@
 # 01: Say why connectivity stays profiling-only
 
-Status: ready-for-agent
+Status: done
 Blocked by: none, once you confirm the spec's `wontfix`
 
 Spec: [defer unreachable meshing](../spec.md).
