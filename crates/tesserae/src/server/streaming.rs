@@ -1696,7 +1696,7 @@ pub(in crate::server) mod tests {
 
     /// The Server tick's streaming half, level 0 then the coarse levels, on a
     /// schedule a measurement runs by itself.
-    #[cfg(any(feature = "dev", feature = "profiling"))]
+    #[cfg(feature = "dev")]
     pub(in crate::server) fn add_stream_systems(
         app: &mut App,
         schedule: impl bevy::ecs::schedule::ScheduleLabel,
