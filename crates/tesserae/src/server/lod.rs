@@ -111,8 +111,8 @@ impl Default for LodBudget {
 }
 
 /// From this level up an untouched coarse Chunk is generated at its own Voxel size with no
-/// caves, one height per column, instead of downsampled from eight children: ticket 06's
-/// captures showed no cave from above that far out, and it costs a thirtieth of the job.
+/// caves, one height per column, instead of downsampled from eight children: captures show
+/// no cave from above that far out, and it costs a thirtieth of the job.
 const COLUMNS_FROM: u32 = 3;
 
 /// How far levels are made, so a dev or profiling run can compare against what ships.
@@ -2133,7 +2133,7 @@ mod tests {
                 );
             }
         }
-        // Built here as ticket 06 decided it: an 8 m Voxel asked about its middle, no caves.
+        // Built here as `COLUMNS_FROM` builds it: an 8 m Voxel asked about its middle, no caves.
         let p = tesserae_core::testgen::world_params();
         let columns = Worldgen::new(
             world().seed,

@@ -3,8 +3,7 @@
 //! (`docs/adr/0002-client-server-from-day-one.md`). `TESSERAE_SIGHT_CULL=1`
 //! under `dev` or `profiling` leaves the rest out of what the camera draws,
 //! though not out of the sun's shadow maps;
-//! `TESSERAE_PROFILE_VISIBILITY` counts what that would remove. Ticket 12 of
-//! `.scratch/2026-10-29-streaming-performance/`.
+//! `TESSERAE_PROFILE_VISIBILITY` counts what that would remove.
 
 #[cfg(feature = "profiling")]
 use bevy::camera::primitives::{Aabb, Frustum};
@@ -32,8 +31,8 @@ const MARGIN_M: f32 = 4.0;
 pub(super) struct Culling {
     /// Whether to leave unseen Chunks out of what is drawn.
     pub cull: bool,
-    /// `TESSERAE_SIGHT_CULL=noshadow`: culled Chunks cast no shadow either, as
-    /// before they did. A control for review captures only.
+    /// `TESSERAE_SIGHT_CULL=noshadow`: culled Chunks cast no shadow either. A
+    /// control for review captures only.
     pub shadowless: bool,
     /// Whether to count what that would remove.
     pub count: bool,
@@ -140,7 +139,7 @@ pub(super) fn walk(
     culling.stale = false;
 }
 
-/// This frame's level-0 draws, as ticket 09's regions make them, and what a
+/// This frame's level-0 draws, as their regions make them, and what a
 /// walk from the camera would remove from them.
 ///
 /// Bevy culls a region whole, so a Chunk is drawn if its region (its own box

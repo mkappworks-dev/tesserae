@@ -7,8 +7,7 @@
 //! draws its Chunk (delivered or retained, an empty mesh included) and no finer
 //! level's bit in the mask the shader reads discards it. Otherwise it is a
 //! *rule hole* when some level draws its Chunk but the mask discards it, and a
-//! *fill hole* when no level does. See
-//! `.scratch/2026-10-29-streaming-performance/`.
+//! *fill hole* when no level does.
 //!
 //! The rule in force is `docs/adr/0019-a-level-is-drawn-until-another-replaces-it.md`,
 //! read from the published mask words, so a mask out of step with the drawn

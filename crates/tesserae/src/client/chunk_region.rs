@@ -39,7 +39,7 @@ const DEFAULT_SHIFT: u32 = 1;
 const MAX_SHIFT: u32 = 5;
 
 /// `TESSERAE_REGION_CHUNKS=1` under `dev` or `profiling` draws a Chunk per
-/// entity again, so one binary can compare region sizes.
+/// entity, so one binary can compare region sizes.
 #[cfg(any(feature = "dev", feature = "profiling"))]
 fn configured_shift() -> u32 {
     std::env::var("TESSERAE_REGION_CHUNKS")

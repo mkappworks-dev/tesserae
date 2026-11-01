@@ -158,7 +158,7 @@ impl ChunkEntities {
         self.blended_hidden = hidden;
     }
 
-    /// Each level-0 Chunk that draws something, as 09's regions draw it.
+    /// Each level-0 Chunk that draws something, as its region draws it.
     #[cfg(feature = "profiling")]
     pub(super) fn level_zero_drawn(&self) -> Vec<DrawnChunk> {
         let mut coords: HashSet<ChunkCoord> = self

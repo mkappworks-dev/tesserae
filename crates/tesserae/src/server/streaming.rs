@@ -2316,9 +2316,8 @@ pub(in crate::server) mod tests {
         }
     }
 
-    /// Here the pre-03 order, highest layer first by distance, measured 3.3 and
-    /// column by column 4.2; the bound leaves room for when the pool's jobs
-    /// finish.
+    /// Ordered highest layer first by distance this measures 3.3, and column by
+    /// column 4.2; the bound leaves room for when the pool's jobs finish.
     #[test]
     fn a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above() {
         let solves = solves_per_chunk_filling_a_fresh_region();
