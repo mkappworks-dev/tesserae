@@ -1118,14 +1118,10 @@ pub(in crate::server) fn stream_lod(
     jobs.mesh.reset_counts();
     jobs.mesh.poll();
 
+    // ADR-0011: an unsaved World's levels above 1 read the generator alone.
+    let reach = if chunks.persistent { levels } else { 2 };
     for coord in changed {
-        let mut covering = coord;
-        for level in 1..if chunks.persistent { levels } else { 2 } {
-            covering = cover(covering);
-            if store.contains(level, covering) || jobs.generate.contains((level, covering)) {
-                state.invalidate(level, covering);
-            }
-        }
+        mark_cover(&store, &mut state, &jobs, (1, cover(coord)), reach);
     }
 
     let plans: Vec<Plan> = (1..levels)
@@ -1157,7 +1153,7 @@ pub(in crate::server) fn stream_lod(
         aim.score_m(min, cell_m, settings.view_distance_m) / 2f32.powi(level as i32)
     };
     land(
-        &plans, &mut store, &mut state, &mut jobs, &budget, &priority,
+        &plans, &mut store, &mut state, &mut jobs, &budget, &priority, reach,
     );
     land_meshes(
         &plans, &mut state, &mut jobs, &mut ready, &budget, &priority,
@@ -1267,6 +1263,7 @@ fn land(
     jobs: &mut LodJobs,
     budget: &LodBudget,
     priority: &dyn Fn(LodKey) -> f32,
+    reach: u32,
 ) {
     let mut finished: Vec<LodKey> = jobs.generate.finished().collect();
     finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
@@ -1287,7 +1284,18 @@ fn land(
             jobs.generate.note_stale();
             continue;
         }
+        // A first generation already read what is below it; a replacement that came out
+        // different is what the level above has not seen.
+        let changed = held
+            && level + 1 < reach
+            && store.shown(level, coord).is_none_or(|was| {
+                !was.chunk.same_packing(&coarse.chunk) || !was.overlay.same_packing(&coarse.overlay)
+            });
         store.insert(level, coord, coarse);
+        if changed {
+            mark_cover(store, state, jobs, (level + 1, cover(coord)), reach);
+        }
+        let lv = state.level_mut(level);
         lv.dirty.insert(coord);
         if held {
             // A first generation cannot change a mesh whose six neighbours are
@@ -1298,6 +1306,25 @@ fn land(
                 }
             }
         }
+    }
+}
+
+/// Marks the lowest level from `key` up, below `reach`, that holds or is generating the cover:
+/// above it, a cover is built from that one, and hears of the change when it lands changed.
+fn mark_cover(
+    store: &LodStore,
+    state: &mut LodState,
+    jobs: &LodJobs,
+    (mut level, mut covering): LodKey,
+    reach: u32,
+) {
+    while level < reach {
+        if store.contains(level, covering) || jobs.generate.contains((level, covering)) {
+            state.invalidate(level, covering);
+            return;
+        }
+        level += 1;
+        covering = cover(covering);
     }
 }
 
@@ -3464,6 +3491,7 @@ mod tests {
     }
 
     mod held;
+    mod saved;
     mod seams;
 }
 

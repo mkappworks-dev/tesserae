@@ -163,6 +163,11 @@ impl ChunkOverlay {
         self.storage.uniform()
     }
 
+    /// As [`crate::Chunk::same_packing`]: `true` means equal, `false` proves nothing.
+    pub fn same_packing(&self, other: &ChunkOverlay) -> bool {
+        self.storage == other.storage
+    }
+
     /// From the palette alone, so it errs towards `true` as
     /// [`crate::Chunk::may_contain_shaped`] does: the direction a gate needs.
     pub fn may_contain_fluid(&self) -> bool {

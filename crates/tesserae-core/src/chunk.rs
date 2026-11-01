@@ -60,7 +60,7 @@ fn write_index(words: &mut [u64], bits: u8, i: usize, value: usize) {
 /// One value per Voxel of a Chunk, palette-compressed. The Voxels themselves
 /// and the fluid overlay beside them share this, so the bit packing exists
 /// once.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Palette<T> {
     /// Every Voxel identical. The common case for air and for solid stone, and
     /// the reason a 4km view distance is affordable at all.
@@ -302,6 +302,12 @@ impl Chunk {
     /// `Some` when every Voxel is identical. Lets callers skip a Chunk entirely.
     pub fn uniform(&self) -> Option<Voxel> {
         self.storage.uniform()
+    }
+
+    /// Equal packing means equal Voxels, but equal Voxels can be packed
+    /// differently, so `false` proves nothing. Cheaper than comparing Voxels.
+    pub fn same_packing(&self, other: &Chunk) -> bool {
+        self.storage == other.storage
     }
 
     /// Every distinct Voxel the Chunk holds, and possibly some it no longer
