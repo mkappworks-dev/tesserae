@@ -236,8 +236,10 @@ fn begin(
                 continue;
             };
             let ticks: Vec<u64> = bytes
-                .chunks_exact(8)
-                .map(|b| u64::from_le_bytes(b.try_into().expect("eight bytes")))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|&b| u64::from_le_bytes(b))
                 .collect();
             if let Some(frame) = slot.frame {
                 let first = ticks.first().copied().unwrap_or(0);
