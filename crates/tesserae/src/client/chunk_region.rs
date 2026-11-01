@@ -28,9 +28,10 @@ use crate::client::chunk_view::layer_of;
 use crate::render::chunk_material::ChunkMaterial;
 use crate::world::{ChunkCoord, WorldSettings};
 
-/// Region edges are powers of two, so a region is a coordinate shift. 4 Chunks
-/// an edge at level 0 is 128 Voxels, well inside the packed position's ±2047.
-const DEFAULT_SHIFT: u32 = 2;
+/// Region edges are powers of two, so a region is a coordinate shift. 2 Chunks
+/// an edge, not 4: Bevy culls a region whole, and in single captures 4 drew
+/// enough extra geometry to cost 5-8% of a GPU-bound frame against 1-2% for 2.
+const DEFAULT_SHIFT: u32 = 1;
 
 /// 32 Chunks an edge is 1024 Voxels; the next power of two is past the range.
 const MAX_SHIFT: u32 = 5;
@@ -122,6 +123,7 @@ impl Regions {
     }
 
     /// The entity drawing the Chunk's layer, once its region is assembled.
+    #[cfg(test)]
     pub(super) fn entity(&self, key: Key) -> Option<Entity> {
         if !self.parts.contains_key(&key) {
             return None;

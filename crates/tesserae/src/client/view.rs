@@ -175,15 +175,22 @@ pub(super) fn place(
 
 type QuadBoxes = Arc<[(Vec3, Vec3)]>;
 
+struct Cached {
+    used: bool,
+    /// Held so the part's address, the cache key, cannot be reused while
+    /// it is cached.
+    _part: Arc<PackedLayer>,
+    boxes: QuadBoxes,
+}
+
 /// The drawn faces of nearby Chunks the Server sent, as axis-aligned boxes.
 /// What the camera collides with is what is drawn, never World storage.
 #[derive(SystemParam)]
 pub(super) struct Obstacles<'w, 's> {
     world: Res<'w, WorldSettings>,
     chunks: Res<'w, ChunkEntities>,
-    /// By the part's address. An entry holds its part, so the address cannot
-    /// be reused while it is cached.
-    cache: Local<'s, HashMap<usize, (bool, Arc<PackedLayer>, QuadBoxes)>>,
+    /// By the part's address.
+    cache: Local<'s, HashMap<usize, Cached>>,
 }
 
 impl Obstacles<'_, '_> {
@@ -228,17 +235,25 @@ impl Obstacles<'_, '_> {
 
     fn boxes(&mut self, part: Arc<PackedLayer>) -> QuadBoxes {
         let at = Arc::as_ptr(&part) as usize;
-        if let Some((used, _, boxes)) = self.cache.get_mut(&at) {
-            *used = true;
-            return boxes.clone();
+        if let Some(cached) = self.cache.get_mut(&at) {
+            cached.used = true;
+            return cached.boxes.clone();
         }
         let boxes = quad_boxes(&part);
-        self.cache.insert(at, (true, part, boxes.clone()));
+        self.cache.insert(
+            at,
+            Cached {
+                used: true,
+                _part: part,
+                boxes: boxes.clone(),
+            },
+        );
         boxes
     }
 
     fn forget_unused(&mut self) {
-        self.cache.retain(|_, (used, _, _)| std::mem::take(used));
+        self.cache
+            .retain(|_, cached| std::mem::take(&mut cached.used));
     }
 }
 

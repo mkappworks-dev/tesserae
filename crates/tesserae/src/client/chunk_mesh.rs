@@ -150,6 +150,7 @@ fn face_of(normal: [f32; 3]) -> i16 {
 
 /// What `chunk_vertex.wesl` reads back from a mesh [`chunk_mesh_to_mesh`]
 /// made, in Voxels: the layer it was made from.
+#[cfg(test)]
 pub fn decoded(mesh: &Mesh) -> Option<MeshLayer> {
     let (
         Some(VertexAttributeValues::Sint16x4(position_face)),
