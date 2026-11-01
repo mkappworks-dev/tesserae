@@ -11,13 +11,18 @@ use bevy::shape::ViewFrustum;
 use tesserae_core::visibility::{Bounds, Connectivity, Visited, sight};
 
 use super::camera::MainCamera;
-use super::chunk_view::ChunkEntities;
+use super::chunk_view::{ChunkEntities, DrawnChunk};
 use crate::server::streaming::{ChunkMeshReady, ChunkUnloaded, Rings, StreamingSettings};
 use crate::session::SessionApp;
 use crate::world::{ChunkCoord, WorldSettings};
 
-/// This frame's level-0 Chunks with geometry in the frustum, and those of
-/// them the walk does not enter.
+/// This frame's level-0 draws, as ticket 09's regions make them, and what a
+/// walk from the camera would remove from them.
+///
+/// Bevy culls a region whole, so a Chunk is drawn if its region (its own box
+/// for a blended layer) is in the frustum. A Chunk the walk does not enter
+/// would be left out of its region's next assembly; a region none of whose
+/// Chunks it enters would not be drawn at all.
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct Sight {
     pub counted: bool,
@@ -27,6 +32,12 @@ pub struct Sight {
     /// Retained and not entered: culling must draw these anyway, since a
     /// retained mesh stands in for a hole.
     pub retained_hidden: u32,
+    /// Opaque and cutout quads of the drawn Chunks, and of the culled ones.
+    pub quads: u64,
+    pub quads_culled: u64,
+    /// Opaque and cutout regions drawn, and those culling would empty.
+    pub regions: u32,
+    pub regions_culled: u32,
 }
 
 /// The connectivity of every level-0 Chunk the Client holds a mesh for.
@@ -83,10 +94,11 @@ fn count(
         &transform.back(),
         streaming.view_distance_m + cell_m,
     ));
-    let shown = |[x, y, z]: [i32; 3]| {
+    let box_shown = |[x, y, z]: [i32; 3], edge: i32| {
         let min = Vec3::new(x as f32, y as f32, z as f32) * cell_m;
-        frustum.intersects_obb_identity(&Aabb::from_min_max(min, min + cell_m))
+        frustum.intersects_obb_identity(&Aabb::from_min_max(min, min + cell_m * edge as f32))
     };
+    let shown = |c: [i32; 3]| box_shown(c, 1);
     let at = world.chunk_at(transform.translation());
     let keep = Rings::new(*streaming, cell_m).keep;
     let bounds = Bounds::around(
@@ -101,34 +113,49 @@ fn count(
             .unwrap_or(Connectivity::ALL)
     };
     let walked = sight([at.x, at.y, at.z], bounds, of, shown);
-    *out = tally(&walked, entities.level_zero_drawn(), shown);
+    *out = tally(&walked, &entities.level_zero_drawn(), box_shown);
 }
 
-/// `drawn` is each level-0 Chunk with geometry and whether it is retained.
+/// `box_shown` answers for a box of `edge` Chunks from its least corner.
 fn tally(
     walked: &Visited,
-    drawn: impl Iterator<Item = (ChunkCoord, bool)>,
-    shown: impl Fn([i32; 3]) -> bool,
+    drawn: &[DrawnChunk],
+    box_shown: impl Fn([i32; 3], i32) -> bool,
 ) -> Sight {
     let mut out = Sight {
         counted: true,
         ..default()
     };
-    for (c, retained) in drawn {
-        let c = [c.x, c.y, c.z];
-        if !shown(c) {
+    // Per drawn region: whether anything in it would still be drawn.
+    let mut regions: HashMap<ChunkCoord, bool> = HashMap::default();
+    for chunk in drawn {
+        let c = [chunk.coord.x, chunk.coord.y, chunk.coord.z];
+        let region_shown = chunk
+            .region
+            .filter(|&(r, edge)| box_shown([r.x * edge, r.y * edge, r.z * edge], edge));
+        if region_shown.is_none() && !(chunk.blended && box_shown(c, 1)) {
             continue;
+        }
+        let kept = walked.contains(c) || chunk.retained;
+        if let Some((region, _)) = region_shown {
+            *regions.entry(region).or_default() |= kept;
+            out.quads += chunk.quads as u64;
+            if !kept {
+                out.quads_culled += chunk.quads as u64;
+            }
         }
         out.drawn += 1;
         if walked.contains(c) {
             continue;
         }
-        if retained {
+        if chunk.retained {
             out.retained_hidden += 1;
         } else {
             out.culled += 1;
         }
     }
+    out.regions = regions.len() as u32;
+    out.regions_culled = regions.values().filter(|&&kept| !kept).count() as u32;
     out
 }
 
@@ -136,9 +163,19 @@ fn tally(
 mod tests {
     use super::*;
 
-    #[test]
-    fn what_lies_behind_a_wall_of_rock_is_culled_unless_it_is_retained() {
-        let bounds = Bounds::around([0; 3], [6, 2, 2]);
+    fn chunk(x: i32, retained: bool) -> DrawnChunk {
+        DrawnChunk {
+            coord: ChunkCoord::new(x, 0, 0),
+            retained,
+            region: Some((ChunkCoord::new(x >> 1, 0, 0), 2)),
+            blended: false,
+            quads: 10,
+        }
+    }
+
+    /// Rock fills x = 2: the walk from the origin sees its face and nothing
+    /// past it.
+    fn walled() -> Visited {
         let of = |c: [i32; 3]| {
             if c[0] == 2 {
                 Connectivity::NONE
@@ -146,24 +183,48 @@ mod tests {
                 Connectivity::ALL
             }
         };
-        let everywhere = |_: [i32; 3]| true;
-        let walked = sight([0; 3], bounds, of, everywhere);
-        let c = |x| ChunkCoord::new(x, 0, 0);
-        let drawn = [(c(1), false), (c(2), false), (c(3), false), (c(4), true)];
-        let s = tally(&walked, drawn.into_iter(), everywhere);
-        assert_eq!((s.drawn, s.culled, s.retained_hidden), (4, 1, 1));
+        sight([0; 3], Bounds::around([0; 3], [7, 2, 2]), of, |_| true)
     }
 
     #[test]
-    fn a_chunk_outside_the_frustum_is_not_counted_as_drawn() {
-        let bounds = Bounds::around([0; 3], [3, 0, 0]);
-        let ahead = |c: [i32; 3]| c[0] >= 0;
-        let walked = sight([0; 3], bounds, |_| Connectivity::ALL, ahead);
+    fn what_lies_behind_a_wall_of_rock_is_culled_unless_it_is_retained() {
         let drawn = [
-            (ChunkCoord::new(-2, 0, 0), false),
-            (ChunkCoord::new(2, 0, 0), false),
+            chunk(1, false),
+            chunk(2, false),
+            chunk(3, false),
+            chunk(4, true),
         ];
-        let s = tally(&walked, drawn.into_iter(), ahead);
-        assert_eq!((s.drawn, s.culled), (1, 0));
+        let s = tally(&walled(), &drawn, |_, _| true);
+        assert_eq!((s.drawn, s.culled, s.retained_hidden), (4, 1, 1));
+        assert_eq!((s.quads, s.quads_culled), (40, 10));
+    }
+
+    #[test]
+    fn a_region_is_culled_only_when_nothing_in_it_is_still_drawn() {
+        // Regions x/2 = 0, 1, 2, 3: (0, 1) seen, (2 seen, 3 not), (4, 5 not),
+        // (6 retained, 7 not).
+        let drawn: Vec<_> = (0..8).map(|x| chunk(x, x == 6)).collect();
+        let s = tally(&walled(), &drawn, |_, _| true);
+        assert_eq!((s.regions, s.regions_culled), (4, 1));
+    }
+
+    #[test]
+    fn a_chunk_counts_as_drawn_when_its_region_is_in_the_frustum() {
+        // Region 1 spans x = 2 and 3; only x >= 3 is in the frustum.
+        let ahead = |c: [i32; 3], edge: i32| c[0] + edge > 3;
+        let blended = DrawnChunk {
+            region: None,
+            blended: true,
+            ..chunk(2, false)
+        };
+        let s = tally(
+            &walled(),
+            &[chunk(2, false), blended, chunk(0, false)],
+            ahead,
+        );
+        assert_eq!(
+            s.drawn, 1,
+            "the region holding x = 2, not its blended layer alone"
+        );
     }
 }

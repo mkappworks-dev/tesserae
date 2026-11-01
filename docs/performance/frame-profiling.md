@@ -198,13 +198,17 @@ measurable over logging alone, which was itself about 3.7% of median.
   that frame spent rebuilding dispatch orders (`server::priority`), every level.
   Last, empty unless `--instruments visibility`, come two walks over each
   Chunk's face-to-face connectivity, which nothing yet culls or reorders by:
-  `sight_drawn0` is the level-0 Chunks with geometry in the frustum,
-  `sight_culled0` those a walk from the camera's Chunk does not enter and
-  `sight_retained_hidden0` the retained ones among them, which culling would
-  still draw; `mesh_reach_run`, `mesh_reach_cpu_ms`, `mesh_unreach_run` and
-  `mesh_unreach_cpu_ms` split level-0 mesh jobs and their worker CPU since the
-  World opened by whether a walk from the Eye through open space reaches the
-  Chunk. The Server walk runs on the tick, so leave it out of a timing series.
+  `sight_drawn0` is the level-0 Chunks drawn, a Chunk counting when its region
+  (its own box for a blended layer alone) is in the frustum, as Bevy culls a
+  region whole; `sight_culled0` is those a walk from the camera's Chunk does not
+  enter and `sight_retained_hidden0` the retained ones among them, which culling
+  would still draw; `sight_quads0` and `sight_quads_culled0` are their opaque
+  and cutout quads, and `sight_regions0` and `sight_regions_culled0` the regions
+  drawn and those culling would empty. `mesh_reach_run`, `mesh_reach_cpu_ms`,
+  `mesh_unreach_run` and `mesh_unreach_cpu_ms` split level-0 mesh jobs and their
+  worker CPU since the World opened by whether a walk from the Eye through open
+  space reaches the Chunk. The Server walk runs on the tick, so leave it out of
+  a timing series.
 - `frames.flow.csv` has one row per level per fixed tick: Chunks held and
   meshed, and per stage (generate, relight, mesh) the Chunks waiting to
   dispatch, in flight, and since the World opened the jobs run and their worker
