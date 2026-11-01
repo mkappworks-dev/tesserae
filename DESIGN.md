@@ -113,9 +113,8 @@ Tune one noise frequency in voxel units, or hardcode a one-voxel step height,
 and voxel size is permanently fixed — every number in the game becomes secretly
 calibrated to it.
 
-Cost of small voxels is non-linear: 0.25m is 64× the voxels per cubic metre, so
-an unchanged chunk budget covers a quarter of the distance. View distance in
-metres scales as 1/`voxel_size`.
+Small voxels cost non-linearly; the arithmetic is in
+[ADR-0003](docs/adr/0003-voxel-size-is-per-world.md).
 
 ## Shaped voxels
 
@@ -531,7 +530,7 @@ multiplayer is a later transport swap, not a rewrite.
    sun, a day/night cycle, and cave lighting that reads as dark and lit by
    torches instead of flat ambient. Sky and time of day are World or Game
    settings, not a function of the seed. Biomes are generator behaviour and
-   belong to step 15; they are listed there because they change what the sky and
+   belong to step 13; they are listed there because they change what the sky and
    fog should be.
 
 ### Steps 10 to 27: engine systems and game content
@@ -542,26 +541,26 @@ ships no content: ADR-0016 keeps air as the only built-in Material. The
 controls, movement, save, camera and input work already in flight is tracked in
 `.scratch/2026-10-27-gameplay-performance-and-controls` and is not repeated.
 
-| #   | Step                    | Engine adds                                                                        | Game or Mod supplies               | Depends on |
-| --- | ----------------------- | ---------------------------------------------------------------------------------- | ---------------------------------- | ---------- |
-| 10  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21) | Which tools exist and what they do | -          |
-| 11  | Chat and commands       | Command registry, parser, permissions                                              | The commands                       | -          |
-| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                     | Item definitions                   | -          |
-| 13  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19) | Stack sizes, item rules            | 10, 12     |
-| 14  | Crafting                | Recipe schema, station interaction, UI host                                        | Recipes, stations                  | 13         |
-| 15  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                       | Biomes, ores, biome caves          | -          |
-| 16  | Weather                 | Weather state and tick, particles, sky hooks                                       | Weather types, climate rules       | 15         |
-| 17  | Plants                  | Growth on the Server tick, placement rules, harvesting                             | Plant data                         | 15         |
-| 18  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                 | Numbers and rules                  | 13         |
-| 19  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport            | Behaviours, spawn tables           | 12, 15, 18 |
-| 20  | NPCs                    | Persistent identity, dialogue and trade plumbing                                   | NPC definitions, dialogue          | 13, 19     |
-| 21  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view         | Map style, markers                 | 15         |
-| 22  | Audio                   | Audio engine, Server-driven events, mixing                                         | Sound and music assets             | -          |
-| 23  | Structures              | Template format, deterministic placement by worldgen and tools                     | Templates                          | 15         |
-| 24  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)             | Machine parts, logic components    | 12, 23     |
-| 25  | Modding SDK             | Mod loading from a folder, reload loop, WIT versioning, contract frozen for 1.0    | Example Game                       | -          |
-| 26  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                | Content made with them             | 23, 25     |
-| 27  | Release hardening       | macOS bundle, first-run, save migration tests, diagnostics, CI budgets             | -                                  | all        |
+| #   | Step                    | Engine adds                                                                        | Game or Mod supplies               | Depends on | Status          |
+| --- | ----------------------- | ---------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
+| 10  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21) | Which tools exist and what they do | -          | First tool done |
+| 11  | Chat and commands       | Command registry, parser, permissions                                              | The commands                       | -          | Not started     |
+| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                     | Item definitions                   | -          | Not started     |
+| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                       | Biomes, ores, biome caves          | -          | Not started     |
+| 14  | Audio                   | Audio engine, Server-driven events, mixing                                         | Sound and music assets             | -          | Not started     |
+| 15  | Modding SDK             | Mod loading from a folder, reload loop, WIT versioning, contract frozen for 1.0    | Example Game                       | -          | Not started     |
+| 16  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19) | Stack sizes, item rules            | 10, 12     | Not started     |
+| 17  | Crafting                | Recipe schema, station interaction, UI host                                        | Recipes, stations                  | 16         | Not started     |
+| 18  | Weather                 | Weather state and tick, particles, sky hooks                                       | Weather types, climate rules       | 13         | Not started     |
+| 19  | Plants                  | Growth on the Server tick, placement rules, harvesting                             | Plant data                         | 13         | Not started     |
+| 20  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view         | Map style, markers                 | 13         | Not started     |
+| 21  | Structures              | Template format, deterministic placement by worldgen and tools                     | Templates                          | 13         | Not started     |
+| 22  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                 | Numbers and rules                  | 16         | Not started     |
+| 23  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport            | Behaviours, spawn tables           | 12, 13, 22 | Not started     |
+| 24  | NPCs                    | Persistent identity, dialogue and trade plumbing                                   | NPC definitions, dialogue          | 16, 23     | Not started     |
+| 25  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)             | Machine parts, logic components    | 12, 21     | Not started     |
+| 26  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                | Content made with them             | 15, 21     | Not started     |
+| 27  | Release hardening       | macOS bundle, first-run, save migration tests, diagnostics, CI budgets             | -                                  | all        | Not started     |
 
 Notes:
 
@@ -572,15 +571,15 @@ Notes:
   Declaration, and the Server runs the kind in native code, so no Mod is called
   when a tool is used. The demo declares one, Measure: it reads two corners of
   drawn Shapes in metres and Voxels and edits nothing. Taking a Voxel into an
-  inventory is step 12, and using a Voxel (a door, a container) is later work.
-- **Step 15** feeds the sky and fog colours from step 9. A World pins its
+  inventory is step 16, and using a Voxel (a door, a container) is later work.
+- **Step 13** feeds the sky and fog colours from step 9. A World pins its
   generator version so a new biome never changes an existing World's terrain for
   the same seed.
-- **Step 24** is the largest unknown in 1.0. Machines move as a unit, so they
+- **Step 15** is the gate for "ready for Mods".
+- **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save
   format for a body that straddles Chunks. Spike it before committing the scope.
-- **Step 25** is the gate for "ready for Mods".
 
 ### After 1.0
 

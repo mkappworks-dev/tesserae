@@ -6,7 +6,6 @@ Source baseline: `7907b6de57e337d6257fc5d345c27e098db0b6d1`.
 All Q1–Q49 recommendations were accepted during the grilling interview.
 [grilling.md](grilling.md) retains the questions and acceptance history.
 This document reconciles those decisions; it is the current product spec.
-[pr-scopes.md](pr-scopes.md) is historical research, not an alternate spec.
 
 ## Scope and authorization
 

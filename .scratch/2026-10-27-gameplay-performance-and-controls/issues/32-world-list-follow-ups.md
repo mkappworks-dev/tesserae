@@ -1,6 +1,6 @@
 # 32: W0.1: World list window and controller follow-ups
 
-Status: ready-for-agent
+Status: done
 Blocked by: none (27 is merged as #30)
 
 Spec: [reconciled desktop gameplay](../spec.md).

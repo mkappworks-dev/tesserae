@@ -1,6 +1,6 @@
 # 34: W1.1: RSS grows about 3 MB per World session
 
-Status: ready-for-human
+Status: done
 Blocked by: 30
 
 Spec: [reconciled desktop gameplay](../spec.md).
