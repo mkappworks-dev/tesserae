@@ -146,7 +146,8 @@ remain mandatory.
 Persistent fixtures append `save_snapshots`, `save_snapshot_ms`,
 `save_worker_ms` and `save_chunks` to the raw frame rows. An explicit disposable
 `TESSERAE_WORLD_DIR` enables saves for a capture; `restart` and `revisit`
-require one, and other fixtures otherwise remain ephemeral. `TESSERAE_EPHEMERAL=1` always disables persistence.
+require one, and other fixtures otherwise remain ephemeral.
+`TESSERAE_EPHEMERAL=1` always disables persistence.
 
 The snapshot counter increments when the Server dispatches an immutable save.
 Snapshot milliseconds measure its capture work on the Server, already included
@@ -160,8 +161,8 @@ fields do not establish power-loss safety, GPU cost or present latency.
 
 ## Streaming fixtures
 
-`--fixtures` also accepts six streaming fixtures, all on the demo's default
-seed and measured in the same 22–32 s phase:
+`--fixtures` also accepts six streaming fixtures, all on the demo's default seed
+and measured in the same 22–32 s phase:
 
 - `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
   heading.
@@ -173,13 +174,13 @@ seed and measured in the same 22–32 s phase:
 - `teleport`: the Server moves the Player 2 km along x at 22 s, keeping its
   height above the generated ground; `streaming_settled` gives the time to
   refill.
-- `revisit`: the same jump on a Persistent World, then back to the start as
-  soon as the far side has settled, so the return refills ground the World held
-  a moment ago.
+- `revisit`: the same jump on a Persistent World, then back to the start as soon
+  as the far side has settled, so the return refills ground the World held a
+  moment ago.
 - `restart`: at 22 s the World saves and quits the way a player's Save and quit
-  does, then reopens from its save in the same process, as the World list
-  would. The reopen's GPU pipelines are already compiled, so it measures the
-  World opening and refilling, not a cold launch.
+  does, then reopens from its save in the same process, as the World list would.
+  The reopen's GPU pipelines are already compiled, so it measures the World
+  opening and refilling, not a cold launch.
 
 `restart` and `revisit` need a `TESSERAE_WORLD_DIR` that does not exist yet and
 refuse to start otherwise; the runner gives each run a `world` folder inside its

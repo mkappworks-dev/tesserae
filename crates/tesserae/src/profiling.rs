@@ -573,7 +573,14 @@ mod tests {
         assert_eq!(app.world().resource::<Profile>().start, long_ago);
         app.world_mut().resource_mut::<Profile>().rows.push(row);
         app.update();
-        assert!(app.world().resource::<Profile>().start.elapsed().as_secs_f64() < 1.0);
+        assert!(
+            app.world()
+                .resource::<Profile>()
+                .start
+                .elapsed()
+                .as_secs_f64()
+                < 1.0
+        );
     }
 
     #[test]
