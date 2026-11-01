@@ -8,6 +8,7 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use crate::client::holes::{Holes, LEVELS};
+use crate::client::sight::Sight;
 use crate::cost::{FrameCost, MainThreadCost, thread_cpu};
 use crate::server::{
     ProfileFixtureStatus, SimulationProfile,
@@ -70,6 +71,8 @@ struct Row {
     holes: Holes,
     /// Mesh entities each camera's visibility pass kept, by camera order.
     visible: [u32; CAMERAS],
+    sight: Sight,
+    mesh_reach: Option<[(u64, f64); 2]>,
 }
 
 /// Camera orders recorded: the Player's and one per coarse level.
@@ -82,6 +85,7 @@ struct VisibleMeshes([u32; CAMERAS]);
 #[derive(bevy::ecs::system::SystemParam)]
 struct Drawn<'w, 's> {
     holes: Option<Res<'w, Holes>>,
+    sight: Option<Res<'w, Sight>>,
     visible: Res<'w, VisibleMeshes>,
     exit: MessageReader<'w, 's, AppExit>,
 }
@@ -238,6 +242,8 @@ fn end(
         focused: windows.iter().any(|w| w.focused),
         holes: drawn.holes.as_deref().copied().unwrap_or_default(),
         visible: drawn.visible.0,
+        sight: drawn.sight.as_deref().copied().unwrap_or_default(),
+        mesh_reach: streaming.mesh_reach,
     });
     if profile.rows.len() >= MAX_FRAMES || drawn.exit.read().next().is_some() {
         // The incomplete final interval is excluded, never replaced with virtual time.
@@ -269,6 +275,9 @@ fn save(
             .chain(std::iter::once(",chunk_entities".to_string()))
             .chain((0..CAMERAS).map(|c| format!(",visible_meshes_camera{c}")))
             .chain(std::iter::once(",rescore_ms".to_string()))
+            .chain(std::iter::once(
+                ",sight_drawn0,sight_culled0,sight_retained_hidden0,mesh_reach_run,mesh_reach_cpu_ms,mesh_unreach_run,mesh_unreach_cpu_ms".to_string()
+            ))
             .collect::<String>()
     )?;
     for r in &profile.rows {
@@ -325,7 +334,17 @@ fn save(
         for count in r.visible {
             write!(out, ",{count}")?;
         }
-        writeln!(out, ",{}", r.cost.rescore_s * 1e3)?;
+        write!(out, ",{}", r.cost.rescore_s * 1e3)?;
+        if r.sight.counted {
+            let s = r.sight;
+            write!(out, ",{},{},{}", s.drawn, s.culled, s.retained_hidden)?;
+        } else {
+            write!(out, ",,,")?;
+        }
+        match r.mesh_reach {
+            Some([(a, b), (c, d)]) => writeln!(out, ",{a},{b},{c},{d}")?,
+            None => writeln!(out, ",,,,")?,
+        }
     }
     out.flush()?;
     let mut meta = BufWriter::new(
@@ -509,6 +528,8 @@ mod tests {
                 focused: false,
                 holes: Holes::default(),
                 visible: [0; CAMERAS],
+                sight: Sight::default(),
+                mesh_reach: None,
             }),
         });
         app.add_systems(First, begin.after(crate::client::presentation::FramePacing));

@@ -160,7 +160,7 @@ fields do not establish power-loss safety, GPU cost or present latency.
 
 ## Streaming fixtures
 
-`--fixtures` also accepts four streaming fixtures, all on the demo's default
+`--fixtures` also accepts five streaming fixtures, all on the demo's default
 seed and measured in the same 22–32 s phase:
 
 - `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
@@ -173,6 +173,9 @@ seed and measured in the same 22–32 s phase:
 - `teleport`: the Server moves the Player 2 km along x at 22 s, keeping its
   height above the generated ground; `streaming_settled` gives the time to
   refill.
+- `cave`: the Server puts the Eye in a cave within 128 m of spawn on its first
+  tick, under at least 8 m of ground, and the camera turns through 360 degrees
+  level with the horizon over 22–32 s.
 
 Each run adds up to three files beside `frames.csv`, and the runner summarises
 them in `streaming.json`. Two of the instruments are opt-in through
@@ -191,8 +194,17 @@ measurable over logging alone, which was itself about 3.7% of median.
   on the Client from what it was sent, never from World storage. The rule in
   force is the metre cut; a Cell the cut's edge crosses is split up to three
   levels finer, then tested at its centre. A hole hidden behind nearer terrain
-  still counts. Last comes `rescore_ms`: main-thread time the Server's ticks in
+  still counts. Then comes `rescore_ms`: main-thread time the Server's ticks in
   that frame spent rebuilding dispatch orders (`server::priority`), every level.
+  Last, empty unless `--instruments visibility`, come two walks over each
+  Chunk's face-to-face connectivity, which nothing yet culls or reorders by:
+  `sight_drawn0` is the level-0 Chunks with geometry in the frustum,
+  `sight_culled0` those a walk from the camera's Chunk does not enter and
+  `sight_retained_hidden0` the retained ones among them, which culling would
+  still draw; `mesh_reach_run`, `mesh_reach_cpu_ms`, `mesh_unreach_run` and
+  `mesh_unreach_cpu_ms` split level-0 mesh jobs and their worker CPU since the
+  World opened by whether a walk from the Eye through open space reaches the
+  Chunk. The Server walk runs on the tick, so leave it out of a timing series.
 - `frames.flow.csv` has one row per level per fixed tick: Chunks held and
   meshed, and per stage (generate, relight, mesh) the Chunks waiting to
   dispatch, in flight, and since the World opened the jobs run and their worker

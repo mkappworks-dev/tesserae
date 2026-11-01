@@ -366,6 +366,84 @@ pub(in crate::server) struct MeshState {
     /// the Weak makes an Edit's `Arc::make_mut` move the Chunk, so a stale
     /// entry never matches what the store holds.
     connectivity: HashMap<ChunkCoord, (std::sync::Weak<Chunk>, Connectivity)>,
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub(in crate::server) reach: MeshReach,
+}
+
+/// Level-0 mesh jobs and their worker CPU, split by whether a walk from the
+/// Eye through open space reaches the Chunk: what moving the unreachable ones
+/// to the back of the order would defer. `TESSERAE_PROFILE_VISIBILITY` only,
+/// as the walk runs on the tick.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+#[derive(Clone)]
+pub(in crate::server) struct MeshReach {
+    pub on: bool,
+    /// Reached jobs and nanoseconds, then unreached ones.
+    split: Arc<[std::sync::atomic::AtomicU64; 4]>,
+}
+
+#[cfg(any(feature = "dev", feature = "profiling"))]
+impl Default for MeshReach {
+    fn default() -> Self {
+        MeshReach {
+            on: std::env::var_os("TESSERAE_PROFILE_VISIBILITY").is_some(),
+            split: Arc::default(),
+        }
+    }
+}
+
+#[cfg(any(feature = "dev", feature = "profiling"))]
+impl MeshReach {
+    /// `[(jobs, cpu ms) reached, (jobs, cpu ms) not]` since the World opened.
+    pub fn totals(&self) -> [(u64, f64); 2] {
+        use std::sync::atomic::Ordering::Relaxed;
+        let at = |i: usize| self.split[i].load(Relaxed);
+        [(at(0), at(1) as f64 / 1e6), (at(2), at(3) as f64 / 1e6)]
+    }
+
+    /// `work`, charging its thread CPU to the reached or the unreached side.
+    fn charge<T, W: FnOnce() -> T + Send + 'static>(
+        &self,
+        reached: bool,
+        work: W,
+    ) -> impl FnOnce() -> T + Send + 'static + use<T, W> {
+        let split = Arc::clone(&self.split);
+        let side = if reached { 0 } else { 2 };
+        move || {
+            use std::sync::atomic::Ordering::Relaxed;
+            let before = crate::cost::thread_cpu();
+            let out = work();
+            split[side].fetch_add(1, Relaxed);
+            if let Some((a, b)) = before.zip(crate::cost::thread_cpu()) {
+                split[side + 1].fetch_add(((b - a) * 1e9) as u64, Relaxed);
+            }
+            out
+        }
+    }
+}
+
+/// The Chunks of `load` a walk from `center` through open space enters, from
+/// the connectivity each held Chunk was generated or meshed with. One without
+/// any counts as open.
+#[cfg(any(feature = "dev", feature = "profiling"))]
+fn reachable(
+    store: &ChunkStore,
+    meshes: &MeshState,
+    center: ChunkCoord,
+    load: Extent,
+) -> tesserae_core::visibility::Visited {
+    let c = [center.x, center.y, center.z];
+    let bounds = tesserae_core::visibility::Bounds::around(
+        c,
+        [load.horizontal, load.vertical, load.horizontal],
+    );
+    tesserae_core::visibility::reach(c, bounds, |[x, y, z]| {
+        let coord = ChunkCoord::new(x, y, z);
+        store
+            .shared(coord)
+            .and_then(|held| meshes.connectivity_of(coord, &held.chunk))
+            .unwrap_or(Connectivity::ALL)
+    })
 }
 
 impl MeshState {
@@ -626,7 +704,7 @@ fn stream(
         &mut jobs,
         order,
         center,
-        rings.mesh,
+        (rings.mesh, rings.load),
         budget.in_flight.mesh,
         budget.wait_for_settled_light,
         &tables.0,
@@ -988,11 +1066,15 @@ fn dispatch_meshes(
     jobs: &mut Jobs,
     order: &LoadOrder,
     center: ChunkCoord,
-    mesh: Extent,
+    (mesh, load): (Extent, Extent),
     in_flight: usize,
     wait_for_settled_light: bool,
     tables: &Arc<Tables>,
 ) {
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
+    let _ = load;
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    let mut reached = None;
     let mut free = in_flight.saturating_sub(jobs.mesh.in_flight());
     for &d in &order.offsets {
         if free == 0 {
@@ -1023,8 +1105,18 @@ fn dispatch_meshes(
         meshes.dirty.remove(&coord);
         let known = meshes.connectivity_of(coord, &own.chunk);
         let tables = Arc::clone(tables);
-        jobs.mesh
-            .spawn(coord, move || build_mesh(&own, &around, known, &tables));
+        let work = move || build_mesh(&own, &around, known, &tables);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        if meshes.reach.on {
+            let walk = reached.get_or_insert_with(|| reachable(store, meshes, center, load));
+            let work = meshes
+                .reach
+                .charge(walk.contains([coord.x, coord.y, coord.z]), work);
+            jobs.mesh.spawn(coord, work);
+            free -= 1;
+            continue;
+        }
+        jobs.mesh.spawn(coord, work);
         free -= 1;
     }
 }
@@ -1106,6 +1198,11 @@ pub mod stats {
         /// they share the workers with streaming.
         #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
         pub fluid_run: (u64, f64),
+        /// Level-0 mesh jobs and worker CPU ms that a walk from the Eye
+        /// reached, then those it did not, since the World opened. `None`
+        /// unless `TESSERAE_PROFILE_VISIBILITY` is set.
+        #[cfg_attr(not(feature = "profiling"), allow(dead_code, reason = "profiler only"))]
+        pub mesh_reach: Option<[(u64, f64); 2]>,
     }
 
     /// Where [`StreamingStats`] is written, for a reader that must see this tick's.
@@ -1270,6 +1367,7 @@ pub mod stats {
             ],
             levels,
             fluid_run: fluids.map_or((0, 0.0), |f| f.jobs_run()),
+            mesh_reach: meshes.reach.on.then(|| meshes.reach.totals()),
         };
     }
 }
@@ -1799,6 +1897,17 @@ pub(in crate::server) mod tests {
         assert!(tunnel.connectivity.connects(NEG_X, POS_X));
         assert_ne!(tunnel.connectivity, before);
         assert_eq!(tunnel.connectivity, now(&h, deep));
+    }
+
+    #[test]
+    fn every_level_zero_mesh_job_is_charged_to_reached_or_unreached() {
+        let mut h = Harness::new(small(), UNLIMITED);
+        h.app.world_mut().resource_mut::<MeshState>().reach.on = true;
+        h.settle();
+        let [(reached, _), (unreached, _)] = h.app.world().resource::<MeshState>().reach.totals();
+        let (run, _) = h.jobs().mesh.run();
+        assert!(run > 0);
+        assert_eq!(reached + unreached, run);
     }
 
     #[test]

@@ -14,7 +14,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ['active', 'stationary', 'flight', 'transparency',
-            'sprint-flight', 'sprint-walk', 'dive', 'teleport']
+            'sprint-flight', 'sprint-walk', 'dive', 'teleport', 'cave']
 # Per fixture, what moves the Eye; teleport's jump is the Server's, at 22 s.
 MOTION = {
     'flight': dict(TESSERAE_SCREENSHOT_SPEED_M_S='12'),
@@ -24,6 +24,9 @@ MOTION = {
     # Up 320 m over 22-27 s and back down over 27-32 s, both at 64 m/s.
     'dive': dict(TESSERAE_SCREENSHOT_DIVE_M='320', TESSERAE_SCREENSHOT_FLY_AFTER_S='22',
                  TESSERAE_SCREENSHOT_FLY_S='10'),
+    # The Server puts the Eye in a cave; it turns through 360 degrees over 22-32 s.
+    'cave': dict(TESSERAE_SCREENSHOT_TURN_DEG='360', TESSERAE_SCREENSHOT_PITCH_DEG='0',
+                 TESSERAE_SCREENSHOT_FLY_AFTER_S='22', TESSERAE_SCREENSHOT_FLY_S='10'),
 }
 
 
@@ -192,7 +195,7 @@ def main():
     parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
     # Each costs more than the overhead bound, so a timing series leaves them off.
-    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes'], default=[])
+    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility'], default=[])
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
     args = parser.parse_args()

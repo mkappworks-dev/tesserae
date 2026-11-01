@@ -118,6 +118,17 @@ impl ChunkEntities {
             })
     }
 
+    /// Each level-0 Chunk with geometry, and whether it is retained.
+    #[cfg(feature = "profiling")]
+    pub(super) fn level_zero_drawn(&self) -> impl Iterator<Item = (ChunkCoord, bool)> + '_ {
+        let mut seen = HashSet::new();
+        [&self.opaque, &self.blended, &self.cutout]
+            .into_iter()
+            .flat_map(|layer| layer.keys())
+            .filter(move |&&(level, coord)| level == 0 && seen.insert(coord))
+            .map(|&key| (key.1, self.retained.contains(&key)))
+    }
+
     #[cfg(feature = "profiling")]
     pub(super) fn entity_count(&self) -> usize {
         self.opaque.len() + self.blended.len() + self.cutout.len()
