@@ -94,3 +94,37 @@ carries the offset.
 
 Status stays `ready-for-human`: effect gate and decision pending the final
 review series.
+
+### 2026-11-01: gate ruled on; cause fixed first (16); is the cache needed?
+
+You chose to fix the cause first: ticket 16, done on this branch. You also
+ruled that the 30% gate is judged on worker CPU until coarse generation has
+caught up (`coarse_generated` in `streaming.json`), not until
+`streaming_settled`.
+
+After 16, smoke runs at `6782863`, one each (16's Comments have the table):
+
+| Run                    | Settle from move | Caught up | Worker ms | Coarse gen ms | Share |
+| ---------------------- | ---------------- | --------- | --------- | ------------- | ----- |
+| restart (reopen)       | 0.27 + 0.77 s    | 7.95 s    | 6,351     | 2,427         | 38%   |
+| revisit (return)       | 0.76 s           | 4.61 s    | 4,080     | 1,419         | 35%   |
+| teleport, unsaved, ref | 0.81 s           | 4.91 s    | 3,562     | 1,148         | 32%   |
+
+Before 16 neither saved run caught up inside the window (backlog 2,876 and
+253 Chunks at +10 s; now 2 and 2).
+
+Answer, by the gate as ruled: still yes. Both fixtures are over 30% (38% and
+35%); `restart` settles level 0 1.04 s after the quit, well inside 3 s, so only
+the share trips it. Two numbers to weigh before building it:
+
+- An unsaved `teleport`, which a disk cache would not touch, is at 32%: once
+  level 0 settles, coarse generation is about a third of the work anywhere, so
+  the gate now trips on the share any refill has, not on something saved
+  Worlds do.
+- What a cache could remove on `restart` is the 2,427 ms of coarse generation
+  out of 6,351 ms; coarse meshing (2,670 ms) and level 0 stay. Level-0 settle
+  would not move. At best it shortens the 7.95 s catch-up by roughly a third,
+  at the cost of the derived-data cache and ADR-0011 amendment above.
+
+Smoke runs, not the review series; the gate's numbers come from the final
+series. Status stays `ready-for-human`.

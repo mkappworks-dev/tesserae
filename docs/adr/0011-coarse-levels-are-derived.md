@@ -91,10 +91,13 @@ The save step resolves the deferred loss above for persistent Worlds. Saved
 level-0 changes are a source even while evicted. At every coarse level, Jobs
 recursively derive only branches containing saved changes, while untouched
 branches use their existing level-specific generator. Invalidation follows all
-affected ancestors. Fluid/fire Overlays are carried through the same volume vote
-at those levels; natural thin-feature loss remains. Coarse Chunks are still
-derived data and never saved or edited. Ephemeral Worlds retain the original
-generator-only policy above level 1.
+affected ancestors one level at a time: a level is marked only when the Chunk
+below it was rebuilt different, and a rebuild reads the held coarse Chunk of a
+finer level for a branch with saved changes rather than deriving it again.
+Fluid/fire Overlays are carried through the same volume vote at those levels;
+natural thin-feature loss remains. Coarse Chunks are still derived data and
+never saved or edited. Ephemeral Worlds retain the original generator-only
+policy above level 1.
 
 ## Columns from level 3
 

@@ -726,11 +726,14 @@ fn seam_margin(level: u32) -> Option<SeamMargin> {
     }
 }
 
+/// `finer` holds coarse Chunks of the levels below that are current for `saved`: a branch
+/// found there is read, not derived again.
 fn generate_persistent(
     level: u32,
     coord: ChunkCoord,
     sources: &[Worldgen],
     saved: &std::collections::BTreeMap<ChunkCoord, Held>,
+    finer: &HashMap<LodKey, Held>,
     tables: &Tables,
 ) -> Coarse {
     let children = std::array::from_fn(|i| {
@@ -747,11 +750,13 @@ fn generate_persistent(
             ) == child
         });
         relevant.then(|| {
-            let coarse = generate_persistent(level - 1, child, sources, saved, tables);
-            Held {
-                chunk: Arc::new(coarse.chunk),
-                changed: Some(Arc::new(coarse.overlay)),
-            }
+            finer.get(&(level - 1, child)).cloned().unwrap_or_else(|| {
+                let coarse = generate_persistent(level - 1, child, sources, saved, finer, tables);
+                Held {
+                    chunk: Arc::new(coarse.chunk),
+                    changed: Some(Arc::new(coarse.overlay)),
+                }
+            })
         })
     });
     let source = &sources[level as usize - 1];
@@ -1136,14 +1141,10 @@ pub(in crate::server) fn stream_lod(
     jobs.mesh.reset_counts();
     jobs.mesh.poll();
 
+    // ADR-0011: an unsaved World's levels above 1 read the generator alone.
+    let reach = if chunks.persistent { levels } else { 2 };
     for coord in changed {
-        let mut covering = coord;
-        for level in 1..if chunks.persistent { levels } else { 2 } {
-            covering = cover(covering);
-            if store.contains(level, covering) || jobs.generate.contains((level, covering)) {
-                state.invalidate(level, covering);
-            }
-        }
+        mark_cover(&store, &mut state, &jobs, (1, cover(coord)), reach);
     }
 
     let plans: Vec<Plan> = (1..levels)
@@ -1175,7 +1176,7 @@ pub(in crate::server) fn stream_lod(
         aim.score_m(min, cell_m, settings.view_distance_m) / 2f32.powi(level as i32)
     };
     land(
-        &plans, &mut store, &mut state, &mut jobs, &budget, &priority,
+        &plans, &mut store, &mut state, &mut jobs, &budget, &priority, reach,
     );
     land_meshes(
         &plans, &mut state, &mut jobs, &mut ready, &budget, &priority,
@@ -1285,6 +1286,7 @@ fn land(
     jobs: &mut LodJobs,
     budget: &LodBudget,
     priority: &dyn Fn(LodKey) -> f32,
+    reach: u32,
 ) {
     let mut finished: Vec<LodKey> = jobs.generate.finished().collect();
     finished.sort_unstable_by(|&a, &b| priority(a).total_cmp(&priority(b)));
@@ -1305,7 +1307,18 @@ fn land(
             jobs.generate.note_stale();
             continue;
         }
+        // A first generation already read what is below it; a replacement that came out
+        // different is what the level above has not seen.
+        let changed = held
+            && level + 1 < reach
+            && store.shown(level, coord).is_none_or(|was| {
+                !was.chunk.same_packing(&coarse.chunk) || !was.overlay.same_packing(&coarse.overlay)
+            });
         store.insert(level, coord, coarse);
+        if changed {
+            mark_cover(store, state, jobs, (level + 1, cover(coord)), reach);
+        }
+        let lv = state.level_mut(level);
         lv.dirty.insert(coord);
         if held {
             // A first generation cannot change a mesh whose six neighbours are
@@ -1316,6 +1329,25 @@ fn land(
                 }
             }
         }
+    }
+}
+
+/// Marks the lowest level from `key` up, below `reach`, that holds or is generating the cover:
+/// above it, a cover is built from that one, and hears of the change when it lands changed.
+fn mark_cover(
+    store: &LodStore,
+    state: &mut LodState,
+    jobs: &LodJobs,
+    (mut level, mut covering): LodKey,
+    reach: u32,
+) {
+    while level < reach {
+        if store.contains(level, covering) || jobs.generate.contains((level, covering)) {
+            state.invalidate(level, covering);
+            return;
+        }
+        level += 1;
+        covering = cover(covering);
     }
 }
 
@@ -1443,6 +1475,7 @@ fn dispatch(
         } else {
             Default::default()
         };
+        let finer = current_finer(store, state, plan.level, persistent.keys());
         let sources = (!persistent.is_empty()).then(|| generators.sources.clone());
         // An Edit must still show, so a probe yields to any changed child.
         let direct = generators
@@ -1463,7 +1496,7 @@ fn dispatch(
         jobs.generate.spawn((level, coord), move || {
             times.generated(level, || {
                 if let Some(sources) = sources {
-                    generate_persistent(level, coord, &sources, &persistent, &tables)
+                    generate_persistent(level, coord, &sources, &persistent, &finer, &tables)
                 } else if let Some(direct) = direct {
                     Coarse {
                         chunk: direct.chunk(coord.x, coord.y, coord.z),
@@ -1484,6 +1517,44 @@ fn dispatch(
             })
         });
     }
+}
+
+/// The held coarse Chunks below `level` over `homes` that no mark or job says are out of date,
+/// for [`generate_persistent`] to read instead of deriving them again.
+fn current_finer<'a>(
+    store: &LodStore,
+    state: &mut LodState,
+    level: u32,
+    homes: impl Iterator<Item = &'a ChunkCoord>,
+) -> HashMap<LodKey, Held> {
+    let mut finer = HashMap::new();
+    for home in homes {
+        for below in 1..level {
+            let divisor = 1i32 << below;
+            let at = ChunkCoord::new(
+                home.x.div_euclid(divisor),
+                home.y.div_euclid(divisor),
+                home.z.div_euclid(divisor),
+            );
+            let marks = state.level_mut(below);
+            if finer.contains_key(&(below, at))
+                || marks.stale.contains(&at)
+                || marks.regenerating.contains(&at)
+            {
+                continue;
+            }
+            if let Some(shown) = store.shown(below, at) {
+                finer.insert(
+                    (below, at),
+                    Held {
+                        chunk: shown.chunk,
+                        changed: Some(shown.overlay),
+                    },
+                );
+            }
+        }
+    }
+    finer
 }
 
 /// A held level-0 Chunk as level 1 reads it. Its overlay is read once anything changed it,
@@ -3529,6 +3600,7 @@ mod tests {
     }
 
     mod held;
+    mod saved;
     mod seams;
 }
 
@@ -3536,6 +3608,107 @@ mod tests {
 mod persistence_tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    fn same(a: &Coarse, b: &Coarse) -> bool {
+        a.openings == b.openings
+            && (0..CHUNK_SIZE).all(|z| {
+                (0..CHUNK_SIZE).all(|y| {
+                    (0..CHUNK_SIZE).all(|x| {
+                        a.chunk.get(x, y, z) == b.chunk.get(x, y, z)
+                            && a.overlay.get(x, y, z) == b.overlay.get(x, y, z)
+                    })
+                })
+            })
+    }
+
+    #[test]
+    fn a_rebuild_reading_held_finer_chunks_makes_what_deriving_them_again_makes() {
+        let tables = crate::server::fixture_tables();
+        let world = WorldSettings::default();
+        let base = Worldgen::new(
+            world.seed,
+            world.voxel_size,
+            tesserae_core::testgen::world_params(),
+        );
+        let generators = LodGenerators::new(&world, &base, 5);
+        let water = tesserae_core::testgen::fixtures().water;
+        let mut wet = ChunkOverlay::none();
+        for (x, y, z) in (0..CHUNK_SIZE.pow(3)).map(|i| {
+            (
+                i % CHUNK_SIZE,
+                i / CHUNK_SIZE % CHUNK_SIZE,
+                i / CHUNK_SIZE.pow(2),
+            )
+        }) {
+            wet.set(
+                x,
+                y,
+                z,
+                tesserae_core::Overlay {
+                    fluid: Some(tesserae_core::Fluid::source(water)),
+                    burning: None,
+                },
+            );
+        }
+        let held = |chunk: Chunk, overlay: ChunkOverlay| Held {
+            chunk: Arc::new(chunk),
+            changed: Some(Arc::new(overlay)),
+        };
+        let stone = Voxel::cube(tesserae_core::testgen::fixtures().ground.rock);
+        // Three saved Chunks: two in one level-1 branch, one in a branch of its own.
+        let saved = BTreeMap::from([
+            (
+                ChunkCoord::new(0, -2, 0),
+                held(Chunk::air(), ChunkOverlay::none()),
+            ),
+            (ChunkCoord::new(1, -2, 0), held(Chunk::air(), wet)),
+            (
+                ChunkCoord::new(0, -1, 0),
+                held(Chunk::filled(stone), ChunkOverlay::none()),
+            ),
+            (
+                ChunkCoord::new(3, 0, 1),
+                held(Chunk::air(), ChunkOverlay::none()),
+            ),
+        ]);
+        for level in 2..=4 {
+            let mut finer = HashMap::new();
+            for below in 1..level {
+                for home in saved.keys() {
+                    let divisor = 1i32 << below;
+                    let at = ChunkCoord::new(
+                        home.x.div_euclid(divisor),
+                        home.y.div_euclid(divisor),
+                        home.z.div_euclid(divisor),
+                    );
+                    let made = generate_persistent(
+                        below,
+                        at,
+                        &generators.sources,
+                        &saved,
+                        &HashMap::new(),
+                        &tables,
+                    );
+                    finer.insert((below, at), held(made.chunk, made.overlay));
+                }
+            }
+            let divisor = 1i32 << level;
+            for home in saved.keys() {
+                let at = ChunkCoord::new(
+                    home.x.div_euclid(divisor),
+                    home.y.div_euclid(divisor),
+                    home.z.div_euclid(divisor),
+                );
+                let again = |held: &HashMap<LodKey, Held>| {
+                    generate_persistent(level, at, &generators.sources, &saved, held, &tables)
+                };
+                assert!(
+                    same(&again(&finer), &again(&HashMap::new())),
+                    "level {level} {at}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn archived_removals_are_sources_for_every_coarse_level() {
@@ -3558,7 +3731,14 @@ mod persistence_tests {
         for level in 1..=4 {
             let divisor = 1i32 << level;
             let covering = ChunkCoord::new(0, home.y.div_euclid(divisor), 0);
-            let coarse = generate_persistent(level, covering, &generators.sources, &saved, &tables);
+            let coarse = generate_persistent(
+                level,
+                covering,
+                &generators.sources,
+                &saved,
+                &HashMap::new(),
+                &tables,
+            );
             let plain = generate_coarse(
                 &generators.sources[level as usize - 1],
                 covering,
