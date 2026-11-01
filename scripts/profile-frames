@@ -14,7 +14,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ['active', 'stationary', 'flight', 'transparency',
-            'sprint-flight', 'sprint-walk', 'dive', 'teleport', 'cave']
+            'sprint-flight', 'sprint-walk', 'dive', 'teleport', 'cave', 'restart', 'revisit']
+# Saved to a fresh World folder inside each run's own folder.
+PERSISTENT = ['restart', 'revisit']
 # Per fixture, what moves the Eye; teleport's jump is the Server's, at 22 s.
 MOTION = {
     'flight': dict(TESSERAE_SCREENSHOT_SPEED_M_S='12'),
@@ -44,6 +46,75 @@ def distribution(values):
         key: values[max(0, math.ceil(len(values) * p) - 1)] if values else None
         for key, p in [('p50', .5), ('p95', .95), ('p99', .99), ('max', 1)]
     })
+
+
+STAGES = ['generate', 'relight', 'mesh']
+
+
+def work(flow, start, end):
+    """Worker CPU per level and stage from `start` to the last flow tick at or
+    before `end`, and coarse generation's share of it."""
+    def last(level, t):
+        picked = [r for r in flow if int(r['level']) == level and float(r['t_s']) <= t]
+        return picked[-1] if picked else None
+    def counters(r):
+        return {k: float(r[f'{k}_cpu_ms']) for k in STAGES + ['fluid']} if r else None
+    levels, fluid = {}, 0.0
+    for level in sorted({int(r['level']) for r in flow}):
+        before, after = counters(last(level, start - 1e-9)), counters(last(level, end))
+        if not after:
+            continue
+        # Counters run since the World opened, so a reopened World starts them at zero.
+        if not before or any(after[k] < before[k] for k in after):
+            before = dict.fromkeys(after, 0.0)
+        levels[str(level)] = {k: after[k] - before[k] for k in STAGES}
+        if level == 0:
+            fluid = after['fluid'] - before['fluid']
+    total = sum(sum(w.values()) for w in levels.values()) + fluid
+    coarse = sum(w['generate'] for level, w in levels.items() if level != '0')
+    return dict(worker_cpu_ms=levels, fluid_cpu_ms=fluid,
+                coarse_generate_share=coarse / total if total else None)
+
+
+def coarse_generated(flow, start, end):
+    """First flow tick in [start, end] at which every coarse level's load extent
+    is held or in flight, after one at which some of it was not."""
+    ticks = {}
+    for r in flow:
+        if int(r['level']) > 0 and start <= float(r['t_s']) <= end:
+            ticks.setdefault(float(r['t_s']), []).append(int(r['generate_waiting']))
+    waited = False
+    for t, waiting in sorted(ticks.items()):
+        waited |= any(waiting)
+        if waited and not any(waiting):
+            return t
+    return None
+
+
+def moves(rows, flow):
+    """Per fixture move (a jump, or the restart's reopen): how long after its
+    first frame streaming settled, the frameless gap before that frame, and
+    worker CPU per level and stage from the move until settled; then the same
+    until coarse generation caught up, which `streaming_settled` does not wait
+    for."""
+    out = []
+    for move in sorted({int(r['fixture_moves']) for r in rows} - {0}):
+        first = next(i for i, r in enumerate(rows) if int(r['fixture_moves']) == move)
+        leg = [r for r in rows[first:] if int(r['fixture_moves']) == move]
+        start, end = float(leg[0]['start_s']), float(leg[-1]['end_s'])
+        # Stats published before a jump still read settled.
+        unsettled = next((i for i, r in enumerate(leg) if r['streaming_settled'] != 'true'), None)
+        settled = None if unsettled is None else next(
+            (r for r in leg[unsettled:] if r['streaming_settled'] == 'true'), None)
+        entry = dict(move=move, settle_s=float(settled['start_s']) - start if settled else None,
+                     blank_s=start - float(rows[first - 1]['end_s']) if first else 0.0)
+        if settled and flow:
+            entry.update(work(flow, start, float(settled['end_s'])))
+        if flow:
+            t = coarse_generated(flow, start, end)
+            entry['coarse_generated'] = t and dict(s=t - start, **work(flow, start, t))
+        out.append(entry)
+    return out
 
 
 def streaming(path, rows):
@@ -111,6 +182,8 @@ def streaming(path, rows):
                 work[level]['fluid_worker_ms_per_s'] = (
                     float(b['fluid_cpu_ms']) - float(a['fluid_cpu_ms'])) / seconds
         out['workers'] = work
+    if 'fixture_moves' in rows[0]:
+        out['moves'] = moves(rows, flow if flow_path.exists() else [])
     return out
 
 
@@ -259,6 +332,8 @@ def main():
                                TESSERAE_SCREENSHOT_SETTLE_S='1', TESSERAE_SCREENSHOT_VIEW=args.view,
                                TESSERAE_SCREENSHOT_SPEED_M_S='0')
                     env.update(MOTION.get(case, {}))
+                    if case in PERSISTENT:
+                        env['TESSERAE_WORLD_DIR'] = str(run.resolve() / 'world')
                     if not args.presented:
                         env['TESSERAE_SCREENSHOT_OFFSCREEN'] = '1'
                     if enabled:

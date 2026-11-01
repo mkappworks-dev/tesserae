@@ -18,10 +18,32 @@ pub(super) fn plugin(app: &mut App) {
         BUILT.contains(&kind.as_str()) || MOVED.contains(&kind.as_str()),
         "Unknown profiling fixture"
     );
-    app.on_session_start(install)
+    if PERSISTENT.contains(&kind.as_str()) {
+        assert!(
+            std::env::var_os("TESSERAE_EPHEMERAL").is_none()
+                && std::env::var_os("TESSERAE_WORLD_DIR").is_some_and(|dir| std::fs::read_dir(dir)
+                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)),
+            "The {kind} fixture needs a TESSERAE_WORLD_DIR that does not exist yet"
+        );
+    }
+    // App-lifetime, so the move count survives the restart fixture's reopen.
+    app.init_resource::<ProfileFixtureStatus>()
+        .on_session_start(install)
         .add_session_systems(FixedPostUpdate, build.run_if(resource_exists::<Fixture>));
-    if kind == "teleport" {
-        app.add_session_systems(FixedUpdate, teleport.before(super::streaming::Streaming));
+    match kind.as_str() {
+        "teleport" => {
+            app.add_session_systems(FixedUpdate, teleport.before(super::streaming::Streaming));
+        }
+        "revisit" => {
+            app.add_session_systems(FixedUpdate, revisit.before(super::streaming::Streaming));
+        }
+        "restart" => {
+            app.add_session_systems(Update, restart).add_systems(
+                Update,
+                reopen.run_if(in_state(crate::session::AppState::List)),
+            );
+        }
+        _ => {}
     }
     if kind == "cave" {
         app.add_session_systems(FixedUpdate, into_cave.before(super::streaming::Streaming));
@@ -29,7 +51,7 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 const BUILT: [&str; 2] = ["transparency", "active"];
-const MOVED: [&str; 7] = [
+const MOVED: [&str; 9] = [
     "stationary",
     "flight",
     "sprint-flight",
@@ -37,14 +59,23 @@ const MOVED: [&str; 7] = [
     "dive",
     "teleport",
     "cave",
+    "restart",
+    "revisit",
 ];
+/// Fixtures that need saves, so their eviction and reopening are a Persistent
+/// World's.
+const PERSISTENT: [&str; 2] = ["restart", "revisit"];
 
 fn install(world: &mut World) {
     let Ok(kind) = std::env::var("TESSERAE_PROFILE_FIXTURE") else {
         return;
     };
+    let moves = world
+        .get_resource::<ProfileFixtureStatus>()
+        .map_or(0, |status| status.moves);
     world.insert_resource(ProfileFixtureStatus {
         ready: MOVED.contains(&kind.as_str()),
+        moves,
         ..default()
     });
     if kind == "transparency" || kind == "active" {
@@ -68,6 +99,8 @@ pub struct ProfileFixtureStatus {
     pub ready: bool,
     pub ignitions: u64,
     pub fire_burning: bool,
+    /// Jumps or reopens the fixture has made, so a row tells which leg it is on.
+    pub moves: u64,
 }
 
 /// When the teleport fixture jumps, at the start of the measured phase.
@@ -75,22 +108,56 @@ const TELEPORT_AT_S: f64 = 22.0;
 /// How far it jumps: past every level-0 and level-1 ring, so the view refills.
 const TELEPORT_M: f32 = 2000.0;
 
-/// Moves the Player once, keeping the Eye's height above the generated ground.
+/// Moves the Player once.
 fn teleport(
     start: Res<crate::profiling::ProcessStart>,
     generator: Res<super::WorldGenerator>,
-    mut player: Single<&mut super::player::Player>,
+    (mut player, mut status): (
+        Single<&mut super::player::Player>,
+        ResMut<ProfileFixtureStatus>,
+    ),
     mut done: Local<bool>,
 ) {
     if *done || start.0.elapsed().as_secs_f64() < TELEPORT_AT_S {
         return;
     }
     *done = true;
+    jump(&generator, &mut player, &mut status, TELEPORT_M);
+}
+
+/// Out as `teleport` does, then back to where it started.
+fn revisit(
+    start: Res<crate::profiling::ProcessStart>,
+    (generator, stats): (
+        Res<super::WorldGenerator>,
+        Res<super::streaming::stats::StreamingStats>,
+    ),
+    (mut player, mut status): (
+        Single<&mut super::player::Player>,
+        ResMut<ProfileFixtureStatus>,
+    ),
+    mut trip: Local<Trip>,
+) {
+    match trip.step(start.0.elapsed().as_secs_f64(), stats.settled) {
+        Some(Leg::Out) => jump(&generator, &mut player, &mut status, TELEPORT_M),
+        Some(Leg::Back) => jump(&generator, &mut player, &mut status, -TELEPORT_M),
+        None => {}
+    }
+}
+
+/// Moves the Player along x, keeping the Eye's height above the generated ground.
+fn jump(
+    generator: &super::WorldGenerator,
+    player: &mut super::player::Player,
+    status: &mut ProfileFixtureStatus,
+    x_m: f32,
+) {
     let eye = player.eye();
     let above_m = eye.y - generator.0.surface_height_m(eye.x, eye.z);
-    let to = eye + Vec3::X * TELEPORT_M;
+    let to = eye + Vec3::X * x_m;
     let to = to.with_y(generator.0.surface_height_m(to.x, to.z) + above_m);
     player.set_eye(to);
+    status.moves += 1;
     info!("profile_fixture teleport from={eye} to={to}");
 }
 
@@ -195,6 +262,75 @@ fn cave_eye(g: &tesserae_core::Worldgen, near_m: Vec3) -> Option<Vec3> {
     }
     let (_, [cx, cy, cz], [x, y, z]) = best?;
     Some(Vec3::new(index(cx, x), index(cy, y), index(cz, z)) + voxel_m / 2.0)
+}
+
+/// Saves and leaves the World at the measured phase, through the same Save
+/// and quit a player uses; [`reopen`] opens it again.
+fn restart(
+    start: Res<crate::profiling::ProcessStart>,
+    mut switch: ResMut<crate::launch::Switch>,
+    mut save: MessageWriter<super::persistence::SaveAction>,
+    mut done: Local<bool>,
+) {
+    if *done || start.0.elapsed().as_secs_f64() < TELEPORT_AT_S {
+        return;
+    }
+    *done = true;
+    switch.0 = Some(crate::launch::Target::List);
+    save.write(super::persistence::SaveAction::SaveQuit);
+    info!("profile_fixture restart: saving and leaving");
+}
+
+/// Opens the saved World the way a launch does, from the environment, so
+/// the reopen reads the save rather than the list's folder.
+fn reopen(
+    mut commands: Commands,
+    mut status: ResMut<ProfileFixtureStatus>,
+    mut next: ResMut<NextState<crate::session::AppState>>,
+) {
+    if status.moves > 0 {
+        return;
+    }
+    status.moves += 1;
+    commands.insert_resource(crate::open::OpenRequest {
+        what: crate::open::What::Direct,
+        name: None,
+        from_list: false,
+    });
+    next.set(crate::session::AppState::Loading);
+    info!("profile_fixture restart: reopening");
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Leg {
+    Out,
+    Back,
+}
+
+/// The revisit fixture's two jumps: out at the measured phase, back once the
+/// far side has settled.
+#[derive(Default)]
+struct Trip {
+    out: bool,
+    /// Stats published before the jump still read settled, so the far side
+    /// counts as settled only after it has been seen unsettled.
+    unsettled: bool,
+    back: bool,
+}
+
+impl Trip {
+    fn step(&mut self, seconds: f64, settled: bool) -> Option<Leg> {
+        if !self.out {
+            self.out = seconds >= TELEPORT_AT_S;
+            return self.out.then_some(Leg::Out);
+        }
+        if self.back {
+            return None;
+        }
+        self.unsettled |= !settled;
+        self.back = self.unsettled && settled;
+        self.back.then_some(Leg::Back)
+    }
 }
 
 fn ignition_round(seconds: f64) -> Option<u64> {
@@ -331,5 +467,19 @@ mod tests {
         assert_eq!(ignition_round(26.0), Some(1));
         assert_eq!(ignition_round(31.99), Some(1));
         assert_eq!(ignition_round(32.0), None);
+    }
+
+    #[test]
+    fn revisit_leaves_at_the_window_and_returns_once_the_far_side_settles() {
+        let mut trip = Trip::default();
+        assert_eq!(trip.step(21.99, true), None);
+        assert_eq!(trip.step(22.0, true), Some(Leg::Out));
+        // Stats published before the jump still read settled.
+        assert_eq!(trip.step(22.02, true), None);
+        assert_eq!(trip.step(22.04, false), None);
+        assert_eq!(trip.step(23.1, true), Some(Leg::Back));
+        assert_eq!(trip.step(23.2, false), None);
+        assert_eq!(trip.step(24.5, true), None);
+        assert_eq!(trip.step(40.0, true), None);
     }
 }
