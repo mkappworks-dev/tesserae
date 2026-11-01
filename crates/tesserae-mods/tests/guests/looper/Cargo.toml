@@ -11,4 +11,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-wit-bindgen = { version = "0.62.0", default-features = false, features = ["macros", "realloc"] }
+wit-bindgen = { version = "0.63.0", default-features = false, features = ["macros", "realloc"] }
