@@ -1,6 +1,6 @@
 # 06: Quality probes for cheaper far levels
 
-Status: ready-for-human
+Status: done
 Blocked by: 04
 
 Spec: [streaming performance](../spec.md).
@@ -24,9 +24,9 @@ LOD reach is 3000 m).
 
 ## Acceptance criteria
 
-- [ ] Worker CPU per coarse Chunk and review captures for both probes recorded
+- [x] Worker CPU per coarse Chunk and review captures for both probes recorded
       here.
-- [ ] Your decision recorded under Comments. A probe never counts as an
+- [x] Your decision recorded under Comments. A probe never counts as an
       equal-quality improvement (frame-profiling.md).
 
 ## Comments
@@ -103,3 +103,50 @@ My read:
   frame and streaming effect is pending the final review series.
 
 Decision for you: adopt neither, direct, or columns, and from which level.
+
+### 2026-11-01: decision, columns from level 3 ship
+
+Your decision: columns from level 3. Levels 1 and 2 stay the downsample.
+
+- `LodGenerators::new` builds the columns generators from `COLUMNS_FROM` (3)
+  in every build: an 8 m, 16 m and 32 m Voxel at levels 3 to 5, no caves, no
+  smoothing, asked about each Voxel's middle. A job whose children hold an
+  Edit or a saved change still takes the downsample, at any level.
+- `TESSERAE_FAR_PROBE=off|direct|columns` and `TESSERAE_FAR_PROBE_FROM` still
+  override it in `dev` and `profiling` builds. Unset is what ships, and `_FROM`
+  now defaults to 3. The final series compares `TESSERAE_FAR_PROBE=off` against
+  no variable, from one binary.
+- A columns Chunk keeps `SeamOpenings::everywhere()`. Exact openings from its
+  own column heights were not built: a level's openings describe its finer
+  level's ground, which at level 3 is level 2's downsample with its caves, and
+  above that is the finer level's generator, not this one's.
+- Tests (`server::lod`, 68 pass): the default is columns from level 3 with
+  levels 1 and 2 the downsample; `FarProbe::Off` is bit-equal to the downsample
+  at levels 1 to 3; an Edit under a probed cover shows for direct and columns;
+  the mesh shell is delivered and fresh with either probe; the seam tests pass
+  unchanged.
+- ADR-0011 gains a "Columns from level 3" section; GLOSSARY's Downsample entry
+  says where it still applies.
+
+Numbers. Worker CPU per coarse Chunk, `coarse_breakdown -- 3`, four runs:
+columns 3 us per job at levels 3 to 5, against 88 to 108 us shipped before
+(-97 to -98%); levels 1 and 2 unchanged. The engine's
+`capture_lod_cost gen_us` in the captures below: levels 3 to 5 at 5 to 6 us
+with the default, 124 to 222 us with `TESSERAE_FAR_PROBE=off`; levels 1 and 2
+the same in both. Fill times did not move (7.5 to 7.6 s, level 1 binds). The
+frame and streaming effect is pending the final review series.
+
+Captures, `bin-06-ship` (bf5b399), `stationary`, default seed, off against the
+default, under `/tmp/claude-streaming-impl/review/`:
+
+- grid: `06s-grid.png` (256 m, 1 km and 2.5 km rows); runs under
+  `06s-<distance>-off/` and `06s-<distance>-default/`.
+- the level 2/3 join: `06s-1km-default-tint/` (`TESSERAE_LOD_TINT=1`, level
+  2 yellow, level 3 green), crops `06s-join-a.png` and `06s-join-b.png`.
+
+The join has no slit: no sky or background shows along it. Where levels 2 and
+3 disagree there is at most a one-Voxel terrace step, covered by the seam walls.
+The few short dark dashes inside level 3 are one-Voxel ponds: the water drawn
+at level 0's height inside an 8 m Voxel with its dimmed wall below it
+(`06s-dashes.png`); the downsample's ponds draw the same way.
+
