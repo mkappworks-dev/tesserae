@@ -9,22 +9,21 @@ use bevy::asset::AssetPath;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::{
     ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+    MeshPipelineKey,
 };
 use bevy::prelude::*;
 use bevy::render::render_resource::{
-    AsBindGroup, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
+    AsBindGroup, FragmentState, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError,
 };
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::{ShaderDefVal, ShaderRef};
 
-use crate::client::chunk_mesh::{ATTRIBUTE_LIGHT, ATTRIBUTE_MATERIAL};
+use crate::client::chunk_mesh::{
+    ATTRIBUTE_MATERIAL_LIGHT, ATTRIBUTE_POSITION_FACE, ATTRIBUTE_UV, LIGHT_SHIFT, STEPS,
+};
 
 /// What to spawn in `MeshMaterial3d`.
 pub type ChunkMaterial = ExtendedMaterial<StandardMaterial, ChunkMaterialExtension>;
-
-/// Locations 0 to 7 are `bevy_pbr`'s own vertex attributes.
-const MATERIAL_SHADER_LOCATION: u32 = 10;
-const LIGHT_SHADER_LOCATION: u32 = 11;
 
 /// Material ids with a colour of their own.
 pub const PALETTE_LEN: usize = 64;
@@ -112,18 +111,16 @@ impl MaterialExtension for ChunkMaterialExtension {
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialExtensionKey<Self>,
+        key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // The base material's layout stops at `bevy_pbr`'s attributes, so the
-        // custom one has to be declared here or the vertex shader reads
-        // garbage. Spelling the set out is safe because this material is only
+        // A packed Chunk mesh has none of `bevy_pbr`'s attributes, so the base
+        // material's layout is empty and the packed one has to be declared
+        // here. Spelling the set out is safe because this material is only
         // ever used on meshes from `chunk_mesh_to_mesh`.
         descriptor.vertex.buffers = vec![layout.0.get_layout(&[
-            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
-            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            ATTRIBUTE_MATERIAL.at_shader_location(MATERIAL_SHADER_LOCATION),
-            ATTRIBUTE_LIGHT.at_shader_location(LIGHT_SHADER_LOCATION),
+            ATTRIBUTE_POSITION_FACE.at_shader_location(0),
+            ATTRIBUTE_UV.at_shader_location(1),
+            ATTRIBUTE_MATERIAL_LIGHT.at_shader_location(2),
         ])?];
 
         // Reach the shader as `constants::*`, so neither the uniform's length
@@ -133,6 +130,8 @@ impl MaterialExtension for ChunkMaterialExtension {
             ShaderDefVal::UInt("CHUNK_PALETTE_SLOTS".into(), PALETTE_LEN as u32 + 1),
             ShaderDefVal::UInt("CHUNK_FLAME".into(), tesserae_core::mesh::FLAME),
             ShaderDefVal::UInt("CHUNK_MAX_LIGHT".into(), tesserae_core::MAX_LIGHT as u32),
+            ShaderDefVal::UInt("CHUNK_VERTEX_STEPS".into(), STEPS as u32),
+            ShaderDefVal::UInt("CHUNK_LIGHT_SHIFT".into(), LIGHT_SHIFT),
             ShaderDefVal::UInt(
                 "CHUNK_TEXTURE_EDGE".into(),
                 super::texture_atlas::EDGE as u32,
@@ -146,12 +145,33 @@ impl MaterialExtension for ChunkMaterialExtension {
                 super::texture_atlas::HEIGHT as u32,
             ),
         ];
+        cut_coverage_in_prepass(descriptor, key.mesh_key);
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
             fragment.shader_defs.extend_from_slice(&defs);
         }
         Ok(())
     }
+}
+
+/// Runs the coverage rule in a prepass, which `bevy_pbr` leaves depth-only for
+/// an opaque material. Without it a coarse level writes depth where a finer one
+/// draws, and the main pass, which loads that depth, loses the finer surface.
+/// The sun's orthographic shadow views are skipped: coarse levels cast no
+/// shadow, and a fragment stage would slow a depth-only pass for nothing.
+fn cut_coverage_in_prepass(descriptor: &mut RenderPipelineDescriptor, key: MeshPipelineKey) {
+    let prepass: ShaderDefVal = "PREPASS_PIPELINE".into();
+    let orthographic = key.intersection(MeshPipelineKey::VIEW_PROJECTION_RESERVED_BITS)
+        == MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC;
+    if !descriptor.vertex.shader_defs.contains(&prepass) || orthographic {
+        return;
+    }
+    let fragment = descriptor.fragment.get_or_insert_with(|| FragmentState {
+        shader: descriptor.vertex.shader.clone(),
+        shader_defs: descriptor.vertex.shader_defs.clone(),
+        ..default()
+    });
+    fragment.shader_defs.push("CHUNK_COVERAGE_CUT".into());
 }
 
 fn shader() -> ShaderRef {
@@ -167,6 +187,77 @@ fn embedded(file: &str) -> ShaderRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy::render::render_resource::VertexState;
+
+    fn pipeline(defs: &[&'static str], fragment: bool) -> RenderPipelineDescriptor {
+        let defs: Vec<ShaderDefVal> = defs.iter().map(|&d| d.into()).collect();
+        let shader = Handle::<bevy::shader::Shader>::default();
+        RenderPipelineDescriptor {
+            vertex: VertexState {
+                shader: shader.clone(),
+                shader_defs: defs.clone(),
+                ..default()
+            },
+            fragment: fragment.then(|| FragmentState {
+                shader,
+                shader_defs: defs,
+                ..default()
+            }),
+            ..default()
+        }
+    }
+
+    fn cuts(descriptor: &RenderPipelineDescriptor) -> bool {
+        let cut: ShaderDefVal = "CHUNK_COVERAGE_CUT".into();
+        descriptor
+            .fragment
+            .as_ref()
+            .is_some_and(|f| f.shader_defs.contains(&cut))
+    }
+
+    #[test]
+    fn a_depth_only_camera_prepass_gains_a_fragment_stage_that_cuts_coverage() {
+        let mut descriptor = pipeline(&["PREPASS_PIPELINE"], false);
+        cut_coverage_in_prepass(
+            &mut descriptor,
+            MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::VIEW_PROJECTION_NONSTANDARD,
+        );
+        assert!(cuts(&descriptor));
+        let fragment = descriptor.fragment.unwrap();
+        assert!(fragment.targets.is_empty(), "depth only");
+        assert_eq!(fragment.shader, descriptor.vertex.shader);
+    }
+
+    #[test]
+    fn a_cutout_prepass_keeps_its_fragment_stage_and_also_cuts_coverage() {
+        let mut descriptor = pipeline(&["PREPASS_PIPELINE", "MAY_DISCARD"], true);
+        cut_coverage_in_prepass(&mut descriptor, MeshPipelineKey::DEPTH_PREPASS);
+        assert!(cuts(&descriptor));
+        let may_discard: ShaderDefVal = "MAY_DISCARD".into();
+        assert!(
+            descriptor
+                .fragment
+                .unwrap()
+                .shader_defs
+                .contains(&may_discard)
+        );
+    }
+
+    #[test]
+    fn the_suns_shadow_views_and_the_main_pass_are_left_alone() {
+        let shadow = pipeline(&["PREPASS_PIPELINE"], false);
+        let mut cut = shadow.clone();
+        cut_coverage_in_prepass(
+            &mut cut,
+            MeshPipelineKey::DEPTH_PREPASS | MeshPipelineKey::VIEW_PROJECTION_ORTHOGRAPHIC,
+        );
+        assert_eq!(cut, shadow);
+
+        let main = pipeline(&["MESH_PIPELINE"], true);
+        let mut cut = main.clone();
+        cut_coverage_in_prepass(&mut cut, MeshPipelineKey::DEPTH_PREPASS);
+        assert_eq!(cut, main);
+    }
 
     #[test]
     fn only_flames_have_a_builtin_colour() {

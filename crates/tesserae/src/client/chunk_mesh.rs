@@ -1,211 +1,322 @@
-//! `ChunkMesh` → Bevy `Mesh`. The one place Voxel-index space becomes metres.
+//! `ChunkMesh` → Bevy `Mesh`, packed to 16 bytes a vertex.
 //!
 //! This conversion lives in `tesserae` and never in `tesserae-core`, which must
 //! acquire no `bevy` or `wgpu` dependency even transitively. See
 //! `docs/architecture.md` invariant 3.
 
 use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{Indices, MeshVertexAttribute, PrimitiveTopology, VertexFormat};
+use bevy::mesh::{
+    Indices, MeshVertexAttribute, PrimitiveTopology, VertexAttributeValues, VertexFormat,
+};
 use bevy::prelude::*;
+use bevy::shape::Aabb3d;
 use tesserae_core::MeshLayer;
+use tesserae_core::shape::SUBDIV;
 
-/// Which Material each vertex belongs to, for the chunk [`MaterialExtension`].
+/// Position in sixteenths of a Voxel, `xyz`, and in `w` the face the vertex
+/// belongs to, `NEG_X..=POS_Z`, which `chunk_vertex.wesl` turns back into the
+/// normal.
 ///
-/// A high id keeps custom attributes sorted after Bevy's built-ins and away from
-/// their ids. `Uint32` with the Material in the low 16 bits.
-///
-/// The high 16 are spare and stay that way. A Shape's geometry is already in the
-/// mesh, so nothing in the shader varies by it; what would earn the bits is a
-/// look pack that shades by Shape (wind in a fence, say), which is step 9's
-/// decision and not worth bytes per vertex before then.
-///
-/// [`MaterialExtension`]: bevy::pbr::MaterialExtension
-pub const ATTRIBUTE_MATERIAL: MeshVertexAttribute =
-    MeshVertexAttribute::new("Vertex_Material", 2_084_155_061, VertexFormat::Uint32);
+/// Sixteenths because every Shape, fluid surface and flame lies on that grid,
+/// so the packing is exact. Signed because a flame stands a sixteenth outside
+/// the Chunk, and sixteen bits because positions local to a region of Chunks
+/// need the range: ±2047 Voxels.
+pub const ATTRIBUTE_POSITION_FACE: MeshVertexAttribute =
+    MeshVertexAttribute::new("Vertex_PositionFace", 2_084_155_063, VertexFormat::Sint16x4);
 
-/// The packed sky and block light of the face each vertex belongs to.
+/// UV in sixteenths of a Voxel, on the same grid as the positions.
+pub const ATTRIBUTE_UV: MeshVertexAttribute =
+    MeshVertexAttribute::new("Vertex_ChunkUv", 2_084_155_064, VertexFormat::Uint16x2);
+
+/// Which Material the vertex belongs to in the low [`LIGHT_SHIFT`] bits, and
+/// the packed sky and block light of the face above them.
 ///
-/// Baked per vertex rather than sampled on the GPU: thousands of torches as
+/// The Material needs 17 bits, for [`tesserae_core::mesh::FLAME`]. Light is
+/// baked per vertex rather than sampled on the GPU: thousands of torches as
 /// point lights is not viable on any hardware, so light is a per-Voxel
 /// flood-fill and this attribute is how it reaches the shader.
-///
-/// `Uint32` for one byte of payload. Folding it into [`ATTRIBUTE_MATERIAL`]'s
-/// spare 16 bits would save four bytes a vertex, which is noise against the 32 in
-/// position, normal and UV and not worth entangling two attributes for.
-pub const ATTRIBUTE_LIGHT: MeshVertexAttribute =
-    MeshVertexAttribute::new("Vertex_Light", 2_084_155_062, VertexFormat::Uint32);
+pub const ATTRIBUTE_MATERIAL_LIGHT: MeshVertexAttribute =
+    MeshVertexAttribute::new("Vertex_MaterialLight", 2_084_155_065, VertexFormat::Uint32);
 
-/// Positions are scaled by `voxel_size` here, so everything downstream — the
-/// `Aabb` Bevy derives, frustum culling, shadow bounds — is already in metres.
-pub fn chunk_mesh_to_mesh(layer: &MeshLayer, voxel_size: f32) -> Mesh {
-    let positions: Vec<[f32; 3]> = layer
+/// Packed position and UV steps per Voxel.
+pub const STEPS: f32 = SUBDIV as f32;
+
+pub const LIGHT_SHIFT: u32 = 24;
+
+/// The mesh is in Voxels, not metres: the entity's `Transform` scales it by
+/// the level's Voxel size. The `Aabb` is explicit because Bevy can only derive
+/// one from a `Float32x3` position.
+pub fn chunk_mesh_to_mesh(layer: &MeshLayer) -> Mesh {
+    let step = |c: f32| {
+        let packed = (c * STEPS) as i16;
+        debug_assert_eq!(f32::from(packed) / STEPS, c, "off the sixteenths grid");
+        packed
+    };
+    let position_face: Vec<[i16; 4]> = layer
         .positions
         .iter()
-        .map(|p| [p[0] * voxel_size, p[1] * voxel_size, p[2] * voxel_size])
+        .zip(&layer.normals)
+        .map(|(p, n)| [step(p[0]), step(p[1]), step(p[2]), face_of(*n)])
+        .collect();
+    let uvs: Vec<[u16; 2]> = layer
+        .uvs
+        .iter()
+        .map(|uv| uv.map(|c| step(c) as u16))
+        .collect();
+    let material_light: Vec<u32> = layer
+        .materials
+        .iter()
+        .zip(&layer.light)
+        .map(|(&material, &light)| {
+            debug_assert!(material < 1 << LIGHT_SHIFT && light <= 0xff);
+            material | light << LIGHT_SHIFT
+        })
         .collect();
 
-    Mesh::new(
+    let (min, max) = position_face
+        .iter()
+        .fold((IVec3::MAX, IVec3::MIN), |(lo, hi), p| {
+            let p = IVec3::new(p[0].into(), p[1].into(), p[2].into());
+            (lo.min(p), hi.max(p))
+        });
+    let mut mesh = Mesh::new(
         PrimitiveTopology::TriangleList,
         RenderAssetUsages::default(),
     )
-    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, layer.normals.clone())
-    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, layer.uvs.clone())
-    .with_inserted_attribute(ATTRIBUTE_MATERIAL, layer.materials.clone())
-    // Unscaled, unlike the positions above: a light level counts attenuation
-    // steps and is not a distance, so `voxel_size` has no business touching it.
-    .with_inserted_attribute(ATTRIBUTE_LIGHT, layer.light.clone())
-    .with_inserted_indices(Indices::U32(layer.indices.clone()))
+    .with_inserted_attribute(
+        ATTRIBUTE_POSITION_FACE,
+        VertexAttributeValues::Sint16x4(position_face),
+    )
+    .with_inserted_attribute(ATTRIBUTE_UV, VertexAttributeValues::Uint16x2(uvs))
+    .with_inserted_attribute(ATTRIBUTE_MATERIAL_LIGHT, material_light)
+    .with_inserted_indices(Indices::U32(layer.indices.clone()));
+    if !layer.positions.is_empty() {
+        mesh.final_aabb = Some(Aabb3d {
+            min: (min.as_vec3() / STEPS).into(),
+            max: (max.as_vec3() / STEPS).into(),
+        });
+    }
+    mesh
+}
+
+/// The face an axis-aligned unit normal belongs to, in `FACE_STEPS` order.
+fn face_of(normal: [f32; 3]) -> i16 {
+    let axis = normal.iter().position(|&c| c != 0.0).unwrap_or(0);
+    debug_assert_eq!(
+        normal[axis].abs(),
+        1.0,
+        "not an axis-aligned normal: {normal:?}"
+    );
+    (axis * 2 + usize::from(normal[axis] > 0.0)) as i16
+}
+
+/// What `chunk_vertex.wesl` reads back from a mesh [`chunk_mesh_to_mesh`]
+/// made, in Voxels: the layer it was made from.
+pub fn decoded(mesh: &Mesh) -> Option<MeshLayer> {
+    let (
+        Some(VertexAttributeValues::Sint16x4(position_face)),
+        Some(VertexAttributeValues::Uint16x2(uvs)),
+        Some(VertexAttributeValues::Uint32(material_light)),
+        Some(Indices::U32(indices)),
+    ) = (
+        mesh.attribute(ATTRIBUTE_POSITION_FACE),
+        mesh.attribute(ATTRIBUTE_UV),
+        mesh.attribute(ATTRIBUTE_MATERIAL_LIGHT),
+        mesh.indices(),
+    )
+    else {
+        return None;
+    };
+    Some(MeshLayer {
+        positions: position_face
+            .iter()
+            .map(|p| [p[0], p[1], p[2]].map(|c| f32::from(c) / STEPS))
+            .collect(),
+        normals: position_face
+            .iter()
+            .map(|p| {
+                let face = p[3] as usize;
+                let mut normal = [0.0; 3];
+                normal[face / 2] = if face % 2 == 1 { 1.0 } else { -1.0 };
+                normal
+            })
+            .collect(),
+        uvs: uvs
+            .iter()
+            .map(|uv| uv.map(|c| f32::from(c) / STEPS))
+            .collect(),
+        materials: material_light
+            .iter()
+            .map(|w| w & ((1 << LIGHT_SHIFT) - 1))
+            .collect(),
+        light: material_light.iter().map(|w| w >> LIGHT_SHIFT).collect(),
+        indices: indices.clone(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::mesh::VertexAttributeValues;
     use tesserae_core::light::{Light, MAX_LIGHT};
+    use tesserae_core::shape::examples;
+    use tesserae_core::testgen::fixtures;
     use tesserae_core::{
-        Chunk, ChunkLight, ChunkMesh, LitChunk, Neighborhood, Voxel, greedy_mesh, testgen,
+        Burning, CHUNK_SIZE, Chunk, ChunkLight, ChunkOverlay, Fluid, Level, LitChunk, Neighborhood,
+        Orientation, Overlay, Tables, Voxel, greedy_mesh,
     };
 
-    /// Full sky, which is what the solver answers for open terrain.
-    static SKY: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 0));
+    /// Both channels non-zero, so a nibble lost on the way shows.
+    static LIT: ChunkLight = ChunkLight::filled(Light::new(MAX_LIGHT, 7));
 
-    fn terrain_mesh(voxel_size: f32) -> (ChunkMesh, Mesh) {
-        let chunk = testgen::terrain_chunk(0, 0, 0, testgen::fixtures().ground);
-        let source = greedy_mesh(
-            &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &testgen::fixtures().tables,
-        );
-        let mesh = chunk_mesh_to_mesh(&source.opaque, voxel_size);
-        (source, mesh)
+    /// The builtin Shapes, then a fence and a pipe, which connect.
+    fn tables() -> Tables {
+        let mut tables = fixtures().tables.clone();
+        tables.shapes.register(examples::fence()).unwrap();
+        tables.shapes.register(examples::pipe()).unwrap();
+        tables
     }
 
-    #[test]
-    fn every_attribute_the_chunk_material_reads_is_present() {
-        let (source, mesh) = terrain_mesh(1.0);
-        for attribute in [
-            Mesh::ATTRIBUTE_POSITION.id,
-            Mesh::ATTRIBUTE_NORMAL.id,
-            Mesh::ATTRIBUTE_UV_0.id,
-            ATTRIBUTE_MATERIAL.id,
-            ATTRIBUTE_LIGHT.id,
-        ] {
-            assert!(mesh.attribute(attribute).is_some(), "{attribute:?} missing");
-        }
-        assert_eq!(mesh.count_vertices(), source.opaque.positions.len());
-        assert_eq!(mesh.indices().unwrap().len(), source.opaque.indices.len());
-    }
-
-    #[test]
-    fn positions_are_metres_so_voxel_size_scales_the_chunk() {
-        let (source, mesh) = terrain_mesh(0.25);
-        let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            panic!("positions are Float32x3");
-        };
-        for (scaled, unscaled) in positions.iter().zip(&source.opaque.positions) {
-            assert_eq!(scaled, &unscaled.map(|c| c * 0.25));
-        }
-        // A 32-Voxel Chunk at 0.25m is an 8m Cell, whatever the terrain inside.
-        let widest = positions.iter().map(|p| p[0]).fold(0.0f32, f32::max);
-        assert!(widest <= 8.0, "{widest} m exceeds the Cell");
-    }
-
-    #[test]
-    fn a_coarse_level_scales_by_its_own_voxel_size() {
-        use crate::world::WorldSettings;
-        let world = WorldSettings {
-            voxel_size: 0.25,
-            ..default()
-        };
-        let (source, mesh) = terrain_mesh(world.voxel_size_at(3));
-        let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
-        else {
-            panic!("positions are Float32x3");
-        };
-        for (scaled, unscaled) in positions.iter().zip(&source.opaque.positions) {
-            assert_eq!(scaled, &unscaled.map(|c| c * 2.0));
-        }
-        let widest = positions.iter().map(|p| p[0]).fold(0.0f32, f32::max);
-        assert!(
-            widest <= world.cell_size_at(3),
-            "{widest} m exceeds the Cell"
-        );
-    }
-
-    #[test]
-    fn normals_and_uvs_pass_through_unscaled() {
-        let (source, mesh) = terrain_mesh(0.25);
-        let Some(VertexAttributeValues::Float32x3(normals)) =
-            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
-        else {
-            panic!("normals are Float32x3");
-        };
-        assert_eq!(normals, &source.opaque.normals);
-        for n in normals {
-            assert!((Vec3::from_array(*n).length() - 1.0).abs() < 1e-6);
+    fn wet(fluid: Fluid) -> Overlay {
+        Overlay {
+            fluid: Some(fluid),
+            burning: None,
         }
     }
 
-    #[test]
-    fn material_indices_survive_as_uint32() {
+    /// A floor the full width of the Chunk, fluid standing at every surface
+    /// level, every Shape in every orientation soaked in a source and in flowing
+    /// fluid at every level, and flames off both far corners.
+    fn every_kind_of_face(tables: &Tables) -> tesserae_core::ChunkMesh {
+        let (rock, water) = (fixtures().ground.rock, fixtures().water);
         let mut chunk = Chunk::air();
-        chunk.set(
-            0,
-            0,
-            0,
-            Voxel::cube(tesserae_core::testgen::fixtures().ground.surface),
-        );
-        let source = greedy_mesh(
-            &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &testgen::fixtures().tables,
-        );
-        let mesh = chunk_mesh_to_mesh(&source.opaque, 1.0);
-
-        let Some(VertexAttributeValues::Uint32(materials)) = mesh.attribute(ATTRIBUTE_MATERIAL)
-        else {
-            panic!("the material index must stay an integer, not become a float");
-        };
-        assert_eq!(materials.len(), source.opaque.positions.len());
-        assert!(
-            materials
-                .iter()
-                .all(|m| *m == tesserae_core::testgen::fixtures().ground.surface as u32)
-        );
-    }
-
-    /// The same trap as the Material index: a light level is two packed
-    /// nibbles, so becoming a float loses them.
-    #[test]
-    fn light_levels_survive_as_uint32_and_voxel_size_does_not_scale_them() {
-        let mut chunk = Chunk::air();
-        // In the middle, so all six faces look out at air inside the Chunk.
-        // At a corner, three of them look into the isolated Neighborhood's dark
-        // shell and the assertion below is about the shell instead.
-        chunk.set(
-            16,
-            16,
-            16,
-            Voxel::cube(tesserae_core::testgen::fixtures().ground.surface),
-        );
-        let source = greedy_mesh(
-            &Neighborhood::isolated(LitChunk::new(&chunk, &SKY)),
-            &testgen::fixtures().tables,
-        );
-
-        for voxel_size in [1.0, 0.25] {
-            let mesh = chunk_mesh_to_mesh(&source.opaque, voxel_size);
-            let Some(VertexAttributeValues::Uint32(light)) = mesh.attribute(ATTRIBUTE_LIGHT) else {
-                panic!("a light level must stay an integer, not become a float");
+        let mut overlay = ChunkOverlay::none();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                chunk.set(x, 0, z, Voxel::cube(rock));
+            }
+        }
+        for surface in 1..=Fluid::FULL_SURFACE {
+            let fluid = Fluid {
+                source: false,
+                surface,
+                reach: 1,
+                ..Fluid::source(water)
             };
-            assert_eq!(light, &source.opaque.light, "at {voxel_size} m Voxels");
+            overlay.set(2 * surface as usize - 1, 2, 1, wet(fluid));
+        }
+        let mut cell = 0;
+        for shape in 1..tables.shapes.len() as u8 {
+            for orientation in Orientation::all() {
+                for surface in 1..=Fluid::FULL_SURFACE {
+                    let at = [
+                        1 + 2 * (cell % 15),
+                        4 + 2 * (cell / 225),
+                        1 + 2 * (cell / 15 % 15),
+                    ];
+                    cell += 1;
+                    chunk.set(at[0], at[1], at[2], Voxel::shaped(rock, shape, orientation));
+                    let level = Level {
+                        surface,
+                        reach: 1,
+                        descent: 0,
+                    };
+                    let fluid = if surface == Fluid::FULL_SURFACE {
+                        Fluid::source(water)
+                    } else {
+                        Fluid::flowing(water, [level; 4]).unwrap()
+                    };
+                    overlay.set(at[0], at[1], at[2], wet(fluid));
+                }
+            }
+        }
+        for at in [0, CHUNK_SIZE - 1] {
+            chunk.set(at, CHUNK_SIZE - 1, at, Voxel::cube(rock));
+            overlay.set(
+                at,
+                CHUNK_SIZE - 1,
+                at,
+                Overlay {
+                    fluid: None,
+                    burning: Some(Burning { fuel: 1 }),
+                },
+            );
+        }
+        let lit = LitChunk::new(&chunk, &LIT).with_overlay(&overlay);
+        greedy_mesh(&Neighborhood::isolated(lit), tables)
+    }
+
+    fn assert_decodes_exactly(layer: &MeshLayer, what: &str) {
+        let decoded = decoded(&chunk_mesh_to_mesh(layer)).expect("a packed Chunk mesh");
+        assert_eq!(decoded.positions, layer.positions, "{what}: positions");
+        assert_eq!(decoded.normals, layer.normals, "{what}: normals");
+        assert_eq!(decoded.uvs, layer.uvs, "{what}: uvs");
+        assert_eq!(decoded.materials, layer.materials, "{what}: materials");
+        assert_eq!(decoded.light, layer.light, "{what}: light");
+        assert_eq!(decoded.indices, layer.indices, "{what}: indices");
+    }
+
+    /// Bevy derives an `Aabb` only from `Float32x3` positions; without one a
+    /// Chunk is never frustum culled.
+    #[test]
+    fn the_aabb_is_exactly_the_bounds_of_the_decoded_positions() {
+        use bevy::camera::primitives::MeshAabb;
+        let mesh = every_kind_of_face(&tables());
+        let packed = chunk_mesh_to_mesh(&mesh.cutout);
+        let aabb = packed.get_aabb().expect("an Aabb Bevy can find");
+        let positions = mesh.cutout.positions.iter().map(|&p| Vec3::from(p));
+        let lo = positions.clone().fold(Vec3::MAX, Vec3::min);
+        let hi = positions.fold(Vec3::MIN, Vec3::max);
+        assert_eq!(Vec3::from(aabb.min()), lo);
+        assert_eq!(Vec3::from(aabb.max()), hi);
+        assert_eq!(lo.x, -1.0 / 16.0, "a flame outside the Chunk");
+
+        let empty = chunk_mesh_to_mesh(&MeshLayer::default());
+        assert!(empty.get_aabb().is_none());
+    }
+
+    #[test]
+    fn every_shape_and_fluid_level_decodes_to_the_meshers_own_vertices() {
+        let tables = tables();
+        for shape in 0..tables.shapes.len() as u8 {
+            for (orientation, quads) in tables.shapes.preview_geometry(shape).iter().enumerate() {
+                let layer = tesserae_core::mesh::mesh_shape(quads, fixtures().ground.rock);
+                assert_decodes_exactly(&layer, &format!("Shape {shape} turned {orientation}"));
+            }
+        }
+
+        let mesh = every_kind_of_face(&tables);
+        for (layer, what) in [
+            (&mesh.opaque, "opaque"),
+            (&mesh.blended, "blended"),
+            (&mesh.cutout, "cutout"),
+        ] {
+            assert_decodes_exactly(layer, what);
+        }
+
+        // What the scene is for: the extremes the packing has to hold.
+        let all = || {
+            [&mesh.opaque, &mesh.blended, &mesh.cutout]
+                .into_iter()
+                .flat_map(|l| l.positions.iter())
+        };
+        let lowest = all().flat_map(|p| p.iter()).copied().fold(0.0, f32::min);
+        let highest = all().flat_map(|p| p.iter()).copied().fold(0.0, f32::max);
+        assert_eq!(lowest, -1.0 / 16.0, "a flame outside the Chunk's low faces");
+        assert_eq!(highest, 32.0 + 1.0 / 16.0, "and outside its high ones");
+        assert!(mesh.cutout.materials.contains(&tesserae_core::mesh::FLAME));
+        let widest = mesh
+            .opaque
+            .uvs
+            .iter()
+            .flatten()
+            .copied()
+            .fold(0.0, f32::max);
+        assert_eq!(widest, 32.0, "the floor's UVs span the Chunk");
+        for surface in 1..=Fluid::FULL_SURFACE {
+            let height = 2.0 + f32::from(surface) / 16.0;
             assert!(
-                light
-                    .iter()
-                    .all(|&l| l == Light::new(MAX_LIGHT, 0).packed() as u32),
-                "the faces of a lone Voxel all look out at full sky"
+                mesh.blended.positions.iter().any(|p| p[1] == height),
+                "no fluid surface at {height}"
             );
         }
     }
