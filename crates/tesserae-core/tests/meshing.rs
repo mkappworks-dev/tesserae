@@ -4,8 +4,8 @@ use tesserae_core::mesh::{NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::shape::{NodeBox, examples};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkLight, ConnectDef, Connections, LitChunk, Neighborhood, Voxel,
-    greedy_mesh, mesh_chunk, mesh_chunk_with_seams, testgen,
+    CHUNK_SIZE, Chunk, ChunkLight, ConnectDef, Connections, LitChunk, Neighborhood, SeamOpenings,
+    Voxel, greedy_mesh, mesh_chunk, mesh_chunk_with_seams, testgen,
 };
 use tesserae_core::{
     Orientation, SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeTable, Tables, Worldgen,
@@ -373,7 +373,7 @@ fn seam_walls_stand_on_every_finer_plane_in_the_top_two_voxels_of_the_ground() {
     let ground = ground_below(8);
     let neighbors = open_ground(&ground);
     let plain = mesh_chunk(unlit(&ground), neighbors, tables());
-    let seamed = mesh_chunk_with_seams(unlit(&ground), neighbors, SEAM, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&ground), neighbors, tables());
     let walls = seams_of(&plain, &seamed);
     assert!(!walls.is_empty());
     let mut area = 0.0;
@@ -396,6 +396,81 @@ fn seam_walls_stand_on_every_finer_plane_in_the_top_two_voxels_of_the_ground() {
     assert_eq!(area, (2 * 4 * 2 * CHUNK_SIZE) as f32);
 }
 
+static CLOSED: SeamOpenings = SeamOpenings::nowhere();
+
+/// `neighbors` with finer ground that closes every side across their planes.
+fn closed(neighbors: [Option<LitChunk<'_>>; 6]) -> [Option<LitChunk<'_>>; 6] {
+    neighbors.map(|n| n.map(|n| n.with_openings(&CLOSED)))
+}
+
+#[test]
+fn a_seam_wall_stands_only_where_the_finer_ground_across_leaves_it_open() {
+    let ground = ground_below(8);
+    let mut openings = SeamOpenings::nowhere();
+    openings.set_open(0, [16, 7, 5]);
+    let center = unlit(&ground).with_openings(&openings);
+    let neighbors = closed(open_ground(&ground));
+    let plain = mesh_chunk(center, neighbors, tables());
+    let walls = seams_of(&plain, &mesh_chunk_with_seams(center, neighbors, tables()));
+    let corners = [
+        [16.0, 7.0, 5.0],
+        [16.0, 7.0, 6.0],
+        [16.0, 8.0, 6.0],
+        [16.0, 8.0, 5.0],
+    ];
+    assert_eq!(walls.len(), 1, "{walls:?}");
+    assert_eq!(walls[0].0, [1.0, 0.0, 0.0]);
+    assert_eq!(sorted(walls[0].1), sorted(corners));
+}
+
+#[test]
+fn a_seam_wall_on_the_chunk_edge_reads_the_neighbours_openings() {
+    let ground = ground_below(8);
+    let mut openings = SeamOpenings::nowhere();
+    openings.set_open(0, [31, 6, 9]);
+    let center = unlit(&ground).with_openings(&CLOSED);
+    let mut neighbors = closed(open_ground(&ground));
+    neighbors[NEG_X] = Some(unlit(&ground).with_openings(&openings));
+    let plain = mesh_chunk(center, neighbors, tables());
+    let walls = seams_of(&plain, &mesh_chunk_with_seams(center, neighbors, tables()));
+    let corners = [
+        [0.0, 6.0, 9.0],
+        [0.0, 6.0, 10.0],
+        [0.0, 7.0, 10.0],
+        [0.0, 7.0, 9.0],
+    ];
+    assert_eq!(walls.len(), 1, "{walls:?}");
+    assert_eq!(walls[0].0, [-1.0, 0.0, 0.0]);
+    assert_eq!(sorted(walls[0].1), sorted(corners));
+}
+
+/// A wall the finer ground hides is still inside the coarse ground, so one
+/// that joins two open ones costs nothing and saves a quad.
+#[test]
+fn seam_walls_between_two_openings_in_a_row_are_kept_and_the_rest_of_the_row_is_not() {
+    let ground = ground_below(8);
+    let mut openings = SeamOpenings::nowhere();
+    openings.set_open(0, [16, 7, 3]);
+    openings.set_open(0, [16, 7, 7]);
+    let center = unlit(&ground).with_openings(&openings);
+    let neighbors = closed(open_ground(&ground));
+    let plain = mesh_chunk(center, neighbors, tables());
+    let walls = seams_of(&plain, &mesh_chunk_with_seams(center, neighbors, tables()));
+    let corners = [
+        [16.0, 7.0, 3.0],
+        [16.0, 7.0, 8.0],
+        [16.0, 8.0, 8.0],
+        [16.0, 8.0, 3.0],
+    ];
+    assert_eq!(walls.len(), 1, "{walls:?}");
+    assert_eq!(sorted(walls[0].1), sorted(corners));
+}
+
+fn sorted(mut corners: [[f32; 3]; 4]) -> [[f32; 3]; 4] {
+    corners.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    corners
+}
+
 #[test]
 fn a_seam_wall_is_lit_by_the_open_air_over_the_ground_across() {
     let ground = ground_below(8);
@@ -414,7 +489,7 @@ fn a_seam_wall_is_lit_by_the_open_air_over_the_ground_across() {
         neighbors[face] = Some(lit);
     }
     let plain = mesh_chunk(lit, neighbors, tables());
-    let seamed = mesh_chunk_with_seams(lit, neighbors, SEAM, tables());
+    let seamed = mesh_chunk_with_seams(lit, neighbors, tables());
     let walls = seams_of(&plain, &seamed);
     assert!(!walls.is_empty());
     for (_, _, packed) in walls {
@@ -429,7 +504,7 @@ fn ground_deeper_than_two_voxels_under_the_surface_has_no_seam_wall() {
     let mut neighbors = enclosed_by(&rock);
     neighbors[POS_Y] = Some(unlit(&surface));
     let plain = mesh_chunk(unlit(&rock), neighbors, tables());
-    let seamed = mesh_chunk_with_seams(unlit(&rock), neighbors, SEAM, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&rock), neighbors, tables());
     assert!(seams_of(&plain, &seamed).is_empty());
 }
 
@@ -445,7 +520,7 @@ fn water_gets_no_seam_wall() {
     }
     let neighbors = open_ground(&lake);
     let plain = mesh_chunk(unlit(&lake), neighbors, tables());
-    let seamed = mesh_chunk_with_seams(unlit(&lake), neighbors, SEAM, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&lake), neighbors, tables());
     assert!(seams_of(&plain, &seamed).is_empty());
 }
 
@@ -465,7 +540,7 @@ fn on_real_terrain_seams_add_only_walls_on_their_planes() {
     .into();
     let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|f| Some(unlit(&chunks[f + 1])));
     let plain = mesh_chunk(unlit(&chunks[0]), neighbors, tables());
-    let seamed = mesh_chunk_with_seams(unlit(&chunks[0]), neighbors, SEAM, tables());
+    let seamed = mesh_chunk_with_seams(unlit(&chunks[0]), neighbors, tables());
     let walls = seams_of(&plain, &seamed);
     assert!(!walls.is_empty(), "the terrain crosses a plane somewhere");
     for (normal, corners, _) in walls {

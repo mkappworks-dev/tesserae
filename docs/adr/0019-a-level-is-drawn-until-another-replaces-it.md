@@ -61,4 +61,9 @@ once instead of all children together.
   and z; the coverage rule hides them wherever the finer level draws the Voxel
   they belong to, and elsewhere they lie inside the ground. A skirt of finer
   Voxels on the finer level's edge was tried first and closed nothing: finer
-  data never holds the coarse level's height. About 15% more coarse quads.
+  data never holds the coarse level's height. A wall is kept only where the
+  finer ground against its plane leaves it open, read from the eight children
+  when the coarse Chunk is generated: exactly at level 1, whose children are
+  level 0's Chunks, and at levels 2 and 3 with a margin of one finer Voxel up
+  and aside, where the children are made at the finer Voxel size but not as that
+  level makes them; levels 4 and up keep every wall. About 9% more coarse quads.

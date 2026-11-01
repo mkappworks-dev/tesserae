@@ -7,7 +7,10 @@ use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
 
 use crate::light::{ChunkLight, Light, MAX_LIGHT};
-use crate::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y};
+use crate::material::{MaterialTable, RenderClass};
+use crate::mesh::{
+    FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, SEAM_EVERY, SEAM_LAYERS, SeamOpenings,
+};
 use crate::worldgen::Worldgen;
 
 const OCTANT: usize = CHUNK_SIZE / 2;
@@ -204,6 +207,88 @@ pub enum Child<'a> {
 pub struct Coarse {
     pub chunk: Chunk,
     pub overlay: ChunkOverlay,
+    /// Open everywhere from [`downsample_changed`]; [`seam_openings`] reads
+    /// them from the children.
+    pub openings: SeamOpenings,
+}
+
+/// How far past the finer Voxels against a seam plane [`seam_openings`] also
+/// looks, in finer Voxels: up, and both ways along the plane.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct SeamMargin {
+    pub above: usize,
+    pub aside: usize,
+}
+
+impl SeamMargin {
+    /// For children that are the finer level's own Chunks.
+    pub const EXACT: SeamMargin = SeamMargin { above: 0, aside: 0 };
+}
+
+/// The [`SeamOpenings`] of the coarse Chunk `children` downsample to: a coarse
+/// Voxel against a seam plane is open where any of its finer Voxels against
+/// the plane, or within `margin` of them, is not an opaque cube. Past the
+/// children, which is another coarse Chunk's, counts as open.
+pub fn seam_openings(
+    children: [&Chunk; 8],
+    margin: SeamMargin,
+    materials: &MaterialTable,
+) -> SeamOpenings {
+    const FINE: usize = 2 * CHUNK_SIZE;
+    let open = |v: Voxel| !v.is_full_cube() || materials.render(v) != RenderClass::Opaque;
+    let mut out = SeamOpenings::nowhere();
+    if children
+        .iter()
+        .all(|c| c.uniform().is_some_and(|v| !open(v)))
+    {
+        return out;
+    }
+    for axis in [0, 2] {
+        let other = 2 - axis;
+        for layer in SEAM_LAYERS {
+            // The finer Voxels of `layer` that touch its plane.
+            let fine = if layer % SEAM_EVERY == 0 {
+                2 * layer
+            } else {
+                2 * layer + 1
+            };
+            let mut rows = [0u64; FINE];
+            for (fy, row) in rows.iter_mut().enumerate() {
+                for fw in 0..FINE {
+                    let mut c = [0; 3];
+                    c[axis] = fine;
+                    c[1] = fy;
+                    c[other] = fw;
+                    let [cx, cy, cz] = c.map(|v| v / CHUNK_SIZE);
+                    let child = children[cx + 2 * cy + 4 * cz];
+                    let v = child.get(c[0] % CHUNK_SIZE, c[1] % CHUNK_SIZE, c[2] % CHUNK_SIZE);
+                    *row |= u64::from(open(v)) << fw;
+                }
+            }
+            for y in 0..CHUNK_SIZE {
+                let top = 2 * y + 2 + margin.above;
+                let mut any = if top > FINE { u64::MAX } else { 0 };
+                for row in &rows[2 * y..top.min(FINE)] {
+                    any |= row;
+                }
+                for w in 0..CHUNK_SIZE {
+                    let (lo, hi) = ((2 * w).checked_sub(margin.aside), 2 * w + 2 + margin.aside);
+                    let seen = match lo {
+                        Some(lo) if hi <= FINE => any & (u64::MAX >> (64 - (hi - lo))) << lo != 0,
+                        _ => true,
+                    };
+                    if seen {
+                        let mut cell = [0; 3];
+                        cell[axis] = layer;
+                        cell[1] = y;
+                        cell[other] = w;
+                        out.set_open(axis, cell);
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Level 1 from eight level-0 Chunks, the changed ones read through
@@ -237,6 +322,7 @@ pub fn downsample_changed(
         return Coarse {
             chunk: downsample(all, &tables.shapes),
             overlay: ChunkOverlay::none(),
+            openings: SeamOpenings::everywhere(),
         };
     }
     let mut chunk = Chunk::air();
@@ -257,7 +343,11 @@ pub fn downsample_changed(
             }
         }
     }
-    Coarse { chunk, overlay }
+    Coarse {
+        chunk,
+        overlay,
+        openings: SeamOpenings::everywhere(),
+    }
 }
 
 struct Changed<'a> {
@@ -680,6 +770,53 @@ mod tests {
 
     const SEED: u64 = 0x7e55_e2ae_0000_0001;
     const COLUMNS: usize = 60;
+
+    /// Eight children of rock below finer y 20, with a two-Voxel pit at finer
+    /// (32, 18..20, 9): against the coarse plane x = 16, in coarse Voxel
+    /// (16, 9, 4).
+    fn pitted_children() -> [Chunk; 8] {
+        let rock = Voxel::cube(fixtures().ground.rock);
+        let mut children: [Chunk; 8] = std::array::from_fn(|_| Chunk::air());
+        for (i, child) in children.iter_mut().enumerate() {
+            if i >> 1 & 1 == 1 {
+                continue;
+            }
+            for y in 0..20 {
+                for z in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        child.set(x, y, z, rock);
+                    }
+                }
+            }
+        }
+        for y in 18..20 {
+            children[1].set(0, y, 9, Voxel::AIR);
+        }
+        children
+    }
+
+    #[test]
+    fn a_seam_opening_is_where_the_finer_voxels_against_the_plane_let_light_through() {
+        let children = pitted_children();
+        let refs = std::array::from_fn(|i| &children[i]);
+        let materials = &fixtures().tables.materials;
+        let exact = seam_openings(refs, SeamMargin::EXACT, materials);
+        assert!(exact.is_open(0, [16, 9, 4]), "the pit");
+        assert!(!exact.is_open(0, [16, 9, 5]), "beside the pit");
+        assert!(!exact.is_open(0, [16, 8, 4]), "under the pit");
+        assert!(!exact.is_open(0, [15, 9, 4]), "the far side of the plane");
+        assert!(exact.is_open(0, [16, 10, 20]), "air over the ground");
+        assert!(
+            !exact.is_open(2, [4, 9, 16]),
+            "the pit is against no plane across z"
+        );
+
+        let wider = SeamMargin { above: 1, aside: 1 };
+        let margin = seam_openings(refs, wider, materials);
+        assert!(margin.is_open(0, [16, 8, 4]), "a finer Voxel above");
+        assert!(margin.is_open(0, [16, 9, 5]), "a finer Voxel aside");
+        assert!(!margin.is_open(0, [16, 7, 4]), "two finer Voxels below");
+    }
 
     const LATTICE: usize = 2 * CHUNK_SIZE;
 

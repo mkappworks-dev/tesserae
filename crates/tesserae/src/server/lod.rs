@@ -23,8 +23,8 @@ use tesserae_core::lod::{
     Child, Coarse, UnderWater, Waterline, coarse_light_in, downsample_changed,
 };
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, Tables, Voxel, Worldgen,
-    WorldgenParams, mesh_chunk_with_seams,
+    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, SeamMargin, SeamOpenings,
+    Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk_with_seams, seam_openings,
 };
 
 use super::jobs::Stage;
@@ -148,10 +148,16 @@ pub(in crate::server) struct LodStore {
     levels: Vec<HashMap<ChunkCoord, Arc<Chunk>>>,
     /// Level 1's fluid and fire, for the Chunks that show any.
     overlays: HashMap<(u32, ChunkCoord), Arc<ChunkOverlay>>,
+    /// For the Chunks open anywhere.
+    openings: HashMap<(u32, ChunkCoord), Arc<SeamOpenings>>,
 }
 
 static DRY: std::sync::LazyLock<Arc<ChunkOverlay>> =
     std::sync::LazyLock::new(|| Arc::new(ChunkOverlay::none()));
+static CLOSED: std::sync::LazyLock<Arc<SeamOpenings>> =
+    std::sync::LazyLock::new(|| Arc::new(SeamOpenings::nowhere()));
+static OPEN: std::sync::LazyLock<Arc<SeamOpenings>> =
+    std::sync::LazyLock::new(|| Arc::new(SeamOpenings::everywhere()));
 
 impl LodStore {
     fn at(&self, level: u32) -> Option<&HashMap<ChunkCoord, Arc<Chunk>>> {
@@ -188,7 +194,12 @@ impl LodStore {
             Some(overlay) => Arc::clone(overlay),
             _ => Arc::clone(&DRY),
         };
-        Some(Shown { chunk, overlay })
+        let openings = Arc::clone(self.openings.get(&(level, coord)).unwrap_or(&CLOSED));
+        Some(Shown {
+            chunk,
+            overlay,
+            openings,
+        })
     }
 
     #[cfg(test)]
@@ -215,6 +226,17 @@ impl LodStore {
         } else {
             self.overlays.remove(&(level, coord));
         }
+        if coarse.openings == SeamOpenings::nowhere() {
+            self.openings.remove(&(level, coord));
+        } else {
+            // Every Chunk above level 3 is open everywhere.
+            let openings = if coarse.openings == **OPEN {
+                Arc::clone(&OPEN)
+            } else {
+                Arc::new(coarse.openings)
+            };
+            self.openings.insert((level, coord), openings);
+        }
     }
 
     pub(in crate::server) fn retain(
@@ -224,6 +246,7 @@ impl LodStore {
     ) {
         self.at_mut(level).retain(|&c, _| keep(c));
         self.overlays.retain(|&(l, c), _| l != level || keep(c));
+        self.openings.retain(|&(l, c), _| l != level || keep(c));
     }
 }
 
@@ -546,6 +569,7 @@ pub(in crate::server) fn generate_coarse(
     held: &[Option<Held>; 8],
     tables: &Tables,
     waterline: Option<Waterline>,
+    margin: Option<SeamMargin>,
 ) -> Coarse {
     let made: [Option<Chunk>; 8] = std::array::from_fn(|i| {
         held[i].is_none().then(|| {
@@ -564,7 +588,27 @@ pub(in crate::server) fn generate_coarse(
                 .expect("each child is held or was just generated"),
         ),
     });
-    downsample_changed(children, coord.y, tables, waterline)
+    let mut coarse = downsample_changed(children, coord.y, tables, waterline);
+    if let Some(margin) = margin {
+        let chunks = children.map(|c| match c {
+            Child::Packed(chunk) | Child::Changed(chunk, _) => chunk,
+        });
+        coarse.openings = seam_openings(chunks, margin, &tables.materials);
+    }
+    coarse
+}
+
+/// How far [`seam_openings`] looks past a level's children, or `None` to keep every seam wall.
+/// Level 1's children are level 0's own Chunks. Above it they are made at the finer level's
+/// Voxel size but not downsampled as that level is, so their ground stands a finer Voxel or two
+/// off its own: a margin of one missed no opening at levels 2 and 3 over four demo-like
+/// terrains, and at 4 and 5 every margin that did saved under 3% of the walls.
+fn seam_margin(level: u32) -> Option<SeamMargin> {
+    match level {
+        1 => Some(SeamMargin::EXACT),
+        2 | 3 => Some(SeamMargin { above: 1, aside: 1 }),
+        _ => None,
+    }
 }
 
 fn generate_persistent(
@@ -596,7 +640,14 @@ fn generate_persistent(
         })
     });
     let source = &sources[level as usize - 1];
-    generate_coarse(source, coord, &children, tables, waterline(source))
+    generate_coarse(
+        source,
+        coord,
+        &children,
+        tables,
+        waterline(source),
+        seam_margin(level),
+    )
 }
 
 /// What generation fills with its lake at level 0, for level 1 to recognise.
@@ -613,6 +664,7 @@ fn waterline(source: &Worldgen) -> Option<Waterline> {
 pub(in crate::server) struct Shown {
     pub chunk: Arc<Chunk>,
     pub overlay: Arc<ChunkOverlay>,
+    pub openings: Arc<SeamOpenings>,
 }
 
 /// Lit by the covered-column rule of [`coarse_light_in`]: no light is stored above level 0, so
@@ -645,13 +697,14 @@ fn mesh_coarse(
     let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|face| {
         Some(
             LitChunk::new(&around[face].chunk, &lit.around[face])
-                .with_overlay(&around[face].overlay),
+                .with_overlay(&around[face].overlay)
+                .with_openings(&around[face].openings),
         )
     });
-    let own = LitChunk::new(&center.chunk, &lit.center).with_overlay(&center.overlay);
-    // A finer Chunk spans half a coarse one, so the finer level's region ends
-    // on these planes.
-    let mut mesh = mesh_chunk_with_seams(own, neighbors, CHUNK_SIZE / 2, tables);
+    let own = LitChunk::new(&center.chunk, &lit.center)
+        .with_overlay(&center.overlay)
+        .with_openings(&center.openings);
+    let mut mesh = mesh_chunk_with_seams(own, neighbors, tables);
     if let Some(water) = water {
         let floor_m = (coord.y * CHUNK_SIZE as i32) as f32 * voxel_m;
         level_the_water(&mut mesh.blended, water, floor_m, voxel_m, &center.overlay);
@@ -1286,7 +1339,14 @@ fn dispatch(
                 if let Some(sources) = sources {
                     generate_persistent(level, coord, &sources, &persistent, &tables)
                 } else {
-                    generate_coarse(&source, coord, &held_children, &tables, waterline)
+                    generate_coarse(
+                        &source,
+                        coord,
+                        &held_children,
+                        &tables,
+                        waterline,
+                        seam_margin(level),
+                    )
                 }
             })
         });
@@ -1799,7 +1859,15 @@ mod tests {
             source.chunk(c.x, c.y, c.z)
         };
         let run = |held: &[Option<Held>; 8]| {
-            generate_coarse(&source, coord, held, &tables, waterline(&source)).chunk
+            generate_coarse(
+                &source,
+                coord,
+                held,
+                &tables,
+                waterline(&source),
+                seam_margin(1),
+            )
+            .chunk
         };
         let all = run(&Default::default());
 
@@ -2859,6 +2927,7 @@ mod tests {
         Coarse {
             chunk,
             overlay: ChunkOverlay::none(),
+            openings: SeamOpenings::everywhere(),
         }
     }
 
@@ -2866,11 +2935,12 @@ mod tests {
         Shown {
             chunk: Arc::new(coarse.chunk),
             overlay: Arc::new(coarse.overlay),
+            openings: Arc::new(coarse.openings),
         }
     }
 
-    /// A coarse Chunk and its six neighbours, built as the Server builds them.
-    fn chunks_around(coord: ChunkCoord, source: &Worldgen) -> (Shown, [Shown; 6]) {
+    /// A level-`level` Chunk and its six neighbours, built as the Server builds them.
+    fn chunks_around(level: u32, coord: ChunkCoord, source: &Worldgen) -> (Shown, [Shown; 6]) {
         let tables = crate::server::fixture_tables();
         let make = |c: ChunkCoord| {
             shown(generate_coarse(
@@ -2879,6 +2949,7 @@ mod tests {
                 &Default::default(),
                 &tables,
                 None,
+                seam_margin(level),
             ))
         };
         let around: Vec<Shown> = face_neighbors(coord).into_iter().map(make).collect();
@@ -2978,7 +3049,7 @@ mod tests {
 
     /// The mesh `mesh_coarse` makes of a level-`level` Chunk of `source`'s ground.
     fn coarse_mesh(level: u32, coord: ChunkCoord, source: &Worldgen) -> ChunkMesh {
-        let (center, around) = chunks_around(coord, source);
+        let (center, around) = chunks_around(level, coord, source);
         let voxel_m = world().voxel_size * 2f32.powi(level as i32);
         mesh_coarse(
             &Worldgen::new(world().seed, 1.0, source.params()),
@@ -3063,13 +3134,16 @@ mod tests {
                 let (cx, cz) = (next(2 * reach) - reach, next(2 * reach) - reach);
                 for cy in rows.clone() {
                     let coord = ChunkCoord::new(cx, cy, cz);
-                    let (center, around) = chunks_around(coord, &source);
-                    let neighbors: [Option<LitChunk>; 6] =
-                        std::array::from_fn(|f| Some(LitChunk::new(&around[f].chunk, &OPEN_SKY)));
+                    let (center, around) = chunks_around(level, coord, &source);
+                    let neighbors: [Option<LitChunk>; 6] = std::array::from_fn(|f| {
+                        Some(
+                            LitChunk::new(&around[f].chunk, &OPEN_SKY)
+                                .with_openings(&around[f].openings),
+                        )
+                    });
                     let open = mesh_chunk_with_seams(
-                        LitChunk::new(&center.chunk, &OPEN_SKY),
+                        LitChunk::new(&center.chunk, &OPEN_SKY).with_openings(&center.openings),
                         neighbors,
-                        CHUNK_SIZE / 2,
                         &tables,
                     );
                     assert!(
@@ -3084,6 +3158,7 @@ mod tests {
     }
 
     mod held;
+    mod seams;
 }
 
 #[cfg(test)]
@@ -3119,6 +3194,7 @@ mod persistence_tests {
                 &Default::default(),
                 &tables,
                 None,
+                seam_margin(level),
             );
             let y = (home.y * 32).div_euclid(divisor).rem_euclid(32) as usize;
             assert!(coarse.chunk.get(0, y, 0).is_air(), "level {level}");
