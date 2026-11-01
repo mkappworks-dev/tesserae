@@ -1,4 +1,5 @@
-// Texture alpha must cut the same holes in colour, depth and shadow passes.
+// Texture alpha and coverage must cut the same holes in colour, depth and
+// shadow passes.
 import super::{
     chunk_vertex::{ChunkVertex, ChunkVertexOutput, transform_vertex},
     material_texture::{material_slot, has_texture, sample_texture},
@@ -7,6 +8,8 @@ import super::{
 
 @if(PREPASS_FRAGMENT)
 import bevy_pbr::prepass::io::FragmentOutput;
+@if(CHUNK_COVERAGE_CUT)
+import super::coverage::finer_drawn;
 
 @vertex
 fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
@@ -14,6 +17,11 @@ fn vertex(in: ChunkVertex) -> ChunkVertexOutput {
 }
 
 fn cut(in: ChunkVertexOutput) {
+@if(CHUNK_COVERAGE_CUT) {
+    if finer_drawn(in.level, in.world_position.xyz, in.world_normal) {
+        discard;
+    }
+}
 @if(MAY_DISCARD) {
     let slot = material_slot(in.material);
     if has_texture(slot) {

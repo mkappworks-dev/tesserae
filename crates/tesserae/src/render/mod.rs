@@ -24,6 +24,7 @@ pub fn plugin(app: &mut App) {
     // embedded file nothing holds a handle to is never registered.
     load_shader_library!(app, "leaf_hole.wesl");
     load_shader_library!(app, "chunk_vertex.wesl");
+    load_shader_library!(app, "coverage.wesl");
     load_shader_library!(app, "material_texture.wesl");
     app.add_plugins((
         MaterialPlugin::<ChunkMaterial>::default(),
