@@ -1,6 +1,6 @@
 # 10: Final verification and the step 8.1 record
 
-Status: ready-for-human
+Status: done
 Blocked by: 07, 09
 
 Spec: [Testing Decisions](../spec.md#testing-decisions).
