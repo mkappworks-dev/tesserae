@@ -11,7 +11,7 @@
 //! a Cell that is partly covered sends it a level further down. Asking every
 //! finer level instead cost about a millisecond a frame at 1080p.
 //!
-//! The layout, which `chunk_material.wesl`'s `cover_at` mirrors: word 0 is the
+//! The layout, which `coverage.wesl`'s `cover_at` mirrors: word 0 is the
 //! level count `L`; then, for each level `k` in `0..L`, eight words: the offset
 //! of its bits, its window's origin as three `i32`, its window's size as three
 //! `u32`, and its Cell size in metres as `f32` bits. Then the bits, two per Cell
@@ -227,7 +227,7 @@ pub fn finer_drawn_at(words: &[u32], level: u32, point_m: Vec3) -> bool {
 }
 
 /// How far behind a face its own Voxel is sampled, as a fraction of a Cell.
-/// `chunk_material.wesl`'s `BEHIND_A_FACE`.
+/// `coverage.wesl`'s `BEHIND_A_FACE`.
 #[cfg(test)]
 const BEHIND_A_FACE: f32 = 1.0 / 1024.0;
 

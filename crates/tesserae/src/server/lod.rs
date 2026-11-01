@@ -1084,14 +1084,18 @@ pub(in crate::server) fn stream_lod(
 
     retire(&plans, &mut store, &mut state, &mut jobs, &mut unloaded);
     let aim = Aim::of(player);
-    orders.update(
-        &plans,
-        &mut state,
-        &aim,
-        world.cell_size(),
-        settings.view_distance_m,
-        time.map_or(0.0, |t| t.elapsed_secs_f64()),
-    );
+    {
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        let _rescoring = crate::cost::Rescoring::start();
+        orders.update(
+            &plans,
+            &mut state,
+            &aim,
+            world.cell_size(),
+            settings.view_distance_m,
+            time.map_or(0.0, |t| t.elapsed_secs_f64()),
+        );
+    }
     let priority = |(level, coord): LodKey| {
         let cell_m = world.cell_size_at(level);
         let min = IVec3::new(coord.x, coord.y, coord.z).as_vec3() * cell_m;

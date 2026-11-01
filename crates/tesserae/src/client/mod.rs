@@ -9,6 +9,7 @@ pub mod camera;
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod capture;
 pub mod chunk_mesh;
+mod chunk_region;
 pub mod chunk_view;
 pub mod drawn_mask;
 pub mod edit;
@@ -17,6 +18,7 @@ mod history;
 #[cfg(feature = "profiling")]
 pub mod holes;
 mod hotbar_store;
+mod in_flight;
 mod input;
 mod layout;
 mod layout_menu;
