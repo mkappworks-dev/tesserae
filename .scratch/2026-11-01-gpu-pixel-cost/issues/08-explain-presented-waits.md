@@ -312,6 +312,26 @@ you report completion. Prior failed folders are retained. Validation:
 eight Rust tests, thirteen runner tests, Clippy and release build pass.
 The probe runner test uses a mocked process; it is not OS validation.
 
+## Native monitor probe passed (2026-11-02)
+
+Your first `monitor-probe-08d` completed successfully in 6.26 seconds with
+`bin-08d` (SHA-256 `941df4b2c836cdcf...`). Backend surface configuration,
+final window metadata and both World cameras all report 2560 x 1440.
+The selected external monitor reports 144,000 millihertz, scale 1; mode is
+borderless fullscreen and the backend reaches Immediate. This verifies
+the corrected native geometry setup, not the performance target.
+
+The probe ended unfocused; the full series needs you to focus each new
+engine window before the measurement window begins at 22 seconds. Host
+load was 2.74 before and 2.68 after, AC attached. The two attempts to reuse
+the same output directory were refused before starting another engine,
+as intended to preserve artifacts. The first successful result remains.
+
+Next: full four-fixture series using the same `bin-08d`, fresh output
+`/tmp/claude-gpu-pixel-cost/presented-external-08d`, and the previous full
+series options with `--borderless`, without `--monitor-probe`. Agent idle
+until you report done. The target remains pending.
+
 ## Validation and authorization
 
 frame-profiling.md. All heavy work goes through the shared heavy.sh lock.
