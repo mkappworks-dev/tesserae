@@ -54,6 +54,25 @@ on by default below 100%. Each run's `run.json` records the anti-aliasing, scale
 and sharpening the engine reports using, under `engine_presentation`; never pool
 runs that differ in them.
 
+`--instruments waits` adds exclusive CPU timestamp markers around window
+preparation (including swapchain acquisition), the root render graph (including
+its command submissions), and renderer finalization after the graph (the final
+submission, presentation scheduling and screenshot collection). Columns in
+`frames.render.csv` end in `_interval_ms` and are summarized by phase alongside
+the existing render samples. They enclose schedule work and may include other
+systems and scheduling delays; they do not isolate an individual driver call,
+GPU execution, or display latency. The exclusive markers serialize work and may
+change frame time, so use them for attribution in a separate series, never as an
+optimization acceptance baseline. Missing boundaries export empty cells, not
+zero. GPU timestamps remain a separate attribution series.
+
+Each run's `run.json` retains load averages, UTC, `pmset -g batt` and
+`pmset -g therm` observations before and after the engine process. Failed or
+unsupported host queries retain their errors; the observations run outside the
+measured process. Metadata reports the window monitor's OS-reported refresh rate
+in millihertz when available; it does not measure physical scanout or variable
+refresh behavior. Keep the window on one monitor throughout a series.
+
 Each run retains its PNG, log, environment, executable hash and raw samples. The
 series retains a copied executable, Engine source hashes, source revision/diff,
 Game file hashes, build profile/features and host identity. Keep native

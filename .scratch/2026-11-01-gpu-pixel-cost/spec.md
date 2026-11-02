@@ -237,7 +237,15 @@ readiness or simulation progress. Ticket 07 checks the targets.
 | 05 | Choose the anti-aliasing                    | 02             |
 | 06 | Render scale with upscaling                 | 02             |
 | 07 | Check the targets                           | 03, 04, 05, 06 |
+| 08 | Explain the two presented timing states     | 07             |
 
 02 ends with an attribution checkpoint. 03, 04 and 05 are conditional on it
 and may become `wontfix`; anything else it finds dominant becomes a new ticket
 for your approval.
+
+## Follow-up approved (2026-11-02)
+
+07 completed its measurement check but missed the presented target. You
+approved [08](issues/08-explain-presented-waits.md): attribute the two
+presented timing states, then settle the 1080p tail check on a quiet host.
+SMAA and native render scale remain the approved defaults.

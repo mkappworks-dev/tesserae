@@ -4,6 +4,8 @@ from pathlib import Path
 import runpy
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 
 PROFILE = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'profile-frames'))
 
@@ -30,6 +32,34 @@ class FrameAnalysis(unittest.TestCase):
             self.assertEqual(result['startup']['frame_ms']['max'], 750)
             self.assertEqual(result['fixture']['render_thread_cpu_ms']['p99'], 1)
             self.assertEqual(result['stationary']['frame_ms']['n'], 0)
+
+
+class WaitAnalysis(unittest.TestCase):
+    def test_intervals_join_by_frame_not_row_order_and_keep_missing_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = root / 'flight-1-on'
+            run.mkdir()
+            (run / 'frames.csv').write_text(
+                'frame_id,phase,frame_ms\n0,startup,10\n1,fixture,20\n2,fixture,30\n')
+            (run / 'frames.render.csv').write_text(
+                'frame_id,render_schedule_wall_ms,render_thread_cpu_ms,window_prepare_interval_ms\n'
+                '2,25,2,\n0,9,1,7\n1,19,2,16\n99,99,99,99\n')
+            PROFILE['analyze'](root)
+            result = json.loads((root / 'summary.json').read_text())['flight-1-on']
+            self.assertEqual(result['fixture']['window_prepare_interval_ms'],
+                             dict(n=1, p50=16, p95=16, p99=16, max=16))
+            self.assertEqual(result['startup']['window_prepare_interval_ms']['p50'], 7)
+
+    def test_host_query_failure_is_retained_without_losing_other_observations(self):
+        with patch('subprocess.run', side_effect=[
+                subprocess.TimeoutExpired('pmset', 5),
+                subprocess.CompletedProcess(['pmset'], 1, '', 'not supported')]):
+            result = PROFILE['host_observation']()
+        self.assertIn('error', result['power'])
+        self.assertEqual(result['thermal']['returncode'], 1)
+        self.assertEqual(result['thermal']['stderr'], 'not supported')
+        self.assertEqual(len(result['load_average']), 3)
 
 
 FRAME_HEADER = ('frame_id,start_s,end_s,phase,frame_ms,streaming_settled,fixture_moves,'

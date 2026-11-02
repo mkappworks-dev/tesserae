@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ['active', 'stationary', 'flight', 'transparency',
@@ -206,7 +207,9 @@ def analyze(folder):
                 key: distribution([float(r[key]) for r in selected if r[key]])
                 for key in rows[0] if key.endswith('_ms')
             }
-        render = list(csv.DictReader(path.with_suffix('.render.csv').read_text().splitlines()))
+        render_reader = csv.DictReader(path.with_suffix('.render.csv').read_text().splitlines())
+        render = list(render_reader)
+        render_metrics = [key for key in render_reader.fieldnames or [] if key.endswith('_ms')]
         assert len({r['frame_id'] for r in render}) == len(render)
         by_id = {r['frame_id']: r['phase'] for r in rows}
         if 'start_s' in rows[0]:
@@ -221,11 +224,14 @@ def analyze(folder):
                 'fixture_ready_all': all(r.get('fixture_ready') == 'true' for r in fixture),
                 'fire_burning_frames': sum(r.get('fixture_fire_burning') == 'true' for r in fixture),
                 'fixture_frames': len(fixture),
+                'focused_fixture_frames': sum(r.get('focused') == 'true' for r in fixture),
+                'no_ground': 'no ground' in (path.parent / 'native.log').read_text().lower()
+                    if (path.parent / 'native.log').exists() else None,
                 'fixture_ignitions': max((int(r.get('fixture_ignitions', 0)) for r in fixture), default=0),
                 'render_rows': len(render), 'frame_rows': len(rows),
             }
         for phase in result[path.parent.name]:
-            for key in ['render_schedule_wall_ms', 'render_thread_cpu_ms']:
+            for key in render_metrics:
                 result[path.parent.name][phase][key] = distribution([
                     float(r[key]) for r in render
                     if by_id.get(r['frame_id']) == phase and r[key]
@@ -273,7 +279,7 @@ def main():
     parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
     # Each costs more than the overhead bound, so a timing series leaves them off.
-    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility'], default=[])
+    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility', 'waits'], default=[])
     parser.add_argument('--size', default='1920x1080', metavar='WxH',
                         help='offscreen target size; ignored with --presented')
     # Each changes one cost and the image; a `profiling` build only, never a timing baseline.
@@ -364,11 +370,30 @@ def main():
                     # Continuous updates must match with logging on and off.
                     env['TESSERAE_PROFILE_CONTINUOUS'] = '1'
                     print('Running', run.name, flush=True)
+                    record = dict(
+                        host_before=host_observation(),
+                        env={k: v for k, v in env.items() if k.startswith('TESSERAE_')},
+                        executable_sha256=digest(binary))
+                    (run / 'run.json').write_text(json.dumps(record, indent=2) + '\n')
                     start = time.monotonic()
-                    with (run / 'native.log').open('w') as log:
-                        subprocess.run(['/usr/bin/caffeinate', '-i', str(binary)], cwd=ROOT,
-                                       env=env, stdout=log, stderr=subprocess.STDOUT,
-                                       check=True, timeout=120)
+                    try:
+                        with (run / 'native.log').open('w') as log:
+                            process = subprocess.run(
+                                ['/usr/bin/caffeinate', '-i', str(binary)], cwd=ROOT,
+                                env=env, stdout=log, stderr=subprocess.STDOUT,
+                                check=True, timeout=120)
+                            record['returncode'] = process.returncode
+                    except subprocess.CalledProcessError as error:
+                        record['returncode'] = error.returncode
+                        raise
+                    except subprocess.TimeoutExpired:
+                        record['timed_out'] = True
+                        raise
+                    finally:
+                        record.update(elapsed_s=time.monotonic() - start,
+                                      host_after=host_observation(),
+                                      engine_presentation=engine_presentation(run))
+                        (run / 'run.json').write_text(json.dumps(record, indent=2) + '\n')
                     if enabled:
                         measured = list(csv.DictReader((run / 'frames.csv').read_text().splitlines()))
                         fixture_rows = [r for r in measured if r['phase'] == 'fixture']
@@ -376,15 +401,23 @@ def main():
                         assert all(r['fixture_ready'] == 'true' for r in fixture_rows), 'Fixture not ready'
                         if case == 'active':
                             assert all(r['fixture_fire_burning'] == 'true' for r in fixture_rows), 'Fire was inactive in the measurement window'
-                    (run / 'run.json').write_text(json.dumps({
-                        'elapsed_s': time.monotonic() - start, 'env': {
-                            k: v for k, v in env.items() if k.startswith('TESSERAE_')},
-                        'executable_sha256': digest(binary),
-                        'engine_presentation': engine_presentation(run),
-                    }, indent=2) + '\n')
         analyze(args.output)
     finally:
         lock.rmdir()
+
+
+def host_observation():
+    """Outside the measured process; retain failures rather than guessing state."""
+    result = dict(utc=datetime.now(timezone.utc).isoformat(), load_average=list(os.getloadavg()))
+    for key, command in [('power', ['pmset', '-g', 'batt']),
+                         ('thermal', ['pmset', '-g', 'therm'])]:
+        try:
+            observation = subprocess.run(command, capture_output=True, text=True, timeout=5)
+            result[key] = dict(returncode=observation.returncode,
+                               stdout=observation.stdout, stderr=observation.stderr)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            result[key] = dict(error=str(error))
+    return result
 
 
 def engine_presentation(run):
