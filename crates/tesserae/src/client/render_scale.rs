@@ -113,7 +113,7 @@ fn apply(
     world: Query<(Entity, &RenderTarget), WorldCameras>,
     main: Option<Single<Entity, With<MainCamera>>>,
     present: Query<(Entity, &RenderTarget, Has<ContrastAdaptiveSharpening>), With<PresentCamera>>,
-    mut upscaled: Query<&mut Sprite, With<Upscaled>>,
+    mut upscaled: Query<(Entity, &mut Sprite), With<Upscaled>>,
 ) {
     let Some(main) = main else {
         return;
@@ -124,6 +124,9 @@ fn apply(
             images.remove(&scaled.0);
             commands.remove_resource::<Scaled>();
             for (entity, ..) in &present {
+                commands.entity(entity).despawn();
+            }
+            for (entity, _) in &upscaled {
                 commands.entity(entity).despawn();
             }
             for (entity, _) in &world {
@@ -213,7 +216,7 @@ fn apply(
             return;
         }
     }
-    for mut sprite in &mut upscaled {
+    for (_, mut sprite) in &mut upscaled {
         if sprite.custom_size != Some(logical) {
             sprite.custom_size = Some(logical);
         }
@@ -343,6 +346,41 @@ mod tests {
         assert!(world_targets(&mut app).iter().all(|t| same(t, &output)));
         assert!(present(&mut app).is_empty());
         assert!(main_draws_ui(&mut app));
+    }
+
+    #[test]
+    fn repeated_scale_changes_remove_old_compositors_and_images() {
+        let (mut app, _) = app(75);
+        for _ in 0..3 {
+            app.world_mut().resource_mut::<Preferences>().render_scale = 75;
+            run(&mut app);
+            let handle = app.world().resource::<Scaled>().0.clone();
+            let sprites: Vec<_> = app
+                .world_mut()
+                .query_filtered::<&Sprite, With<Upscaled>>()
+                .iter(app.world())
+                .map(|s| s.image.clone())
+                .collect();
+            assert_eq!(sprites, vec![handle.clone()]);
+            assert_eq!(present(&mut app).len(), 1);
+            app.world_mut().resource_mut::<Preferences>().render_scale = 100;
+            run(&mut app);
+            assert!(
+                app.world()
+                    .resource::<Assets<Image>>()
+                    .get(&handle)
+                    .is_none()
+            );
+            assert_eq!(
+                app.world_mut()
+                    .query_filtered::<Entity, With<Upscaled>>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+            assert!(present(&mut app).is_empty());
+            assert!(main_draws_ui(&mut app));
+        }
     }
 
     #[test]
