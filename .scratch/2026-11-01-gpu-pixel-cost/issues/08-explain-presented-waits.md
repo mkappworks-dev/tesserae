@@ -385,6 +385,21 @@ verification/correction of the focus observation is needed before marking
 the presented target met. No further presented run has been requested
 while that observation is being clarified with you.
 
+## Focus confirmed (2026-11-03)
+
+You confirmed that another app was active during `presented-external-08d`.
+Its focus telemetry is consistent with that observation; this is retained
+as an unfocused series, not an accepted focused-play target pass. No
+focus-reporting fix or rebuild is justified by that result.
+
+Repeat with the same validated `bin-08d`, fresh output
+`/tmp/claude-gpu-pixel-cost/presented-focused-08e`, and the same full
+four-fixture options. Click each new engine window as it opens and keep
+it the active app throughout the series. Do not switch to another app
+between runs; each process creates a new window. The measured phase begins
+22 seconds after launch. Expected duration remains about fourteen minutes.
+The agent stays idle until you say done. Target acceptance remains open.
+
 ## Validation and authorization
 
 frame-profiling.md. All heavy work goes through the shared heavy.sh lock.
