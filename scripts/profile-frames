@@ -257,7 +257,7 @@ def competitors():
         r'/(cargo|rustc|tesserae[^/ ]*|meshing-[^/ ]+|fluids-[^/ ]+)$', line)]
 
 
-SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'msaa-2', 'fxaa', 'smaa', 'no-shadows']
+SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'msaa-4', 'msaa-2', 'fxaa', 'smaa', 'no-shadows']
 
 
 def main():

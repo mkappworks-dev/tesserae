@@ -3,7 +3,7 @@
 
 mod actions;
 mod aim;
-mod anti_alias;
+pub(crate) mod anti_alias;
 mod avatar;
 mod blend_order;
 pub mod camera;
@@ -62,6 +62,7 @@ pub fn plugin(app: &mut App) {
         save::plugin,
         profile::plugin,
         presentation::plugin,
+        anti_alias::plugin,
         settings::plugin,
         menu_ui::plugin,
         actions::plugin,

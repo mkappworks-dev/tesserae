@@ -236,9 +236,10 @@ fn end(
     }
     if let Some(preferences) = preferences {
         profile.presentation = format!(
-            "selected_display_sync={} selected_fps_cap={:?} capture_override={}",
+            "selected_display_sync={} selected_fps_cap={:?} anti_aliasing={:?} capture_override={}",
             preferences.display_sync,
             preferences.fps_cap,
+            crate::client::anti_alias::chosen(&preferences),
             std::env::var_os("TESSERAE_SCREENSHOT").is_some()
         );
     }

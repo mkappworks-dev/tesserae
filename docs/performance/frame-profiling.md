@@ -43,10 +43,11 @@ the physical target. `--switches` turns on diagnostic switches of a `profiling`
 build, each changing one cost and the image, so they are for attribution and
 never for a timing baseline: `no-coverage-discard` (the coverage test is
 compiled out of the chunk shader), `level0-only` (coarse levels are not drawn),
-`no-shadows` (the sun casts no shadow map) and four that replace the chosen
-anti-aliasing, one at a time: `msaa-off`, `msaa-2`, `fxaa` and `smaa` (the last
-two with MSAA off). The hand camera takes the Player camera's sample count. A
-normal build compiles none of them.
+`no-shadows` (the sun casts no shadow map) and five that replace the
+anti-aliasing setting, one at a time: `msaa-off`, `msaa-4`, `msaa-2`, `fxaa` and
+`smaa` (the last two with MSAA off). The hand camera takes the Player camera's
+sample count. A normal build compiles none of them. Runs record the
+anti-aliasing in use in `frames.metadata.txt`.
 
 Each run retains its PNG, log, environment, executable hash and raw samples. The
 series retains a copied executable, Engine source hashes, source revision/diff,
