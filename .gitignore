@@ -9,3 +9,6 @@ node_modules/
 /games/meadow/target
 /games/demo/dist
 /games/demo/trust.json
+
+__pycache__/
+*.py[cod]
