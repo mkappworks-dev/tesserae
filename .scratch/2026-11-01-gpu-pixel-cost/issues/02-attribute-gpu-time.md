@@ -1,6 +1,6 @@
 # 02: Attribute GPU time at 1440p
 
-Status: ready-for-agent
+Status: done
 Blocked by: 01
 
 Spec: [GPU cost per pixel](../spec.md).
@@ -60,15 +60,15 @@ takes every argument after it.
 
 - [x] The offscreen size and the switches are in the runner and recorded in
       provenance; a normal build compiles none of the switches.
-- [ ] GPU time per pass at 1080p and 1440p offscreen, and presented 1440p,
-      recorded here. (Offscreen: GPU frame totals only; see the checkpoint.
-      Presented: waits for your run.)
+- [x] GPU time per pass at 1080p and 1440p offscreen, and presented 1440p,
+      recorded here. GPU frame totals only: the markers cannot split passes
+      (see the checkpoint); the switches attribute instead.
 - [x] Each switch's effect measured offscreen at 1440p.
-- [ ] The presented p95 tail attributed to GPU time or presentation.
+- [x] The presented p95 tail attributed to GPU time or presentation.
 - [x] The offscreen 1440p timing baseline recorded, every fixture.
 - [x] A proposed order for 03 to 06, for your approval.
 
-## Checkpoint (2026-11-02), offscreen; the presented run is still to do
+## Checkpoint (2026-11-02), offscreen
 
 Release `profiling` binary `bin-02` (sha256 `86581972...`), the demo Game
 built from this worktree, `--instruments gpu` markers on in the attribution
@@ -134,6 +134,39 @@ Proposed order, for your approval:
 
 The presented run (your step) names whether the p95 tail is GPU time or
 presentation, and it can change this order.
+
+## Presented run (2026-11-02)
+
+Your run: `bin-02`, 2560 x 1440 surface, `Immediate` present, GPU markers
+and holes on, three rounds of `stationary` and `sprint-flight`, in
+`/tmp/claude-gpu-pixel-cost/presented-gpu-02`. Zero rule-hole and fill-hole
+frames. `stationary` round 1 reconfigured its surface to 3024 x 1898 at
+31.8 s, the end of the fixture window; its numbers match the other rounds.
+
+| fixture       | round | wall p50 | wall p95 | GPU frame | GPU share over p95 |
+| ------------- | ----- | -------- | -------- | --------- | ------------------ |
+| stationary    | 1     | 6.80     | 15.87    | 6.50      | 40% of 16.6 ms     |
+| stationary    | 2     | 9.29     | 15.41    | 6.73      | 37% of 18.1 ms     |
+| stationary    | 3     | 9.45     | 14.75    | 6.66      | 40% of 16.8 ms     |
+| sprint-flight | 1     | 8.75     | 15.66    | 6.81      | 39% of 17.8 ms     |
+| sprint-flight | 2     | 9.21     | 14.28    | 6.73      | 39% of 17.4 ms     |
+| sprint-flight | 3     | 8.76     | 15.20    | 6.70      | 39% of 17.4 ms     |
+
+- **The engine's GPU frame is the same presented as offscreen**, 6.5 to
+  6.8 ms against 6.8 ms, and it does not grow in slow frames: frames over the
+  p95 still take 6.7 ms of GPU. In frames over the p50 the GPU frame covers
+  about 62% of the wall frame; over the p95, about 40%.
+- **So the p95 tail is waiting, not more engine GPU work.** The render
+  thread spends 1.5 ms of CPU in an 8.8 ms render schedule; the rest is
+  blocked, on the drawable or on the GPU, which also composites the window
+  for WindowServer. Wall frames are bimodal: 3 to 7 ms and 8 to 12 ms.
+- At 6.7 ms the GPU frame uses 97% of the 6.94 ms a 144 Hz frame allows,
+  leaving the compositor no room. Cutting GPU time is still the lever; 03's
+  2.4 ms would leave a third of the budget free.
+- If the tail stays after 03, it is presentation and pacing (frame latency,
+  present mode), which the spec keeps out of scope: then a new ticket.
+
+The proposed order stands: 03 first.
 
 ## Validation and authorization
 
