@@ -332,6 +332,59 @@ Next: full four-fixture series using the same `bin-08d`, fresh output
 series options with `--borderless`, without `--monitor-probe`. Agent idle
 until you report done. The target remains pending.
 
+## External timing series reviewed (2026-11-03)
+
+`presented-external-08d` completed all 24 processes with `bin-08d` (SHA-256
+`941df4b2c836cdcf...`), at SMAA and 100% scale, holes on, waits and GPU
+markers off. All twelve logging-on windows have complete fixture windows,
+readiness before flight, simulation advancement, fixture readiness, zero
+rule-hole and fill-hole frames. No `no ground` occurs in any native log.
+
+Every logging-on run reports external `Monitor #10002`, 144,000 millihertz,
+2560 x 1440 physical surface, scale 1, borderless fullscreen, and Immediate
+backend presentation after startup. The geometry fix held through the
+whole series. Before/after load across all 24 runs ranges 2.65 to 10.87,
+AC attached; thermal queries report no recorded warning/status.
+
+Per-run frame distributions in ms, whole fixture window, without pooling:
+
+| fixture | round | p50 | p95 | p99 | max | focused / frames |
+| ------- | ----- | --- | --- | --- | --- | ---------------- |
+| stationary | 1 | 4.41 | 6.05 | 8.00 | 11.01 | 0 / 2222 |
+| stationary | 2 | 2.66 | 3.98 | 4.48 | 9.58 | 0 / 3501 |
+| stationary | 3 | 2.62 | 3.89 | 4.48 | 5.88 | 0 / 3555 |
+| flight | 1 | 4.50 | 6.40 | 9.10 | 17.53 | 212 / 2172 |
+| flight | 2 | 2.97 | 4.53 | 5.19 | 9.41 | 0 / 3176 |
+| flight | 3 | 2.77 | 4.27 | 5.00 | 9.45 | 0 / 3355 |
+| sprint-flight | 1 | 4.36 | 6.07 | 7.71 | 13.44 | 0 / 2241 |
+| sprint-flight | 2 | 2.70 | 4.63 | 5.78 | 12.87 | 0 / 3289 |
+| sprint-flight | 3 | 2.77 | 4.55 | 5.40 | 9.72 | 0 / 3280 |
+| sprint-walk | 1 | 2.98 | 4.55 | 5.51 | 13.63 | 0 / 3150 |
+| sprint-walk | 2 | 2.83 | 4.27 | 4.96 | 10.22 | 0 / 3314 |
+| sprint-walk | 3 | 2.85 | 4.43 | 5.25 | 7.65 | 0 / 3259 |
+
+All twelve p95 values satisfy the numerical <= 6.9 ms threshold. This is
+not yet an accepted focused-play target pass: eleven measured windows are
+unfocused throughout, and flight round 1 has only 212 focused frames of
+2,172. No run is fully focused. The focused subset is not substituted for
+the whole flight window; all samples remain retained. Whether this is
+actual app inactivity or a focus-reporting problem needs confirmation.
+
+The first three runs have p50 about 4.4 to 4.5 ms, later runs about 2.6 to
+3.0 ms despite the same final geometry and mostly identical unfocused
+status. The earlier internal-display 8.4 ms state did not recur here, but
+monitor, window mode, focus and host conditions differ, so this is not a
+controlled causal explanation or a pooled comparison to the old baseline.
+Logging-on/off pairs also vary substantially; their ratios cannot provide
+a tight overhead bound for accepting a small optimization. No such claim
+is made from this series.
+
+The numerical target and geometry are recorded, the hole target remains
+met, and 08 stays open for focused-play validation. A focused repeat or
+verification/correction of the focus observation is needed before marking
+the presented target met. No further presented run has been requested
+while that observation is being clarified with you.
+
 ## Validation and authorization
 
 frame-profiling.md. All heavy work goes through the shared heavy.sh lock.

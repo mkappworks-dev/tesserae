@@ -206,3 +206,11 @@ frame-profiling.md. Local work only; no push or PR without approval.
 fixtures have lower median and p99 ranges in three matched rounds, zero
 holes, and no `no ground`. Its presented attribution was on the internal
 120 Hz display, confirmed by you; the external 144 Hz check remains open.
+
+## External-display follow-up reviewed (2026-11-03)
+
+08's complete `presented-external-08d` series has twelve p95 values below
+6.9 ms with verified external 144 Hz, 2560 x 1440 borderless geometry and
+zero hole frames. None of the measured windows stayed fully focused, so
+the numerical threshold is satisfied but a focused-play target pass is
+not yet accepted. Distributions and the focus counts are recorded in 08.
