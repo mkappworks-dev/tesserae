@@ -1,6 +1,6 @@
 # 04: Cut partly covered coarse faces at upload
 
-Status: ready-for-agent
+Status: wontfix
 Blocked by: 03
 
 Spec: [GPU cost per pixel](../spec.md).
@@ -40,6 +40,15 @@ the coverage test.
 - [ ] Offscreen 1440p passes the effect gate against 03; the cut's CPU cost
       per frame recorded, and main-thread p99 does not regress.
 - [ ] ADR-0019 amended.
+
+## Decision (2026-11-02): wontfix
+
+After 03 the coverage test runs only on the ring of coarse Chunks finer
+levels partly cover. 02's switches put the GPU frame with the test compiled
+out at 4.38 ms and with level 0 alone at 4.35 ms; 03's is 4.70 ms. So at
+most about 0.3 ms is left for this ticket, against quad splitting on every
+mask change, an ADR-0019 amendment and risk to the zero-holes rule. Declined
+with you; reopen only if a later measurement shows the ring costs more.
 
 ## Validation and authorization
 

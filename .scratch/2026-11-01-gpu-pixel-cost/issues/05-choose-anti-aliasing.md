@@ -27,6 +27,15 @@ The Player camera has Bevy's default 4x MSAA, never chosen. Choose it.
 - [ ] Zero rule-hole frames in every fixture; offscreen 1080p does not
       regress against 02's baseline unless you accept it.
 
+## Decision (2026-11-02): go ahead
+
+02's MSAA-off switch saved 1.2 ms of 6.8 ms at 1440p, so the condition is
+met. Approved with you, to be done in a new session. Start by rerunning the
+`msaa-off` and `level0-only` switches on 03's binary (`bin-03`), offscreen
+1440p, three rounds, so the gains are post-03 numbers and not 02's. 03 left
+the presented p95 at 6.1 to 6.7 ms in passing runs against 6.94 ms, so the
+point is headroom. You pick the anti-aliasing on captures.
+
 ## Validation and authorization
 
 frame-profiling.md. Image quality is your call on captures. Local work only;

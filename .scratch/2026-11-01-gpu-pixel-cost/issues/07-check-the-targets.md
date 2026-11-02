@@ -1,7 +1,7 @@
 # 07: Check the targets
 
 Status: ready-for-agent
-Blocked by: 03, 04, 05, 06
+Blocked by: 05, 06
 
 Spec: [GPU cost per pixel](../spec.md).
 PR boundary: a measurement note on its own branch `tech/gpu-targets`.
@@ -46,6 +46,10 @@ Zero rule-hole and fill-hole frames. Ten of twelve runs meet p95 at most
 - `stationary` round 1 is 5.8 ms at p95 in every second but 23 and 24 s,
   where 112 frames exceed 6.94 ms; rounds 2 and 3 have none. A transient in
   the series' first run, not reproduced.
+
+Still to do: your rerun of `stationary` and `sprint-walk` with the window
+focused (output `/tmp/claude-gpu-pixel-cost/presented-03b`, command in the
+2026-11-02 session), and the offscreen check of every fixture.
 
 ## Validation and authorization
 

@@ -36,6 +36,13 @@ and upscales it, with UI at full resolution.
 - [ ] At 1.0 the image is pixel-identical to before; zero rule-hole frames in
       every fixture at every scale.
 
+## Decision (2026-11-02): go ahead
+
+The spec wants this setting whatever the target (user stories 6 to 8): its
+value is larger displays and weaker Macs, not this one at 1440p. Approved
+with you, to be done in a new session. Default 1.0 until you choose
+otherwise on captures.
+
 ## Validation and authorization
 
 frame-profiling.md. Image quality is your call on captures. Local work only;
