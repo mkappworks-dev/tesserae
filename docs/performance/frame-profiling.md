@@ -64,6 +64,15 @@ the selected display; this requests placement, not a refresh-rate or
 present-mode change. Without `--monitor-hz`, presented window sizing and
 placement retain their existing behavior.
 
+Add `--borderless` with `--presented --monitor-hz` when the requested content
+size fills the selected monitor. This explicitly uses borderless fullscreen on
+that monitor to avoid macOS shrinking a decorated window to its work area. The
+requested size must equal the monitor's physical size. The runner records the
+request in provenance and checks the final size and window mode when metadata is
+available. Treat this as a distinct presentation condition; do not pool it with
+windowed measurements. It changes neither the normal window default nor the
+requested present mode.
+
 `--instruments waits` adds exclusive CPU timestamp markers around window
 preparation (including swapchain acquisition), the root render graph (including
 its command submissions), and renderer finalization after the graph (the final

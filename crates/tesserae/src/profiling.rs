@@ -430,12 +430,13 @@ fn save(
     for w in windows.iter() {
         writeln!(
             meta,
-            "window={}x{} scale={} requested_present={:?} focused={}",
+            "window={}x{} scale={} requested_present={:?} focused={} mode={:?}",
             w.physical_width(),
             w.physical_height(),
             w.scale_factor(),
             w.present_mode,
-            w.focused
+            w.focused,
+            w.mode
         )?;
     }
     for (camera, target) in cameras.iter() {

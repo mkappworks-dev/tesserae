@@ -148,7 +148,8 @@ This matches the internal monitor seen in the smoke check. The surface is
 The 8.4 / 16.7 ms pattern is consistent with 120 Hz pacing, but these
 intervals do not prove the underlying mechanism. This run is not evidence
 of the external 144 Hz target. You confirmed that the windows were on the
-internal display. No default has been changed. A profiling-only `--monitor-hz` selector is being added
+internal display. No default has been changed. A profiling-only `--monitor-hz`
+selector is being added
 so every new process can open on the verified external monitor. The
 external target check remains pending.
 
@@ -229,6 +230,33 @@ cd /Users/mk/Downloads/app/Tesserae/tesserae/.worktrees/tech+gpu-pixel-cost \
 The target remains open pending that run. The previous internal-display
 attribution identifies a slow acquisition region, not a proven driver or
 compositor cause and not a reproduction of both timing states.
+
+## External window size rejection (2026-11-02)
+
+`presented-external-08` stopped after its first logging-on run. Selection
+worked: external `Monitor #10002`, physical 2560 x 1440, reported 144 Hz,
+focused, SMAA, 100% scale. Backend logs show the surface briefly at
+2560 x 1440, then macOS reduced it to 2560 x 1378; final metadata and both
+World cameras agree. The exact-size guard correctly rejected it. The
+assertion message incorrectly made this sound like monitor selection had
+failed. This is not an accepted 1440p target run.
+
+The runner now reports the actual content size in that rejection. Explicit
+`--borderless` with `--monitor-hz` requests borderless fullscreen on the
+selected monitor, with the requested target required to match its physical
+size. Final metadata includes the window mode, checked by the runner.
+This is a profiling-only presentation condition, recorded separately;
+windowed and borderless measurements are not pooled. Normal window and
+present-mode defaults are unchanged. Real OS placement and sizing still
+need the next presented run; tests cover the requested mode, monitor,
+physical sizing and the observed 1378-pixel rejection.
+
+Repeat the previous four-fixture command with `--borderless`, the binary
+`/tmp/claude-gpu-pixel-cost/bin-08b`, and fresh output folder
+`/tmp/claude-gpu-pixel-cost/presented-external-08b`. All other arguments
+stay the same. The first accepted run must report the external 144 Hz
+monitor, 2560 x 1440 content, and borderless fullscreen. Agent idle until
+you report completion.
 
 ## Validation and authorization
 

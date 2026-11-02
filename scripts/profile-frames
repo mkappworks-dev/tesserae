@@ -273,6 +273,7 @@ def main():
     parser.add_argument('--features', help='exact Cargo features used for this executable')
     parser.add_argument('--game', type=Path, default=ROOT / 'games/demo/dist/mods')
     parser.add_argument('--presented', action='store_true')
+    parser.add_argument('--borderless', action='store_true', help='fill the selected monitor; requires --monitor-hz and a target matching its physical size')
     parser.add_argument('--monitor-hz', type=int, help='select the unique monitor reporting this refresh rate (within 1 Hz)')
     # An engine without views ignores it, so one runner serves an A/B against main.
     parser.add_argument('--view', choices=['first', 'third'], default='first')
@@ -295,6 +296,8 @@ def main():
     if args.analyze_only:
         analyze(args.output)
         return
+    if args.borderless and (not args.presented or args.monitor_hz is None):
+        parser.error('--borderless requires --presented --monitor-hz')
     if args.monitor_hz is not None and (not args.presented or args.monitor_hz <= 0):
         parser.error('--monitor-hz requires --presented and a positive integer')
     if not args.binary or not args.profile or not args.features:
@@ -333,6 +336,7 @@ def main():
             'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
             'physical_target': 'window (see runtime metadata)' if args.presented else [width, height],
             'switches': args.switches,
+            'requested_borderless': args.borderless,
             'requested_monitor_hz': args.monitor_hz,
             'requested_render_scale': args.render_scale, 'requested_sharpen': args.sharpen,
         }
@@ -359,6 +363,8 @@ def main():
                     env.update(MOTION.get(case, {}))
                     for name in args.switches:
                         env['TESSERAE_DIAG_' + name.upper().replace('-', '_')] = '1'
+                    if args.borderless:
+                        env['TESSERAE_PROFILE_BORDERLESS'] = '1'
                     if args.monitor_hz is not None:
                         env['TESSERAE_PROFILE_MONITOR_HZ'] = str(args.monitor_hz)
                     if args.render_scale:
@@ -401,7 +407,9 @@ def main():
                                       engine_presentation=engine_presentation(run))
                         (run / 'run.json').write_text(json.dumps(record, indent=2) + '\n')
                     if args.monitor_hz is not None:
-                        assert monitor_selected(run, args.monitor_hz, (width, height)), 'Requested monitor selection was not confirmed'
+                        error = monitor_selection_error(run, args.monitor_hz, (width, height), args.borderless)
+                        if error:
+                            raise SystemExit(f'{run.name}: {error}; see {run / "native.log"}')
                     if enabled:
                         measured = list(csv.DictReader((run / 'frames.csv').read_text().splitlines()))
                         fixture_rows = [r for r in measured if r['phase'] == 'fixture']
@@ -415,19 +423,33 @@ def main():
 
 
 def monitor_selected(run, hz, size=None):
-    rates = re.findall(r'profile_monitor_selected refresh_millihertz=(\d+)',
-                       (run / 'native.log').read_text())
+    return monitor_selection_error(run, hz, size) is None
+
+
+def monitor_selection_error(run, hz, size=None, borderless=False):
+    log = (run / 'native.log').read_text()
+    rates = re.findall(r'profile_monitor_selected refresh_millihertz=(\d+)', log)
+    if not rates:
+        return 'engine did not confirm monitor arrival'
+    if borderless and not re.search(r'profile_monitor_selected [^\n]*borderless=true', log):
+        return 'engine did not confirm the borderless request'
     meta = run / 'frames.metadata.txt'
     if meta.exists():
-        reported = re.findall(r'reported_refresh_millihertz=Some\((\d+)\)', meta.read_text())
+        text = meta.read_text()
+        reported = re.findall(r'reported_refresh_millihertz=Some\((\d+)\)', text)
         if not reported:
-            return False
-        if size is not None:
-            sizes = re.findall(r'^window=(\d+)x(\d+)', meta.read_text(), re.MULTILINE)
-            if not sizes or any(tuple(map(int, value)) != size for value in sizes):
-                return False
+            return 'final monitor refresh is unavailable'
         rates.extend(reported)
-    return bool(rates) and all(abs(int(rate) - hz * 1000) <= 1000 for rate in rates)
+        if size is not None:
+            sizes = re.findall(r'^window=(\d+)x(\d+)', text, re.MULTILINE)
+            if not sizes or any(tuple(map(int, value)) != size for value in sizes):
+                actual = ', '.join('x'.join(value) for value in sizes) or 'unavailable'
+                return f'monitor reached, but actual content size is {actual}; requested {size[0]}x{size[1]}'
+        if borderless and 'mode=BorderlessFullscreen(' not in text:
+            return 'final window mode is not borderless fullscreen'
+    if any(abs(int(rate) - hz * 1000) > 1000 for rate in rates):
+        return f'actual monitor refresh {rates} millihertz does not match {hz} Hz'
+    return None
 
 
 def host_observation():

@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use bevy::{
     prelude::*,
-    window::{Monitor, MonitorSelection, OnMonitor, WindowPosition},
+    window::{Monitor, MonitorSelection, OnMonitor, WindowMode, WindowPosition},
 };
 
 #[derive(Resource)]
@@ -11,6 +11,7 @@ struct Request {
     started: Option<Instant>,
     selected: Option<Entity>,
     size: UVec2,
+    borderless: bool,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -26,6 +27,7 @@ pub(super) fn plugin(app: &mut App) {
         .expect("invalid monitor Hz");
     app.insert_resource(Request {
         millihertz,
+        borderless: std::env::var_os("TESSERAE_PROFILE_BORDERLESS").is_some(),
         started: None,
         selected: None,
         size: UVec2::new(
@@ -65,17 +67,29 @@ fn select(
                 .get(selected)
                 .expect("selected monitor disappeared");
             assert!(matches(monitor.refresh_rate_millihertz, request.millihertz));
+            if request.borderless {
+                assert_eq!(
+                    monitor.physical_size(),
+                    request.size,
+                    "borderless target must match the monitor's physical size"
+                );
+            }
             for (mut window, _) in &mut windows {
+                if request.borderless {
+                    window.mode =
+                        WindowMode::BorderlessFullscreen(MonitorSelection::Entity(selected));
+                }
                 window
                     .resolution
                     .set_physical_resolution(request.size.x, request.size.y);
             }
             info!(
-                "profile_monitor_selected refresh_millihertz={} physical={}x{} name={:?}",
+                "profile_monitor_selected refresh_millihertz={} physical={}x{} name={:?} borderless={}",
                 monitor.refresh_rate_millihertz.unwrap(),
                 monitor.physical_width,
                 monitor.physical_height,
-                monitor.name
+                monitor.name,
+                request.borderless
             );
             commands.remove_resource::<Request>();
             return;
@@ -107,9 +121,15 @@ mod tests {
 
     #[test]
     fn selection_uses_requested_monitor_and_sizes_after_arrival() {
+        check_selection(false);
+        check_selection(true);
+    }
+
+    fn check_selection(borderless: bool) {
         let mut app = App::new();
         app.insert_resource(Request {
             millihertz: 144_000,
+            borderless,
             started: None,
             selected: None,
             size: UVec2::new(2560, 1440),
@@ -141,6 +161,14 @@ mod tests {
             .insert(OnMonitor(external));
         app.update();
         assert!(!app.world().contains_resource::<Request>());
+        assert_eq!(
+            app.world().get::<Window>(window).unwrap().mode,
+            if borderless {
+                WindowMode::BorderlessFullscreen(MonitorSelection::Entity(external))
+            } else {
+                WindowMode::Windowed
+            }
+        );
         assert_eq!(
             app.world().get::<Window>(window).unwrap().physical_size(),
             UVec2::new(2560, 1440)

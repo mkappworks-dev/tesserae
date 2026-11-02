@@ -72,6 +72,27 @@ class WaitAnalysis(unittest.TestCase):
                 'reported_refresh_millihertz=Some(144000)\nwindow=2560x1440 scale=1')
             self.assertTrue(PROFILE['monitor_selected'](run, 144, (2560, 1440)))
 
+    def test_clipped_size_reports_actual_dimensions_and_borderless_needs_confirmation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run = Path(folder)
+            (run / 'native.log').write_text(
+                'profile_monitor_selected refresh_millihertz=144000 borderless=true')
+            meta = run / 'frames.metadata.txt'
+            meta.write_text('reported_refresh_millihertz=Some(144000)\n'
+                            'window=2560x1378 scale=1 mode=Windowed')
+            error = PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True)
+            self.assertIn('actual content size is 2560x1378', error)
+            meta.write_text('reported_refresh_millihertz=Some(144000)\n'
+                            'window=2560x1440 scale=1 mode=Windowed')
+            self.assertIn('not borderless',
+                          PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True))
+            meta.write_text('reported_refresh_millihertz=Some(144000)\n'
+                            'window=2560x1440 scale=1 mode=BorderlessFullscreen(Entity(1v0))')
+            self.assertIsNone(PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True))
+            (run / 'native.log').write_text('profile_monitor_selected refresh_millihertz=144000')
+            self.assertIn('did not confirm the borderless',
+                          PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True))
+
     def test_host_query_failure_is_retained_without_losing_other_observations(self):
         with patch('subprocess.run', side_effect=[
                 subprocess.TimeoutExpired('pmset', 5),
