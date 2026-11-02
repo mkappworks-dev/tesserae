@@ -33,9 +33,9 @@ render scale. No present-mode or quality default changes are authorized.
       uncertainty retained wherever an underlying wait is unavailable.
 - [ ] Controlled timing repeats establish whether p95 <= 6.9 ms holds in
       all four presented fixtures at SMAA and 100% scale.
-- [ ] The quiet-host 1080p median and p99 comparison recorded, or explicit
+- [x] The quiet-host 1080p median and p99 comparison recorded, or explicit
       evidence that the host cannot provide an uncontended comparison.
-- [ ] Zero rule-hole frames; no `no ground` in accepted series.
+- [x] Zero rule-hole frames; no `no ground` in accepted series.
 
 ## Implementation and next measurement
 
@@ -94,6 +94,141 @@ compares `bin-08` against `bin-02`, eight fixtures and three rounds, holes
 on, no waits or GPU markers. Run through heavy.sh only when no build or
 presented series is active and the host is quiet; do not silently discard
 contended tails. Pending measurements keep this ticket open.
+
+## Presented attribution result (2026-11-02)
+
+Your completed `presented-waits-08` series uses the final `bin-08`, SMAA,
+100% scale, holes and waits on, GPU markers off. All six logging-on windows
+are complete, with zero rule-hole and fill-hole frames; no `no ground`
+appears in any of the twelve native logs. Stationary rounds 1 and 2 are
+unfocused throughout; stationary round 3 and all sprint-flight rounds are
+focused throughout. Host load before/after runs ranges 2.21 to 5.08, AC
+attached; thermal queries have no recorded warning/status rather than a
+measured temperature.
+
+Per-run frame distributions, milliseconds, whole 22 to 32 s window:
+
+| fixture | round | p50 | p95 | p99 | max | focus |
+| ------- | ----- | --- | --- | --- | --- | ----- |
+| stationary | 1 | 8.37 | 14.88 | 16.06 | 23.79 | no |
+| stationary | 2 | 8.38 | 15.83 | 16.44 | 22.38 | no |
+| stationary | 3 | 8.40 | 16.02 | 16.76 | 17.44 | yes |
+| sprint-flight | 1 | 8.45 | 16.51 | 17.05 | 22.35 | yes |
+| sprint-flight | 2 | 8.89 | 16.77 | 16.87 | 18.39 | yes |
+| sprint-flight | 3 | 8.52 | 16.74 | 16.87 | 19.13 | yes |
+
+CPU wall attribution intervals, p50 / p95 in ms. These are enclosing
+intervals that can include scheduling and other systems, not isolated
+calls. Percentiles are not added together.
+
+| fixture | round | window prepare | render graph | finalization |
+| ------- | ----- | -------------- | ------------ | ------------ |
+| stationary | 1 | 5.422 / 11.225 | 1.215 / 1.325 | 0.021 / 0.031 |
+| stationary | 2 | 5.356 / 12.564 | 1.222 / 1.416 | 0.023 / 0.033 |
+| stationary | 3 | 5.312 / 12.800 | 1.229 / 1.548 | 0.023 / 0.038 |
+| sprint-flight | 1 | 5.522 / 13.317 | 1.213 / 1.759 | 0.023 / 0.039 |
+| sprint-flight | 2 | 5.669 / 14.041 | 1.233 / 1.787 | 0.024 / 0.044 |
+| sprint-flight | 3 | 5.620 / 13.879 | 1.206 / 1.613 | 0.023 / 0.033 |
+
+The slow state is dominated by window preparation, which encloses Bevy's
+swapchain acquisition: 5.31 to 5.67 ms p50 and 11.23 to 14.04 ms p95. Its
+summed duration is 68 to 74% of summed render-schedule wall duration over
+each window. Same-render-frame Pearson correlation with render-schedule
+wall time is 0.965 to 0.992. The graph stays at 1.21 to 1.23 ms p50 and
+finalization (including the final submission and presentation scheduling)
+at 0.021 to 0.024 ms. Render-thread CPU p50 is 1.31 to 1.35 ms. This locates
+the slow region; it does not distinguish GPU backpressure from compositor
+or driver pacing inside acquisition. A fast presented state was not
+reproduced, so its transition is not fully explained yet.
+
+Every logging-on run reports the same window monitor:
+`Monitor #41057`, physical 3024 x 1964, OS-reported 120,000 millihertz.
+This matches the internal monitor seen in the smoke check. The surface is
+2560 x 1440 at scale 2 and changes from Fifo to Immediate at startup.
+The 8.4 / 16.7 ms pattern is consistent with 120 Hz pacing, but these
+intervals do not prove the underlying mechanism. This run is not evidence
+of the external 144 Hz target. You confirmed that the windows were on the
+internal display. No default has been changed. A profiling-only `--monitor-hz` selector is being added
+so every new process can open on the verified external monitor. The
+external target check remains pending.
+
+## Matched 1080p repeat (2026-11-02): target met
+
+`quiet1080-08`, `bin-08` against 02, eight fixtures and three interleaved
+rounds, native 1920 x 1080 offscreen, holes on, waits and GPU markers off.
+All 48 processes completed with full fixture windows, readiness before
+flight, fixture readiness, zero rule-hole and fill-hole frames, and no
+`no ground` in any native log. Every active window had burning fuel.
+
+The host began near load 2.1 on AC, without a competing build or benchmark;
+Docker was about 7% CPU rather than the earlier sustained VM saturation.
+Before/after load observations range 2.11 to 7.44 during the serial series.
+This is lower background contention, not a claim of an idle machine.
+Raw power and thermal observations are retained per run. No samples or
+rounds were dropped. Isolated maxima remain visible in the table.
+
+Ranges of per-run percentiles, milliseconds:
+
+| arm | fixture | p50 | p95 | p99 | max |
+| --- | ------- | --- | --- | --- | --- |
+| 02 | stationary | 4.40-4.57 | 5.40-5.51 | 6.03-6.25 | 7.25-10.27 |
+| 08 | stationary | 3.09-3.42 | 4.46-4.80 | 4.96-5.49 | 6.69-8.53 |
+| 02 | flight | 4.84-4.87 | 5.98-6.11 | 6.68-7.01 | 10.30-13.55 |
+| 08 | flight | 3.12-3.32 | 4.77-5.22 | 5.61-6.40 | 10.52-12.96 |
+| 02 | sprint-flight | 4.67-4.72 | 5.89-6.70 | 7.12-9.32 | 11.14-30.04 |
+| 08 | sprint-flight | 3.13-3.21 | 5.14-5.21 | 6.19-6.55 | 9.96-12.94 |
+| 02 | sprint-walk | 4.60-4.97 | 5.60-7.61 | 6.30-9.81 | 10.39-34.77 |
+| 08 | sprint-walk | 3.07-3.62 | 4.59-5.36 | 5.39-6.07 | 9.97-11.95 |
+| 02 | dive | 3.12-3.54 | 4.77-4.90 | 5.87-6.03 | 9.86-29.57 |
+| 08 | dive | 2.67-2.75 | 3.74-4.01 | 4.57-5.09 | 10.03-12.90 |
+| 02 | teleport | 4.71-4.72 | 5.59-5.87 | 6.70-6.99 | 7.41-8.76 |
+| 08 | teleport | 3.01-3.19 | 4.59-5.00 | 5.37-5.89 | 6.29-8.39 |
+| 02 | transparency | 5.13-5.22 | 5.78-6.19 | 6.45-7.06 | 7.18-12.44 |
+| 08 | transparency | 3.44-3.64 | 4.58-5.22 | 5.14-5.92 | 6.85-18.56 |
+| 02 | active | 4.67-4.80 | 5.48-6.10 | 6.25-6.93 | 7.13-9.91 |
+| 08 | active | 3.01-3.37 | 4.21-4.82 | 4.74-5.40 | 5.46-19.13 |
+
+Every fixture's tip median range lies wholly below its baseline range;
+so does every p99 range. The 1080p no-regression gate is met in this
+repeat. Some isolated maxima are higher on the tip (notably active and
+transparency); the target is median and consistent p99, not maximum.
+This resolves 07's inconclusive 1080p tail check. The baseline uses MSAA
+4x, the tip your approved SMAA, both at 100% scale.
+
+## Corrected external-display check
+
+A profiling-only `--monitor-hz 144` selects the unique monitor reporting
+144 Hz within 1 Hz, moves the window there and sets the requested physical
+size after arrival. It does not change monitor refresh or present mode.
+Absent or ambiguous monitors fail; each process must confirm arrival
+within five seconds. The runner checks that confirmation for logging-off
+runs too, and checks final monitor and physical-size metadata when present.
+Eight Rust profiler tests and eleven Python runner tests cover the new
+selection, sizing and rejection paths. Clippy and the release build pass.
+Real external placement remains to
+be verified in the next presented run.
+
+Use the normal timing instruments for the four-fixture target check,
+without the serializing wait markers. With the external display connected
+and set to 144 Hz, keep the engine focused and unobstructed throughout.
+Expected duration: about fourteen minutes. The agent stays idle until you
+say done. Binary: `/tmp/claude-gpu-pixel-cost/bin-08m`.
+
+```sh
+cd /Users/mk/Downloads/app/Tesserae/tesserae/.worktrees/tech+gpu-pixel-cost \
+&& /tmp/claude-streaming-impl/heavy.sh scripts/profile-frames \
+  /tmp/claude-gpu-pixel-cost/presented-external-08 \
+  --binary /tmp/claude-gpu-pixel-cost/bin-08m \
+  --profile release --features profiling \
+  --game /Users/mk/Downloads/app/Tesserae/tesserae/.worktrees/tech+gpu-pixel-cost/games/demo/dist/mods \
+  --presented --monitor-hz 144 --size 2560x1440 \
+  --render-scale 100 --instruments holes \
+  --fixtures stationary flight sprint-flight sprint-walk
+```
+
+The target remains open pending that run. The previous internal-display
+attribution identifies a slow acquisition region, not a proven driver or
+compositor cause and not a reproduction of both timing states.
 
 ## Validation and authorization
 

@@ -51,6 +51,27 @@ class WaitAnalysis(unittest.TestCase):
                              dict(n=1, p50=16, p95=16, p99=16, max=16))
             self.assertEqual(result['startup']['window_prepare_interval_ms']['p50'], 7)
 
+    def test_monitor_confirmation_rejects_wrong_missing_or_mixed_displays(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run = Path(folder)
+            log = run / 'native.log'
+            for text, expected in [('', False),
+                                   ('profile_monitor_selected refresh_millihertz=120000', False),
+                                   ('profile_monitor_selected refresh_millihertz=143970', True),
+                                   ('profile_monitor_selected refresh_millihertz=144000\n'
+                                    'profile_monitor_selected refresh_millihertz=120000', False)]:
+                log.write_text(text)
+                self.assertEqual(PROFILE['monitor_selected'](run, 144), expected)
+            log.write_text('profile_monitor_selected refresh_millihertz=144000')
+            (run / 'frames.metadata.txt').write_text('reported_refresh_millihertz=Some(120000)')
+            self.assertFalse(PROFILE['monitor_selected'](run, 144))
+            (run / 'frames.metadata.txt').write_text(
+                'reported_refresh_millihertz=Some(144000)\nwindow=1280x720 scale=1')
+            self.assertFalse(PROFILE['monitor_selected'](run, 144, (2560, 1440)))
+            (run / 'frames.metadata.txt').write_text(
+                'reported_refresh_millihertz=Some(144000)\nwindow=2560x1440 scale=1')
+            self.assertTrue(PROFILE['monitor_selected'](run, 144, (2560, 1440)))
+
     def test_host_query_failure_is_retained_without_losing_other_observations(self):
         with patch('subprocess.run', side_effect=[
                 subprocess.TimeoutExpired('pmset', 5),

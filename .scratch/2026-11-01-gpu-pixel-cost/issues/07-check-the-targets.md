@@ -199,3 +199,10 @@ sharpening below 100%.
 ## Validation and authorization
 
 frame-profiling.md. Local work only; no push or PR without approval.
+
+## Follow-up (2026-11-02)
+
+[08](08-explain-presented-waits.md) resolves the 1080p tail gate: all eight
+fixtures have lower median and p99 ranges in three matched rounds, zero
+holes, and no `no ground`. Its presented attribution was on the internal
+120 Hz display, confirmed by you; the external 144 Hz check remains open.

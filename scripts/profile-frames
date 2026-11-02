@@ -273,6 +273,7 @@ def main():
     parser.add_argument('--features', help='exact Cargo features used for this executable')
     parser.add_argument('--game', type=Path, default=ROOT / 'games/demo/dist/mods')
     parser.add_argument('--presented', action='store_true')
+    parser.add_argument('--monitor-hz', type=int, help='select the unique monitor reporting this refresh rate (within 1 Hz)')
     # An engine without views ignores it, so one runner serves an A/B against main.
     parser.add_argument('--view', choices=['first', 'third'], default='first')
     parser.add_argument('--repeats', type=int, default=3)
@@ -281,7 +282,7 @@ def main():
     # Each costs more than the overhead bound, so a timing series leaves them off.
     parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility', 'waits'], default=[])
     parser.add_argument('--size', default='1920x1080', metavar='WxH',
-                        help='offscreen target size; ignored with --presented')
+                        help='physical target size offscreen, or with --presented --monitor-hz')
     # Each changes one cost and the image; a `profiling` build only, never a timing baseline.
     parser.add_argument('--switches', nargs='+', default=[], choices=SWITCHES)
     # Overrides the render scale setting; each run records the scale the engine used.
@@ -294,6 +295,8 @@ def main():
     if args.analyze_only:
         analyze(args.output)
         return
+    if args.monitor_hz is not None and (not args.presented or args.monitor_hz <= 0):
+        parser.error('--monitor-hz requires --presented and a positive integer')
     if not args.binary or not args.profile or not args.features:
         parser.error('--binary, --profile and --features are required')
     if args.repeats < 3:
@@ -330,6 +333,7 @@ def main():
             'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
             'physical_target': 'window (see runtime metadata)' if args.presented else [width, height],
             'switches': args.switches,
+            'requested_monitor_hz': args.monitor_hz,
             'requested_render_scale': args.render_scale, 'requested_sharpen': args.sharpen,
         }
         (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
@@ -355,6 +359,8 @@ def main():
                     env.update(MOTION.get(case, {}))
                     for name in args.switches:
                         env['TESSERAE_DIAG_' + name.upper().replace('-', '_')] = '1'
+                    if args.monitor_hz is not None:
+                        env['TESSERAE_PROFILE_MONITOR_HZ'] = str(args.monitor_hz)
                     if args.render_scale:
                         env['TESSERAE_SCREENSHOT_RENDER_SCALE'] = str(args.render_scale)
                     if args.sharpen:
@@ -394,6 +400,8 @@ def main():
                                       host_after=host_observation(),
                                       engine_presentation=engine_presentation(run))
                         (run / 'run.json').write_text(json.dumps(record, indent=2) + '\n')
+                    if args.monitor_hz is not None:
+                        assert monitor_selected(run, args.monitor_hz, (width, height)), 'Requested monitor selection was not confirmed'
                     if enabled:
                         measured = list(csv.DictReader((run / 'frames.csv').read_text().splitlines()))
                         fixture_rows = [r for r in measured if r['phase'] == 'fixture']
@@ -404,6 +412,22 @@ def main():
         analyze(args.output)
     finally:
         lock.rmdir()
+
+
+def monitor_selected(run, hz, size=None):
+    rates = re.findall(r'profile_monitor_selected refresh_millihertz=(\d+)',
+                       (run / 'native.log').read_text())
+    meta = run / 'frames.metadata.txt'
+    if meta.exists():
+        reported = re.findall(r'reported_refresh_millihertz=Some\((\d+)\)', meta.read_text())
+        if not reported:
+            return False
+        if size is not None:
+            sizes = re.findall(r'^window=(\d+)x(\d+)', meta.read_text(), re.MULTILINE)
+            if not sizes or any(tuple(map(int, value)) != size for value in sizes):
+                return False
+        rates.extend(reported)
+    return bool(rates) and all(abs(int(rate) - hz * 1000) <= 1000 for rate in rates)
 
 
 def host_observation():

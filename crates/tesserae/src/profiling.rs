@@ -1,6 +1,7 @@
 //! Bounded, opt-in measurements. Frame intervals end at the next First;
 //! main schedule spans end at Last and exclude extraction and render work.
 mod gpu;
+mod monitor;
 mod waits;
 
 use crate::session::SessionApp;
@@ -115,6 +116,7 @@ pub(crate) fn switch(name: &str) -> bool {
 }
 
 pub fn plugin(app: &mut App) {
+    monitor::plugin(app);
     if std::env::var_os("TESSERAE_PROFILE_CONTINUOUS").is_some() {
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     }

@@ -54,6 +54,16 @@ on by default below 100%. Each run's `run.json` records the anti-aliasing, scale
 and sharpening the engine reports using, under `engine_presentation`; never pool
 runs that differ in them.
 
+`--presented --monitor-hz 144 --size 2560x1440` selects the unique monitor whose
+OS-reported refresh is within 1 Hz of 144 Hz, then sizes the window in physical
+pixels after it reaches that monitor. It fails if the display is missing or
+ambiguous, or the window does not arrive within five seconds. Each process logs
+confirmation, including logging-off references. The runner checks that
+confirmation and, when present, the final monitor metadata. Keep the window on
+the selected display; this requests placement, not a refresh-rate or
+present-mode change. Without `--monitor-hz`, presented window sizing and
+placement retain their existing behavior.
+
 `--instruments waits` adds exclusive CPU timestamp markers around window
 preparation (including swapchain acquisition), the root render graph (including
 its command submissions), and renderer finalization after the graph (the final
