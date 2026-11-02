@@ -30,7 +30,7 @@ and upscales it, with UI at full resolution.
 - [x] Captures at every scale, with and without sharpening, offscreen at
       1440p: `stationary`, the far view, the hotbar and a menu open. UI is
       identical across scales.
-- [ ] A presented series by you at the scale you lean to (command written
+- [x] A presented series by you at the scale you lean to (command written
       here when the binary exists, output folder right after the script name).
 - [x] Your choice of default recorded here.
 - [x] At 1.0 the image is pixel-identical to before; zero rule-hole frames in
@@ -89,8 +89,9 @@ holds through 07's series.
 
 **Your choice (2026-11-02): default 100%, sharpening on below 100%.** At
 100% the World draws to the window exactly as before, so the presented
-series at your choice is 07's, at SMAA and 100%; the box above stays open
-until it runs.
+series at your choice is 07's, at SMAA and 100%; the completed
+`presented-07` series is recorded in 07. Its unstable presentation timing misses the performance target; this check records the
+chosen scale, not a performance pass.
 
 ## Validation and authorization
 
