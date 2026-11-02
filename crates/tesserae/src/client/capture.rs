@@ -440,6 +440,9 @@ fn render_offscreen(
     if menu.open {
         commands.entity(*main).insert(IsDefaultUiCamera);
     }
+    commands.insert_resource(super::render_scale::Output(RenderTarget::Image(
+        handle.clone().into(),
+    )));
     commands.insert_resource(Offscreen(handle));
 }
 

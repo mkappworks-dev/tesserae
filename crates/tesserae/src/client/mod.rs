@@ -35,6 +35,7 @@ pub(crate) mod presentation;
 mod preview;
 pub(crate) mod profile;
 mod removal;
+pub(crate) mod render_scale;
 mod save;
 mod settings;
 #[cfg(feature = "profiling")]
@@ -61,6 +62,7 @@ pub fn plugin(app: &mut App) {
         save::plugin,
         profile::plugin,
         presentation::plugin,
+        render_scale::plugin,
         settings::plugin,
         menu_ui::plugin,
         actions::plugin,

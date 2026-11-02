@@ -278,6 +278,9 @@ def main():
                         help='offscreen target size; ignored with --presented')
     # Each changes one cost and the image; a `profiling` build only, never a timing baseline.
     parser.add_argument('--switches', nargs='+', default=[], choices=SWITCHES)
+    # Overrides the render scale setting; each run records the scale the engine used.
+    parser.add_argument('--render-scale', type=int, choices=[100, 85, 75, 67])
+    parser.add_argument('--sharpen', action='store_true')
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
@@ -321,6 +324,7 @@ def main():
             'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
             'physical_target': 'window (see runtime metadata)' if args.presented else [width, height],
             'switches': args.switches,
+            'requested_render_scale': args.render_scale, 'requested_sharpen': args.sharpen,
         }
         (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
         for repeat in range(args.repeats):
@@ -345,6 +349,10 @@ def main():
                     env.update(MOTION.get(case, {}))
                     for name in args.switches:
                         env['TESSERAE_DIAG_' + name.upper().replace('-', '_')] = '1'
+                    if args.render_scale:
+                        env['TESSERAE_SCREENSHOT_RENDER_SCALE'] = str(args.render_scale)
+                    if args.sharpen:
+                        env['TESSERAE_SCREENSHOT_SHARPEN'] = '1'
                     if case in PERSISTENT:
                         env['TESSERAE_WORLD_DIR'] = str(run.resolve() / 'world')
                     if not args.presented:
@@ -372,10 +380,23 @@ def main():
                         'elapsed_s': time.monotonic() - start, 'env': {
                             k: v for k, v in env.items() if k.startswith('TESSERAE_')},
                         'executable_sha256': digest(binary),
+                        'engine_presentation': engine_presentation(run),
                     }, indent=2) + '\n')
         analyze(args.output)
     finally:
         lock.rmdir()
+
+
+def engine_presentation(run):
+    """The render scale and sharpening the engine reports, or None without logging."""
+    meta = run / 'frames.metadata.txt'
+    if not meta.exists():
+        return None
+    for line in meta.read_text().splitlines():
+        if line.startswith('selected_display_sync='):
+            fields = dict(f.split('=', 1) for f in line.split())
+            return {k: fields.get(k) for k in ('render_scale', 'sharpen')}
+    return None
 
 
 if __name__ == '__main__':

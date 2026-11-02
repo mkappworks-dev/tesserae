@@ -111,6 +111,7 @@ pub(super) enum Operation {
     ScrollDirection(bool),
     Sync(bool),
     Cap(Option<u32>),
+    Scale(u32),
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -468,6 +469,7 @@ fn activate(
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,
                 Operation::Cap(value) => p.fps_cap = value,
+                Operation::Scale(value) => p.render_scale = value,
                 _ => {}
             }
         }
@@ -1319,6 +1321,24 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                         p.display_sync,
                     );
                     option(buttons, "Sync off", Operation::Sync(false), !p.display_sync);
+                })
+            },
+        );
+        setting_row(
+            card,
+            "Render scale",
+            "Draws the World at a fraction of the window and scales it up. Menus and text stay sharp.",
+            false,
+            |row| {
+                segment(row, |buttons| {
+                    for scale in super::render_scale::SCALES {
+                        option(
+                            buttons,
+                            format!("{scale}%"),
+                            Operation::Scale(scale),
+                            p.render_scale == scale,
+                        );
+                    }
                 })
             },
         );
