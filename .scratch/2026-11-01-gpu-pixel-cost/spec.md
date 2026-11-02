@@ -249,3 +249,14 @@ for your approval.
 approved [08](issues/08-explain-presented-waits.md): attribute the two
 presented timing states, then settle the 1080p tail check on a quiet host.
 SMAA and native render scale remain the approved defaults.
+
+## Targets verified (2026-11-03)
+
+[07](issues/07-check-the-targets.md) records the final target pass:
+external 144 Hz, 2560 x 1440 borderless presentation, SMAA, 100% scale,
+three fully focused rounds of all four presented fixtures, p95 at most
+6.454 ms. 08's matched 1080p repeat has lower median and p99 ranges in
+all eight fixtures. Rule and fill hole counts are zero in those series.
+The pass is specific to the recorded borderless condition and measures
+rendered frame intervals rather than physical scanout. The exact cause of
+the older acquisition waits is still an open research item in 08.

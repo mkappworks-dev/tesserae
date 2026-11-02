@@ -1,6 +1,6 @@
 # 08: Explain the two presented timing states
 
-Status: ready-for-human
+Status: ready-for-agent
 Blocked by: 07
 
 Spec: [GPU cost per pixel](../spec.md).
@@ -31,7 +31,7 @@ render scale. No present-mode or quality default changes are authorized.
 - [x] The new intervals and host observations are verified on a native run.
 - [ ] Presented fast and slow states attributed to measured intervals, with
       uncertainty retained wherever an underlying wait is unavailable.
-- [ ] Controlled timing repeats establish whether p95 <= 6.9 ms holds in
+- [x] Controlled timing repeats establish whether p95 <= 6.9 ms holds in
       all four presented fixtures at SMAA and 100% scale.
 - [x] The quiet-host 1080p median and p99 comparison recorded, or explicit
       evidence that the host cannot provide an uncontended comparison.
@@ -399,6 +399,64 @@ it the active app throughout the series. Do not switch to another app
 between runs; each process creates a new window. The measured phase begins
 22 seconds after launch. Expected duration remains about fourteen minutes.
 The agent stays idle until you say done. Target acceptance remains open.
+
+## Focused external target check (2026-11-03): target met
+
+`presented-focused-08f` completed all 24 processes with the same validated
+`bin-08d` (SHA-256 `941df4b2c836cdcf...`). SMAA, 100% render scale,
+external `Monitor #10002` reporting 144,000 millihertz, 2560 x 1440,
+scale 1, borderless fullscreen. Backend logs end in Immediate at this size
+in all 24 runs. GPU and wait markers are off; holes are on.
+
+All twelve measured windows are fully focused, complete, and ready before
+flight, with simulation advancement and fixture readiness. Every measured
+frame has zero rule-hole and fill-hole counts. No `no ground` appears in
+any native log. Host load before/after ranges 4.79 to 7.38, AC attached;
+thermal queries have no recorded warning/status. No samples were dropped.
+
+Per-run frame distributions in ms, whole 22 to 32 s window:
+
+| fixture | round | p50 | p95 | p99 | max |
+| ------- | ----- | --- | --- | --- | --- |
+| stationary | 1 | 4.47 | 6.45 | 8.18 | 11.87 |
+| stationary | 2 | 4.29 | 5.64 | 6.41 | 9.16 |
+| stationary | 3 | 4.30 | 5.66 | 6.23 | 12.21 |
+| flight | 1 | 4.42 | 6.03 | 6.91 | 11.99 |
+| flight | 2 | 4.50 | 6.02 | 6.71 | 17.22 |
+| flight | 3 | 4.48 | 5.91 | 6.64 | 12.03 |
+| sprint-flight | 1 | 4.60 | 6.26 | 8.28 | 14.58 |
+| sprint-flight | 2 | 4.35 | 6.10 | 7.69 | 11.13 |
+| sprint-flight | 3 | 4.37 | 5.99 | 7.74 | 14.04 |
+| sprint-walk | 1 | 4.50 | 5.88 | 6.33 | 10.06 |
+| sprint-walk | 2 | 4.46 | 5.83 | 6.28 | 9.71 |
+| sprint-walk | 3 | 4.35 | 5.93 | 6.50 | 11.58 |
+
+All twelve p95 measurements meet <= 6.9 ms; the worst is stationary round
+1 at 6.454 ms. This establishes the focused rendered-frame target in the
+verified external borderless condition. It is not a display-scanout
+latency measurement, nor a promise that every frame is under 6.9 ms: p99
+reaches 8.28 ms and the largest frame is 17.22 ms. Those tails are retained.
+The spec's threshold is p95, not maximum.
+
+Logging-on/off pairs still show variation above the small-effect overhead
+bound in some cases (including stationary round 1). This series checks an
+absolute threshold with logging enabled; it does not establish a small
+optimization effect or a precise logging overhead estimate. No new
+performance optimization is accepted on its basis.
+
+The earlier unfocused external series has lower medians in its later
+rounds than this focused series. The focus conditions are now confirmed
+by you and the telemetry; those observations remain separate. Earlier
+internal-display slow frames were dominated by window preparation, but
+the exact driver/compositor wait and a controlled causal explanation of
+every timing-state transition remain unresolved. The attribution checkbox
+stays open rather than claiming that mechanism was proven. No additional
+presented target repeat is needed: the current target has passed.
+
+With the matched 1080p check and the hole checks, 07's performance targets
+are now met for the recorded external borderless presentation condition.
+Normal window and present-mode defaults remain unchanged. The remaining
+08 work is causal attribution research, not a failed performance gate.
 
 ## Validation and authorization
 

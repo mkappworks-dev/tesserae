@@ -214,3 +214,17 @@ holes, and no `no ground`. Its presented attribution was on the internal
 zero hole frames. None of the measured windows stayed fully focused, so
 the numerical threshold is satisfied but a focused-play target pass is
 not yet accepted. Distributions and the focus counts are recorded in 08.
+
+## Final focused target pass (2026-11-03)
+
+`presented-focused-08f`, recorded in 08, verifies the external 144 Hz
+monitor with a 2560 x 1440 borderless surface, SMAA, 100% scale, Immediate
+backend presentation, holes on and GPU/wait markers off. Every measured
+frame in all twelve windows is focused, with zero rule and fill holes.
+All p95 values meet 6.9 ms (range 5.64 to 6.45 ms); complete per-round
+p50/p95/p99/max are in 08. No `no ground` in any of the 24 native logs.
+
+Targets: presented p95 met in this borderless condition; 1080p median and
+p99 no-regression met by 08's matched repeat; hole target met. This closes
+the target check. The historical driver/compositor cause remains uncertain
+and is retained separately in 08; it does not invalidate this focused pass.
