@@ -273,6 +273,7 @@ def main():
     parser.add_argument('--features', help='exact Cargo features used for this executable')
     parser.add_argument('--game', type=Path, default=ROOT / 'games/demo/dist/mods')
     parser.add_argument('--presented', action='store_true')
+    parser.add_argument('--monitor-probe', action='store_true', help='one short monitor setup check, without a timing series')
     parser.add_argument('--borderless', action='store_true', help='fill the selected monitor; requires --monitor-hz and a target matching its physical size')
     parser.add_argument('--monitor-hz', type=int, help='select the unique monitor reporting this refresh rate (within 1 Hz)')
     # An engine without views ignores it, so one runner serves an A/B against main.
@@ -296,13 +297,15 @@ def main():
     if args.analyze_only:
         analyze(args.output)
         return
+    if args.monitor_probe and (not args.presented or args.monitor_hz is None):
+        parser.error('--monitor-probe requires --presented --monitor-hz')
     if args.borderless and (not args.presented or args.monitor_hz is None):
         parser.error('--borderless requires --presented --monitor-hz')
     if args.monitor_hz is not None and (not args.presented or args.monitor_hz <= 0):
         parser.error('--monitor-hz requires --presented and a positive integer')
     if not args.binary or not args.profile or not args.features:
         parser.error('--binary, --profile and --features are required')
-    if args.repeats < 3:
+    if args.repeats < 3 and not args.monitor_probe:
         parser.error('comparisons require at least three interleaved rounds')
     if not args.game.is_dir():
         parser.error('Game distribution is missing; use the existing built distribution')
@@ -336,17 +339,18 @@ def main():
             'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
             'physical_target': 'window (see runtime metadata)' if args.presented else [width, height],
             'switches': args.switches,
+            'monitor_probe': args.monitor_probe,
             'requested_borderless': args.borderless,
             'requested_monitor_hz': args.monitor_hz,
             'requested_render_scale': args.render_scale, 'requested_sharpen': args.sharpen,
         }
         (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
-        for repeat in range(args.repeats):
-            cases = list(args.fixtures)
+        for repeat in range(1 if args.monitor_probe else args.repeats):
+            cases = ['stationary'] if args.monitor_probe else list(args.fixtures)
             if repeat % 2:
                 cases.reverse()
             for case in cases:
-                for enabled in ([True, False] if repeat % 2 == 0 else [False, True]):
+                for enabled in ([True] if args.monitor_probe else ([True, False] if repeat % 2 == 0 else [False, True])):
                     if competitors():
                         raise SystemExit('Contended run refused: ' + str(competitors()))
                     run = args.output / f'{case}-{repeat + 1}-{"on" if enabled else "off"}'
@@ -363,6 +367,8 @@ def main():
                     env.update(MOTION.get(case, {}))
                     for name in args.switches:
                         env['TESSERAE_DIAG_' + name.upper().replace('-', '_')] = '1'
+                    if args.monitor_probe:
+                        env['TESSERAE_PROFILE_MONITOR_PROBE'] = '1'
                     if args.borderless:
                         env['TESSERAE_PROFILE_BORDERLESS'] = '1'
                     if args.monitor_hz is not None:
@@ -410,14 +416,17 @@ def main():
                         error = monitor_selection_error(run, args.monitor_hz, (width, height), args.borderless)
                         if error:
                             raise SystemExit(f'{run.name}: {error}; see {run / "native.log"}')
-                    if enabled:
+                    if enabled and not args.monitor_probe:
                         measured = list(csv.DictReader((run / 'frames.csv').read_text().splitlines()))
                         fixture_rows = [r for r in measured if r['phase'] == 'fixture']
                         assert fixture_rows and float(fixture_rows[-1]['end_s']) >= 31.9, 'Incomplete fixture window'
                         assert all(r['fixture_ready'] == 'true' for r in fixture_rows), 'Fixture not ready'
                         if case == 'active':
                             assert all(r['fixture_fire_burning'] == 'true' for r in fixture_rows), 'Fire was inactive in the measurement window'
-        analyze(args.output)
+        if args.monitor_probe:
+            print('Monitor probe passed; no performance target measured.', flush=True)
+        else:
+            analyze(args.output)
     finally:
         lock.rmdir()
 

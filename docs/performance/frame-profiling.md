@@ -76,6 +76,15 @@ mode when metadata is available. Treat this as a distinct presentation
 condition; do not pool it with windowed measurements. It changes neither the
 normal window default nor the requested present mode.
 
+Use `--monitor-probe` with the presented monitor options for a short geometry
+check before a full series. It runs one logging-on stationary process and exits
+after setup confirms stable geometry; it skips fixture-window validation and
+analysis and makes no performance claim. The same exact-size and mode checks
+still apply. For borderless profiling on macOS, the window is created with a
+full-size content view and transparent titlebar so content can occupy the whole
+native frame. These creation-time attributes apply only to the explicit
+borderless profiling request.
+
 `--instruments waits` adds exclusive CPU timestamp markers around window
 preparation (including swapchain acquisition), the root render graph (including
 its command submissions), and renderer finalization after the graph (the final

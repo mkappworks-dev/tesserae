@@ -286,6 +286,32 @@ Next binary: `/tmp/claude-gpu-pixel-cost/bin-08c`. Use the previous command
 with fresh output `/tmp/claude-gpu-pixel-cost/presented-external-08c` and
 that binary. Keep `--borderless --monitor-hz 144 --size 2560x1440`.
 
+## Startup guard rejection (2026-11-02)
+
+`presented-external-08c` failed the startup guard after about ten seconds,
+before a fixture window. The observed size was 2560 x 1408, with the
+borderless component set; the surface briefly reached 2560 x 1440 first.
+This confirms that waiting alone did not fix the full-height content area.
+No performance evidence is accepted from this attempt.
+
+Bevy exposes macOS `fullsize_content_view` and `titlebar_transparent` as
+window creation attributes; the former allows content behind the titlebar.
+They were still at their defaults. Both are now enabled at creation only
+for the explicit borderless profiler request. The remaining 32-pixel gap
+suggests a titlebar/content-area issue, but native verification is pending;
+these logs do not prove the exact Cocoa behavior.
+
+A new `--monitor-probe` runs one short logging-on process and exits after
+stable monitor/mode/size confirmation. It does not require a fixture window
+or produce performance analysis. Use it before another full series:
+`/tmp/claude-gpu-pixel-cost/bin-08d`, output
+`/tmp/claude-gpu-pixel-cost/monitor-probe-08d`, with
+`--presented --monitor-hz 144 --borderless --size 2560x1440 --monitor-probe`.
+This probe still requires you at the Mac, and the agent stays idle until
+you report completion. Prior failed folders are retained. Validation:
+eight Rust tests, thirteen runner tests, Clippy and release build pass.
+The probe runner test uses a mocked process; it is not OS validation.
+
 ## Validation and authorization
 
 frame-profiling.md. All heavy work goes through the shared heavy.sh lock.

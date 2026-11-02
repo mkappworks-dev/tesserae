@@ -4,7 +4,7 @@ from pathlib import Path
 import runpy
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import subprocess
 
 PROFILE = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'profile-frames'))
@@ -102,6 +102,50 @@ class WaitAnalysis(unittest.TestCase):
         self.assertEqual(result['thermal']['returncode'], 1)
         self.assertEqual(result['thermal']['stderr'], 'not supported')
         self.assertEqual(len(result['load_average']), 3)
+
+
+class MonitorProbe(unittest.TestCase):
+    def test_probe_runs_once_without_requiring_or_analyzing_fixture_samples(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            engine = root / 'engine'
+            for name in ['Cargo.toml', 'Cargo.lock', 'crates/tesserae/Cargo.toml']:
+                target = engine / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text('test manifest')
+            game = root / 'game/mods'
+            game.mkdir(parents=True)
+            binary = root / 'test-binary'
+            binary.write_text('test executable')
+            output = root / 'probe'
+            analyze = Mock()
+            def process(*args, **kwargs):
+                run = output / 'stationary-1-on'
+                (run / 'native.log').write_text(
+                    'profile_monitor_selected refresh_millihertz=144000 borderless=true')
+                (run / 'frames.metadata.txt').write_text(
+                    'reported_refresh_millihertz=Some(144000)\n'
+                    'window=2560x1440 mode=BorderlessFullscreen(Entity(1v0))')
+                return subprocess.CompletedProcess(args[0], 0)
+            def local_path(value):
+                return root / 'lock' if str(value) == '/tmp/tesserae-frame-profile.lock' else Path(value)
+            argv = ['profile-frames', str(output), '--binary', str(binary),
+                    '--profile', 'release', '--features', 'profiling', '--game', str(game),
+                    '--presented', '--monitor-hz', '144', '--borderless', '--size', '2560x1440',
+                    '--monitor-probe']
+            with patch.dict(PROFILE['main'].__globals__, {
+                    'ROOT': engine, 'Path': local_path, 'analyze': analyze,
+                    'competitors': lambda: [], 'host_observation': lambda: {'load_average': [0, 0, 0]}}):
+                with patch('sys.argv', argv), patch('subprocess.run', side_effect=process) as calls:
+                    with patch('subprocess.check_output', side_effect=lambda *a, **kw: 'test' if kw.get('text') else b''):
+                        PROFILE['main']()
+            self.assertEqual(calls.call_count, 1)
+            analyze.assert_not_called()
+            env = calls.call_args.kwargs['env']
+            self.assertEqual(env['TESSERAE_PROFILE_MONITOR_PROBE'], '1')
+            self.assertEqual(env['TESSERAE_PROFILE_BORDERLESS'], '1')
+            self.assertFalse((root / 'lock').exists())
+            self.assertFalse((output / 'stationary-1-on/frames.csv').exists())
 
 
 FRAME_HEADER = ('frame_id,start_s,end_s,phase,frame_ms,streaming_settled,fixture_moves,'

@@ -2,6 +2,7 @@
 //! main schedule spans end at Last and exclude extraction and render work.
 mod gpu;
 mod monitor;
+pub(crate) use monitor::window as monitor_window;
 mod waits;
 
 use crate::session::SessionApp;

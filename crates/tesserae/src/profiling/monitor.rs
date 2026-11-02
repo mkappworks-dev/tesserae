@@ -5,6 +5,18 @@ use bevy::{
     window::{Monitor, MonitorSelection, OnMonitor, WindowMode, WindowPosition},
 };
 
+pub(crate) fn window(mut window: Window) -> Window {
+    if std::env::var_os("TESSERAE_SCREENSHOT").is_some()
+        && std::env::var_os("TESSERAE_PROFILE_BORDERLESS").is_some()
+        && std::env::var_os("TESSERAE_PROFILE_MONITOR_HZ").is_some()
+    {
+        // macOS reads these attributes when creating the NSWindow, not on mode changes.
+        window.fullsize_content_view = true;
+        window.titlebar_transparent = true;
+    }
+    window
+}
+
 #[derive(Resource)]
 struct Request {
     millihertz: u32,
@@ -62,6 +74,7 @@ fn select(
     mut request: ResMut<Request>,
     monitors: Query<(Entity, &Monitor)>,
     mut windows: Query<(&mut Window, Option<&OnMonitor>)>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     let started = *request.started.get_or_insert_with(Instant::now);
     if let Some(selected) = request.selected {
@@ -113,6 +126,9 @@ fn select(
                             request.borderless
                         );
                         commands.remove_resource::<Request>();
+                        if std::env::var_os("TESSERAE_PROFILE_MONITOR_PROBE").is_some() {
+                            exit.write(AppExit::Success);
+                        }
                         return;
                     }
                 } else {
@@ -194,6 +210,7 @@ mod tests {
             .world_mut()
             .spawn((Window::default(), OnMonitor(internal)))
             .id();
+        app.add_message::<AppExit>();
         app.add_systems(Update, select.run_if(resource_exists::<Request>));
         app.update();
         assert_eq!(app.world().resource::<Request>().selected, Some(external));
