@@ -257,6 +257,9 @@ def competitors():
         r'/(cargo|rustc|tesserae[^/ ]*|meshing-[^/ ]+|fluids-[^/ ]+)$', line)]
 
 
+SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'no-shadows']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path)
@@ -271,9 +274,14 @@ def main():
                         default=['active', 'stationary', 'flight', 'transparency'])
     # Each costs more than the overhead bound, so a timing series leaves them off.
     parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility'], default=[])
+    parser.add_argument('--size', default='1920x1080', metavar='WxH',
+                        help='offscreen target size; ignored with --presented')
+    # Each changes one cost and the image; a `profiling` build only, never a timing baseline.
+    parser.add_argument('--switches', nargs='+', default=[], choices=SWITCHES)
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
+    width, height = (int(v) for v in args.size.split('x'))
     if args.analyze_only:
         analyze(args.output)
         return
@@ -311,7 +319,8 @@ def main():
             'kind': 'rendered-presented' if args.presented else 'rendered-offscreen',
             'seed': '0x7e55e2ae00000001', 'quality': 'unchanged', 'view': args.view,
             'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
-            'physical_target': 'window (see runtime metadata)' if args.presented else [1920, 1080],
+            'physical_target': 'window (see runtime metadata)' if args.presented else [width, height],
+            'switches': args.switches,
         }
         (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
         for repeat in range(args.repeats):
@@ -329,11 +338,13 @@ def main():
                     env.update(RUST_LOG='info,wgpu_core::device::resource=debug', BEVY_ASSET_ROOT=str(ROOT), TESSERAE_MODS_DIR=str(args.game.resolve()),
                                TESSERAE_TRUST_MODS='1', TESSERAE_PROFILE_FIXTURE=case,
                                TESSERAE_SCREENSHOT=str(run.resolve() / 'capture.png'),
-                               TESSERAE_SCREENSHOT_WIDTH='1920', TESSERAE_SCREENSHOT_HEIGHT='1080',
+                               TESSERAE_SCREENSHOT_WIDTH=str(width), TESSERAE_SCREENSHOT_HEIGHT=str(height),
                                TESSERAE_SCREENSHOT_FLY_AFTER_S='20', TESSERAE_SCREENSHOT_FLY_S='12',
                                TESSERAE_SCREENSHOT_SETTLE_S='1', TESSERAE_SCREENSHOT_VIEW=args.view,
                                TESSERAE_SCREENSHOT_SPEED_M_S='0')
                     env.update(MOTION.get(case, {}))
+                    for name in args.switches:
+                        env['TESSERAE_DIAG_' + name.upper().replace('-', '_')] = '1'
                     if case in PERSISTENT:
                         env['TESSERAE_WORLD_DIR'] = str(run.resolve() / 'world')
                     if not args.presented:

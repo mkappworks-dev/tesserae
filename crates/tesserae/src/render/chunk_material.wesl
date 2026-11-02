@@ -156,6 +156,7 @@ fn fragment(
 
     // Coarse geometry up to a Voxel above the real surface would stand over the
     // finer silhouette, and coarse water under finer water would be drawn twice.
+    @if(!CHUNK_NO_COVERAGE_DISCARD)
     if finer_drawn(in.level, in.world_position.xyz, in.world_normal) {
         discard;
     }

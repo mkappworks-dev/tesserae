@@ -144,6 +144,14 @@ impl MaterialExtension for ChunkMaterialExtension {
                 super::texture_atlas::HEIGHT as u32,
             ),
         ];
+        #[cfg(feature = "profiling")]
+        let defs = {
+            let mut defs = defs.to_vec();
+            if crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD") {
+                defs.push(ShaderDefVal::Bool("CHUNK_NO_COVERAGE_DISCARD".into(), true));
+            }
+            defs
+        };
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
             fragment.shader_defs.extend_from_slice(&defs);

@@ -105,6 +105,12 @@ fn count_visible(
     }
 }
 
+/// A diagnostic switch, read from the environment by the profiling runner's
+/// `--switches`. Each changes one cost for attribution; none is a shipping option.
+pub(crate) fn switch(name: &str) -> bool {
+    std::env::var_os(name).is_some_and(|v| v != "0")
+}
+
 pub fn plugin(app: &mut App) {
     if std::env::var_os("TESSERAE_PROFILE_CONTINUOUS").is_some() {
         app.insert_resource(bevy::winit::WinitSettings::continuous());

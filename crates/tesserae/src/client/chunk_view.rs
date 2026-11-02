@@ -620,12 +620,22 @@ fn publish_drawn(
 /// 16 KiB, so the mask grows past its buffer rarely.
 const MIN_DRAWN_WORDS: usize = 4096;
 
+#[cfg(feature = "profiling")]
+fn shadows_enabled() -> bool {
+    !crate::profiling::switch("TESSERAE_DIAG_NO_SHADOWS")
+}
+
+#[cfg(not(feature = "profiling"))]
+fn shadows_enabled() -> bool {
+    true
+}
+
 fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) {
     // A light's layers are also its shadow-caster mask, so level 0 alone
     // casts: a coarse caster would shadow the finer ground it stands over.
     commands.spawn((
         DirectionalLight {
-            shadow_maps_enabled: true,
+            shadow_maps_enabled: shadows_enabled(),
             ..default()
         },
         Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
@@ -666,6 +676,12 @@ fn spawn_camera(
     let layers: Vec<usize> = (0..level_count(&streaming).max(1))
         .map(|level| level as usize)
         .collect();
+    #[cfg(feature = "profiling")]
+    let layers = if crate::profiling::switch("TESSERAE_DIAG_LEVEL0_ONLY") {
+        vec![NEAR_LAYER]
+    } else {
+        layers
+    };
 
     let camera = commands
         .spawn((
@@ -691,6 +707,10 @@ fn spawn_camera(
             super::camera::CameraHome(pose),
         ))
         .id();
+    #[cfg(feature = "profiling")]
+    if crate::profiling::switch("TESSERAE_DIAG_MSAA_OFF") {
+        commands.entity(camera).insert(Msaa::Off);
+    }
     if let Some(fog) = fog::camera_fog(
         fog::enabled(),
         &fog_settings,
