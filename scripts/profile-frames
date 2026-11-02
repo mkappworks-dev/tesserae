@@ -280,7 +280,7 @@ def main():
     parser.add_argument('--switches', nargs='+', default=[], choices=SWITCHES)
     # Overrides the render scale setting; each run records the scale the engine used.
     parser.add_argument('--render-scale', type=int, choices=[100, 85, 75, 67])
-    parser.add_argument('--sharpen', action='store_true')
+    parser.add_argument('--sharpen', choices=['on', 'off'])
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
@@ -352,7 +352,7 @@ def main():
                     if args.render_scale:
                         env['TESSERAE_SCREENSHOT_RENDER_SCALE'] = str(args.render_scale)
                     if args.sharpen:
-                        env['TESSERAE_SCREENSHOT_SHARPEN'] = '1'
+                        env['TESSERAE_SCREENSHOT_SHARPEN'] = '1' if args.sharpen == 'on' else '0'
                     if case in PERSISTENT:
                         env['TESSERAE_WORLD_DIR'] = str(run.resolve() / 'world')
                     if not args.presented:

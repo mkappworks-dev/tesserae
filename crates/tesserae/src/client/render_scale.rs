@@ -66,15 +66,19 @@ pub(crate) fn percent(preferences: &Preferences) -> u32 {
     preferences.render_scale
 }
 
+/// Below 100% only; `TESSERAE_SCREENSHOT_SHARPEN=0` or `1` overrides it for a
+/// capture.
 pub(crate) fn sharpen() -> bool {
     #[cfg(any(feature = "dev", feature = "profiling"))]
-    if std::env::var_os("TESSERAE_SCREENSHOT_SHARPEN").is_some() {
-        return true;
+    if let Some(value) = std::env::var_os("TESSERAE_SCREENSHOT_SHARPEN") {
+        return value != "0";
     }
     SHARPEN
 }
 
-const SHARPEN: bool = false;
+/// Chosen on captures: it restores much of the texture contrast the bilinear
+/// upscale loses, for about 0.15 ms at 75%.
+const SHARPEN: bool = true;
 
 /// `RenderTarget` has no `PartialEq`; a placeholder stands in for the primary
 /// window, which every `WindowRef::Primary` here means.

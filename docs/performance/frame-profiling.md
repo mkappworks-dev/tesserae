@@ -47,9 +47,10 @@ compiled out of the chunk shader), `level0-only` (coarse levels are not drawn),
 no shadow map). A normal build compiles none of them.
 
 `--render-scale` (100, 85, 75 or 67) overrides the render scale setting and
-`--sharpen` adds contrast-adaptive sharpening to the upscale. Each run's
-`run.json` records the scale and sharpening the engine reports using, under
-`engine_presentation`; never pool runs at different scales.
+`--sharpen on` or `off` overrides contrast-adaptive sharpening of the upscale,
+on by default below 100%. Each run's `run.json` records the scale and sharpening
+the engine reports using, under `engine_presentation`; never pool runs at
+different scales.
 
 Each run retains its PNG, log, environment, executable hash and raw samples. The
 series retains a copied executable, Engine source hashes, source revision/diff,
