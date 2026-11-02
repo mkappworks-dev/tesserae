@@ -782,10 +782,7 @@ fn spawn_camera(
             super::camera::CameraHome(pose),
         ))
         .id();
-    #[cfg(feature = "profiling")]
-    if crate::profiling::switch("TESSERAE_DIAG_MSAA_OFF") {
-        commands.entity(camera).insert(Msaa::Off);
-    }
+    super::anti_alias::apply(&mut commands.entity(camera), super::anti_alias::chosen());
     if let Some(fog) = fog::camera_fog(
         fog::enabled(),
         &fog_settings,

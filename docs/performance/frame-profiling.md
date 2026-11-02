@@ -38,13 +38,15 @@ backend-resolved fallback and actual present elapsed time are unavailable.
 Presented window dimensions are recorded at runtime. Do not pool presented and
 offscreen measurements.
 
-`--size WxH` sets the offscreen target (default 1920x1080) and is recorded as the
-physical target. `--switches` turns on diagnostic switches of a `profiling`
+`--size WxH` sets the offscreen target (default 1920x1080) and is recorded as
+the physical target. `--switches` turns on diagnostic switches of a `profiling`
 build, each changing one cost and the image, so they are for attribution and
 never for a timing baseline: `no-coverage-discard` (the coverage test is
 compiled out of the chunk shader), `level0-only` (coarse levels are not drawn),
-`msaa-off` (the Player camera gets `Msaa::Off`) and `no-shadows` (the sun casts
-no shadow map). A normal build compiles none of them.
+`no-shadows` (the sun casts no shadow map) and four that replace the chosen
+anti-aliasing, one at a time: `msaa-off`, `msaa-2`, `fxaa` and `smaa` (the last
+two with MSAA off). The hand camera takes the Player camera's sample count. A
+normal build compiles none of them.
 
 Each run retains its PNG, log, environment, executable hash and raw samples. The
 series retains a copied executable, Engine source hashes, source revision/diff,

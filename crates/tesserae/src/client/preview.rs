@@ -46,13 +46,13 @@ pub(super) fn plugin(app: &mut App) {
 }
 pub(super) fn camera(
     mut commands: Commands,
-    main: Query<(Entity, &Camera), With<FlyCamera>>,
+    main: Query<(Entity, &Camera, &Msaa), With<FlyCamera>>,
     existing: Query<Entity, With<HandCamera>>,
 ) {
     if !existing.is_empty() {
         return;
     }
-    let Ok((parent, main)) = main.single() else {
+    let Ok((parent, main, msaa)) = main.single() else {
         return;
     };
     commands.spawn((
@@ -63,6 +63,7 @@ pub(super) fn camera(
             clear_color: ClearColorConfig::None,
             ..default()
         },
+        *msaa,
         RenderLayers::layer(HAND_LAYER),
         Transform::default(),
         ChildOf(parent),
@@ -387,5 +388,24 @@ mod tests {
                 .iter(app.world())
                 .all(|v| *v == Visibility::Hidden)
         );
+    }
+    #[test]
+    fn the_hand_camera_takes_the_player_cameras_sample_count() {
+        use bevy::ecs::system::RunSystemOnce;
+        for msaa in [Msaa::Off, Msaa::Sample2, Msaa::Sample4] {
+            let mut app = App::new();
+            app.world_mut().spawn((
+                Camera::default(),
+                msaa,
+                FlyCamera::looking_along(Vec3::NEG_Z),
+            ));
+            app.world_mut().run_system_once(camera).unwrap();
+            let hand = app
+                .world_mut()
+                .query_filtered::<&Msaa, With<HandCamera>>()
+                .single(app.world())
+                .unwrap();
+            assert_eq!(*hand, msaa);
+        }
     }
 }

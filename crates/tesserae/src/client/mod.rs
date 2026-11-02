@@ -3,6 +3,7 @@
 
 mod actions;
 mod aim;
+mod anti_alias;
 mod avatar;
 mod blend_order;
 pub mod camera;
