@@ -46,8 +46,13 @@ compiled out of the chunk shader), `level0-only` (coarse levels are not drawn),
 `no-shadows` (the sun casts no shadow map) and five that replace the
 anti-aliasing setting, one at a time: `msaa-off`, `msaa-4`, `msaa-2`, `fxaa` and
 `smaa` (the last two with MSAA off). The hand camera takes the Player camera's
-sample count. A normal build compiles none of them. Runs record the
-anti-aliasing in use in `frames.metadata.txt`.
+sample count. A normal build compiles none of them.
+
+`--render-scale` (100, 85, 75 or 67) overrides the render scale setting and
+`--sharpen on` or `off` overrides contrast-adaptive sharpening of the upscale,
+on by default below 100%. Each run's `run.json` records the anti-aliasing, scale
+and sharpening the engine reports using, under `engine_presentation`; never pool
+runs that differ in them.
 
 Each run retains its PNG, log, environment, executable hash and raw samples. The
 series retains a copied executable, Engine source hashes, source revision/diff,

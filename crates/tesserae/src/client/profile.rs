@@ -22,6 +22,9 @@ pub(crate) struct Preferences {
     pub display_sync: bool,
     pub fps_cap: Option<u32>,
     pub anti_aliasing: super::anti_alias::AntiAliasing,
+    /// Percent of the window the World is drawn at on each axis, one of
+    /// [`super::render_scale::SCALES`].
+    pub render_scale: u32,
     pub pad: PadPreferences,
     pub touch: TouchPreferences,
     /// The last view, restored in every World: a preference of the user's,
@@ -97,6 +100,7 @@ impl Default for Preferences {
             display_sync: true,
             fps_cap: None,
             anti_aliasing: default(),
+            render_scale: 100,
             pad: PadPreferences::default(),
             touch: TouchPreferences::default(),
             view: default(),
@@ -179,6 +183,7 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         || !(0.1..=10.0).contains(&p.scroll_sensitivity)
         || p.fps_cap.is_some_and(|cap| !(15..=1000).contains(&cap))
         || !super::anti_alias::CHOICES.contains(&p.anti_aliasing)
+        || !super::render_scale::SCALES.contains(&p.render_scale)
         || !PAD_SENSITIVITY.contains(&pad.look_sensitivity)
         || !PAD_DEADZONE.contains(&pad.move_deadzone)
         || !PAD_DEADZONE.contains(&pad.look_deadzone)

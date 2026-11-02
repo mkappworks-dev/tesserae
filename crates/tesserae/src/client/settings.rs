@@ -112,6 +112,7 @@ pub(super) enum Operation {
     Sync(bool),
     Cap(Option<u32>),
     AntiAliasing(super::anti_alias::AntiAliasing),
+    Scale(u32),
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -470,6 +471,7 @@ fn activate(
                 Operation::Sync(value) => p.display_sync = value,
                 Operation::Cap(value) => p.fps_cap = value,
                 Operation::AntiAliasing(value) => p.anti_aliasing = value,
+                Operation::Scale(value) => p.render_scale = value,
                 _ => {}
             }
         }
@@ -1337,6 +1339,24 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                             aa.label(),
                             Operation::AntiAliasing(aa),
                             p.anti_aliasing == aa,
+                        );
+                    }
+                })
+            },
+        );
+        setting_row(
+            card,
+            "Render scale",
+            "Draws the World at a fraction of the window and scales it up. Menus and text stay sharp.",
+            false,
+            |row| {
+                segment(row, |buttons| {
+                    for scale in super::render_scale::SCALES {
+                        option(
+                            buttons,
+                            format!("{scale}%"),
+                            Operation::Scale(scale),
+                            p.render_scale == scale,
                         );
                     }
                 })
