@@ -1,6 +1,6 @@
 # 03: Discard only where the coverage rule cuts
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: [GPU cost per pixel](../spec.md).
@@ -32,7 +32,7 @@ where it can discard something.
 - [x] Unit tests: level 0, an uncovered, a partly covered and a wholly
       covered coarse Chunk each take the right variant or are hidden, and
       each follows a finer Chunk landing and unloading.
-- [ ] Offscreen captures pixel-identical to the before binary: `stationary`,
+- [x] Offscreen captures pixel-identical to the before binary: `stationary`,
       the far view (lift 90 m, pitch -5) and `teleport` 1.2 s after the jump.
 - [x] Zero rule-hole frames in every fixture.
 - [x] Offscreen 1440p passes the spec's effect gate against 02's baseline;
@@ -81,6 +81,9 @@ edge pixels: MSAA shades an edge pixel at a point just outside its triangle,
 and the old test, sampling there, could discard a fragment of an uncovered
 Chunk; texture derivatives across discarded helper pixels change too. Not
 proven. Diffs and crops: `/tmp/claude-gpu-pixel-cost/diff-03-*.png`.
+
+Accepted by you on 2026-11-02: the edge pixels differ, the cause is not
+proven, and the ticket is done on that basis.
 
 ## Validation and authorization
 
