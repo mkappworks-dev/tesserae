@@ -258,6 +258,34 @@ stay the same. The first accepted run must report the external 144 Hz
 monitor, 2560 x 1440 content, and borderless fullscreen. Agent idle until
 you report completion.
 
+## Borderless transition rejection (2026-11-02)
+
+`presented-external-08b` also stopped after its first logging-on run. It
+reached the external 144 Hz monitor and reported borderless fullscreen,
+but the surface went from 1280 x 720 to 2560 x 1440 and immediately back to
+1280 x 720. Final metadata and both World cameras agree on 1280 x 720;
+focus was false. This is another rejected target run, not timing evidence.
+
+The setup code requested fullscreen and physical resizing together, then
+reported confirmation before observing either finish. Bevy propagates
+mode before resolution, while winit's macOS fullscreen transition is
+asynchronous. The simultaneous requests are a plausible source of the
+reversion; the underlying OS cause is not proven from these logs.
+
+Setup now stages the mode change separately. It waits two seconds for the
+transition, allows one corrective resize if still needed, and requires
+the correct monitor, mode and physical dimensions to remain stable for a
+second before reporting confirmation. A ten-second startup deadline fails
+with requested and observed dimensions, instead of continuing through a
+fixture after premature confirmation. Unit tests emulate delayed arrival,
+mode application and stale size, and ensure confirmation is withheld until
+stable. Eight Rust profiler tests and twelve Python tests pass; native OS
+transition validation remains pending.
+
+Next binary: `/tmp/claude-gpu-pixel-cost/bin-08c`. Use the previous command
+with fresh output `/tmp/claude-gpu-pixel-cost/presented-external-08c` and
+that binary. Keep `--borderless --monitor-hz 144 --size 2560x1440`.
+
 ## Validation and authorization
 
 frame-profiling.md. All heavy work goes through the shared heavy.sh lock.

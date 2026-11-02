@@ -12,6 +12,9 @@ struct Request {
     selected: Option<Entity>,
     size: UVec2,
     borderless: bool,
+    applied: Option<Instant>,
+    stable: Option<Instant>,
+    repaired: bool,
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -30,6 +33,9 @@ pub(super) fn plugin(app: &mut App) {
         borderless: std::env::var_os("TESSERAE_PROFILE_BORDERLESS").is_some(),
         started: None,
         selected: None,
+        applied: None,
+        stable: None,
+        repaired: false,
         size: UVec2::new(
             dimension("TESSERAE_SCREENSHOT_WIDTH"),
             dimension("TESSERAE_SCREENSHOT_HEIGHT"),
@@ -74,25 +80,54 @@ fn select(
                     "borderless target must match the monitor's physical size"
                 );
             }
-            for (mut window, _) in &mut windows {
-                if request.borderless {
-                    window.mode =
-                        WindowMode::BorderlessFullscreen(MonitorSelection::Entity(selected));
+            let mode = if request.borderless {
+                WindowMode::BorderlessFullscreen(MonitorSelection::Entity(selected))
+            } else {
+                WindowMode::Windowed
+            };
+            if request.applied.is_none() {
+                for (mut window, _) in &mut windows {
+                    window.mode = mode;
+                    if !request.borderless {
+                        window
+                            .resolution
+                            .set_physical_resolution(request.size.x, request.size.y);
+                    }
                 }
-                window
-                    .resolution
-                    .set_physical_resolution(request.size.x, request.size.y);
+                request.applied = Some(Instant::now());
+            } else if request.applied.unwrap().elapsed() >= Duration::from_secs(2) {
+                let ready = windows.iter().all(|(window, on)| {
+                    on.is_some_and(|on| on.0 == selected)
+                        && window.mode == mode
+                        && window.physical_size() == request.size
+                });
+                if ready {
+                    let since = *request.stable.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= Duration::from_secs(1) {
+                        info!(
+                            "profile_monitor_selected refresh_millihertz={} physical={}x{} name={:?} borderless={}",
+                            monitor.refresh_rate_millihertz.unwrap(),
+                            monitor.physical_width,
+                            monitor.physical_height,
+                            monitor.name,
+                            request.borderless
+                        );
+                        commands.remove_resource::<Request>();
+                        return;
+                    }
+                } else {
+                    request.stable = None;
+                    // Resizing during macOS's fullscreen animation can restore the old size.
+                    if request.borderless && !request.repaired {
+                        for (mut window, _) in &mut windows {
+                            window
+                                .resolution
+                                .set_physical_resolution(request.size.x, request.size.y);
+                        }
+                        request.repaired = true;
+                    }
+                }
             }
-            info!(
-                "profile_monitor_selected refresh_millihertz={} physical={}x{} name={:?} borderless={}",
-                monitor.refresh_rate_millihertz.unwrap(),
-                monitor.physical_width,
-                monitor.physical_height,
-                monitor.name,
-                request.borderless
-            );
-            commands.remove_resource::<Request>();
-            return;
         }
     } else {
         let mut candidates = monitors
@@ -110,8 +145,15 @@ fn select(
         }
     }
     assert!(
-        started.elapsed() < Duration::from_secs(5),
-        "requested monitor not found or window did not reach it within five seconds"
+        started.elapsed() < Duration::from_secs(10),
+        "monitor setup failed to stabilize within ten seconds: requested {}x{} at {} millihertz; observed {:?}",
+        request.size.x,
+        request.size.y,
+        request.millihertz,
+        windows
+            .iter()
+            .map(|(w, _)| (w.physical_size(), w.mode))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -132,6 +174,9 @@ mod tests {
             borderless,
             started: None,
             selected: None,
+            applied: None,
+            stable: None,
+            repaired: false,
             size: UVec2::new(2560, 1440),
         });
         let monitor = |hz| Monitor {
@@ -159,6 +204,32 @@ mod tests {
         app.world_mut()
             .entity_mut(window)
             .insert(OnMonitor(external));
+        app.update();
+        assert!(app.world().contains_resource::<Request>());
+        assert_eq!(
+            app.world().get::<Window>(window).unwrap().mode,
+            if borderless {
+                WindowMode::BorderlessFullscreen(MonitorSelection::Entity(external))
+            } else {
+                WindowMode::Windowed
+            }
+        );
+        if borderless {
+            assert_ne!(
+                app.world().get::<Window>(window).unwrap().physical_size(),
+                UVec2::new(2560, 1440)
+            );
+        }
+        app.world_mut().resource_mut::<Request>().applied =
+            Some(Instant::now() - Duration::from_secs(3));
+        app.update();
+        if borderless {
+            assert!(app.world().resource::<Request>().repaired);
+            app.update();
+        }
+        assert!(app.world().contains_resource::<Request>());
+        app.world_mut().resource_mut::<Request>().stable =
+            Some(Instant::now() - Duration::from_secs(2));
         app.update();
         assert!(!app.world().contains_resource::<Request>());
         assert_eq!(
