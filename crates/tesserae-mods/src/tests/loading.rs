@@ -573,3 +573,135 @@ fn migration_keeps_a_games_trust_because_trust_follows_the_build_not_the_path() 
         Verdict::Trusted(_)
     ));
 }
+
+#[test]
+fn data_source_is_discovered_and_trust_checked_without_a_component() {
+    let s = Scratch::new("data-source");
+    s.write_mod(
+        "plain",
+        "id = \"plain\"\nversion = \"1.0.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n",
+        None,
+    );
+    fs::write(s.mod_dir("plain").join("content.toml"), "").unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    let host = ModHost::new().unwrap();
+    assert!(matches!(
+        host.load(vec![found.clone()], &s.trust()),
+        Err(ModError::Untrusted { .. })
+    ));
+    let mut trust = s.trust();
+    trust.grant(&found).unwrap();
+    assert_eq!(host.load(vec![found], &trust).unwrap().len(), 1);
+}
+
+#[test]
+fn missing_data_source_names_the_mod_and_declaration_field() {
+    let s = Scratch::new("missing-data");
+    s.write_mod(
+        "plain",
+        "id = \"plain\"\nversion = \"1.0.0\"\napi = \"0.3\"\ndeclaration = \"absent.toml\"\n",
+        None,
+    );
+    let found = only(discover(&s.mods()).unwrap());
+    let error = Trust::hash_of(&found).unwrap_err().to_string();
+    assert!(
+        error.contains("plain") && error.contains("declaration"),
+        "{error}"
+    );
+}
+
+#[test]
+fn data_build_identity_covers_only_checked_content_and_manifest() {
+    let s = Scratch::new("data-identity");
+    s.write_mod(
+        "plain",
+        "id = \"plain\"\nversion = \"1.0.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n",
+        None,
+    );
+    let dir = s.mod_dir("plain");
+    fs::write(dir.join("content.toml"), "").unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    let mut trust = s.trust();
+    trust.grant(&found).unwrap();
+    let host = ModHost::new().unwrap();
+    let loaded = host.load(vec![found.clone()], &trust).unwrap();
+    let original = loaded[0].build_sha256.clone();
+    fs::write(dir.join("editor.txt"), "unrelated").unwrap();
+    assert_eq!(Trust::hash_of(&found).unwrap(), original);
+    fs::write(dir.join("content.toml"), "# changed\n").unwrap();
+    assert!(matches!(
+        trust.check(&found).unwrap(),
+        Verdict::Untrusted(Untrusted::Changed)
+    ));
+    assert_eq!(loaded[0].build_sha256, original);
+    assert!(loaded[0].declaration().unwrap().materials.is_empty());
+    let mut edited = found.clone();
+    edited.manifest_bytes.push(b'\n');
+    fs::write(dir.join("content.toml"), "").unwrap();
+    assert_ne!(Trust::hash_of(&edited).unwrap(), original);
+}
+
+#[test]
+fn data_manifest_requires_exactly_one_confined_current_source() {
+    for (extra, api, field) in [
+        ("", "0.3", "source"),
+        (
+            "wasm = 'm.wasm'\ndeclaration = 'data.toml'",
+            "0.3",
+            "source",
+        ),
+        ("declaration = '../data.toml'", "0.3", "declaration"),
+        ("declaration = '/data.toml'", "0.3", "declaration"),
+        ("declaration = ''", "0.3", "declaration"),
+        ("declaration = 'data.toml'", "0.2", "0.3"),
+    ] {
+        let s = Scratch::new("data-manifest");
+        s.write_mod(
+            "plain",
+            &format!("id = 'plain'\nversion = '1.0.0'\napi = '{api}'\n{extra}\n"),
+            None,
+        );
+        let error = err_text(discover(&s.mods()));
+        assert!(error.contains("plain") && error.contains(field), "{error}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn data_declaration_symlink_escape_is_refused_even_after_discovery() {
+    let s = Scratch::new("data-escape");
+    s.write_mod(
+        "plain",
+        "id = 'plain'\nversion = '1.0.0'\napi = '0.3'\ndeclaration = 'data.toml'\n",
+        None,
+    );
+    let dir = s.mod_dir("plain");
+    fs::write(dir.join("data.toml"), "").unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    let outside = s.0.join("outside.toml");
+    fs::write(&outside, "").unwrap();
+    fs::remove_file(dir.join("data.toml")).unwrap();
+    std::os::unix::fs::symlink(outside.canonicalize().unwrap(), dir.join("data.toml")).unwrap();
+    let error = Trust::hash_of(&found).unwrap_err().to_string();
+    assert!(
+        error.contains("plain") && error.contains("declaration") && error.contains("outside"),
+        "{error}"
+    );
+    assert!(scan(&s.mods()).unwrap().mods.is_empty());
+}
+
+#[test]
+fn existing_component_trust_hash_remains_compatible() {
+    let s = Scratch::new("legacy-hash");
+    s.good("alpha", "");
+    let found = only(discover(&s.mods()).unwrap());
+    assert_eq!(
+        Trust::hash_of(&found).unwrap(),
+        "d931ac548c8e4618480131b7eac011bdb1284d830e8f1c404f18dfae85981963"
+    );
+    fs::write(s.0.join("trust.json"), r#"{"records":[{"kind":"mod","id":"alpha","sha256":"d931ac548c8e4618480131b7eac011bdb1284d830e8f1c404f18dfae85981963"}]}"#).unwrap();
+    assert!(matches!(
+        s.trust().check(&found).unwrap(),
+        Verdict::Trusted(_)
+    ));
+}

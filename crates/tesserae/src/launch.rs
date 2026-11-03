@@ -320,7 +320,8 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
         version: "1".into(),
         api: "0.3".into(),
         root: false,
-        wasm: "m.wasm".into(),
+        wasm: Some("m.wasm".into()),
+        declaration: None,
         depends: Vec::new(),
         limits: Default::default(),
     }

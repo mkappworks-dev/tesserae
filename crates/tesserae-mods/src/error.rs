@@ -20,6 +20,10 @@ pub enum ModError {
         who: String,
         reason: String,
     },
+    Data {
+        id: String,
+        reason: String,
+    },
     Api {
         id: String,
         api: String,
@@ -170,6 +174,7 @@ impl fmt::Display for ModError {
                 write!(f, "mod `{who}`: {}: {source}", path.display())
             }
             ModError::Manifest { who, reason } => write!(f, "mod `{who}`: mod.toml: {reason}"),
+            ModError::Data { id, reason } => write!(f, "mod `{id}`: declaration: {reason}"),
             ModError::Api { id, api, supported } => write!(
                 f,
                 "mod `{id}` was built against api {api}, but this build of Tesserae supports {}",

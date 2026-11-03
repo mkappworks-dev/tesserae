@@ -10,6 +10,7 @@ mod character;
 mod command;
 mod context;
 mod convert;
+mod data;
 mod declare;
 mod error;
 mod host;
@@ -51,7 +52,7 @@ pub use manifest::{
 pub use prompt::{confirm_trust, trust_prompt};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
-pub use trust::{Trust, Untrusted, Verdict};
+pub use trust::{CheckedPayload, Trust, Untrusted, Verdict};
 
 #[cfg(test)]
 mod tests;

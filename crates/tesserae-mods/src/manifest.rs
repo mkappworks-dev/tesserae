@@ -18,14 +18,15 @@ pub struct Manifest {
     pub api: String,
     #[serde(default)]
     pub root: bool,
-    pub wasm: String,
+    pub wasm: Option<String>,
+    pub declaration: Option<String>,
     #[serde(default)]
     pub depends: Vec<String>,
     #[serde(default)]
     pub limits: ManifestLimits,
 }
 
-/// A Mod found on disk with a valid Manifest; its component is not yet read.
+/// A Mod found on disk with a valid Manifest; its content is not yet read.
 #[derive(Debug, Clone)]
 pub struct Found {
     pub manifest: Manifest,
@@ -34,19 +35,21 @@ pub struct Found {
 }
 
 impl Found {
-    /// The component's path, re-checked for escaping the Mod's directory.
+    /// Legacy alias for the selected source's confined path.
     pub fn component_path(&self) -> Result<PathBuf, ModError> {
-        let path = self.dir.join(&self.manifest.wasm);
-        // A missing file is not an escape; reading it reports that.
+        self.source_path()
+    }
+
+    /// Resolves either Declaration source inside the installed Mod directory.
+    pub fn source_path(&self) -> Result<PathBuf, ModError> {
+        let (field, name) = self.manifest.source();
+        let path = self.dir.join(name);
         if let (Ok(real), Ok(base)) = (path.canonicalize(), self.dir.canonicalize())
             && !real.starts_with(&base)
         {
             return Err(manifest_error(
                 &self.manifest.id,
-                format!(
-                    "wasm `{}` resolves outside the mod's directory",
-                    self.manifest.wasm
-                ),
+                format!("{field} `{name}` resolves outside the mod's directory"),
             ));
         }
         Ok(path)
@@ -94,7 +97,19 @@ impl Manifest {
                 supported: SUPPORTED_API.to_vec(),
             });
         }
-        self.validate_wasm_path()?;
+        match (&self.wasm, &self.declaration) {
+            (Some(_), None) | (None, Some(_)) => {}
+            _ => {
+                return Err(manifest_error(
+                    id,
+                    "select exactly one source: wasm or declaration".into(),
+                ));
+            }
+        }
+        if self.declaration.is_some() && self.api != "0.3" {
+            return Err(manifest_error(id, "declaration requires api 0.3".into()));
+        }
+        self.validate_source_path()?;
         for dep in &self.depends {
             if !valid_id(dep) {
                 return Err(manifest_error(
@@ -106,19 +121,23 @@ impl Manifest {
         Ok(())
     }
 
-    fn validate_wasm_path(&self) -> Result<(), ModError> {
-        let wasm = Path::new(&self.wasm);
-        let plain =
-            !self.wasm.is_empty() && wasm.components().all(|c| matches!(c, Component::Normal(_)));
-        if plain {
+    pub fn source(&self) -> (&'static str, &str) {
+        match (&self.wasm, &self.declaration) {
+            (Some(path), None) => ("wasm", path),
+            (None, Some(path)) => ("declaration", path),
+            _ => unreachable!("validated Manifest selects exactly one source"),
+        }
+    }
+
+    fn validate_source_path(&self) -> Result<(), ModError> {
+        let (field, name) = self.source();
+        let path = Path::new(name);
+        if !name.is_empty() && path.components().all(|c| matches!(c, Component::Normal(_))) {
             Ok(())
         } else {
             Err(manifest_error(
                 &self.id,
-                format!(
-                    "wasm `{}` must be a relative path inside the mod's directory",
-                    self.wasm
-                ),
+                format!("{field} `{name}` must be a relative path inside the mod's directory"),
             ))
         }
     }
@@ -314,7 +333,7 @@ fn read_folder(folder: &Path, role: Role) -> Result<Option<Found>, String> {
         dir: folder.to_path_buf(),
         manifest_bytes,
     };
-    entry.component_path().map_err(|e| e.to_string())?;
+    entry.source_path().map_err(|e| e.to_string())?;
     Ok(Some(entry))
 }
 

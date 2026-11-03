@@ -423,15 +423,19 @@ fn load_with_opening(
                 build_sha256: component.build_sha256.clone(),
             });
             let fault = |e| format!("mod `{id}`: {e}");
-            let instance = host
-                .instantiate(component, world.seed)
-                .await
-                .map_err(fault)?;
-            let (mut instance, declaration) = instance.declare().await.map_err(fault)?;
-            // Where an adapter warns of what an older line could not declare.
-            for line in instance.drain_log().lines {
-                eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
-            }
+            let (instance, declaration) = if let Some(declaration) = component.declaration() {
+                (None, declaration.clone())
+            } else {
+                let instance = host
+                    .instantiate(component, world.seed)
+                    .await
+                    .map_err(fault)?;
+                let (mut instance, declaration) = instance.declare().await.map_err(fault)?;
+                for line in instance.drain_log().lines {
+                    eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
+                }
+                (Some(instance), declaration)
+            };
             let root = component.found.manifest.root;
             let applied = apply(
                 declaration,
@@ -465,7 +469,7 @@ fn load_with_opening(
                 loaded.character = applied.character;
                 loaded.tools = applied.tools;
             }
-            loaded.mods.push(instance);
+            loaded.mods.extend(instance);
         }
         // Every name is registered now; what flows, reacts and burns is fixed
         // before any Mod starts and the World opens.
@@ -497,7 +501,8 @@ fn load_with_opening(
                 .map_err(|e| e.to_string())?;
         }
         let instances = std::mem::take(&mut loaded.mods);
-        for (component, instance) in compiled.iter().zip(instances) {
+        for instance in instances {
+            let id = instance.id().to_owned();
             let instance = instance
                 .start(
                     opening.map_or_else(
@@ -512,7 +517,7 @@ fn load_with_opening(
                     ids.clone(),
                 )
                 .await
-                .map_err(|e| format!("mod `{}`: {e}", component.found.manifest.id))?;
+                .map_err(|e| format!("mod `{id}`: {e}"))?;
             loaded.mods.push(instance);
         }
         Ok::<_, String>(loaded)
@@ -729,6 +734,240 @@ mod tests {
     impl Drop for Scratch {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    fn data(s: &Scratch, id: &str, root: bool, extra: &str, content: &str) -> PathBuf {
+        let dir = s.0.join(if root { "games" } else { "mods" }).join(id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mod.toml"), format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.3\"\nroot = {root}\ndeclaration = \"content.toml\"\n{extra}\n")).unwrap();
+        fs::write(dir.join("content.toml"), content).unwrap();
+        dir
+    }
+
+    const DATA_GAME: &str = r#"
+[[materials]]
+name = "rock"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+[[appearance]]
+material = "rock"
+color = [80, 90, 100, 255]
+[world.ground]
+rock = "plain:rock"
+soil = "plain:rock"
+surface = "plain:rock"
+"#;
+
+    #[test]
+    fn data_game_registers_ground_and_colour_without_guest_callbacks() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "", DATA_GAME);
+        let loaded = s.load(TrustMode::All).unwrap();
+        assert!(loaded.game);
+        assert!(loaded.mods.is_empty());
+        assert_eq!(loaded.registry.id_of(Kind::Material, "plain:rock"), Some(8));
+        assert_eq!(loaded.world.unwrap().ground.unwrap().rock, 8);
+        assert_eq!(loaded.appearance, [(8, [80, 90, 100, 255])]);
+        let catalogue = catalogue(&loaded.registry, &loaded.tables, None, Some(8));
+        assert!(
+            catalogue
+                .materials
+                .iter()
+                .any(|m| m.name == "plain:rock" && m.solid)
+        );
+    }
+
+    #[test]
+    fn data_errors_use_shared_validation_and_name_the_mod_and_field() {
+        for (content, root, field) in [
+            ("[world]", false, "world"),
+            ("[world]\nrelief-m = -1.0", true, "relief"),
+            ("[world]\nrelief-m = nan", true, "relief"),
+            (
+                "[world.ground]\nrock='missing:rock'\nsoil='missing:rock'\nsurface='missing:rock'",
+                true,
+                "ground.rock",
+            ),
+            (
+                "[[materials]]\nname='rock'\nemission=16\ndimming=15\nocclusion='opaque'\nrender='opaque'\nsolid=true",
+                false,
+                "emission",
+            ),
+            ("shapes = []", false, "shapes"),
+            ("[world]\nwater = {}", true, "water"),
+            ("[[materials]]\nname='rock'\nextra=1", false, "extra"),
+            (
+                "[[appearance]]\nmaterial='rock'\ncolor=[256,0,0,255]",
+                false,
+                "color",
+            ),
+            ("[world.ground]\nrock = [", true, "declaration"),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", root, "", content);
+            let error = s
+                .load(TrustMode::All)
+                .err()
+                .expect("invalid data must fail");
+            assert!(error.contains("plain") && error.contains(field), "{error}");
+        }
+    }
+
+    #[test]
+    fn mixed_data_dependencies_register_before_consumers_and_keep_guest_callbacks() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "depends = ['middle']", DATA_GAME);
+        data(
+            &s,
+            "base",
+            false,
+            "",
+            &DATA_GAME
+                .split("[world.ground]")
+                .next()
+                .unwrap()
+                .replace("rock", "ore"),
+        );
+        s.add("middle", "catalog", "depends = ['base']");
+        let loaded = s.load(TrustMode::All).unwrap();
+        assert_eq!(required_ids(&loaded), ["base", "middle", "plain"]);
+        assert_eq!(
+            loaded.mods.iter().map(ModInstance::id).collect::<Vec<_>>(),
+            ["middle"]
+        );
+        assert_eq!(loaded.registry.id_of(Kind::Material, "base:ore"), Some(8));
+        assert_eq!(loaded.registry.id_of(Kind::Material, "middle:m0"), Some(9));
+        assert_eq!(
+            loaded.registry.id_of(Kind::Material, "plain:rock"),
+            Some(17)
+        );
+        assert_eq!(
+            loaded.tables.materials.def(8),
+            loaded.tables.materials.def(17)
+        );
+        let pure = Scratch::new();
+        data(
+            &pure,
+            "equivalent",
+            false,
+            "",
+            "[[materials]]\nname='m0'\nemission=0\ndimming=0\nocclusion='never'\nrender='opaque'\nsolid=true",
+        );
+        assert_eq!(
+            pure.load(TrustMode::All).unwrap().tables.materials.def(8),
+            loaded.tables.materials.def(9)
+        );
+    }
+
+    #[test]
+    fn data_game_uses_normal_explicit_trust() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "", DATA_GAME);
+        let (refused, prompt) = prompted(&s, TrustMode::None, true, "n\n");
+        assert!(!refused.unwrap().game);
+        assert!(prompt.contains("Trust this exact build?"));
+        assert!(!s.0.join("trust.json").exists());
+        assert!(prompted(&s, TrustMode::None, true, "y\n").0.unwrap().game);
+        assert!(prompted(&s, TrustMode::None, false, "").0.unwrap().game);
+    }
+
+    #[test]
+    fn data_and_mixed_worlds_reopen_exact_registry_and_refuse_changes_before_writes() {
+        use super::super::persistence::Opening;
+        use tesserae_core::save::{self, Commit, Generation, WorldId, Writer};
+        for mixed in [false, true] {
+            let s = Scratch::new();
+            let data_content = if mixed {
+                DATA_GAME.split("[world.ground]").next().unwrap()
+            } else {
+                DATA_GAME
+            };
+            let dir = data(&s, "plain", !mixed, "", data_content);
+            data(&s, "extra", false, "", "");
+            if mixed {
+                s.add_on("0.3", "lake", "lake", "root = true");
+            }
+            let loaded = s.load(TrustMode::All).unwrap();
+            let registry = loaded.registry.clone();
+            let (content, mapping) = super::super::persistence::content(&loaded);
+            let path = s.0.join("world");
+            let id = WorldId::new();
+            let commit = Commit {
+                format: save::FORMAT_VERSION,
+                generator: save::GENERATOR_VERSION,
+                world: id.clone(),
+                sequence: 1,
+                seed: 123,
+                voxel_size_m: 0.5,
+                parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+                content: content.clone(),
+                player: save::Player {
+                    eye_m: [1.0, 2.0, 3.0],
+                    extensions: Default::default(),
+                },
+                chunks: vec![],
+                simulation: super::super::fluids::FluidSim::default()
+                    .checkpoint(&mapping)
+                    .unwrap()
+                    .0,
+                paused: vec![],
+            };
+            Writer::acquire(&path, &id, &content)
+                .unwrap()
+                .write(&commit)
+                .unwrap();
+            let reopen = || {
+                let opening = Opening::from_folder(&path).unwrap();
+                let settings = opening.settings(WorldSettings::default());
+                load_with_opening(
+                    &opening.selection(),
+                    Some(&opening),
+                    &s.0.join("mods"),
+                    &s.0.join("trust.json"),
+                    &settings,
+                    |found, trust| {
+                        trust.grant_for_run(found).map_err(|e| e.to_string())?;
+                        Ok(true)
+                    },
+                )
+            };
+            assert_eq!(reopen().unwrap().registry, registry);
+            let files = || {
+                let mut files: Vec<_> = fs::read_dir(&path)
+                    .unwrap()
+                    .map(|entry| {
+                        let path = entry.unwrap().path();
+                        let bytes = fs::read(&path).unwrap();
+                        (path, bytes)
+                    })
+                    .collect();
+                files.sort();
+                files
+            };
+            let before = files();
+            fs::write(
+                dir.join("content.toml"),
+                format!("{data_content}\n# changed"),
+            )
+            .unwrap();
+            let error = reopen().err().unwrap();
+            assert!(
+                error.contains("plain") && error.contains("changed"),
+                "{error}"
+            );
+            assert_eq!(files(), before);
+            fs::write(dir.join("content.toml"), data_content).unwrap();
+            fs::remove_dir_all(s.0.join("mods/extra")).unwrap();
+            let error = reopen().err().unwrap();
+            assert!(
+                error.contains("extra") && error.contains("not installed"),
+                "{error}"
+            );
+            assert_eq!(files(), before);
         }
     }
 
