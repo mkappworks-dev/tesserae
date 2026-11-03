@@ -301,6 +301,17 @@ not per-voxel calls. Crossing the WASM boundary copies, so call frequency — no
 throughput — is what costs. See [ADR-0001](docs/adr/0001-wasm-mod-boundary.md)
 before adding a host function.
 
+### Running the other demo Games
+
+```bash
+./scripts/package-demo   # builds the Games, packages them and every Mod into dist/
+./scripts/demo           # runs the Engine on dist/
+```
+
+`package-demo` keeps `dist/trust.json`, so Trust grants survive a repackage; run
+it again after changing anything under `games/` or `mods/`. See
+[Demo Games and shared Mods](docs/demo-games.md).
+
 ### Running the Terra Game
 
 ```bash
