@@ -30,6 +30,8 @@ mkdir -p games/terra/dist/games/terra games/terra/dist/mods
 terra_target=$(cargo metadata --manifest-path games/terra/Cargo.toml --no-deps \
   --format-version 1 | jq -r .target_directory)
 cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/dist/games/terra/
+# Also beside its manifest, so `tesserae package games/terra` finds it like the demo Games.
+cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/terra.wasm
 cp games/terra/mod.toml games/terra/dist/games/terra/
 
 # The demo Games depend on the data Mods in mods/, so they are not installed beside Terra (a

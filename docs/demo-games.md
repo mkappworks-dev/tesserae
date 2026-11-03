@@ -115,7 +115,7 @@ into the same folder:
 
 ```sh
 for mod in mods/*/; do tesserae package "$mod" --out dist --mods mods; done
-for game in meadow ember tidewater lumen; do
+for game in terra meadow ember tidewater lumen; do
   tesserae package games/$game --mods mods --out dist --trust-for-run
 done
 cargo run --release -- --mods dist/mods

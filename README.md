@@ -74,8 +74,8 @@ mods directory.
 What Terra shows, and how to run it at another Voxel size, is in
 [CONTRIBUTING.md](CONTRIBUTING.md#running-the-terra-game).
 
-To try the other Games (meadow, ember, tidewater, lumen), which take their
-content from the shared Mods in `mods/`:
+To try the other Games (meadow, ember, tidewater, lumen) beside Terra, which
+take their content from the shared Mods in `mods/`:
 
 ```bash
 ./scripts/package-demo   # build and package them with every Mod into dist/
