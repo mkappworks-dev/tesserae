@@ -150,8 +150,9 @@ terminal) from the named Game and Mods, and watches them. Nothing is saved and
 no Trust record is written: the named projects are trusted for this run only,
 while installed dependencies load as usual and an installed component still
 needs a recorded grant. `--seed` fixes the seed (otherwise the Engine's
-default). Source build commands are never run; rebuild a component yourself and
-the new `.wasm` is picked up like any other file.
+default). No build command runs unless a project enables one (see below);
+otherwise rebuild a component yourself and the new `.wasm` is picked up like any
+other file.
 
 Each saved change is prepared and validated off the main thread through the same
 code as `validate`, as one consistent candidate:
@@ -171,6 +172,46 @@ code as `validate`, as one consistent candidate:
 - If the replacement World stops while starting, the session ends in the
   ordinary error state with the reason, and the next valid save, even of the
   same bytes, opens another.
+
+### Building before a restart
+
+A component project opts in to automatic building with a `dev.toml` beside its
+`mod.toml`:
+
+```toml
+[build]
+enabled = true
+command = ["cargo", "build", "--target", "wasm32-wasip2", "--release"]
+output = "target/wasm32-wasip2/release/my_game.wasm"
+```
+
+`command` is a program and arguments (no shell), run in the project folder.
+`output` is the component it produces, a relative path inside the project; on
+success it is copied over the `wasm` file `mod.toml` names. Only this file
+enables a build: `enabled` defaults to false, installed Mods are never built,
+`package` leaves `dev.toml` out, and a project without one, or a data-only
+project, is only loaded. Enabling a build on a project whose `mod.toml` has no
+`wasm`, or a malformed `dev.toml`, is refused naming the project.
+
+The build is the first step of preparing a candidate, so the rules above still
+hold:
+
+- Each enabled project is built when its sources changed since its last
+  successful build (files other than dot-folders, `target` and the `wasm` file
+  the build writes, which are not watched, so generated output starts no further
+  build). A change to a data-only project or to a project without a build does
+  not rebuild the others.
+- A failed build (non-zero exit, or no `output`) is refused naming the project
+  and printing the end of the build's diagnostics. The `wasm` file on disk is
+  not replaced, the current World keeps running, and the next source edit builds
+  again.
+- A build that succeeds is then validated like any candidate; invalid content
+  after a successful build also leaves the World running.
+- An edit that lands during a build lets that build finish, drops its result and
+  builds the newer sources, so an older output never replaces a newer one.
+
+The build runs with your user's permissions, so enable it only for projects you
+trust.
 
 Only the named projects are watched (everything inside them except dot-folders
 and `target`); other local projects and installed Mods are not. Saved Worlds are

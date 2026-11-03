@@ -338,7 +338,7 @@ solid = true
         fs::write(dir.join("art/unused.png"), png(48, 16, 2)).unwrap();
         fs::write(dir.join("src/lib.rs"), "fn main() {}").unwrap();
         fs::write(dir.join("notes.txt"), "editor notes").unwrap();
-        fs::write(dir.join("dev.toml"), "watch = true").unwrap();
+        fs::write(dir.join("dev.toml"), "# development configuration\n").unwrap();
         dir
     }
 

@@ -40,9 +40,24 @@ tesserae dev . [--mods <dir>] [--seed <n>]
 
 Opens a disposable World from this project and restarts it when `mod.toml` or
 the copied `.wasm` changes and still validates; otherwise the running World
-stays and the terminal explains why. It never runs Cargo: rebuild and copy the
-`.wasm` as above, and the new build is picked up. The project is trusted for
-that run only; nothing is saved and no Trust is recorded.
+stays and the terminal explains why. By default it never runs Cargo: rebuild and
+copy the `.wasm` as above, and the new build is picked up. The project is
+trusted for that run only; nothing is saved and no Trust is recorded.
+
+To have `tesserae dev` rebuild on every source edit, opt in with a `dev.toml`
+beside `mod.toml` (it is left out of the package):
+
+```toml
+[build]
+enabled = true
+command = ["cargo", "build", "--target", "wasm32-wasip2", "--release"]
+output = "target/wasm32-wasip2/release/starter_rust.wasm"
+```
+
+The built component is copied over `starter_rust.wasm` only when Cargo succeeds.
+A compile error is printed with the project name and the running World stays
+until the next edit. Rename `starter_rust.wasm` in `output` along with the other
+names. The build runs with your permissions: enable it only for code you trust.
 
 ## Package
 
