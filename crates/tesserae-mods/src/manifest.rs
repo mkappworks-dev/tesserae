@@ -207,7 +207,20 @@ pub struct Scan {
     pub rejected: Vec<Rejected>,
 }
 
+/// The Game a World with no record opens: `cargo dev`, an ephemeral World and the empty create
+/// form. Installed ids never decide it, so adding a Game cannot change it.
+pub const DEFAULT_GAME: &str = "terra";
+
 impl Scan {
+    /// [`DEFAULT_GAME`], or the first installed Game when that one is absent (an install that
+    /// ships a different Game set).
+    pub fn default_game(&self) -> Option<&Found> {
+        self.games
+            .iter()
+            .find(|f| f.manifest.id == DEFAULT_GAME)
+            .or_else(|| self.games.first())
+    }
+
     pub fn find(&self, id: &str) -> Option<&Found> {
         self.games
             .iter()

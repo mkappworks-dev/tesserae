@@ -304,7 +304,7 @@ cargo dev
 ```
 
 Once the guests are built, `cargo dev` loads the Games in
-`games/terra/dist/games` on its own (Terra, and `willow`, a plain second Game
+`games/terra/dist/games` on its own (Terra, and `meadow`, a plain second Game
 for trying side-by-side installs; pick one when creating a World) and trusts it
 for the run, with no prompt and no Trust record; before that it opens a World
 with no Game and logs that `./scripts/build-guests` must be run. A directory

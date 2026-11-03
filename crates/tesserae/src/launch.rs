@@ -87,7 +87,7 @@ pub struct Untrusted {
 /// What the World list can offer, found without running any Mod code.
 #[derive(Resource)]
 pub struct Installed {
-    /// The first installed Game: what a World with no record, and the empty form, default to.
+    /// [`tesserae_mods::DEFAULT_GAME`]: what a World with no record, and the empty form, default to.
     pub game: Option<GameRef>,
     /// Trust still to grant for the set about to open; see [`Installed::prepare_trust`].
     pub untrusted: Vec<Untrusted>,
@@ -110,10 +110,11 @@ impl Installed {
             id: f.manifest.id.clone(),
             version: f.manifest.version.clone(),
         };
+        let default = scan.default_game().map(item);
         let games: Vec<_> = scan.games.iter().map(item).collect();
         let mods: Vec<_> = scan.mods.iter().map(item).collect();
         Self {
-            game: games.first().cloned(),
+            game: default,
             untrusted: Vec::new(),
             error: None,
             games,

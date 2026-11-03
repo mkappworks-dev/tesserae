@@ -18,6 +18,13 @@ Ground, World parameters, movement, character and tools come from the root Game
 alone; a Mod adds Materials, appearance and textures. The Engine still ships
 only Air ([ADR-0016](0016-only-air-is-built-in.md)).
 
+A World with no record to follow (`cargo dev`, an ephemeral World, the empty
+create form) opens the Game named by `DEFAULT_GAME` in `tesserae-mods`, which is
+`terra`; if that Game is not installed, the first installed Game by id.
+Installed ids otherwise never decide it, so adding `ember` or `lumen` cannot
+change it. There is no manifest key or flag for it: the default is the Engine's
+choice, not content's.
+
 `TESSERAE_SOAK_ALTERNATE=1` with `TESSERAE_SOAK_CYCLES=n` (dev) opens the listed
 Worlds in turn, so two Games load and unload alternately.
 

@@ -11,7 +11,7 @@ use tesserae::mods::content::{
 };
 use tesserae::mods::types::Srgba;
 
-struct Willow;
+struct Meadow;
 
 fn solid(name: &str) -> MaterialDef {
     MaterialDef {
@@ -33,7 +33,7 @@ fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     }
 }
 
-impl Guest for Willow {
+impl Guest for Meadow {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
         world.movement = Some(MovementPolicy {
@@ -43,9 +43,9 @@ impl Guest for Willow {
         });
         world.relief_m = 14.0;
         world.ground = Some(GroundParams {
-            rock: "willow:sandstone".into(),
-            soil: "willow:clay".into(),
-            surface: "willow:turf".into(),
+            rock: "meadow:sandstone".into(),
+            soil: "meadow:clay".into(),
+            surface: "meadow:turf".into(),
         });
         Declaration {
             materials: vec![solid("sandstone"), solid("clay"), solid("turf")],
@@ -71,4 +71,4 @@ impl Guest for Willow {
     }
 }
 
-export!(Willow);
+export!(Meadow);

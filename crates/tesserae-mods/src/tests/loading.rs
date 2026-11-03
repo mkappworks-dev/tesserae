@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    Found, ManifestLimits, Migration, ModError, ModHost, ModLimits, Scan, Trust, Untrusted,
-    Verdict, migrate_legacy_games, plan, scan,
+    DEFAULT_GAME, Found, ManifestLimits, Migration, ModError, ModHost, ModLimits, Scan, Trust,
+    Untrusted, Verdict, migrate_legacy_games, plan, scan,
 };
 
 /// A scratch directory under the cargo target dir, unique per test and removed on drop.
@@ -399,6 +399,28 @@ fn a_manifest_cannot_raise_a_limit() {
     let result = host.lowered_by(&lowered);
     assert_eq!(result.call_fuel, 10);
     assert_eq!(result.memory_bytes, host.memory_bytes);
+}
+
+#[test]
+fn the_default_game_is_terra_whatever_the_ids_sort_to() {
+    let s = Scratch::new("default");
+    for id in ["aurora", "terra", "zephyr"] {
+        s.good_game(id, id);
+    }
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(ids(&found.games), ["aurora", "terra", "zephyr"]);
+    assert_eq!(found.default_game().unwrap().manifest.id, DEFAULT_GAME);
+}
+
+#[test]
+fn the_default_game_is_the_first_installed_when_terra_is_absent() {
+    let s = Scratch::new("default-absent");
+    for id in ["zephyr", "aurora"] {
+        s.good_game(id, id);
+    }
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(found.default_game().unwrap().manifest.id, "aurora");
+    assert!(Scan::default().default_game().is_none());
 }
 
 #[test]

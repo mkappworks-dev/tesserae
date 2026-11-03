@@ -309,7 +309,7 @@ tesserae/
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
 ├── games/terra/                 MIT WASI guest, only the WIT contract       ▸ 7
-├── games/willow/               a plain second Game, for side-by-side installs
+├── games/meadow/               a plain second Game, for side-by-side installs
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
 └── USE-GRANT.md                the most important file in the repo

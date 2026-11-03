@@ -154,7 +154,7 @@ pub struct Wanted {
 /// removing an unrelated Mod cannot change a World's content.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
-    /// A World with no record to follow, such as an ephemeral one: the first Game and every Mod.
+    /// A World with no record to follow, such as an ephemeral one: the default Game and every Mod.
     Everything,
     /// A World saved without a Game: it is empty sky and loads no Mods.
     Nothing,
@@ -166,12 +166,8 @@ impl Selection {
     fn choose(&self, installed: Scan) -> Result<Vec<tesserae_mods::Found>, String> {
         let wanted = match self {
             Selection::Everything => {
-                return Ok(installed
-                    .games
-                    .into_iter()
-                    .take(1)
-                    .chain(installed.mods)
-                    .collect());
+                let default = installed.default_game().cloned();
+                return Ok(default.into_iter().chain(installed.mods).collect());
             }
             Selection::Nothing => return Ok(Vec::new()),
             Selection::Named(wanted) => wanted,
@@ -1322,6 +1318,26 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
 
     fn required_ids(loaded: &LoadedMods) -> Vec<&str> {
         loaded.required.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_world_with_no_record_opens_the_default_game_whatever_the_ids_sort_to() {
+        let s = Scratch::new();
+        for id in ["aurora", "terra", "zephyr"] {
+            s.add(id, "hello", "root = true");
+        }
+        let loaded = load_selected(&s, &Selection::Everything).unwrap();
+        assert_eq!(required_ids(&loaded), ["terra"]);
+    }
+
+    #[test]
+    fn a_world_with_no_record_falls_back_to_the_first_game_without_the_default() {
+        let s = Scratch::new();
+        for id in ["zephyr", "aurora"] {
+            s.add(id, "hello", "root = true");
+        }
+        let loaded = load_selected(&s, &Selection::Everything).unwrap();
+        assert_eq!(required_ids(&loaded), ["aurora"]);
     }
 
     #[test]

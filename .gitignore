@@ -6,7 +6,7 @@ node_modules/
 /crates/tesserae-mods/tests/guests/*/target
 
 /games/terra/target
-/games/willow/target
+/games/meadow/target
 /games/terra/dist
 /games/terra/trust.json
 

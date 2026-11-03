@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Builds test guests to target/guests and the Terra Game to games/terra/dist/games/terra,
-# beside the plain `willow` Game (named to sort after `terra`: the first Game by id is the default) and an empty
-# dist/mods, the layout `--mods games/terra/dist/mods` reads.
+# beside the plain `meadow` Game and an empty dist/mods, the layout `--mods games/terra/dist/mods` reads.
 #
 # Cargo may use a shared target directory; metadata locates the artifact
 # under either layout before the finished component is copied out.
@@ -32,10 +31,10 @@ terra_target=$(cargo metadata --manifest-path games/terra/Cargo.toml --no-deps \
 cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/dist/games/terra/
 cp games/terra/mod.toml games/terra/dist/games/terra/
 
-RUSTFLAGS= cargo build --manifest-path games/willow/Cargo.toml \
+RUSTFLAGS= cargo build --manifest-path games/meadow/Cargo.toml \
   --target wasm32-wasip2 --release --locked
-mkdir -p games/terra/dist/games/willow
-willow_target=$(cargo metadata --manifest-path games/willow/Cargo.toml --no-deps \
+mkdir -p games/terra/dist/games/meadow
+meadow_target=$(cargo metadata --manifest-path games/meadow/Cargo.toml --no-deps \
   --format-version 1 | jq -r .target_directory)
-cp "$willow_target/wasm32-wasip2/release/willow.wasm" games/terra/dist/games/willow/
-cp games/willow/mod.toml games/terra/dist/games/willow/
+cp "$meadow_target/wasm32-wasip2/release/meadow.wasm" games/terra/dist/games/meadow/
+cp games/meadow/mod.toml games/terra/dist/games/meadow/

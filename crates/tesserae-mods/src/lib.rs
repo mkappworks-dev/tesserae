@@ -48,8 +48,8 @@ pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};
 pub use loader::{Compiled, ModHost};
 pub use log::{LogDrain, LogHandle, LogLevel, LogLine};
 pub use manifest::{
-    Found, MAX_SCAN_ENTRIES, Manifest, Migration, Rejected, SUPPORTED_API, Scan, games_dir,
-    migrate_legacy_games, plan, scan, with_dependencies,
+    DEFAULT_GAME, Found, MAX_SCAN_ENTRIES, Manifest, Migration, Rejected, SUPPORTED_API, Scan,
+    games_dir, migrate_legacy_games, plan, scan, with_dependencies,
 };
 pub use package::{Staged, stage};
 pub use prompt::{confirm_trust, trust_prompt};

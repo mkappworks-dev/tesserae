@@ -1,5 +1,5 @@
-id = "willow"
+id = "meadow"
 version = "0.1.0"
 api = "0.3"
 root = true
-wasm = "willow.wasm"
+wasm = "meadow.wasm"
