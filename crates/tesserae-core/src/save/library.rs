@@ -471,7 +471,7 @@ mod tests {
         assert_eq!(
             details.game,
             Some(GameRef {
-                id: "demo".into(),
+                id: "terra".into(),
                 version: "1".into()
             })
         );

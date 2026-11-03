@@ -240,11 +240,11 @@ mod tests {
     }
     fn catalogue(material: u16, fluid: u16, shape: u8) -> ContentCatalogue {
         ContentCatalogue {
-            game: Some("demo".into()),
+            game: Some("terra".into()),
             materials: vec![
                 CatalogueMaterial {
                     id: material,
-                    name: "demo:wood".into(),
+                    name: "terra:wood".into(),
                     solid: true,
                     fluid: None,
                     burns: true,
@@ -252,7 +252,7 @@ mod tests {
                 },
                 CatalogueMaterial {
                     id: fluid,
-                    name: "demo:water".into(),
+                    name: "terra:water".into(),
                     solid: false,
                     fluid: Some(0),
                     burns: false,
@@ -268,7 +268,7 @@ mod tests {
                 },
                 CatalogueShape {
                     id: shape,
-                    name: "demo:step".into(),
+                    name: "terra:step".into(),
                     turnable: true,
                     geometry: vec![],
                 },
@@ -329,7 +329,7 @@ mod tests {
         restarted.update();
         assert_eq!(*restarted.world().resource::<Hotbar>(), before);
         let bytes = fs::read_to_string(dir.path()).unwrap();
-        assert!(bytes.contains("demo:wood") && bytes.contains("demo:step"));
+        assert!(bytes.contains("terra:wood") && bytes.contains("terra:step"));
         assert!(!bytes.contains("outside"));
     }
     #[test]
@@ -403,10 +403,10 @@ mod tests {
         app.update();
         let bytes = fs::read(dir.path()).unwrap();
         let mut document: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        document["games"]["demo"]["selected"] = 9.into();
+        document["games"]["terra"]["selected"] = 9.into();
         assert!(decode(&serde_json::to_vec(&document).unwrap()).is_err());
-        document["games"]["demo"]["selected"] = 0.into();
-        document["games"]["demo"]["slots"][0] = serde_json::json!({"kind":"solid","material":"demo:wood","shape":"core:cube","orientation":24});
+        document["games"]["terra"]["selected"] = 0.into();
+        document["games"]["terra"]["slots"][0] = serde_json::json!({"kind":"solid","material":"terra:wood","shape":"core:cube","orientation":24});
         assert!(decode(&serde_json::to_vec(&document).unwrap()).is_err());
         let previous = bytes.clone();
         let obstruction = dir.path().with_extension("json.bak");

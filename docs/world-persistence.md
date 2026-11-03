@@ -179,7 +179,7 @@ rebuilt; the established volume vote and natural thin-feature loss remain.
 ## Game and Player lifecycle
 
 The amended unreleased 0.3 WIT `world-info` carries `world-id` and `reopened`.
-Declarations and registrations run for both opening kinds. The demo starts its
+Declarations and registrations run for both opening kinds. Terra starts its
 construction/scenarios only for a new World; reopening starts in its completed
 stage and cannot overwrite restored edits. Older contract lines still work for
 new Worlds, but refuse persistent reopening because they cannot observe the
@@ -209,7 +209,7 @@ bound simulation work by the existing count limits, not a universal time bound.
 
 Library and headless Server regressions cover content remapping, independent
 same-seed identities, exact timers/Agenda cursors, eviction/return/restart,
-new/open demo WIT behavior, stale revision/Lifetime completions, missing
+new/open terra WIT behavior, stale revision/Lifetime completions, missing
 content, Save & Quit failure/retry/return/confirmation, corruption, interrupted
 writes and coarse removals. Native review and save-related frame/tick evidence
 are recorded in the save-specific implementation validation document under

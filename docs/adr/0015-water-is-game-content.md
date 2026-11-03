@@ -9,12 +9,12 @@ permanent ids.
 ## Context
 
 The engine owns mechanics and a Game's Declaration owns content: lava, mud and
-wood are rows the demo declares, and the engine decides how any fluid flows,
+wood are rows Terra declares, and the engine decides how any fluid flows,
 waterlogs, reacts, heats and puts fire out. Water was the exception. It was
 Material 7, reserved in step 5 for generated lakes before fluids existed, with a
 fluid row built into the engine that extinguishes. So every World had water, the
 engine chose its reach and rates, a Game could neither leave it out nor fill its
-lakes with something else, and the demo's lava-and-water reaction had to name
+lakes with something else, and Terra's lava-and-water reaction had to name
 `core:water` instead of a Material of its own.
 
 ADR-0009 made ids 0 to 7 permanent because a saved World refers to them by
@@ -66,7 +66,7 @@ at `start` do not include it.
 
 - A Game declares water as it declares lava, with its own reach, rates,
   waterlogging and extinguishing, and may have water lakes, lava lakes or none.
-  The demo declares `demo:water` with the numbers the built-in row had.
+  Terra declares `terra:water` with the numbers the built-in row had.
 - The Material table's dense rows keep one row that is never registered. Its
   cost is five bytes; in exchange no saved id moves and no Mod renumbers.
 - `MaterialTable::len` and the Registry's length count the retired slot: they

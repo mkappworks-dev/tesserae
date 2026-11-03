@@ -43,7 +43,7 @@ you.
   publishing it under MIT is not.
 - **BSL code cannot be mixed into a GPL project** before its Change Date,
   because the pre-change grant is limited to non-production use.
-- **`games/` and `assets/` are not BSL.** The demo game and the default assets
+- **`games/` and `assets/` are not BSL.** The Terra Game and the default assets
   are licensed permissively on purpose — they are templates to copy. See
   [CONTRIBUTING.md](CONTRIBUTING.md).
 - **"Tesserae" is a trademark.** The licence grants no rights in it. You can

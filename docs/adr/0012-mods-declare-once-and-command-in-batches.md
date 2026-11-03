@@ -14,7 +14,7 @@ the Registry's id order; all Declarations precede every `start`. Only the Game
 may supply World generation and view parameters, fixed at load time. Content
 Mods cannot race to change the World's terrain or reach. A Game uses the same
 loader and contract as any Mod, preserving
-[ADR-0004](0004-demo-game-in-repo-real-game-out.md)'s independent guest
+[ADR-0004](0004-terra-game-in-repo-real-game-out.md)'s independent guest
 boundary.
 
 **A Command describes intent in metres, never access to core.** A complete batch

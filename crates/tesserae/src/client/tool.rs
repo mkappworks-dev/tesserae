@@ -346,7 +346,7 @@ mod tests {
         ContentCatalogue {
             tools: vec![CatalogueTool {
                 id: ToolId(0),
-                name: "demo:measure".into(),
+                name: "terra:measure".into(),
                 kind: ToolKind::Measure,
             }],
             ..default()

@@ -1681,7 +1681,7 @@ mod tests {
         Sidecar {
             name: name.into(),
             game: game.then(|| GameRef {
-                id: "demo".into(),
+                id: "terra".into(),
                 version: "0.1.0".into(),
             }),
             mods: Vec::new(),
@@ -1697,7 +1697,7 @@ mod tests {
     #[test]
     fn an_empty_list_focuses_create_and_creating_loads_the_new_world() {
         let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.add_plugins(bevy::state::app::StatesPlugin)
             .init_state::<AppState>();
         app.world_mut()
@@ -1719,7 +1719,7 @@ mod tests {
         assert_eq!(created.name, "Ridge");
         assert_eq!(created.seed, u64::MAX);
         assert_eq!(created.voxel_size_m, 0.25);
-        assert_eq!(created.game.unwrap().id, "demo");
+        assert_eq!(created.game.unwrap().id, "terra");
         assert!(created.pending);
         assert!(matches!(launcher(&app).screen, Screen::Opening(_)));
         assert!(
@@ -1742,7 +1742,7 @@ mod tests {
     #[test]
     fn an_invalid_seed_or_name_keeps_the_form_and_writes_nothing() {
         let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.update();
         act(&mut app, Act::New);
         type_into(&mut app, Field::Seed, "18446744073709551616");
@@ -1763,7 +1763,7 @@ mod tests {
     fn delete_defaults_to_cancel_refuses_an_open_world_then_removes_it() {
         let worlds = Directory::new();
         let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.update();
         act(&mut app, Act::Delete);
         app.update();
@@ -1795,7 +1795,10 @@ mod tests {
     fn an_untrusted_game_asks_before_opening_and_cancel_runs_nothing() {
         let worlds = Directory::new();
         let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+        );
         app.update();
         act(&mut app, Act::Open);
         assert_eq!(
@@ -1826,8 +1829,8 @@ mod tests {
             version: "1.0".into(),
         }];
         library::create(&worlds.0, &needs).unwrap();
-        let mut installed = Installed::fake(Some(("demo", "0.1.0")), &[]);
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[]);
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.update();
         assert!(app.world().resource::<Switch>().0.is_none());
         let has_open = app
@@ -1856,7 +1859,10 @@ mod tests {
     fn a_world_saved_without_a_game_opens_without_asking_for_trust() {
         let worlds = Directory::new();
         let path = library::create(&worlds.0, &details("Plain", false)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+        );
         app.update();
         act(&mut app, Act::Open);
         assert_eq!(
@@ -1889,7 +1895,7 @@ mod tests {
     fn rename_changes_the_listed_name_and_recreate_copies_the_settings() {
         let worlds = Directory::new();
         library::create(&worlds.0, &details("Old", true)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.update();
         act(&mut app, Act::Rename);
         type_into(&mut app, Field::Rename, "New name");
@@ -1916,7 +1922,7 @@ mod tests {
     #[test]
     fn a_blank_seed_shows_the_random_seed_that_will_be_used() {
         let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.update();
         act(&mut app, Act::New);
         let shown = app
@@ -1938,7 +1944,7 @@ mod tests {
     #[test]
     fn recreate_never_swaps_in_a_different_installed_game() {
         let worlds = Directory::new();
-        library::create(&worlds.0, &details("Demo world", true)).unwrap();
+        library::create(&worlds.0, &details("Terra world", true)).unwrap();
         let mut app = app(&worlds, Installed::fake(Some(("other", "2.0.0")), &[]));
         app.update();
         let offered = app
@@ -2040,7 +2046,7 @@ mod tests {
     #[test]
     fn a_controller_alone_creates_a_world_without_typing() {
         let worlds = Directory::new();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         assert_eq!(focused_act(&app), Some(Act::New));
         tap(&mut app, pad, GamepadButton::South);
         assert_eq!(launcher(&app).screen, Screen::Create);
@@ -2057,7 +2063,7 @@ mod tests {
     }
 
     fn mod_installed() -> Installed {
-        Installed::fake(Some(("demo", "0.1.0")), &[])
+        Installed::fake(Some(("terra", "0.1.0")), &[])
             .with_mod("lake", &["reeds"])
             .with_mod("reeds", &[])
             .with_mod("broken", &["ghost"])
@@ -2122,14 +2128,14 @@ mod tests {
                 .count()
         };
         let worlds = Directory::new();
-        let mut first = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut first = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         first.update();
         first.update();
         assert_eq!(trapping(&mut first), 0);
 
         let worlds = Directory::new();
         library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let mut listed = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut listed = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         listed.update();
         assert_eq!(trapping(&mut listed), 0);
         act(&mut listed, Act::Delete);
@@ -2197,7 +2203,10 @@ mod tests {
         use bevy::input_focus::tab_navigation::NavAction;
         let worlds = Directory::new();
         library::create(&worlds.0, &details("Mine", true)).unwrap();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+        );
         app.update();
         app.update();
         let screens: [(&str, Option<Act>, &[&str]); 5] = [
@@ -2238,7 +2247,7 @@ mod tests {
     fn east_is_back_on_each_screen_and_dismisses_on_the_list() {
         let worlds = Directory::new();
         library::create(&worlds.0, &details("Keep", true)).unwrap();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         for opener in [Act::New, Act::Rename, Act::Delete] {
             reach(&mut app, pad, opener.clone());
             tap(&mut app, pad, GamepadButton::South);
@@ -2254,7 +2263,7 @@ mod tests {
     fn a_controller_deletes_only_after_confirming_with_cancel_focused_first() {
         let worlds = Directory::new();
         let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         reach(&mut app, pad, Act::Delete);
         tap(&mut app, pad, GamepadButton::South);
         assert_eq!(focused_act(&app), Some(Act::Back));
@@ -2272,7 +2281,7 @@ mod tests {
     fn the_press_that_opens_delete_does_not_also_answer_it() {
         let worlds = Directory::new();
         let path = library::create(&worlds.0, &details("Doomed", true)).unwrap();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         reach(&mut app, pad, Act::Delete);
         pad_button(&mut app, pad, GamepadButton::South, 1.0);
         for _ in 0..4 {
@@ -2285,7 +2294,7 @@ mod tests {
     #[test]
     fn a_button_already_down_when_the_list_appears_waits_for_release() {
         let worlds = Directory::new();
-        let mut app = app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.add_plugins(bevy::input::InputPlugin);
         app.world_mut().spawn((
             PrimaryWindow,
@@ -2310,7 +2319,7 @@ mod tests {
     #[test]
     fn an_unfocused_window_ignores_the_controller() {
         let worlds = Directory::new();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &[]));
+        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         app.world_mut()
             .query::<&mut Window>()
             .single_mut(app.world_mut())
@@ -2324,7 +2333,10 @@ mod tests {
     fn a_controller_can_confirm_a_rename_and_grant_trust() {
         let worlds = Directory::new();
         library::create(&worlds.0, &details("Old", true)).unwrap();
-        let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("demo", "0.1.0")), &["demo"]));
+        let (mut app, pad) = pad_app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra"]),
+        );
         reach(&mut app, pad, Act::Rename);
         tap(&mut app, pad, GamepadButton::South);
         reach(&mut app, pad, Act::SaveName);

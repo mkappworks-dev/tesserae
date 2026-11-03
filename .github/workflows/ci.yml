@@ -43,7 +43,7 @@ jobs:
       - name: Check formatting
         run: |
           cargo fmt --all --check
-          cargo fmt --manifest-path games/demo/Cargo.toml --check
+          cargo fmt --manifest-path games/terra/Cargo.toml --check
           cargo fmt --manifest-path starters/rust/Cargo.toml --check
 
       - name: Clippy
@@ -89,8 +89,8 @@ jobs:
       - name: Cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Demo uses only the WIT contract
-        run: ./scripts/check-demo-boundary
+      - name: Terra uses only the WIT contract
+        run: ./scripts/check-terra-boundary
 
       # Invariant 3 in docs/architecture.md. tesserae-core and tesserae-mods stay
       # headless so every expensive algorithm is testable and benchmarkable; a
@@ -157,7 +157,7 @@ jobs:
       # tesserae-mods' tests load Mods compiled to WASM components. Each guest is
       # its own workspace root, so without a shared target dir wit-bindgen
       # recompiles 22 times and rust-cache saves none of it.
-      - name: Build test guests and demo Game
+      - name: Build test guests and terra Game
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target/wasm-guests
         run: |

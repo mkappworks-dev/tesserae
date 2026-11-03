@@ -476,7 +476,7 @@ mod tests {
         let sidecar = library::Sidecar {
             name: "Needs a Game".into(),
             game: Some(library::GameRef {
-                id: "demo".into(),
+                id: "terra".into(),
                 version: "0.1.0".into(),
             }),
             mods: Vec::new(),
@@ -497,7 +497,7 @@ mod tests {
         assert!(
             failure
                 .reason
-                .contains("Game `demo` 0.1.0 is not installed"),
+                .contains("Game `terra` 0.1.0 is not installed"),
             "{}",
             failure.reason
         );
@@ -557,12 +557,12 @@ mod tests {
         crate::session::testing::open(&mut app);
         app.world_mut()
             .write_message(crate::server::mods::ModDisabled {
-                name: "demo".into(),
+                name: "terra".into(),
                 reason: "trapped".into(),
             });
         assert!(until(&mut app, AppState::List));
         let failure = app.world().resource::<LastFailure>().0.as_ref().unwrap();
         assert_eq!(failure.folder, PathBuf::from("/worlds/Trapped"));
-        assert!(failure.reason.contains("demo") && failure.reason.contains("trapped"));
+        assert!(failure.reason.contains("terra") && failure.reason.contains("trapped"));
     }
 }

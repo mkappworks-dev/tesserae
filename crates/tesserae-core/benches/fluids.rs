@@ -23,7 +23,7 @@ const QUOTA: Quota = Quota { evaluations: 1024 };
 
 const SIZES: [f32; 3] = [1.0, 0.5, 0.25];
 
-/// The demo's content: lava cooling to stone against water, wood burning to
+/// Terra's content: lava cooling to stone against water, wood burning to
 /// ash with the spec's tuning.
 #[derive(Clone, Copy)]
 struct Ids {
@@ -38,7 +38,7 @@ fn water_tables() -> (Tables, MaterialId) {
     (tables, water)
 }
 
-fn demo_tables() -> (Tables, Ids) {
+fn terra_tables() -> (Tables, Ids) {
     let fixture_rock = fixtures().ground.rock;
     // Water first: an equal claim goes to the earlier registered fluid.
     let (mut tables, water) = water_tables();
@@ -569,7 +569,7 @@ fn waterlogging(c: &mut Criterion) {
 /// cools to stone, until no lava touches water.
 fn reactions(c: &mut Criterion) {
     for v in SIZES {
-        let (tables, ids) = demo_tables();
+        let (tables, ids) = terra_tables();
         let mut sim = open_floor(tables, v, 8.0, 4.0, Limits::UNBOUNDED);
         let (w, l) = ([-cells(3.0, v), 1, 0], [cells(3.0, v), 1, 0]);
         sim.source(w, ids.water);
@@ -583,7 +583,7 @@ fn reactions(c: &mut Criterion) {
 /// puts it out.
 fn fire(c: &mut Criterion) {
     for v in SIZES {
-        let (tables, ids) = demo_tables();
+        let (tables, ids) = terra_tables();
         let bar = |length_m: f32| {
             let mut sim = open_floor(tables.clone(), v, 10.0, 4.0, Limits::UNBOUNDED);
             let (n, w) = (cells(length_m, v), cells(1.0, v));

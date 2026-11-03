@@ -14,7 +14,7 @@ use tesserae_core::{CHUNK_SIZE, ChunkMesh, WorldgenParams};
 
 use super::super::super::jobs::Jobs;
 use super::super::super::lod::{LodBudget, LodJobs, LodState};
-use super::super::super::mods::runtime::tests::demo_loaded;
+use super::super::super::mods::runtime::tests::terra_loaded;
 use super::super::super::streaming::{
     ChunkMeshReady, ChunkUnloaded, LodMeshReady, LodUnloaded, Rings, StreamingBudget,
     StreamingSettings, tests::add_stream_systems,
@@ -199,14 +199,14 @@ struct Run {
 impl Run {
     fn new(v: f32) -> Self {
         AsyncComputeTaskPool::get_or_init(|| TaskPoolBuilder::new().num_threads(3).build());
-        let loaded = demo_loaded(v);
+        let loaded = terra_loaded(v);
         let id = |name: &str| {
             loaded
                 .registry
                 .id_of(tesserae_mods::Kind::Material, name)
                 .unwrap() as MaterialId
         };
-        let (water, lava, wood) = (id("demo:water"), id("demo:lava"), id("demo:wood"));
+        let (water, lava, wood) = (id("terra:water"), id("terra:lava"), id("terra:wood"));
         let world = WorldSettings {
             voxel_size: v,
             ..default()

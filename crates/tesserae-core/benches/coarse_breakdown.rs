@@ -21,8 +21,8 @@ use tesserae_core::testgen::fixtures;
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{CHUNK_SIZE, Chunk, ShapeTable, Worldgen, WorldgenParams, downsample};
 
-/// The demo's World: `World::default`'s seed, a 1 m Voxel, and the demo Game's
-/// relief and lake (`games/demo/src/lib.rs`) over the engine's defaults.
+/// Terra's World: `World::default`'s seed, a 1 m Voxel, and the Terra Game's
+/// relief and lake (`games/terra/src/lib.rs`) over the engine's defaults.
 const SEED: u64 = 0x7e55_e2ae_0000_0001;
 const SEA_LEVEL_M: f32 = 24.0;
 const RELIEF_M: f32 = 24.0;
@@ -30,7 +30,7 @@ const RELIEF_M: f32 = 24.0;
 /// Where `teleport` puts the Eye: `profile_fixture teleport ... to=` in its log.
 const EYE_M: [f32; 3] = [2000.0, 56.843224, 0.0];
 
-/// The demo's `StreamingSettings`, from the level-1 counts in `frames.flow.csv`
+/// Terra's `StreamingSettings`, from the level-1 counts in `frames.flow.csv`
 /// (1,639 held, 564 meshed) and `lod_rings.rs`.
 const VIEW_M: f32 = 160.0;
 const VERTICAL_M: f32 = 96.0;
