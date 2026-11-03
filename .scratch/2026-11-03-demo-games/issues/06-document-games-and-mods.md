@@ -10,6 +10,10 @@ Write `docs/demo-games.md`: a table of the Games and Mods, what each demonstrate
 
 ## Acceptance criteria
 
-- [ ] Every Game and Mod is listed with its purpose, dependencies and licence.
-- [ ] The commands in the docs are the ones that exist, and each was run.
-- [ ] Formatting passes (`npm run fmt:check`).
+- [x] Every Game and Mod is listed with its purpose, dependencies and licence.
+- [x] The commands in the docs are the ones that exist, and each was run.
+- [x] Formatting passes (`npm run fmt:check`).
+
+## Comments
+
+Every command was run except those that open a window (`./scripts/demo`, `cargo run --release -- --mods dist/mods`): no display was available.

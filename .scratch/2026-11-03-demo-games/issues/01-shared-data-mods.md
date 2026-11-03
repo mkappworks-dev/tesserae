@@ -10,8 +10,8 @@ Create `mods/strata`, `mods/waters`, `mods/flora`, `mods/hearth` and `mods/glass
 
 ## Acceptance criteria
 
-- [ ] Every Mod validates with `tesserae validate mods/<id>` and packages.
-- [ ] Dependencies between the Mods are declared with `depends` and load in order.
-- [ ] A test loads all five together and checks that every cross-Mod reference resolves.
-- [ ] Each Mod has a README: purpose, the Materials, fluids and Shapes it declares, what depends on it, and the licence and artwork sources.
-- [ ] CI validates `mods/`.
+- [x] Every Mod validates with `tesserae validate mods/<id>` and packages.
+- [x] Dependencies between the Mods are declared with `depends` and load in order.
+- [x] A test loads all five together and checks that every cross-Mod reference resolves.
+- [x] Each Mod has a README: purpose, the Materials, fluids and Shapes it declares, what depends on it, and the licence and artwork sources.
+- [x] CI validates `mods/`.
