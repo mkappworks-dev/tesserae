@@ -1,0 +1,49 @@
+[world.character]
+pixel-m = 0.045
+skin = "skin.png"
+idle = { swing-deg = 5.0, rate-hz = 0.5, arm-raise-deg = 0.0 }
+walk = { swing-deg = 40.0, rate-hz = 2.2, arm-raise-deg = 0.0 }
+sprint = { swing-deg = 65.0, rate-hz = 3.2, arm-raise-deg = 0.0 }
+airborne = { swing-deg = 12.0, rate-hz = 1.5, arm-raise-deg = 35.0 }
+crouch = { swing-deg = 26.0, rate-hz = 1.5, arm-raise-deg = 14.0 }
+
+[[world.character.bones]]
+name = "body"
+role = "body"
+pivot = [0.0, 12.0, 0.0]
+cubes = [{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }]
+
+[[world.character.bones]]
+name = "head"
+parent = "body"
+role = "head"
+pivot = [0.0, 24.0, 0.0]
+cubes = [{ origin = [-4.0, 24.0, -4.0], size = [8, 8, 8], uv = [0, 0] }]
+
+[[world.character.bones]]
+name = "right_arm"
+parent = "body"
+role = "arm-right"
+pivot = [6.0, 22.0, 0.0]
+cubes = [{ origin = [4.0, 12.0, -2.0], size = [4, 12, 4], uv = [40, 16] }]
+
+[[world.character.bones]]
+name = "left_arm"
+parent = "body"
+role = "arm-left"
+pivot = [-6.0, 22.0, 0.0]
+cubes = [{ origin = [-8.0, 12.0, -2.0], size = [4, 12, 4], uv = [32, 48] }]
+
+[[world.character.bones]]
+name = "right_leg"
+parent = "body"
+role = "leg-right"
+pivot = [2.0, 12.0, 0.0]
+cubes = [{ origin = [0.0, 0.0, -2.0], size = [4, 12, 4], uv = [0, 16] }]
+
+[[world.character.bones]]
+name = "left_leg"
+parent = "body"
+role = "leg-left"
+pivot = [-2.0, 12.0, 0.0]
+cubes = [{ origin = [-4.0, 0.0, -2.0], size = [4, 12, 4], uv = [16, 48] }]

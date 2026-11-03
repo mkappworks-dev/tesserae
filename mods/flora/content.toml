@@ -1,0 +1,56 @@
+[[materials]]
+name = "wood"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "leaves"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.1
+
+[[materials]]
+name = "grass"
+emission = 0
+dimming = 1
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[materials]]
+name = "kelp"
+emission = 0
+dimming = 2
+occlusion = "never"
+render = "cutout"
+solid = true
+remove-time-s = 0.05
+
+[[appearance]]
+material = "wood"
+color = [150, 104, 60, 255]
+texture = "art/wood.png"
+
+[[appearance]]
+material = "leaves"
+color = [41, 107, 36, 255]
+texture = "art/leaves.png"
+
+[[appearance]]
+material = "grass"
+color = [88, 160, 56, 255]
+texture = "art/grass.png"
+
+[[appearance]]
+material = "kelp"
+color = [44, 110, 70, 255]
+texture = "art/kelp.png"
+

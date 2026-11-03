@@ -1,0 +1,6 @@
+id = "lamps"
+version = "0.1.0"
+api = "0.3"
+declaration = "content.toml"
+category = "Fire & light"
+description = "Glowstone, amberlight and moonlight"

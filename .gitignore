@@ -5,10 +5,11 @@ node_modules/
 .DS_Store
 /crates/tesserae-mods/tests/guests/*/target
 
-/games/terra/target
-/games/meadow/target
+/games/*/target
+/games/*/*.wasm
 /games/terra/dist
 /games/terra/trust.json
 
 __pycache__/
 *.py[cod]
+/dist

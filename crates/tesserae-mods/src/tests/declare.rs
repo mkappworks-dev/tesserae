@@ -390,7 +390,9 @@ fn only_the_game_sets_world_or_view() {
     d.world = Some(world(true));
     let mut load = Load::new();
     match load.apply("content", d).unwrap_err() {
-        ModError::NotAGame { id, field } => assert_eq!((id.as_str(), field), ("content", "world")),
+        ModError::NotAGame { id, field } => {
+            assert_eq!((id.as_str(), field), ("content", "world.caves"))
+        }
         other => panic!("{other:?}"),
     }
     let mut d = declaring(&[], &[]);

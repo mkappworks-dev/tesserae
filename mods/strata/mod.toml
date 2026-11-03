@@ -1,0 +1,6 @@
+id = "strata"
+version = "0.1.0"
+api = "0.3"
+declaration = "content.toml"
+category = "Terrain"
+description = "Stone, basalt, clay, sand, soil and turf"

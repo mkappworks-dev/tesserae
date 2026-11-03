@@ -43,7 +43,9 @@ jobs:
       - name: Check formatting
         run: |
           cargo fmt --all --check
-          cargo fmt --manifest-path games/terra/Cargo.toml --check
+          for game in terra meadow; do
+            cargo fmt --manifest-path "games/$game/Cargo.toml" --check
+          done
           cargo fmt --manifest-path starters/rust/Cargo.toml --check
 
       - name: Clippy
@@ -253,6 +255,9 @@ jobs:
 
       - name: Build
         run: cargo build --workspace --release --locked
+
+      - name: Validate the shared Mods
+        run: for mod in mods/*/; do target/release/tesserae validate "$mod" --mods mods; done
 
       - name: Upload binaries
         uses: actions/upload-artifact@v7

@@ -77,6 +77,13 @@ impl Leave<'_> {
     }
 }
 
+/// Why a Mod cannot be added to the chosen set, and which picked Mod adding it would replace.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Clash {
+    pub reason: String,
+    pub replaces: Option<String>,
+}
+
 /// A Mod that would run without a recorded Trust grant for its exact bytes.
 pub struct Untrusted {
     pub prompt: String,
@@ -190,6 +197,20 @@ impl Installed {
         self
     }
 
+    #[cfg(test)]
+    pub fn with_game_depends(mut self, depends: &[&str]) -> Self {
+        let id = self.game.as_ref().map(|g| g.id.clone()).unwrap();
+        let mut manifest = test_manifest(&id);
+        manifest.root = true;
+        manifest.depends = depends.iter().map(|d| d.to_string()).collect();
+        self.found.push(tesserae_mods::Found {
+            manifest,
+            dir: PathBuf::new(),
+            manifest_bytes: Vec::new(),
+        });
+        self
+    }
+
     /// Finds which of `ids` lack a Trust grant for their exact bytes. Hashing waits until a World
     /// is about to open so the scan stays cheap.
     pub fn prepare_trust(&mut self, ids: &[String]) -> Result<(), String> {
@@ -242,6 +263,180 @@ impl Installed {
             .filter(|m| out.contains(&m.id))
             .map(|m| m.id.clone())
             .collect()
+    }
+
+    /// The installed Mods `game` suggests, which Create World ticks for it but lets you untick.
+    pub fn suggested(&self, game: &str) -> std::collections::BTreeSet<String> {
+        self.found
+            .iter()
+            .find(|f| f.manifest.id == game)
+            .map(|f| f.manifest.suggests.as_slice())
+            .unwrap_or_default()
+            .iter()
+            .filter(|id| self.mods.iter().any(|m| &m.id == *id) && self.blocked(game, id).is_none())
+            .cloned()
+            .collect()
+    }
+
+    /// Why each installed data Mod cannot join `game` with the picks `picked`, by id. A clash with
+    /// a Mod the user picked can be swapped for it: `replaces` names it. Only data Mods are tried:
+    /// a component would have to run to be checked, so one is never reported, and neither is a
+    /// Mod that needs one. Nothing is reported when the set as it stands does not load.
+    pub fn clashes(
+        &self,
+        game: &str,
+        picked: &std::collections::BTreeSet<String>,
+    ) -> std::collections::BTreeMap<String, Clash> {
+        let mut out = std::collections::BTreeMap::new();
+        let Ok(host) = tesserae_mods::ModHost::new() else {
+            return out;
+        };
+        let set =
+            |picks: &std::collections::BTreeSet<String>| -> std::collections::BTreeSet<String> {
+                self.closure_for(game, picks).into_iter().collect()
+            };
+        let base = set(picked);
+        if !matches!(self.loads(&host, &base), Some(Ok(()))) {
+            return out;
+        }
+        for m in &self.mods {
+            if base.contains(&m.id) {
+                continue;
+            }
+            let mut with = base.clone();
+            with.extend(self.closure(&[m.id.clone()].into()));
+            let Some(Err(reason)) = self.loads(&host, &with) else {
+                continue;
+            };
+            let replaces = picked.iter().find(|p| {
+                let mut rest = picked.clone();
+                rest.remove(*p);
+                let mut swapped = set(&rest);
+                swapped.extend(self.closure(&[m.id.clone()].into()));
+                matches!(self.loads(&host, &swapped), Some(Ok(())))
+            });
+            out.insert(
+                m.id.clone(),
+                Clash {
+                    reason: reason.lines().next().unwrap_or("").to_owned(),
+                    replaces: replaces.cloned(),
+                },
+            );
+        }
+        out
+    }
+
+    /// Whether the data Mods `ids` declare together; `None` when one of them is a component.
+    fn loads(
+        &self,
+        host: &tesserae_mods::ModHost,
+        ids: &std::collections::BTreeSet<String>,
+    ) -> Option<Result<(), String>> {
+        let mut found = Vec::new();
+        for id in ids {
+            let f = self.found.iter().find(|f| &f.manifest.id == id)?;
+            f.manifest.declaration.as_ref()?;
+            found.push(f.clone());
+        }
+        Some((|| {
+            let order = tesserae_mods::plan(found).map_err(|e| e.to_string())?;
+            let mut trust = tesserae_mods::Trust::load("");
+            for f in &order {
+                trust.grant_for_run(f).map_err(|e| e.to_string())?;
+            }
+            let compiled = host.load(order, &trust).map_err(|e| e.to_string())?;
+            bevy::tasks::block_on(crate::server::mods::declare_all(
+                host,
+                &compiled,
+                &crate::world::WorldSettings::default(),
+            ))
+            .map(|_| ())
+        })())
+    }
+
+    /// What a Mod's Manifest says to show for it: its section and a line about it.
+    pub fn about(&self, id: &str) -> (Option<&str>, Option<&str>) {
+        self.found
+            .iter()
+            .find(|f| f.manifest.id == id)
+            .map_or((None, None), |f| {
+                (
+                    f.manifest.category.as_deref(),
+                    f.manifest.description.as_deref(),
+                )
+            })
+    }
+
+    #[cfg(test)]
+    pub fn with_game_suggests(mut self, suggests: &[&str]) -> Self {
+        let id = self.game.as_ref().map(|g| g.id.clone()).unwrap();
+        let mut manifest = test_manifest(&id);
+        manifest.root = true;
+        manifest.suggests = suggests.iter().map(|d| d.to_string()).collect();
+        self.found.push(tesserae_mods::Found {
+            manifest,
+            dir: PathBuf::new(),
+            manifest_bytes: Vec::new(),
+        });
+        self
+    }
+
+    /// A Game in the scan, as the real Mods tests need one beside real Mods.
+    #[cfg(test)]
+    pub fn add_game(&mut self, id: &str, depends: &[&str], suggests: &[&str]) {
+        let mut manifest = test_manifest(id);
+        manifest.root = true;
+        manifest.depends = depends.iter().map(|d| d.to_string()).collect();
+        manifest.suggests = suggests.iter().map(|d| d.to_string()).collect();
+        self.found.push(tesserae_mods::Found {
+            manifest,
+            dir: PathBuf::new(),
+            manifest_bytes: Vec::new(),
+        });
+    }
+
+    #[cfg(test)]
+    pub fn set_about(&mut self, id: &str, category: Option<&str>, description: Option<&str>) {
+        let found = self.found.iter_mut().find(|f| f.manifest.id == id).unwrap();
+        found.manifest.category = category.map(str::to_owned);
+        found.manifest.description = description.map(str::to_owned);
+    }
+
+    /// The Mods `game` names in `depends`, and theirs: what a World made with it cannot do without.
+    pub fn required(&self, game: &str) -> Vec<String> {
+        let direct = self.depends_of(game).iter().cloned().collect();
+        self.closure(&direct)
+    }
+
+    /// [`Installed::closure`] of `picked` and everything `game` requires.
+    pub fn closure_for(
+        &self,
+        game: &str,
+        picked: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
+        let mut all = picked.clone();
+        all.extend(self.required(game));
+        self.closure(&all)
+    }
+
+    /// What `game` depends on that is not installed, directly or through a Mod it needs.
+    pub fn missing(&self, game: &str) -> Vec<String> {
+        let mut out = std::collections::BTreeSet::new();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut todo = vec![game];
+        while let Some(next) = todo.pop() {
+            if !seen.insert(next) {
+                continue;
+            }
+            for dep in self.depends_of(next) {
+                if self.mods.iter().any(|m| &m.id == dep) {
+                    todo.push(dep);
+                } else {
+                    out.insert(dep.clone());
+                }
+            }
+        }
+        out.into_iter().collect()
     }
 
     /// Why a Mod cannot be used with `game`: a dependency that is neither that Game nor an
@@ -298,19 +493,20 @@ impl Installed {
         out
     }
 
-    /// Records Trust for the first untrusted Mod's exact bytes.
-    pub fn grant_first(&mut self) -> Result<(), String> {
-        if self.untrusted.is_empty() {
-            return Ok(());
-        }
-        let first = self.untrusted.remove(0);
+    /// Records Trust for every untrusted item's exact bytes, in one write.
+    pub fn grant_all(&mut self) -> Result<(), String> {
         let Some(trust_file) = &self.trust_file else {
+            self.untrusted.clear();
             return Ok(());
         };
         let mut trust = tesserae_mods::Trust::load(trust_file);
-        trust
-            .grant_exact(&first.found, &first.sha256)
-            .map_err(|e| e.to_string())
+        for item in &self.untrusted {
+            trust
+                .grant_exact(&item.found, &item.sha256)
+                .map_err(|e| e.to_string())?;
+        }
+        self.untrusted.clear();
+        Ok(())
     }
 }
 
@@ -325,6 +521,9 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
         declaration: None,
         depends: Vec::new(),
         limits: Default::default(),
+        suggests: Vec::new(),
+        category: None,
+        description: None,
     }
 }
 
@@ -361,6 +560,95 @@ mod tests {
         );
         assert_eq!(installed.blocked("terra", "ok"), None);
         assert!(installed.blocked("other", "ok").is_some());
+    }
+
+    #[test]
+    fn a_games_dependencies_are_required_through_their_own_and_a_missing_one_is_named() {
+        let installed = with_mods(&[
+            ("strata", &[]),
+            ("waters", &[]),
+            ("hearth", &["strata", "waters"]),
+            ("glassworks", &[]),
+        ])
+        .with_game_depends(&["hearth"]);
+        assert_eq!(installed.required("terra"), ["strata", "waters", "hearth"]);
+        let picked = ["glassworks".to_string()].into();
+        assert_eq!(
+            installed.closure_for("terra", &picked),
+            ["strata", "waters", "hearth", "glassworks"]
+        );
+        assert!(installed.missing("terra").is_empty());
+
+        let lacking = with_mods(&[("strata", &[])]).with_game_depends(&["strata", "ghost"]);
+        assert_eq!(lacking.missing("terra"), ["ghost"]);
+    }
+
+    fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let (src, dst) = (entry.path(), to.join(entry.file_name()));
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&src, &dst);
+            } else {
+                std::fs::copy(&src, &dst).unwrap();
+            }
+        }
+    }
+
+    /// The repository's own Mods, installed as a user would have them.
+    fn shared_mods(name: &str) -> (PathBuf, Installed) {
+        let root =
+            std::env::temp_dir().join(format!("tesserae-clash-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+        copy_tree(&source, &root.join("mods"));
+        let scan = tesserae_mods::scan(&root.join("mods")).unwrap();
+        (root, Installed::new(scan, false, PathBuf::new()))
+    }
+
+    #[test]
+    fn a_second_character_mod_clashes_and_can_replace_the_picked_one() {
+        let (root, installed) = shared_mods("character");
+        let picked = ["hearth".to_string(), "wanderer".to_string()].into();
+        let clashes = installed.clashes("none", &picked);
+        let _ = std::fs::remove_dir_all(&root);
+
+        let mut named: Vec<_> = clashes.keys().cloned().collect();
+        named.sort();
+        assert_eq!(named, ["golem", "sprite"], "{clashes:?}");
+        assert!(
+            clashes["golem"]
+                .reason
+                .contains("both supply the character")
+        );
+        assert_eq!(clashes["golem"].replaces.as_deref(), Some("wanderer"));
+    }
+
+    #[test]
+    fn a_clash_with_a_required_mod_cannot_be_swapped_for() {
+        let (root, mut installed) = shared_mods("required");
+        installed.add_game("meadow", &["wanderer"], &[]);
+        let clashes = installed.clashes("meadow", &Default::default());
+        let _ = std::fs::remove_dir_all(&root);
+
+        assert_eq!(clashes["golem"].replaces, None, "{clashes:?}");
+    }
+
+    #[test]
+    fn with_no_character_chosen_every_mod_can_be_added() {
+        let (root, installed) = shared_mods("none");
+        let clashes = installed.clashes("none", &["hearth".to_string()].into());
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(clashes.is_empty(), "{clashes:?}");
+    }
+
+    #[test]
+    fn a_game_suggests_mods_that_are_installed_and_usable() {
+        let installed = with_mods(&[("wanderer", &[]), ("golem", &["ghost"])])
+            .with_game_suggests(&["wanderer", "golem", "missing"]);
+        let expected: std::collections::BTreeSet<String> = ["wanderer".to_string()].into();
+        assert_eq!(installed.suggested("terra"), expected);
     }
 
     fn args(list: &[&str]) -> Vec<OsString> {

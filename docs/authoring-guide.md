@@ -109,6 +109,9 @@ alone, `extra` fails with ``depends on `starter_rust`, which is not installed``
 unless `--mods` supplies it. Dependencies load first, whichever source they use,
 and names resolve across the whole set.
 
+The repository's [demo Games and shared Mods](demo-games.md) are worked examples
+of this: four small Rust Games that depend on shared data Mods.
+
 ## One Declaration source per Mod
 
 `mod.toml` selects exactly one of `wasm = "game.wasm"` or
@@ -129,7 +132,9 @@ at every level, naming the Mod. Absent optional tables mean _none_, never a
 default; the single exception is the numeric fields of a present `[world]`,
 which take the Engine's terrain values. Omitted lists are empty.
 
-Only a Game may declare `world`, `view` and `tools`.
+Only a Game may declare `world`, `view` and `tools`, except that a Mod may
+supply `world.character` alone
+([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)).
 
 | Table                       | Fields                                                                                                                                                                   |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

@@ -1,0 +1,7 @@
+id = "hearth"
+version = "0.1.0"
+api = "0.3"
+depends = ["strata", "waters", "flora"]
+declaration = "content.toml"
+category = "Fire & light"
+description = "Lava, ash, and rules for lava, water and fire"

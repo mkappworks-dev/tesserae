@@ -116,6 +116,32 @@ pub struct Behaviour {
     ground: Option<content::GroundParams>,
 }
 
+/// The first `world` field a Mod set besides `character`: anything but the engine's own terrain
+/// values, which is what a data Declaration's absent numbers become, and no optional table.
+fn beyond_character(world: &content::WorldParams) -> Option<&'static str> {
+    let bare = WorldgenParams::default();
+    [
+        (world.movement.is_some(), "world.movement"),
+        (world.caves.is_some(), "world.caves"),
+        (world.smoothing.is_some(), "world.smoothing"),
+        (world.water.is_some(), "world.water"),
+        (world.ground.is_some(), "world.ground"),
+        (world.sea_level_m != bare.sea_level_m, "world.sea-level-m"),
+        (world.relief_m != bare.relief_m, "world.relief-m"),
+        (
+            world.feature_size_m != bare.feature_size_m,
+            "world.feature-size-m",
+        ),
+        (
+            world.soil_depth_m != bare.soil_depth_m,
+            "world.soil-depth-m",
+        ),
+        (world.octaves != bare.octaves, "world.octaves"),
+    ]
+    .into_iter()
+    .find_map(|(set, field)| set.then_some(field))
+}
+
 /// Validates `declaration` and registers it after whatever `tables` and
 /// `registry` already hold, in declaration order. A load that fails is
 /// abandoned, so an `Err` can leave a partly registered Mod behind.
@@ -135,13 +161,16 @@ pub fn apply(
     }
     if !is_root {
         for (set, field) in [
-            (declaration.world.is_some(), "world"),
             (declaration.view.is_some(), "view"),
             (!declaration.tools.is_empty(), "tools"),
         ] {
             if set {
                 return Err(ModError::NotAGame { id: id(), field });
             }
+        }
+        // A Mod may supply the character and nothing else of the World.
+        if let Some(field) = declaration.world.as_ref().and_then(beyond_character) {
+            return Err(ModError::NotAGame { id: id(), field });
         }
     }
 

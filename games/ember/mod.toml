@@ -1,0 +1,7 @@
+id = "ember"
+version = "0.1.0"
+api = "0.3"
+root = true
+depends = ["strata", "waters", "flora", "hearth"]
+suggests = ["golem"]
+wasm = "ember.wasm"

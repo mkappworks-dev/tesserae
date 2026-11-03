@@ -20,8 +20,20 @@ game developer will copy as a starting point. A BSL demo would block the on-ramp
 to our own engine.
 
 Mechanically a Game is not a workspace member — it compiles to `wasm32-wasip2`.
-The root `Cargo.toml` needs `[workspace] exclude = ["games/terra"]`, or a root
-`cargo build` tries to compile it for the host.
+It carries an empty `[workspace]` table of its own, which makes it a separate
+workspace root, so a root `cargo build` does not try to compile it for the host
+and the root `Cargo.toml` lists nothing for it.
+
+Other in-repo Games exist to show the SDK, not to be the template: `meadow`,
+`ember`, `tidewater` and `lumen` are small Rust Games that declare a World and
+one behaviour and take their content from the data Mods in `mods/` (strata,
+waters, flora, hearth, glassworks). They are MIT, like `terra`, because authors
+copy them too. Each carries its own empty `[workspace]` table like `terra`, and
+the Mods have no build. A World with no record loads every Mod installed beside
+the default Game, so these Games are not installed in the `games/terra/dist`
+folder that `cargo dev` reads; `docs/demo-games.md` shows how to package and run
+them. `terra` is unchanged and stays the only self-contained Game, the one
+`scripts/check-terra-boundary` holds to the published contract.
 
 ## Naming
 

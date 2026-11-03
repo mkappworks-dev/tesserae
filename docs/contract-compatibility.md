@@ -21,6 +21,12 @@ the **line** (`0.3`), never a patch.
 - A component exports one line. Moving a Game to a newer line means rebuilding
   it against that line's bundle; the Engine never rewrites a component.
 
+## Loader rules are not the contract
+
+A change to what the loader accepts without changing a WIT record is not a new
+line. [ADR-0021](adr/0021-a-mod-may-supply-the-character.md) lets a Mod supply
+`world.character` on line 0.3: nothing that loaded before behaves differently.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

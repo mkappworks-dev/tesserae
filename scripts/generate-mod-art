@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""Writes the PNG textures of the shared Mods under mods/*/art/, and the character skins
+(mods/<id>/skin.png) of the character Mods.
+
+The artwork is original and generated here, so it is CC0 and its source is this file. Each texture
+is 48 by 16: three 16 by 16 faces side by side, in the order top, side, bottom. Run it from
+anywhere; output is deterministic, so a re-run changes no file.
+"""
+
+import pathlib
+import struct
+import zlib
+
+EDGE = 16
+root = pathlib.Path(__file__).resolve().parent.parent / "mods"
+
+
+def noise(x, y, salt):
+    n = (x * 374_761_393 ^ y * 668_265_263 ^ salt * 1_274_126_177) & 0xFFFFFFFF
+    n = ((n ^ (n >> 13)) * 1_274_126_177) & 0xFFFFFFFF
+    return (n ^ (n >> 16)) & 255
+
+
+def tint(base, amount, alpha=255):
+    return (*(max(0, min(255, c + amount)) for c in base), alpha)
+
+
+def speckle(base, spread=7):
+    return lambda face, x, y: tint(base, (noise(x, y, face + 3) - 128) // spread)
+
+
+def stone(face, x, y):
+    n = noise(x, y, face + 3)
+    if (x + 2 * y) % 13 == 0 and noise(x // 3, y // 3, 19) > 145:
+        return tint((96, 97, 106), 0)
+    return tint((140, 141, 148), (n - 128) // 9)
+
+
+def basalt(face, x, y):
+    n = noise(x, y, face + 5)
+    column = 14 if x % 5 == 0 else 0
+    return tint((58, 60, 68), (n - 128) // 12 - column)
+
+
+def clay(face, x, y):
+    band = -10 if (y + face) % 6 == 0 else 0
+    return tint((166, 112, 92), (noise(x, y, face + 7) - 128) // 11 + band)
+
+
+def sand(face, x, y):
+    n = noise(x, y, face + 9)
+    return tint((222, 205, 150) if n < 235 else (240, 226, 176), (n - 128) // 16)
+
+
+def soil(face, x, y):
+    n = noise(x, y, face + 11)
+    if n > 236:
+        return (151, 119, 79, 255)
+    return tint((107, 74, 46), (n - 128) // 7)
+
+
+def turf(face, x, y):
+    if face == 2 or (face == 1 and y >= 3 + noise(x // 2, 0, 41) % 3):
+        return soil(face, x, y)
+    patch = noise(x // 2, y // 2, 71)
+    return tint((80, 144, 49), (patch - 128) // 5 + (noise(x, y, face + 13) - 128) // 16)
+
+
+def wood(face, x, y):
+    n = noise(x, y, face + 17)
+    if face != 1:
+        ring = max(abs(x - 7), abs(y - 7))
+        return tint((150, 104, 60), (-37 if ring % 3 == 0 else 16) + (n - 128) // 18)
+    return tint((120, 82, 48), (-24 if (x + noise(0, y // 4, 23)) % 4 == 0 else 8) + (n - 128) // 20)
+
+
+def leaves(face, x, y):
+    n = noise(x, y, face + 29)
+    dx, dy = abs(x % 5 - 2), abs(y % 5 - 2)
+    if dx + dy <= 2:
+        return tint((60, 136, 44), (n - 128) // 12 - (19 if dx == 0 else 0))
+    return tint((25, 75, 29), (n - 128) // 14, 0 if n > 150 else 255)
+
+
+def grass(face, x, y):
+    blade = noise(x, 0, 31) % 3
+    height = 6 + noise(x, 1, 33) % 9
+    if face == 2 or y < EDGE - height - blade:
+        return (0, 0, 0, 0)
+    return tint((88, 160, 56), (noise(x, y, 35) - 128) // 10)
+
+
+def kelp(face, x, y):
+    sway = (y // 3 + noise(x // 4, 0, 37)) % 2
+    strand = (x + sway) % 4 in (0, 1)
+    if not strand or noise(x, y, 39) > 230:
+        return (0, 0, 0, 0)
+    return tint((44, 110, 70), (noise(x, y, 41) - 128) // 12)
+
+
+def obsidian(face, x, y):
+    n = noise(x, y, face + 43)
+    if n > 238:
+        return (118, 78, 168, 255)
+    return tint((26, 20, 40), (n - 128) // 14)
+
+
+def ash(face, x, y):
+    return tint((70, 66, 62), (noise(x, y, face + 47) - 128) // 8)
+
+
+def lava(face, x, y):
+    cell = noise(x // 3, y // 3, face + 53)
+    crust = cell > 175
+    n = noise(x, y, face + 55)
+    if crust:
+        return tint((92, 36, 18), (n - 128) // 12)
+    return tint((236, 98, 20), (n - 128) // 6 + (cell - 128) // 5)
+
+
+def pane(base, alpha, shine):
+    def paint(face, x, y):
+        border = x in (0, EDGE - 1) or y in (0, EDGE - 1)
+        glint = x - y in (3, 4) and 3 <= y <= 8
+        if border:
+            return (*base, min(255, alpha + 90))
+        if glint and shine:
+            return (255, 255, 255, min(255, alpha + 70))
+        return (*base, alpha)
+
+    return paint
+
+
+def frosted(face, x, y):
+    n = noise(x, y, face + 59)
+    return tint((218, 232, 242), (n - 128) // 10, 150 + n // 8)
+
+
+def lantern(face, x, y):
+    frame = x in (0, 1, EDGE - 2, EDGE - 1) or y in (0, 1, EDGE - 2, EDGE - 1)
+    if face != 1:
+        frame = x < 2 or x >= EDGE - 2 or y < 2 or y >= EDGE - 2
+    if frame:
+        return tint((70, 62, 52), (noise(x, y, face + 61) - 128) // 14)
+    centre = max(abs(x - 7.5), abs(y - 7.5))
+    return tint((255, 226, 140) if centre < 3.5 else (250, 196, 96), (noise(x, y, 63) - 128) // 18)
+
+
+def planks(face, x, y):
+    n = noise(x, y, face + 67)
+    seam = y % 5 == 0 or (x + 7 * (y // 5)) % 16 == 0
+    return tint((176, 132, 78), (-30 if seam else 0) + (n - 128) // 16)
+
+
+def thatch(face, x, y):
+    n = noise(x, y, face + 71)
+    strand = (x + y // 2) % 3 == 0
+    return tint((196, 170, 92), (-22 if strand else 8) + (n - 128) // 14)
+
+
+def bricks(base, mortar):
+    def paint(face, x, y):
+        row = y // 4
+        joint = y % 4 == 3 or (x + 8 * (row % 2)) % 8 == 7
+        n = noise(x // 2, y // 2, face + 73)
+        return tint(mortar if joint else base, (n - 128) // (30 if joint else 14))
+
+    return paint
+
+
+def cobble(face, x, y):
+    cell = noise(x // 5, y // 5, face + 79)
+    edge = x % 5 == 4 or y % 5 == 4
+    return tint((120, 118, 112), -34 if edge else (cell - 128) // 8)
+
+
+def tile(face, x, y):
+    grout = x % 8 == 7 or y % 8 == 7
+    return tint((190, 120, 70), -50 if grout else (noise(x // 8, y // 8, face + 83) - 128) // 10)
+
+
+def glow(base, hot):
+    def paint(face, x, y):
+        d = max(abs(x - 7.5), abs(y - 7.5))
+        n = noise(x, y, face + 89)
+        core = d < 3.5 + (n % 3)
+        return tint(hot if core else base, (n - 128) // 20)
+
+    return paint
+
+
+def cloth(base):
+    def paint(face, x, y):
+        weave = -10 if (x + y) % 2 else 6
+        return tint(base, weave + (noise(x, y, face + 97) - 128) // 18)
+
+    return paint
+
+
+def ice(face, x, y):
+    n = noise(x, y, face + 101)
+    crack = (x - y) % 11 == 0 and n > 120
+    return (230, 244, 252, 190) if crack else tint((170, 214, 240), (n - 128) // 18, 150)
+
+
+def snow(face, x, y):
+    return tint((240, 244, 248), (noise(x, y, face + 103) - 128) // 22)
+
+
+def packed_ice(face, x, y):
+    n = noise(x // 2, y // 2, face + 107)
+    return tint((130, 184, 230), (n - 128) // 12)
+
+
+def gem(base, alpha):
+    def paint(face, x, y):
+        facet = (x // 4 + y // 4) % 2
+        n = noise(x, y, face + 109)
+        edge = x % 4 == 0 or y % 4 == 0
+        return tint(base, (18 if facet else -14) + (-24 if edge else 0) + (n - 128) // 24, alpha)
+
+    return paint
+
+
+def peat(face, x, y):
+    n = noise(x, y, face + 113)
+    fibre = noise(x // 3, y, face + 127) > 190
+    return tint((70, 52, 36), (24 if fibre else 0) + (n - 128) // 10)
+
+
+TEXTURES = {
+    "strata": {
+        "stone": stone,
+        "basalt": basalt,
+        "clay": clay,
+        "sand": sand,
+        "soil": soil,
+        "turf": turf,
+    },
+    "flora": {"wood": wood, "leaves": leaves, "grass": grass, "kelp": kelp},
+    "waters": {"obsidian": obsidian},
+    "hearth": {"ash": ash, "lava": lava},
+    "glassworks": {
+        "glass": pane((164, 210, 250), 70, True),
+        "frosted_glass": frosted,
+        "lantern": lantern,
+    },
+    "timber": {"planks": planks, "thatch": thatch},
+    "brickwork": {
+        "brick": bricks((168, 74, 52), (206, 200, 190)),
+        "cobble": cobble,
+        "tile": tile,
+    },
+    "lamps": {
+        "glowstone": glow((226, 196, 90), (255, 244, 180)),
+        "amberlight": glow((220, 130, 40), (255, 200, 110)),
+        "moonlight": glow((120, 160, 230), (210, 230, 255)),
+    },
+    "wool": {
+        "wool_red": cloth((190, 52, 52)),
+        "wool_blue": cloth((52, 92, 190)),
+        "wool_green": cloth((60, 150, 70)),
+        "wool_yellow": cloth((214, 184, 60)),
+        "wool_white": cloth((232, 232, 228)),
+        "wool_black": cloth((34, 34, 38)),
+    },
+    "frost": {"ice": ice, "snow": snow, "packed_ice": packed_ice},
+    "crystals": {
+        "amethyst": gem((150, 90, 210), 200),
+        "citrine": gem((236, 190, 60), 200),
+        "aquamarine": gem((70, 200, 200), 200),
+    },
+    "bog": {"peat": peat},
+}
+
+
+SKIN = 64
+FACES = ("top", "bottom", "right", "front", "left", "back")
+LAYOUT = {
+    "head": ((0, 0), (8, 8, 8)),
+    "body": ((16, 16), (8, 12, 4)),
+    "right_arm": ((40, 16), (4, 12, 4)),
+    "left_arm": ((32, 48), (4, 12, 4)),
+    "right_leg": ((0, 16), (4, 12, 4)),
+    "left_leg": ((16, 48), (4, 12, 4)),
+}
+
+
+def paint_box(skin, part, colour):
+    (u, v), (w, h, d) = LAYOUT[part]
+    rects = {
+        "top": (u + d, v, w, d),
+        "bottom": (u + d + w, v, w, d),
+        "right": (u, v + d, d, h),
+        "front": (u + d, v + d, w, h),
+        "left": (u + d + w, v + d, d, h),
+        "back": (u + 2 * d + w, v + d, w, h),
+    }
+    for face, (x0, y0, width, height) in rects.items():
+        for y in range(height):
+            for x in range(width):
+                skin[y0 + y][x0 + x] = colour(face, x, y)
+
+
+def humanoid(flesh, hair, top, bottom, boots, eye, salt, trim=None):
+    grain = lambda base, x, y, k: tint(base, (noise(x, y, salt + k) - 128) // 16)
+
+    def head(face, x, y):
+        if face == "front" and y == 4 and x in (1, 2, 5, 6):
+            return (*eye, 255) if x in (2, 5) else (236, 236, 236, 255)
+        if face in ("top",) or (face == "back" and y < 7) or (face != "bottom" and y < 2):
+            return grain(hair, x, y, 1)
+        return grain(flesh, x, y, 3)
+
+    def body(face, x, y):
+        if trim and face == "front" and y == 6:
+            return grain(trim, x, y, 5)
+        return grain(top, x, y, 7)
+
+    def arm(face, x, y):
+        return grain(top if face == "top" or (face != "bottom" and y < 4) else flesh, x, y, 11)
+
+    def leg(face, x, y):
+        return grain(boots if face == "bottom" or (face != "top" and y >= 10) else bottom, x, y, 13)
+
+    skin = [[(0, 0, 0, 0)] * SKIN for _ in range(SKIN)]
+    paint_box(skin, "head", head)
+    paint_box(skin, "body", body)
+    for part in ("right_arm", "left_arm"):
+        paint_box(skin, part, arm)
+    for part in ("right_leg", "left_leg"):
+        paint_box(skin, part, leg)
+    return skin
+
+
+CHARACTERS = {
+    "wanderer": humanoid((196, 146, 112), (74, 50, 34), (176, 98, 52), (72, 62, 52), (48, 40, 36), (40, 52, 88), 131, (230, 190, 90)),
+    "golem": humanoid((132, 138, 140), (88, 94, 96), (118, 124, 126), (96, 102, 104), (70, 74, 76), (255, 190, 80), 151, (70, 76, 78)),
+    "sprite": humanoid((236, 214, 190), (120, 200, 160), (96, 190, 150), (80, 150, 200), (60, 100, 140), (60, 90, 70), 171, (250, 250, 250)),
+}
+
+
+def png(rows):
+    height, width = len(rows), len(rows[0])
+    raw = b"".join(b"\x00" + bytes(c for px in row for c in px) for row in rows)
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+for mod, textures in TEXTURES.items():
+    art = root / mod / "art"
+    art.mkdir(parents=True, exist_ok=True)
+    for name, paint in textures.items():
+        rows = [
+            [paint(face, x, y) for face in range(3) for x in range(EDGE)] for y in range(EDGE)
+        ]
+        (art / f"{name}.png").write_bytes(png(rows))
+
+for name, skin in CHARACTERS.items():
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "skin.png").write_bytes(png(skin))

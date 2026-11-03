@@ -1,0 +1,79 @@
+[[materials]]
+name = "peat"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.3
+
+[[materials]]
+name = "mud"
+emission = 0
+dimming = 6
+occlusion = "same-material"
+render = "blend"
+solid = false
+
+[[materials]]
+name = "tar"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = false
+
+[[appearance]]
+material = "peat"
+color = [70, 52, 36, 255]
+texture = "art/peat.png"
+
+[[appearance]]
+material = "mud"
+color = [92, 70, 44, 224]
+
+[[appearance]]
+material = "tar"
+color = [24, 22, 28, 255]
+
+[[fluids]]
+material = "bog:mud"
+reach-m = 2.0
+sideways-m-per-s = 1.0
+downward-m-per-s = 2.0
+recession-m-per-s = 1.0
+reset-drop-m = 0.5
+waterlogs = true
+extinguishes = true
+
+[[fluids]]
+material = "bog:tar"
+reach-m = 4.0
+sideways-m-per-s = 0.4
+downward-m-per-s = 0.8
+recession-m-per-s = 0.3
+reset-drop-m = 0.5
+waterlogs = false
+extinguishes = false
+
+# Mud that touches lava fires to brick; the lava is kept. Tar that touches lava burns to ash.
+[[reactions]]
+first = { fluid = "bog:mud", state = "any" }
+second = { fluid = "hearth:lava", state = "any" }
+consumed = "first"
+product = "brickwork:brick"
+
+[[reactions]]
+first = { fluid = "bog:tar", state = "any" }
+second = { fluid = "hearth:lava", state = "any" }
+consumed = "first"
+product = "hearth:ash"
+
+# Dried peat burns slowly and leaves ash.
+[[combustion]]
+fuel = "bog:peat"
+ignition-threshold = 4
+ignition-delay-s = 3.0
+emission = 8
+heat = { strength = 8, reach-m = 1.5 }
+end = { after = { seconds = 20.0, residue = "hearth:ash" } }

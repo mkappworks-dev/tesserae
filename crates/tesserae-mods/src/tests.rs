@@ -18,6 +18,7 @@ mod export_version;
 mod lines;
 mod loading;
 mod sandbox;
+mod shared_mods;
 mod starters;
 
 fn guest(name: &str) -> PathBuf {

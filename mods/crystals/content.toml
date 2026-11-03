@@ -1,0 +1,46 @@
+[[materials]]
+name = "amethyst"
+emission = 6
+dimming = 1
+occlusion = "same-material"
+render = "blend"
+solid = true
+remove-time-s = 0.5
+
+[[materials]]
+name = "citrine"
+emission = 7
+dimming = 1
+occlusion = "same-material"
+render = "blend"
+solid = true
+remove-time-s = 0.5
+
+[[materials]]
+name = "aquamarine"
+emission = 6
+dimming = 1
+occlusion = "same-material"
+render = "blend"
+solid = true
+remove-time-s = 0.5
+
+[[appearance]]
+material = "amethyst"
+color = [150, 90, 210, 200]
+texture = "art/amethyst.png"
+
+[[appearance]]
+material = "citrine"
+color = [236, 190, 60, 200]
+texture = "art/citrine.png"
+
+[[appearance]]
+material = "aquamarine"
+color = [70, 200, 200, 200]
+texture = "art/aquamarine.png"
+
+[[shapes]]
+name = "cluster"
+boxes = [{ min = [3, 0, 3], max = [13, 6, 13] }, { min = [6, 6, 6], max = [10, 13, 10] }]
+collision = [{ min = [3, 0, 3], max = [13, 13, 13] }]

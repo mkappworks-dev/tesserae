@@ -71,7 +71,10 @@ Declaration, so bounds, Game-only restrictions and per-Mod limits are identical.
 
 The complete field list, with a Declaration that uses every table, is in the
 [authoring guide](authoring-guide.md#the-declaration-schema). Only Games may
-declare `world`, `view` and `tools`.
+declare `world`, `view` and `tools`, except that a Mod may supply
+`world.character` and nothing else of `world`
+([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)); a World has one
+character source, and two fail the load naming both.
 
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
@@ -82,6 +85,17 @@ no guest instances, `start` or `tick` callbacks. Dependencies use the existing
 `depends` Manifest field and load before their consumers, regardless of
 Declaration format. Paths must be relative and stay inside the installed
 directory after symlink resolution.
+
+A Game's Manifest may list `suggests = ["wanderer"]`: Create World ticks those
+Mods when the Game is picked, but they can be unticked or swapped, unlike
+`depends`, which is locked on. Nothing loads a suggestion unless the World
+records it.
+
+A Manifest may also carry two display-only fields, which Create World uses to
+list a Mod under a section with a line about it: `category` (1 to 24 characters,
+for example `"Fire & light"`) and `description` (1 to 80 characters). Neither
+changes what the Mod does, but both are part of the Manifest, so editing one
+asks for Trust again like any other change.
 
 ## Validating and packaging projects
 

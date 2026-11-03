@@ -1,0 +1,71 @@
+[[materials]]
+name = "lava"
+emission = 15
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = false
+
+[[materials]]
+name = "ash"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.2
+
+[[appearance]]
+material = "lava"
+color = [230, 72, 16, 255]
+texture = "art/lava.png"
+
+[[appearance]]
+material = "ash"
+color = [70, 66, 62, 255]
+texture = "art/ash.png"
+
+# Slower and shorter than water, and hot; it stays out of Shapes.
+[[fluids]]
+material = "hearth:lava"
+reach-m = 3.0
+sideways-m-per-s = 0.75
+downward-m-per-s = 1.5
+recession-m-per-s = 0.75
+reset-drop-m = 0.5
+waterlogs = false
+extinguishes = false
+heat = { strength = 12, reach-m = 2.0 }
+
+# Lava standing still cools to obsidian; lava that is still running cools to basalt.
+# Water is kept in both, and the two states cannot match one contact, so they do not conflict.
+[[reactions]]
+first = { fluid = "hearth:lava", state = "source" }
+second = { fluid = "waters:water", state = "any" }
+consumed = "first"
+product = "waters:obsidian"
+
+[[reactions]]
+first = { fluid = "hearth:lava", state = "flowing" }
+second = { fluid = "waters:water", state = "any" }
+consumed = "first"
+product = "strata:basalt"
+
+# Wood catches 2 s after heat reaches it, burns for 8 s lighting and heating 2 m round it,
+# and leaves ash, which does not burn.
+[[combustion]]
+fuel = "flora:wood"
+ignition-threshold = 6
+ignition-delay-s = 2.0
+emission = 12
+heat = { strength = 12, reach-m = 2.0 }
+end = { after = { seconds = 8.0, residue = "hearth:ash" } }
+
+# Leaves flare quickly and leave nothing.
+[[combustion]]
+fuel = "flora:leaves"
+ignition-threshold = 4
+ignition-delay-s = 0.5
+emission = 10
+heat = { strength = 8, reach-m = 1.5 }
+end = { after = { seconds = 3.0 } }

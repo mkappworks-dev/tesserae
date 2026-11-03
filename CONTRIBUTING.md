@@ -37,6 +37,7 @@ people copy:
 | Path                        | Licence    | Why                                                                                                                                                             |
 | --------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `games/terra/`              | CC0 or MIT | It is the starting point for every game built on Tesserae. BSL here would block the on-ramp. See [ADR-0004](docs/adr/0004-terra-game-in-repo-real-game-out.md). |
+| `games/*/` and `mods/*/`    | MIT        | The demo Games and the shared data Mods they depend on; authors copy them as worked examples. See [Demo Games and shared Mods](docs/demo-games.md).             |
 | `starters/`                 | MIT        | Templates a Game author copies out of the checkout; a proprietary Game must be free to start from them.                                                         |
 | `crates/tesserae-mods/wit/` | MIT        | The public Mod contract, and the copy each Rust starter bundles; building against it must not need BSL terms.                                                   |
 | `assets/`                   | CC0        | Default and placeholder art must be reusable in proprietary games.                                                                                              |
@@ -287,8 +288,9 @@ To make a Game or Mod rather than change the Engine, follow the
 
 Install the guest target with `rustup target add wasm32-wasip2`, then run
 `./scripts/build-guests` from the repository root to build the independent test
-guests and MIT Terra Game. The Terra component and Manifest are copied to
-`games/terra/dist/games/terra/`, where `cargo dev`
+guests, the MIT Terra Game and the demo Games (see
+[Demo Games and shared Mods](docs/demo-games.md)). The Terra component and
+Manifest are copied to `games/terra/dist/games/terra/`, where `cargo dev`
 [runs it](#running-the-terra-game) with no flags, trusted for that run only. Any
 other directory, given with `--mods`, gets the normal Trust check: `--trust-all`
 for an explicit unattended grant, or omit it to review the terminal prompt.
@@ -299,6 +301,17 @@ not per-voxel calls. Crossing the WASM boundary copies, so call frequency — no
 throughput — is what costs. See [ADR-0001](docs/adr/0001-wasm-mod-boundary.md)
 before adding a host function.
 
+### Running the other demo Games
+
+```bash
+./scripts/package-demo   # builds the Games, packages them and every Mod into dist/
+./scripts/demo           # runs the Engine on dist/
+```
+
+`package-demo` keeps `dist/trust.json`, so Trust grants survive a repackage; run
+it again after changing anything under `games/` or `mods/`. See
+[Demo Games and shared Mods](docs/demo-games.md).
+
 ### Running the Terra Game
 
 ```bash
@@ -308,14 +321,15 @@ cargo dev
 ```
 
 Once the guests are built, `cargo dev` loads the Games in
-`games/terra/dist/games` on its own (Terra, and `meadow`, a plain second Game
-for trying side-by-side installs; pick one when creating a World) and trusts it
-for the run, with no prompt and no Trust record; before that it opens a World
-with no Game and logs that `./scripts/build-guests` must be run. A directory
-named by `--mods` or `TESSERAE_MODS_DIR` replaces Terra and goes through the
-normal Trust check; the Games are read from the `games` directory beside it,
-Mods from the directory itself. Only a `dev` build does this:
-`cargo run -p tesserae -- --mods games/terra/dist/mods` runs the same Game
+`games/terra/dist/games` on its own (Terra alone: the demo Games depend on Mods,
+and a World with no record loads every Mod installed beside it, so they are not
+installed there; see [Demo Games and shared Mods](docs/demo-games.md) to run
+them) and trusts it for the run, with no prompt and no Trust record; before that
+it opens a World with no Game and logs that `./scripts/build-guests` must be
+run. A directory named by `--mods` or `TESSERAE_MODS_DIR` replaces Terra and
+goes through the normal Trust check; the Games are read from the `games`
+directory beside it, Mods from the directory itself. Only a `dev` build does
+this: `cargo run -p tesserae -- --mods games/terra/dist/mods` runs the same Game
 without the `dev` tools, with the full Trust check. In a `dev` build,
 `TESSERAE_VOXEL_SIZE_M` opens the World at 1.0 (the default), 0.5 or 0.25 m, and
 Terra builds the same scenes in metres at each:

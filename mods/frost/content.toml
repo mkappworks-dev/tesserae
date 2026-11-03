@@ -1,0 +1,68 @@
+[[materials]]
+name = "ice"
+emission = 0
+dimming = 1
+occlusion = "same-material"
+render = "blend"
+solid = true
+remove-time-s = 0.3
+
+[[materials]]
+name = "snow"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.15
+
+[[materials]]
+name = "packed_ice"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.5
+
+[[materials]]
+name = "slush"
+emission = 0
+dimming = 2
+occlusion = "same-material"
+render = "blend"
+solid = false
+
+[[appearance]]
+material = "ice"
+color = [170, 214, 240, 150]
+texture = "art/ice.png"
+
+[[appearance]]
+material = "snow"
+color = [240, 244, 248, 255]
+texture = "art/snow.png"
+
+[[appearance]]
+material = "packed_ice"
+color = [130, 184, 230, 255]
+texture = "art/packed_ice.png"
+
+[[appearance]]
+material = "slush"
+color = [210, 226, 238, 170]
+
+[[shapes]]
+name = "snow_layer"
+boxes = [{ min = [0, 0, 0], max = [16, 4, 16] }]
+collision = [{ min = [0, 0, 0], max = [16, 4, 16] }]
+
+[[fluids]]
+material = "frost:slush"
+reach-m = 2.0
+sideways-m-per-s = 0.5
+downward-m-per-s = 1.0
+recession-m-per-s = 0.5
+reset-drop-m = 0.5
+waterlogs = false
+extinguishes = true

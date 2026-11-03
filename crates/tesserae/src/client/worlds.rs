@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use crate::session::{AppState, has_state, in_list};
 use bevy::text::EditableText;
-use bevy::ui_widgets::{Activate, TextInput};
+use bevy::ui_widgets::{Activate, ScrollArea, TextInput};
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
 use super::menu_ui::{self as ui, Danger, Tone};
@@ -54,6 +54,8 @@ const OPENING_FRAMES: u32 = 2;
 enum Screen {
     List,
     Create,
+    /// Step two of Create World: the Mods.
+    Mods,
     Rename(PathBuf),
     Delete(PathBuf),
     Trust(Next),
@@ -123,6 +125,8 @@ struct Launcher {
     form: Form,
     rename: String,
     problem: Option<String>,
+    /// Installed Mods that would clash with the chosen set, by id, and why.
+    clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
@@ -181,6 +185,7 @@ pub(super) enum Act {
     Quit,
     Back,
     Create,
+    NextMods,
     Randomize,
     CopyResolved,
     More,
@@ -208,6 +213,10 @@ struct Resolved;
 
 #[derive(Component)]
 struct Root;
+
+/// The page's own scrolling column, whose position survives a rebuild of the same page.
+#[derive(Component)]
+struct PageScroll;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
@@ -273,6 +282,7 @@ fn review_capture(
                 "recreate" => Act::ReCreate,
                 "open" => Act::Open,
                 "create" => Act::Create,
+                "mods" => Act::NextMods,
                 other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
             });
         }
@@ -379,6 +389,7 @@ fn start(mut commands: Commands, worlds: Res<WorldsDir>, failure: Res<LastFailur
         form: Form::default(),
         rename: String::new(),
         problem: None,
+        clashes: Default::default(),
         version: 0,
         opening_frames: 0,
     };
@@ -533,6 +544,11 @@ fn handle(
                 }
                 l.form = Form {
                     game: installed.game.as_ref().map(|g| g.id.clone()),
+                    mods: installed
+                        .game
+                        .as_ref()
+                        .map(|g| installed.suggested(&g.id))
+                        .unwrap_or_default(),
                     ..Form::default()
                 };
                 l.show(Screen::Create);
@@ -555,7 +571,13 @@ fn handle(
                     mods: details.mods.iter().map(|m| m.id.clone()).collect(),
                     ..Form::default()
                 };
-                l.show(Screen::Create);
+                match l.form.game.clone() {
+                    Some(game) if !installed.mods.is_empty() => {
+                        l.clashes = installed.clashes(&game, &l.form.mods);
+                        l.show(Screen::Mods);
+                    }
+                    _ => l.show(Screen::Create),
+                }
             }
             Act::Rename => {
                 let Some(entry) = l.selected() else {
@@ -590,7 +612,12 @@ fn handle(
                 exit.write(AppExit::Success);
             }
             Act::Back => match l.screen {
-                Screen::Trust(Next::Create) => l.show(Screen::Create),
+                Screen::Trust(Next::Create) => l.show(if installed.mods.is_empty() {
+                    Screen::Create
+                } else {
+                    Screen::Mods
+                }),
+                Screen::Mods => l.show(Screen::Create),
                 Screen::Opening(_) | Screen::List => {}
                 _ => l.show(Screen::List),
             },
@@ -612,8 +639,8 @@ fn handle(
                     continue;
                 };
                 l.form.game = Some(game.id.clone());
-                let id = game.id.clone();
-                l.form.mods.retain(|m| installed.blocked(&id, m).is_none());
+                // Each Game starts from the Mods it suggests; picks made for another do not carry over.
+                l.form.mods = installed.suggested(&game.id);
                 l.version += 1;
             }
             Act::ToggleMod(index) => {
@@ -623,21 +650,42 @@ fn handle(
                 if installed.blocked(&game, &m.id).is_some() {
                     continue;
                 }
-                if !l.form.mods.remove(&m.id) {
-                    let needed = installed.closure(&l.form.mods);
+                if let Some(clash) = l.clashes.get(&m.id) {
+                    // A Mod that clashes with a pick swaps it out; one that clashes with what the
+                    // Game requires cannot be added.
+                    let Some(out) = clash.replaces.clone() else {
+                        continue;
+                    };
+                    l.form.mods.remove(&out);
+                    l.form.mods.insert(m.id.clone());
+                } else if !l.form.mods.remove(&m.id) {
+                    let needed = installed.closure_for(&game, &l.form.mods);
                     // A dependency of another pick is locked on; ticking it by hand adds nothing.
                     if !needed.contains(&m.id) {
                         l.form.mods.insert(m.id.clone());
                     }
                 }
+                l.clashes = installed.clashes(&game, &l.form.mods);
                 l.version += 1;
+            }
+            Act::NextMods => {
+                if l.screen != Screen::Create {
+                    continue;
+                }
+                let Some(game) = l.form.game.clone() else {
+                    l.problem = Some(NO_GAME.into());
+                    l.version += 1;
+                    continue;
+                };
+                l.clashes = installed.clashes(&game, &l.form.mods);
+                l.show(Screen::Mods);
             }
             Act::Voxel(size) => {
                 l.form.voxel_size_m = size;
                 l.version += 1;
             }
             Act::Create => {
-                if l.screen != Screen::Create {
+                if !matches!(l.screen, Screen::Create | Screen::Mods) {
                     continue;
                 }
                 let ids = chosen_ids(&l.form, &installed);
@@ -657,7 +705,7 @@ fn handle(
                 let Screen::Trust(next) = l.screen.clone() else {
                     continue;
                 };
-                if let Err(e) = installed.grant_first() {
+                if let Err(e) = installed.grant_all() {
                     l.problem = Some(format!("Could not record Trust: {e}"));
                     l.version += 1;
                     continue;
@@ -726,10 +774,11 @@ fn validate(form: &Form) -> Result<(String, u64), String> {
 
 /// The Game and every Mod, dependencies included, a World made from this form would load.
 fn chosen_ids(form: &Form, installed: &Installed) -> Vec<String> {
-    form.game
-        .iter()
-        .cloned()
-        .chain(installed.closure(&form.mods))
+    let Some(game) = &form.game else {
+        return Vec::new();
+    };
+    std::iter::once(game.clone())
+        .chain(installed.closure_for(game, &form.mods))
         .collect()
 }
 
@@ -745,8 +794,19 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         l.show(Screen::Create);
         return;
     };
+    let missing = installed.missing(&game.id);
+    if !missing.is_empty() {
+        l.form.problem = Some(format!(
+            "{} needs {}, which {} not installed.",
+            ui::title(&game.id),
+            missing.join(", "),
+            if missing.len() == 1 { "is" } else { "are" }
+        ));
+        l.show(Screen::Create);
+        return;
+    }
     let mods: Vec<_> = installed
-        .closure(&l.form.mods)
+        .closure_for(&game.id, &l.form.mods)
         .iter()
         .filter_map(|id| installed.mods.iter().find(|m| &m.id == id))
         .map(|m| library::ModRef {
@@ -847,8 +907,9 @@ fn render(
     launcher: Option<Res<Launcher>>,
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
+    scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
-    mut built: Local<Option<u64>>,
+    (mut built, mut shown): (Local<Option<u64>>, Local<Option<Screen>>),
 ) {
     let Some(l) = launcher else {
         return;
@@ -857,6 +918,13 @@ fn render(
         return;
     }
     *built = Some(l.version);
+    // A click rebuilds the page it is on; keep its place there, and start a new page at the top.
+    let scroll = if shown.as_ref() == Some(&l.screen) {
+        scrolled.iter().next().map_or(Vec2::ZERO, |p| p.0)
+    } else {
+        Vec2::ZERO
+    };
+    *shown = Some(l.screen.clone());
     for root in &roots {
         commands.entity(root).despawn();
     }
@@ -865,6 +933,11 @@ fn render(
         Root,
         BackgroundColor(ui::BG),
         Node {
+            // Absolute, like the in-game menus' roots: a flow root is as tall as its content, so
+            // a long page would overflow the window instead of scrolling inside it.
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
             padding: UiRect::axes(Val::Percent(5.0), Val::Px(20.0)),
@@ -880,13 +953,14 @@ fn render(
         header(root, logo.as_deref());
         match &l.screen {
             Screen::List => focus = list(root, &l, &installed),
-            Screen::Create => focus = form(root, &l, &installed),
+            Screen::Create => focus = form(root, &l, &installed, scroll),
+            Screen::Mods => focus = mods_page(root, &l, &installed, scroll),
             Screen::Opening(name) => {
                 centered(root, false, |card| super::loading::opening(card, name));
             }
             Screen::Rename(_) => focus = rename(root, &l),
             Screen::Delete(path) => focus = delete(root, &l, path),
-            Screen::Trust(next) => focus = trust(root, &l, &installed, next),
+            Screen::Trust(next) => focus = trust(root, &l, &installed, next, scroll),
         }
     });
     if let Some(entity) = focus {
@@ -940,6 +1014,8 @@ fn heading(parent: &mut ChildSpawnerCommands, title: &str, subtitle: &str) {
         .spawn(Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(6.0),
+            flex_shrink: 1.0,
+            min_width: Val::Px(0.0),
             ..default()
         })
         .with_children(|t| {
@@ -959,6 +1035,18 @@ fn row(
             row_gap: Val::Px(gap),
             flex_wrap: FlexWrap::Wrap,
             align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(children);
+}
+
+/// A page's buttons in one line that never wraps or shrinks, however long the heading beside it.
+fn actions(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+    parent
+        .spawn(Node {
+            column_gap: Val::Px(7.0),
+            align_items: AlignItems::Center,
+            flex_shrink: 0.0,
             ..default()
         })
         .with_children(children);
@@ -1190,14 +1278,17 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
     })
     .with_children(|columns| {
         columns
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                flex_basis: Val::Percent(55.0),
-                min_width: Val::Px(0.0),
-                overflow: Overflow::scroll_y(),
-                ..default()
-            })
+            .spawn((
+                ScrollArea,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    flex_basis: Val::Percent(55.0),
+                    min_width: Val::Px(0.0),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
+            ))
             .with_children(|rows| {
                 for entry in &l.entries {
                     let selected = l.selected.as_deref() == Some(entry.path.as_path());
@@ -1280,6 +1371,21 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: &Installed
                     12.0,
                     ui::INK,
                 );
+                if !d.mods.is_empty() {
+                    ui::paragraph(
+                        p,
+                        format!(
+                            "Mods: {}",
+                            d.mods
+                                .iter()
+                                .map(|m| ui::title(&m.id))
+                                .collect::<Vec<_>>()
+                                .join(" · ")
+                        ),
+                        12.0,
+                        ui::INK,
+                    );
+                }
                 row(p, 8.0, |r| {
                     ui::text(r, format!("Seed: {}", d.seed), 12.0, ui::INK);
                     ui::compact_button(r, "Copy", Act::CopySeed, false, 26.0, 10.0);
@@ -1351,11 +1457,19 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: &Installed
     });
 }
 
-fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
+fn form(
+    root: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    scroll: Vec2,
+) -> Option<Entity> {
     let f = &l.form;
     let mut focus = None;
     root.spawn((
         TabGroup::default(),
+        ScrollArea,
+        ScrollPosition(scroll),
+        PageScroll,
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(10.0),
@@ -1381,9 +1495,13 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
                 "Create World",
                 "Name it, pick a Game and, if you like, a seed.",
             );
-            row(top, 7.0, |r| {
+            actions(top, |r| {
                 ui::button(r, "Cancel", Act::Back, false, false, false);
-                ui::button(r, "Create World", Act::Create, false, false, true);
+                if installed.mods.is_empty() {
+                    ui::button(r, "Create World", Act::Create, false, false, true);
+                } else {
+                    ui::button(r, "Next: Mods", Act::NextMods, false, false, true);
+                }
             });
         });
         problem(col, f.problem.as_ref());
@@ -1394,7 +1512,7 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
             &f.name,
             "Up to 64 characters. Blank uses \u{201c}New World\u{201d}.",
         ));
-        game_and_mods(col, f, installed);
+        game_picker(col, f, installed);
         label(col, "Seed");
         row(col, 7.0, |r| {
             r.spawn(Node {
@@ -1450,7 +1568,7 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
     focus
 }
 
-fn game_and_mods(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) {
+fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) {
     label(col, "Game");
     for (i, g) in installed.games.iter().enumerate() {
         let chosen = f.game.as_deref() == Some(g.id.as_str());
@@ -1466,38 +1584,228 @@ fn game_and_mods(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed
     if !installed.untrusted.is_empty() {
         ui::description(col, "Needs Trust before it opens.");
     }
-    let Some(game) = f.game.as_deref() else {
-        return;
-    };
-    if !installed.mods.is_empty() {
-        label(col, "Mods");
-    }
-    let locked = installed.closure(&f.mods);
-    for (i, m) in installed.mods.iter().enumerate() {
-        let name = format!("{} {}", ui::title(&m.id), m.version);
-        if let Some(why) = installed.blocked(game, &m.id) {
-            ui::text(col, format!("{name} · unavailable: {why}"), 12.0, ui::MUTED);
-        } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
-            ui::text(
+    if let Some(game) = f.game.as_deref() {
+        let needs = installed.required(game).len();
+        if needs > 0 {
+            ui::description(
                 col,
-                format!("{name} · needed by another Mod"),
-                12.0,
-                ui::INK,
-            );
-        } else {
-            ui::button(
-                col,
-                name,
-                Act::ToggleMod(i),
-                f.mods.contains(&m.id),
-                false,
-                false,
+                &format!(
+                    "{} needs {needs} Mods, chosen on the next page.",
+                    ui::title(game)
+                ),
             );
         }
     }
-    for line in &installed.rejected {
-        ui::paragraph(col, format!("Skipped: {line}"), 12.0, ui::AMBER);
+}
+
+/// Step two: the Mods, with what the Game needs locked on and what would clash left out.
+fn mods_page(
+    root: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    scroll: Vec2,
+) -> Option<Entity> {
+    let f = &l.form;
+    let game = f.game.clone().unwrap_or_default();
+    root.spawn((
+        TabGroup::default(),
+        ScrollArea,
+        ScrollPosition(scroll),
+        PageScroll,
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            max_width: Val::Px(720.0),
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    ))
+    .with_children(|col| {
+        col.spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|top| {
+            heading(
+                top,
+                &format!("Mods for {}", ui::title(&game)),
+                "Required Mods are locked on. Optional ones load after them.",
+            );
+            actions(top, |r| {
+                ui::button(r, "Back", Act::Back, false, false, false);
+                ui::button(r, "Create World", Act::Create, false, false, true);
+            });
+        });
+        problem(col, f.problem.as_ref());
+        let required = installed.required(&game);
+        let locked = installed.closure_for(&game, &f.mods);
+        if !required.is_empty() {
+            label(col, &format!("Required by {}", ui::title(&game)));
+            for id in &required {
+                if let Some(m) = installed.mods.iter().find(|m| &m.id == id) {
+                    let (_, about) = installed.about(id);
+                    mod_card(
+                        col,
+                        ModCard {
+                            act: None,
+                            border: ui::EDGE,
+                            selected: false,
+                            title: format!("{} {}", ui::title(&m.id), m.version),
+                            detail: about.unwrap_or_default().to_owned(),
+                            tag: Some(("Required".to_owned(), ui::MUTED)),
+                        },
+                    );
+                }
+            }
+        }
+        for section in sections(installed, &required) {
+            label(col, &section.0);
+            for i in section.1 {
+                let m = &installed.mods[i];
+                let (_, about) = installed.about(&m.id);
+                let title = format!("{} {}", ui::title(&m.id), m.version);
+                let mut shown = ModCard {
+                    act: Some(Act::ToggleMod(i)),
+                    border: ui::EDGE,
+                    selected: f.mods.contains(&m.id),
+                    title,
+                    detail: about.unwrap_or_default().to_owned(),
+                    tag: None,
+                };
+                if let Some(why) = installed.blocked(&game, &m.id) {
+                    shown.act = None;
+                    shown.detail = format!("Unavailable: {why}");
+                    shown.tag = Some(("Unavailable".to_owned(), ui::MUTED));
+                } else if let Some(clash) = l.clashes.get(&m.id) {
+                    shown.border = ui::AMBER;
+                    shown.detail = format!("Conflicts: {}", clash.reason);
+                    match &clash.replaces {
+                        Some(out) => {
+                            shown.tag = Some((format!("Replaces {}", ui::title(out)), ui::AMBER));
+                        }
+                        None => {
+                            shown.act = None;
+                            shown.tag = Some(("Conflict".to_owned(), ui::AMBER));
+                        }
+                    }
+                } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
+                    shown.act = None;
+                    shown.tag = Some(("Needed by another Mod".to_owned(), ui::MUTED));
+                } else if shown.selected {
+                    shown.tag = Some(("Added".to_owned(), ui::LEAF));
+                }
+                mod_card(col, shown);
+            }
+        }
+        for line in &installed.rejected {
+            ui::paragraph(col, format!("Skipped: {line}"), 12.0, ui::AMBER);
+        }
+    });
+    None
+}
+
+/// What one Mod card shows. `act` makes it a button; without one it only informs.
+struct ModCard {
+    act: Option<Act>,
+    border: Color,
+    selected: bool,
+    title: String,
+    detail: String,
+    tag: Option<(String, Color)>,
+}
+
+fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
+    let node = Node {
+        padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+        border: UiRect::all(Val::Px(1.0)),
+        border_radius: BorderRadius::all(Val::Px(6.0)),
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(12.0),
+        flex_shrink: 0.0,
+        ..default()
+    };
+    let body = |card: &mut ChildSpawnerCommands| {
+        card.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.0),
+            flex_shrink: 1.0,
+            ..default()
+        })
+        .with_children(|text| {
+            ui::weighted_text(text, c.title.clone(), 13.0, 620, ui::INK);
+            if !c.detail.is_empty() {
+                ui::paragraph(text, c.detail.clone(), 11.0, ui::MUTED);
+            }
+        });
+        if let Some((tag, colour)) = c.tag {
+            ui::text(card, tag, 11.0, colour);
+        }
+    };
+    match c.act.clone() {
+        Some(act) => {
+            parent
+                .spawn((
+                    bevy::ui_widgets::Button,
+                    bevy::input_focus::tab_navigation::TabIndex(0),
+                    act,
+                    ui::Styled {
+                        selected: c.selected,
+                        tab: false,
+                        primary: false,
+                    },
+                    BackgroundColor(ui::CARD),
+                    BorderColor::all(if c.selected { ui::LEAF } else { c.border }),
+                    node,
+                ))
+                .with_children(body);
+        }
+        None => {
+            parent
+                .spawn((BackgroundColor(ui::CARD), BorderColor::all(c.border), node))
+                .with_children(body);
+        }
     }
+}
+
+/// Optional Mods grouped under their Manifest's category, known sections first, then the rest
+/// alphabetically, with uncategorised ones last. Each holds indexes into `installed.mods`.
+fn sections(installed: &Installed, required: &[String]) -> Vec<(String, Vec<usize>)> {
+    const ORDER: [&str; 6] = [
+        "Terrain",
+        "Water",
+        "Plants",
+        "Fire & light",
+        "Building",
+        "Characters",
+    ];
+    const OTHER: &str = "Other";
+    let mut groups: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
+    for (i, m) in installed.mods.iter().enumerate() {
+        if required.contains(&m.id) {
+            continue;
+        }
+        let name = installed.about(&m.id).0.unwrap_or(OTHER).to_owned();
+        groups.entry(name).or_default().push(i);
+    }
+    let rank = |name: &str| {
+        ORDER
+            .iter()
+            .position(|known| *known == name)
+            .unwrap_or(if name == OTHER {
+                usize::MAX
+            } else {
+                ORDER.len()
+            })
+    };
+    let mut out: Vec<_> = groups.into_iter().collect();
+    out.sort_by_key(|(name, _)| (rank(name), name.clone()));
+    out
 }
 
 fn rename(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
@@ -1557,44 +1865,125 @@ fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
     focus
 }
 
+/// Trust for the whole set on one scrolling page, with its buttons above the list so they stay
+/// in view however many items there are.
 fn trust(
     root: &mut ChildSpawnerCommands,
     l: &Launcher,
     installed: &Installed,
     next: &Next,
+    scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
-    centered(root, true, |card| {
-        ui::weighted_text(card, "Trust this Mod?", 19.0, 620, ui::INK);
-        ui::paragraph(
-            card,
-            "It runs its own code. Trust it only if you know where it came from.",
-            12.0,
-            ui::MUTED,
-        );
-        if let Some(mod_) = installed.untrusted.first() {
-            // The shared prompt ends with the terminal's [y/N] question.
-            let details = mod_
-                .prompt
-                .trim_end()
-                .trim_end_matches("Trust this exact build? [y/N]");
-            ui::technical_text(card, details.trim_end(), 11.0, ui::INK);
-        }
-        problem(card, l.problem.as_ref());
-        row(card, 7.0, |r| {
-            focus = Some(ui::button(r, "Cancel", Act::Back, false, false, false));
-            ui::button(
-                r,
-                match next {
-                    Next::Open(_) => "Trust and open",
-                    Next::Create => "Trust and create",
+    let items = &installed.untrusted;
+    let code = items
+        .iter()
+        .filter(|u| u.found.manifest.declaration.is_none())
+        .count();
+    root.spawn((
+        TabGroup {
+            modal: true,
+            ..default()
+        },
+        ScrollArea,
+        ScrollPosition(scroll),
+        PageScroll,
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            max_width: Val::Px(720.0),
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    ))
+    .with_children(|col| {
+        col.spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|top| {
+            heading(
+                top,
+                &if items.len() == 1 {
+                    "Trust this item?".to_owned()
+                } else {
+                    format!("Trust {} items?", items.len())
                 },
-                Act::Trust,
-                false,
-                false,
-                true,
+                if code == 0 {
+                    "Data only: none of it runs code. Trust is for these exact files."
+                } else {
+                    "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
+                },
             );
+            actions(top, |r| {
+                focus = Some(ui::button(
+                    r,
+                    match next {
+                        Next::Create if !installed.mods.is_empty() => "Back to Mods",
+                        Next::Create => "Back",
+                        Next::Open(_) => "Cancel",
+                    },
+                    Act::Back,
+                    false,
+                    false,
+                    false,
+                ));
+                ui::button(
+                    r,
+                    format!(
+                        "Trust {} and {}",
+                        if items.len() == 1 {
+                            "it".to_owned()
+                        } else {
+                            format!("all {}", items.len())
+                        },
+                        match next {
+                            Next::Open(_) => "open",
+                            Next::Create => "create",
+                        }
+                    ),
+                    Act::Trust,
+                    false,
+                    false,
+                    true,
+                );
+            });
         });
+        problem(col, l.problem.as_ref());
+        for item in items {
+            let manifest = &item.found.manifest;
+            let data = manifest.declaration.is_some();
+            // A component's requested limits are worth reading; a data Mod has none to show.
+            let detail = if data {
+                format!("Build {}", &item.sha256[..12.min(item.sha256.len())])
+            } else {
+                item.prompt
+                    .trim_end()
+                    .trim_end_matches("Trust this exact build? [y/N]")
+                    .trim_end()
+                    .to_owned()
+            };
+            mod_card(
+                col,
+                ModCard {
+                    act: None,
+                    border: ui::EDGE,
+                    selected: false,
+                    title: format!("{} {}", ui::title(&manifest.id), manifest.version),
+                    detail,
+                    tag: Some(if data {
+                        ("Data only".to_owned(), ui::MUTED)
+                    } else {
+                        ("Runs code".to_owned(), ui::AMBER)
+                    }),
+                },
+            );
+        }
     });
     focus
 }
@@ -1799,6 +2188,47 @@ mod tests {
     }
 
     #[test]
+    fn the_chosen_set_holds_a_games_mods_without_ticking_them() {
+        let installed = Installed::fake(Some(("ember", "0.1.0")), &[])
+            .with_mod("strata", &[])
+            .with_mod("hearth", &["strata"])
+            .with_mod("glassworks", &[])
+            .with_game_depends(&["hearth"]);
+        let mut form = Form {
+            game: Some("ember".into()),
+            ..Form::default()
+        };
+        assert_eq!(chosen_ids(&form, &installed), ["ember", "strata", "hearth"]);
+        form.mods.insert("glassworks".into());
+        assert_eq!(
+            chosen_ids(&form, &installed),
+            ["ember", "strata", "hearth", "glassworks"]
+        );
+    }
+
+    #[test]
+    fn one_trust_grants_every_untrusted_item_and_opens() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra", "strata", "hearth"]),
+        );
+        app.update();
+        act(&mut app, Act::Open);
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::Trust(Next::Open(path.clone()))
+        );
+        act(&mut app, Act::Trust);
+        assert!(app.world().resource::<Installed>().untrusted.is_empty());
+        assert_eq!(
+            app.world().resource::<Switch>().0,
+            Some(Target::World(path))
+        );
+    }
+
+    #[test]
     fn an_untrusted_game_asks_before_opening_and_cancel_runs_nothing() {
         let worlds = Directory::new();
         let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
@@ -1963,6 +2393,139 @@ mod tests {
     }
 
     #[test]
+    fn creating_takes_two_steps_and_back_keeps_the_picks() {
+        let worlds = Directory::new();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &[])
+                .with_mod("glassworks", &[])
+                .with_mod("lamps", &[]),
+        );
+        app.update();
+        act(&mut app, Act::New);
+        assert_eq!(launcher(&app).screen, Screen::Create);
+        act(&mut app, Act::PickGame(0));
+        act(&mut app, Act::NextMods);
+        assert_eq!(launcher(&app).screen, Screen::Mods);
+        act(&mut app, Act::ToggleMod(1));
+        assert!(launcher(&app).form.mods.contains("lamps"));
+        act(&mut app, Act::Back);
+        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert!(launcher(&app).form.mods.contains("lamps"));
+        assert_eq!(launcher(&app).form.game.as_deref(), Some("terra"));
+    }
+
+    #[test]
+    fn a_world_lists_its_mods_and_recreate_opens_them_on_step_two() {
+        let worlds = Directory::new();
+        let mut world = details("Lit", true);
+        world.mods = vec![library::ModRef {
+            id: "glassworks".into(),
+            version: "1".into(),
+        }];
+        library::create(&worlds.0, &world).unwrap();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &[])
+                .with_mod("glassworks", &[])
+                .with_mod("lamps", &[]),
+        );
+        app.update();
+        let listed = app
+            .world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .any(|t| t.0 == "Mods: Glassworks");
+        assert!(listed, "the World's Mods are named");
+        act(&mut app, Act::ReCreate);
+        assert_eq!(launcher(&app).screen, Screen::Mods);
+        assert!(launcher(&app).form.mods.contains("glassworks"));
+        assert!(!launcher(&app).form.mods.contains("lamps"));
+    }
+
+    #[test]
+    fn picking_a_game_ticks_what_it_suggests_and_a_suggestion_can_be_unticked() {
+        let worlds = Directory::new();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &[])
+                .with_mod("wanderer", &[])
+                .with_mod("golem", &[])
+                .with_game_suggests(&["wanderer"]),
+        );
+        app.update();
+        act(&mut app, Act::New);
+        assert!(launcher(&app).form.mods.contains("wanderer"));
+        act(&mut app, Act::NextMods);
+        act(&mut app, Act::ToggleMod(0));
+        assert!(
+            !launcher(&app).form.mods.contains("wanderer"),
+            "it can be unticked"
+        );
+        assert!(
+            installed_required(&app).is_empty(),
+            "a suggestion is not a dependency"
+        );
+    }
+
+    fn installed_required(app: &App) -> Vec<String> {
+        app.world().resource::<Installed>().required("terra")
+    }
+
+    #[test]
+    fn trust_for_a_new_world_goes_back_to_the_mods_page() {
+        let worlds = Directory::new();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra", "lamps"]).with_mod("lamps", &[]),
+        );
+        app.update();
+        act(&mut app, Act::New);
+        act(&mut app, Act::NextMods);
+        act(&mut app, Act::ToggleMod(0));
+        act(&mut app, Act::Create);
+        assert_eq!(launcher(&app).screen, Screen::Trust(Next::Create));
+        act(&mut app, Act::Back);
+        assert_eq!(launcher(&app).screen, Screen::Mods);
+        assert!(
+            launcher(&app).form.mods.contains("lamps"),
+            "the picks are kept"
+        );
+        assert!(
+            std::fs::read_dir(&worlds.0).unwrap().next().is_none(),
+            "nothing created"
+        );
+    }
+
+    #[test]
+    fn optional_mods_are_grouped_by_category_in_a_fixed_order() {
+        let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[])
+            .with_mod("zeta", &[])
+            .with_mod("lamps", &[])
+            .with_mod("strata", &[])
+            .with_mod("mystery", &[])
+            .with_mod("hearth", &[]);
+        installed.set_about("lamps", Some("Fire & light"), None);
+        installed.set_about("hearth", Some("Fire & light"), None);
+        installed.set_about("strata", Some("Terrain"), None);
+        installed.set_about("zeta", Some("Zoology"), None);
+        let names: Vec<_> = sections(&installed, &["hearth".to_string()])
+            .into_iter()
+            .map(|(name, mods)| (name, mods.len()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Terrain".to_string(), 1),
+                ("Fire & light".to_string(), 1),
+                ("Zoology".to_string(), 1),
+                ("Other".to_string(), 1),
+            ],
+            "a required Mod is left out, and uncategorised Mods come last"
+        );
+    }
+
+    #[test]
     fn with_no_game_installed_nothing_can_be_created() {
         let worlds = Directory::new();
         let mut app = app(&worlds, Installed::fake(None, &[]));
@@ -2083,6 +2646,7 @@ mod tests {
         app.update();
         act(&mut app, Act::New);
         assert!(launcher(&app).form.mods.is_empty(), "Mods start unticked");
+        act(&mut app, Act::NextMods);
         act(&mut app, Act::ToggleMod(0));
         assert_eq!(launcher(&app).form.mods.len(), 1);
         // reeds is needed by lake: shown locked, with nothing to toggle.
@@ -2119,6 +2683,8 @@ mod tests {
     fn a_controller_reaches_a_mod_toggle_and_ticks_it() {
         let worlds = Directory::new();
         let (mut app, pad) = pad_app(&worlds, mod_installed());
+        tap(&mut app, pad, GamepadButton::South);
+        reach(&mut app, pad, Act::NextMods);
         tap(&mut app, pad, GamepadButton::South);
         reach(&mut app, pad, Act::ToggleMod(1));
         tap(&mut app, pad, GamepadButton::South);

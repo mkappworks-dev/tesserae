@@ -1,0 +1,6 @@
+id = "golem"
+version = "0.1.0"
+api = "0.3"
+declaration = "content.toml"
+category = "Characters"
+description = "A slow stone figure, 2.16 m tall"

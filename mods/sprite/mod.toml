@@ -1,0 +1,6 @@
+id = "sprite"
+version = "0.1.0"
+api = "0.3"
+declaration = "content.toml"
+category = "Characters"
+description = "A small, quick figure, 1.44 m tall"
