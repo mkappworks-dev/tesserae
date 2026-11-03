@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bevy::tasks::block_on;
-use tesserae_core::Burn;
+use tesserae_core::{Burn, Worldgen};
 use tesserae_mods::{BatchReport, Command, Kind, Resolved, TickContext, validate};
 
 use super::{LoadedMods, TrustMode, load};
@@ -369,4 +369,88 @@ fn ember_wet_vent_has_water_beside_its_lava() {
         sources[0].1[0], 8.0,
         "on the wet vent's cap, two cells from its lava"
     );
+}
+
+#[test]
+fn tidewater_exercises_sea_level_caves_and_smoothing() {
+    let (_install, loaded) = loaded("tidewater", 0.5);
+    assert_eq!(ids(&loaded), ["flora", "strata", "waters", "tidewater"]);
+    let world = loaded.world.unwrap();
+    assert_eq!((world.sea_level_m, world.relief_m), (16.0, 24.0));
+    let caves = world.caves.expect("caves are declared");
+    assert!(caves.floor_m >= world.sea_level_m && caves.radius_m > 0.0);
+    assert_eq!(
+        world.smoothing.expect("smoothing is declared").min_rise_m,
+        0.5
+    );
+    let sea = world.water.unwrap();
+    assert_eq!(sea.level_m, 26.0);
+    assert_eq!(sea.material, material(&loaded, "waters:water"));
+}
+
+#[test]
+fn tidewater_tide_stays_in_bounds_and_never_reaches_the_spawn() {
+    const SEA_M: f32 = 26.0;
+    const RANGE_M: f32 = 1.0;
+    for size in [0.5, 0.25, 0.125] {
+        let (_install, mut loaded) = loaded("tidewater", size);
+        let params = loaded.world.unwrap();
+        let water = material(&loaded, "waters:water");
+        let layers = (RANGE_M / size) as usize;
+        let batches = run(&mut loaded, size, 0.5, 600);
+
+        let mut up = std::collections::BTreeSet::new();
+        let (mut highest, mut cycles) = (0usize, 0);
+        for batch in &batches {
+            for command in &batch.commands {
+                match command {
+                    Command::PlaceSources { region, material } if *material == water => {
+                        assert!(
+                            region.min[1] >= SEA_M && region.max[1] <= SEA_M + RANGE_M,
+                            "{region:?}"
+                        );
+                        up.insert((region.min[1] / size).round() as i64);
+                    }
+                    Command::RemoveSources(region) => {
+                        assert!(
+                            region.min[1] >= SEA_M && region.max[1] <= SEA_M + RANGE_M,
+                            "{region:?}"
+                        );
+                        up.remove(&((region.min[1] / size).round() as i64));
+                        if up.is_empty() {
+                            cycles += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                highest = highest.max(up.len());
+            }
+        }
+        assert_eq!(
+            highest, layers,
+            "the tide reaches its full range at {size} m"
+        );
+        assert!(
+            cycles >= 2,
+            "and falls again, more than once ({cycles}) in 300 s at {size} m"
+        );
+
+        // The spawn eye is 2 m above the higher of the ground and the sea.
+        for seed in 0..32 {
+            let generator = Worldgen::new(seed, size, params);
+            let ground = generator.surface_height_m(0.0, 0.0);
+            let eye = ground.max(SEA_M) + 2.0;
+            assert!(eye > SEA_M + RANGE_M, "seed {seed}: eye {eye}");
+        }
+    }
+}
+
+#[test]
+fn tidewater_steps_come_every_declared_interval() {
+    let (_install, mut loaded) = loaded("tidewater", 0.5);
+    let batches = run(&mut loaded, 0.5, 0.5, 200);
+    let water = material(&loaded, "waters:water");
+    let steps: Vec<f32> = sources(&batches, water).iter().map(|(t, _)| *t).collect();
+    assert!(near(steps[0], 8.0, 0.5), "{steps:?}");
+    assert!(near(steps[1] - steps[0], 8.0, 0.5), "{steps:?}");
 }

@@ -1,6 +1,6 @@
 # 04: Add the tidewater Game
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 

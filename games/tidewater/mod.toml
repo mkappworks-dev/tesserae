@@ -1,0 +1,6 @@
+id = "tidewater"
+version = "0.1.0"
+api = "0.3"
+root = true
+depends = ["strata", "waters", "flora"]
+wasm = "tidewater.wasm"
