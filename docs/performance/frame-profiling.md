@@ -43,14 +43,16 @@ the physical target. `--switches` turns on diagnostic switches of a `profiling`
 build, each changing one cost and the image, so they are for attribution and
 never for a timing baseline: `no-coverage-discard` (the coverage test is
 compiled out of the chunk shader), `level0-only` (coarse levels are not drawn),
-`msaa-off` (the Player camera gets `Msaa::Off`) and `no-shadows` (the sun casts
-no shadow map). A normal build compiles none of them.
+`no-shadows` (the sun casts no shadow map) and five that replace the
+anti-aliasing setting, one at a time: `msaa-off`, `msaa-4`, `msaa-2`, `fxaa` and
+`smaa` (the last two with MSAA off). The hand camera takes the Player camera's
+sample count. A normal build compiles none of them.
 
 `--render-scale` (100, 85, 75 or 67) overrides the render scale setting and
 `--sharpen on` or `off` overrides contrast-adaptive sharpening of the upscale,
-on by default below 100%. Each run's `run.json` records the scale and sharpening
-the engine reports using, under `engine_presentation`; never pool runs at
-different scales.
+on by default below 100%. Each run's `run.json` records the anti-aliasing, scale
+and sharpening the engine reports using, under `engine_presentation`; never pool
+runs that differ in them.
 
 Each run retains its PNG, log, environment, executable hash and raw samples. The
 series retains a copied executable, Engine source hashes, source revision/diff,

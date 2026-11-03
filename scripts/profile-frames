@@ -257,7 +257,7 @@ def competitors():
         r'/(cargo|rustc|tesserae[^/ ]*|meshing-[^/ ]+|fluids-[^/ ]+)$', line)]
 
 
-SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'no-shadows']
+SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'msaa-4', 'msaa-2', 'fxaa', 'smaa', 'no-shadows']
 
 
 def main():
@@ -388,14 +388,14 @@ def main():
 
 
 def engine_presentation(run):
-    """The render scale and sharpening the engine reports, or None without logging."""
+    """The anti-aliasing, render scale and sharpening the engine reports, or None without logging."""
     meta = run / 'frames.metadata.txt'
     if not meta.exists():
         return None
     for line in meta.read_text().splitlines():
         if line.startswith('selected_display_sync='):
             fields = dict(f.split('=', 1) for f in line.split())
-            return {k: fields.get(k) for k in ('render_scale', 'sharpen')}
+            return {k: fields.get(k) for k in ('anti_aliasing', 'render_scale', 'sharpen')}
     return None
 
 

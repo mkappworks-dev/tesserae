@@ -111,6 +111,7 @@ pub(super) enum Operation {
     ScrollDirection(bool),
     Sync(bool),
     Cap(Option<u32>),
+    AntiAliasing(super::anti_alias::AntiAliasing),
     Scale(u32),
 }
 
@@ -469,6 +470,7 @@ fn activate(
                 Operation::ScrollDirection(value) => p.reverse_scroll = value,
                 Operation::Sync(value) => p.display_sync = value,
                 Operation::Cap(value) => p.fps_cap = value,
+                Operation::AntiAliasing(value) => p.anti_aliasing = value,
                 Operation::Scale(value) => p.render_scale = value,
                 _ => {}
             }
@@ -1321,6 +1323,24 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                         p.display_sync,
                     );
                     option(buttons, "Sync off", Operation::Sync(false), !p.display_sync);
+                })
+            },
+        );
+        setting_row(
+            card,
+            "Anti-aliasing",
+            "Smooths block edges. MSAA 4x also smooths the held item and costs more; Off is fastest.",
+            false,
+            |row| {
+                segment(row, |buttons| {
+                    for aa in super::anti_alias::CHOICES {
+                        option(
+                            buttons,
+                            aa.label(),
+                            Operation::AntiAliasing(aa),
+                            p.anti_aliasing == aa,
+                        );
+                    }
                 })
             },
         );
