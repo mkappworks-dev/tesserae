@@ -12,10 +12,10 @@ gazebo posts are `flora:wood` in the `glassworks:fence` Shape.
 ## Dependencies
 
 [strata](../../mods/strata/), [flora](../../mods/flora/),
-[glassworks](../../mods/glassworks/). This Game declares no Material, Shape or
-fluid of its own; every name it uses is `<mod id>:<name>` from those Mods. It
-declares only its World (ground, sea level, relief and the like) and one
-behaviour.
+[glassworks](../../mods/glassworks/), and [wanderer](../../mods/wanderer/) for
+its character. This Game declares no Material, Shape or fluid of its own; every
+name it uses is `<mod id>:<name>` from those Mods. It declares only its World
+(ground, sea level, relief and the like) and one behaviour.
 
 ## Behaviour
 
@@ -37,7 +37,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/flora mods/glassworks --out dist
+tesserae package mods/strata mods/flora mods/glassworks mods/wanderer --out dist
 tesserae package games/meadow --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

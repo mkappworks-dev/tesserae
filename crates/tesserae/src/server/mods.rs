@@ -430,6 +430,7 @@ pub(crate) async fn declare_all(
 ) -> Result<LoadedMods, String> {
     let mut loaded = LoadedMods::default();
     let mut behaviours = Vec::new();
+    let mut character_from: Option<String> = None;
     for component in compiled {
         let id = &component.found.manifest.id;
         let manifest = &component.found.manifest;
@@ -484,8 +485,16 @@ pub(crate) async fn declare_all(
             loaded.view = applied.view;
             loaded.game = true;
             loaded.movement = applied.movement;
-            loaded.character = applied.character;
             loaded.tools = applied.tools;
+        }
+        if let Some(character) = applied.character {
+            if let Some(first) = &character_from {
+                return Err(format!(
+                    "`{first}` and `{id}` both supply the character; a World has one"
+                ));
+            }
+            character_from = Some(id.clone());
+            loaded.character = Some(character);
         }
         loaded.mods.extend(instance);
     }
@@ -853,7 +862,7 @@ surface = "plain:rock"
     #[test]
     fn data_errors_use_shared_validation_and_name_the_mod_and_field() {
         for (content, root, field) in [
-            ("[world]", false, "world"),
+            ("[world]\nrelief-m = 10.0", false, "world.relief-m"),
             ("[world]\nrelief-m = -1.0", true, "relief"),
             ("[world]\nrelief-m = nan", true, "relief"),
             (
@@ -929,6 +938,72 @@ surface = "plain:rock"
             pure.load(TrustMode::All).unwrap().tables.materials.def(8),
             loaded.tables.materials.def(9)
         );
+    }
+
+    fn character_mod(world: &str) -> String {
+        format!(
+            "{world}\n[world.character]\nskin = \"skin.png\"\n{}",
+            include_str!("../../../tesserae-mods/tests/fixtures/data/character.toml"),
+        )
+    }
+
+    #[test]
+    fn a_mod_can_supply_the_character_of_a_game_that_has_none() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "depends = [\"wanderer\"]", DATA_GAME);
+        data(&s, "wanderer", false, "", &character_mod(""));
+        let loaded = s.load(TrustMode::All).unwrap();
+        assert_eq!(loaded.character.as_ref().unwrap().bones.len(), 2);
+        assert_eq!(
+            loaded.world.unwrap().relief_m,
+            WorldgenParams::default().relief_m
+        );
+    }
+
+    #[test]
+    fn two_character_sources_fail_naming_both() {
+        let s = Scratch::new();
+        data(
+            &s,
+            "plain",
+            true,
+            "depends = [\"wanderer\"]",
+            &format!("{DATA_GAME}\n{}", character_mod("")),
+        );
+        data(&s, "wanderer", false, "", &character_mod(""));
+        let error = s.load(TrustMode::All).err().unwrap();
+        assert!(
+            error.contains("`wanderer` and `plain` both supply the character"),
+            "{error}"
+        );
+
+        let t = Scratch::new();
+        data(&t, "plain", true, "depends = [\"a\", \"b\"]", DATA_GAME);
+        data(&t, "a", false, "", &character_mod(""));
+        data(&t, "b", false, "", &character_mod(""));
+        let error = t.load(TrustMode::All).err().unwrap();
+        assert!(error.contains("both supply the character"), "{error}");
+    }
+
+    #[test]
+    fn a_mod_may_not_set_any_other_part_of_the_world() {
+        for (world, field) in [
+            ("[world]\nrelief-m = 10.0", "world.relief-m"),
+            (
+                "[world.movement]\nallow-flight = true\nallow-physics = true\nstart-in-flight = false",
+                "world.movement",
+            ),
+            ("[world.smoothing]\nmin-rise-m = 0.5", "world.smoothing"),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", true, "depends = [\"wanderer\"]", DATA_GAME);
+            data(&s, "wanderer", false, "", &character_mod(world));
+            let error = s.load(TrustMode::All).err().unwrap();
+            assert!(
+                error.contains("mod `wanderer`") && error.contains(field),
+                "{field}: {error}"
+            );
+        }
     }
 
     fn full_game() -> String {

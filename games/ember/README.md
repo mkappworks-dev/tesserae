@@ -14,10 +14,11 @@ sets the scene and starts the eruptions.
 ## Dependencies
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
-[flora](../../mods/flora/), [hearth](../../mods/hearth/). This Game declares no
-Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
-from those Mods. It declares only its World (ground, sea level, relief and the
-like) and one behaviour.
+[flora](../../mods/flora/), [hearth](../../mods/hearth/), and
+[golem](../../mods/golem/) for its character. This Game declares no Material,
+Shape or fluid of its own; every name it uses is `<mod id>:<name>` from those
+Mods. It declares only its World (ground, sea level, relief and the like) and
+one behaviour.
 
 ## Behaviour
 
@@ -40,7 +41,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/waters mods/flora mods/hearth --out dist
+tesserae package mods/strata mods/waters mods/flora mods/hearth mods/golem --out dist
 tesserae package games/ember --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

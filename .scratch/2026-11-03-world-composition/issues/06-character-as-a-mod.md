@@ -1,6 +1,6 @@
 # 06: A character can come from a Mod
 
-Status: ready-for-human
+Status: done
 
 ## What to build
 
@@ -8,6 +8,6 @@ Allow one non-root Mod to supply `world.character` and nothing else from `world`
 
 ## Acceptance criteria
 
-- [ ] ADR records the rule and how a Mod's `world` is limited.
-- [ ] Two sources fail the load naming both.
-- [ ] Each demo Game other than terra shows a Mod's character.
+- [x] ADR records the rule and how a Mod's `world` is limited.
+- [x] Two sources fail the load naming both.
+- [x] Each demo Game other than terra shows a Mod's character.

@@ -18,10 +18,13 @@ Mod is a folder of TOML and PNG files. Only a Game declares `world`, `view` and
 | [frost](frost/)           | Ice, snow, packed ice, slush fluid; snow layer Shape      | -                     |
 | [crystals](crystals/)     | Amethyst, citrine, aquamarine; cluster Shape              | -                     |
 | [bog](bog/)               | Peat, mud and tar fluids; lava reactions; peat burns      | hearth, brickwork     |
+| [wanderer](wanderer/)     | Character: a traveller, 1.8 m                             | -                     |
+| [golem](golem/)           | Character: a slow stone figure, 2.16 m                    | -                     |
+| [sprite](sprite/)         | Character: a small quick figure, 1.44 m                   | -                     |
 
 Validate and package all of them with the real commands:
 
 ```sh
-tesserae validate mods/*/ --mods mods
-tesserae package mods/*/ --out dist
+for mod in mods/*/; do tesserae validate "$mod" --mods mods; done
+for mod in mods/*/; do tesserae package "$mod" --out dist --mods mods; done
 ```

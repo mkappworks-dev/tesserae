@@ -71,7 +71,10 @@ Declaration, so bounds, Game-only restrictions and per-Mod limits are identical.
 
 The complete field list, with a Declaration that uses every table, is in the
 [authoring guide](authoring-guide.md#the-declaration-schema). Only Games may
-declare `world`, `view` and `tools`.
+declare `world`, `view` and `tools`, except that a Mod may supply
+`world.character` and nothing else of `world`
+([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)); a World has one
+character source, and two fail the load naming both.
 
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes

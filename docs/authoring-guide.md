@@ -132,7 +132,9 @@ at every level, naming the Mod. Absent optional tables mean _none_, never a
 default; the single exception is the numeric fields of a present `[world]`,
 which take the Engine's terrain values. Omitted lists are empty.
 
-Only a Game may declare `world`, `view` and `tools`.
+Only a Game may declare `world`, `view` and `tools`, except that a Mod may
+supply `world.character` alone
+([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)).
 
 | Table                       | Fields                                                                                                                                                                   |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

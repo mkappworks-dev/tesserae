@@ -13,9 +13,10 @@ removed above the sea.
 ## Dependencies
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
-[flora](../../mods/flora/). This Game declares no Material, Shape or fluid of
-its own; every name it uses is `<mod id>:<name>` from those Mods. It declares
-only its World (ground, sea level, relief and the like) and one behaviour.
+[flora](../../mods/flora/), and [sprite](../../mods/sprite/) for its character.
+This Game declares no Material, Shape or fluid of its own; every name it uses is
+`<mod id>:<name>` from those Mods. It declares only its World (ground, sea
+level, relief and the like) and one behaviour.
 
 ## Behaviour
 
@@ -40,7 +41,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/waters mods/flora --out dist
+tesserae package mods/strata mods/waters mods/flora mods/sprite --out dist
 tesserae package games/tidewater --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

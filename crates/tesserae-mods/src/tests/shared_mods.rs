@@ -9,7 +9,7 @@ use tesserae_core::{Burn, Tables};
 
 use crate::{Behaviour, Kind, ModHost, Registry, Trust, apply, plan, resolve, scan};
 
-const SHARED: [&str; 12] = [
+const SHARED: [&str; 15] = [
     "strata",
     "waters",
     "flora",
@@ -22,6 +22,9 @@ const SHARED: [&str; 12] = [
     "frost",
     "crystals",
     "bog",
+    "wanderer",
+    "golem",
+    "sprite",
 ];
 
 fn checkout() -> PathBuf {
@@ -69,8 +72,9 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// Every shared Mod declared in dependency order, then resolved as one set.
-fn load_all() -> (Vec<String>, Tables, Registry) {
+/// Every shared Mod declared in dependency order, then resolved as one set, and the Mods that
+/// supplied a character.
+fn load_all() -> (Vec<String>, Tables, Registry, Vec<String>) {
     let installed = Installed::new();
     let scanned = scan(&installed.mods()).unwrap();
     assert!(scanned.rejected.is_empty(), "{:?}", scanned.rejected);
@@ -84,15 +88,20 @@ fn load_all() -> (Vec<String>, Tables, Registry) {
     let mut registry = Registry::builtin();
     let mut behaviours: Vec<Behaviour> = Vec::new();
     let mut ids = Vec::new();
+    let mut characters = Vec::new();
     for component in &compiled {
         let id = component.found.manifest.id.clone();
         let declaration = component.declaration().unwrap().clone();
         let applied = apply(declaration, &id, &mut tables, &mut registry, false).unwrap();
+        if let Some(character) = &applied.character {
+            assert_eq!(character.bones.len(), 6, "{id}");
+            characters.push(id.clone());
+        }
         behaviours.push(applied.behaviour);
         ids.push(id);
     }
     resolve(behaviours, &mut tables, &registry).unwrap();
-    (ids, tables, registry)
+    (ids, tables, registry, characters)
 }
 
 fn material(registry: &Registry, name: &str) -> u16 {
@@ -149,7 +158,7 @@ fn dependencies_load_before_the_mods_that_use_them() {
 
 #[test]
 fn every_cross_mod_reference_resolves() {
-    let (_, tables, registry) = load_all();
+    let (_, tables, registry, _) = load_all();
 
     let water = material(&registry, "waters:water");
     let lava = material(&registry, "hearth:lava");
@@ -205,4 +214,11 @@ fn every_cross_mod_reference_resolves() {
     ] {
         assert!(registry.id_of(Kind::Shape, name).is_some(), "{name}");
     }
+}
+
+#[test]
+fn the_character_mods_each_supply_a_six_bone_figure() {
+    let (_, _, _, mut characters) = load_all();
+    characters.sort_unstable();
+    assert_eq!(characters, ["golem", "sprite", "wanderer"]);
 }

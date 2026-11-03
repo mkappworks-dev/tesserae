@@ -13,13 +13,13 @@ data for content, shared across Games.
 All Games are MIT licensed and sit in `games/<id>/`. Only a Game declares
 `world`, `view` and `tools`.
 
-| Game                             | Behaviour (Rust)                         | Depends on                    | Shows                                                                               |
-| -------------------------------- | ---------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------- |
-| [terra](../games/terra/)         | Everything; self-contained               | -                             | A Game that declares its own content, fluids, fire and a tool                       |
-| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks     | A Game with no Material of its own; a Shape from one Mod with a Material of another |
-| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth | Fluid, reaction and fire rules that live in Mods                                    |
-| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora         | Sea level, caves and smoothing; fluid Commands from `tick`                          |
-| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks            | Blended glass, emission and Shapes; timed placement from `tick`                     |
+| Game                             | Behaviour (Rust)                         | Depends on                           | Shows                                                                               |
+| -------------------------------- | ---------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
+| [terra](../games/terra/)         | Everything; self-contained               | -                                    | A Game that declares its own content, fluids, fire and a tool                       |
+| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks, wanderer  | A Game with no Material of its own; a Shape from one Mod with a Material of another |
+| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth, golem | Fluid, reaction and fire rules that live in Mods                                    |
+| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, sprite        | Sea level, caves and smoothing; fluid Commands from `tick`                          |
+| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks, wanderer         | Blended glass, emission and Shapes; timed placement from `tick`                     |
 
 ## Mods
 
@@ -42,6 +42,9 @@ third-party source. They declare content only.
 | [frost](frost/)           | Ice, snow, packed ice, slush fluid; snow layer Shape      | -                     | -                                |
 | [crystals](crystals/)     | Amethyst, citrine, aquamarine; cluster Shape              | -                     | -                                |
 | [bog](bog/)               | Peat, mud and tar fluids; lava reactions; peat burns      | hearth, brickwork     | -                                |
+| [wanderer](wanderer/)     | Character: a traveller, 1.8 m                             | -                     | meadow, lumen                    |
+| [golem](golem/)           | Character: a slow stone figure, 2.16 m                    | -                     | ember                            |
+| [sprite](sprite/)         | Character: a small quick figure, 1.44 m                   | -                     | tidewater                        |
 
 The lava and water reactions are in `hearth` rather than `waters`, because they
 need both fluids and `waters` has to work in a World with no lava, such as
@@ -63,6 +66,10 @@ graph LR
   tidewater --> flora
   lumen --> strata
   lumen --> glassworks
+  lumen --> wanderer
+  meadow --> wanderer
+  ember --> golem
+  tidewater --> sprite
   hearth --> strata
   hearth --> waters
   hearth --> flora
@@ -78,7 +85,7 @@ These commands run from the repository root. `tesserae` is the Engine binary;
 from a checkout use `cargo run --release --` in its place.
 
 ```sh
-tesserae validate mods/*/ --mods mods
+for mod in mods/*/; do tesserae validate "$mod" --mods mods; done
 ```
 
 The glob ends in `/` so it names the Mod folders and not `mods/README.md`. A
@@ -97,7 +104,7 @@ tesserae validate games/ember --mods mods --trust-for-run
 into the same folder:
 
 ```sh
-tesserae package mods/*/ --out dist
+for mod in mods/*/; do tesserae package "$mod" --out dist --mods mods; done
 for game in meadow ember tidewater lumen; do
   tesserae package games/$game --mods mods --out dist --trust-for-run
 done

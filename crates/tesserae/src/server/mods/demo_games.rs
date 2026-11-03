@@ -215,11 +215,30 @@ fn near(a: f32, b: f32, tolerance: f32) -> bool {
     (a - b).abs() <= tolerance
 }
 
+/// The six-bone figure a Game's character Mod supplies, which the Game itself never declares.
+#[test]
+fn every_demo_game_draws_the_character_of_the_mod_it_depends_on() {
+    for (game, size) in [
+        ("meadow", 0.05625),
+        ("ember", 0.0675),
+        ("tidewater", 0.045),
+        ("lumen", 0.05625),
+    ] {
+        let (_install, loaded) = loaded(game, 0.5);
+        let character = loaded.character.as_ref().expect(game);
+        assert_eq!(character.bones.len(), 6, "{game}");
+        assert_eq!(character.pixel_m, size, "{game}");
+    }
+}
+
 #[test]
 fn meadow_declares_no_material_and_takes_its_ground_from_strata() {
     let (_install, loaded) = loaded("meadow", 0.5);
     assert!(loaded.game);
-    assert_eq!(ids(&loaded), ["flora", "glassworks", "strata", "meadow"]);
+    assert_eq!(
+        ids(&loaded),
+        ["flora", "glassworks", "strata", "wanderer", "meadow"]
+    );
     assert!(
         loaded
             .registry
@@ -282,7 +301,7 @@ fn ember_gets_lava_reactions_and_burning_wood_from_hearth() {
     let (_install, loaded) = loaded("ember", 0.5);
     assert_eq!(
         ids(&loaded),
-        ["flora", "strata", "waters", "hearth", "ember"]
+        ["flora", "golem", "strata", "waters", "hearth", "ember"]
     );
     let tables = &loaded.tables;
     let (lava, water) = (
@@ -374,7 +393,10 @@ fn ember_wet_vent_has_water_beside_its_lava() {
 #[test]
 fn tidewater_exercises_sea_level_caves_and_smoothing() {
     let (_install, loaded) = loaded("tidewater", 0.5);
-    assert_eq!(ids(&loaded), ["flora", "strata", "waters", "tidewater"]);
+    assert_eq!(
+        ids(&loaded),
+        ["flora", "sprite", "strata", "waters", "tidewater"]
+    );
     let world = loaded.world.unwrap();
     assert_eq!((world.sea_level_m, world.relief_m), (16.0, 24.0));
     let caves = world.caves.expect("caves are declared");
@@ -458,7 +480,7 @@ fn tidewater_steps_come_every_declared_interval() {
 #[test]
 fn lumen_builds_blended_glass_light_and_all_three_shapes() {
     let (_install, mut loaded) = loaded("lumen", 0.5);
-    assert_eq!(ids(&loaded), ["glassworks", "strata", "lumen"]);
+    assert_eq!(ids(&loaded), ["glassworks", "strata", "wanderer", "lumen"]);
     let batches = run(&mut loaded, 0.5, 0.05, 40);
     let all: Vec<&Command> = batches.iter().flat_map(|b| &b.commands).collect();
     let has = |wanted: &dyn Fn(Voxel) -> bool| {

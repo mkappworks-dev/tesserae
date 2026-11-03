@@ -11,10 +11,11 @@ Everything you can see comes from `glassworks`: clear `glass` walls and a
 
 ## Dependencies
 
-[strata](../../mods/strata/), [glassworks](../../mods/glassworks/). This Game
-declares no Material, Shape or fluid of its own; every name it uses is
-`<mod id>:<name>` from those Mods. It declares only its World (ground, sea
-level, relief and the like) and one behaviour.
+[strata](../../mods/strata/), [glassworks](../../mods/glassworks/), and
+[wanderer](../../mods/wanderer/) for its character. This Game declares no
+Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
+from those Mods. It declares only its World (ground, sea level, relief and the
+like) and one behaviour.
 
 ## Behaviour
 
@@ -36,7 +37,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/glassworks --out dist
+tesserae package mods/strata mods/glassworks mods/wanderer --out dist
 tesserae package games/lumen --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

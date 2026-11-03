@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Writes the PNG textures of the shared Mods under mods/*/art/.
+"""Writes the PNG textures of the shared Mods under mods/*/art/, and the character skins
+(mods/<id>/skin.png) of the character Mods.
 
 The artwork is original and generated here, so it is CC0 and its source is this file. Each texture
 is 48 by 16: three 16 by 16 faces side by side, in the order top, side, bottom. Run it from
@@ -273,6 +274,72 @@ TEXTURES = {
 }
 
 
+SKIN = 64
+FACES = ("top", "bottom", "right", "front", "left", "back")
+LAYOUT = {
+    "head": ((0, 0), (8, 8, 8)),
+    "body": ((16, 16), (8, 12, 4)),
+    "right_arm": ((40, 16), (4, 12, 4)),
+    "left_arm": ((32, 48), (4, 12, 4)),
+    "right_leg": ((0, 16), (4, 12, 4)),
+    "left_leg": ((16, 48), (4, 12, 4)),
+}
+
+
+def paint_box(skin, part, colour):
+    (u, v), (w, h, d) = LAYOUT[part]
+    rects = {
+        "top": (u + d, v, w, d),
+        "bottom": (u + d + w, v, w, d),
+        "right": (u, v + d, d, h),
+        "front": (u + d, v + d, w, h),
+        "left": (u + d + w, v + d, d, h),
+        "back": (u + 2 * d + w, v + d, w, h),
+    }
+    for face, (x0, y0, width, height) in rects.items():
+        for y in range(height):
+            for x in range(width):
+                skin[y0 + y][x0 + x] = colour(face, x, y)
+
+
+def humanoid(flesh, hair, top, bottom, boots, eye, salt, trim=None):
+    grain = lambda base, x, y, k: tint(base, (noise(x, y, salt + k) - 128) // 16)
+
+    def head(face, x, y):
+        if face == "front" and y == 4 and x in (1, 2, 5, 6):
+            return (*eye, 255) if x in (2, 5) else (236, 236, 236, 255)
+        if face in ("top",) or (face == "back" and y < 7) or (face != "bottom" and y < 2):
+            return grain(hair, x, y, 1)
+        return grain(flesh, x, y, 3)
+
+    def body(face, x, y):
+        if trim and face == "front" and y == 6:
+            return grain(trim, x, y, 5)
+        return grain(top, x, y, 7)
+
+    def arm(face, x, y):
+        return grain(top if face == "top" or (face != "bottom" and y < 4) else flesh, x, y, 11)
+
+    def leg(face, x, y):
+        return grain(boots if face == "bottom" or (face != "top" and y >= 10) else bottom, x, y, 13)
+
+    skin = [[(0, 0, 0, 0)] * SKIN for _ in range(SKIN)]
+    paint_box(skin, "head", head)
+    paint_box(skin, "body", body)
+    for part in ("right_arm", "left_arm"):
+        paint_box(skin, part, arm)
+    for part in ("right_leg", "left_leg"):
+        paint_box(skin, part, leg)
+    return skin
+
+
+CHARACTERS = {
+    "wanderer": humanoid((196, 146, 112), (74, 50, 34), (176, 98, 52), (72, 62, 52), (48, 40, 36), (40, 52, 88), 131, (230, 190, 90)),
+    "golem": humanoid((132, 138, 140), (88, 94, 96), (118, 124, 126), (96, 102, 104), (70, 74, 76), (255, 190, 80), 151, (70, 76, 78)),
+    "sprite": humanoid((236, 214, 190), (120, 200, 160), (96, 190, 150), (80, 150, 200), (60, 100, 140), (60, 90, 70), 171, (250, 250, 250)),
+}
+
+
 def png(rows):
     height, width = len(rows), len(rows[0])
     raw = b"".join(b"\x00" + bytes(c for px in row for c in px) for row in rows)
@@ -298,3 +365,8 @@ for mod, textures in TEXTURES.items():
             [paint(face, x, y) for face in range(3) for x in range(EDGE)] for y in range(EDGE)
         ]
         (art / f"{name}.png").write_bytes(png(rows))
+
+for name, skin in CHARACTERS.items():
+    folder = root / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "skin.png").write_bytes(png(skin))

@@ -447,8 +447,9 @@ fn a_mod_that_is_not_the_game_may_not_declare_game_only_fields() {
         ("[[tools]]\nname = 'ruler'\nkind = 'measure'", "tools"),
         (
             "[world.movement]\nallow-flight = true\nallow-physics = true\nstart-in-flight = false",
-            "world",
+            "world.movement",
         ),
+        ("[world]\nrelief-m = 10.0", "world.relief-m"),
     ] {
         let d = parse(toml).unwrap();
         let mut tables = Tables::builtin();
