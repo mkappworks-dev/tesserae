@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds test guests to target/guests and the Terra Game to games/terra/dist/games/terra,
-# beside the plain `meadow` Game and an empty dist/mods, the layout `--mods games/terra/dist/mods` reads.
+# beside an empty dist/mods, the layout `--mods games/terra/dist/mods` reads. Also builds the
+# demo Games (meadow, ember, tidewater, lumen) into their own project folders.
 #
 # Cargo may use a shared target directory; metadata locates the artifact
 # under either layout before the finished component is copied out.
@@ -31,10 +32,13 @@ terra_target=$(cargo metadata --manifest-path games/terra/Cargo.toml --no-deps \
 cp "$terra_target/wasm32-wasip2/release/terra.wasm" games/terra/dist/games/terra/
 cp games/terra/mod.toml games/terra/dist/games/terra/
 
-RUSTFLAGS= cargo build --manifest-path games/meadow/Cargo.toml \
-  --target wasm32-wasip2 --release --locked
-mkdir -p games/terra/dist/games/meadow
-meadow_target=$(cargo metadata --manifest-path games/meadow/Cargo.toml --no-deps \
-  --format-version 1 | jq -r .target_directory)
-cp "$meadow_target/wasm32-wasip2/release/meadow.wasm" games/terra/dist/games/meadow/
-cp games/meadow/mod.toml games/terra/dist/games/meadow/
+# The demo Games depend on the data Mods in mods/, so they are not installed beside Terra (a
+# World with no record loads every Mod there). Each component lands in its project folder, where
+# `tesserae validate games/<id> --mods mods --trust-for-run` and the tests find it.
+for game in meadow; do
+  RUSTFLAGS= cargo build --manifest-path "games/$game/Cargo.toml" \
+    --target wasm32-wasip2 --release --locked
+  game_target=$(cargo metadata --manifest-path "games/$game/Cargo.toml" --no-deps \
+    --format-version 1 | jq -r .target_directory)
+  cp "$game_target/wasm32-wasip2/release/$game.wasm" "games/$game/$game.wasm"
+done

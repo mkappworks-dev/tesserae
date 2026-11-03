@@ -736,6 +736,9 @@ pub(super) fn terra_for_save(
 }
 
 #[cfg(test)]
+mod demo_games;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::render::chunk_material::ChunkMaterialExtension;

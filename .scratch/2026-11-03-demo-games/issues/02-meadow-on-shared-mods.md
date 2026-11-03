@@ -1,6 +1,6 @@
 # 02: Rebuild meadow on shared Mods
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
