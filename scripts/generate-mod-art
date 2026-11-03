@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Writes the PNG textures of the shared Mods under mods/*/art/.
+
+The artwork is original and generated here, so it is CC0 and its source is this file. Each texture
+is 48 by 16: three 16 by 16 faces side by side, in the order top, side, bottom. Run it from
+anywhere; output is deterministic, so a re-run changes no file.
+"""
+
+import pathlib
+import struct
+import zlib
+
+EDGE = 16
+root = pathlib.Path(__file__).resolve().parent.parent / "mods"
+
+
+def noise(x, y, salt):
+    n = (x * 374_761_393 ^ y * 668_265_263 ^ salt * 1_274_126_177) & 0xFFFFFFFF
+    n = ((n ^ (n >> 13)) * 1_274_126_177) & 0xFFFFFFFF
+    return (n ^ (n >> 16)) & 255
+
+
+def tint(base, amount, alpha=255):
+    return (*(max(0, min(255, c + amount)) for c in base), alpha)
+
+
+def speckle(base, spread=7):
+    return lambda face, x, y: tint(base, (noise(x, y, face + 3) - 128) // spread)
+
+
+def stone(face, x, y):
+    n = noise(x, y, face + 3)
+    if (x + 2 * y) % 13 == 0 and noise(x // 3, y // 3, 19) > 145:
+        return tint((96, 97, 106), 0)
+    return tint((140, 141, 148), (n - 128) // 9)
+
+
+def basalt(face, x, y):
+    n = noise(x, y, face + 5)
+    column = 14 if x % 5 == 0 else 0
+    return tint((58, 60, 68), (n - 128) // 12 - column)
+
+
+def clay(face, x, y):
+    band = -10 if (y + face) % 6 == 0 else 0
+    return tint((166, 112, 92), (noise(x, y, face + 7) - 128) // 11 + band)
+
+
+def sand(face, x, y):
+    n = noise(x, y, face + 9)
+    return tint((222, 205, 150) if n < 235 else (240, 226, 176), (n - 128) // 16)
+
+
+def soil(face, x, y):
+    n = noise(x, y, face + 11)
+    if n > 236:
+        return (151, 119, 79, 255)
+    return tint((107, 74, 46), (n - 128) // 7)
+
+
+def turf(face, x, y):
+    if face == 2 or (face == 1 and y >= 3 + noise(x // 2, 0, 41) % 3):
+        return soil(face, x, y)
+    patch = noise(x // 2, y // 2, 71)
+    return tint((80, 144, 49), (patch - 128) // 5 + (noise(x, y, face + 13) - 128) // 16)
+
+
+def wood(face, x, y):
+    n = noise(x, y, face + 17)
+    if face != 1:
+        ring = max(abs(x - 7), abs(y - 7))
+        return tint((150, 104, 60), (-37 if ring % 3 == 0 else 16) + (n - 128) // 18)
+    return tint((120, 82, 48), (-24 if (x + noise(0, y // 4, 23)) % 4 == 0 else 8) + (n - 128) // 20)
+
+
+def leaves(face, x, y):
+    n = noise(x, y, face + 29)
+    dx, dy = abs(x % 5 - 2), abs(y % 5 - 2)
+    if dx + dy <= 2:
+        return tint((60, 136, 44), (n - 128) // 12 - (19 if dx == 0 else 0))
+    return tint((25, 75, 29), (n - 128) // 14, 0 if n > 150 else 255)
+
+
+def grass(face, x, y):
+    blade = noise(x, 0, 31) % 3
+    height = 6 + noise(x, 1, 33) % 9
+    if face == 2 or y < EDGE - height - blade:
+        return (0, 0, 0, 0)
+    return tint((88, 160, 56), (noise(x, y, 35) - 128) // 10)
+
+
+def kelp(face, x, y):
+    sway = (y // 3 + noise(x // 4, 0, 37)) % 2
+    strand = (x + sway) % 4 in (0, 1)
+    if not strand or noise(x, y, 39) > 230:
+        return (0, 0, 0, 0)
+    return tint((44, 110, 70), (noise(x, y, 41) - 128) // 12)
+
+
+def obsidian(face, x, y):
+    n = noise(x, y, face + 43)
+    if n > 238:
+        return (118, 78, 168, 255)
+    return tint((26, 20, 40), (n - 128) // 14)
+
+
+def ash(face, x, y):
+    return tint((70, 66, 62), (noise(x, y, face + 47) - 128) // 8)
+
+
+def lava(face, x, y):
+    cell = noise(x // 3, y // 3, face + 53)
+    crust = cell > 175
+    n = noise(x, y, face + 55)
+    if crust:
+        return tint((92, 36, 18), (n - 128) // 12)
+    return tint((236, 98, 20), (n - 128) // 6 + (cell - 128) // 5)
+
+
+def pane(base, alpha, shine):
+    def paint(face, x, y):
+        border = x in (0, EDGE - 1) or y in (0, EDGE - 1)
+        glint = x - y in (3, 4) and 3 <= y <= 8
+        if border:
+            return (*base, min(255, alpha + 90))
+        if glint and shine:
+            return (255, 255, 255, min(255, alpha + 70))
+        return (*base, alpha)
+
+    return paint
+
+
+def frosted(face, x, y):
+    n = noise(x, y, face + 59)
+    return tint((218, 232, 242), (n - 128) // 10, 150 + n // 8)
+
+
+def lantern(face, x, y):
+    frame = x in (0, 1, EDGE - 2, EDGE - 1) or y in (0, 1, EDGE - 2, EDGE - 1)
+    if face != 1:
+        frame = x < 2 or x >= EDGE - 2 or y < 2 or y >= EDGE - 2
+    if frame:
+        return tint((70, 62, 52), (noise(x, y, face + 61) - 128) // 14)
+    centre = max(abs(x - 7.5), abs(y - 7.5))
+    return tint((255, 226, 140) if centre < 3.5 else (250, 196, 96), (noise(x, y, 63) - 128) // 18)
+
+
+TEXTURES = {
+    "strata": {
+        "stone": stone,
+        "basalt": basalt,
+        "clay": clay,
+        "sand": sand,
+        "soil": soil,
+        "turf": turf,
+    },
+    "flora": {"wood": wood, "leaves": leaves, "grass": grass, "kelp": kelp},
+    "waters": {"obsidian": obsidian},
+    "hearth": {"ash": ash, "lava": lava},
+    "glassworks": {
+        "glass": pane((164, 210, 250), 70, True),
+        "frosted_glass": frosted,
+        "lantern": lantern,
+    },
+}
+
+
+def png(rows):
+    height, width = len(rows), len(rows[0])
+    raw = b"".join(b"\x00" + bytes(c for px in row for c in px) for row in rows)
+
+    def chunk(kind, data):
+        body = kind + data
+        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(raw, 9))
+        + chunk(b"IEND", b"")
+    )
+
+
+for mod, textures in TEXTURES.items():
+    art = root / mod / "art"
+    art.mkdir(parents=True, exist_ok=True)
+    for name, paint in textures.items():
+        rows = [
+            [paint(face, x, y) for face in range(3) for x in range(EDGE)] for y in range(EDGE)
+        ]
+        (art / f"{name}.png").write_bytes(png(rows))

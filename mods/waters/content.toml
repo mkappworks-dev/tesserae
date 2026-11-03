@@ -1,0 +1,47 @@
+[[materials]]
+name = "water"
+emission = 0
+dimming = 2
+occlusion = "same-material"
+render = "blend"
+solid = false
+
+[[materials]]
+name = "steam"
+emission = 0
+dimming = 1
+occlusion = "same-material"
+render = "blend"
+solid = false
+
+[[materials]]
+name = "obsidian"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.8
+
+[[appearance]]
+material = "water"
+color = [26, 82, 158, 166]
+
+[[appearance]]
+material = "steam"
+color = [226, 232, 238, 90]
+
+[[appearance]]
+material = "obsidian"
+color = [26, 20, 40, 255]
+texture = "art/obsidian.png"
+
+[[fluids]]
+material = "waters:water"
+reach-m = 7.0
+sideways-m-per-s = 4.0
+downward-m-per-s = 8.0
+recession-m-per-s = 4.0
+reset-drop-m = 0.5
+waterlogs = true
+extinguishes = true

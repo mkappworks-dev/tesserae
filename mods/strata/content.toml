@@ -1,0 +1,83 @@
+[[materials]]
+name = "stone"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "basalt"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "clay"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "sand"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "soil"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[materials]]
+name = "turf"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.35
+
+[[appearance]]
+material = "stone"
+color = [140, 141, 148, 255]
+texture = "art/stone.png"
+
+[[appearance]]
+material = "basalt"
+color = [58, 60, 68, 255]
+texture = "art/basalt.png"
+
+[[appearance]]
+material = "clay"
+color = [166, 112, 92, 255]
+texture = "art/clay.png"
+
+[[appearance]]
+material = "sand"
+color = [222, 205, 150, 255]
+texture = "art/sand.png"
+
+[[appearance]]
+material = "soil"
+color = [107, 74, 46, 255]
+texture = "art/soil.png"
+
+[[appearance]]
+material = "turf"
+color = [80, 144, 49, 255]
+texture = "art/turf.png"

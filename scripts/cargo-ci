@@ -47,6 +47,9 @@ cargo test --workspace --locked --features tesserae/dev
 step "Test: benches compile"
 cargo bench --workspace --no-run --locked
 
+step "Validate: shared Mods"
+cargo run --locked --features tesserae/dev --bin tesserae -- validate mods/* --mods mods
+
 step "Boundaries"
 ./scripts/check-terra-boundary
 members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')

@@ -1,0 +1,68 @@
+[[materials]]
+name = "glass"
+emission = 0
+dimming = 0
+occlusion = "same-material"
+render = "blend"
+solid = true
+remove-time-s = 0.15
+
+[[materials]]
+name = "frosted_glass"
+emission = 0
+dimming = 1
+occlusion = "same-material"
+render = "blend"
+solid = true
+remove-time-s = 0.2
+
+[[materials]]
+name = "lantern"
+emission = 15
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.2
+
+[[appearance]]
+material = "glass"
+color = [164, 210, 250, 89]
+texture = "art/glass.png"
+
+[[appearance]]
+material = "frosted_glass"
+color = [218, 232, 242, 170]
+texture = "art/frosted_glass.png"
+
+[[appearance]]
+material = "lantern"
+color = [245, 227, 184, 255]
+texture = "art/lantern.png"
+
+[[shapes]]
+name = "slab"
+boxes = [{ min = [0, 0, 0], max = [16, 8, 16] }]
+
+[[shapes]]
+name = "stair"
+boxes = [
+  { min = [0, 0, 0], max = [16, 8, 16] },
+  { min = [0, 8, 0], max = [16, 16, 8] },
+]
+
+[[shapes]]
+name = "fence"
+boxes = [{ min = [6, 0, 6], max = [10, 16, 10] }]
+collision = [{ min = [6, 0, 6], max = [10, 24, 10] }]
+
+[shapes.connect]
+group = 1
+connects-to = 1
+to-sealed = true
+arms = [
+  { face = 0, boxes = [{ min = [0, 7, 7], max = [6, 13, 9] }], collision = [{ min = [0, 0, 7], max = [6, 24, 9] }] },
+  { face = 1, boxes = [{ min = [10, 7, 7], max = [16, 13, 9] }], collision = [{ min = [10, 0, 7], max = [16, 24, 9] }] },
+  { face = 4, boxes = [{ min = [7, 7, 0], max = [9, 13, 6] }], collision = [{ min = [7, 0, 0], max = [9, 24, 6] }] },
+  { face = 5, boxes = [{ min = [7, 7, 10], max = [9, 13, 16] }], collision = [{ min = [7, 0, 10], max = [9, 24, 16] }] },
+]
