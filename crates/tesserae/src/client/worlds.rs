@@ -1014,6 +1014,8 @@ fn heading(parent: &mut ChildSpawnerCommands, title: &str, subtitle: &str) {
         .spawn(Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(6.0),
+            flex_shrink: 1.0,
+            min_width: Val::Px(0.0),
             ..default()
         })
         .with_children(|t| {
@@ -1033,6 +1035,18 @@ fn row(
             row_gap: Val::Px(gap),
             flex_wrap: FlexWrap::Wrap,
             align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(children);
+}
+
+/// A page's buttons in one line that never wraps or shrinks, however long the heading beside it.
+fn actions(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
+    parent
+        .spawn(Node {
+            column_gap: Val::Px(7.0),
+            align_items: AlignItems::Center,
+            flex_shrink: 0.0,
             ..default()
         })
         .with_children(children);
@@ -1481,7 +1495,7 @@ fn form(
                 "Create World",
                 "Name it, pick a Game and, if you like, a seed.",
             );
-            row(top, 7.0, |r| {
+            actions(top, |r| {
                 ui::button(r, "Cancel", Act::Back, false, false, false);
                 if installed.mods.is_empty() {
                     ui::button(r, "Create World", Act::Create, false, false, true);
@@ -1622,7 +1636,7 @@ fn mods_page(
                 &format!("Mods for {}", ui::title(&game)),
                 "Required Mods are locked on. Optional ones load after them.",
             );
-            row(top, 7.0, |r| {
+            actions(top, |r| {
                 ui::button(r, "Back", Act::Back, false, false, false);
                 ui::button(r, "Create World", Act::Create, false, false, true);
             });
@@ -1906,7 +1920,7 @@ fn trust(
                     "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
                 },
             );
-            row(top, 7.0, |r| {
+            actions(top, |r| {
                 focus = Some(ui::button(
                     r,
                     match next {
