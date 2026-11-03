@@ -3,14 +3,30 @@ use serde::Deserialize;
 use crate::bindings::tesserae::mods::{content, types};
 use crate::{Declaration, ModError};
 
+mod behaviour;
+mod character;
+mod shape;
+mod world;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Data {
     #[serde(default)]
     materials: Vec<Material>,
     #[serde(default)]
+    shapes: Vec<shape::Shape>,
+    #[serde(default)]
     appearance: Vec<Appearance>,
     world: Option<World>,
+    view: Option<world::View>,
+    #[serde(default)]
+    fluids: Vec<behaviour::Fluid>,
+    #[serde(default)]
+    reactions: Vec<behaviour::Reaction>,
+    #[serde(default)]
+    combustion: Vec<behaviour::Combustion>,
+    #[serde(default)]
+    tools: Vec<behaviour::Tool>,
 }
 
 #[derive(Deserialize)]
@@ -56,7 +72,12 @@ struct World {
     feature_size_m: Option<f32>,
     soil_depth_m: Option<f32>,
     octaves: Option<u32>,
+    caves: Option<world::Caves>,
+    smoothing: Option<world::Smoothing>,
+    water: Option<world::Water>,
     ground: Option<Ground>,
+    movement: Option<world::Movement>,
+    character: Option<character::Character>,
 }
 
 #[derive(Deserialize)]
@@ -121,18 +142,18 @@ pub(crate) fn parse(id: &str, bytes: &[u8]) -> Result<Declaration, ModError> {
                     soil: g.soil,
                     surface: g.surface,
                 }),
-                caves: None,
-                smoothing: None,
-                water: None,
-                movement: None,
-                character: None,
+                caves: w.caves.map(Into::into),
+                smoothing: w.smoothing.map(Into::into),
+                water: w.water.map(Into::into),
+                movement: w.movement.map(Into::into),
+                character: w.character.map(Into::into),
             }
         }),
-        shapes: vec![],
-        view: None,
-        fluids: vec![],
-        reactions: vec![],
-        combustion: vec![],
-        tools: vec![],
+        shapes: data.shapes.into_iter().map(Into::into).collect(),
+        view: data.view.map(Into::into),
+        fluids: data.fluids.into_iter().map(Into::into).collect(),
+        reactions: data.reactions.into_iter().map(Into::into).collect(),
+        combustion: data.combustion.into_iter().map(Into::into).collect(),
+        tools: data.tools.into_iter().map(Into::into).collect(),
     })
 }
