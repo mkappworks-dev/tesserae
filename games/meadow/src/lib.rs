@@ -23,7 +23,8 @@ const GLADE_X_M: (f32, f32) = (8.0, 24.0);
 const GLADE_Z_M: (f32, f32) = (8.0, 24.0);
 const GLADE_FLOOR_M: f32 = SEA_LEVEL_M - 2.0;
 const GLADE_TOP_M: f32 = SEA_LEVEL_M + RELIEF_M / 2.0;
-const GLADE_CLEAR_M: f32 = GLADE_TOP_M + 12.0;
+/// Above the ground band there is only air, so clearing stops at its top.
+const GLADE_CLEAR_M: f32 = SEA_LEVEL_M + RELIEF_M;
 
 const TREES_AT_M: [(f32, f32); 3] = [(11.0, 11.0), (12.0, 20.0), (21.0, 12.0)];
 const TRUNK_HEIGHT_M: f32 = 5.0;

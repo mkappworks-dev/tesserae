@@ -17,7 +17,7 @@ use tesserae::mods::types::{BoxM, Vec3, Voxel};
 /// Ground spans `SEA_LEVEL_M` to `SEA_LEVEL_M + RELIEF_M`; the garden's floor is levelled above
 /// that, because a Mod cannot read the terrain it will build on.
 const SEA_LEVEL_M: f32 = 24.0;
-const RELIEF_M: f32 = 6.0;
+const RELIEF_M: f32 = 1.0;
 const FLOOR_M: f32 = SEA_LEVEL_M + RELIEF_M + 1.0;
 const WALL_M: f32 = 5.0;
 
@@ -206,10 +206,11 @@ fn build(state: &State) -> Vec<Command> {
     let (x, z) = (GARDEN_X_M, GARDEN_Z_M);
     let top = FLOOR_M + WALL_M;
     let mut commands = Vec::new();
-    // Ground to the floor with turf on top, and air above it, so the garden stands on a level site.
+    // Ground from the bottom of the ground band to the floor, with turf on top. Nothing needs
+    // clearing above: the floor is above the highest ground, so what is there is air.
     commands.extend(fill(
         region(
-            (x.0 - 1.0, FLOOR_M - 8.0, z.0 - 1.0),
+            (x.0 - 1.0, SEA_LEVEL_M, z.0 - 1.0),
             (x.1 + 1.0, FLOOR_M - 1.0, z.1 + 1.0),
         ),
         s,
@@ -222,14 +223,6 @@ fn build(state: &State) -> Vec<Command> {
         ),
         s,
         cube(ids.turf),
-    ));
-    commands.extend(fill(
-        region(
-            (x.0 - 1.0, FLOOR_M, z.0 - 1.0),
-            (x.1 + 1.0, top + 4.0, z.1 + 1.0),
-        ),
-        s,
-        cube(0),
     ));
     // Walls, all four sides, then the doorway cut back out of the near one.
     for wall in [
