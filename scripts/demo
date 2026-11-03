@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Runs the Engine on the packaged demo Games in dist/, packaging them first if dist/ is missing.
+# Extra arguments go to the Engine. Run ./scripts/package-demo again after changing a Game or Mod.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+[ -d dist/mods ] || ./scripts/package-demo
+exec cargo run --release -- --mods dist/mods "$@"

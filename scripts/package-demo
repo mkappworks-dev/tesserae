@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Builds the demo Games and packages them with every shared Mod into dist/ (ignored by git). Only
+# dist/games and dist/mods are replaced, so dist/trust.json and its Trust grants survive.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+out=dist
+tesserae() { cargo run --release --quiet -- "$@"; }
+
+./scripts/build-guests
+rm -rf "$out/games" "$out/mods"
+for mod in mods/*/; do
+  tesserae package "$mod" --out "$out" --mods mods >/dev/null
+done
+for game in meadow ember tidewater lumen; do
+  tesserae package "games/$game" --mods mods --out "$out" --trust-for-run >/dev/null
+done
+echo "packaged $(ls "$out/games" | wc -l | tr -d ' ') Games and $(ls "$out/mods" | wc -l | tr -d ' ') Mods in $out"

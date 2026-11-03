@@ -100,6 +100,16 @@ tesserae validate games/ember --mods mods --trust-for-run
 
 ## Package and run
 
+From a checkout, two scripts do the steps below:
+
+```sh
+./scripts/package-demo   # build the Games, package them and every Mod into dist/
+./scripts/demo           # run the Engine on dist/ (packages first if it is missing)
+```
+
+`package-demo` replaces `dist/games` and `dist/mods` only, so Trust grants in
+`dist/trust.json` survive. The steps by hand:
+
 `package` takes one Game at most, so package the Mods once and each Game in turn
 into the same folder:
 
