@@ -59,12 +59,16 @@ pub(crate) fn decode(bytes: &[u8], width: u32, height: u32) -> Result<Vec<u8>, S
     let rgba: Vec<u8> = match frame.color_type {
         ColorType::Rgba => raw.to_vec(),
         ColorType::Rgb => raw
-            .chunks_exact(3)
-            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b]| [r, g, b, 255])
             .collect(),
         ColorType::GrayscaleAlpha => raw
-            .chunks_exact(2)
-            .flat_map(|p| [p[0], p[0], p[0], p[1]])
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .flat_map(|&[g, a]| [g, g, g, a])
             .collect(),
         ColorType::Grayscale => raw.iter().flat_map(|&g| [g, g, g, 255]).collect(),
         ColorType::Indexed => return Err("indexed colour was not expanded".into()),
