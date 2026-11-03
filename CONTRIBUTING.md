@@ -31,13 +31,15 @@ version's first public release. All code contributions are accepted under the
 same terms. By submitting a contribution, you agree that your work will be
 licensed under BSL 1.1.
 
-Two parts of the repo are deliberately **not** BSL, because they are templates
+Some parts of the repo are deliberately **not** BSL, because they are templates
 people copy:
 
-| Path          | Licence    | Why                                                                                                                                                            |
-| ------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `games/demo/` | CC0 or MIT | It is the starting point for every game built on Tesserae. BSL here would block the on-ramp. See [ADR-0004](docs/adr/0004-demo-game-in-repo-real-game-out.md). |
-| `assets/`     | CC0        | Default and placeholder art must be reusable in proprietary games.                                                                                             |
+| Path                        | Licence    | Why                                                                                                                                                            |
+| --------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `games/demo/`               | CC0 or MIT | It is the starting point for every game built on Tesserae. BSL here would block the on-ramp. See [ADR-0004](docs/adr/0004-demo-game-in-repo-real-game-out.md). |
+| `starters/`                 | MIT        | Templates a Game author copies out of the checkout; a proprietary Game must be free to start from them.                                                        |
+| `crates/tesserae-mods/wit/` | MIT        | The public Mod contract, and the copy each Rust starter bundles; building against it must not need BSL terms.                                                  |
+| `assets/`                   | CC0        | Default and placeholder art must be reusable in proprietary games.                                                                                             |
 
 BSL is **source-available, not open source** — it is not OSI-approved, and the
 licence text says so itself. Please don't describe the project as open source.

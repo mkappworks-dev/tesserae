@@ -1,6 +1,6 @@
 # 05: Supply independent starters and a versioned contract bundle
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 

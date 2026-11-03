@@ -18,6 +18,7 @@ mod export_version;
 mod lines;
 mod loading;
 mod sandbox;
+mod starters;
 
 fn guest(name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
