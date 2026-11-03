@@ -960,7 +960,7 @@ fn render(
             }
             Screen::Rename(_) => focus = rename(root, &l),
             Screen::Delete(path) => focus = delete(root, &l, path),
-            Screen::Trust(next) => focus = trust(root, &l, &installed, next),
+            Screen::Trust(next) => focus = trust(root, &l, &installed, next, scroll),
         }
     });
     if let Some(entity) = focus {
@@ -1851,94 +1851,125 @@ fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
     focus
 }
 
+/// Trust for the whole set on one scrolling page, with its buttons above the list so they stay
+/// in view however many items there are.
 fn trust(
     root: &mut ChildSpawnerCommands,
     l: &Launcher,
     installed: &Installed,
     next: &Next,
+    scroll: Vec2,
 ) -> Option<Entity> {
     let mut focus = None;
-    centered(root, true, |card| {
-        let items = &installed.untrusted;
-        let code = items
-            .iter()
-            .filter(|u| u.found.manifest.declaration.is_none())
-            .count();
-        ui::weighted_text(
-            card,
-            if items.len() == 1 {
-                "Trust this item?".to_owned()
-            } else {
-                format!("Trust {} items?", items.len())
-            },
-            19.0,
-            620,
-            ui::INK,
-        );
-        ui::paragraph(
-            card,
-            if code == 0 {
-                "These are data only and run no code. Trust is for these exact files; changing one asks again."
-            } else {
-                "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
-            },
-            12.0,
-            ui::MUTED,
-        );
-        for item in items {
-            let manifest = &item.found.manifest;
-            let kind = if manifest.declaration.is_some() {
-                "data only"
-            } else {
-                "runs code"
-            };
-            ui::text(
-                card,
-                format!(
-                    "{} {} · {kind} · build {}",
-                    ui::title(&manifest.id),
-                    manifest.version,
-                    &item.sha256[..12.min(item.sha256.len())]
-                ),
-                12.0,
-                if manifest.declaration.is_some() {
-                    ui::INK
+    let items = &installed.untrusted;
+    let code = items
+        .iter()
+        .filter(|u| u.found.manifest.declaration.is_none())
+        .count();
+    root.spawn((
+        TabGroup {
+            modal: true,
+            ..default()
+        },
+        ScrollArea,
+        ScrollPosition(scroll),
+        PageScroll,
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            max_width: Val::Px(720.0),
+            flex_grow: 1.0,
+            min_height: Val::Px(0.0),
+            overflow: Overflow::scroll_y(),
+            ..default()
+        },
+    ))
+    .with_children(|col| {
+        col.spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(12.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|top| {
+            heading(
+                top,
+                &if items.len() == 1 {
+                    "Trust this item?".to_owned()
                 } else {
-                    ui::AMBER
+                    format!("Trust {} items?", items.len())
+                },
+                if code == 0 {
+                    "Data only: none of it runs code. Trust is for these exact files."
+                } else {
+                    "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
                 },
             );
-            // A component's requested limits are worth reading; a data Mod has none to show.
-            if manifest.declaration.is_none() {
-                let details = item
-                    .prompt
-                    .trim_end()
-                    .trim_end_matches("Trust this exact build? [y/N]");
-                ui::technical_text(card, details.trim_end(), 11.0, ui::MUTED);
-            }
-        }
-        problem(card, l.problem.as_ref());
-        row(card, 7.0, |r| {
-            focus = Some(ui::button(r, "Cancel", Act::Back, false, false, false));
-            ui::button(
-                r,
-                format!(
-                    "Trust {} and {}",
-                    if installed.untrusted.len() == 1 {
-                        "it".to_owned()
-                    } else {
-                        format!("all {}", installed.untrusted.len())
-                    },
+            row(top, 7.0, |r| {
+                focus = Some(ui::button(
+                    r,
                     match next {
-                        Next::Open(_) => "open",
-                        Next::Create => "create",
-                    }
-                ),
-                Act::Trust,
-                false,
-                false,
-                true,
-            );
+                        Next::Create if !installed.mods.is_empty() => "Back to Mods",
+                        Next::Create => "Back",
+                        Next::Open(_) => "Cancel",
+                    },
+                    Act::Back,
+                    false,
+                    false,
+                    false,
+                ));
+                ui::button(
+                    r,
+                    format!(
+                        "Trust {} and {}",
+                        if items.len() == 1 {
+                            "it".to_owned()
+                        } else {
+                            format!("all {}", items.len())
+                        },
+                        match next {
+                            Next::Open(_) => "open",
+                            Next::Create => "create",
+                        }
+                    ),
+                    Act::Trust,
+                    false,
+                    false,
+                    true,
+                );
+            });
         });
+        problem(col, l.problem.as_ref());
+        for item in items {
+            let manifest = &item.found.manifest;
+            let data = manifest.declaration.is_some();
+            // A component's requested limits are worth reading; a data Mod has none to show.
+            let detail = if data {
+                format!("Build {}", &item.sha256[..12.min(item.sha256.len())])
+            } else {
+                item.prompt
+                    .trim_end()
+                    .trim_end_matches("Trust this exact build? [y/N]")
+                    .trim_end()
+                    .to_owned()
+            };
+            mod_card(
+                col,
+                ModCard {
+                    act: None,
+                    border: ui::EDGE,
+                    selected: false,
+                    title: format!("{} {}", ui::title(&manifest.id), manifest.version),
+                    detail,
+                    tag: Some(if data {
+                        ("Data only".to_owned(), ui::MUTED)
+                    } else {
+                        ("Runs code".to_owned(), ui::AMBER)
+                    }),
+                },
+            );
+        }
     });
     focus
 }
@@ -2425,6 +2456,31 @@ mod tests {
 
     fn installed_required(app: &App) -> Vec<String> {
         app.world().resource::<Installed>().required("terra")
+    }
+
+    #[test]
+    fn trust_for_a_new_world_goes_back_to_the_mods_page() {
+        let worlds = Directory::new();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra", "lamps"]).with_mod("lamps", &[]),
+        );
+        app.update();
+        act(&mut app, Act::New);
+        act(&mut app, Act::NextMods);
+        act(&mut app, Act::ToggleMod(0));
+        act(&mut app, Act::Create);
+        assert_eq!(launcher(&app).screen, Screen::Trust(Next::Create));
+        act(&mut app, Act::Back);
+        assert_eq!(launcher(&app).screen, Screen::Mods);
+        assert!(
+            launcher(&app).form.mods.contains("lamps"),
+            "the picks are kept"
+        );
+        assert!(
+            std::fs::read_dir(&worlds.0).unwrap().next().is_none(),
+            "nothing created"
+        );
     }
 
     #[test]
