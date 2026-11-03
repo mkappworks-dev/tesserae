@@ -29,7 +29,7 @@ verified examples rather than untested command sequences.
 - [x] An integrated check starts from both independent starters, validates and
       packages them, loads installed content, exercises data/PNG and Rust
       changes, and verifies failure recovery and unchanged saved reopening.
-- [ ] Record manual edit-and-restart results for both authoring paths, including
+- [x] Record manual edit-and-restart results for both authoring paths, including
       failure and correction. Do not substitute design approval for evidence
       that the running loop works.
 - [x] Required repository formatting, boundary, test and build checks pass, or
@@ -47,8 +47,7 @@ when completing this ticket.
 
 ## Completion note
 
-Done except the manual criterion, which is **outstanding**: no display was
-available, so `tesserae dev` was never run in a real window.
+Done. The manual criterion was met on 2026-11-03 (see Manual check below).
 
 Guide: `docs/authoring-guide.md`. Integrated check: `crates/tesserae/src/dev/sdk.rs`
 (four tests; it reuses the ticket 06/07 session rig and the loader's reopen
@@ -81,12 +80,6 @@ schema now lives in the guide.
 
 Not verified:
 
-- **Manual edit-and-restart in the running window, for either authoring path,
-  including failure and correction.** `tesserae dev` started headless panics
-  (`Resource does not exist`) as expected without a display; that is not
-  evidence about the loop. To do: run `tesserae dev` on a copy of each starter,
-  save a data/PNG change and a Rust change, break each, fix each, and record
-  what the window showed (title, same seed, spawn reset, Edits discarded).
 - Installing the packaged folder into `games/` and creating a World through the
   Create screen (the UI); the tests use the loader and reopen path.
 - Build timeout and cancellation do not exist; the guide and Rust README say so.
@@ -94,12 +87,37 @@ Not verified:
 - `cargo-deny` printed one "license not encountered" warning (BSL-1.0 in
   `deny.toml`); it passed.
 
-Roadmap: DESIGN.md step 10 reads "Check pending", not Done, and README says the
-SDK is built and tested but not marked done. Step 10 completes when the manual
-check above is recorded; nothing else in the parent spec's scope is outstanding.
+Roadmap: DESIGN.md step 10 is Done; the README and ADR-0020 say so.
 
 Checks: `./scripts/cargo-ci` (rustfmt, Prettier, clippy, docs, default-features
 check, guests, tests with `tesserae/dev`, benches compile, boundaries,
 cargo-deny) passed; `cargo test --workspace --all-features` passed (843 in
 `tesserae`, 411, 2, 77, 138; 3 ignored each in `tesserae` and the last crate,
 as before).
+
+## Manual check
+
+Run on 2026-11-03 on macOS 27.2, Apple M5 (Metal), with a release build of this
+branch, from copies of both starters outside the checkout. Evidence is the
+console log of `tesserae dev`; the user also reported the window working.
+
+- The first run found a real bug the headless tests hid: `tesserae dev`
+  panicked on its first frame (`client::worlds::handle` and `render` need the
+  `Installed` resource, which the dev path never inserted). Fixed in `c16f478`,
+  with a regression test that uses Bevy's default error handler.
+- Data starter, seed 1: the World opened ("Opening the Disposable development
+  World with seed 1", Player spawned). A valid `relief-m` edit logged
+  "Restarting the Disposable development World with seed 1" with a new eye
+  height (35.1 m, then 46.4 m). `relief-m = nope` logged "Development content
+  was not accepted (the current World keeps running)" with the Mod and the TOML
+  line. Fixing it restarted (31.4 m). A truncated PNG was refused naming
+  `appearance[1].texture` and the World kept running; the restored PNG
+  restarted a fresh World.
+- Rust starter, seed 1: the World opened after a build. A `compile_error!`
+  logged "the current World keeps running" with the project, the build command
+  and the compiler error at `src/lib.rs:72`; removing it rebuilt and restarted.
+
+Found, not blocking: with `CARGO_TARGET_DIR` set, Cargo writes the component
+outside the project, so `dev.toml`'s `output` is never found and no World opens
+("the build succeeded but produced no ... inside the project"). Unset it for
+the command or point `output` at the real path; the guide should say so.

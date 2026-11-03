@@ -1,7 +1,7 @@
 # Data-only Mods share validation; development reload restarts the World
 
-Status: accepted. Implemented through the development loop and its build phase;
-the manual running-window check is outstanding.
+Status: accepted. Implemented through the development loop and its build phase,
+and checked by hand in a running window.
 
 Step 10 designs the whole Modding SDK, implemented in increments starting with
 data-only Mods. A basic Game can be authored using text files without Rust or a

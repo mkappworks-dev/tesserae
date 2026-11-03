@@ -483,6 +483,9 @@ Line `0.x` is pre-release. This guide documents how contracts evolve; it does
   and PNG edits through the development loop, and, for Rust, the README's build,
   its `dev.toml` through a real Cargo rebuild, a compile error and its fix. The
   full-schema example above is extracted from this page and validated.
-- Not checked automatically: the running window. That the title, input and
-  rendering survive a restart on a real display is a manual check, recorded in
-  the ticket that tracks it.
+- Not checked automatically: the running window. That a restart works on a real
+  display was checked by hand and is recorded in ticket 08 of the Modding SDK
+  spec.
+- If `CARGO_TARGET_DIR` is set, Cargo builds outside the project and `output` in
+  `dev.toml` is not found; unset it for `tesserae dev`, or point `output` at the
+  real path.

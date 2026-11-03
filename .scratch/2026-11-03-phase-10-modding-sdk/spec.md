@@ -1,6 +1,6 @@
 # Step 10: Modding SDK
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 
