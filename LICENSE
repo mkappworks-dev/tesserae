@@ -12,9 +12,10 @@ Licensor:             Malith Kuruppu
 Licensed Work:        Tesserae 0.0.0
                       The Licensed Work is (c) 2026 Malith Kuruppu.
                       The Licensed Work excludes the contents of the
-                      games/ and assets/ directories, which are
-                      licensed separately and permissively; see
-                      CONTRIBUTING.md.
+                      games/, starters/ and assets/ directories and
+                      the crates/tesserae-mods/wit/ contract bundle,
+                      which are licensed separately and
+                      permissively; see CONTRIBUTING.md.
 
 Additional Use Grant: You may make production use of the Licensed
                       Work, including developing, distributing, and

@@ -1,0 +1,15 @@
+package tesserae:mods@0.3.0;
+
+/// The whole import surface of a Mod. Two functions, neither of which touches a
+/// Voxel: a per-Voxel host call is the mistake ADR-0001 exists to prevent.
+interface host {
+    use types.{log-level};
+    use content.{world-params};
+
+    /// Writes a line to the engine's log under the Mod's id. Rate limited.
+    log: func(level: log-level, message: string);
+
+    /// The engine's default terrain parameters, so a Game can change one field
+    /// and return the rest as they were.
+    default-world-params: func() -> world-params;
+}
