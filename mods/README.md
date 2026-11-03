@@ -15,6 +15,6 @@ Mod is a folder of TOML and PNG files. Only a Game declares `world`, `view` and
 Validate and package all of them with the real commands:
 
 ```sh
-tesserae validate mods/* --mods mods
-tesserae package mods/* --out dist --mods mods
+tesserae validate mods/*/ --mods mods
+tesserae package mods/*/ --out dist
 ```

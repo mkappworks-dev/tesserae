@@ -48,7 +48,7 @@ step "Test: benches compile"
 cargo bench --workspace --no-run --locked
 
 step "Validate: shared Mods"
-cargo run --locked --features tesserae/dev --bin tesserae -- validate mods/* --mods mods
+cargo run --locked --features tesserae/dev --bin tesserae -- validate mods/*/ --mods mods
 
 step "Boundaries"
 ./scripts/check-terra-boundary

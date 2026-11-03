@@ -255,7 +255,7 @@ jobs:
         run: cargo build --workspace --release --locked
 
       - name: Validate the shared Mods
-        run: target/release/tesserae validate mods/* --mods mods
+        run: target/release/tesserae validate mods/*/ --mods mods
 
       - name: Upload binaries
         uses: actions/upload-artifact@v7
