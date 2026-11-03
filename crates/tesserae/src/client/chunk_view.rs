@@ -25,7 +25,7 @@ use tesserae_core::{ChunkMesh, MeshLayer};
 use crate::client::blend_order::{BlendOrder, sort_blended};
 use crate::client::camera::MainCamera;
 use crate::client::chunk_mesh::chunk_mesh_to_mesh;
-use crate::client::drawn_mask::DrawnMask;
+use crate::client::drawn_mask::{self, DrawnMask};
 use crate::client::in_flight::InFlight;
 use crate::render::chunk_material::{ChunkMaterial, ChunkMaterialExtension, LodParams};
 use crate::render::fog::{self, FogSettings};
@@ -62,6 +62,8 @@ pub(super) struct ChunkEntities {
     mask: DrawnMask,
     /// Since `publish_drawn` last ran.
     drawn_changed: bool,
+    /// Landed since `apply_cover` last ran, so it sets their material.
+    cover_due: HashSet<(u32, ChunkCoord)>,
     /// Something was delivered or unloaded since `release` last ran.
     release_due: bool,
     /// Each level's anchor when `release` last ran.
@@ -160,7 +162,23 @@ struct TerrainMaterial {
     opaque: Handle<ChunkMaterial>,
     blended: Handle<ChunkMaterial>,
     cutout: Handle<ChunkMaterial>,
+    /// `opaque` and `cutout` without the coverage test, for Chunks no finer
+    /// level draws any of. Water keeps the test everywhere.
+    opaque_untested: Handle<ChunkMaterial>,
+    cutout_untested: Handle<ChunkMaterial>,
     drawn: Handle<ShaderBuffer>,
+}
+
+impl TerrainMaterial {
+    fn all(&self) -> [&Handle<ChunkMaterial>; 5] {
+        [
+            &self.opaque,
+            &self.blended,
+            &self.cutout,
+            &self.opaque_untested,
+            &self.cutout_untested,
+        ]
+    }
 }
 
 /// A Chunk's meshes, built off the main thread: a mesh layer with nothing to
@@ -216,6 +234,7 @@ fn add_view_systems(app: &mut App) {
             drop_meshes,
             land_meshes,
             release,
+            apply_cover,
             sort_blended.run_if(blend_sort_on),
             publish_drawn,
         )
@@ -231,7 +250,7 @@ fn update_textures(
     if !textures.is_changed() {
         return;
     }
-    for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+    for handle in terrain.all() {
         if let Some(mut material) = materials.get_mut(handle) {
             textures.apply(&mut material.extension);
         }
@@ -290,7 +309,16 @@ fn add_material(
         },
         extension: opaque.extension.clone(),
     };
+    let untested = |material: &ChunkMaterial| ChunkMaterial {
+        base: material.base.clone(),
+        extension: ChunkMaterialExtension {
+            coverage_test: false,
+            ..material.extension.clone()
+        },
+    };
     commands.insert_resource(TerrainMaterial {
+        opaque_untested: materials.add(untested(&opaque)),
+        cutout_untested: materials.add(untested(&cutout)),
         opaque: materials.add(opaque),
         blended: materials.add(blended),
         cutout: materials.add(cutout),
@@ -409,6 +437,7 @@ fn land_meshes(
         // Marked drawn as it lands, not as it is sent: a bit set for a mesh
         // still building would discard the coarser level drawing its region.
         entities.deliver(key);
+        entities.cover_due.insert(key);
         let opaque = draw.show(
             &mut entities.opaque,
             &material.opaque,
@@ -591,6 +620,52 @@ fn release(
     entities.anchors = anchors;
 }
 
+/// Gives each opaque and cutout Chunk whose finer cover changed, or which
+/// landed, the material its cover needs, in the frame the mask is published:
+/// none covered, no coverage test; part, the test; all, not drawn, since the
+/// test would discard every fragment. Water keeps the test and is not hidden.
+fn apply_cover(
+    mut commands: Commands,
+    mut entities: ResMut<ChunkEntities>,
+    terrain: Res<TerrainMaterial>,
+    current: Query<(&MeshMaterial3d<ChunkMaterial>, Option<&Visibility>)>,
+) {
+    let entities = &mut *entities;
+    let due: HashSet<_> = entities
+        .mask
+        .take_changed()
+        .chain(entities.cover_due.drain())
+        .collect();
+    for key in due {
+        let cover = entities.mask.finer_cover(key);
+        let visibility = if cover & drawn_mask::ALL != 0 {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        for (layer, tested, untested) in [
+            (&entities.opaque, &terrain.opaque, &terrain.opaque_untested),
+            (&entities.cutout, &terrain.cutout, &terrain.cutout_untested),
+        ] {
+            let Some(&entity) = layer.get(&key) else {
+                continue;
+            };
+            let material = if cover == 0 { untested } else { tested };
+            let Ok((now, shown)) = current.get(entity) else {
+                continue;
+            };
+            if now.0 != *material {
+                commands
+                    .entity(entity)
+                    .insert(MeshMaterial3d(material.clone()));
+            }
+            if shown != Some(&visibility) {
+                commands.entity(entity).insert(visibility);
+            }
+        }
+    }
+}
+
 /// Rewrites the record of what each level draws, when it changed. Padded to a
 /// power of two so its size, and with it the GPU buffer, rarely changes: Bevy
 /// writes a same-sized buffer in place and remakes the materials' bind groups
@@ -620,12 +695,22 @@ fn publish_drawn(
 /// 16 KiB, so the mask grows past its buffer rarely.
 const MIN_DRAWN_WORDS: usize = 4096;
 
+#[cfg(feature = "profiling")]
+fn shadows_enabled() -> bool {
+    !crate::profiling::switch("TESSERAE_DIAG_NO_SHADOWS")
+}
+
+#[cfg(not(feature = "profiling"))]
+fn shadows_enabled() -> bool {
+    true
+}
+
 fn spawn_light(mut commands: Commands, mut ambient: ResMut<GlobalAmbientLight>) {
     // A light's layers are also its shadow-caster mask, so level 0 alone
     // casts: a coarse caster would shadow the finer ground it stands over.
     commands.spawn((
         DirectionalLight {
-            shadow_maps_enabled: true,
+            shadow_maps_enabled: shadows_enabled(),
             ..default()
         },
         Transform::from_xyz(1.0, 2.2, 0.8).looking_at(Vec3::ZERO, Vec3::Y),
@@ -666,6 +751,12 @@ fn spawn_camera(
     let layers: Vec<usize> = (0..level_count(&streaming).max(1))
         .map(|level| level as usize)
         .collect();
+    #[cfg(feature = "profiling")]
+    let layers = if crate::profiling::switch("TESSERAE_DIAG_LEVEL0_ONLY") {
+        vec![NEAR_LAYER]
+    } else {
+        layers
+    };
 
     let camera = commands
         .spawn((
@@ -893,7 +984,7 @@ mod tests {
         let first = app.world().resource::<Textures>().texture(held).unwrap();
         let terrain = app.world().resource::<TerrainMaterial>();
         let materials = app.world().resource::<Assets<ChunkMaterial>>();
-        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+        for handle in terrain.all() {
             let extension = &materials.get(handle).unwrap().extension;
             assert_eq!(extension.texture.as_ref(), Some(&first));
             assert_eq!(extension.textured, UVec4::new(1 << 23, 1 << 31, 1, 0));
@@ -915,7 +1006,7 @@ mod tests {
         );
         let terrain = app.world().resource::<TerrainMaterial>();
         let materials = app.world().resource::<Assets<ChunkMaterial>>();
-        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+        for handle in terrain.all() {
             assert_eq!(
                 materials.get(handle).unwrap().extension.textured,
                 UVec4::new(0, 0, 1, 0)
@@ -924,7 +1015,7 @@ mod tests {
     }
 
     #[test]
-    fn the_palette_message_reaches_all_three_terrain_material_uniforms() {
+    fn the_palette_message_reaches_every_terrain_material_uniform() {
         let app = app_with_palette(Some(crate::content::MaterialPalette(vec![(
             8,
             [64, 128, 192, 128],
@@ -934,7 +1025,7 @@ mod tests {
         let expected = Color::srgba(64.0 / 255.0, 128.0 / 255.0, 192.0 / 255.0, 128.0 / 255.0)
             .to_linear()
             .to_vec4();
-        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+        for handle in terrain.all() {
             let palette = materials.get(handle).unwrap().extension.palette;
             assert_eq!(palette[8], expected);
             assert_eq!(palette[9], Vec4::new(1.0, 0.0, 1.0, 1.0));
@@ -953,7 +1044,7 @@ mod tests {
     fn cuts_facing(app: &App, level: u32, point: Vec3, normal: Vec3) -> bool {
         let terrain = app.world().resource::<TerrainMaterial>();
         let materials = app.world().resource::<Assets<ChunkMaterial>>();
-        for handle in [&terrain.opaque, &terrain.blended, &terrain.cutout] {
+        for handle in terrain.all() {
             assert_eq!(
                 materials.get(handle).unwrap().extension.drawn,
                 terrain.drawn,
@@ -971,6 +1062,112 @@ mod tests {
             point,
             normal,
         )
+    }
+
+    /// Which material an opaque Chunk draws with, if it is drawn at all.
+    fn coverage_tested(app: &mut App, level: u32, coord: ChunkCoord) -> Option<bool> {
+        let entity = entity_at(app, level, coord)?;
+        let world = app.world();
+        if world.get::<Visibility>(entity) == Some(&Visibility::Hidden) {
+            return None;
+        }
+        let handle = &world.get::<MeshMaterial3d<ChunkMaterial>>(entity)?.0;
+        let materials = world.resource::<Assets<ChunkMaterial>>();
+        Some(materials.get(handle)?.extension.coverage_test)
+    }
+
+    #[test]
+    fn untested_materials_differ_from_the_tested_ones_only_in_the_test() {
+        let app = app();
+        let terrain = app.world().resource::<TerrainMaterial>();
+        let materials = app.world().resource::<Assets<ChunkMaterial>>();
+        for (tested, untested) in [
+            (&terrain.opaque, &terrain.opaque_untested),
+            (&terrain.cutout, &terrain.cutout_untested),
+        ] {
+            let (a, b) = (
+                materials.get(tested).unwrap(),
+                materials.get(untested).unwrap(),
+            );
+            assert!(a.extension.coverage_test && !b.extension.coverage_test);
+            assert_eq!(a.base.alpha_mode, b.base.alpha_mode);
+            assert_eq!(a.extension.drawn, b.extension.drawn);
+        }
+        assert!(
+            materials
+                .get(&terrain.blended)
+                .unwrap()
+                .extension
+                .coverage_test
+        );
+    }
+
+    #[test]
+    fn level_zero_is_drawn_without_the_coverage_test() {
+        let mut app = app();
+        put_eye(&mut app, FAR_M);
+        let coord = ChunkCoord::new(0, 0, 0);
+        send_mesh(&mut app, coord, geometry());
+        assert_eq!(coverage_tested(&mut app, 0, coord), Some(false));
+    }
+
+    #[test]
+    fn a_coarse_chunk_takes_the_test_only_while_finer_levels_draw_part_of_it() {
+        let mut app = app();
+        put_eye(&mut app, FAR_M);
+        let coarse = ChunkCoord::new(0, 0, 0);
+        send_coarse(&mut app, 1, coarse, geometry());
+        assert_eq!(
+            coverage_tested(&mut app, 1, coarse),
+            Some(false),
+            "uncovered"
+        );
+
+        let children: Vec<_> = coarse.children().collect();
+        send_mesh(&mut app, children[0], geometry());
+        assert_eq!(coverage_tested(&mut app, 1, coarse), Some(true), "partly");
+
+        for &child in &children[1..7] {
+            send_mesh(&mut app, child, geometry());
+        }
+        assert_eq!(coverage_tested(&mut app, 1, coarse), Some(true));
+        // An empty mesh covers its region too.
+        send_mesh(&mut app, children[7], tesserae_core::ChunkMesh::default());
+        assert_eq!(coverage_tested(&mut app, 1, coarse), None, "wholly: hidden");
+        assert!(entity_at(&app, 1, coarse).is_some(), "but kept");
+
+        app.world_mut()
+            .write_message(ChunkUnloaded { coord: children[3] });
+        app.update();
+        // Far from the camera, an unloaded child is released at once.
+        assert_eq!(
+            coverage_tested(&mut app, 1, coarse),
+            Some(true),
+            "part again"
+        );
+        for &child in &children {
+            app.world_mut()
+                .write_message(ChunkUnloaded { coord: child });
+        }
+        app.update();
+        assert_eq!(
+            coverage_tested(&mut app, 1, coarse),
+            Some(false),
+            "uncovered again"
+        );
+    }
+
+    #[test]
+    fn a_coarse_chunk_landing_under_drawn_children_is_hidden_as_it_lands() {
+        let mut app = app();
+        put_eye(&mut app, FAR_M);
+        let coarse = ChunkCoord::new(0, 0, 0);
+        for child in coarse.children() {
+            send_mesh(&mut app, child, geometry());
+        }
+        send_coarse(&mut app, 1, coarse, geometry());
+        assert!(entity_at(&app, 1, coarse).is_some());
+        assert_eq!(coverage_tested(&mut app, 1, coarse), None);
     }
 
     /// Past every level's mesh extent, so nothing retained survives.
@@ -2307,7 +2504,12 @@ mod tests {
         let base = |handle| &materials.get(handle).unwrap().base;
         assert!(base(&terrain.blended).double_sided);
         assert_eq!(base(&terrain.blended).cull_mode, None);
-        for handle in [&terrain.opaque, &terrain.cutout] {
+        for handle in [
+            &terrain.opaque,
+            &terrain.cutout,
+            &terrain.opaque_untested,
+            &terrain.cutout_untested,
+        ] {
             assert!(!base(handle).double_sided);
             assert!(base(handle).cull_mode.is_some());
         }

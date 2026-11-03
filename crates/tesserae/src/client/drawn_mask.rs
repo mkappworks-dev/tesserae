@@ -116,6 +116,9 @@ fn children(c: IVec3) -> impl Iterator<Item = IVec3> {
 #[derive(Default)]
 pub(super) struct DrawnMask {
     levels: Vec<Level>,
+    /// Chunks whose [`DrawnMask::finer_cover`] may have changed since
+    /// [`DrawnMask::take_changed`] last ran.
+    changed: HashSet<(u32, IVec3)>,
 }
 
 impl DrawnMask {
@@ -132,11 +135,44 @@ impl DrawnMask {
         let mut cell = coord;
         for at in level..self.levels.len() {
             let cover = self.derive(at, cell);
-            if !self.levels[at].put(cell, cover) {
+            if !self.put(at, cell, cover) {
                 break;
             }
             cell = cell.div_euclid(IVec3::splat(2));
         }
+    }
+
+    /// A level-`at` Cell's cover is the finer cover of the Chunk above it.
+    fn put(&mut self, at: usize, cell: IVec3, cover: u32) -> bool {
+        let changed = self.levels[at].put(cell, cover);
+        if changed {
+            self.changed
+                .insert((at as u32 + 1, cell.div_euclid(IVec3::splat(2))));
+        }
+        changed
+    }
+
+    /// What levels finer than `level` draw of its Chunk at `coord`: [`SOME`]
+    /// if part of it, [`ALL`] too if all of it, so the shader's coverage test
+    /// can discard nothing without the one and everything with the other.
+    pub fn finer_cover(&self, (level, coord): (u32, ChunkCoord)) -> u32 {
+        let Some(finer) = (level as usize)
+            .checked_sub(1)
+            .and_then(|f| self.levels.get(f))
+        else {
+            return 0;
+        };
+        let cell = IVec3::new(coord.x, coord.y, coord.z);
+        let some = children(cell).any(|c| finer.some.contains(&c));
+        let all = children(cell).all(|c| finer.all.contains(&c));
+        u32::from(some) * SOME + u32::from(all) * ALL
+    }
+
+    /// The Chunks whose finer cover may have changed since the last call.
+    pub fn take_changed(&mut self) -> impl Iterator<Item = (u32, ChunkCoord)> {
+        std::mem::take(&mut self.changed)
+            .into_iter()
+            .map(|(level, c)| (level, ChunkCoord::new(c.x, c.y, c.z)))
     }
 
     fn derive(&self, at: usize, cell: IVec3) -> u32 {
@@ -166,7 +202,7 @@ impl DrawnMask {
                 .collect();
             for cell in parents {
                 let cover = self.derive(at, cell);
-                self.levels[at].put(cell, cover);
+                self.put(at, cell, cover);
             }
         }
     }
@@ -324,6 +360,53 @@ mod tests {
             !finer_drawn_at(&words, 1, at(4.5, 2.5)),
             "level 1 draws its own"
         );
+    }
+
+    #[test]
+    fn a_chunks_finer_cover_is_none_part_or_all_of_its_region_and_follows_the_mask() {
+        let mut mask = DrawnMask::default();
+        mask.set(key(3, 50, 50, 50), true);
+        assert_eq!(mask.finer_cover(key(0, 0, 0, 0)), 0, "level 0 has no finer");
+        mask.set(key(0, 0, 0, 0), true);
+        assert_eq!(mask.finer_cover(key(0, 0, 0, 0)), 0);
+        assert_eq!(mask.finer_cover(key(1, 0, 0, 0)), SOME);
+        assert_eq!(mask.finer_cover(key(2, 0, 0, 0)), SOME, "and up the levels");
+        assert_eq!(mask.finer_cover(key(1, 1, 0, 0)), 0, "a neighbour");
+        let mut changed: Vec<_> = mask.take_changed().collect();
+        changed.sort_by_key(|&(level, c)| (level, c.x, c.y, c.z));
+        assert!(changed.contains(&key(1, 0, 0, 0)) && changed.contains(&key(2, 0, 0, 0)));
+        assert_eq!(mask.take_changed().count(), 0, "taken");
+
+        for c in children(IVec3::ZERO).skip(1) {
+            mask.set(key(0, c.x, c.y, c.z), true);
+        }
+        assert_eq!(mask.finer_cover(key(1, 0, 0, 0)), SOME | ALL);
+        assert_eq!(mask.finer_cover(key(2, 0, 0, 0)), SOME);
+        assert!(mask.take_changed().any(|k| k == key(1, 0, 0, 0)));
+
+        mask.set(key(0, 0, 0, 0), false);
+        assert_eq!(mask.finer_cover(key(1, 0, 0, 0)), SOME, "a child unloads");
+        assert!(mask.take_changed().any(|k| k == key(1, 0, 0, 0)));
+        for c in children(IVec3::ZERO).skip(1) {
+            mask.set(key(0, c.x, c.y, c.z), false);
+        }
+        assert_eq!(mask.finer_cover(key(1, 0, 0, 0)), 0);
+        assert_eq!(mask.finer_cover(key(2, 0, 0, 0)), 0);
+    }
+
+    #[test]
+    fn a_chunk_drawn_by_a_finer_level_through_an_intermediate_one_is_wholly_covered() {
+        let mut mask = DrawnMask::default();
+        mask.set(key(3, 50, 50, 50), true);
+        mask.set(key(1, 0, 0, 0), true);
+        for c in children(IVec3::new(1, 0, 0)) {
+            mask.set(key(0, c.x, c.y, c.z), true);
+        }
+        assert_eq!(mask.finer_cover(key(2, 0, 0, 0)), SOME);
+        for c in children(IVec3::ZERO).skip(2) {
+            mask.set(key(1, c.x, c.y, c.z), true);
+        }
+        assert_eq!(mask.finer_cover(key(2, 0, 0, 0)), SOME | ALL);
     }
 
     #[test]

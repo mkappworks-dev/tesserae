@@ -1,6 +1,9 @@
 //! Bounded, opt-in measurements. Frame intervals end at the next First;
 //! main schedule spans end at Last and exclude extraction and render work.
 mod gpu;
+mod monitor;
+pub(crate) use monitor::window as monitor_window;
+mod waits;
 
 use crate::session::SessionApp;
 
@@ -81,13 +84,15 @@ const CAMERAS: usize = 8;
 #[derive(Resource, Default)]
 struct VisibleMeshes([u32; CAMERAS]);
 
-/// What this frame drew and failed to, and whether the app is closing.
+/// Client observations for the frame and export metadata.
 #[derive(bevy::ecs::system::SystemParam)]
 struct Drawn<'w, 's> {
     holes: Option<Res<'w, Holes>>,
     sight: Option<Res<'w, Sight>>,
     visible: Res<'w, VisibleMeshes>,
     exit: MessageReader<'w, 's, AppExit>,
+    monitors: Query<'w, 's, &'static bevy::window::Monitor>,
+    on_monitor: Query<'w, 's, &'static bevy::window::OnMonitor, With<Window>>,
 }
 
 fn count_visible(
@@ -105,7 +110,14 @@ fn count_visible(
     }
 }
 
+/// A diagnostic switch, read from the environment by the profiling runner's
+/// `--switches`. Each changes one cost for attribution; none is a shipping option.
+pub(crate) fn switch(name: &str) -> bool {
+    std::env::var_os(name).is_some_and(|v| v != "0")
+}
+
 pub fn plugin(app: &mut App) {
+    monitor::plugin(app);
     if std::env::var_os("TESSERAE_PROFILE_CONTINUOUS").is_some() {
         app.insert_resource(bevy::winit::WinitSettings::continuous());
     }
@@ -122,6 +134,9 @@ pub fn plugin(app: &mut App) {
             .add_systems(ExtractSchedule, extract_frame)
             .add_systems(Render, render_begin.before(RenderSystems::ExtractCommands))
             .add_systems(Render, render_end.after(RenderSystems::PostCleanup));
+    }
+    if std::env::var_os("TESSERAE_PROFILE_WAITS").is_some() {
+        waits::plugin(app);
     }
     let gpu = gpu::GpuSamples::default();
     // Its marker passes cost more than the overhead bound allows a timing run.
@@ -228,13 +243,28 @@ fn end(
     if profile.saved {
         return;
     }
+    profile.presentation.clear();
     if let Some(preferences) = preferences {
         profile.presentation = format!(
-            "selected_display_sync={} selected_fps_cap={:?} capture_override={}",
+            "selected_display_sync={} selected_fps_cap={:?} anti_aliasing={:?} render_scale={} sharpen={} capture_override={}",
             preferences.display_sync,
             preferences.fps_cap,
+            crate::client::anti_alias::chosen(&preferences),
+            crate::client::render_scale::percent(&preferences),
+            crate::client::render_scale::sharpen(),
             std::env::var_os("TESSERAE_SCREENSHOT").is_some()
         );
+    }
+    for on in &drawn.on_monitor {
+        if let Ok(monitor) = drawn.monitors.get(on.0) {
+            profile.presentation.push_str(&format!(
+                "\nmonitor name={:?} physical={}x{} reported_refresh_millihertz={:?}",
+                monitor.name,
+                monitor.physical_width,
+                monitor.physical_height,
+                monitor.refresh_rate_millihertz
+            ));
+        }
     }
     let wall_s = profile.start.elapsed().as_secs_f64();
     let cpu_s = profile.cpu.zip(thread_cpu()).map(|(a, b)| b - a);
@@ -390,18 +420,24 @@ fn save(
         std::env::var("TESSERAE_FIXTURE_MOVEMENT").unwrap_or_else(|_| "flight".into())
     )?;
     writeln!(meta, "{}", profile.presentation)?;
+    writeln!(
+        meta,
+        "wait_intervals={}; enclosing CPU wall intervals, not GPU elapsed or display latency",
+        std::env::var_os("TESSERAE_PROFILE_WAITS").is_some()
+    )?;
     for configuration in profile.surfaces.0.lock().unwrap().iter() {
         writeln!(meta, "backend_surface_configuration={configuration}")?;
     }
     for w in windows.iter() {
         writeln!(
             meta,
-            "window={}x{} scale={} requested_present={:?} focused={}",
+            "window={}x{} scale={} requested_present={:?} focused={} mode={:?}",
             w.physical_width(),
             w.physical_height(),
             w.scale_factor(),
             w.present_mode,
-            w.focused
+            w.focused,
+            w.mode
         )?;
     }
     for (camera, target) in cameras.iter() {
@@ -421,15 +457,23 @@ fn save(
     );
     writeln!(
         render,
-        "frame_id,render_schedule_wall_ms,render_thread_cpu_ms"
+        "frame_id,render_schedule_wall_ms,render_thread_cpu_ms,window_prepare_interval_ms,render_graph_interval_ms,render_finalize_interval_ms"
     )?;
-    for (id, wall, cpu) in profile.render.0.lock().unwrap().iter() {
-        writeln!(
+    for (id, wall, cpu, waits) in profile.render.0.lock().unwrap().iter() {
+        write!(
             render,
             "{id},{},{}",
             wall * 1e3,
             cpu.map(|s| (s * 1e3).to_string()).unwrap_or_default()
         )?;
+        for value in waits {
+            write!(
+                render,
+                ",{}",
+                value.map(|s| (s * 1e3).to_string()).unwrap_or_default()
+            )?;
+        }
+        writeln!(render)?;
     }
     render.flush()?;
     let mut flow = BufWriter::new(
@@ -646,7 +690,7 @@ mod tests {
 
 #[derive(Resource, Default, Clone)]
 struct RenderSamples(std::sync::Arc<std::sync::Mutex<Vec<RenderRow>>>);
-type RenderRow = (usize, f64, Option<f64>);
+type RenderRow = (usize, f64, Option<f64>, [Option<f64>; 3]);
 #[derive(Resource, Default)]
 struct RenderSpan {
     id: Option<usize>,
@@ -657,6 +701,9 @@ fn extract_frame(mut span: ResMut<RenderSpan>, profile: bevy::render::Extract<Re
     span.id = profile.pending.as_ref().map(|row| row.id);
 }
 fn render_begin(world: &mut World) {
+    if let Some(mut intervals) = world.get_resource_mut::<waits::Intervals>() {
+        intervals.reset();
+    }
     let mut span = world.resource_mut::<RenderSpan>();
     span.start = Some(Instant::now());
     span.cpu = thread_cpu();
@@ -669,7 +716,10 @@ fn render_end(world: &mut World) {
         let samples = world.resource::<RenderSamples>();
         let mut rows = samples.0.lock().unwrap();
         if rows.len() < MAX_FRAMES {
-            rows.push((id, wall, cpu));
+            let waits = world
+                .get_resource::<waits::Intervals>()
+                .map_or([None; 3], |intervals| intervals.seconds());
+            rows.push((id, wall, cpu, waits));
         }
     }
 }

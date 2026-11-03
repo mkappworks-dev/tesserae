@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ['active', 'stationary', 'flight', 'transparency',
@@ -206,7 +207,9 @@ def analyze(folder):
                 key: distribution([float(r[key]) for r in selected if r[key]])
                 for key in rows[0] if key.endswith('_ms')
             }
-        render = list(csv.DictReader(path.with_suffix('.render.csv').read_text().splitlines()))
+        render_reader = csv.DictReader(path.with_suffix('.render.csv').read_text().splitlines())
+        render = list(render_reader)
+        render_metrics = [key for key in render_reader.fieldnames or [] if key.endswith('_ms')]
         assert len({r['frame_id'] for r in render}) == len(render)
         by_id = {r['frame_id']: r['phase'] for r in rows}
         if 'start_s' in rows[0]:
@@ -221,11 +224,14 @@ def analyze(folder):
                 'fixture_ready_all': all(r.get('fixture_ready') == 'true' for r in fixture),
                 'fire_burning_frames': sum(r.get('fixture_fire_burning') == 'true' for r in fixture),
                 'fixture_frames': len(fixture),
+                'focused_fixture_frames': sum(r.get('focused') == 'true' for r in fixture),
+                'no_ground': 'no ground' in (path.parent / 'native.log').read_text().lower()
+                    if (path.parent / 'native.log').exists() else None,
                 'fixture_ignitions': max((int(r.get('fixture_ignitions', 0)) for r in fixture), default=0),
                 'render_rows': len(render), 'frame_rows': len(rows),
             }
         for phase in result[path.parent.name]:
-            for key in ['render_schedule_wall_ms', 'render_thread_cpu_ms']:
+            for key in render_metrics:
                 result[path.parent.name][phase][key] = distribution([
                     float(r[key]) for r in render
                     if by_id.get(r['frame_id']) == phase and r[key]
@@ -257,6 +263,9 @@ def competitors():
         r'/(cargo|rustc|tesserae[^/ ]*|meshing-[^/ ]+|fluids-[^/ ]+)$', line)]
 
 
+SWITCHES = ['no-coverage-discard', 'level0-only', 'msaa-off', 'msaa-4', 'msaa-2', 'fxaa', 'smaa', 'no-shadows']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--binary', type=Path)
@@ -264,22 +273,39 @@ def main():
     parser.add_argument('--features', help='exact Cargo features used for this executable')
     parser.add_argument('--game', type=Path, default=ROOT / 'games/demo/dist/mods')
     parser.add_argument('--presented', action='store_true')
+    parser.add_argument('--monitor-probe', action='store_true', help='one short monitor setup check, without a timing series')
+    parser.add_argument('--borderless', action='store_true', help='fill the selected monitor; requires --monitor-hz and a target matching its physical size')
+    parser.add_argument('--monitor-hz', type=int, help='select the unique monitor reporting this refresh rate (within 1 Hz)')
     # An engine without views ignores it, so one runner serves an A/B against main.
     parser.add_argument('--view', choices=['first', 'third'], default='first')
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--fixtures', nargs='+', choices=FIXTURES,
                         default=['active', 'stationary', 'flight', 'transparency'])
     # Each costs more than the overhead bound, so a timing series leaves them off.
-    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility'], default=[])
+    parser.add_argument('--instruments', nargs='+', choices=['gpu', 'holes', 'visibility', 'waits'], default=[])
+    parser.add_argument('--size', default='1920x1080', metavar='WxH',
+                        help='physical target size offscreen, or with --presented --monitor-hz')
+    # Each changes one cost and the image; a `profiling` build only, never a timing baseline.
+    parser.add_argument('--switches', nargs='+', default=[], choices=SWITCHES)
+    # Overrides the render scale setting; each run records the scale the engine used.
+    parser.add_argument('--render-scale', type=int, choices=[100, 85, 75, 67])
+    parser.add_argument('--sharpen', choices=['on', 'off'])
     parser.add_argument('--analyze-only', action='store_true')
     parser.add_argument('output', type=Path)
     args = parser.parse_args()
+    width, height = (int(v) for v in args.size.split('x'))
     if args.analyze_only:
         analyze(args.output)
         return
+    if args.monitor_probe and (not args.presented or args.monitor_hz is None):
+        parser.error('--monitor-probe requires --presented --monitor-hz')
+    if args.borderless and (not args.presented or args.monitor_hz is None):
+        parser.error('--borderless requires --presented --monitor-hz')
+    if args.monitor_hz is not None and (not args.presented or args.monitor_hz <= 0):
+        parser.error('--monitor-hz requires --presented and a positive integer')
     if not args.binary or not args.profile or not args.features:
         parser.error('--binary, --profile and --features are required')
-    if args.repeats < 3:
+    if args.repeats < 3 and not args.monitor_probe:
         parser.error('comparisons require at least three interleaved rounds')
     if not args.game.is_dir():
         parser.error('Game distribution is missing; use the existing built distribution')
@@ -311,15 +337,20 @@ def main():
             'kind': 'rendered-presented' if args.presented else 'rendered-offscreen',
             'seed': '0x7e55e2ae00000001', 'quality': 'unchanged', 'view': args.view,
             'phase_boundaries_s': [0, 16, 20, 22, 32], 'instruments': args.instruments,
-            'physical_target': 'window (see runtime metadata)' if args.presented else [1920, 1080],
+            'physical_target': 'window (see runtime metadata)' if args.presented else [width, height],
+            'switches': args.switches,
+            'monitor_probe': args.monitor_probe,
+            'requested_borderless': args.borderless,
+            'requested_monitor_hz': args.monitor_hz,
+            'requested_render_scale': args.render_scale, 'requested_sharpen': args.sharpen,
         }
         (args.output / 'provenance.json').write_text(json.dumps(metadata, indent=2) + '\n')
-        for repeat in range(args.repeats):
-            cases = list(args.fixtures)
+        for repeat in range(1 if args.monitor_probe else args.repeats):
+            cases = ['stationary'] if args.monitor_probe else list(args.fixtures)
             if repeat % 2:
                 cases.reverse()
             for case in cases:
-                for enabled in ([True, False] if repeat % 2 == 0 else [False, True]):
+                for enabled in ([True] if args.monitor_probe else ([True, False] if repeat % 2 == 0 else [False, True])):
                     if competitors():
                         raise SystemExit('Contended run refused: ' + str(competitors()))
                     run = args.output / f'{case}-{repeat + 1}-{"on" if enabled else "off"}'
@@ -329,11 +360,23 @@ def main():
                     env.update(RUST_LOG='info,wgpu_core::device::resource=debug', BEVY_ASSET_ROOT=str(ROOT), TESSERAE_MODS_DIR=str(args.game.resolve()),
                                TESSERAE_TRUST_MODS='1', TESSERAE_PROFILE_FIXTURE=case,
                                TESSERAE_SCREENSHOT=str(run.resolve() / 'capture.png'),
-                               TESSERAE_SCREENSHOT_WIDTH='1920', TESSERAE_SCREENSHOT_HEIGHT='1080',
+                               TESSERAE_SCREENSHOT_WIDTH=str(width), TESSERAE_SCREENSHOT_HEIGHT=str(height),
                                TESSERAE_SCREENSHOT_FLY_AFTER_S='20', TESSERAE_SCREENSHOT_FLY_S='12',
                                TESSERAE_SCREENSHOT_SETTLE_S='1', TESSERAE_SCREENSHOT_VIEW=args.view,
                                TESSERAE_SCREENSHOT_SPEED_M_S='0')
                     env.update(MOTION.get(case, {}))
+                    for name in args.switches:
+                        env['TESSERAE_DIAG_' + name.upper().replace('-', '_')] = '1'
+                    if args.monitor_probe:
+                        env['TESSERAE_PROFILE_MONITOR_PROBE'] = '1'
+                    if args.borderless:
+                        env['TESSERAE_PROFILE_BORDERLESS'] = '1'
+                    if args.monitor_hz is not None:
+                        env['TESSERAE_PROFILE_MONITOR_HZ'] = str(args.monitor_hz)
+                    if args.render_scale:
+                        env['TESSERAE_SCREENSHOT_RENDER_SCALE'] = str(args.render_scale)
+                    if args.sharpen:
+                        env['TESSERAE_SCREENSHOT_SHARPEN'] = '1' if args.sharpen == 'on' else '0'
                     if case in PERSISTENT:
                         env['TESSERAE_WORLD_DIR'] = str(run.resolve() / 'world')
                     if not args.presented:
@@ -345,26 +388,103 @@ def main():
                     # Continuous updates must match with logging on and off.
                     env['TESSERAE_PROFILE_CONTINUOUS'] = '1'
                     print('Running', run.name, flush=True)
+                    record = dict(
+                        host_before=host_observation(),
+                        env={k: v for k, v in env.items() if k.startswith('TESSERAE_')},
+                        executable_sha256=digest(binary))
+                    (run / 'run.json').write_text(json.dumps(record, indent=2) + '\n')
                     start = time.monotonic()
-                    with (run / 'native.log').open('w') as log:
-                        subprocess.run(['/usr/bin/caffeinate', '-i', str(binary)], cwd=ROOT,
-                                       env=env, stdout=log, stderr=subprocess.STDOUT,
-                                       check=True, timeout=120)
-                    if enabled:
+                    try:
+                        with (run / 'native.log').open('w') as log:
+                            process = subprocess.run(
+                                ['/usr/bin/caffeinate', '-i', str(binary)], cwd=ROOT,
+                                env=env, stdout=log, stderr=subprocess.STDOUT,
+                                check=True, timeout=120)
+                            record['returncode'] = process.returncode
+                    except subprocess.CalledProcessError as error:
+                        record['returncode'] = error.returncode
+                        raise
+                    except subprocess.TimeoutExpired:
+                        record['timed_out'] = True
+                        raise
+                    finally:
+                        record.update(elapsed_s=time.monotonic() - start,
+                                      host_after=host_observation(),
+                                      engine_presentation=engine_presentation(run))
+                        (run / 'run.json').write_text(json.dumps(record, indent=2) + '\n')
+                    if args.monitor_hz is not None:
+                        error = monitor_selection_error(run, args.monitor_hz, (width, height), args.borderless)
+                        if error:
+                            raise SystemExit(f'{run.name}: {error}; see {run / "native.log"}')
+                    if enabled and not args.monitor_probe:
                         measured = list(csv.DictReader((run / 'frames.csv').read_text().splitlines()))
                         fixture_rows = [r for r in measured if r['phase'] == 'fixture']
                         assert fixture_rows and float(fixture_rows[-1]['end_s']) >= 31.9, 'Incomplete fixture window'
                         assert all(r['fixture_ready'] == 'true' for r in fixture_rows), 'Fixture not ready'
                         if case == 'active':
                             assert all(r['fixture_fire_burning'] == 'true' for r in fixture_rows), 'Fire was inactive in the measurement window'
-                    (run / 'run.json').write_text(json.dumps({
-                        'elapsed_s': time.monotonic() - start, 'env': {
-                            k: v for k, v in env.items() if k.startswith('TESSERAE_')},
-                        'executable_sha256': digest(binary),
-                    }, indent=2) + '\n')
-        analyze(args.output)
+        if args.monitor_probe:
+            print('Monitor probe passed; no performance target measured.', flush=True)
+        else:
+            analyze(args.output)
     finally:
         lock.rmdir()
+
+
+def monitor_selected(run, hz, size=None):
+    return monitor_selection_error(run, hz, size) is None
+
+
+def monitor_selection_error(run, hz, size=None, borderless=False):
+    log = (run / 'native.log').read_text()
+    rates = re.findall(r'profile_monitor_selected refresh_millihertz=(\d+)', log)
+    if not rates:
+        return 'engine did not confirm monitor arrival'
+    if borderless and not re.search(r'profile_monitor_selected [^\n]*borderless=true', log):
+        return 'engine did not confirm the borderless request'
+    meta = run / 'frames.metadata.txt'
+    if meta.exists():
+        text = meta.read_text()
+        reported = re.findall(r'reported_refresh_millihertz=Some\((\d+)\)', text)
+        if not reported:
+            return 'final monitor refresh is unavailable'
+        rates.extend(reported)
+        if size is not None:
+            sizes = re.findall(r'^window=(\d+)x(\d+)', text, re.MULTILINE)
+            if not sizes or any(tuple(map(int, value)) != size for value in sizes):
+                actual = ', '.join('x'.join(value) for value in sizes) or 'unavailable'
+                return f'monitor reached, but actual content size is {actual}; requested {size[0]}x{size[1]}'
+        if borderless and 'mode=BorderlessFullscreen(' not in text:
+            return 'final window mode is not borderless fullscreen'
+    if any(abs(int(rate) - hz * 1000) > 1000 for rate in rates):
+        return f'actual monitor refresh {rates} millihertz does not match {hz} Hz'
+    return None
+
+
+def host_observation():
+    """Outside the measured process; retain failures rather than guessing state."""
+    result = dict(utc=datetime.now(timezone.utc).isoformat(), load_average=list(os.getloadavg()))
+    for key, command in [('power', ['pmset', '-g', 'batt']),
+                         ('thermal', ['pmset', '-g', 'therm'])]:
+        try:
+            observation = subprocess.run(command, capture_output=True, text=True, timeout=5)
+            result[key] = dict(returncode=observation.returncode,
+                               stdout=observation.stdout, stderr=observation.stderr)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            result[key] = dict(error=str(error))
+    return result
+
+
+def engine_presentation(run):
+    """The anti-aliasing, render scale and sharpening the engine reports, or None without logging."""
+    meta = run / 'frames.metadata.txt'
+    if not meta.exists():
+        return None
+    for line in meta.read_text().splitlines():
+        if line.startswith('selected_display_sync='):
+            fields = dict(f.split('=', 1) for f in line.split())
+            return {k: fields.get(k) for k in ('anti_aliasing', 'render_scale', 'sharpen')}
+    return None
 
 
 if __name__ == '__main__':

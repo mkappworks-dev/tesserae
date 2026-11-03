@@ -4,6 +4,8 @@ from pathlib import Path
 import runpy
 import tempfile
 import unittest
+from unittest.mock import patch, Mock
+import subprocess
 
 PROFILE = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'profile-frames'))
 
@@ -30,6 +32,120 @@ class FrameAnalysis(unittest.TestCase):
             self.assertEqual(result['startup']['frame_ms']['max'], 750)
             self.assertEqual(result['fixture']['render_thread_cpu_ms']['p99'], 1)
             self.assertEqual(result['stationary']['frame_ms']['n'], 0)
+
+
+class WaitAnalysis(unittest.TestCase):
+    def test_intervals_join_by_frame_not_row_order_and_keep_missing_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            run = root / 'flight-1-on'
+            run.mkdir()
+            (run / 'frames.csv').write_text(
+                'frame_id,phase,frame_ms\n0,startup,10\n1,fixture,20\n2,fixture,30\n')
+            (run / 'frames.render.csv').write_text(
+                'frame_id,render_schedule_wall_ms,render_thread_cpu_ms,window_prepare_interval_ms\n'
+                '2,25,2,\n0,9,1,7\n1,19,2,16\n99,99,99,99\n')
+            PROFILE['analyze'](root)
+            result = json.loads((root / 'summary.json').read_text())['flight-1-on']
+            self.assertEqual(result['fixture']['window_prepare_interval_ms'],
+                             dict(n=1, p50=16, p95=16, p99=16, max=16))
+            self.assertEqual(result['startup']['window_prepare_interval_ms']['p50'], 7)
+
+    def test_monitor_confirmation_rejects_wrong_missing_or_mixed_displays(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run = Path(folder)
+            log = run / 'native.log'
+            for text, expected in [('', False),
+                                   ('profile_monitor_selected refresh_millihertz=120000', False),
+                                   ('profile_monitor_selected refresh_millihertz=143970', True),
+                                   ('profile_monitor_selected refresh_millihertz=144000\n'
+                                    'profile_monitor_selected refresh_millihertz=120000', False)]:
+                log.write_text(text)
+                self.assertEqual(PROFILE['monitor_selected'](run, 144), expected)
+            log.write_text('profile_monitor_selected refresh_millihertz=144000')
+            (run / 'frames.metadata.txt').write_text('reported_refresh_millihertz=Some(120000)')
+            self.assertFalse(PROFILE['monitor_selected'](run, 144))
+            (run / 'frames.metadata.txt').write_text(
+                'reported_refresh_millihertz=Some(144000)\nwindow=1280x720 scale=1')
+            self.assertFalse(PROFILE['monitor_selected'](run, 144, (2560, 1440)))
+            (run / 'frames.metadata.txt').write_text(
+                'reported_refresh_millihertz=Some(144000)\nwindow=2560x1440 scale=1')
+            self.assertTrue(PROFILE['monitor_selected'](run, 144, (2560, 1440)))
+
+    def test_clipped_size_reports_actual_dimensions_and_borderless_needs_confirmation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run = Path(folder)
+            (run / 'native.log').write_text(
+                'profile_monitor_selected refresh_millihertz=144000 borderless=true')
+            meta = run / 'frames.metadata.txt'
+            meta.write_text('reported_refresh_millihertz=Some(144000)\n'
+                            'window=2560x1378 scale=1 mode=Windowed')
+            error = PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True)
+            self.assertIn('actual content size is 2560x1378', error)
+            meta.write_text('reported_refresh_millihertz=Some(144000)\n'
+                            'window=2560x1440 scale=1 mode=Windowed')
+            self.assertIn('not borderless',
+                          PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True))
+            meta.write_text('reported_refresh_millihertz=Some(144000)\n'
+                            'window=2560x1440 scale=1 mode=BorderlessFullscreen(Entity(1v0))')
+            self.assertIsNone(PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True))
+            (run / 'native.log').write_text('profile_monitor_selected refresh_millihertz=144000')
+            self.assertIn('did not confirm the borderless',
+                          PROFILE['monitor_selection_error'](run, 144, (2560, 1440), True))
+
+    def test_host_query_failure_is_retained_without_losing_other_observations(self):
+        with patch('subprocess.run', side_effect=[
+                subprocess.TimeoutExpired('pmset', 5),
+                subprocess.CompletedProcess(['pmset'], 1, '', 'not supported')]):
+            result = PROFILE['host_observation']()
+        self.assertIn('error', result['power'])
+        self.assertEqual(result['thermal']['returncode'], 1)
+        self.assertEqual(result['thermal']['stderr'], 'not supported')
+        self.assertEqual(len(result['load_average']), 3)
+
+
+class MonitorProbe(unittest.TestCase):
+    def test_probe_runs_once_without_requiring_or_analyzing_fixture_samples(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            engine = root / 'engine'
+            for name in ['Cargo.toml', 'Cargo.lock', 'crates/tesserae/Cargo.toml']:
+                target = engine / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text('test manifest')
+            game = root / 'game/mods'
+            game.mkdir(parents=True)
+            binary = root / 'test-binary'
+            binary.write_text('test executable')
+            output = root / 'probe'
+            analyze = Mock()
+            def process(*args, **kwargs):
+                run = output / 'stationary-1-on'
+                (run / 'native.log').write_text(
+                    'profile_monitor_selected refresh_millihertz=144000 borderless=true')
+                (run / 'frames.metadata.txt').write_text(
+                    'reported_refresh_millihertz=Some(144000)\n'
+                    'window=2560x1440 mode=BorderlessFullscreen(Entity(1v0))')
+                return subprocess.CompletedProcess(args[0], 0)
+            def local_path(value):
+                return root / 'lock' if str(value) == '/tmp/tesserae-frame-profile.lock' else Path(value)
+            argv = ['profile-frames', str(output), '--binary', str(binary),
+                    '--profile', 'release', '--features', 'profiling', '--game', str(game),
+                    '--presented', '--monitor-hz', '144', '--borderless', '--size', '2560x1440',
+                    '--monitor-probe']
+            with patch.dict(PROFILE['main'].__globals__, {
+                    'ROOT': engine, 'Path': local_path, 'analyze': analyze,
+                    'competitors': lambda: [], 'host_observation': lambda: {'load_average': [0, 0, 0]}}):
+                with patch('sys.argv', argv), patch('subprocess.run', side_effect=process) as calls:
+                    with patch('subprocess.check_output', side_effect=lambda *a, **kw: 'test' if kw.get('text') else b''):
+                        PROFILE['main']()
+            self.assertEqual(calls.call_count, 1)
+            analyze.assert_not_called()
+            env = calls.call_args.kwargs['env']
+            self.assertEqual(env['TESSERAE_PROFILE_MONITOR_PROBE'], '1')
+            self.assertEqual(env['TESSERAE_PROFILE_BORDERLESS'], '1')
+            self.assertFalse((root / 'lock').exists())
+            self.assertFalse((output / 'stationary-1-on/frames.csv').exists())
 
 
 FRAME_HEADER = ('frame_id,start_s,end_s,phase,frame_ms,streaming_settled,fixture_moves,'

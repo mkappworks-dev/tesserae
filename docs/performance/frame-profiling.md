@@ -38,6 +38,72 @@ backend-resolved fallback and actual present elapsed time are unavailable.
 Presented window dimensions are recorded at runtime. Do not pool presented and
 offscreen measurements.
 
+`--size WxH` sets the offscreen target (default 1920x1080) and is recorded as
+the physical target. `--switches` turns on diagnostic switches of a `profiling`
+build, each changing one cost and the image, so they are for attribution and
+never for a timing baseline: `no-coverage-discard` (the coverage test is
+compiled out of the chunk shader), `level0-only` (coarse levels are not drawn),
+`no-shadows` (the sun casts no shadow map) and five that replace the
+anti-aliasing setting, one at a time: `msaa-off`, `msaa-4`, `msaa-2`, `fxaa` and
+`smaa` (the last two with MSAA off). The hand camera takes the Player camera's
+sample count. A normal build compiles none of them.
+
+`--render-scale` (100, 85, 75 or 67) overrides the render scale setting and
+`--sharpen on` or `off` overrides contrast-adaptive sharpening of the upscale,
+on by default below 100%. Each run's `run.json` records the anti-aliasing, scale
+and sharpening the engine reports using, under `engine_presentation`; never pool
+runs that differ in them.
+
+`--presented --monitor-hz 144 --size 2560x1440` selects the unique monitor whose
+OS-reported refresh is within 1 Hz of 144 Hz, then sizes the window in physical
+pixels after it reaches that monitor. It fails if the display is missing or
+ambiguous, or the window does not arrive within five seconds. Each process logs
+confirmation, including logging-off references. The runner checks that
+confirmation and, when present, the final monitor metadata. Keep the window on
+the selected display; this requests placement, not a refresh-rate or
+present-mode change. Without `--monitor-hz`, presented window sizing and
+placement retain their existing behavior.
+
+Add `--borderless` with `--presented --monitor-hz` when the requested content
+size fills the selected monitor. This explicitly uses borderless fullscreen on
+that monitor to avoid macOS shrinking a decorated window to its work area. The
+requested size must equal the monitor's physical size. Fullscreen is requested
+separately from resizing: after a two-second transition grace period, one
+corrective size request is allowed if needed. The requested monitor, mode and
+physical size must then remain correct for a second before confirmation. The
+runner records the request in provenance and checks the final size and window
+mode when metadata is available. Treat this as a distinct presentation
+condition; do not pool it with windowed measurements. It changes neither the
+normal window default nor the requested present mode.
+
+Use `--monitor-probe` with the presented monitor options for a short geometry
+check before a full series. It runs one logging-on stationary process and exits
+after setup confirms stable geometry; it skips fixture-window validation and
+analysis and makes no performance claim. The same exact-size and mode checks
+still apply. For borderless profiling on macOS, the window is created with a
+full-size content view and transparent titlebar so content can occupy the whole
+native frame. These creation-time attributes apply only to the explicit
+borderless profiling request.
+
+`--instruments waits` adds exclusive CPU timestamp markers around window
+preparation (including swapchain acquisition), the root render graph (including
+its command submissions), and renderer finalization after the graph (the final
+submission, presentation scheduling and screenshot collection). Columns in
+`frames.render.csv` end in `_interval_ms` and are summarized by phase alongside
+the existing render samples. They enclose schedule work and may include other
+systems and scheduling delays; they do not isolate an individual driver call,
+GPU execution, or display latency. The exclusive markers serialize work and may
+change frame time, so use them for attribution in a separate series, never as an
+optimization acceptance baseline. Missing boundaries export empty cells, not
+zero. GPU timestamps remain a separate attribution series.
+
+Each run's `run.json` retains load averages, UTC, `pmset -g batt` and
+`pmset -g therm` observations before and after the engine process. Failed or
+unsupported host queries retain their errors; the observations run outside the
+measured process. Metadata reports the window monitor's OS-reported refresh rate
+in millihertz when available; it does not measure physical scanout or variable
+refresh behavior. Keep the window on one monitor throughout a series.
+
 Each run retains its PNG, log, environment, executable hash and raw samples. The
 series retains a copied executable, Engine source hashes, source revision/diff,
 Game file hashes, build profile/features and host identity. Keep native

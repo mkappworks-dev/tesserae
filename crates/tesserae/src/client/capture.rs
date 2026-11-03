@@ -440,6 +440,9 @@ fn render_offscreen(
     if menu.open {
         commands.entity(*main).insert(IsDefaultUiCamera);
     }
+    commands.insert_resource(super::render_scale::Output(RenderTarget::Image(
+        handle.clone().into(),
+    )));
     commands.insert_resource(Offscreen(handle));
 }
 
@@ -720,7 +723,8 @@ fn fly_forward(
 }
 
 /// `TESSERAE_SCREENSHOT_PILLAR=1` stacks stone 1.1 m ahead of the Eye and 0.1 m
-/// right of it, through ordinary Place intents from the Eye, one per 0.2 s. With
+/// right of it, through ordinary Place intents from the Eye, one per 0.2 s; a
+/// material name instead of `1`, such as `demo:leaves`, stacks that. With
 /// 0.25 m Voxels it hides the ground ahead from the Eye while the shoulder
 /// camera's crosshair line passes it, so the shutter shows a Blocked target.
 fn pillar(
@@ -734,8 +738,10 @@ fn pillar(
 ) {
     const BLOCKS: u32 = 7;
     let elapsed_s = capture.elapsed_s(&time);
-    if std::env::var_os("TESSERAE_SCREENSHOT_PILLAR").is_none()
-        || placed.0 >= BLOCKS
+    let Some(pillar) = std::env::var_os("TESSERAE_SCREENSHOT_PILLAR") else {
+        return;
+    };
+    if placed.0 >= BLOCKS
         || capture
             .frames
             .fill_ended_s
@@ -744,11 +750,15 @@ fn pillar(
     {
         return;
     }
-    let Some(stone) = catalogue
+    let name = match pillar.to_str() {
+        Some(name) if name.contains(':') => name,
+        _ => "demo:stone",
+    };
+    let Some(material) = catalogue
         .0
         .materials
         .iter()
-        .find(|material| material.name == "demo:stone")
+        .find(|material| material.name == name)
     else {
         return;
     };
@@ -761,7 +771,7 @@ fn pillar(
     // Each Place strikes the top of the column so far and lands on it.
     let top = base + Vec3::Y * size * placed.0 as f32;
     intents.write(crate::server::edit::EditIntent {
-        action: crate::server::edit::EditAction::Place(tesserae_core::Voxel::cube(stone.id)),
+        action: crate::server::edit::EditAction::Place(tesserae_core::Voxel::cube(material.id)),
         origin: eye,
         direction: top - eye,
     });

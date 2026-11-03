@@ -53,12 +53,15 @@ fn main() -> std::process::ExitCode {
 }
 
 fn window_plugin() -> WindowPlugin {
+    let window = Window {
+        title: "Tesserae".into(),
+        ..default()
+    };
+    #[cfg(feature = "profiling")]
+    let window = profiling::monitor_window(window);
     WindowPlugin {
         close_when_requested: false,
-        primary_window: Some(Window {
-            title: "Tesserae".into(),
-            ..default()
-        }),
+        primary_window: Some(window),
         ..default()
     }
 }

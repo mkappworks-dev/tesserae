@@ -40,6 +40,7 @@ pub struct LodParams {
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
+#[bind_group_data(ChunkMaterialKey)]
 pub struct ChunkMaterialExtension {
     /// Indexed by Material id. Bindings 0 to 99 belong to the base
     /// `StandardMaterial`, so an extension starts at 100.
@@ -56,6 +57,26 @@ pub struct ChunkMaterialExtension {
     pub texture: Option<Handle<Image>>,
     #[uniform(105)]
     pub textured: UVec4,
+    /// Whether the pipeline holds the coverage test's `discard`. A Chunk no
+    /// finer level draws any of takes a material without it: on Apple's
+    /// tile-based GPUs a pipeline that may discard defeats hidden-surface
+    /// removal, which cost 35% of the GPU frame at 1440p.
+    pub coverage_test: bool,
+}
+
+/// The pipeline variant a [`ChunkMaterialExtension`] specialises.
+#[repr(C)]
+#[derive(Eq, PartialEq, Hash, Copy, Clone)]
+pub struct ChunkMaterialKey {
+    coverage_test: bool,
+}
+
+impl From<&ChunkMaterialExtension> for ChunkMaterialKey {
+    fn from(extension: &ChunkMaterialExtension) -> Self {
+        Self {
+            coverage_test: extension.coverage_test,
+        }
+    }
 }
 
 /// `base_color` is linear in the shader, so a colour picked by eye has to be
@@ -81,6 +102,7 @@ impl Default for ChunkMaterialExtension {
             drawn: Handle::default(),
             texture: None,
             textured: UVec4::ZERO,
+            coverage_test: true,
         }
     }
 }
@@ -110,7 +132,7 @@ impl MaterialExtension for ChunkMaterialExtension {
         _pipeline: &MaterialExtensionPipeline,
         descriptor: &mut RenderPipelineDescriptor,
         layout: &MeshVertexBufferLayoutRef,
-        _key: MaterialExtensionKey<Self>,
+        key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
         // A packed Chunk mesh has none of `bevy_pbr`'s attributes, so the base
         // material's layout is empty and the packed one has to be declared
@@ -144,6 +166,14 @@ impl MaterialExtension for ChunkMaterialExtension {
                 super::texture_atlas::HEIGHT as u32,
             ),
         ];
+        #[cfg(feature = "profiling")]
+        let switched = crate::profiling::switch("TESSERAE_DIAG_NO_COVERAGE_DISCARD");
+        #[cfg(not(feature = "profiling"))]
+        let switched = false;
+        let mut defs = defs.to_vec();
+        if !key.bind_group_data.coverage_test || switched {
+            defs.push(ShaderDefVal::Bool("CHUNK_NO_COVERAGE_DISCARD".into(), true));
+        }
         descriptor.vertex.shader_defs.extend_from_slice(&defs);
         if let Some(fragment) = descriptor.fragment.as_mut() {
             fragment.shader_defs.extend_from_slice(&defs);
