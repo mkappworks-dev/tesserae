@@ -138,8 +138,8 @@ explanation; supported CI configurations are reported separately.
 ## Remaining limits
 
 The historical driver/compositor cause of the internal-display acquisition
-waits remains open in ticket 08. It is not a failed current performance
-gate. The final borderless target pass and the user-approved image choices
+waits remains unproven. You accepted that limitation and closed ticket 08
+on 2026-11-03; it is not a failed current performance gate. The final borderless target pass and the user-approved image choices
 are recorded independently of that unresolved causal explanation.
 
 ## Publication decision (2026-11-03)

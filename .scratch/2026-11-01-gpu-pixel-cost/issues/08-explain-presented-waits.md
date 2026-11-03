@@ -1,10 +1,26 @@
 # 08: Explain the two presented timing states
 
-Status: ready-for-agent
+Status: done
 Blocked by: 07
 
 Spec: [GPU cost per pixel](../spec.md).
 PR boundary: own branch `tech/gpu-present-waits`, cut from `tech/gpu-targets`.
+
+## Accepted closure (2026-11-03)
+
+You instructed that ticket 08 be marked done and the remaining checkbox
+ticked, accepting the attribution limits already described. That checkbox
+is closed by this explicit decision, not by an additional measurement.
+
+Measured: the slow internal-display state is dominated by the enclosing
+window-preparation interval; the focused external series passes the target
+at verified geometry. Not measured: fast-state wait intervals paired with
+the slow state under controlled matching conditions. The exact driver or
+compositor cause is therefore unproven. Those limits remain in this record
+and PR 50; no missing capture or causal proof is claimed.
+
+The previously proposed paired capture and separate GPU attribution are
+optional future research, not outstanding acceptance work for this ticket.
 
 ## Decision (2026-11-02)
 
@@ -29,7 +45,7 @@ render scale. No present-mode or quality default changes are authorized.
 ## Acceptance criteria
 
 - [x] The new intervals and host observations are verified on a native run.
-- [ ] Presented fast and slow states attributed to measured intervals, with
+- [x] Presented fast and slow states attributed to measured intervals, with
       uncertainty retained wherever an underlying wait is unavailable.
 - [x] Controlled timing repeats establish whether p95 <= 6.9 ms holds in
       all four presented fixtures at SMAA and 100% scale.
