@@ -13,13 +13,13 @@ data for content, shared across Games.
 All Games are MIT licensed and sit in `games/<id>/`. Only a Game declares
 `world`, `view` and `tools`.
 
-| Game                             | Behaviour (Rust)                         | Depends on                           | Shows                                                                               |
-| -------------------------------- | ---------------------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------- |
-| [terra](../games/terra/)         | Everything; self-contained               | -                                    | A Game that declares its own content, fluids, fire and a tool                       |
-| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks, wanderer  | A Game with no Material of its own; a Shape from one Mod with a Material of another |
-| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth, golem | Fluid, reaction and fire rules that live in Mods                                    |
-| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, sprite        | Sea level, caves and smoothing; fluid Commands from `tick`                          |
-| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks, wanderer         | Blended glass, emission and Shapes; timed placement from `tick`                     |
+| Game                             | Behaviour (Rust)                         | Depends on                                     | Shows                                                                               |
+| -------------------------------- | ---------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------- |
+| [terra](../games/terra/)         | Everything; self-contained               | -                                              | A Game that declares its own content, fluids, fire and a tool                       |
+| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks (suggests wanderer)  | A Game with no Material of its own; a Shape from one Mod with a Material of another |
+| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth (suggests golem) | Fluid, reaction and fire rules that live in Mods                                    |
+| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora (suggests sprite)        | Sea level, caves and smoothing; fluid Commands from `tick`                          |
+| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks (suggests wanderer)         | Blended glass, emission and Shapes; timed placement from `tick`                     |
 
 ## Mods
 
@@ -66,10 +66,10 @@ graph LR
   tidewater --> flora
   lumen --> strata
   lumen --> glassworks
-  lumen --> wanderer
-  meadow --> wanderer
-  ember --> golem
-  tidewater --> sprite
+  lumen -.-> wanderer
+  meadow -.-> wanderer
+  ember -.-> golem
+  tidewater -.-> sprite
   hearth --> strata
   hearth --> waters
   hearth --> flora

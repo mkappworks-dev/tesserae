@@ -13,10 +13,10 @@ removed above the sea.
 ## Dependencies
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
-[flora](../../mods/flora/), and [sprite](../../mods/sprite/) for its character.
-This Game declares no Material, Shape or fluid of its own; every name it uses is
-`<mod id>:<name>` from those Mods. It declares only its World (ground, sea
-level, relief and the like) and one behaviour.
+[flora](../../mods/flora/), and it suggests [sprite](../../mods/sprite/) for its
+character. This Game declares no Material, Shape or fluid of its own; every name
+it uses is `<mod id>:<name>` from those Mods. It declares only its World
+(ground, sea level, relief and the like) and one behaviour.
 
 ## Behaviour
 

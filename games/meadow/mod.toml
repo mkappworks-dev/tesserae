@@ -2,5 +2,6 @@ id = "meadow"
 version = "0.2.0"
 api = "0.3"
 root = true
-depends = ["strata", "flora", "glassworks", "wanderer"]
+depends = ["strata", "flora", "glassworks"]
+suggests = ["wanderer"]
 wasm = "meadow.wasm"

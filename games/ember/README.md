@@ -14,7 +14,7 @@ sets the scene and starts the eruptions.
 ## Dependencies
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
-[flora](../../mods/flora/), [hearth](../../mods/hearth/), and
+[flora](../../mods/flora/), [hearth](../../mods/hearth/), and it suggests
 [golem](../../mods/golem/) for its character. This Game declares no Material,
 Shape or fluid of its own; every name it uses is `<mod id>:<name>` from those
 Mods. It declares only its World (ground, sea level, relief and the like) and

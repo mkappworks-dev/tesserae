@@ -12,10 +12,11 @@ gazebo posts are `flora:wood` in the `glassworks:fence` Shape.
 ## Dependencies
 
 [strata](../../mods/strata/), [flora](../../mods/flora/),
-[glassworks](../../mods/glassworks/), and [wanderer](../../mods/wanderer/) for
-its character. This Game declares no Material, Shape or fluid of its own; every
-name it uses is `<mod id>:<name>` from those Mods. It declares only its World
-(ground, sea level, relief and the like) and one behaviour.
+[glassworks](../../mods/glassworks/), and it suggests
+[wanderer](../../mods/wanderer/) for its character. This Game declares no
+Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
+from those Mods. It declares only its World (ground, sea level, relief and the
+like) and one behaviour.
 
 ## Behaviour
 

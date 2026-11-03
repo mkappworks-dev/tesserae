@@ -126,7 +126,7 @@ struct Launcher {
     rename: String,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
-    clashes: std::collections::BTreeMap<String, String>,
+    clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
@@ -213,6 +213,10 @@ struct Resolved;
 
 #[derive(Component)]
 struct Root;
+
+/// The page's own scrolling column, whose position survives a rebuild of the same page.
+#[derive(Component)]
+struct PageScroll;
 
 pub fn plugin(app: &mut App) {
     app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
@@ -540,6 +544,11 @@ fn handle(
                 }
                 l.form = Form {
                     game: installed.game.as_ref().map(|g| g.id.clone()),
+                    mods: installed
+                        .game
+                        .as_ref()
+                        .map(|g| installed.suggested(&g.id))
+                        .unwrap_or_default(),
                     ..Form::default()
                 };
                 l.show(Screen::Create);
@@ -564,7 +573,7 @@ fn handle(
                 };
                 match l.form.game.clone() {
                     Some(game) if !installed.mods.is_empty() => {
-                        l.clashes = installed.clashes(&installed.closure_for(&game, &l.form.mods));
+                        l.clashes = installed.clashes(&game, &l.form.mods);
                         l.show(Screen::Mods);
                     }
                     _ => l.show(Screen::Create),
@@ -630,8 +639,8 @@ fn handle(
                     continue;
                 };
                 l.form.game = Some(game.id.clone());
-                let id = game.id.clone();
-                l.form.mods.retain(|m| installed.blocked(&id, m).is_none());
+                // Each Game starts from the Mods it suggests; picks made for another do not carry over.
+                l.form.mods = installed.suggested(&game.id);
                 l.version += 1;
             }
             Act::ToggleMod(index) => {
@@ -641,17 +650,22 @@ fn handle(
                 if installed.blocked(&game, &m.id).is_some() {
                     continue;
                 }
-                if l.clashes.contains_key(&m.id) {
-                    continue;
-                }
-                if !l.form.mods.remove(&m.id) {
+                if let Some(clash) = l.clashes.get(&m.id) {
+                    // A Mod that clashes with a pick swaps it out; one that clashes with what the
+                    // Game requires cannot be added.
+                    let Some(out) = clash.replaces.clone() else {
+                        continue;
+                    };
+                    l.form.mods.remove(&out);
+                    l.form.mods.insert(m.id.clone());
+                } else if !l.form.mods.remove(&m.id) {
                     let needed = installed.closure_for(&game, &l.form.mods);
                     // A dependency of another pick is locked on; ticking it by hand adds nothing.
                     if !needed.contains(&m.id) {
                         l.form.mods.insert(m.id.clone());
                     }
                 }
-                l.clashes = installed.clashes(&installed.closure_for(&game, &l.form.mods));
+                l.clashes = installed.clashes(&game, &l.form.mods);
                 l.version += 1;
             }
             Act::NextMods => {
@@ -663,7 +677,7 @@ fn handle(
                     l.version += 1;
                     continue;
                 };
-                l.clashes = installed.clashes(&installed.closure_for(&game, &l.form.mods));
+                l.clashes = installed.clashes(&game, &l.form.mods);
                 l.show(Screen::Mods);
             }
             Act::Voxel(size) => {
@@ -893,8 +907,9 @@ fn render(
     launcher: Option<Res<Launcher>>,
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
+    scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
-    mut built: Local<Option<u64>>,
+    (mut built, mut shown): (Local<Option<u64>>, Local<Option<Screen>>),
 ) {
     let Some(l) = launcher else {
         return;
@@ -903,6 +918,13 @@ fn render(
         return;
     }
     *built = Some(l.version);
+    // A click rebuilds the page it is on; keep its place there, and start a new page at the top.
+    let scroll = if shown.as_ref() == Some(&l.screen) {
+        scrolled.iter().next().map_or(Vec2::ZERO, |p| p.0)
+    } else {
+        Vec2::ZERO
+    };
+    *shown = Some(l.screen.clone());
     for root in &roots {
         commands.entity(root).despawn();
     }
@@ -931,8 +953,8 @@ fn render(
         header(root, logo.as_deref());
         match &l.screen {
             Screen::List => focus = list(root, &l, &installed),
-            Screen::Create => focus = form(root, &l, &installed),
-            Screen::Mods => focus = mods_page(root, &l, &installed),
+            Screen::Create => focus = form(root, &l, &installed, scroll),
+            Screen::Mods => focus = mods_page(root, &l, &installed, scroll),
             Screen::Opening(name) => {
                 centered(root, false, |card| super::loading::opening(card, name));
             }
@@ -1421,12 +1443,19 @@ fn details(side: &mut ChildSpawnerCommands, entry: &Entry, installed: &Installed
     });
 }
 
-fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -> Option<Entity> {
+fn form(
+    root: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    scroll: Vec2,
+) -> Option<Entity> {
     let f = &l.form;
     let mut focus = None;
     root.spawn((
         TabGroup::default(),
         ScrollArea,
+        ScrollPosition(scroll),
+        PageScroll,
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(10.0),
@@ -1560,12 +1589,15 @@ fn mods_page(
     root: &mut ChildSpawnerCommands,
     l: &Launcher,
     installed: &Installed,
+    scroll: Vec2,
 ) -> Option<Entity> {
     let f = &l.form;
     let game = f.game.clone().unwrap_or_default();
     root.spawn((
         TabGroup::default(),
         ScrollArea,
+        ScrollPosition(scroll),
+        PageScroll,
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(10.0),
@@ -1611,7 +1643,7 @@ fn mods_page(
                             selected: false,
                             title: format!("{} {}", ui::title(&m.id), m.version),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: Some(("Required", ui::MUTED)),
+                            tag: Some(("Required".to_owned(), ui::MUTED)),
                         },
                     );
                 }
@@ -1634,17 +1666,24 @@ fn mods_page(
                 if let Some(why) = installed.blocked(&game, &m.id) {
                     shown.act = None;
                     shown.detail = format!("Unavailable: {why}");
-                    shown.tag = Some(("Unavailable", ui::MUTED));
-                } else if let Some(why) = l.clashes.get(&m.id) {
-                    shown.act = None;
+                    shown.tag = Some(("Unavailable".to_owned(), ui::MUTED));
+                } else if let Some(clash) = l.clashes.get(&m.id) {
                     shown.border = ui::AMBER;
-                    shown.detail = format!("Cannot be added: {why}");
-                    shown.tag = Some(("Conflict", ui::AMBER));
+                    shown.detail = format!("Conflicts: {}", clash.reason);
+                    match &clash.replaces {
+                        Some(out) => {
+                            shown.tag = Some((format!("Replaces {}", ui::title(out)), ui::AMBER));
+                        }
+                        None => {
+                            shown.act = None;
+                            shown.tag = Some(("Conflict".to_owned(), ui::AMBER));
+                        }
+                    }
                 } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
                     shown.act = None;
-                    shown.tag = Some(("Needed by another Mod", ui::MUTED));
+                    shown.tag = Some(("Needed by another Mod".to_owned(), ui::MUTED));
                 } else if shown.selected {
-                    shown.tag = Some(("Added", ui::LEAF));
+                    shown.tag = Some(("Added".to_owned(), ui::LEAF));
                 }
                 mod_card(col, shown);
             }
@@ -1663,7 +1702,7 @@ struct ModCard {
     selected: bool,
     title: String,
     detail: String,
-    tag: Option<(&'static str, Color)>,
+    tag: Option<(String, Color)>,
 }
 
 fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
@@ -2357,6 +2396,35 @@ mod tests {
         assert_eq!(launcher(&app).screen, Screen::Mods);
         assert!(launcher(&app).form.mods.contains("glassworks"));
         assert!(!launcher(&app).form.mods.contains("lamps"));
+    }
+
+    #[test]
+    fn picking_a_game_ticks_what_it_suggests_and_a_suggestion_can_be_unticked() {
+        let worlds = Directory::new();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &[])
+                .with_mod("wanderer", &[])
+                .with_mod("golem", &[])
+                .with_game_suggests(&["wanderer"]),
+        );
+        app.update();
+        act(&mut app, Act::New);
+        assert!(launcher(&app).form.mods.contains("wanderer"));
+        act(&mut app, Act::NextMods);
+        act(&mut app, Act::ToggleMod(0));
+        assert!(
+            !launcher(&app).form.mods.contains("wanderer"),
+            "it can be unticked"
+        );
+        assert!(
+            installed_required(&app).is_empty(),
+            "a suggestion is not a dependency"
+        );
+    }
+
+    fn installed_required(app: &App) -> Vec<String> {
+        app.world().resource::<Installed>().required("terra")
     }
 
     #[test]

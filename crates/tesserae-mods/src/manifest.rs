@@ -27,6 +27,9 @@ pub struct Manifest {
     pub depends: Vec<String>,
     #[serde(default)]
     pub limits: ManifestLimits,
+    /// Mods Create World ticks for a Game by default; unlike `depends`, they can be unticked.
+    #[serde(default)]
+    pub suggests: Vec<String>,
     /// Display only: the section a Mod is listed under when a World is made.
     pub category: Option<String>,
     /// Display only: one line saying what the Mod holds.
@@ -152,12 +155,14 @@ impl Manifest {
                 ));
             }
         }
-        for dep in &self.depends {
-            if !valid_id(dep) {
-                return Err(manifest_error(
-                    id,
-                    format!("depends entry `{dep}` is not a valid id"),
-                ));
+        for (field, ids) in [("depends", &self.depends), ("suggests", &self.suggests)] {
+            for dep in ids {
+                if !valid_id(dep) {
+                    return Err(manifest_error(
+                        id,
+                        format!("{field} entry `{dep}` is not a valid id"),
+                    ));
+                }
             }
         }
         Ok(())

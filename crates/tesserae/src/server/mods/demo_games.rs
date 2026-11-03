@@ -39,15 +39,15 @@ fn copy_tree(from: &Path, to: &Path) {
     }
 }
 
-/// What a Game's `mod.toml` lists in `depends`.
+/// What a Game's `mod.toml` lists in `depends` and `suggests`.
 fn depends(game: &str) -> Vec<String> {
     let manifest =
         fs::read_to_string(checkout().join("games").join(game).join("mod.toml")).unwrap();
     let manifest: toml::Table = manifest.parse().unwrap();
-    manifest["depends"]
-        .as_array()
-        .unwrap()
+    ["depends", "suggests"]
         .iter()
+        .filter_map(|field| manifest.get(*field))
+        .flat_map(|list| list.as_array().unwrap())
         .map(|id| id.as_str().unwrap().to_owned())
         .collect()
 }
@@ -217,7 +217,7 @@ fn near(a: f32, b: f32, tolerance: f32) -> bool {
 
 /// The six-bone figure a Game's character Mod supplies, which the Game itself never declares.
 #[test]
-fn every_demo_game_draws_the_character_of_the_mod_it_depends_on() {
+fn every_demo_game_draws_the_character_of_the_mod_it_suggests() {
     for (game, size) in [
         ("meadow", 0.05625),
         ("ember", 0.0675),
@@ -237,7 +237,7 @@ fn meadow_declares_no_material_and_takes_its_ground_from_strata() {
     assert!(loaded.game);
     assert_eq!(
         ids(&loaded),
-        ["flora", "glassworks", "strata", "wanderer", "meadow"]
+        ["flora", "glassworks", "strata", "meadow", "wanderer"]
     );
     assert!(
         loaded
@@ -480,7 +480,7 @@ fn tidewater_steps_come_every_declared_interval() {
 #[test]
 fn lumen_builds_blended_glass_light_and_all_three_shapes() {
     let (_install, mut loaded) = loaded("lumen", 0.5);
-    assert_eq!(ids(&loaded), ["glassworks", "strata", "wanderer", "lumen"]);
+    assert_eq!(ids(&loaded), ["glassworks", "strata", "lumen", "wanderer"]);
     let batches = run(&mut loaded, 0.5, 0.05, 40);
     let all: Vec<&Command> = batches.iter().flat_map(|b| &b.commands).collect();
     let has = |wanted: &dyn Fn(Voxel) -> bool| {
