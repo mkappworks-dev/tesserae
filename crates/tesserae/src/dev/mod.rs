@@ -698,8 +698,13 @@ mod tests {
         assert!(!rig.app.world().contains_resource::<Progress>());
         assert_eq!(rig.app.world().resource::<WorldSettings>().seed, SEED);
         let player = players.single(rig.app.world()).unwrap();
-        // Gravity has already moved either Player a little, but never to where this one was put.
-        assert!(player.eye().distance(initial) < 0.5, "{:?}", player.eye());
+        // Gravity moves either Player down for as long as the runner takes to settle, so only the
+        // horizontal position says whether the spawn was restored.
+        let (eye, spawn) = (player.eye(), initial);
+        assert!(
+            (eye.x - spawn.x).abs() < 0.5 && (eye.z - spawn.z).abs() < 0.5,
+            "{eye:?}"
+        );
         assert_eq!(rig.app.world().iter_resources().count(), resources);
         assert_eq!(rig.app.world().iter_entities().count(), entities);
     }
