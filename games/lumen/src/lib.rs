@@ -193,82 +193,144 @@ fn light(state: &mut State) -> Vec<Command> {
         .collect()
 }
 
+/// Width of the strips the ground is laid in, so the near edge goes down first.
+const STRIP_M: f32 = 4.0;
+
+/// How far the nearest point of `region` is from the spawn at the origin, over the ground.
+fn distance_m(region: &BoxM) -> f32 {
+    let along = |low: f32, high: f32| {
+        if low > 0.0 {
+            low
+        } else if high < 0.0 {
+            -high
+        } else {
+            0.0
+        }
+    };
+    along(region.min.x, region.max.x).hypot(along(region.min.z, region.max.z))
+}
+
+fn nearest(command: &Command) -> f32 {
+    match command {
+        Command::Fill(f) => distance_m(&f.region),
+        Command::PlaceSources(f) => distance_m(&f.region),
+        Command::RemoveSources(r) | Command::Ignite(r) | Command::Extinguish(r) => distance_m(r),
+        Command::Place(p) => p
+            .iter()
+            .map(|at| at.at.x.hypot(at.at.z))
+            .fold(f32::MAX, f32::min),
+    }
+}
+
+/// The Server applies a Mod's Commands in order, a few Voxels a tick, so the pieces nearest the
+/// Player go first. A piece is Commands that must land in order; pieces are stable-sorted.
+fn nearest_first(mut pieces: Vec<Vec<Command>>) -> Vec<Command> {
+    let key = |piece: &Vec<Command>| piece.iter().map(nearest).fold(f32::MAX, f32::min);
+    pieces.sort_by(|a, b| key(a).total_cmp(&key(b)));
+    pieces.into_iter().flatten().collect()
+}
+
+/// `region` cut along z into strips of `STRIP_M`.
+fn strips(region: BoxM) -> Vec<BoxM> {
+    let mut pieces = Vec::new();
+    let mut z = region.min.z;
+    while z < region.max.z {
+        let end = (z + STRIP_M).min(region.max.z);
+        pieces.push(BoxM {
+            min: point(region.min.x, region.min.y, z),
+            max: point(region.max.x, region.max.y, end),
+        });
+        z = end;
+    }
+    pieces
+}
+
 /// The levelled floor, glass walls with a door, a frosted roof, a slab path and stair, and the
-/// unlit lantern posts.
+/// unlit lantern posts. The Server applies Commands in order, a few Voxels a tick, so each group
+/// is laid nearest the spawn first: the floor, then walls, path and posts, then the roof. A piece
+/// is Commands that must land in order: the door is cut after its wall, the stair after the door.
 fn build(state: &State) -> Vec<Command> {
     let (s, ids) = (state.size_m, state.ids);
-    let voxel = |material, shape, orientation| Voxel {
+    let voxel = |material, shape| Voxel {
         material,
         shape,
-        orientation,
+        orientation: 0,
     };
-    let cube = |material| voxel(material, ids.cube, 0);
+    let cube = |material| voxel(material, ids.cube);
     let (x, z) = (GARDEN_X_M, GARDEN_Z_M);
     let top = FLOOR_M + WALL_M;
-    let mut commands = Vec::new();
+
     // Ground from the bottom of the ground band to the floor, with turf on top. Nothing needs
     // clearing above: the floor is above the highest ground, so what is there is air.
-    commands.extend(fill(
-        region(
-            (x.0 - 1.0, SEA_LEVEL_M, z.0 - 1.0),
-            (x.1 + 1.0, FLOOR_M - 1.0, z.1 + 1.0),
-        ),
-        s,
-        cube(ids.soil),
-    ));
-    commands.extend(fill(
-        region(
-            (x.0 - 1.0, FLOOR_M - 1.0, z.0 - 1.0),
-            (x.1 + 1.0, FLOOR_M, z.1 + 1.0),
-        ),
-        s,
-        cube(ids.turf),
-    ));
-    // Walls, all four sides, then the doorway cut back out of the near one.
-    for wall in [
-        ((x.0, z.0), (x.1, z.0 + 1.0)),
-        ((x.0, z.1 - 1.0), (x.1, z.1)),
-        ((x.0, z.0), (x.0 + 1.0, z.1)),
-        ((x.1 - 1.0, z.0), (x.1, z.1)),
-    ] {
-        commands.extend(fill(
-            region((wall.0.0, FLOOR_M, wall.0.1), (wall.1.0, top, wall.1.1)),
+    let floor: Vec<Vec<Command>> = strips(region(
+        (x.0 - 1.0, SEA_LEVEL_M, z.0 - 1.0),
+        (x.1 + 1.0, FLOOR_M, z.1 + 1.0),
+    ))
+    .into_iter()
+    .map(|strip| {
+        let layer = |low: f32, high: f32, material| {
+            let mut layer = strip;
+            layer.min.y = low;
+            layer.max.y = high;
+            fill(layer, s, material)
+        };
+        let mut piece = layer(SEA_LEVEL_M, FLOOR_M - 1.0, cube(ids.soil));
+        piece.extend(layer(FLOOR_M - 1.0, FLOOR_M, cube(ids.turf)));
+        piece
+    })
+    .collect();
+
+    let wall = |min: (f32, f32), max: (f32, f32)| {
+        fill(
+            region((min.0, FLOOR_M, min.1), (max.0, top, max.1)),
             s,
             cube(ids.glass),
-        ));
-    }
-    commands.extend(fill(
+        )
+    };
+    let mut south = wall((x.0, z.0), (x.1, z.0 + 1.0));
+    south.extend(fill(
         region((DOOR_X_M.0, FLOOR_M, z.0), (DOOR_X_M.1, top, z.0 + 1.0)),
         s,
         cube(0),
     ));
-    commands.extend(fill(
-        region((x.0, top, z.0), (x.1, top + 1.0, z.1)),
-        s,
-        cube(ids.frosted),
-    ));
-    // A path of slabs from the door to the middle, with a stair up to it.
-    commands.extend(fill(
-        region((-1.0, FLOOR_M, z.0 + 1.0), (1.0, FLOOR_M + s, z.0 + 12.0)),
-        s,
-        voxel(ids.stone, ids.slab, 0),
-    ));
-    commands.extend(fill(
+    // A stair up to the path, where the door was cut.
+    south.extend(fill(
         region((-1.0, FLOOR_M, z.0), (1.0, FLOOR_M + s, z.0 + 1.0)),
         s,
-        voxel(ids.stone, ids.stair, 0),
+        voxel(ids.stone, ids.stair),
     ));
+    let mut standing = vec![
+        south,
+        wall((x.0, z.1 - 1.0), (x.1, z.1)),
+        wall((x.0, z.0), (x.0 + 1.0, z.1)),
+        wall((x.1 - 1.0, z.0), (x.1, z.1)),
+        // A path of slabs from the door to the middle.
+        fill(
+            region((-1.0, FLOOR_M, z.0 + 1.0), (1.0, FLOOR_M + s, z.0 + 12.0)),
+            s,
+            voxel(ids.stone, ids.slab),
+        ),
+    ];
     // Lantern posts: stone in the fence Shape, with nothing yet where the lantern will go.
     for &(px, pz) in &LANTERNS_AT_M {
-        commands.extend(fill(
+        standing.push(fill(
             region(
                 (px, FLOOR_M, pz),
                 (px + 1.0, FLOOR_M + POST_HEIGHT_M, pz + 1.0),
             ),
             s,
-            voxel(ids.stone, ids.fence, 0),
+            voxel(ids.stone, ids.fence),
         ));
     }
+
+    let roof: Vec<Vec<Command>> = strips(region((x.0, top, z.0), (x.1, top + 1.0, z.1)))
+        .into_iter()
+        .map(|strip| fill(strip, s, cube(ids.frosted)))
+        .collect();
+
+    let mut commands = nearest_first(floor);
+    commands.extend(nearest_first(standing));
+    commands.extend(nearest_first(roof));
     commands
 }
 

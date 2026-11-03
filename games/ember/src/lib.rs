@@ -154,8 +154,43 @@ fn is_erupting(vent: usize, elapsed_s: f32) -> bool {
     since >= 0.0 && since % PERIOD_S < ERUPTION_S
 }
 
+/// How far the nearest point of `region` is from the spawn at the origin, over the ground.
+fn distance_m(region: &BoxM) -> f32 {
+    let along = |low: f32, high: f32| {
+        if low > 0.0 {
+            low
+        } else if high < 0.0 {
+            -high
+        } else {
+            0.0
+        }
+    };
+    along(region.min.x, region.max.x).hypot(along(region.min.z, region.max.z))
+}
+
+fn nearest(command: &Command) -> f32 {
+    match command {
+        Command::Fill(f) => distance_m(&f.region),
+        Command::PlaceSources(f) => distance_m(&f.region),
+        Command::RemoveSources(r) | Command::Ignite(r) | Command::Extinguish(r) => distance_m(r),
+        Command::Place(p) => p
+            .iter()
+            .map(|at| at.at.x.hypot(at.at.z))
+            .fold(f32::MAX, f32::min),
+    }
+}
+
+/// The Server applies a Mod's Commands in order, a few Voxels a tick, so the pieces nearest the
+/// Player go first. A piece is Commands that must land in order; pieces are stable-sorted.
+fn nearest_first(mut pieces: Vec<Vec<Command>>) -> Vec<Command> {
+    let key = |piece: &Vec<Command>| piece.iter().map(nearest).fold(f32::MAX, f32::min);
+    pieces.sort_by(|a, b| key(a).total_cmp(&key(b)));
+    pieces.into_iter().flatten().collect()
+}
+
 /// Three chimneys, a wooden deck round the first that its lava will reach, and the wet vent's
-/// water.
+/// water. The Server applies Commands in order, a few Voxels a tick, so the chimney nearest the
+/// spawn goes up first; each is one piece, since the deck replaces part of its shaft.
 fn build(state: &State) -> Vec<Command> {
     let (s, ids) = (state.size_m, state.ids);
     let solid = |material| Voxel {
@@ -163,39 +198,45 @@ fn build(state: &State) -> Vec<Command> {
         shape: ids.cube,
         orientation: 0,
     };
-    let mut commands = Vec::new();
     let shaft_split = CHIMNEY_TOP_M - 6.0;
-    for (x, z) in VENTS_AT_M {
-        commands.extend(fill(
-            region(
-                (x - 1.0, CHIMNEY_FLOOR_M, z - 1.0),
-                (x + 4.0, shaft_split, z + 4.0),
-            ),
-            s,
-            solid(ids.basalt),
-        ));
-        commands.extend(fill(
-            region((x, shaft_split, z), (x + 3.0, CHIMNEY_TOP_M, z + 3.0)),
-            s,
-            solid(ids.basalt),
-        ));
-    }
-    // Wood where the first vent's lava comes down, which heat from it will light.
-    let (x, z) = VENTS_AT_M[0];
-    commands.extend(fill(
-        region(
-            (x - 2.0, CHIMNEY_TOP_M - 4.0, z - 2.0),
-            (x + 5.0, CHIMNEY_TOP_M - 3.0, z + 5.0),
-        ),
-        s,
-        solid(ids.wood),
-    ));
-    let (x, z) = VENTS_AT_M[WET_VENT];
-    commands.push(Command::PlaceSources(SourceFill {
-        region: cell(state, (x + 2.0, CHIMNEY_TOP_M, z + 2.0)),
-        material: ids.water,
-    }));
-    commands
+    let pieces = VENTS_AT_M
+        .iter()
+        .enumerate()
+        .map(|(vent, &(x, z))| {
+            let mut piece = fill(
+                region(
+                    (x - 1.0, CHIMNEY_FLOOR_M, z - 1.0),
+                    (x + 4.0, shaft_split, z + 4.0),
+                ),
+                s,
+                solid(ids.basalt),
+            );
+            piece.extend(fill(
+                region((x, shaft_split, z), (x + 3.0, CHIMNEY_TOP_M, z + 3.0)),
+                s,
+                solid(ids.basalt),
+            ));
+            if vent == 0 {
+                // Wood where the first vent's lava comes down, which heat from it will light.
+                piece.extend(fill(
+                    region(
+                        (x - 2.0, CHIMNEY_TOP_M - 4.0, z - 2.0),
+                        (x + 5.0, CHIMNEY_TOP_M - 3.0, z + 5.0),
+                    ),
+                    s,
+                    solid(ids.wood),
+                ));
+            }
+            if vent == WET_VENT {
+                piece.push(Command::PlaceSources(SourceFill {
+                    region: cell(state, (x + 2.0, CHIMNEY_TOP_M, z + 2.0)),
+                    material: ids.water,
+                }));
+            }
+            piece
+        })
+        .collect();
+    nearest_first(pieces)
 }
 
 impl Guest for Ember {

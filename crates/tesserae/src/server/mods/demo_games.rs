@@ -559,3 +559,49 @@ fn lumen_lanterns_light_in_sequence_then_go_dark_together() {
         dark[0].at_s
     );
 }
+
+/// The Server drains a Mod's Commands in order, so what stands near the spawn must be sent first.
+#[test]
+fn builds_go_up_nearest_the_spawn_first() {
+    let size = 0.5;
+    let sorted = |values: &[f32]| values.windows(2).all(|w| w[0] <= w[1]);
+
+    let (_i, mut meadow) = loaded("meadow", size);
+    let batches = run(&mut meadow, size, 0.05, 40);
+    let clay = material(&meadow, "strata:clay");
+    let rows: Vec<f32> = fills(&batches, clay).map(|(_, min, _)| min[2]).collect();
+    assert!(
+        rows.len() > 3 && sorted(&rows),
+        "glade ground, near strip first: {rows:?}"
+    );
+
+    let (_i, mut lumen) = loaded("lumen", size);
+    let batches = run(&mut lumen, size, 0.05, 40);
+    let soil = material(&lumen, "strata:soil");
+    let rows: Vec<f32> = fills(&batches, soil).map(|(_, min, _)| min[2]).collect();
+    assert!(
+        rows.len() > 3 && sorted(&rows),
+        "garden floor, near strip first: {rows:?}"
+    );
+    let first = batches[0].commands.first().unwrap();
+    assert!(
+        matches!(first, Command::Fill { voxel, .. } if voxel.material() == soil),
+        "the floor goes down before the walls: {first:?}"
+    );
+    let frosted = material(&lumen, "glassworks:frosted_glass");
+    let last = batches.iter().flat_map(|b| &b.commands).last().unwrap();
+    assert!(
+        matches!(last, Command::Fill { voxel, .. } if voxel.material() == frosted),
+        "the roof goes on last: {last:?}"
+    );
+
+    let (_i, mut ember) = loaded("ember", size);
+    let batches = run(&mut ember, size, 0.05, 40);
+    let basalt = material(&ember, "strata:basalt");
+    let columns: Vec<f32> = fills(&batches, basalt).map(|(_, min, _)| min[0]).collect();
+    assert_eq!(
+        (columns.first(), columns.last()),
+        (Some(&17.0), Some(&6.0)),
+        "the chimney nearest the spawn first, the farthest last: {columns:?}"
+    );
+}

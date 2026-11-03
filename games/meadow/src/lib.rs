@@ -126,7 +126,61 @@ fn next_batch(state: &mut State) -> Vec<Command> {
     batch
 }
 
-/// The glade, its trees and the gazebo, in the order they must land.
+/// Width of the strips the glade's ground is laid in, so the near edge goes down first.
+const STRIP_M: f32 = 4.0;
+
+/// How far the nearest point of `region` is from the spawn at the origin, over the ground.
+fn distance_m(region: &BoxM) -> f32 {
+    let along = |low: f32, high: f32| {
+        if low > 0.0 {
+            low
+        } else if high < 0.0 {
+            -high
+        } else {
+            0.0
+        }
+    };
+    along(region.min.x, region.max.x).hypot(along(region.min.z, region.max.z))
+}
+
+fn nearest(command: &Command) -> f32 {
+    match command {
+        Command::Fill(f) => distance_m(&f.region),
+        Command::PlaceSources(f) => distance_m(&f.region),
+        Command::RemoveSources(r) | Command::Ignite(r) | Command::Extinguish(r) => distance_m(r),
+        Command::Place(p) => p
+            .iter()
+            .map(|at| at.at.x.hypot(at.at.z))
+            .fold(f32::MAX, f32::min),
+    }
+}
+
+/// The Server applies a Mod's Commands in order, a few Voxels a tick, so the pieces nearest the
+/// Player go first. A piece is Commands that must land in order; pieces are stable-sorted.
+fn nearest_first(mut pieces: Vec<Vec<Command>>) -> Vec<Command> {
+    let key = |piece: &Vec<Command>| piece.iter().map(nearest).fold(f32::MAX, f32::min);
+    pieces.sort_by(|a, b| key(a).total_cmp(&key(b)));
+    pieces.into_iter().flatten().collect()
+}
+
+/// `region` cut along z into strips of `STRIP_M`.
+fn strips(region: BoxM) -> Vec<BoxM> {
+    let mut pieces = Vec::new();
+    let mut z = region.min.z;
+    while z < region.max.z {
+        let end = (z + STRIP_M).min(region.max.z);
+        pieces.push(BoxM {
+            min: point(region.min.x, region.min.y, z),
+            max: point(region.max.x, region.max.y, end),
+        });
+        z = end;
+    }
+    pieces
+}
+
+/// The glade, its trees and the gazebo: the levelled ground first, near strips before far ones,
+/// then each tree and the gazebo, nearest first. Structures stand on air the ground pieces clear,
+/// so they come after all of them.
 fn build(state: &State) -> Vec<Command> {
     let (s, ids) = (state.size_m, state.ids);
     let voxel = |material, shape| Voxel {
@@ -136,30 +190,35 @@ fn build(state: &State) -> Vec<Command> {
     };
     let (x, z) = (GLADE_X_M, GLADE_Z_M);
     let band = |low: f32, high: f32| region((x.0, low, z.0), (x.1, high, z.1));
-    let mut commands = fill(
-        band(GLADE_FLOOR_M, GLADE_TOP_M - 1.0),
-        s,
-        voxel(ids.clay, ids.cube),
-    );
-    commands.extend(fill(
-        band(GLADE_TOP_M - 1.0, GLADE_TOP_M),
-        s,
-        voxel(ids.turf, ids.cube),
-    ));
-    commands.extend(fill(
-        band(GLADE_TOP_M, GLADE_CLEAR_M),
-        s,
-        voxel(0, ids.cube),
-    ));
+    let layers = [
+        (GLADE_FLOOR_M, GLADE_TOP_M - 1.0, voxel(ids.clay, ids.cube)),
+        (GLADE_TOP_M - 1.0, GLADE_TOP_M, voxel(ids.turf, ids.cube)),
+        (GLADE_TOP_M, GLADE_CLEAR_M, voxel(0, ids.cube)),
+    ];
+    let ground: Vec<Vec<Command>> = strips(band(GLADE_FLOOR_M, GLADE_CLEAR_M))
+        .into_iter()
+        .map(|strip| {
+            layers
+                .iter()
+                .flat_map(|&(low, high, material)| {
+                    let mut layer = strip;
+                    layer.min.y = low;
+                    layer.max.y = high;
+                    fill(layer, s, material)
+                })
+                .collect()
+        })
+        .collect();
 
+    let mut structures: Vec<Vec<Command>> = Vec::new();
     let crown_y = GLADE_TOP_M + TRUNK_HEIGHT_M;
     for (tx, tz) in TREES_AT_M {
-        commands.extend(fill(
+        let mut tree = fill(
             region((tx, GLADE_TOP_M, tz), (tx + 1.0, crown_y, tz + 1.0)),
             s,
             voxel(ids.wood, ids.cube),
-        ));
-        commands.extend(fill(
+        );
+        tree.extend(fill(
             region(
                 (tx - 1.0, crown_y - 1.0, tz - 1.0),
                 (tx + 2.0, crown_y + 1.0, tz + 2.0),
@@ -167,23 +226,25 @@ fn build(state: &State) -> Vec<Command> {
             s,
             voxel(ids.leaves, ids.cube),
         ));
-        commands.extend(fill(
+        tree.extend(fill(
             region((tx, crown_y + 1.0, tz), (tx + 1.0, crown_y + 2.0, tz + 1.0)),
             s,
             voxel(ids.leaves, ids.cube),
         ));
+        structures.push(tree);
     }
 
     // Wooden posts in a glassworks fence Shape, under a glass slab roof: Material and Shape
     // come from different Mods.
     let (gx, gz) = GAZEBO_AT_M;
+    let mut gazebo = Vec::new();
     for (px, pz) in [
         (gx, gz),
         (gx + GAZEBO_SPAN_M, gz),
         (gx, gz + GAZEBO_SPAN_M),
         (gx + GAZEBO_SPAN_M, gz + GAZEBO_SPAN_M),
     ] {
-        commands.extend(fill(
+        gazebo.extend(fill(
             region(
                 (px, GLADE_TOP_M, pz),
                 (px + 1.0, GLADE_TOP_M + POST_HEIGHT_M, pz + 1.0),
@@ -192,7 +253,7 @@ fn build(state: &State) -> Vec<Command> {
             voxel(ids.wood, ids.fence),
         ));
     }
-    commands.extend(fill(
+    gazebo.extend(fill(
         region(
             (gx, GLADE_TOP_M + POST_HEIGHT_M, gz),
             (
@@ -204,6 +265,10 @@ fn build(state: &State) -> Vec<Command> {
         s,
         voxel(ids.glass, ids.slab),
     ));
+    structures.push(gazebo);
+
+    let mut commands = nearest_first(ground);
+    commands.extend(nearest_first(structures));
     commands
 }
 
