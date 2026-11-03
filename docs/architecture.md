@@ -330,3 +330,6 @@ World. It creates, renames and trashes only closed World folders, through core's
 `save::library`, which refuses any folder whose writer lock another process
 holds. Opening a World restarts the process, so the Server rule above holds for
 everything inside a World.
+
+Authors do not need this repository to make a Game or Mod: the
+[authoring guide](authoring-guide.md) and the starters are self-contained.

@@ -281,6 +281,10 @@ throughput and presented/offscreen frame times are separate evidence.
 
 ### Working on mods
 
+To make a Game or Mod rather than change the Engine, follow the
+[authoring guide](docs/authoring-guide.md) and start from a copy of a
+[starter](starters/). What follows is for working on the Mod host itself.
+
 Install the guest target with `rustup target add wasm32-wasip2`, then run
 `./scripts/build-guests` from the repository root to build the independent test
 guests and MIT Terra Game. The Terra component and Manifest are copied to
