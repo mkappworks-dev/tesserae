@@ -1597,51 +1597,51 @@ fn mods_page(
             label(col, &format!("Required by {}", ui::title(&game)));
             for id in &required {
                 if let Some(m) = installed.mods.iter().find(|m| &m.id == id) {
-                    ui::text(
+                    let (_, about) = installed.about(id);
+                    mod_card(
                         col,
-                        format!("{} {} · locked on", ui::title(&m.id), m.version),
-                        12.0,
-                        ui::INK,
+                        ModCard {
+                            act: None,
+                            border: ui::EDGE,
+                            selected: false,
+                            title: format!("{} {}", ui::title(&m.id), m.version),
+                            detail: about.unwrap_or_default().to_owned(),
+                            tag: Some(("Required", ui::MUTED)),
+                        },
                     );
                 }
             }
         }
-        let optional: Vec<_> = installed
-            .mods
-            .iter()
-            .enumerate()
-            .filter(|(_, m)| !required.contains(&m.id))
-            .collect();
-        if !optional.is_empty() {
-            label(col, "Optional");
-        }
-        for (i, m) in optional {
-            let name = format!("{} {}", ui::title(&m.id), m.version);
-            if let Some(why) = installed.blocked(&game, &m.id) {
-                ui::text(col, format!("{name} · unavailable: {why}"), 12.0, ui::MUTED);
-            } else if let Some(why) = l.clashes.get(&m.id) {
-                ui::paragraph(
-                    col,
-                    format!("{name} · cannot be added: {why}"),
-                    12.0,
-                    ui::AMBER,
-                );
-            } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
-                ui::text(
-                    col,
-                    format!("{name} · needed by another Mod"),
-                    12.0,
-                    ui::INK,
-                );
-            } else {
-                ui::button(
-                    col,
-                    name,
-                    Act::ToggleMod(i),
-                    f.mods.contains(&m.id),
-                    false,
-                    false,
-                );
+        for section in sections(installed, &required) {
+            label(col, &section.0);
+            for i in section.1 {
+                let m = &installed.mods[i];
+                let (_, about) = installed.about(&m.id);
+                let title = format!("{} {}", ui::title(&m.id), m.version);
+                let mut shown = ModCard {
+                    act: Some(Act::ToggleMod(i)),
+                    border: ui::EDGE,
+                    selected: f.mods.contains(&m.id),
+                    title,
+                    detail: about.unwrap_or_default().to_owned(),
+                    tag: None,
+                };
+                if let Some(why) = installed.blocked(&game, &m.id) {
+                    shown.act = None;
+                    shown.detail = format!("Unavailable: {why}");
+                    shown.tag = Some(("Unavailable", ui::MUTED));
+                } else if let Some(why) = l.clashes.get(&m.id) {
+                    shown.act = None;
+                    shown.border = ui::AMBER;
+                    shown.detail = format!("Cannot be added: {why}");
+                    shown.tag = Some(("Conflict", ui::AMBER));
+                } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
+                    shown.act = None;
+                    shown.tag = Some(("Needed by another Mod", ui::MUTED));
+                } else if shown.selected {
+                    shown.tag = Some(("Added", ui::LEAF));
+                }
+                mod_card(col, shown);
             }
         }
         for line in &installed.rejected {
@@ -1649,6 +1649,105 @@ fn mods_page(
         }
     });
     None
+}
+
+/// What one Mod card shows. `act` makes it a button; without one it only informs.
+struct ModCard {
+    act: Option<Act>,
+    border: Color,
+    selected: bool,
+    title: String,
+    detail: String,
+    tag: Option<(&'static str, Color)>,
+}
+
+fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
+    let node = Node {
+        padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
+        border: UiRect::all(Val::Px(1.0)),
+        border_radius: BorderRadius::all(Val::Px(6.0)),
+        justify_content: JustifyContent::SpaceBetween,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(12.0),
+        flex_shrink: 0.0,
+        ..default()
+    };
+    let body = |card: &mut ChildSpawnerCommands| {
+        card.spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(2.0),
+            flex_shrink: 1.0,
+            ..default()
+        })
+        .with_children(|text| {
+            ui::weighted_text(text, c.title.clone(), 13.0, 620, ui::INK);
+            if !c.detail.is_empty() {
+                ui::paragraph(text, c.detail.clone(), 11.0, ui::MUTED);
+            }
+        });
+        if let Some((tag, colour)) = c.tag {
+            ui::text(card, tag, 11.0, colour);
+        }
+    };
+    match c.act.clone() {
+        Some(act) => {
+            parent
+                .spawn((
+                    bevy::ui_widgets::Button,
+                    bevy::input_focus::tab_navigation::TabIndex(0),
+                    act,
+                    ui::Styled {
+                        selected: c.selected,
+                        tab: false,
+                        primary: false,
+                    },
+                    BackgroundColor(ui::CARD),
+                    BorderColor::all(if c.selected { ui::LEAF } else { c.border }),
+                    node,
+                ))
+                .with_children(body);
+        }
+        None => {
+            parent
+                .spawn((BackgroundColor(ui::CARD), BorderColor::all(c.border), node))
+                .with_children(body);
+        }
+    }
+}
+
+/// Optional Mods grouped under their Manifest's category, known sections first, then the rest
+/// alphabetically, with uncategorised ones last. Each holds indexes into `installed.mods`.
+fn sections(installed: &Installed, required: &[String]) -> Vec<(String, Vec<usize>)> {
+    const ORDER: [&str; 6] = [
+        "Terrain",
+        "Water",
+        "Plants",
+        "Fire & light",
+        "Building",
+        "Characters",
+    ];
+    const OTHER: &str = "Other";
+    let mut groups: std::collections::BTreeMap<String, Vec<usize>> = Default::default();
+    for (i, m) in installed.mods.iter().enumerate() {
+        if required.contains(&m.id) {
+            continue;
+        }
+        let name = installed.about(&m.id).0.unwrap_or(OTHER).to_owned();
+        groups.entry(name).or_default().push(i);
+    }
+    let rank = |name: &str| {
+        ORDER
+            .iter()
+            .position(|known| *known == name)
+            .unwrap_or(if name == OTHER {
+                usize::MAX
+            } else {
+                ORDER.len()
+            })
+    };
+    let mut out: Vec<_> = groups.into_iter().collect();
+    out.sort_by_key(|(name, _)| (rank(name), name.clone()));
+    out
 }
 
 fn rename(root: &mut ChildSpawnerCommands, l: &Launcher) -> Option<Entity> {
@@ -2253,6 +2352,34 @@ mod tests {
         assert_eq!(launcher(&app).screen, Screen::Mods);
         assert!(launcher(&app).form.mods.contains("glassworks"));
         assert!(!launcher(&app).form.mods.contains("lamps"));
+    }
+
+    #[test]
+    fn optional_mods_are_grouped_by_category_in_a_fixed_order() {
+        let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[])
+            .with_mod("zeta", &[])
+            .with_mod("lamps", &[])
+            .with_mod("strata", &[])
+            .with_mod("mystery", &[])
+            .with_mod("hearth", &[]);
+        installed.set_about("lamps", Some("Fire & light"), None);
+        installed.set_about("hearth", Some("Fire & light"), None);
+        installed.set_about("strata", Some("Terrain"), None);
+        installed.set_about("zeta", Some("Zoology"), None);
+        let names: Vec<_> = sections(&installed, &["hearth".to_string()])
+            .into_iter()
+            .map(|(name, mods)| (name, mods.len()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("Terrain".to_string(), 1),
+                ("Fire & light".to_string(), 1),
+                ("Zoology".to_string(), 1),
+                ("Other".to_string(), 1),
+            ],
+            "a required Mod is left out, and uncategorised Mods come last"
+        );
     }
 
     #[test]

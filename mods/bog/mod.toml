@@ -3,3 +3,5 @@ version = "0.1.0"
 api = "0.3"
 depends = ["hearth", "brickwork"]
 declaration = "content.toml"
+category = "Water"
+description = "Peat, mud and tar, and how they meet lava"

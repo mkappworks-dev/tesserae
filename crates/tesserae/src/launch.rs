@@ -311,6 +311,26 @@ impl Installed {
         })())
     }
 
+    /// What a Mod's Manifest says to show for it: its section and a line about it.
+    pub fn about(&self, id: &str) -> (Option<&str>, Option<&str>) {
+        self.found
+            .iter()
+            .find(|f| f.manifest.id == id)
+            .map_or((None, None), |f| {
+                (
+                    f.manifest.category.as_deref(),
+                    f.manifest.description.as_deref(),
+                )
+            })
+    }
+
+    #[cfg(test)]
+    pub fn set_about(&mut self, id: &str, category: Option<&str>, description: Option<&str>) {
+        let found = self.found.iter_mut().find(|f| f.manifest.id == id).unwrap();
+        found.manifest.category = category.map(str::to_owned);
+        found.manifest.description = description.map(str::to_owned);
+    }
+
     /// The Mods `game` names in `depends`, and theirs: what a World made with it cannot do without.
     pub fn required(&self, game: &str) -> Vec<String> {
         let direct = self.depends_of(game).iter().cloned().collect();
@@ -430,6 +450,8 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
         declaration: None,
         depends: Vec::new(),
         limits: Default::default(),
+        category: None,
+        description: None,
     }
 }
 

@@ -8,6 +8,9 @@ use crate::error::ModError;
 use crate::limits::ManifestLimits;
 
 /// Contract lines this build can host, newest first (spec decision 2).
+pub const MAX_CATEGORY_CHARS: usize = 24;
+pub const MAX_DESCRIPTION_CHARS: usize = 80;
+
 pub const SUPPORTED_API: &[&str] = &["0.3", "0.2", "0.1"];
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -24,6 +27,10 @@ pub struct Manifest {
     pub depends: Vec<String>,
     #[serde(default)]
     pub limits: ManifestLimits,
+    /// Display only: the section a Mod is listed under when a World is made.
+    pub category: Option<String>,
+    /// Display only: one line saying what the Mod holds.
+    pub description: Option<String>,
 }
 
 /// A Mod found on disk with a valid Manifest; its content is not yet read.
@@ -130,6 +137,21 @@ impl Manifest {
             return Err(manifest_error(id, "declaration requires api 0.3".into()));
         }
         self.validate_source_path()?;
+        for (field, text, max) in [
+            ("category", &self.category, MAX_CATEGORY_CHARS),
+            ("description", &self.description, MAX_DESCRIPTION_CHARS),
+        ] {
+            if let Some(text) = text
+                && (text.is_empty()
+                    || text.chars().count() > max
+                    || text.chars().any(char::is_control))
+            {
+                return Err(manifest_error(
+                    id,
+                    format!("{field} must be 1 to {max} characters with no control characters"),
+                ));
+            }
+        }
         for dep in &self.depends {
             if !valid_id(dep) {
                 return Err(manifest_error(

@@ -86,6 +86,12 @@ no guest instances, `start` or `tick` callbacks. Dependencies use the existing
 Declaration format. Paths must be relative and stay inside the installed
 directory after symlink resolution.
 
+A Manifest may also carry two display-only fields, which Create World uses to
+list a Mod under a section with a line about it: `category` (1 to 24 characters,
+for example `"Fire & light"`) and `description` (1 to 80 characters). Neither
+changes what the Mod does, but both are part of the Manifest, so editing one
+asks for Trust again like any other change.
+
 ## Validating and packaging projects
 
 Both commands run without opening a World and take project folders (each holds a

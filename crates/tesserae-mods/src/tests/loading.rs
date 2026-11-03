@@ -883,3 +883,28 @@ fn non_rgba_png_colour_types_expand_to_straight_rgba() {
         [10, 10, 10, 20, 30, 30, 30, 40]
     );
 }
+
+#[test]
+fn a_manifest_may_say_which_section_and_what_a_mod_holds() {
+    let base = "id = \"a\"\nversion = \"0.1.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n";
+    let ok = format!("{base}category = \"Fire & light\"\ndescription = \"Lava and ash\"\n");
+    let manifest = crate::Manifest::parse("a", ok.as_bytes()).unwrap();
+    assert_eq!(manifest.category.as_deref(), Some("Fire & light"));
+    assert_eq!(manifest.description.as_deref(), Some("Lava and ash"));
+    assert_eq!(
+        crate::Manifest::parse("a", base.as_bytes())
+            .unwrap()
+            .category,
+        None
+    );
+
+    for bad in [
+        "category = \"\"".to_string(),
+        format!("category = \"{}\"", "x".repeat(25)),
+        format!("description = \"{}\"", "x".repeat(81)),
+        "description = \"two\\nlines\"".to_string(),
+    ] {
+        let error = crate::Manifest::parse("a", format!("{base}{bad}\n").as_bytes()).unwrap_err();
+        assert!(error.to_string().contains("mod.toml"), "{bad}: {error}");
+    }
+}
