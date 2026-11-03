@@ -1,6 +1,6 @@
 # 06: Document every Game and Mod
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 03, 04, 05
 

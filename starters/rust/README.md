@@ -84,6 +84,9 @@ in it; to move to a newer line, replace the whole directory and change `api` in
 `mod.toml`. Types and host calls reach your Game only through `wit-bindgen`'s
 bindings for that directory.
 
+For a Rust Game that takes its content from data Mods, see the
+[demo Games](../../docs/demo-games.md).
+
 The whole workflow, including mixing with data Mods and how Trust and saved
 Worlds treat a rebuilt component, is in
 [`docs/authoring-guide.md`](../../docs/authoring-guide.md).

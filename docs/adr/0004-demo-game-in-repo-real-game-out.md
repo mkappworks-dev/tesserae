@@ -23,6 +23,17 @@ Mechanically a Game is not a workspace member — it compiles to `wasm32-wasip2`
 The root `Cargo.toml` needs `[workspace] exclude = ["games/terra"]`, or a root
 `cargo build` tries to compile it for the host.
 
+Other in-repo Games exist to show the SDK, not to be the template: `meadow`,
+`ember`, `tidewater` and `lumen` are small Rust Games that declare a World and
+one behaviour and take their content from the data Mods in `mods/` (strata,
+waters, flora, hearth, glassworks). They are MIT, like `terra`, because authors
+copy them too. None is a workspace member and the Mods have no build, so
+`[workspace] exclude` lists each Game. A World with no record loads every Mod
+installed beside the default Game, so these Games are not installed in the
+`games/terra/dist` folder that `cargo dev` reads; `docs/demo-games.md` shows how
+to package and run them. `terra` is unchanged and stays the only self-contained
+Game, the one `scripts/check-terra-boundary` holds to the published contract.
+
 ## Naming
 
 **"Tesserae" is the engine, not a game.** The name describes the primitive — the

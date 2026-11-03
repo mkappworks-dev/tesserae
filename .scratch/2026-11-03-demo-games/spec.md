@@ -1,6 +1,6 @@
 # Demo Games and shared Mods
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 

@@ -14,4 +14,6 @@ from it. The compatibility rules for the contract line are in
 [`docs/contract-compatibility.md`](../docs/contract-compatibility.md).
 
 Start with the [authoring guide](../docs/authoring-guide.md): it takes either
-starter from a copy to an installed Game.
+starter from a copy to an installed Game. For worked examples, the
+[demo Games and shared Mods](../docs/demo-games.md) show small Rust Games built
+on data Mods.

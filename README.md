@@ -10,9 +10,10 @@ terra Game in `games/terra/`, the starting point for writing your own.
 
 Steps **1 to 8 of 27** in [DESIGN.md](DESIGN.md)'s build order are done, and
 step 11 (use and a first tool) has started. The Modding SDK (step 10) is done:
-see the [authoring guide](docs/authoring-guide.md). `cargo run` opens a World
-list; a World is streamed and generated, and you can fly or walk around it,
-swim, edit it and save it. Keyboard and mouse, a gamepad and, on Windows and
+see the [authoring guide](docs/authoring-guide.md) and the
+[demo Games built on shared data Mods](docs/demo-games.md). `cargo run` opens a
+World list; a World is streamed and generated, and you can fly or walk around
+it, swim, edit it and save it. Keyboard and mouse, a gamepad and, on Windows and
 Linux, a touchscreen all play. The Terra Game adds flowing water, lava and fire
 to it.
 
