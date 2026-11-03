@@ -544,7 +544,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 
 | #   | Step                    | Engine adds                                                                                       | Game or Mod supplies               | Depends on | Status          |
 | --- | ----------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
-| 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Not started     |
+| 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Check pending   |
 | 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done |
 | 12  | Chat and commands       | Command registry, parser, permissions                                                             | The commands                       | -          | Not started     |
 | 13  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Not started     |
@@ -579,9 +579,13 @@ Notes:
 - **Step 10** is the gate for "ready for Mods" and has no dependency on the
   later gameplay systems. Folder loading and versioned WIT contracts already
   exist; this step completes the authoring workflow, starting with data-only
-  Mods. It establishes how contracts evolve compatibly while later systems add
-  APIs. The final 1.0 contract freeze belongs to step 27, after those systems
-  are implemented.
+  Mods. Its tickets are built and checked by tests, including both starters
+  copied outside the checkout (`docs/authoring-guide.md`). The step stays open
+  until the edit-and-restart loop has been run by hand in the real window for a
+  data change, a Rust change, a failure and its correction: the spec requires
+  that evidence, and no display was available to collect it. It establishes how
+  contracts evolve compatibly while later systems add APIs. The final 1.0
+  contract freeze belongs to step 27, after those systems are implemented.
 - **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save

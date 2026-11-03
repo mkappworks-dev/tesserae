@@ -12,3 +12,6 @@ Both produce the same kind of installed Game folder and load through the same
 path. Each is MIT licensed (see its `LICENSE`), so a proprietary Game may start
 from it. The compatibility rules for the contract line are in
 [`docs/contract-compatibility.md`](../docs/contract-compatibility.md).
+
+Start with the [authoring guide](../docs/authoring-guide.md): it takes either
+starter from a copy to an installed Game.

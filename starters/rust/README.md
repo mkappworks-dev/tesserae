@@ -26,11 +26,13 @@ and the `starter_rust:` names in `src/lib.rs` together.
 ## Validate
 
 ```sh
-tesserae validate .
+tesserae validate . --trust-for-run
 ```
 
 It loads the component under the usual sandbox and limits, reports the Mod and
-field of any error, and exits non-zero on failure. It opens no World.
+field of any error, and exits non-zero on failure. It opens no World. A
+component runs code, so without a recorded Trust grant it needs
+`--trust-for-run`, which applies to this project only and writes nothing.
 
 ## Watch
 
@@ -56,13 +58,14 @@ output = "target/wasm32-wasip2/release/starter_rust.wasm"
 
 The built component is copied over `starter_rust.wasm` only when Cargo succeeds.
 A compile error is printed with the project name and the running World stays
-until the next edit. Rename `starter_rust.wasm` in `output` along with the other
+until the next edit. The build has no timeout and cannot be cancelled from
+`tesserae dev`. Rename `starter_rust.wasm` in `output` along with the other
 names. The build runs with your permissions: enable it only for code you trust.
 
 ## Package
 
 ```sh
-tesserae package . --out dist
+tesserae package . --out dist --trust-for-run
 ```
 
 This writes `dist/games/<id>/` holding `mod.toml` and the built `.wasm`. Build
@@ -80,3 +83,7 @@ to trust the build; rebuilding asks again.
 in it; to move to a newer line, replace the whole directory and change `api` in
 `mod.toml`. Types and host calls reach your Game only through `wit-bindgen`'s
 bindings for that directory.
+
+The whole workflow, including mixing with data Mods and how Trust and saved
+Worlds treat a rebuilt component, is in
+[`docs/authoring-guide.md`](../../docs/authoring-guide.md).

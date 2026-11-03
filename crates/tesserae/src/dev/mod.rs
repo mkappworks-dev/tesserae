@@ -428,6 +428,9 @@ fn after_session(mut run: ResMut<Run>, last: Option<Res<LastFailure>>) {
 }
 
 #[cfg(test)]
+mod sdk;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::author::tests::{Scratch, component, data_game, png};
@@ -461,14 +464,14 @@ mod tests {
         }
     }
 
-    struct Rig {
-        app: App,
-        s: Scratch,
-        mods: PathBuf,
+    pub(super) struct Rig {
+        pub(super) app: App,
+        pub(super) s: Scratch,
+        pub(super) mods: PathBuf,
     }
 
     impl Rig {
-        fn with(select: impl FnOnce(&Scratch, &Path) -> Vec<PathBuf>) -> Self {
+        pub(super) fn with(select: impl FnOnce(&Scratch, &Path) -> Vec<PathBuf>) -> Self {
             let s = Scratch::new();
             let mods = s.dir("installed/mods");
             let projects = select(&s, &mods);
@@ -509,15 +512,15 @@ mod tests {
             (rig, game)
         }
 
-        fn state(&self) -> AppState {
+        pub(super) fn state(&self) -> AppState {
             *self.app.world().resource::<State<AppState>>().get()
         }
 
-        fn session(&self) -> u64 {
+        pub(super) fn session(&self) -> u64 {
             self.app.world().resource::<SessionId>().0
         }
 
-        fn emission(&self) -> u8 {
+        pub(super) fn emission(&self) -> u8 {
             let tables = &self.app.world().resource::<ContentTables>().0;
             tables
                 .materials
@@ -538,7 +541,7 @@ mod tests {
                 .len()
         }
 
-        fn diagnostic(&self) -> Option<String> {
+        pub(super) fn diagnostic(&self) -> Option<String> {
             self.app
                 .world()
                 .resource::<Run>()
@@ -547,8 +550,9 @@ mod tests {
         }
 
         /// Updates until `done`, giving the off-thread preparation time to finish.
-        fn until(&mut self, what: &str, mut done: impl FnMut(&Self) -> bool) {
-            for _ in 0..4000 {
+        pub(super) fn until(&mut self, what: &str, mut done: impl FnMut(&Self) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(180);
+            while Instant::now() < deadline {
                 self.app.update();
                 if done(self) {
                     return;
@@ -558,12 +562,12 @@ mod tests {
             panic!("timed out waiting for {what}");
         }
 
-        fn open(&mut self) {
+        pub(super) fn open(&mut self) {
             self.until("the first World", |r| r.state() == AppState::InWorld);
         }
 
         /// Until every edit so far has been looked at and acted on.
-        fn settle(&mut self) {
+        pub(super) fn settle(&mut self) {
             let mut calm = 0;
             self.until("the watcher to settle", |r| {
                 let run = r.app.world().resource::<Run>();
@@ -577,7 +581,7 @@ mod tests {
             });
         }
 
-        fn restarted(&mut self, from: u64) {
+        pub(super) fn restarted(&mut self, from: u64) {
             self.until("a replacement World", |r| {
                 r.session() > from && r.state() == AppState::InWorld
             });

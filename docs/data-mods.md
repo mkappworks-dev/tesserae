@@ -69,30 +69,9 @@ are the contract's, in kebab-case; unknown fields and variants at every level
 fail naming the Mod. Values go through the same validation as a component
 Declaration, so bounds, Game-only restrictions and per-Mod limits are identical.
 
-| Only Games may declare `world`, `view` and `tools`. | Table | Fields |     |
-| --------------------------------------------------- | ----- | ------ | --- |
-
----
-
-| | `[[shapes]]` | `name`, `boxes`, optional `collision`, optional `connect` | |
-`boxes` entry | `min`, `max`: three integers, sixteenths of a Voxel (collision
-boxes are signed) | | `[shapes.connect]` | `group`, `connects-to`, `to-sealed`,
-`arms` (`face`, `boxes`, optional `collision`) | | `[view]` | `view-distance-m`,
-`lod-distance-m` | | `[world.caves]` | `feature-size-m`, `radius-m`, `floor-m`,
-`octaves` | | `[world.smoothing]` | `min-rise-m` | | `[world.water]` |
-`level-m`, `material` (a fluid, by full name) | | `[world.movement]` |
-`allow-flight`, `allow-physics`, `start-in-flight` | | `[world.character]` |
-`bones`, `pixel-m`, `skin` (a 64 by 64 PNG path), `idle`, `walk`, `sprint`,
-`airborne`, `crouch` (limb motion: `swing-deg`, `rate-hz`, `arm-raise-deg`) | |
-character bone | `name`, optional `parent`, `role` (`body`, `head`, `arm-left`,
-`arm-right`, `leg-left`, `leg-right`, `fixed`), `pivot`, `cubes` (`origin`,
-`size`, `uv`) | | `[[fluids]]` | `material`, `reach-m`, `sideways-m-per-s`,
-`downward-m-per-s`, `recession-m-per-s`, `reset-drop-m`, `waterlogs`,
-`extinguishes`, optional `heat` (`strength`, `reach-m`) | | `[[reactions]]` |
-`first`, `second` (`fluid`, `state`: `any`, `source` or `flowing`), `consumed`
-(`first` or `second`), optional `product`, optional `receiving` | |
-`[[combustion]]` | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`,
-optional `heat`, `end` | | `[[tools]]` | `name`, `kind` (`measure`) |
+The complete field list, with a Declaration that uses every table, is in the
+[authoring guide](authoring-guide.md#the-declaration-schema). Only Games may
+declare `world`, `view` and `tools`.
 
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes

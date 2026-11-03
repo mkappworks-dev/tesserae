@@ -52,3 +52,7 @@ referenced PNGs, and nothing else. By hand, copy exactly those files.
 Copy `dist/games/<id>/` into the Engine's `games/` directory (beside `mods/`),
 then start the Engine and create a World with the Game. The first run asks you
 to trust the build; changing any listed file asks again.
+
+The whole workflow, including the full Declaration schema, diagnostics and how
+Trust and saved Worlds treat a changed build, is in
+[`docs/authoring-guide.md`](../../docs/authoring-guide.md).

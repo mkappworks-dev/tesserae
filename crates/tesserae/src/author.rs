@@ -45,7 +45,7 @@ impl Request {
 
 /// How an authoring command ended.
 #[derive(Debug, PartialEq, Eq)]
-enum Outcome {
+pub(crate) enum Outcome {
     Done,
     Failed(String),
     Usage(String),
@@ -246,14 +246,21 @@ pub(crate) mod tests {
 
     impl Scratch {
         pub fn new() -> Self {
+            Self::under(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/phase10-author"))
+        }
+
+        /// In the system temp directory, where no Cargo workspace can claim a project copied here.
+        pub fn outside() -> Self {
+            Self::under(&std::env::temp_dir().join("tesserae-phase10-author"))
+        }
+
+        fn under(base: &Path) -> Self {
             static NEXT: AtomicUsize = AtomicUsize::new(0);
-            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../target/phase10-author")
-                .join(format!(
-                    "{}-{}",
-                    std::process::id(),
-                    NEXT.fetch_add(1, Ordering::Relaxed)
-                ));
+            let path = base.join(format!(
+                "{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
             fs::create_dir_all(&path).unwrap();
             Self(path)
         }
@@ -265,7 +272,7 @@ pub(crate) mod tests {
         }
 
         /// Runs a command from this process's own directory, never from a project.
-        fn run(&self, args: &[&str]) -> Outcome {
+        pub(crate) fn run(&self, args: &[&str]) -> Outcome {
             let args: Vec<OsString> = args.iter().map(OsString::from).collect();
             command(&args).expect("an authoring command")
         }
@@ -360,7 +367,7 @@ solid = true
         dir
     }
 
-    fn files(dir: &Path) -> Vec<String> {
+    pub(crate) fn files(dir: &Path) -> Vec<String> {
         fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) {
             for entry in fs::read_dir(dir).unwrap() {
                 let p = entry.unwrap().path();
@@ -377,7 +384,7 @@ solid = true
         out
     }
 
-    fn failed(outcome: Outcome) -> String {
+    pub(crate) fn failed(outcome: Outcome) -> String {
         match outcome {
             Outcome::Failed(e) => e,
             other => panic!("expected a failure, got {other:?}"),

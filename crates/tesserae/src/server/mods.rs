@@ -354,6 +354,60 @@ pub(crate) fn load(
     })
 }
 
+/// Saves `loaded` as a first commit at `path`, as a World created from it would be.
+#[cfg(test)]
+pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
+    use tesserae_core::save::{self, Commit, Generation, WorldId, Writer};
+    let (content, mapping) = super::persistence::content(loaded);
+    let id = WorldId::new();
+    let commit = Commit {
+        format: save::FORMAT_VERSION,
+        generator: save::GENERATOR_VERSION,
+        world: id.clone(),
+        sequence: 1,
+        seed: 123,
+        voxel_size_m: 0.5,
+        parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+        content: content.clone(),
+        player: save::Player {
+            eye_m: [1.0, 2.0, 3.0],
+            extensions: Default::default(),
+        },
+        chunks: vec![],
+        simulation: super::fluids::FluidSim::default()
+            .checkpoint(&mapping)
+            .unwrap()
+            .0,
+        paused: vec![],
+    };
+    Writer::acquire(path, &id, &content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+}
+
+/// Loads exactly the content the saved World at `path` names, the way reopening it does.
+#[cfg(test)]
+pub(crate) fn reopen_world(
+    path: &Path,
+    mods: &Path,
+    trust_file: &Path,
+) -> Result<LoadedMods, String> {
+    let opening = super::persistence::Opening::from_folder(path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    load_with_opening(
+        &opening.selection(),
+        Some(&opening),
+        mods,
+        trust_file,
+        &settings,
+        |found, trust| {
+            trust.grant_for_run(found).map_err(|e| e.to_string())?;
+            Ok(true)
+        },
+    )
+}
+
 #[cfg(test)]
 fn load_with(
     directory: &Path,
@@ -1209,53 +1263,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
 
     #[test]
     fn artwork_game_reopens_unchanged_and_refuses_changed_art_before_writes() {
-        use super::super::persistence::Opening;
-        use tesserae_core::save::{self, Commit, Generation, WorldId, Writer};
         let s = Scratch::new();
         let (dir, _) = art_game(&s);
         let loaded = s.load(TrustMode::All).unwrap();
-        let (content, mapping) = super::super::persistence::content(&loaded);
         let path = s.0.join("world");
-        let id = WorldId::new();
-        let commit = Commit {
-            format: save::FORMAT_VERSION,
-            generator: save::GENERATOR_VERSION,
-            world: id.clone(),
-            sequence: 1,
-            seed: 123,
-            voxel_size_m: 0.5,
-            parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
-            content: content.clone(),
-            player: save::Player {
-                eye_m: [1.0, 2.0, 3.0],
-                extensions: Default::default(),
-            },
-            chunks: vec![],
-            simulation: super::super::fluids::FluidSim::default()
-                .checkpoint(&mapping)
-                .unwrap()
-                .0,
-            paused: vec![],
-        };
-        Writer::acquire(&path, &id, &content)
-            .unwrap()
-            .write(&commit)
-            .unwrap();
-        let reopen = || {
-            let opening = Opening::from_folder(&path).unwrap();
-            let settings = opening.settings(WorldSettings::default());
-            load_with_opening(
-                &opening.selection(),
-                Some(&opening),
-                &s.0.join("mods"),
-                &s.0.join("trust.json"),
-                &settings,
-                |found, trust| {
-                    trust.grant_for_run(found).map_err(|e| e.to_string())?;
-                    Ok(true)
-                },
-            )
-        };
+        save_world(&loaded, &path);
+        let reopen = || reopen_world(&path, &s.0.join("mods"), &s.0.join("trust.json"));
         assert!(reopen().is_ok());
         let files = || {
             let mut files: Vec<_> = fs::read_dir(&path)
