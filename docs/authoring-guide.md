@@ -110,7 +110,7 @@ unless `--mods` supplies it. Dependencies load first, whichever source they use,
 and names resolve across the whole set.
 
 The repository's [demo Games and shared Mods](demo-games.md) are worked examples
-of this: four small Rust Games that depend on five data Mods.
+of this: four small Rust Games that depend on shared data Mods.
 
 ## One Declaration source per Mod
 

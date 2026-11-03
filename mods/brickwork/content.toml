@@ -1,0 +1,57 @@
+[[materials]]
+name = "brick"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "cobble"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.6
+
+[[materials]]
+name = "tile"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.5
+
+[[appearance]]
+material = "brick"
+color = [168, 74, 52, 255]
+texture = "art/brick.png"
+
+[[appearance]]
+material = "cobble"
+color = [120, 118, 112, 255]
+texture = "art/cobble.png"
+
+[[appearance]]
+material = "tile"
+color = [190, 120, 70, 255]
+texture = "art/tile.png"
+
+[[shapes]]
+name = "wall"
+boxes = [{ min = [4, 0, 4], max = [12, 16, 12] }]
+collision = [{ min = [4, 0, 4], max = [12, 24, 12] }]
+
+[shapes.connect]
+group = 2
+connects-to = 2
+to-sealed = true
+arms = [
+  { face = 0, boxes = [{ min = [0, 2, 5], max = [4, 14, 11] }], collision = [{ min = [0, 0, 5], max = [4, 24, 11] }] },
+  { face = 1, boxes = [{ min = [12, 2, 5], max = [16, 14, 11] }], collision = [{ min = [12, 0, 5], max = [16, 24, 11] }] },
+  { face = 4, boxes = [{ min = [5, 2, 0], max = [11, 14, 4] }], collision = [{ min = [5, 0, 0], max = [11, 24, 4] }] },
+  { face = 5, boxes = [{ min = [5, 2, 12], max = [11, 14, 16] }], collision = [{ min = [5, 0, 12], max = [11, 24, 16] }] },
+]

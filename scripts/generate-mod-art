@@ -145,6 +145,88 @@ def lantern(face, x, y):
     return tint((255, 226, 140) if centre < 3.5 else (250, 196, 96), (noise(x, y, 63) - 128) // 18)
 
 
+def planks(face, x, y):
+    n = noise(x, y, face + 67)
+    seam = y % 5 == 0 or (x + 7 * (y // 5)) % 16 == 0
+    return tint((176, 132, 78), (-30 if seam else 0) + (n - 128) // 16)
+
+
+def thatch(face, x, y):
+    n = noise(x, y, face + 71)
+    strand = (x + y // 2) % 3 == 0
+    return tint((196, 170, 92), (-22 if strand else 8) + (n - 128) // 14)
+
+
+def bricks(base, mortar):
+    def paint(face, x, y):
+        row = y // 4
+        joint = y % 4 == 3 or (x + 8 * (row % 2)) % 8 == 7
+        n = noise(x // 2, y // 2, face + 73)
+        return tint(mortar if joint else base, (n - 128) // (30 if joint else 14))
+
+    return paint
+
+
+def cobble(face, x, y):
+    cell = noise(x // 5, y // 5, face + 79)
+    edge = x % 5 == 4 or y % 5 == 4
+    return tint((120, 118, 112), -34 if edge else (cell - 128) // 8)
+
+
+def tile(face, x, y):
+    grout = x % 8 == 7 or y % 8 == 7
+    return tint((190, 120, 70), -50 if grout else (noise(x // 8, y // 8, face + 83) - 128) // 10)
+
+
+def glow(base, hot):
+    def paint(face, x, y):
+        d = max(abs(x - 7.5), abs(y - 7.5))
+        n = noise(x, y, face + 89)
+        core = d < 3.5 + (n % 3)
+        return tint(hot if core else base, (n - 128) // 20)
+
+    return paint
+
+
+def cloth(base):
+    def paint(face, x, y):
+        weave = -10 if (x + y) % 2 else 6
+        return tint(base, weave + (noise(x, y, face + 97) - 128) // 18)
+
+    return paint
+
+
+def ice(face, x, y):
+    n = noise(x, y, face + 101)
+    crack = (x - y) % 11 == 0 and n > 120
+    return (230, 244, 252, 190) if crack else tint((170, 214, 240), (n - 128) // 18, 150)
+
+
+def snow(face, x, y):
+    return tint((240, 244, 248), (noise(x, y, face + 103) - 128) // 22)
+
+
+def packed_ice(face, x, y):
+    n = noise(x // 2, y // 2, face + 107)
+    return tint((130, 184, 230), (n - 128) // 12)
+
+
+def gem(base, alpha):
+    def paint(face, x, y):
+        facet = (x // 4 + y // 4) % 2
+        n = noise(x, y, face + 109)
+        edge = x % 4 == 0 or y % 4 == 0
+        return tint(base, (18 if facet else -14) + (-24 if edge else 0) + (n - 128) // 24, alpha)
+
+    return paint
+
+
+def peat(face, x, y):
+    n = noise(x, y, face + 113)
+    fibre = noise(x // 3, y, face + 127) > 190
+    return tint((70, 52, 36), (24 if fibre else 0) + (n - 128) // 10)
+
+
 TEXTURES = {
     "strata": {
         "stone": stone,
@@ -162,6 +244,32 @@ TEXTURES = {
         "frosted_glass": frosted,
         "lantern": lantern,
     },
+    "timber": {"planks": planks, "thatch": thatch},
+    "brickwork": {
+        "brick": bricks((168, 74, 52), (206, 200, 190)),
+        "cobble": cobble,
+        "tile": tile,
+    },
+    "lamps": {
+        "glowstone": glow((226, 196, 90), (255, 244, 180)),
+        "amberlight": glow((220, 130, 40), (255, 200, 110)),
+        "moonlight": glow((120, 160, 230), (210, 230, 255)),
+    },
+    "wool": {
+        "wool_red": cloth((190, 52, 52)),
+        "wool_blue": cloth((52, 92, 190)),
+        "wool_green": cloth((60, 150, 70)),
+        "wool_yellow": cloth((214, 184, 60)),
+        "wool_white": cloth((232, 232, 228)),
+        "wool_black": cloth((34, 34, 38)),
+    },
+    "frost": {"ice": ice, "snow": snow, "packed_ice": packed_ice},
+    "crystals": {
+        "amethyst": gem((150, 90, 210), 200),
+        "citrine": gem((236, 190, 60), 200),
+        "aquamarine": gem((70, 200, 200), 200),
+    },
+    "bog": {"peat": peat},
 }
 
 

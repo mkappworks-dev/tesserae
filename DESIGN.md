@@ -584,7 +584,7 @@ Notes:
   Rust change, a failure and its correction (ticket 08). It establishes how
   contracts evolve compatibly while later systems add APIs. The final 1.0
   contract freeze belongs to step 27, after those systems are implemented.
-  `mods/` holds five shared data Mods and `games/` four small Rust Games built
+  `mods/` holds twelve shared data Mods and `games/` four small Rust Games built
   on them (`docs/demo-games.md`); `terra` remains the one self-contained Game.
 - **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned

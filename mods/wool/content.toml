@@ -1,0 +1,88 @@
+[[materials]]
+name = "wool_red"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.15
+
+[[materials]]
+name = "wool_blue"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.15
+
+[[materials]]
+name = "wool_green"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.15
+
+[[materials]]
+name = "wool_yellow"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.15
+
+[[materials]]
+name = "wool_white"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.15
+
+[[materials]]
+name = "wool_black"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.15
+
+[[appearance]]
+material = "wool_red"
+color = [190, 52, 52, 255]
+texture = "art/wool_red.png"
+
+[[appearance]]
+material = "wool_blue"
+color = [52, 92, 190, 255]
+texture = "art/wool_blue.png"
+
+[[appearance]]
+material = "wool_green"
+color = [60, 150, 70, 255]
+texture = "art/wool_green.png"
+
+[[appearance]]
+material = "wool_yellow"
+color = [214, 184, 60, 255]
+texture = "art/wool_yellow.png"
+
+[[appearance]]
+material = "wool_white"
+color = [232, 232, 228, 255]
+texture = "art/wool_white.png"
+
+[[appearance]]
+material = "wool_black"
+color = [34, 34, 38, 255]
+texture = "art/wool_black.png"
+
+[[shapes]]
+name = "carpet"
+boxes = [{ min = [0, 0, 0], max = [16, 2, 16] }]
+collision = [{ min = [0, 0, 0], max = [16, 2, 16] }]

@@ -1,0 +1,37 @@
+[[materials]]
+name = "planks"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.4
+
+[[materials]]
+name = "thatch"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+remove-time-s = 0.2
+
+[[appearance]]
+material = "planks"
+color = [176, 132, 78, 255]
+texture = "art/planks.png"
+
+[[appearance]]
+material = "thatch"
+color = [196, 170, 92, 255]
+texture = "art/thatch.png"
+
+[[shapes]]
+name = "beam"
+boxes = [{ min = [0, 6, 6], max = [16, 10, 10] }]
+collision = [{ min = [0, 6, 6], max = [16, 10, 10] }]
+
+[[shapes]]
+name = "panel"
+boxes = [{ min = [0, 0, 7], max = [16, 16, 9] }]
+collision = [{ min = [0, 0, 7], max = [16, 16, 9] }]

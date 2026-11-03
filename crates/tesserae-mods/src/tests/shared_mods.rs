@@ -9,7 +9,20 @@ use tesserae_core::{Burn, Tables};
 
 use crate::{Behaviour, Kind, ModHost, Registry, Trust, apply, plan, resolve, scan};
 
-const SHARED: [&str; 5] = ["strata", "waters", "flora", "hearth", "glassworks"];
+const SHARED: [&str; 12] = [
+    "strata",
+    "waters",
+    "flora",
+    "hearth",
+    "glassworks",
+    "timber",
+    "brickwork",
+    "lamps",
+    "wool",
+    "frost",
+    "crystals",
+    "bog",
+];
 
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -120,6 +133,12 @@ fn the_shared_mods_are_all_installed_and_data_only() {
 fn dependencies_load_before_the_mods_that_use_them() {
     let (ids, ..) = load_all();
     let position = |id: &str| ids.iter().position(|loaded| loaded == id).unwrap();
+    for needed in ["hearth", "brickwork"] {
+        assert!(
+            position(needed) < position("bog"),
+            "{needed} before bog: {ids:?}"
+        );
+    }
     for needed in ["strata", "waters", "flora"] {
         assert!(
             position(needed) < position("hearth"),
@@ -142,29 +161,48 @@ fn every_cross_mod_reference_resolves() {
         .iter()
         .map(|rule| rule.product)
         .collect();
-    assert_eq!(products.len(), 2);
-    for product in ["waters:obsidian", "strata:basalt"] {
+    assert_eq!(products.len(), 4);
+    for product in [
+        "waters:obsidian",
+        "strata:basalt",
+        "brickwork:brick",
+        "hearth:ash",
+    ] {
         assert!(
             products.contains(&Some(material(&registry, product))),
             "{product}"
         );
     }
+    for fluid in ["bog:mud", "bog:tar", "frost:slush"] {
+        assert!(
+            tables.fluids.contains(material(&registry, fluid)),
+            "{fluid}"
+        );
+    }
 
-    let wood = tables
-        .combustion
-        .get(material(&registry, "flora:wood"))
-        .unwrap();
-    let residue = material(&registry, "hearth:ash");
-    assert!(matches!(wood.burn, Burn::For { residue: left, .. } if left == residue));
+    let ash = material(&registry, "hearth:ash");
+    for fuel in ["flora:wood", "bog:peat"] {
+        let burn = tables.combustion.get(material(&registry, fuel)).unwrap();
+        assert!(
+            matches!(burn.burn, Burn::For { residue, .. } if residue == ash),
+            "{fuel}"
+        );
+    }
     assert!(
         tables
             .combustion
             .contains(material(&registry, "flora:leaves"))
     );
-    assert!(!tables.combustion.contains(residue), "ash does not burn");
+    assert!(!tables.combustion.contains(ash), "ash does not burn");
 
-    for shape in ["slab", "stair", "fence"] {
-        let name = format!("glassworks:{shape}");
+    for name in [
+        "glassworks:slab",
+        "glassworks:stair",
+        "glassworks:fence",
+        "brickwork:wall",
+        "timber:beam",
+        "wool:carpet",
+    ] {
         assert!(registry.id_of(Kind::Shape, &name).is_some(), "{name}");
     }
 }

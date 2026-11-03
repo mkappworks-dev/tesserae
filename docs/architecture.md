@@ -311,7 +311,7 @@ tesserae/
 ├── games/terra/                 MIT WASI guest, only the WIT contract       ▸ 7
 ├── games/{meadow,ember,        small Rust Games on the shared Mods; MIT
 │         tidewater,lumen}/
-├── mods/                       five shared data-only Mods, no build; MIT
+├── mods/                       twelve shared data-only Mods, no build; MIT
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
 └── USE-GRANT.md                the most important file in the repo
