@@ -35,6 +35,26 @@ pub struct Found {
 }
 
 impl Found {
+    /// A project folder as an author keeps it: any folder holding a `mod.toml`, installed or not.
+    pub fn read(dir: &Path) -> Result<Found, ModError> {
+        let name = dir
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let path = dir.join("mod.toml");
+        let manifest_bytes = fs::read(&path).map_err(|source| ModError::Io {
+            who: name.clone(),
+            path,
+            source,
+        })?;
+        let found = Found {
+            manifest: Manifest::parse(&name, &manifest_bytes)?,
+            dir: dir.to_path_buf(),
+            manifest_bytes,
+        };
+        found.source_path()?;
+        Ok(found)
+    }
+
     /// Legacy alias for the selected source's confined path.
     pub fn component_path(&self) -> Result<PathBuf, ModError> {
         self.source_path()
@@ -401,6 +421,25 @@ pub fn migrate_legacy_games(mods_dir: &Path) -> Vec<Migration> {
         });
     }
     outcomes
+}
+
+/// `projects` plus every installed Mod or Game they need, transitively. A project shadows an
+/// installed item of its id; a dependency found nowhere is left for [`plan`] to report.
+pub fn with_dependencies(projects: Vec<Found>, installed: Scan) -> Vec<Found> {
+    let mut chosen = projects;
+    let mut at = 0;
+    while at < chosen.len() {
+        for dep in chosen[at].manifest.depends.clone() {
+            if chosen.iter().any(|f| f.manifest.id == dep) {
+                continue;
+            }
+            if let Some(found) = installed.find(&dep) {
+                chosen.push(found.clone());
+            }
+        }
+        at += 1;
+    }
+    chosen
 }
 
 /// Load order: dependencies first, then by id, whatever order `found` is in.

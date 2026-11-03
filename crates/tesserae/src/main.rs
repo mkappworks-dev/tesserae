@@ -1,5 +1,6 @@
 //! The Tesserae engine's Bevy application.
 
+mod author;
 mod client;
 mod content;
 #[cfg(any(feature = "dev", feature = "profiling"))]
@@ -19,9 +20,11 @@ use bevy::prelude::*;
 fn main() -> std::process::ExitCode {
     #[cfg(feature = "profiling")]
     let process_start = profiling::ProcessStart(std::time::Instant::now());
-    let args = launch::parse(std::env::args_os().skip(1), |name| {
-        std::env::var_os(name).is_some()
-    });
+    let argv: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(code) = author::run(&argv) {
+        return code;
+    }
+    let args = launch::parse(argv, |name| std::env::var_os(name).is_some());
     let worlds = server::persistence::worlds_dir().unwrap_or_else(|| "worlds".into());
     let mut app = App::new();
     app.insert_resource(args.launch)

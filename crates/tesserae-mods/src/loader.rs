@@ -7,7 +7,7 @@ use crate::host::{HostState, engine, linker};
 use crate::limits::ModLimits;
 use crate::manifest::Found;
 use crate::sandbox::{ModFault, ModInstance};
-use crate::trust::{Trust, Verdict};
+use crate::trust::{CheckedPayload, Trust, Verdict};
 
 /// A trusted Mod with a compiled component or decoded data Declaration.
 pub struct Compiled {
@@ -51,6 +51,20 @@ impl ModHost {
 
     /// Every Mod is trust-checked before any is compiled, so one refusal costs no compile time.
     pub fn load(&self, plan: Vec<Found>, trust: &Trust) -> Result<Vec<Compiled>, ModError> {
+        Ok(self
+            .load_checked(plan, trust)?
+            .into_iter()
+            .map(|(compiled, _)| compiled)
+            .collect())
+    }
+
+    /// [`ModHost::load`], also returning the exact bytes whose identity was checked, so a caller
+    /// that republishes them cannot publish something other than what loaded.
+    pub fn load_checked(
+        &self,
+        plan: Vec<Found>,
+        trust: &Trust,
+    ) -> Result<Vec<(Compiled, CheckedPayload)>, ModError> {
         let mut trusted = Vec::with_capacity(plan.len());
         for found in plan {
             match trust.check(&found)? {
@@ -71,12 +85,16 @@ impl ModHost {
                 let limits = self.limits.lowered_by(&found.manifest.limits);
                 if found.manifest.declaration.is_some() {
                     let declaration = crate::data::parse(&found.manifest.id, &payload)?;
-                    return Ok(Compiled {
-                        found,
-                        limits,
-                        build_sha256,
-                        source: LoadedSource::Data(Box::new(declaration)),
-                    });
+                    let source = LoadedSource::Data(Box::new(declaration));
+                    return Ok((
+                        Compiled {
+                            found,
+                            limits,
+                            build_sha256,
+                            source,
+                        },
+                        payload,
+                    ));
                 }
                 let component =
                     Component::new(&self.engine, bytes).map_err(|source| ModError::Compile {
@@ -91,12 +109,16 @@ impl ModHost {
                         exported: exported.map_or("no contract line", Line::api),
                     });
                 }
-                Ok(Compiled {
-                    found,
-                    limits,
-                    build_sha256,
-                    source: LoadedSource::Component(component),
-                })
+                let source = LoadedSource::Component(component);
+                Ok((
+                    Compiled {
+                        found,
+                        limits,
+                        build_sha256,
+                        source,
+                    },
+                    payload,
+                ))
             })
             .collect()
     }

@@ -335,7 +335,7 @@ fn load_prompted(
 }
 
 #[cfg(test)]
-fn load(
+pub(crate) fn load(
     directory: &Path,
     trust_file: &Path,
     mode: TrustMode,
@@ -369,6 +369,85 @@ fn load_with(
         world,
         authorize,
     )
+}
+
+/// Declares every Mod in load order and resolves their names, as opening a World does but
+/// without starting any instance. Validation shares it so it accepts exactly what loading does.
+pub(crate) async fn declare_all(
+    host: &ModHost,
+    compiled: &[tesserae_mods::Compiled],
+    world: &WorldSettings,
+) -> Result<LoadedMods, String> {
+    let mut loaded = LoadedMods::default();
+    let mut behaviours = Vec::new();
+    for component in compiled {
+        let id = &component.found.manifest.id;
+        let manifest = &component.found.manifest;
+        loaded.required.push(tesserae_core::save::RequiredMod {
+            id: id.clone(),
+            version: manifest.version.clone(),
+            contract: manifest.api.clone(),
+            game: manifest.root,
+            build_sha256: component.build_sha256.clone(),
+        });
+        let fault = |e| format!("mod `{id}`: {e}");
+        let (instance, declaration) = if let Some(declaration) = component.declaration() {
+            (None, declaration.clone())
+        } else {
+            let instance = host
+                .instantiate(component, world.seed)
+                .await
+                .map_err(fault)?;
+            let (mut instance, declaration) = instance.declare().await.map_err(fault)?;
+            for line in instance.drain_log().lines {
+                eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
+            }
+            (Some(instance), declaration)
+        };
+        let root = component.found.manifest.root;
+        let applied = apply(
+            declaration,
+            id,
+            &mut loaded.tables,
+            &mut loaded.registry,
+            root,
+        )
+        .map_err(|e| e.to_string())?;
+        loaded.remove_times.extend(applied.remove_times);
+        behaviours.push(applied.behaviour);
+        for row in applied.appearance {
+            if let Some(index) = loaded
+                .registry
+                .id_of(Kind::Material, &format!("{id}:{}", row.material))
+            {
+                if let Some(pixels) = row.texture {
+                    loaded.textures.push((index as MaterialId, pixels));
+                }
+                let c = row.color;
+                loaded
+                    .appearance
+                    .push((index as MaterialId, [c.r, c.g, c.b, c.a]));
+            }
+        }
+        if root {
+            loaded.world = applied.world;
+            loaded.view = applied.view;
+            loaded.game = true;
+            loaded.movement = applied.movement;
+            loaded.character = applied.character;
+            loaded.tools = applied.tools;
+        }
+        loaded.mods.extend(instance);
+    }
+    // Every name is registered now; what flows, reacts and burns is fixed
+    // before any Mod starts and the World opens.
+    let (ground, lake) =
+        resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    if let Some(world) = &mut loaded.world {
+        world.water = lake;
+        world.ground = ground;
+    }
+    Ok(loaded)
 }
 
 fn load_with_opening(
@@ -410,75 +489,7 @@ fn load_with_opening(
     let host = ModHost::new().map_err(|e| e.to_string())?;
     let compiled = host.load(accepted, &trust).map_err(|e| e.to_string())?;
     let loaded = bevy::tasks::block_on(async {
-        let mut loaded = LoadedMods::default();
-        let mut behaviours = Vec::new();
-        for component in &compiled {
-            let id = &component.found.manifest.id;
-            let manifest = &component.found.manifest;
-            loaded.required.push(tesserae_core::save::RequiredMod {
-                id: id.clone(),
-                version: manifest.version.clone(),
-                contract: manifest.api.clone(),
-                game: manifest.root,
-                build_sha256: component.build_sha256.clone(),
-            });
-            let fault = |e| format!("mod `{id}`: {e}");
-            let (instance, declaration) = if let Some(declaration) = component.declaration() {
-                (None, declaration.clone())
-            } else {
-                let instance = host
-                    .instantiate(component, world.seed)
-                    .await
-                    .map_err(fault)?;
-                let (mut instance, declaration) = instance.declare().await.map_err(fault)?;
-                for line in instance.drain_log().lines {
-                    eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
-                }
-                (Some(instance), declaration)
-            };
-            let root = component.found.manifest.root;
-            let applied = apply(
-                declaration,
-                id,
-                &mut loaded.tables,
-                &mut loaded.registry,
-                root,
-            )
-            .map_err(|e| e.to_string())?;
-            loaded.remove_times.extend(applied.remove_times);
-            behaviours.push(applied.behaviour);
-            for row in applied.appearance {
-                if let Some(index) = loaded
-                    .registry
-                    .id_of(Kind::Material, &format!("{id}:{}", row.material))
-                {
-                    if let Some(pixels) = row.texture {
-                        loaded.textures.push((index as MaterialId, pixels));
-                    }
-                    let c = row.color;
-                    loaded
-                        .appearance
-                        .push((index as MaterialId, [c.r, c.g, c.b, c.a]));
-                }
-            }
-            if root {
-                loaded.world = applied.world;
-                loaded.view = applied.view;
-                loaded.game = true;
-                loaded.movement = applied.movement;
-                loaded.character = applied.character;
-                loaded.tools = applied.tools;
-            }
-            loaded.mods.extend(instance);
-        }
-        // Every name is registered now; what flows, reacts and burns is fixed
-        // before any Mod starts and the World opens.
-        let (ground, lake) =
-            resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
-        if let Some(world) = &mut loaded.world {
-            world.water = lake;
-            world.ground = ground;
-        }
+        let mut loaded = declare_all(&host, &compiled, world).await?;
         let listed = |kind| {
             loaded
                 .registry

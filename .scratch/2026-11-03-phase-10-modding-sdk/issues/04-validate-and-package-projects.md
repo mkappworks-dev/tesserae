@@ -1,6 +1,6 @@
 # 04: Validate and package authoring projects
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 03
 
@@ -13,23 +13,23 @@ result is installed.
 
 ## Acceptance criteria
 
-- [ ] A documented headless command validates the selected Game and dependency
+- [x] A documented headless command validates the selected Game and dependency
       set using the same source loading, Trust, Declaration validation and
       reference resolution as normal startup.
-- [ ] Validation does not open or mutate a World. Component Declaration calls
+- [x] Validation does not open or mutate a World. Component Declaration calls
       retain the existing sandbox, limits and applicable Trust requirements.
-- [ ] Validation returns success or a failing exit status with actionable
+- [x] Validation returns success or a failing exit status with actionable
       diagnostics identifying the Mod and relevant field or file.
-- [ ] Packaging handles data-only and already-built component content and
+- [x] Packaging handles data-only and already-built component content and
       produces the existing Game and Mod installation layout.
-- [ ] Output contains the Manifest and every required Declaration, component or
+- [x] Output contains the Manifest and every required Declaration, component or
       referenced image while preserving usable local references. Source,
       development configuration and unrelated files are excluded.
-- [ ] Packaged content passes normal installed loading independently of the
+- [x] Packaged content passes normal installed loading independently of the
       authoring directory and can be selected with its required dependencies.
-- [ ] Packaging uses the checked content consistently; a changing or invalid
+- [x] Packaging uses the checked content consistently; a changing or invalid
       input cannot be reported as a successfully validated package.
-- [ ] Command-level tests cover valid data, valid components, mixed dependency
+- [x] Command-level tests cover valid data, valid components, mixed dependency
       sets, failures and loading the output after source is unavailable.
 
 ## Verification

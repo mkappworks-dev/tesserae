@@ -103,3 +103,38 @@ no guest instances, `start` or `tick` callbacks. Dependencies use the existing
 `depends` Manifest field and load before their consumers, regardless of
 Declaration format. Paths must be relative and stay inside the installed
 directory after symlink resolution.
+
+## Validating and packaging projects
+
+Both commands run without opening a World and take project folders (each holds a
+`mod.toml`), wherever they are:
+
+```sh
+tesserae validate <project>... [--mods <dir>] [--trust-for-run]
+tesserae package <project>... --out <dir> [--mods <dir>] [--trust-for-run] [--force]
+```
+
+`--mods` is the installed `mods` folder (default `TESSERAE_MODS_DIR`, then the
+user data directory). It supplies dependencies the projects do not include, and
+the `games` folder beside it supplies a Game, as at startup. A project shadows
+an installed item of its id.
+
+Validation loads the projects and their dependencies through the code a World
+uses: Manifest, dependency order, Trust, Declaration (data or component),
+artwork and name resolution. It stops before any component's `start`, so no
+World exists. It prints one `ok:` line per Mod, or exits 1 with an error naming
+the Mod and the field or file; a usage error exits 2.
+
+Trust is unchanged. A data Declaration runs no code, so it needs no grant to be
+checked. A component needs a recorded grant, or `--trust-for-run` for the
+projects named on the command line (never for installed dependencies); the flag
+writes nothing.
+
+`package` writes `games/<id>/` or `mods/<id>/` under `--out`, holding exactly
+`mod.toml`, the Declaration or component, and the referenced PNGs, at the same
+relative paths. Source, development configuration and unreferenced files are
+left out. The bytes written are the bytes that were checked; the copy is then
+loaded again, in place of the source, and must have the same build before
+anything is installed, so a project that changes or fails during the run
+produces no output. An existing folder needs `--force`, and only a packaged Mod
+is replaced. Select the result with `--mods <dir>/mods`.

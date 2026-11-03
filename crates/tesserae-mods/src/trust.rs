@@ -46,6 +46,11 @@ impl CheckedPayload {
         }
     }
 
+    /// Every runtime file, by Mod-relative name: the source and the artwork it references.
+    pub fn files(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.files.iter().map(|(n, b)| (n.as_str(), b.as_slice()))
+    }
+
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.files[&self.source]
     }
