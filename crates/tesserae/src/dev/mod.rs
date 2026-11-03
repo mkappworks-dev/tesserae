@@ -302,7 +302,9 @@ pub fn systems(app: &mut App) {
     eprintln!(
         "{WORLD_NAME}: nothing is saved, and the named projects are trusted for this run only."
     );
-    app.add_systems(Startup, retitle)
+    // `open::plugin` skips its scan under `Run`; the World list's systems still require the resource.
+    app.insert_resource(crate::launch::Installed::none(None))
+        .add_systems(Startup, retitle)
         .add_systems(Update, (watch, collect, apply, adopt, restart).chain())
         .add_systems(OnEnter(AppState::List), after_session);
 }
@@ -586,6 +588,58 @@ mod tests {
                 r.session() > from && r.state() == AppState::InWorld
             });
         }
+    }
+
+    /// The tests above ignore system errors so a fault does not hide the behaviour under test; the
+    /// real app panics on them, so this run wires the World list in as `main` does and does not.
+    #[test]
+    fn the_first_world_and_a_restart_raise_no_system_error() {
+        let s = Scratch::new();
+        let mods = s.dir("installed/mods");
+        let game = data_game(&s.dir("src"), "plain", "");
+        let request = Request {
+            projects: vec![game.clone()],
+            mods: Some(mods),
+            seed: Some(SEED),
+        };
+        let worlds = s.dir("installed/worlds");
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            StatesPlugin,
+            crate::session::plugin,
+            crate::open::plugin,
+            server::plugin,
+        ))
+        .add_message::<AppExit>()
+        .add_message::<bevy::window::WindowCloseRequested>()
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<crate::launch::Switch>()
+        .insert_resource(crate::open::UserArgs(Vec::new()))
+        .insert_resource(crate::client::worlds::WorldsDir(worlds))
+        .add_plugins((
+            crate::client::worlds::headless_support,
+            crate::client::worlds::plugin,
+        ))
+        .insert_resource(Run::new(
+            request,
+            Timing {
+                poll: Duration::ZERO,
+                quiet: Duration::ZERO,
+            },
+        ))
+        .add_plugins(systems);
+        #[cfg(any(feature = "dev", feature = "profiling"))]
+        app.add_plugins(crate::cost::plugin);
+        let mut rig = Rig {
+            app,
+            s,
+            mods: PathBuf::new(),
+        };
+        rig.open();
+        set_emission(&game, 0, 5);
+        rig.restarted(1);
+        assert_eq!(rig.emission(), 5);
     }
 
     fn set_emission(game: &Path, from: u8, to: u8) {

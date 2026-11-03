@@ -334,6 +334,13 @@ fn logic(app: &mut App) {
     }
 }
 
+/// What the other client plugins insert for the list, for a headless App that runs the real list.
+#[cfg(test)]
+pub(crate) fn headless_support(app: &mut App) {
+    app.init_resource::<super::input::Ownership>()
+        .init_resource::<Assets<Image>>();
+}
+
 #[derive(Component)]
 struct ListCamera;
 
