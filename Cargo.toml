@@ -7,6 +7,7 @@ members = ["crates/tesserae", "crates/tesserae-core", "crates/tesserae-mods"]
 exclude = [
     "games/terra",
     "games/meadow",
+    "games/ember",
     "crates/tesserae-mods/tests/guests",
 ]
 

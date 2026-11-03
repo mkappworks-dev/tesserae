@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bevy::tasks::block_on;
+use tesserae_core::Burn;
 use tesserae_mods::{BatchReport, Command, Kind, Resolved, TickContext, validate};
 
 use super::{LoadedMods, TrustMode, load};
@@ -177,6 +178,43 @@ fn fills<'a>(
     })
 }
 
+fn sources(batches: &[Batch], material: u16) -> Vec<(f32, [f32; 3])> {
+    batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .commands
+                .iter()
+                .filter_map(move |command| match command {
+                    Command::PlaceSources {
+                        region,
+                        material: m,
+                    } if *m == material => Some((batch.at_s, region.min)),
+                    _ => None,
+                })
+        })
+        .collect()
+}
+
+fn removals(batches: &[Batch]) -> Vec<(f32, [f32; 3])> {
+    batches
+        .iter()
+        .flat_map(|batch| {
+            batch
+                .commands
+                .iter()
+                .filter_map(move |command| match command {
+                    Command::RemoveSources(region) => Some((batch.at_s, region.min)),
+                    _ => None,
+                })
+        })
+        .collect()
+}
+
+fn near(a: f32, b: f32, tolerance: f32) -> bool {
+    (a - b).abs() <= tolerance
+}
+
 #[test]
 fn meadow_declares_no_material_and_takes_its_ground_from_strata() {
     let (_install, loaded) = loaded("meadow", 0.5);
@@ -237,4 +275,98 @@ fn meadow_places_its_trees_and_gazebo_on_start() {
             "nothing more after the {before} Commands of the build"
         );
     }
+}
+
+#[test]
+fn ember_gets_lava_reactions_and_burning_wood_from_hearth() {
+    let (_install, loaded) = loaded("ember", 0.5);
+    assert_eq!(
+        ids(&loaded),
+        ["flora", "strata", "waters", "hearth", "ember"]
+    );
+    let tables = &loaded.tables;
+    let (lava, water) = (
+        material(&loaded, "hearth:lava"),
+        material(&loaded, "waters:water"),
+    );
+    assert!(tables.fluids.contains(lava) && tables.fluids.contains(water));
+    let products: Vec<_> = tables.reactions.rules().iter().map(|r| r.product).collect();
+    assert!(products.contains(&Some(material(&loaded, "waters:obsidian"))));
+    let wood = tables
+        .combustion
+        .get(material(&loaded, "flora:wood"))
+        .unwrap();
+    let ash = material(&loaded, "hearth:ash");
+    assert!(matches!(wood.burn, Burn::For { residue, .. } if residue == ash));
+
+    let world = loaded.world.unwrap();
+    assert_eq!(world.water.unwrap().material, water);
+    let ground = world.ground.unwrap();
+    assert_eq!(ground.rock, material(&loaded, "strata:basalt"));
+    assert_eq!(ground.surface, ash);
+}
+
+#[test]
+fn ember_vents_erupt_and_stop_on_the_declared_timer() {
+    let (_install, mut loaded) = loaded("ember", 0.5);
+    let ran_s = 400.0 * 0.25;
+    let batches = run(&mut loaded, 0.5, 0.25, 400);
+    let lava = material(&loaded, "hearth:lava");
+    let basalt = material(&loaded, "strata:basalt");
+    assert!(
+        fills(&batches, basalt).count() > 0,
+        "the chimneys are built first"
+    );
+
+    let eruptions = sources(&batches, lava);
+    let ends = removals(&batches);
+    assert!(!eruptions.is_empty(), "lava is placed");
+    // Vents are told apart by their cell's x; the first eruption anchors the timer.
+    let first = eruptions[0].0;
+    assert!(
+        first >= 5.0,
+        "no eruption before the build is applied and 5 s have passed"
+    );
+    for (vent, x) in [(0, 19.0), (1, -21.0), (2, 6.0)] {
+        let starts: Vec<f32> = eruptions
+            .iter()
+            .filter(|(_, at)| at[0] == x)
+            .map(|(t, _)| *t)
+            .collect();
+        let stops: Vec<f32> = ends
+            .iter()
+            .filter(|(_, at)| at[0] == x)
+            .map(|(t, _)| *t)
+            .collect();
+        assert!(
+            starts.len() >= 3,
+            "vent {vent} erupts repeatedly: {starts:?}"
+        );
+        for (n, start) in starts.iter().enumerate() {
+            let expected = first + 10.0 * vent as f32 + 30.0 * n as f32;
+            assert!(
+                near(*start, expected, 0.5),
+                "vent {vent} eruption {n}: {start} vs {expected}"
+            );
+            if start + 8.0 < ran_s - 1.0 {
+                assert!(
+                    stops.iter().any(|stop| near(*stop, start + 8.0, 0.5)),
+                    "vent {vent} stops 8 s after {start}: {stops:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn ember_wet_vent_has_water_beside_its_lava() {
+    let (_install, mut loaded) = loaded("ember", 0.5);
+    let batches = run(&mut loaded, 0.5, 0.25, 200);
+    let water = material(&loaded, "waters:water");
+    let sources = sources(&batches, water);
+    assert_eq!(sources.len(), 1, "one standing water source");
+    assert_eq!(
+        sources[0].1[0], 8.0,
+        "on the wet vent's cap, two cells from its lava"
+    );
 }

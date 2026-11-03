@@ -1,6 +1,6 @@
 # 03: Add the ember Game
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
