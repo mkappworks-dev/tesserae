@@ -466,6 +466,35 @@ solid = true
     }
 
     #[test]
+    fn the_data_starter_validates_and_packages_as_its_readme_says() {
+        let s = Scratch::new();
+        let starter = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../starters/data-only");
+        assert_eq!(s.run(&["validate", path(&starter)]), Outcome::Done);
+        let out = s.dir("out");
+        let mods = out.join("mods");
+        assert_eq!(
+            s.run(&[
+                "package",
+                path(&starter),
+                "--out",
+                path(&out),
+                "--mods",
+                path(&mods)
+            ]),
+            Outcome::Done
+        );
+        let loaded = load(
+            &mods,
+            &s.0.join("trust.json"),
+            TrustMode::All,
+            &WorldSettings::default(),
+        )
+        .unwrap();
+        assert!(loaded.game);
+        assert_eq!(loaded.textures.len(), 2);
+    }
+
+    #[test]
     fn packaging_keeps_only_runtime_files_and_loads_after_the_source_is_gone() {
         let s = Scratch::new();
         let src = s.dir("src");
