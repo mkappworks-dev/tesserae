@@ -28,6 +28,16 @@ pub struct Opening {
 }
 
 impl Opening {
+    /// A World with no folder: nothing is read from or written to disk.
+    pub fn ephemeral() -> Self {
+        Self {
+            directory: None,
+            id: WorldId::new(),
+            recovered: None,
+            details: None,
+        }
+    }
+
     pub fn from_env() -> Result<Self, String> {
         let explicit = std::env::var_os("TESSERAE_WORLD_DIR").map(PathBuf::from);
         let directory = if std::env::var_os("TESSERAE_EPHEMERAL").is_some() {

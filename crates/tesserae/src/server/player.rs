@@ -187,7 +187,7 @@ impl Player {
         Self::new(eye, MovementMode::Physics)
     }
     #[cfg(test)]
-    pub(in crate::server) fn at(eye: Vec3) -> Self {
+    pub(crate) fn at(eye: Vec3) -> Self {
         Self::new(eye, MovementMode::Flight)
     }
     #[cfg(any(test, feature = "profiling"))]

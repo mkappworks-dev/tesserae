@@ -27,6 +27,17 @@ tesserae validate .
 It reports the Mod and field of any error and exits non-zero on failure. It
 opens no World.
 
+## Watch
+
+```sh
+tesserae dev . [--mods <dir>] [--seed <n>]
+```
+
+Opens a disposable World from this project and restarts it when you save a valid
+change to `mod.toml`, `content.toml` or a referenced PNG. An invalid change is
+explained in the terminal and the running World stays; the next valid save
+recovers. Nothing is saved and no Trust is recorded.
+
 ## Package
 
 ```sh

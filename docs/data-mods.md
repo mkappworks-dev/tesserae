@@ -138,3 +138,40 @@ loaded again, in place of the source, and must have the same build before
 anything is installed, so a project that changes or fails during the run
 produces no output. An existing folder needs `--force`, and only a packaged Mod
 is replaced. Select the result with `--mods <dir>/mods`.
+
+## Watching a project
+
+```sh
+tesserae dev <project>... [--mods <dir>] [--seed <n>]
+```
+
+Opens a disposable World ("Disposable development World" in the window title and
+terminal) from the named Game and Mods, and watches them. Nothing is saved and
+no Trust record is written: the named projects are trusted for this run only,
+while installed dependencies load as usual and an installed component still
+needs a recorded grant. `--seed` fixes the seed (otherwise the Engine's
+default). Source build commands are never run; rebuild a component yourself and
+the new `.wasm` is picked up like any other file.
+
+Each saved change is prepared and validated off the main thread through the same
+code as `validate`, as one consistent candidate:
+
+- A valid candidate closes the running session by the ordinary teardown and
+  opens a fresh World with the same seed. The Player returns to the Game's
+  initial spawn; Edits and simulation progress are discarded, not migrated. A
+  change that loads as the identical build (an editor file, a re-save of the
+  same bytes) restarts nothing.
+- An invalid candidate (malformed data, missing, invalid or wrongly sized
+  artwork, rejected content, an untrusted installed component) leaves the World
+  running and prints the Mod and field. Repeated identical reports are printed
+  once. The next valid save recovers without restarting the command.
+- A burst of saves is read once after the files stop changing; a candidate that
+  was prepared while a newer edit landed is dropped and the newer state
+  prepared, so a stale version never replaces a newer one.
+- If the replacement World stops while starting, the session ends in the
+  ordinary error state with the reason, and the next valid save, even of the
+  same bytes, opens another.
+
+Only the named projects are watched (everything inside them except dot-folders
+and `target`); other local projects and installed Mods are not. Saved Worlds are
+never opened, written or checked against the build.

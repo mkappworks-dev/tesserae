@@ -23,12 +23,24 @@ folder (default: TESSERAE_MODS_DIR, then the user data directory) that supplies 
 the `trust.json` beside it. Components need a recorded Trust grant, or --trust-for-run for the
 projects named here; data Declarations run no code and need none to be checked.";
 
-struct Request {
-    projects: Vec<PathBuf>,
-    mods: Option<PathBuf>,
+pub(crate) struct Request {
+    pub projects: Vec<PathBuf>,
+    pub mods: Option<PathBuf>,
     out: Option<PathBuf>,
-    trust_for_run: bool,
+    pub trust_for_run: bool,
     force: bool,
+}
+
+impl Request {
+    pub fn checking(projects: Vec<PathBuf>, mods: Option<PathBuf>, trust_for_run: bool) -> Self {
+        Self {
+            projects,
+            mods,
+            out: None,
+            trust_for_run,
+            force: false,
+        }
+    }
 }
 
 /// How an authoring command ended.
@@ -107,16 +119,16 @@ fn parse(package: bool, args: &[OsString]) -> Result<Request, String> {
     Ok(request)
 }
 
-struct Checked {
-    compiled: Vec<Compiled>,
+pub(crate) struct Checked {
+    pub compiled: Vec<Compiled>,
     payloads: Vec<CheckedPayload>,
-    // Kept to prove the whole set resolved; nothing reads it.
-    _loaded: LoadedMods,
+    /// Declared and name-resolved, with no component started.
+    pub loaded: LoadedMods,
 }
 
 /// Loads `projects` and what they depend on through the path a World uses (Trust, declaration,
 /// validation, name resolution), stopping before any instance starts or World opens.
-fn check(request: &Request, projects: &[PathBuf]) -> Result<Checked, String> {
+pub(crate) fn check(request: &Request, projects: &[PathBuf]) -> Result<Checked, String> {
     let read = |dir: &PathBuf| Found::read(dir).map_err(|e| format!("{}: {e}", dir.display()));
     let own: Vec<Found> = projects.iter().map(read).collect::<Result<_, _>>()?;
     let own_ids: BTreeSet<String> = own.iter().map(|f| f.manifest.id.clone()).collect();
@@ -147,7 +159,7 @@ fn check(request: &Request, projects: &[PathBuf]) -> Result<Checked, String> {
     Ok(Checked {
         compiled,
         payloads,
-        _loaded: loaded,
+        loaded,
     })
 }
 
@@ -223,17 +235,17 @@ fn package_projects(request: &Request) -> Result<(), String> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::server::mods::{TrustMode, load};
     use std::fs;
     use std::path::Path;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    struct Scratch(PathBuf);
+    pub(crate) struct Scratch(pub PathBuf);
 
     impl Scratch {
-        fn new() -> Self {
+        pub fn new() -> Self {
             static NEXT: AtomicUsize = AtomicUsize::new(0);
             let path = Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("../../target/phase10-author")
@@ -246,7 +258,7 @@ mod tests {
             Self(path)
         }
 
-        fn dir(&self, name: &str) -> PathBuf {
+        pub fn dir(&self, name: &str) -> PathBuf {
             let dir = self.0.join(name);
             fs::create_dir_all(&dir).unwrap();
             dir
@@ -265,11 +277,11 @@ mod tests {
         }
     }
 
-    fn path(p: &Path) -> &str {
+    pub(crate) fn path(p: &Path) -> &str {
         p.to_str().unwrap()
     }
 
-    fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
+    pub(crate) fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
         let mut out = Vec::new();
         let mut encoder = png::Encoder::new(&mut out, width, height);
         encoder.set_color(png::ColorType::Rgba);
@@ -283,7 +295,7 @@ mod tests {
         out
     }
 
-    const ROCK: &str = r#"
+    pub(crate) const ROCK: &str = r#"
 [[materials]]
 name = "rock"
 emission = 0
@@ -294,7 +306,7 @@ solid = true
 "#;
 
     /// A data project with a texture, the files an editor leaves, and an unreferenced image.
-    fn data_game(root: &Path, id: &str, depends: &str) -> PathBuf {
+    pub(crate) fn data_game(root: &Path, id: &str, depends: &str) -> PathBuf {
         let dir = root.join(id);
         fs::create_dir_all(dir.join("art")).unwrap();
         fs::create_dir_all(dir.join("src")).unwrap();
@@ -330,7 +342,7 @@ solid = true
         dir
     }
 
-    fn component(root: &Path, id: &str, guest: &str, extra: &str) -> PathBuf {
+    pub(crate) fn component(root: &Path, id: &str, guest: &str, extra: &str) -> PathBuf {
         let dir = root.join(id);
         fs::create_dir_all(&dir).unwrap();
         fs::write(

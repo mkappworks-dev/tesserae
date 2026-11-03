@@ -1,6 +1,6 @@
 # 06: Watch data and safely restart a development World
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03
 
@@ -47,3 +47,12 @@ from ticket 02 is not a prerequisite for the watcher lifecycle.
 Exercise observable lifecycle outcomes through existing Server and session
 boundaries. Manually edit a small data Game and PNG in the running app and
 record the restart and failure-recovery results when completing this ticket.
+
+## Completion notes
+
+`tesserae dev <project>... [--mods <dir>] [--seed <n>]` (`crates/tesserae/src/dev.rs`)
+reuses `author::check` for validation and `server::mods::start_all` for
+starting. Lifecycle behaviour is covered by the `dev::tests` suite, which drives
+the real Server and session plugins headlessly. The windowed manual edit of a
+data Game and PNG was not run by the implementing agent (no display); it is
+still to be recorded by a human.

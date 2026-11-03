@@ -32,6 +32,18 @@ tesserae validate .
 It loads the component under the usual sandbox and limits, reports the Mod and
 field of any error, and exits non-zero on failure. It opens no World.
 
+## Watch
+
+```sh
+tesserae dev . [--mods <dir>] [--seed <n>]
+```
+
+Opens a disposable World from this project and restarts it when `mod.toml` or
+the copied `.wasm` changes and still validates; otherwise the running World
+stays and the terminal explains why. It never runs Cargo: rebuild and copy the
+`.wasm` as above, and the new build is picked up. The project is trusted for
+that run only; nothing is saved and no Trust is recorded.
+
 ## Package
 
 ```sh

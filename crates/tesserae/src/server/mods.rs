@@ -490,20 +490,6 @@ fn load_with_opening(
     let compiled = host.load(accepted, &trust).map_err(|e| e.to_string())?;
     let loaded = bevy::tasks::block_on(async {
         let mut loaded = declare_all(&host, &compiled, world).await?;
-        let listed = |kind| {
-            loaded
-                .registry
-                .names(kind)
-                .map(|(id, name)| tesserae_mods::RegisteredId {
-                    id: id as u32,
-                    name: name.to_owned(),
-                })
-                .collect()
-        };
-        let ids = Registered {
-            materials: listed(Kind::Material),
-            shapes: listed(Kind::Shape),
-        };
         if let Some(recovered) = opening.and_then(|o| o.recovered.as_ref()) {
             let (content, _) = super::persistence::content(&loaded);
             recovered
@@ -511,32 +497,50 @@ fn load_with_opening(
                 .compatible(&content)
                 .map_err(|e| e.to_string())?;
         }
-        let instances = std::mem::take(&mut loaded.mods);
-        for instance in instances {
-            let id = instance.id().to_owned();
-            let instance = instance
-                .start(
-                    opening.map_or_else(
-                        || WorldInfo {
-                            voxel_size_m: world.voxel_size,
-                            seed: world.seed,
-                            world_id: String::new(),
-                            reopened: false,
-                        },
-                        |o| o.info(world),
-                    ),
-                    ids.clone(),
-                )
-                .await
-                .map_err(|e| format!("mod `{id}`: {e}"))?;
-            loaded.mods.push(instance);
-        }
+        let info = opening.map_or_else(
+            || WorldInfo {
+                voxel_size_m: world.voxel_size,
+                seed: world.seed,
+                world_id: String::new(),
+                reopened: false,
+            },
+            |o| o.info(world),
+        );
+        start_all(&mut loaded, info).await?;
         Ok::<_, String>(loaded)
     })?;
     for instance in &loaded.mods {
         eprintln!("Loaded Mod `{}`", instance.id());
     }
     Ok(loaded)
+}
+
+/// Runs every declared component's `start`, in load order, once all names are registered.
+pub(crate) async fn start_all(loaded: &mut LoadedMods, info: WorldInfo) -> Result<(), String> {
+    let listed = |kind| {
+        loaded
+            .registry
+            .names(kind)
+            .map(|(id, name)| tesserae_mods::RegisteredId {
+                id: id as u32,
+                name: name.to_owned(),
+            })
+            .collect()
+    };
+    let ids = Registered {
+        materials: listed(Kind::Material),
+        shapes: listed(Kind::Shape),
+    };
+    let instances = std::mem::take(&mut loaded.mods);
+    for instance in instances {
+        let id = instance.id().to_owned();
+        let instance = instance
+            .start(info.clone(), ids.clone())
+            .await
+            .map_err(|e| format!("mod `{id}`: {e}"))?;
+        loaded.mods.push(instance);
+    }
+    Ok(())
 }
 
 /// Registers what every World shares; [`install`] then builds what this one
