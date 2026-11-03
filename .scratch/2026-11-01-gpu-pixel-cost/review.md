@@ -44,7 +44,8 @@ meshes and same-frame visibility/material publication. Blended terrain
 keeps its coverage test. The previously accepted edge-pixel differences
 are retained in ticket 03; pixel identity is not claimed. Settings touch
 Client presentation only, and Game code and the WIT contract are unchanged.
-No core or mods source, manifest, or lockfile changed from `origin/main`.
+No core or mods source or manifest changed from `origin/main`. The later
+lockfile-only dependency repair is recorded below.
 
 ## Local dependency and merge order
 
@@ -154,3 +155,21 @@ Main was refreshed before publication. GitHub API settings permit merge,
 squash and rebase merges; a single integrated PR avoids the multi-layer
 merge-policy and CI-trigger issues described in the original plan.
 Merging remains subject to separate user approval after remote checks.
+
+## Remote dependency check repair (2026-11-03)
+
+PR 50's initial dependency job rejected locked `async-executor 1.14.0` as
+yanked. A targeted `cargo update -p async-executor` selected 1.14.1 and
+changed only that package's version and checksum in the root lockfile.
+The published crate changelog describes a lifetime fix for a waker during
+executor destruction. No advisory, license, ban or source policy is relaxed.
+
+The CI-equivalent all-feature dependency check passes with the updated
+lock. The supported dev suite and all-feature suite pass again (1,391 and
+1,409 tests respectively, six ignored in each). All-feature Clippy
+with warnings denied and the normal build check also pass. Logs are under
+`/tmp/claude-gpu-pixel-cost/pr50-ci-fix-checks/`.
+
+The accepted native frame-time evidence was collected before this patch.
+It remains identified by its original executable hash; no new frame-time
+measurement is claimed for the dependency update.
