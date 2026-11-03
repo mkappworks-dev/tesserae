@@ -1,9 +1,11 @@
 //! The Tesserae engine's Bevy application.
 
+mod author;
 mod client;
 mod content;
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod cost;
+mod dev;
 mod launch;
 mod open;
 #[cfg(feature = "profiling")]
@@ -19,9 +21,24 @@ use bevy::prelude::*;
 fn main() -> std::process::ExitCode {
     #[cfg(feature = "profiling")]
     let process_start = profiling::ProcessStart(std::time::Instant::now());
-    let args = launch::parse(std::env::args_os().skip(1), |name| {
-        std::env::var_os(name).is_some()
-    });
+    let argv: Vec<_> = std::env::args_os().skip(1).collect();
+    if let Some(code) = author::run(&argv) {
+        return code;
+    }
+    let watching = match dev::parse(&argv) {
+        None => None,
+        Some(Ok(request)) => Some(request),
+        Some(Err(e)) => {
+            eprintln!("error: {e}\n\n{}", dev::USAGE);
+            return std::process::ExitCode::from(2);
+        }
+    };
+    // A dev run opens its own World, so neither its arguments nor the direct-open variables apply.
+    let args = if watching.is_some() {
+        launch::parse([], |_| false)
+    } else {
+        launch::parse(argv, |name| std::env::var_os(name).is_some())
+    };
     let worlds = server::persistence::worlds_dir().unwrap_or_else(|| "worlds".into());
     let mut app = App::new();
     app.insert_resource(args.launch)
@@ -44,6 +61,9 @@ fn main() -> std::process::ExitCode {
             open::plugin,
         ))
         .add_plugins(dev_plugins);
+    if let Some(request) = watching {
+        app.add_plugins(dev::plugin(request));
+    }
     #[cfg(feature = "profiling")]
     app.insert_resource(process_start);
     match app.run() {

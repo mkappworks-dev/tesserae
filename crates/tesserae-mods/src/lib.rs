@@ -5,11 +5,13 @@
 //! neither Bevy nor wgpu. `docs/adr/0001-wasm-mod-boundary.md`.
 
 mod adapt;
+mod artwork;
 mod bindings;
 mod character;
 mod command;
 mod context;
 mod convert;
+mod data;
 mod declare;
 mod error;
 mod host;
@@ -17,6 +19,7 @@ mod limits;
 mod loader;
 mod log;
 mod manifest;
+mod package;
 mod prompt;
 mod random;
 mod registry;
@@ -45,13 +48,14 @@ pub use limits::{MAX_COMMANDS, ManifestLimits, ModLimits};
 pub use loader::{Compiled, ModHost};
 pub use log::{LogDrain, LogHandle, LogLevel, LogLine};
 pub use manifest::{
-    Found, MAX_SCAN_ENTRIES, Manifest, Migration, Rejected, SUPPORTED_API, Scan, games_dir,
-    migrate_legacy_games, plan, scan,
+    DEFAULT_GAME, Found, MAX_SCAN_ENTRIES, Manifest, Migration, Rejected, SUPPORTED_API, Scan,
+    games_dir, migrate_legacy_games, plan, scan, with_dependencies,
 };
+pub use package::{Staged, stage};
 pub use prompt::{confirm_trust, trust_prompt};
 pub use registry::{Kind, Registry, RegistryMismatch};
 pub use sandbox::{ModFault, ModInstance};
-pub use trust::{Trust, Untrusted, Verdict};
+pub use trust::{CheckedPayload, Trust, Untrusted, Verdict};
 
 #[cfg(test)]
 mod tests;

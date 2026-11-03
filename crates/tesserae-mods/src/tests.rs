@@ -12,11 +12,13 @@ mod alloc;
 mod behaviour;
 mod commands;
 mod convert;
+mod data;
 mod declare;
 mod export_version;
 mod lines;
 mod loading;
 mod sandbox;
+mod starters;
 
 fn guest(name: &str) -> PathBuf {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

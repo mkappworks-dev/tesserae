@@ -1,4 +1,4 @@
-//! The demo's player figure: Minecraft's humanoid proportions and skin layout,
+//! Terra's player figure: Minecraft's humanoid proportions and skin layout,
 //! painted here rather than shipped as an image.
 
 use crate::tesserae::mods::content::{

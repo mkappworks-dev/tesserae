@@ -31,13 +31,15 @@ version's first public release. All code contributions are accepted under the
 same terms. By submitting a contribution, you agree that your work will be
 licensed under BSL 1.1.
 
-Two parts of the repo are deliberately **not** BSL, because they are templates
+Some parts of the repo are deliberately **not** BSL, because they are templates
 people copy:
 
-| Path          | Licence    | Why                                                                                                                                                            |
-| ------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `games/demo/` | CC0 or MIT | It is the starting point for every game built on Tesserae. BSL here would block the on-ramp. See [ADR-0004](docs/adr/0004-demo-game-in-repo-real-game-out.md). |
-| `assets/`     | CC0        | Default and placeholder art must be reusable in proprietary games.                                                                                             |
+| Path                        | Licence    | Why                                                                                                                                                             |
+| --------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `games/terra/`              | CC0 or MIT | It is the starting point for every game built on Tesserae. BSL here would block the on-ramp. See [ADR-0004](docs/adr/0004-terra-game-in-repo-real-game-out.md). |
+| `starters/`                 | MIT        | Templates a Game author copies out of the checkout; a proprietary Game must be free to start from them.                                                         |
+| `crates/tesserae-mods/wit/` | MIT        | The public Mod contract, and the copy each Rust starter bundles; building against it must not need BSL terms.                                                   |
+| `assets/`                   | CC0        | Default and placeholder art must be reusable in proprietary games.                                                                                              |
 
 BSL is **source-available, not open source** — it is not OSI-approved, and the
 licence text says so itself. Please don't describe the project as open source.
@@ -131,9 +133,9 @@ cargo run -p tesserae --features dev
 
 `--features dev` adds shader hot-reloading; without it the command still runs,
 and a shader edit then needs a restart. A window opens on a generated World you
-can fly around and edit. Once the guests are built that World is the demo
-Game's; without a Game it is empty air, with no ground, lakes or fuel. See
-[Running the demo Game](#running-the-demo-game).
+can fly around and edit. Once the guests are built that World is Terra Game's;
+without a Game it is empty air, with no ground, lakes or fuel. See
+[Running the Terra Game](#running-the-terra-game).
 
 **Controls:**
 
@@ -206,7 +208,7 @@ ghost shows that texture at 75 percent opacity. The last compatible Server aim
 answer remains visible briefly while the next arrives, so movement snaps between
 accepted cells without flickering between them. Expired, out-of-order or
 incompatible answers are hidden. Missing textures use the Material's colour. The
-demo supplies distinct textures for every Material, and fire has a flame
+terra supplies distinct textures for every Material, and fire has a flame
 silhouette.
 
 There is no zoom. Field of view is fixed, and in a fly camera the distance to
@@ -236,7 +238,7 @@ What each kind of change costs:
 | you edit                                  | what happens                                                                  |
 | ----------------------------------------- | ----------------------------------------------------------------------------- |
 | a `.wesl` shader or anything in `assets/` | **hot-reloads in the running app** — no rebuild, no restart                   |
-| a mod or the demo game under `games/`     | rebuild the `.wasm`, reload the mod — **no engine rebuild**                   |
+| a mod or the Terra Game under `games/`    | rebuild the `.wasm`, reload the mod — **no engine rebuild**                   |
 | `tesserae` (the Bevy app)                 | rebuild, restart (~5–20s warm)                                                |
 | `tesserae-core`                           | rebuild everything downstream, restart — it is a dependency of the whole tree |
 
@@ -279,11 +281,15 @@ throughput and presented/offscreen frame times are separate evidence.
 
 ### Working on mods
 
+To make a Game or Mod rather than change the Engine, follow the
+[authoring guide](docs/authoring-guide.md) and start from a copy of a
+[starter](starters/). What follows is for working on the Mod host itself.
+
 Install the guest target with `rustup target add wasm32-wasip2`, then run
 `./scripts/build-guests` from the repository root to build the independent test
-guests and MIT demo. The demo component and Manifest are copied to
-`games/demo/dist/games/demo/`, where `cargo dev`
-[runs it](#running-the-demo-game) with no flags, trusted for that run only. Any
+guests and MIT Terra Game. The Terra component and Manifest are copied to
+`games/terra/dist/games/terra/`, where `cargo dev`
+[runs it](#running-the-terra-game) with no flags, trusted for that run only. Any
 other directory, given with `--mods`, gets the normal Trust check: `--trust-all`
 for an explicit unattended grant, or omit it to review the terminal prompt.
 Guest edits need a rebuild and World reopen; runtime Mod reload is deferred.
@@ -293,7 +299,7 @@ not per-voxel calls. Crossing the WASM boundary copies, so call frequency — no
 throughput — is what costs. See [ADR-0001](docs/adr/0001-wasm-mod-boundary.md)
 before adding a host function.
 
-### Running the demo Game
+### Running the Terra Game
 
 ```bash
 rustup target add wasm32-wasip2   # once
@@ -302,28 +308,28 @@ cargo dev
 ```
 
 Once the guests are built, `cargo dev` loads the Games in
-`games/demo/dist/games` on its own (the demo, and `meadow`, a plain second Game
+`games/terra/dist/games` on its own (Terra, and `meadow`, a plain second Game
 for trying side-by-side installs; pick one when creating a World) and trusts it
 for the run, with no prompt and no Trust record; before that it opens a World
 with no Game and logs that `./scripts/build-guests` must be run. A directory
-named by `--mods` or `TESSERAE_MODS_DIR` replaces the demo and goes through the
+named by `--mods` or `TESSERAE_MODS_DIR` replaces Terra and goes through the
 normal Trust check; the Games are read from the `games` directory beside it,
 Mods from the directory itself. Only a `dev` build does this:
-`cargo run -p tesserae -- --mods games/demo/dist/mods` runs the same Game
+`cargo run -p tesserae -- --mods games/terra/dist/mods` runs the same Game
 without the `dev` tools, with the full Trust check. In a `dev` build,
 `TESSERAE_VOXEL_SIZE_M` opens the World at 1.0 (the default), 0.5 or 0.25 m, and
-the demo builds the same scenes in metres at each:
+Terra builds the same scenes in metres at each:
 
 ```bash
 TESSERAE_VOXEL_SIZE_M=0.25 cargo dev
 ```
 
-The water is the demo's own, `demo:water`, declared with its fluid row and
-colour as its lava and mud are: it fills the demo World's lakes, which stand at
+The water is Terra's own, `terra:water`, declared with its fluid row and colour
+as its lava and mud are: it fills the lakes of the Terra World, which stand at
 25.5 m in valleys well away from the scenes, and it is the water every scene
 pours.
 
-On its first tick the demo builds its scenes in a row along x, 7 m from spawn
+On its first tick Terra builds its scenes in a row along x, 7 m from spawn
 toward −z and below the Eye; look down to find them. Once the build has landed:
 
 | where (x, in metres) | what plays out                                                                                                                     |

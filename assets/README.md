@@ -12,8 +12,8 @@ binary, as `bevy_pbr`'s own shaders are.
 
 **CC0-1.0, not BUSL-1.1.** Everything else in this repository is under the
 Business Source License; this directory is not, for the same reason
-[ADR-0004](../docs/adr/0004-demo-game-in-repo-real-game-out.md) exempts
-`games/demo`. Placeholder art that a game developer cannot reuse is placeholder
+[ADR-0004](../docs/adr/0004-terra-game-in-repo-real-game-out.md) exempts
+`games/terra`. Placeholder art that a game developer cannot reuse is placeholder
 art that does its job badly, and a sharealike licence would stop a studio with
 proprietary art using ours as a base — see DESIGN.md's media licence row.
 

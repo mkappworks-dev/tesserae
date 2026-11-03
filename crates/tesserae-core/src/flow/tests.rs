@@ -1366,7 +1366,7 @@ mod declared {
     use crate::material::{MaterialDef, Occlusion, RenderClass};
     use crate::{Orientation, SHAPE_STAIR};
 
-    /// The spec's proposed demo lava: 0.75 m/s does not divide a step at any
+    /// The spec's proposed terra lava: 0.75 m/s does not divide a step at any
     /// of the three sizes.
     pub(super) const LAVA: FluidDef = FluidDef {
         reach_m: 3.0,
@@ -1649,7 +1649,7 @@ mod reactions {
         }
     }
 
-    /// The demo's rule: lava touching water becomes stone, water stays.
+    /// Terra's rule: lava touching water becomes stone, water stays.
     fn cooling() -> (Tables, MaterialId) {
         let (mut tables, ids) = with(&[LAVA]);
         tables

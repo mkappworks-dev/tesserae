@@ -89,7 +89,7 @@ gap is held again, unless its solid was replaced meanwhile.
   anywhere would be two mutable copies and is the mistake to look for.
 - Per-Void light is out of scope. A fluid that is opaque and emits nothing draws
   its partial surfaces, and the Shapes it fills, with its own dark light; lava
-  emits, water and the demo's mud are translucent. Precise per-Void light is a
+  emits, water and Terra's mud are translucent. Precise per-Void light is a
   later decision, not an extension of this one.
 - A Shape with more than four Voids under any arms (`MAX_VOIDS`) holds no fluid.
 - Burning fuel cannot be partly consumed, and a thin film of water against a

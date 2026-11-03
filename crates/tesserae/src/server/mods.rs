@@ -28,7 +28,7 @@ use crate::world::WorldSettings;
 pub enum TrustMode {
     All,
     None,
-    /// Only for the in-repo demo a `dev` build picks itself, never for a named directory.
+    /// Only for the in-repo Terra a `dev` build picks itself, never for a named directory.
     ThisRun,
 }
 
@@ -39,14 +39,14 @@ struct LoadOptions {
 }
 
 impl LoadOptions {
-    /// `None` when a `dev` build's default, the demo, has not been built: the World opens with
+    /// `None` when a `dev` build's default, Terra, has not been built: the World opens with
     /// no Game.
     fn resolve(
         args: impl IntoIterator<Item = OsString>,
         mods_env: Option<OsString>,
         trust_env: Option<OsString>,
         default_directory: Option<PathBuf>,
-        dev_demo: Option<PathBuf>,
+        dev_terra: Option<PathBuf>,
     ) -> Result<Option<Self>, String> {
         let mut directory = mods_env.map(PathBuf::from);
         let mut trust = if trust_env.as_deref() == Some(std::ffi::OsStr::new("1")) {
@@ -64,11 +64,11 @@ impl LoadOptions {
                 return Err(format!("unknown argument: {}", arg.to_string_lossy()));
             }
         }
-        let directory = match (directory, dev_demo) {
+        let directory = match (directory, dev_terra) {
             (Some(directory), _) => directory,
-            (None, Some(demo)) if games_dir(&demo).is_dir() => {
+            (None, Some(terra)) if games_dir(&terra).is_dir() => {
                 trust = TrustMode::ThisRun;
-                demo
+                terra
             }
             (None, Some(_)) => return Ok(None),
             (None, None) => default_directory
@@ -90,17 +90,17 @@ impl LoadOptions {
             std::env::var_os("TESSERAE_MODS_DIR"),
             std::env::var_os("TESSERAE_TRUST_MODS"),
             tesserae_mods::default_mods_dir(),
-            dev_demo(),
+            dev_terra(),
         )
     }
 }
 
-/// The empty Mods directory beside the `games/` that `./scripts/build-guests` puts the demo in,
+/// The empty Mods directory beside the `games/` that `./scripts/build-guests` puts Terra in,
 /// fixed at compile time because a `dev` binary runs from its own checkout whatever the working
 /// directory.
-fn dev_demo() -> Option<PathBuf> {
+fn dev_terra() -> Option<PathBuf> {
     cfg!(feature = "dev")
-        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist/mods"))
+        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/terra/dist/mods"))
 }
 
 pub struct LoadedMods {
@@ -154,7 +154,7 @@ pub struct Wanted {
 /// removing an unrelated Mod cannot change a World's content.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selection {
-    /// A World with no record to follow, such as an ephemeral one: the first Game and every Mod.
+    /// A World with no record to follow, such as an ephemeral one: the default Game and every Mod.
     Everything,
     /// A World saved without a Game: it is empty sky and loads no Mods.
     Nothing,
@@ -166,12 +166,8 @@ impl Selection {
     fn choose(&self, installed: Scan) -> Result<Vec<tesserae_mods::Found>, String> {
         let wanted = match self {
             Selection::Everything => {
-                return Ok(installed
-                    .games
-                    .into_iter()
-                    .take(1)
-                    .chain(installed.mods)
-                    .collect());
+                let default = installed.default_game().cloned();
+                return Ok(default.into_iter().chain(installed.mods).collect());
             }
             Selection::Nothing => return Ok(Vec::new()),
             Selection::Named(wanted) => wanted,
@@ -213,7 +209,7 @@ pub fn load_world(
     opening: &super::persistence::Opening,
 ) -> Result<LoadedMods, String> {
     let Some(options) = LoadOptions::from_args(args)? else {
-        eprintln!("No Game: the demo is not built; run ./scripts/build-guests");
+        eprintln!("No Game: Terra is not built; run ./scripts/build-guests");
         return Ok(LoadedMods::default());
     };
     let stdin = io::stdin();
@@ -245,7 +241,7 @@ pub fn installed(args: &[OsString]) -> Installed {
     )
 }
 
-/// Moves a legacy root out of `mods/`, then lists what is installed. The dev demo is generated
+/// Moves a legacy root out of `mods/`, then lists what is installed. The dev terra is generated
 /// output, so it is never rearranged.
 fn prepare(options: &LoadOptions) -> Result<Scan, tesserae_mods::ModError> {
     if options.trust != TrustMode::ThisRun {
@@ -286,7 +282,7 @@ fn load_prompted(
             let id = &found.manifest.id;
             if mode == TrustMode::ThisRun {
                 trust.grant_for_run(found).map_err(|e| e.to_string())?;
-                writeln!(output, "Trusting in-repo demo Mod `{id}` for this run")
+                writeln!(output, "Trusting in-repo terra Mod `{id}` for this run")
                     .map_err(|e| e.to_string())?;
                 return Ok(true);
             }
@@ -335,7 +331,7 @@ fn load_prompted(
 }
 
 #[cfg(test)]
-fn load(
+pub(crate) fn load(
     directory: &Path,
     trust_file: &Path,
     mode: TrustMode,
@@ -354,6 +350,60 @@ fn load(
     })
 }
 
+/// Saves `loaded` as a first commit at `path`, as a World created from it would be.
+#[cfg(test)]
+pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
+    use tesserae_core::save::{self, Commit, Generation, WorldId, Writer};
+    let (content, mapping) = super::persistence::content(loaded);
+    let id = WorldId::new();
+    let commit = Commit {
+        format: save::FORMAT_VERSION,
+        generator: save::GENERATOR_VERSION,
+        world: id.clone(),
+        sequence: 1,
+        seed: 123,
+        voxel_size_m: 0.5,
+        parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+        content: content.clone(),
+        player: save::Player {
+            eye_m: [1.0, 2.0, 3.0],
+            extensions: Default::default(),
+        },
+        chunks: vec![],
+        simulation: super::fluids::FluidSim::default()
+            .checkpoint(&mapping)
+            .unwrap()
+            .0,
+        paused: vec![],
+    };
+    Writer::acquire(path, &id, &content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+}
+
+/// Loads exactly the content the saved World at `path` names, the way reopening it does.
+#[cfg(test)]
+pub(crate) fn reopen_world(
+    path: &Path,
+    mods: &Path,
+    trust_file: &Path,
+) -> Result<LoadedMods, String> {
+    let opening = super::persistence::Opening::from_folder(path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    load_with_opening(
+        &opening.selection(),
+        Some(&opening),
+        mods,
+        trust_file,
+        &settings,
+        |found, trust| {
+            trust.grant_for_run(found).map_err(|e| e.to_string())?;
+            Ok(true)
+        },
+    )
+}
+
 #[cfg(test)]
 fn load_with(
     directory: &Path,
@@ -369,6 +419,85 @@ fn load_with(
         world,
         authorize,
     )
+}
+
+/// Declares every Mod in load order and resolves their names, as opening a World does but
+/// without starting any instance. Validation shares it so it accepts exactly what loading does.
+pub(crate) async fn declare_all(
+    host: &ModHost,
+    compiled: &[tesserae_mods::Compiled],
+    world: &WorldSettings,
+) -> Result<LoadedMods, String> {
+    let mut loaded = LoadedMods::default();
+    let mut behaviours = Vec::new();
+    for component in compiled {
+        let id = &component.found.manifest.id;
+        let manifest = &component.found.manifest;
+        loaded.required.push(tesserae_core::save::RequiredMod {
+            id: id.clone(),
+            version: manifest.version.clone(),
+            contract: manifest.api.clone(),
+            game: manifest.root,
+            build_sha256: component.build_sha256.clone(),
+        });
+        let fault = |e| format!("mod `{id}`: {e}");
+        let (instance, declaration) = if let Some(declaration) = component.declaration() {
+            (None, declaration.clone())
+        } else {
+            let instance = host
+                .instantiate(component, world.seed)
+                .await
+                .map_err(fault)?;
+            let (mut instance, declaration) = instance.declare().await.map_err(fault)?;
+            for line in instance.drain_log().lines {
+                eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
+            }
+            (Some(instance), declaration)
+        };
+        let root = component.found.manifest.root;
+        let applied = apply(
+            declaration,
+            id,
+            &mut loaded.tables,
+            &mut loaded.registry,
+            root,
+        )
+        .map_err(|e| e.to_string())?;
+        loaded.remove_times.extend(applied.remove_times);
+        behaviours.push(applied.behaviour);
+        for row in applied.appearance {
+            if let Some(index) = loaded
+                .registry
+                .id_of(Kind::Material, &format!("{id}:{}", row.material))
+            {
+                if let Some(pixels) = row.texture {
+                    loaded.textures.push((index as MaterialId, pixels));
+                }
+                let c = row.color;
+                loaded
+                    .appearance
+                    .push((index as MaterialId, [c.r, c.g, c.b, c.a]));
+            }
+        }
+        if root {
+            loaded.world = applied.world;
+            loaded.view = applied.view;
+            loaded.game = true;
+            loaded.movement = applied.movement;
+            loaded.character = applied.character;
+            loaded.tools = applied.tools;
+        }
+        loaded.mods.extend(instance);
+    }
+    // Every name is registered now; what flows, reacts and burns is fixed
+    // before any Mod starts and the World opens.
+    let (ground, lake) =
+        resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    if let Some(world) = &mut loaded.world {
+        world.water = lake;
+        world.ground = ground;
+    }
+    Ok(loaded)
 }
 
 fn load_with_opening(
@@ -410,85 +539,7 @@ fn load_with_opening(
     let host = ModHost::new().map_err(|e| e.to_string())?;
     let compiled = host.load(accepted, &trust).map_err(|e| e.to_string())?;
     let loaded = bevy::tasks::block_on(async {
-        let mut loaded = LoadedMods::default();
-        let mut behaviours = Vec::new();
-        for component in &compiled {
-            let id = &component.found.manifest.id;
-            let manifest = &component.found.manifest;
-            loaded.required.push(tesserae_core::save::RequiredMod {
-                id: id.clone(),
-                version: manifest.version.clone(),
-                contract: manifest.api.clone(),
-                game: manifest.root,
-                build_sha256: component.build_sha256.clone(),
-            });
-            let fault = |e| format!("mod `{id}`: {e}");
-            let instance = host
-                .instantiate(component, world.seed)
-                .await
-                .map_err(fault)?;
-            let (mut instance, declaration) = instance.declare().await.map_err(fault)?;
-            // Where an adapter warns of what an older line could not declare.
-            for line in instance.drain_log().lines {
-                eprintln!("Mod `{id}` {:?}: {}", line.level, line.message);
-            }
-            let root = component.found.manifest.root;
-            let applied = apply(
-                declaration,
-                id,
-                &mut loaded.tables,
-                &mut loaded.registry,
-                root,
-            )
-            .map_err(|e| e.to_string())?;
-            loaded.remove_times.extend(applied.remove_times);
-            behaviours.push(applied.behaviour);
-            for row in applied.appearance {
-                if let Some(index) = loaded
-                    .registry
-                    .id_of(Kind::Material, &format!("{id}:{}", row.material))
-                {
-                    if let Some(pixels) = row.texture {
-                        loaded.textures.push((index as MaterialId, pixels));
-                    }
-                    let c = row.color;
-                    loaded
-                        .appearance
-                        .push((index as MaterialId, [c.r, c.g, c.b, c.a]));
-                }
-            }
-            if root {
-                loaded.world = applied.world;
-                loaded.view = applied.view;
-                loaded.game = true;
-                loaded.movement = applied.movement;
-                loaded.character = applied.character;
-                loaded.tools = applied.tools;
-            }
-            loaded.mods.push(instance);
-        }
-        // Every name is registered now; what flows, reacts and burns is fixed
-        // before any Mod starts and the World opens.
-        let (ground, lake) =
-            resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
-        if let Some(world) = &mut loaded.world {
-            world.water = lake;
-            world.ground = ground;
-        }
-        let listed = |kind| {
-            loaded
-                .registry
-                .names(kind)
-                .map(|(id, name)| tesserae_mods::RegisteredId {
-                    id: id as u32,
-                    name: name.to_owned(),
-                })
-                .collect()
-        };
-        let ids = Registered {
-            materials: listed(Kind::Material),
-            shapes: listed(Kind::Shape),
-        };
+        let mut loaded = declare_all(&host, &compiled, world).await?;
         if let Some(recovered) = opening.and_then(|o| o.recovered.as_ref()) {
             let (content, _) = super::persistence::content(&loaded);
             recovered
@@ -496,31 +547,50 @@ fn load_with_opening(
                 .compatible(&content)
                 .map_err(|e| e.to_string())?;
         }
-        let instances = std::mem::take(&mut loaded.mods);
-        for (component, instance) in compiled.iter().zip(instances) {
-            let instance = instance
-                .start(
-                    opening.map_or_else(
-                        || WorldInfo {
-                            voxel_size_m: world.voxel_size,
-                            seed: world.seed,
-                            world_id: String::new(),
-                            reopened: false,
-                        },
-                        |o| o.info(world),
-                    ),
-                    ids.clone(),
-                )
-                .await
-                .map_err(|e| format!("mod `{}`: {e}", component.found.manifest.id))?;
-            loaded.mods.push(instance);
-        }
+        let info = opening.map_or_else(
+            || WorldInfo {
+                voxel_size_m: world.voxel_size,
+                seed: world.seed,
+                world_id: String::new(),
+                reopened: false,
+            },
+            |o| o.info(world),
+        );
+        start_all(&mut loaded, info).await?;
         Ok::<_, String>(loaded)
     })?;
     for instance in &loaded.mods {
         eprintln!("Loaded Mod `{}`", instance.id());
     }
     Ok(loaded)
+}
+
+/// Runs every declared component's `start`, in load order, once all names are registered.
+pub(crate) async fn start_all(loaded: &mut LoadedMods, info: WorldInfo) -> Result<(), String> {
+    let listed = |kind| {
+        loaded
+            .registry
+            .names(kind)
+            .map(|(id, name)| tesserae_mods::RegisteredId {
+                id: id as u32,
+                name: name.to_owned(),
+            })
+            .collect()
+    };
+    let ids = Registered {
+        materials: listed(Kind::Material),
+        shapes: listed(Kind::Shape),
+    };
+    let instances = std::mem::take(&mut loaded.mods);
+    for instance in instances {
+        let id = instance.id().to_owned();
+        let instance = instance
+            .start(info.clone(), ids.clone())
+            .await
+            .map_err(|e| format!("mod `{id}`: {e}"))?;
+        loaded.mods.push(instance);
+    }
+    Ok(())
 }
 
 /// Registers what every World shares; [`install`] then builds what this one
@@ -646,11 +716,11 @@ pub(in crate::server) fn catalogue(
 }
 
 #[cfg(test)]
-pub(super) fn demo_for_save(
+pub(super) fn terra_for_save(
     opening: &super::persistence::Opening,
     world: &WorldSettings,
 ) -> LoadedMods {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist/mods");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/terra/dist/mods");
     load_with_opening(
         &opening.selection(),
         Some(opening),
@@ -662,7 +732,7 @@ pub(super) fn demo_for_save(
             Ok(true)
         },
     )
-    .expect("build demo with scripts/build-guests")
+    .expect("build terra with scripts/build-guests")
 }
 
 #[cfg(test)]
@@ -732,6 +802,494 @@ mod tests {
         }
     }
 
+    fn data(s: &Scratch, id: &str, root: bool, extra: &str, content: &str) -> PathBuf {
+        let dir = s.0.join(if root { "games" } else { "mods" }).join(id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mod.toml"), format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.3\"\nroot = {root}\ndeclaration = \"content.toml\"\n{extra}\n")).unwrap();
+        fs::write(dir.join("content.toml"), content).unwrap();
+        fs::write(dir.join("skin.png"), png(64, 64, 0)).unwrap();
+        dir
+    }
+
+    const DATA_GAME: &str = r#"
+[[materials]]
+name = "rock"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+[[appearance]]
+material = "rock"
+color = [80, 90, 100, 255]
+[world.ground]
+rock = "plain:rock"
+soil = "plain:rock"
+surface = "plain:rock"
+"#;
+
+    #[test]
+    fn data_game_registers_ground_and_colour_without_guest_callbacks() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "", DATA_GAME);
+        let loaded = s.load(TrustMode::All).unwrap();
+        assert!(loaded.game);
+        assert!(loaded.mods.is_empty());
+        assert_eq!(loaded.registry.id_of(Kind::Material, "plain:rock"), Some(8));
+        assert_eq!(loaded.world.unwrap().ground.unwrap().rock, 8);
+        assert_eq!(loaded.appearance, [(8, [80, 90, 100, 255])]);
+        let catalogue = catalogue(&loaded.registry, &loaded.tables, None, Some(8));
+        assert!(
+            catalogue
+                .materials
+                .iter()
+                .any(|m| m.name == "plain:rock" && m.solid)
+        );
+    }
+
+    #[test]
+    fn data_errors_use_shared_validation_and_name_the_mod_and_field() {
+        for (content, root, field) in [
+            ("[world]", false, "world"),
+            ("[world]\nrelief-m = -1.0", true, "relief"),
+            ("[world]\nrelief-m = nan", true, "relief"),
+            (
+                "[world.ground]\nrock='missing:rock'\nsoil='missing:rock'\nsurface='missing:rock'",
+                true,
+                "ground.rock",
+            ),
+            (
+                "[[materials]]\nname='rock'\nemission=16\ndimming=15\nocclusion='opaque'\nrender='opaque'\nsolid=true",
+                false,
+                "emission",
+            ),
+            ("[world]\nwater = {}", true, "water"),
+            ("[[materials]]\nname='rock'\nextra=1", false, "extra"),
+            (
+                "[[appearance]]\nmaterial='rock'\ncolor=[256,0,0,255]",
+                false,
+                "color",
+            ),
+            ("[world.ground]\nrock = [", true, "declaration"),
+        ] {
+            let s = Scratch::new();
+            data(&s, "plain", root, "", content);
+            let error = s
+                .load(TrustMode::All)
+                .err()
+                .expect("invalid data must fail");
+            assert!(error.contains("plain") && error.contains(field), "{error}");
+        }
+    }
+
+    #[test]
+    fn mixed_data_dependencies_register_before_consumers_and_keep_guest_callbacks() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "depends = ['middle']", DATA_GAME);
+        data(
+            &s,
+            "base",
+            false,
+            "",
+            &DATA_GAME
+                .split("[world.ground]")
+                .next()
+                .unwrap()
+                .replace("rock", "ore"),
+        );
+        s.add("middle", "catalog", "depends = ['base']");
+        let loaded = s.load(TrustMode::All).unwrap();
+        assert_eq!(required_ids(&loaded), ["base", "middle", "plain"]);
+        assert_eq!(
+            loaded.mods.iter().map(ModInstance::id).collect::<Vec<_>>(),
+            ["middle"]
+        );
+        assert_eq!(loaded.registry.id_of(Kind::Material, "base:ore"), Some(8));
+        assert_eq!(loaded.registry.id_of(Kind::Material, "middle:m0"), Some(9));
+        assert_eq!(
+            loaded.registry.id_of(Kind::Material, "plain:rock"),
+            Some(17)
+        );
+        assert_eq!(
+            loaded.tables.materials.def(8),
+            loaded.tables.materials.def(17)
+        );
+        let pure = Scratch::new();
+        data(
+            &pure,
+            "equivalent",
+            false,
+            "",
+            "[[materials]]\nname='m0'\nemission=0\ndimming=0\nocclusion='never'\nrender='opaque'\nsolid=true",
+        );
+        assert_eq!(
+            pure.load(TrustMode::All).unwrap().tables.materials.def(8),
+            loaded.tables.materials.def(9)
+        );
+    }
+
+    fn full_game() -> String {
+        format!(
+            "{}\n[world.character]\nskin = \"skin.png\"\n{}",
+            include_str!("../../../tesserae-mods/tests/fixtures/data/full.toml"),
+            include_str!("../../../tesserae-mods/tests/fixtures/data/character.toml"),
+        )
+    }
+
+    #[test]
+    fn data_game_fluids_reactions_combustion_and_tool_reach_native_simulation() {
+        let s = Scratch::new();
+        data(&s, "full", true, "", &full_game());
+        let loaded = s.load(TrustMode::All).unwrap();
+        let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+        let (water, lava, wood, ash, rock) = (
+            id("full:water"),
+            id("full:lava"),
+            id("full:wood"),
+            id("full:ash"),
+            id("full:rock"),
+        );
+        assert!(loaded.mods.is_empty() && loaded.game);
+        assert!(loaded.tables.fluids.get(water).unwrap().extinguishes);
+        assert!(loaded.tables.fluids.get(lava).unwrap().heat.is_some());
+        let rules = loaded.tables.reactions.rules();
+        assert_eq!((rules.len(), rules[0].product), (1, Some(rock)));
+        assert!(loaded.tables.combustion.get(wood).is_some());
+        assert!(loaded.tables.combustion.get(ash).is_some());
+        assert_eq!(loaded.registry.id_of(Kind::Shape, "full:fence"), Some(5));
+        assert!(loaded.tables.shapes.any_connected());
+        assert_eq!(
+            loaded.world.as_ref().unwrap().water.unwrap().material,
+            water
+        );
+        assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
+        assert_eq!(loaded.character.as_ref().unwrap().bones.len(), 2);
+        assert!(loaded.movement.unwrap().allow_flight);
+        let catalogue = published_catalogue(loaded);
+        assert_eq!(catalogue.lake, Some(water));
+        assert_eq!(
+            catalogue.tools,
+            vec![CatalogueTool {
+                id: crate::server::tool::ToolId(0),
+                name: "full:ruler".into(),
+                kind: tesserae_mods::ToolKind::Measure,
+            }]
+        );
+        let material = |m: MaterialId| catalogue.materials.iter().find(|c| c.id == m).unwrap();
+        assert!(material(lava).fluid.is_some() && !material(lava).solid);
+        assert!(material(wood).burns && material(wood).solid);
+    }
+
+    #[test]
+    fn data_content_resolves_names_across_data_and_component_mods() {
+        let s = Scratch::new();
+        data(
+            &s,
+            "plain",
+            true,
+            "depends = ['middle']",
+            &format!(
+                "[[combustion]]\nfuel='middle:m0'\nignition-threshold=5\nignition-delay-s=1\nemission=3\nend={{ after = {{ seconds = 2, residue = 'base:ore' }} }}\n{}",
+                DATA_GAME
+            ),
+        );
+        data(
+            &s,
+            "base",
+            false,
+            "",
+            "[[materials]]\nname='ore'\nemission=0\ndimming=15\nocclusion='opaque'\nrender='opaque'\nsolid=true",
+        );
+        s.add("middle", "catalog", "depends = ['base']");
+        let loaded = s.load(TrustMode::All).unwrap();
+        let fuel = loaded.registry.id_of(Kind::Material, "middle:m0").unwrap();
+        let ore = loaded.registry.id_of(Kind::Material, "base:ore").unwrap();
+        let row = loaded.tables.combustion.get(fuel as MaterialId).unwrap();
+        assert_eq!(
+            row.burn,
+            tesserae_core::Burn::For {
+                seconds: 2.0,
+                residue: ore as MaterialId,
+            }
+        );
+    }
+
+    #[test]
+    fn data_content_refusals_name_the_mod_and_field_at_the_server() {
+        let game = full_game();
+        for (from, to, field) in [
+            ("kind = \"measure\"", "kind = \"dig\"", "dig"),
+            (
+                "material = \"full:water\"\nreach-m",
+                "material = \"other:water\"\nreach-m",
+                "other:water",
+            ),
+            (
+                "fuel = \"full:wood\"",
+                "fuel = \"full:rock\"\nextra = 1",
+                "extra",
+            ),
+            ("octaves = 2", "octaves = 2\nspeed = 1", "speed"),
+        ] {
+            let s = Scratch::new();
+            data(&s, "full", true, "", &game.replacen(from, to, 1));
+            let error = s.load(TrustMode::All).err().expect(to);
+            assert!(error.contains("full") && error.contains(field), "{error}");
+        }
+        let s = Scratch::new();
+        data(
+            &s,
+            "full",
+            false,
+            "",
+            "[[tools]]\nname='ruler'\nkind='measure'",
+        );
+        let error = s.load(TrustMode::All).err().unwrap();
+        assert!(error.contains("full") && error.contains("tools"), "{error}");
+    }
+
+    #[test]
+    fn data_game_uses_normal_explicit_trust() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "", DATA_GAME);
+        let (refused, prompt) = prompted(&s, TrustMode::None, true, "n\n");
+        assert!(!refused.unwrap().game);
+        assert!(prompt.contains("Trust this exact build?"));
+        assert!(!s.0.join("trust.json").exists());
+        assert!(prompted(&s, TrustMode::None, true, "y\n").0.unwrap().game);
+        assert!(prompted(&s, TrustMode::None, false, "").0.unwrap().game);
+    }
+
+    #[test]
+    fn data_and_mixed_worlds_reopen_exact_registry_and_refuse_changes_before_writes() {
+        use super::super::persistence::Opening;
+        use tesserae_core::save::{self, Commit, Generation, WorldId, Writer};
+        for mixed in [false, true] {
+            let s = Scratch::new();
+            let data_content = if mixed {
+                DATA_GAME.split("[world.ground]").next().unwrap()
+            } else {
+                DATA_GAME
+            };
+            let dir = data(&s, "plain", !mixed, "", data_content);
+            data(&s, "extra", false, "", "");
+            if mixed {
+                s.add_on("0.3", "lake", "lake", "root = true");
+            }
+            let loaded = s.load(TrustMode::All).unwrap();
+            let registry = loaded.registry.clone();
+            let (content, mapping) = super::super::persistence::content(&loaded);
+            let path = s.0.join("world");
+            let id = WorldId::new();
+            let commit = Commit {
+                format: save::FORMAT_VERSION,
+                generator: save::GENERATOR_VERSION,
+                world: id.clone(),
+                sequence: 1,
+                seed: 123,
+                voxel_size_m: 0.5,
+                parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+                content: content.clone(),
+                player: save::Player {
+                    eye_m: [1.0, 2.0, 3.0],
+                    extensions: Default::default(),
+                },
+                chunks: vec![],
+                simulation: super::super::fluids::FluidSim::default()
+                    .checkpoint(&mapping)
+                    .unwrap()
+                    .0,
+                paused: vec![],
+            };
+            Writer::acquire(&path, &id, &content)
+                .unwrap()
+                .write(&commit)
+                .unwrap();
+            let reopen = || {
+                let opening = Opening::from_folder(&path).unwrap();
+                let settings = opening.settings(WorldSettings::default());
+                load_with_opening(
+                    &opening.selection(),
+                    Some(&opening),
+                    &s.0.join("mods"),
+                    &s.0.join("trust.json"),
+                    &settings,
+                    |found, trust| {
+                        trust.grant_for_run(found).map_err(|e| e.to_string())?;
+                        Ok(true)
+                    },
+                )
+            };
+            assert_eq!(reopen().unwrap().registry, registry);
+            let files = || {
+                let mut files: Vec<_> = fs::read_dir(&path)
+                    .unwrap()
+                    .map(|entry| {
+                        let path = entry.unwrap().path();
+                        let bytes = fs::read(&path).unwrap();
+                        (path, bytes)
+                    })
+                    .collect();
+                files.sort();
+                files
+            };
+            let before = files();
+            fs::write(
+                dir.join("content.toml"),
+                format!("{data_content}\n# changed"),
+            )
+            .unwrap();
+            let error = reopen().err().unwrap();
+            assert!(
+                error.contains("plain") && error.contains("changed"),
+                "{error}"
+            );
+            assert_eq!(files(), before);
+            fs::write(dir.join("content.toml"), data_content).unwrap();
+            fs::remove_dir_all(s.0.join("mods/extra")).unwrap();
+            let error = reopen().err().unwrap();
+            assert!(
+                error.contains("extra") && error.contains("not installed"),
+                "{error}"
+            );
+            assert_eq!(files(), before);
+        }
+    }
+
+    fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|i| [(i % 251) as u8, seed, (i / 251) as u8, (i % 2 * 255) as u8])
+            .collect();
+        writer.write_image_data(&pixels).unwrap();
+        writer.finish().unwrap();
+        out
+    }
+
+    const MOTION: &str = "{ swing-deg = 0.0, rate-hz = 0.0, arm-raise-deg = 0.0 }";
+
+    fn art_game(s: &Scratch) -> (PathBuf, String) {
+        let content = format!(
+            r#"{}
+[world.character]
+pixel-m = 0.05625
+skin = "skin.png"
+idle = {MOTION}
+walk = {MOTION}
+sprint = {MOTION}
+airborne = {MOTION}
+crouch = {MOTION}
+
+[[world.character.bones]]
+name = "body"
+role = "body"
+pivot = [0.0, 12.0, 0.0]
+cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
+"#,
+            DATA_GAME.replace(
+                "color = [80, 90, 100, 255]",
+                "color = [80, 90, 100, 255]\ntexture = \"rock.png\""
+            )
+        );
+        let dir = data(s, "plain", true, "", &content);
+        fs::write(dir.join("rock.png"), png(48, 16, 1)).unwrap();
+        fs::write(dir.join("skin.png"), png(64, 64, 2)).unwrap();
+        (dir, content)
+    }
+
+    #[test]
+    fn png_artwork_reaches_registered_textures_and_the_client_character() {
+        let s = Scratch::new();
+        art_game(&s);
+        let loaded = s.load(TrustMode::All).unwrap();
+        let rock = loaded.registry.id_of(Kind::Material, "plain:rock").unwrap();
+        let [(id, atlas)] = &loaded.textures[..] else {
+            panic!("one texture expected");
+        };
+        assert_eq!(*id as u32, rock as u32);
+        assert_eq!(atlas.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
+        assert_eq!(atlas[..8], [0, 1, 0, 0, 1, 1, 0, 255]);
+        let skin = &loaded.character.as_ref().unwrap().skin;
+        assert_eq!(skin.len(), tesserae_mods::SKIN_BYTES);
+        assert_eq!(skin[..8], [0, 2, 0, 0, 1, 2, 0, 255]);
+
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let textures = app
+            .world_mut()
+            .resource_mut::<Messages<MaterialTextures>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(textures.0.len(), 1);
+        let model = app
+            .world_mut()
+            .resource_mut::<Messages<CharacterModel>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(model.0.unwrap().skin[4..8], [1, 2, 0, 255]);
+    }
+
+    #[test]
+    fn bad_artwork_is_refused_before_any_world_opens_naming_the_field() {
+        let s = Scratch::new();
+        let (dir, _) = art_game(&s);
+        for (file, bytes, field) in [
+            ("rock.png", png(16, 16, 0), "appearance[0].texture"),
+            ("skin.png", b"nope".to_vec(), "world.character.skin"),
+        ] {
+            let good = fs::read(dir.join(file)).unwrap();
+            fs::write(dir.join(file), bytes).unwrap();
+            let error = s.load(TrustMode::All).err().unwrap();
+            assert!(
+                error.contains("plain") && error.contains(field) && error.contains(file),
+                "{error}"
+            );
+            fs::write(dir.join(file), good).unwrap();
+        }
+        fs::remove_file(dir.join("skin.png")).unwrap();
+        let error = s.load(TrustMode::All).err().unwrap();
+        assert!(error.contains("world.character.skin"), "{error}");
+    }
+
+    #[test]
+    fn artwork_game_reopens_unchanged_and_refuses_changed_art_before_writes() {
+        let s = Scratch::new();
+        let (dir, _) = art_game(&s);
+        let loaded = s.load(TrustMode::All).unwrap();
+        let path = s.0.join("world");
+        save_world(&loaded, &path);
+        let reopen = || reopen_world(&path, &s.0.join("mods"), &s.0.join("trust.json"));
+        assert!(reopen().is_ok());
+        let files = || {
+            let mut files: Vec<_> = fs::read_dir(&path)
+                .unwrap()
+                .map(|entry| {
+                    let path = entry.unwrap().path();
+                    let bytes = fs::read(&path).unwrap();
+                    (path, bytes)
+                })
+                .collect();
+            files.sort();
+            files
+        };
+        let before = files();
+        fs::write(dir.join("unrelated.png"), png(48, 16, 9)).unwrap();
+        assert!(reopen().is_ok());
+        fs::write(dir.join("skin.png"), png(64, 64, 3)).unwrap();
+        let error = reopen().err().unwrap();
+        assert!(
+            error.contains("plain") && error.contains("changed"),
+            "{error}"
+        );
+        assert_eq!(files(), before);
+    }
+
     fn want(id: &str, version: &str, game: bool) -> Wanted {
         Wanted {
             id: id.into(),
@@ -760,6 +1318,26 @@ mod tests {
 
     fn required_ids(loaded: &LoadedMods) -> Vec<&str> {
         loaded.required.iter().map(|m| m.id.as_str()).collect()
+    }
+
+    #[test]
+    fn a_world_with_no_record_opens_the_default_game_whatever_the_ids_sort_to() {
+        let s = Scratch::new();
+        for id in ["aurora", "terra", "zephyr"] {
+            s.add(id, "hello", "root = true");
+        }
+        let loaded = load_selected(&s, &Selection::Everything).unwrap();
+        assert_eq!(required_ids(&loaded), ["terra"]);
+    }
+
+    #[test]
+    fn a_world_with_no_record_falls_back_to_the_first_game_without_the_default() {
+        let s = Scratch::new();
+        for id in ["zephyr", "aurora"] {
+            s.add(id, "hello", "root = true");
+        }
+        let loaded = load_selected(&s, &Selection::Everything).unwrap();
+        assert_eq!(required_ids(&loaded), ["aurora"]);
     }
 
     #[test]
@@ -1034,12 +1612,12 @@ mod tests {
 
     #[test]
     fn the_catalogue_lists_the_games_tools_in_declared_order() {
-        let catalogue = published_catalogue(super::runtime::tests::demo_loaded(1.0));
+        let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
         assert_eq!(
             catalogue.tools,
             vec![CatalogueTool {
                 id: crate::server::tool::ToolId(0),
-                name: "demo:measure".into(),
+                name: "terra:measure".into(),
                 kind: tesserae_mods::ToolKind::Measure,
             }]
         );
@@ -1049,9 +1627,9 @@ mod tests {
     /// Every registered name, with what the Client may do with it, and the
     /// Game's lake.
     #[test]
-    fn the_catalogue_names_the_demos_content_and_its_lake() {
-        let catalogue = published_catalogue(super::runtime::tests::demo_loaded(1.0));
-        assert_eq!(catalogue.game.as_deref(), Some("demo"));
+    fn the_catalogue_names_the_terras_content_and_its_lake() {
+        let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
+        assert_eq!(catalogue.game.as_deref(), Some("terra"));
         let material = |name: &str| {
             catalogue
                 .materials
@@ -1059,14 +1637,14 @@ mod tests {
                 .find(|m| m.name == name)
                 .unwrap_or_else(|| panic!("{name}"))
         };
-        assert_eq!(catalogue.lake, Some(material("demo:water").id));
-        for fluid in ["demo:water", "demo:lava", "demo:mud"] {
+        assert_eq!(catalogue.lake, Some(material("terra:water").id));
+        for fluid in ["terra:water", "terra:lava", "terra:mud"] {
             let fluid = material(fluid);
             assert!(fluid.fluid.is_some() && !fluid.solid && !fluid.burns);
         }
-        assert!(material("demo:water").fluid < material("demo:lava").fluid);
-        assert!(material("demo:wood").solid && material("demo:wood").burns);
-        for solid in ["demo:stone", "demo:brick", "demo:lamp"] {
+        assert!(material("terra:water").fluid < material("terra:lava").fluid);
+        assert!(material("terra:wood").solid && material("terra:wood").burns);
+        for solid in ["terra:stone", "terra:brick", "terra:lamp"] {
             let solid = material(solid);
             assert!(solid.solid && solid.fluid.is_none() && !solid.burns);
         }
@@ -1084,15 +1662,18 @@ mod tests {
                 ("core:post", true)
             ]
         );
-        assert!(turnable.contains(&("demo:fence", false)), "it is connected");
+        assert!(
+            turnable.contains(&("terra:fence", false)),
+            "it is connected"
+        );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
         assert_eq!(ids, std::iter::once(0).chain(8..20).collect::<Vec<_>>());
     }
 
     #[test]
-    fn demo_preview_textures_reach_the_client_under_the_registered_material_ids() {
-        let loaded = super::runtime::tests::demo_loaded(1.0);
+    fn terra_preview_textures_reach_the_client_under_the_registered_material_ids() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
         let mut app = App::new();
         app.insert_non_send(loaded).add_plugins(plugin);
         let catalogue = app
@@ -1118,7 +1699,7 @@ mod tests {
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
                 material.name.as_str(),
-                "demo:glass" | "demo:water" | "demo:mud"
+                "terra:glass" | "terra:water" | "terra:mud"
             ) {
                 assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {
@@ -1397,39 +1978,39 @@ mod tests {
     }
 
     #[test]
-    fn a_built_dev_demo_is_the_default_trusted_for_the_run_and_an_explicit_directory_wins() {
+    fn a_built_dev_terra_is_the_default_trusted_for_the_run_and_an_explicit_directory_wins() {
         let s = Scratch::new();
-        let demo = s.0.join("games/demo/dist/mods");
+        let terra = s.0.join("games/terra/dist/mods");
         let options =
-            |args: &[&str], env: Option<&str>, trust: Option<&str>, demo: Option<&Path>| {
+            |args: &[&str], env: Option<&str>, trust: Option<&str>, terra: Option<&Path>| {
                 LoadOptions::resolve(
                     args.iter().map(OsString::from),
                     env.map(OsString::from),
                     trust.map(OsString::from),
                     Some(PathBuf::from("data/tesserae/mods")),
-                    demo.map(Path::to_path_buf),
+                    terra.map(Path::to_path_buf),
                 )
                 .unwrap()
             };
 
-        assert!(options(&[], None, None, Some(&demo)).is_none());
-        assert!(options(&["--trust-all"], None, Some("1"), Some(&demo)).is_none());
+        assert!(options(&[], None, None, Some(&terra)).is_none());
+        assert!(options(&["--trust-all"], None, Some("1"), Some(&terra)).is_none());
 
-        fs::create_dir_all(games_dir(&demo)).unwrap();
+        fs::create_dir_all(games_dir(&terra)).unwrap();
         for (args, trust) in [(&[][..], None), (&["--trust-all"][..], Some("1"))] {
-            let chosen = options(args, None, trust, Some(&demo)).unwrap();
-            assert_eq!(chosen.directory, demo);
+            let chosen = options(args, None, trust, Some(&terra)).unwrap();
+            assert_eq!(chosen.directory, terra);
             assert_eq!(chosen.trust, TrustMode::ThisRun);
         }
-        let cli = options(&["--mods", "cli"], Some("env"), None, Some(&demo)).unwrap();
+        let cli = options(&["--mods", "cli"], Some("env"), None, Some(&terra)).unwrap();
         assert_eq!(cli.directory, PathBuf::from("cli"));
         assert_eq!(cli.trust, TrustMode::None);
-        let env = options(&[], Some("env"), Some("1"), Some(&demo)).unwrap();
+        let env = options(&[], Some("env"), Some("1"), Some(&terra)).unwrap();
         assert_eq!(env.directory, PathBuf::from("env"));
         assert_eq!(env.trust, TrustMode::All);
-        let named = demo.to_str().unwrap();
-        let explicit = options(&["--mods", named], None, None, Some(&demo)).unwrap();
-        assert_eq!(explicit.directory, demo);
+        let named = terra.to_str().unwrap();
+        let explicit = options(&["--mods", named], None, None, Some(&terra)).unwrap();
+        assert_eq!(explicit.directory, terra);
         assert_eq!(explicit.trust, TrustMode::None);
 
         let release = options(&[], None, None, None).unwrap();
@@ -1438,11 +2019,11 @@ mod tests {
     }
 
     #[test]
-    fn only_a_dev_build_offers_the_in_repo_demo() {
+    fn only_a_dev_build_offers_the_in_repo_terra() {
         #[cfg(feature = "dev")]
-        assert!(dev_demo().unwrap().ends_with("games/demo/dist/mods"));
+        assert!(dev_terra().unwrap().ends_with("games/terra/dist/mods"));
         #[cfg(not(feature = "dev"))]
-        assert!(dev_demo().is_none());
+        assert!(dev_terra().is_none());
     }
 
     #[test]
@@ -1467,8 +2048,11 @@ mod tests {
     }
     #[test]
     fn catalogue_preserves_mod_removal_times_by_registered_material_id() {
-        let mut loaded = super::runtime::tests::demo_loaded(1.0);
-        let id = loaded.registry.id_of(Kind::Material, "demo:stone").unwrap() as MaterialId;
+        let mut loaded = super::runtime::tests::terra_loaded(1.0);
+        let id = loaded
+            .registry
+            .id_of(Kind::Material, "terra:stone")
+            .unwrap() as MaterialId;
         assert!(
             loaded
                 .remove_times

@@ -20,9 +20,62 @@ pub enum Untrusted {
 
 #[derive(Debug)]
 pub enum Verdict {
-    /// Carries the component bytes the hash was taken over, so what is compiled is what was checked.
-    Trusted(Vec<u8>),
+    /// Owns the source files whose identity was checked; loading never rereads them.
+    Trusted(CheckedPayload),
     Untrusted(Untrusted),
+}
+
+/// Immutable source snapshot. Data files are ordered by their Mod-relative names.
+#[derive(Debug)]
+pub struct CheckedPayload {
+    source: String,
+    files: std::collections::BTreeMap<String, Vec<u8>>,
+    data: bool,
+}
+
+impl CheckedPayload {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        source: &str,
+        files: impl IntoIterator<Item = (&'static str, Vec<u8>)>,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            files: files.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+            data: true,
+        }
+    }
+
+    /// Every runtime file, by Mod-relative name: the source and the artwork it references.
+    pub fn files(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.files.iter().map(|(n, b)| (n.as_str(), b.as_slice()))
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.files[&self.source]
+    }
+
+    pub(crate) fn file(&self, name: &str) -> Option<&[u8]> {
+        self.files.get(name).map(Vec::as_slice)
+    }
+
+    pub(crate) fn hash(&self, manifest: &[u8]) -> String {
+        if !self.data {
+            return hash(self.bytes(), manifest);
+        }
+        let mut sha = Sha256::new();
+        sha.update(b"tesserae-data-v1\0");
+        sha.update((self.files.len() as u64).to_le_bytes());
+        for (name, bytes) in &self.files {
+            sha.update((name.len() as u64).to_le_bytes());
+            sha.update(name.as_bytes());
+            sha.update((bytes.len() as u64).to_le_bytes());
+            sha.update(bytes);
+        }
+        sha.update((manifest.len() as u64).to_le_bytes());
+        sha.update(manifest);
+        sha.finalize().iter().map(|b| format!("{b:02x}")).collect()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,7 +106,7 @@ impl Trust {
         Trust { path, records }
     }
 
-    /// Hashes the component only when a record for the id exists to compare against.
+    /// Reads content only when a record for the id exists to compare against.
     pub fn check(&self, found: &Found) -> Result<Verdict, ModError> {
         let id = &found.manifest.id;
         let Some(record) = self
@@ -63,9 +116,9 @@ impl Trust {
         else {
             return Ok(Verdict::Untrusted(Untrusted::New));
         };
-        let component = read_component(found)?;
-        if hash(&component, &found.manifest_bytes) == record.sha256 {
-            Ok(Verdict::Trusted(component))
+        let payload = read_payload(found)?;
+        if payload.hash(&found.manifest_bytes) == record.sha256 {
+            Ok(Verdict::Trusted(payload))
         } else {
             Ok(Verdict::Untrusted(Untrusted::Changed))
         }
@@ -73,7 +126,7 @@ impl Trust {
 
     /// The hash that `grant` would record, for showing in a prompt.
     pub fn hash_of(found: &Found) -> Result<String, ModError> {
-        Ok(hash(&read_component(found)?, &found.manifest_bytes))
+        Ok(read_payload(found)?.hash(&found.manifest_bytes))
     }
 
     pub fn grant(&mut self, found: &Found) -> Result<(), ModError> {
@@ -147,12 +200,44 @@ impl Trust {
     }
 }
 
-fn read_component(found: &Found) -> Result<Vec<u8>, ModError> {
-    let path = found.component_path()?;
-    fs::read(&path).map_err(|source| ModError::Io {
-        who: found.manifest.id.clone(),
-        path,
+fn read_payload(found: &Found) -> Result<CheckedPayload, ModError> {
+    let path = found.source_path()?;
+    let bytes = fs::read(&path).map_err(|source| {
+        if found.manifest.declaration.is_some() {
+            ModError::Data {
+                id: found.manifest.id.clone(),
+                reason: format!("declaration `{}`: {source}", path.display()),
+            }
+        } else {
+            ModError::Io {
+                who: found.manifest.id.clone(),
+                path,
+                source,
+            }
+        }
+    })?;
+    let source = found.manifest.source().1.to_owned();
+    let mut files = std::collections::BTreeMap::new();
+    let data = found.manifest.declaration.is_some();
+    if data {
+        let id = &found.manifest.id;
+        for (field, name) in crate::data::references(id, &bytes)? {
+            if files.contains_key(&name) {
+                continue;
+            }
+            let artwork =
+                crate::artwork::read(&found.dir, &name).map_err(|reason| ModError::Data {
+                    id: id.clone(),
+                    reason: format!("{field}: {reason}"),
+                })?;
+            files.insert(name, artwork);
+        }
+    }
+    files.insert(source.clone(), bytes);
+    Ok(CheckedPayload {
+        files,
         source,
+        data,
     })
 }
 

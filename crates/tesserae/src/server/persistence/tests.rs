@@ -42,9 +42,9 @@ impl Rig {
         Self::open(dir.opening(), WorldSettings::default())
     }
     fn open(opening: Opening, settings: WorldSettings) -> Self {
-        let mut loaded = crate::server::mods::demo_for_save(&opening, &settings);
+        let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
         let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as u16;
-        let (stone, water, wood) = (id("demo:stone"), id("demo:water"), id("demo:wood"));
+        let (stone, water, wood) = (id("terra:stone"), id("terra:water"), id("terra:wood"));
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
         let eye = p.reopened_eye.unwrap_or(Vec3::new(8.0, 4.0, 8.0));
         let restored_player = p
@@ -406,11 +406,11 @@ fn autosave_at_thirty_seconds_preserves_current_server_player() {
 }
 
 #[test]
-fn real_demo_new_builds_but_reopened_guest_never_replays_construction() {
+fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
     let dir = Directory::new();
     let opening = dir.opening();
     let settings = WorldSettings::default();
-    let mut loaded = crate::server::mods::demo_for_save(&opening, &settings);
+    let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
     let (content, mapping) = super::content(&loaded);
     let guest = loaded.mods.remove(0);
     let context = |tick| tesserae_mods::TickContext {
@@ -444,7 +444,7 @@ fn real_demo_new_builds_but_reopened_guest_never_replays_construction() {
         .unwrap()
         .write(&commit)
         .unwrap();
-    let mut reopened = crate::server::mods::demo_for_save(&dir.opening(), &settings);
+    let mut reopened = crate::server::mods::terra_for_save(&dir.opening(), &settings);
     let mut guest = reopened.mods.remove(0);
     for tick in [0, 1, 1000, 100000] {
         let (next, commands) = bevy::tasks::block_on(guest.tick(context(tick))).unwrap();
@@ -621,7 +621,7 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
     library::Sidecar {
         name: name.into(),
         game: Some(library::GameRef {
-            id: "demo".into(),
+            id: "terra".into(),
             version: "0.1.0".into(),
         }),
         mods: Vec::new(),
@@ -644,7 +644,7 @@ fn a_new_world_takes_its_identity_and_settings_from_its_details() {
     assert_eq!(
         opening.selection(),
         crate::server::mods::Selection::Named(vec![crate::server::mods::Wanted {
-            id: "demo".into(),
+            id: "terra".into(),
             version: "0.1.0".into(),
             game: true,
         }])
@@ -731,7 +731,7 @@ fn refused_opens_leave_every_file_unchanged() {
     let open = Rig::open(holder, settings);
     let locked = Opening::from_folder(&path).unwrap();
     let settings = locked.settings(WorldSettings::default());
-    let mut loaded = crate::server::mods::demo_for_save(&locked, &settings);
+    let mut loaded = crate::server::mods::terra_for_save(&locked, &settings);
     assert!(Persistence::prepare(locked, &mut loaded, settings).is_err());
     drop(open);
     assert_eq!(folder_bytes(&path), before_touch(&before, &path));
@@ -804,7 +804,7 @@ fn the_writer_lock_is_free_as_soon_as_the_session_ends() {
     let prepare = || {
         let opening = Opening::from_folder(&path).unwrap();
         let settings = opening.settings(WorldSettings::default());
-        let mut loaded = crate::server::mods::demo_for_save(&opening, &settings);
+        let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
         Persistence::prepare(opening, &mut loaded, settings)
     };
     let mut app = app();

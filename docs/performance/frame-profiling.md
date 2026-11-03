@@ -11,10 +11,10 @@ Server edits using declared Game content. No Client reads storage.
 export CARGO_TARGET_DIR=/Users/mk/.cache/cargo-target
 caffeinate -i env RUSTFLAGS="-D warnings" cargo build --locked \
   -p tesserae --features profiling --release
-# Point --game at an already built demo distribution. No WIT/Game changes here.
+# Point --game at an already built terra distribution. No WIT/Game changes here.
 # Use a fresh path: the runner refuses an existing output directory.
 scripts/profile-frames --binary "$CARGO_TARGET_DIR/release/tesserae" \
-  --profile release --features profiling --game /path/to/games/demo/dist/mods \
+  --profile release --features profiling --game /path/to/games/terra/dist/mods \
   /tmp/tesserae-release-unique
 ```
 
@@ -227,8 +227,8 @@ fields do not establish power-loss safety, GPU cost or present latency.
 
 ## Streaming fixtures
 
-`--fixtures` also accepts eight streaming fixtures, all on the demo's default
-seed and measured in the same 22–32 s phase:
+`--fixtures` also accepts eight streaming fixtures, all on Terra's default seed
+and measured in the same 22–32 s phase:
 
 - `sprint-flight`: noclip at 64 m/s, the flight sprint cap, along the default
   heading.

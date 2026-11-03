@@ -4,8 +4,8 @@ Bevy resolves its asset root as `BEVY_ASSET_ROOT`, else `CARGO_MANIFEST_DIR`,
 else the directory holding the executable. For a workspace binary the middle
 rule is wrong: under `cargo run -p tesserae` it resolves to `crates/tesserae`,
 which would put `assets/` inside a crate directory. Assets are **CC0, not BSL**
-— for the reason [ADR-0004](0004-demo-game-in-repo-real-game-out.md) exempts
-`games/demo`: placeholder art a game developer cannot reuse is placeholder art
+— for the reason [ADR-0004](0004-terra-game-in-repo-real-game-out.md) exempts
+`games/terra`: placeholder art a game developer cannot reuse is placeholder art
 that does its job badly.
 
 So `assets/` sits at the repository root, beside `crates/`. `.cargo/config.toml`

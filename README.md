@@ -3,16 +3,18 @@
 A high-performance, moddable voxel engine. Rust, Bevy 0.20, macOS first.
 
 Tesserae ships no gameplay. A **Game** is a Mod with a root manifest, built on
-the engine and living outside this repository. The one exception is the MIT demo
-Game in `games/demo/`, the starting point for writing your own.
+the engine and living outside this repository. The one exception is the MIT
+terra Game in `games/terra/`, the starting point for writing your own.
 
 ## Status: early, and not usable for anything yet
 
 Steps **1 to 8 of 27** in [DESIGN.md](DESIGN.md)'s build order are done, and
-step 10 (use and a first tool) has started. `cargo run` opens a World list; a
-World is streamed and generated, and you can fly or walk around it, swim, edit
-it and save it. Keyboard and mouse, a gamepad and, on Windows and Linux, a
-touchscreen all play. The demo Game adds flowing water, lava and fire to it.
+step 11 (use and a first tool) has started. The Modding SDK (step 10) is done:
+see the [authoring guide](docs/authoring-guide.md). `cargo run` opens a World
+list; a World is streamed and generated, and you can fly or walk around it,
+swim, edit it and save it. Keyboard and mouse, a gamepad and, on Windows and
+Linux, a touchscreen all play. The Terra Game adds flowing water, lava and fire
+to it.
 
 | works today                                           | not written yet              |
 | ----------------------------------------------------- | ---------------------------- |
@@ -50,7 +52,7 @@ passes `dev` to the binary as an argument and leaves the feature off. Controls,
 and what each kind of edit costs to rebuild, are in
 [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
 
-Once the guests are built, `cargo dev` runs the demo Game, which declares its
+Once the guests are built, `cargo dev` runs the Terra Game, which declares its
 own ground and solids, fills lakes with its water, and plays out water, lava, a
 second fluid and fire beside spawn. Until then it opens a World with no Game,
 which is empty air because the engine declares no ground, and says to run the
@@ -62,14 +64,14 @@ rustup target add wasm32-wasip2   # once
 cargo dev
 ```
 
-A `dev` build trusts the in-repo demo for the run without asking or recording
+A `dev` build trusts the in-repo Terra for the run without asking or recording
 anything. `--mods <dir>` or `TESSERAE_MODS_DIR` runs another Mods directory
 instead (its Games are the `games` directory beside it), with the usual Trust
-check. A release build never picks the demo itself: its default is the user's
-own mods directory.
+check. A release build never picks Terra itself: its default is the user's own
+mods directory.
 
-What the demo shows, and how to run it at another Voxel size, is in
-[CONTRIBUTING.md](CONTRIBUTING.md#running-the-demo-game).
+What Terra shows, and how to run it at another Voxel size, is in
+[CONTRIBUTING.md](CONTRIBUTING.md#running-the-terra-game).
 
 ```bash
 cargo fmt --all && npm run fmt
@@ -110,6 +112,21 @@ benchmarkable. CI enforces it.
 | `crates/tesserae-mods` | WASM host, WIT contract, command queue — step 7               |
 | `crates/tesserae`      | The Bevy app: rendering, input, and the in-process server     |
 
+## Making a Game or Mod
+
+Start from a copy of a starter, outside this checkout:
+
+| starter                                      | you write                     |
+| -------------------------------------------- | ----------------------------- |
+| [`starters/data-only/`](starters/data-only/) | TOML and PNG files, no Rust   |
+| [`starters/rust/`](starters/rust/)           | Rust, compiled to WebAssembly |
+
+[docs/authoring-guide.md](docs/authoring-guide.md) walks through editing,
+`tesserae validate`, `tesserae dev`, `tesserae package` and installing.
+[docs/data-mods.md](docs/data-mods.md) is the data format reference, and
+[docs/contract-compatibility.md](docs/contract-compatibility.md) says what may
+change between contract versions.
+
 ## Reading order
 
 - [GLOSSARY.md](GLOSSARY.md) — the glossary. Voxel, Material, Shape, Chunk,
@@ -119,6 +136,7 @@ benchmarkable. CI enforces it.
 - [DESIGN.md](DESIGN.md) — every decision and why, including the ones rejected.
 - [docs/adr/](docs/adr/) — the decisions that are hard to reverse.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — setup, the dev loop, and the workflow.
+- [docs/authoring-guide.md](docs/authoring-guide.md) — making a Game or Mod.
 
 ## Licence
 

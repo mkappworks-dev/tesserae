@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{
-    Found, ManifestLimits, Migration, ModError, ModHost, ModLimits, Scan, Trust, Untrusted,
-    Verdict, migrate_legacy_games, plan, scan,
+    DEFAULT_GAME, Found, ManifestLimits, Migration, ModError, ModHost, ModLimits, Scan, Trust,
+    Untrusted, Verdict, migrate_legacy_games, plan, scan,
 };
 
 /// A scratch directory under the cargo target dir, unique per test and removed on drop.
@@ -402,6 +402,28 @@ fn a_manifest_cannot_raise_a_limit() {
 }
 
 #[test]
+fn the_default_game_is_terra_whatever_the_ids_sort_to() {
+    let s = Scratch::new("default");
+    for id in ["aurora", "terra", "zephyr"] {
+        s.good_game(id, id);
+    }
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(ids(&found.games), ["aurora", "terra", "zephyr"]);
+    assert_eq!(found.default_game().unwrap().manifest.id, DEFAULT_GAME);
+}
+
+#[test]
+fn the_default_game_is_the_first_installed_when_terra_is_absent() {
+    let s = Scratch::new("default-absent");
+    for id in ["zephyr", "aurora"] {
+        s.good_game(id, id);
+    }
+    let found = scan(&s.mods()).unwrap();
+    assert_eq!(found.default_game().unwrap().manifest.id, "aurora");
+    assert!(Scan::default().default_game().is_none());
+}
+
+#[test]
 fn several_games_and_mods_are_found_in_sibling_folders() {
     let s = Scratch::new("many");
     s.good_game("aurora", "aurora");
@@ -522,18 +544,18 @@ fn legacy_game(s: &Scratch, folder: &str, id: &str) {
 #[test]
 fn migration_moves_a_legacy_root_into_games_once_and_leaves_the_rest() {
     let s = Scratch::new("migrate");
-    legacy_game(&s, "old", "demo");
+    legacy_game(&s, "old", "terra");
     s.good("lamps", "");
     let moved = migrate_legacy_games(&s.mods());
     assert!(
-        matches!(moved.as_slice(), [Migration::Moved { id, .. }] if id == "demo"),
+        matches!(moved.as_slice(), [Migration::Moved { id, .. }] if id == "terra"),
         "{moved:?}"
     );
-    assert!(s.games().join("demo/mod.toml").is_file());
+    assert!(s.games().join("terra/mod.toml").is_file());
     assert!(!s.mods().join("old").exists());
     assert!(s.mods().join("lamps/mod.toml").is_file());
     let found = scan(&s.mods()).unwrap();
-    assert_eq!(ids(&found.games), ["demo"]);
+    assert_eq!(ids(&found.games), ["terra"]);
     assert!(found.rejected.is_empty());
     assert!(migrate_legacy_games(&s.mods()).is_empty());
 }
@@ -541,21 +563,21 @@ fn migration_moves_a_legacy_root_into_games_once_and_leaves_the_rest() {
 #[test]
 fn migration_refuses_to_overwrite_an_installed_game() {
     let s = Scratch::new("migrate-clash");
-    s.good_game("demo", "demo");
-    legacy_game(&s, "old", "demo");
+    s.good_game("terra", "terra");
+    legacy_game(&s, "old", "terra");
     let moved = migrate_legacy_games(&s.mods());
     assert!(
-        matches!(moved.as_slice(), [Migration::Refused { id, .. }] if id == "demo"),
+        matches!(moved.as_slice(), [Migration::Refused { id, .. }] if id == "terra"),
         "{moved:?}"
     );
     assert!(s.mods().join("old/mod.toml").is_file());
-    assert!(s.games().join("demo/m.wasm").is_file());
+    assert!(s.games().join("terra/m.wasm").is_file());
 }
 
 #[test]
 fn migration_keeps_a_games_trust_because_trust_follows_the_build_not_the_path() {
     let s = Scratch::new("migrate-trust");
-    legacy_game(&s, "old", "demo");
+    legacy_game(&s, "old", "terra");
     let before = scan(&s.mods());
     assert!(before.unwrap().games.is_empty());
     let legacy = Found {
@@ -572,4 +594,292 @@ fn migration_keeps_a_games_trust_because_trust_follows_the_build_not_the_path() 
         s.trust().check(&moved).unwrap(),
         Verdict::Trusted(_)
     ));
+}
+
+#[test]
+fn data_source_is_discovered_and_trust_checked_without_a_component() {
+    let s = Scratch::new("data-source");
+    s.write_mod(
+        "plain",
+        "id = \"plain\"\nversion = \"1.0.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n",
+        None,
+    );
+    fs::write(s.mod_dir("plain").join("content.toml"), "").unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    let host = ModHost::new().unwrap();
+    assert!(matches!(
+        host.load(vec![found.clone()], &s.trust()),
+        Err(ModError::Untrusted { .. })
+    ));
+    let mut trust = s.trust();
+    trust.grant(&found).unwrap();
+    assert_eq!(host.load(vec![found], &trust).unwrap().len(), 1);
+}
+
+#[test]
+fn missing_data_source_names_the_mod_and_declaration_field() {
+    let s = Scratch::new("missing-data");
+    s.write_mod(
+        "plain",
+        "id = \"plain\"\nversion = \"1.0.0\"\napi = \"0.3\"\ndeclaration = \"absent.toml\"\n",
+        None,
+    );
+    let found = only(discover(&s.mods()).unwrap());
+    let error = Trust::hash_of(&found).unwrap_err().to_string();
+    assert!(
+        error.contains("plain") && error.contains("declaration"),
+        "{error}"
+    );
+}
+
+#[test]
+fn data_build_identity_covers_only_checked_content_and_manifest() {
+    let s = Scratch::new("data-identity");
+    s.write_mod(
+        "plain",
+        "id = \"plain\"\nversion = \"1.0.0\"\napi = \"0.3\"\ndeclaration = \"content.toml\"\n",
+        None,
+    );
+    let dir = s.mod_dir("plain");
+    fs::write(dir.join("content.toml"), "").unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    let mut trust = s.trust();
+    trust.grant(&found).unwrap();
+    let host = ModHost::new().unwrap();
+    let loaded = host.load(vec![found.clone()], &trust).unwrap();
+    let original = loaded[0].build_sha256.clone();
+    fs::write(dir.join("editor.txt"), "unrelated").unwrap();
+    assert_eq!(Trust::hash_of(&found).unwrap(), original);
+    fs::write(dir.join("content.toml"), "# changed\n").unwrap();
+    assert!(matches!(
+        trust.check(&found).unwrap(),
+        Verdict::Untrusted(Untrusted::Changed)
+    ));
+    assert_eq!(loaded[0].build_sha256, original);
+    assert!(loaded[0].declaration().unwrap().materials.is_empty());
+    let mut edited = found.clone();
+    edited.manifest_bytes.push(b'\n');
+    fs::write(dir.join("content.toml"), "").unwrap();
+    assert_ne!(Trust::hash_of(&edited).unwrap(), original);
+}
+
+#[test]
+fn data_manifest_requires_exactly_one_confined_current_source() {
+    for (extra, api, field) in [
+        ("", "0.3", "source"),
+        (
+            "wasm = 'm.wasm'\ndeclaration = 'data.toml'",
+            "0.3",
+            "source",
+        ),
+        ("declaration = '../data.toml'", "0.3", "declaration"),
+        ("declaration = '/data.toml'", "0.3", "declaration"),
+        ("declaration = ''", "0.3", "declaration"),
+        ("declaration = 'data.toml'", "0.2", "0.3"),
+    ] {
+        let s = Scratch::new("data-manifest");
+        s.write_mod(
+            "plain",
+            &format!("id = 'plain'\nversion = '1.0.0'\napi = '{api}'\n{extra}\n"),
+            None,
+        );
+        let error = err_text(discover(&s.mods()));
+        assert!(error.contains("plain") && error.contains(field), "{error}");
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn data_declaration_symlink_escape_is_refused_even_after_discovery() {
+    let s = Scratch::new("data-escape");
+    s.write_mod(
+        "plain",
+        "id = 'plain'\nversion = '1.0.0'\napi = '0.3'\ndeclaration = 'data.toml'\n",
+        None,
+    );
+    let dir = s.mod_dir("plain");
+    fs::write(dir.join("data.toml"), "").unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    let outside = s.0.join("outside.toml");
+    fs::write(&outside, "").unwrap();
+    fs::remove_file(dir.join("data.toml")).unwrap();
+    std::os::unix::fs::symlink(outside.canonicalize().unwrap(), dir.join("data.toml")).unwrap();
+    let error = Trust::hash_of(&found).unwrap_err().to_string();
+    assert!(
+        error.contains("plain") && error.contains("declaration") && error.contains("outside"),
+        "{error}"
+    );
+    assert!(scan(&s.mods()).unwrap().mods.is_empty());
+}
+
+#[test]
+fn existing_component_trust_hash_remains_compatible() {
+    let s = Scratch::new("legacy-hash");
+    s.good("alpha", "");
+    let found = only(discover(&s.mods()).unwrap());
+    assert_eq!(
+        Trust::hash_of(&found).unwrap(),
+        "d931ac548c8e4618480131b7eac011bdb1284d830e8f1c404f18dfae85981963"
+    );
+    fs::write(s.0.join("trust.json"), r#"{"records":[{"kind":"mod","id":"alpha","sha256":"d931ac548c8e4618480131b7eac011bdb1284d830e8f1c404f18dfae85981963"}]}"#).unwrap();
+    assert!(matches!(
+        s.trust().check(&found).unwrap(),
+        Verdict::Trusted(_)
+    ));
+}
+
+/// A PNG whose pixel `i` is `[i % 251, i / 251 % 251, seed, alpha(i)]`, so any swap shows.
+fn png_bytes(width: u32, height: u32, seed: u8) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    let pixels: Vec<u8> = (0..width * height)
+        .flat_map(|i| {
+            [
+                (i % 251) as u8,
+                (i / 251 % 251) as u8,
+                seed,
+                (i % 2 * 200) as u8,
+            ]
+        })
+        .collect();
+    writer.write_image_data(&pixels).unwrap();
+    writer.finish().unwrap();
+    out
+}
+
+const ART_MANIFEST: &str =
+    "id = 'art'\nversion = '1.0.0'\napi = '0.3'\ndeclaration = 'content.toml'\n";
+
+const ART_CONTENT: &str = r#"
+[[materials]]
+name = "rock"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[appearance]]
+material = "rock"
+color = [80, 90, 100, 255]
+texture = "art/rock.png"
+"#;
+
+fn art_mod(s: &Scratch, png: &[u8]) -> (PathBuf, Found) {
+    s.write_mod("art", ART_MANIFEST, None);
+    let dir = s.mod_dir("art");
+    fs::create_dir_all(dir.join("art")).unwrap();
+    fs::write(dir.join("content.toml"), ART_CONTENT).unwrap();
+    fs::write(dir.join("art/rock.png"), png).unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    (dir, found)
+}
+
+fn load_art(found: &Found, s: &Scratch) -> Result<Vec<crate::Compiled>, ModError> {
+    let mut trust = s.trust();
+    trust.grant_for_run(found)?;
+    ModHost::new().unwrap().load(vec![found.clone()], &trust)
+}
+
+#[test]
+fn png_texture_decodes_to_the_registered_atlas_and_joins_build_identity() {
+    let s = Scratch::new("art-identity");
+    let png = png_bytes(48, 16, 7);
+    let (dir, found) = art_mod(&s, &png);
+    let loaded = load_art(&found, &s).unwrap();
+    let texture = loaded[0].declaration().unwrap().appearance[0]
+        .texture
+        .clone()
+        .unwrap();
+    assert_eq!(texture.len(), crate::MATERIAL_TEXTURE_BYTES);
+    assert_eq!(texture[..4], [0, 0, 7, 0]);
+    assert_eq!(texture[4..8], [1, 0, 7, 200]);
+    let original = loaded[0].build_sha256.clone();
+
+    fs::write(dir.join("art/unrelated.png"), png_bytes(48, 16, 1)).unwrap();
+    fs::write(dir.join("editor.txt"), "scratch").unwrap();
+    assert_eq!(Trust::hash_of(&found).unwrap(), original);
+
+    // The Declaration was decoded from the checked bytes; a later edit cannot reach it.
+    fs::write(dir.join("art/rock.png"), png_bytes(48, 16, 8)).unwrap();
+    assert_eq!(
+        loaded[0].declaration().unwrap().appearance[0]
+            .texture
+            .as_deref(),
+        Some(texture.as_slice())
+    );
+    assert_ne!(Trust::hash_of(&found).unwrap(), original);
+    let mut trust = s.trust();
+    trust.grant_for_run(&found).unwrap();
+    fs::write(dir.join("art/rock.png"), &png).unwrap();
+    assert!(matches!(
+        trust.check(&found).unwrap(),
+        Verdict::Untrusted(Untrusted::Changed)
+    ));
+}
+
+#[test]
+fn invalid_artwork_names_the_mod_and_field() {
+    let s = Scratch::new("art-invalid");
+    let (dir, found) = art_mod(&s, &png_bytes(48, 16, 0));
+    let cases: [(Option<Vec<u8>>, &str); 3] = [
+        (None, "No such file"),
+        (Some(b"not a png".to_vec()), "PNG"),
+        (Some(png_bytes(16, 16, 0)), "16 by 16"),
+    ];
+    for (bytes, expect) in cases {
+        match bytes {
+            Some(bytes) => fs::write(dir.join("art/rock.png"), bytes).unwrap(),
+            None => fs::remove_file(dir.join("art/rock.png")).unwrap(),
+        }
+        let error = load_art(&found, &s).err().unwrap().to_string();
+        assert!(
+            error.contains("art")
+                && error.contains("appearance[0].texture")
+                && error.contains("art/rock.png")
+                && error.contains(expect),
+            "{error}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn artwork_escaping_the_mod_directory_is_refused() {
+    let s = Scratch::new("art-escape");
+    let (dir, found) = art_mod(&s, &png_bytes(48, 16, 0));
+    let outside = s.0.join("outside.png");
+    fs::write(&outside, png_bytes(48, 16, 0)).unwrap();
+    fs::remove_file(dir.join("art/rock.png")).unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("art/rock.png")).unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(
+        error.contains("appearance[0].texture") && error.contains("outside"),
+        "{error}"
+    );
+    fs::write(
+        dir.join("content.toml"),
+        ART_CONTENT.replace("art/rock.png", "../outside.png"),
+    )
+    .unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(error.contains("relative path"), "{error}");
+}
+
+#[test]
+fn non_rgba_png_colour_types_expand_to_straight_rgba() {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, 2, 1);
+    encoder.set_color(png::ColorType::GrayscaleAlpha);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[10, 20, 30, 40]).unwrap();
+    writer.finish().unwrap();
+    assert_eq!(
+        crate::artwork::decode(&out, 2, 1).unwrap(),
+        [10, 10, 10, 20, 30, 30, 30, 40]
+    );
 }

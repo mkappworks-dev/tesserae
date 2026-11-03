@@ -765,7 +765,7 @@ mod tests {
     };
     use bevy::ui_widgets::Activate;
 
-    fn demo_ids() -> &'static [MaterialId; 7] {
+    fn terra_ids() -> &'static [MaterialId; 7] {
         static IDS: std::sync::OnceLock<[MaterialId; 7]> = std::sync::OnceLock::new();
         IDS.get_or_init(|| {
             let mut tables = tesserae_core::testgen::fixtures().tables.clone();
@@ -777,14 +777,14 @@ mod tests {
             })
         })
     }
-    fn demo_water() -> MaterialId {
-        demo_ids()[6]
+    fn terra_water() -> MaterialId {
+        terra_ids()[6]
     }
     fn lava() -> MaterialId {
-        demo_ids()[1]
+        terra_ids()[1]
     }
     fn wood() -> MaterialId {
-        demo_ids()[4]
+        terra_ids()[4]
     }
 
     fn material(id: MaterialId, name: &str, solid: bool) -> CatalogueMaterial {
@@ -837,18 +837,18 @@ mod tests {
         }
     }
 
-    /// Shaped like the demo's: its water is declared first but registered last,
+    /// Shaped like Terra's: its water is declared first but registered last,
     /// and wood burns.
-    fn demo() -> ContentCatalogue {
+    fn terra() -> ContentCatalogue {
         let mut catalogue = dry();
         for (id, name, solid, fluid, burns) in [
-            (demo_ids()[0], "demo:lamp", true, None, false),
-            (lava(), "demo:lava", false, Some(1), false),
-            (demo_ids()[2], "demo:mud", false, Some(2), false),
-            (demo_ids()[3], "demo:brick", true, None, false),
-            (wood(), "demo:wood", true, None, true),
-            (demo_ids()[5], "demo:ash", true, None, false),
-            (demo_water(), "demo:water", false, Some(0), false),
+            (terra_ids()[0], "terra:lamp", true, None, false),
+            (lava(), "terra:lava", false, Some(1), false),
+            (terra_ids()[2], "terra:mud", false, Some(2), false),
+            (terra_ids()[3], "terra:brick", true, None, false),
+            (wood(), "terra:wood", true, None, true),
+            (terra_ids()[5], "terra:ash", true, None, false),
+            (terra_water(), "terra:water", false, Some(0), false),
         ] {
             catalogue.materials.push(CatalogueMaterial {
                 fluid,
@@ -856,12 +856,12 @@ mod tests {
                 ..material(id, name, solid)
             });
         }
-        catalogue.lake = Some(demo_water());
+        catalogue.lake = Some(terra_water());
         catalogue
     }
 
     fn app(grab: CursorGrabMode) -> App {
-        app_with(grab, demo())
+        app_with(grab, terra())
     }
 
     fn app_with(grab: CursorGrabMode, catalogue: ContentCatalogue) -> App {
@@ -1031,8 +1031,8 @@ mod tests {
             slots
         };
         assert_eq!(
-            Hotbar::defaults(&demo()).to_vec(),
-            with([Holding::Fluid(demo_water()), Holding::Fire])
+            Hotbar::defaults(&terra()).to_vec(),
+            with([Holding::Fluid(terra_water()), Holding::Fire])
         );
         assert_eq!(
             Hotbar::defaults(&dry()).to_vec(),
@@ -1040,14 +1040,14 @@ mod tests {
         );
         let no_lake = ContentCatalogue {
             lake: None,
-            ..demo()
+            ..terra()
         };
         assert_eq!(
             Hotbar::defaults(&no_lake)[7],
-            Holding::Fluid(demo_water()),
+            Holding::Fluid(terra_water()),
             "the first declared fluid, not the lowest id"
         );
-        let mut lava_lakes = demo();
+        let mut lava_lakes = terra();
         lava_lakes.lake = Some(lava());
         assert_eq!(Hotbar::defaults(&lava_lakes)[7], Holding::Fluid(lava()));
         let mut fuel_only = dry();
@@ -1065,7 +1065,7 @@ mod tests {
         frame(&mut app);
         assert_eq!(
             app.world().resource::<Hotbar>().slots.to_vec(),
-            with([Holding::Fluid(demo_water()), Holding::Fire]),
+            with([Holding::Fluid(terra_water()), Holding::Fire]),
             "from the catalogue the Server sent"
         );
     }
@@ -1088,7 +1088,7 @@ mod tests {
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit8),
-            [Some(EditAction::PlaceSource(demo_water())), None]
+            [Some(EditAction::PlaceSource(terra_water())), None]
         );
         assert_eq!(
             both_buttons(&mut app, KeyCode::Digit9),
@@ -1270,7 +1270,7 @@ mod tests {
 
     #[test]
     fn a_held_fluid_places_and_removes_sources_of_that_fluid() {
-        let mut lava_lakes = demo();
+        let mut lava_lakes = terra();
         lava_lakes.lake = Some(lava());
         let mut app = app_with(CursorGrabMode::Locked, lava_lakes);
         frame(&mut app);
@@ -1449,7 +1449,7 @@ mod tests {
                 }
             );
         }
-        for held in [Holding::Fluid(demo_water()), Holding::Fire, Holding::Empty] {
+        for held in [Holding::Fluid(terra_water()), Holding::Fire, Holding::Empty] {
             app.world_mut().resource_mut::<Hotbar>().outside = Some(held);
             key(&mut app, KeyCode::KeyF);
             assert_eq!(app.world().resource::<Hotbar>().held(), held);
@@ -1466,7 +1466,7 @@ mod tests {
         frame(&mut app);
         for (keycode, expected, verb) in [
             (KeyCode::Digit1, "1: test:stone", "place"),
-            (KeyCode::Digit8, "8: demo:water source", "place source"),
+            (KeyCode::Digit8, "8: terra:water source", "place source"),
             (KeyCode::Digit9, "9: fire", "ignite"),
         ] {
             key(&mut app, keycode);
@@ -1596,10 +1596,10 @@ mod tests {
 
     #[test]
     fn the_hud_names_a_tools_verbs_as_presses() {
-        let mut catalogue = demo();
+        let mut catalogue = terra();
         catalogue.tools = vec![crate::content::CatalogueTool {
             id: ToolId(0),
-            name: "demo:measure".into(),
+            name: "terra:measure".into(),
             kind: tesserae_mods::ToolKind::Measure,
         }];
         let mut app = app_with(CursorGrabMode::Locked, catalogue);
@@ -1615,7 +1615,7 @@ mod tests {
     fn with_measure(mut catalogue: ContentCatalogue) -> ContentCatalogue {
         catalogue.tools = vec![crate::content::CatalogueTool {
             id: ToolId(0),
-            name: "demo:measure".into(),
+            name: "terra:measure".into(),
             kind: tesserae_mods::ToolKind::Measure,
         }];
         catalogue
@@ -1623,7 +1623,7 @@ mod tests {
 
     #[test]
     fn the_menu_does_not_list_tools_even_when_the_game_declares_one() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
         frame(&mut app);
         key(&mut app, KeyCode::Tab);
         assert!(!offered(&mut app).contains(&Entry::Tool(ToolId(0))));
@@ -1631,7 +1631,7 @@ mod tests {
 
     #[test]
     fn the_tool_key_takes_the_games_tool_and_a_second_press_puts_it_back() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
         frame(&mut app);
         app.world_mut().resource_mut::<Hotbar>().select(2);
         let before = app.world().resource::<Hotbar>().held();
@@ -1647,7 +1647,7 @@ mod tests {
 
     #[test]
     fn putting_the_tool_away_restores_an_empty_hand() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
         frame(&mut app);
         key(&mut app, KeyCode::KeyX);
         key(&mut app, KeyCode::KeyM);
@@ -1657,7 +1657,7 @@ mod tests {
 
     #[test]
     fn the_tool_key_does_nothing_in_a_game_without_tools() {
-        let mut app = app_with(CursorGrabMode::Locked, demo());
+        let mut app = app_with(CursorGrabMode::Locked, terra());
         frame(&mut app);
         let before = app.world().resource::<Hotbar>().clone();
         key(&mut app, KeyCode::KeyM);
@@ -1666,7 +1666,7 @@ mod tests {
 
     #[test]
     fn choosing_a_slot_or_the_empty_hand_puts_a_held_tool_away() {
-        let mut app = app_with(CursorGrabMode::Locked, with_measure(demo()));
+        let mut app = app_with(CursorGrabMode::Locked, with_measure(terra()));
         frame(&mut app);
         key(&mut app, KeyCode::KeyM);
         key(&mut app, KeyCode::Digit3);
@@ -1678,7 +1678,7 @@ mod tests {
 
     #[test]
     fn the_menu_offers_every_solid_in_every_shape_every_fluid_and_fire() {
-        let catalogue = demo();
+        let catalogue = terra();
         let mut app = app(CursorGrabMode::Locked);
         frame(&mut app);
         assert!(offered(&mut app).is_empty(), "closed");
@@ -1686,7 +1686,7 @@ mod tests {
         assert_eq!(cursor(&mut app), CursorGrabMode::None);
 
         let solids: Vec<_> = catalogue.materials.iter().filter(|m| m.solid).collect();
-        for name in ["demo:wood", "demo:brick", "demo:lamp"] {
+        for name in ["terra:wood", "terra:brick", "terra:lamp"] {
             assert!(solids.iter().any(|m| m.name == name), "{name}");
         }
         for solid in &solids {
@@ -1718,7 +1718,7 @@ mod tests {
             solids.len(),
             "solids only"
         );
-        for fluid in ["demo:water", "demo:lava", "demo:mud"] {
+        for fluid in ["terra:water", "terra:lava", "terra:mud"] {
             assert!(
                 offered.contains(&Entry::Fluid(id(&catalogue, fluid))),
                 "{fluid}"
@@ -1728,14 +1728,14 @@ mod tests {
 
         let texts = texts(&mut app);
         for name in [
-            "demo:wood",
-            "demo:brick",
-            "demo:lamp",
+            "terra:wood",
+            "terra:brick",
+            "terra:lamp",
             "core:stair",
             "dev:fence",
-            "demo:water",
-            "demo:lava",
-            "demo:mud",
+            "terra:water",
+            "terra:lava",
+            "terra:mud",
             "fire",
         ] {
             assert!(
@@ -1784,7 +1784,7 @@ mod tests {
     fn catalogue_selection_and_clear_never_edit_until_the_menu_closes() {
         for entry in [
             Entry::Material(wood()),
-            Entry::Fluid(demo_water()),
+            Entry::Fluid(terra_water()),
             Entry::Fire,
         ] {
             let mut app = app(CursorGrabMode::Locked);
@@ -1933,11 +1933,11 @@ mod tests {
         choose(&mut app, Entry::Slot(4));
         assert_eq!(app.world().resource::<Hotbar>().selected, 4);
         assert!(app.world().resource::<menu::Menu>().open);
-        hover(&mut app, Entry::Fluid(demo_water()));
+        hover(&mut app, Entry::Fluid(terra_water()));
         key(&mut app, KeyCode::Digit1);
         assert_eq!(
             app.world().resource::<Hotbar>().slots[0],
-            Holding::Fluid(demo_water())
+            Holding::Fluid(terra_water())
         );
         assert_eq!(app.world().resource::<Hotbar>().selected, 4);
         assert!(app.world().resource::<menu::Menu>().open);

@@ -7,14 +7,29 @@ use crate::host::{HostState, engine, linker};
 use crate::limits::ModLimits;
 use crate::manifest::Found;
 use crate::sandbox::{ModFault, ModInstance};
-use crate::trust::{Trust, Verdict};
+use crate::trust::{CheckedPayload, Trust, Verdict};
 
-/// A trusted Mod whose component compiled; not yet instantiated.
+/// A trusted Mod with a compiled component or decoded data Declaration.
 pub struct Compiled {
     pub found: Found,
     pub limits: ModLimits,
     pub build_sha256: String,
-    pub(crate) component: Component,
+    source: LoadedSource,
+}
+
+enum LoadedSource {
+    Component(Component),
+    Data(Box<crate::Declaration>),
+}
+
+impl Compiled {
+    /// A data-only Mod has content but no guest lifecycle.
+    pub fn declaration(&self) -> Option<&crate::Declaration> {
+        match &self.source {
+            LoadedSource::Data(declaration) => Some(declaration),
+            LoadedSource::Component(_) => None,
+        }
+    }
 }
 
 pub struct ModHost {
@@ -36,6 +51,20 @@ impl ModHost {
 
     /// Every Mod is trust-checked before any is compiled, so one refusal costs no compile time.
     pub fn load(&self, plan: Vec<Found>, trust: &Trust) -> Result<Vec<Compiled>, ModError> {
+        Ok(self
+            .load_checked(plan, trust)?
+            .into_iter()
+            .map(|(compiled, _)| compiled)
+            .collect())
+    }
+
+    /// [`ModHost::load`], also returning the exact bytes whose identity was checked, so a caller
+    /// that republishes them cannot publish something other than what loaded.
+    pub fn load_checked(
+        &self,
+        plan: Vec<Found>,
+        trust: &Trust,
+    ) -> Result<Vec<(Compiled, CheckedPayload)>, ModError> {
         let mut trusted = Vec::with_capacity(plan.len());
         for found in plan {
             match trust.check(&found)? {
@@ -50,8 +79,23 @@ impl ModHost {
         }
         trusted
             .into_iter()
-            .map(|(found, bytes)| {
-                let build_sha256 = crate::trust::hash(&bytes, &found.manifest_bytes);
+            .map(|(found, payload)| {
+                let build_sha256 = payload.hash(&found.manifest_bytes);
+                let bytes = payload.bytes();
+                let limits = self.limits.lowered_by(&found.manifest.limits);
+                if found.manifest.declaration.is_some() {
+                    let declaration = crate::data::parse(&found.manifest.id, &payload)?;
+                    let source = LoadedSource::Data(Box::new(declaration));
+                    return Ok((
+                        Compiled {
+                            found,
+                            limits,
+                            build_sha256,
+                            source,
+                        },
+                        payload,
+                    ));
+                }
                 let component =
                     Component::new(&self.engine, bytes).map_err(|source| ModError::Compile {
                         id: found.manifest.id.clone(),
@@ -65,13 +109,16 @@ impl ModHost {
                         exported: exported.map_or("no contract line", Line::api),
                     });
                 }
-                let limits = self.limits.lowered_by(&found.manifest.limits);
-                Ok(Compiled {
-                    found,
-                    limits,
-                    build_sha256,
-                    component,
-                })
+                let source = LoadedSource::Component(component);
+                Ok((
+                    Compiled {
+                        found,
+                        limits,
+                        build_sha256,
+                        source,
+                    },
+                    payload,
+                ))
             })
             .collect()
     }
@@ -82,10 +129,15 @@ impl ModHost {
         compiled: &Compiled,
         world_seed: u64,
     ) -> Result<ModInstance, ModFault> {
+        let LoadedSource::Component(component) = &compiled.source else {
+            return Err(ModFault::BadBatch(
+                "data-only Mod has no guest instance".into(),
+            ));
+        };
         ModInstance::new(
             &self.engine,
             &self.linker,
-            &compiled.component,
+            component,
             &compiled.found.manifest.id,
             world_seed,
             compiled.limits,

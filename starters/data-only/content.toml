@@ -1,0 +1,38 @@
+[[materials]]
+name = "stone"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "turf"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[appearance]]
+material = "stone"
+color = [110, 115, 125, 255]
+texture = "art/stone.png"
+
+[[appearance]]
+material = "turf"
+color = [90, 160, 60, 255]
+texture = "art/turf.png"
+
+[world]
+relief-m = 12.0
+
+[world.movement]
+allow-flight = true
+allow-physics = true
+start-in-flight = false
+
+[world.ground]
+rock = "starter_data:stone"
+soil = "starter_data:stone"
+surface = "starter_data:turf"

@@ -13,7 +13,7 @@ use crate::shape::{NodeBox, Orientation, ShapeDef};
 use crate::testgen::fixtures;
 use crate::{SHAPE_SLAB, SHAPE_STAIR};
 
-/// The spec's demo tuning: 2 m of heat, a 2 s delay and an 8 s burn.
+/// The spec's terra tuning: 2 m of heat, a 2 s delay and an 8 s burn.
 fn wood_def(residue: MaterialId) -> CombustionDef {
     CombustionDef {
         threshold: 6,
@@ -985,7 +985,7 @@ fn each_fluid_extinguishes_or_not_by_its_own_declaration() {
     }
 }
 
-/// How far a fuel's evaluation reads follows the lowest threshold: the demo's
+/// How far a fuel's evaluation reads follows the lowest threshold: Terra's
 /// 6 of 12 over 2 m is caught within 1 m, so 1 step at 1 m and 4 at 0.25 m,
 /// plus the fuel's surface, the fires beside a void and a connected Shape's
 /// arms. No fuel, no thermal work at all.

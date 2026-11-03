@@ -25,8 +25,13 @@ wgpu = { version = "30.0.1", default-features = false, optional = true }
 bevy = { version = "0.20.1", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+toml = "1"
 # The version is not redundant with the path: a path dependency without one
 # is unpublishable to crates.io, and cargo-deny counts it as a wildcard.
 tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
 tesserae-mods = { path = "../tesserae-mods", version = "0.0.0" }
 trash = "5"
+
+[dev-dependencies]
+# Encodes the artwork fixtures the data-Mod tests load.
+png = "0.18"

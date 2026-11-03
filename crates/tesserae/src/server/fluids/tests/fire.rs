@@ -32,7 +32,7 @@ fn solid(tables: &mut Tables) -> MaterialId {
         .unwrap()
 }
 
-/// The watered tables with the demo's wood, ash and a brazier giving off heat
+/// The watered tables with Terra's wood, ash and a brazier giving off heat
 /// for ever, and block light `glow` while it burns.
 fn fire_tables(glow: u8) -> (Tables, Fuel) {
     let mut tables = tables();
@@ -671,9 +671,9 @@ fn under_saturation_fire_flow_edits_and_mod_queues_all_keep_moving() {
     assert!(f.state() == reference, "settled elsewhere than unbounded");
 }
 
-/// Real Mods, from their WASI components: the demo's lava flows to its 3 m
-/// and sets the demo's wood a Voxel past its front alight, which burns to the
-/// demo's ash. The `fluids` guest's slime, which extinguishes, waterlogs its
+/// Real Mods, from their WASI components: Terra's lava flows to its 3 m
+/// and sets Terra's wood a Voxel past its front alight, which burns to the
+/// terra's ash. The `fluids` guest's slime, which extinguishes, waterlogs its
 /// wood stair and keeps it from catching beside a fire, while the same stair
 /// dry catches; its wood lit by a 0.2 `ignite` burns to its ash through the
 /// simulation.
@@ -681,19 +681,14 @@ fn under_saturation_fire_flow_edits_and_mod_queues_all_keep_moving() {
 fn declared_fuel_from_real_mods_catches_burns_and_is_protected_by_their_fluids() {
     use tesserae_mods::{Command, Line, Region};
     let (tables, id) = declared(1.0);
-    let (lava, wood, ash) = (id("demo:lava"), id("demo:wood"), id("demo:ash"));
-    let def = tables.combustion.get(wood).expect("the demo's wood burns");
+    let (lava, wood, ash) = (id("terra:lava"), id("terra:wood"), id("terra:ash"));
+    let def = tables.combustion.get(wood).expect("Terra's wood burns");
     assert_eq!(def.ignition_delay_s, 2.0);
     assert_eq!(def.heat.map(|h| h.reach_m), Some(2.0));
     assert_eq!(def.fuel_steps() as Step, BURN);
     assert!(!tables.combustion.contains(ash), "ash burns");
-    let mut f = Fixture::with_tables(
-        1.0,
-        8.0,
-        0,
-        tables.clone(),
-        tesserae_core::testgen::fixtures().ground.rock,
-    );
+    // Ground is a loaded Material: the testgen rock id names whichever Mod registers first.
+    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables.clone(), id("terra:stone"));
     put(&mut f, 5, Voxel::cube(wood));
     f.send(0, EditAction::PlaceSource(lava));
     let caught = steps_until(&mut f, |f| burning(f, 5));
@@ -707,13 +702,7 @@ fn declared_fuel_from_real_mods_catches_burns_and_is_protected_by_their_fluids()
 
     let (slime, their_wood, their_ash) = (id("fluids:slime"), id("fluids:wood"), id("fluids:ash"));
     for wet in [true, false] {
-        let mut f = Fixture::with_tables(
-            1.0,
-            8.0,
-            0,
-            tables.clone(),
-            tesserae_core::testgen::fixtures().ground.rock,
-        );
+        let mut f = Fixture::with_tables(1.0, 8.0, 0, tables.clone(), id("terra:stone"));
         put(&mut f, 2, Voxel::new(their_wood, SHAPE_STAIR, 0));
         if wet {
             f.send(2, EditAction::PlaceSource(slime));
@@ -726,13 +715,7 @@ fn declared_fuel_from_real_mods_catches_burns_and_is_protected_by_their_fluids()
         assert_eq!(burning(&f, 2), !wet, "slime-wet {wet}");
     }
 
-    let mut f = Fixture::with_tables(
-        1.0,
-        8.0,
-        0,
-        tables,
-        tesserae_core::testgen::fixtures().ground.rock,
-    );
+    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables, id("terra:stone"));
     put(&mut f, 0, Voxel::cube(their_wood));
     let at = [0.0, Y as f32, Z as f32];
     mod_runtime::tests::drain_validated(

@@ -898,7 +898,7 @@ fn tables_of(h: &Harness) -> std::sync::Arc<Tables> {
     std::sync::Arc::clone(&h.app.world().resource::<ContentTables>().0)
 }
 
-pub(in crate::server) fn demo_loaded(size: f32) -> LoadedMods {
+pub(in crate::server) fn terra_loaded(size: f32) -> LoadedMods {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let dir = loop {
@@ -914,7 +914,7 @@ pub(in crate::server) fn demo_loaded(size: f32) -> LoadedMods {
         }
     };
     let loaded = load(
-        &root.join("games/demo/dist/mods"),
+        &root.join("games/terra/dist/mods"),
         &dir.join("trust.json"),
         TrustMode::All,
         &WorldSettings {
@@ -924,7 +924,7 @@ pub(in crate::server) fn demo_loaded(size: f32) -> LoadedMods {
     )
     .unwrap();
     std::fs::remove_dir_all(dir).unwrap();
-    assert!(loaded.game, "build the demo with scripts/build-guests");
+    assert!(loaded.game, "build Terra with scripts/build-guests");
     loaded
 }
 
@@ -937,10 +937,10 @@ fn fluids_named(loaded: &LoadedMods, params: WorldgenParams) -> Vec<u16> {
         .collect()
 }
 
-/// The demo's lakes are its water, standing in valleys at the default seed. Its
+/// Terra's lakes are its water, standing in valleys at the default seed. Its
 /// stage site, not the generator, keeps them off the stage.
 fn assert_lakes_in_valleys(params: WorldgenParams, size: f32, water: u16) {
-    let lake = params.water.expect("the demo has lakes");
+    let lake = params.water.expect("Terra has lakes");
     assert_eq!(lake.material, water);
     let world = Worldgen::new(WorldSettings::default().seed, size, params);
     let mut valley = None;
@@ -965,23 +965,23 @@ fn assert_lakes_in_valleys(params: WorldgenParams, size: f32, water: u16) {
 }
 
 #[test]
-fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
+fn terra_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
     for size in [1.0, 0.5, 0.25] {
-        let loaded = demo_loaded(size);
+        let loaded = terra_loaded(size);
         let stone = loaded
             .registry
-            .id_of(tesserae_mods::Kind::Material, "demo:stone")
+            .id_of(tesserae_mods::Kind::Material, "terra:stone")
             .unwrap() as u16;
         assert_eq!(
             loaded
                 .registry
-                .id_of(tesserae_mods::Kind::Material, "demo:lamp"),
+                .id_of(tesserae_mods::Kind::Material, "terra:lamp"),
             Some(8)
         );
         assert_eq!(
             loaded
                 .registry
-                .id_of(tesserae_mods::Kind::Shape, "demo:fence"),
+                .id_of(tesserae_mods::Kind::Shape, "terra:fence"),
             Some(4)
         );
         let params = loaded.world.unwrap();
@@ -1009,32 +1009,32 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             ]
         );
         assert_eq!(loaded.tables.materials.def(8).emission, 15);
-        // Lava is the demo's own Material after its lamp; no built-in moved.
+        // Lava is Terra's own Material after its lamp; no built-in moved.
         let lava = loaded
             .registry
-            .id_of(tesserae_mods::Kind::Material, "demo:lava")
+            .id_of(tesserae_mods::Kind::Material, "terra:lava")
             .unwrap() as u16;
         assert_eq!(lava, 9);
         assert_eq!(loaded.tables.materials.def(lava).emission, 15);
         let flow = loaded.tables.fluids.get(lava).unwrap();
         // Its own water, with the fixture water's Material and fluid row.
-        let demo_water = loaded
+        let terra_water = loaded
             .registry
-            .id_of(tesserae_mods::Kind::Material, "demo:water")
+            .id_of(tesserae_mods::Kind::Material, "terra:water")
             .unwrap() as u16;
-        assert_eq!(demo_water, 14);
+        assert_eq!(terra_water, 14);
         let grass = loaded
             .registry
-            .id_of(tesserae_mods::Kind::Material, "demo:grass")
+            .id_of(tesserae_mods::Kind::Material, "terra:grass")
             .unwrap() as u16;
         assert_eq!(
-            *loaded.tables.materials.def(demo_water),
+            *loaded.tables.materials.def(terra_water),
             tesserae_core::testgen::WATER_MATERIAL
         );
-        let water = loaded.tables.fluids.get(demo_water).unwrap();
+        let water = loaded.tables.fluids.get(terra_water).unwrap();
         assert_eq!(*water, tesserae_core::testgen::WATER_FLUID);
         assert!(
-            loaded.tables.fluids.rank(demo_water) < loaded.tables.fluids.rank(lava),
+            loaded.tables.fluids.rank(terra_water) < loaded.tables.fluids.rank(lava),
             "water's fluid row is not first"
         );
         assert_eq!(
@@ -1047,9 +1047,9 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             fluids_named(&loaded, params)
                 .iter()
                 .all(|&id| id != tesserae_core::material::FIRST_MOD_ID.saturating_sub(1)),
-            "the demo names the retired id"
+            "Terra names the retired id"
         );
-        assert_lakes_in_valleys(params, size, demo_water);
+        assert_lakes_in_valleys(params, size, terra_water);
         let terrain = Worldgen::new(WorldSettings::default().seed, size, params);
         assert!(flow.sideways_m_per_s < water.sideways_m_per_s);
         assert!(flow.downward_m_per_s < water.downward_m_per_s);
@@ -1063,9 +1063,9 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 .unwrap() as u16
         };
         let (mud, wood, brick) = (
-            material("demo:mud"),
-            material("demo:wood"),
-            material("demo:brick"),
+            material("terra:mud"),
+            material("terra:wood"),
+            material("terra:brick"),
         );
         assert_eq!((mud, brick), (12, 13));
         let mud_flow = loaded.tables.fluids.get(mud).unwrap();
@@ -1076,14 +1076,14 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         );
         assert_eq!(mud_flow.reach_m, 2.0);
         // Its two reactions, resolved by name, either state of each fluid:
-        // lava touching its water becomes demo:stone and the water stays; mud
-        // touching lava becomes demo:brick and the lava stays.
+        // lava touching its water becomes terra:stone and the water stays; mud
+        // touching lava becomes terra:brick and the lava stays.
         let rules = loaded.tables.reactions.rules();
         assert_eq!(rules.len(), 2);
         for (rule, pair, consumed, product) in [
             (
                 rules[0],
-                (lava, demo_water),
+                (lava, terra_water),
                 tesserae_core::Side::First,
                 stone,
             ),
@@ -1160,10 +1160,10 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         loop {
             h.call();
             log.push_str(&h.log(0));
-            if log.contains("demo build applied") {
+            if log.contains("terra build applied") {
                 break;
             }
-            assert!(!log.contains("demo scenario"), "started before the build");
+            assert!(!log.contains("terra scenario"), "started before the build");
             let batch = h.backlog(0);
             assert!(batch <= 65_536, "batch of {batch} Voxels");
             sent += batch;
@@ -1216,7 +1216,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         assert_eq!(source.fluid, Some(tesserae_core::Fluid::source(lava)));
         assert_eq!(store.light_at([x, y + 1, z]).block(), 14, "lava lights");
         // The scenarios start on the finished build, then keep their time.
-        assert_eq!(log.matches("demo first tick:").count(), 1);
+        assert_eq!(log.matches("terra first tick:").count(), 1);
         // Removing sources where there are none is reported as rejected, so
         // the only rejections are the site's dry cells.
         let reported = |key: &str| -> u64 {
@@ -1227,10 +1227,10 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
                 .parse()
                 .unwrap()
         };
-        let (applied, rejected) = (reported("demo build applied="), reported("rejected="));
+        let (applied, rejected) = (reported("terra build applied="), reported("rejected="));
         assert_eq!(applied + rejected, total, "{log}");
         assert!(rejected <= 54 * 10 * 16 * by_size([1, 8, 64]), "{log}");
-        assert!(log.contains("demo scenario: sources placed, fuel lit"));
+        assert!(log.contains("terra scenario: sources placed, fuel lit"));
         let started = h.backlog(0);
         assert_eq!(started, by_size([6, 12, 36]));
         while h.backlog(0) > 0 {
@@ -1240,8 +1240,8 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         for (at, fluid) in [
             ([6.0, 29.0, -7.0], mud),
             ([9.0, 29.0, -7.0], lava),
-            ([19.0, 29.0, -7.0], demo_water),
-            ([22.0, 35.0, -7.0], demo_water),
+            ([19.0, 29.0, -7.0], terra_water),
+            ([22.0, 35.0, -7.0], terra_water),
         ] {
             let here = h.occupants(lifted(at));
             assert_eq!(
@@ -1266,7 +1266,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         }
         assert_eq!(
             h.occupants(lifted([-23.0, 30.0, -7.0])).fluid,
-            Some(tesserae_core::Fluid::source(demo_water))
+            Some(tesserae_core::Fluid::source(terra_water))
         );
         while !h.log(0).contains("source taken away") {
             h.call();
@@ -1282,7 +1282,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
             ([23.0, 30.0, -7.0], "no waterfall")
         };
         let falling = h.occupants(lifted(probe)).fluid;
-        assert_eq!(falling.map(|f| f.material), Some(demo_water), "{what}");
+        assert_eq!(falling.map(|f| f.material), Some(terra_water), "{what}");
         while h.backlog(0) > 0 {
             h.drain();
         }
@@ -1329,7 +1329,7 @@ fn demo_contract_content_build_and_scenarios_reach_real_voxels_and_light() {
         for _ in 0..8 {
             h.call();
         }
-        assert_eq!(h.backlog(0), 0, "the demo runs its scenarios once");
+        assert_eq!(h.backlog(0), 0, "Terra runs its scenarios once");
     }
 }
 
@@ -1634,9 +1634,9 @@ fn a_mismatched_line_or_an_unknown_name_fails_the_load() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
-/// The demo Game and the `fluids` guest loaded together, so lava, slime and
+/// the Terra Game and the `fluids` guest loaded together, so lava, slime and
 /// water share one set of tables.
-pub(in crate::server) fn demo_and_fluids(size: f32) -> LoadedMods {
+pub(in crate::server) fn terra_and_fluids(size: f32) -> LoadedMods {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let dir = root.join(format!(
@@ -1645,14 +1645,14 @@ pub(in crate::server) fn demo_and_fluids(size: f32) -> LoadedMods {
         NEXT.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = std::fs::remove_dir_all(&dir);
-    let demo = dir.join("games/demo");
+    let terra = dir.join("games/terra");
     let fluids = dir.join("mods/fluids");
-    std::fs::create_dir_all(&demo).unwrap();
+    std::fs::create_dir_all(&terra).unwrap();
     std::fs::create_dir_all(&fluids).unwrap();
-    for file in ["mod.toml", "demo.wasm"] {
+    for file in ["mod.toml", "terra.wasm"] {
         std::fs::copy(
-            root.join("games/demo/dist/games/demo").join(file),
-            demo.join(file),
+            root.join("games/terra/dist/games/terra").join(file),
+            terra.join(file),
         )
         .unwrap();
     }

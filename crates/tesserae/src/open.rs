@@ -85,11 +85,11 @@ impl Stage {
     }
 }
 
-struct Parts {
-    settings: WorldSettings,
-    loaded: server::mods::LoadedMods,
-    persistence: server::persistence::Persistence,
-    name: Option<String>,
+pub(crate) struct Parts {
+    pub settings: WorldSettings,
+    pub loaded: server::mods::LoadedMods,
+    pub persistence: server::persistence::Persistence,
+    pub name: Option<String>,
 }
 
 #[derive(Resource)]
@@ -108,7 +108,10 @@ impl Load {
 
 pub fn plugin(app: &mut App) {
     app.init_resource::<LastFailure>()
-        .add_systems(OnEnter(AppState::List), refresh_installed)
+        .add_systems(
+            OnEnter(AppState::List),
+            refresh_installed.run_if(not(resource_exists::<crate::dev::Run>)),
+        )
         .add_systems(
             Update,
             (
@@ -175,16 +178,39 @@ fn begin(mut commands: Commands, request: Res<OpenRequest>, args: Res<UserArgs>)
     commands.remove_resource::<OpenRequest>();
 }
 
+/// The defaults, except that a `dev` build reads its Voxel size from the environment.
+pub(crate) fn base_settings() -> WorldSettings {
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    return WorldSettings::from_env(|name| std::env::var(name).ok());
+    #[cfg(not(any(feature = "dev", feature = "profiling")))]
+    WorldSettings::default()
+}
+
+/// Opens a World from content that is already loaded, in place of reading a save. Runs while
+/// `Loading`, after the baseline a session is restored to was recorded, so teardown removes both.
+pub(crate) fn begin_prepared(commands: &mut Commands, parts: Parts) {
+    let stage = Arc::new(AtomicU8::new(Stage::PreparingWorld as u8));
+    let task = AsyncComputeTaskPool::get().spawn(async move { Ok(parts) });
+    commands.insert_resource(Opened {
+        from_list: false,
+        name: None,
+        folder: None,
+        direct: false,
+    });
+    commands.insert_resource(Load {
+        stage,
+        task: Some(task),
+        direct: false,
+        folder: None,
+    });
+}
+
 fn load(what: &What, user: &[OsString], stage: &AtomicU8) -> Result<Parts, String> {
     let opening = match what {
         What::Direct => server::persistence::Opening::from_env()?,
         What::Folder(folder) => server::persistence::Opening::from_folder(folder)?,
     };
-    #[cfg(any(feature = "dev", feature = "profiling"))]
-    let base = WorldSettings::from_env(|name| std::env::var(name).ok());
-    #[cfg(not(any(feature = "dev", feature = "profiling")))]
-    let base = WorldSettings::default();
-    let settings = opening.settings(base);
+    let settings = opening.settings(base_settings());
     let name = opening.display_name();
     let wanted = opening.pending_game().cloned();
     stage.store(Stage::LoadingGame as u8, Ordering::Relaxed);
@@ -450,7 +476,7 @@ mod tests {
         let sidecar = library::Sidecar {
             name: "Needs a Game".into(),
             game: Some(library::GameRef {
-                id: "demo".into(),
+                id: "terra".into(),
                 version: "0.1.0".into(),
             }),
             mods: Vec::new(),
@@ -471,7 +497,7 @@ mod tests {
         assert!(
             failure
                 .reason
-                .contains("Game `demo` 0.1.0 is not installed"),
+                .contains("Game `terra` 0.1.0 is not installed"),
             "{}",
             failure.reason
         );
@@ -531,12 +557,12 @@ mod tests {
         crate::session::testing::open(&mut app);
         app.world_mut()
             .write_message(crate::server::mods::ModDisabled {
-                name: "demo".into(),
+                name: "terra".into(),
                 reason: "trapped".into(),
             });
         assert!(until(&mut app, AppState::List));
         let failure = app.world().resource::<LastFailure>().0.as_ref().unwrap();
         assert_eq!(failure.folder, PathBuf::from("/worlds/Trapped"));
-        assert!(failure.reason.contains("demo") && failure.reason.contains("trapped"));
+        assert!(failure.reason.contains("terra") && failure.reason.contains("trapped"));
     }
 }

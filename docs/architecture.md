@@ -100,17 +100,17 @@ Orange is untrusted and sandboxed. Blue is ours. Dashed grey is third party.
 
 The engine owns how things behave; a Mod's Declaration says which Materials
 behave that way, and with what numbers. The engine has no water, lava, wood or
-mud; those are the demo Game's. Its only built-in Material is air. The Game
+mud; those are the Terra Game's. Its only built-in Material is air. The Game
 names the rock, soil and surface of its ground and the fluid filling its lakes
 ([ADR-0016](adr/0016-only-air-is-built-in.md)).
 
-| Behaviour              | The engine decides                                                      | Data that switches it on, and who declares it                    |
-| ---------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| A fluid flows          | Spreading, falling, receding and waterlogging, in metres and seconds    | A fluid row, from a Mod: the demo's water, lava and mud          |
-| A fluid puts out fire  | How touching fuel wets it, puts its fire out and keeps it from igniting | `extinguishes` on the fluid row, from a Mod: the demo's water    |
-| Lakes stand in valleys | Filling open air below a level with packed sources, in metres           | The Game's World parameters: a level and a declared fluid        |
-| Two fluids react       | How a Contact is found and applied whole or not at all                  | A reaction row, from a Mod: the demo's lava and water make stone |
-| Heat sets fuel alight  | Exposure through open space, ignition delay, burning and its residue    | A fluid's or a fuel's heat and a combustion row, from a Mod      |
+| Behaviour              | The engine decides                                                      | Data that switches it on, and who declares it                 |
+| ---------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
+| A fluid flows          | Spreading, falling, receding and waterlogging, in metres and seconds    | A fluid row, from a Mod: Terra's water, lava and mud          |
+| A fluid puts out fire  | How touching fuel wets it, puts its fire out and keeps it from igniting | `extinguishes` on the fluid row, from a Mod: Terra's water    |
+| Lakes stand in valleys | Filling open air below a level with packed sources, in metres           | The Game's World parameters: a level and a declared fluid     |
+| Two fluids react       | How a Contact is found and applied whole or not at all                  | A reaction row, from a Mod: Terra's lava and water make stone |
+| Heat sets fuel alight  | Exposure through open space, ignition delay, burning and its residue    | A fluid's or a fuel's heat and a combustion row, from a Mod   |
 
 A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See
 [ADR-0013](adr/0013-fluid-and-fire-live-beside-the-voxel.md) and
@@ -244,7 +244,7 @@ tesserae/
 │   ├── architecture.md         this file
 │   ├── positioning.md          vs Minecraft/Luanti — internal, not README
 │   └── adr/                    0001 wasm · 0002 client-server · 0003 voxel size
-│                               0004 demo game · 0005 asset root
+│                               0004 terra game · 0005 asset root
 │                               0006 shapes are table data
 │                               0007 streaming jobs · 0008 player pose
 │                               0009 materials are table data
@@ -308,7 +308,7 @@ tesserae/
 │           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
-├── games/demo/                 MIT WASI guest, only the WIT contract       ▸ 7
+├── games/terra/                 MIT WASI guest, only the WIT contract       ▸ 7
 ├── games/meadow/               a plain second Game, for side-by-side installs
 ├── assets/                     CC0 placeholder textures
 ├── LICENSE                     BSL 1.1 — blocked on the Change License check
@@ -330,3 +330,6 @@ World. It creates, renames and trashes only closed World folders, through core's
 `save::library`, which refuses any folder whose writer lock another process
 holds. Opening a World restarts the process, so the Server rule above holds for
 everything inside a World.
+
+Authors do not need this repository to make a Game or Mod: the
+[authoring guide](authoring-guide.md) and the starters are self-contained.

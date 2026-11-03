@@ -211,7 +211,7 @@ impl LodGenerators {
                     // The generator asks about a Voxel's floor, so a Voxel the ground barely
                     // enters is ground and a shallow lake drains. Lowering the surface and the
                     // lake by half a Voxel asks about its middle, as the downsample's vote does;
-                    // `next_up` gives the lake its ties, as the vote does (the demo's lake sits
+                    // `next_up` gives the lake its ties, as the vote does (Terra's lake sits
                     // on a level-3 Voxel's middle).
                     let half = voxel_m / 2.0;
                     let params = WorldgenParams {
@@ -699,7 +699,7 @@ pub(in crate::server) fn generate_coarse(
 /// How far [`seam_openings`] looks past a level's children, or `None` to keep every seam wall.
 /// Level 1's children are level 0's own Chunks. Above it they are made at the finer level's
 /// Voxel size but not downsampled as that level is, so their ground stands a finer Voxel or two
-/// off its own: a margin of one missed no opening at levels 2 and 3 over four demo-like
+/// off its own: a margin of one missed no opening at levels 2 and 3 over four terra-like
 /// terrains, but at level 3 on one only because a kept run covered the miss, so 3 takes two.
 /// At 4 and 5 every margin that missed nothing saved under 3% of the walls.
 fn seam_margin(level: u32) -> Option<SeamMargin> {

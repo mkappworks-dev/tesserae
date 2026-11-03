@@ -6049,10 +6049,12 @@ version = "0.0.0"
 dependencies = [
  "bevy",
  "libc",
+ "png",
  "serde",
  "serde_json",
  "tesserae-core",
  "tesserae-mods",
+ "toml",
  "trash",
  "wgpu",
 ]
@@ -6079,6 +6081,7 @@ dependencies = [
  "dirs",
  "futures-lite",
  "libc",
+ "png",
  "rand_core",
  "serde",
  "serde_json",

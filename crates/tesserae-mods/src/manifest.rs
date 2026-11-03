@@ -18,14 +18,15 @@ pub struct Manifest {
     pub api: String,
     #[serde(default)]
     pub root: bool,
-    pub wasm: String,
+    pub wasm: Option<String>,
+    pub declaration: Option<String>,
     #[serde(default)]
     pub depends: Vec<String>,
     #[serde(default)]
     pub limits: ManifestLimits,
 }
 
-/// A Mod found on disk with a valid Manifest; its component is not yet read.
+/// A Mod found on disk with a valid Manifest; its content is not yet read.
 #[derive(Debug, Clone)]
 pub struct Found {
     pub manifest: Manifest,
@@ -34,19 +35,41 @@ pub struct Found {
 }
 
 impl Found {
-    /// The component's path, re-checked for escaping the Mod's directory.
+    /// A project folder as an author keeps it: any folder holding a `mod.toml`, installed or not.
+    pub fn read(dir: &Path) -> Result<Found, ModError> {
+        let name = dir
+            .file_name()
+            .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+        let path = dir.join("mod.toml");
+        let manifest_bytes = fs::read(&path).map_err(|source| ModError::Io {
+            who: name.clone(),
+            path,
+            source,
+        })?;
+        let found = Found {
+            manifest: Manifest::parse(&name, &manifest_bytes)?,
+            dir: dir.to_path_buf(),
+            manifest_bytes,
+        };
+        found.source_path()?;
+        Ok(found)
+    }
+
+    /// Legacy alias for the selected source's confined path.
     pub fn component_path(&self) -> Result<PathBuf, ModError> {
-        let path = self.dir.join(&self.manifest.wasm);
-        // A missing file is not an escape; reading it reports that.
+        self.source_path()
+    }
+
+    /// Resolves either Declaration source inside the installed Mod directory.
+    pub fn source_path(&self) -> Result<PathBuf, ModError> {
+        let (field, name) = self.manifest.source();
+        let path = self.dir.join(name);
         if let (Ok(real), Ok(base)) = (path.canonicalize(), self.dir.canonicalize())
             && !real.starts_with(&base)
         {
             return Err(manifest_error(
                 &self.manifest.id,
-                format!(
-                    "wasm `{}` resolves outside the mod's directory",
-                    self.manifest.wasm
-                ),
+                format!("{field} `{name}` resolves outside the mod's directory"),
             ));
         }
         Ok(path)
@@ -94,7 +117,19 @@ impl Manifest {
                 supported: SUPPORTED_API.to_vec(),
             });
         }
-        self.validate_wasm_path()?;
+        match (&self.wasm, &self.declaration) {
+            (Some(_), None) | (None, Some(_)) => {}
+            _ => {
+                return Err(manifest_error(
+                    id,
+                    "select exactly one source: wasm or declaration".into(),
+                ));
+            }
+        }
+        if self.declaration.is_some() && self.api != "0.3" {
+            return Err(manifest_error(id, "declaration requires api 0.3".into()));
+        }
+        self.validate_source_path()?;
         for dep in &self.depends {
             if !valid_id(dep) {
                 return Err(manifest_error(
@@ -106,19 +141,23 @@ impl Manifest {
         Ok(())
     }
 
-    fn validate_wasm_path(&self) -> Result<(), ModError> {
-        let wasm = Path::new(&self.wasm);
-        let plain =
-            !self.wasm.is_empty() && wasm.components().all(|c| matches!(c, Component::Normal(_)));
-        if plain {
+    pub fn source(&self) -> (&'static str, &str) {
+        match (&self.wasm, &self.declaration) {
+            (Some(path), None) => ("wasm", path),
+            (None, Some(path)) => ("declaration", path),
+            _ => unreachable!("validated Manifest selects exactly one source"),
+        }
+    }
+
+    fn validate_source_path(&self) -> Result<(), ModError> {
+        let (field, name) = self.source();
+        let path = Path::new(name);
+        if !name.is_empty() && path.components().all(|c| matches!(c, Component::Normal(_))) {
             Ok(())
         } else {
             Err(manifest_error(
                 &self.id,
-                format!(
-                    "wasm `{}` must be a relative path inside the mod's directory",
-                    self.wasm
-                ),
+                format!("{field} `{name}` must be a relative path inside the mod's directory"),
             ))
         }
     }
@@ -168,7 +207,20 @@ pub struct Scan {
     pub rejected: Vec<Rejected>,
 }
 
+/// The Game a World with no record opens: `cargo dev`, an ephemeral World and the empty create
+/// form. Installed ids never decide it, so adding a Game cannot change it.
+pub const DEFAULT_GAME: &str = "terra";
+
 impl Scan {
+    /// [`DEFAULT_GAME`], or the first installed Game when that one is absent (an install that
+    /// ships a different Game set).
+    pub fn default_game(&self) -> Option<&Found> {
+        self.games
+            .iter()
+            .find(|f| f.manifest.id == DEFAULT_GAME)
+            .or_else(|| self.games.first())
+    }
+
     pub fn find(&self, id: &str) -> Option<&Found> {
         self.games
             .iter()
@@ -314,7 +366,7 @@ fn read_folder(folder: &Path, role: Role) -> Result<Option<Found>, String> {
         dir: folder.to_path_buf(),
         manifest_bytes,
     };
-    entry.component_path().map_err(|e| e.to_string())?;
+    entry.source_path().map_err(|e| e.to_string())?;
     Ok(Some(entry))
 }
 
@@ -382,6 +434,25 @@ pub fn migrate_legacy_games(mods_dir: &Path) -> Vec<Migration> {
         });
     }
     outcomes
+}
+
+/// `projects` plus every installed Mod or Game they need, transitively. A project shadows an
+/// installed item of its id; a dependency found nowhere is left for [`plan`] to report.
+pub fn with_dependencies(projects: Vec<Found>, installed: Scan) -> Vec<Found> {
+    let mut chosen = projects;
+    let mut at = 0;
+    while at < chosen.len() {
+        for dep in chosen[at].manifest.depends.clone() {
+            if chosen.iter().any(|f| f.manifest.id == dep) {
+                continue;
+            }
+            if let Some(found) = installed.find(&dep) {
+                chosen.push(found.clone());
+            }
+        }
+        at += 1;
+    }
+    chosen
 }
 
 /// Load order: dependencies first, then by id, whatever order `found` is in.

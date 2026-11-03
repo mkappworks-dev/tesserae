@@ -87,7 +87,7 @@ pub struct Untrusted {
 /// What the World list can offer, found without running any Mod code.
 #[derive(Resource)]
 pub struct Installed {
-    /// The first installed Game: what a World with no record, and the empty form, default to.
+    /// [`tesserae_mods::DEFAULT_GAME`]: what a World with no record, and the empty form, default to.
     pub game: Option<GameRef>,
     /// Trust still to grant for the set about to open; see [`Installed::prepare_trust`].
     pub untrusted: Vec<Untrusted>,
@@ -110,10 +110,11 @@ impl Installed {
             id: f.manifest.id.clone(),
             version: f.manifest.version.clone(),
         };
+        let default = scan.default_game().map(item);
         let games: Vec<_> = scan.games.iter().map(item).collect();
         let mods: Vec<_> = scan.mods.iter().map(item).collect();
         Self {
-            game: games.first().cloned(),
+            game: default,
             untrusted: Vec::new(),
             error: None,
             games,
@@ -320,7 +321,8 @@ fn test_manifest(id: &str) -> tesserae_mods::Manifest {
         version: "1".into(),
         api: "0.3".into(),
         root: false,
-        wasm: "m.wasm".into(),
+        wasm: Some("m.wasm".into()),
+        declaration: None,
         depends: Vec::new(),
         limits: Default::default(),
     }
@@ -331,7 +333,7 @@ mod tests {
     use super::*;
 
     fn with_mods(deps: &[(&str, &[&str])]) -> Installed {
-        let mut installed = Installed::fake(Some(("demo", "0.1.0")), &[]);
+        let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[]);
         for (id, depends) in deps {
             installed = installed.with_mod(id, depends);
         }
@@ -340,19 +342,24 @@ mod tests {
 
     #[test]
     fn picking_a_mod_pulls_in_its_dependencies_in_install_order() {
-        let installed = with_mods(&[("a", &["b"]), ("b", &["c", "demo"]), ("c", &[]), ("d", &[])]);
+        let installed = with_mods(&[
+            ("a", &["b"]),
+            ("b", &["c", "terra"]),
+            ("c", &[]),
+            ("d", &[]),
+        ]);
         let picked = ["a".to_string()].into();
         assert_eq!(installed.closure(&picked), ["a", "b", "c"]);
     }
 
     #[test]
     fn a_mod_with_a_missing_dependency_is_blocked_with_the_reason() {
-        let installed = with_mods(&[("a", &["b"]), ("b", &["ghost"]), ("ok", &["demo"])]);
+        let installed = with_mods(&[("a", &["b"]), ("b", &["ghost"]), ("ok", &["terra"])]);
         assert_eq!(
-            installed.blocked("demo", "a").as_deref(),
+            installed.blocked("terra", "a").as_deref(),
             Some("needs `ghost`, which is not installed")
         );
-        assert_eq!(installed.blocked("demo", "ok"), None);
+        assert_eq!(installed.blocked("terra", "ok"), None);
         assert!(installed.blocked("other", "ok").is_some());
     }
 

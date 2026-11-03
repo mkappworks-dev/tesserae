@@ -18,13 +18,13 @@ fn mapping(solid: u16, water: u16, shape: u8) -> Mapping {
     Mapping {
         materials: [
             (0, "core:air"),
-            (solid, "demo:stone"),
-            (water, "demo:water"),
+            (solid, "terra:stone"),
+            (water, "terra:water"),
         ]
         .into_iter()
         .map(|(id, n)| (id, n.to_owned()))
         .collect(),
-        shapes: [(0, "core:cube"), (shape, "demo:shape")]
+        shapes: [(0, "core:cube"), (shape, "terra:shape")]
             .into_iter()
             .map(|(id, n)| (id, n.to_owned()))
             .collect(),
@@ -43,7 +43,7 @@ pub(super) fn fixture() -> Commit {
         parameters: Generation::capture(crate::WorldgenParams::default(), &m).unwrap(),
         content: Content {
             mods: vec![RequiredMod {
-                id: "demo".into(),
+                id: "terra".into(),
                 version: "1".into(),
                 contract: "0.3".into(),
                 game: true,
@@ -223,7 +223,7 @@ fn incompatible_content_refuses_writer_without_touching_directory() {
         before
     );
     installed = c.content.clone();
-    installed.materials.remove("demo:water");
+    installed.materials.remove("terra:water");
     assert!(matches!(
         recover(&d.0, &installed),
         Err(Error::Incompatible(_))
@@ -486,7 +486,7 @@ fn retired_or_ambiguous_runtime_mappings_are_refused() {
     m.materials.insert(1, "retired".into());
     assert!(m.validate().is_err());
     m.materials.remove(&1);
-    m.materials.insert(10, "demo:stone".into());
+    m.materials.insert(10, "terra:stone".into());
     assert!(m.validate().is_err());
 }
 

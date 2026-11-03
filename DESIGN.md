@@ -369,7 +369,7 @@ closest competing choice if BSL's undefined "production use" becomes a problem.
   new BSD or dedicate to the public domain; a CLA is the mainstream BSL practice
   and what we use.)
 - Luanti is LGPL-2.1+: its ideas are usable, its code is not.
-- `games/demo/` and `assets/` are deliberately **not** BSL — see ADR-0004.
+- `games/terra/` and `assets/` are deliberately **not** BSL — see ADR-0004.
 
 ## Road to version 1.0
 
@@ -448,8 +448,8 @@ multiplayer is a later transport swap, not a rewrite.
    universal latency bound; presentation work differs, so live CPU totals are
    not equal-work throughput. The full fixed-tick metric also replaces the old
    streaming-only frame sum. Evidence and qualifications are in tickets 04, 05
-   and 07 of `.scratch/2026-10-14-phase-7-mod-host/`. The MIT demo exercises the
-   contract at 1 m and 0.5 m without a direct engine dependency.
+   and 07 of `.scratch/2026-10-14-phase-7-mod-host/`. The MIT terra exercises
+   the contract at 1 m and 0.5 m without a direct engine dependency.
 8. Fluid simulation. **Done.** Sources feed flowing fluid that falls first and
    spreads a declared reach in metres, renewing it after each declared drop and
    receding without supply; water waterlogs Shapes through Voids derived from
@@ -468,24 +468,23 @@ multiplayer is a later transport swap, not a rewrite.
    `EMITTERS_PER_STEP` 4, an Agenda of 16384 entries plus a reserve of 4096,
    4096 Voxels rescanned a step, 1024 evaluations a Job and 4 Jobs in flight,
    and a light solve made on the tick after `SPOILT_BEFORE_ON_TICK` (4) spoilt
-   solves. The demo's water reaches 7 m at 4 m/s sideways and 8 m/s down, its
-   lava 3 m at 0.75 and 1.5 m/s. Water was built in at the time and is the
-   demo's own since step 8.1
-   ([ADR-0015](docs/adr/0015-water-is-game-content.md)). **These Server figures
-   are at the `dev` profile** (opt-level 1, what `cargo dev` runs), which
-   overstates a release build, and were taken on a shared host at one-minute
-   loads of 1.5 to 7.6: the worst main-thread tick was 11.2 ms of thread CPU
-   (lava draining at 0.25 m) against the 15.625 ms of a 64 Hz tick, with no tick
-   over it in any scenario and every player Edit landing on its tick. At 8
-   emitters a lava step reached 13.75 ms, which is why the bound is 4. In
-   release a flow evaluation costs 0.3 to 0.5 us, a fuel evaluation up to 8.9 us
-   at 0.25 m, and a Chunk-sized rescan about 9 ms of worker CPU. A dry,
-   unburning Chunk's meshing is 15 to 45% faster than before the phase and its
-   bulk light within noise of it, in release thread CPU; registering the
-   built-in Shapes costs 8 to 15% more (4.8 ms), which is the Void derivation
-   itself. A quota bounds work, not time. Evidence: tickets 09 and 11 of
-   `.scratch/2026-10-22-phase-8-fluid-simulation/`, which the MIT demo exercises
-   at all three sizes.
+   solves. Terra's water reaches 7 m at 4 m/s sideways and 8 m/s down, its lava
+   3 m at 0.75 and 1.5 m/s. Water was built in at the time and is the terra's
+   own since step 8.1 ([ADR-0015](docs/adr/0015-water-is-game-content.md)).
+   **These Server figures are at the `dev` profile** (opt-level 1, what
+   `cargo dev` runs), which overstates a release build, and were taken on a
+   shared host at one-minute loads of 1.5 to 7.6: the worst main-thread tick was
+   11.2 ms of thread CPU (lava draining at 0.25 m) against the 15.625 ms of a 64
+   Hz tick, with no tick over it in any scenario and every player Edit landing
+   on its tick. At 8 emitters a lava step reached 13.75 ms, which is why the
+   bound is 4. In release a flow evaluation costs 0.3 to 0.5 us, a fuel
+   evaluation up to 8.9 us at 0.25 m, and a Chunk-sized rescan about 9 ms of
+   worker CPU. A dry, unburning Chunk's meshing is 15 to 45% faster than before
+   the phase and its bulk light within noise of it, in release thread CPU;
+   registering the built-in Shapes costs 8 to 15% more (4.8 ms), which is the
+   Void derivation itself. A quota bounds work, not time. Evidence: tickets 09
+   and 11 of `.scratch/2026-10-22-phase-8-fluid-simulation/`, which the MIT
+   terra exercises at all three sizes.
 
    **Step 8.1: water is Game content, and the player places anything declared.
    Done.** At this step the engine built in no fluid and retired id 7; step 8.2
@@ -493,12 +492,12 @@ multiplayer is a later transport swap, not a rewrite.
    with no Game became dry ([ADR-0015](docs/adr/0015-water-is-game-content.md)).
    A Game's lakes name their fluid in contract line 0.3, which 0.2 and 0.1
    components reach through adapters; a 0.2 Game that asks for standing water
-   opens dry with a warning. The demo declares `demo:water` and lakes at 25.5 m,
+   opens dry with a warning. Terra declares `terra:water` and lakes at 25.5 m,
    clear of its stage. A player ignites fuel and puts fire out through the Edit
    path, under the same rules and messages as a Mod's Commands, and a 0.3 Mod
    sees both as Edits. The hotbar is built from a content catalogue the Server
    publishes, and a Tab menu puts any declared solid in any of its Shapes, any
-   fluid or fire into a slot. `cargo dev` loads the in-repo demo once it is
+   fluid or fire into a slot. `cargo dev` loads the in-repo Terra once it is
    built, trusted for that run only. Against main, interleaved thread-CPU-time
    runs put the meshing, collide, LOD and fluids benches within noise; the one
    steady outlier, `greedy_mesh/terrain_water` at +7%, is code layout, since its
@@ -508,7 +507,7 @@ multiplayer is a later transport swap, not a rewrite.
    **Step 8.2: no built-in content but air. Done.** Air is the only engine
    Material; ids 1 to 7 are retired and Mod ids still start at 8. The Game names
    optional ground on the amended unreleased 0.3 contract; older lines warn and
-   have no ground. The demo declares its solids. Hotbar defaults and the gallery
+   have no ground. Terra declares its solids. Hotbar defaults and the gallery
    read declared content. A single remove action, an item held outside the
    slots, square menu and hotbar model tiles, and Server-answered aim previews
    complete the player's content controls. Tiles share a content-only model
@@ -531,7 +530,7 @@ multiplayer is a later transport swap, not a rewrite.
    sun, a day/night cycle, and cave lighting that reads as dark and lit by
    torches instead of flat ambient. Sky and time of day are World or Game
    settings, not a function of the seed. Biomes are generator behaviour and
-   belong to step 13; they are listed there because they change what the sky and
+   belong to step 14; they are listed there because they change what the sky and
    fog should be.
 
 ### Steps 10 to 27: engine systems and game content
@@ -542,41 +541,49 @@ ships no content: ADR-0016 keeps air as the only built-in Material. The
 controls, movement, save, camera and input work already in flight is tracked in
 `.scratch/2026-10-27-gameplay-performance-and-controls` and is not repeated.
 
-| #   | Step                    | Engine adds                                                                        | Game or Mod supplies               | Depends on | Status          |
-| --- | ----------------------- | ---------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
-| 10  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21) | Which tools exist and what they do | -          | First tool done |
-| 11  | Chat and commands       | Command registry, parser, permissions                                              | The commands                       | -          | Not started     |
-| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                     | Item definitions                   | -          | Not started     |
-| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                       | Biomes, ores, biome caves          | -          | Not started     |
-| 14  | Audio                   | Audio engine, Server-driven events, mixing                                         | Sound and music assets             | -          | Not started     |
-| 15  | Modding SDK             | Mod loading from a folder, reload loop, WIT versioning, contract frozen for 1.0    | Example Game                       | -          | Not started     |
-| 16  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19) | Stack sizes, item rules            | 10, 12     | Not started     |
-| 17  | Crafting                | Recipe schema, station interaction, UI host                                        | Recipes, stations                  | 16         | Not started     |
-| 18  | Weather                 | Weather state and tick, particles, sky hooks                                       | Weather types, climate rules       | 13         | Not started     |
-| 19  | Plants                  | Growth on the Server tick, placement rules, harvesting                             | Plant data                         | 13         | Not started     |
-| 20  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view         | Map style, markers                 | 13         | Not started     |
-| 21  | Structures              | Template format, deterministic placement by worldgen and tools                     | Templates                          | 13         | Not started     |
-| 22  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                 | Numbers and rules                  | 16         | Not started     |
-| 23  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport            | Behaviours, spawn tables           | 12, 13, 22 | Not started     |
-| 24  | NPCs                    | Persistent identity, dialogue and trade plumbing                                   | NPC definitions, dialogue          | 16, 23     | Not started     |
-| 25  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)             | Machine parts, logic components    | 12, 21     | Not started     |
-| 26  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                | Content made with them             | 15, 21     | Not started     |
-| 27  | Release hardening       | macOS bundle, first-run, save migration tests, diagnostics, CI budgets             | -                                  | all        | Not started     |
+| #   | Step                    | Engine adds                                                                                       | Game or Mod supplies               | Depends on | Status          |
+| --- | ----------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
+| 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Done            |
+| 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done |
+| 12  | Chat and commands       | Command registry, parser, permissions                                                             | The commands                       | -          | Not started     |
+| 13  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Not started     |
+| 14  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, biome caves          | -          | Not started     |
+| 15  | Audio                   | Audio engine, Server-driven events, mixing                                                        | Sound and music assets             | -          | Not started     |
+| 16  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19)                | Stack sizes, item rules            | 11, 13     | Not started     |
+| 17  | Crafting                | Recipe schema, station interaction, UI host                                                       | Recipes, stations                  | 16         | Not started     |
+| 18  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 14         | Not started     |
+| 19  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 14         | Not started     |
+| 20  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 14         | Not started     |
+| 21  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 14         | Not started     |
+| 22  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 16         | Not started     |
+| 23  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                           | Behaviours, spawn tables           | 13, 14, 22 | Not started     |
+| 24  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                  | NPC definitions, dialogue          | 16, 23     | Not started     |
+| 25  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                            | Machine parts, logic components    | 13, 21     | Not started     |
+| 26  | Creation tools          | Structure, material and texture editors, screenshot and replay mode                               | Content made with them             | 10, 21     | Not started     |
+| 27  | Release hardening       | Final 1.0 contract freeze, macOS bundle, first-run, save migration tests, diagnostics, CI budgets | -                                  | all        | Not started     |
 
 Notes:
 
-- **Step 10** is done for the first tool. Use is a Server intent of its own,
+- **Step 11** is done for the first tool. Use is a Server intent of its own,
   answered and never applied, that enters no history; a tool is a hand state, so
   holding one makes Place and Remove its verbs and leaves undo and redo live. A
   Game declares tools once, as a name and a closed kind in the unreleased 0.3
   Declaration, and the Server runs the kind in native code, so no Mod is called
-  when a tool is used. The demo declares one, Measure: it reads two corners of
+  when a tool is used. Terra declares one, Measure: it reads two corners of
   drawn Shapes in metres and Voxels and edits nothing. Taking a Voxel into an
   inventory is step 16, and using a Voxel (a door, a container) is later work.
-- **Step 13** feeds the sky and fog colours from step 9. A World pins its
+- **Step 14** feeds the sky and fog colours from step 9. A World pins its
   generator version so a new biome never changes an existing World's terrain for
   the same seed.
-- **Step 15** is the gate for "ready for Mods".
+- **Step 10** is the gate for "ready for Mods" and has no dependency on the
+  later gameplay systems. Folder loading and versioned WIT contracts already
+  exist; this step completes the authoring workflow, starting with data-only
+  Mods. Its tickets are built and checked by tests, including both starters
+  copied outside the checkout (`docs/authoring-guide.md`), and the
+  edit-and-restart loop was run by hand in the real window for a data change, a
+  Rust change, a failure and its correction (ticket 08). It establishes how
+  contracts evolve compatibly while later systems add APIs. The final 1.0
+  contract freeze belongs to step 27, after those systems are implemented.
 - **Step 25** is the largest unknown in 1.0. Machines move as a unit, so they
   need collision, lighting and meshing outside the Chunk grid, Server-owned
   motion that composes with the Player's flight and physics movement, and a save
@@ -655,9 +662,9 @@ Not blocking 1.0, in rough order of value:
 - **Reach is configurable at load time.** Step 7 resolves the step-6 loose end
   through the Game's Declaration: full detail 32–512 m and LOD reach from that
   radius to 8192 m. Runtime changes remain deferred; tables and view parameters
-  are fixed once the World opens. The demo requests 160/3000 m, below the
-  engine's 4096 m default LOD reach; its distant capture shows beyond the
-  default 192 m full-detail radius, not beyond default LOD reach.
+  are fixed once the World opens. Terra requests 160/3000 m, below the engine's
+  4096 m default LOD reach; its distant capture shows beyond the default 192 m
+  full-detail radius, not beyond default LOD reach.
 - **Mod host follow-ups are explicit.** No World read until a batched Snapshot
   API; no bulk write until relight can run once per Chunk without breaking Edit
   invariants; no save-time tombstones or missing-Mod migration; no compile
@@ -672,7 +679,7 @@ Not blocking 1.0, in rough order of value:
 - **Fluid and fire have known limits, each a later decision.** A fluid that is
   opaque and emits nothing draws its partial surfaces, and the Shapes it fills,
   unlit, because light is one value per Voxel; lava emits, and water and the
-  demo's mud are translucent. Nothing climbs inside Shape geometry: water on a
+  terra's mud are translucent. Nothing climbs inside Shape geometry: water on a
   floor does not run up into a slab's or a stair's Void beside it, and a lip is
   not modelled. Level 1 is a mip-like volume vote, so a one-Voxel stream that
   shares a coarse Voxel with its floor is lost to the stone, waterlogged water
@@ -702,19 +709,20 @@ Not blocking 1.0, in rough order of value:
   none. A fluid is not solid to a body or the edit ray (`MaterialDef::solid`),
   and leaves are cut out on a pass of their own. The Client's hotbar is a
   stopgap.
-- **Data-only Mods are the agreed next session.** A Declaration read from a data
-  file beside `mod.toml`, with no component, through the same validation path.
-  Most of a Game's `declare` is data, and since step 8.1 the demo carries more
-  of it. A guest SDK crate was the alternative, and would amend
-  [ADR-0004](docs/adr/0004-demo-game-in-repo-real-game-out.md)'s boundary for
-  the demo.
+- **Data-only Mods start step 10 and are the agreed next session.** A
+  Declaration read from a data file beside `mod.toml`, with no component,
+  through the same validation path. Most of a Game's `declare` is data, and
+  since step 8.1 Terra carries more of it. A guest SDK crate was the
+  alternative, and would amend
+  [ADR-0004](docs/adr/0004-terra-game-in-repo-real-game-out.md)'s boundary for
+  Terra.
 - **Step 8.1 left these untested or unmeasured.** A trackpad's scroll adds up to
   one hotbar slot per 100 px (`PIXELS_PER_NOTCH`), a guess never tried on
-  hardware. With its lakes the demo's burning row at 1 m shows at 13 s what a
-  World without them shows at 12 s, and the two agree by 40 s; the gallery makes
-  no difference. Generated lakes are rescanned once as their Chunks arrive,
-  under the same Agenda quota as everything else, which is the likely reason the
-  first fuel evaluations wait. No rule changes; a quota bounds work, not time.
+  hardware. With its lakes Terra's burning row at 1 m shows at 13 s what a World
+  without them shows at 12 s, and the two agree by 40 s; the gallery makes no
+  difference. Generated lakes are rescanned once as their Chunks arrive, under
+  the same Agenda quota as everything else, which is the likely reason the first
+  fuel evaluations wait. No rule changes; a quota bounds work, not time.
 - **The Server advances the Player's body.** Fixed-step flight and physics use
   core Shape collision in metres. Unknown terrain blocks physics; embedded mode
   entry is refused without relocation. Player position, mode and view persist.
