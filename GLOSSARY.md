@@ -18,6 +18,9 @@ side under `games/`; a World uses exactly one.
 entities, recipes, worldgen parameters, assets. Installed under `mods/`; a World
 freezes the set chosen at Create, dependencies included.
 
+**Data-only Mod** — a Mod whose Declaration is supplied as data, with no guest
+code. It may be the World's Game or add content alongside other Mods.
+
 **Look pack** — a Mod that supplies rendering appearance only: materials and
 post-process settings. The equivalent of a Minecraft shaderpack.
 

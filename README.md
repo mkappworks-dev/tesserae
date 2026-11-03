@@ -9,10 +9,11 @@ Game in `games/demo/`, the starting point for writing your own.
 ## Status: early, and not usable for anything yet
 
 Steps **1 to 8 of 27** in [DESIGN.md](DESIGN.md)'s build order are done, and
-step 10 (use and a first tool) has started. `cargo run` opens a World list; a
-World is streamed and generated, and you can fly or walk around it, swim, edit
-it and save it. Keyboard and mouse, a gamepad and, on Windows and Linux, a
-touchscreen all play. The demo Game adds flowing water, lava and fire to it.
+step 11 (use and a first tool) has started. The Modding SDK is step 10, starting
+with data-only Mods. `cargo run` opens a World list; a World is streamed and
+generated, and you can fly or walk around it, swim, edit it and save it.
+Keyboard and mouse, a gamepad and, on Windows and Linux, a touchscreen all play.
+The demo Game adds flowing water, lava and fire to it.
 
 | works today                                           | not written yet              |
 | ----------------------------------------------------- | ---------------------------- |
