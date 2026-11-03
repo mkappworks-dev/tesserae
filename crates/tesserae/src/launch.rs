@@ -190,6 +190,20 @@ impl Installed {
         self
     }
 
+    #[cfg(test)]
+    pub fn with_game_depends(mut self, depends: &[&str]) -> Self {
+        let id = self.game.as_ref().map(|g| g.id.clone()).unwrap();
+        let mut manifest = test_manifest(&id);
+        manifest.root = true;
+        manifest.depends = depends.iter().map(|d| d.to_string()).collect();
+        self.found.push(tesserae_mods::Found {
+            manifest,
+            dir: PathBuf::new(),
+            manifest_bytes: Vec::new(),
+        });
+        self
+    }
+
     /// Finds which of `ids` lack a Trust grant for their exact bytes. Hashing waits until a World
     /// is about to open so the scan stays cheap.
     pub fn prepare_trust(&mut self, ids: &[String]) -> Result<(), String> {
@@ -242,6 +256,43 @@ impl Installed {
             .filter(|m| out.contains(&m.id))
             .map(|m| m.id.clone())
             .collect()
+    }
+
+    /// The Mods `game` names in `depends`, and theirs: what a World made with it cannot do without.
+    pub fn required(&self, game: &str) -> Vec<String> {
+        let direct = self.depends_of(game).iter().cloned().collect();
+        self.closure(&direct)
+    }
+
+    /// [`Installed::closure`] of `picked` and everything `game` requires.
+    pub fn closure_for(
+        &self,
+        game: &str,
+        picked: &std::collections::BTreeSet<String>,
+    ) -> Vec<String> {
+        let mut all = picked.clone();
+        all.extend(self.required(game));
+        self.closure(&all)
+    }
+
+    /// What `game` depends on that is not installed, directly or through a Mod it needs.
+    pub fn missing(&self, game: &str) -> Vec<String> {
+        let mut out = std::collections::BTreeSet::new();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut todo = vec![game];
+        while let Some(next) = todo.pop() {
+            if !seen.insert(next) {
+                continue;
+            }
+            for dep in self.depends_of(next) {
+                if self.mods.iter().any(|m| &m.id == dep) {
+                    todo.push(dep);
+                } else {
+                    out.insert(dep.clone());
+                }
+            }
+        }
+        out.into_iter().collect()
     }
 
     /// Why a Mod cannot be used with `game`: a dependency that is neither that Game nor an
@@ -298,19 +349,20 @@ impl Installed {
         out
     }
 
-    /// Records Trust for the first untrusted Mod's exact bytes.
-    pub fn grant_first(&mut self) -> Result<(), String> {
-        if self.untrusted.is_empty() {
-            return Ok(());
-        }
-        let first = self.untrusted.remove(0);
+    /// Records Trust for every untrusted item's exact bytes, in one write.
+    pub fn grant_all(&mut self) -> Result<(), String> {
         let Some(trust_file) = &self.trust_file else {
+            self.untrusted.clear();
             return Ok(());
         };
         let mut trust = tesserae_mods::Trust::load(trust_file);
-        trust
-            .grant_exact(&first.found, &first.sha256)
-            .map_err(|e| e.to_string())
+        for item in &self.untrusted {
+            trust
+                .grant_exact(&item.found, &item.sha256)
+                .map_err(|e| e.to_string())?;
+        }
+        self.untrusted.clear();
+        Ok(())
     }
 }
 
@@ -361,6 +413,27 @@ mod tests {
         );
         assert_eq!(installed.blocked("terra", "ok"), None);
         assert!(installed.blocked("other", "ok").is_some());
+    }
+
+    #[test]
+    fn a_games_dependencies_are_required_through_their_own_and_a_missing_one_is_named() {
+        let installed = with_mods(&[
+            ("strata", &[]),
+            ("waters", &[]),
+            ("hearth", &["strata", "waters"]),
+            ("glassworks", &[]),
+        ])
+        .with_game_depends(&["hearth"]);
+        assert_eq!(installed.required("terra"), ["strata", "waters", "hearth"]);
+        let picked = ["glassworks".to_string()].into();
+        assert_eq!(
+            installed.closure_for("terra", &picked),
+            ["strata", "waters", "hearth", "glassworks"]
+        );
+        assert!(installed.missing("terra").is_empty());
+
+        let lacking = with_mods(&[("strata", &[])]).with_game_depends(&["strata", "ghost"]);
+        assert_eq!(lacking.missing("terra"), ["ghost"]);
     }
 
     fn args(list: &[&str]) -> Vec<OsString> {

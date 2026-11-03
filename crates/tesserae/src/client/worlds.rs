@@ -624,7 +624,7 @@ fn handle(
                     continue;
                 }
                 if !l.form.mods.remove(&m.id) {
-                    let needed = installed.closure(&l.form.mods);
+                    let needed = installed.closure_for(&game, &l.form.mods);
                     // A dependency of another pick is locked on; ticking it by hand adds nothing.
                     if !needed.contains(&m.id) {
                         l.form.mods.insert(m.id.clone());
@@ -657,7 +657,7 @@ fn handle(
                 let Screen::Trust(next) = l.screen.clone() else {
                     continue;
                 };
-                if let Err(e) = installed.grant_first() {
+                if let Err(e) = installed.grant_all() {
                     l.problem = Some(format!("Could not record Trust: {e}"));
                     l.version += 1;
                     continue;
@@ -726,10 +726,11 @@ fn validate(form: &Form) -> Result<(String, u64), String> {
 
 /// The Game and every Mod, dependencies included, a World made from this form would load.
 fn chosen_ids(form: &Form, installed: &Installed) -> Vec<String> {
-    form.game
-        .iter()
-        .cloned()
-        .chain(installed.closure(&form.mods))
+    let Some(game) = &form.game else {
+        return Vec::new();
+    };
+    std::iter::once(game.clone())
+        .chain(installed.closure_for(game, &form.mods))
         .collect()
 }
 
@@ -745,8 +746,19 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         l.show(Screen::Create);
         return;
     };
+    let missing = installed.missing(&game.id);
+    if !missing.is_empty() {
+        l.form.problem = Some(format!(
+            "{} needs {}, which {} not installed.",
+            ui::title(&game.id),
+            missing.join(", "),
+            if missing.len() == 1 { "is" } else { "are" }
+        ));
+        l.show(Screen::Create);
+        return;
+    }
     let mods: Vec<_> = installed
-        .closure(&l.form.mods)
+        .closure_for(&game.id, &l.form.mods)
         .iter()
         .filter_map(|id| installed.mods.iter().find(|m| &m.id == id))
         .map(|m| library::ModRef {
@@ -1476,11 +1488,19 @@ fn game_and_mods(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed
     if !installed.mods.is_empty() {
         label(col, "Mods");
     }
-    let locked = installed.closure(&f.mods);
+    let locked = installed.closure_for(game, &f.mods);
+    let required = installed.required(game);
     for (i, m) in installed.mods.iter().enumerate() {
         let name = format!("{} {}", ui::title(&m.id), m.version);
         if let Some(why) = installed.blocked(game, &m.id) {
             ui::text(col, format!("{name} · unavailable: {why}"), 12.0, ui::MUTED);
+        } else if required.contains(&m.id) {
+            ui::text(
+                col,
+                format!("{name} · needed by {}", ui::title(game)),
+                12.0,
+                ui::INK,
+            );
         } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
             ui::text(
                 col,
@@ -1569,30 +1589,80 @@ fn trust(
 ) -> Option<Entity> {
     let mut focus = None;
     centered(root, true, |card| {
-        ui::weighted_text(card, "Trust this Mod?", 19.0, 620, ui::INK);
+        let items = &installed.untrusted;
+        let code = items
+            .iter()
+            .filter(|u| u.found.manifest.declaration.is_none())
+            .count();
+        ui::weighted_text(
+            card,
+            if items.len() == 1 {
+                "Trust this item?".to_owned()
+            } else {
+                format!("Trust {} items?", items.len())
+            },
+            19.0,
+            620,
+            ui::INK,
+        );
         ui::paragraph(
             card,
-            "It runs its own code. Trust it only if you know where it came from.",
+            if code == 0 {
+                "These are data only and run no code. Trust is for these exact files; changing one asks again."
+            } else {
+                "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
+            },
             12.0,
             ui::MUTED,
         );
-        if let Some(mod_) = installed.untrusted.first() {
-            // The shared prompt ends with the terminal's [y/N] question.
-            let details = mod_
-                .prompt
-                .trim_end()
-                .trim_end_matches("Trust this exact build? [y/N]");
-            ui::technical_text(card, details.trim_end(), 11.0, ui::INK);
+        for item in items {
+            let manifest = &item.found.manifest;
+            let kind = if manifest.declaration.is_some() {
+                "data only"
+            } else {
+                "runs code"
+            };
+            ui::text(
+                card,
+                format!(
+                    "{} {} · {kind} · build {}",
+                    ui::title(&manifest.id),
+                    manifest.version,
+                    &item.sha256[..12.min(item.sha256.len())]
+                ),
+                12.0,
+                if manifest.declaration.is_some() {
+                    ui::INK
+                } else {
+                    ui::AMBER
+                },
+            );
+            // A component's requested limits are worth reading; a data Mod has none to show.
+            if manifest.declaration.is_none() {
+                let details = item
+                    .prompt
+                    .trim_end()
+                    .trim_end_matches("Trust this exact build? [y/N]");
+                ui::technical_text(card, details.trim_end(), 11.0, ui::MUTED);
+            }
         }
         problem(card, l.problem.as_ref());
         row(card, 7.0, |r| {
             focus = Some(ui::button(r, "Cancel", Act::Back, false, false, false));
             ui::button(
                 r,
-                match next {
-                    Next::Open(_) => "Trust and open",
-                    Next::Create => "Trust and create",
-                },
+                format!(
+                    "Trust {} and {}",
+                    if installed.untrusted.len() == 1 {
+                        "it".to_owned()
+                    } else {
+                        format!("all {}", installed.untrusted.len())
+                    },
+                    match next {
+                        Next::Open(_) => "open",
+                        Next::Create => "create",
+                    }
+                ),
                 Act::Trust,
                 false,
                 false,
@@ -1800,6 +1870,47 @@ mod tests {
         assert!(!path.exists());
         assert_eq!(launcher(&app).screen, Screen::List);
         assert!(launcher(&app).entries.is_empty());
+    }
+
+    #[test]
+    fn the_chosen_set_holds_a_games_mods_without_ticking_them() {
+        let installed = Installed::fake(Some(("ember", "0.1.0")), &[])
+            .with_mod("strata", &[])
+            .with_mod("hearth", &["strata"])
+            .with_mod("glassworks", &[])
+            .with_game_depends(&["hearth"]);
+        let mut form = Form {
+            game: Some("ember".into()),
+            ..Form::default()
+        };
+        assert_eq!(chosen_ids(&form, &installed), ["ember", "strata", "hearth"]);
+        form.mods.insert("glassworks".into());
+        assert_eq!(
+            chosen_ids(&form, &installed),
+            ["ember", "strata", "hearth", "glassworks"]
+        );
+    }
+
+    #[test]
+    fn one_trust_grants_every_untrusted_item_and_opens() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Guarded", true)).unwrap();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &["terra", "strata", "hearth"]),
+        );
+        app.update();
+        act(&mut app, Act::Open);
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::Trust(Next::Open(path.clone()))
+        );
+        act(&mut app, Act::Trust);
+        assert!(app.world().resource::<Installed>().untrusted.is_empty());
+        assert_eq!(
+            app.world().resource::<Switch>().0,
+            Some(Target::World(path))
+        );
     }
 
     #[test]

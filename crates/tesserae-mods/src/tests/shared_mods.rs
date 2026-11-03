@@ -203,6 +203,6 @@ fn every_cross_mod_reference_resolves() {
         "timber:beam",
         "wool:carpet",
     ] {
-        assert!(registry.id_of(Kind::Shape, &name).is_some(), "{name}");
+        assert!(registry.id_of(Kind::Shape, name).is_some(), "{name}");
     }
 }
