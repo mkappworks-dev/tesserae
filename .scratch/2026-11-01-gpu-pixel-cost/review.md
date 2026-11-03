@@ -1,6 +1,7 @@
 # GPU stack: local review and publication preparation
 
-Reviewed 2026-11-03. Nothing pushed; no PR created or merged.
+Local review snapshot: 2026-11-03. The publication decision below
+supersedes the original multi-PR plan.
 
 ## Outcome
 
@@ -141,4 +142,15 @@ waits remains open in ticket 08. It is not a failed current performance
 gate. The final borderless target pass and the user-approved image choices
 are recorded independently of that unresolved causal explanation.
 
-Publishing, PR creation and merging require the user's next authorization.
+## Publication decision (2026-11-03)
+
+You authorized publication, then requested one integrated PR rather than
+seven. Publish only `tech/gpu-present-waits` against `main`; the prepared
+local branches remain as history and review boundaries. The seven local
+PR drafts are superseded, not published. The integrated description is
+`/tmp/claude-gpu-pixel-cost/integrated-pr-body.md`.
+
+Main was refreshed before publication. GitHub API settings permit merge,
+squash and rebase merges; a single integrated PR avoids the multi-layer
+merge-policy and CI-trigger issues described in the original plan.
+Merging remains subject to separate user approval after remote checks.
