@@ -5,6 +5,7 @@
 //! neither Bevy nor wgpu. `docs/adr/0001-wasm-mod-boundary.md`.
 
 mod adapt;
+mod artwork;
 mod bindings;
 mod character;
 mod command;

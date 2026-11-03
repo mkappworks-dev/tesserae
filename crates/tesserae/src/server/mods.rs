@@ -971,6 +971,181 @@ surface = "plain:rock"
         }
     }
 
+    fn png(width: u32, height: u32, seed: u8) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut encoder = png::Encoder::new(&mut out, width, height);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|i| [(i % 251) as u8, seed, (i / 251) as u8, (i % 2 * 255) as u8])
+            .collect();
+        writer.write_image_data(&pixels).unwrap();
+        writer.finish().unwrap();
+        out
+    }
+
+    const MOTION: &str = "{ swing-deg = 0.0, rate-hz = 0.0, arm-raise-deg = 0.0 }";
+
+    fn art_game(s: &Scratch) -> (PathBuf, String) {
+        let content = format!(
+            r#"{}
+[world.character]
+pixel-m = 0.05625
+skin = "skin.png"
+idle = {MOTION}
+walk = {MOTION}
+sprint = {MOTION}
+airborne = {MOTION}
+crouch = {MOTION}
+
+[[world.character.bones]]
+name = "body"
+role = "body"
+pivot = [0.0, 12.0, 0.0]
+cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
+"#,
+            DATA_GAME.replace(
+                "color = [80, 90, 100, 255]",
+                "color = [80, 90, 100, 255]\ntexture = \"rock.png\""
+            )
+        );
+        let dir = data(s, "plain", true, "", &content);
+        fs::write(dir.join("rock.png"), png(48, 16, 1)).unwrap();
+        fs::write(dir.join("skin.png"), png(64, 64, 2)).unwrap();
+        (dir, content)
+    }
+
+    #[test]
+    fn png_artwork_reaches_registered_textures_and_the_client_character() {
+        let s = Scratch::new();
+        art_game(&s);
+        let loaded = s.load(TrustMode::All).unwrap();
+        let rock = loaded.registry.id_of(Kind::Material, "plain:rock").unwrap();
+        let [(id, atlas)] = &loaded.textures[..] else {
+            panic!("one texture expected");
+        };
+        assert_eq!(*id as u32, rock as u32);
+        assert_eq!(atlas.len(), tesserae_mods::MATERIAL_TEXTURE_BYTES);
+        assert_eq!(atlas[..8], [0, 1, 0, 0, 1, 1, 0, 255]);
+        let skin = &loaded.character.as_ref().unwrap().skin;
+        assert_eq!(skin.len(), tesserae_mods::SKIN_BYTES);
+        assert_eq!(skin[..8], [0, 2, 0, 0, 1, 2, 0, 255]);
+
+        let mut app = App::new();
+        app.insert_non_send(loaded).add_plugins(plugin);
+        let textures = app
+            .world_mut()
+            .resource_mut::<Messages<MaterialTextures>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(textures.0.len(), 1);
+        let model = app
+            .world_mut()
+            .resource_mut::<Messages<CharacterModel>>()
+            .drain()
+            .next()
+            .unwrap();
+        assert_eq!(model.0.unwrap().skin[4..8], [1, 2, 0, 255]);
+    }
+
+    #[test]
+    fn bad_artwork_is_refused_before_any_world_opens_naming_the_field() {
+        let s = Scratch::new();
+        let (dir, _) = art_game(&s);
+        for (file, bytes, field) in [
+            ("rock.png", png(16, 16, 0), "appearance[0].texture"),
+            ("skin.png", b"nope".to_vec(), "world.character.skin"),
+        ] {
+            let good = fs::read(dir.join(file)).unwrap();
+            fs::write(dir.join(file), bytes).unwrap();
+            let error = s.load(TrustMode::All).err().unwrap();
+            assert!(
+                error.contains("plain") && error.contains(field) && error.contains(file),
+                "{error}"
+            );
+            fs::write(dir.join(file), good).unwrap();
+        }
+        fs::remove_file(dir.join("skin.png")).unwrap();
+        let error = s.load(TrustMode::All).err().unwrap();
+        assert!(error.contains("world.character.skin"), "{error}");
+    }
+
+    #[test]
+    fn artwork_game_reopens_unchanged_and_refuses_changed_art_before_writes() {
+        use super::super::persistence::Opening;
+        use tesserae_core::save::{self, Commit, Generation, WorldId, Writer};
+        let s = Scratch::new();
+        let (dir, _) = art_game(&s);
+        let loaded = s.load(TrustMode::All).unwrap();
+        let (content, mapping) = super::super::persistence::content(&loaded);
+        let path = s.0.join("world");
+        let id = WorldId::new();
+        let commit = Commit {
+            format: save::FORMAT_VERSION,
+            generator: save::GENERATOR_VERSION,
+            world: id.clone(),
+            sequence: 1,
+            seed: 123,
+            voxel_size_m: 0.5,
+            parameters: Generation::capture(loaded.world.unwrap(), &mapping).unwrap(),
+            content: content.clone(),
+            player: save::Player {
+                eye_m: [1.0, 2.0, 3.0],
+                extensions: Default::default(),
+            },
+            chunks: vec![],
+            simulation: super::super::fluids::FluidSim::default()
+                .checkpoint(&mapping)
+                .unwrap()
+                .0,
+            paused: vec![],
+        };
+        Writer::acquire(&path, &id, &content)
+            .unwrap()
+            .write(&commit)
+            .unwrap();
+        let reopen = || {
+            let opening = Opening::from_folder(&path).unwrap();
+            let settings = opening.settings(WorldSettings::default());
+            load_with_opening(
+                &opening.selection(),
+                Some(&opening),
+                &s.0.join("mods"),
+                &s.0.join("trust.json"),
+                &settings,
+                |found, trust| {
+                    trust.grant_for_run(found).map_err(|e| e.to_string())?;
+                    Ok(true)
+                },
+            )
+        };
+        assert!(reopen().is_ok());
+        let files = || {
+            let mut files: Vec<_> = fs::read_dir(&path)
+                .unwrap()
+                .map(|entry| {
+                    let path = entry.unwrap().path();
+                    let bytes = fs::read(&path).unwrap();
+                    (path, bytes)
+                })
+                .collect();
+            files.sort();
+            files
+        };
+        let before = files();
+        fs::write(dir.join("unrelated.png"), png(48, 16, 9)).unwrap();
+        assert!(reopen().is_ok());
+        fs::write(dir.join("skin.png"), png(64, 64, 3)).unwrap();
+        let error = reopen().err().unwrap();
+        assert!(
+            error.contains("plain") && error.contains("changed"),
+            "{error}"
+        );
+        assert_eq!(files(), before);
+    }
+
     fn want(id: &str, version: &str, game: bool) -> Wanted {
         Wanted {
             id: id.into(),

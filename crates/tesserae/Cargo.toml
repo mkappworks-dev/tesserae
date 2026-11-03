@@ -30,3 +30,7 @@ serde_json = "1"
 tesserae-core = { path = "../tesserae-core", version = "0.0.0" }
 tesserae-mods = { path = "../tesserae-mods", version = "0.0.0" }
 trash = "5"
+
+[dev-dependencies]
+# Encodes the artwork fixtures the data-Mod tests load.
+png = "0.18"

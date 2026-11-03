@@ -1,6 +1,6 @@
 # 03: Load PNG textures and character skins
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -17,23 +17,23 @@ with the full Declaration model; ticket 02 is not a blocker.
 
 ## Acceptance criteria
 
-- [ ] Material appearance accepts a local PNG reference and produces the
+- [x] Material appearance accepts a local PNG reference and produces the
       existing 48 by 16 RGBA atlas. Game character artwork accepts a local PNG
       reference and produces the existing 64 by 64 RGBA skin.
-- [ ] Existing colour, alpha, geometry and artwork limits remain enforced;
+- [x] Existing colour, alpha, geometry and artwork limits remain enforced;
       decoding is bounded and does not relax dimensions or content limits.
-- [ ] Missing files, invalid PNGs and incorrect dimensions fail before World
+- [x] Missing files, invalid PNGs and incorrect dimensions fail before World
       opening with the Mod and artwork field identified.
-- [ ] Artwork references remain inside their Mod directory after symlink
+- [x] Artwork references remain inside their Mod directory after symlink
       resolution; escaping paths are refused.
-- [ ] Manifest, Declaration and referenced artwork bytes contribute to build
+- [x] Manifest, Declaration and referenced artwork bytes contribute to build
       identity. Changing referenced artwork changes identity; unrelated PNGs and
       editor files do not.
-- [ ] The artwork consumed is the artwork whose identity was checked. Changed
+- [x] The artwork consumed is the artwork whose identity was checked. Changed
       files cannot silently replace a previously checked payload.
-- [ ] An unchanged packaged data Game with artwork can save and reopen; changed
+- [x] An unchanged packaged data Game with artwork can save and reopen; changed
       artwork is rejected under exact-build compatibility before save writes.
-- [ ] Tests verify decoded artwork reaches registered appearance or character
+- [x] Tests verify decoded artwork reaches registered appearance or character
       data and the Client-facing content path, and cover invalid artwork,
       directory escapes, identity changes and unchanged reopening.
 
@@ -42,3 +42,14 @@ with the full Declaration model; ticket 02 is not a blocker.
 Use small known PNG fixtures with distinguishable pixels and alpha. Verify
 content data and existing rendering integration rather than private decoder
 helpers. Record focused test and formatting results when completing this ticket.
+
+## Result
+
+Focused tests: `tests::loading` (artwork identity, invalid, escape, colour
+types) in `tesserae-mods`, and `server::mods` (client path, bad artwork,
+unchanged reopen, changed artwork refused before writes) in `tesserae`. The
+Character's bone and motion fields are in the data schema here because a skin
+is meaningless without them; ticket 02 should reuse them. The preexisting
+`demo_contract_content_build_and_scenarios_reach_real_voxels_and_light`
+failure (the demo guest logs an info line the test asserts is absent) is
+unrelated.

@@ -70,7 +70,7 @@ impl ModHost {
                 let bytes = payload.bytes();
                 let limits = self.limits.lowered_by(&found.manifest.limits);
                 if found.manifest.declaration.is_some() {
-                    let declaration = crate::data::parse(&found.manifest.id, bytes)?;
+                    let declaration = crate::data::parse(&found.manifest.id, &payload)?;
                     return Ok(Compiled {
                         found,
                         limits,

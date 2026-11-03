@@ -38,6 +38,10 @@ impl CheckedPayload {
         &self.files[&self.source]
     }
 
+    pub(crate) fn file(&self, name: &str) -> Option<&[u8]> {
+        self.files.get(name).map(Vec::as_slice)
+    }
+
     pub(crate) fn hash(&self, manifest: &[u8]) -> String {
         if !self.data {
             return hash(self.bytes(), manifest);
@@ -196,10 +200,27 @@ fn read_payload(found: &Found) -> Result<CheckedPayload, ModError> {
         }
     })?;
     let source = found.manifest.source().1.to_owned();
+    let mut files = std::collections::BTreeMap::new();
+    let data = found.manifest.declaration.is_some();
+    if data {
+        let id = &found.manifest.id;
+        for (field, name) in crate::data::references(id, &bytes)? {
+            if files.contains_key(&name) {
+                continue;
+            }
+            let artwork =
+                crate::artwork::read(&found.dir, &name).map_err(|reason| ModError::Data {
+                    id: id.clone(),
+                    reason: format!("{field}: {reason}"),
+                })?;
+            files.insert(name, artwork);
+        }
+    }
+    files.insert(source.clone(), bytes);
     Ok(CheckedPayload {
-        files: [(source.clone(), bytes)].into(),
+        files,
         source,
-        data: found.manifest.declaration.is_some(),
+        data,
     })
 }
 

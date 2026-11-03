@@ -705,3 +705,159 @@ fn existing_component_trust_hash_remains_compatible() {
         Verdict::Trusted(_)
     ));
 }
+
+/// A PNG whose pixel `i` is `[i % 251, i / 251 % 251, seed, alpha(i)]`, so any swap shows.
+fn png_bytes(width: u32, height: u32, seed: u8) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, width, height);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    let pixels: Vec<u8> = (0..width * height)
+        .flat_map(|i| {
+            [
+                (i % 251) as u8,
+                (i / 251 % 251) as u8,
+                seed,
+                (i % 2 * 200) as u8,
+            ]
+        })
+        .collect();
+    writer.write_image_data(&pixels).unwrap();
+    writer.finish().unwrap();
+    out
+}
+
+const ART_MANIFEST: &str =
+    "id = 'art'\nversion = '1.0.0'\napi = '0.3'\ndeclaration = 'content.toml'\n";
+
+const ART_CONTENT: &str = r#"
+[[materials]]
+name = "rock"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[appearance]]
+material = "rock"
+color = [80, 90, 100, 255]
+texture = "art/rock.png"
+"#;
+
+fn art_mod(s: &Scratch, png: &[u8]) -> (PathBuf, Found) {
+    s.write_mod("art", ART_MANIFEST, None);
+    let dir = s.mod_dir("art");
+    fs::create_dir_all(dir.join("art")).unwrap();
+    fs::write(dir.join("content.toml"), ART_CONTENT).unwrap();
+    fs::write(dir.join("art/rock.png"), png).unwrap();
+    let found = only(discover(&s.mods()).unwrap());
+    (dir, found)
+}
+
+fn load_art(found: &Found, s: &Scratch) -> Result<Vec<crate::Compiled>, ModError> {
+    let mut trust = s.trust();
+    trust.grant_for_run(found)?;
+    ModHost::new().unwrap().load(vec![found.clone()], &trust)
+}
+
+#[test]
+fn png_texture_decodes_to_the_registered_atlas_and_joins_build_identity() {
+    let s = Scratch::new("art-identity");
+    let png = png_bytes(48, 16, 7);
+    let (dir, found) = art_mod(&s, &png);
+    let loaded = load_art(&found, &s).unwrap();
+    let texture = loaded[0].declaration().unwrap().appearance[0]
+        .texture
+        .clone()
+        .unwrap();
+    assert_eq!(texture.len(), crate::MATERIAL_TEXTURE_BYTES);
+    assert_eq!(texture[..4], [0, 0, 7, 0]);
+    assert_eq!(texture[4..8], [1, 0, 7, 200]);
+    let original = loaded[0].build_sha256.clone();
+
+    fs::write(dir.join("art/unrelated.png"), png_bytes(48, 16, 1)).unwrap();
+    fs::write(dir.join("editor.txt"), "scratch").unwrap();
+    assert_eq!(Trust::hash_of(&found).unwrap(), original);
+
+    // The Declaration was decoded from the checked bytes; a later edit cannot reach it.
+    fs::write(dir.join("art/rock.png"), png_bytes(48, 16, 8)).unwrap();
+    assert_eq!(
+        loaded[0].declaration().unwrap().appearance[0]
+            .texture
+            .as_deref(),
+        Some(texture.as_slice())
+    );
+    assert_ne!(Trust::hash_of(&found).unwrap(), original);
+    let mut trust = s.trust();
+    trust.grant_for_run(&found).unwrap();
+    fs::write(dir.join("art/rock.png"), &png).unwrap();
+    assert!(matches!(
+        trust.check(&found).unwrap(),
+        Verdict::Untrusted(Untrusted::Changed)
+    ));
+}
+
+#[test]
+fn invalid_artwork_names_the_mod_and_field() {
+    let s = Scratch::new("art-invalid");
+    let (dir, found) = art_mod(&s, &png_bytes(48, 16, 0));
+    let cases: [(Option<Vec<u8>>, &str); 3] = [
+        (None, "No such file"),
+        (Some(b"not a png".to_vec()), "PNG"),
+        (Some(png_bytes(16, 16, 0)), "16 by 16"),
+    ];
+    for (bytes, expect) in cases {
+        match bytes {
+            Some(bytes) => fs::write(dir.join("art/rock.png"), bytes).unwrap(),
+            None => fs::remove_file(dir.join("art/rock.png")).unwrap(),
+        }
+        let error = load_art(&found, &s).err().unwrap().to_string();
+        assert!(
+            error.contains("art")
+                && error.contains("appearance[0].texture")
+                && error.contains("art/rock.png")
+                && error.contains(expect),
+            "{error}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn artwork_escaping_the_mod_directory_is_refused() {
+    let s = Scratch::new("art-escape");
+    let (dir, found) = art_mod(&s, &png_bytes(48, 16, 0));
+    let outside = s.0.join("outside.png");
+    fs::write(&outside, png_bytes(48, 16, 0)).unwrap();
+    fs::remove_file(dir.join("art/rock.png")).unwrap();
+    std::os::unix::fs::symlink(&outside, dir.join("art/rock.png")).unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(
+        error.contains("appearance[0].texture") && error.contains("outside"),
+        "{error}"
+    );
+    fs::write(
+        dir.join("content.toml"),
+        ART_CONTENT.replace("art/rock.png", "../outside.png"),
+    )
+    .unwrap();
+    let error = load_art(&found, &s).err().unwrap().to_string();
+    assert!(error.contains("relative path"), "{error}");
+}
+
+#[test]
+fn non_rgba_png_colour_types_expand_to_straight_rgba() {
+    let mut out = Vec::new();
+    let mut encoder = png::Encoder::new(&mut out, 2, 1);
+    encoder.set_color(png::ColorType::GrayscaleAlpha);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header().unwrap();
+    writer.write_image_data(&[10, 20, 30, 40]).unwrap();
+    writer.finish().unwrap();
+    assert_eq!(
+        crate::artwork::decode(&out, 2, 1).unwrap(),
+        [10, 10, 10, 20, 30, 30, 30, 40]
+    );
+}
