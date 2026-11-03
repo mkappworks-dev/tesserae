@@ -911,6 +911,11 @@ fn render(
         Root,
         BackgroundColor(ui::BG),
         Node {
+            // Absolute, like the in-game menus' roots: a flow root is as tall as its content, so
+            // a long page would overflow the window instead of scrolling inside it.
+            position_type: PositionType::Absolute,
+            left: Val::Px(0.0),
+            top: Val::Px(0.0),
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
             padding: UiRect::axes(Val::Percent(5.0), Val::Px(20.0)),
