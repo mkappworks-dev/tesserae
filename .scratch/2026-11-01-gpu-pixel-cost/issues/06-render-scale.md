@@ -90,10 +90,22 @@ holds through 07's series.
 **Your choice (2026-11-02): default 100%, sharpening on below 100%.** At
 100% the World draws to the window exactly as before, so the presented
 series at your choice is 07's, at SMAA and 100%; the completed
-`presented-07` series is recorded in 07. Its unstable presentation timing misses the performance target; this check records the
+`presented-07` series is recorded in 07. Its unstable presentation timing misses
+the performance target; this check records the
 chosen scale, not a performance pass.
 
 ## Validation and authorization
 
 frame-profiling.md. Image quality is your call on captures. Local work only;
 no push or PR without approval.
+
+## Local review correction (2026-11-03)
+
+The merge review found that reduced scale -> 100% removed the compositor
+camera and image but retained the upscale sprite. Re-entering reduced
+scale could accumulate sprites referencing removed images. The fix also
+despawns the sprite. A new repeated-transition regression failed before
+the change and passes after it, along with all six render-scale tests.
+Fix `378489e` is on this ticket's branch and merged through its dependents.
+The 100% default path without a scaled target is unchanged, so no further
+presented target run was needed. Full review evidence: [review](../review.md).
