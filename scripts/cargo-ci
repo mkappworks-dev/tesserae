@@ -17,7 +17,7 @@ step() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 step "Lint: rustfmt"
 cargo fmt --all --check
-cargo fmt --manifest-path games/demo/Cargo.toml --check
+cargo fmt --manifest-path games/terra/Cargo.toml --check
 
 step "Format: prettier"
 npm run fmt:check --silent
@@ -48,7 +48,7 @@ step "Test: benches compile"
 cargo bench --workspace --no-run --locked
 
 step "Boundaries"
-./scripts/check-demo-boundary
+./scripts/check-terra-boundary
 members=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name')
 for crate in tesserae-core tesserae-mods; do
   if ! grep -qxF "$crate" <<<"$members"; then

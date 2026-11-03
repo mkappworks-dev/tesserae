@@ -254,7 +254,7 @@ mod tests {
 
     fn measuring() -> Tools {
         Tools(vec![tesserae_mods::ToolDef {
-            name: "demo:measure".into(),
+            name: "terra:measure".into(),
             kind: ToolKind::Measure,
         }])
     }

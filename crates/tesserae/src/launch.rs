@@ -332,7 +332,7 @@ mod tests {
     use super::*;
 
     fn with_mods(deps: &[(&str, &[&str])]) -> Installed {
-        let mut installed = Installed::fake(Some(("demo", "0.1.0")), &[]);
+        let mut installed = Installed::fake(Some(("terra", "0.1.0")), &[]);
         for (id, depends) in deps {
             installed = installed.with_mod(id, depends);
         }
@@ -341,19 +341,24 @@ mod tests {
 
     #[test]
     fn picking_a_mod_pulls_in_its_dependencies_in_install_order() {
-        let installed = with_mods(&[("a", &["b"]), ("b", &["c", "demo"]), ("c", &[]), ("d", &[])]);
+        let installed = with_mods(&[
+            ("a", &["b"]),
+            ("b", &["c", "terra"]),
+            ("c", &[]),
+            ("d", &[]),
+        ]);
         let picked = ["a".to_string()].into();
         assert_eq!(installed.closure(&picked), ["a", "b", "c"]);
     }
 
     #[test]
     fn a_mod_with_a_missing_dependency_is_blocked_with_the_reason() {
-        let installed = with_mods(&[("a", &["b"]), ("b", &["ghost"]), ("ok", &["demo"])]);
+        let installed = with_mods(&[("a", &["b"]), ("b", &["ghost"]), ("ok", &["terra"])]);
         assert_eq!(
-            installed.blocked("demo", "a").as_deref(),
+            installed.blocked("terra", "a").as_deref(),
             Some("needs `ghost`, which is not installed")
         );
-        assert_eq!(installed.blocked("demo", "ok"), None);
+        assert_eq!(installed.blocked("terra", "ok"), None);
         assert!(installed.blocked("other", "ok").is_some());
     }
 

@@ -608,7 +608,7 @@ fn derived(tables: &Tables, id: u8) -> Vec<String> {
 }
 
 #[test]
-fn the_demo_fence_and_pipe_declared_as_data_register_as_the_core_examples_do() {
+fn the_terra_fence_and_pipe_declared_as_data_register_as_the_core_examples_do() {
     let mut load = Load::new();
     let d = Declaration {
         shapes: vec![
@@ -617,7 +617,7 @@ fn the_demo_fence_and_pipe_declared_as_data_register_as_the_core_examples_do() {
         ],
         ..declaring(&[], &[])
     };
-    load.apply("demo", d).unwrap();
+    load.apply("terra", d).unwrap();
 
     let mut native = Tables::builtin();
     assert_eq!(
@@ -627,7 +627,7 @@ fn the_demo_fence_and_pipe_declared_as_data_register_as_the_core_examples_do() {
     native.shapes.register(examples::pipe()).unwrap();
 
     assert_eq!(
-        load.registry.id_of(Kind::Shape, "demo:fence"),
+        load.registry.id_of(Kind::Shape, "terra:fence"),
         Some(examples::FENCE_ID as usize)
     );
     for id in [examples::FENCE_ID, examples::FENCE_ID + 1] {
@@ -866,16 +866,16 @@ fn as_the_game(id: &str, d: Declaration) -> Result<Applied, ModError> {
 fn the_game_declares_tools_named_by_its_mod() {
     let mut d = declaring(&[], &[]);
     d.tools = vec![measure("ruler"), measure("tape")];
-    let applied = as_the_game("demo", d).unwrap();
+    let applied = as_the_game("terra", d).unwrap();
     assert_eq!(
         applied.tools,
         vec![
             ToolDef {
-                name: "demo:ruler".into(),
+                name: "terra:ruler".into(),
                 kind: ToolKind::Measure
             },
             ToolDef {
-                name: "demo:tape".into(),
+                name: "terra:tape".into(),
                 kind: ToolKind::Measure
             },
         ]
@@ -895,12 +895,12 @@ fn a_mod_that_is_not_the_game_declares_no_tools() {
 
 #[test]
 fn tool_names_are_local_unique_and_bounded() {
-    for bad in ["", "Ruler", "demo:ruler", "9lives", &"x".repeat(33)] {
+    for bad in ["", "Ruler", "terra:ruler", "9lives", &"x".repeat(33)] {
         let mut d = declaring(&[], &[]);
         d.tools = vec![measure(bad)];
         assert!(
             matches!(
-                as_the_game("demo", d).unwrap_err(),
+                as_the_game("terra", d).unwrap_err(),
                 ModError::Params { what: "tool", .. }
             ),
             "{bad:?}"
@@ -909,7 +909,7 @@ fn tool_names_are_local_unique_and_bounded() {
     let mut d = declaring(&[], &[]);
     d.tools = vec![measure("ruler"), measure("ruler")];
     assert!(matches!(
-        as_the_game("demo", d).unwrap_err(),
+        as_the_game("terra", d).unwrap_err(),
         ModError::Params { what: "tool", .. }
     ));
     let mut d = declaring(&[], &[]);
@@ -917,7 +917,7 @@ fn tool_names_are_local_unique_and_bounded() {
         .map(|i| measure(&format!("t{i}")))
         .collect();
     assert!(matches!(
-        as_the_game("demo", d).unwrap_err(),
+        as_the_game("terra", d).unwrap_err(),
         ModError::TooManyRows {
             what: "tool",
             count: 9,

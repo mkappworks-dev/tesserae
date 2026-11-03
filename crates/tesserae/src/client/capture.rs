@@ -724,7 +724,7 @@ fn fly_forward(
 
 /// `TESSERAE_SCREENSHOT_PILLAR=1` stacks stone 1.1 m ahead of the Eye and 0.1 m
 /// right of it, through ordinary Place intents from the Eye, one per 0.2 s; a
-/// material name instead of `1`, such as `demo:leaves`, stacks that. With
+/// material name instead of `1`, such as `terra:leaves`, stacks that. With
 /// 0.25 m Voxels it hides the ground ahead from the Eye while the shoulder
 /// camera's crosshair line passes it, so the shutter shows a Blocked target.
 fn pillar(
@@ -752,7 +752,7 @@ fn pillar(
     }
     let name = match pillar.to_str() {
         Some(name) if name.contains(':') => name,
-        _ => "demo:stone",
+        _ => "terra:stone",
     };
     let Some(material) = catalogue
         .0

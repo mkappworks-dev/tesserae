@@ -1,5 +1,5 @@
-id = "meadow"
+id = "terra"
 version = "0.1.0"
 api = "0.3"
 root = true
-wasm = "meadow.wasm"
+wasm = "terra.wasm"

@@ -28,7 +28,7 @@ use crate::world::WorldSettings;
 pub enum TrustMode {
     All,
     None,
-    /// Only for the in-repo demo a `dev` build picks itself, never for a named directory.
+    /// Only for the in-repo Terra a `dev` build picks itself, never for a named directory.
     ThisRun,
 }
 
@@ -39,14 +39,14 @@ struct LoadOptions {
 }
 
 impl LoadOptions {
-    /// `None` when a `dev` build's default, the demo, has not been built: the World opens with
+    /// `None` when a `dev` build's default, Terra, has not been built: the World opens with
     /// no Game.
     fn resolve(
         args: impl IntoIterator<Item = OsString>,
         mods_env: Option<OsString>,
         trust_env: Option<OsString>,
         default_directory: Option<PathBuf>,
-        dev_demo: Option<PathBuf>,
+        dev_terra: Option<PathBuf>,
     ) -> Result<Option<Self>, String> {
         let mut directory = mods_env.map(PathBuf::from);
         let mut trust = if trust_env.as_deref() == Some(std::ffi::OsStr::new("1")) {
@@ -64,11 +64,11 @@ impl LoadOptions {
                 return Err(format!("unknown argument: {}", arg.to_string_lossy()));
             }
         }
-        let directory = match (directory, dev_demo) {
+        let directory = match (directory, dev_terra) {
             (Some(directory), _) => directory,
-            (None, Some(demo)) if games_dir(&demo).is_dir() => {
+            (None, Some(terra)) if games_dir(&terra).is_dir() => {
                 trust = TrustMode::ThisRun;
-                demo
+                terra
             }
             (None, Some(_)) => return Ok(None),
             (None, None) => default_directory
@@ -90,17 +90,17 @@ impl LoadOptions {
             std::env::var_os("TESSERAE_MODS_DIR"),
             std::env::var_os("TESSERAE_TRUST_MODS"),
             tesserae_mods::default_mods_dir(),
-            dev_demo(),
+            dev_terra(),
         )
     }
 }
 
-/// The empty Mods directory beside the `games/` that `./scripts/build-guests` puts the demo in,
+/// The empty Mods directory beside the `games/` that `./scripts/build-guests` puts Terra in,
 /// fixed at compile time because a `dev` binary runs from its own checkout whatever the working
 /// directory.
-fn dev_demo() -> Option<PathBuf> {
+fn dev_terra() -> Option<PathBuf> {
     cfg!(feature = "dev")
-        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist/mods"))
+        .then(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/terra/dist/mods"))
 }
 
 pub struct LoadedMods {
@@ -213,7 +213,7 @@ pub fn load_world(
     opening: &super::persistence::Opening,
 ) -> Result<LoadedMods, String> {
     let Some(options) = LoadOptions::from_args(args)? else {
-        eprintln!("No Game: the demo is not built; run ./scripts/build-guests");
+        eprintln!("No Game: Terra is not built; run ./scripts/build-guests");
         return Ok(LoadedMods::default());
     };
     let stdin = io::stdin();
@@ -245,7 +245,7 @@ pub fn installed(args: &[OsString]) -> Installed {
     )
 }
 
-/// Moves a legacy root out of `mods/`, then lists what is installed. The dev demo is generated
+/// Moves a legacy root out of `mods/`, then lists what is installed. The dev terra is generated
 /// output, so it is never rearranged.
 fn prepare(options: &LoadOptions) -> Result<Scan, tesserae_mods::ModError> {
     if options.trust != TrustMode::ThisRun {
@@ -286,7 +286,7 @@ fn load_prompted(
             let id = &found.manifest.id;
             if mode == TrustMode::ThisRun {
                 trust.grant_for_run(found).map_err(|e| e.to_string())?;
-                writeln!(output, "Trusting in-repo demo Mod `{id}` for this run")
+                writeln!(output, "Trusting in-repo terra Mod `{id}` for this run")
                     .map_err(|e| e.to_string())?;
                 return Ok(true);
             }
@@ -720,11 +720,11 @@ pub(in crate::server) fn catalogue(
 }
 
 #[cfg(test)]
-pub(super) fn demo_for_save(
+pub(super) fn terra_for_save(
     opening: &super::persistence::Opening,
     world: &WorldSettings,
 ) -> LoadedMods {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/demo/dist/mods");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../games/terra/dist/mods");
     load_with_opening(
         &opening.selection(),
         Some(opening),
@@ -736,7 +736,7 @@ pub(super) fn demo_for_save(
             Ok(true)
         },
     )
-    .expect("build demo with scripts/build-guests")
+    .expect("build terra with scripts/build-guests")
 }
 
 #[cfg(test)]
@@ -1596,12 +1596,12 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
 
     #[test]
     fn the_catalogue_lists_the_games_tools_in_declared_order() {
-        let catalogue = published_catalogue(super::runtime::tests::demo_loaded(1.0));
+        let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
         assert_eq!(
             catalogue.tools,
             vec![CatalogueTool {
                 id: crate::server::tool::ToolId(0),
-                name: "demo:measure".into(),
+                name: "terra:measure".into(),
                 kind: tesserae_mods::ToolKind::Measure,
             }]
         );
@@ -1611,9 +1611,9 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     /// Every registered name, with what the Client may do with it, and the
     /// Game's lake.
     #[test]
-    fn the_catalogue_names_the_demos_content_and_its_lake() {
-        let catalogue = published_catalogue(super::runtime::tests::demo_loaded(1.0));
-        assert_eq!(catalogue.game.as_deref(), Some("demo"));
+    fn the_catalogue_names_the_terras_content_and_its_lake() {
+        let catalogue = published_catalogue(super::runtime::tests::terra_loaded(1.0));
+        assert_eq!(catalogue.game.as_deref(), Some("terra"));
         let material = |name: &str| {
             catalogue
                 .materials
@@ -1621,14 +1621,14 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 .find(|m| m.name == name)
                 .unwrap_or_else(|| panic!("{name}"))
         };
-        assert_eq!(catalogue.lake, Some(material("demo:water").id));
-        for fluid in ["demo:water", "demo:lava", "demo:mud"] {
+        assert_eq!(catalogue.lake, Some(material("terra:water").id));
+        for fluid in ["terra:water", "terra:lava", "terra:mud"] {
             let fluid = material(fluid);
             assert!(fluid.fluid.is_some() && !fluid.solid && !fluid.burns);
         }
-        assert!(material("demo:water").fluid < material("demo:lava").fluid);
-        assert!(material("demo:wood").solid && material("demo:wood").burns);
-        for solid in ["demo:stone", "demo:brick", "demo:lamp"] {
+        assert!(material("terra:water").fluid < material("terra:lava").fluid);
+        assert!(material("terra:wood").solid && material("terra:wood").burns);
+        for solid in ["terra:stone", "terra:brick", "terra:lamp"] {
             let solid = material(solid);
             assert!(solid.solid && solid.fluid.is_none() && !solid.burns);
         }
@@ -1646,15 +1646,18 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
                 ("core:post", true)
             ]
         );
-        assert!(turnable.contains(&("demo:fence", false)), "it is connected");
+        assert!(
+            turnable.contains(&("terra:fence", false)),
+            "it is connected"
+        );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
         assert_eq!(ids, std::iter::once(0).chain(8..20).collect::<Vec<_>>());
     }
 
     #[test]
-    fn demo_preview_textures_reach_the_client_under_the_registered_material_ids() {
-        let loaded = super::runtime::tests::demo_loaded(1.0);
+    fn terra_preview_textures_reach_the_client_under_the_registered_material_ids() {
+        let loaded = super::runtime::tests::terra_loaded(1.0);
         let mut app = App::new();
         app.insert_non_send(loaded).add_plugins(plugin);
         let catalogue = app
@@ -1680,7 +1683,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             assert!(pixels.as_chunks::<4>().0.iter().any(|p| p != &pixels[..4]));
             if matches!(
                 material.name.as_str(),
-                "demo:glass" | "demo:water" | "demo:mud"
+                "terra:glass" | "terra:water" | "terra:mud"
             ) {
                 assert!(pixels.as_chunks::<4>().0.iter().any(|p| p[3] < 255));
             } else {
@@ -1959,39 +1962,39 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     #[test]
-    fn a_built_dev_demo_is_the_default_trusted_for_the_run_and_an_explicit_directory_wins() {
+    fn a_built_dev_terra_is_the_default_trusted_for_the_run_and_an_explicit_directory_wins() {
         let s = Scratch::new();
-        let demo = s.0.join("games/demo/dist/mods");
+        let terra = s.0.join("games/terra/dist/mods");
         let options =
-            |args: &[&str], env: Option<&str>, trust: Option<&str>, demo: Option<&Path>| {
+            |args: &[&str], env: Option<&str>, trust: Option<&str>, terra: Option<&Path>| {
                 LoadOptions::resolve(
                     args.iter().map(OsString::from),
                     env.map(OsString::from),
                     trust.map(OsString::from),
                     Some(PathBuf::from("data/tesserae/mods")),
-                    demo.map(Path::to_path_buf),
+                    terra.map(Path::to_path_buf),
                 )
                 .unwrap()
             };
 
-        assert!(options(&[], None, None, Some(&demo)).is_none());
-        assert!(options(&["--trust-all"], None, Some("1"), Some(&demo)).is_none());
+        assert!(options(&[], None, None, Some(&terra)).is_none());
+        assert!(options(&["--trust-all"], None, Some("1"), Some(&terra)).is_none());
 
-        fs::create_dir_all(games_dir(&demo)).unwrap();
+        fs::create_dir_all(games_dir(&terra)).unwrap();
         for (args, trust) in [(&[][..], None), (&["--trust-all"][..], Some("1"))] {
-            let chosen = options(args, None, trust, Some(&demo)).unwrap();
-            assert_eq!(chosen.directory, demo);
+            let chosen = options(args, None, trust, Some(&terra)).unwrap();
+            assert_eq!(chosen.directory, terra);
             assert_eq!(chosen.trust, TrustMode::ThisRun);
         }
-        let cli = options(&["--mods", "cli"], Some("env"), None, Some(&demo)).unwrap();
+        let cli = options(&["--mods", "cli"], Some("env"), None, Some(&terra)).unwrap();
         assert_eq!(cli.directory, PathBuf::from("cli"));
         assert_eq!(cli.trust, TrustMode::None);
-        let env = options(&[], Some("env"), Some("1"), Some(&demo)).unwrap();
+        let env = options(&[], Some("env"), Some("1"), Some(&terra)).unwrap();
         assert_eq!(env.directory, PathBuf::from("env"));
         assert_eq!(env.trust, TrustMode::All);
-        let named = demo.to_str().unwrap();
-        let explicit = options(&["--mods", named], None, None, Some(&demo)).unwrap();
-        assert_eq!(explicit.directory, demo);
+        let named = terra.to_str().unwrap();
+        let explicit = options(&["--mods", named], None, None, Some(&terra)).unwrap();
+        assert_eq!(explicit.directory, terra);
         assert_eq!(explicit.trust, TrustMode::None);
 
         let release = options(&[], None, None, None).unwrap();
@@ -2000,11 +2003,11 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
 
     #[test]
-    fn only_a_dev_build_offers_the_in_repo_demo() {
+    fn only_a_dev_build_offers_the_in_repo_terra() {
         #[cfg(feature = "dev")]
-        assert!(dev_demo().unwrap().ends_with("games/demo/dist/mods"));
+        assert!(dev_terra().unwrap().ends_with("games/terra/dist/mods"));
         #[cfg(not(feature = "dev"))]
-        assert!(dev_demo().is_none());
+        assert!(dev_terra().is_none());
     }
 
     #[test]
@@ -2029,8 +2032,11 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
     }
     #[test]
     fn catalogue_preserves_mod_removal_times_by_registered_material_id() {
-        let mut loaded = super::runtime::tests::demo_loaded(1.0);
-        let id = loaded.registry.id_of(Kind::Material, "demo:stone").unwrap() as MaterialId;
+        let mut loaded = super::runtime::tests::terra_loaded(1.0);
+        let id = loaded
+            .registry
+            .id_of(Kind::Material, "terra:stone")
+            .unwrap() as MaterialId;
         assert!(
             loaded
                 .remove_times

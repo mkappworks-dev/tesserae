@@ -522,18 +522,18 @@ fn legacy_game(s: &Scratch, folder: &str, id: &str) {
 #[test]
 fn migration_moves_a_legacy_root_into_games_once_and_leaves_the_rest() {
     let s = Scratch::new("migrate");
-    legacy_game(&s, "old", "demo");
+    legacy_game(&s, "old", "terra");
     s.good("lamps", "");
     let moved = migrate_legacy_games(&s.mods());
     assert!(
-        matches!(moved.as_slice(), [Migration::Moved { id, .. }] if id == "demo"),
+        matches!(moved.as_slice(), [Migration::Moved { id, .. }] if id == "terra"),
         "{moved:?}"
     );
-    assert!(s.games().join("demo/mod.toml").is_file());
+    assert!(s.games().join("terra/mod.toml").is_file());
     assert!(!s.mods().join("old").exists());
     assert!(s.mods().join("lamps/mod.toml").is_file());
     let found = scan(&s.mods()).unwrap();
-    assert_eq!(ids(&found.games), ["demo"]);
+    assert_eq!(ids(&found.games), ["terra"]);
     assert!(found.rejected.is_empty());
     assert!(migrate_legacy_games(&s.mods()).is_empty());
 }
@@ -541,21 +541,21 @@ fn migration_moves_a_legacy_root_into_games_once_and_leaves_the_rest() {
 #[test]
 fn migration_refuses_to_overwrite_an_installed_game() {
     let s = Scratch::new("migrate-clash");
-    s.good_game("demo", "demo");
-    legacy_game(&s, "old", "demo");
+    s.good_game("terra", "terra");
+    legacy_game(&s, "old", "terra");
     let moved = migrate_legacy_games(&s.mods());
     assert!(
-        matches!(moved.as_slice(), [Migration::Refused { id, .. }] if id == "demo"),
+        matches!(moved.as_slice(), [Migration::Refused { id, .. }] if id == "terra"),
         "{moved:?}"
     );
     assert!(s.mods().join("old/mod.toml").is_file());
-    assert!(s.games().join("demo/m.wasm").is_file());
+    assert!(s.games().join("terra/m.wasm").is_file());
 }
 
 #[test]
 fn migration_keeps_a_games_trust_because_trust_follows_the_build_not_the_path() {
     let s = Scratch::new("migrate-trust");
-    legacy_game(&s, "old", "demo");
+    legacy_game(&s, "old", "terra");
     let before = scan(&s.mods());
     assert!(before.unwrap().games.is_empty());
     let legacy = Found {

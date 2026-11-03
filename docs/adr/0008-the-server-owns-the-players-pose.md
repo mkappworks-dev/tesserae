@@ -25,7 +25,7 @@ introduced.
 **Game and Server policy govern modes.** The unreleased 0.3 World declaration
 adds optional movement permissions and an allowed initial mode. Non-Game World
 parameters remain forbidden. Older contract adapters supply no movement policy.
-The demo allows both modes and starts physics. Without Game policy, generated
+Terra allows both modes and starts physics. Without Game policy, generated
 ground defaults physics and an empty World retains flight. The Server also
 checks policy while advancing an existing body, so a forbidden mode freezes.
 

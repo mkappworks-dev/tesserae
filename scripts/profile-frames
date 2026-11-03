@@ -271,7 +271,7 @@ def main():
     parser.add_argument('--binary', type=Path)
     parser.add_argument('--profile', choices=['dev', 'release'])
     parser.add_argument('--features', help='exact Cargo features used for this executable')
-    parser.add_argument('--game', type=Path, default=ROOT / 'games/demo/dist/mods')
+    parser.add_argument('--game', type=Path, default=ROOT / 'games/terra/dist/mods')
     parser.add_argument('--presented', action='store_true')
     parser.add_argument('--monitor-probe', action='store_true', help='one short monitor setup check, without a timing series')
     parser.add_argument('--borderless', action='store_true', help='fill the selected monitor; requires --monitor-hz and a target matching its physical size')

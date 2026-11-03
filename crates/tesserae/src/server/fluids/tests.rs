@@ -1752,23 +1752,23 @@ fn run_seconds(f: &mut Fixture, seconds: f64) {
     }
 }
 
-/// Water and lava from the demo Game and slime from an independent Mod,
+/// Water and lava from the Terra Game and slime from an independent Mod,
 /// placed with the fluid tool, flow by their own declared metres through the
 /// same Server tick: after a second each front is where its rate puts it, each settles
 /// at its own reach, and each recedes. Lava is the slowest of the three.
 #[test]
 fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
     for v in [1.0, 0.5, 0.25] {
-        let loaded = mod_runtime::tests::demo_and_fluids(v);
+        let loaded = mod_runtime::tests::terra_and_fluids(v);
         let id = |name| {
             loaded
                 .registry
                 .id_of(tesserae_mods::Kind::Material, name)
                 .unwrap() as u16
         };
-        let (lava, slime) = (id("demo:lava"), id("fluids:slime"));
+        let (lava, slime) = (id("terra:lava"), id("fluids:slime"));
         for (material, after_1_s, reach) in [
-            (id("demo:water"), 4.0, 7.0),
+            (id("terra:water"), 4.0, 7.0),
             (lava, 0.75, 3.0),
             (slime, 2.0, 2.0),
         ] {
@@ -1804,12 +1804,12 @@ fn declared_fluids_flow_by_their_own_rows_through_the_server_tick() {
     }
 }
 
-/// Each fluid the demo's catalogue offers the hotbar, held and clicked, lands
+/// Each fluid that Terra's catalogue offers the hotbar, held and clicked, lands
 /// as a source, and a right click takes it away again.
 #[test]
-fn every_fluid_the_demo_catalogues_reaches_the_world_as_a_source() {
+fn every_fluid_the_terra_catalogues_reaches_the_world_as_a_source() {
     for v in [1.0, 0.25] {
-        let loaded = mod_runtime::tests::demo_loaded(v);
+        let loaded = mod_runtime::tests::terra_loaded(v);
         let catalogue = super::super::mods::catalogue(
             &loaded.registry,
             &loaded.tables,
@@ -1821,7 +1821,7 @@ fn every_fluid_the_demo_catalogues_reaches_the_world_as_a_source() {
             .iter()
             .filter(|m| m.fluid.is_some())
             .collect();
-        for name in ["demo:water", "demo:lava", "demo:mud"] {
+        for name in ["terra:water", "terra:lava", "terra:mud"] {
             assert!(fluids.iter().any(|m| m.name == name), "{name}");
         }
         for fluid in fluids {
@@ -1856,10 +1856,10 @@ fn every_fluid_the_demo_catalogues_reaches_the_world_as_a_source() {
 /// recedes, each time what a fresh solve of the final cells gives.
 #[test]
 fn lava_lights_the_dark_as_it_flows_and_the_light_goes_with_it() {
-    let loaded = mod_runtime::tests::demo_and_fluids(1.0);
+    let loaded = mod_runtime::tests::terra_and_fluids(1.0);
     let lava = loaded
         .registry
-        .id_of(tesserae_mods::Kind::Material, "demo:lava")
+        .id_of(tesserae_mods::Kind::Material, "terra:lava")
         .unwrap() as u16;
     let rock = loaded.world.unwrap().ground.unwrap().rock;
     let tables = loaded.tables;
@@ -1931,10 +1931,10 @@ fn a_source_from_a_player_or_either_contract_line_flows_the_same() {
     assert!(states[0] == states[1] && states[1] == states[2]);
 }
 
-/// The demo Game's and the `fluids` guest's content, from their real WASI
+/// the Terra Game's and the `fluids` guest's content, from their real WASI
 /// components, and a Material by full name.
 fn declared(v: f32) -> (Tables, impl Fn(&str) -> u16) {
-    let loaded = mod_runtime::tests::demo_and_fluids(v);
+    let loaded = mod_runtime::tests::terra_and_fluids(v);
     let registry = loaded.registry;
     let id = move |name: &str| registry.id_of(tesserae_mods::Kind::Material, name).unwrap() as u16;
     (loaded.tables, id)
@@ -1950,17 +1950,17 @@ fn touching(f: &Fixture, a: MaterialId, b: MaterialId) -> bool {
 }
 
 /// A lava source and a water source placed on one tick either side of the
-/// face between Chunks -1 and 0: the demo's declared rule turns the lava to
+/// face between Chunks -1 and 0: Terra's declared rule turns the lava to
 /// stone on the next step and keeps the water, at every Voxel size, and the
 /// change reaches the level-1 cover of the Chunk it landed in.
 #[test]
 fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
     for v in [1.0, 0.5, 0.25] {
         let (tables, id) = declared(v);
-        let water = id("demo:water");
-        let (lava, stone_id) = (id("demo:lava"), id("demo:stone"));
-        assert_eq!(stone_id, id("demo:stone"));
-        let mut f = Fixture::with_tables(v, 4.0, 0, tables, id("demo:stone"));
+        let water = id("terra:water");
+        let (lava, stone_id) = (id("terra:lava"), id("terra:stone"));
+        assert_eq!(stone_id, id("terra:stone"));
+        let mut f = Fixture::with_tables(v, 4.0, 0, tables, id("terra:stone"));
         f.send(-1, EditAction::PlaceSource(lava));
         f.send(0, EditAction::PlaceSource(water));
         f.apply_intents();
@@ -1979,7 +1979,7 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
         f.settle();
         assert_eq!(
             f.occupants(-1).solid,
-            Voxel::cube(id("demo:stone")),
+            Voxel::cube(id("terra:stone")),
             "{v} m"
         );
         assert_eq!(f.fluid(-1), None);
@@ -2005,9 +2005,9 @@ fn lava_touching_water_across_a_chunk_face_cools_to_stone_at_every_size() {
 #[test]
 fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() {
     let (tables, id) = declared(1.0);
-    let water = id("demo:water");
-    let lava = id("demo:lava");
-    let mut f = Fixture::with_tables(1.0, 10.0, 16, tables.clone(), id("demo:stone"));
+    let water = id("terra:water");
+    let lava = id("terra:lava");
+    let mut f = Fixture::with_tables(1.0, 10.0, 16, tables.clone(), id("terra:stone"));
     let home = ChunkCoord::new(0, 0, 0);
     let fresh = |f: &Fixture| {
         light_cells(
@@ -2030,7 +2030,7 @@ fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() 
     f.send(4, EditAction::PlaceSource(water));
     f.settle();
     let stones: Vec<i32> = (-f.half..=f.half)
-        .filter(|&x| f.occupants(x).solid == Voxel::cube(id("demo:stone")))
+        .filter(|&x| f.occupants(x).solid == Voxel::cube(id("terra:stone")))
         .collect();
     assert!(!stones.is_empty(), "nothing cooled");
     assert!(!touching(&f, lava, water));
@@ -2051,7 +2051,7 @@ fn a_mods_own_pair_reacts_through_the_server() {
     let (tables, id) = declared(1.0);
     let brine = id("fluids:brine");
     let (slime, ash) = (id("fluids:slime"), id("fluids:ash"));
-    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables, id("demo:stone"));
+    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables, id("terra:stone"));
     f.send(0, EditAction::PlaceSource(slime));
     f.settle();
     assert_eq!(f.wet_length_m(), 2.0);
@@ -2064,7 +2064,7 @@ fn a_mods_own_pair_reacts_through_the_server() {
     assert_eq!(f.fluid(0), Some(Fluid::source(slime)));
     assert_eq!(f.fluid(3), Some(Fluid::source(brine)));
     assert!(!touching(&f, slime, brine));
-    assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != Voxel::cube(id("demo:stone"))));
+    assert!((-f.half..=f.half).all(|x| f.occupants(x).solid != Voxel::cube(id("terra:stone"))));
 }
 
 /// A held step read water beside the lava and would cool it; the player
@@ -2073,9 +2073,9 @@ fn a_mods_own_pair_reacts_through_the_server() {
 #[test]
 fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
     let (tables, id) = declared(1.0);
-    let water = id("demo:water");
-    let lava = id("demo:lava");
-    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables, id("demo:stone"));
+    let water = id("terra:water");
+    let lava = id("terra:lava");
+    let mut f = Fixture::with_tables(1.0, 8.0, 0, tables, id("terra:stone"));
     f.send(0, EditAction::PlaceSource(lava));
     f.settle();
     assert!(f.fluid(3).is_some_and(|l| l.material == lava) && f.fluid(4).is_none());
@@ -2100,7 +2100,7 @@ fn an_older_job_cannot_cool_lava_whose_water_is_gone() {
         f.tick();
         assert_ne!(
             f.occupants(3).solid,
-            Voxel::cube(id("demo:stone")),
+            Voxel::cube(id("terra:stone")),
             "an old step's reaction landed"
         );
         assert!(started.elapsed() < CEILING);
@@ -2120,9 +2120,9 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
     let states: Vec<Vec<Occupants>> = (0..3)
         .map(|way| {
             let (tables, id) = declared(0.5);
-            let water = id("demo:water");
-            let mut f = Fixture::with_tables(0.5, 4.0, 0, tables, id("demo:stone"));
-            f.send(-2, EditAction::PlaceSource(id("demo:lava")));
+            let water = id("terra:water");
+            let mut f = Fixture::with_tables(0.5, 4.0, 0, tables, id("terra:stone"));
+            f.send(-2, EditAction::PlaceSource(id("terra:lava")));
             f.apply_intents();
             let at = [0.0, Y as f32 * 0.5, Z as f32 * 0.5];
             match way {
@@ -2149,7 +2149,7 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
             }
             f.settle();
             assert!(
-                (-f.half..=f.half).any(|x| f.occupants(x).solid == Voxel::cube(id("demo:stone"))),
+                (-f.half..=f.half).any(|x| f.occupants(x).solid == Voxel::cube(id("terra:stone"))),
                 "way {way}: nothing cooled"
             );
             f.state()
@@ -2165,9 +2165,9 @@ fn water_from_a_player_or_either_contract_line_cools_lava_the_same() {
 fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
     let run = |bound: Option<usize>| {
         let (tables, id) = declared(1.0);
-        let water = id("demo:water");
-        let lava = id("demo:lava");
-        let mut f = Fixture::with_tables(1.0, 6.0, 0, tables, id("demo:stone"));
+        let water = id("terra:water");
+        let lava = id("terra:lava");
+        let mut f = Fixture::with_tables(1.0, 6.0, 0, tables, id("terra:stone"));
         match bound {
             Some(bound) => f.sim_mut().set_bounds(AGENDA, bound),
             // Each cooling puts out lava's light, so the emitter bound counts too.
@@ -2194,7 +2194,7 @@ fn reactions_past_the_landing_bound_land_whole_in_later_steps() {
         loop {
             f.tick();
             let now = (-4..=4)
-                .filter(|&x| f.occupants(x).solid == Voxel::cube(id("demo:stone")))
+                .filter(|&x| f.occupants(x).solid == Voxel::cube(id("terra:stone")))
                 .count();
             if bound.is_some() {
                 assert!(now <= cooled + 1, "{now} landed in one step");
@@ -2226,15 +2226,15 @@ fn meshes_are_redelivered_after_a_reaction() {
     let settings = WorldSettings::default();
     let params = tesserae_core::WorldgenParams {
         ground: Some(tesserae_core::GroundParams {
-            rock: id("demo:stone"),
-            soil: id("demo:dirt"),
-            surface: id("demo:grass"),
+            rock: id("terra:stone"),
+            soil: id("terra:dirt"),
+            surface: id("terra:grass"),
         }),
         ..tesserae_core::WorldgenParams::default()
     };
     let mut h = Harness::with_world(small(), UNLIMITED, settings, params);
-    let water = id("demo:water");
-    let lava = id("demo:lava");
+    let water = id("terra:water");
+    let lava = id("terra:lava");
     let tables = Arc::new(tables);
     h.app.insert_resource(ContentTables(Arc::clone(&tables)));
     h.settle();
@@ -2280,7 +2280,7 @@ fn meshes_are_redelivered_after_a_reaction() {
                     meshes,
                     tables,
                     [x, y + dy, z + dz],
-                    Voxel::cube(id("demo:stone")),
+                    Voxel::cube(id("terra:stone")),
                 )
                 .unwrap();
             }
@@ -2288,7 +2288,7 @@ fn meshes_are_redelivered_after_a_reaction() {
             let voxel = if open {
                 Voxel::AIR
             } else {
-                Voxel::cube(id("demo:stone"))
+                Voxel::cube(id("terra:stone"))
             };
             edit::set_voxel(store, meshes, tables, [x, y, z], voxel).unwrap();
         }
@@ -2305,7 +2305,7 @@ fn meshes_are_redelivered_after_a_reaction() {
     });
     let store = h.store();
     let cooled = (11..20)
-        .filter(|&x| store.voxel([x, y, z]) == Some(Voxel::cube(id("demo:stone"))))
+        .filter(|&x| store.voxel([x, y, z]) == Some(Voxel::cube(id("terra:stone"))))
         .count();
     assert!(cooled > 0, "nothing cooled");
 }

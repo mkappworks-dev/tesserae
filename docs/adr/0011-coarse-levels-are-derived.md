@@ -115,7 +115,7 @@ holds.
   2.5 km on the default seed no cave was visible past level 2 and the picture
   was no worse.
 - **What it loses.** A cave mouth or overhang beyond level 2, about 640 m in the
-  demo, is not drawn. Levels 1 and 2 keep the downsample and its caves.
+  terra, is not drawn. Levels 1 and 2 keep the downsample and its caves.
 - **What does not change.** A job whose children hold an Edit or a saved change
   still takes the downsample at every level, so a change shows wherever it did.
   A level-3-up Chunk made this way keeps every seam wall, having no finer

@@ -27,7 +27,7 @@ warning. Retired core names are unknown on every contract line; no adapter maps
 them to Game content. Frozen builder and echo components still return their
 original ids, and validation refuses their retired placements.
 
-The demo declares its own solids and ground. The engine's default World has no
+Terra declares its own solids and ground. The engine's default World has no
 ground, lakes or playable Materials. Its palette contains no Material colours
 beyond air's sentinel; the flame colour remains engine drawing. Tests and
 benches register fixture Materials and use the returned ids.
@@ -42,7 +42,7 @@ The unreleased 0.3 appearance record carries one optional texture: a 48 by 16
 RGBA atlas with top, side and bottom tiles, exactly 3072 bytes. The host accepts
 at most 64 appearance rows per Mod and validates byte lengths before publishing
 them to the Client. Adapters for 0.1 and 0.2 supply no texture, preserving
-colour fallback. The demo owns its pixel patterns; the Client uploads one shared
+colour fallback. Terra owns its pixel patterns; the Client uploads one shared
 atlas for World surfaces, tiles, drag feedback, held models and ghosts. Greedy
 faces repeat per Voxel, and depth/shadow cutouts sample the same alpha as the
 visible face. Fire's artwork remains engine drawing. Basic texture appearance

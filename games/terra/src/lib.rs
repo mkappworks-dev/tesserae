@@ -85,7 +85,7 @@ thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
 }
 
-struct Demo;
+struct Terra;
 
 fn solid(name: &str) -> MaterialDef {
     MaterialDef {
@@ -171,7 +171,7 @@ fn appearance(material: &str, [r, g, b, a]: [u8; 4]) -> Appearance {
     }
 }
 
-impl Guest for Demo {
+impl Guest for Terra {
     fn declare() -> Declaration {
         let mut world = tesserae::mods::host::default_world_params();
         world.movement = Some(tesserae::mods::content::MovementPolicy {
@@ -184,12 +184,12 @@ impl Guest for Demo {
         world.relief_m = RELIEF_M;
         world.water = Some(WaterParams {
             level_m: LAKE_M,
-            material: "demo:water".into(),
+            material: "terra:water".into(),
         });
         world.ground = Some(GroundParams {
-            rock: "demo:stone".into(),
-            soil: "demo:dirt".into(),
-            surface: "demo:grass".into(),
+            rock: "terra:stone".into(),
+            soil: "terra:dirt".into(),
+            surface: "terra:grass".into(),
         });
         Declaration {
             materials: vec![
@@ -274,7 +274,7 @@ impl Guest for Demo {
             // Water first: registration order decides an otherwise equal claim.
             fluids: vec![
                 FluidDef {
-                    material: "demo:water".into(),
+                    material: "terra:water".into(),
                     reach_m: 7.0,
                     sideways_m_per_s: 4.0,
                     downward_m_per_s: 8.0,
@@ -286,7 +286,7 @@ impl Guest for Demo {
                 },
                 // Slower and shorter than water, and hot; it stays out of Shapes.
                 FluidDef {
-                    material: "demo:lava".into(),
+                    material: "terra:lava".into(),
                     reach_m: 3.0,
                     sideways_m_per_s: 0.75,
                     downward_m_per_s: 1.5,
@@ -302,7 +302,7 @@ impl Guest for Demo {
                 // Faster than lava and slower than water; it soaks into Shapes
                 // and smothers fire as water does, but goes only 2 m.
                 FluidDef {
-                    material: "demo:mud".into(),
+                    material: "terra:mud".into(),
                     reach_m: 2.0,
                     sideways_m_per_s: 1.0,
                     downward_m_per_s: 2.0,
@@ -317,36 +317,36 @@ impl Guest for Demo {
                 // Lava that touches water cools to stone; the water is kept.
                 ReactionDef {
                     first: Reactant {
-                        fluid: "demo:lava".into(),
+                        fluid: "terra:lava".into(),
                         state: FluidState::Any,
                     },
                     second: Reactant {
-                        fluid: "demo:water".into(),
+                        fluid: "terra:water".into(),
                         state: FluidState::Any,
                     },
                     consumed: ReactionSide::First,
-                    product: Some("demo:stone".into()),
+                    product: Some("terra:stone".into()),
                     receiving: None,
                 },
                 // Mud that touches lava fires to brick; here the lava is kept.
                 ReactionDef {
                     first: Reactant {
-                        fluid: "demo:mud".into(),
+                        fluid: "terra:mud".into(),
                         state: FluidState::Any,
                     },
                     second: Reactant {
-                        fluid: "demo:lava".into(),
+                        fluid: "terra:lava".into(),
                         state: FluidState::Any,
                     },
                     consumed: ReactionSide::First,
-                    product: Some("demo:brick".into()),
+                    product: Some("terra:brick".into()),
                     receiving: None,
                 },
             ],
             // Wood catches 2 s after heat reaches it, burns for 8 s, lighting
             // and heating 2 m round it, and leaves ash, which does not burn.
             combustion: vec![CombustionDef {
-                fuel: "demo:wood".into(),
+                fuel: "terra:wood".into(),
                 ignition_threshold: 6,
                 ignition_delay_s: 2.0,
                 emission: 12,
@@ -356,7 +356,7 @@ impl Guest for Demo {
                 }),
                 end: BurnEnd::After(BurnAfter {
                     seconds: 8.0,
-                    residue: Some("demo:ash".into()),
+                    residue: Some("terra:ash".into()),
                 }),
             }],
             tools: vec![ToolDef {
@@ -382,18 +382,18 @@ impl Guest for Demo {
             } else {
                 Stage::Unbuilt
             },
-            stone: material("demo:stone"),
-            lamp: material("demo:lamp"),
-            lava: material("demo:lava"),
-            water: material("demo:water"),
-            mud: material("demo:mud"),
-            wood: material("demo:wood"),
-            grass: material("demo:grass"),
+            stone: material("terra:stone"),
+            lamp: material("terra:lamp"),
+            lava: material("terra:lava"),
+            water: material("terra:water"),
+            mud: material("terra:mud"),
+            wood: material("terra:wood"),
+            grass: material("terra:grass"),
             cube: shape("core:cube"),
             slab: shape("core:slab"),
             stair: shape("core:stair"),
             post: shape("core:post"),
-            fence: shape("demo:fence"),
+            fence: shape("terra:fence"),
             ..State::default()
         });
     }
@@ -405,7 +405,7 @@ impl Guest for Demo {
             let elapsed_s = (ctx.tick.saturating_sub(state.started_tick)) as f32 * ctx.dt_s;
             match state.stage {
                 Stage::Unbuilt => {
-                    log("demo first tick: site, wall, lantern post, lava and the scenarios in metres");
+                    log("terra first tick: site, wall, lantern post, lava and the scenarios in metres");
                     let mut all = site(state);
                     all.extend(lifted(build(state)));
                     state.issued = voxels(&all, state.size_m);
@@ -416,16 +416,16 @@ impl Guest for Demo {
                 Stage::Building if !state.queued.is_empty() => next_batch(state),
                 Stage::Building if state.applied + state.rejected >= state.issued => {
                     log(&format!(
-                        "demo build applied={} rejected={}",
+                        "terra build applied={} rejected={}",
                         state.applied, state.rejected
                     ));
-                    log("demo scenario: sources placed, fuel lit");
+                    log("terra scenario: sources placed, fuel lit");
                     state.stage = Stage::Running;
                     state.started_tick = ctx.tick;
                     lifted(start(state))
                 }
                 Stage::Running if elapsed_s >= DOUSE_S => {
-                    log("demo scenario: water poured on the burning post");
+                    log("terra scenario: water poured on the burning post");
                     state.stage = Stage::Doused;
                     vec![Command::PlaceSources(SourceFill {
                         region: cell(state, (-23.0, 30.0 + LIFT_M, -7.0)),
@@ -433,7 +433,7 @@ impl Guest for Demo {
                     })]
                 }
                 Stage::Doused if elapsed_s >= DRY_S => {
-                    log("demo scenario: the waterfall's source taken away");
+                    log("terra scenario: the waterfall's source taken away");
                     state.stage = Stage::Dried;
                     vec![Command::RemoveSources(cell(
                         state,
@@ -657,4 +657,4 @@ fn start(state: &State) -> Vec<Command> {
     ]
 }
 
-export!(Demo);
+export!(Terra);
