@@ -1,6 +1,6 @@
 # Composing a World from a Game and Mods
 
-Status: ready-for-agent
+Status: done
 
 ## Problem Statement
 

@@ -1,6 +1,6 @@
 # 04: The World list shows a World's Mods and Re-create reopens them
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03
 
@@ -10,6 +10,6 @@ The World details name the Mods the World was made with. Re-create opens step 2 
 
 ## Acceptance criteria
 
-- [ ] A World made with five Mods lists them.
-- [ ] Re-create on a World whose Mods are installed opens step 2 with those ticked.
-- [ ] A saved World is never changed.
+- [x] A World made with five Mods lists them.
+- [x] Re-create on a World whose Mods are installed opens step 2 with those ticked.
+- [x] A saved World is never changed.

@@ -1,6 +1,6 @@
 # 03: Create World in two steps with a conflict check
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -10,6 +10,6 @@ Step 1 picks a Game (name and seed stay there). Step 2 lists required Mods locke
 
 ## Acceptance criteria
 
-- [ ] Next and Back keep the form's name, seed and picks.
-- [ ] A Mod whose rules clash with a ticked or required Mod cannot be ticked, and says why.
-- [ ] The Create button is always visible.
+- [x] Next and Back keep the form's name, seed and picks.
+- [x] A Mod whose rules clash with a ticked or required Mod cannot be ticked, and says why.
+- [x] The Create button is always visible.

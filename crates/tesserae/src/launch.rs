@@ -258,6 +258,59 @@ impl Installed {
             .collect()
     }
 
+    /// Why each installed data Mod cannot join `chosen`, by id, in one line. `chosen` must itself
+    /// load. Only data Mods are tried: a component would have to run to be checked, so one is never
+    /// reported, and neither is a Mod that needs one.
+    pub fn clashes(&self, chosen: &[String]) -> std::collections::BTreeMap<String, String> {
+        let mut out = std::collections::BTreeMap::new();
+        let Ok(host) = tesserae_mods::ModHost::new() else {
+            return out;
+        };
+        let base: std::collections::BTreeSet<String> = chosen.iter().cloned().collect();
+        if !matches!(self.loads(&host, &base), Some(Ok(()))) {
+            return out;
+        }
+        for m in &self.mods {
+            if base.contains(&m.id) {
+                continue;
+            }
+            let mut with = base.clone();
+            with.extend(self.closure(&[m.id.clone()].into()));
+            if let Some(Err(reason)) = self.loads(&host, &with) {
+                out.insert(m.id.clone(), reason.lines().next().unwrap_or("").to_owned());
+            }
+        }
+        out
+    }
+
+    /// Whether the data Mods `ids` declare together; `None` when one of them is a component.
+    fn loads(
+        &self,
+        host: &tesserae_mods::ModHost,
+        ids: &std::collections::BTreeSet<String>,
+    ) -> Option<Result<(), String>> {
+        let mut found = Vec::new();
+        for id in ids {
+            let f = self.found.iter().find(|f| &f.manifest.id == id)?;
+            f.manifest.declaration.as_ref()?;
+            found.push(f.clone());
+        }
+        Some((|| {
+            let order = tesserae_mods::plan(found).map_err(|e| e.to_string())?;
+            let mut trust = tesserae_mods::Trust::load("");
+            for f in &order {
+                trust.grant_for_run(f).map_err(|e| e.to_string())?;
+            }
+            let compiled = host.load(order, &trust).map_err(|e| e.to_string())?;
+            bevy::tasks::block_on(crate::server::mods::declare_all(
+                host,
+                &compiled,
+                &crate::world::WorldSettings::default(),
+            ))
+            .map(|_| ())
+        })())
+    }
+
     /// The Mods `game` names in `depends`, and theirs: what a World made with it cannot do without.
     pub fn required(&self, game: &str) -> Vec<String> {
         let direct = self.depends_of(game).iter().cloned().collect();
@@ -434,6 +487,53 @@ mod tests {
 
         let lacking = with_mods(&[("strata", &[])]).with_game_depends(&["strata", "ghost"]);
         assert_eq!(lacking.missing("terra"), ["ghost"]);
+    }
+
+    fn copy_tree(from: &std::path::Path, to: &std::path::Path) {
+        std::fs::create_dir_all(to).unwrap();
+        for entry in std::fs::read_dir(from).unwrap() {
+            let entry = entry.unwrap();
+            let (src, dst) = (entry.path(), to.join(entry.file_name()));
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&src, &dst);
+            } else {
+                std::fs::copy(&src, &dst).unwrap();
+            }
+        }
+    }
+
+    /// The repository's own Mods, installed as a user would have them.
+    fn shared_mods(name: &str) -> (PathBuf, Installed) {
+        let root =
+            std::env::temp_dir().join(format!("tesserae-clash-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../mods");
+        copy_tree(&source, &root.join("mods"));
+        let scan = tesserae_mods::scan(&root.join("mods")).unwrap();
+        (root, Installed::new(scan, false, PathBuf::new()))
+    }
+
+    #[test]
+    fn a_second_character_mod_is_named_as_a_clash_and_nothing_else_is() {
+        let (root, installed) = shared_mods("character");
+        let picked = ["hearth".to_string(), "wanderer".to_string()].into();
+        let chosen = installed.closure_for("none", &picked);
+        let clashes = installed.clashes(&chosen);
+        let _ = std::fs::remove_dir_all(&root);
+
+        let mut named: Vec<_> = clashes.keys().cloned().collect();
+        named.sort();
+        assert_eq!(named, ["golem", "sprite"], "{clashes:?}");
+        assert!(clashes["golem"].contains("both supply the character"));
+    }
+
+    #[test]
+    fn with_no_character_chosen_every_mod_can_be_added() {
+        let (root, installed) = shared_mods("none");
+        let chosen = installed.closure_for("none", &["hearth".to_string()].into());
+        let clashes = installed.clashes(&chosen);
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(clashes.is_empty(), "{clashes:?}");
     }
 
     fn args(list: &[&str]) -> Vec<OsString> {
