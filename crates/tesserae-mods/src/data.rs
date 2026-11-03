@@ -4,14 +4,30 @@ use crate::bindings::tesserae::mods::{content, types};
 use crate::trust::CheckedPayload;
 use crate::{Declaration, ModError};
 
+mod behaviour;
+mod character;
+mod shape;
+mod world;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Data {
     #[serde(default)]
     materials: Vec<Material>,
     #[serde(default)]
+    shapes: Vec<shape::Shape>,
+    #[serde(default)]
     appearance: Vec<Appearance>,
     world: Option<World>,
+    view: Option<world::View>,
+    #[serde(default)]
+    fluids: Vec<behaviour::Fluid>,
+    #[serde(default)]
+    reactions: Vec<behaviour::Reaction>,
+    #[serde(default)]
+    combustion: Vec<behaviour::Combustion>,
+    #[serde(default)]
+    tools: Vec<behaviour::Tool>,
 }
 
 #[derive(Deserialize)]
@@ -58,59 +74,12 @@ struct World {
     feature_size_m: Option<f32>,
     soil_depth_m: Option<f32>,
     octaves: Option<u32>,
+    caves: Option<world::Caves>,
+    smoothing: Option<world::Smoothing>,
+    water: Option<world::Water>,
     ground: Option<Ground>,
-    character: Option<Character>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct Character {
-    pixel_m: f32,
-    skin: String,
-    bones: Vec<Bone>,
-    idle: Motion,
-    walk: Motion,
-    sprint: Motion,
-    airborne: Motion,
-    crouch: Motion,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Bone {
-    name: String,
-    parent: Option<String>,
-    role: BoneRole,
-    pivot: (f32, f32, f32),
-    cubes: Vec<Cube>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum BoneRole {
-    Body,
-    Head,
-    ArmLeft,
-    ArmRight,
-    LegLeft,
-    LegRight,
-    Fixed,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Cube {
-    origin: (f32, f32, f32),
-    size: (u8, u8, u8),
-    uv: (u8, u8),
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
-struct Motion {
-    swing_deg: f32,
-    rate_hz: f32,
-    arm_raise_deg: f32,
+    movement: Option<world::Movement>,
+    character: Option<character::Character>,
 }
 
 #[derive(Deserialize)]
@@ -131,7 +100,7 @@ pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<(String, String)>
         }
     }
     if let Some(character) = data.world.and_then(|w| w.character) {
-        found.push(("world.character.skin".into(), character.skin));
+        found.push(("world.character.skin".into(), character.skin().to_owned()));
     }
     Ok(found)
 }
@@ -205,57 +174,17 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                 let defaults = crate::convert::engine_world_params();
                 let character = w
                     .character
-                    .map(|c| -> Result<_, ModError> {
+                    .map(|c| {
                         let skin = artwork(
                             "world.character.skin".into(),
-                            &c.skin,
+                            c.skin(),
                             crate::SKIN_EDGE as u32,
                             crate::SKIN_EDGE as u32,
                         )?;
-                        let motion = |m: Motion| content::LimbMotion {
-                            swing_deg: m.swing_deg,
-                            rate_hz: m.rate_hz,
-                            arm_raise_deg: m.arm_raise_deg,
-                        };
-                        Ok(content::CharacterDef {
-                            pixel_m: c.pixel_m,
-                            skin,
-                            bones: c
-                                .bones
-                                .into_iter()
-                                .map(|b| content::CharacterBone {
-                                    name: b.name,
-                                    parent: b.parent,
-                                    role: match b.role {
-                                        BoneRole::Body => content::BoneRole::Body,
-                                        BoneRole::Head => content::BoneRole::Head,
-                                        BoneRole::ArmLeft => content::BoneRole::ArmLeft,
-                                        BoneRole::ArmRight => content::BoneRole::ArmRight,
-                                        BoneRole::LegLeft => content::BoneRole::LegLeft,
-                                        BoneRole::LegRight => content::BoneRole::LegRight,
-                                        BoneRole::Fixed => content::BoneRole::Fixed,
-                                    },
-                                    pivot: b.pivot,
-                                    cubes: b
-                                        .cubes
-                                        .into_iter()
-                                        .map(|c| content::CharacterCube {
-                                            origin: c.origin,
-                                            size: c.size,
-                                            uv: c.uv,
-                                        })
-                                        .collect(),
-                                })
-                                .collect(),
-                            idle: motion(c.idle),
-                            walk: motion(c.walk),
-                            sprint: motion(c.sprint),
-                            airborne: motion(c.airborne),
-                            crouch: motion(c.crouch),
-                        })
+                        Ok::<_, ModError>(c.into_def(skin))
                     })
                     .transpose()?;
-                Ok(content::WorldParams {
+                Ok::<_, ModError>(content::WorldParams {
                     sea_level_m: w.sea_level_m.unwrap_or(defaults.sea_level_m),
                     relief_m: w.relief_m.unwrap_or(defaults.relief_m),
                     feature_size_m: w.feature_size_m.unwrap_or(defaults.feature_size_m),
@@ -266,19 +195,19 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                         soil: g.soil,
                         surface: g.surface,
                     }),
-                    caves: None,
-                    smoothing: None,
-                    water: None,
-                    movement: None,
+                    caves: w.caves.map(Into::into),
+                    smoothing: w.smoothing.map(Into::into),
+                    water: w.water.map(Into::into),
+                    movement: w.movement.map(Into::into),
                     character,
                 })
             })
             .transpose()?,
-        shapes: vec![],
-        view: None,
-        fluids: vec![],
-        reactions: vec![],
-        combustion: vec![],
-        tools: vec![],
+        shapes: data.shapes.into_iter().map(Into::into).collect(),
+        view: data.view.map(Into::into),
+        fluids: data.fluids.into_iter().map(Into::into).collect(),
+        reactions: data.reactions.into_iter().map(Into::into).collect(),
+        combustion: data.combustion.into_iter().map(Into::into).collect(),
+        tools: data.tools.into_iter().map(Into::into).collect(),
     })
 }

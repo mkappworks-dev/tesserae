@@ -59,14 +59,47 @@ the bytes that were checked are the bytes decoded. Changing a referenced PNG
 needs Trust again and breaks exact-build reopening of saved Worlds; unreferenced
 PNGs and editor files do not.
 
-Only Games may declare `world`. Its optional numeric fields are `sea-level-m`,
-`relief-m`, `feature-size-m`, `soil-depth-m` and `octaves`, defaulting to the
-Engine's terrain values. Omitted ground means empty air; caves, smoothing and
-water are absent in this initial schema. Unknown fields at every level fail
-explicitly. Shapes, view, movement, characters, simulation and Tools are added
-by subsequent SDK tickets, not silently ignored here.
+Absent optional values are absent, as in the contract: an omitted `caves`,
+`smoothing`, `water`, `ground`, `movement`, `character`, `view`, `heat`,
+`collision`, `connect`, `product`, `receiving` or `residue` means none, never a
+default. The one exception is a present `world` table's numeric fields
+(`sea-level-m`, `relief-m`, `feature-size-m`, `soil-depth-m`, `octaves`), which
+default to the Engine's terrain values. Every omitted list is empty. Field names
+are the contract's, in kebab-case; unknown fields and variants at every level
+fail naming the Mod. Values go through the same validation as a component
+Declaration, so bounds, Game-only restrictions and per-Mod limits are identical.
 
-Data-only Mods have no guest instances, `start` or `tick` callbacks.
-Dependencies use the existing `depends` Manifest field and load before their
-consumers, regardless of Declaration format. Paths must be relative and stay
-inside the installed directory after symlink resolution.
+| Only Games may declare `world`, `view` and `tools`. | Table | Fields |     |
+| --------------------------------------------------- | ----- | ------ | --- |
+
+---
+
+| | `[[shapes]]` | `name`, `boxes`, optional `collision`, optional `connect` | |
+`boxes` entry | `min`, `max`: three integers, sixteenths of a Voxel (collision
+boxes are signed) | | `[shapes.connect]` | `group`, `connects-to`, `to-sealed`,
+`arms` (`face`, `boxes`, optional `collision`) | | `[view]` | `view-distance-m`,
+`lod-distance-m` | | `[world.caves]` | `feature-size-m`, `radius-m`, `floor-m`,
+`octaves` | | `[world.smoothing]` | `min-rise-m` | | `[world.water]` |
+`level-m`, `material` (a fluid, by full name) | | `[world.movement]` |
+`allow-flight`, `allow-physics`, `start-in-flight` | | `[world.character]` |
+`bones`, `pixel-m`, `skin` (a 64 by 64 PNG path), `idle`, `walk`, `sprint`,
+`airborne`, `crouch` (limb motion: `swing-deg`, `rate-hz`, `arm-raise-deg`) | |
+character bone | `name`, optional `parent`, `role` (`body`, `head`, `arm-left`,
+`arm-right`, `leg-left`, `leg-right`, `fixed`), `pivot`, `cubes` (`origin`,
+`size`, `uv`) | | `[[fluids]]` | `material`, `reach-m`, `sideways-m-per-s`,
+`downward-m-per-s`, `recession-m-per-s`, `reset-drop-m`, `waterlogs`,
+`extinguishes`, optional `heat` (`strength`, `reach-m`) | | `[[reactions]]` |
+`first`, `second` (`fluid`, `state`: `any`, `source` or `flowing`), `consumed`
+(`first` or `second`), optional `product`, optional `receiving` | |
+`[[combustion]]` | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`,
+optional `heat`, `end` | | `[[tools]]` | `name`, `kind` (`measure`) |
+
+A combustion `end` is `"permanent"` or
+`{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
+the solid. Fluid, reaction, combustion, ground and water names are full
+`<mod id>:<name>` names and resolve after every Mod has declared, in dependency
+order, whether their Material came from data or a component. Data-only Mods have
+no guest instances, `start` or `tick` callbacks. Dependencies use the existing
+`depends` Manifest field and load before their consumers, regardless of
+Declaration format. Paths must be relative and stay inside the installed
+directory after symlink resolution.

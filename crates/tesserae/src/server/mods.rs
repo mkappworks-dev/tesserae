@@ -742,6 +742,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("mod.toml"), format!("id = \"{id}\"\nversion = \"0.1.0\"\napi = \"0.3\"\nroot = {root}\ndeclaration = \"content.toml\"\n{extra}\n")).unwrap();
         fs::write(dir.join("content.toml"), content).unwrap();
+        fs::write(dir.join("skin.png"), png(64, 64, 0)).unwrap();
         dir
     }
 
@@ -797,7 +798,6 @@ surface = "plain:rock"
                 false,
                 "emission",
             ),
-            ("shapes = []", false, "shapes"),
             ("[world]\nwater = {}", true, "water"),
             ("[[materials]]\nname='rock'\nextra=1", false, "extra"),
             (
@@ -861,6 +861,126 @@ surface = "plain:rock"
             pure.load(TrustMode::All).unwrap().tables.materials.def(8),
             loaded.tables.materials.def(9)
         );
+    }
+
+    fn full_game() -> String {
+        format!(
+            "{}\n[world.character]\nskin = \"skin.png\"\n{}",
+            include_str!("../../../tesserae-mods/tests/fixtures/data/full.toml"),
+            include_str!("../../../tesserae-mods/tests/fixtures/data/character.toml"),
+        )
+    }
+
+    #[test]
+    fn data_game_fluids_reactions_combustion_and_tool_reach_native_simulation() {
+        let s = Scratch::new();
+        data(&s, "full", true, "", &full_game());
+        let loaded = s.load(TrustMode::All).unwrap();
+        let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+        let (water, lava, wood, ash, rock) = (
+            id("full:water"),
+            id("full:lava"),
+            id("full:wood"),
+            id("full:ash"),
+            id("full:rock"),
+        );
+        assert!(loaded.mods.is_empty() && loaded.game);
+        assert!(loaded.tables.fluids.get(water).unwrap().extinguishes);
+        assert!(loaded.tables.fluids.get(lava).unwrap().heat.is_some());
+        let rules = loaded.tables.reactions.rules();
+        assert_eq!((rules.len(), rules[0].product), (1, Some(rock)));
+        assert!(loaded.tables.combustion.get(wood).is_some());
+        assert!(loaded.tables.combustion.get(ash).is_some());
+        assert_eq!(loaded.registry.id_of(Kind::Shape, "full:fence"), Some(5));
+        assert!(loaded.tables.shapes.any_connected());
+        assert_eq!(
+            loaded.world.as_ref().unwrap().water.unwrap().material,
+            water
+        );
+        assert_eq!(loaded.view.unwrap().view_distance_m, 160.0);
+        assert_eq!(loaded.character.as_ref().unwrap().bones.len(), 2);
+        assert!(loaded.movement.unwrap().allow_flight);
+        let catalogue = published_catalogue(loaded);
+        assert_eq!(catalogue.lake, Some(water));
+        assert_eq!(
+            catalogue.tools,
+            vec![CatalogueTool {
+                id: crate::server::tool::ToolId(0),
+                name: "full:ruler".into(),
+                kind: tesserae_mods::ToolKind::Measure,
+            }]
+        );
+        let material = |m: MaterialId| catalogue.materials.iter().find(|c| c.id == m).unwrap();
+        assert!(material(lava).fluid.is_some() && !material(lava).solid);
+        assert!(material(wood).burns && material(wood).solid);
+    }
+
+    #[test]
+    fn data_content_resolves_names_across_data_and_component_mods() {
+        let s = Scratch::new();
+        data(
+            &s,
+            "plain",
+            true,
+            "depends = ['middle']",
+            &format!(
+                "[[combustion]]\nfuel='middle:m0'\nignition-threshold=5\nignition-delay-s=1\nemission=3\nend={{ after = {{ seconds = 2, residue = 'base:ore' }} }}\n{}",
+                DATA_GAME
+            ),
+        );
+        data(
+            &s,
+            "base",
+            false,
+            "",
+            "[[materials]]\nname='ore'\nemission=0\ndimming=15\nocclusion='opaque'\nrender='opaque'\nsolid=true",
+        );
+        s.add("middle", "catalog", "depends = ['base']");
+        let loaded = s.load(TrustMode::All).unwrap();
+        let fuel = loaded.registry.id_of(Kind::Material, "middle:m0").unwrap();
+        let ore = loaded.registry.id_of(Kind::Material, "base:ore").unwrap();
+        let row = loaded.tables.combustion.get(fuel as MaterialId).unwrap();
+        assert_eq!(
+            row.burn,
+            tesserae_core::Burn::For {
+                seconds: 2.0,
+                residue: ore as MaterialId,
+            }
+        );
+    }
+
+    #[test]
+    fn data_content_refusals_name_the_mod_and_field_at_the_server() {
+        let game = full_game();
+        for (from, to, field) in [
+            ("kind = \"measure\"", "kind = \"dig\"", "dig"),
+            (
+                "material = \"full:water\"\nreach-m",
+                "material = \"other:water\"\nreach-m",
+                "other:water",
+            ),
+            (
+                "fuel = \"full:wood\"",
+                "fuel = \"full:rock\"\nextra = 1",
+                "extra",
+            ),
+            ("octaves = 2", "octaves = 2\nspeed = 1", "speed"),
+        ] {
+            let s = Scratch::new();
+            data(&s, "full", true, "", &game.replacen(from, to, 1));
+            let error = s.load(TrustMode::All).err().expect(to);
+            assert!(error.contains("full") && error.contains(field), "{error}");
+        }
+        let s = Scratch::new();
+        data(
+            &s,
+            "full",
+            false,
+            "",
+            "[[tools]]\nname='ruler'\nkind='measure'",
+        );
+        let error = s.load(TrustMode::All).err().unwrap();
+        assert!(error.contains("full") && error.contains("tools"), "{error}");
     }
 
     #[test]

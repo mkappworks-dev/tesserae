@@ -34,6 +34,18 @@ pub struct CheckedPayload {
 }
 
 impl CheckedPayload {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        source: &str,
+        files: impl IntoIterator<Item = (&'static str, Vec<u8>)>,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            files: files.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+            data: true,
+        }
+    }
+
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.files[&self.source]
     }

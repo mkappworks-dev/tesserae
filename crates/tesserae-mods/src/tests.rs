@@ -12,6 +12,7 @@ mod alloc;
 mod behaviour;
 mod commands;
 mod convert;
+mod data;
 mod declare;
 mod export_version;
 mod lines;
