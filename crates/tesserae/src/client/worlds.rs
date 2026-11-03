@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use crate::session::{AppState, has_state, in_list};
 use bevy::text::EditableText;
-use bevy::ui_widgets::{Activate, TextInput};
+use bevy::ui_widgets::{Activate, ScrollArea, TextInput};
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
 use super::menu_ui::{self as ui, Danger, Tone};
@@ -1190,14 +1190,17 @@ fn list(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
     })
     .with_children(|columns| {
         columns
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                flex_basis: Val::Percent(55.0),
-                min_width: Val::Px(0.0),
-                overflow: Overflow::scroll_y(),
-                ..default()
-            })
+            .spawn((
+                ScrollArea,
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    flex_basis: Val::Percent(55.0),
+                    min_width: Val::Px(0.0),
+                    overflow: Overflow::scroll_y(),
+                    ..default()
+                },
+            ))
             .with_children(|rows| {
                 for entry in &l.entries {
                     let selected = l.selected.as_deref() == Some(entry.path.as_path());
@@ -1356,6 +1359,7 @@ fn form(root: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) ->
     let mut focus = None;
     root.spawn((
         TabGroup::default(),
+        ScrollArea,
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(10.0),
