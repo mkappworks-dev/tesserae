@@ -1,0 +1,6 @@
+id = "lumen"
+version = "0.1.0"
+api = "0.3"
+root = true
+depends = ["strata", "glassworks"]
+wasm = "lumen.wasm"

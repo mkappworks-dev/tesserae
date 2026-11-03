@@ -1,6 +1,6 @@
 # 05: Add the lumen Game
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 

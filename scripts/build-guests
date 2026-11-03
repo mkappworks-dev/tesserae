@@ -35,7 +35,7 @@ cp games/terra/mod.toml games/terra/dist/games/terra/
 # The demo Games depend on the data Mods in mods/, so they are not installed beside Terra (a
 # World with no record loads every Mod there). Each component lands in its project folder, where
 # `tesserae validate games/<id> --mods mods --trust-for-run` and the tests find it.
-for game in meadow ember tidewater; do
+for game in meadow ember tidewater lumen; do
   RUSTFLAGS= cargo build --manifest-path "games/$game/Cargo.toml" \
     --target wasm32-wasip2 --release --locked
   game_target=$(cargo metadata --manifest-path "games/$game/Cargo.toml" --no-deps \

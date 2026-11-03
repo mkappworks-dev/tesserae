@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bevy::tasks::block_on;
-use tesserae_core::{Burn, Worldgen};
+use tesserae_core::{Burn, RenderClass, Voxel, Worldgen};
 use tesserae_mods::{BatchReport, Command, Kind, Resolved, TickContext, validate};
 
 use super::{LoadedMods, TrustMode, load};
@@ -453,4 +453,87 @@ fn tidewater_steps_come_every_declared_interval() {
     let steps: Vec<f32> = sources(&batches, water).iter().map(|(t, _)| *t).collect();
     assert!(near(steps[0], 8.0, 0.5), "{steps:?}");
     assert!(near(steps[1] - steps[0], 8.0, 0.5), "{steps:?}");
+}
+
+#[test]
+fn lumen_builds_blended_glass_light_and_all_three_shapes() {
+    let (_install, mut loaded) = loaded("lumen", 0.5);
+    assert_eq!(ids(&loaded), ["glassworks", "strata", "lumen"]);
+    let batches = run(&mut loaded, 0.5, 0.05, 40);
+    let all: Vec<&Command> = batches.iter().flat_map(|b| &b.commands).collect();
+    let has = |wanted: &dyn Fn(Voxel) -> bool| {
+        all.iter()
+            .any(|c| matches!(c, Command::Fill { voxel, .. } if wanted(*voxel)))
+    };
+
+    let glass = material(&loaded, "glassworks:glass");
+    let lantern = material(&loaded, "glassworks:lantern");
+    assert!(has(&|v| v.material() == glass));
+    assert!(has(
+        &|v| v.material() == material(&loaded, "glassworks:frosted_glass")
+    ));
+    for name in ["slab", "stair", "fence"] {
+        let id = shape(&loaded, &format!("glassworks:{name}"));
+        assert!(has(&|v| v.shape() == id), "{name} appears in the World");
+    }
+
+    let materials = &loaded.tables.materials;
+    assert_eq!(materials.emission(Voxel::cube(lantern)), 15);
+    assert_eq!(materials.render(Voxel::cube(glass)), RenderClass::Blend);
+    assert!(
+        !has(&|v| v.material() == lantern),
+        "lanterns are not lit by the build itself"
+    );
+}
+
+#[test]
+fn lumen_lanterns_light_in_sequence_then_go_dark_together() {
+    const POSTS: [(f32, f32); 8] = [
+        (8.0, 26.0),
+        (6.0, 32.0),
+        (0.0, 34.0),
+        (-6.0, 32.0),
+        (-8.0, 26.0),
+        (-6.0, 20.0),
+        (0.0, 18.0),
+        (6.0, 20.0),
+    ];
+    let (_install, mut loaded) = loaded("lumen", 0.5);
+    let batches = run(&mut loaded, 0.5, 0.25, 400);
+    let lantern = material(&loaded, "glassworks:lantern");
+
+    let lit: Vec<_> = fills(&batches, lantern).collect();
+    assert!(lit.len() >= 16, "two rounds of eight: {}", lit.len());
+    let first = lit[0].0;
+    for round in 0..2 {
+        for (n, post) in POSTS.iter().enumerate() {
+            let (at, min, _) = lit[round * 8 + n];
+            assert_eq!(
+                (min[0], min[2]),
+                *post,
+                "round {round} lantern {n} is in order"
+            );
+            let expected = first + round as f32 * (7.0 * 2.0 + 6.0 + 2.0) + n as f32 * 2.0;
+            assert!(
+                near(at, expected, 0.5),
+                "round {round} lantern {n} at {at}, expected {expected}"
+            );
+        }
+    }
+
+    let dark: Vec<_> = batches
+        .iter()
+        .filter(|b| {
+            b.commands.len() == POSTS.len()
+                && b.commands
+                    .iter()
+                    .all(|c| matches!(c, Command::Fill { voxel, .. } if voxel.is_air()))
+        })
+        .collect();
+    assert!(!dark.is_empty(), "all eight go out together");
+    assert!(
+        near(dark[0].at_s, first + 7.0 * 2.0 + 6.0, 0.5),
+        "{}",
+        dark[0].at_s
+    );
 }

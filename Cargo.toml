@@ -9,6 +9,7 @@ exclude = [
     "games/meadow",
     "games/ember",
     "games/tidewater",
+    "games/lumen",
     "crates/tesserae-mods/tests/guests",
 ]
 
