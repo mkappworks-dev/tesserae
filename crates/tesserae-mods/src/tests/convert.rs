@@ -204,6 +204,7 @@ fn world_params_field_for_field_with_the_lake_apart() {
             ground: None,
             water: None,
             generator: 2,
+            ..WorldgenParams::default()
         }
     );
     assert_eq!(lake, wit.water);

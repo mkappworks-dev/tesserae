@@ -1,6 +1,6 @@
 # 02: Climate and Biome selection
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -10,10 +10,10 @@ The generator can answer which Biome a column belongs to. Climate is temperature
 
 ## Acceptance criteria
 
-- [ ] Biome selection is a pure function of seed and metres: the same answer at every Voxel size and for every LOD level generator.
-- [ ] Selection at known Climate points picks the expected Biome; the warped border is irregular and deterministic.
-- [ ] The generator stays Send + Sync and cheap to construct per level.
-- [ ] `tesserae-core` still depends on neither Bevy nor wgpu.
+- [x] Biome selection is a pure function of seed and metres: the same answer at every Voxel size and for every LOD level generator.
+- [x] Selection at known Climate points picks the expected Biome; the warped border is irregular and deterministic.
+- [x] The generator stays Send + Sync and cheap to construct per level.
+- [x] `tesserae-core` still depends on neither Bevy nor wgpu.
 
 ## Comments
 

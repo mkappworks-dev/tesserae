@@ -517,6 +517,8 @@ impl Generation {
                     })
                 })
                 .transpose()?,
+            climate: Default::default(),
+            biomes: Default::default(),
         };
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
         Ok(p)

@@ -7,6 +7,7 @@
 
 pub mod agenda;
 pub mod chunk;
+pub mod climate;
 pub mod collide;
 pub mod combustion;
 pub mod entity;
@@ -32,6 +33,9 @@ pub mod voxel;
 pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
+pub use climate::{
+    Biome, BiomeId, BiomeName, BiomeTable, Climate, ClimateParams, MAX_BIOME_NAME_BYTES, MAX_BIOMES,
+};
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};
 pub use light::{

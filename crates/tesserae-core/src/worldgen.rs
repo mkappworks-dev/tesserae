@@ -10,6 +10,7 @@
 //! feeds the benches a fixed surface and makes no World.
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
+use crate::climate::{BIOMES_SINCE, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams};
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
@@ -42,6 +43,11 @@ pub struct WorldgenParams {
     /// `None` is a World without lakes.
     pub water: Option<WaterParams>,
     pub ground: Option<GroundParams>,
+    /// How large the Climate regions are. Read by every Generator version, since
+    /// Climate is a pure query, but only version 2 selects Biomes from it.
+    pub climate: ClimateParams,
+    /// Empty is a World with no Biomes. Ignored by Generator version 1.
+    pub biomes: BiomeTable,
     /// Which generation algorithm runs. A World pins the version it was created
     /// with, so a revision never reshapes terrain that already exists.
     pub generator: u32,
@@ -141,6 +147,8 @@ impl Default for WorldgenParams {
             // The engine declares no fluid, so standing fluid is a Game's to add.
             water: None,
             ground: None,
+            climate: ClimateParams::default(),
+            biomes: BiomeTable::default(),
             generator: crate::save::GENERATOR_VERSION,
         }
     }
@@ -251,6 +259,11 @@ impl WorldgenParams {
         if let Some(water) = self.water {
             require(water.level_m.is_finite(), "water.level_m", "must be finite")?;
         }
+        positive_size(
+            "climate.temperature_size_m",
+            self.climate.temperature_size_m,
+        )?;
+        positive_size("climate.humidity_size_m", self.climate.humidity_size_m)?;
         require(
             crate::save::SUPPORTED_GENERATORS.contains(&self.generator),
             "generator",
@@ -451,6 +464,7 @@ pub struct Worldgen {
     smoothing: bool,
     /// The lake, its level already clamped to the surface band.
     water: Option<WaterParams>,
+    climate: ClimateField,
 }
 
 impl Worldgen {
@@ -471,6 +485,7 @@ impl Worldgen {
                 level_m: w.level_m.min(params.sea_level_m + params.relief_m),
                 ..w
             }),
+            climate: ClimateField::new(folded, params.climate),
         }
     }
 
@@ -486,6 +501,22 @@ impl Worldgen {
     /// The lake, its level clamped as generation clamps it.
     pub fn water(&self) -> Option<WaterParams> {
         self.water
+    }
+
+    /// Temperature and humidity over a point on the ground plane, in metres.
+    pub fn climate_at(&self, x_m: f32, z_m: f32) -> Climate {
+        self.climate.at(x_m, z_m)
+    }
+
+    /// The Biome over a point on the ground plane, in metres; `None` where the
+    /// World has no Biomes or runs a Generator version from before them. A pure
+    /// function of the seed and the position, so it is the same at every Voxel
+    /// size and at every LOD level.
+    pub fn biome_at(&self, x_m: f32, z_m: f32) -> Option<BiomeId> {
+        if self.params.generator < BIOMES_SINCE {
+            return None;
+        }
+        self.climate.biome_at(&self.params.biomes, x_m, z_m)
     }
 
     /// The metre height of the surface over a point on the ground plane.
