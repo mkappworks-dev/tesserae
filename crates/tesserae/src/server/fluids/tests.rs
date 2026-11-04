@@ -10,7 +10,9 @@ use tesserae_core::{
     Chunk, Fluid, LitChunk, MaterialId, Occupants, Orientation, SHAPE_STAIR, Voxel, mesh_chunk,
 };
 
-use super::super::edit::{EditAction, EditIntent, EditRejected, PendingEdits, RejectReason};
+use super::super::edit::{
+    EditAction, EditIntent, EditRejected, PendingEdits, RejectReason, set_occupants,
+};
 use super::super::mods::runtime::{self as mod_runtime, PendingCommands};
 use super::super::player::Player;
 use super::super::streaming::face_neighbors;
@@ -1520,10 +1522,11 @@ fn under_saturation_every_chunk_player_edits_and_mod_queues_keep_moving() {
         let queues = f.app.world().resource::<PendingCommands>();
         let now = [queues.applied(0), queues.applied(1)];
         if applied[1] < 40 {
+            assert!(now[1] > applied[1], "the Mod queues did not move");
             assert_eq!(
-                (now[0] - applied[0], now[1] - applied[1]),
-                (1, 1),
-                "the Mod queues did not take turns at two Voxels a tick"
+                now[0] - applied[0],
+                now[1] - applied[1],
+                "the Mod queues did not take turns"
             );
         }
         applied = now;
@@ -2047,6 +2050,49 @@ fn flowing_lava_meeting_water_cools_and_its_light_goes_as_a_fresh_solve_would() 
         f.store().light(home) == Some(&fresh(&f)),
         "light disagrees with a fresh solve"
     );
+}
+
+/// Three lava sources light the corridor and are taken away together: the
+/// flow drains in steps that each land, and relight, as one batch of many
+/// emitter changes, and what is left is what a fresh solve gives.
+#[test]
+fn lava_draining_relights_in_batches_as_a_fresh_solve_would() {
+    let (tables, id) = declared(1.0);
+    let lava = id("terra:lava");
+    let mut f = Fixture::with_tables(1.0, 10.0, 16, tables.clone(), id("terra:stone"));
+    let home = ChunkCoord::new(0, 0, 0);
+    let fresh = |f: &Fixture| {
+        light_cells(
+            f.store().get(home).unwrap(),
+            f.store().overlay(home).unwrap(),
+            [None; 6],
+            &tables,
+        )
+    };
+    let solved = fresh(&f);
+    f.app
+        .world_mut()
+        .resource_mut::<ChunkStore>()
+        .set_light(home, solved);
+    for x in [-6, 0, 6] {
+        f.send(x, EditAction::PlaceSource(lava));
+    }
+    f.settle();
+    assert!(f.wet_length_m() > 3.0, "the lava spread");
+    assert!(
+        f.store().light(home) == Some(&fresh(&f)),
+        "spreading disagrees with a fresh solve"
+    );
+    for x in [-6, 0, 6] {
+        f.send(x, EditAction::Remove);
+    }
+    f.settle();
+    assert!(f.wet().is_empty(), "the lava drained");
+    assert!(
+        f.store().light(home) == Some(&fresh(&f)),
+        "draining disagrees with a fresh solve"
+    );
+    assert_eq!(f.store().light_at([16, Y, Z]).block(), 0, "dark again");
 }
 
 /// The `fluids` Mod's own rule, slime that is flowing and touches its brine

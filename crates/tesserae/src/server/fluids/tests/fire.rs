@@ -650,7 +650,8 @@ fn under_saturation_fire_flow_edits_and_mod_queues_all_keep_moving() {
         let queues = f.app.world().resource::<PendingCommands>();
         let now = [queues.applied(0), queues.applied(1)];
         if applied[1] < 30 {
-            assert_eq!((now[0] - applied[0], now[1] - applied[1]), (1, 1));
+            assert!(now[1] > applied[1], "the Mod queues did not move");
+            assert_eq!(now[0] - applied[0], now[1] - applied[1], "no turns");
         }
         applied = now;
         let sim = f.sim();

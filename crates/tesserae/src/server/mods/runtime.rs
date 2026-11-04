@@ -20,7 +20,25 @@ use super::super::streaming::MeshState;
 use super::super::world_state::{ChunkStore, VoxelCoord};
 use crate::world::WorldSettings;
 
-const MOD_VOXELS_PER_TICK: usize = 2;
+/// What one tick's drain may do, across every Mod: write `writes` Voxels that
+/// change, and look at `reads` in all. A write of what is already there costs
+/// a look and no relight, so a build over air is not held to the write rate.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::server) struct DrainBudget {
+    pub writes: usize,
+    pub reads: usize,
+}
+
+/// Writes an emitter counts as. Its relight floods as far as its light
+/// reaches, so a fill of lanterns at the write rate overruns a tick that a
+/// fill of stone does not.
+const EMITTER_WRITES: usize = 6;
+
+const MOD_VOXELS_PER_TICK: DrainBudget = DrainBudget {
+    writes: 96,
+    reads: 4096,
+};
+const _: () = assert!(MOD_VOXELS_PER_TICK.reads > MOD_VOXELS_PER_TICK.writes);
 const MAX_BACKLOG_VOXELS: u64 = 262_144;
 const MAX_EDIT_EVENTS: usize = 1_024;
 
@@ -210,20 +228,23 @@ impl PendingCommands {
         &mut self.queues[index]
     }
 
+    /// One batch: every Voxel this tick lands in storage under the Edit rules,
+    /// then the light around all of them re-floods once.
     fn drain(
         &mut self,
         store: &mut ChunkStore,
         meshes: &mut MeshState,
         tables: &ContentTables,
-        budget: usize,
+        budget: DrainBudget,
     ) {
         let count = self.queues.len();
         if count == 0 {
             return;
         }
+        let mut batch = edit::Batch::default();
         let mut skipped = 0;
-        let mut spent = 0;
-        while spent < budget && skipped < count {
+        let (mut written, mut read) = (0, 0);
+        while written < budget.writes && read < budget.reads && skipped < count {
             let index = self.next;
             self.next = (index + 1) % count;
             let queue = &mut self.queues[index];
@@ -237,7 +258,7 @@ impl PendingCommands {
                 skipped += 1;
                 continue;
             }
-            let result = edit::apply_intent(store, meshes, tables, at, intent);
+            let result = batch.apply_intent(store, meshes, tables, at, intent);
             let counter = if result.is_ok() {
                 &mut queue.report.applied
             } else {
@@ -245,9 +266,16 @@ impl PendingCommands {
             };
             *counter = counter.saturating_add(1);
             queue.advance();
-            spent += 1;
+            read += 1;
+            written += match result {
+                Ok(edit::Written::Unchanged) => 0,
+                Ok(edit::Written::Emitter) => EMITTER_WRITES,
+                // A refusal costs a write: it may have read as much as a write does.
+                Ok(edit::Written::Changed) | Err(_) => 1,
+            };
             skipped = 0;
         }
+        batch.finish(store, meshes, tables);
     }
 }
 

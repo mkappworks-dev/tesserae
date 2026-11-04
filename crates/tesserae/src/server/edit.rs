@@ -22,7 +22,7 @@
 
 mod layout;
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 
@@ -1024,6 +1024,7 @@ fn extinguish(here: Occupants) -> Result<Occupants, RejectReason> {
 
 /// One Voxel of a Mod's Command, relit at once: [`Batch::apply_intent`] in a
 /// batch of its own.
+#[cfg(test)]
 pub(in crate::server) fn apply_intent(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
@@ -1037,12 +1038,26 @@ pub(in crate::server) fn apply_intent(
     written.map(drop)
 }
 
-/// Whether a write changed the World.
+/// Whether a write changed the World, and how far its relight may reach.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::server) enum Written {
     Changed,
+    /// Changed the block light the Voxel gives off: its relight floods as far
+    /// as that light reaches, a hundred times an ordinary change's.
+    Emitter,
     /// It held exactly this already: nothing was journalled, woken or marked.
     Unchanged,
+}
+
+/// The block light a Voxel gives off: its solid's and fluid's emission, or a
+/// fire's, by the larger.
+pub(in crate::server) fn emission(tables: &Tables, o: &Occupants) -> u8 {
+    let lit = tables.wet_emission(o.solid, o.fluid.map(|f| f.material));
+    if o.burning.is_some() {
+        lit.max(tables.burning_emission(o.solid))
+    } else {
+        lit
+    }
 }
 
 /// The one World change, shared by the intents above, the Mod drain, the fluid
@@ -1059,6 +1074,10 @@ pub(in crate::server) struct Batch {
     /// Every write that moved light, with the light its position held before
     /// the batch.
     relit: Vec<([i32; 3], Light)>,
+    /// Each Chunk's shaped units once a write here has counted them, kept
+    /// current by every later write: counting means reading the whole Chunk,
+    /// and a build of stairs would do it once per stair.
+    shaped: HashMap<ChunkCoord, usize>,
 }
 
 impl Batch {
@@ -1145,7 +1164,22 @@ impl Batch {
         let was = store
             .occupants(at, &tables.fluids)
             .expect("the Chunk is held");
-        vet_capacity(store, tables, at, voxel)?;
+        let (added, removed) = (
+            tables.shapes.cap_units(voxel) as usize,
+            tables.shapes.cap_units(before) as usize,
+        );
+        if added > removed {
+            let units = self
+                .shaped
+                .entry(place.chunk)
+                .or_insert_with(|| chunk.shaped_units(|v| tables.shapes.cap_units(v)));
+            if *units + (added - removed) > MAX_SHAPED_PER_CHUNK {
+                return Err(RejectReason::TooManyShaped);
+            }
+        }
+        if let Some(units) = self.shaped.get_mut(&place.chunk) {
+            *units = *units + added - removed;
+        }
 
         let seen = (store.optical(at), store.wet(at), store.burning(at));
         store.set_overlay(place, overlay);
@@ -1193,7 +1227,11 @@ impl Batch {
                 }
             }
         }
-        Ok(Written::Changed)
+        Ok(if emission(tables, &was) != emission(tables, &now) {
+            Written::Emitter
+        } else {
+            Written::Changed
+        })
     }
 
     /// The whole-Voxel Edit a player's click, a Mod's Command and a `dev`
