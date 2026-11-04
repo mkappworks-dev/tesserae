@@ -942,3 +942,45 @@ fn a_change_that_only_moves_the_entity_revision_makes_the_world_dirty() {
     rig.tick();
     assert!(rig.app.world().resource::<SaveStatus>().dirty);
 }
+
+fn saved_generator(dir: &Directory) -> u32 {
+    save::inspect(&dir.0).unwrap().unwrap().commit.generator
+}
+
+/// What a World saved before the generator moved to version 2 looks like.
+fn rewrite_as_version_1(dir: &Directory) {
+    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    commit.generator = 1;
+    commit.sequence += 1;
+    Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+}
+
+fn pinned_generator(dir: &Directory) -> u32 {
+    let (opening, settings) = (dir.opening(), WorldSettings::default());
+    let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+    Persistence::prepare(opening, &mut loaded, settings).unwrap();
+    loaded.world.unwrap().generator
+}
+
+#[test]
+fn a_new_world_is_stamped_with_the_current_generator() {
+    let dir = Directory::new();
+    assert_eq!(pinned_generator(&dir), 2);
+    Rig::new(&dir).settled_save();
+    assert_eq!(saved_generator(&dir), 2);
+}
+
+#[test]
+fn a_version_1_world_reopens_on_version_1_and_saves_as_version_1() {
+    let dir = Directory::new();
+    Rig::new(&dir).settled_save();
+    rewrite_as_version_1(&dir);
+    assert_eq!(pinned_generator(&dir), 1);
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.settled_save();
+    assert_eq!(saved_generator(&dir), 1);
+}

@@ -14,7 +14,10 @@ use sha2::{Digest, Sha256};
 use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay, Voxel};
 
 pub const FORMAT_VERSION: u32 = 1;
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
+/// A World keeps the Generator version it was created with, so every version
+/// that ever shipped stays here until a migration exists.
+pub const SUPPORTED_GENERATORS: [u32; 2] = [1, GENERATOR_VERSION];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
 const MAX_COMMIT_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -476,9 +479,16 @@ impl Generation {
         })
     }
 
-    pub fn restore(&self, mapping: &Mapping) -> Result<crate::WorldgenParams, Error> {
+    /// `generator` is the Commit's pin: it is not a generation parameter, since
+    /// the Server owns which algorithm a World runs.
+    pub fn restore(
+        &self,
+        mapping: &Mapping,
+        generator: u32,
+    ) -> Result<crate::WorldgenParams, Error> {
         mapping.validate()?;
         let p = crate::WorldgenParams {
+            generator,
             sea_level_m: self.sea_level_m,
             relief_m: self.relief_m,
             feature_size_m: self.feature_size_m,
@@ -535,7 +545,7 @@ pub struct Commit {
 
 impl Commit {
     pub fn compatible(&self, installed: &Content) -> Result<(), Error> {
-        if self.format != FORMAT_VERSION || self.generator != GENERATOR_VERSION {
+        if self.format != FORMAT_VERSION || !SUPPORTED_GENERATORS.contains(&self.generator) {
             return Err(Error::Incompatible(format!(
                 "unsupported save/generator version {}/{}",
                 self.format, self.generator
@@ -555,7 +565,7 @@ impl Commit {
         self.entities.validate()?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;
-        self.parameters.restore(&mapping)?;
+        self.parameters.restore(&mapping, self.generator)?;
         let mut coords = BTreeSet::new();
         for chunk in &self.chunks {
             if !coords.insert(chunk.coord) {

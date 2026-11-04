@@ -205,6 +205,62 @@ fn a_changed_checksum_recovers_but_a_complete_new_version_refuses_rollback() {
 }
 
 #[test]
+fn generator_versions_1_and_2_open_and_any_other_is_refused() {
+    let mut c = fixture();
+    for accepted in [1, 2] {
+        c.generator = accepted;
+        assert!(c.compatible(&c.content.clone()).is_ok(), "{accepted}");
+    }
+    for refused in [0, 3, u32::MAX] {
+        c.generator = refused;
+        assert!(
+            matches!(
+                c.compatible(&c.content.clone()),
+                Err(Error::Incompatible(_))
+            ),
+            "{refused}"
+        );
+    }
+}
+
+#[test]
+fn a_complete_commit_of_an_unknown_generator_refuses_rollback() {
+    let d = Directory::new();
+    let mut c = fixture();
+    let mut writer = Writer::acquire(&d.0, &c.world, &c.content).unwrap();
+    writer.write(&c).unwrap();
+    c.sequence = 2;
+    c.generator = 3;
+    let body = serde_json::to_vec(&c).unwrap();
+    let mut bytes = MAGIC.to_vec();
+    bytes.extend(Sha256::digest(&body));
+    bytes.extend(body);
+    fs::write(d.0.join("00000000000000000002.commit"), bytes).unwrap();
+    assert!(matches!(
+        recover(&d.0, &c.content),
+        Err(Error::Incompatible(_))
+    ));
+}
+
+#[test]
+fn a_version_1_commit_keeps_its_version_through_a_write_and_recover() {
+    let d = Directory::new();
+    let mut c = fixture();
+    c.generator = 1;
+    Writer::acquire(&d.0, &c.world, &c.content)
+        .unwrap()
+        .write(&c)
+        .unwrap();
+    let recovered = recover(&d.0, &c.content).unwrap().unwrap().commit;
+    assert_eq!(recovered.generator, 1);
+}
+
+#[test]
+fn a_current_commit_is_version_2() {
+    assert_eq!(fixture().generator, 2);
+}
+
+#[test]
 fn incompatible_content_refuses_writer_without_touching_directory() {
     let d = Directory::new();
     let c = fixture();
@@ -440,13 +496,13 @@ fn named_generation_parameters_restore_ground_and_lakes_after_remapping() {
         ..crate::WorldgenParams::default()
     };
     let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
-    let restored = saved.restore(&mapping(17, 8, 5)).unwrap();
+    let restored = saved.restore(&mapping(17, 8, 5), 2).unwrap();
     assert_eq!(restored.ground.unwrap().rock, 17);
     assert_eq!(restored.water.unwrap().material, 8);
     assert_eq!(restored.relief_m, params.relief_m);
     let mut corrupt = saved;
     corrupt.feature_size_m = -1.0;
-    assert!(corrupt.restore(&mapping(17, 8, 5)).is_err());
+    assert!(corrupt.restore(&mapping(17, 8, 5), 2).is_err());
 }
 #[test]
 fn equal_seed_worlds_commit_to_independent_directories() {

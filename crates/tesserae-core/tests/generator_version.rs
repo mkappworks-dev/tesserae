@@ -24,6 +24,13 @@ fn params() -> WorldgenParams {
     }
 }
 
+fn at_version(generator: u32) -> WorldgenParams {
+    WorldgenParams {
+        generator,
+        ..params()
+    }
+}
+
 fn put(digest: &mut Sha256, v: Voxel) {
     digest.update(v.material().to_le_bytes());
     digest.update(v.shape().to_le_bytes());
@@ -69,20 +76,30 @@ fn digest(generator: &Worldgen) -> String {
         .collect()
 }
 
-fn recorded_digests() -> Vec<String> {
+fn digests(generator: u32) -> Vec<String> {
     SEEDS
         .iter()
         .flat_map(|&seed| {
             VOXEL_SIZES
                 .iter()
-                .map(move |&size| digest(&Worldgen::new(seed, size, params())))
+                .map(move |&size| digest(&Worldgen::new(seed, size, at_version(generator))))
         })
         .collect()
 }
 
 #[test]
-fn the_generator_makes_the_recorded_chunks() {
-    assert_eq!(recorded_digests(), RECORDED);
+fn version_1_makes_the_recorded_chunks() {
+    assert_eq!(digests(1), RECORDED);
+}
+
+#[test]
+fn version_2_with_no_biomes_equals_version_1() {
+    assert_eq!(digests(2), RECORDED);
+}
+
+#[test]
+fn a_new_generator_defaults_to_the_current_version() {
+    assert_eq!(WorldgenParams::default().generator, 2);
 }
 
 /// Without this the digests could be of a box no tunnel or lake reaches.

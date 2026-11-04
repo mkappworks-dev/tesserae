@@ -203,6 +203,7 @@ fn world_params_field_for_field_with_the_lake_apart() {
             smoothing: Some(SmoothingParams { min_rise_m: 0.5 }),
             ground: None,
             water: None,
+            generator: 2,
         }
     );
     assert_eq!(lake, wit.water);

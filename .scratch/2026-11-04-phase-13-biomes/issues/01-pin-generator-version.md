@@ -1,6 +1,6 @@
 # 01: Pin the Generator version
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -10,11 +10,11 @@ A World reads its saved Generator version and the generator honours it. Version 
 
 ## Acceptance criteria
 
-- [ ] A fixed seed, params and Chunk set at version 1 is byte-identical to the output before this branch (test written before any biome code).
-- [ ] Version 2 with an empty Biome table equals version 1 for the same seed.
-- [ ] A version 1 save reopens and reproduces its terrain; an unknown version is refused with the existing incompatible error.
-- [ ] A new World is stamped version 2.
-- [ ] No change to how entities are stored; the version field is additive.
+- [x] A fixed seed, params and Chunk set at version 1 is byte-identical to the output before this branch (test written before any biome code).
+- [x] Version 2 with an empty Biome table equals version 1 for the same seed.
+- [x] A version 1 save reopens and reproduces its terrain; an unknown version is refused with the existing incompatible error.
+- [x] A new World is stamped version 2.
+- [x] No change to how entities are stored; the version field is additive.
 
 ## Comments
 

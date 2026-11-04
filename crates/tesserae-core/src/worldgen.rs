@@ -42,6 +42,9 @@ pub struct WorldgenParams {
     /// `None` is a World without lakes.
     pub water: Option<WaterParams>,
     pub ground: Option<GroundParams>,
+    /// Which generation algorithm runs. A World pins the version it was created
+    /// with, so a revision never reshapes terrain that already exists.
+    pub generator: u32,
 }
 
 /// A fluid filling the open air above the ground up to one height: the World's
@@ -138,6 +141,7 @@ impl Default for WorldgenParams {
             // The engine declares no fluid, so standing fluid is a Game's to add.
             water: None,
             ground: None,
+            generator: crate::save::GENERATOR_VERSION,
         }
     }
 }
@@ -247,6 +251,11 @@ impl WorldgenParams {
         if let Some(water) = self.water {
             require(water.level_m.is_finite(), "water.level_m", "must be finite")?;
         }
+        require(
+            crate::save::SUPPORTED_GENERATORS.contains(&self.generator),
+            "generator",
+            "must be a supported Generator version",
+        )?;
         Ok(())
     }
 

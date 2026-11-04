@@ -143,6 +143,7 @@ pub(crate) fn world_params(
         }),
         ground: None,
         water: None,
+        ..WorldgenParams::default()
     };
     (terrain, p.water)
 }
