@@ -3,7 +3,7 @@
 Status: ready-for-agent
 Blocked by: 03
 
-Spec: [bulk relight](../spec.md), decisions 3, 4 and 5.
+Spec: [bulk relight](../spec.md), decisions 3, 4, 5 and 9.
 
 ## What to build
 
@@ -15,10 +15,10 @@ one `edit::Batch` and finishes it once.
 - `MOD_VOXELS_PER_TICK` counts writes that change the World. A skipped no-op
   counts as applied in the report and against a separate, larger bound on
   Voxels read a tick, so a tick's work stays bounded by operation counts.
-- Both numbers are set by a sweep with 01's lumen harness: the largest budget
-  whose worst drain tick stays within what phase 7 accepted for the drain beside
-  streaming (the cap of 2 measured 0.3 ms; streaming's worst tick is 0.7 ms),
-  checked with an interleaved A/B against the base, CPU time.
+- Both numbers are set by a sweep with 01's lumen harness: the largest write
+  budget whose worst drain tick stays at or under 2 ms at the dev profile,
+  checked with an interleaved A/B against the base, CPU time. If lumen misses
+  10 s within that, follow the spec's decision 9.
 
 ## Acceptance criteria
 

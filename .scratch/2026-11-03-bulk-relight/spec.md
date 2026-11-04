@@ -1,6 +1,6 @@
 # Bulk relight: write a batch of Voxels, relight once
 
-Status: ready-for-agent. Branch `tech/bulk-relight`, stacked on
+Status: ready-for-agent; decisions grilled and confirmed 2026-11-04. Branch `tech/bulk-relight`, stacked on
 `feat/demo-games-and-shared-mods` (PR #52). Primary-source findings:
 [research.md](research.md). Tickets: [issues/](issues/). Closes
 [world composition ticket 07](../2026-11-03-world-composition/issues/07-faster-mod-builds.md).
@@ -90,7 +90,9 @@ about removal.
    `MOD_VOXELS_PER_TICK` counts Voxels that change; skipped no-ops count against
    a larger, separate bound of reads, so a build over air is not held to the
    write rate. Both are operation counts, which keeps ADR-0014's rule that
-   bounds count operations, not time.
+   bounds count operations, not time. The write budget is the largest whose
+   worst drain tick stays at or under 2 ms at the dev profile, swept with
+   ticket 01's lumen harness.
 5. **The drain keeps queue order.** Draining nearest the Player first across a
    Mod's queue was weighed and rejected: reordering Commands breaks last-write-
    wins between overlapping ones (a Game that fills air then places a door
@@ -106,11 +108,23 @@ about removal.
    (option E).** Both cost a new light state or a second flood path. Build B
    only if a measured full 32³ fill through `relight_many` does not fit the
    tick; E only if neither does.
-8. **Docs.** ADR-0012's "two Voxels per tick" consequence and ADR-0014's "bulk
-   relight remains a follow-up" are updated in place with the new measured
-   figures; this is an amendment to how a recorded decision is carried out, not
-   a new decision. DESIGN.md's Mod host and fluid follow-ups and GLOSSARY.md
-   (**Write batch**) follow.
+8. **Not built: writing the start build before the spawn is lit.** Minecraft's
+   worldgen features and Luanti's mapgen write into unlit Chunks and light them
+   once. Here it would help only a Game's first build, not later Commands, and
+   would undo ADR-0012's "startup dispatch waits for the held, lit spawn
+   neighborhood" with a second startup state.
+9. **If lumen at 0.5 m misses 10 s within 2 ms**, the remedies go in this
+   order: cut per-access cost (a Chunk cache in `LightLattice`, a running
+   shaped-unit count per batch); then region relight for Chunks a batch nearly
+   fills; raising the 2 ms ceiling trades frame time for build speed and is
+   asked first, not done.
+10. **Docs.** ADR-0012's "two Voxels per tick" consequence and ADR-0014's "bulk
+    relight remains a follow-up" are amended in place with the new measured
+    figures: the decision that Commands land through the one World change
+    stands, and dropping the batch is cheap, so it is no new ADR. DESIGN.md's
+    Mod host and fluid follow-ups follow. GLOSSARY.md is unchanged: neither a
+    Mod author nor a Player sees the batch, and a "Write batch" term would blur
+    with **Command batch**; the code calls it `edit::Batch`.
 
 ## Out of scope
 
