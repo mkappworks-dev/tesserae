@@ -17,7 +17,7 @@ journal is taken.
 
 ## Acceptance criteria
 
-- [ ] Every fluid and fire test passes unchanged, including the determinism
+- [x] Every fluid and fire test passes unchanged, including the determinism
       tests: equal state and events give equal state.
 - [x] A test drains a line of lava sources outdoors and checks the light after
       settling equals a fresh solve.

@@ -161,3 +161,27 @@ and after, not wall clock alone.
 | 04  | [The Mod drain on a batch](issues/04-mod-drain-batch.md) | 03         |
 | 05  | [Fluid landing on a batch](issues/05-fluid-landing-batch.md) | 03     |
 | 06  | [Docs, ADRs and closing](issues/06-docs-and-closing.md)  | 04, 05     |
+
+## Outcome
+
+- **01.** Core bench `relight` and the ignored drain tests
+  (`measure_game_build_drain`, `measure_plain_fill_drain`). Baseline: lumen at
+  0.5 m, 154 s at 2 a tick.
+- **02.** `relight_many`, brightest level first. A 4096-Voxel batch relights
+  3-12x faster than one at a time (release); a single relight is about 10%
+  slower.
+- **03.** `edit::Batch`. One existing fluid test changed its set-up, because a
+  write of what is already there no longer delivers a mesh.
+- **04.** Drain: 96 writes (emitter 6) and 4096 reads a tick. lumen 3.1 s,
+  meadow 1.5 s, ember 1.9 s at 0.5 m; worst drain tick under 2 ms in the test
+  profile. Against the old path at the same 96 a tick: 3x less CPU a Voxel, worst
+  tick 4-8x shorter. The emitter weight and the running shaped count were not in
+  the plan; profiling found both.
+- **05.** Fluid steps land as one batch. The 0.25 m lava drain did not
+  measurably speed up (inconclusive: noise matches the difference), so the
+  emitter bound is unchanged.
+- **Not verified:** the drain in a running client (no display here); release
+  profile Server figures; the lava claim above; the full core bench A/B against
+  the other benches (they call `light_chunk`, whose code is unchanged).
+- **Region relight (option B) and a deferred relight (option E)** were not
+  needed to reach the 10 s target and were not built.

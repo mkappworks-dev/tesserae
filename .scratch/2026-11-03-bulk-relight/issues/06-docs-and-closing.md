@@ -1,6 +1,6 @@
 # 06: Docs, ADRs and closing
 
-Status: ready-for-agent
+Status: done
 Blocked by: 04, 05
 
 Spec: [bulk relight](../spec.md), decision 10.
@@ -21,7 +21,7 @@ Spec: [bulk relight](../spec.md), decision 10.
 
 ## Acceptance criteria
 
-- [ ] No doc still states two Voxels a tick as the current budget.
-- [ ] `npm run fmt:check` and `scripts/check-terra-boundary` pass.
+- [x] No doc still states two Voxels a tick as the current budget.
+- [x] `npm run fmt:check` and `scripts/check-terra-boundary` pass.
 
 ## Comments
