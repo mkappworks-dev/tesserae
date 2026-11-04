@@ -18,7 +18,6 @@ fn biome(name: &str, temperature: f32, cave_scale: Option<f32>) -> Biome {
     }
 }
 
-/// Regions small enough that a few Chunks cross a border.
 fn small_regions() -> ClimateParams {
     ClimateParams {
         temperature_size_m: 96.0,
@@ -41,8 +40,6 @@ fn generator(biomes: &[Biome], voxel_size: f32) -> Worldgen {
     Worldgen::new(SEED, voxel_size, params(biomes))
 }
 
-/// Every Chunk from the cave floor up to the surface band, `reach` Chunks either
-/// way of the origin at the generator's Voxel size.
 fn chunks(g: &Worldgen, reach: i32) -> Vec<((i32, i32, i32), Chunk)> {
     let cell_m = CHUNK_SIZE as f32 * g.voxel_size();
     let floor = g.params().caves.expect("caves").floor_m;
@@ -62,9 +59,7 @@ fn chunks(g: &Worldgen, reach: i32) -> Vec<((i32, i32, i32), Chunk)> {
     out
 }
 
-/// The Voxels of the rock layer that are air, per column, with the column's
-/// metre position: tunnels and nothing else, since the layers above are
-/// excluded and nothing else is carved.
+/// Tunnels and nothing else: the layers above are excluded and nothing else is carved.
 fn tunnels(g: &Worldgen, reach: i32) -> Vec<((f32, f32), usize)> {
     let size = CHUNK_SIZE as i32;
     let voxel = g.voxel_size();

@@ -1,7 +1,4 @@
 //! The sky and fog over the Player's Eye, sent to the Client as they change.
-//!
-//! The blend of Biomes is the generator's (`Worldgen::sky_fog_at`), so the
-//! Client needs no generator to know it, only this message.
 
 use bevy::prelude::*;
 use tesserae_core::SkyFogBlend;
@@ -11,8 +8,7 @@ use super::player::Player;
 use crate::content::SkyFogTarget;
 use crate::session::SessionApp;
 
-/// One byte in the least-significant bit of an 8-bit channel: a smaller move
-/// cannot be seen, so it is not worth a message.
+/// One 8-bit step: a smaller move cannot be seen, so is not worth a message.
 const VISIBLE_STEP: f32 = 1.0 / 255.0;
 
 pub(super) fn plugin(app: &mut App) {
@@ -25,8 +21,7 @@ fn moved(sent: SkyFogBlend, now: SkyFogBlend) -> bool {
     apart(sent.sky, now.sky) || apart(sent.fog, now.fog)
 }
 
-/// Measured against what was last sent, not the last tick, so a slow drift
-/// still arrives once it adds up to a step.
+/// Measured against what was last sent, not the last tick, so a slow drift still arrives.
 fn publish(
     generator: Option<Res<WorldGenerator>>,
     player: Query<&Player>,
@@ -100,7 +95,6 @@ mod tests {
         app(&[biome("dry", 0.9, air(200)), biome("cold", 0.1, air(60))])
     }
 
-    /// Runs a tick and returns what the Server sent in it.
     fn tick(app: &mut App) -> Vec<SkyFogTarget> {
         app.update();
         app.world_mut()
@@ -117,8 +111,6 @@ mod tests {
             .set_eye(Vec3::new(x, 0.0, 0.0));
     }
 
-    /// An x along the ground where the blend differs from the origin's by well
-    /// over a visible step.
     fn far_from_origin(app: &App) -> f32 {
         let generator = app.world().resource::<WorldGenerator>();
         let origin = generator.sky_fog_at(0.0, 0.0).unwrap();

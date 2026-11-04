@@ -515,7 +515,6 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> crate::Biome {
     }
 }
 
-/// Three Biomes, a Climate of its own and two ores, one of them in `dry` only.
 fn biome_params(generator: u32) -> crate::WorldgenParams {
     let ore = |material, biomes| crate::Ore {
         material,

@@ -227,8 +227,7 @@ struct SkyFog {
     fog: [u8; 3],
 }
 
-/// Through a `Vec` because serde stops an array at its length and ignores a
-/// fourth byte, which would pass an RGBA colour off as an RGB one.
+/// Through a `Vec`: serde stops an array at its length and would pass an RGBA colour off as RGB.
 fn rgb<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 3], D::Error> {
     let bytes = Vec::<u8>::deserialize(d)?;
     <[u8; 3]>::try_from(bytes)

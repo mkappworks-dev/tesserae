@@ -1,6 +1,7 @@
 //! A Declaration into `tesserae-core`'s tables and the Registry.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
@@ -32,7 +33,8 @@ pub const MAX_TOOLS_PER_MOD: usize = 8;
 pub const MAX_ITEMS_PER_MOD: usize = 64;
 pub const MAX_ITEMS: usize = 256;
 pub const MAX_BIOMES_PER_MOD: usize = MAX_BIOMES;
-pub const MAX_ORES_PER_MOD: usize = 16;
+/// Half the World's table, so no one Mod can fill it.
+pub const MAX_ORES_PER_MOD: usize = MAX_ORES / 2;
 /// Bounds of an item's cube edge in metres.
 pub const ITEM_SIZE_M: (f32, f32) = (0.05, 0.5);
 
@@ -436,9 +438,8 @@ fn check_biomes(mod_id: &str, biomes: &[content::BiomeDef]) -> Result<(), ModErr
     Ok(())
 }
 
-/// Every Mod's Biomes and ores in load order, ids by append, their names
-/// resolved: an ore may name a Material or Biome of any Mod. Called once every
-/// Declaration is in, like [`resolve_items`].
+/// An ore may name a Material or Biome of any Mod, so this runs once every Declaration is in, like
+/// [`resolve_items`].
 pub fn resolve_biomes(
     behaviours: &[Behaviour],
     tables: &Tables,
@@ -453,9 +454,12 @@ pub fn resolve_biomes(
                 source,
             };
             if biomes.len() == MAX_BIOMES {
+                // `ParamError::rule` is `&'static str`, so format a constant-derived one once.
+                static RULE: OnceLock<String> = OnceLock::new();
                 return Err(bad(ParamError {
                     field: "biomes",
-                    rule: "holds at most 16 Biomes in a World",
+                    rule: RULE
+                        .get_or_init(|| format!("holds at most {MAX_BIOMES} Biomes in a World")),
                 }));
             }
             let ground = def
@@ -479,9 +483,10 @@ pub fn resolve_biomes(
             if let Some(scale) = def.cave_scale
                 && !(0.0..=MAX_CAVE_SCALE).contains(&scale)
             {
+                static RULE: OnceLock<String> = OnceLock::new();
                 return Err(bad(ParamError {
                     field: "biomes.cave_scale",
-                    rule: "must be from 0 to 4",
+                    rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CAVE_SCALE}")),
                 }));
             }
             biomes.push(Biome {
@@ -530,7 +535,9 @@ pub fn resolve_biomes(
             };
             ore.validate().map_err(|e| bad(e.field, e.rule))?;
             if ores.len() == MAX_ORES {
-                return Err(bad("ores", "holds at most 32 ores in a World"));
+                static RULE: OnceLock<String> = OnceLock::new();
+                let rule = RULE.get_or_init(|| format!("holds at most {MAX_ORES} ores in a World"));
+                return Err(bad("ores", rule));
             }
             ores.push(ore);
         }

@@ -48,8 +48,7 @@ fn params() -> WorldgenParams {
     }
 }
 
-/// The Biome over a coarse Voxel when every level-0 column under it agrees, else `None`: the
-/// derived levels vote across a border, so only a Voxel clear of one has a Biome to show.
+/// `None` unless every level-0 column under the Voxel agrees: derived levels vote across a border.
 fn biome_under(level_zero: &Worldgen, x_m: f32, z_m: f32, edge_m: f32) -> Option<usize> {
     let step = level_zero.voxel_size();
     let n = (edge_m / step).round() as usize;

@@ -1,10 +1,7 @@
 //! Eases the sky and fog to the pair the Server sends for where the Eye is.
 //!
-//! The Client holds no generator and reads no World storage: the target is a
-//! message (`SkyFogTarget`), and the only thing written is [`FogSettings`], which
-//! re-derives the clear colour and every camera's fog when it changes. Sky and
-//! fog take one step together, so the terrain never ends in an edge against the
-//! sky mid-ease.
+//! Sky and fog take one step together, so the terrain never ends in an edge against the sky
+//! mid-ease.
 
 use bevy::prelude::*;
 
@@ -12,17 +9,14 @@ use crate::content::SkyFogTarget;
 use crate::render::fog::{self, FogSettings};
 use crate::session::{SessionApp, SessionTeardown};
 
-/// Time constant of the ease, in seconds: the remaining distance falls to 1/e
-/// in this long. Slower than a tick of the Server's own blend, so a border
-/// walked across reads as the air changing and not as the air flickering.
+/// Time constant: slow enough that a border walked across reads as the air changing, not flicker.
 const EASE_TIME_S: f32 = 1.5;
 
-/// Longest frame the ease counts as, so a hitch (a World loading, a window
-/// dragged) cannot jump the air in one frame.
+/// A hitch (a World loading, a window dragged) must not jump the air in one frame.
 const MAX_STEP_S: f32 = 0.1;
 
-/// A channel this close to its target is at it: under half a byte is invisible,
-/// and stopping there lets [`FogSettings`] settle instead of changing forever.
+/// Under half a byte is invisible, and stopping there lets [`FogSettings`] settle instead of
+/// changing forever.
 const SETTLED: f32 = 0.5 / 255.0;
 
 pub(super) fn plugin(app: &mut App) {
@@ -31,8 +25,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_systems(SessionTeardown, restore_haze);
 }
 
-/// What the Server last asked for; `None` until it does, which a World whose
-/// Biomes carry no colours never does.
+/// `None` until the Server asks, which a World whose Biomes carry no colours never does.
 #[derive(Resource, Default)]
 struct Goal(Option<SkyFogTarget>);
 
@@ -74,8 +67,7 @@ fn ease(
     settings.color = fog;
 }
 
-/// The settings outlive a World, so the next one starts from the haze and not
-/// from wherever the last one's Biomes left the air.
+/// The settings outlive a World, so the next one starts from the haze, not the last one's air.
 fn restore_haze(mut settings: ResMut<FogSettings>) {
     let haze = FogSettings::default();
     settings.sky = haze.sky;
@@ -304,6 +296,35 @@ mod tests {
             let [r, g, b] = DRY.sky;
             assert_eq!(app.world().resource::<ClearColor>().0, Color::srgb(r, g, b));
             let [r, g, b] = DRY.fog;
+            assert_eq!(
+                app.world().get::<DistanceFog>(camera).unwrap().color,
+                Color::srgb(r, g, b)
+            );
+        }
+
+        #[test]
+        fn surfacing_mid_ease_shows_the_pair_as_eased_underwater_not_the_haze() {
+            let (mut app, camera) = wet_app();
+            dive(&mut app, camera, 9.0);
+            app.update();
+            send(&mut app, DRY);
+            for _ in 0..40 {
+                app.update();
+            }
+            let eased = settings(&app);
+            assert_ne!(
+                eased.sky,
+                FogSettings::default().sky,
+                "it kept easing under water"
+            );
+            assert_ne!(eased.sky, DRY.sky, "and is not there yet");
+
+            dive(&mut app, camera, 12.0);
+            app.update();
+            let eased = settings(&app);
+            let [r, g, b] = eased.sky;
+            assert_eq!(app.world().resource::<ClearColor>().0, Color::srgb(r, g, b));
+            let [r, g, b] = eased.color;
             assert_eq!(
                 app.world().get::<DistanceFog>(camera).unwrap().color,
                 Color::srgb(r, g, b)

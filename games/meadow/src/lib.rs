@@ -42,8 +42,8 @@ const POST_HEIGHT_M: f32 = 3.0;
 const MAX_FILL_VOXELS: u64 = 32_768;
 const MAX_BATCH_VOXELS: u64 = 65_536;
 
-/// Climate clusters near the middle of its square, so the points stay between 0.2 and 0.8 or a
-/// Biome would seldom be the nearest. The World has no caves, so no Biome sets a `cave_scale`.
+/// Climate clusters near the middle of its square: points outside 0.2 to 0.8 seldom win.
+/// The World has no caves, so no Biome sets a `cave_scale`.
 fn biomes() -> Vec<BiomeDef> {
     let ground = |rock: &str, soil: &str, surface: &str| {
         Some(GroundParams {

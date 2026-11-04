@@ -7,7 +7,6 @@ use super::{loaded, material};
 
 type Rgb = [u8; 3];
 
-/// A Biome the maintainer approved: its local name, and the sky and fog it must carry exactly.
 struct Approved {
     name: &'static str,
     sky: Rgb,
@@ -117,8 +116,7 @@ fn check_biomes(game: &str, approved: &[Approved; 3]) {
     assert!(biomes[0].ground.is_none() && world.ground.is_some());
 }
 
-/// The Chunks around a column of `biome`, as the ore Voxels in them: `(x, y, z)` of the lower
-/// corner in metres.
+/// `(x, y, z)` of each ore Voxel's lower corner, in metres.
 fn ore_near(generator: &Worldgen, params: WorldgenParams, biome: BiomeId) -> Vec<[f32; 3]> {
     let edge_m = CHUNK_SIZE as f32 * generator.voxel_size();
     let ore = params.ores.as_slice()[0];
@@ -157,8 +155,7 @@ fn ore_near(generator: &Worldgen, params: WorldgenParams, biome: BiomeId) -> Vec
     found
 }
 
-/// The Game's one ore is `material`, in a depth band that is deeper than the topsoil and inside
-/// the rock, and it shows up in generated rock, only in the Biomes `only` (all when empty).
+/// `only` names the Biomes the ore may appear in (all when empty).
 fn check_ore(game: &str, material_name: &str, only: &[&str]) {
     let (_install, loaded) = declared(game);
     let params = loaded.world.expect("the Game declares a World");

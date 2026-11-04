@@ -1,5 +1,4 @@
-//! Climate and Biome selection through the generator's public query. Nothing
-//! here looks at a Chunk: Biomes change no generated Voxel yet.
+//! Climate and Biome selection through the generator's public query.
 
 use tesserae_core::climate::BORDER_WARP;
 use tesserae_core::{
@@ -13,8 +12,7 @@ fn generator(seed: u64, voxel_size: f32) -> Worldgen {
     Worldgen::new(seed, voxel_size, WorldgenParams::default())
 }
 
-/// A coarse grid of metre positions, spaced past one Climate feature size so
-/// it crosses several regions.
+/// Spaced past one Climate feature size so it crosses several regions.
 fn grid() -> impl Iterator<Item = (f32, f32)> {
     (-20..20).flat_map(|i| (-20..20).map(move |j| (i as f32 * 53.0, j as f32 * 53.0)))
 }
@@ -135,7 +133,7 @@ fn with_biomes(biomes: &[Biome], generator: u32, voxel_size: f32) -> Worldgen {
     )
 }
 
-/// A fine grid across several regions, so a border is crossed many times.
+/// Fine enough that a border is crossed many times.
 fn dense() -> impl Iterator<Item = (f32, f32)> {
     (-100..100).flat_map(|i| (-100..100).map(move |j| (i as f32 * 11.0, j as f32 * 11.0)))
 }
@@ -143,8 +141,7 @@ fn dense() -> impl Iterator<Item = (f32, f32)> {
 const COLD: BiomeId = BiomeId::new(0);
 const WARM: BiomeId = BiomeId::new(1);
 
-/// Two Biomes that differ in temperature alone, so the border between them is
-/// where temperature crosses 0.5 whatever the humidity.
+/// Differ in temperature alone, so the border is where temperature crosses 0.5 at any humidity.
 fn cold_and_warm(generator: u32, voxel_size: f32) -> Worldgen {
     with_biomes(
         &[biome("cold", 0.2, 0.5), biome("warm", 0.8, 0.5)],

@@ -37,7 +37,6 @@ fn tundra() -> GroundParams {
     }
 }
 
-/// Regions small enough that a few Chunks cross a border.
 fn small_regions() -> ClimateParams {
     ClimateParams {
         temperature_size_m: 48.0,
@@ -45,7 +44,7 @@ fn small_regions() -> ClimateParams {
     }
 }
 
-/// Cubes only, so the terrain tests see the ground and not its stairs.
+/// Cubes only, so the terrain tests see the ground, not its stairs.
 fn params(biomes: &[Biome]) -> WorldgenParams {
     WorldgenParams {
         caves: None,
@@ -61,9 +60,7 @@ fn generator(biomes: &[Biome], voxel_size: f32) -> Worldgen {
     Worldgen::new(SEED, voxel_size, params(biomes))
 }
 
-/// Every column of the Chunks `-reach..reach` either way of the origin, as the
-/// column's metre position and its Voxels from `y = 0` m up past the surface
-/// band.
+/// Each column's metre position and its Voxels from `y = 0` m past the surface band.
 fn columns(g: &Worldgen, reach: i32) -> Vec<((f32, f32), Vec<Voxel>)> {
     let size = CHUNK_SIZE as i32;
     let voxel = g.voxel_size();
@@ -138,8 +135,6 @@ fn a_biome_without_ground_has_the_worlds() {
     assert!(seen.iter().all(|&n| n > 2_000), "{seen:?}");
 }
 
-/// The shape of every column with the Materials taken out: which Voxels are
-/// air, and the Shape and Orientation of the rest.
 fn silhouette(g: &Worldgen, reach: i32) -> Vec<Vec<(bool, u8, u8)>> {
     columns(g, reach)
         .into_iter()

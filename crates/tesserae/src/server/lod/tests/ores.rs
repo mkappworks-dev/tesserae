@@ -22,8 +22,6 @@ fn params() -> WorldgenParams {
     }
 }
 
-/// How many Voxels of ore the Chunks `-1..1` either way of the origin in x and z hold, from
-/// the lowest row the ground reaches up.
 fn ore_at(generators: &LodGenerators, level: u32) -> usize {
     let tables = &fixtures().tables;
     let mut found = 0;

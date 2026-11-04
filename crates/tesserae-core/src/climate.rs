@@ -9,57 +9,46 @@
 use crate::noise::fbm2;
 use crate::worldgen::{GroundParams, ParamError};
 
-/// Octaves of each Climate field. Fixed rather than a parameter: a declaration
-/// sizes the regions, and the border warp supplies the finer detail.
+/// Fixed, not a parameter: a declaration sizes the regions, the border warp adds detail.
 const OCTAVES: u32 = 3;
 
-/// Far from the terrain octaves' `seed + 0..octaves` and the cave fields, so
-/// Climate is not correlated with the surface.
+/// Far from the terrain octaves' `seed + 0..octaves` and the cave fields, so Climate does not
+/// track the surface.
 const TEMPERATURE_SEED: u32 = 0x0c11_a7e0;
 const HUMIDITY_SEED: u32 = 0x0c11_a8e0;
 const WARP_TEMPERATURE_SEED: u32 = 0x0c11_a9e0;
 const WARP_HUMIDITY_SEED: u32 = 0x0c11_aae0;
 
-/// The first Generator version that selects Biomes. Version 1 is frozen as it
-/// was before they existed.
+/// Version 1 stays frozen as it was before Biomes existed.
 pub const BIOMES_SINCE: u32 = 2;
 
-/// The most Biomes a World declares. A fixed bound keeps [`BiomeTable`] inline
-/// so [`crate::WorldgenParams`] stays `Copy` and a per-level generator costs no
-/// allocation.
+/// Bounded so [`BiomeTable`] stays inline and [`crate::WorldgenParams`] stays `Copy`.
 pub const MAX_BIOMES: usize = 16;
 
-/// The longest [`BiomeName`], in bytes.
 pub const MAX_BIOME_NAME_BYTES: usize = 32;
 
-/// How far, in Climate units, the border between two Biomes is pushed either
-/// way. A Biome point further than this from a straight border always wins its
-/// side of it, so a Game can place points knowing where the warp stops.
+/// A Biome point further than this (Climate units) from a straight border always wins its side, so
+/// a Game can place points knowing where the warp stops.
 pub const BORDER_WARP: f32 = 0.1;
 
-/// The warp varies faster than the Climate it bends, as a fraction of the
-/// Climate's own feature size, or borders would only ever drift smoothly.
+/// The warp must vary faster than the Climate it bends, or borders would only drift smoothly.
 const WARP_SIZE_FRACTION: f32 = 0.25;
 
-/// How much further than the nearest Biome, in Climate units, a Biome can be and
-/// still weigh in on a blend. Wider than [`BORDER_WARP`], so a blend is already
-/// under way where the warp has pushed the hard border to.
+/// Wider than [`BORDER_WARP`], so a blend is already under way where the warp has pushed the hard
+/// border to.
 const BLEND_RANGE: f32 = 0.15;
 
-/// The largest [`Biome::cave_scale`]. A tunnel four times as wide carves sixteen
-/// times the rock, which is the most a Game can ask before the ground is lace.
+/// A tunnel four times as wide carves sixteen times the rock: the most before the ground is lace.
 pub const MAX_CAVE_SCALE: f32 = 4.0;
 
-/// Temperature and humidity at one point, each in `[0, 1)`.
+/// Each field in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Climate {
     pub temperature: f32,
     pub humidity: f32,
 }
 
-/// How large the Climate regions are, in metres: the horizontal period of the
-/// lowest octave of each field. Plain `Copy` data like the rest of
-/// [`crate::WorldgenParams`].
+/// Horizontal period, in metres, of the lowest octave of each field.
 #[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ClimateParams {
@@ -76,7 +65,6 @@ impl Default for ClimateParams {
     }
 }
 
-/// The two Climate fields, with their frequencies already inverted.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ClimateField {
     seed: u32,
@@ -112,9 +100,8 @@ impl ClimateField {
 }
 
 impl ClimateField {
-    /// The Climate a column is judged by when a Biome is chosen: the real
-    /// Climate pushed by a second, faster pair of fields, so a border follows
-    /// neither a contour of temperature nor of humidity.
+    /// The Climate pushed by a second, faster pair of fields, so a border follows no contour of
+    /// either.
     fn warped(&self, x_m: f32, z_m: f32) -> Climate {
         let c = self.at(x_m, z_m);
         let offset = |n: f32| (n - 0.5) * 2.0 * BORDER_WARP;
@@ -140,11 +127,9 @@ impl ClimateField {
         }
     }
 
-    /// The mean of `values`, indexed by [`BiomeId`], weighted by how near each
-    /// Biome is to the warped Climate at a point. The nearest weighs 1 and the
-    /// weight falls away linearly to 0 at [`BLEND_RANGE`] past it, so the mean
-    /// follows the same warped Climate as [`ClimateField::biome_at`] but moves
-    /// continuously across its border. `0.0` for an empty table.
+    /// The mean of `values` (indexed by [`BiomeId`]) weighted by nearness to the warped Climate: it
+    /// follows the borders of [`ClimateField::biome_at`] but moves continuously across them. `0.0`
+    /// for an empty table.
     pub(crate) fn blend(
         &self,
         biomes: &BiomeTable,
@@ -172,8 +157,7 @@ impl ClimateField {
         sum / weights
     }
 
-    /// The Biome nearest the warped Climate at a point; the earlier of two
-    /// equally near. `None` for an empty table.
+    /// The earlier of two equally near Biomes. `None` for an empty table.
     pub(crate) fn biome_at(&self, biomes: &BiomeTable, x_m: f32, z_m: f32) -> Option<BiomeId> {
         if biomes.is_empty() {
             return None;
@@ -193,10 +177,8 @@ impl ClimateField {
         Some(BiomeId(nearest.0 as u8))
     }
 
-    /// The sky and fog over a point, each Biome that has colours weighing in by
-    /// how near the Climate is to its point. A continuous function of
-    /// position, so colour never steps where [`Self::biome_at`] does. `None`
-    /// where no Biome has colours.
+    /// Continuous in position, so colour never steps where [`Self::biome_at`] does. `None` where no
+    /// Biome has colours.
     pub(crate) fn sky_fog_at(
         &self,
         biomes: &BiomeTable,
@@ -209,8 +191,7 @@ impl ClimateField {
                 .iter()
                 .filter_map(|b| Some((b, b.sky_fog?)))
         };
-        // The unwarped Climate: the border warp varies fast to roughen a border, and the
-        // air would shimmer with it.
+        // Unwarped: the warp varies fast to roughen a border, and the air would shimmer with it.
         let c = self.at(x_m, z_m);
         let distance = |b: &Biome| {
             let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
@@ -219,7 +200,7 @@ impl ClimateField {
         let nearest = coloured().map(|(b, _)| distance(b)).reduce(f32::min)?;
         let (mut sky, mut fog, mut total) = ([0.0; 3], [0.0; 3], 0.0);
         for (b, colours) in coloured() {
-            // Relative to the nearest, so the nearest weighs 1 and nothing underflows.
+            // Relative to the nearest so nothing underflows.
             let weight = (-(distance(b) - nearest) / SKY_BLEND_WIDTH).exp();
             total += weight;
             for i in 0..3 {
@@ -235,8 +216,7 @@ impl ClimateField {
     }
 }
 
-/// Which entry of a [`BiomeTable`] a column belongs to. An index and not a
-/// name: it is only meaningful beside the table that made it.
+/// An index, not a name: only meaningful beside the [`BiomeTable`] that made it.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct BiomeId(u8);
 
@@ -250,7 +230,7 @@ impl BiomeId {
     }
 }
 
-/// A Biome's name, 1 to [`MAX_BIOME_NAME_BYTES`] bytes of UTF-8, held inline.
+/// 1 to [`MAX_BIOME_NAME_BYTES`] bytes of UTF-8, held inline.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BiomeName {
     len: u8,
@@ -309,12 +289,10 @@ impl<'de> serde::Deserialize<'de> for BiomeName {
     }
 }
 
-/// A region type: a point in the unit square of temperature and humidity. The
-/// nearest point to a column's Climate wins it. What a Biome owns beyond that
-/// (ores, colours) arrives with the tickets that use it.
+/// A point in the unit square of temperature and humidity; the nearest to a column's Climate wins.
 ///
-/// Not serde: ground is held by Material id, which only means something beside
-/// the tables that made it, so the save writes names (`save::SavedBiome`).
+/// Not serde: ground is held by Material id, which only means something beside the tables that
+/// made it, so the save writes names (`save::SavedBiome`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Biome {
     pub name: BiomeName,
@@ -322,11 +300,9 @@ pub struct Biome {
     pub humidity: f32,
     /// `None` takes the World's own ground.
     pub ground: Option<GroundParams>,
-
     /// `None` has no say in the sky and fog.
     pub sky_fog: Option<SkyFog>,
-    /// A multiplier on the World's cave radius: `None` leaves the caves as the
-    /// World has them, `Some(0.0)` switches them off.
+    /// Multiplies the World's cave radius: `None` leaves the caves alone, `Some(0.0)` removes them.
     pub cave_scale: Option<f32>,
 }
 
@@ -341,12 +317,10 @@ impl Biome {
     };
 }
 
-/// The air over a Biome, as sRGB bytes. The two are a pair, so a Biome carries
-/// both or neither.
+/// sRGB bytes. A pair, so a Biome carries both or neither.
 ///
-/// `fog` is what the shader fogs toward, not what is seen: the tonemapper
-/// darkens it on the way out, so it is a little lighter than `sky`, the clear
-/// colour behind the terrain (`render::fog::HAZE_FOG_SRGB`).
+/// `fog` is what the shader fogs toward and the tonemapper darkens, so it is a little lighter than
+/// `sky` (`render::fog::HAZE_FOG_SRGB`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkyFog {
@@ -354,26 +328,19 @@ pub struct SkyFog {
     pub fog: [u8; 3],
 }
 
-/// [`SkyFog`] blended across Biomes: sRGB in `[0, 1]`, as the Client's fog
-/// settings hold it.
+/// sRGB in `[0, 1]`, as the Client's fog settings hold it.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct SkyFogBlend {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
 }
 
-/// How much farther than the nearest a Biome's point may lie, in Climate units,
-/// for its say in the sky to fall to 1/e. Wide enough that a walk never sees a
-/// step, narrow enough that the middle of a region is its own colour.
+/// Wide enough that a walk never sees a step, narrow enough that a region's middle is its own.
 const SKY_BLEND_WIDTH: f32 = 0.1;
 
-/// A World's Biomes in declaration order, at most [`MAX_BIOMES`] with distinct
-/// names and points inside the unit square. Empty means a World with no Biomes,
-/// which generates exactly as it did before they existed. Order is identity:
-/// [`BiomeId`] is a position here, and a tie goes to the earlier entry.
-///
-/// Built only through [`BiomeTable::new`], which checks those rules, so a table
-/// in hand is a valid one.
+/// At most [`MAX_BIOMES`], distinctly named, points inside the unit square. Empty generates exactly
+/// as before Biomes existed. Order is identity: [`BiomeId`] is a position, and a tie goes to the
+/// earlier entry.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct BiomeTable {
     len: u8,

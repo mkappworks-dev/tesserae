@@ -627,7 +627,6 @@ fn builds_go_up_nearest_the_spawn_first() {
     );
 }
 
-/// A Game's Biomes as `(name, sky, fog)`, in declaration order.
 fn palette(world: &WorldgenParams) -> Vec<(&str, [u8; 3], [u8; 3])> {
     world
         .biomes
@@ -650,8 +649,7 @@ fn biome<'a>(world: &'a WorldgenParams, name: &str) -> &'a Biome {
         .unwrap_or_else(|| panic!("{name} is declared"))
 }
 
-/// The Voxels of `ore` around the origin in the Game's own World, each as its depth below the
-/// surface in metres.
+/// Each ore Voxel's depth below the surface, in metres.
 fn ore_depths(world: WorldgenParams, size: f32, ore: &Ore) -> Vec<f32> {
     let generator = Worldgen::new(7, size, world);
     let cell_m = CHUNK_SIZE as f32 * size;
@@ -685,7 +683,6 @@ fn ore_depths(world: WorldgenParams, size: f32, ore: &Ore) -> Vec<f32> {
     depths
 }
 
-/// Each Biome's share of the ground over a square of side `2 * half_m`, sampled every `step_m`.
 fn shares(world: WorldgenParams, seed: u64, half_m: f32, step_m: f32) -> Vec<f32> {
     let generator = Worldgen::new(seed, 0.5, world);
     let mut counts = vec![0u32; world.biomes.len()];
@@ -700,7 +697,6 @@ fn shares(world: WorldgenParams, seed: u64, half_m: f32, step_m: f32) -> Vec<f32
     counts.iter().map(|&c| c as f32 / total).collect()
 }
 
-/// The ore of `game` appears in rock, and only inside the band it declares.
 fn assert_ore_in_band(game: &str, material_name: &str) {
     let (_install, loaded) = loaded(game, 0.5);
     let world = loaded.world.unwrap();

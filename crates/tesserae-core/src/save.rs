@@ -15,8 +15,8 @@ use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay
 
 pub const FORMAT_VERSION: u32 = 1;
 pub const GENERATOR_VERSION: u32 = 2;
-/// A World keeps the Generator version it was created with, so every version
-/// that ever shipped stays here until a migration exists.
+/// Every version that ever shipped stays until a migration exists: a World keeps the one it was
+/// created with.
 pub const SUPPORTED_GENERATORS: [u32; 2] = [1, GENERATOR_VERSION];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
 const MAX_COMMIT_BYTES: u64 = 256 * 1024 * 1024;
@@ -448,9 +448,8 @@ pub struct Generation {
     pub smoothing: Option<crate::SmoothingParams>,
     pub lake: Option<(f32, String)>,
     pub ground: Option<[String; 3]>,
-    /// The World's own Biome snapshot, so a Game that later gains a Biome never
-    /// reshapes it. Absent before Biomes, for Generator version 1 and for an
-    /// empty table; all three of these fields are absent together.
+    /// A snapshot, so a Game that later gains a Biome never reshapes the World. All three are
+    /// absent together: before Biomes, for Generator version 1 and for an empty table.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub climate: Option<crate::ClimateParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -459,18 +458,16 @@ pub struct Generation {
     pub ores: Option<Vec<SavedOre>>,
 }
 
-/// A [`crate::Biome`] as the save holds it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedBiome {
     pub name: String,
     pub temperature: f32,
     pub humidity: f32,
-    /// Rock, soil and surface by name; absent is the World's own ground.
+    /// Rock, soil and surface by name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ground: Option<[String; 3]>,
-
-    /// Sky and fog sRGB bytes; absent is a Biome with no say in the air.
+    /// Absent is a Biome with no say in the air.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sky_fog: Option<crate::SkyFog>,
     /// Absent is the World's own caves.
@@ -478,8 +475,7 @@ pub struct SavedBiome {
     pub cave_scale: Option<f32>,
 }
 
-/// An [`crate::Ore`] with its Material and Biomes by name, since ids are only
-/// meaningful beside the tables that made them.
+/// Material and Biomes by name, since ids are only meaningful beside the tables that made them.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedOre {
@@ -534,8 +530,8 @@ impl Generation {
         })
     }
 
-    /// `generator` is the Commit's pin: it is not a generation parameter, since
-    /// the Server owns which algorithm a World runs.
+    /// `generator` is the Commit's pin, not a generation parameter: the Server owns which algorithm
+    /// a World runs.
     pub fn restore(
         &self,
         mapping: &Mapping,

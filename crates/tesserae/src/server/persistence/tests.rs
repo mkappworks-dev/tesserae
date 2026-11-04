@@ -956,7 +956,6 @@ fn saved_generator(dir: &Directory) -> u32 {
     save::inspect(&dir.0).unwrap().unwrap().commit.generator
 }
 
-/// What a World saved before the generator moved to version 2 looks like.
 fn rewrite_as_version_1(dir: &Directory) {
     let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
     commit.generator = 1;
@@ -994,7 +993,6 @@ fn a_version_1_world_reopens_on_version_1_and_saves_as_version_1() {
     assert_eq!(saved_generator(&dir), 1);
 }
 
-/// A Game whose World holds two Biomes, a Climate of its own and one ore.
 fn declares_biomes(names: [&str; 2]) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
     use tesserae_core::{Biome, BiomeName, BiomeSet, BiomeTable, ClimateParams, Ore, OreTable};
     move |loaded| {
@@ -1081,7 +1079,7 @@ fn a_reopened_world_keeps_its_own_biomes_whatever_the_game_declares_now() {
     assert_eq!(biome_names(&without), ["terra:dry", "terra:wet"]);
 }
 
-/// `declares_biomes` with the first Biome's ground named, `None` leaving it the World's.
+/// `None` leaves the first Biome the World's ground.
 fn declares_ground(ground: Option<[&str; 3]>) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
     move |loaded| {
         declares_biomes(["terra:dry", "terra:wet"])(loaded);

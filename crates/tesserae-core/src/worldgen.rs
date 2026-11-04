@@ -47,15 +47,13 @@ pub struct WorldgenParams {
     /// `None` is a World without lakes.
     pub water: Option<WaterParams>,
     pub ground: Option<GroundParams>,
-    /// How large the Climate regions are. Read by every Generator version, since
-    /// Climate is a pure query, but only version 2 selects Biomes from it.
+    /// Read by every Generator version, but only version 2 selects Biomes from it.
     pub climate: ClimateParams,
     /// Empty is a World with no Biomes. Ignored by Generator version 1.
     pub biomes: BiomeTable,
     /// Empty is a World without ore. Ignored by Generator version 1.
     pub ores: OreTable,
-    /// Which generation algorithm runs. A World pins the version it was created
-    /// with, so a revision never reshapes terrain that already exists.
+    /// A World pins the version it was created with, so a revision never reshapes existing terrain.
     pub generator: u32,
 }
 
@@ -287,7 +285,7 @@ impl WorldgenParams {
         Ok(())
     }
 
-    /// The World's ground and every Biome's, each held to the same rules.
+    /// Checks the World's ground and every Biome's alike.
     pub fn validate_ground(&self, tables: &Tables) -> Result<(), ParamError> {
         let grounds = self
             .ground
@@ -384,8 +382,7 @@ impl CaveField {
         }
     }
 
-    /// `scale` multiplies the tunnel radius, so a Biome's tuning narrows or
-    /// widens the same window on the same field; 1 is the World's own caves.
+    /// `scale` multiplies the tunnel radius; 1 is the World's own caves.
     fn carves(&self, x_m: f32, y_m: f32, z_m: f32, scale: f32) -> bool {
         self.carves_near(&mut Default::default(), x_m, y_m, z_m, scale)
     }
@@ -503,14 +500,12 @@ pub struct Worldgen {
     cave_tuning: Option<CaveTuning>,
 }
 
-/// How each Biome scales the caves, as an offset from the World's own scale of 1
-/// so that untuned Biomes blend to exactly 1. Built only when some Biome tunes
-/// the caves of a World that has them: otherwise no column needs its Climate.
+/// Offsets from the World's scale of 1, so untuned Biomes blend to exactly 1. Built only when some
+/// Biome tunes the caves: otherwise no column needs its Climate.
 #[derive(Clone, Copy, Debug)]
 struct CaveTuning {
     offsets: [f32; MAX_BIOMES],
-    /// The largest scale any column can reach, which every early-out must hold
-    /// to: a blend never leaves the range of the scales it mixes.
+    /// Every early-out must hold to this: a blend never leaves the range of the scales it mixes.
     max_scale: f32,
 }
 
@@ -532,21 +527,18 @@ impl CaveTuning {
     }
 }
 
-/// The scale of the caves in each column of a Chunk, row by row, and the largest.
 struct ColumnCaves {
     scales: [f32; CHUNK_SIZE * CHUNK_SIZE],
     max: f32,
 }
 
-/// Every Biome's ground with its omissions filled from the World's, so a
-/// column's Materials are one index away. Built only when some Biome's ground
-/// differs from the World's: otherwise no column needs its Biome looked up.
+/// Omissions filled from the World's, so a column's Materials are one index away. Built only when
+/// some Biome's ground differs: otherwise no column needs its Biome looked up.
 #[derive(Clone, Copy, Debug)]
 struct BiomeGrounds {
     world: GroundParams,
     by_biome: [GroundParams; MAX_BIOMES],
-    /// Every Biome's rock is the World's, so the deep early-out can answer
-    /// without asking which Biome each column is in.
+    /// Lets the deep early-out answer without asking which Biome each column is in.
     same_rock: bool,
 }
 
@@ -615,15 +607,12 @@ impl Worldgen {
         self.water
     }
 
-    /// Temperature and humidity over a point on the ground plane, in metres.
     pub fn climate_at(&self, x_m: f32, z_m: f32) -> Climate {
         self.climate.at(x_m, z_m)
     }
 
-    /// The Biome over a point on the ground plane, in metres; `None` where the
-    /// World has no Biomes or runs a Generator version from before them. A pure
-    /// function of the seed and the position, so it is the same at every Voxel
-    /// size and at every LOD level.
+    /// `None` where the World has no Biomes or runs a Generator version from before them. Pure in
+    /// the seed and the position, so the same at every Voxel size and LOD level.
     pub fn biome_at(&self, x_m: f32, z_m: f32) -> Option<BiomeId> {
         if self.params.generator < BIOMES_SINCE {
             return None;
@@ -631,10 +620,8 @@ impl Worldgen {
         self.climate.biome_at(&self.params.biomes, x_m, z_m)
     }
 
-    /// The sky and fog over a point on the ground plane, in metres, blended
-    /// smoothly across Biomes; `None` where no Biome has colours or the World
-    /// runs a Generator version from before them. A pure function of the seed
-    /// and the position, like [`Self::biome_at`].
+    /// `None` where no Biome has colours or the Generator version predates them. Pure like
+    /// [`Self::biome_at`].
     pub fn sky_fog_at(&self, x_m: f32, z_m: f32) -> Option<SkyFogBlend> {
         if self.params.generator < BIOMES_SINCE {
             return None;
@@ -642,9 +629,8 @@ impl Worldgen {
         self.climate.sky_fog_at(&self.params.biomes, x_m, z_m)
     }
 
-    /// The ground of each column of the Chunks at `(cx, cz)`, row by row, or
-    /// `None` when every column has the World's. Asked at the metre position the
-    /// column's surface is, so every LOD level reads the same Biome there.
+    /// `None` when every column has the World's. Asked at the metre position of the column's
+    /// surface, so every LOD level reads the same Biome there.
     fn column_grounds(&self, cx: i32, cz: i32) -> Option<ColumnGrounds> {
         let grounds = self.biome_grounds.as_ref()?;
         Some(std::array::from_fn(|i| {
@@ -654,9 +640,8 @@ impl Worldgen {
         }))
     }
 
-    /// The scale of the caves over a point on the ground plane: the World's own
-    /// (1) where no Biome tunes them, otherwise a mean of its Biomes' scales that
-    /// moves continuously across a border, unlike the ground it sits beside.
+    /// 1 where no Biome tunes the caves, otherwise a mean that moves continuously across a border,
+    /// unlike the ground it sits beside.
     fn cave_scale_at(&self, x_m: f32, z_m: f32) -> f32 {
         self.cave_tuning.as_ref().map_or(1.0, |t| {
             1.0 + self
@@ -665,14 +650,12 @@ impl Worldgen {
         })
     }
 
-    /// The largest scale of any cave in the World, which a box can be ruled out
-    /// against when its columns have not been asked.
+    /// Lets a box be ruled out before its columns are asked.
     fn cave_scale_bound(&self) -> f32 {
         self.cave_tuning.as_ref().map_or(1.0, |t| t.max_scale)
     }
 
-    /// The caves of each column of the Chunks at `(cx, cz)`, or `None` when no
-    /// Biome tunes them. Asked at the same metre position as the Voxels.
+    /// `None` when no Biome tunes the caves. Asked at the same metre position as the Voxels.
     fn column_caves(&self, cx: i32, cz: i32) -> Option<ColumnCaves> {
         self.cave_tuning.as_ref()?;
         let mut columns = ColumnCaves {
@@ -775,8 +758,7 @@ impl Worldgen {
             .flat_map(|z| (0..CHUNK_SIZE as i32).map(move |x| surface_index(x, z)))
             .map(|i| surface_m[i])
             .fold(f32::MIN, f32::max);
-        // A Chunk above every column of its own holds only air and water, which
-        // take nothing from a Biome.
+        // A Chunk above every column holds only air and water, which take nothing from a Biome.
         let columns = if floor_m <= top_m {
             self.column_grounds(cx, cz)
         } else {
@@ -884,9 +866,8 @@ impl Worldgen {
         chunk
     }
 
-    /// A Chunk below the surface band: rock in every column, each column's own
-    /// where Biomes disagree about rock, which is the one case that must ask
-    /// 1024 columns for their Biome before it can answer.
+    /// Each column's own rock where Biomes disagree: the one case that must ask all 1024 columns
+    /// for their Biome.
     fn deep_rock(&self, cx: i32, cz: i32, ground: GroundParams) -> Chunk {
         let columns = self
             .biome_grounds
@@ -910,9 +891,8 @@ impl Worldgen {
         chunk.build()
     }
 
-    /// The ores with a Voxel in a Chunk spanning `floor_m..=ceiling_m`, if any
-    /// do. Depth is measured from a surface somewhere in the surface band, so
-    /// this only ever errs towards reaching.
+    /// Depth is measured from a surface somewhere in the surface band, so this only errs towards
+    /// reaching.
     fn ores_reaching(&self, floor_m: f32, ceiling_m: f32) -> Option<(&OreField, OreMask)> {
         let field = self.ores.as_ref()?;
         let (lowest, highest) = self.surface_bounds_m();
@@ -920,8 +900,7 @@ impl Worldgen {
         (!mask.is_empty()).then_some((field, mask))
     }
 
-    /// The Biome of a column, looked up the first time it is asked and not at
-    /// all in a column no ore vein touches.
+    /// Looked up on first ask, so not at all in a column no ore vein touches.
     fn column_biome(
         &self,
         [cx, cz]: [i32; 2],
@@ -934,8 +913,7 @@ impl Worldgen {
         }
     }
 
-    /// Puts veins in a Chunk below the surface band that is rock throughout,
-    /// where depth needs the surface of each of its columns.
+    /// Depth needs each column's own surface.
     fn sow_deep_rock(
         &self,
         chunk: &mut Chunk,
@@ -1553,8 +1531,7 @@ mod tests {
             .collect()
     }
 
-    /// Regions small enough that a sweep crosses several borders, whose Biomes
-    /// scale the caves to nothing and to three times the radius.
+    /// Regions small enough that a sweep crosses several borders.
     fn tuned(voxel_size: f32) -> Worldgen {
         let biome = |name: &str, temperature, cave_scale| crate::Biome {
             name: crate::BiomeName::new(name).unwrap(),

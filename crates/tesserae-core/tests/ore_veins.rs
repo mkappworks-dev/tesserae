@@ -26,8 +26,7 @@ fn anywhere() -> Ore {
     ore(fixtures().lantern, 0.0, 400.0)
 }
 
-/// Caves, smoothing and a lake, so every property is checked against the
-/// things that also shape a Chunk.
+/// Caves, smoothing and a lake, so each property is checked against everything shaping a Chunk.
 fn params(ores: &[Ore]) -> WorldgenParams {
     WorldgenParams {
         ores: OreTable::new(ores).unwrap(),
@@ -35,7 +34,6 @@ fn params(ores: &[Ore]) -> WorldgenParams {
     }
 }
 
-/// Cubes only, no caves and no lake: the ground and nothing else.
 fn bare(ores: &[Ore]) -> WorldgenParams {
     WorldgenParams {
         caves: None,
@@ -49,8 +47,7 @@ fn generator(params: WorldgenParams, voxel_size: f32) -> Worldgen {
     Worldgen::new(SEED, voxel_size, params)
 }
 
-/// Every Voxel of the Chunks `-reach..reach` either way of the origin in x and
-/// z and `rows` in y, with its lower corner in metres.
+/// Each Voxel's lower corner, in metres.
 fn each_voxel(
     g: &Worldgen,
     rows: std::ops::Range<i32>,
@@ -183,8 +180,7 @@ fn biome(name: &str, temperature: f32) -> Biome {
     }
 }
 
-/// Two Biomes, cold (id 0) and warm (id 1), in regions small enough that the
-/// sweep crosses a border.
+/// Cold (id 0) and warm (id 1), in regions small enough that the sweep crosses a border.
 fn two_biomes(ores: &[Ore]) -> WorldgenParams {
     WorldgenParams {
         climate: ClimateParams {
@@ -234,7 +230,6 @@ fn an_ore_restricted_to_biomes_is_absent_from_a_world_without_any() {
     assert!(ore_voxels(&g, fixtures().lantern).is_empty());
 }
 
-/// The Voxel at a metre position, asked of whichever Chunk holds it.
 struct Probe<'a> {
     g: &'a Worldgen,
     chunks: HashMap<[i32; 3], Chunk>,
