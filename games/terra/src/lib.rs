@@ -363,17 +363,41 @@ impl Guest for Terra {
                 name: "measure".into(),
                 kind: ToolKind::Measure,
             }],
-            items: vec![ItemDef {
-                name: "rock".into(),
-                size_m: 0.25,
-                color: Srgba {
-                    r: 133,
-                    g: 133,
-                    b: 140,
-                    a: 255,
+            items: vec![
+                ItemDef {
+                    name: "rock".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 133,
+                        g: 133,
+                        b: 140,
+                        a: 255,
+                    },
+                    material: Some("terra:stone".into()),
                 },
-                material: Some("terra:stone".into()),
-            }],
+                ItemDef {
+                    name: "dirt".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 107,
+                        g: 74,
+                        b: 46,
+                        a: 255,
+                    },
+                    material: Some("terra:dirt".into()),
+                },
+                ItemDef {
+                    name: "grass".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 84,
+                        g: 143,
+                        b: 61,
+                        a: 255,
+                    },
+                    material: Some("terra:grass".into()),
+                },
+            ],
         }
     }
 

@@ -25,6 +25,12 @@ material = "ash"
 color = [70, 66, 62, 255]
 texture = "art/ash.png"
 
+[[items]]
+name = "ash"
+size-m = 0.2
+color = [70, 66, 62, 255]
+material = "hearth:ash"
+
 # Slower and shorter than water, and hot; it stays out of Shapes.
 [[fluids]]
 material = "hearth:lava"
