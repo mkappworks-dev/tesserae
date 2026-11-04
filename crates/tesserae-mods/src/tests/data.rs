@@ -205,6 +205,10 @@ fn component() -> Declaration {
                 soil: "full:rock".into(),
                 surface: "full:rock".into(),
             }),
+            climate: Some(content::ClimateParams {
+                temperature_size_m: 400.0,
+                humidity_size_m: 640.0,
+            }),
         }),
         view: Some(content::ViewParams {
             view_distance_m: 160.0,
@@ -290,6 +294,36 @@ fn component() -> Declaration {
                 material: None,
             },
         ],
+        biomes: vec![
+            content::BiomeDef {
+                name: "dry".into(),
+                temperature: 0.8,
+                humidity: 0.15,
+            },
+            content::BiomeDef {
+                name: "wet".into(),
+                temperature: 0.35,
+                humidity: 0.9,
+            },
+        ],
+        ores: vec![
+            content::OreDef {
+                material: "full:ash".into(),
+                min_depth_m: 4.0,
+                max_depth_m: 40.0,
+                vein_size_m: 3.0,
+                rarity: 0.05,
+                biomes: vec!["full:dry".into()],
+            },
+            content::OreDef {
+                material: "full:wood".into(),
+                min_depth_m: 0.0,
+                max_depth_m: 12.0,
+                vein_size_m: 1.5,
+                rarity: 1.0,
+                biomes: vec![],
+            },
+        ],
     }
 }
 
@@ -316,6 +350,13 @@ fn equivalent_declarations_register_equivalent_content_and_simulation() {
     assert_eq!(data.movement, native.movement);
     assert_eq!(data.view, native.view);
     assert_eq!(data.world, native.world);
+    assert_eq!(
+        data.world.unwrap().climate,
+        tesserae_core::ClimateParams {
+            temperature_size_m: 400.0,
+            humidity_size_m: 640.0
+        }
+    );
     let id = |name| registry.id_of(Kind::Material, name).unwrap() as u16;
     let (water, lava, wood, ash) = (
         id("full:water"),
@@ -346,6 +387,7 @@ fn absent_optional_values_stay_absent_rather_than_defaulting() {
     assert!(world.movement.is_none() && world.character.is_none() && world.ground.is_none());
     assert!(d.view.is_none() && d.fluids.is_empty() && d.tools.is_empty());
     assert!(d.items.is_empty());
+    assert!(world.climate.is_none() && d.biomes.is_empty() && d.ores.is_empty());
     assert_eq!(d.materials[0].remove_time_s, None);
 }
 
@@ -402,6 +444,21 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
             "x",
         ),
         ("[world.movement]", "[world.walking]", "walking"),
+        ("[world.climate]", "[world.weather]", "weather"),
+        (
+            "temperature-size-m = 400.0",
+            "temperature-size-m = 400.0\nwind = 1",
+            "wind",
+        ),
+        ("name = \"dry\"", "name = \"dry\"\nextra = 1", "extra"),
+        ("humidity = 0.9", "humidity = 0.9\nrain = 3", "rain"),
+        ("rarity = 0.05", "rarity = 0.05\nluck = 1", "luck"),
+        ("rarity = 0.05", "rarity = \"rare\"", "rarity"),
+        (
+            "biomes = [\"full:dry\"]",
+            "biomes = [\"full:dry\", 3]",
+            "biomes",
+        ),
     ] {
         refused(replace, with, field);
     }
@@ -428,6 +485,15 @@ fn shared_validation_bounds_apply_to_data() {
         ),
         ("view-distance-m = 160.0", "view-distance-m = 1.0", "view"),
         ("relief-m = 12", "relief-m = -3", "world"),
+        (
+            "temperature-size-m = 400.0",
+            "temperature-size-m = 0.0",
+            "climate",
+        ),
+        ("humidity = 0.15", "humidity = 1.5", "biome"),
+        ("temperature = 0.8", "temperature = -0.1", "biome"),
+        ("name = \"wet\"", "name = \"dry\"", "biome"),
+        ("name = \"wet\"", "name = \"Wet\"", "biome"),
         (
             "allow-flight = true\nallow-physics = true\nstart-in-flight = false",
             "allow-flight = false\nallow-physics = true\nstart-in-flight = true",
@@ -476,6 +542,10 @@ fn a_mod_that_is_not_the_game_may_not_declare_game_only_fields() {
             "world.movement",
         ),
         ("[world]\nrelief-m = 10.0", "world.relief-m"),
+        (
+            "[world.climate]\ntemperature-size-m = 100\nhumidity-size-m = 100",
+            "world.climate",
+        ),
     ] {
         let d = parse(toml).unwrap();
         let mut tables = Tables::builtin();
@@ -499,6 +569,16 @@ fn per_mod_row_limits_apply_to_data() {
     };
     for (table, row, what) in [
         ("tools", "name = 'a'\nkind = 'measure'", "tool"),
+        (
+            "biomes",
+            "name = 'a'\ntemperature = 0.5\nhumidity = 0.5",
+            "biome",
+        ),
+        (
+            "ores",
+            "material = 'full:x'\nmin-depth-m = 0\nmax-depth-m = 1\nvein-size-m = 1\nrarity = 1",
+            "ore",
+        ),
         (
             "fluids",
             "material = 'full:x'\nreach-m = 1\nsideways-m-per-s = 1\ndownward-m-per-s = 1\nrecession-m-per-s = 1\nreset-drop-m = 1\nwaterlogs = false\nextinguishes = false",

@@ -13,6 +13,13 @@ pub(super) struct Caves {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Climate {
+    temperature_size_m: f32,
+    humidity_size_m: f32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub(super) struct Smoothing {
     min_rise_m: f32,
 }
@@ -46,6 +53,15 @@ impl From<Caves> for content::CaveParams {
             radius_m: c.radius_m,
             floor_m: c.floor_m,
             octaves: c.octaves,
+        }
+    }
+}
+
+impl From<Climate> for content::ClimateParams {
+    fn from(c: Climate) -> Self {
+        Self {
+            temperature_size_m: c.temperature_size_m,
+            humidity_size_m: c.humidity_size_m,
         }
     }
 }

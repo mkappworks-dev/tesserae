@@ -361,6 +361,8 @@ impl Guest for Lumen {
             combustion: Vec::new(),
             tools: Vec::new(),
             items: Vec::new(),
+            biomes: Vec::new(),
+            ores: Vec::new(),
         }
     }
 

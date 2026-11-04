@@ -203,3 +203,46 @@ impl From<Item> for content::ItemDef {
         }
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Biome {
+    name: String,
+    temperature: f32,
+    humidity: f32,
+}
+
+impl From<Biome> for content::BiomeDef {
+    fn from(b: Biome) -> Self {
+        Self {
+            name: b.name,
+            temperature: b.temperature,
+            humidity: b.humidity,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Ore {
+    material: String,
+    min_depth_m: f32,
+    max_depth_m: f32,
+    vein_size_m: f32,
+    rarity: f32,
+    #[serde(default)]
+    biomes: Vec<String>,
+}
+
+impl From<Ore> for content::OreDef {
+    fn from(o: Ore) -> Self {
+        Self {
+            material: o.material,
+            min_depth_m: o.min_depth_m,
+            max_depth_m: o.max_depth_m,
+            vein_size_m: o.vein_size_m,
+            rarity: o.rarity,
+            biomes: o.biomes,
+        }
+    }
+}

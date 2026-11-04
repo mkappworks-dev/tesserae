@@ -504,6 +504,176 @@ fn named_generation_parameters_restore_ground_and_lakes_after_remapping() {
     corrupt.feature_size_m = -1.0;
     assert!(corrupt.restore(&mapping(17, 8, 5), 2).is_err());
 }
+fn biome(name: &str, temperature: f32, humidity: f32) -> crate::Biome {
+    crate::Biome {
+        name: crate::BiomeName::new(name).unwrap(),
+        temperature,
+        humidity,
+    }
+}
+
+/// Three Biomes, a Climate of its own and two ores, one of them in `dry` only.
+fn biome_params(generator: u32) -> crate::WorldgenParams {
+    let ore = |material, biomes| crate::Ore {
+        material,
+        min_depth_m: 3.0,
+        max_depth_m: 30.0,
+        vein_size_m: 2.5,
+        rarity: 0.25,
+        biomes,
+    };
+    crate::WorldgenParams {
+        generator,
+        climate: crate::ClimateParams {
+            temperature_size_m: 300.0,
+            humidity_size_m: 700.0,
+        },
+        biomes: crate::BiomeTable::new(&[
+            biome("wet", 0.2, 0.9),
+            biome("dry", 0.8, 0.1),
+            biome("cold", 0.1, 0.4),
+        ])
+        .unwrap(),
+        ores: crate::OreTable::new(&[
+            ore(8, crate::BiomeSet::new(&[crate::BiomeId::new(1)]).unwrap()),
+            ore(9, crate::BiomeSet::default()),
+        ])
+        .unwrap(),
+        ..crate::WorldgenParams::default()
+    }
+}
+
+#[test]
+fn biomes_climate_and_ores_restore_in_order_with_their_materials_remapped() {
+    let params = biome_params(2);
+    let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    let restored = saved.restore(&mapping(17, 8, 5), 2).unwrap();
+    assert_eq!(restored.climate, params.climate);
+    assert_eq!(restored.biomes, params.biomes);
+    let (ores, was) = (restored.ores.as_slice(), params.ores.as_slice());
+    assert_eq!(ores.len(), 2);
+    assert_eq!((ores[0].material, ores[1].material), (17, 8));
+    assert_eq!(ores[0].biomes, was[0].biomes);
+    assert_eq!(ores[1].biomes, was[1].biomes);
+    assert_eq!(ores[0].rarity, was[0].rarity);
+}
+
+#[test]
+fn the_snapshot_survives_a_json_round_trip_of_the_commit() {
+    let mut c = fixture();
+    c.parameters = Generation::capture(biome_params(2), &mapping(8, 9, 4)).unwrap();
+    let back: Commit = serde_json::from_slice(&serde_json::to_vec(&c).unwrap()).unwrap();
+    assert_eq!(back.parameters, c.parameters);
+    assert!(back.compatible(&c.content.clone()).is_ok());
+}
+
+fn keys(g: &Generation) -> Vec<String> {
+    let serde_json::Value::Object(map) = serde_json::to_value(g).unwrap() else {
+        unreachable!()
+    };
+    map.keys().cloned().collect()
+}
+
+#[test]
+fn a_version_1_world_and_an_empty_table_leave_the_snapshot_fields_absent() {
+    let version_1 = Generation::capture(biome_params(1), &mapping(8, 9, 4)).unwrap();
+    let plain = Generation::capture(
+        crate::WorldgenParams {
+            generator: 2,
+            climate: biome_params(2).climate,
+            ..crate::WorldgenParams::default()
+        },
+        &mapping(8, 9, 4),
+    )
+    .unwrap();
+    for g in [version_1, plain] {
+        assert!(
+            !keys(&g)
+                .iter()
+                .any(|k| ["climate", "biomes", "ores"].contains(&k.as_str())),
+            "{:?}",
+            keys(&g)
+        );
+    }
+}
+
+#[test]
+fn a_world_with_ores_but_no_biomes_keeps_its_ores_only() {
+    let params = crate::WorldgenParams {
+        biomes: Default::default(),
+        ..biome_params(2)
+    };
+    // The first ore names a Biome the World no longer has.
+    assert!(params.validate().is_err());
+    let ore = crate::Ore {
+        biomes: crate::BiomeSet::default(),
+        ..params.ores.as_slice()[1]
+    };
+    let params = crate::WorldgenParams {
+        ores: crate::OreTable::new(&[ore]).unwrap(),
+        ..params
+    };
+    let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    let names = keys(&saved);
+    assert!(names.contains(&"ores".to_owned()));
+    assert!(!names.contains(&"biomes".to_owned()) && !names.contains(&"climate".to_owned()));
+    assert_eq!(
+        saved.restore(&mapping(8, 9, 4), 2).unwrap().ores,
+        params.ores
+    );
+}
+
+#[test]
+fn a_commit_written_before_biomes_restores_with_none() {
+    let saved = Generation::capture(
+        crate::WorldgenParams {
+            generator: 1,
+            ..crate::WorldgenParams::default()
+        },
+        &mapping(8, 9, 4),
+    )
+    .unwrap();
+    let old: Generation = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+    for generator in [1, 2] {
+        let restored = old.restore(&mapping(8, 9, 4), generator).unwrap();
+        assert!(restored.biomes.is_empty() && restored.ores.is_empty());
+        assert_eq!(restored.climate, crate::ClimateParams::default());
+    }
+}
+
+#[test]
+fn a_version_1_world_restores_with_none_whatever_its_snapshot_holds() {
+    let saved = Generation::capture(biome_params(2), &mapping(8, 9, 4)).unwrap();
+    let restored = saved.restore(&mapping(8, 9, 4), 1).unwrap();
+    assert!(restored.biomes.is_empty() && restored.ores.is_empty());
+}
+
+#[test]
+fn a_snapshot_that_cannot_be_restored_is_corrupt() {
+    let good = Generation::capture(biome_params(2), &mapping(8, 9, 4)).unwrap();
+    let m = mapping(8, 9, 4);
+
+    let mut unknown_biome = good.clone();
+    unknown_biome.ores.as_mut().unwrap()[0].biomes = vec!["nowhere".into()];
+    let mut missing_material = good.clone();
+    missing_material.ores.as_mut().unwrap()[0].material = "terra:ruby".into();
+    let mut bad_ore = good.clone();
+    bad_ore.ores.as_mut().unwrap()[0].rarity = 2.0;
+    let mut bad_climate = good.clone();
+    bad_climate.climate.as_mut().unwrap().humidity_size_m = 0.0;
+
+    for (what, g) in [
+        ("unknown biome", unknown_biome),
+        ("missing material", missing_material),
+        ("bad ore", bad_ore),
+        ("bad climate", bad_climate),
+    ] {
+        assert!(g.restore(&m, 2).is_err(), "{what}");
+    }
+    let outside = r#"[{"name":"x","temperature":2.0,"humidity":0.5}]"#;
+    assert!(serde_json::from_str::<crate::BiomeTable>(outside).is_err());
+}
+
 #[test]
 fn equal_seed_worlds_commit_to_independent_directories() {
     let a = Directory::new();

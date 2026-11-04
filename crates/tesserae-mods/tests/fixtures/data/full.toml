@@ -163,3 +163,32 @@ material = "full:wood"
 name = "pebble"
 size-m = 0.1
 color = [150, 150, 150, 255]
+
+[world.climate]
+temperature-size-m = 400.0
+humidity-size-m = 640.0
+
+[[biomes]]
+name = "dry"
+temperature = 0.8
+humidity = 0.15
+
+[[biomes]]
+name = "wet"
+temperature = 0.35
+humidity = 0.9
+
+[[ores]]
+material = "full:ash"
+min-depth-m = 4.0
+max-depth-m = 40.0
+vein-size-m = 3.0
+rarity = 0.05
+biomes = ["full:dry"]
+
+[[ores]]
+material = "full:wood"
+min-depth-m = 0.0
+max-depth-m = 12.0
+vein-size-m = 1.5
+rarity = 1.0

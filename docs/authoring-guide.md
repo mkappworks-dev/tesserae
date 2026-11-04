@@ -134,7 +134,11 @@ which take the Engine's terrain values. Omitted lists are empty.
 
 Only a Game may declare `world`, `view` and `tools`, except that a Mod may
 supply `world.character` alone
-([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)).
+([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)). Any Mod may add
+`[[biomes]]` and `[[ores]]` to the Game's World, in load order, a Biome's id
+being its place in that order; only the Game declares `[world.climate]`. A Biome
+point is in the 0 to 1 Climate square, an ore band is metres below the surface,
+and an ore without `biomes` is in every Biome.
 
 | Table                       | Fields                                                                                                                                                                   |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -149,6 +153,7 @@ supply `world.character` alone
 | `[world.caves]`             | `feature-size-m`, `radius-m`, `floor-m`, `octaves`                                                                                                                       |
 | `[world.smoothing]`         | `min-rise-m`                                                                                                                                                             |
 | `[world.water]`             | `level-m`, `material` (a fluid, by full name)                                                                                                                            |
+| `[world.climate]` (Game)    | `temperature-size-m`, `humidity-size-m` (metres; omitted keeps 512 m)                                                                                                    |
 | `[world.movement]`          | `allow-flight`, `allow-physics`, `start-in-flight`                                                                                                                       |
 | `[world.character]`         | `pixel-m`, `skin` (a 64 by 64 PNG path), `idle`, `walk`, `sprint`, `airborne`, `crouch` (each `swing-deg`, `rate-hz`, `arm-raise-deg`), `bones`                          |
 | `[[world.character.bones]]` | `name`, optional `parent`, `role`, `pivot`, `cubes` (each `origin`, `size`, `uv`)                                                                                        |
@@ -158,6 +163,8 @@ supply `world.character` alone
 | `[[combustion]]`            | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`, optional `heat`, `end`                                                                                     |
 | `[[tools]]` (Game)          | `name`, `kind`                                                                                                                                                           |
 | `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item)                             |
+| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1); at most 16 per Mod and in a World                                                                                       |
+| `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                  |
 
 Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
 `opaque`, `blend` or `cutout`; a bone `role` is `body`, `head`, `arm-left`,
@@ -167,9 +174,10 @@ tool `kind` is `measure`. A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`, and an omitted `residue`
 removes the solid.
 
-Materials and Shapes are declared by local name. Ground, water, fluid, reaction
-and combustion names are full `<mod id>:<name>` names and resolve after every
-Mod has declared, whether the Material came from data or from a component.
+Materials, Shapes and Biomes are declared by local name. Ground, water, fluid,
+reaction, combustion and ore names, and the Biomes an ore lists, are full
+`<mod id>:<name>` names and resolve after every Mod has declared, whether the
+Material came from data or from a component.
 
 ### A Declaration using every table
 
@@ -212,6 +220,14 @@ solid = true
 
 [[materials]]
 name = "ash"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+
+[[materials]]
+name = "iron"
 emission = 0
 dimming = 15
 occlusion = "opaque"
@@ -274,6 +290,10 @@ min-rise-m = 1.0
 [world.water]
 level-m = 22.0
 material = "showcase:water"
+
+[world.climate]
+temperature-size-m = 400.0
+humidity-size-m = 600.0
 
 [world.movement]
 allow-flight = true
@@ -349,6 +369,24 @@ kind = "measure"
 name = "pebble"
 size-m = 0.1
 color = [150, 150, 150, 255]
+
+[[biomes]]
+name = "dry"
+temperature = 0.8
+humidity = 0.15
+
+[[biomes]]
+name = "cold"
+temperature = 0.1
+humidity = 0.4
+
+[[ores]]
+material = "showcase:iron"
+min-depth-m = 4.0
+max-depth-m = 40.0
+vein-size-m = 3.0
+rarity = 0.05
+biomes = ["showcase:cold"]
 ```
 
 Its `mod.toml` is the data-only starter's with `id = "showcase"`.

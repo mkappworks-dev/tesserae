@@ -1,6 +1,6 @@
 # 03: Declare Biomes, Climate and ores
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -10,11 +10,11 @@ A Game declares Biomes, ores and Climate as data and a Mod may add Biomes and or
 
 ## Acceptance criteria
 
-- [ ] A Declaration with Biomes, ores and Climate parses; unknown fields are still rejected.
-- [ ] Only a Game may declare Climate; a Mod may add Biomes and ores.
-- [ ] A declared Biome table survives a save and reopen as the World's own snapshot.
-- [ ] The contract compatibility doc records the in-place 0.3 addition.
-- [ ] An empty or absent table parses as today.
+- [x] A Declaration with Biomes, ores and Climate parses; unknown fields are still rejected.
+- [x] Only a Game may declare Climate; a Mod may add Biomes and ores.
+- [x] A declared Biome table survives a save and reopen as the World's own snapshot.
+- [x] The contract compatibility doc records the in-place 0.3 addition.
+- [x] An empty or absent table parses as today.
 
 ## Comments
 

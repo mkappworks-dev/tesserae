@@ -448,12 +448,38 @@ pub struct Generation {
     pub smoothing: Option<crate::SmoothingParams>,
     pub lake: Option<(f32, String)>,
     pub ground: Option<[String; 3]>,
+    /// The World's own Biome snapshot, so a Game that later gains a Biome never
+    /// reshapes it. Absent before Biomes, for Generator version 1 and for an
+    /// empty table; all three of these fields are absent together.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub climate: Option<crate::ClimateParams>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub biomes: Option<crate::BiomeTable>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ores: Option<Vec<SavedOre>>,
+}
+
+/// An [`crate::Ore`] with its Material and Biomes by name, since ids are only
+/// meaningful beside the tables that made them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedOre {
+    pub material: String,
+    pub min_depth_m: f32,
+    pub max_depth_m: f32,
+    pub vein_size_m: f32,
+    pub rarity: f32,
+    /// Empty is every Biome, as in [`crate::BiomeSet`].
+    pub biomes: Vec<String>,
 }
 
 impl Generation {
     pub fn capture(p: crate::WorldgenParams, mapping: &Mapping) -> Result<Self, Error> {
         mapping.validate()?;
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
+        // Version 1 ignores all three, so saving them would pin nothing.
+        let has_biomes = p.generator >= crate::climate::BIOMES_SINCE && !p.biomes.is_empty();
+        let has_ores = p.generator >= crate::climate::BIOMES_SINCE && !p.ores.is_empty();
         Ok(Self {
             sea_level_m: p.sea_level_m,
             relief_m: p.relief_m,
@@ -476,6 +502,17 @@ impl Generation {
                     ])
                 })
                 .transpose()?,
+            climate: has_biomes.then_some(p.climate),
+            biomes: has_biomes.then_some(p.biomes),
+            ores: has_ores
+                .then(|| {
+                    p.ores
+                        .as_slice()
+                        .iter()
+                        .map(|o| saved_ore(o, &p.biomes, mapping))
+                        .collect::<Result<_, _>>()
+                })
+                .transpose()?,
         })
     }
 
@@ -487,6 +524,16 @@ impl Generation {
         generator: u32,
     ) -> Result<crate::WorldgenParams, Error> {
         mapping.validate()?;
+        let biomes_apply = generator >= crate::climate::BIOMES_SINCE;
+        let biomes = self.biomes.filter(|_| biomes_apply).unwrap_or_default();
+        let ores = self
+            .ores
+            .as_deref()
+            .filter(|_| biomes_apply)
+            .unwrap_or_default()
+            .iter()
+            .map(|o| restored_ore(o, &biomes, mapping))
+            .collect::<Result<Vec<_>, _>>()?;
         let p = crate::WorldgenParams {
             generator,
             sea_level_m: self.sea_level_m,
@@ -517,12 +564,64 @@ impl Generation {
                     })
                 })
                 .transpose()?,
-            climate: Default::default(),
-            biomes: Default::default(),
+            climate: self.climate.filter(|_| biomes_apply).unwrap_or_default(),
+            biomes,
+            ores: crate::OreTable::new(&ores).map_err(|e| Error::Corrupt(e.to_string()))?,
         };
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
         Ok(p)
     }
+}
+
+fn saved_ore(
+    o: &crate::Ore,
+    biomes: &crate::BiomeTable,
+    mapping: &Mapping,
+) -> Result<SavedOre, Error> {
+    Ok(SavedOre {
+        material: mapping.material_name(o.material)?,
+        min_depth_m: o.min_depth_m,
+        max_depth_m: o.max_depth_m,
+        vein_size_m: o.vein_size_m,
+        rarity: o.rarity,
+        biomes: o
+            .biomes
+            .ids()
+            .map(|id| {
+                biomes
+                    .get(id)
+                    .map(|b| b.name.to_string())
+                    .ok_or_else(|| Error::Corrupt("an ore names a missing Biome".into()))
+            })
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+fn restored_ore(
+    o: &SavedOre,
+    biomes: &crate::BiomeTable,
+    mapping: &Mapping,
+) -> Result<crate::Ore, Error> {
+    let ids = o
+        .biomes
+        .iter()
+        .map(|name| {
+            biomes
+                .as_slice()
+                .iter()
+                .position(|b| b.name.as_str() == name)
+                .map(|at| crate::BiomeId::new(at as u8))
+                .ok_or_else(|| Error::Corrupt(format!("an ore names the unknown Biome {name}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(crate::Ore {
+        material: mapping.material_id(&o.material)?,
+        min_depth_m: o.min_depth_m,
+        max_depth_m: o.max_depth_m,
+        vein_size_m: o.vein_size_m,
+        rarity: o.rarity,
+        biomes: crate::BiomeSet::new(&ids).map_err(|e| Error::Corrupt(e.to_string()))?,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

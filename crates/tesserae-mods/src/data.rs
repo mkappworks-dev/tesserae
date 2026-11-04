@@ -30,6 +30,10 @@ struct Data {
     tools: Vec<behaviour::Tool>,
     #[serde(default)]
     items: Vec<behaviour::Item>,
+    #[serde(default)]
+    biomes: Vec<behaviour::Biome>,
+    #[serde(default)]
+    ores: Vec<behaviour::Ore>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +84,7 @@ struct World {
     smoothing: Option<world::Smoothing>,
     water: Option<world::Water>,
     ground: Option<Ground>,
+    climate: Option<world::Climate>,
     movement: Option<world::Movement>,
     character: Option<character::Character>,
 }
@@ -197,6 +202,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                         soil: g.soil,
                         surface: g.surface,
                     }),
+                    climate: w.climate.map(Into::into),
                     caves: w.caves.map(Into::into),
                     smoothing: w.smoothing.map(Into::into),
                     water: w.water.map(Into::into),
@@ -212,5 +218,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         combustion: data.combustion.into_iter().map(Into::into).collect(),
         tools: data.tools.into_iter().map(Into::into).collect(),
         items: data.items.into_iter().map(Into::into).collect(),
+        biomes: data.biomes.into_iter().map(Into::into).collect(),
+        ores: data.ores.into_iter().map(Into::into).collect(),
     })
 }

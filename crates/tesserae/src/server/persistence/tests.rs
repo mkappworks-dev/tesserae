@@ -2,7 +2,7 @@ use super::*;
 use crate::server::{ContentTables, edit, streaming::MeshState, undo::Journal};
 use bevy::ecs::message::Messages;
 use std::time::{Duration, Instant};
-use tesserae_core::{Burning, Chunk, Fluid, Occupants, Voxel};
+use tesserae_core::{Burning, Chunk, Fluid, Occupants, Voxel, WorldgenParams};
 use tesserae_mods::Kind;
 
 struct Directory(PathBuf);
@@ -42,7 +42,16 @@ impl Rig {
         Self::open(dir.opening(), WorldSettings::default())
     }
     fn open(opening: Opening, settings: WorldSettings) -> Self {
+        Self::open_with(opening, settings, |_| {})
+    }
+    /// `game` edits what the Game declares before the World opens on it.
+    fn open_with(
+        opening: Opening,
+        settings: WorldSettings,
+        game: impl FnOnce(&mut crate::server::mods::LoadedMods),
+    ) -> Self {
         let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+        game(&mut loaded);
         let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as u16;
         let (stone, water, wood) = (id("terra:stone"), id("terra:water"), id("terra:wood"));
         loaded.items = vec![tesserae_mods::ItemDef {
@@ -983,4 +992,120 @@ fn a_version_1_world_reopens_on_version_1_and_saves_as_version_1() {
     rig.insert();
     rig.settled_save();
     assert_eq!(saved_generator(&dir), 1);
+}
+
+/// A Game whose World holds two Biomes, a Climate of its own and one ore.
+fn declares_biomes(names: [&str; 2]) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
+    use tesserae_core::{Biome, BiomeName, BiomeSet, BiomeTable, ClimateParams, Ore, OreTable};
+    move |loaded| {
+        let stone = loaded
+            .registry
+            .id_of(Kind::Material, "terra:stone")
+            .unwrap() as u16;
+        let biome = |name: &str, temperature| Biome {
+            name: BiomeName::new(name).unwrap(),
+            temperature,
+            humidity: 0.5,
+        };
+        loaded.world = Some(WorldgenParams {
+            climate: ClimateParams {
+                temperature_size_m: 250.0,
+                humidity_size_m: 750.0,
+            },
+            biomes: BiomeTable::new(&[biome(names[0], 0.2), biome(names[1], 0.8)]).unwrap(),
+            ores: OreTable::new(&[Ore {
+                material: stone,
+                min_depth_m: 4.0,
+                max_depth_m: 20.0,
+                vein_size_m: 2.0,
+                rarity: 0.1,
+                biomes: BiomeSet::default(),
+            }])
+            .unwrap(),
+            ..loaded.world.take().unwrap_or_default()
+        });
+    }
+}
+
+fn prepared_world(
+    dir: &Directory,
+    game: impl FnOnce(&mut crate::server::mods::LoadedMods),
+) -> WorldgenParams {
+    let (opening, settings) = (dir.opening(), WorldSettings::default());
+    let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+    game(&mut loaded);
+    Persistence::prepare(opening, &mut loaded, settings).unwrap();
+    loaded.world.unwrap()
+}
+
+fn biome_names(p: &WorldgenParams) -> Vec<String> {
+    p.biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.name.to_string())
+        .collect()
+}
+
+#[test]
+fn a_declared_biome_table_is_saved_with_the_world() {
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_biomes(["terra:dry", "terra:wet"]),
+    )
+    .settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    assert_eq!(saved.climate.unwrap().temperature_size_m, 250.0);
+    assert_eq!(saved.biomes.unwrap().len(), 2);
+    assert_eq!(saved.ores.unwrap()[0].material, "terra:stone");
+}
+
+#[test]
+fn a_reopened_world_keeps_its_own_biomes_whatever_the_game_declares_now() {
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_biomes(["terra:dry", "terra:wet"]),
+    )
+    .settled_save();
+    let reopened = prepared_world(&dir, declares_biomes(["terra:hot", "terra:cold"]));
+    assert_eq!(biome_names(&reopened), ["terra:dry", "terra:wet"]);
+    assert_eq!(reopened.climate.temperature_size_m, 250.0);
+    assert_eq!(reopened.ores.len(), 1);
+    let without = prepared_world(&dir, |l| l.world = None);
+    assert_eq!(biome_names(&without), ["terra:dry", "terra:wet"]);
+}
+
+#[test]
+fn a_world_saved_with_no_biomes_stays_without_them_after_the_game_gains_some() {
+    let dir = Directory::new();
+    Rig::new(&dir).settled_save();
+    assert!(
+        save::inspect(&dir.0)
+            .unwrap()
+            .unwrap()
+            .commit
+            .parameters
+            .biomes
+            .is_none()
+    );
+    let reopened = prepared_world(&dir, declares_biomes(["terra:dry", "terra:wet"]));
+    assert!(reopened.biomes.is_empty() && reopened.ores.is_empty());
+}
+
+#[test]
+fn a_version_1_world_reopens_without_biomes_even_if_its_game_declares_them() {
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_biomes(["terra:dry", "terra:wet"]),
+    )
+    .settled_save();
+    rewrite_as_version_1(&dir);
+    let reopened = prepared_world(&dir, declares_biomes(["terra:dry", "terra:wet"]));
+    assert!(reopened.biomes.is_empty() && reopened.ores.is_empty());
+    assert_eq!(reopened.generator, 1);
 }

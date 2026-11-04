@@ -3,8 +3,8 @@
 //! the registration's, so a bad row is reported by the table that owns the rule.
 
 use tesserae_core::{
-    Arm, CaveParams, CollisionBox, ConnectDef, MaterialDef, NodeBox, Occlusion, RenderClass,
-    ShapeDef, SmoothingParams, Voxel, WorldgenParams,
+    Arm, CaveParams, ClimateParams, CollisionBox, ConnectDef, MaterialDef, NodeBox, Occlusion,
+    RenderClass, ShapeDef, SmoothingParams, Voxel, WorldgenParams,
 };
 
 use crate::bindings::exports::tesserae::mods::guest;
@@ -143,6 +143,10 @@ pub(crate) fn world_params(
         }),
         ground: None,
         water: None,
+        climate: p.climate.map_or_else(Default::default, |c| ClimateParams {
+            temperature_size_m: c.temperature_size_m,
+            humidity_size_m: c.humidity_size_m,
+        }),
         ..WorldgenParams::default()
     };
     (terrain, p.water)
@@ -172,6 +176,7 @@ pub(crate) fn engine_world_params() -> content::WorldParams {
         }),
         ground: None,
         water: None,
+        climate: None,
     }
 }
 

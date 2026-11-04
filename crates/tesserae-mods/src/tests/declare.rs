@@ -2,15 +2,15 @@
 
 use tesserae_core::shape::examples;
 use tesserae_core::{
-    Arm, ConnectDef, Connections, MaterialError, Orientation, ShapeDef, ShapeError, Tables, Voxel,
-    WorldgenParams,
+    Arm, BiomeId, BiomeSet, BiomeTable, ConnectDef, Connections, MaterialError, OreTable,
+    Orientation, ShapeDef, ShapeError, Tables, Voxel, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::bindings::tesserae::mods::types;
 use crate::{
     Applied, Kind, MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_TOOLS_PER_MOD, ModError, Registry,
-    RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve_items,
+    RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve_biomes, resolve_items,
 };
 
 fn material(name: &str) -> content::MaterialDef {
@@ -49,6 +49,8 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         combustion: Vec::new(),
         tools: Vec::new(),
         items: Vec::new(),
+        biomes: Vec::new(),
+        ores: Vec::new(),
     }
 }
 
@@ -1107,4 +1109,299 @@ fn items_are_bounded_per_mod_and_per_world() {
             ..
         })
     ));
+}
+
+fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
+    content::BiomeDef {
+        name: name.into(),
+        temperature,
+        humidity,
+    }
+}
+
+fn ore(material: &str, biomes: &[&str]) -> content::OreDef {
+    content::OreDef {
+        material: material.into(),
+        min_depth_m: 4.0,
+        max_depth_m: 30.0,
+        vein_size_m: 2.0,
+        rarity: 0.1,
+        biomes: biomes.iter().map(|b| (*b).into()).collect(),
+    }
+}
+
+fn with_biomes(
+    materials: &[&str],
+    biomes: Vec<content::BiomeDef>,
+    ores: Vec<content::OreDef>,
+) -> Declaration {
+    let mut d = declaring(materials, &[]);
+    d.biomes = biomes;
+    d.ores = ores;
+    d
+}
+
+fn resolved_biomes(
+    load: &mut Load,
+    mods: &[(&str, Declaration)],
+) -> Result<(BiomeTable, OreTable), ModError> {
+    let behaviours: Vec<_> = mods
+        .iter()
+        .map(|(id, d)| load.apply(id, d.clone()).unwrap().behaviour)
+        .collect();
+    resolve_biomes(&behaviours, &load.tables, &load.registry)
+}
+
+#[test]
+fn biomes_and_ores_append_in_load_order_with_ores_naming_any_mods_biome() {
+    let mut load = Load::new();
+    let (biomes, ores) = resolved_biomes(
+        &mut load,
+        &[
+            (
+                "a",
+                with_biomes(
+                    &["rock"],
+                    vec![biome("dry", 0.8, 0.1), biome("wet", 0.2, 0.9)],
+                    vec![ore("a:rock", &["b:cold"])],
+                ),
+            ),
+            (
+                "b",
+                with_biomes(
+                    &["gem"],
+                    vec![biome("cold", 0.1, 0.4)],
+                    vec![ore("b:gem", &[])],
+                ),
+            ),
+        ],
+    )
+    .unwrap();
+    let names: Vec<_> = biomes.as_slice().iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, ["a:dry", "a:wet", "b:cold"]);
+    assert_eq!(
+        (
+            biomes.as_slice()[1].temperature,
+            biomes.as_slice()[1].humidity
+        ),
+        (0.2, 0.9)
+    );
+    let rock = load.registry.id_of(Kind::Material, "a:rock").unwrap() as u16;
+    let gem = load.registry.id_of(Kind::Material, "b:gem").unwrap() as u16;
+    let ores = ores.as_slice();
+    assert_eq!((ores[0].material, ores[1].material), (rock, gem));
+    assert_eq!(ores[0].biomes, BiomeSet::new(&[BiomeId::new(2)]).unwrap());
+    assert!(ores[1].biomes.is_unrestricted());
+    assert_eq!((ores[0].min_depth_m, ores[0].max_depth_m), (4.0, 30.0));
+    assert_eq!((ores[0].vein_size_m, ores[0].rarity), (2.0, 0.1));
+}
+
+#[test]
+fn no_biomes_and_no_ores_resolve_to_empty_tables() {
+    let mut load = Load::new();
+    let (biomes, ores) = resolved_biomes(&mut load, &[("a", declaring(&["rock"], &[]))]).unwrap();
+    assert!(biomes.is_empty() && ores.is_empty());
+}
+
+#[test]
+fn a_mod_that_is_not_the_game_may_add_biomes_and_ores() {
+    let mut load = Load::new();
+    let d = with_biomes(
+        &["rock"],
+        vec![biome("dry", 0.5, 0.5)],
+        vec![ore("content:rock", &[])],
+    );
+    assert!(load.apply("content", d).is_ok());
+}
+
+fn refused_biome_rows(d: Declaration, field: &str) {
+    let mut load = Load::new();
+    let error = match load.apply("m", d.clone()) {
+        Err(e) => e,
+        Ok(applied) => {
+            resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+        }
+    };
+    match error {
+        ModError::Params { id, source, .. } => {
+            assert_eq!(id, "m");
+            assert!(source.field.contains(field), "{field}: {source}");
+        }
+        ModError::UnknownName { id, what, .. } => {
+            assert_eq!((id.as_str(), what, field), ("m", "ore", "material"));
+        }
+        other => panic!("{field}: {other:?}"),
+    }
+}
+
+#[test]
+fn a_bad_biome_names_the_mod_and_the_field() {
+    for (bad, field) in [
+        (biome("", 0.5, 0.5), "name"),
+        (biome("Dry", 0.5, 0.5), "name"),
+        (biome("m:dry", 0.5, 0.5), "name"),
+        (biome("dry", -0.1, 0.5), "temperature"),
+        (biome("dry", 0.5, 1.1), "humidity"),
+        (biome("dry", f32::NAN, 0.5), "temperature"),
+        (biome("dry", 0.5, f32::INFINITY), "humidity"),
+    ] {
+        refused_biome_rows(with_biomes(&[], vec![bad], vec![]), field);
+    }
+    refused_biome_rows(
+        with_biomes(
+            &[],
+            vec![biome("dry", 0.1, 0.1), biome("dry", 0.9, 0.9)],
+            vec![],
+        ),
+        "name",
+    );
+}
+
+#[test]
+fn a_biome_whose_full_name_outgrows_the_table_is_refused() {
+    let long_mod = "m".repeat(20);
+    let mut load = Load::new();
+    let d = with_biomes(&[], vec![biome("a_rather_long_biome", 0.5, 0.5)], vec![]);
+    let applied = load.apply(&long_mod, d).unwrap();
+    let error = resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err();
+    assert!(error.to_string().contains(&long_mod), "{error}");
+}
+
+#[test]
+fn a_bad_ore_names_the_mod_and_the_field() {
+    let edit = |f: fn(&mut content::OreDef)| {
+        let mut o = ore("m:rock", &[]);
+        f(&mut o);
+        o
+    };
+    for (bad, field) in [
+        (ore("m:nothing", &[]), "material"),
+        (ore("core:air", &[]), "material"),
+        (ore("m:glass", &[]), "material"),
+        (ore("m:rock", &["m:nowhere"]), "biomes"),
+        (edit(|o| o.min_depth_m = -1.0), "depth"),
+        (edit(|o| o.min_depth_m = 31.0), "depth"),
+        (edit(|o| o.max_depth_m = f32::NAN), "depth"),
+        (edit(|o| o.vein_size_m = 0.0), "vein_size_m"),
+        (edit(|o| o.rarity = 0.0), "rarity"),
+        (edit(|o| o.rarity = 1.5), "rarity"),
+    ] {
+        let mut d = with_biomes(&["rock"], vec![biome("dry", 0.5, 0.5)], vec![bad]);
+        // A Material that is not solid.
+        d.materials.push(content::MaterialDef {
+            name: "glass".into(),
+            solid: false,
+            ..material("glass")
+        });
+        refused_biome_rows(d, field);
+    }
+}
+
+#[test]
+fn the_world_holds_at_most_the_tables_cap_across_mods() {
+    let rows = |prefix: &str, n: usize| -> Vec<content::BiomeDef> {
+        (0..n)
+            .map(|i| biome(&format!("{prefix}{i}"), 0.5, 0.5))
+            .collect()
+    };
+    let mut load = Load::new();
+    let error = resolved_biomes(
+        &mut load,
+        &[
+            ("a", with_biomes(&[], rows("x", 10), vec![])),
+            ("b", with_biomes(&[], rows("y", 7), vec![])),
+        ],
+    )
+    .unwrap_err();
+    assert!(
+        matches!(&error, ModError::Params { id, .. } if id == "b"),
+        "{error:?}"
+    );
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[
+            ("a", with_biomes(&[], rows("x", 10), vec![])),
+            ("b", with_biomes(&[], rows("y", 6), vec![])),
+        ],
+    )
+    .unwrap();
+    assert_eq!(biomes.len(), 16);
+
+    let ores: Vec<_> = (0..16).map(|_| ore("a:rock", &[])).collect();
+    let mut load = Load::new();
+    let (_, table) = resolved_biomes(
+        &mut load,
+        &[
+            ("a", with_biomes(&["rock"], vec![], ores.clone())),
+            ("b", with_biomes(&[], vec![], ores.clone())),
+        ],
+    )
+    .unwrap();
+    assert_eq!(table.len(), 32);
+    let mut load = Load::new();
+    assert!(
+        resolved_biomes(
+            &mut load,
+            &[
+                ("a", with_biomes(&["rock"], vec![], ores.clone())),
+                ("b", with_biomes(&[], vec![], ores.clone())),
+                ("c", with_biomes(&[], vec![], vec![ore("a:rock", &[])])),
+            ],
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn a_climate_that_is_not_finite_and_positive_is_a_load_error() {
+    for (t, h, field) in [
+        (0.0, 100.0, "climate.temperature_size_m"),
+        (100.0, f32::NAN, "climate.humidity_size_m"),
+        (f32::INFINITY, 100.0, "climate.temperature_size_m"),
+    ] {
+        let mut p = world(true);
+        p.climate = Some(content::ClimateParams {
+            temperature_size_m: t,
+            humidity_size_m: h,
+        });
+        let mut d = declaring(&[], &[]);
+        d.world = Some(p);
+        let mut load = Load::new();
+        match apply(d, "game", &mut load.tables, &mut load.registry, true).unwrap_err() {
+            ModError::Params { what, source, .. } => {
+                assert_eq!((what, source.field), ("world", field));
+            }
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn only_the_game_declares_climate() {
+    let mut p = crate::convert::engine_world_params();
+    p.caves = None;
+    p.smoothing = None;
+    p.climate = Some(content::ClimateParams {
+        temperature_size_m: 100.0,
+        humidity_size_m: 100.0,
+    });
+    let mut d = declaring(&[], &[]);
+    d.world = Some(p);
+    let mut load = Load::new();
+    assert!(matches!(
+        load.apply("content", d.clone()).unwrap_err(),
+        ModError::NotAGame {
+            field: "world.climate",
+            ..
+        }
+    ));
+    let applied = apply(d, "game", &mut load.tables, &mut load.registry, true).unwrap();
+    assert_eq!(
+        applied.world.unwrap().climate,
+        tesserae_core::ClimateParams {
+            temperature_size_m: 100.0,
+            humidity_size_m: 100.0
+        }
+    );
 }

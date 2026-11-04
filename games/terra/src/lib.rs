@@ -398,6 +398,8 @@ impl Guest for Terra {
                     material: Some("terra:grass".into()),
                 },
             ],
+            biomes: Vec::new(),
+            ores: Vec::new(),
         }
     }
 

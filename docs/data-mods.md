@@ -76,6 +76,20 @@ declare `world`, `view` and `tools`, except that a Mod may supply
 ([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)); a World has one
 character source, and two fail the load naming both.
 
+Any Mod may add `[[biomes]]` and `[[ores]]` to the Game's World;
+`[world.climate]` is the Game's alone. Biomes and ores append in load order
+(dependencies first), so a Biome's id is its place in that order, and the World
+holds at most 16 Biomes and 32 ores. A Biome row is `name`, `temperature` and
+`humidity`, the last two from 0 to 1; its full name is `<mod id>:<name>`, at
+most 32 bytes. An ore row is `material` (a solid Material, by full name),
+`min-depth-m` and `max-depth-m` (the band below the surface, shallow end first),
+`vein-size-m`, `rarity` (above 0, at most 1) and an optional `biomes` list of
+full Biome names from any Mod; omitted, the ore is in every Biome.
+`[world.climate]` is `temperature-size-m` and `humidity-size-m`, in metres.
+Tables that are absent change nothing: a World with no Biomes generates as it
+always did. Declaring them only records them: this step neither selects ground
+by Biome nor places ore.
+
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
 the solid. Fluid, reaction, combustion, ground and water names are full

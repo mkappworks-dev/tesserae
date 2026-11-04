@@ -13,6 +13,7 @@ use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{BIOMES_SINCE, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams};
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
+use crate::ore::OreTable;
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -48,6 +49,9 @@ pub struct WorldgenParams {
     pub climate: ClimateParams,
     /// Empty is a World with no Biomes. Ignored by Generator version 1.
     pub biomes: BiomeTable,
+    /// Empty is a World without ore. Declared and saved, not yet generated.
+    /// Ignored by Generator version 1.
+    pub ores: OreTable,
     /// Which generation algorithm runs. A World pins the version it was created
     /// with, so a revision never reshapes terrain that already exists.
     pub generator: u32,
@@ -149,6 +153,7 @@ impl Default for WorldgenParams {
             ground: None,
             climate: ClimateParams::default(),
             biomes: BiomeTable::default(),
+            ores: OreTable::default(),
             generator: crate::save::GENERATOR_VERSION,
         }
     }
@@ -264,6 +269,14 @@ impl WorldgenParams {
             self.climate.temperature_size_m,
         )?;
         positive_size("climate.humidity_size_m", self.climate.humidity_size_m)?;
+        require(
+            self.ores
+                .as_slice()
+                .iter()
+                .all(|o| o.biomes.ids().all(|id| id.index() < self.biomes.len())),
+            "ores.biomes",
+            "must name Biomes the World declares",
+        )?;
         require(
             crate::save::SUPPORTED_GENERATORS.contains(&self.generator),
             "generator",
