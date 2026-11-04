@@ -209,3 +209,8 @@ trust.
 Only the named projects are watched (everything inside them except dot-folders
 and `target`); other local projects and installed Mods are not. Saved Worlds are
 never opened, written or checked against the build.
+
+An item row is `name`, `size-m` (the dropped cube's edge, 0.05 to 0.5 m),
+`color` and an optional `material`: a solid Material, `<mod id>:<name>`, whose
+removed Voxels drop it. Any Mod may declare items, at most 64 per Mod and 256 in
+a World; two items may not name one Material. Lines 0.1 and 0.2 declare none.

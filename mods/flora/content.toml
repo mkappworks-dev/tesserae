@@ -54,3 +54,8 @@ material = "kelp"
 color = [44, 110, 70, 255]
 texture = "art/kelp.png"
 
+[[items]]
+name = "log"
+size-m = 0.3
+color = [120, 82, 46, 255]
+material = "flora:wood"

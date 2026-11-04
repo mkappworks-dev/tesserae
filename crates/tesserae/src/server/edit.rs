@@ -78,6 +78,14 @@ const MAX_DEFERRED_TICKS: u32 = 64;
 /// Intents queued at once. A Server that stalls must not grow without bound.
 const MAX_PENDING: usize = 256;
 
+/// A Player's single deliberate Remove took this solid out of the World. Not
+/// written for undo, Layout, fluid, fire or a Mod's Commands.
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct VoxelRemoved {
+    pub at: [i32; 3],
+    pub material: MaterialId,
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EditAction {
     /// Remove fire, then solid, then source at the first occupied Voxel.
@@ -333,6 +341,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<super::mods::EditHistory>()
         .add_session_message::<EditIntent>()
         .add_session_message::<EditRejected>()
+        .add_session_message::<VoxelRemoved>()
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_session_systems(
             RunFixedMainLoop,
@@ -666,7 +675,7 @@ pub(in crate::server) fn apply_pending(
     ),
     mut store: ResMut<ChunkStore>,
     mut meshes: ResMut<MeshState>,
-    mut rejected: MessageWriter<EditRejected>,
+    (mut rejected, mut removed): (MessageWriter<EditRejected>, MessageWriter<VoxelRemoved>),
     (tables, world): (Res<ContentTables>, Res<WorldSettings>),
     players: Query<&Player>,
 ) {
@@ -690,7 +699,12 @@ pub(in crate::server) fn apply_pending(
                     change,
                     p.intent.action,
                 )
-                .map(|entry| journal.record(entry))
+                .map(|entry| {
+                    if let Some(gone) = removal(p.intent.action, &entry) {
+                        removed.write(gone);
+                    }
+                    journal.record(entry)
+                })
             });
         match outcome {
             Ok(()) => applied += 1,
@@ -788,6 +802,20 @@ fn land(
         after: now,
         event,
     })
+}
+
+fn removal(action: EditAction, entry: &super::undo::Entry) -> Option<VoxelRemoved> {
+    match (action, entry.event.kind) {
+        (EditAction::Remove | EditAction::RemoveAt(_), EditKind::Solid { before, after })
+            if after.is_air() && !before.is_air() =>
+        {
+            Some(VoxelRemoved {
+                at: entry.at,
+                material: before.material(),
+            })
+        }
+        _ => None,
+    }
 }
 
 /// What a fluid-tool Edit meant, read from what it changed.
@@ -1331,7 +1359,7 @@ pub(in crate::server) fn set_voxel(
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::server) mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::time::TimeUpdateStrategy;
@@ -1365,7 +1393,7 @@ mod tests {
         WATERED.1
     }
 
-    pub(super) fn stone() -> Voxel {
+    pub(in crate::server) fn stone() -> Voxel {
         Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
     }
 
@@ -1379,7 +1407,7 @@ mod tests {
 
     /// Chunk (0, 0, 0) with stone filling y = 0..8, so the surface is at 8 m, and
     /// air above it.
-    pub(super) fn ground() -> Chunk {
+    pub(in crate::server) fn ground() -> Chunk {
         let mut chunk = Chunk::air();
         for y in 0..8 {
             for z in 0..CHUNK_SIZE {
@@ -1391,7 +1419,7 @@ mod tests {
         chunk
     }
 
-    pub(super) fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
+    pub(in crate::server) fn app_with(chunks: &[(ChunkCoord, Chunk)]) -> App {
         app_with_tables(chunks, watered())
     }
 
@@ -1417,7 +1445,7 @@ mod tests {
     pub(super) const DOWN_EYE: Vec3 = Vec3::new(5.5, 12.0, 5.5);
 
     /// A click straight down at the ground over (5, 5), from 4 m up.
-    pub(super) fn down(action: EditAction) -> EditIntent {
+    pub(in crate::server) fn down(action: EditAction) -> EditIntent {
         EditIntent {
             action,
             origin: DOWN_EYE,
@@ -1425,7 +1453,7 @@ mod tests {
         }
     }
 
-    pub(super) fn voxel_at(app: &App, at: [i32; 3]) -> Voxel {
+    pub(in crate::server) fn voxel_at(app: &App, at: [i32; 3]) -> Voxel {
         app.world().resource::<ChunkStore>().voxel(at).unwrap()
     }
 
@@ -1440,14 +1468,14 @@ mod tests {
     /// Delivers one intent as if the Player stood at its origin, so the tests
     /// that exercise `resolve` with arbitrary origins are not also testing the
     /// origin check; `send_from_afar` is the one that does.
-    pub(super) fn send(app: &mut App, intent: EditIntent) {
+    pub(in crate::server) fn send(app: &mut App, intent: EditIntent) {
         if intent.origin.is_finite() {
             set_eye(app, intent.origin);
         }
         send_from_afar(app, intent);
     }
 
-    pub(super) fn set_eye(app: &mut App, eye: Vec3) {
+    pub(in crate::server) fn set_eye(app: &mut App, eye: Vec3) {
         let mut players = app.world_mut().query::<&mut Player>();
         players.single_mut(app.world_mut()).unwrap().set_eye(eye);
     }
@@ -1463,7 +1491,7 @@ mod tests {
             .clear();
     }
 
-    pub(super) fn tick(app: &mut App) {
+    pub(in crate::server) fn tick(app: &mut App) {
         app.world_mut().run_system_once(apply_pending).unwrap();
     }
 

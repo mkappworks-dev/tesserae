@@ -28,6 +28,8 @@ struct Data {
     combustion: Vec<behaviour::Combustion>,
     #[serde(default)]
     tools: Vec<behaviour::Tool>,
+    #[serde(default)]
+    items: Vec<behaviour::Item>,
 }
 
 #[derive(Deserialize)]
@@ -209,5 +211,6 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         reactions: data.reactions.into_iter().map(Into::into).collect(),
         combustion: data.combustion.into_iter().map(Into::into).collect(),
         tools: data.tools.into_iter().map(Into::into).collect(),
+        items: data.items.into_iter().map(Into::into).collect(),
     })
 }

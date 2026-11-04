@@ -152,3 +152,14 @@ end = "permanent"
 [[tools]]
 name = "ruler"
 kind = "measure"
+
+[[items]]
+name = "log"
+size-m = 0.25
+color = [120, 80, 40, 255]
+material = "full:wood"
+
+[[items]]
+name = "pebble"
+size-m = 0.1
+color = [150, 150, 150, 255]

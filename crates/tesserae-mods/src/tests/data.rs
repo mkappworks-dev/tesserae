@@ -266,6 +266,30 @@ fn component() -> Declaration {
             name: "ruler".into(),
             kind: content::ToolKind::Measure,
         }],
+        items: vec![
+            content::ItemDef {
+                name: "log".into(),
+                size_m: 0.25,
+                color: types::Srgba {
+                    r: 120,
+                    g: 80,
+                    b: 40,
+                    a: 255,
+                },
+                material: Some("full:wood".into()),
+            },
+            content::ItemDef {
+                name: "pebble".into(),
+                size_m: 0.1,
+                color: types::Srgba {
+                    r: 150,
+                    g: 150,
+                    b: 150,
+                    a: 255,
+                },
+                material: None,
+            },
+        ],
     }
 }
 
@@ -321,6 +345,7 @@ fn absent_optional_values_stay_absent_rather_than_defaulting() {
     assert!(world.caves.is_none() && world.smoothing.is_none() && world.water.is_none());
     assert!(world.movement.is_none() && world.character.is_none() && world.ground.is_none());
     assert!(d.view.is_none() && d.fluids.is_empty() && d.tools.is_empty());
+    assert!(d.items.is_empty());
     assert_eq!(d.materials[0].remove_time_s, None);
 }
 
@@ -351,6 +376,7 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
     for (replace, with, field) in [
         ("kind = \"measure\"", "kind = \"dig\"", "dig"),
         ("name = \"ruler\"", "name = \"ruler\"\nextra = 1", "extra"),
+        ("size-m = 0.25", "size-m = 0.25\nweight = 3", "weight"),
         ("state = \"any\"", "state = \"sideways\"", "sideways"),
         ("end = \"permanent\"", "end = \"never\"", "never"),
         (

@@ -81,3 +81,39 @@ texture = "art/soil.png"
 material = "turf"
 color = [80, 144, 49, 255]
 texture = "art/turf.png"
+
+[[items]]
+name = "stone"
+size-m = 0.25
+color = [140, 141, 148, 255]
+material = "strata:stone"
+
+[[items]]
+name = "basalt"
+size-m = 0.25
+color = [58, 60, 68, 255]
+material = "strata:basalt"
+
+[[items]]
+name = "clay"
+size-m = 0.25
+color = [166, 112, 92, 255]
+material = "strata:clay"
+
+[[items]]
+name = "sand"
+size-m = 0.25
+color = [222, 205, 150, 255]
+material = "strata:sand"
+
+[[items]]
+name = "soil"
+size-m = 0.25
+color = [107, 74, 46, 255]
+material = "strata:soil"
+
+[[items]]
+name = "turf"
+size-m = 0.25
+color = [80, 144, 49, 255]
+material = "strata:turf"

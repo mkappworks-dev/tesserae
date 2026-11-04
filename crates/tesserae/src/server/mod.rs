@@ -15,6 +15,7 @@
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod builder;
 pub mod edit;
+pub mod entities;
 mod fluids;
 #[cfg(feature = "profiling")]
 mod profile_fixture;
@@ -24,6 +25,7 @@ pub use fluids::SimulationProfile;
 pub use profile_fixture::ProfileFixtureStatus;
 #[cfg(feature = "dev")]
 mod gallery;
+pub mod items;
 mod jobs;
 mod lod;
 mod lod_rings;
@@ -98,6 +100,7 @@ pub fn plugin(app: &mut App) {
             player::plugin,
         ));
     app.add_plugins(persistence::plugin);
+    app.add_plugins(entities::plugin);
     #[cfg(feature = "dev")]
     if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
         app.add_plugins(gallery::plugin);

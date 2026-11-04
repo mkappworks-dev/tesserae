@@ -23,6 +23,10 @@ name = "fluids"
 harness = false
 
 [[bench]]
+name = "entities"
+harness = false
+
+[[bench]]
 name = "coarse_breakdown"
 harness = false
 

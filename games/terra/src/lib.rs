@@ -11,8 +11,8 @@ use std::collections::VecDeque;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, GroundParams, HeatDef,
-    MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ToolDef,
-    ToolKind, ViewParams, WaterParams,
+    ItemDef, MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef,
+    ToolDef, ToolKind, ViewParams, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -363,6 +363,41 @@ impl Guest for Terra {
                 name: "measure".into(),
                 kind: ToolKind::Measure,
             }],
+            items: vec![
+                ItemDef {
+                    name: "rock".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 133,
+                        g: 133,
+                        b: 140,
+                        a: 255,
+                    },
+                    material: Some("terra:stone".into()),
+                },
+                ItemDef {
+                    name: "dirt".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 107,
+                        g: 74,
+                        b: 46,
+                        a: 255,
+                    },
+                    material: Some("terra:dirt".into()),
+                },
+                ItemDef {
+                    name: "grass".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 84,
+                        g: 143,
+                        b: 61,
+                        a: 255,
+                    },
+                    material: Some("terra:grass".into()),
+                },
+            ],
         }
     }
 

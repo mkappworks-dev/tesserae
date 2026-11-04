@@ -182,3 +182,24 @@ impl From<Tool> for content::ToolDef {
         }
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Item {
+    name: String,
+    size_m: f32,
+    color: [u8; 4],
+    material: Option<String>,
+}
+
+impl From<Item> for content::ItemDef {
+    fn from(i: Item) -> Self {
+        let [r, g, b, a] = i.color;
+        Self {
+            name: i.name,
+            size_m: i.size_m,
+            color: crate::bindings::tesserae::mods::types::Srgba { r, g, b, a },
+            material: i.material,
+        }
+    }
+}

@@ -31,3 +31,6 @@ tesserae package mods/flora --out dist --mods mods
 Copy `dist/mods/flora/` into the `mods/` folder beside `games/`. A Game lists it
 in `depends`; this Mod declares no `world`, `view` or `tools`, which only a Game
 may.
+
+The `wood` Material also has a `log` item (0.3 m) that a removed Voxel of it
+drops.

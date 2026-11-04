@@ -58,9 +58,11 @@ that cannot safely be evicted.
 `core::save::Commit` carries format/generator versions, a random UUID World
 identity independent of seed, a monotonic commit sequence, seed, Voxel size,
 named generation parameters, exact required Game/Mod builds, content names,
-current Player Eye, authoritative Chunks and simulation checkpoints. Global
-preferences and creative shortcuts are separate data. No inventory or character
-implementation is introduced.
+current Player Eye, authoritative Chunks and simulation checkpoints. Dropped
+items are a separate `entities` record, below. Global preferences and creative
+shortcuts are separate data. There is no inventory: the one thing a Player holds
+is a `Carried` count, the interim sink for Pickup that the inventory step
+replaces.
 
 Changed Chunks are complete run-length encoded level-0 records, including Air.
 Traversal is x/y/z, z fastest. Material and Shape references are names,
@@ -89,6 +91,21 @@ stationary Eye. Rebuilds of a required Game still change its exact build hash:
 existing commits with a different required build refuse loading and remain
 untouched. There is no automatic content migration. Movement policy is Game
 declaration data.
+
+Dropped items are saved whole in every commit as `entities`: the next entity id
+and, per drop, its id, Item by name, count, position and velocity in metres,
+whether it is resting, and its remaining steps to despawn and to pickup. The
+field is optional on read, so a commit written before dropped items opens with
+none, and it changes neither the format nor the generator version. An unknown
+Item name, a non-finite number, a duplicate id or a timer out of range makes the
+commit corrupt. A drop in an unloaded Chunk is saved and still frozen on
+reopening. The live set is capped at 2048, which bounds what each commit adds
+and is why there is no per-Chunk entity storage yet. What a Player carried is
+the Player extension `carried_v1`, a map from Item name to count, written only
+when not empty; older engines refuse it like any unknown extension. Save
+dirtiness includes a revision that moves when a drop spawns, despawns, merges,
+is picked up or comes to rest, and the Player's Carried count. Save & Quit stops
+spawning, stepping and Pickup, so the final commit is what the Player last saw.
 
 Light, meshes, connections, coarse Chunks, Jobs and Lifetimes are derived and
 must be rebuilt. A saved revision is data identity, not a reusable Lifetime.

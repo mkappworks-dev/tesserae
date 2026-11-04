@@ -10,6 +10,27 @@ pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
 
+/// How the Client draws each declared Item, in the Server's item order.
+#[derive(Message, Clone, Debug, Default, PartialEq)]
+pub struct ItemLooks(pub Vec<ItemLook>);
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ItemLook {
+    /// `<mod id>:<name>`.
+    pub name: String,
+    pub size_m: f32,
+    pub color: [u8; 4],
+    /// Its Material's appearance is drawn when set.
+    pub material: Option<MaterialId>,
+}
+
+impl ItemLook {
+    /// The name without its Mod's id, for the Player to read.
+    pub fn label(&self) -> &str {
+        self.name.split_once(':').map_or(&self.name, |(_, l)| l)
+    }
+}
+
 /// The Game's player figure, or `None` for the engine's plain box.
 #[derive(Message, Clone, Debug, Default, PartialEq)]
 pub struct CharacterModel(pub Option<std::sync::Arc<tesserae_mods::Character>>);

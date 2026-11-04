@@ -380,9 +380,28 @@ pub struct MovementV1 {
     pub yaw: f32,
     pub pitch: f32,
 }
+/// The Player extension holding what Pickup collected, by Item name.
+pub const CARRIED_V1: &str = "carried_v1";
+
 impl Player {
+    /// What the Player carried, empty when the extension is absent.
+    pub fn carried(&self) -> Result<BTreeMap<String, u32>, Error> {
+        self.extensions
+            .get(CARRIED_V1)
+            .map(|value| {
+                serde_json::from_value::<BTreeMap<String, u32>>(value.clone())
+                    .map_err(|e| Error::Corrupt(format!("invalid carried items: {e}")))
+            })
+            .transpose()
+            .map(Option::unwrap_or_default)
+    }
+
     pub fn movement(&self) -> Result<Option<MovementV1>, Error> {
-        if self.extensions.keys().any(|key| key != "movement_v1") {
+        if self
+            .extensions
+            .keys()
+            .any(|key| key != "movement_v1" && key != CARRIED_V1)
+        {
             return Err(Error::Incompatible(
                 "unknown Player extensions require migration".into(),
             ));
@@ -509,6 +528,9 @@ pub struct Commit {
     pub chunks: Vec<SavedChunk>,
     pub simulation: Simulation,
     pub paused: Vec<([i32; 3], Simulation)>,
+    /// Absent in commits written before dropped items: opens with none.
+    #[serde(default)]
+    pub entities: entities::SavedEntities,
 }
 
 impl Commit {
@@ -529,6 +551,8 @@ impl Commit {
             return Err(Error::Corrupt("invalid World or Player coordinates".into()));
         }
         self.player.movement()?;
+        self.player.carried()?;
+        self.entities.validate()?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;
         self.parameters.restore(&mapping)?;
@@ -905,6 +929,7 @@ impl DirtyState {
     }
 }
 
+pub mod entities;
 pub mod library;
 #[cfg(test)]
 mod tests;

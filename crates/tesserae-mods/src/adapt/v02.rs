@@ -226,6 +226,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         reactions: d.reactions.into_iter().map(reaction).collect(),
         combustion: d.combustion.into_iter().map(combustion).collect(),
         tools: Vec::new(),
+        items: Vec::new(),
     }
 }
 

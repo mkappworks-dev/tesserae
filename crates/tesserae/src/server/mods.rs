@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
-    apply, games_dir, migrate_legacy_games, plan, resolve, scan,
+    apply, games_dir, migrate_legacy_games, plan, resolve, resolve_items, scan,
 };
 
 use crate::content::{
@@ -116,6 +116,7 @@ pub struct LoadedMods {
     pub movement: Option<tesserae_mods::MovementPolicy>,
     pub character: Option<tesserae_mods::Character>,
     pub tools: Vec<tesserae_mods::ToolDef>,
+    pub items: Vec<tesserae_mods::ItemDef>,
     pub required: Vec<tesserae_core::save::RequiredMod>,
 }
 
@@ -134,6 +135,7 @@ impl Default for LoadedMods {
             movement: None,
             character: None,
             tools: Vec::new(),
+            items: Vec::new(),
             required: Vec::new(),
         }
     }
@@ -375,6 +377,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
             .unwrap()
             .0,
         paused: vec![],
+        entities: Default::default(),
     };
     Writer::acquire(path, &id, &content)
         .unwrap()
@@ -500,6 +503,8 @@ pub(crate) async fn declare_all(
     }
     // Every name is registered now; what flows, reacts and burns is fixed
     // before any Mod starts and the World opens.
+    loaded.items =
+        resolve_items(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     if let Some(world) = &mut loaded.world {
@@ -670,6 +675,19 @@ fn install(world: &mut World) {
     }
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
+    world.write_message(crate::content::ItemLooks(
+        loaded
+            .items
+            .iter()
+            .map(|item| crate::content::ItemLook {
+                name: item.name.clone(),
+                size_m: item.size_m,
+                color: item.color,
+                material: item.material,
+            })
+            .collect(),
+    ));
+    world.insert_resource(super::items::Items(loaded.items));
     world.insert_resource(WorldParameters(params));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
@@ -1178,6 +1196,7 @@ surface = "plain:rock"
                     .unwrap()
                     .0,
                 paused: vec![],
+                entities: Default::default(),
             };
             Writer::acquire(&path, &id, &content)
                 .unwrap()

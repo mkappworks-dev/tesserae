@@ -157,6 +157,7 @@ supply `world.character` alone
 | `[[reactions]]`             | `first`, `second` (each `fluid`, `state`), `consumed`, optional `product`, optional `receiving`                                                                          |
 | `[[combustion]]`            | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`, optional `heat`, `end`                                                                                     |
 | `[[tools]]` (Game)          | `name`, `kind`                                                                                                                                                           |
+| `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item)                             |
 
 Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
 `opaque`, `blend` or `cutout`; a bone `role` is `body`, `head`, `arm-left`,
@@ -343,6 +344,11 @@ end = { after = { seconds = 8.0, residue = "showcase:ash" } }
 [[tools]]
 name = "measure"
 kind = "measure"
+
+[[items]]
+name = "pebble"
+size-m = 0.1
+color = [150, 150, 150, 255]
 ```
 
 Its `mod.toml` is the data-only starter's with `id = "showcase"`.
