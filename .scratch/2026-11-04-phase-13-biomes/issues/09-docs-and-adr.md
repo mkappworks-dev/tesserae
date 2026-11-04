@@ -1,6 +1,6 @@
 # 09: Docs and ADR
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 08
 
@@ -10,10 +10,10 @@ Record the decision. Write ADR-0022, 'Biomes are column content chosen by Climat
 
 ## Acceptance criteria
 
-- [ ] The ADR records why Biomes cannot shape height and why the save snapshots the Biome table.
-- [ ] `DESIGN.md` step 13 shows its status and what shipped.
-- [ ] The glossary has no implementation detail and matches the code.
-- [ ] Formatting passes: cargo fmt --all --check and npm run fmt:check.
+- [x] The ADR records why Biomes cannot shape height and why the save snapshots the Biome table.
+- [x] `DESIGN.md` step 13 shows its status and what shipped.
+- [x] The glossary has no implementation detail and matches the code.
+- [x] Formatting passes: cargo fmt --all --check and npm run fmt:check.
 
 ## Comments
 

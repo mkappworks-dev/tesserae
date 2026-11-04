@@ -1,6 +1,6 @@
 # 08: Content for the five Games
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04, 05, 06, 07
 
@@ -10,10 +10,10 @@ Ember, lumen, meadow, terra and tidewater each declare three Biomes of their own
 
 ## Acceptance criteria
 
-- [ ] Each Game declares three Biomes and loads, validates and packages.
-- [ ] Each Game shows its Biomes with the approved sky and fog pairs.
-- [ ] Terra declares its own sand, snow and ore and still has no dependencies.
-- [ ] At least one ore per Game appears in rock within its band.
+- [x] Each Game declares three Biomes and loads, validates and packages.
+- [x] Each Game shows its Biomes with the approved sky and fog pairs.
+- [x] Terra declares its own sand, snow and ore and still has no dependencies.
+- [x] At least one ore per Game appears in rock within its band.
 - [ ] The screenshot folder is deleted after review.
 
 ## Comments
