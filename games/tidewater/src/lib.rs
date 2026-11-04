@@ -1,6 +1,6 @@
 //! Islands and shallow seas whose sea level rises and falls slowly. The tide is a layer of water
 //! sources added or taken away above the sea, a step at a time; the water itself, the ground and
-//! the kelp come from the Mods this Game depends on (strata, waters, flora).
+//! the kelp and the ore come from the Mods this Game depends on (strata, waters, flora, crystals).
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
@@ -12,7 +12,8 @@ use exports::tesserae::mods::guest::{
 };
 use tesserae::mods::commands::{Fill, SourceFill};
 use tesserae::mods::content::{
-    CaveParams, GroundParams, MovementPolicy, SmoothingParams, WaterParams,
+    BiomeDef, CaveParams, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
+    SmoothingParams, WaterParams,
 };
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
@@ -233,6 +234,11 @@ impl Guest for Tidewater {
             soil: "strata:soil".into(),
             surface: "strata:turf".into(),
         });
+        // Smaller than the engine's 512 m, so one island hop meets a border.
+        world.climate = Some(ClimateParams {
+            temperature_size_m: 256.0,
+            humidity_size_m: 256.0,
+        });
         Declaration {
             materials: Vec::new(),
             shapes: Vec::new(),
@@ -244,8 +250,57 @@ impl Guest for Tidewater {
             combustion: Vec::new(),
             tools: Vec::new(),
             items: Vec::new(),
-            biomes: Vec::new(),
-            ores: Vec::new(),
+            biomes: vec![
+                BiomeDef {
+                    name: "lagoon".into(),
+                    temperature: 0.5,
+                    humidity: 0.5,
+                    ground: None,
+                    sky_fog: Some(SkyFog {
+                        sky: (118, 150, 170),
+                        fog: (132, 172, 192),
+                    }),
+                    cave_scale: Some(1.4),
+                },
+                BiomeDef {
+                    name: "salt_flats".into(),
+                    temperature: 0.7,
+                    humidity: 0.3,
+                    ground: Some(GroundParams {
+                        rock: "strata:stone".into(),
+                        soil: "strata:clay".into(),
+                        surface: "strata:sand".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (170, 164, 150),
+                        fog: (190, 184, 166),
+                    }),
+                    cave_scale: Some(0.0),
+                },
+                BiomeDef {
+                    name: "cold_shallows".into(),
+                    temperature: 0.3,
+                    humidity: 0.55,
+                    ground: Some(GroundParams {
+                        rock: "strata:basalt".into(),
+                        soil: "strata:stone".into(),
+                        surface: "strata:stone".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (144, 160, 180),
+                        fog: (168, 186, 206),
+                    }),
+                    cave_scale: None,
+                },
+            ],
+            ores: vec![OreDef {
+                material: "crystals:aquamarine".into(),
+                min_depth_m: 6.0,
+                max_depth_m: 22.0,
+                vein_size_m: 5.0,
+                rarity: 0.06,
+                biomes: Vec::new(),
+            }],
         }
     }
 

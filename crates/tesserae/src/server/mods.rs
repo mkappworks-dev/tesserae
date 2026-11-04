@@ -1849,7 +1849,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..20).collect::<Vec<_>>());
+        assert_eq!(ids, std::iter::once(0).chain(8..23).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1869,7 +1869,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 12);
+        assert_eq!(textures.0.len(), 15);
         for material in catalogue.materials.iter().filter(|m| m.id != 0) {
             let (_, pixels) = textures
                 .0

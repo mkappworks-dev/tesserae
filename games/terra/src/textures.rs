@@ -34,6 +34,13 @@ fn pixel(name: &str, face: usize, x: usize, y: usize, base: [u8; 3]) -> [u8; 3] 
             }
         }
         "dirt" => dirt(x, y, face),
+        "iron" => {
+            if noise(x / 2, y / 2, 53) > 176 {
+                tint([190, 128, 86], (n - 128) / 10)
+            } else {
+                pixel("stone", face, x, y, [133, 133, 140])
+            }
+        }
         "grass" => {
             if face == 2 || (face == 1 && y >= 3 + noise(x / 2, 0, 41) as usize % 3) {
                 dirt(x, y, face)

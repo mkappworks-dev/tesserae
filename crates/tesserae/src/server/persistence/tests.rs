@@ -1138,7 +1138,12 @@ fn a_biomes_ground_is_saved_by_name_and_a_reopened_world_keeps_it() {
 #[test]
 fn a_world_saved_with_no_biomes_stays_without_them_after_the_game_gains_some() {
     let dir = Directory::new();
-    Rig::new(&dir).settled_save();
+    Rig::open_with(dir.opening(), WorldSettings::default(), |loaded| {
+        let world = loaded.world.as_mut().unwrap();
+        world.biomes = Default::default();
+        world.ores = Default::default();
+    })
+    .settled_save();
     assert!(
         save::inspect(&dir.0)
             .unwrap()
