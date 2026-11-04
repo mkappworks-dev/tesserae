@@ -1,6 +1,6 @@
 # 03: The Server write batch
 
-Status: ready-for-agent
+Status: done
 Blocked by: 02
 
 Spec: [bulk relight](../spec.md), decisions 2 and 3.
@@ -31,14 +31,29 @@ can wait for the end of a batch.
 
 ## Acceptance criteria
 
-- [ ] Every existing Server test passes unchanged.
-- [ ] A test applies the same mixed writes (solids, sources, fire, shaped,
+- [x] Every existing Server test passes, one with a changed set-up (Comments).
+- [x] A test applies the same mixed writes (solids, sources, fire, shaped,
       emitters, across a Chunk seam) one `set_occupants` at a time and as one
       batch, and the two stores hold equal Voxels, overlays and light, and
       `MeshState` holds equal stale and cover-changed sets.
-- [ ] A no-op write in a batch leaves the journal, the save revision and
+- [x] A no-op write in a batch leaves the journal, the save revision and
       `MeshState` untouched.
-- [ ] A batch over the shaped cap refuses the write that would pass it, as one
+- [x] A batch over the shaped cap refuses the write that would pass it, as one
       at a time does.
 
 ## Comments
+
+### Result, 2026-11-04
+
+`edit::Batch` holds `set_occupants`, `set_voxel` and `apply_intent`; the free
+functions of those names are a batch of one each, so every caller kept its
+code. One existing test changed:
+`fluids::tests::full_detail_meshes_follow_the_water_as_it_flows_and_recedes`
+took the Client's first mesh from a dry write of air over air, which now
+changes nothing and delivers no mesh, so it takes that mesh from the `settle`
+after the corridor is built.
+
+The equivalence test fails if `finish` relights only the first write. The
+shaped cap needs no running count: writes land in storage as they come, so a
+batch's later write sees the earlier ones. Whether the whole-Chunk sum shows in
+a profile is ticket 04's to see.

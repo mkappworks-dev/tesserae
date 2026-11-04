@@ -675,10 +675,16 @@ fn full_detail_meshes_follow_the_water_as_it_flows_and_recedes() {
             },
         )
         .unwrap();
-    h.settle();
+    // What the Client holds before any water: the first cycle's dry write
+    // changes nothing, so it delivers no mesh of its own.
+    let mut held: HashMap<ChunkCoord, tesserae_core::ChunkMesh> = h
+        .settle()
+        .0
+        .into_iter()
+        .map(|m| (m.coord, m.mesh))
+        .collect();
 
     let source = [16, y, z];
-    let mut held: HashMap<ChunkCoord, tesserae_core::ChunkMesh> = HashMap::default();
     // Sets the source Voxel's fluid, runs flow and streaming until both are
     // quiet, and checks what the Client holds against a fresh mesh.
     let mut cycle = |h: &mut Harness, fluid: Option<Fluid>| {

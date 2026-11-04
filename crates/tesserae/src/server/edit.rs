@@ -30,8 +30,8 @@ use crate::session::SessionApp;
 use tesserae_core::collide::{Aabb, RayHit, VoxelVolume, overlaps, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
-    Burning, Fluid, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault, SHAPE_FULL_CUBE,
-    Tables, Voxel, relight,
+    Burning, Fluid, Light, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault,
+    SHAPE_FULL_CUBE, Tables, Voxel, relight_many,
 };
 use tesserae_mods::{EditKind, Intent};
 
@@ -1022,8 +1022,8 @@ fn extinguish(here: Occupants) -> Result<Occupants, RejectReason> {
     })
 }
 
-/// One Voxel of a Mod's Command, through the same rules and the same World
-/// change as a player's Edit.
+/// One Voxel of a Mod's Command, relit at once: [`Batch::apply_intent`] in a
+/// batch of its own.
 pub(in crate::server) fn apply_intent(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
@@ -1031,89 +1031,207 @@ pub(in crate::server) fn apply_intent(
     at: [i32; 3],
     intent: Intent,
 ) -> Result<(), RejectReason> {
-    if let Intent::Voxel(voxel) = intent {
-        return set_voxel(store, meshes, tables, at, voxel);
-    }
-    let here = store
-        .occupants(at, &tables.fluids)
-        .ok_or(RejectReason::NotLoaded)?;
-    let next = match intent {
-        Intent::Voxel(_) => unreachable!("placed above"),
-        Intent::Source(material) => with_source(here, material, tables)?,
-        Intent::RemoveSource => without_source(here)?,
-        Intent::Ignite => ignite(here, tesserae_core::fire::is_wet(store, tables, at), tables)?,
-        Intent::Extinguish => extinguish(here)?,
-    };
-    set_occupants(store, meshes, tables, at, next)
+    let mut batch = Batch::default();
+    let written = batch.apply_intent(store, meshes, tables, at, intent);
+    batch.finish(store, meshes, tables);
+    written.map(drop)
 }
 
-/// Replaces what is at one position, re-floods the light around it, and marks
-/// every Chunk whose mesh that made stale.
-///
-/// The one World change, shared by the intents above, the Mod drain and the
-/// `dev` builders: [`set_voxel`] is this with the solid-layer rule applied
-/// first. A change to the fluid or the fire alone is a change all the same,
-/// though the packed Voxel stays: the mesh, the cover and any Snapshot taken
-/// before it read what is now gone.
-///
-/// Every change is journalled in the store, which is what wakes the fluid
-/// simulation around it on the next step.
-///
-/// A mesh is stale in four kinds of Chunk: the edited one; any the relight
-/// wrote to; any across a plane of light the relight wrote to, whose faces
-/// against it that light shades; and the neighbour across a boundary plane the
-/// Voxel sits on, whose faces next to it change whether or not any light does.
-/// Removing a stone Voxel in the dark moves no light and still leaves the next
-/// Chunk a face to grow.
-pub(in crate::server) fn set_occupants(
-    store: &mut ChunkStore,
-    meshes: &mut MeshState,
-    tables: &Tables,
-    at: [i32; 3],
-    occupants: Occupants,
-) -> Result<(), RejectReason> {
-    let place = VoxelCoord::of(at);
-    let chunk = store.get(place.chunk).ok_or(RejectReason::NotLoaded)?;
+/// Whether a write changed the World.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(in crate::server) enum Written {
+    Changed,
+    /// It held exactly this already: nothing was journalled, woken or marked.
+    Unchanged,
+}
 
-    // Air is air whatever shape or orientation byte it carries.
-    let solid = if occupants.solid.is_air() {
-        Voxel::AIR
-    } else {
-        occupants.solid
-    };
-    let occupants = Occupants { solid, ..occupants };
-    tables.vet_occupants(occupants)?;
-    // A cube looks the same however it is turned, and a connected Shape ignores
-    // its orientation, so the turn is dropped. Left in, two that look identical
-    // would be two palette entries and unequal.
-    let solid = if solid.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(solid) {
-        Voxel::new(solid.material(), solid.shape(), 0)
-    } else {
-        solid
-    };
-    let (voxel, overlay) = Occupants { solid, ..occupants }.encode(&tables.fluids);
+/// The one World change, shared by the intents above, the Mod drain, the fluid
+/// simulation and the `dev` builders, split so a run of writes floods light
+/// once: each write lands in storage at once, under every rule an Edit keeps,
+/// and only the relight waits for [`Batch::finish`].
+///
+/// Nothing may read light between a batch's first write and its `finish`; the
+/// rules a write is checked by read Occupants, and neither flow nor heat reads
+/// light (`docs/adr/0013-fluid-and-fire-live-beside-the-voxel.md`).
+#[must_use = "light is stale until the batch is finished"]
+#[derive(Default)]
+pub(in crate::server) struct Batch {
+    /// Every write that moved light, with the light its position held before
+    /// the batch.
+    relit: Vec<([i32; 3], Light)>,
+}
 
-    let before = chunk.get(place.x, place.y, place.z);
-    let was = store
-        .occupants(at, &tables.fluids)
-        .expect("the Chunk is held");
-    vet_capacity(store, tables, at, voxel)?;
-
-    let seen = (store.optical(at), store.wet(at), store.burning(at));
-    store.set_overlay(place, overlay);
-    if voxel != before {
-        store.set_voxel(place, voxel);
+impl Batch {
+    /// One Voxel of a Mod's Command, through the same rules and the same World
+    /// change as a player's Edit.
+    pub(in crate::server) fn apply_intent(
+        &mut self,
+        store: &mut ChunkStore,
+        meshes: &mut MeshState,
+        tables: &Tables,
+        at: [i32; 3],
+        intent: Intent,
+    ) -> Result<Written, RejectReason> {
+        if let Intent::Voxel(voxel) = intent {
+            return self.set_voxel(store, meshes, tables, at, voxel);
+        }
+        let here = store
+            .occupants(at, &tables.fluids)
+            .ok_or(RejectReason::NotLoaded)?;
+        let next = match intent {
+            Intent::Voxel(_) => unreachable!("placed above"),
+            Intent::Source(material) => with_source(here, material, tables)?,
+            Intent::RemoveSource => without_source(here)?,
+            Intent::Ignite => ignite(here, tesserae_core::fire::is_wet(store, tables, at), tables)?,
+            Intent::Extinguish => extinguish(here)?,
+        };
+        self.set_occupants(store, meshes, tables, at, next)
     }
-    // Light reads fluid as it reads a cube of its Material, or combined with
-    // the solid it stands in, and a fire by its emission, so water flowing in
-    // or receding and a fire catching or going out relight though the packed
-    // Voxel stays; a surface or reach change alone moves nothing.
-    if (store.optical(at), store.wet(at), store.burning(at)) != seen {
-        let was = store.light_at(at);
+
+    /// Replaces what is at one position and marks every Chunk whose mesh that
+    /// made stale but for the relight's, which [`Batch::finish`] marks.
+    ///
+    /// [`Batch::set_voxel`] is this with the solid-layer rule applied first. A
+    /// change to the fluid or the fire alone is a change all the same, though
+    /// the packed Voxel stays: the mesh, the cover and any Snapshot taken before
+    /// it read what is now gone.
+    ///
+    /// Every change is journalled in the store, which is what wakes the fluid
+    /// simulation around it on the next step.
+    ///
+    /// A mesh is stale in four kinds of Chunk: the edited one; any the relight
+    /// wrote to; any across a plane of light the relight wrote to, whose faces
+    /// against it that light shades; and the neighbour across a boundary plane
+    /// the Voxel sits on, whose faces next to it change whether or not any
+    /// light does. Removing a stone Voxel in the dark moves no light and still
+    /// leaves the next Chunk a face to grow.
+    pub(in crate::server) fn set_occupants(
+        &mut self,
+        store: &mut ChunkStore,
+        meshes: &mut MeshState,
+        tables: &Tables,
+        at: [i32; 3],
+        occupants: Occupants,
+    ) -> Result<Written, RejectReason> {
+        let place = VoxelCoord::of(at);
+        let chunk = store.get(place.chunk).ok_or(RejectReason::NotLoaded)?;
+
+        // Air is air whatever shape or orientation byte it carries.
+        let solid = if occupants.solid.is_air() {
+            Voxel::AIR
+        } else {
+            occupants.solid
+        };
+        let occupants = Occupants { solid, ..occupants };
+        tables.vet_occupants(occupants)?;
+        // A cube looks the same however it is turned, and a connected Shape
+        // ignores its orientation, so the turn is dropped. Left in, two that
+        // look identical would be two palette entries and unequal.
+        let solid = if solid.shape() == SHAPE_FULL_CUBE || tables.shapes.is_connected(solid) {
+            Voxel::new(solid.material(), solid.shape(), 0)
+        } else {
+            solid
+        };
+        let (voxel, overlay) = Occupants { solid, ..occupants }.encode(&tables.fluids);
+
+        let before = chunk.get(place.x, place.y, place.z);
+        let held = store
+            .overlay(place.chunk)
+            .expect("the Chunk is held")
+            .get(place.x, place.y, place.z);
+        if voxel == before && overlay == held {
+            return Ok(Written::Unchanged);
+        }
+        let was = store
+            .occupants(at, &tables.fluids)
+            .expect("the Chunk is held");
+        vet_capacity(store, tables, at, voxel)?;
+
+        let seen = (store.optical(at), store.wet(at), store.burning(at));
+        store.set_overlay(place, overlay);
+        if voxel != before {
+            store.set_voxel(place, voxel);
+        }
+        // Light reads fluid as it reads a cube of its Material, or combined
+        // with the solid it stands in, and a fire by its emission, so water
+        // flowing in or receding and a fire catching or going out relight
+        // though the packed Voxel stays; a surface or reach change alone moves
+        // nothing. Nothing has relit since the batch began, so the light here
+        // is still what it held before it.
+        if (store.optical(at), store.wet(at), store.burning(at)) != seen {
+            self.relit.push((at, store.light_at(at)));
+        }
+        let now = Occupants { solid, ..occupants };
+        store.note_changed(
+            at,
+            voxel != before,
+            tesserae_core::fire::alters_exposure(tables, &was, &now),
+        );
+
+        meshes.voxels_changed(place.chunk);
+        meshes.edited(place.chunk);
+        let local = [place.x, place.y, place.z];
+        let last = tesserae_core::CHUNK_SIZE - 1;
+        for (axis, step) in [
+            (0, [NEG_X, POS_X]),
+            (1, [NEG_Y, POS_Y]),
+            (2, [NEG_Z, POS_Z]),
+        ] {
+            for (on_boundary, face) in [(local[axis] == 0, step[0]), (local[axis] == last, step[1])]
+            {
+                if !on_boundary {
+                    continue;
+                }
+                let d = FACE_STEPS[face];
+                let neighbour = ChunkCoord::new(
+                    place.chunk.x + d[0],
+                    place.chunk.y + d[1],
+                    place.chunk.z + d[2],
+                );
+                if store.contains(neighbour) {
+                    meshes.edited(neighbour);
+                }
+            }
+        }
+        Ok(Written::Changed)
+    }
+
+    /// The whole-Voxel Edit a player's click, a Mod's Command and a `dev`
+    /// builder make: `voxel` applied to the solid layer by
+    /// [`Occupants::place_solid`], then [`Batch::set_occupants`].
+    pub(in crate::server) fn set_voxel(
+        &mut self,
+        store: &mut ChunkStore,
+        meshes: &mut MeshState,
+        tables: &Tables,
+        at: [i32; 3],
+        voxel: Voxel,
+    ) -> Result<Written, RejectReason> {
+        let now = store
+            .occupants(at, &tables.fluids)
+            .ok_or(RejectReason::NotLoaded)?;
+        self.set_occupants(store, meshes, tables, at, now.place_solid(voxel, tables))
+    }
+
+    /// Re-floods the light around every write that moved it, once for all of
+    /// them, and marks each Chunk that light was written into or across.
+    pub(in crate::server) fn finish(
+        self,
+        store: &mut ChunkStore,
+        meshes: &mut MeshState,
+        tables: &Tables,
+    ) {
+        if self.relit.is_empty() {
+            return;
+        }
         let mut lattice = LightLattice::new(store);
-        relight(&mut lattice, tables, at, was);
-        let lit = std::mem::take(&mut lattice.touched);
-        let across = std::mem::take(&mut lattice.across);
+        relight_many(&mut lattice, tables, &self.relit);
+        let mut lit = std::mem::take(&mut lattice.touched);
+        let mut across = std::mem::take(&mut lattice.across);
+        for list in [&mut lit, &mut across] {
+            list.sort_unstable_by_key(|c| (c.x, c.y, c.z));
+            list.dedup();
+        }
         for coord in lit {
             meshes.edited(coord);
         }
@@ -1123,38 +1241,20 @@ pub(in crate::server) fn set_occupants(
             }
         }
     }
-    let now = Occupants { solid, ..occupants };
-    store.note_changed(
-        at,
-        voxel != before,
-        tesserae_core::fire::alters_exposure(tables, &was, &now),
-    );
+}
 
-    meshes.voxels_changed(place.chunk);
-    meshes.edited(place.chunk);
-    let local = [place.x, place.y, place.z];
-    let last = tesserae_core::CHUNK_SIZE - 1;
-    for (axis, step) in [
-        (0, [NEG_X, POS_X]),
-        (1, [NEG_Y, POS_Y]),
-        (2, [NEG_Z, POS_Z]),
-    ] {
-        for (on_boundary, face) in [(local[axis] == 0, step[0]), (local[axis] == last, step[1])] {
-            if !on_boundary {
-                continue;
-            }
-            let d = FACE_STEPS[face];
-            let neighbour = ChunkCoord::new(
-                place.chunk.x + d[0],
-                place.chunk.y + d[1],
-                place.chunk.z + d[2],
-            );
-            if store.contains(neighbour) {
-                meshes.edited(neighbour);
-            }
-        }
-    }
-    Ok(())
+/// One write, relit at once: [`Batch::set_occupants`] in a batch of its own.
+pub(in crate::server) fn set_occupants(
+    store: &mut ChunkStore,
+    meshes: &mut MeshState,
+    tables: &Tables,
+    at: [i32; 3],
+    occupants: Occupants,
+) -> Result<(), RejectReason> {
+    let mut batch = Batch::default();
+    let written = batch.set_occupants(store, meshes, tables, at, occupants);
+    batch.finish(store, meshes, tables);
+    written.map(drop)
 }
 
 fn vet_capacity(
@@ -1177,9 +1277,8 @@ fn vet_capacity(
     Ok(())
 }
 
-/// The whole-Voxel Edit a player's click, a Mod's Command and a `dev` builder
-/// make: `voxel` applied to the solid layer by [`Occupants::place_solid`], then
-/// [`set_occupants`].
+/// One whole-Voxel write, relit at once: [`Batch::set_voxel`] in a batch of
+/// its own.
 pub(in crate::server) fn set_voxel(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
@@ -1187,10 +1286,10 @@ pub(in crate::server) fn set_voxel(
     at: [i32; 3],
     voxel: Voxel,
 ) -> Result<(), RejectReason> {
-    let now = store
-        .occupants(at, &tables.fluids)
-        .ok_or(RejectReason::NotLoaded)?;
-    set_occupants(store, meshes, tables, at, now.place_solid(voxel, tables))
+    let mut batch = Batch::default();
+    let written = batch.set_voxel(store, meshes, tables, at, voxel);
+    batch.finish(store, meshes, tables);
+    written.map(drop)
 }
 
 #[cfg(test)]
@@ -3296,5 +3395,168 @@ mod tests {
         replay(&mut app, Undo);
         assert_eq!(voxel_at(&app, [5, 7, 5]), stone());
         assert!(rejections(&mut app).is_empty());
+    }
+
+    /// Two Chunks side by side, `ground` in each, so writes cross a seam.
+    fn seam_store() -> ChunkStore {
+        let mut store = ChunkStore::default();
+        store.insert(origin(), ground());
+        store.insert(ChunkCoord::new(1, 0, 0), ground());
+        store
+    }
+
+    fn lantern() -> Voxel {
+        Voxel::cube(tesserae_core::testgen::fixtures().lantern)
+    }
+
+    /// Solids, shaped Voxels, emitters placed and taken away and sources, on
+    /// both sides of the seam at x = 32, some written twice.
+    fn mixed_writes() -> Vec<([i32; 3], Occupants)> {
+        let solid = |voxel| Occupants {
+            solid: voxel,
+            fluid: None,
+            burning: None,
+        };
+        let source = Occupants {
+            solid: Voxel::AIR,
+            fluid: Some(Fluid::source(water())),
+            burning: None,
+        };
+        vec![
+            ([30, 8, 5], solid(lantern())),
+            ([31, 8, 5], solid(stone())),
+            ([32, 8, 5], solid(stair())),
+            ([33, 9, 5], solid(lantern())),
+            ([31, 7, 6], solid(Voxel::AIR)),
+            ([32, 8, 6], source),
+            ([34, 8, 5], solid(stone())),
+            ([30, 8, 5], solid(Voxel::AIR)),
+            ([31, 9, 5], solid(stone())),
+            ([33, 9, 5], solid(Voxel::AIR)),
+            ([33, 9, 6], solid(lantern())),
+        ]
+    }
+
+    fn cells(store: &ChunkStore) -> Vec<(Voxel, tesserae_core::Overlay, Light)> {
+        let mut out = Vec::new();
+        for x in 0..2 * CHUNK_SIZE as i32 {
+            for y in 0..CHUNK_SIZE as i32 {
+                for z in 0..CHUNK_SIZE as i32 {
+                    let at = VoxelCoord::of([x, y, z]);
+                    out.push((
+                        store.voxel([x, y, z]).unwrap(),
+                        store.overlay(at.chunk).unwrap().get(at.x, at.y, at.z),
+                        store.light_at([x, y, z]),
+                    ));
+                }
+            }
+        }
+        out
+    }
+
+    fn mesh_marks(meshes: &mut MeshState) -> Vec<(ChunkCoord, bool, bool)> {
+        let mut cover = meshes.take_cover_changes();
+        cover.sort_by_key(|c| (c.x, c.y, c.z));
+        let mut out = Vec::new();
+        for x in -1..=2 {
+            for y in -1..=1 {
+                for z in -1..=1 {
+                    let c = ChunkCoord::new(x, y, z);
+                    out.push((c, meshes.is_dirty(c), meshes.is_edited(c)));
+                }
+            }
+        }
+        out.extend(cover.into_iter().map(|c| (c, true, true)));
+        out
+    }
+
+    #[test]
+    fn a_batch_leaves_the_world_and_its_stale_meshes_as_its_writes_one_at_a_time_do() {
+        let tables = watered();
+        let writes = mixed_writes();
+
+        let mut one = seam_store();
+        let mut one_meshes = MeshState::default();
+        for &(at, occupants) in &writes {
+            set_occupants(&mut one, &mut one_meshes, &tables, at, occupants).unwrap();
+        }
+
+        let mut all = seam_store();
+        let mut all_meshes = MeshState::default();
+        let mut batch = Batch::default();
+        for &(at, occupants) in &writes {
+            batch
+                .set_occupants(&mut all, &mut all_meshes, &tables, at, occupants)
+                .unwrap();
+        }
+        batch.finish(&mut all, &mut all_meshes, &tables);
+
+        assert!(
+            cells(&one) == cells(&all),
+            "Voxels, overlays or light differ"
+        );
+        assert_eq!(mesh_marks(&mut one_meshes), mesh_marks(&mut all_meshes));
+        let (one, all) = (one.take_changed(), all.take_changed());
+        assert_eq!(
+            (one.cells, one.solids, one.heated),
+            (all.cells, all.solids, all.heated)
+        );
+        assert!(
+            all_meshes.is_dirty(ChunkCoord::new(1, 0, 0)),
+            "the seam's far side"
+        );
+    }
+
+    #[test]
+    fn a_write_of_what_is_already_there_journals_wakes_and_marks_nothing() {
+        let tables = watered();
+        let mut store = seam_store();
+        store.persistent = true;
+        let mut meshes = MeshState::default();
+        let mut batch = Batch::default();
+        for (at, voxel) in [([5, 3, 5], stone()), ([5, 20, 5], Voxel::AIR)] {
+            assert_eq!(
+                batch.set_voxel(&mut store, &mut meshes, &tables, at, voxel),
+                Ok(Written::Unchanged)
+            );
+        }
+        batch.finish(&mut store, &mut meshes, &tables);
+        let changed = store.take_changed();
+        assert!(changed.cells.is_empty() && changed.chunks.is_empty());
+        assert!(store.revisions.is_empty(), "no save revision");
+        assert!(!meshes.is_dirty(origin()) && !meshes.is_edited(origin()));
+        assert!(meshes.take_cover_changes().is_empty());
+    }
+
+    #[test]
+    fn a_batch_refuses_the_shaped_voxel_that_would_pass_the_cap_as_one_at_a_time_does() {
+        let tables = crate::server::fixture_tables();
+        let mut store = ChunkStore::default();
+        store.insert(origin(), ground());
+        let mut meshes = MeshState::default();
+        let mut batch = Batch::default();
+        let units = tables.shapes.cap_units(stair()) as usize;
+        let mut outcomes = Vec::new();
+        'fill: for y in 8..CHUNK_SIZE as i32 {
+            for z in 0..CHUNK_SIZE as i32 {
+                for x in 0..CHUNK_SIZE as i32 {
+                    let outcome =
+                        batch.set_voxel(&mut store, &mut meshes, &tables, [x, y, z], stair());
+                    let refused = outcome.is_err();
+                    outcomes.push(outcome);
+                    if refused {
+                        break 'fill;
+                    }
+                }
+            }
+        }
+        batch.finish(&mut store, &mut meshes, &tables);
+        assert_eq!(outcomes.len(), MAX_SHAPED_PER_CHUNK / units + 1);
+        assert_eq!(outcomes.last(), Some(&Err(RejectReason::TooManyShaped)));
+        assert!(
+            outcomes[..outcomes.len() - 1]
+                .iter()
+                .all(|o| *o == Ok(Written::Changed))
+        );
     }
 }
