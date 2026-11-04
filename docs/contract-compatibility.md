@@ -35,7 +35,8 @@ Line 0.3 gained `items` on its `declaration` while unreleased. A Declaration for
 Line 0.3 gained `biomes` and `ores` on its `declaration`, and `climate` on its
 `world-params`, in the same way. A Declaration for 0.1 or 0.2 loads with none. A
 `biome-def` carries an optional `ground`, with the same fields as the World's,
-and an optional `sky-fog`, a `sky-fog` record of two sRGB colours.
+and an optional `sky-fog`, a `sky-fog` record of two sRGB colours, and an
+optional `cave-scale`, a multiplier from 0 to 4 on the World's cave radius.
 
 ## What is not frozen
 

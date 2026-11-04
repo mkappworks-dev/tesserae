@@ -1008,6 +1008,7 @@ fn declares_biomes(names: [&str; 2]) -> impl FnOnce(&mut crate::server::mods::Lo
             humidity: 0.5,
             ground: None,
             sky_fog: None,
+            cave_scale: None,
         };
         loaded.world = Some(WorldgenParams {
             climate: ClimateParams {

@@ -41,6 +41,15 @@ pub const BORDER_WARP: f32 = 0.1;
 /// Climate's own feature size, or borders would only ever drift smoothly.
 const WARP_SIZE_FRACTION: f32 = 0.25;
 
+/// How much further than the nearest Biome, in Climate units, a Biome can be and
+/// still weigh in on a blend. Wider than [`BORDER_WARP`], so a blend is already
+/// under way where the warp has pushed the hard border to.
+const BLEND_RANGE: f32 = 0.15;
+
+/// The largest [`Biome::cave_scale`]. A tunnel four times as wide carves sixteen
+/// times the rock, which is the most a Game can ask before the ground is lace.
+pub const MAX_CAVE_SCALE: f32 = 4.0;
+
 /// Temperature and humidity at one point, each in `[0, 1)`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Climate {
@@ -129,6 +138,38 @@ impl ClimateField {
                     2,
                 )),
         }
+    }
+
+    /// The mean of `values`, indexed by [`BiomeId`], weighted by how near each
+    /// Biome is to the warped Climate at a point. The nearest weighs 1 and the
+    /// weight falls away linearly to 0 at [`BLEND_RANGE`] past it, so the mean
+    /// follows the same warped Climate as [`ClimateField::biome_at`] but moves
+    /// continuously across its border. `0.0` for an empty table.
+    pub(crate) fn blend(
+        &self,
+        biomes: &BiomeTable,
+        x_m: f32,
+        z_m: f32,
+        values: &[f32; MAX_BIOMES],
+    ) -> f32 {
+        if biomes.is_empty() {
+            return 0.0;
+        }
+        let c = self.warped(x_m, z_m);
+        let distances: [f32; MAX_BIOMES] = std::array::from_fn(|i| {
+            biomes.as_slice().get(i).map_or(f32::INFINITY, |b| {
+                let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
+                (dt * dt + dh * dh).sqrt()
+            })
+        });
+        let nearest = distances.iter().copied().fold(f32::INFINITY, f32::min);
+        let (mut sum, mut weights) = (0.0, 0.0);
+        for (d, v) in distances.iter().zip(values) {
+            let w = (1.0 - (d - nearest) / BLEND_RANGE).max(0.0);
+            sum += w * v;
+            weights += w;
+        }
+        sum / weights
     }
 
     /// The Biome nearest the warped Climate at a point; the earlier of two
@@ -270,7 +311,7 @@ impl<'de> serde::Deserialize<'de> for BiomeName {
 
 /// A region type: a point in the unit square of temperature and humidity. The
 /// nearest point to a column's Climate wins it. What a Biome owns beyond that
-/// (ores, caves, colours) arrives with the tickets that use it.
+/// (ores, colours) arrives with the tickets that use it.
 ///
 /// Not serde: ground is held by Material id, which only means something beside
 /// the tables that made it, so the save writes names (`save::SavedBiome`).
@@ -284,6 +325,9 @@ pub struct Biome {
 
     /// `None` has no say in the sky and fog.
     pub sky_fog: Option<SkyFog>,
+    /// A multiplier on the World's cave radius: `None` leaves the caves as the
+    /// World has them, `Some(0.0)` switches them off.
+    pub cave_scale: Option<f32>,
 }
 
 impl Biome {
@@ -293,6 +337,7 @@ impl Biome {
         humidity: 0.0,
         ground: None,
         sky_fog: None,
+        cave_scale: None,
     };
 }
 
@@ -366,6 +411,15 @@ impl BiomeTable {
             .any(|(i, b)| biomes[..i].iter().any(|earlier| earlier.name == b.name))
         {
             return Err(refuse("must give every Biome its own name"));
+        }
+        if !biomes.iter().all(|b| {
+            b.cave_scale
+                .is_none_or(|s| (0.0..=MAX_CAVE_SCALE).contains(&s))
+        }) {
+            return Err(ParamError {
+                field: "biomes.cave_scale",
+                rule: "must be from 0 to 4",
+            });
         }
         let mut table = BiomeTable::default();
         table.biomes[..biomes.len()].copy_from_slice(biomes);

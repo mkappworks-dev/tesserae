@@ -66,6 +66,7 @@ mod tests {
             humidity: 0.5,
             ground: None,
             sky_fog,
+            cave_scale: None,
         }
     }
 

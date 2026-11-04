@@ -1118,6 +1118,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         humidity,
         ground: None,
         sky_fog: None,
+        cave_scale: None,
     }
 }
 
@@ -1294,6 +1295,68 @@ fn a_biomes_sky_and_fog_resolve_as_a_pair_and_an_omitted_pair_stays_none() {
         })
     );
     assert_eq!(biomes.as_slice()[1].sky_fog, None);
+}
+
+#[test]
+fn a_biomes_cave_scale_resolves_and_an_omitted_one_stays_none() {
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[(
+            "a",
+            with_biomes(
+                &[],
+                vec![
+                    content::BiomeDef {
+                        cave_scale: Some(0.0),
+                        ..biome("flat", 0.8, 0.1)
+                    },
+                    biome("plain", 0.5, 0.5),
+                    content::BiomeDef {
+                        cave_scale: Some(2.5),
+                        ..biome("holey", 0.2, 0.9)
+                    },
+                ],
+                vec![],
+            ),
+        )],
+    )
+    .unwrap();
+    let scales: Vec<_> = biomes.as_slice().iter().map(|b| b.cave_scale).collect();
+    assert_eq!(scales, [Some(0.0), None, Some(2.5)]);
+}
+
+#[test]
+fn a_bad_cave_scale_names_the_mod_that_declared_it() {
+    for scale in [-1.0, 4.5, f32::NAN, f32::INFINITY] {
+        let mut load = Load::new();
+        let bad = load
+            .apply(
+                "m",
+                with_biomes(
+                    &[],
+                    vec![content::BiomeDef {
+                        cave_scale: Some(scale),
+                        ..biome("odd", 0.5, 0.5)
+                    }],
+                    vec![],
+                ),
+            )
+            .unwrap()
+            .behaviour;
+        // A later Mod, so a table-wide check would blame it and not `m`.
+        let later = load
+            .apply("n", with_biomes(&[], vec![biome("fine", 0.1, 0.1)], vec![]))
+            .unwrap()
+            .behaviour;
+        match resolve_biomes(&[bad, later], &load.tables, &load.registry).unwrap_err() {
+            ModError::Params { id, what, source } => {
+                assert_eq!((id.as_str(), what), ("m", "biome"), "{scale}");
+                assert_eq!(source.field, "biomes.cave_scale", "{scale}");
+            }
+            other => panic!("{scale}: {other:?}"),
+        }
+    }
 }
 
 #[test]

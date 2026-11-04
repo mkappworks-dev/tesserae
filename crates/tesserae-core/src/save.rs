@@ -473,6 +473,9 @@ pub struct SavedBiome {
     /// Sky and fog sRGB bytes; absent is a Biome with no say in the air.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sky_fog: Option<crate::SkyFog>,
+    /// Absent is the World's own caves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cave_scale: Option<f32>,
 }
 
 /// An [`crate::Ore`] with its Material and Biomes by name, since ids are only
@@ -595,6 +598,7 @@ fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error>
         humidity: b.humidity,
         ground: b.ground.map(|g| ground_names(g, mapping)).transpose()?,
         sky_fog: b.sky_fog,
+        cave_scale: b.cave_scale,
     })
 }
 
@@ -628,6 +632,7 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
                     .map(|names| ground_ids(names, mapping))
                     .transpose()?,
                 sky_fog: b.sky_fog,
+                cave_scale: b.cave_scale,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;

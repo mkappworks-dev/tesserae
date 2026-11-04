@@ -23,6 +23,7 @@ fn biome(name: &str, temperature: f32, humidity: f32, sky_fog: Option<SkyFog>) -
         humidity,
         ground: None,
         sky_fog,
+        cave_scale: None,
     }
 }
 

@@ -7,8 +7,9 @@ pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
 use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
-    GroundParams, Heat, MAX_BIOMES, MAX_ORES, MaterialId, Ore, OreTable, ParamError, Phase,
-    Reactant, ReactionDef, Side, SkyFog, Tables, Voxel, WaterParams, WorldgenParams,
+    GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
+    ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, Tables, Voxel, WaterParams,
+    WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -475,6 +476,14 @@ pub fn resolve_biomes(
                     Ok(ground)
                 })
                 .transpose()?;
+            if let Some(scale) = def.cave_scale
+                && !(0.0..=MAX_CAVE_SCALE).contains(&scale)
+            {
+                return Err(bad(ParamError {
+                    field: "biomes.cave_scale",
+                    rule: "must be from 0 to 4",
+                }));
+            }
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
@@ -484,6 +493,7 @@ pub fn resolve_biomes(
                     sky: c.sky.into(),
                     fog: c.fog.into(),
                 }),
+                cave_scale: def.cave_scale,
             });
         }
     }

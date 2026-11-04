@@ -214,6 +214,8 @@ pub(super) struct Biome {
     ground: Option<super::Ground>,
 
     sky_fog: Option<SkyFog>,
+
+    cave_scale: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -254,6 +256,8 @@ impl From<Biome> for content::BiomeDef {
             ground: b.ground.map(Into::into),
 
             sky_fog: b.sky_fog.map(Into::into),
+
+            cave_scale: b.cave_scale,
         }
     }
 }

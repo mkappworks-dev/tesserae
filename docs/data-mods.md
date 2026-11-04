@@ -108,6 +108,13 @@ visible step; the Client eases to it, sky and fog together, and underwater fog
 still wins below a surface. A Biome without `sky-fog` has no say in the blend,
 and a World where none has one keeps the Look pack's haze.
 
+A Biome row may also add `cave-scale`, a multiplier from 0 to 4 on the World's
+`caves.radius_m`: 2 carves much more rock with wider tunnels, 0.5 less, and 0
+switches caves off in that Biome. Omitted, the Biome keeps the World's caves.
+Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
+where a cave field meets a solid one. It does nothing in a World without
+`[world.caves]`, and caves still only turn solid into air.
+
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
 

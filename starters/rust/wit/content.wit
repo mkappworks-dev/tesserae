@@ -366,6 +366,11 @@ interface content {
         /// The sky and fog colours over this Biome, easing as the Player walks
         /// between Biomes. `none` leaves the Biome out of the blend.
         sky-fog: option<sky-fog>,
+
+        /// A multiplier on the Game's cave radius in this Biome, from 0 to 4:
+        /// `none` and 1 leave the caves as they are, 0 switches them off. It
+        /// blends smoothly across the Biome's border, unlike `ground`.
+        cave-scale: option<f32>,
     }
 
     /// A sky colour and the fog that matches it, as sRGB bytes. A pair, so a

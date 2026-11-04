@@ -1,6 +1,6 @@
 # 06: Biome cave tuning
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -8,12 +8,14 @@ Blocked by: 04
 
 A Biome scales the existing cave field's density and size, or switches caves off. The numbers blend smoothly across Biome borders. There is still one carver.
 
+One multiplier, `cave-scale` (0 to 4) on the cave radius, covers both: the carver's tunnels are the crossing of two slabs of that half-width, so a wider window is more tunnel and more rock carved at once, and the tunnel spacing is the field's and cannot blend. 0 switches caves off.
+
 ## Acceptance criteria
 
-- [ ] A Biome with caves off has none; a Biome with a larger scale has measurably more carving.
-- [ ] Cave tuning blends across a border with no step.
-- [ ] Caves still only turn solid into air, so the surface band is unchanged.
-- [ ] Levels 3 and up still carry no caves.
+- [x] A Biome with caves off has none; a Biome with a larger scale has measurably more carving.
+- [x] Cave tuning blends across a border with no step.
+- [x] Caves still only turn solid into air, so the surface band is unchanged.
+- [x] Levels 3 and up still carry no caves.
 
 ## Comments
 

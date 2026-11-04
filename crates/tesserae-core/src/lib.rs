@@ -36,7 +36,7 @@ pub mod worldgen;
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
 pub use climate::{
     Biome, BiomeId, BiomeName, BiomeTable, Climate, ClimateParams, MAX_BIOME_NAME_BYTES,
-    MAX_BIOMES, SkyFog, SkyFogBlend,
+    MAX_BIOMES, MAX_CAVE_SCALE, SkyFog, SkyFogBlend,
 };
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};

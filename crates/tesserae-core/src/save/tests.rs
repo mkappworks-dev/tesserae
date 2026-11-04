@@ -511,6 +511,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> crate::Biome {
         humidity,
         ground: None,
         sky_fog: None,
+        cave_scale: None,
     }
 }
 
@@ -645,6 +646,46 @@ fn a_snapshot_written_before_sky_and_fog_restores_without_them() {
             .iter()
             .all(|b| b.sky_fog.is_none())
     );
+}
+
+#[test]
+fn a_biomes_cave_scale_is_saved_only_when_set_and_restored_as_it_was() {
+    let mut params = biome_params(2);
+    let table = params.biomes.as_slice().to_vec();
+    params.biomes = crate::BiomeTable::new(&[
+        crate::Biome {
+            cave_scale: Some(0.0),
+            ..table[0]
+        },
+        table[1],
+        crate::Biome {
+            cave_scale: Some(2.5),
+            ..table[2]
+        },
+    ])
+    .unwrap();
+    let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(json["biomes"][0]["cave_scale"], 0.0);
+    assert!(json["biomes"][1].get("cave_scale").is_none());
+    assert_eq!(json["biomes"][2]["cave_scale"], 2.5);
+
+    let restored = saved.restore(&mapping(8, 9, 4), 2).unwrap();
+    let scales: Vec<_> = restored
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.cave_scale)
+        .collect();
+    assert_eq!(scales, [Some(0.0), None, Some(2.5)]);
+}
+
+#[test]
+fn a_saved_cave_scale_outside_the_range_is_corrupt() {
+    let params = biome_params(2);
+    let mut saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    saved.biomes.as_mut().unwrap()[0].cave_scale = Some(9.0);
+    assert!(saved.restore(&mapping(8, 9, 4), 2).is_err());
 }
 
 #[test]

@@ -304,6 +304,7 @@ fn component() -> Declaration {
                     sky: (176, 160, 128),
                     fog: (196, 178, 142),
                 }),
+                cave_scale: Some(0.0),
             },
             content::BiomeDef {
                 name: "wet".into(),
@@ -315,6 +316,7 @@ fn component() -> Declaration {
                     surface: "full:wood".into(),
                 }),
                 sky_fog: None,
+                cave_scale: Some(1.5),
             },
         ],
         ores: vec![
