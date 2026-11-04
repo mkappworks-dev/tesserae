@@ -11,8 +11,8 @@ use std::collections::VecDeque;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, GroundParams, HeatDef,
-    ItemDef, MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ToolDef,
-    ToolKind, ViewParams, WaterParams,
+    ItemDef, MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef,
+    ToolDef, ToolKind, ViewParams, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
