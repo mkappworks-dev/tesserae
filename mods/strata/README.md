@@ -11,7 +11,8 @@ The ground: six solid Materials with 48 by 16 textures. Data only; no code.
 | `soil`   | Sub-surface earth                                         |
 | `turf`   | Grass-topped surface                                      |
 
-Declares no fluids, Shapes, reactions or fire. Depends on nothing.
+Each Material also has an item of the same name that a removed Voxel of it drops
+(0.25 m). Declares no fluids, Shapes, reactions or fire. Depends on nothing.
 
 **Used by:** `meadow`, `ember`, `tidewater`, `lumen`, and `hearth` (basalt).
 

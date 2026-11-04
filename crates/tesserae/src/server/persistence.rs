@@ -7,7 +7,9 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures::check_ready};
 use tesserae_core::save::{self, Commit, Content, Generation, Mapping, WorldId, Writer, library};
 
+use super::entities::{Carried, EntityStore};
 use super::fluids::FluidSim;
+use super::items::Items;
 use super::mods::LoadedMods;
 use super::player::Player;
 use super::world_state::{ChunkStore, Lifetime};
@@ -255,6 +257,8 @@ struct Completed {
     simulation_revision: u64,
     eye: Vec3,
     movement: save::MovementV1,
+    entities: u64,
+    carried: BTreeMap<String, u32>,
     details_completed: bool,
     #[cfg(feature = "profiling")]
     write_ms: f64,
@@ -287,6 +291,10 @@ pub struct Persistence {
     saved_simulation: u64,
     saved_eye: Option<Vec3>,
     saved_movement: Option<save::MovementV1>,
+    saved_entities: u64,
+    saved_carried: Option<BTreeMap<String, u32>>,
+    initial_entities: Option<tesserae_core::entity::Entities>,
+    restored_carried: Option<BTreeMap<String, u32>>,
     pub(super) reopened_mode: Option<super::player::MovementMode>,
     pub(super) reopened_view: Option<save::MovementV1>,
     pub(super) reopened_eye: Option<Vec3>,
@@ -298,6 +306,15 @@ pub struct Persistence {
 }
 
 impl Persistence {
+    pub(super) fn has_carried_to_restore(&self) -> bool {
+        self.restored_carried.is_some()
+    }
+
+    /// What a reopened Player carried, handed over once the Player exists.
+    pub(super) fn take_carried(&mut self) -> Option<BTreeMap<String, u32>> {
+        self.restored_carried.take()
+    }
+
     pub fn prepare(
         opening: Opening,
         loaded: &mut LoadedMods,
@@ -316,6 +333,7 @@ impl Persistence {
             .transpose()
             .map_err(|e| e.to_string())?
             .flatten();
+        let mut restored_entities = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
                 recovered
@@ -323,6 +341,18 @@ impl Persistence {
                     .compatible(&content)
                     .map_err(|e| e.to_string())?;
                 let c = recovered.commit;
+                let items = &loaded.items;
+                restored_entities = Some((
+                    c.entities
+                        .restore(settings.voxel_size, |name| {
+                            items
+                                .iter()
+                                .position(|i| i.name == name)
+                                .map(|at| (at as u32, items[at].size_m))
+                        })
+                        .map_err(|e| e.to_string())?,
+                    c.player.carried().map_err(|e| e.to_string())?,
+                ));
                 loaded.world = Some(c.parameters.restore(&mapping).map_err(|e| e.to_string())?);
                 let revisions = c
                     .chunks
@@ -394,6 +424,10 @@ impl Persistence {
             saved_simulation: 0,
             saved_eye: reopened_eye,
             saved_movement: restored,
+            saved_entities: 0,
+            saved_carried: restored_entities.as_ref().map(|(_, c)| c.clone()),
+            initial_entities: restored_entities.as_ref().map(|(e, _)| e.clone()),
+            restored_carried: restored_entities.map(|(_, c)| c),
             reopened_mode: restored
                 .map(|s| {
                     if s.flight {
@@ -461,6 +495,10 @@ fn install(world: &mut World) {
         simulation.restore(active, paused);
     }
     world.insert_resource(simulation);
+    if let Some(entities) = p.initial_entities.take() {
+        p.saved_entities = entities.revision();
+        world.insert_resource(EntityStore(entities));
+    }
     world.insert_resource(p);
 }
 
@@ -515,18 +553,27 @@ fn requests(
     }
 }
 
+/// What a save reads of the Player's side of the World.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Held<'w, 's> {
+    player: Query<'w, 's, (&'static Player, &'static Carried)>,
+    entities: Res<'w, EntityStore>,
+    items: Res<'w, Items>,
+}
+
 fn drive(
     mut p: ResMut<Persistence>,
     mut status: ResMut<SaveStatus>,
     mut store: ResMut<ChunkStore>,
     mut sim: ResMut<FluidSim>,
-    (player, time): (Query<&Player>, Res<Time<Real>>),
+    (held, time): (Held, Res<Time<Real>>),
     mut leave: crate::launch::Leave,
     #[cfg(feature = "profiling")] mut profile: ResMut<SaveProfile>,
 ) {
-    let Ok(player) = player.single() else {
+    let Ok((player, carried)) = held.player.single() else {
         return;
     };
+    let (entities, items) = (&held.entities, &held.items);
     let now = time.elapsed_secs_f64();
     p.elapsed += (now - p.last_clock).max(0.0);
     p.last_clock = now;
@@ -551,6 +598,8 @@ fn drive(
                 p.saved_simulation = done.simulation_revision;
                 p.saved_eye = Some(done.eye);
                 p.saved_movement = Some(done.movement);
+                p.saved_entities = done.entities;
+                p.saved_carried = Some(done.carried);
                 if done.details_completed
                     && let Some((_, d)) = p.details.as_mut()
                 {
@@ -563,6 +612,8 @@ fn drive(
                     && done.eye == player.eye()
                     && done.movement == player.saved_movement()
                     && p.saved_simulation == sim.revision
+                    && p.saved_entities == entities.revision()
+                    && p.saved_carried.as_ref() == Some(&carried.0)
                 {
                     leave.now();
                 } else if status.quitting {
@@ -581,7 +632,9 @@ fn drive(
     status.dirty = p.saved_revisions != store.revisions
         || p.saved_eye != Some(player.eye())
         || p.saved_movement != Some(player.saved_movement())
-        || p.saved_simulation != sim.revision;
+        || p.saved_simulation != sim.revision
+        || p.saved_entities != entities.revision()
+        || p.saved_carried.as_ref() != Some(&carried.0);
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
         if status.dirty && !status.quitting {
@@ -646,6 +699,18 @@ fn drive(
         .collect();
     let revisions = store.revisions.clone();
     let simulation_revision = sim.revision;
+    let saved_entities = match save::entities::SavedEntities::capture(entities, |index| {
+        items.0.get(index as usize).map(|item| item.name.clone())
+    }) {
+        Ok(saved) => saved,
+        Err(error) => {
+            status.error = Some(error.to_string());
+            p.failed = true;
+            return;
+        }
+    };
+    let entities_revision = entities.revision();
+    let carried = carried.0.clone();
     let eye = player.eye();
     let movement = player.saved_movement();
     let writer = Arc::clone(p.writer.as_ref().expect("persistent"));
@@ -684,10 +749,19 @@ fn drive(
                 content,
                 player: save::Player {
                     eye_m: eye.to_array(),
-                    extensions: BTreeMap::from([(
-                        "movement_v1".into(),
-                        serde_json::to_value(movement).expect("finite movement"),
-                    )]),
+                    extensions: {
+                        let mut extensions = BTreeMap::from([(
+                            "movement_v1".into(),
+                            serde_json::to_value(movement).expect("finite movement"),
+                        )]);
+                        if !carried.is_empty() {
+                            extensions.insert(
+                                save::CARRIED_V1.into(),
+                                serde_json::to_value(&carried).expect("plain counts"),
+                            );
+                        }
+                        extensions
+                    },
                 },
                 chunks,
                 simulation,
@@ -695,6 +769,7 @@ fn drive(
                     .into_iter()
                     .map(|(home, saved)| (home, (*saved).clone()))
                     .collect(),
+                entities: saved_entities,
             };
             writer.write(&commit)
         })()
@@ -714,6 +789,8 @@ fn drive(
             simulation_revision,
             eye,
             movement,
+            entities: entities_revision,
+            carried,
             #[cfg(feature = "profiling")]
             write_ms: write_started.elapsed().as_secs_f64() * 1e3,
         }

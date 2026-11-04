@@ -45,6 +45,13 @@ impl Rig {
         let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
         let id = |name| loaded.registry.id_of(Kind::Material, name).unwrap() as u16;
         let (stone, water, wood) = (id("terra:stone"), id("terra:water"), id("terra:wood"));
+        loaded.items = vec![tesserae_mods::ItemDef {
+            name: "terra:rock".into(),
+            size_m: 0.25,
+            color: [1, 2, 3, 255],
+            material: None,
+        }];
+        let items = Items(loaded.items.clone());
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
         let eye = p.reopened_eye.unwrap_or(Vec3::new(8.0, 4.0, 8.0));
         let restored_player = p
@@ -60,10 +67,13 @@ impl Rig {
             .init_resource::<MeshState>()
             .init_resource::<edit::PendingEdits>()
             .init_resource::<Journal>()
+            .insert_resource(items)
             .insert_resource(p)
-            .add_plugins(plugin)
+            .add_message::<edit::VoxelRemoved>()
+            .add_plugins((plugin, super::super::entities::plugin))
             .add_systems(FixedPreUpdate, super::super::fluids::simulate);
         app.world_mut().spawn(restored_player);
+        app.world_mut().run_schedule(Update);
         Self {
             app,
             stone,
@@ -439,6 +449,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         chunks: vec![],
         simulation,
         paused: paused.into_iter().map(|(h, s)| (h, (*s).clone())).collect(),
+        entities: Default::default(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
         .unwrap()
@@ -817,4 +828,117 @@ fn the_writer_lock_is_free_as_soon_as_the_session_ends() {
     leave(&mut app);
     assert!(!app.world().contains_resource::<Persistence>());
     assert!(prepare().is_ok(), "free at once after Return");
+}
+
+#[test]
+fn dropped_items_and_carried_survive_save_and_reopen() {
+    use tesserae_core::entity::DropSpec;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.app
+        .world_mut()
+        .resource_scope(|world, mut entities: Mut<EntityStore>| {
+            let store = world.resource::<ChunkStore>();
+            let tables = world.resource::<ContentTables>();
+            let spec = DropSpec {
+                item: 0,
+                count: 5,
+                size_m: 0.25,
+            };
+            // Two on the cavity floor, further apart than the merge radius. A
+            // drop saved mid-fall is covered where the record is built.
+            entities.spawn_drop(store, &tables.0, 1.0, [4, 3, 4], spec);
+            entities.spawn_drop(store, &tables.0, 1.0, [9, 3, 9], spec);
+            for _ in 0..200 {
+                entities.step(store, &tables.0, 1.0);
+            }
+        });
+    let mut carried = rig.app.world_mut().query::<&mut Carried>();
+    carried
+        .single_mut(rig.app.world_mut())
+        .unwrap()
+        .0
+        .insert("terra:rock".into(), 7);
+    let before: Vec<_> = rig
+        .app
+        .world()
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| (e.id, *e.as_dropped()))
+        .collect();
+    assert_eq!(before.len(), 2);
+    assert!(before.iter().all(|(_, d)| d.resting));
+    rig.settled_save();
+    drop(rig);
+
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert_eq!(commit.entities.dropped.len(), 2);
+    assert_eq!(commit.player.carried().unwrap()["terra:rock"], 7);
+
+    let reopened = Rig::new(&dir);
+    let after: Vec<_> = reopened
+        .app
+        .world()
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| (e.id, *e.as_dropped()))
+        .collect();
+    // Ageing while the save ran moved the timers; where and what they are did not.
+    let shape = |all: &[(
+        tesserae_core::entity::EntityId,
+        tesserae_core::entity::DroppedItem,
+    )]| {
+        all.iter()
+            .map(|(id, d)| (*id, d.item, d.count, d.pos_m, d.resting))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(shape(&after), shape(&before));
+    assert!(
+        after
+            .iter()
+            .zip(&before)
+            .all(|(a, b)| a.1.steps_left <= b.1.steps_left)
+    );
+    let mut q = reopened
+        .app
+        .world()
+        .try_query::<&Carried>()
+        .map(|mut q| {
+            q.iter(reopened.app.world())
+                .map(|c| c.0.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap();
+    assert_eq!(q.pop().unwrap()["terra:rock"], 7);
+}
+
+#[test]
+fn a_change_that_only_moves_the_entity_revision_makes_the_world_dirty() {
+    use tesserae_core::entity::DropSpec;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.settled_save();
+    rig.tick();
+    assert!(!rig.app.world().resource::<SaveStatus>().dirty);
+    rig.app
+        .world_mut()
+        .resource_scope(|world, mut entities: Mut<EntityStore>| {
+            let store = world.resource::<ChunkStore>();
+            let tables = world.resource::<ContentTables>();
+            entities.spawn_drop(
+                store,
+                &tables.0,
+                1.0,
+                [4, 1, 4],
+                DropSpec {
+                    item: 0,
+                    count: 1,
+                    size_m: 0.25,
+                },
+            );
+        });
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
 }

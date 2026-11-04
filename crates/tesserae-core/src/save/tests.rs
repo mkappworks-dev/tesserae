@@ -77,6 +77,7 @@ pub(super) fn fixture() -> Commit {
             landing_turn: None,
             landing_cursors: vec![],
         },
+        entities: Default::default(),
     }
 }
 
@@ -585,4 +586,159 @@ fn a_newer_format_is_incompatible_not_corrupt_and_is_never_rolled_back_past() {
     fs::write(&newer, &bytes).unwrap();
     assert!(matches!(inspect(&d.0), Err(Error::Incompatible(_))));
     assert_eq!(fs::read(&newer).unwrap(), bytes);
+}
+
+mod dropped_items {
+    use super::*;
+    use crate::entity::{DESPAWN_STEPS, DropSpec, Entities};
+    use crate::save::entities::SavedEntities;
+    use crate::testgen::fixtures;
+
+    const SIZE: f32 = 0.5;
+
+    fn names(index: u32) -> Option<String> {
+        ["t:rock", "t:dust"]
+            .get(index as usize)
+            .map(|n| (*n).to_owned())
+    }
+
+    fn resolve(name: &str) -> Option<(u32, f32)> {
+        match name {
+            "t:rock" => Some((0, 0.25)),
+            "t:dust" => Some((1, 0.1)),
+            _ => None,
+        }
+    }
+
+    struct Floor;
+    impl crate::collide::VoxelVolume for Floor {
+        fn voxel(&self, at: [i32; 3]) -> Option<Voxel> {
+            (at[1] >= -2 && at[1] < 30).then(|| {
+                if at[1] <= 0 {
+                    Voxel::cube(fixtures().ground.rock)
+                } else {
+                    Voxel::AIR
+                }
+            })
+        }
+    }
+
+    fn world() -> Entities {
+        let mut e = Entities::default();
+        for (i, item) in [0u32, 1, 0].into_iter().enumerate() {
+            e.spawn_drop(
+                &Floor,
+                &fixtures().tables,
+                SIZE,
+                [i as i32 * 4, 6, 0],
+                DropSpec {
+                    item,
+                    count: 3 + i as u32,
+                    size_m: if item == 0 { 0.25 } else { 0.1 },
+                },
+            );
+            for _ in 0..40 {
+                e.step(&Floor, &fixtures().tables, SIZE);
+            }
+        }
+        e
+    }
+
+    #[test]
+    fn drops_round_trip_through_a_commit_including_one_still_falling() {
+        let before = world();
+        assert!(
+            before.iter().any(|e| !e.as_dropped().resting),
+            "a mid-fall drop"
+        );
+        let mut commit = fixture();
+        commit.entities = SavedEntities::capture(&before, names).unwrap();
+        let json = serde_json::to_vec(&commit).unwrap();
+        let back: Commit = serde_json::from_slice(&json).unwrap();
+        assert_eq!(back, commit);
+        let after = back.entities.restore(SIZE, resolve).unwrap();
+        let all = |e: &Entities| {
+            e.iter()
+                .map(|w| (w.id, w.chunk, *w.as_dropped()))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(all(&before), all(&after));
+        assert_eq!(after.next_id(), before.next_id());
+        assert_eq!(after.revision(), 0, "restored state is clean");
+    }
+
+    #[test]
+    fn a_restored_world_steps_like_one_that_never_stopped() {
+        let mut live = world();
+        let saved = SavedEntities::capture(&live, names).unwrap();
+        let mut reopened = saved.restore(SIZE, resolve).unwrap();
+        for _ in 0..300 {
+            live.step(&Floor, &fixtures().tables, SIZE);
+            reopened.step(&Floor, &fixtures().tables, SIZE);
+        }
+        let all = |e: &Entities| {
+            e.iter()
+                .map(|w| (w.id, *w.as_dropped()))
+                .collect::<Vec<_>>()
+        };
+        // Motion is the same; only the pop-out's step counter differs, and no
+        // spawn happens here.
+        assert_eq!(all(&live), all(&reopened));
+    }
+
+    #[test]
+    fn a_commit_without_entities_opens_with_none() {
+        let commit = fixture();
+        let mut value = serde_json::to_value(&commit).unwrap();
+        value.as_object_mut().unwrap().remove("entities").unwrap();
+        let back: Commit = serde_json::from_value(value).unwrap();
+        assert!(back.entities.dropped.is_empty());
+        assert_eq!(back, commit);
+    }
+
+    #[test]
+    fn an_unknown_item_or_a_bad_number_is_a_corrupt_commit() {
+        let saved = SavedEntities::capture(&world(), names).unwrap();
+        let mut unknown = saved.clone();
+        unknown.dropped[0].item = "t:gone".into();
+        assert!(matches!(
+            unknown.restore(SIZE, resolve),
+            Err(Error::Corrupt(_))
+        ));
+        let corrupt = |edit: fn(&mut SavedEntities)| {
+            let mut s = saved.clone();
+            edit(&mut s);
+            let mut commit = fixture();
+            commit.entities = s;
+            matches!(
+                commit.compatible(&commit.content.clone()),
+                Err(Error::Corrupt(_))
+            )
+        };
+        assert!(corrupt(|s| s.dropped[0].pos_m[1] = f32::NAN));
+        assert!(corrupt(|s| s.dropped[0].count = 0));
+        assert!(corrupt(|s| s.dropped[1].id = s.dropped[0].id));
+        assert!(corrupt(|s| s.dropped[0].steps_left = DESPAWN_STEPS + 1));
+        assert!(corrupt(|s| s.next_id = 0));
+    }
+
+    #[test]
+    fn carried_is_an_extension_and_an_unknown_one_still_refuses() {
+        let mut player = fixture().player;
+        assert!(player.carried().unwrap().is_empty());
+        player.extensions.insert(
+            "carried_v1".into(),
+            serde_json::json!({"t:rock": 14, "t:dust": 3}),
+        );
+        assert!(player.movement().is_ok());
+        assert_eq!(player.carried().unwrap()["t:rock"], 14);
+        player
+            .extensions
+            .insert("carried_v1".into(), serde_json::json!("many"));
+        assert!(matches!(player.carried(), Err(Error::Corrupt(_))));
+        player
+            .extensions
+            .insert("other_v1".into(), serde_json::json!(1));
+        assert!(matches!(player.movement(), Err(Error::Incompatible(_))));
+    }
 }

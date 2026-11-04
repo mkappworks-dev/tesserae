@@ -12,6 +12,7 @@ mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
 pub mod drawn_mask;
+mod drops;
 pub mod edit;
 mod help;
 mod history;
@@ -96,6 +97,7 @@ pub fn plugin(app: &mut App) {
         underwater::plugin,
         layout::plugin,
         layout_menu::plugin,
+        drops::plugin,
     ));
     app.add_session_systems(
         Update,

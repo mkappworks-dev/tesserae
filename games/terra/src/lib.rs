@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, GroundParams, HeatDef,
-    MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ToolDef,
+    ItemDef, MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef, ToolDef,
     ToolKind, ViewParams, WaterParams,
 };
 use tesserae::mods::types::{
@@ -362,6 +362,17 @@ impl Guest for Terra {
             tools: vec![ToolDef {
                 name: "measure".into(),
                 kind: ToolKind::Measure,
+            }],
+            items: vec![ItemDef {
+                name: "rock".into(),
+                size_m: 0.25,
+                color: Srgba {
+                    r: 133,
+                    g: 133,
+                    b: 140,
+                    a: 255,
+                },
+                material: Some("terra:stone".into()),
             }],
         }
     }

@@ -549,7 +549,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | --- | ----------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- | ---------- | --------------- |
 | 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Done            |
 | 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done |
-| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Not started     |
+| 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | In review       |
 | 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, biome caves          | -          | Not started     |
 | 14  | Audio                   | Audio engine, Server-driven events, mixing                                                        | Sound and music assets             | -          | Not started     |
 | 15  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19)                | Stack sizes, item rules            | 11, 12     | Not started     |

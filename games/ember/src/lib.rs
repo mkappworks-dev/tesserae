@@ -268,6 +268,7 @@ impl Guest for Ember {
             reactions: Vec::new(),
             combustion: Vec::new(),
             tools: Vec::new(),
+            items: Vec::new(),
         }
     }
 

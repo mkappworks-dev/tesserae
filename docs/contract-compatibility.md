@@ -27,6 +27,11 @@ A change to what the loader accepts without changing a WIT record is not a new
 line. [ADR-0021](adr/0021-a-mod-may-supply-the-character.md) lets a Mod supply
 `world.character` on line 0.3: nothing that loaded before behaves differently.
 
+## Amended before release
+
+Line 0.3 gained `items` on its `declaration` while unreleased. A Declaration for
+0.1 or 0.2 loads with no items.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and

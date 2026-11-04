@@ -65,6 +65,7 @@ impl Guest for Lake {
             reactions: vec![],
             combustion: vec![],
             tools: vec![],
+            items: vec![],
         }
     }
 

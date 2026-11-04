@@ -87,6 +87,7 @@ fn empty() -> Declaration {
         reactions: vec![],
         combustion: vec![],
         tools: vec![],
+        items: vec![],
     }
 }
 
@@ -733,4 +734,21 @@ fn an_older_line_declares_no_tools() {
     };
     let log = crate::log::LogBuffer::shared();
     assert!(crate::adapt::v02::declaration(old, &log).tools.is_empty());
+}
+
+#[test]
+fn an_older_line_declares_no_items() {
+    use crate::bindings::v02::tesserae::mods::content as v02;
+    let old = v02::Declaration {
+        materials: vec![],
+        shapes: vec![],
+        appearance: vec![],
+        world: None,
+        view: None,
+        fluids: vec![],
+        reactions: vec![],
+        combustion: vec![],
+    };
+    let log = crate::log::LogBuffer::shared();
+    assert!(crate::adapt::v02::declaration(old, &log).items.is_empty());
 }

@@ -325,6 +325,19 @@ interface content {
         kind: tool-kind,
     }
 
+    /// A thing a Player can carry. A removed Voxel of its `material` drops one;
+    /// nothing else makes a drop yet.
+    record item-def {
+        /// Local to the Mod, like a Material's; the engine adds `<mod id>:`.
+        name: string,
+        /// Edge of the dropped item's cube in metres, from 0.05 to 0.5.
+        size-m: f32,
+        color: srgba,
+        /// A solid Material, `<mod id>:<name>`, resolved after every Mod's
+        /// Declaration. At most one item names a given Material.
+        material: option<string>,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -347,5 +360,7 @@ interface content {
         /// At most 8 rows, from the Game only: a `tools` from a Mod that is not
         /// the Game is a load error, like `world` and `view`.
         tools: list<tool-def>,
+        /// At most 64 rows per Mod and 256 in a World, from any Mod.
+        items: list<item-def>,
     }
 }

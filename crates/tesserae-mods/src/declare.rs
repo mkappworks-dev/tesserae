@@ -7,7 +7,7 @@ pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
 use tesserae_core::{
     AIR, Burn, CombustionDef, FluidDef, GroundParams, Heat, MaterialId, ParamError, Phase,
-    Reactant, ReactionDef, Side, Tables, WaterParams, WorldgenParams,
+    Reactant, ReactionDef, Side, Tables, Voxel, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -27,6 +27,20 @@ pub const MATERIAL_TEXTURE_EDGE: usize = 16;
 pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTURE_EDGE * 3 * 4;
 
 pub const MAX_TOOLS_PER_MOD: usize = 8;
+pub const MAX_ITEMS_PER_MOD: usize = 64;
+pub const MAX_ITEMS: usize = 256;
+/// Bounds of an item's cube edge in metres.
+pub const ITEM_SIZE_M: (f32, f32) = (0.05, 0.5);
+
+/// A declared item, named `<mod id>:<name>`, with the Material that drops it
+/// resolved once every Mod has declared.
+#[derive(Clone, PartialEq, Debug)]
+pub struct ItemDef {
+    pub name: String,
+    pub size_m: f32,
+    pub color: [u8; 4],
+    pub material: Option<MaterialId>,
+}
 
 /// What a tool does when used; mirrors the contract's closed `tool-kind`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -112,6 +126,7 @@ pub struct Behaviour {
     fluids: Vec<content::FluidDef>,
     reactions: Vec<content::ReactionDef>,
     combustion: Vec<content::CombustionDef>,
+    items: Vec<content::ItemDef>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -192,6 +207,7 @@ pub fn apply(
             MAX_BEHAVIOURS_PER_MOD,
         ),
         ("tool", declaration.tools.len(), MAX_TOOLS_PER_MOD),
+        ("item", declaration.items.len(), MAX_ITEMS_PER_MOD),
     ] {
         if count > max {
             return Err(ModError::TooManyRows {
@@ -300,6 +316,8 @@ pub fn apply(
         });
     }
 
+    check_items(mod_id, &declaration.items)?;
+
     let mut remove_times = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Material, row, &material.name)?;
@@ -353,10 +371,80 @@ pub fn apply(
             fluids: declaration.fluids,
             reactions: declaration.reactions,
             combustion: declaration.combustion,
+            items: declaration.items,
             lake,
             ground,
         },
     })
+}
+
+fn check_items(mod_id: &str, items: &[content::ItemDef]) -> Result<(), ModError> {
+    for (row, item) in items.iter().enumerate() {
+        let bad = |field, rule| ModError::Params {
+            id: mod_id.to_owned(),
+            what: "item",
+            source: ParamError { field, rule },
+        };
+        if !valid_local(&item.name) {
+            return Err(bad("name", NAME_RULE));
+        }
+        if items[..row].iter().any(|i| i.name == item.name) {
+            return Err(bad("name", "must be unique among the Mod's items"));
+        }
+        let (min, max) = ITEM_SIZE_M;
+        if !(min..=max).contains(&item.size_m) {
+            return Err(bad("size-m", "must be finite and from 0.05 to 0.5 m"));
+        }
+    }
+    Ok(())
+}
+
+/// Every Mod's items in load order, their Materials resolved. Called once
+/// every Declaration is in, like [`resolve`]. An item's id is its index.
+pub fn resolve_items(
+    behaviours: &[Behaviour],
+    tables: &Tables,
+    registry: &Registry,
+) -> Result<Vec<ItemDef>, ModError> {
+    let mut items: Vec<ItemDef> = Vec::new();
+    for b in behaviours {
+        for (row, item) in b.items.iter().enumerate() {
+            let bad = |field, rule| ModError::Params {
+                id: b.mod_id.clone(),
+                what: "item",
+                source: ParamError { field, rule },
+            };
+            let material = item
+                .material
+                .as_deref()
+                .map(|name| lookup(b, registry, "item", row, name))
+                .transpose()?;
+            if let Some(id) = material {
+                if !tables.materials.solid(Voxel::cube(id)) {
+                    return Err(bad("material", "must be a solid Material"));
+                }
+                if items.iter().any(|i| i.material == Some(id)) {
+                    return Err(bad("material", "is already dropped by another item"));
+                }
+            }
+            if items.len() == MAX_ITEMS {
+                return Err(ModError::TooManyRows {
+                    id: b.mod_id.clone(),
+                    what: "item",
+                    count: items.len() + 1,
+                    max: MAX_ITEMS,
+                });
+            }
+            let c = item.color;
+            items.push(ItemDef {
+                name: format!("{}:{}", b.mod_id, item.name),
+                size_m: item.size_m,
+                color: [c.r, c.g, c.b, c.a],
+                material,
+            });
+        }
+    }
+    Ok(items)
 }
 
 /// Registers every Mod's fluids, then reactions, then fires, in load order,

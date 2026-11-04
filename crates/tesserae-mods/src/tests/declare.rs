@@ -9,8 +9,8 @@ use tesserae_core::{
 use crate::bindings::tesserae::mods::content::{self, Declaration};
 use crate::bindings::tesserae::mods::types;
 use crate::{
-    Applied, Kind, MAX_TOOLS_PER_MOD, ModError, Registry, RegistryMismatch, ToolDef, ToolKind,
-    ViewParams, apply,
+    Applied, Kind, MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_TOOLS_PER_MOD, ModError, Registry,
+    RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve_items,
 };
 
 fn material(name: &str) -> content::MaterialDef {
@@ -48,6 +48,7 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         reactions: Vec::new(),
         combustion: Vec::new(),
         tools: Vec::new(),
+        items: Vec::new(),
     }
 }
 
@@ -926,5 +927,184 @@ fn tool_names_are_local_unique_and_bounded() {
             max: 8,
             ..
         }
+    ));
+}
+
+fn item(name: &str, material: Option<&str>) -> content::ItemDef {
+    content::ItemDef {
+        name: name.into(),
+        size_m: 0.25,
+        color: types::Srgba {
+            r: 1,
+            g: 2,
+            b: 3,
+            a: 255,
+        },
+        material: material.map(Into::into),
+    }
+}
+
+fn with_items(materials: &[&str], items: Vec<content::ItemDef>) -> Declaration {
+    let mut d = declaring(materials, &[]);
+    d.items = items;
+    d
+}
+
+fn resolved(
+    load: &mut Load,
+    mods: &[(&str, Declaration)],
+) -> Result<Vec<crate::ItemDef>, ModError> {
+    let behaviours: Vec<_> = mods
+        .iter()
+        .map(|(id, d)| load.apply(id, d.clone()).unwrap().behaviour)
+        .collect();
+    resolve_items(&behaviours, &load.tables, &load.registry)
+}
+
+#[test]
+fn items_register_in_load_order_with_full_names_and_resolved_materials() {
+    let mut load = Load::new();
+    let items = resolved(
+        &mut load,
+        &[
+            (
+                "a",
+                with_items(
+                    &["rock"],
+                    vec![item("chunk", Some("a:rock")), item("dust", None)],
+                ),
+            ),
+            ("b", with_items(&[], vec![item("seed", None)])),
+        ],
+    )
+    .unwrap();
+    let names: Vec<_> = items.iter().map(|i| i.name.as_str()).collect();
+    assert_eq!(names, ["a:chunk", "a:dust", "b:seed"]);
+    assert_eq!(
+        items[0].material,
+        load.registry
+            .id_of(Kind::Material, "a:rock")
+            .map(|i| i as u16)
+    );
+    assert_eq!(items[1].material, None);
+    assert_eq!(items[0].color, [1, 2, 3, 255]);
+}
+
+#[test]
+fn an_item_may_come_from_a_mod_that_is_not_the_game() {
+    let mut load = Load::new();
+    assert!(
+        load.apply("content", with_items(&[], vec![item("dust", None)]))
+            .is_ok()
+    );
+}
+
+#[test]
+fn a_bad_item_names_the_mod_and_the_field() {
+    for (bad, field) in [
+        (item("", None), "name"),
+        (item("Dust", None), "name"),
+        (item("a:dust", None), "name"),
+        (
+            content::ItemDef {
+                size_m: 0.04,
+                ..item("dust", None)
+            },
+            "size-m",
+        ),
+        (
+            content::ItemDef {
+                size_m: 0.51,
+                ..item("dust", None)
+            },
+            "size-m",
+        ),
+        (
+            content::ItemDef {
+                size_m: f32::NAN,
+                ..item("dust", None)
+            },
+            "size-m",
+        ),
+    ] {
+        let error = Load::new()
+            .apply("m", with_items(&[], vec![bad]))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ModError::Params { what: "item", source, .. } if source.field == field),
+            "{error}"
+        );
+        assert!(error.to_string().contains("`m`"), "{error}");
+    }
+    let error = Load::new()
+        .apply(
+            "m",
+            with_items(&[], vec![item("dust", None), item("dust", None)]),
+        )
+        .unwrap_err();
+    assert!(matches!(error, ModError::Params { what: "item", .. }));
+}
+
+#[test]
+fn an_item_material_must_exist_be_solid_and_belong_to_one_item() {
+    let unknown = resolved(
+        &mut Load::new(),
+        &[("m", with_items(&[], vec![item("a", Some("m:nope"))]))],
+    );
+    assert!(matches!(
+        unknown,
+        Err(ModError::UnknownName { what: "item", .. })
+    ));
+
+    let mut d = with_items(&["glass"], vec![item("shard", Some("m:glass"))]);
+    d.materials[0].solid = false;
+    let not_solid = resolved(&mut Load::new(), &[("m", d)]);
+    assert!(
+        matches!(not_solid, Err(ModError::Params { what: "item", ref source, .. }) if source.field == "material"),
+        "{not_solid:?}"
+    );
+
+    let twice = resolved(
+        &mut Load::new(),
+        &[
+            ("m", with_items(&["rock"], vec![item("a", Some("m:rock"))])),
+            ("n", with_items(&[], vec![item("b", Some("m:rock"))])),
+        ],
+    );
+    assert!(
+        matches!(twice, Err(ModError::Params { what: "item", ref source, .. }) if source.field == "material"),
+        "{twice:?}"
+    );
+}
+
+#[test]
+fn items_are_bounded_per_mod_and_per_world() {
+    let many = |prefix: &str, n: usize| {
+        (0..n)
+            .map(|i| item(&format!("{prefix}{i}"), None))
+            .collect::<Vec<_>>()
+    };
+    assert!(matches!(
+        Load::new()
+            .apply("m", with_items(&[], many("i", MAX_ITEMS_PER_MOD + 1)))
+            .unwrap_err(),
+        ModError::TooManyRows {
+            what: "item",
+            count: 65,
+            max: 64,
+            ..
+        }
+    ));
+    let mods: Vec<_> = ["a", "b", "c", "d", "e"]
+        .iter()
+        .map(|id| (*id, with_items(&[], many("i", MAX_ITEMS_PER_MOD))))
+        .collect();
+    assert!(matches!(
+        resolved(&mut Load::new(), &mods),
+        Err(ModError::TooManyRows {
+            what: "item",
+            max: MAX_ITEMS,
+            ..
+        })
     ));
 }

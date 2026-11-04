@@ -191,8 +191,21 @@ not Pickup.
 Game by name and kind. A hand state taken with its own key, not from the
 Catalogue: while one is held, Place and Remove are its verbs instead of Edits.
 
-**Pickup** — an item entering a Player's inventory. Not built; distinct from Use
-and from Sample, which copies what is aimed at into the hand.
+**Item** — a thing a Game or Mod declares by name, with a size in metres. Not a
+Voxel and not a Tool. A Material may be tied to one Item: removing a Voxel of it
+drops that Item.
+
+**Entity** — a Server-owned thing with a position in metres that is not a Voxel,
+fluid or Player. Not a Bevy `Entity`.
+
+**Dropped item** — an Entity holding a count of one Item, falling or at rest,
+until picked up or despawned.
+
+**Carried** — how many of each Item a Player holds after Pickup. Not an
+inventory: it has no slots and no limits.
+
+**Pickup** — a Dropped item entering a Player's Carried, by nearness. Distinct
+from Use and from Sample, which copies what is aimed at into the hand.
 
 **Measurement** — two corners a Tool's Use resolved, kept by the Client for the
 session. A corner is a vertex of the struck face of a Voxel's drawn Shape.
