@@ -4,7 +4,7 @@
 //! [`Agenda`], snapshots every Chunk they read, and hands them to up to
 //! [`JOBS_IN_FLIGHT`] workers in slices of a quota of evaluations, each slice
 //! carrying its own Voxels' timers. Once every slice is back the step lands
-//! whole, in one tick, through `edit::set_occupants`, and the next starts: so
+//! whole, in one tick, as one `edit::Batch` relit once, and the next starts: so
 //! the quota, the number of workers and the order they finish in change how
 //! many ticks a step takes and never what lands. At most one step completes
 //! per tick, so a quiet Server simulates in real time and a busy one slows
@@ -72,10 +72,10 @@ use tesserae_core::flow::{
     still_applies,
 };
 use tesserae_core::mesh::FACE_STEPS;
-use tesserae_core::{FluidTable, Occupants, Overlay, Tables, Voxel};
+use tesserae_core::{FluidTable, Overlay, Tables, Voxel};
 
 use super::ContentTables;
-use super::edit::{self, set_occupants};
+use super::edit;
 use super::jobs::Stage;
 use super::streaming::MeshState;
 use super::world_state::{ChunkStore, Lifetime, VoxelCoord};
@@ -938,6 +938,9 @@ fn land_step(
             sim.agenda.rewake(p.at, next);
         }
     }
+    // Validity reads Occupants and never light, so the step's changes relight
+    // together once they have all landed.
+    let mut batch = edit::Batch::default();
     for p in chosen {
         debug_assert!(
             !p.next.fluid.is_some_and(|f| f.source) || p.next.fluid == p.read.fluid,
@@ -956,7 +959,10 @@ fn land_step(
             sim.agenda.park(p.at);
             continue;
         }
-        if set_occupants(store, meshes, tables, p.at, p.next).is_ok() {
+        if batch
+            .set_occupants(store, meshes, tables, p.at, p.next)
+            .is_ok()
+        {
             sim.landed += 1;
         } else if p.contact.is_some() {
             // Neither participant changed: retrying before an input does
@@ -967,6 +973,7 @@ fn land_step(
             sim.agenda.rewake(p.at, next);
         }
     }
+    batch.finish(store, meshes, tables);
     let changed = store.take_changed();
     debug_assert!(changed.chunks.is_empty(), "a step outgrew the journal");
     for at in changed.cells {
@@ -1051,17 +1058,6 @@ fn still_valid(
 /// A Chunk's changes waiting their turn, each marked if it moves light.
 type Queue = VecDeque<(bool, Proposal)>;
 
-/// The block light a Voxel gives off: its solid's and fluid's emission, or a
-/// fire's, by the larger.
-fn emission(tables: &Tables, o: &Occupants) -> u8 {
-    let lit = tables.wet_emission(o.solid, o.fluid.map(|f| f.material));
-    if o.burning.is_some() {
-        lit.max(tables.burning_emission(o.solid))
-    } else {
-        lit
-    }
-}
-
 /// Picks the changes a step lands: all of them within the bounds; past them,
 /// one per Chunk in turn, starting after the Chunk served last and, in each,
 /// from where its last turn stopped, so every Chunk with work keeps landing
@@ -1073,7 +1069,7 @@ fn choose(
     proposals: Vec<Proposal>,
 ) -> (Vec<Proposal>, Vec<Proposal>) {
     let bound = sim.landed_per_step;
-    let emits = |p: &Proposal| emission(tables, &p.read) != emission(tables, &p.next);
+    let emits = |p: &Proposal| edit::emission(tables, &p.read) != edit::emission(tables, &p.next);
     let emitters = proposals.iter().filter(|p| emits(p)).count();
     if proposals.len() <= bound && emitters <= sim.emitters_per_step {
         sim.turn = None;

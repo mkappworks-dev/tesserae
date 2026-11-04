@@ -55,10 +55,14 @@ fn stone() -> Voxel {
     Voxel::cube(fixtures().ground.rock)
 }
 
+fn lantern() -> Voxel {
+    Voxel::cube(fixtures().lantern)
+}
+
 /// A 3x2x3 block of Chunks under a layer of open sky, with stone filling the
-/// bottom eight Voxels and `extra` placed on it, lit by relaxing the bulk
-/// solver to its fixed point, as a World that streamed in is.
-fn scene(extra: &[[i32; 3]]) -> Lattice {
+/// bottom eight Voxels and `voxel` at each of `extra`, lit by relaxing the
+/// bulk solver to its fixed point, as a World that streamed in is.
+fn scene(extra: &[[i32; 3]], voxel: Voxel) -> Lattice {
     let mut cells = HashMap::new();
     for cy in 0..=2 {
         for cz in -1..=1 {
@@ -84,7 +88,7 @@ fn scene(extra: &[[i32; 3]]) -> Lattice {
     }
     let mut lattice = Lattice { cells };
     for &at in extra {
-        lattice.set_voxel(at, stone());
+        lattice.set_voxel(at, voxel);
     }
     let mut coords: Vec<[i32; 3]> = lattice.cells.keys().copied().filter(|c| c[1] < 2).collect();
     coords.sort_by_key(|c| std::cmp::Reverse(c[1]));
@@ -154,10 +158,18 @@ fn batched(lattice: &mut Lattice, writes: &[[i32; 3]], voxel: Voxel, size: usize
 fn bench(c: &mut Criterion) {
     let solid = box_order([8, 8, 8], [24, 24, 24]);
     let roof = box_order([8, 24, 8], [24, 25, 24]);
+    // A row of emitters on the floor under open sky, as lava draining is.
+    let lanterns = box_order([8, 8, 16], [24, 9, 17]);
     let cases = [
-        ("place_box_16", scene(&[]), solid.clone(), stone()),
-        ("remove_box_16", scene(&solid), solid, Voxel::AIR),
-        ("roof_16x16", scene(&[]), roof, stone()),
+        ("place_box_16", scene(&[], stone()), solid.clone(), stone()),
+        ("remove_box_16", scene(&solid, stone()), solid, Voxel::AIR),
+        ("roof_16x16", scene(&[], stone()), roof, stone()),
+        (
+            "remove_lanterns_16",
+            scene(&lanterns, lantern()),
+            lanterns.clone(),
+            Voxel::AIR,
+        ),
     ];
     let mut group = c.benchmark_group("relight");
     group.sample_size(10);
