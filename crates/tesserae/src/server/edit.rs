@@ -3409,9 +3409,38 @@ mod tests {
         Voxel::cube(tesserae_core::testgen::fixtures().lantern)
     }
 
-    /// Solids, shaped Voxels, emitters placed and taken away and sources, on
-    /// both sides of the seam at x = 32, some written twice.
-    fn mixed_writes() -> Vec<([i32; 3], Occupants)> {
+    /// The watered tables with an opaque wood that burns with block light 12.
+    fn fuelled() -> (Tables, MaterialId) {
+        use tesserae_core::{Burn, CombustionDef, MaterialDef, Occlusion, RenderClass};
+        let mut tables = watered();
+        let wood = tables
+            .materials
+            .register(MaterialDef {
+                emission: 0,
+                dimming: 15,
+                occlusion: Occlusion::Opaque,
+                render: RenderClass::Opaque,
+                solid: true,
+            })
+            .unwrap();
+        tables
+            .register_combustion(
+                wood,
+                CombustionDef {
+                    threshold: 6,
+                    ignition_delay_s: 2.0,
+                    emission: 12,
+                    heat: None,
+                    burn: Burn::Permanent,
+                },
+            )
+            .unwrap();
+        (tables, wood)
+    }
+
+    /// Solids, shaped Voxels, emitters placed and taken away, sources and a
+    /// fire lit, on both sides of the seam at x = 32, some written twice.
+    fn mixed_writes(tables: &Tables, wood: MaterialId) -> Vec<([i32; 3], Occupants)> {
         let solid = |voxel| Occupants {
             solid: voxel,
             fluid: None,
@@ -3421,6 +3450,12 @@ mod tests {
             solid: Voxel::AIR,
             fluid: Some(Fluid::source(water())),
             burning: None,
+        };
+        let alight = Occupants {
+            burning: Some(Burning {
+                fuel: tables.combustion.get(wood).unwrap().fuel_steps(),
+            }),
+            ..solid(Voxel::cube(wood))
         };
         vec![
             ([30, 8, 5], solid(lantern())),
@@ -3434,6 +3469,8 @@ mod tests {
             ([31, 9, 5], solid(stone())),
             ([33, 9, 5], solid(Voxel::AIR)),
             ([33, 9, 6], solid(lantern())),
+            ([31, 8, 8], solid(Voxel::cube(wood))),
+            ([31, 8, 8], alight),
         ]
     }
 
@@ -3472,8 +3509,8 @@ mod tests {
 
     #[test]
     fn a_batch_leaves_the_world_and_its_stale_meshes_as_its_writes_one_at_a_time_do() {
-        let tables = watered();
-        let writes = mixed_writes();
+        let (tables, wood) = fuelled();
+        let writes = mixed_writes(&tables, wood);
 
         let mut one = seam_store();
         let mut one_meshes = MeshState::default();
