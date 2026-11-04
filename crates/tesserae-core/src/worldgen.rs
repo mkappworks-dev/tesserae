@@ -12,6 +12,7 @@
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
 use crate::climate::{
     BIOMES_SINCE, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
+    SkyFogBlend,
 };
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
@@ -579,6 +580,17 @@ impl Worldgen {
             return None;
         }
         self.climate.biome_at(&self.params.biomes, x_m, z_m)
+    }
+
+    /// The sky and fog over a point on the ground plane, in metres, blended
+    /// smoothly across Biomes; `None` where no Biome has colours or the World
+    /// runs a Generator version from before them. A pure function of the seed
+    /// and the position, like [`Self::biome_at`].
+    pub fn sky_fog_at(&self, x_m: f32, z_m: f32) -> Option<SkyFogBlend> {
+        if self.params.generator < BIOMES_SINCE {
+            return None;
+        }
+        self.climate.sky_fog_at(&self.params.biomes, x_m, z_m)
     }
 
     /// The ground of each column of the Chunks at `(cx, cz)`, row by row, or

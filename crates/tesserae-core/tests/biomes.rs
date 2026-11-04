@@ -114,6 +114,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> Biome {
         temperature,
         humidity,
         ground: None,
+        sky_fog: None,
     }
 }
 

@@ -151,6 +151,47 @@ impl ClimateField {
         }
         Some(BiomeId(nearest.0 as u8))
     }
+
+    /// The sky and fog over a point, each Biome that has colours weighing in by
+    /// how near the Climate is to its point. A continuous function of
+    /// position, so colour never steps where [`Self::biome_at`] does. `None`
+    /// where no Biome has colours.
+    pub(crate) fn sky_fog_at(
+        &self,
+        biomes: &BiomeTable,
+        x_m: f32,
+        z_m: f32,
+    ) -> Option<SkyFogBlend> {
+        let coloured = || {
+            biomes
+                .as_slice()
+                .iter()
+                .filter_map(|b| Some((b, b.sky_fog?)))
+        };
+        // The unwarped Climate: the border warp varies fast to roughen a border, and the
+        // air would shimmer with it.
+        let c = self.at(x_m, z_m);
+        let distance = |b: &Biome| {
+            let (dt, dh) = (b.temperature - c.temperature, b.humidity - c.humidity);
+            dt.hypot(dh)
+        };
+        let nearest = coloured().map(|(b, _)| distance(b)).reduce(f32::min)?;
+        let (mut sky, mut fog, mut total) = ([0.0; 3], [0.0; 3], 0.0);
+        for (b, colours) in coloured() {
+            // Relative to the nearest, so the nearest weighs 1 and nothing underflows.
+            let weight = (-(distance(b) - nearest) / SKY_BLEND_WIDTH).exp();
+            total += weight;
+            for i in 0..3 {
+                sky[i] += weight * f32::from(colours.sky[i]);
+                fog[i] += weight * f32::from(colours.fog[i]);
+            }
+        }
+        let unit = |sum: [f32; 3]| sum.map(|v| v / total / 255.0);
+        Some(SkyFogBlend {
+            sky: unit(sky),
+            fog: unit(fog),
+        })
+    }
 }
 
 /// Which entry of a [`BiomeTable`] a column belongs to. An index and not a
@@ -240,6 +281,9 @@ pub struct Biome {
     pub humidity: f32,
     /// `None` takes the World's own ground.
     pub ground: Option<GroundParams>,
+
+    /// `None` has no say in the sky and fog.
+    pub sky_fog: Option<SkyFog>,
 }
 
 impl Biome {
@@ -248,8 +292,35 @@ impl Biome {
         temperature: 0.0,
         humidity: 0.0,
         ground: None,
+        sky_fog: None,
     };
 }
+
+/// The air over a Biome, as sRGB bytes. The two are a pair, so a Biome carries
+/// both or neither.
+///
+/// `fog` is what the shader fogs toward, not what is seen: the tonemapper
+/// darkens it on the way out, so it is a little lighter than `sky`, the clear
+/// colour behind the terrain (`render::fog::HAZE_FOG_SRGB`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkyFog {
+    pub sky: [u8; 3],
+    pub fog: [u8; 3],
+}
+
+/// [`SkyFog`] blended across Biomes: sRGB in `[0, 1]`, as the Client's fog
+/// settings hold it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct SkyFogBlend {
+    pub sky: [f32; 3],
+    pub fog: [f32; 3],
+}
+
+/// How much farther than the nearest a Biome's point may lie, in Climate units,
+/// for its say in the sky to fall to 1/e. Wide enough that a walk never sees a
+/// step, narrow enough that the middle of a region is its own colour.
+const SKY_BLEND_WIDTH: f32 = 0.1;
 
 /// A World's Biomes in declaration order, at most [`MAX_BIOMES`] with distinct
 /// names and points inside the unit square. Empty means a World with no Biomes,

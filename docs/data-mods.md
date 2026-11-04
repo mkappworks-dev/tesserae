@@ -98,6 +98,16 @@ surface, water or air, inside its depth band and its Biomes. Caves carve the ore
 with the rock, the farthest LOD levels carry none, and a World on Generator
 version 1 has none.
 
+A Biome row may also add `sky-fog = { sky = [r, g, b], fog = [r, g, b] }`, sRGB
+bytes, both together or neither. `sky` is the colour behind the terrain and
+`fog` is what distant terrain fades toward, a little lighter than `sky` because
+the tonemapper darkens the fog on its way to the screen. The Server blends the
+pairs of the Biomes near the Eye by closeness in Climate, so the air changes
+smoothly and never in a step, and sends the Client the pair when it has moved a
+visible step; the Client eases to it, sky and fog together, and underwater fog
+still wins below a surface. A Biome without `sky-fog` has no say in the blend,
+and a World where none has one keeps the Look pack's haze.
+
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
 

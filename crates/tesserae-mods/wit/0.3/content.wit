@@ -362,6 +362,18 @@ interface content {
         /// The ground this Biome's columns are made of. `none` uses the Game's
         /// `world.ground`. Switches hard at the Biome's border.
         ground: option<ground-params>,
+
+        /// The sky and fog colours over this Biome, easing as the Player walks
+        /// between Biomes. `none` leaves the Biome out of the blend.
+        sky-fog: option<sky-fog>,
+    }
+
+    /// A sky colour and the fog that matches it, as sRGB bytes. A pair, so a
+    /// Biome gives both or neither. `sky` is the colour behind the terrain; `fog`
+    /// is what distant terrain fades toward, a little lighter than `sky`.
+    record sky-fog {
+        sky: tuple<u8, u8, u8>,
+        fog: tuple<u8, u8, u8>,
     }
 
     /// A vein of one Material in the rock, centred within a band of depth

@@ -1,6 +1,6 @@
 # 07: Server-sent sky and fog
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 03
 
@@ -10,11 +10,11 @@ The Server computes the Biome blend at each Eye's position and sends a sky and f
 
 ## Acceptance criteria
 
-- [ ] Crossing a Biome border changes the sky and fog target; the Client eases and never snaps.
-- [ ] Sky and fog always move as a pair; the terrain never ends in an edge against the sky.
-- [ ] With no Biomes declared the haze colours are unchanged.
-- [ ] Underwater fog still overrides.
-- [ ] No Client system mutates World state and the Client reads no generator.
+- [x] Crossing a Biome border changes the sky and fog target; the Client eases and never snaps.
+- [x] Sky and fog always move as a pair; the terrain never ends in an edge against the sky.
+- [x] With no Biomes declared the haze colours are unchanged.
+- [x] Underwater fog still overrides.
+- [x] No Client system mutates World state and the Client reads no generator.
 
 ## Comments
 

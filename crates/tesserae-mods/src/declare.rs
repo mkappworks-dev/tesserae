@@ -8,7 +8,7 @@ pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
     GroundParams, Heat, MAX_BIOMES, MAX_ORES, MaterialId, Ore, OreTable, ParamError, Phase,
-    Reactant, ReactionDef, Side, Tables, Voxel, WaterParams, WorldgenParams,
+    Reactant, ReactionDef, Side, SkyFog, Tables, Voxel, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -480,6 +480,10 @@ pub fn resolve_biomes(
                 temperature: def.temperature,
                 humidity: def.humidity,
                 ground,
+                sky_fog: def.sky_fog.as_ref().map(|c| SkyFog {
+                    sky: c.sky.into(),
+                    fog: c.fog.into(),
+                }),
             });
         }
     }

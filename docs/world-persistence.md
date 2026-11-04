@@ -77,9 +77,10 @@ parameters, so a Game that gains a Biome later cannot reshape it. The three
 fields are optional on read and written only for Generator version 2 and a
 non-empty table, so a version 1 commit, or one written before Biomes, restores
 with none. Ores name their Material and Biomes, and a Biome names its ground
-Materials, all through the Mapping like the World's own ground. The snapshot is
-separate from `entities` and changes neither the format nor the generator
-version.
+Materials, all through the Mapping like the World's own ground. A Biome's
+optional sky and fog colours ride in its snapshot as two RGB triples, absent
+when it has none. The snapshot is separate from `entities` and changes neither
+the format nor the generator version.
 
 Simulation checkpoints contain the logical step, count bounds, flow deadlines
 and desired changes, running and frozen fire clocks, ignition/burn-out changes,

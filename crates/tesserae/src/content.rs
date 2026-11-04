@@ -122,3 +122,13 @@ impl ContentCatalogue {
         self.materials.iter().any(|m| m.burns)
     }
 }
+
+/// The sky and fog the Server wants over the Player's Eye: the blend of the
+/// Biomes there, sRGB in `[0, 1]`. Sent only when it has moved a visible step,
+/// and never in a World whose Biomes carry no colours. The Client eases to it;
+/// it holds no generator to work it out itself (ADR-0002).
+#[derive(Message, Clone, Copy, Debug, PartialEq)]
+pub struct SkyFogTarget {
+    pub sky: [f32; 3],
+    pub fog: [f32; 3],
+}

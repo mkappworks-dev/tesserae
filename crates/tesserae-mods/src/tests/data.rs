@@ -300,6 +300,10 @@ fn component() -> Declaration {
                 temperature: 0.8,
                 humidity: 0.15,
                 ground: None,
+                sky_fog: Some(content::SkyFog {
+                    sky: (176, 160, 128),
+                    fog: (196, 178, 142),
+                }),
             },
             content::BiomeDef {
                 name: "wet".into(),
@@ -310,6 +314,7 @@ fn component() -> Declaration {
                     soil: "full:ash".into(),
                     surface: "full:wood".into(),
                 }),
+                sky_fog: None,
             },
         ],
         ores: vec![
@@ -464,6 +469,14 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
             "peat",
         ),
         ("soil = \"full:ash\", ", "", "soil"),
+        ("fog = [196, 178, 142]", "fog = [196, 178, 142, 9]", "fog"),
+        ("fog = [196, 178, 142]", "fog = [196, 178, 300]", "fog"),
+        ("sky = [176, 160, 128], ", "", "sky"),
+        (
+            "fog = [196, 178, 142]",
+            "fog = [196, 178, 142], haze = 1",
+            "haze",
+        ),
         ("rarity = 0.05", "rarity = 0.05\nluck = 1", "luck"),
         ("rarity = 0.05", "rarity = \"rare\"", "rarity"),
         (

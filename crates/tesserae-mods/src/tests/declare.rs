@@ -3,7 +3,7 @@
 use tesserae_core::shape::examples;
 use tesserae_core::{
     Arm, BiomeId, BiomeSet, BiomeTable, ConnectDef, Connections, GroundParams, MaterialError,
-    OreTable, Orientation, ShapeDef, ShapeError, Tables, Voxel, WorldgenParams,
+    OreTable, Orientation, ShapeDef, ShapeError, SkyFog, Tables, Voxel, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -1117,6 +1117,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         temperature,
         humidity,
         ground: None,
+        sky_fog: None,
     }
 }
 
@@ -1259,6 +1260,40 @@ fn a_biomes_ground_resolves_to_material_ids_and_an_omitted_ground_stays_none() {
             surface: id("a:sand")
         })
     );
+}
+
+#[test]
+fn a_biomes_sky_and_fog_resolve_as_a_pair_and_an_omitted_pair_stays_none() {
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[(
+            "a",
+            with_biomes(
+                &[],
+                vec![
+                    content::BiomeDef {
+                        sky_fog: Some(content::SkyFog {
+                            sky: (126, 146, 168),
+                            fog: (136, 160, 190),
+                        }),
+                        ..biome("dry", 0.8, 0.1)
+                    },
+                    biome("wet", 0.2, 0.9),
+                ],
+                vec![],
+            ),
+        )],
+    )
+    .unwrap();
+    assert_eq!(
+        biomes.as_slice()[0].sky_fog,
+        Some(SkyFog {
+            sky: [126, 146, 168],
+            fog: [136, 160, 190]
+        })
+    );
+    assert_eq!(biomes.as_slice()[1].sky_fog, None);
 }
 
 #[test]

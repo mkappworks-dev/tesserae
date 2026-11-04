@@ -172,6 +172,7 @@ humidity-size-m = 640.0
 name = "dry"
 temperature = 0.8
 humidity = 0.15
+sky-fog = { sky = [176, 160, 128], fog = [196, 178, 142] }
 
 [[biomes]]
 name = "wet"

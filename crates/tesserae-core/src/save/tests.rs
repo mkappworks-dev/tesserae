@@ -510,6 +510,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> crate::Biome {
         temperature,
         humidity,
         ground: None,
+        sky_fog: None,
     }
 }
 
@@ -596,6 +597,53 @@ fn a_biomes_ground_is_saved_by_name_and_restored_through_the_mapping() {
             soil: 17,
             surface: 8
         })
+    );
+}
+
+#[test]
+fn a_biomes_sky_and_fog_are_saved_as_a_pair_and_omitted_when_absent() {
+    let mut params = biome_params(2);
+    let table = params.biomes.as_slice().to_vec();
+    let air = crate::SkyFog {
+        sky: [176, 160, 128],
+        fog: [196, 178, 142],
+    };
+    params.biomes = crate::BiomeTable::new(&[
+        table[0],
+        crate::Biome {
+            sky_fog: Some(air),
+            ..table[1]
+        },
+        table[2],
+    ])
+    .unwrap();
+    let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(
+        json["biomes"][1]["sky_fog"],
+        serde_json::json!({ "sky": [176, 160, 128], "fog": [196, 178, 142] })
+    );
+    assert!(json["biomes"][0].get("sky_fog").is_none());
+
+    let restored = saved.restore(&mapping(17, 8, 5), 2).unwrap();
+    let biomes = restored.biomes.as_slice();
+    assert_eq!(biomes[1].sky_fog, Some(air));
+    assert_eq!((biomes[0].sky_fog, biomes[2].sky_fog), (None, None));
+}
+
+#[test]
+fn a_snapshot_written_before_sky_and_fog_restores_without_them() {
+    let saved = Generation::capture(biome_params(2), &mapping(8, 9, 4)).unwrap();
+    let mut json = serde_json::to_value(&saved).unwrap();
+    assert!(json["biomes"][0].get("sky_fog").is_none());
+    let old: Generation = serde_json::from_value(json.take()).unwrap();
+    let restored = old.restore(&mapping(8, 9, 4), 2).unwrap();
+    assert!(
+        restored
+            .biomes
+            .as_slice()
+            .iter()
+            .all(|b| b.sky_fog.is_none())
     );
 }
 

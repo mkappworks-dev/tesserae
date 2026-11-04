@@ -212,6 +212,36 @@ pub(super) struct Biome {
     humidity: f32,
 
     ground: Option<super::Ground>,
+
+    sky_fog: Option<SkyFog>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct SkyFog {
+    #[serde(deserialize_with = "rgb")]
+    sky: [u8; 3],
+    #[serde(deserialize_with = "rgb")]
+    fog: [u8; 3],
+}
+
+/// Through a `Vec` because serde stops an array at its length and ignores a
+/// fourth byte, which would pass an RGBA colour off as an RGB one.
+fn rgb<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 3], D::Error> {
+    let bytes = Vec::<u8>::deserialize(d)?;
+    <[u8; 3]>::try_from(bytes)
+        .map_err(|b| serde::de::Error::invalid_length(b.len(), &"an RGB colour of 3 bytes"))
+}
+
+impl From<SkyFog> for content::SkyFog {
+    fn from(c: SkyFog) -> Self {
+        let [s0, s1, s2] = c.sky;
+        let [f0, f1, f2] = c.fog;
+        Self {
+            sky: (s0, s1, s2),
+            fog: (f0, f1, f2),
+        }
+    }
 }
 
 impl From<Biome> for content::BiomeDef {
@@ -222,6 +252,8 @@ impl From<Biome> for content::BiomeDef {
             humidity: b.humidity,
 
             ground: b.ground.map(Into::into),
+
+            sky_fog: b.sky_fog.map(Into::into),
         }
     }
 }

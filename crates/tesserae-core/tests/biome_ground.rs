@@ -15,6 +15,7 @@ fn biome(name: &str, temperature: f32, ground: Option<GroundParams>) -> Biome {
         temperature,
         humidity: 0.5,
         ground,
+        sky_fog: None,
     }
 }
 
