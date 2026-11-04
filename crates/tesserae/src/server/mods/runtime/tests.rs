@@ -283,10 +283,10 @@ fn a_full_fill_resumes_its_cursor_and_a_second_mod_is_served_in_the_same_tick() 
         if ticks == 1 {
             assert_eq!(h.backlog(1), 0);
             assert_eq!(h.voxel([31, 31, 31]), Voxel::cube(h.rock));
-            assert_eq!(h.backlog(0), 32768 - MOD_VOXELS_PER_TICK as u64 + 1);
+            assert_eq!(h.backlog(0), 32768 - MOD_VOXELS_PER_TICK.writes as u64 + 1);
         }
     }
-    assert_eq!(ticks, 32769usize.div_ceil(MOD_VOXELS_PER_TICK));
+    assert_eq!(ticks, 32769usize.div_ceil(MOD_VOXELS_PER_TICK.writes));
     assert_eq!(h.pending().queues.len(), 2);
     assert_eq!(h.pending().queues[0].report.applied, 32768);
     for y in 0..32 {
@@ -303,7 +303,34 @@ fn a_full_fill_resumes_its_cursor_and_a_second_mod_is_served_in_the_same_tick() 
         alone.drain();
         ticks += 1;
     }
-    assert_eq!(ticks, 32768usize.div_ceil(MOD_VOXELS_PER_TICK));
+    assert_eq!(ticks, 32768usize.div_ceil(MOD_VOXELS_PER_TICK.writes));
+}
+
+#[test]
+fn a_fill_of_what_is_already_there_drains_at_the_read_bound_and_reports_it_applied() {
+    let mut h = Harness::new(&[]);
+    let air = Command::Fill {
+        region: Region {
+            min: [0.0; 3],
+            max: [32.0; 3],
+        },
+        voxel: Voxel::AIR,
+    };
+    let checked = batch(&[air], &tables_of(&h));
+    h.app
+        .world_mut()
+        .resource_mut::<PendingCommands>()
+        .queue(0)
+        .push(checked);
+    let mut ticks = 0;
+    while h.backlog(0) > 0 {
+        h.drain();
+        ticks += 1;
+    }
+    assert_eq!(ticks, 32768usize.div_ceil(MOD_VOXELS_PER_TICK.reads));
+    assert_eq!(h.pending().queues[0].report.applied, 32768);
+    let mut meshes = h.app.world_mut().resource_mut::<MeshState>();
+    assert!(!meshes.is_edited(home()) && meshes.take_cover_changes().is_empty());
 }
 
 #[test]
@@ -455,11 +482,12 @@ fn backlog_pauses_calls_without_consuming_events_or_reports_and_resumes_after_dr
     while h.backlog(0) > MAX_BACKLOG_VOXELS {
         h.drain();
     }
+    let drained = 327680 - h.backlog(0);
+    assert!(drained >= 65536 && drained < 65536 + MOD_VOXELS_PER_TICK.reads as u64);
     h.call();
-    assert!(
-        h.log(0)
-            .contains("call=6 tick=7 dt=0.015625 applied=65536 rejected=0 edits=1")
-    );
+    assert!(h.log(0).contains(&format!(
+        "call=6 tick=7 dt=0.015625 applied={drained} rejected=0 edits=1"
+    )));
 }
 
 #[test]
@@ -831,6 +859,10 @@ fn measure_gallery_budget() {
                         builder::step(&plan, &mut progress, &mut store, &mut meshes, tables);
                         let before = pending.queues.first().map_or(0, |q| q.voxels);
                         let start = Instant::now();
+                        let budget = DrainBudget {
+                            writes: budget,
+                            reads: budget,
+                        };
                         pending.drain(&mut store, &mut meshes, tables, budget);
                         let elapsed = start.elapsed().as_secs_f64();
                         let after = pending.queues.first().map_or(0, |q| q.voxels);
@@ -854,6 +886,150 @@ fn measure_gallery_budget() {
         worst_drain * 1000.0,
         sum_drain * 1e6 / applied.max(1) as f64
     );
+}
+
+/// What draining a build costs: ticks to empty the queue, and the drain's
+/// thread CPU per tick, with streaming ticking beside it as on the Server.
+#[cfg(feature = "profiling")]
+fn measure_drain(label: &str, loaded: LoadedMods, size: f32, batches: Vec<CommandBatch>) {
+    use crate::cost::thread_cpu;
+    use crate::server::streaming::tests::Harness as StreamingHarness;
+    use crate::server::streaming::{StreamingBudget, StreamingSettings};
+    let var = |name| std::env::var(name).ok().map(|v: String| v.parse().unwrap());
+    let budget = DrainBudget {
+        writes: var("TESSERAE_DRAIN_BUDGET").unwrap_or(MOD_VOXELS_PER_TICK.writes),
+        reads: var("TESSERAE_DRAIN_READS").unwrap_or(MOD_VOXELS_PER_TICK.reads),
+    };
+    let voxels: u64 = batches.iter().map(|b| b.voxels).sum();
+    let (mut min, mut max) = ([i32::MAX; 3], [i32::MIN; 3]);
+    for batch in &batches {
+        for command in &batch.commands {
+            if let Resolved::Fill { region, .. } = command {
+                for at in region.cursor() {
+                    min = std::array::from_fn(|i| min[i].min(at[i]));
+                    max = std::array::from_fn(|i| max[i].max(at[i]));
+                }
+            }
+        }
+    }
+    let center = Vec3::from_array(std::array::from_fn(|i| {
+        (min[i] + max[i]) as f32 * 0.5 * size
+    }));
+    let settings = StreamingSettings {
+        view_distance_m: 48.0,
+        vertical_distance_m: 32.0,
+        hysteresis_m: 32.0,
+        lod_distance_m: 48.0,
+    };
+    let world = WorldSettings {
+        voxel_size: size,
+        seed: 7,
+    };
+    let params = loaded.world.expect("a Game sets its World");
+    let mut h = StreamingHarness::with_world(settings, StreamingBudget::default(), world, params);
+    h.app
+        .insert_resource(ContentTables(std::sync::Arc::new(loaded.tables)))
+        .init_resource::<PendingCommands>();
+    h.anchor_at(center);
+    h.settle();
+    for batch in batches {
+        h.app
+            .world_mut()
+            .resource_mut::<PendingCommands>()
+            .queue(0)
+            .push(batch);
+    }
+    let (mut ticks, mut sum, mut worst, mut worst_stream) = (0u64, 0.0f64, 0.0f64, 0.0f64);
+    while h.app.world().resource::<PendingCommands>().queues[0].voxels > 0 {
+        h.app
+            .world_mut()
+            .resource_scope(|world, mut store: Mut<ChunkStore>| {
+                world.resource_scope(|world, mut meshes: Mut<MeshState>| {
+                    let tables = ContentTables(Arc::clone(&world.resource::<ContentTables>().0));
+                    let mut pending = world.resource_mut::<PendingCommands>();
+                    let start = thread_cpu().unwrap();
+                    pending.drain(&mut store, &mut meshes, &tables, budget);
+                    let spent = thread_cpu().unwrap() - start;
+                    sum += spent;
+                    worst = worst.max(spent);
+                });
+            });
+        let start = thread_cpu().unwrap();
+        h.tick();
+        worst_stream = worst_stream.max(thread_cpu().unwrap() - start);
+        ticks += 1;
+    }
+    let report = &h.app.world().resource::<PendingCommands>().queues[0].report;
+    println!(
+        "drain {label} writes={} reads={} voxels={voxels} applied={} rejected={} ticks={ticks} \
+         seconds_at_64hz={:.2} drain_cpu_s={sum:.3} mean_drain_ms={:.4} worst_drain_ms={:.4} \
+         worst_stream_tick_ms={:.4} voxels_per_drain_cpu_s={:.0}",
+        budget.writes,
+        budget.reads,
+        report.applied,
+        report.rejected,
+        ticks as f64 / 64.0,
+        sum * 1000.0 / ticks.max(1) as f64,
+        worst * 1000.0,
+        worst_stream * 1000.0,
+        voxels as f64 / sum.max(1e-9),
+    );
+}
+
+/// A demo Game's build at 0.5 m Voxels, drained through the real drain: lumen's,
+/// or `TESSERAE_GAME`'s.
+#[cfg(feature = "profiling")]
+#[test]
+#[ignore = "manual interleaved measurement; TESSERAE_DRAIN_BUDGET overrides the budget"]
+fn measure_game_build_drain() {
+    let size = 0.5;
+    let game = std::env::var("TESSERAE_GAME").unwrap_or("lumen".into());
+    let (_install, mut loaded) = super::super::demo_games::loaded(&game, size);
+    let mut instance = loaded.mods.remove(0);
+    let line = instance.line();
+    let mut batches = Vec::new();
+    // As `demo_games` runs it: the build is sent within two seconds, before
+    // the first lantern.
+    for tick in 0..40 {
+        let context = TickContext {
+            tick,
+            dt_s: 0.05,
+            edits: Vec::new(),
+            last: BatchReport::default(),
+        };
+        let (next, commands) = bevy::tasks::block_on(instance.tick(context)).unwrap();
+        instance = next;
+        let batch = validate(&commands, line, &loaded.tables, size).unwrap();
+        if batch.voxels > 0 {
+            batches.push(batch);
+        }
+    }
+    measure_drain(&game, loaded, size, batches);
+}
+
+/// A plain 16³ stone fill into open air, 5 m over lumen's ground beside the
+/// spawn; `TESSERAE_FILL_MATERIAL` names another Material.
+#[cfg(feature = "profiling")]
+#[test]
+#[ignore = "manual interleaved measurement; TESSERAE_DRAIN_BUDGET overrides the budget"]
+fn measure_plain_fill_drain() {
+    let size = 0.5;
+    let (_install, loaded) = super::super::demo_games::loaded("lumen", size);
+    let name = std::env::var("TESSERAE_FILL_MATERIAL").unwrap_or("strata:stone".into());
+    let stone = loaded
+        .registry
+        .id_of(tesserae_mods::Kind::Material, &name)
+        .unwrap() as u16;
+    let fill = Command::Fill {
+        region: Region {
+            min: [-4.0, 30.0, -12.0],
+            max: [4.0, 38.0, -4.0],
+        },
+        voxel: Voxel::cube(stone),
+    };
+    let batch = validate(&[fill], Line::V03, &loaded.tables, size).unwrap();
+    assert_eq!(batch.voxels, 4096);
+    measure_drain("plain_fill", loaded, size, vec![batch]);
 }
 
 #[test]

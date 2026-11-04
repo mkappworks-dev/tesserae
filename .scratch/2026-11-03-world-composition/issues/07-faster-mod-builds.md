@@ -1,6 +1,6 @@
 # 07: A Mod's build should appear near the Player first and not take minutes
 
-Status: needs-info
+Status: done
 
 ## What to build
 
@@ -25,6 +25,13 @@ one the contract lacks is a gap to record, not to work around.
 
 ## Acceptance criteria
 
-- [ ] A benchmark shows Voxels applied per second for a plain fill, before and after.
-- [ ] `lumen` at 0.5 m Voxels (19,712 Voxels) builds in under 10 s on the reference host.
-- [ ] ADR-0012's "two Voxels per tick" consequence is updated with the new measured figure.
+- [x] A benchmark shows Voxels applied per second for a plain fill, before and after.
+- [x] `lumen` at 0.5 m Voxels (19,712 Voxels) builds in under 10 s on the reference host.
+- [x] ADR-0012's "two Voxels per tick" consequence is updated with the new measured figure.
+
+## Comments
+
+Done by [bulk relight](../../2026-11-03-bulk-relight/spec.md): a bulk write path
+that relights once per batch. The Games keep their nearest-first order and the
+drain keeps queue order; no-op writes no longer spend the write budget. lumen at
+0.5 m builds in about 3 s (test profile, thread CPU).

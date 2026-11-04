@@ -439,10 +439,14 @@ multiplayer is a later transport swap, not a rewrite.
    0.93/11.57/178.99 µs (load 9.01→8.55), but omits the production tick's
    deadline thread: no flat per-command cost or small-batch speedup is
    established. At 4096 placements the naive path is 1.94 times tick plus
-   validation (load 9.01→8.55). `MOD_VOXELS_PER_TICK` is **2**, replacing the
-   initial 256: the median worst drain was 0.296 ms (load 10.43) versus 10.585
-   ms at 256 (load 9.52–9.92). A full 32³ fill takes 16384 uncontended, lit
-   ticks, about 256 s at 64 Hz. Final live filling/control worst ticks were
+   validation (load 9.01→8.55). `MOD_VOXELS_PER_TICK` was **2** while each write
+   re-flooded light on its own, replacing the initial 256: the median worst
+   drain was 0.296 ms (load 10.43) versus 10.585 ms at 256 (load 9.52–9.92), and
+   a full 32³ fill took 16384 uncontended, lit ticks, about 256 s at 64 Hz.
+   Ticket 04 of `.scratch/2026-11-03-bulk-relight` batched the drain: 96 writes
+   a tick, an emitter counting as 6, 4096 looks; lumen's 19,712 Voxels at 0.5 m
+   drain in 3.1 s with a worst drain tick under 2 ms, against 8.4 ms for the old
+   path at the same 96 a tick. Final live filling/control worst ticks were
    5.3/3.7 ms (respective loads 5.04→6.07/5.12→6.12) and 3.6/6.1 ms
    (4.79→5.52/5.52→6.74). These observations support the conservative cap, not a
    universal latency bound; presentation work differs, so live CPU totals are
@@ -669,11 +673,10 @@ Not blocking 1.0, in rough order of value:
   4096 m default LOD reach; its distant capture shows beyond the default 192 m
   full-detail radius, not beyond default LOD reach.
 - **Mod host follow-ups are explicit.** No World read until a batched Snapshot
-  API; no bulk write until relight can run once per Chunk without breaking Edit
-  invariants; no save-time tombstones or missing-Mod migration; no compile
-  cache; terminal-only Trust until a pre-World window state; a 64-entry flat
-  appearance palette until step 9; disabled Mods recover only on reopen. Distant
-  Mod Materials retain dominant-volume LOD and no emission. Closed `command` and
+  API; no save-time tombstones or missing-Mod migration; no compile cache;
+  terminal-only Trust until a pre-World window state; a 64-entry flat appearance
+  palette until step 9; disabled Mods recover only on reopen. Distant Mod
+  Materials retain dominant-volume LOD and no emission. Closed `command` and
   `occlusion` variants require a 0.2 line to grow. The patch export-lookup
   question is resolved by the compatibility fixture, with no fallback. The
   per-call deadline thread is a future optimization; generated bindings still
@@ -694,8 +697,8 @@ Not blocking 1.0, in rough order of value:
   not held keeps its progress until it is, but flow beside it drops the change
   it was waiting for and starts its delay again. Reactions have no delay of
   their own, and a thin film against a cube wets all of it. Lava draining
-  outdoors at 0.25 m is the costliest step measured; a bulk relight is the named
-  follow-up.
+  outdoors at 0.25 m is the costliest step measured; landing a step as one relit
+  batch did not measurably cut it, so what its cost is made of is open.
 - **Shaped Voxels have loose ends worth a ticket each.** Smoothing has no corner
   stairs (a corner gets a slab) and does not ease a step of two Voxels or more.
   Connection groups still belong to a Shape and not a Material after step 7, a

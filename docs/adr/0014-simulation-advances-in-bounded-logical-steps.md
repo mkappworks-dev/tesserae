@@ -72,7 +72,8 @@ neighbour's light, and the meshes waiting on it, by at most four solves.
 - Every new kind of simulation joins the kernel, the Agenda and the landing
   rules; a second scheduler or a second write path is the mistake to look for.
 - Player Edits and the fair Mod queues run before the step each tick and are
-  never deferred by it; the phase 7 drain cap of two Voxels a tick is unchanged.
-- A general bulk relight remains a follow-up. It would cut the costliest case
-  measured, lava draining outdoors at fine Voxel sizes, and let the emitter
-  bound rise.
+  never deferred by it; the drain's budget is in
+  [ADR-0012](0012-mods-declare-once-and-command-in-batches.md).
+- A step lands as one write batch, relit once. That did not measurably cut the
+  costliest case, lava draining outdoors at 0.25 m, so the emitter bound stays
+  where it was and raising it is a decision of its own.

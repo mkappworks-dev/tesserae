@@ -854,16 +854,27 @@ pub trait LightVolume {
     fn set_light(&mut self, at: [i32; 3], light: Light);
 }
 
-/// Re-flood the light around one edited Voxel.
+/// Re-flood the light around one edited Voxel: [`relight_many`] of one.
+pub fn relight(volume: &mut impl LightVolume, tables: &Tables, edited: [i32; 3], was: Light) {
+    relight_many(volume, tables, &[(edited, was)]);
+}
+
+/// Re-flood the light around every edited Voxel, once for all of them.
 ///
 /// The incremental path, and the point of this step: a Voxel's light reaches at
 /// most [`MAX_LIGHT`] Voxels, so this touches that region and not the Chunk it
 /// happened in. DESIGN.md's "one torch re-floods a small region, not a chunk"
 /// rules out a per-Chunk re-solve by name.
 ///
-/// `was` is the light the Voxel held before the edit, which the caller still
-/// has and this function cannot recover — by the time it runs, the store
-/// already holds the new Voxel.
+/// Each edit carries the light its Voxel held before the batch, which the
+/// caller still has and this function cannot recover: by the time it runs, the
+/// volume already holds every new Voxel. Nothing may have relit in between, so
+/// every `was` describes the same, consistent, World.
+///
+/// One darkening from every edit, then one brightening, as Starlight and
+/// Luanti batch theirs: where edits' regions overlap, as neighbouring Voxels of
+/// a build do, the overlap is cleared and refilled once and not once per edit.
+/// The result is exactly that of the edits applied one at a time.
 ///
 /// **Not interchangeable with [`light_chunk`].** Re-solving a Chunk from
 /// scratch is a Gauss-Seidel iteration over a max system: it converges upwards
@@ -873,37 +884,40 @@ pub trait LightVolume {
 /// tracks provenance — clear what the old level could have lit, then
 /// re-propagate from the independent sources that uncovers. So: an edit uses
 /// this, a Chunk arriving uses `light_chunk`, and neither does the other's job.
-pub fn relight(volume: &mut impl LightVolume, tables: &Tables, edited: [i32; 3], was: Light) {
-    let Some(voxel) = volume.voxel(edited) else {
-        return;
-    };
-
-    // What the Voxel holds now, before anything propagates: its own emission if
-    // it emits, and nothing at all if it has become opaque.
-    let now = Light::DARK.with_block(optic(volume, tables, edited, voxel).1);
-    volume.set_light(edited, now);
+pub fn relight_many(volume: &mut impl LightVolume, tables: &Tables, edits: &[([i32; 3], Light)]) {
+    // What each Voxel holds now, before anything propagates: its own emission
+    // if it emits, and nothing at all if it has become opaque. All of them
+    // first, so no darkening reads an edited Voxel's stale level.
+    let mut edited = Vec::with_capacity(edits.len());
+    for &(at, was) in edits {
+        let Some(voxel) = volume.voxel(at) else {
+            continue;
+        };
+        let now = Light::DARK.with_block(optic(volume, tables, at, voxel).1);
+        volume.set_light(at, now);
+        edited.push((at, was, now));
+    }
 
     for channel in [Channel::Sky, Channel::Block] {
-        let mut regrow: Vec<[i32; 3]> = Vec::new();
-        if was.get(channel) > now.get(channel) {
-            darken(
-                volume,
-                tables,
-                edited,
-                was.get(channel),
-                channel,
-                &mut regrow,
-            );
-        }
-        if now.get(channel) > 0 {
-            regrow.push(edited);
-        }
-        // The six neighbours always: the edit may have opened a path that light
-        // already sitting beside it can now take.
-        for face in FACES {
-            let at = step(edited, face);
-            if volume.light(at).get(channel) > 0 {
-                regrow.push(at);
+        let mut regrow = Seeds::default();
+        let dimmed = edited
+            .iter()
+            .filter(|(_, was, now)| was.get(channel) > now.get(channel))
+            .map(|&(at, was, _)| (at, was.get(channel)))
+            .collect();
+        darken(volume, tables, dimmed, channel, &mut regrow);
+        for &(at, _, now) in &edited {
+            if now.get(channel) > 0 {
+                regrow[now.get(channel) as usize].push(at);
+            }
+            // The six neighbours always: the edit may have opened a path that
+            // light already sitting beside it can now take.
+            for face in FACES {
+                let beside = step(at, face);
+                let level = volume.light(beside).get(channel);
+                if level > 0 {
+                    regrow[level as usize].push(beside);
+                }
             }
         }
         brighten(volume, tables, regrow, channel);
@@ -927,8 +941,8 @@ fn optic(volume: &impl LightVolume, tables: &Tables, at: [i32; 3], voxel: Voxel)
     (tables.wet_light_params(voxel, wet).1, emission)
 }
 
-/// Clears the light `from` used to cast, collecting the independent sources it
-/// uncovers into `regrow`.
+/// Clears the light each of `from` used to cast, given the level it held,
+/// collecting the independent sources that uncovers into `regrow`.
 ///
 /// It crosses every face, sealed or not, and that is deliberate rather than an
 /// oversight of opacity. It has to clear what the *old* Voxel could have lit and
@@ -951,12 +965,11 @@ fn optic(volume: &impl LightVolume, tables: &Tables, at: [i32; 3], voxel: Voxel)
 fn darken(
     volume: &mut impl LightVolume,
     tables: &Tables,
-    from: [i32; 3],
-    had: u8,
+    from: Vec<([i32; 3], u8)>,
     channel: Channel,
-    regrow: &mut Vec<[i32; 3]>,
+    regrow: &mut Seeds,
 ) {
-    let mut queue = vec![(from, had)];
+    let mut queue = from;
     let mut head = 0;
     while head < queue.len() {
         let (at, level) = queue[head];
@@ -975,7 +988,7 @@ fn darken(
             if there > delivered {
                 // Brighter than anything this source could have delivered, so
                 // it has one of its own and the cleared region refills from it.
-                regrow.push(next);
+                regrow[there as usize].push(next);
                 continue;
             }
             let own = match channel {
@@ -987,41 +1000,52 @@ fn darken(
                 queue.push((next, there));
             }
             if own > 0 {
-                regrow.push(next);
+                regrow[own as usize].push(next);
             }
         }
     }
 }
 
-/// Floods light outwards from every Voxel in `from`, improving only.
-fn brighten(volume: &mut impl LightVolume, tables: &Tables, from: Vec<[i32; 3]>, channel: Channel) {
-    let mut queue = from;
-    let mut head = 0;
-    while head < queue.len() {
-        let at = queue[head];
-        head += 1;
-        let level = volume.light(at).get(channel);
-        if level == 0 {
-            continue;
-        }
-        let Some(source) = volume.voxel(at) else {
-            continue;
-        };
-        for face in FACES {
-            let t = transmitted(channel, level, face);
-            if t == 0 {
+/// Positions to spread light from, queued by the level each held when found.
+/// A level read once there is not read again to queue it.
+type Seeds = [Vec<[i32; 3]>; MAX_LIGHT as usize + 1];
+
+/// Floods light outwards from every Voxel in `pending`, improving only.
+///
+/// Brightest first, one queue per level, for the reason [`flood`] gives: a
+/// batch seeds many sources at once, and in arrival order a cell lit dimly by
+/// one would spread, then be raised by a brighter one and spread again.
+fn brighten(volume: &mut impl LightVolume, tables: &Tables, mut pending: Seeds, channel: Channel) {
+    for level in (1..=MAX_LIGHT).rev() {
+        let mut head = 0;
+        while let Some(&at) = pending[level as usize].get(head) {
+            head += 1;
+            // Raised after it was queued, so it spreads at the higher level, or
+            // darkened after it was found, so it is no source at this one.
+            if volume.light(at).get(channel) != level {
                 continue;
             }
-            let next = step(at, face);
-            let Some(voxel) = volume.voxel(next) else {
+            let Some(source) = volume.voxel(at) else {
                 continue;
             };
-            let t = t.saturating_sub(optic(volume, tables, next, voxel).0);
-            if !light_passes(tables, source, voxel, face) || volume.light(next).get(channel) >= t {
-                continue;
+            for face in FACES {
+                let t = transmitted(channel, level, face);
+                if t == 0 {
+                    continue;
+                }
+                let next = step(at, face);
+                let Some(voxel) = volume.voxel(next) else {
+                    continue;
+                };
+                let t = t.saturating_sub(optic(volume, tables, next, voxel).0);
+                if !light_passes(tables, source, voxel, face)
+                    || volume.light(next).get(channel) >= t
+                {
+                    continue;
+                }
+                volume.set_light(next, volume.light(next).with(channel, t));
+                pending[t as usize].push(next);
             }
-            volume.set_light(next, volume.light(next).with(channel, t));
-            queue.push(next);
         }
     }
 }
@@ -1350,7 +1374,8 @@ mod tests {
                     self.light.set(x, LAST, z, Light::new(MAX_LIGHT, 0));
                 }
             }
-            let seeds: Vec<[i32; 3]> = (0..CHUNK_SIZE)
+            let mut seeds = Seeds::default();
+            seeds[MAX_LIGHT as usize] = (0..CHUNK_SIZE)
                 .flat_map(|z| (0..CHUNK_SIZE).map(move |x| [x as i32, LAST as i32, z as i32]))
                 .collect();
             brighten(self, self.tables, seeds, Channel::Sky);
@@ -3086,6 +3111,107 @@ mod tests {
                 assert_eq!(dry, wet);
                 assert_eq!(dry, light_cells(chunk, &drained, border, tables()));
             }
+        }
+    }
+
+    /// A seeded xorshift, so a failing scene can be replayed by its seed.
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            self.0
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    fn any_voxel(rng: &mut Rng) -> Voxel {
+        let rock = fixtures().ground.rock;
+        match rng.below(10) {
+            0..=2 => Voxel::AIR,
+            3 | 4 => Voxel::cube(rock),
+            5 => Voxel::cube(fixtures().lantern),
+            6 => Voxel::cube(fixtures().glass),
+            7 => stair(rng.below(4) as u8),
+            8 => slab(if rng.below(2) == 0 { POS_Y } else { NEG_Y }),
+            _ => Voxel::shaped(rock, SHAPE_DIAGONAL, Orientation::new(POS_Y, 0)),
+        }
+    }
+
+    /// Edits clustered round a Chunk seam, so their regions overlap and cross it.
+    fn near_seam(rng: &mut Rng) -> [i32; 3] {
+        let n = CHUNK_SIZE as i32;
+        [
+            n - 6 + rng.below(12) as i32,
+            2 + rng.below(20) as i32,
+            n - 6 + rng.below(12) as i32,
+        ]
+    }
+
+    /// The guard on [`relight_many`]: a batch lights a World exactly as its
+    /// edits applied one at a time do, and as a fresh solve of where they end.
+    #[test]
+    fn a_batch_relights_exactly_as_its_edits_one_at_a_time_and_a_fresh_solve() {
+        let chunks = [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]];
+        let roof = [[0, 1, 0], [1, 1, 0], [0, 1, 1], [1, 1, 1]];
+        for seed in 1..=24u64 {
+            let mut rng = Rng(seed.wrapping_mul(0x9e37_79b9_7f4a_7c15));
+            let mut start = Lattice::new(&chunks).with_roof(&roof);
+            for x in 0..2 * CHUNK_SIZE as i32 {
+                for z in 0..2 * CHUNK_SIZE as i32 {
+                    start.set_voxel([x, 0, z], Voxel::cube(fixtures().ground.rock));
+                }
+            }
+            for _ in 0..400 {
+                let at = near_seam(&mut rng);
+                start.set_voxel(at, any_voxel(&mut rng));
+            }
+            start.solve_bulk();
+
+            let size = [1, 2, 64, 600][rng.below(4) as usize];
+            let edits: Vec<([i32; 3], Voxel)> = (0..size)
+                .map(|_| (near_seam(&mut rng), any_voxel(&mut rng)))
+                .collect();
+
+            let mut one_at_a_time = Lattice {
+                cells: start.cells.clone(),
+                roof: start.roof.clone(),
+            };
+            for &(at, voxel) in &edits {
+                one_at_a_time.place(at, voxel);
+            }
+
+            let mut batched = Lattice {
+                cells: start.cells.clone(),
+                roof: start.roof.clone(),
+            };
+            let mut was = Vec::new();
+            for &(at, voxel) in &edits {
+                was.push((at, batched.light(at)));
+                batched.set_voxel(at, voxel);
+            }
+            relight_many(&mut batched, tables(), &was);
+
+            let mut fresh = Lattice {
+                cells: batched.cells.clone(),
+                roof: batched.roof.clone(),
+            };
+            fresh.solve_bulk();
+
+            let batched = batched.snapshot();
+            assert!(
+                batched == one_at_a_time.snapshot(),
+                "seed {seed}: batch of {size} against one at a time"
+            );
+            assert!(
+                batched == fresh.snapshot(),
+                "seed {seed}: batch of {size} against a fresh solve"
+            );
         }
     }
 }

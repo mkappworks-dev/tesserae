@@ -35,6 +35,7 @@ pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat
 pub use fluid::{FluidDef, FluidError, FluidTable};
 pub use light::{
     Channel, ChunkLight, Light, LightVolume, MAX_LIGHT, light_cells, light_chunk, relight,
+    relight_many,
 };
 pub use lod::{
     COVERED_SKY, CoarseLight, SeamMargin, Surface, coarse_light, downsample, seam_openings,

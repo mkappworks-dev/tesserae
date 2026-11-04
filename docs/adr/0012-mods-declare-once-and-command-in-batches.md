@@ -21,10 +21,12 @@ boundary.
 is validated before acceptance. Fill membership uses Voxel lower corners in
 `[min,max)`; the host converts through the World's Voxel size, as required by
 [ADR-0003](0003-voxel-size-is-per-world.md). The Server drains fair per-Mod
-queues through the one World change a player's Edit takes, `set_occupants`,
-preserving shaped caps, light, mesh and LOD invalidation. The Client receives
-appearance and meshes, never a queue mutator, so
-[ADR-0002](0002-client-server-from-day-one.md) still has one World authority.
+queues through the one World change a player's Edit takes, `set_occupants`, as
+one write batch a tick (`edit::Batch`): every Voxel lands under the Edit rules
+and the light around all of them re-floods once, preserving shaped caps, light,
+mesh and LOD invalidation. The Client receives appearance and meshes, never a
+queue mutator, so [ADR-0002](0002-client-server-from-day-one.md) still has one
+World authority.
 
 **Mod execution is an asynchronous Job, not work on the tick.** One owned
 instance moves into a worker with events and immutable tables and returns with
@@ -98,8 +100,12 @@ is permission to run within the sandbox, never permission to bypass it.
   history, accumulated reports and queue backpressure limit retained work.
 - Fatal faults disable only that Mod until reopen; previously queued Commands
   still drain. Startup dispatch waits for the held, lit spawn neighborhood.
-- Incremental relight makes large fills slow: the measured drain budget is two
-  Voxels per tick. Bulk writes must preserve the existing Edit invariants.
+- The drain lands 96 Voxels a tick, an emitter counting as 6, and looks at up to
+  4096 (a write of what is already there costs a look, not a write). lumen's
+  19,712 Voxels at 0.5 m drain in 3.1 s instead of 154 s, with a worst drain
+  tick under 2 ms in the test profile. The budget was two Voxels a tick while
+  every write re-flooded light on its own; the batch keeps the Edit invariants
+  and the `relight` that tracks where light came from, so removal stays exact.
 - A Mod cannot read the World. A future region read needs a Snapshot and a
   batched contract rather than a per-Voxel host call.
 - Export lookup is semver-compatible across patches within a line, as the
