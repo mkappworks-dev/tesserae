@@ -25,8 +25,8 @@ use tesserae_core::lod::{
 };
 use tesserae_core::worldgen::WaterParams;
 use tesserae_core::{
-    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, SeamMargin, SeamOpenings,
-    Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk_with_seams, seam_openings,
+    CHUNK_SIZE, Chunk, ChunkMesh, ChunkOverlay, LitChunk, MeshLayer, OreTable, SeamMargin,
+    SeamOpenings, Tables, Voxel, Worldgen, WorldgenParams, mesh_chunk_with_seams, seam_openings,
 };
 
 use super::jobs::Stage;
@@ -217,6 +217,7 @@ impl LodGenerators {
                     let params = WorldgenParams {
                         smoothing: None,
                         caves: p.caves.filter(|_| caves),
+                        ores: if caves { p.ores } else { OreTable::default() },
                         sea_level_m: p.sea_level_m - half,
                         water: p.water.map(|w| WaterParams {
                             level_m: (w.level_m - half).next_up(),
@@ -3624,6 +3625,7 @@ mod tests {
 
     mod biomes;
     mod held;
+    mod ores;
     mod saved;
     mod seams;
 }

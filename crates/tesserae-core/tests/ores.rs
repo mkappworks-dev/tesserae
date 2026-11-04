@@ -1,9 +1,9 @@
 //! The ore record a World declares: validated plain data, empty by default,
-//! carried in `WorldgenParams` and changing no generated Chunk yet.
+//! carried in `WorldgenParams`. Where it generates is `ore_veins.rs`.
 
 use tesserae_core::{
-    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, CHUNK_SIZE, MAX_BIOMES, MAX_ORES, Ore,
-    OreTable, Worldgen, WorldgenParams,
+    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, MAX_BIOMES, MAX_ORES, Ore, OreTable,
+    WorldgenParams,
 };
 
 fn ore() -> Ore {
@@ -150,31 +150,4 @@ fn params_refuse_an_ore_that_names_a_biome_the_world_lacks() {
             .validate()
             .is_ok()
     );
-}
-
-#[test]
-fn declaring_ores_changes_no_generated_chunk() {
-    let plain = tesserae_core::testgen::world_params();
-    let with_ores = WorldgenParams {
-        ores: OreTable::new(&[Ore {
-            material: plain.ground.unwrap().rock,
-            ..ore()
-        }])
-        .unwrap(),
-        ..plain
-    };
-    let (a, b) = (
-        Worldgen::new(7, 1.0, plain),
-        Worldgen::new(7, 1.0, with_ores),
-    );
-    for (cx, cy, cz) in [(0, 0, 0), (1, 0, -2), (-3, 1, 4), (2, -1, 2)] {
-        let (a, b) = (a.chunk(cx, cy, cz), b.chunk(cx, cy, cz));
-        for z in 0..CHUNK_SIZE {
-            for y in 0..CHUNK_SIZE {
-                for x in 0..CHUNK_SIZE {
-                    assert_eq!(a.get(x, y, z), b.get(x, y, z), "{cx},{cy},{cz}");
-                }
-            }
-        }
-    }
 }

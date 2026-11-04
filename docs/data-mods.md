@@ -92,8 +92,14 @@ its Biome, switching hard at the border, and a Biome without `ground` has the
 World's; surface height, relief, sea level and lakes are never a Biome's. A
 World with no ground is empty air whatever its Biomes name.
 
+An ore is a blob of `vein-size-m` metres at most, in a cube of that edge; a
+`rarity` fraction of the cubes hold one. It replaces rock only, never soil, the
+surface, water or air, inside its depth band and its Biomes. Caves carve the ore
+with the rock, the farthest LOD levels carry none, and a World on Generator
+version 1 has none.
+
 Tables that are absent change nothing: a World with no Biomes generates as it
-always did. Declaring ores only records them: this step does not place ore.
+always did.
 
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes

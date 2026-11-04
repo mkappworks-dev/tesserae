@@ -1,6 +1,6 @@
 # 05: Ores
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -10,10 +10,10 @@ A Game declares ores and they appear as noise blobs in metres, only in the rock 
 
 ## Acceptance criteria
 
-- [ ] Ore never replaces soil, surface, water or air.
-- [ ] Ore appears only inside its depth band and only in its Biomes.
-- [ ] The same seed gives the same veins at different Voxel sizes.
-- [ ] Levels 1 and 2 derive ore from level 0; levels 3 and up have none.
+- [x] Ore never replaces soil, surface, water or air.
+- [x] Ore appears only inside its depth band and only in its Biomes.
+- [x] The same seed gives the same veins at different Voxel sizes.
+- [x] Levels 1 and 2 derive ore from level 0; levels 3 and up have none.
 
 ## Comments
 

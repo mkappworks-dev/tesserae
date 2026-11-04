@@ -15,7 +15,7 @@ use crate::climate::{
 };
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
-use crate::ore::OreTable;
+use crate::ore::{OreField, OreMask, OreTable};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -51,8 +51,7 @@ pub struct WorldgenParams {
     pub climate: ClimateParams,
     /// Empty is a World with no Biomes. Ignored by Generator version 1.
     pub biomes: BiomeTable,
-    /// Empty is a World without ore. Declared and saved, not yet generated.
-    /// Ignored by Generator version 1.
+    /// Empty is a World without ore. Ignored by Generator version 1.
     pub ores: OreTable,
     /// Which generation algorithm runs. A World pins the version it was created
     /// with, so a revision never reshapes terrain that already exists.
@@ -486,6 +485,8 @@ pub struct Worldgen {
     water: Option<WaterParams>,
     climate: ClimateField,
     biome_grounds: Option<BiomeGrounds>,
+    /// `None` without ores, and under a Generator version from before them.
+    ores: Option<OreField>,
 }
 
 /// Every Biome's ground with its omissions filled from the World's, so a
@@ -546,6 +547,7 @@ impl Worldgen {
             }),
             climate: ClimateField::new(folded, params.climate),
             biome_grounds: BiomeGrounds::new(&params),
+            ores: OreField::new(folded, &params.ores).filter(|_| params.generator >= BIOMES_SINCE),
         }
     }
 
@@ -644,6 +646,9 @@ impl Worldgen {
         }
         if ceiling_m < lowest - self.params.soil_depth_m {
             let mut chunk = self.deep_rock(cx, cz, ground);
+            if let Some((field, ores)) = self.ores_reaching(floor_m, ceiling_m) {
+                self.sow_deep_rock(&mut chunk, [cx, cz], origin_m, field, ores);
+            }
             // A Chunk that only *might* hold a tunnel stays `filled` unless a
             // Voxel is actually carved, so the light and mesh fast paths that
             // key off `uniform()` still fire for it.
@@ -694,6 +699,7 @@ impl Worldgen {
             })
             .map(|caves| (caves, self.reachable_blocks(caves, origin_m, top_m)));
 
+        let ores = self.ores_reaching(floor_m, ceiling_m);
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
         for z in 0..CHUNK_SIZE {
@@ -704,6 +710,7 @@ impl Worldgen {
                 let ground = columns
                     .as_ref()
                     .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
+                let biome = self.column_biome([cx, cz], [x, z]);
 
                 for y in 0..CHUNK_SIZE {
                     let y_m = floor_m + y as f32 * self.voxel_size;
@@ -731,7 +738,10 @@ impl Worldgen {
                     } else if below_m < self.params.soil_depth_m {
                         ground.soil
                     } else {
-                        ground.rock
+                        ores.and_then(|(field, mask)| {
+                            field.at(mask, [x_m, y_m, z_m], below_m, &biome)
+                        })
+                        .unwrap_or(ground.rock)
                     };
                     chunk.set(x, y, z, Voxel::cube(material));
                 }
@@ -774,6 +784,57 @@ impl Worldgen {
             }
         }
         chunk.build()
+    }
+
+    /// The ores with a Voxel in a Chunk spanning `floor_m..=ceiling_m`, if any
+    /// do. Depth is measured from a surface somewhere in the surface band, so
+    /// this only ever errs towards reaching.
+    fn ores_reaching(&self, floor_m: f32, ceiling_m: f32) -> Option<(&OreField, OreMask)> {
+        let field = self.ores.as_ref()?;
+        let (lowest, highest) = self.surface_bounds_m();
+        let mask = field.reaching((lowest - ceiling_m).max(0.0), highest - floor_m);
+        (!mask.is_empty()).then_some((field, mask))
+    }
+
+    /// The Biome of a column, looked up the first time it is asked and not at
+    /// all in a column no ore vein touches.
+    fn column_biome(
+        &self,
+        [cx, cz]: [i32; 2],
+        [x, z]: [usize; 2],
+    ) -> impl Fn() -> Option<BiomeId> + '_ {
+        let cell = std::cell::OnceCell::new();
+        move || {
+            *cell
+                .get_or_init(|| self.biome_at(self.axis_m(cx, x as i32), self.axis_m(cz, z as i32)))
+        }
+    }
+
+    /// Puts veins in a Chunk below the surface band that is rock throughout,
+    /// where depth needs the surface of each of its columns.
+    fn sow_deep_rock(
+        &self,
+        chunk: &mut Chunk,
+        coord: [i32; 2],
+        origin_m: [f32; 3],
+        field: &OreField,
+        ores: OreMask,
+    ) {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let x_m = origin_m[0] + x as f32 * self.voxel_size;
+                let z_m = origin_m[2] + z as f32 * self.voxel_size;
+                let surface_m = self.surface_height_m(x_m, z_m);
+                let biome = self.column_biome(coord, [x, z]);
+                for y in 0..CHUNK_SIZE {
+                    let y_m = origin_m[1] + y as f32 * self.voxel_size;
+                    if let Some(material) = field.at(ores, [x_m, y_m, z_m], surface_m - y_m, &biome)
+                    {
+                        chunk.set(x, y, z, Voxel::cube(material));
+                    }
+                }
+            }
+        }
     }
 
     /// Eases every one-Voxel step in the ground with a stair or slab on top of
