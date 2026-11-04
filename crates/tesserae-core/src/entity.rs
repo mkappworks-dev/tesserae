@@ -168,8 +168,8 @@ impl Entities {
 
     /// Spawns a drop of `count` of `item` at the centre of the Voxel `at`,
     /// popping out in a direction fixed by its id and the step. A drop that
-    /// would start inside solid terrain is lifted clear of it, by at most
-    /// [`LIFT_MAX_M`].
+    /// would start inside solid terrain is lifted clear of it, by at most a
+    /// metre.
     pub fn spawn_drop(
         &mut self,
         vol: &impl VoxelVolume,
