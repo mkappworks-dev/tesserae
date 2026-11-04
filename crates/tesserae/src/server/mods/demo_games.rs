@@ -18,7 +18,7 @@ fn checkout() -> PathBuf {
 }
 
 /// A scratch install (`games/<id>` and `mods/<dep>...`) under target/, removed on drop.
-struct Install(PathBuf);
+pub(super) struct Install(PathBuf);
 
 impl Drop for Install {
     fn drop(&mut self) {
@@ -81,7 +81,7 @@ fn install(game: &str) -> Install {
     Install(root)
 }
 
-fn loaded(game: &str, voxel_size: f32) -> (Install, LoadedMods) {
+pub(super) fn loaded(game: &str, voxel_size: f32) -> (Install, LoadedMods) {
     let install = install(game);
     let loaded = load(
         &install.0.join("mods"),

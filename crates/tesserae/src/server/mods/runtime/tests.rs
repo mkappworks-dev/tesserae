@@ -856,6 +856,143 @@ fn measure_gallery_budget() {
     );
 }
 
+/// What draining a build costs: ticks to empty the queue, and the drain's
+/// thread CPU per tick, with streaming ticking beside it as on the Server.
+#[cfg(feature = "profiling")]
+fn measure_drain(label: &str, loaded: LoadedMods, size: f32, batches: Vec<CommandBatch>) {
+    use crate::cost::thread_cpu;
+    use crate::server::streaming::tests::Harness as StreamingHarness;
+    use crate::server::streaming::{StreamingBudget, StreamingSettings};
+    let budget = std::env::var("TESSERAE_DRAIN_BUDGET")
+        .ok()
+        .map_or(MOD_VOXELS_PER_TICK, |v| v.parse().unwrap());
+    let voxels: u64 = batches.iter().map(|b| b.voxels).sum();
+    let (mut min, mut max) = ([i32::MAX; 3], [i32::MIN; 3]);
+    for batch in &batches {
+        for command in &batch.commands {
+            if let Resolved::Fill { region, .. } = command {
+                for at in region.cursor() {
+                    min = std::array::from_fn(|i| min[i].min(at[i]));
+                    max = std::array::from_fn(|i| max[i].max(at[i]));
+                }
+            }
+        }
+    }
+    let center = Vec3::from_array(std::array::from_fn(|i| {
+        (min[i] + max[i]) as f32 * 0.5 * size
+    }));
+    let settings = StreamingSettings {
+        view_distance_m: 48.0,
+        vertical_distance_m: 32.0,
+        hysteresis_m: 32.0,
+        lod_distance_m: 48.0,
+    };
+    let world = WorldSettings {
+        voxel_size: size,
+        seed: 7,
+    };
+    let params = loaded.world.expect("a Game sets its World");
+    let mut h = StreamingHarness::with_world(settings, StreamingBudget::default(), world, params);
+    h.app
+        .insert_resource(ContentTables(std::sync::Arc::new(loaded.tables)))
+        .init_resource::<PendingCommands>();
+    h.anchor_at(center);
+    h.settle();
+    for batch in batches {
+        h.app
+            .world_mut()
+            .resource_mut::<PendingCommands>()
+            .queue(0)
+            .push(batch);
+    }
+    let (mut ticks, mut sum, mut worst, mut worst_stream) = (0u64, 0.0f64, 0.0f64, 0.0f64);
+    while h.app.world().resource::<PendingCommands>().queues[0].voxels > 0 {
+        h.app
+            .world_mut()
+            .resource_scope(|world, mut store: Mut<ChunkStore>| {
+                world.resource_scope(|world, mut meshes: Mut<MeshState>| {
+                    let tables = ContentTables(Arc::clone(&world.resource::<ContentTables>().0));
+                    let mut pending = world.resource_mut::<PendingCommands>();
+                    let start = thread_cpu().unwrap();
+                    pending.drain(&mut store, &mut meshes, &tables, budget);
+                    let spent = thread_cpu().unwrap() - start;
+                    sum += spent;
+                    worst = worst.max(spent);
+                });
+            });
+        let start = thread_cpu().unwrap();
+        h.tick();
+        worst_stream = worst_stream.max(thread_cpu().unwrap() - start);
+        ticks += 1;
+    }
+    let report = &h.app.world().resource::<PendingCommands>().queues[0].report;
+    println!(
+        "drain {label} budget={budget} voxels={voxels} applied={} rejected={} ticks={ticks} \
+         seconds_at_64hz={:.2} drain_cpu_s={sum:.3} mean_drain_ms={:.4} worst_drain_ms={:.4} \
+         worst_stream_tick_ms={:.4} voxels_per_drain_cpu_s={:.0}",
+        report.applied,
+        report.rejected,
+        ticks as f64 / 64.0,
+        sum * 1000.0 / ticks.max(1) as f64,
+        worst * 1000.0,
+        worst_stream * 1000.0,
+        voxels as f64 / sum.max(1e-9),
+    );
+}
+
+/// lumen's build at 0.5 m Voxels, drained through the real drain.
+#[cfg(feature = "profiling")]
+#[test]
+#[ignore = "manual interleaved measurement; TESSERAE_DRAIN_BUDGET overrides the budget"]
+fn measure_lumen_build_drain() {
+    let size = 0.5;
+    let (_install, mut loaded) = super::super::demo_games::loaded("lumen", size);
+    let mut instance = loaded.mods.remove(0);
+    let line = instance.line();
+    let mut batches = Vec::new();
+    // As `demo_games` runs it: the build is sent within two seconds, before
+    // the first lantern.
+    for tick in 0..40 {
+        let context = TickContext {
+            tick,
+            dt_s: 0.05,
+            edits: Vec::new(),
+            last: BatchReport::default(),
+        };
+        let (next, commands) = bevy::tasks::block_on(instance.tick(context)).unwrap();
+        instance = next;
+        let batch = validate(&commands, line, &loaded.tables, size).unwrap();
+        if batch.voxels > 0 {
+            batches.push(batch);
+        }
+    }
+    measure_drain("lumen", loaded, size, batches);
+}
+
+/// A plain 16³ stone fill into open air, 5 m over lumen's ground beside the
+/// spawn.
+#[cfg(feature = "profiling")]
+#[test]
+#[ignore = "manual interleaved measurement; TESSERAE_DRAIN_BUDGET overrides the budget"]
+fn measure_plain_fill_drain() {
+    let size = 0.5;
+    let (_install, loaded) = super::super::demo_games::loaded("lumen", size);
+    let stone = loaded
+        .registry
+        .id_of(tesserae_mods::Kind::Material, "strata:stone")
+        .unwrap() as u16;
+    let fill = Command::Fill {
+        region: Region {
+            min: [-4.0, 30.0, -12.0],
+            max: [4.0, 38.0, -4.0],
+        },
+        voxel: Voxel::cube(stone),
+    };
+    let batch = validate(&[fill], Line::V03, &loaded.tables, size).unwrap();
+    assert_eq!(batch.voxels, 4096);
+    measure_drain("plain_fill", loaded, size, vec![batch]);
+}
+
 #[test]
 fn the_fixed_pre_update_drain_runs_after_player_apply_pending() {
     use crate::server::edit::{EditAction, EditIntent};

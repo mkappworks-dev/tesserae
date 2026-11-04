@@ -26,6 +26,10 @@ harness = false
 name = "coarse_breakdown"
 harness = false
 
+[[bench]]
+name = "relight"
+harness = false
+
 [dependencies]
 getrandom = "0.4"
 serde = { version = "1", features = ["derive"] }
