@@ -1,4 +1,4 @@
-# Biomes are column content, and a World pins its generator
+# Biomes are column content chosen by Climate, and a World pins its generator version
 
 Status: accepted.
 
