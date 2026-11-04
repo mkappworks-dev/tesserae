@@ -1,6 +1,6 @@
 # 04: The Client draws drops and the carried count
 
-Status: ready-for-human
+Status: done
 
 Blocked by: 02, 03
 
@@ -19,5 +19,5 @@ as in the agreed mockup. Nothing outside F3 shows Carried.
 - [x] Draws correctly at the 0.1 m and 0.5 m Voxel sizes (item size is metres).
 - [x] The Carried line shows names and counts in F3 only; the toast appears on
       pickup and fades.
-- [ ] One offscreen capture is reviewed by the user, then deleted. (Needs the
+- [x] One offscreen capture is reviewed by the user, then deleted. (Needs the
       user: the agent cannot judge the look.)
