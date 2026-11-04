@@ -279,7 +279,12 @@ one `/tmp` folder, never committed, deleted after review) check the palette.
 
 ## Further Notes
 
-- Step 12 runs in parallel on `feat/phase-12-dropped-items`. Shared surfaces:
+- Step 12 has since merged (#55), and the branch is rebased on it. It followed
+  the same pattern this spec uses: an optional `entities` field that changes
+  neither the format nor the generator version, `items` appended to the 0.3
+  declaration, and an "Amended before release" section in the contract
+  compatibility doc. Biomes append beside `items` and extend that section.
+- Step 12 ran in parallel on `feat/phase-12-dropped-items`. Shared surfaces:
   the save format (keep the version field additive, separate from entities),
   the 0.3 declaration and its compatibility doc (touch only what Biomes need),
   and server tick and plugin wiring (keep worldgen changes inside worldgen
