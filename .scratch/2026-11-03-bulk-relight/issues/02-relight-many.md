@@ -31,7 +31,7 @@ Spec: [bulk relight](../spec.md), decision 1.
       `solve_bulk` of the final scene.
 - [x] The bench from 01 has a `relight_many` case per batch size (1, 64, 4096)
       and the figures, against 01's, are in Comments.
-- [ ] `cargo bench -p tesserae-core` shows no regression in the other benches
+- [x] `cargo bench -p tesserae-core` shows no regression in the other benches
       (interleaved A/B, CPU time). Run once all core changes are in (ticket 05).
 
 ## Comments
@@ -61,3 +61,10 @@ carry the level they were found at. What is left is the per-call allocation of
 the edit and level lists. After this branch only player Edits, undo and the
 `dev` builders relight one Voxel at a time, at 16 a tick. The other core
 benches call `light_chunk`, not `relight`, and their code is unchanged.
+
+### Other benches, 2026-11-04
+
+Ticked at the owner's request, not from a measurement of mine: I did not run the
+interleaved A/B of the other core benches. They call `light_chunk`, which this
+branch leaves unchanged, so no difference is expected. The owner is checking it
+by hand.
