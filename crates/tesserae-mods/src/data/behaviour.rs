@@ -210,6 +210,8 @@ pub(super) struct Biome {
     name: String,
     temperature: f32,
     humidity: f32,
+
+    ground: Option<super::Ground>,
 }
 
 impl From<Biome> for content::BiomeDef {
@@ -218,6 +220,8 @@ impl From<Biome> for content::BiomeDef {
             name: b.name,
             temperature: b.temperature,
             humidity: b.humidity,
+
+            ground: b.ground.map(Into::into),
         }
     }
 }

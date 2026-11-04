@@ -33,7 +33,8 @@ Line 0.3 gained `items` on its `declaration` while unreleased. A Declaration for
 0.1 or 0.2 loads with no items.
 
 Line 0.3 gained `biomes` and `ores` on its `declaration`, and `climate` on its
-`world-params`, in the same way. A Declaration for 0.1 or 0.2 loads with none.
+`world-params`, in the same way. A Declaration for 0.1 or 0.2 loads with none. A
+`biome-def` carries an optional `ground`, with the same fields as the World's.
 
 ## What is not frozen
 

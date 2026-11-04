@@ -509,6 +509,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> crate::Biome {
         name: crate::BiomeName::new(name).unwrap(),
         temperature,
         humidity,
+        ground: None,
     }
 }
 
@@ -556,6 +557,65 @@ fn biomes_climate_and_ores_restore_in_order_with_their_materials_remapped() {
     assert_eq!(ores[0].biomes, was[0].biomes);
     assert_eq!(ores[1].biomes, was[1].biomes);
     assert_eq!(ores[0].rarity, was[0].rarity);
+}
+
+#[test]
+fn a_biomes_ground_is_saved_by_name_and_restored_through_the_mapping() {
+    let mut params = biome_params(2);
+    let table = params.biomes.as_slice().to_vec();
+    let ground = crate::GroundParams {
+        rock: 9,
+        soil: 8,
+        surface: 9,
+    };
+    params.biomes = crate::BiomeTable::new(&[
+        table[0],
+        crate::Biome {
+            ground: Some(ground),
+            ..table[1]
+        },
+        table[2],
+    ])
+    .unwrap();
+    let saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(
+        json["biomes"][1]["ground"],
+        serde_json::json!(["terra:water", "terra:stone", "terra:water"])
+    );
+    assert!(json["biomes"][0].get("ground").is_none());
+
+    let restored = saved.restore(&mapping(17, 8, 5), 2).unwrap();
+    let biomes = restored.biomes.as_slice();
+    assert_eq!(biomes[0].ground, None);
+    assert_eq!(biomes[2].ground, None);
+    assert_eq!(
+        biomes[1].ground,
+        Some(crate::GroundParams {
+            rock: 8,
+            soil: 17,
+            surface: 8
+        })
+    );
+}
+
+#[test]
+fn a_biome_ground_naming_a_missing_material_is_corrupt() {
+    let mut params = biome_params(2);
+    let first = params.biomes.as_slice()[0];
+    params.biomes = crate::BiomeTable::new(&[crate::Biome {
+        ground: Some(crate::GroundParams {
+            rock: 8,
+            soil: 8,
+            surface: 8,
+        }),
+        ..first
+    }])
+    .unwrap();
+    params.ores = Default::default();
+    let mut saved = Generation::capture(params, &mapping(8, 9, 4)).unwrap();
+    saved.biomes.as_mut().unwrap()[0].ground.as_mut().unwrap()[2] = "terra:ruby".into();
+    assert!(saved.restore(&mapping(8, 9, 4), 2).is_err());
 }
 
 #[test]
@@ -670,8 +730,16 @@ fn a_snapshot_that_cannot_be_restored_is_corrupt() {
     ] {
         assert!(g.restore(&m, 2).is_err(), "{what}");
     }
-    let outside = r#"[{"name":"x","temperature":2.0,"humidity":0.5}]"#;
-    assert!(serde_json::from_str::<crate::BiomeTable>(outside).is_err());
+
+    let mut outside = good.clone();
+    outside.biomes.as_mut().unwrap()[0].temperature = 2.0;
+    assert!(
+        outside.restore(&m, 2).is_err(),
+        "a point outside the square"
+    );
+    let mut nameless = good.clone();
+    nameless.biomes.as_mut().unwrap()[0].name.clear();
+    assert!(nameless.restore(&m, 2).is_err(), "an empty name");
 }
 
 #[test]

@@ -1006,6 +1006,7 @@ fn declares_biomes(names: [&str; 2]) -> impl FnOnce(&mut crate::server::mods::Lo
             name: BiomeName::new(name).unwrap(),
             temperature,
             humidity: 0.5,
+            ground: None,
         };
         loaded.world = Some(WorldgenParams {
             climate: ClimateParams {
@@ -1076,6 +1077,60 @@ fn a_reopened_world_keeps_its_own_biomes_whatever_the_game_declares_now() {
     assert_eq!(reopened.ores.len(), 1);
     let without = prepared_world(&dir, |l| l.world = None);
     assert_eq!(biome_names(&without), ["terra:dry", "terra:wet"]);
+}
+
+/// `declares_biomes` with the first Biome's ground named, `None` leaving it the World's.
+fn declares_ground(ground: Option<[&str; 3]>) -> impl FnOnce(&mut crate::server::mods::LoadedMods) {
+    move |loaded| {
+        declares_biomes(["terra:dry", "terra:wet"])(loaded);
+        let ground = ground.map(|names| {
+            let id = |n| loaded.registry.id_of(Kind::Material, n).unwrap() as u16;
+            tesserae_core::GroundParams {
+                rock: id(names[0]),
+                soil: id(names[1]),
+                surface: id(names[2]),
+            }
+        });
+        let world = loaded.world.as_mut().unwrap();
+        let mut biomes = world.biomes.as_slice().to_vec();
+        biomes[0].ground = ground;
+        world.biomes = tesserae_core::BiomeTable::new(&biomes).unwrap();
+    }
+}
+
+#[test]
+fn a_biomes_ground_is_saved_by_name_and_a_reopened_world_keeps_it() {
+    let dir = Directory::new();
+    Rig::open_with(
+        dir.opening(),
+        WorldSettings::default(),
+        declares_ground(Some(["terra:dirt", "terra:grass", "terra:stone"])),
+    )
+    .settled_save();
+    let saved = save::inspect(&dir.0).unwrap().unwrap().commit.parameters;
+    assert_eq!(
+        saved.biomes.unwrap()[0].ground,
+        Some(["terra:dirt", "terra:grass", "terra:stone"].map(String::from))
+    );
+
+    // The Game now gives that Biome other ground, or none: the World's snapshot wins.
+    for game in [None, Some(["terra:stone", "terra:stone", "terra:grass"])] {
+        let reopened = prepared_world(&dir, declares_ground(game));
+        let (stone, grass, dirt) = {
+            let tables =
+                crate::server::mods::terra_for_save(&dir.opening(), &WorldSettings::default());
+            let id = |n| tables.registry.id_of(Kind::Material, n).unwrap() as u16;
+            (id("terra:stone"), id("terra:grass"), id("terra:dirt"))
+        };
+        let ground = reopened.biomes.as_slice()[0]
+            .ground
+            .expect("the saved ground");
+        assert_eq!(
+            (ground.rock, ground.soil, ground.surface),
+            (dirt, grass, stone)
+        );
+        assert_eq!(reopened.biomes.as_slice()[1].ground, None);
+    }
 }
 
 #[test]

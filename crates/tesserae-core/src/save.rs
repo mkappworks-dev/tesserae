@@ -454,9 +454,21 @@ pub struct Generation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub climate: Option<crate::ClimateParams>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub biomes: Option<crate::BiomeTable>,
+    pub biomes: Option<Vec<SavedBiome>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ores: Option<Vec<SavedOre>>,
+}
+
+/// A [`crate::Biome`] as the save holds it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedBiome {
+    pub name: String,
+    pub temperature: f32,
+    pub humidity: f32,
+    /// Rock, soil and surface by name; absent is the World's own ground.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground: Option<[String; 3]>,
 }
 
 /// An [`crate::Ore`] with its Material and Biomes by name, since ids are only
@@ -492,18 +504,17 @@ impl Generation {
                 .water
                 .map(|w| Ok::<_, Error>((w.level_m, mapping.material_name(w.material)?)))
                 .transpose()?,
-            ground: p
-                .ground
-                .map(|g| {
-                    Ok::<_, Error>([
-                        mapping.material_name(g.rock)?,
-                        mapping.material_name(g.soil)?,
-                        mapping.material_name(g.surface)?,
-                    ])
+            ground: p.ground.map(|g| ground_names(g, mapping)).transpose()?,
+            climate: has_biomes.then_some(p.climate),
+            biomes: has_biomes
+                .then(|| {
+                    p.biomes
+                        .as_slice()
+                        .iter()
+                        .map(|b| saved_biome(b, mapping))
+                        .collect::<Result<_, _>>()
                 })
                 .transpose()?,
-            climate: has_biomes.then_some(p.climate),
-            biomes: has_biomes.then_some(p.biomes),
             ores: has_ores
                 .then(|| {
                     p.ores
@@ -525,7 +536,13 @@ impl Generation {
     ) -> Result<crate::WorldgenParams, Error> {
         mapping.validate()?;
         let biomes_apply = generator >= crate::climate::BIOMES_SINCE;
-        let biomes = self.biomes.filter(|_| biomes_apply).unwrap_or_default();
+        let biomes = self
+            .biomes
+            .as_deref()
+            .filter(|_| biomes_apply)
+            .map(|saved| restored_biomes(saved, mapping))
+            .transpose()?
+            .unwrap_or_default();
         let ores = self
             .ores
             .as_deref()
@@ -556,13 +573,7 @@ impl Generation {
             ground: self
                 .ground
                 .as_ref()
-                .map(|names| {
-                    Ok::<_, Error>(crate::GroundParams {
-                        rock: mapping.material_id(&names[0])?,
-                        soil: mapping.material_id(&names[1])?,
-                        surface: mapping.material_id(&names[2])?,
-                    })
-                })
+                .map(|names| ground_ids(names, mapping))
                 .transpose()?,
             climate: self.climate.filter(|_| biomes_apply).unwrap_or_default(),
             biomes,
@@ -571,6 +582,50 @@ impl Generation {
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
         Ok(p)
     }
+}
+
+fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error> {
+    Ok(SavedBiome {
+        name: b.name.to_string(),
+        temperature: b.temperature,
+        humidity: b.humidity,
+        ground: b.ground.map(|g| ground_names(g, mapping)).transpose()?,
+    })
+}
+
+fn ground_names(g: crate::GroundParams, mapping: &Mapping) -> Result<[String; 3], Error> {
+    Ok([
+        mapping.material_name(g.rock)?,
+        mapping.material_name(g.soil)?,
+        mapping.material_name(g.surface)?,
+    ])
+}
+
+fn ground_ids(names: &[String; 3], mapping: &Mapping) -> Result<crate::GroundParams, Error> {
+    Ok(crate::GroundParams {
+        rock: mapping.material_id(&names[0])?,
+        soil: mapping.material_id(&names[1])?,
+        surface: mapping.material_id(&names[2])?,
+    })
+}
+
+fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::BiomeTable, Error> {
+    let biomes = saved
+        .iter()
+        .map(|b| {
+            Ok(crate::Biome {
+                name: crate::BiomeName::new(&b.name).map_err(|e| Error::Corrupt(e.to_string()))?,
+                temperature: b.temperature,
+                humidity: b.humidity,
+                ground: b
+                    .ground
+                    .as_ref()
+                    .map(|names| ground_ids(names, mapping))
+                    .transpose()?,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::BiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))
 }
 
 fn saved_ore(

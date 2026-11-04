@@ -1,6 +1,6 @@
 # 04: Ground per Biome
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02, 03
 
@@ -10,11 +10,11 @@ Columns take their ground Materials from their Biome, switching hard at the warp
 
 ## Acceptance criteria
 
-- [ ] Two Biomes produce visibly different ground in a generated Chunk; the border is hard and irregular.
-- [ ] Surface height, relief, sea level and the surface bounds are unchanged by Biomes.
-- [ ] An empty Biome table yields output identical to version 1.
-- [ ] Adding a Biome to a Game leaves an existing World's reopened terrain unchanged.
-- [ ] Levels 1 to 3 and up show the same Biome ground as level 0 at the same metres, at more than one Voxel size.
+- [x] Two Biomes produce visibly different ground in a generated Chunk; the border is hard and irregular.
+- [x] Surface height, relief, sea level and the surface bounds are unchanged by Biomes.
+- [x] An empty Biome table yields output identical to version 1.
+- [x] Adding a Biome to a Game leaves an existing World's reopened terrain unchanged.
+- [x] Levels 1 to 3 and up show the same Biome ground as level 0 at the same metres, at more than one Voxel size.
 
 ## Comments
 

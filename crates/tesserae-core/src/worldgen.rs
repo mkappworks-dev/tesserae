@@ -10,7 +10,9 @@
 //! feeds the benches a fixed surface and makes no World.
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
-use crate::climate::{BIOMES_SINCE, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams};
+use crate::climate::{
+    BIOMES_SINCE, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
+};
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
 use crate::ore::OreTable;
@@ -285,8 +287,13 @@ impl WorldgenParams {
         Ok(())
     }
 
+    /// The World's ground and every Biome's, each held to the same rules.
     pub fn validate_ground(&self, tables: &Tables) -> Result<(), ParamError> {
-        if let Some(ground) = self.ground {
+        let grounds = self
+            .ground
+            .into_iter()
+            .chain(self.biomes.as_slice().iter().filter_map(|b| b.ground));
+        for ground in grounds {
             for (field, material) in [
                 ("ground.rock", ground.rock),
                 ("ground.soil", ground.soil),
@@ -478,7 +485,46 @@ pub struct Worldgen {
     /// The lake, its level already clamped to the surface band.
     water: Option<WaterParams>,
     climate: ClimateField,
+    biome_grounds: Option<BiomeGrounds>,
 }
+
+/// Every Biome's ground with its omissions filled from the World's, so a
+/// column's Materials are one index away. Built only when some Biome's ground
+/// differs from the World's: otherwise no column needs its Biome looked up.
+#[derive(Clone, Copy, Debug)]
+struct BiomeGrounds {
+    world: GroundParams,
+    by_biome: [GroundParams; MAX_BIOMES],
+    /// Every Biome's rock is the World's, so the deep early-out can answer
+    /// without asking which Biome each column is in.
+    same_rock: bool,
+}
+
+impl BiomeGrounds {
+    fn new(params: &WorldgenParams) -> Option<Self> {
+        let world = params.ground?;
+        if params.generator < BIOMES_SINCE
+            || !params
+                .biomes
+                .as_slice()
+                .iter()
+                .any(|b| b.ground.is_some_and(|g| g != world))
+        {
+            return None;
+        }
+        let mut by_biome = [world; MAX_BIOMES];
+        for (slot, biome) in by_biome.iter_mut().zip(params.biomes.as_slice()) {
+            *slot = biome.ground.unwrap_or(world);
+        }
+        Some(BiomeGrounds {
+            world,
+            same_rock: by_biome.iter().all(|g| g.rock == world.rock),
+            by_biome,
+        })
+    }
+}
+
+type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
 impl Worldgen {
     pub fn new(seed: u64, voxel_size: f32, params: WorldgenParams) -> Self {
@@ -499,6 +545,7 @@ impl Worldgen {
                 ..w
             }),
             climate: ClimateField::new(folded, params.climate),
+            biome_grounds: BiomeGrounds::new(&params),
         }
     }
 
@@ -530,6 +577,18 @@ impl Worldgen {
             return None;
         }
         self.climate.biome_at(&self.params.biomes, x_m, z_m)
+    }
+
+    /// The ground of each column of the Chunks at `(cx, cz)`, row by row, or
+    /// `None` when every column has the World's. Asked at the metre position the
+    /// column's surface is, so every LOD level reads the same Biome there.
+    fn column_grounds(&self, cx: i32, cz: i32) -> Option<ColumnGrounds> {
+        let grounds = self.biome_grounds.as_ref()?;
+        Some(std::array::from_fn(|i| {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            self.biome_at(self.axis_m(cx, x), self.axis_m(cz, z))
+                .map_or(grounds.world, |id| grounds.by_biome[id.index()])
+        }))
     }
 
     /// The metre height of the surface over a point on the ground plane.
@@ -584,7 +643,7 @@ impl Worldgen {
             return Chunk::air();
         }
         if ceiling_m < lowest - self.params.soil_depth_m {
-            let mut chunk = Chunk::filled(Voxel::cube(ground.rock));
+            let mut chunk = self.deep_rock(cx, cz, ground);
             // A Chunk that only *might* hold a tunnel stays `filled` unless a
             // Voxel is actually carved, so the light and mesh fast paths that
             // key off `uniform()` still fire for it.
@@ -615,6 +674,13 @@ impl Worldgen {
             .flat_map(|z| (0..CHUNK_SIZE as i32).map(move |x| surface_index(x, z)))
             .map(|i| surface_m[i])
             .fold(f32::MIN, f32::max);
+        // A Chunk above every column of its own holds only air and water, which
+        // take nothing from a Biome.
+        let columns = if floor_m <= top_m {
+            self.column_grounds(cx, cz)
+        } else {
+            None
+        };
         let reachable = self
             .caves
             .as_ref()
@@ -635,6 +701,9 @@ impl Worldgen {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
                 let z_m = origin_m[2] + z as f32 * self.voxel_size;
                 let surface_m = surface_m[surface_index(x as i32, z as i32)];
+                let ground = columns
+                    .as_ref()
+                    .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
 
                 for y in 0..CHUNK_SIZE {
                     let y_m = floor_m + y as f32 * self.voxel_size;
@@ -670,9 +739,41 @@ impl Worldgen {
         }
         let mut chunk = chunk.build();
         if self.smoothing {
-            self.smooth(&mut chunk, &surface_m, [cx, cy, cz], floor_m);
+            self.smooth(
+                &mut chunk,
+                &surface_m,
+                [cx, cy, cz],
+                floor_m,
+                columns.as_ref(),
+            );
         }
         chunk
+    }
+
+    /// A Chunk below the surface band: rock in every column, each column's own
+    /// where Biomes disagree about rock, which is the one case that must ask
+    /// 1024 columns for their Biome before it can answer.
+    fn deep_rock(&self, cx: i32, cz: i32, ground: GroundParams) -> Chunk {
+        let columns = self
+            .biome_grounds
+            .filter(|g| !g.same_rock)
+            .and_then(|_| self.column_grounds(cx, cz));
+        let Some(columns) = columns else {
+            return Chunk::filled(Voxel::cube(ground.rock));
+        };
+        if columns.iter().all(|g| g.rock == columns[0].rock) {
+            return Chunk::filled(Voxel::cube(columns[0].rock));
+        }
+        let mut chunk = ChunkBuilder::new();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let rock = Voxel::cube(columns[z * CHUNK_SIZE + x].rock);
+                for y in 0..CHUNK_SIZE {
+                    chunk.set(x, y, z, rock);
+                }
+            }
+        }
+        chunk.build()
     }
 
     /// Eases every one-Voxel step in the ground with a stair or slab on top of
@@ -686,6 +787,7 @@ impl Worldgen {
         surface_m: &[f32; SURFACE_W * SURFACE_W],
         coord: [i32; 3],
         floor_m: f32,
+        columns: Option<&ColumnGrounds>,
     ) {
         let Some(ground) = self.params.ground else {
             return;
@@ -715,10 +817,13 @@ impl Worldgen {
                         turn = quarter;
                     }
                 }
+                let cap = columns
+                    .map_or(ground, |c| c[z as usize * CHUNK_SIZE + x as usize])
+                    .surface;
                 let voxel = match rising {
                     0 => continue,
-                    1 => Voxel::shaped(ground.surface, SHAPE_STAIR, Orientation::new(POS_Y, turn)),
-                    _ => Voxel::shaped(ground.surface, SHAPE_SLAB, Orientation::IDENTITY),
+                    1 => Voxel::shaped(cap, SHAPE_STAIR, Orientation::new(POS_Y, turn)),
+                    _ => Voxel::shaped(cap, SHAPE_SLAB, Orientation::IDENTITY),
                 };
                 chunk.set(x as usize, y as usize, z as usize, voxel);
                 placed += 1;
@@ -1784,7 +1889,7 @@ mod tests {
                 }
             }
         }
-        g.smooth(&mut chunk, &surface, [0, 0, 0], 0.0);
+        g.smooth(&mut chunk, &surface, [0, 0, 0], 0.0, None);
         // A stair's cell has to be in the Chunk, so columns 26 and up have none
         // to place: 26 candidates a row.
         let per_row = CHUNK_SIZE - 6;

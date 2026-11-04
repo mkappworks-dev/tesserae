@@ -97,6 +97,16 @@ struct Ground {
     surface: String,
 }
 
+impl From<Ground> for content::GroundParams {
+    fn from(g: Ground) -> Self {
+        Self {
+            rock: g.rock,
+            soil: g.soil,
+            surface: g.surface,
+        }
+    }
+}
+
 /// Every artwork file a Declaration names, as (field, Mod-relative path), in Declaration order.
 pub(crate) fn references(id: &str, bytes: &[u8]) -> Result<Vec<(String, String)>, ModError> {
     let data = decode(id, bytes)?;
@@ -197,11 +207,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                     feature_size_m: w.feature_size_m.unwrap_or(defaults.feature_size_m),
                     soil_depth_m: w.soil_depth_m.unwrap_or(defaults.soil_depth_m),
                     octaves: w.octaves.unwrap_or(defaults.octaves),
-                    ground: w.ground.map(|g| content::GroundParams {
-                        rock: g.rock,
-                        soil: g.soil,
-                        surface: g.surface,
-                    }),
+                    ground: w.ground.map(Into::into),
                     climate: w.climate.map(Into::into),
                     caves: w.caves.map(Into::into),
                     smoothing: w.smoothing.map(Into::into),

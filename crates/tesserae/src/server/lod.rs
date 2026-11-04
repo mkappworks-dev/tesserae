@@ -3622,6 +3622,7 @@ mod tests {
         assert!(meshes > 40, "only {meshes} non-empty meshes were compared");
     }
 
+    mod biomes;
     mod held;
     mod saved;
     mod seams;

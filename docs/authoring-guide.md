@@ -138,7 +138,10 @@ supply `world.character` alone
 `[[biomes]]` and `[[ores]]` to the Game's World, in load order, a Biome's id
 being its place in that order; only the Game declares `[world.climate]`. A Biome
 point is in the 0 to 1 Climate square, an ore band is metres below the surface,
-and an ore without `biomes` is in every Biome.
+and an ore without `biomes` is in every Biome. A Biome may name its own `ground`
+(rock, soil and surface, as in `[world.ground]`); a column takes the ground of
+its Biome and switches hard at the border, and a Biome without one has the
+World's. A Biome never changes the surface height.
 
 | Table                       | Fields                                                                                                                                                                   |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -163,7 +166,7 @@ and an ore without `biomes` is in every Biome.
 | `[[combustion]]`            | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`, optional `heat`, `end`                                                                                     |
 | `[[tools]]` (Game)          | `name`, `kind`                                                                                                                                                           |
 | `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item)                             |
-| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1); at most 16 per Mod and in a World                                                                                       |
+| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name); at most 16 per Mod and in a World          |
 | `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                  |
 
 Variants: `occlusion` is `opaque`, `same-material` or `never`; `render` is
@@ -379,6 +382,7 @@ humidity = 0.15
 name = "cold"
 temperature = 0.1
 humidity = 0.4
+ground = { rock = "showcase:stone", soil = "showcase:ash", surface = "showcase:wood" }
 
 [[ores]]
 material = "showcase:iron"

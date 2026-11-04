@@ -177,6 +177,7 @@ humidity = 0.15
 name = "wet"
 temperature = 0.35
 humidity = 0.9
+ground = { rock = "full:rock", soil = "full:ash", surface = "full:wood" }
 
 [[ores]]
 material = "full:ash"

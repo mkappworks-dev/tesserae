@@ -299,11 +299,17 @@ fn component() -> Declaration {
                 name: "dry".into(),
                 temperature: 0.8,
                 humidity: 0.15,
+                ground: None,
             },
             content::BiomeDef {
                 name: "wet".into(),
                 temperature: 0.35,
                 humidity: 0.9,
+                ground: Some(content::GroundParams {
+                    rock: "full:rock".into(),
+                    soil: "full:ash".into(),
+                    surface: "full:wood".into(),
+                }),
             },
         ],
         ores: vec![
@@ -452,6 +458,12 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
         ),
         ("name = \"dry\"", "name = \"dry\"\nextra = 1", "extra"),
         ("humidity = 0.9", "humidity = 0.9\nrain = 3", "rain"),
+        (
+            "soil = \"full:ash\"",
+            "soil = \"full:ash\", peat = 1",
+            "peat",
+        ),
+        ("soil = \"full:ash\", ", "", "soil"),
         ("rarity = 0.05", "rarity = 0.05\nluck = 1", "luck"),
         ("rarity = 0.05", "rarity = \"rare\"", "rarity"),
         (

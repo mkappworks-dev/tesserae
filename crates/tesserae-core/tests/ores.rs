@@ -22,6 +22,7 @@ fn biome(name: &str) -> Biome {
         name: BiomeName::new(name).unwrap(),
         temperature: 0.5,
         humidity: 0.5,
+        ground: None,
     }
 }
 

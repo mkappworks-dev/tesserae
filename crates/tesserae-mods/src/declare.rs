@@ -445,7 +445,7 @@ pub fn resolve_biomes(
 ) -> Result<(BiomeTable, OreTable), ModError> {
     let mut biomes: Vec<Biome> = Vec::new();
     for b in behaviours {
-        for def in &b.biomes {
+        for (row, def) in b.biomes.iter().enumerate() {
             let bad = |source| ModError::Params {
                 id: b.mod_id.clone(),
                 what: "biome",
@@ -457,10 +457,29 @@ pub fn resolve_biomes(
                     rule: "holds at most 16 Biomes in a World",
                 }));
             }
+            let ground = def
+                .ground
+                .as_ref()
+                .map(|names| {
+                    let ground = GroundParams {
+                        rock: lookup(b, registry, "biome", row, &names.rock)?,
+                        soil: lookup(b, registry, "biome", row, &names.soil)?,
+                        surface: lookup(b, registry, "biome", row, &names.surface)?,
+                    };
+                    WorldgenParams {
+                        ground: Some(ground),
+                        ..WorldgenParams::default()
+                    }
+                    .validate_ground(tables)
+                    .map_err(bad)?;
+                    Ok(ground)
+                })
+                .transpose()?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
                 humidity: def.humidity,
+                ground,
             });
         }
     }

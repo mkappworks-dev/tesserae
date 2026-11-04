@@ -358,6 +358,10 @@ interface content {
         /// Both from 0 to 1.
         temperature: f32,
         humidity: f32,
+
+        /// The ground this Biome's columns are made of. `none` uses the Game's
+        /// `world.ground`. Switches hard at the Biome's border.
+        ground: option<ground-params>,
     }
 
     /// A vein of one Material in the rock, centred within a band of depth

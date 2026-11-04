@@ -2,8 +2,8 @@
 
 use tesserae_core::shape::examples;
 use tesserae_core::{
-    Arm, BiomeId, BiomeSet, BiomeTable, ConnectDef, Connections, MaterialError, OreTable,
-    Orientation, ShapeDef, ShapeError, Tables, Voxel, WorldgenParams,
+    Arm, BiomeId, BiomeSet, BiomeTable, ConnectDef, Connections, GroundParams, MaterialError,
+    OreTable, Orientation, ShapeDef, ShapeError, Tables, Voxel, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -1116,7 +1116,16 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         name: name.into(),
         temperature,
         humidity,
+        ground: None,
     }
+}
+
+fn ground(rock: &str, soil: &str, surface: &str) -> Option<content::GroundParams> {
+    Some(content::GroundParams {
+        rock: rock.into(),
+        soil: soil.into(),
+        surface: surface.into(),
+    })
 }
 
 fn ore(material: &str, biomes: &[&str]) -> content::OreDef {
@@ -1194,6 +1203,104 @@ fn biomes_and_ores_append_in_load_order_with_ores_naming_any_mods_biome() {
     assert!(ores[1].biomes.is_unrestricted());
     assert_eq!((ores[0].min_depth_m, ores[0].max_depth_m), (4.0, 30.0));
     assert_eq!((ores[0].vein_size_m, ores[0].rarity), (2.0, 0.1));
+}
+
+#[test]
+fn a_biomes_ground_resolves_to_material_ids_and_an_omitted_ground_stays_none() {
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[
+            (
+                "a",
+                with_biomes(
+                    &["sand", "clay", "dust"],
+                    vec![
+                        content::BiomeDef {
+                            ground: ground("a:sand", "a:clay", "a:dust"),
+                            ..biome("dry", 0.8, 0.1)
+                        },
+                        biome("wet", 0.2, 0.9),
+                    ],
+                    vec![],
+                ),
+            ),
+            (
+                "b",
+                // Another Mod's Materials, as an ore may name them.
+                with_biomes(
+                    &[],
+                    vec![content::BiomeDef {
+                        ground: ground("a:dust", "a:dust", "a:sand"),
+                        ..biome("cold", 0.1, 0.4)
+                    }],
+                    vec![],
+                ),
+            ),
+        ],
+    )
+    .unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as u16;
+    let at = biomes.as_slice();
+    assert_eq!(
+        at[0].ground,
+        Some(GroundParams {
+            rock: id("a:sand"),
+            soil: id("a:clay"),
+            surface: id("a:dust")
+        })
+    );
+    assert_eq!(at[1].ground, None);
+    assert_eq!(
+        at[2].ground,
+        Some(GroundParams {
+            rock: id("a:dust"),
+            soil: id("a:dust"),
+            surface: id("a:sand")
+        })
+    );
+}
+
+#[test]
+fn a_bad_biome_ground_names_the_mod_and_the_field() {
+    let refused = |ground| {
+        let mut d = with_biomes(
+            &["rock"],
+            vec![content::BiomeDef {
+                ground,
+                ..biome("dry", 0.5, 0.5)
+            }],
+            vec![],
+        );
+        d.materials.push(content::MaterialDef {
+            name: "glass".into(),
+            solid: false,
+            ..material("glass")
+        });
+        let mut load = Load::new();
+        let applied = load.apply("m", d).unwrap();
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+    };
+    for (bad, field) in [
+        (ground("m:rock", "m:rock", "m:glass"), "ground.surface"),
+        (ground("core:air", "m:rock", "m:rock"), "ground.rock"),
+        (ground("m:rock", "m:glass", "m:rock"), "ground.soil"),
+    ] {
+        match refused(bad) {
+            ModError::Params { id, what, source } => {
+                assert_eq!((id.as_str(), what), ("m", "biome"));
+                assert_eq!(source.field, field);
+            }
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+    match refused(ground("m:rock", "m:rock", "m:nothing")) {
+        ModError::UnknownName { id, what, name, .. } => assert_eq!(
+            (id.as_str(), what, name.as_str()),
+            ("m", "biome", "m:nothing")
+        ),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]

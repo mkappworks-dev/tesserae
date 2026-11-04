@@ -113,6 +113,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> Biome {
         name: BiomeName::new(name).unwrap(),
         temperature,
         humidity,
+        ground: None,
     }
 }
 
@@ -320,30 +321,6 @@ fn climate_sizes_must_be_positive_and_finite() {
         }
     }
     assert!(WorldgenParams::default().validate().is_ok());
-}
-
-#[test]
-fn the_declaration_shape_is_a_list_of_named_points() {
-    let json = r#"[{"name":"cold","temperature":0.2,"humidity":0.5},
-                   {"name":"warm","temperature":0.8,"humidity":0.5}]"#;
-    let parsed: BiomeTable = serde_json::from_str(json).unwrap();
-    assert_eq!(
-        parsed,
-        table(&[biome("cold", 0.2, 0.5), biome("warm", 0.8, 0.5)])
-    );
-    let again: BiomeTable = serde_json::from_str(&serde_json::to_string(&parsed).unwrap()).unwrap();
-    assert_eq!(again, parsed);
-    assert_eq!(
-        serde_json::from_str::<BiomeTable>("[]").unwrap(),
-        BiomeTable::default()
-    );
-    for bad in [
-        r#"[{"name":"x","temperature":2.0,"humidity":0.5}]"#,
-        r#"[{"name":"","temperature":0.5,"humidity":0.5}]"#,
-        r#"[{"name":"x","temperature":0.5,"humidity":0.5,"extra":1}]"#,
-    ] {
-        assert!(serde_json::from_str::<BiomeTable>(bad).is_err(), "{bad}");
-    }
 }
 
 #[test]

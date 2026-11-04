@@ -7,7 +7,7 @@
 //! `docs/adr/0011-coarse-levels-are-derived.md`).
 
 use crate::noise::fbm2;
-use crate::worldgen::ParamError;
+use crate::worldgen::{GroundParams, ParamError};
 
 /// Octaves of each Climate field. Fixed rather than a parameter: a declaration
 /// sizes the regions, and the border warp supplies the finer detail.
@@ -229,13 +229,17 @@ impl<'de> serde::Deserialize<'de> for BiomeName {
 
 /// A region type: a point in the unit square of temperature and humidity. The
 /// nearest point to a column's Climate wins it. What a Biome owns beyond that
-/// (ground, ores, caves, colours) arrives with the tickets that use it.
-#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+/// (ores, caves, colours) arrives with the tickets that use it.
+///
+/// Not serde: ground is held by Material id, which only means something beside
+/// the tables that made it, so the save writes names (`save::SavedBiome`).
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Biome {
     pub name: BiomeName,
     pub temperature: f32,
     pub humidity: f32,
+    /// `None` takes the World's own ground.
+    pub ground: Option<GroundParams>,
 }
 
 impl Biome {
@@ -243,6 +247,7 @@ impl Biome {
         name: BiomeName::UNUSED,
         temperature: 0.0,
         humidity: 0.0,
+        ground: None,
     };
 }
 
@@ -251,8 +256,8 @@ impl Biome {
 /// which generates exactly as it did before they existed. Order is identity:
 /// [`BiomeId`] is a position here, and a tie goes to the earlier entry.
 ///
-/// Built only through [`BiomeTable::new`] or deserialisation, both of which
-/// check those rules, so a table in hand is a valid one.
+/// Built only through [`BiomeTable::new`], which checks those rules, so a table
+/// in hand is a valid one.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct BiomeTable {
     len: u8,
@@ -311,18 +316,5 @@ impl BiomeTable {
 
     pub fn get(&self, id: BiomeId) -> Option<&Biome> {
         self.as_slice().get(id.index())
-    }
-}
-
-impl serde::Serialize for BiomeTable {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        self.as_slice().serialize(s)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for BiomeTable {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let biomes = Vec::<Biome>::deserialize(d)?;
-        BiomeTable::new(&biomes).map_err(serde::de::Error::custom)
     }
 }

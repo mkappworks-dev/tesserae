@@ -85,10 +85,15 @@ most 32 bytes. An ore row is `material` (a solid Material, by full name),
 `min-depth-m` and `max-depth-m` (the band below the surface, shallow end first),
 `vein-size-m`, `rarity` (above 0, at most 1) and an optional `biomes` list of
 full Biome names from any Mod; omitted, the ore is in every Biome.
-`[world.climate]` is `temperature-size-m` and `humidity-size-m`, in metres.
+`[world.climate]` is `temperature-size-m` and `humidity-size-m`, in metres. A
+Biome row may add `ground = { rock, soil, surface }`, solid Materials by full
+name from any Mod, checked as `[world.ground]` is. A column takes the ground of
+its Biome, switching hard at the border, and a Biome without `ground` has the
+World's; surface height, relief, sea level and lakes are never a Biome's. A
+World with no ground is empty air whatever its Biomes name.
+
 Tables that are absent change nothing: a World with no Biomes generates as it
-always did. Declaring them only records them: this step neither selects ground
-by Biome nor places ore.
+always did. Declaring ores only records them: this step does not place ore.
 
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
