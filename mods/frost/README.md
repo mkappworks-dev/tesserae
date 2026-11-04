@@ -11,7 +11,7 @@ Shape.
 
 **Depends on:** nothing.
 
-**Used by:** nothing yet.
+**Used by:** `lumen`.
 
 ## Licence and artwork
 

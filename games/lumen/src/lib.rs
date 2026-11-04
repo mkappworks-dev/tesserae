@@ -11,7 +11,9 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 use tesserae::mods::commands::Fill;
-use tesserae::mods::content::{GroundParams, MovementPolicy};
+use tesserae::mods::content::{
+    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
+};
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
 /// Ground spans `SEA_LEVEL_M` to `SEA_LEVEL_M + RELIEF_M`; the garden's floor is levelled above
@@ -20,6 +22,9 @@ const SEA_LEVEL_M: f32 = 24.0;
 const RELIEF_M: f32 = 1.0;
 const FLOOR_M: f32 = SEA_LEVEL_M + RELIEF_M + 1.0;
 const WALL_M: f32 = 5.0;
+
+/// Much wider than the garden, so its walls seldom stand across a Biome border.
+const CLIMATE_SIZE_M: f32 = 480.0;
 
 /// The garden's footprint: 24 m square, clear of the origin where the Player spawns, with a gap in
 /// the wall nearest the origin.
@@ -48,6 +53,53 @@ const HOLD_S: f32 = 6.0;
 /// The host's caps on one `fill` and on one batch.
 const MAX_FILL_VOXELS: u64 = 32_768;
 const MAX_BATCH_VOXELS: u64 = 65_536;
+
+/// Climate clusters near the middle of its square, so the points stay between 0.2 and 0.8 or a
+/// Biome would seldom be the nearest. The World has no caves, so no Biome sets a `cave_scale`.
+fn biomes() -> Vec<BiomeDef> {
+    let ground = |rock: &str, soil: &str, surface: &str| {
+        Some(GroundParams {
+            rock: rock.into(),
+            soil: soil.into(),
+            surface: surface.into(),
+        })
+    };
+    vec![
+        BiomeDef {
+            name: "garden".into(),
+            temperature: 0.5,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: Some(SkyFog {
+                sky: (130, 150, 160),
+                fog: (146, 168, 180),
+            }),
+            cave_scale: None,
+        },
+        BiomeDef {
+            name: "arid_court".into(),
+            temperature: 0.78,
+            humidity: 0.25,
+            ground: ground("strata:stone", "strata:sand", "strata:sand"),
+            sky_fog: Some(SkyFog {
+                sky: (172, 158, 132),
+                fog: (192, 176, 146),
+            }),
+            cave_scale: None,
+        },
+        BiomeDef {
+            name: "frost_court".into(),
+            temperature: 0.22,
+            humidity: 0.65,
+            ground: ground("strata:stone", "strata:soil", "frost:snow"),
+            sky_fog: Some(SkyFog {
+                sky: (152, 166, 188),
+                fog: (178, 192, 212),
+            }),
+            cave_scale: None,
+        },
+    ]
+}
 
 #[derive(Default)]
 struct State {
@@ -350,6 +402,10 @@ impl Guest for Lumen {
             soil: "strata:soil".into(),
             surface: "strata:turf".into(),
         });
+        world.climate = Some(ClimateParams {
+            temperature_size_m: CLIMATE_SIZE_M,
+            humidity_size_m: CLIMATE_SIZE_M,
+        });
         Declaration {
             materials: Vec::new(),
             shapes: Vec::new(),
@@ -361,8 +417,15 @@ impl Guest for Lumen {
             combustion: Vec::new(),
             tools: Vec::new(),
             items: Vec::new(),
-            biomes: Vec::new(),
-            ores: Vec::new(),
+            biomes: biomes(),
+            ores: vec![OreDef {
+                material: "crystals:amethyst".into(),
+                min_depth_m: 8.0,
+                max_depth_m: 40.0,
+                vein_size_m: 3.0,
+                rarity: 0.25,
+                biomes: Vec::new(),
+            }],
         }
     }
 

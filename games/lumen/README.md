@@ -7,15 +7,33 @@ another.
 
 Everything you can see comes from `glassworks`: clear `glass` walls and a
 `frosted_glass` roof (both blended), `lantern` (emission 15), and the `slab`,
-`stair` and `fence` Shapes. Ground is `strata`.
+`stair` and `fence` Shapes. Ground is `strata`, with `frost` snow in one court
+and `crystals` amethyst in the rock below.
 
 ## Dependencies
 
-[strata](../../mods/strata/), [glassworks](../../mods/glassworks/), and it
-suggests [wanderer](../../mods/wanderer/) for its character. This Game declares
-no Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
-from those Mods. It declares only its World (ground, sea level, relief and the
-like) and one behaviour.
+[strata](../../mods/strata/), [glassworks](../../mods/glassworks/),
+[frost](../../mods/frost/) for the snow of the frost court,
+[crystals](../../mods/crystals/) for the amethyst ore, and it suggests
+[wanderer](../../mods/wanderer/) for its character. This Game declares no
+Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
+from those Mods. It declares only its World (ground, sea level, relief, climate
+and the like), its Biomes and ore, and one behaviour.
+
+## Biomes
+
+Three Biomes, each with a sky and fog pair that eases as the Player walks
+between them. The climate regions are 480 m across, far larger than the garden,
+so the garden seldom straddles a border. The World has no caves, so no Biome
+tunes them.
+
+| Biome         | Ground (rock, soil, surface)      | Sky and fog |
+| ------------- | --------------------------------- | ----------- |
+| `garden`      | the Game's own: stone, soil, turf | soft green  |
+| `arid_court`  | stone, sand, sand                 | warm sand   |
+| `frost_court` | stone, soil, `frost:snow`         | cold blue   |
+
+`crystals:amethyst` forms veins in the rock of every court, 8 to 40 m down.
 
 ## Behaviour
 
@@ -28,7 +46,9 @@ starts again.
 
 The tests check that the build holds blended glass, an emitting Material and all
 three Shapes, that no lantern is lit by the build itself, and that lanterns are
-lit in order on the 2 s timer and put out together after the 6 s hold.
+lit in order on the 2 s timer and put out together after the 6 s hold. Others
+check the three Biomes' sky and fog and ground, and that the amethyst lies in
+rock within its band.
 
 ## Run it
 
@@ -37,7 +57,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/glassworks mods/wanderer --out dist
+tesserae package mods/strata mods/glassworks mods/frost mods/crystals mods/wanderer --out dist
 tesserae package games/lumen --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

@@ -15,6 +15,8 @@ use tesserae_mods::{BatchReport, Command, Kind, Resolved, TickContext, validate}
 use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
 
+mod biomes;
+
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
@@ -489,7 +491,17 @@ fn tidewater_steps_come_every_declared_interval() {
 #[test]
 fn lumen_builds_blended_glass_light_and_all_three_shapes() {
     let (_install, mut loaded) = loaded("lumen", 0.5);
-    assert_eq!(ids(&loaded), ["glassworks", "strata", "lumen", "wanderer"]);
+    assert_eq!(
+        ids(&loaded),
+        [
+            "crystals",
+            "frost",
+            "glassworks",
+            "strata",
+            "lumen",
+            "wanderer"
+        ]
+    );
     let batches = run(&mut loaded, 0.5, 0.05, 40);
     let all: Vec<&Command> = batches.iter().flat_map(|b| &b.commands).collect();
     let has = |wanted: &dyn Fn(Voxel) -> bool| {

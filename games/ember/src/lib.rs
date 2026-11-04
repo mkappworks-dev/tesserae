@@ -11,7 +11,9 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 use tesserae::mods::commands::{Fill, SourceFill};
-use tesserae::mods::content::{GroundParams, MovementPolicy, WaterParams};
+use tesserae::mods::content::{
+    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog, WaterParams,
+};
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
 /// Ground spans `SEA_LEVEL_M` to `SEA_LEVEL_M + RELIEF_M`; a chimney cut from below that band to
@@ -27,6 +29,9 @@ const CHIMNEY_TOP_M: f32 = SEA_LEVEL_M + RELIEF_M + 3.0;
 const VENTS_AT_M: [(f32, f32); 3] = [(18.0, -14.0), (-22.0, 10.0), (6.0, 30.0)];
 const WET_VENT: usize = 2;
 
+/// Climate regions are this wide, so a walk crosses into another Biome within a few minutes.
+const CLIMATE_SIZE_M: f32 = 320.0;
+
 /// Seconds after the build is applied that the first vent erupts, and the stagger between vents.
 const FIRST_ERUPTION_S: f32 = 5.0;
 const STAGGER_S: f32 = 10.0;
@@ -37,6 +42,53 @@ const ERUPTION_S: f32 = 8.0;
 /// The host's caps on one `fill` and on one batch.
 const MAX_FILL_VOXELS: u64 = 32_768;
 const MAX_BATCH_VOXELS: u64 = 65_536;
+
+/// Climate clusters near the middle of its square, so the points stay between 0.2 and 0.8 or a
+/// Biome would seldom be the nearest.
+fn biomes() -> Vec<BiomeDef> {
+    let ground = |rock: &str, soil: &str, surface: &str| {
+        Some(GroundParams {
+            rock: rock.into(),
+            soil: soil.into(),
+            surface: surface.into(),
+        })
+    };
+    vec![
+        BiomeDef {
+            name: "ash_flats".into(),
+            temperature: 0.5,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: Some(SkyFog {
+                sky: (112, 106, 106),
+                fog: (130, 122, 120),
+            }),
+            cave_scale: None,
+        },
+        BiomeDef {
+            name: "scorched".into(),
+            temperature: 0.75,
+            humidity: 0.3,
+            ground: ground("strata:basalt", "strata:basalt", "strata:clay"),
+            sky_fog: Some(SkyFog {
+                sky: (150, 102, 78),
+                fog: (176, 120, 90),
+            }),
+            cave_scale: Some(1.5),
+        },
+        BiomeDef {
+            name: "highland".into(),
+            temperature: 0.25,
+            humidity: 0.7,
+            ground: ground("strata:stone", "strata:soil", "flora:grass"),
+            sky_fog: Some(SkyFog {
+                sky: (120, 134, 152),
+                fog: (138, 152, 172),
+            }),
+            cave_scale: Some(0.5),
+        },
+    ]
+}
 
 #[derive(Default)]
 struct State {
@@ -258,6 +310,10 @@ impl Guest for Ember {
             soil: "strata:stone".into(),
             surface: "hearth:ash".into(),
         });
+        world.climate = Some(ClimateParams {
+            temperature_size_m: CLIMATE_SIZE_M,
+            humidity_size_m: CLIMATE_SIZE_M,
+        });
         Declaration {
             materials: Vec::new(),
             shapes: Vec::new(),
@@ -269,8 +325,15 @@ impl Guest for Ember {
             combustion: Vec::new(),
             tools: Vec::new(),
             items: Vec::new(),
-            biomes: Vec::new(),
-            ores: Vec::new(),
+            biomes: biomes(),
+            ores: vec![OreDef {
+                material: "waters:obsidian".into(),
+                min_depth_m: 6.0,
+                max_depth_m: 48.0,
+                vein_size_m: 4.0,
+                rarity: 0.35,
+                biomes: vec!["ember:ash_flats".into(), "ember:scorched".into()],
+            }],
         }
     }
 

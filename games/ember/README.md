@@ -17,8 +17,23 @@ sets the scene and starts the eruptions.
 [flora](../../mods/flora/), [hearth](../../mods/hearth/), and it suggests
 [golem](../../mods/golem/) for its character. This Game declares no Material,
 Shape or fluid of its own; every name it uses is `<mod id>:<name>` from those
-Mods. It declares only its World (ground, sea level, relief and the like) and
-one behaviour.
+Mods. It declares only its World (ground, sea level, relief, climate and the
+like), its Biomes and ore, and one behaviour.
+
+## Biomes
+
+Three Biomes, each with a sky and fog pair that eases as the Player walks
+between them. The climate regions are 320 m across.
+
+| Biome       | Ground (rock, soil, surface)                | Caves  | Sky and fog         |
+| ----------- | ------------------------------------------- | ------ | ------------------- |
+| `ash_flats` | the Game's own: basalt, stone, `hearth:ash` | as set | grey, a little warm |
+| `scorched`  | basalt, basalt, `strata:clay`               | 1.5 x  | rust red            |
+| `highland`  | stone, soil, `flora:grass`                  | 0.5 x  | cool blue-grey      |
+
+`waters:obsidian` also forms veins in the rock of the ash flats and the scorched
+ground, 6 to 48 m down, and nowhere in the highland. Every name is from a Mod
+the Game already depends on.
 
 ## Behaviour
 
@@ -32,7 +47,8 @@ burns under `hearth`'s rules. The third has a standing water source on its cap,
 The timer is in simulation seconds, so eruptions are the same at any Voxel size.
 The tests observe each vent start and stop on that schedule, and check that the
 loaded tables hold the lava and water fluids, the obsidian reaction and the
-wood-to-ash fire.
+wood-to-ash fire. Others check the three Biomes' sky and fog and ground, and
+that the ore lies in rock within its band and Biomes.
 
 ## Run it
 

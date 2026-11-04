@@ -13,13 +13,13 @@ data for content, shared across Games.
 All Games are MIT licensed and sit in `games/<id>/`. Only a Game declares
 `world`, `view` and `tools`.
 
-| Game                             | Behaviour (Rust)                         | Depends on                                        | Shows                                                                               |
-| -------------------------------- | ---------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| [terra](../games/terra/)         | Everything; self-contained               | -                                                 | A Game that declares its own content, fluids, fire, a tool, Biomes and an ore       |
-| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks (suggests wanderer)     | A Game with no Material of its own; a Shape from one Mod with a Material of another |
-| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth (suggests golem)    | Fluid, reaction and fire rules that live in Mods                                    |
-| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, crystals (suggests sprite) | Sea level, caves, smoothing, Biomes and a gem ore; fluid Commands from `tick`       |
-| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks (suggests wanderer)            | Blended glass, emission and Shapes; timed placement from `tick`                     |
+| Game                             | Behaviour (Rust)                         | Depends on                                              | Shows                                                                                                     |
+| -------------------------------- | ---------------------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| [terra](../games/terra/)         | Everything; self-contained               | -                                                       | A Game that declares its own content, fluids, fire, a tool, Biomes and an ore                             |
+| [meadow](../games/meadow/)       | Builds a glade, three trees and a gazebo | strata, flora, glassworks (suggests wanderer)           | A Game with no Material of its own; a Shape from one Mod with a Material of another; Biomes from `strata` |
+| [ember](../games/ember/)         | Lava vents erupt on a timer              | strata, waters, flora, hearth (suggests golem)          | Fluid, reaction and fire rules that live in Mods; Biomes that tune the caves                              |
+| [tidewater](../games/tidewater/) | The sea level rises and falls slowly     | strata, waters, flora, crystals (suggests sprite)       | Sea level, caves, smoothing, Biomes and a gem ore; fluid Commands from `tick`                             |
+| [lumen](../games/lumen/)         | Lanterns light up in sequence            | strata, glassworks, frost, crystals (suggests wanderer) | Blended glass, emission and Shapes; timed placement from `tick`; Biomes with a snow court and a gem ore   |
 
 ## Mods
 
@@ -39,8 +39,8 @@ third-party source. They declare content only.
 | [brickwork](brickwork/)   | Brick, cobble, tile; connecting wall Shape                | -                     | bog                              |
 | [lamps](lamps/)           | Glowstone, amberlight, moonlight; bulb Shape              | -                     | -                                |
 | [wool](wool/)             | Six coloured cloths; carpet Shape                         | -                     | -                                |
-| [frost](frost/)           | Ice, snow, packed ice, slush fluid; snow layer Shape      | -                     | -                                |
-| [crystals](crystals/)     | Amethyst, citrine, aquamarine; cluster Shape              | -                     | tidewater                        |
+| [frost](frost/)           | Ice, snow, packed ice, slush fluid; snow layer Shape      | -                     | lumen                            |
+| [crystals](crystals/)     | Amethyst, citrine, aquamarine; cluster Shape              | -                     | tidewater, lumen                 |
 | [bog](bog/)               | Peat, mud and tar fluids; lava reactions; peat burns      | hearth, brickwork     | -                                |
 | [wanderer](wanderer/)     | Character: a traveller, 1.8 m                             | -                     | meadow, lumen                    |
 | [golem](golem/)           | Character: a slow stone figure, 2.16 m                    | -                     | ember                            |
@@ -67,6 +67,8 @@ graph LR
   tidewater --> crystals
   lumen --> strata
   lumen --> glassworks
+  lumen --> frost
+  lumen --> crystals
   lumen -.-> wanderer
   meadow -.-> wanderer
   ember -.-> golem
