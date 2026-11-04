@@ -5,6 +5,7 @@ use tesserae_core::mesh::{FACE_STEPS, LitChunk};
 use tesserae_core::testgen::fixtures;
 use tesserae_core::{
     CHUNK_SIZE, Chunk, ChunkLight, Light, LightVolume, MAX_LIGHT, Voxel, light_chunk, relight,
+    relight_many,
 };
 
 const N: i32 = CHUNK_SIZE as i32;
@@ -134,6 +135,22 @@ fn one_at_a_time(lattice: &mut Lattice, writes: &[[i32; 3]], voxel: Voxel) {
     }
 }
 
+/// The same writes in batches of `size`, each relit once, as a drain tick does.
+fn batched(lattice: &mut Lattice, writes: &[[i32; 3]], voxel: Voxel, size: usize) {
+    let tables = &fixtures().tables;
+    for batch in writes.chunks(size) {
+        let was: Vec<_> = batch
+            .iter()
+            .map(|&at| {
+                let was = lattice.light(at);
+                lattice.set_voxel(at, voxel);
+                (at, was)
+            })
+            .collect();
+        relight_many(lattice, tables, &was);
+    }
+}
+
 fn bench(c: &mut Criterion) {
     let solid = box_order([8, 8, 8], [24, 24, 24]);
     let roof = box_order([8, 24, 8], [24, 25, 24]);
@@ -156,6 +173,18 @@ fn bench(c: &mut Criterion) {
                 BatchSize::LargeInput,
             )
         });
+        for size in [1, 64, 4096] {
+            group.bench_function(format!("{name}/batch_{size}"), |b| {
+                b.iter_batched(
+                    || start.clone(),
+                    |mut lattice| {
+                        batched(&mut lattice, writes, *voxel, size);
+                        black_box(lattice)
+                    },
+                    BatchSize::LargeInput,
+                )
+            });
+        }
     }
     group.finish();
 }
