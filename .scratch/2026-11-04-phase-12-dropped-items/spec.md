@@ -1,6 +1,6 @@
 # Phase 12: dropped items, pickup
 
-Status: ready-for-agent
+Status: done
 
 Roadmap step 12 in `DESIGN.md`: the entity system, with Server simulation,
 pickup and save. The Game or a Mod supplies item definitions.
