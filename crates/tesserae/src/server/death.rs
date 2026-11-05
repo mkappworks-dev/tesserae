@@ -1,0 +1,524 @@
+//! A Player's death: what killed them, where their feet were and what they
+//! dropped, kept by the Server until they respawn; the Client is told
+//! (`docs/adr/0002-client-server-from-day-one.md`).
+
+use bevy::ecs::message::Messages;
+use bevy::ecs::system::EntityCommands;
+use bevy::prelude::*;
+use tesserae_core::inventory::Stack;
+use tesserae_core::save::{DeathCause, DeathV1};
+
+use super::ContentTables;
+use super::edit::{EditIntent, LayoutIntent, PendingEdits};
+use super::entities::EntityStore;
+use super::inventory::{Inventory, InventoryIntent, drop_around};
+use super::items::Items;
+use super::persistence::extensions::PlayerState;
+use super::player::{MovementIntent, Player, PlayerInput, Respawned};
+use super::survival::Survival;
+use super::tool::UseIntent;
+use super::undo::{HistoryAction, Journal};
+use super::vitals::{DamageCause, EatIntent, LastDamage, Vitals};
+use super::world_state::{ChunkStore, SpawnPoint};
+use crate::session::SessionApp;
+use crate::world::WorldSettings;
+
+#[derive(Component, Clone, PartialEq, Debug)]
+pub struct Death {
+    pub cause: Option<DeathCause>,
+    /// Where the feet were.
+    pub at_m: Vec3,
+    /// Dropped where they fell, as Dropped items; empty when the Game keeps
+    /// the Inventory.
+    pub dropped: Vec<Stack>,
+    pub kept_inventory: bool,
+}
+
+/// What the death screen shows.
+#[derive(Clone, PartialEq, Debug)]
+pub struct DeathReport {
+    pub death: Death,
+    pub from_spawn_m: f32,
+}
+
+/// The Player's death, sent when it happens or a reopened World holds one;
+/// `None` once they respawn.
+#[derive(Message, Clone, PartialEq, Debug)]
+pub struct DeathChanged(pub Option<DeathReport>);
+
+pub(crate) fn plugin(app: &mut App) {
+    app.add_session_message::<DeathChanged>()
+        .add_session_systems(
+            RunFixedMainLoop,
+            (
+                (
+                    discard::<MovementIntent>,
+                    discard::<EditIntent>,
+                    discard::<LayoutIntent>,
+                    discard::<HistoryAction>,
+                    discard::<InventoryIntent>,
+                    discard::<EatIntent>,
+                    discard::<UseIntent>,
+                )
+                    .run_if(dead)
+                    .before(PlayerInput),
+                revive.after(PlayerInput),
+            )
+                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+        )
+        .add_session_systems(
+            FixedUpdate,
+            (die.run_if(resource_exists::<Survival>), announce)
+                .chain()
+                .after(super::vitals::tick),
+        );
+}
+
+pub(super) fn dead(players: Query<(), (With<Player>, With<Death>)>) -> bool {
+    !players.is_empty()
+}
+
+pub(super) fn alive(players: Query<(), (With<Player>, With<Death>)>) -> bool {
+    players.is_empty()
+}
+
+/// Cleared from the buffer rather than left unread, so an intent sent while
+/// dead cannot be read once the Player respawns.
+fn discard<M: Message>(messages: Option<ResMut<Messages<M>>>) {
+    if let Some(mut messages) = messages {
+        messages.clear();
+    }
+}
+
+type Dying<'a> = (
+    Entity,
+    &'a mut Player,
+    &'a Vitals,
+    &'a LastDamage,
+    &'a mut Inventory,
+);
+
+fn die(
+    mut commands: Commands,
+    survival: Res<Survival>,
+    player: Single<Dying, Without<Death>>,
+    mut entities: ResMut<EntityStore>,
+    (store, tables, world, items): (
+        Res<ChunkStore>,
+        Res<ContentTables>,
+        Res<WorldSettings>,
+        Res<Items>,
+    ),
+    (mut journal, mut pending): (ResMut<Journal>, ResMut<PendingEdits>),
+) {
+    let (id, mut player, vitals, last, mut inventory) = player.into_inner();
+    if vitals.health > 0.0 {
+        return;
+    }
+    let body = player.body();
+    let kept_inventory = survival.rules.keep_inventory;
+    let dropped = if kept_inventory {
+        Vec::new()
+    } else {
+        inventory.take_all()
+    };
+    drop_around(
+        &mut entities,
+        &store,
+        &tables.0,
+        world.voxel_size,
+        &items,
+        &body,
+        dropped.iter().map(|s| (s.item.clone(), s.count)),
+    );
+    journal.clear();
+    pending.clear();
+    player.stop();
+    let at_m = Vec3::new(
+        (body.min[0] + body.max[0]) / 2.0,
+        body.min[1],
+        (body.min[2] + body.max[2]) / 2.0,
+    );
+    commands.entity(id).insert(Death {
+        cause: last.0.map(|cause| saved_cause(cause, &survival)),
+        at_m,
+        dropped,
+        kept_inventory,
+    });
+}
+
+fn saved_cause(cause: DamageCause, survival: &Survival) -> DeathCause {
+    match cause {
+        DamageCause::Fall { height_m } => DeathCause::Fall { height_m },
+        DamageCause::Drowning => DeathCause::Drowning,
+        DamageCause::Contact(material) => DeathCause::Contact {
+            material: survival
+                .material_name(material)
+                .unwrap_or_default()
+                .to_owned(),
+        },
+        DamageCause::Starvation => DeathCause::Starvation,
+    }
+}
+
+/// Reads every respawn, so one made while alive is not taken for a later
+/// death's.
+fn revive(
+    mut respawned: MessageReader<Respawned>,
+    mut commands: Commands,
+    survival: Option<Res<Survival>>,
+    mut players: Query<(Entity, &mut Vitals, &mut LastDamage), With<Death>>,
+) {
+    if respawned.read().count() == 0 {
+        return;
+    }
+    let rules = survival.map(|s| s.rules).unwrap_or_default();
+    for (id, mut vitals, mut last) in &mut players {
+        *vitals = Vitals::full(&rules);
+        *last = LastDamage::default();
+        commands.entity(id).remove::<Death>();
+    }
+}
+
+fn announce(
+    player: Single<Option<Ref<Death>>, With<Player>>,
+    spawn: Res<SpawnPoint>,
+    mut told: Local<bool>,
+    mut changed: MessageWriter<DeathChanged>,
+) {
+    match player.into_inner() {
+        Some(death) if death.is_changed() || !*told => {
+            *told = true;
+            changed.write(DeathChanged(Some(DeathReport {
+                from_spawn_m: death.at_m.distance(spawn.metres()),
+                death: Death::clone(&death),
+            })));
+        }
+        None if *told => {
+            *told = false;
+            changed.write(DeathChanged(None));
+        }
+        _ => {}
+    }
+}
+
+impl PlayerState for DeathV1 {
+    fn capture(player: EntityRef) -> Option<Self> {
+        player.get::<Death>().map(|death| DeathV1 {
+            cause: death.cause.clone(),
+            at_m: death.at_m.to_array(),
+            dropped: death.dropped.clone(),
+            kept_inventory: death.kept_inventory,
+        })
+    }
+
+    fn restore(self, player: &mut EntityCommands) {
+        player.insert(Death {
+            cause: self.cause,
+            at_m: Vec3::from_array(self.at_m),
+            dropped: self.dropped,
+            kept_inventory: self.kept_inventory,
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use bevy::time::TimeUpdateStrategy;
+    use tesserae_core::collide::VoxelVolume;
+    use tesserae_core::{Chunk, SurvivalRules, Voxel};
+
+    use super::*;
+    use crate::server::edit::{EditAction, EditRejected};
+    use crate::server::entities::{EntityDelta, EntityView};
+    use crate::server::game_mode::{GameMode, PlayerMode};
+    use crate::server::player::{EYE_HEIGHT, RespawnIntent};
+    use crate::server::streaming::MeshState;
+    use crate::world::ChunkCoord;
+
+    const SPAWN: Vec3 = Vec3::new(20.5, 8.0, 20.5);
+    /// On the ground's surface, 8 m up.
+    const FEET: Vec3 = Vec3::new(5.5, 8.0, 5.5);
+
+    /// What the Server told the Client, kept across updates.
+    #[derive(Resource, Default)]
+    struct Told {
+        deaths: Vec<DeathChanged>,
+        spawned: Vec<EntityView>,
+        rejected: usize,
+    }
+
+    fn listen(
+        mut told: ResMut<Told>,
+        mut deaths: ResMut<Messages<DeathChanged>>,
+        mut deltas: ResMut<Messages<EntityDelta>>,
+        mut rejected: ResMut<Messages<EditRejected>>,
+    ) {
+        told.deaths.extend(deaths.drain());
+        told.spawned.extend(deltas.drain().filter_map(|d| match d {
+            EntityDelta::Spawned(view) => Some(view),
+            _ => None,
+        }));
+        told.rejected += rejected.drain().count();
+    }
+
+    fn item(name: &str, food: Option<f32>) -> tesserae_mods::ItemDef {
+        tesserae_mods::ItemDef {
+            name: name.into(),
+            size_m: 0.25,
+            color: [0; 4],
+            material: None,
+            max_stack: 64,
+            food,
+        }
+    }
+
+    /// A Survival Player standing on stone, holding 70 rock and 3 bread, with
+    /// the World spawn 15 m away.
+    fn app(keep_inventory: bool) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_nanos(
+                15_625_000,
+            )))
+            .insert_resource(WorldSettings::default())
+            .insert_resource(SpawnPoint::for_tests(SPAWN))
+            .init_resource::<ChunkStore>()
+            .init_resource::<MeshState>()
+            .insert_resource(ContentTables(Arc::new(crate::server::fixture_tables())))
+            .insert_resource(Survival::new(
+                SurvivalRules {
+                    keep_inventory,
+                    fall_damage_per_m: 2.0,
+                    hunger_per_min: 0.0,
+                    sprinting_hunger_per_min: 0.0,
+                    ..default()
+                },
+                Vec::new(),
+            ))
+            .insert_resource(Items(vec![
+                item("t:rock", None),
+                item("t:bread", Some(6.0)),
+            ]))
+            .init_resource::<Told>()
+            .add_plugins((
+                super::super::player::plugin,
+                super::super::vitals::plugin,
+                super::super::entities::plugin,
+                super::super::inventory::plugin,
+                super::super::edit::plugin,
+                plugin,
+            ))
+            .add_systems(Last, listen);
+        app.update();
+        let stone = Voxel::cube(tesserae_core::testgen::fixtures().ground.rock);
+        let mut ground = Chunk::air();
+        for y in 0..8 {
+            for z in 0..32 {
+                for x in 0..32 {
+                    ground.set(x, y, z, stone);
+                }
+            }
+        }
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(ChunkCoord::new(0, 0, 0), ground);
+        let (mut player, mut mode, mut inventory) = app
+            .world_mut()
+            .query::<(&mut Player, &mut PlayerMode, &mut Inventory)>()
+            .single_mut(app.world_mut())
+            .unwrap();
+        *player = Player::physics_at(FEET + Vec3::Y * EYE_HEIGHT);
+        mode.0 = GameMode::Survival;
+        inventory.receive("t:rock", 70, 64);
+        inventory.receive("t:bread", 3, 64);
+        app
+    }
+
+    fn seconds(app: &mut App, s: f32) {
+        for _ in 0..(s * 64.0).round() as usize {
+            app.update();
+        }
+    }
+
+    fn eye(app: &mut App) -> Vec3 {
+        app.world_mut()
+            .query::<&Player>()
+            .single(app.world())
+            .unwrap()
+            .eye()
+    }
+
+    /// Lifts the Player 20 m over the ground, inside the one loaded Chunk, and
+    /// lets them land: 17 m beyond the safe 3 m at 2 per metre outweighs 20
+    /// health.
+    fn fall_to_death(app: &mut App) -> DeathReport {
+        let mut player = app.world_mut().query::<&mut Player>();
+        let mut player = player.single_mut(app.world_mut()).unwrap();
+        let eye = player.eye();
+        player.set_eye(eye + Vec3::Y * 20.0);
+        seconds(app, 3.0);
+        let told = &app.world().resource::<Told>().deaths;
+        assert_eq!(told.len(), 1, "{told:?}");
+        told[0].0.clone().expect("died")
+    }
+
+    fn stack(item: &str, count: u32) -> Stack {
+        Stack {
+            item: item.into(),
+            count,
+        }
+    }
+
+    fn inventory(app: &mut App) -> tesserae_core::inventory::Inventory {
+        app.world_mut()
+            .query::<&Inventory>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone()
+    }
+
+    fn vitals(app: &mut App) -> Vitals {
+        *app.world_mut()
+            .query::<&Vitals>()
+            .single(app.world())
+            .unwrap()
+    }
+
+    #[test]
+    fn death_drops_every_stack_as_dropped_items_where_the_player_fell() {
+        let mut app = app(false);
+        let report = fall_to_death(&mut app);
+        let death = &report.death;
+        assert!(
+            matches!(death.cause, Some(DeathCause::Fall { height_m }) if height_m > 15.0),
+            "{:?}",
+            death.cause
+        );
+        assert!(death.at_m.distance(FEET) < 0.01, "{}", death.at_m);
+        assert!((report.from_spawn_m - FEET.distance(SPAWN)).abs() < 0.01);
+        assert_eq!(
+            death.dropped,
+            [stack("t:rock", 64), stack("t:rock", 6), stack("t:bread", 3)]
+        );
+        assert!(!death.kept_inventory);
+        assert!(inventory(&mut app).is_empty());
+
+        let spawned = &app.world().resource::<Told>().spawned;
+        assert_eq!(
+            spawned
+                .iter()
+                .map(|v| (v.item, v.count))
+                .collect::<Vec<_>>(),
+            [(0, 64), (0, 6), (1, 3)]
+        );
+        for view in spawned {
+            let at = Vec3::from_array(view.pos_m);
+            assert!(at.distance(FEET + Vec3::Y) < 1.5, "{at}");
+        }
+        seconds(&mut app, 2.0);
+        assert!(
+            inventory(&mut app).is_empty(),
+            "a dead body picks nothing up"
+        );
+    }
+
+    #[test]
+    fn a_game_that_keeps_the_inventory_drops_nothing_on_death() {
+        let mut app = app(true);
+        let before = inventory(&mut app);
+        let report = fall_to_death(&mut app);
+        assert!(report.death.kept_inventory);
+        assert!(report.death.dropped.is_empty());
+        assert!(app.world().resource::<Told>().spawned.is_empty());
+        assert_eq!(inventory(&mut app), before);
+    }
+
+    #[test]
+    fn intents_sent_while_dead_are_ignored() {
+        let mut app = app(true);
+        fall_to_death(&mut app);
+        let still = eye(&mut app);
+        let below = [5, 7, 5];
+        let stone = app.world().resource::<ChunkStore>().voxel(below);
+        for _ in 0..32 {
+            app.world_mut().write_message(MovementIntent {
+                direction: Vec3::X,
+                speed_mps: 4.0,
+                jump: true,
+                ..default()
+            });
+            app.world_mut().write_message(EditIntent {
+                action: EditAction::Remove,
+                origin: still,
+                direction: Vec3::NEG_Y,
+            });
+            app.world_mut().write_message(InventoryIntent::Select(4));
+            app.world_mut().write_message(EatIntent);
+            app.update();
+        }
+        seconds(&mut app, 0.5);
+        assert!(eye(&mut app).distance(still) < 1e-3, "{}", eye(&mut app));
+        assert_eq!(
+            app.world().resource::<ChunkStore>().voxel(below),
+            stone,
+            "no removal"
+        );
+        assert_eq!(app.world().resource::<Told>().rejected, 0, "nor a refusal");
+        assert_eq!(inventory(&mut app).selected(), 0);
+        assert_eq!(vitals(&mut app).health, 0.0);
+    }
+
+    #[test]
+    fn respawn_restores_full_vitals_at_the_world_spawn_and_ends_the_death() {
+        let mut app = app(false);
+        fall_to_death(&mut app);
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        let told = &app.world().resource::<Told>().deaths;
+        assert_eq!(told.last(), Some(&DeathChanged(None)));
+        let rules = app.world().resource::<Survival>().rules;
+        assert_eq!(vitals(&mut app), Vitals::full(&rules));
+        let at = eye(&mut app);
+        assert!((at.with_y(0.0) - SPAWN.with_y(0.0)).length() < 1e-3, "{at}");
+        seconds(&mut app, 1.0);
+        assert_eq!(vitals(&mut app), Vitals::full(&rules), "the fall is spent");
+
+        let from = eye(&mut app);
+        for _ in 0..32 {
+            app.world_mut().write_message(MovementIntent {
+                direction: Vec3::X,
+                speed_mps: 4.0,
+                ..default()
+            });
+            app.update();
+        }
+        assert!(eye(&mut app).x > from.x + 1.0, "moves again");
+    }
+
+    #[test]
+    fn undo_after_a_respawn_has_nothing_from_before_the_death() {
+        let mut app = app(false);
+        let eye_at = eye(&mut app);
+        let removed = [7, 7, 5];
+        app.world_mut().write_message(EditIntent {
+            action: EditAction::Remove,
+            origin: eye_at,
+            direction: (Vec3::new(7.5, 7.9, 5.5) - eye_at).normalize(),
+        });
+        seconds(&mut app, 0.25);
+        let voxel = |app: &App| app.world().resource::<ChunkStore>().voxel(removed);
+        assert!(voxel(&app).unwrap().is_air(), "removed");
+
+        fall_to_death(&mut app);
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        app.world_mut().write_message(HistoryAction::Undo);
+        seconds(&mut app, 0.25);
+        assert!(voxel(&app).unwrap().is_air(), "nothing left to undo");
+    }
+}

@@ -85,7 +85,7 @@ pub(crate) fn plugin(app: &mut App) {
         )
         .add_session_systems(
             FixedUpdate,
-            (tick, announce)
+            (tick.run_if(super::death::alive), announce)
                 .chain()
                 .after(super::player::simulate)
                 .run_if(resource_exists::<Survival>),
@@ -152,7 +152,7 @@ fn eat(
     }
 }
 
-fn tick(
+pub(super) fn tick(
     survival: Res<Survival>,
     player: Single<(&mut Player, &PlayerMode, &mut Vitals, &mut LastDamage)>,
     (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),

@@ -691,10 +691,16 @@ fn install(world: &mut World) {
     }
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
-    world.insert_resource(super::survival::Survival::new(
-        loaded.survival.unwrap_or_default(),
-        loaded.contact_damage,
-    ));
+    world.insert_resource(
+        super::survival::Survival::new(loaded.survival.unwrap_or_default(), loaded.contact_damage)
+            .named(|id| {
+                catalogue
+                    .materials
+                    .iter()
+                    .find(|m| m.id == id)
+                    .map(|m| m.name.clone())
+            }),
+    );
     world.write_message(crate::content::ItemLooks(
         loaded
             .items

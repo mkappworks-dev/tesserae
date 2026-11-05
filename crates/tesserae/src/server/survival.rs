@@ -8,6 +8,8 @@ pub struct Survival {
     pub rules: SurvivalRules,
     /// Health per second, by Material id.
     contact_damage: Vec<f32>,
+    /// The harmful Materials' names, which a saved death holds instead of ids.
+    names: Vec<(MaterialId, String)>,
 }
 
 impl Survival {
@@ -21,7 +23,27 @@ impl Survival {
         Self {
             rules,
             contact_damage: by_id,
+            names: Vec::new(),
         }
+    }
+
+    /// Names each harmful Material by `name`.
+    pub fn named(mut self, name: impl Fn(MaterialId) -> Option<String>) -> Self {
+        self.names = (0..self.contact_damage.len())
+            .filter(|&at| self.contact_damage[at] > 0.0)
+            .filter_map(|at| {
+                let id = MaterialId::try_from(at).ok()?;
+                Some((id, name(id)?))
+            })
+            .collect();
+        self
+    }
+
+    pub fn material_name(&self, material: MaterialId) -> Option<&str> {
+        self.names
+            .iter()
+            .find(|(id, _)| *id == material)
+            .map(|(_, name)| name.as_str())
     }
 
     pub fn contact_damage_per_s(&self, material: MaterialId) -> f32 {

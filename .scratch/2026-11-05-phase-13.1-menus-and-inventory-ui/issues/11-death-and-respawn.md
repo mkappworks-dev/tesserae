@@ -1,6 +1,6 @@
 # 11: Death and respawn
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 07, 09
 
@@ -12,8 +12,8 @@ At zero health the Player dies. The Server records the cause, the position in me
 
 ## Acceptance criteria
 
-- [ ] Death drops every stack as Dropped items at the death point; with keep_inventory nothing drops.
-- [ ] Intents sent while dead are ignored.
-- [ ] Quitting while dead and reopening shows the death screen.
-- [ ] Respawn restores full Vitals at the World spawn and shows the distance notice.
-- [ ] Undo after a respawn has nothing from before the death.
+- [x] Death drops every stack as Dropped items at the death point; with keep_inventory nothing drops.
+- [x] Intents sent while dead are ignored.
+- [x] Quitting while dead and reopening shows the death screen.
+- [x] Respawn restores full Vitals at the World spawn and shows the distance notice.
+- [x] Undo after a respawn has nothing from before the death.

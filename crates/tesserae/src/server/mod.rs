@@ -14,6 +14,7 @@
 
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod builder;
+pub mod death;
 pub mod edit;
 pub mod entities;
 mod fluids;
@@ -111,6 +112,7 @@ pub fn plugin(app: &mut App) {
         inventory::plugin,
         game_mode::plugin,
         vitals::plugin,
+        death::plugin,
     ));
     #[cfg(feature = "dev")]
     if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {

@@ -12,6 +12,7 @@ mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
 mod cinematic;
+mod death;
 pub mod drawn_mask;
 mod drops;
 pub mod edit;
@@ -112,6 +113,7 @@ pub fn plugin(app: &mut App) {
         hotbar::plugin,
         game_mode::plugin,
         vitals::plugin,
+        death::plugin,
     ));
     app.add_session_systems(
         Update,

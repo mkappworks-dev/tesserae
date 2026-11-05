@@ -123,6 +123,9 @@ pub struct BodyState {
 }
 #[derive(Message, Clone, Copy, Debug)]
 pub struct RespawnIntent;
+/// A respawn the Server carried out, for a death to end on.
+#[derive(Message, Clone, Copy, Debug)]
+pub(super) struct Respawned;
 #[derive(Message)]
 pub struct RestoreView(pub f32, pub f32);
 
@@ -224,6 +227,10 @@ impl Player {
     pub(in crate::server) fn take_fall_m(&mut self) -> f32 {
         let v = std::mem::take(&mut self.impact_mps);
         v * v / (2.0 * GRAVITY_MPS2)
+    }
+    /// Drops whatever movement the Client last asked for.
+    pub(in crate::server) fn stop(&mut self) {
+        self.intent = default();
     }
     /// Sprint held and the body travelling, not merely the key down.
     pub(in crate::server) fn sprinting(&self) -> bool {
@@ -440,6 +447,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<MovementFeedback>()
         .add_session_message::<PoseCorrection>()
         .add_session_message::<RespawnIntent>()
+        .add_session_message::<Respawned>()
         .add_session_systems(PostStartup, spawn_player)
         .add_session_systems(
             RunFixedMainLoop,
@@ -548,7 +556,7 @@ pub(super) fn receive(
     policy: Res<MovementPolicy>,
     spawn: Res<SpawnPoint>,
     (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
-    mut feedback: MessageWriter<MovementFeedback>,
+    (mut feedback, mut respawned): (MessageWriter<MovementFeedback>, MessageWriter<Respawned>),
 ) {
     let (mut player, game_mode) = player.into_inner();
     for intent in intents.read() {
@@ -621,6 +629,8 @@ pub(super) fn receive(
         player.crouching = false;
         player.swimming = false;
         player.swim_hold_s = 0.0;
+        player.impact_mps = 0.0;
+        respawned.write(Respawned);
     }
 }
 fn publish(mut player: Single<&mut Player>, mut poses: MessageWriter<PoseCorrection>) {

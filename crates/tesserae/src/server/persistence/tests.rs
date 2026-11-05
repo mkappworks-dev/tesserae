@@ -1,4 +1,5 @@
 use super::*;
+use crate::server::death::Death;
 use crate::server::game_mode::PlayerMode;
 use crate::server::inventory::Inventory;
 use crate::server::vitals::Vitals;
@@ -1119,6 +1120,58 @@ fn vitals_survive_save_and_reopen() {
         })
     );
     assert_eq!(vitals(&Rig::new(&dir)), hurt);
+}
+
+fn death(rig: &Rig) -> Option<Death> {
+    let mut q = rig.app.world().try_query::<&Death>().unwrap();
+    q.iter(rig.app.world()).next().cloned()
+}
+
+#[test]
+fn quitting_while_dead_reopens_still_dead() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let died = Death {
+        cause: Some(save::DeathCause::Contact {
+            material: "terra:lava".into(),
+        }),
+        at_m: Vec3::new(12.5, 3.0, -4.25),
+        dropped: vec![tesserae_core::inventory::Stack {
+            item: "terra:rock".into(),
+            count: 40,
+        }],
+        kept_inventory: false,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert((
+        died.clone(),
+        Vitals {
+            health: 0.0,
+            ..Vitals::default()
+        },
+    ));
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    drop(rig);
+    let saved = save::inspect(&dir.0)
+        .unwrap()
+        .unwrap()
+        .commit
+        .player
+        .get::<save::DeathV1>()
+        .unwrap()
+        .expect("the death is saved");
+    assert_eq!(saved.at_m, [12.5, 3.0, -4.25]);
+    let reopened = Rig::new(&dir);
+    assert_eq!(death(&reopened), Some(died));
+    assert_eq!(vitals(&reopened).health, 0.0);
 }
 
 fn inventory(rig: &Rig) -> tesserae_core::inventory::Inventory {

@@ -71,6 +71,10 @@ impl Journal {
         self.requests.clear();
     }
 
+    pub(super) fn clear(&mut self) {
+        *self = Self::default();
+    }
+
     pub(super) fn record(&mut self, entry: Entry) {
         self.record_group(vec![entry]);
     }

@@ -17,6 +17,7 @@ pub(super) enum Owner {
     BindingCapture,
     TextEntry,
     Modal,
+    Dead,
     #[default]
     Unfocused,
 }
@@ -93,12 +94,13 @@ type Contexts<'w> = (
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, super::death::Dead>>,
 );
 
 pub(super) fn resolve(
     (keys, mouse, pad): super::actions::Devices,
     touch: Res<super::touch::TouchFrame>,
-    (menu, settings, ui, save, layout_menu, inventory): Contexts,
+    (menu, settings, ui, save, layout_menu, inventory, dead): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -109,6 +111,8 @@ pub(super) fn resolve(
         Owner::Unfocused
     } else if save.is_some_and(|status| status.modal()) {
         Owner::Modal
+    } else if !super::death::alive(dead) {
+        Owner::Dead
     } else if ui.as_ref().is_some_and(|ui| ui.text_entry) {
         Owner::TextEntry
     } else if settings
@@ -179,6 +183,7 @@ pub(super) fn resolve(
                         | Owner::BindingCapture
                         | Owner::TextEntry
                         | Owner::Modal
+                        | Owner::Dead
                 )
             {
                 actions.cancel(action);

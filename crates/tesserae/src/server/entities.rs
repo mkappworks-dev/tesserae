@@ -87,7 +87,8 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_systems(
             FixedPreUpdate,
             (
-                (step_entities, pick_up).run_if(super::persistence::playing),
+                (step_entities, pick_up.run_if(super::death::alive))
+                    .run_if(super::persistence::playing),
                 announce_entities,
             )
                 .chain()

@@ -364,6 +364,16 @@ impl Inventory {
             max_stack,
         )
     }
+
+    /// Empties every slot, keeping the selection, and returns the stacks,
+    /// the hotbar first.
+    pub fn take_all(&mut self) -> Vec<Stack> {
+        self.hotbar
+            .iter_mut()
+            .chain(&mut self.backpack)
+            .filter_map(Option::take)
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -390,6 +400,19 @@ mod tests {
         assert_eq!(inventory.held(), None);
         assert_eq!(inventory.select(9), Err(Refusal::NoSuchSlot));
         assert_eq!(inventory.selected(), 8);
+    }
+
+    #[test]
+    fn taking_everything_empties_every_slot_hotbar_first_and_keeps_the_selection() {
+        let mut inventory = Inventory::default();
+        inventory.receive("m:rock", 64 * 9 + 3, 64);
+        inventory.select(4).unwrap();
+        let taken = inventory.take_all();
+        assert_eq!(taken.len(), 10);
+        assert_eq!(Some(taken[0].clone()), stack("m:rock", 64));
+        assert_eq!(Some(taken[9].clone()), stack("m:rock", 3));
+        assert!(inventory.is_empty());
+        assert_eq!(inventory.selected(), 4);
     }
 
     #[test]

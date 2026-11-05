@@ -492,6 +492,47 @@ impl PlayerExtension for VitalsV1 {
     }
 }
 
+/// What brought a Player's health to zero.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DeathCause {
+    Fall { height_m: f32 },
+    Drowning,
+    Contact { material: String },
+    Starvation,
+}
+
+/// A Player who died and has not respawned.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DeathV1 {
+    pub cause: Option<DeathCause>,
+    /// Where the feet were.
+    pub at_m: [f32; 3],
+    /// Dropped where they fell; empty when the Game keeps the Inventory.
+    pub dropped: Vec<crate::inventory::Stack>,
+    pub kept_inventory: bool,
+}
+
+impl PlayerExtension for DeathV1 {
+    const KEY: &'static str = "death_v1";
+
+    fn validate(&self) -> Result<(), Error> {
+        let fall_ok = match self.cause {
+            Some(DeathCause::Fall { height_m }) => height_m.is_finite() && height_m >= 0.0,
+            _ => true,
+        };
+        if !fall_ok
+            || !self.at_m.iter().all(|m| m.is_finite())
+            || self.dropped.iter().any(|s| s.count == 0)
+            || (self.kept_inventory && !self.dropped.is_empty())
+        {
+            return Err(Error::Corrupt("invalid Player death".into()));
+        }
+        Ok(())
+    }
+}
+
 impl Player {
     /// The value saved under `E::KEY`, `None` when the key is absent.
     pub fn get<E: PlayerExtension>(&self) -> Result<Option<E>, Error> {

@@ -68,7 +68,7 @@ impl Swatches {
 
 /// What the Server reported about the open World.
 #[derive(Resource, Default)]
-struct Facts(Option<WorldFacts>);
+pub(super) struct Facts(pub(super) Option<WorldFacts>);
 
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum Choice {
