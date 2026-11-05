@@ -10,6 +10,7 @@ use super::{
     menu_ui as ui,
     profile::{Preferences, Store},
 };
+use crate::client::buttons::{self, ButtonStyle, Eyebrow};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
 use bevy::input_focus::{FocusCause, InputFocus};
@@ -322,7 +323,7 @@ fn section(parent: &mut ChildSpawnerCommands, title: &str) {
             margin: UiRect::top(Val::Px(8.0)),
             ..default()
         })
-        .with_children(|p| ui::eyebrow(p, title));
+        .with_children(|p| buttons::eyebrow(p, title, Eyebrow::Menu));
 }
 
 fn header(card: &mut ChildSpawnerCommands, open: bool, kind: Kind) {
@@ -396,11 +397,29 @@ fn segmented(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut Child
 }
 
 fn choice(parent: &mut ChildSpawnerCommands, label: &str, control: Control, selected: bool) {
-    ui::compact_button(parent, label, control, selected, 26.0, 11.0);
+    buttons::button(
+        parent,
+        label,
+        control,
+        ButtonStyle::Compact {
+            selected,
+            height_px: 26.0,
+            text_px: 11.0,
+        },
+    );
 }
 
 fn button(parent: &mut ChildSpawnerCommands, label: &str, control: Control, selected: bool) {
-    ui::compact_button(parent, label, control, selected, 28.0, 11.0);
+    buttons::button(
+        parent,
+        label,
+        control,
+        ButtonStyle::Compact {
+            selected,
+            height_px: 28.0,
+            text_px: 11.0,
+        },
+    );
 }
 
 /// A row that is itself the button: it unfolds what is under it.

@@ -1,11 +1,10 @@
 //! The approved Cinematic menu look: charcoal sheets with a black grout edge,
 //! warm-white ink and a muted sage accent.
 
-use bevy::input_focus::{InputFocus, InputFocusVisible, tab_navigation::TabIndex};
+use bevy::input_focus::{InputFocus, InputFocusVisible};
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
 use bevy::ui::InteractionDisabled;
-use bevy::ui_widgets::Button;
 
 use super::menu_ui as ui;
 
@@ -27,7 +26,7 @@ pub(super) const NOTICE: Color = Color::srgb_u8(0x41, 0x4c, 0x55);
 pub(super) const NOTICE_EDGE: Color = Color::srgb_u8(0xa8, 0xb5, 0xbd);
 pub(super) const WARNING: Color = Color::srgb_u8(0xf0, 0xc0, 0x80);
 const FOCUS: Color = Color::srgb_u8(0xf3, 0xf6, 0xec);
-const DANGER_INK: Color = Color::srgb_u8(0xe9, 0xaa, 0xa1);
+pub(super) const DANGER_INK: Color = Color::srgb_u8(0xe9, 0xaa, 0xa1);
 const DANGER_EDGE: Color = Color::srgb_u8(0x8a, 0x5a, 0x50);
 const GHOST: Color = Color::srgba(40.0 / 255.0, 48.0 / 255.0, 55.0 / 255.0, 0.32);
 
@@ -94,111 +93,6 @@ fn paint(
     }
 }
 
-/// Where a button's label sits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Align<'a> {
-    Centre,
-    /// As the other labels of a stacked menu do.
-    Left,
-    /// Left, with a glyph such as a key or `+` at the right.
-    Glyph(&'a str),
-}
-
-pub(super) fn button(
-    parent: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    align: Align,
-    act: impl Bundle,
-    kind: Kind,
-) -> Entity {
-    spawn(
-        parent,
-        label,
-        align,
-        act,
-        Look {
-            kind,
-            selected: false,
-        },
-    )
-}
-
-pub(super) fn choice(
-    parent: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    act: impl Bundle,
-    selected: bool,
-) -> Entity {
-    let look = Look {
-        kind: Kind::Plain,
-        selected,
-    };
-    spawn(parent, label, Align::Centre, act, look)
-}
-
-fn spawn(
-    parent: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    align: Align,
-    act: impl Bundle,
-    look: Look,
-) -> Entity {
-    let kind = look.kind;
-    let ink = match kind {
-        Kind::Primary => SAGE_INK,
-        Kind::Danger => DANGER_INK,
-        _ => INK,
-    };
-    let weight = if kind == Kind::Primary { 650 } else { 450 };
-    parent
-        .spawn((
-            Button,
-            TabIndex(0),
-            act,
-            look,
-            Node {
-                min_height: Val::Px(40.0),
-                padding: UiRect::axes(Val::Px(15.0), Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(5.0)),
-                align_items: AlignItems::Center,
-                justify_content: if align == Align::Centre {
-                    JustifyContent::Center
-                } else {
-                    JustifyContent::SpaceBetween
-                },
-                column_gap: Val::Px(12.0),
-                flex_shrink: 0.0,
-                ..default()
-            },
-            BackgroundColor(RAISED),
-            BorderColor::all(EDGE),
-        ))
-        .with_children(|b| {
-            ui::weighted_text(b, label, 14.0, weight, ink);
-            if let Align::Glyph(glyph) = align
-                && !glyph.is_empty()
-            {
-                ui::weighted_text(b, glyph, 14.0, weight, ink);
-            }
-        })
-        .id()
-}
-
-/// Small spaced capitals above a heading.
-pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, value: &str) {
-    parent.spawn((
-        Text::new(value),
-        TextFont {
-            weight: bevy::text::FontWeight(650),
-            ..ui::font(11.0)
-        },
-        bevy::text::LetterSpacing::Px(2.0),
-        TextColor(MUTED),
-        Pickable::IGNORE,
-    ));
-}
-
 /// A raised surface with a black grout edge.
 pub(super) fn surface(background: Color) -> impl Bundle {
     (
@@ -258,7 +152,7 @@ pub(super) fn sheet(
             },
         ))
         .with_children(|h| {
-            eyebrow(h, sheet.eyebrow);
+            super::buttons::eyebrow(h, sheet.eyebrow, super::buttons::Eyebrow::Cinematic);
             ui::weighted_text(h, sheet.title, 25.0, 500, INK);
             ui::paragraph(h, sheet.subtitle, 13.0, MUTED);
         });

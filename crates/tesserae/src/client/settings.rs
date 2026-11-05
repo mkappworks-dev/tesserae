@@ -3,6 +3,7 @@ use super::{
     actions::{Action, Binding, Bindings, Device, Modifier, Trigger, Wheel},
     profile::{Preferences, Store},
 };
+use crate::client::buttons::{self, Align, ButtonStyle};
 use crate::session::SessionApp;
 use bevy::{
     prelude::*,
@@ -150,7 +151,7 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 fn button(parent: &mut ChildSpawnerCommands, text: String, operation: Operation) {
-    super::menu_ui::button(parent, text, operation, false, false, false);
+    buttons::button(parent, text, operation, ButtonStyle::Plain);
 }
 fn launch(
     mut settings: ResMut<Settings>,
@@ -733,7 +734,16 @@ fn option(
     operation: Operation,
     selected: bool,
 ) {
-    super::menu_ui::compact_button(parent, label, operation, selected, 31.0, 11.0);
+    buttons::button(
+        parent,
+        label,
+        operation,
+        ButtonStyle::Compact {
+            selected,
+            height_px: 31.0,
+            text_px: 11.0,
+        },
+    );
 }
 pub(super) fn action_name(action: Action) -> &'static str {
     use Action::*;
@@ -1501,13 +1511,15 @@ fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                 })
                 .with_children(|caps| {
                     for cap in [None, Some(60), Some(120), Some(144), Some(240), Some(1000)] {
-                        let button = ui::compact_button(
+                        let button = buttons::button(
                             caps,
                             cap.map_or("No limit".into(), |n| n.to_string()),
                             Operation::Cap(cap),
-                            p.fps_cap == cap,
-                            35.0,
-                            11.0,
+                            ButtonStyle::Compact {
+                                selected: p.fps_cap == cap,
+                                height_px: 35.0,
+                                text_px: 11.0,
+                            },
                         );
                         caps.commands().entity(button).insert(Node {
                             min_width: Val::Px(48.0),
@@ -1617,13 +1629,13 @@ fn bindings_page(
         ))
         .with_children(|filters| {
             for category in [Category::Movement, Category::Building, Category::Interface] {
-                let entity = ui::button(
+                let entity = buttons::button(
                     filters,
                     category.label(),
                     Operation::Category(category),
-                    settings.category == category,
-                    true,
-                    false,
+                    ButtonStyle::Tab {
+                        selected: settings.category == category,
+                    },
                 );
                 filters.commands().queue(move |world: &mut World| {
                     let children: Vec<_> = world
@@ -1759,11 +1771,21 @@ fn binding_rows(
                             ));
                     }
                     if binding.is_some() {
-                        ui::quiet_button(cell, "×", Operation::Clear(device, action, slot), 12.0);
+                        buttons::button(
+                            cell,
+                            "×",
+                            Operation::Clear(device, action, slot),
+                            ButtonStyle::Quiet { text_px: 12.0 },
+                        );
                     }
                 });
             }
-            ui::quiet_button(row, "↺", Operation::ResetAction(device, action), 16.0);
+            buttons::button(
+                row,
+                "↺",
+                Operation::ResetAction(device, action),
+                ButtonStyle::Quiet { text_px: 16.0 },
+            );
         });
     }
 }
@@ -1977,12 +1999,14 @@ fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
             },
         ))
         .with_children(|footer| {
-            cine::button(
+            buttons::button(
                 footer,
                 "Back",
-                cine::Align::Centre,
                 Operation::Back,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
             );
             footer
                 .spawn(Node {
@@ -2001,19 +2025,23 @@ fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                         12.0,
                         if changed { cine::WARNING } else { cine::MUTED },
                     );
-                    cine::button(
+                    buttons::button(
                         actions,
                         "Restore defaults",
-                        cine::Align::Centre,
                         Operation::Reset,
-                        Kind::Ghost,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Ghost,
+                            align: Align::Centre,
+                        },
                     );
-                    let apply = cine::button(
+                    let apply = buttons::button(
                         actions,
                         "Apply changes",
-                        cine::Align::Centre,
                         Operation::Apply,
-                        Kind::Primary,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                            align: Align::Centre,
+                        },
                     );
                     if !changed {
                         actions
@@ -2052,14 +2080,14 @@ fn modal(commands: &mut Commands, settings: &Settings) {
                 ui::paragraph(dialog,format!("{} · {}",action_name(action),if slot==0{"Primary"}else{"Alternative"}),12.0,ui::MUTED);
                 dialog.spawn((BackgroundColor(Color::srgb(0.069,0.118,0.081)),BorderColor::all(ui::LEAF),Node {padding:UiRect::all(Val::Px(28.0)),margin:UiRect::vertical(Val::Px(5.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(6.0)),justify_content:JustifyContent::Center,..default()})).with_children(|well|ui::technical_text(well,prompt,12.0,ui::LEAF));
                 ui::paragraph(dialog,cancel,12.0,ui::MUTED);
-                dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions|{ui::button(actions,"Cancel",Operation::Cancel,false,false,false);});
+                dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions|{buttons::button(actions, "Cancel", Operation::Cancel, ButtonStyle::Plain);});
             }else {
                 let (title,description)=if settings.unsaved {("Keep your changes?","You have unapplied behavior, binding or display changes.".into())}else if settings.resetting {("Restore defaults?","This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into())}else{let names=settings.conflict.as_ref().map(|(_,_,conflicts)|conflicts.iter().map(|(action,_)|action_name(*action)).collect::<Vec<_>>().join(", ")).unwrap_or_default();("Binding already in use",format!("This binding is assigned to {names}. Replace it?"))};
                 ui::weighted_text(dialog,title,19.0,620,ui::INK);ui::paragraph(dialog,description,12.0,ui::MUTED);
                 dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,column_gap:Val::Px(7.0),row_gap:Val::Px(7.0),flex_wrap:FlexWrap::Wrap,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions| {
-                    if settings.unsaved {first=Some(ui::button(actions,"Stay",Operation::Stay,false,false,false));let discard=ui::button(actions,"Discard",Operation::Discard,false,false,false);actions.commands().entity(discard).insert(ui::Danger);ui::button(actions,"Save changes",Operation::Apply,false,false,true);}
-                    else if settings.resetting {first=Some(ui::button(actions,"Cancel",Operation::CancelReset,false,false,false));let restore=ui::button(actions,"Restore defaults",Operation::ConfirmReset,false,false,true);actions.commands().entity(restore).insert(ui::Danger);}
-                    else {first=Some(ui::button(actions,"Keep existing",Operation::CancelConflict,false,false,false));ui::button(actions,"Replace binding",Operation::Replace,false,false,true);}
+                    if settings.unsaved {first=Some(buttons::button(actions, "Stay", Operation::Stay, ButtonStyle::Plain));let discard=buttons::button(actions, "Discard", Operation::Discard, ButtonStyle::Plain);actions.commands().entity(discard).insert(ui::Danger);buttons::button(actions, "Save changes", Operation::Apply, ButtonStyle::Primary);}
+                    else if settings.resetting {first=Some(buttons::button(actions, "Cancel", Operation::CancelReset, ButtonStyle::Plain));let restore=buttons::button(actions, "Restore defaults", Operation::ConfirmReset, ButtonStyle::Primary);actions.commands().entity(restore).insert(ui::Danger);}
+                    else {first=Some(buttons::button(actions, "Keep existing", Operation::CancelConflict, ButtonStyle::Plain));buttons::button(actions, "Replace binding", Operation::Replace, ButtonStyle::Primary);}
                 });
             }
         }).id();anchor=Some(dialog);

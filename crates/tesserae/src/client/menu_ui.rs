@@ -1,11 +1,12 @@
 //! Shared menu chrome; page bodies never replace the focused search widget.
 use super::settings::{Operation, Settings};
+use crate::client::buttons::{self, ButtonStyle, Eyebrow};
 use crate::session::SessionApp;
 use bevy::{
     input_focus::{FocusCause, InputFocus, InputFocusSystems, tab_navigation::TabIndex},
     prelude::*,
     text::{EditableText, TextEdit},
-    ui_widgets::{Activate, Button, TextInput},
+    ui_widgets::{Activate, TextInput},
 };
 
 pub(super) const LEAF: Color = Color::srgb(0.286745, 0.696314, 0.384471);
@@ -83,7 +84,7 @@ pub(super) struct SearchField(Tab);
 #[derive(Component)]
 struct ClearSearch;
 #[derive(Component)]
-struct Quiet;
+pub(super) struct Quiet;
 #[derive(Component)]
 pub(super) struct BindingControl;
 #[derive(Component)]
@@ -141,79 +142,6 @@ pub(super) fn text(
         bevy::text::LineHeight::RelativeToFont(1.5),
         Pickable::IGNORE,
     ));
-}
-pub(super) fn button(
-    parent: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    operation: impl Bundle,
-    selected: bool,
-    tab: bool,
-    primary: bool,
-) -> Entity {
-    parent
-        .spawn((
-            Button,
-            TabIndex(0),
-            operation,
-            Styled {
-                selected,
-                tab,
-                primary,
-            },
-            Node {
-                min_height: Val::Px(39.0),
-                padding: if tab {
-                    UiRect {
-                        left: Val::Px(2.0),
-                        right: Val::Px(2.0),
-                        top: Val::Px(8.0),
-                        bottom: Val::Px(11.0),
-                    }
-                } else {
-                    UiRect::axes(Val::Px(13.0), Val::Px(9.0))
-                },
-                border: if tab {
-                    UiRect::bottom(Val::Px(2.0))
-                } else {
-                    UiRect::all(Val::Px(1.0))
-                },
-                border_radius: BorderRadius::all(Val::Px(if tab { 0.0 } else { 5.0 })),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(if primary {
-                LEAF
-            } else if tab {
-                Color::NONE
-            } else {
-                CARD
-            }),
-            BorderColor::all(if selected || primary {
-                LEAF
-            } else if tab {
-                Color::NONE
-            } else {
-                EDGE
-            }),
-        ))
-        .with_child((
-            Text::new(label),
-            TextFont {
-                weight: bevy::text::FontWeight(if primary { 650 } else { 400 }),
-                ..font(12.0)
-            },
-            bevy::text::LineHeight::RelativeToFont(1.5),
-            TextColor(if primary {
-                BG
-            } else if tab && !selected {
-                MUTED
-            } else {
-                INK
-            }),
-            Pickable::IGNORE,
-        ))
-        .id()
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -569,9 +497,16 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
                 padding: UiRect::new(Val::Px(9.0), Val::Px(0.0), Val::Px(0.0), Val::Px(10.0)),
                 ..default()
             })
-            .with_children(|title| cine::eyebrow(title, "SETTINGS"));
+            .with_children(|title| buttons::eyebrow(title, "SETTINGS", Eyebrow::Cinematic));
             for page in Tab::ORDER {
-                let entry = cine::choice(nav, page.label(), Operation::Navigate(page), page == tab);
+                let entry = buttons::button(
+                    nav,
+                    page.label(),
+                    Operation::Navigate(page),
+                    ButtonStyle::Choice {
+                        selected: page == tab,
+                    },
+                );
                 nav.commands().entity(entry).insert(Node {
                     min_height: Val::Px(44.0),
                     padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
@@ -622,7 +557,7 @@ fn heading(sheet: &mut ChildSpawnerCommands, tab: Tab) {
                     ..default()
                 })
                 .with_children(|title| {
-                    cine::eyebrow(title, "MENU / SETTINGS");
+                    buttons::eyebrow(title, "MENU / SETTINGS", Eyebrow::Cinematic);
                     weighted_text(title, tab.label(), 25.0, 500, cine::INK);
                     paragraph(
                         title,
@@ -735,7 +670,12 @@ pub(super) fn search_frame(
                         },
                     ));
                 });
-            let clear = quiet_button(field, "×", ClearSearch, 13.0);
+            let clear = buttons::button(
+                field,
+                "×",
+                ClearSearch,
+                ButtonStyle::Quiet { text_px: 13.0 },
+            );
             field.commands().entity(clear).insert(if value.is_empty() {
                 Visibility::Hidden
             } else {
@@ -900,55 +840,6 @@ pub(super) fn weighted_text(
         Pickable::IGNORE,
     ));
 }
-pub(super) fn compact_button(
-    parent: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    operation: impl Bundle,
-    selected: bool,
-    height: f32,
-    size: f32,
-) -> Entity {
-    let label = label.into();
-    parent
-        .spawn((
-            Button,
-            TabIndex(0),
-            operation,
-            Styled {
-                selected,
-                tab: false,
-                primary: false,
-            },
-            Node {
-                min_height: Val::Px(height),
-                padding: UiRect::axes(Val::Px(11.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-            BackgroundColor(CARD),
-            BorderColor::all(if selected { LEAF } else { EDGE }),
-        ))
-        .with_children(|button| {
-            if label == "×" || label == "↺" {
-                icon(
-                    button,
-                    if label == "×" {
-                        IconKind::Close
-                    } else {
-                        IconKind::Reset
-                    },
-                    MUTED,
-                    if label == "×" { 12.0 } else { 16.0 },
-                );
-            } else {
-                text(button, label, size, INK);
-            }
-        })
-        .id()
-}
 
 fn search_presentation(
     focus: Res<InputFocus>,
@@ -1008,48 +899,6 @@ fn search_presentation(
         };
         text.set_if_neq(Text::new(format!("{number} {label}")));
     }
-}
-
-pub(super) fn quiet_button(
-    parent: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    operation: impl Bundle,
-    size: f32,
-) -> Entity {
-    let label = label.into();
-    let icon = label == "×" || label == "↺";
-    let entity = compact_button(
-        parent,
-        &label,
-        operation,
-        false,
-        if icon { 25.0 } else { 19.0 },
-        size,
-    );
-    parent.commands().entity(entity).insert((
-        Quiet,
-        Node {
-            width: if label == "×" {
-                Val::Px(15.0)
-            } else if label == "↺" {
-                Val::Px(28.0)
-            } else {
-                Val::Auto
-            },
-            min_height: Val::Px(if icon { 25.0 } else { 19.0 }),
-            padding: if icon {
-                UiRect::ZERO
-            } else {
-                UiRect::axes(Val::Px(4.0), Val::Px(2.0))
-            },
-            border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(4.0)),
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-    ));
-    entity
 }
 
 #[derive(Clone, Copy)]
@@ -1194,16 +1043,6 @@ pub(super) fn icon(parent: &mut ChildSpawnerCommands, kind: IconKind, color: Col
     ));
 }
 
-pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str) {
-    parent.spawn((
-        Text::new(label),
-        font(9.0),
-        bevy::text::LineHeight::RelativeToFont(1.5),
-        bevy::text::LetterSpacing::Px(1.2),
-        TextColor(MUTED),
-        Pickable::IGNORE,
-    ));
-}
 pub(super) fn technical_text(
     parent: &mut ChildSpawnerCommands,
     label: &str,
@@ -1593,7 +1432,12 @@ mod tests {
             .commands()
             .entity(parent)
             .with_children(|children| {
-                quiet_button(children, "Restore defaults", Operation::Reset, 10.0);
+                buttons::button(
+                    children,
+                    "Restore defaults",
+                    Operation::Reset,
+                    ButtonStyle::Quiet { text_px: 10.0 },
+                );
             });
         app.world_mut().flush();
         app.update();

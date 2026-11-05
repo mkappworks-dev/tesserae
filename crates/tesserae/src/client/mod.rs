@@ -7,6 +7,7 @@ mod aim;
 pub(crate) mod anti_alias;
 mod avatar;
 mod blend_order;
+mod buttons;
 pub mod camera;
 #[cfg(any(feature = "dev", feature = "profiling"))]
 mod capture;

@@ -1,4 +1,5 @@
 //! Save controls send intents; only the Server sees persistence or World data.
+use crate::client::buttons::{self, Align, ButtonStyle};
 use crate::server::persistence::{SaveAction, SaveStatus};
 use bevy::prelude::*;
 
@@ -21,20 +22,24 @@ struct DirectQuit;
 /// The Menu's way out: back to the Worlds, or for a World opened directly,
 /// which has no list to return to, Save & Quit.
 pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
-    use super::cinematic::{self as cine, Kind};
-    cine::button(
+    use super::cinematic::Kind;
+    buttons::button(
         parent,
         "Return to Worlds",
-        cine::Align::Left,
         ToList,
-        Kind::Plain,
+        ButtonStyle::Cinematic {
+            kind: Kind::Plain,
+            align: Align::Left,
+        },
     );
-    let quit = cine::button(
+    let quit = buttons::button(
         parent,
         "Save & Quit",
-        cine::Align::Left,
         Action(SaveAction::SaveQuit),
-        Kind::Plain,
+        ButtonStyle::Cinematic {
+            kind: Kind::Plain,
+            align: Align::Left,
+        },
     );
     parent.commands().entity(quit).insert(DirectQuit);
 }
@@ -235,22 +240,18 @@ fn show(
                                 ..default()
                             })
                             .with_children(|actions| {
-                                let exit = ui::button(
+                                let exit = buttons::button(
                                     actions,
                                     "Exit without saving",
                                     Action(SaveAction::ConfirmUnsafe),
-                                    false,
-                                    false,
-                                    false,
+                                    ButtonStyle::Plain,
                                 );
                                 actions.commands().entity(exit).insert(ui::Danger);
-                                initial_focus = Some(ui::button(
+                                initial_focus = Some(buttons::button(
                                     actions,
                                     "Cancel",
                                     Action(SaveAction::CancelUnsafe),
-                                    false,
-                                    false,
-                                    true,
+                                    ButtonStyle::Primary,
                                 ));
                             });
                     } else if let Some(error) = &status.error {
@@ -307,16 +308,14 @@ fn show(
                             })
                             .with_children(|actions| {
                                 if status.quitting {
-                                    initial_focus = Some(ui::button(
+                                    initial_focus = Some(buttons::button(
                                         actions,
                                         "Return to World",
                                         Action(SaveAction::Return),
-                                        false,
-                                        false,
-                                        false,
+                                        ButtonStyle::Plain,
                                     ));
                                 }
-                                let retry = ui::button(
+                                let retry = buttons::button(
                                     actions,
                                     if status.quitting {
                                         "Retry Save & Quit"
@@ -324,9 +323,7 @@ fn show(
                                         "Retry save"
                                     },
                                     Action(SaveAction::Retry),
-                                    false,
-                                    false,
-                                    true,
+                                    ButtonStyle::Primary,
                                 );
                                 if initial_focus.is_none() {
                                     initial_focus = Some(retry);
@@ -339,11 +336,11 @@ fn show(
                                     ..default()
                                 })
                                 .with_children(|actions| {
-                                    let exit = ui::quiet_button(
+                                    let exit = buttons::button(
                                         actions,
                                         "Exit without saving…",
                                         Action(SaveAction::AskUnsafe),
-                                        11.0,
+                                        ButtonStyle::Quiet { text_px: 11.0 },
                                     );
                                     actions.commands().entity(exit).insert(ui::Danger);
                                 });

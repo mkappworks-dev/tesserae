@@ -5,6 +5,7 @@
 //! While it is open the cursor is free, so mouse look is off and a click edits
 //! nothing: both already wait on a grabbed cursor.
 
+use crate::client::buttons::{self, Align, ButtonStyle, Eyebrow};
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
@@ -290,7 +291,7 @@ fn render(
                 },
             ))
             .with_children(|panel| {
-                cine::eyebrow(panel, "TAKE A MOMENT");
+                buttons::eyebrow(panel, "TAKE A MOMENT", Eyebrow::Cinematic);
                 ui::weighted_text(panel, "Menu", 31.0, 450, cine::INK);
                 let place = facts
                     .and_then(|f| f.name.clone())
@@ -309,36 +310,44 @@ fn render(
                     })
                     .with_children(|list| {
                         let key = |action| bindings.label(action, &labels);
-                        let resume = cine::button(
+                        let resume = buttons::button(
                             list,
                             "Resume",
-                            cine::Align::Glyph(&key(Action::ReleaseCursor)),
                             Choice::Resume,
-                            Kind::Primary,
+                            ButtonStyle::Cinematic {
+                                kind: Kind::Primary,
+                                align: Align::Glyph(&key(Action::ReleaseCursor)),
+                            },
                         );
                         if !details {
                             focus = Some(resume);
                         }
-                        cine::button(
+                        buttons::button(
                             list,
                             "Inventory",
-                            cine::Align::Glyph(&key(Action::Inventory)),
                             Choice::Inventory,
-                            Kind::Plain,
+                            ButtonStyle::Cinematic {
+                                kind: Kind::Plain,
+                                align: Align::Glyph(&key(Action::Inventory)),
+                            },
                         );
-                        cine::button(
+                        buttons::button(
                             list,
                             "Settings",
-                            cine::Align::Left,
                             Choice::Settings,
-                            Kind::Plain,
+                            ButtonStyle::Cinematic {
+                                kind: Kind::Plain,
+                                align: Align::Left,
+                            },
                         );
-                        cine::button(
+                        buttons::button(
                             list,
                             "World details",
-                            cine::Align::Left,
                             Choice::Details,
-                            Kind::Plain,
+                            ButtonStyle::Cinematic {
+                                kind: Kind::Plain,
+                                align: Align::Left,
+                            },
                         );
                         super::save::return_buttons(list);
                     });
@@ -391,7 +400,7 @@ fn world_details(
                 },
             ))
             .with_children(|dialog| {
-                cine::eyebrow(dialog, "WORLD DETAILS");
+                buttons::eyebrow(dialog, "WORLD DETAILS", Eyebrow::Cinematic);
                 let Some(facts) = facts else {
                     ui::paragraph(
                         dialog,
@@ -399,12 +408,14 @@ fn world_details(
                         13.0,
                         cine::MUTED,
                     );
-                    close = Some(cine::button(
+                    close = Some(buttons::button(
                         dialog,
                         "Close",
-                        cine::Align::Centre,
                         Choice::CloseDetails,
-                        Kind::Primary,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                            align: Align::Centre,
+                        },
                     ));
                     return;
                 };
@@ -418,12 +429,14 @@ fn world_details(
                 for line in lines(facts, own) {
                     ui::paragraph(dialog, line, 13.0, cine::MUTED);
                 }
-                close = Some(cine::button(
+                close = Some(buttons::button(
                     dialog,
                     "Close",
-                    cine::Align::Centre,
                     Choice::CloseDetails,
-                    Kind::Primary,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Primary,
+                        align: Align::Centre,
+                    },
                 ));
             });
     });

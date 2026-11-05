@@ -1,5 +1,6 @@
 //! What each launcher screen shows, in the Cinematic layout.
 
+use crate::client::buttons::{self, Align, ButtonStyle, Eyebrow};
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::prelude::*;
 use bevy::text::EditableText;
@@ -116,8 +117,16 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
                 Pickable::IGNORE,
             ));
         });
-        cine::eyebrow(row, "A WORLD OF YOUR OWN");
-        cine::button(row, "Quit", cine::Align::Centre, Act::Quit, Kind::Ghost);
+        buttons::eyebrow(row, "A WORLD OF YOUR OWN", Eyebrow::Cinematic);
+        buttons::button(
+            row,
+            "Quit",
+            Act::Quit,
+            ButtonStyle::Cinematic {
+                kind: Kind::Ghost,
+                align: Align::Centre,
+            },
+        );
     });
 }
 
@@ -172,7 +181,11 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
         ..default()
     })
     .with_children(|hero| {
-        cine::eyebrow(hero, "A LITTLE CURIOSITY. A WHOLE WORLD.");
+        buttons::eyebrow(
+            hero,
+            "A LITTLE CURIOSITY. A WHOLE WORLD.",
+            Eyebrow::Cinematic,
+        );
         hero.spawn((
             Text::new("Make room\nfor wonder."),
             TextFont {
@@ -204,33 +217,41 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             },
         ))
         .with_children(|actions| {
-            let worlds = cine::button(
+            let worlds = buttons::button(
                 actions,
                 "Your Worlds",
-                cine::Align::Left,
                 Act::Worlds,
-                Kind::Primary,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Primary,
+                    align: Align::Left,
+                },
             );
-            let create = cine::button(
+            let create = buttons::button(
                 actions,
                 "Create a World",
-                cine::Align::Glyph("+"),
                 Act::New,
-                Kind::Plain,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Plain,
+                    align: Align::Glyph("+"),
+                },
             );
-            cine::button(
+            buttons::button(
                 actions,
                 "Mods",
-                cine::Align::Left,
                 Act::Library,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Left,
+                },
             );
-            cine::button(
+            buttons::button(
                 actions,
                 "Settings",
-                cine::Align::Left,
                 Act::Settings,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Left,
+                },
             );
             if installed.game.is_none() {
                 actions
@@ -277,7 +298,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             },
         ))
         .with_children(|card| {
-            cine::eyebrow(card, "CONTINUE");
+            buttons::eyebrow(card, "CONTINUE", Eyebrow::Cinematic);
             ui::weighted_text(card, entry.name().unwrap_or(UNNAMED), 17.0, 600, cine::INK);
             if let Some(d) = entry.details() {
                 ui::paragraph(
@@ -294,12 +315,14 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             for line in &unmet {
                 ui::paragraph(card, line, 12.0, cine::WARNING);
             }
-            let button = cine::button(
+            let button = buttons::button(
                 card,
                 "Continue",
-                cine::Align::Left,
                 Act::Continue,
-                Kind::Primary,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Primary,
+                    align: Align::Left,
+                },
             );
             if unmet.is_empty() {
                 focus = Some(button);
@@ -370,12 +393,14 @@ fn worlds(
                             "Find a World by name or Game…",
                         );
                     });
-                    let create = cine::button(
+                    let create = buttons::button(
                         line,
                         "Create World",
-                        cine::Align::Glyph("+"),
                         Act::New,
-                        Kind::Primary,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                            align: Align::Glyph("+"),
+                        },
                     );
                     if installed.game.is_none() {
                         line.commands()
@@ -423,7 +448,15 @@ fn worlds(
                 });
             },
             |f| {
-                cine::button(f, "Main menu", cine::Align::Centre, Act::Home, Kind::Ghost);
+                buttons::button(
+                    f,
+                    "Main menu",
+                    Act::Home,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Ghost,
+                        align: Align::Centre,
+                    },
+                );
                 ui::text(f, "Stored on this device", 12.0, cine::MUTED);
                 ui::text(
                     f,
@@ -468,7 +501,15 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
                 ui::paragraph(words, "Nothing was changed in its save.", 12.0, cine::MUTED);
             }
         });
-        cine::button(c, "Dismiss", cine::Align::Centre, Act::Dismiss, Kind::Ghost);
+        buttons::button(
+            c,
+            "Dismiss",
+            Act::Dismiss,
+            ButtonStyle::Cinematic {
+                kind: Kind::Ghost,
+                align: Align::Centre,
+            },
+        );
     });
 }
 
@@ -574,21 +615,9 @@ fn world_card(
         })
         .with_children(|actions| {
             if unmet.is_empty() {
-                play = Some(cine::button(
-                    actions,
-                    if entry.incomplete() { "Retry" } else { "Play" },
-                    cine::Align::Centre,
-                    Act::Play(entry.path.clone()),
-                    Kind::Primary,
-                ));
+                play = Some(buttons::button(actions, if entry.incomplete() { "Retry" } else { "Play" }, Act::Play(entry.path.clone()), ButtonStyle::Cinematic { kind: Kind::Primary, align: Align::Centre }));
             }
-            cine::button(
-                actions,
-                "Edit",
-                cine::Align::Centre,
-                Act::Edit(entry.path.clone()),
-                Kind::Ghost,
-            );
+            buttons::button(actions, "Edit", Act::Edit(entry.path.clone()), ButtonStyle::Cinematic { kind: Kind::Ghost, align: Align::Centre });
         });
     });
     play
@@ -638,12 +667,14 @@ fn library_page(
                 }
             },
             |f| {
-                focus = Some(cine::button(
+                focus = Some(buttons::button(
                     f,
                     "Main menu",
-                    cine::Align::Centre,
                     Act::Home,
-                    Kind::Ghost,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Ghost,
+                        align: Align::Centre,
+                    },
                 ));
                 ui::text(
                     f,
@@ -654,12 +685,14 @@ fn library_page(
                     12.0,
                     cine::MUTED,
                 );
-                let create = cine::button(
+                let create = buttons::button(
                     f,
                     "Create World",
-                    cine::Align::Centre,
                     Act::New,
-                    Kind::Primary,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Primary,
+                        align: Align::Centre,
+                    },
                 );
                 if installed.game.is_none() {
                     f.commands()
@@ -724,12 +757,14 @@ fn edit(
                         locked(body, format!("Voxel size: {} m", d.voxel_size_m));
                         row(body, 8.0, |r| {
                             locked(r, format!("Seed: {}", d.seed));
-                            cine::button(
+                            buttons::button(
                                 r,
                                 "Copy",
-                                cine::Align::Centre,
                                 Act::CopySeed,
-                                Kind::Ghost,
+                                ButtonStyle::Cinematic {
+                                    kind: Kind::Ghost,
+                                    align: Align::Centre,
+                                },
                             );
                         });
                         locked(
@@ -795,27 +830,33 @@ fn edit(
                             && installed.unmet(d).is_empty()
                     });
                     if same_game && !entry.is_some_and(Entry::incomplete) {
-                        cine::button(
+                        buttons::button(
                             r,
                             "Create from these settings",
-                            cine::Align::Centre,
                             Act::ReCreate,
-                            Kind::Plain,
+                            ButtonStyle::Cinematic {
+                                kind: Kind::Plain,
+                                align: Align::Centre,
+                            },
                         );
                     }
-                    cine::button(
+                    buttons::button(
                         r,
                         "Show folder",
-                        cine::Align::Centre,
                         Act::ShowFolder,
-                        Kind::Plain,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Plain,
+                            align: Align::Centre,
+                        },
                     );
-                    cine::button(
+                    buttons::button(
                         r,
                         "Delete World…",
-                        cine::Align::Centre,
                         Act::Delete,
-                        Kind::Danger,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Danger,
+                            align: Align::Centre,
+                        },
                     );
                 });
                 ui::paragraph(
@@ -826,14 +867,24 @@ fn edit(
                 );
             },
             |f| {
-                cine::button(f, "Cancel", cine::Align::Centre, Act::Back, Kind::Ghost);
+                buttons::button(
+                    f,
+                    "Cancel",
+                    Act::Back,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Ghost,
+                        align: Align::Centre,
+                    },
+                );
                 ui::text(f, "Generation is pinned", 12.0, cine::MUTED);
-                cine::button(
+                buttons::button(
                     f,
                     "Save changes",
-                    cine::Align::Centre,
                     Act::SaveName,
-                    Kind::Primary,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Primary,
+                        align: Align::Centre,
+                    },
                 );
             },
         );
@@ -872,7 +923,14 @@ fn mode_picks(
             (GameMode::Creative, "Creative"),
             (GameMode::Survival, "Survival"),
         ] {
-            cine::choice(r, name, act(mode), chosen == mode);
+            buttons::button(
+                r,
+                name,
+                act(mode),
+                ButtonStyle::Choice {
+                    selected: chosen == mode,
+                },
+            );
         }
     });
     ui::paragraph(parent, hint, 12.0, cine::MUTED);
@@ -1040,12 +1098,14 @@ fn form(
             .with_children(|c| {
                 text_field(c, Field::Seed, &f.seed, "", "Words or a number");
             });
-            cine::button(
+            buttons::button(
                 r,
                 "Randomize",
-                cine::Align::Centre,
                 Act::Randomize,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
             );
         });
         ui::paragraph(
@@ -1062,32 +1122,43 @@ fn form(
                 TextColor(cine::MUTED),
                 Pickable::IGNORE,
             ));
-            cine::button(
+            buttons::button(
                 r,
                 "Copy",
-                cine::Align::Centre,
                 Act::CopyResolved,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
             );
         });
         row(col, 0.0, |r| {
-            cine::button(
+            buttons::button(
                 r,
                 if f.more {
                     "Hide World options"
                 } else {
                     "More World options"
                 },
-                cine::Align::Centre,
                 Act::More,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
             );
         });
         if f.more {
             label(col, "Voxel size");
             row(col, 7.0, |r| {
                 for (size, text) in VOXEL_SIZES {
-                    cine::choice(r, text, Act::Voxel(size), f.voxel_size_m == size);
+                    buttons::button(
+                        r,
+                        text,
+                        Act::Voxel(size),
+                        ButtonStyle::Choice {
+                            selected: f.voxel_size_m == size,
+                        },
+                    );
                 }
             });
             cine::notice(
@@ -1107,7 +1178,14 @@ fn mode_picker(col: &mut ChildSpawnerCommands, chosen: GameMode) {
             (GameMode::Creative, "Creative"),
             (GameMode::Survival, "Survival"),
         ] {
-            cine::choice(r, name, Act::Mode(mode), chosen == mode);
+            buttons::button(
+                r,
+                name,
+                Act::Mode(mode),
+                ButtonStyle::Choice {
+                    selected: chosen == mode,
+                },
+            );
         }
     });
     ui::paragraph(
@@ -1130,11 +1208,11 @@ fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) 
     row(col, 8.0, |r| {
         for (i, g) in installed.games.iter().enumerate() {
             let chosen = f.game.as_deref() == Some(g.id.as_str());
-            cine::choice(
+            buttons::button(
                 r,
                 format!("{} {}", ui::title(&g.id), g.version),
                 Act::PickGame(i),
-                chosen,
+                ButtonStyle::Choice { selected: chosen },
             );
         }
     });
@@ -1363,19 +1441,23 @@ fn delete(main: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
         );
         problem(card, l.problem.as_ref());
         row(card, 8.0, |r| {
-            focus = Some(cine::button(
+            focus = Some(buttons::button(
                 r,
                 "Keep World",
-                cine::Align::Centre,
                 Act::Back,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
             ));
-            cine::button(
+            buttons::button(
                 r,
                 "Delete World",
-                cine::Align::Centre,
                 Act::ConfirmDelete,
-                Kind::Danger,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Danger,
+                    align: Align::Centre,
+                },
             );
         });
     });
@@ -1460,20 +1542,12 @@ fn trust(
                 }
             },
             |foot| {
-                focus = Some(cine::button(
-                    foot,
-                    match next {
+                focus = Some(buttons::button(foot, match next {
                         Next::Create => "Back to Review",
                         Next::Biomes => "Back to Mods",
                         Next::Open(_) => "Cancel",
-                    },
-                    cine::Align::Centre,
-                    Act::Back,
-                    Kind::Ghost,
-                ));
-                cine::button(
-                    foot,
-                    format!(
+                    }, Act::Back, ButtonStyle::Cinematic { kind: Kind::Ghost, align: Align::Centre }));
+                buttons::button(foot, format!(
                         "Trust {} and {}",
                         if items.len() == 1 {
                             "it".to_owned()
@@ -1485,11 +1559,7 @@ fn trust(
                             Next::Create => "create",
                             Next::Biomes => "show their Biomes",
                         }
-                    ),
-                    cine::Align::Centre,
-                    Act::Trust,
-                    Kind::Primary,
-                );
+                    ), Act::Trust, ButtonStyle::Cinematic { kind: Kind::Primary, align: Align::Centre });
             },
         );
     });
@@ -1540,12 +1610,24 @@ fn step_frame(
             body,
             |foot| {
                 match step.previous() {
-                    Some(_) => {
-                        cine::button(foot, "Back", cine::Align::Centre, Act::Back, Kind::Ghost)
-                    }
-                    None => {
-                        cine::button(foot, "Cancel", cine::Align::Centre, Act::Back, Kind::Ghost)
-                    }
+                    Some(_) => buttons::button(
+                        foot,
+                        "Back",
+                        Act::Back,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Ghost,
+                            align: Align::Centre,
+                        },
+                    ),
+                    None => buttons::button(
+                        foot,
+                        "Cancel",
+                        Act::Back,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Ghost,
+                            align: Align::Centre,
+                        },
+                    ),
                 };
                 ui::text(
                     foot,
@@ -1554,19 +1636,23 @@ fn step_frame(
                     cine::MUTED,
                 );
                 forward = Some(match step.next() {
-                    Some(next) => cine::button(
+                    Some(next) => buttons::button(
                         foot,
                         format!("Next: {}", next.label()),
-                        cine::Align::Centre,
                         Act::Next,
-                        Kind::Primary,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                            align: Align::Centre,
+                        },
                     ),
-                    None => cine::button(
+                    None => buttons::button(
                         foot,
                         "Create World",
-                        cine::Align::Centre,
                         Act::Create,
-                        Kind::Primary,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                            align: Align::Centre,
+                        },
                     ),
                 });
             },
@@ -1594,7 +1680,7 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
             padding: UiRect::new(Val::Px(9.0), Val::Px(0.0), Val::Px(0.0), Val::Px(10.0)),
             ..default()
         })
-        .with_children(|title| cine::eyebrow(title, "NEW WORLD"));
+        .with_children(|title| buttons::eyebrow(title, "NEW WORLD", Eyebrow::Cinematic));
         for step in Step::ORDER {
             let done = step < current && check(step, &l.form, installed).is_ok();
             let label = format!(
@@ -1603,7 +1689,14 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
                 step.label(),
                 if done { " \u{00b7} done" } else { "" }
             );
-            let entry = cine::choice(rail, label, Act::Step(step), step == current);
+            let entry = buttons::button(
+                rail,
+                label,
+                Act::Step(step),
+                ButtonStyle::Choice {
+                    selected: step == current,
+                },
+            );
             rail.commands().entity(entry).insert(Node {
                 min_height: Val::Px(44.0),
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
@@ -1789,27 +1882,33 @@ fn biomes_page(
                     13.0,
                     cine::INK,
                 );
-                cine::button(
+                buttons::button(
                     r,
                     "Keep changes",
-                    cine::Align::Centre,
                     Act::KeepBiomes,
-                    Kind::Ghost,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Ghost,
+                        align: Align::Centre,
+                    },
                 );
-                cine::button(
+                buttons::button(
                     r,
                     "Reset defaults",
-                    cine::Align::Centre,
                     Act::ConfirmReset,
-                    Kind::Primary,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Primary,
+                        align: Align::Centre,
+                    },
                 );
             } else {
-                cine::button(
+                buttons::button(
                     r,
                     "Reset biome defaults",
-                    cine::Align::Centre,
                     Act::ResetBiomes,
-                    Kind::Ghost,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Ghost,
+                        align: Align::Centre,
+                    },
                 );
             }
         });
@@ -1890,17 +1989,19 @@ fn biome_row(list: &mut ChildSpawnerCommands, at: usize, choice: &BiomeChoice, s
         },
     ))
     .with_children(|card| {
-        cine::choice(
+        buttons::button(
             card,
             if choice.enabled { "On" } else { "Off" },
             Act::ToggleBiome(at),
-            choice.enabled,
+            ButtonStyle::Choice {
+                selected: choice.enabled,
+            },
         );
-        let name = cine::choice(
+        let name = buttons::button(
             card,
             ui::declared_title(&choice.name),
             Act::SelectBiome(at),
-            selected,
+            ButtonStyle::Choice { selected },
         );
         card.commands().entity(name).insert(Node {
             flex_grow: 1.0,
@@ -1919,7 +2020,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
     let Some(choice) = draft.choices.get(draft.selected) else {
         return;
     };
-    cine::eyebrow(editor, "BIOME SETTINGS");
+    buttons::eyebrow(editor, "BIOME SETTINGS", Eyebrow::Cinematic);
     ui::weighted_text(
         editor,
         ui::declared_title(&choice.name),
@@ -1954,20 +2055,24 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                     ..default()
                 })
                 .with_children(|s| {
-                    cine::button(
+                    buttons::button(
                         s,
                         "-",
-                        cine::Align::Centre,
                         Act::Nudge(knob, -1),
-                        Kind::Ghost,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Ghost,
+                            align: Align::Centre,
+                        },
                     );
                     ui::text(s, value, 13.0, cine::INK);
-                    cine::button(
+                    buttons::button(
                         s,
                         "+",
-                        cine::Align::Centre,
                         Act::Nudge(knob, 1),
-                        Kind::Ghost,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Ghost,
+                            align: Align::Centre,
+                        },
                     );
                 });
             });
@@ -2021,12 +2126,14 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
             })
             .with_children(|r| {
                 ui::text(r, title, 13.0, cine::INK);
-                cine::button(
+                buttons::button(
                     r,
                     ui::declared_title(name),
-                    cine::Align::Centre,
                     Act::CycleGround(layer),
-                    Kind::Plain,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Plain,
+                        align: Align::Centre,
+                    },
                 );
             });
     }
@@ -2125,13 +2232,15 @@ fn summary(
             ..default()
         })
         .with_children(|head| {
-            cine::eyebrow(head, title);
-            cine::button(
+            buttons::eyebrow(head, title, Eyebrow::Cinematic);
+            buttons::button(
                 head,
                 "Edit",
-                cine::Align::Centre,
                 Act::Step(step),
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
             );
         });
         fill(card);
@@ -2150,19 +2259,23 @@ fn discard(main: &mut ChildSpawnerCommands) -> Option<Entity> {
             cine::MUTED,
         );
         row(card, 8.0, |r| {
-            focus = Some(cine::button(
+            focus = Some(buttons::button(
                 r,
                 "Keep editing",
-                cine::Align::Centre,
                 Act::KeepEditing,
-                Kind::Ghost,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Ghost,
+                    align: Align::Centre,
+                },
             ));
-            cine::button(
+            buttons::button(
                 r,
                 "Discard setup",
-                cine::Align::Centre,
                 Act::DiscardSetup,
-                Kind::Danger,
+                ButtonStyle::Cinematic {
+                    kind: Kind::Danger,
+                    align: Align::Centre,
+                },
             );
         });
     });

@@ -1,6 +1,7 @@
 //! The Catalogue beside the Inventory: search, categories and the Materials as
 //! tiles. A take is an intent the Server answers like any other change.
 
+use crate::client::buttons::{self, ButtonStyle, Eyebrow};
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::picking::events::PointerDragStart;
 use bevy::picking::hover::Hovered;
@@ -10,9 +11,7 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use tesserae_core::inventory::{Destination, Slot};
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE};
 
-use super::{
-    INK, InventoryWindow, RULE, SLOT_EDGE, SLOT_FILL, SLOT_HOVER, SOFT, eyebrow, weighted,
-};
+use super::{INK, InventoryWindow, RULE, SLOT_EDGE, SLOT_FILL, SLOT_HOVER, SOFT, weighted};
 use crate::client::edit::{Catalogue, Holding, Hotbar};
 use crate::client::menu_ui::{self as ui, Searches};
 use crate::content::ContentCatalogue;
@@ -284,7 +283,7 @@ pub(super) fn panel(row: &mut ChildSpawnerCommands, query: &str) {
                 ..default()
             })
             .with_children(|header| {
-                eyebrow(header, "CREATIVE");
+                buttons::eyebrow(header, "CREATIVE", Eyebrow::Inventory);
                 header.spawn(weighted("Catalogue", 19.0, 550, INK));
                 header.spawn(weighted(
                     "Drag a Material into any slot",
@@ -385,13 +384,15 @@ pub(super) fn fill(
                 .despawn_related::<Children>()
                 .with_children(|row| {
                     for category in Category::ALL {
-                        ui::compact_button(
+                        buttons::button(
                             row,
                             category.label(),
                             CatalogueControl::Category(category),
-                            category == side.category,
-                            26.0,
-                            11.0,
+                            ButtonStyle::Compact {
+                                selected: category == side.category,
+                                height_px: 26.0,
+                                text_px: 11.0,
+                            },
                         );
                     }
                 });
@@ -533,7 +534,16 @@ fn transfer_rows(
                 BorderColor::all(RULE),
             ))
             .with_children(|stepper| {
-                ui::compact_button(stepper, "−", CatalogueControl::Fewer, false, 34.0, 15.0);
+                buttons::button(
+                    stepper,
+                    "−",
+                    CatalogueControl::Fewer,
+                    ButtonStyle::Compact {
+                        selected: false,
+                        height_px: 34.0,
+                        text_px: 15.0,
+                    },
+                );
                 stepper
                     .spawn((
                         Node {
@@ -544,7 +554,16 @@ fn transfer_rows(
                         Pickable::IGNORE,
                     ))
                     .with_child(weighted(side.count.to_string(), 13.0, 600, INK));
-                ui::compact_button(stepper, "+", CatalogueControl::More, false, 34.0, 15.0);
+                buttons::button(
+                    stepper,
+                    "+",
+                    CatalogueControl::More,
+                    ButtonStyle::Compact {
+                        selected: false,
+                        height_px: 34.0,
+                        text_px: 15.0,
+                    },
+                );
             });
             row.spawn(Node {
                 margin: UiRect::left(Val::Auto),
@@ -553,13 +572,15 @@ fn transfer_rows(
             })
             .with_children(|presets| {
                 for count in COUNT_PRESETS {
-                    ui::compact_button(
+                    buttons::button(
                         presets,
                         count.to_string(),
                         CatalogueControl::Count(count),
-                        count == side.count,
-                        30.0,
-                        11.0,
+                        ButtonStyle::Compact {
+                            selected: count == side.count,
+                            height_px: 30.0,
+                            text_px: 11.0,
+                        },
                     );
                 }
             });
@@ -585,7 +606,16 @@ fn transfer_rows(
                     true,
                 ),
             ] {
-                let button = ui::button(actions, label, control, false, false, primary);
+                let button = buttons::button(
+                    actions,
+                    label,
+                    control,
+                    if primary {
+                        ButtonStyle::Primary
+                    } else {
+                        ButtonStyle::Plain
+                    },
+                );
                 actions.commands().entity(button).insert(Node {
                     flex_grow: 1.0,
                     flex_basis: Val::Px(0.0),

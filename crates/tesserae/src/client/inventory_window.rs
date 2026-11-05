@@ -5,6 +5,7 @@
 //! It is its own input context, as the Layout menu is: the cursor is free and
 //! gameplay input waits until it closes.
 
+use crate::client::buttons::{self, ButtonStyle, Eyebrow};
 use bevy::input_focus::InputFocus;
 use bevy::picking::events::{PointerDragDrop, PointerDragEnd, PointerDragStart, PointerPress};
 use bevy::picking::hover::Hovered;
@@ -49,7 +50,7 @@ const DROP_TARGET: Color = Color::srgb_u8(214, 200, 143);
 const FULL: Color = Color::srgb_u8(232, 210, 159);
 const INK: Color = Color::srgb_u8(244, 244, 237);
 const SOFT: Color = Color::srgb_u8(173, 175, 185);
-const EYEBROW: Color = Color::srgb_u8(192, 194, 200);
+pub(super) const EYEBROW: Color = Color::srgb_u8(192, 194, 200);
 const SOURCE: Color = Color::srgb_u8(153, 156, 167);
 
 #[derive(Resource, Default)]
@@ -565,7 +566,12 @@ impl Names<'_> {
     }
 }
 
-fn weighted(value: impl Into<String>, size: f32, weight: u16, color: Color) -> impl Bundle {
+pub(super) fn weighted(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Color,
+) -> impl Bundle {
     (
         Text::new(value),
         TextFont {
@@ -576,13 +582,6 @@ fn weighted(value: impl Into<String>, size: f32, weight: u16, color: Color) -> i
         TextColor(color),
         Pickable::IGNORE,
     )
-}
-
-fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str) {
-    parent.spawn((
-        weighted(label, 11.0, 550, EYEBROW),
-        bevy::text::LetterSpacing::Px(1.3),
-    ));
 }
 
 fn header(card: &mut ChildSpawnerCommands, key: &str) {
@@ -634,8 +633,26 @@ fn header(card: &mut ChildSpawnerCommands, key: &str) {
                 ..default()
             })
             .with_children(|context| {
-                ui::compact_button(context, "i", Control::Details, false, 38.0, 13.0);
-                ui::compact_button(context, "×", Control::Close, false, 38.0, 13.0);
+                buttons::button(
+                    context,
+                    "i",
+                    Control::Details,
+                    ButtonStyle::Compact {
+                        selected: false,
+                        height_px: 38.0,
+                        text_px: 13.0,
+                    },
+                );
+                buttons::button(
+                    context,
+                    "×",
+                    Control::Close,
+                    ButtonStyle::Compact {
+                        selected: false,
+                        height_px: 38.0,
+                        text_px: 13.0,
+                    },
+                );
             });
     });
 }
@@ -665,7 +682,7 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                         ..default()
                     })
                     .with_children(|title| {
-                        eyebrow(title, "YOUR ITEMS");
+                        buttons::eyebrow(title, "YOUR ITEMS", Eyebrow::Inventory);
                         title.spawn(weighted("Backpack", 23.0, 500, INK));
                     });
                 heading
@@ -681,7 +698,16 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                         } else {
                             weighted(capacity, 11.0, 400, SOFT)
                         });
-                        ui::compact_button(row, "Sort", Control::Sort, false, 36.0, 12.0);
+                        buttons::button(
+                            row,
+                            "Sort",
+                            Control::Sort,
+                            ButtonStyle::Compact {
+                                selected: false,
+                                height_px: 36.0,
+                                text_px: 12.0,
+                            },
+                        );
                     });
             });
         grid(browser, state, names, Slot::Backpack, BACKPACK_SLOTS);
@@ -873,13 +899,14 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
         BorderColor::all(RULE),
     ))
     .with_children(|panel| {
-        eyebrow(
+        buttons::eyebrow(
             panel,
             if state.picked.is_some() {
                 "MOVING STACK"
             } else {
                 "ITEM DETAILS"
             },
+            Eyebrow::Inventory,
         );
         match stack {
             Some((slot, stack)) => {
@@ -936,32 +963,26 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                             Slot::Hotbar(_) => "Move to backpack",
                             Slot::Backpack(_) => "Move to hotbar",
                         };
-                        ui::button(
+                        buttons::button(
                             actions,
                             other,
                             Control::QuickTransfer(slot),
-                            false,
-                            false,
-                            false,
+                            ButtonStyle::Plain,
                         );
                         if stack.count >= 2 {
-                            ui::button(
+                            buttons::button(
                                 actions,
                                 "Split stack",
                                 Control::Split(slot),
-                                false,
-                                false,
-                                false,
+                                ButtonStyle::Plain,
                             );
                         }
                         if state.picked.is_some() {
-                            ui::button(
+                            buttons::button(
                                 actions,
                                 "Cancel move",
                                 Control::CancelMove,
-                                false,
-                                false,
-                                false,
+                                ButtonStyle::Plain,
                             );
                         }
                     });
@@ -1036,7 +1057,11 @@ fn shape_row(
             ..default()
         })
         .with_children(|row| {
-            eyebrow(row, &format!("SHAPE · {}", placed.to_uppercase()));
+            buttons::eyebrow(
+                row,
+                &format!("SHAPE · {}", placed.to_uppercase()),
+                Eyebrow::Inventory,
+            );
             row.spawn(Node {
                 flex_wrap: FlexWrap::Wrap,
                 column_gap: Val::Px(6.0),
@@ -1045,13 +1070,15 @@ fn shape_row(
             })
             .with_children(|choices| {
                 for shape in shapes {
-                    ui::compact_button(
+                    buttons::button(
                         choices,
                         ui::title(&shape.name),
                         Control::Shape(shape.id),
-                        shape.id == chosen,
-                        30.0,
-                        12.0,
+                        ButtonStyle::Compact {
+                            selected: shape.id == chosen,
+                            height_px: 30.0,
+                            text_px: 12.0,
+                        },
                     );
                 }
             });
@@ -1105,7 +1132,7 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     400,
                     SOFT,
                 ));
-                ui::button(actions, "Back to game", Control::Close, false, false, false);
+                buttons::button(actions, "Back to game", Control::Close, ButtonStyle::Plain);
             });
     });
 }

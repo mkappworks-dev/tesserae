@@ -4,6 +4,7 @@
 //! Drawn from Server messages only
 //! (`docs/adr/0002-client-server-from-day-one.md`).
 
+use crate::client::buttons::{self, Align, ButtonStyle};
 use bevy::input_focus::InputFocus;
 use bevy::input_focus::tab_navigation::TabGroup;
 use bevy::prelude::*;
@@ -320,12 +321,14 @@ fn render(
                             ..default()
                         })
                         .with_children(|actions| {
-                            cine::button(
+                            buttons::button(
                                 actions,
                                 "Respawn",
-                                cine::Align::Glyph("Enter"),
                                 Respawn,
-                                Kind::Primary,
+                                ButtonStyle::Cinematic {
+                                    kind: Kind::Primary,
+                                    align: Align::Glyph("Enter"),
+                                },
                             );
                             super::save::return_buttons(actions);
                         });
