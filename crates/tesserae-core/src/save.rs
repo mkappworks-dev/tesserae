@@ -468,6 +468,30 @@ impl PlayerExtension for GameModeV1 {
     const KEY: &'static str = "game_mode_v1";
 }
 
+/// Health and hunger in points, air in seconds.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VitalsV1 {
+    pub health: f32,
+    pub hunger: f32,
+    pub air_s: f32,
+}
+
+impl PlayerExtension for VitalsV1 {
+    const KEY: &'static str = "vitals_v1";
+
+    fn validate(&self) -> Result<(), Error> {
+        let points = 0.0..=crate::survival::MAX_SURVIVAL_VALUE;
+        if !points.contains(&self.health)
+            || !points.contains(&self.hunger)
+            || !(0.0..=crate::survival::MAX_AIR_S).contains(&self.air_s)
+        {
+            return Err(Error::Corrupt("invalid Player vitals".into()));
+        }
+        Ok(())
+    }
+}
+
 impl Player {
     /// The value saved under `E::KEY`, `None` when the key is absent.
     pub fn get<E: PlayerExtension>(&self) -> Result<Option<E>, Error> {

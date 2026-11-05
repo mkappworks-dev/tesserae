@@ -1,6 +1,7 @@
 use super::*;
 use crate::server::game_mode::PlayerMode;
 use crate::server::inventory::Inventory;
+use crate::server::vitals::Vitals;
 use crate::server::{ContentTables, edit, streaming::MeshState, undo::Journal};
 use bevy::ecs::message::Messages;
 use bevy::ecs::system::EntityCommands;
@@ -1075,6 +1076,49 @@ fn an_inventory_arranged_by_intents_survives_save_and_reopen() {
     rig.settled_save();
     drop(rig);
     assert_eq!(inventory(&Rig::new(&dir)), arranged);
+}
+
+fn vitals(rig: &Rig) -> Vitals {
+    let mut q = rig.app.world().try_query::<&Vitals>().unwrap();
+    *q.single(rig.app.world()).unwrap()
+}
+
+#[test]
+fn vitals_survive_save_and_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    let hurt = Vitals {
+        health: 7.5,
+        hunger: 19.0,
+        air_s: 4.25,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert(hurt);
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(
+        save::inspect(&dir.0)
+            .unwrap()
+            .unwrap()
+            .commit
+            .player
+            .get::<save::VitalsV1>()
+            .unwrap(),
+        Some(save::VitalsV1 {
+            health: 7.5,
+            hunger: 19.0,
+            air_s: 4.25,
+        })
+    );
+    assert_eq!(vitals(&Rig::new(&dir)), hurt);
 }
 
 fn inventory(rig: &Rig) -> tesserae_core::inventory::Inventory {

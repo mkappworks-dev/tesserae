@@ -55,6 +55,7 @@ mod tool;
 mod touch;
 mod underwater;
 mod view;
+mod vitals;
 pub mod worlds;
 
 use bevy::prelude::*;
@@ -110,6 +111,7 @@ pub fn plugin(app: &mut App) {
         inventory_window::plugin,
         hotbar::plugin,
         game_mode::plugin,
+        vitals::plugin,
     ));
     app.add_session_systems(
         Update,

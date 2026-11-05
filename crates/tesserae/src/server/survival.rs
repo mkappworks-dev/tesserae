@@ -3,7 +3,6 @@
 use bevy::prelude::*;
 use tesserae_core::{MaterialId, SurvivalRules};
 
-#[cfg_attr(not(test), expect(dead_code, reason = "the Vitals will read it"))]
 #[derive(Resource, Clone, Default, Debug)]
 pub struct Survival {
     pub rules: SurvivalRules,
@@ -25,11 +24,14 @@ impl Survival {
         }
     }
 
-    #[cfg_attr(not(test), expect(dead_code, reason = "the Vitals will read it"))]
     pub fn contact_damage_per_s(&self, material: MaterialId) -> f32 {
         self.contact_damage
             .get(usize::from(material))
             .copied()
             .unwrap_or(0.0)
+    }
+
+    pub fn any_contact_damage(&self) -> bool {
+        self.contact_damage.iter().any(|&d| d > 0.0)
     }
 }
