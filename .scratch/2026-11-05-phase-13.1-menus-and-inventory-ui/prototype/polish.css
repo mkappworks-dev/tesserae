@@ -1,0 +1,47 @@
+/* Loaded last: cross-page fixes from the 9.5 review. */
+.game input[type=checkbox]{appearance:none;-webkit-appearance:none;display:grid;place-items:center;width:20px;height:20px;flex-shrink:0;margin:0;border:2px solid #050506;border-radius:4px;background:linear-gradient(#1b1c1f,#131416);box-shadow:inset 0 0 0 1px #5a5d63;cursor:pointer}
+.game input[type=checkbox]:hover{box-shadow:inset 0 0 0 1px #9a9f93}
+.game input[type=checkbox]:checked{background:#c1cdb5;box-shadow:inset 0 0 0 1px #e6eedb}
+.game input[type=checkbox]:checked::after{content:'';width:5px;height:10px;border:solid #161b16;border-width:0 2.5px 2.5px 0;transform:translateY(-1px) rotate(45deg)}
+.game input[type=checkbox]:disabled{opacity:.55;cursor:not-allowed}
+.game input[type=checkbox]:focus-visible{outline:2px solid #f3f6ec;outline-offset:2px}
+
+.game .game-header .icon-button{background:transparent;border-color:#ffffff38;color:#e8ebe4}
+.game .game-header .icon-button:hover{background:#ffffff14;border-color:#ffffff70}
+
+.game[data-view=pause] .game-header{display:none}
+.game .world-status{display:block}
+.game .world-status h3{text-shadow:0 2px 8px #000c}
+.game .world-status p,.game .world-status .eyebrow{color:#eef1ea;opacity:1;text-shadow:0 1px 4px #000,0 0 10px #000a}
+
+.card-actions{flex-direction:row;align-items:center;gap:8px}
+.card-actions .btn{min-height:40px}
+.world-card{margin:10px 0}
+
+.game .input:disabled{background:#121315;border-style:dashed;border-color:#4d4f55;color:#b2b6bd;cursor:not-allowed;box-shadow:none}
+
+.range-field{display:flex;flex-direction:column;gap:8px}
+.range-head{display:flex;justify-content:space-between;align-items:baseline}
+.range-head output{min-width:44px;text-align:right;font:600 13px ui-monospace,monospace;color:#e6ebdf}
+.game input[type=range]{width:100%;accent-color:#c1cdb5}
+
+.climate-map{height:110px}
+.climate-dot{position:absolute;width:12px;height:12px;padding:0;border:2px solid #0b0c0d;border-radius:3px;background:var(--swatch,#cbd4b3);box-shadow:0 0 0 1px #ffffff55;transform:translate(-50%,50%);cursor:pointer}
+.climate-dot.off{opacity:.4}
+.climate-dot.current{z-index:2;width:16px;height:16px;box-shadow:0 0 0 2px #f3f6ec,0 0 10px #000a}
+.climate-dot span{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%);padding:2px 6px;border-radius:3px;background:#0b0b0de6;color:#f3f5ee;font-size:11px;font-weight:550;white-space:nowrap;pointer-events:none}
+
+.library-note{margin:0 0 6px}
+.mod-category{margin-left:auto;align-self:center;font-size:11px;letter-spacing:.04em;color:#aeb2b9}
+.game .biome-card input,.game .biome-card input:hover,.game .biome-card input:checked{display:block;height:44px;border:0;background:none;box-shadow:none}
+.game .biome-card input:checked::after{content:none}
+.game .biome-card input:before{border:2px solid #050506;border-radius:4px;background:linear-gradient(#1b1c1f,#131416);box-shadow:inset 0 0 0 1px #5a5d63}
+.game .biome-card input:checked:before{background:#c1cdb5;box-shadow:inset 0 0 0 1px #e6eedb;font-weight:700}
+.climate-dot:not(.current){z-index:3}
+.game .mod-card{align-items:center}
+.game .mod-card input{width:20px;height:20px;margin:0}
+.game .mod-card .pill{background:none;border:0;padding:0;font-size:11px;letter-spacing:.04em;color:#aeb2b9;text-transform:none}
+.game .setting-row input[type=checkbox]{width:22px;height:22px;min-height:0;max-width:none;padding:0}
+.game .sheet,.game .rail,.game .pause-panel,.game .continue-card,.game .home-actions,.game .dialog,.layout-panel,.layout-stage-label,.layout-status{border:2px solid #000;box-shadow:inset 0 0 0 1px #ffffff1f,0 20px 60px #0009}
+.layout-panel>footer>small{display:none}
+.game .rail-note{font-size:12px;line-height:1.6}
