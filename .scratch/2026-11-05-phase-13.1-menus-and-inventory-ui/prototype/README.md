@@ -124,8 +124,9 @@ decisions it illustrates are in [../decisions.md](../decisions.md). Code is in
   a HUD notice; a full backpack reads "Full".
 - Illustrative numbers: 20 health, 20 hunger, 10 air, falls over 3 m hurt 1 per
   metre, lava 4 per second, regeneration at hunger 18 or more, 5-minute
-  despawn (the engine's step-12 value). `Berries` is an illustrative food Item;
-  no Game declares food yet.
+  despawn (the engine's step-12 value), regeneration 0.25 health per second
+  (the Game declares it). `Melon` is Terra's food Item: a placeable solid worth
+  6 hunger, eaten with G, generated on grass.
 
 In play, routine success shows no message: the hotbar count, the slots and
 the vitals already change. Pickup shows a feed at the bottom right (same Item

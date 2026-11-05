@@ -107,3 +107,25 @@ the prototype extension adds:
   `/implement`.
 - Rebase onto origin/main once the phase 13 PR merges. Do not commit or push
   until asked.
+
+## During implementation
+
+Taken with the maintainer on 2026-11-05, while the tickets were being built.
+The prototype shows the ones with a screen.
+
+- Terra generates melons on grass. `terra:melon` is a placeable solid whose
+  Item is food worth 6; G eats it. Every Terra World's terrain changes.
+- The Game declares the health regeneration rate in its Survival rules,
+  default 0.25 health per second.
+- The death screen counts down to the moment the dropped Items despawn, and
+  the respawn notice gives the same time left. The Server owns the deadline.
+- An undo entry pays and refunds by the mode it was made in, so a switch
+  between Creative and Survival cannot mint or destroy Items.
+- Anything that does not fit in the Inventory drops at the Player, including
+  an undeclared Item's Carried overflow.
+- The Inventory dims the World behind it without blur, as Minecraft (blur on
+  menus only, by design) and Luanti (a translucent fullscreen colour) do. The
+  Menu, Settings and Create World keep their blur.
+- Any solid Material, food included, can be a Biome's ground.
+- At the end the branch, this folder and these documents are renamed from
+  phase 13.1 to phase 15.

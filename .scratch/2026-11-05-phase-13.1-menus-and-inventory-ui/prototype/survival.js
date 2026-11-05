@@ -1,22 +1,18 @@
 /* PROTOTYPE, throwaway. Step 15 Survival states and step 21 vitals, death and game mode.
    Every number below stands in for a Game declaration; the engine computes them on the Server in metres. */
-const rules={maxHealth:20,maxHunger:20,maxAir:10,safeFall:3,fallPerMetre:1,drownPerSecond:2,lavaPerSecond:4,regenAbove:18,sprintDrain:1,idleDrain:1,despawnSeconds:300};
-carriedItems.push({id:'berries',name:'Berries',color:'#a34f63',food:3,maxStack:64,material:null,materialId:null});
+const rules={maxHealth:20,maxHunger:20,maxAir:10,safeFall:3,fallPerMetre:1,drownPerSecond:2,lavaPerSecond:4,regenAbove:18,regenPerSecond:.25,sprintDrain:1,idleDrain:1,despawnSeconds:300};
+carriedItems.find(x=>x.id==='melon').food=6;
 
-const baseVoxelIcon=voxelIcon;
-voxelIcon=function(item,shape){
-  if(!item?.food)return baseVoxelIcon(item,shape);
-  return `<svg class="voxel-icon" viewBox="0 0 48 48" aria-hidden="true"><circle cx="18" cy="28" r="10" fill="${item.color}"/><circle cx="31" cy="30" r="9" fill="${item.color}"/><circle cx="25" cy="18" r="8" fill="${item.color}"/><circle cx="21" cy="25" r="3" fill="#fff" opacity=".35"/><path d="M25 10c3-5 8-6 11-5-2 3-6 5-11 5Z" fill="#6f8f4f"/></svg>`;
-};
 
 function ensureSurvival(){
   state.vitals ||= {health:rules.maxHealth,hunger:rules.maxHunger,air:rules.maxAir,underwater:false};
   state.journal ||= [];
   state.mode ||= 'Creative';
   for(const w of worlds){w.mode ||= w.id===1?'Creative':'Survival';w.playerMode ||= w.mode;}
-  if(!state.survivalSeedRevision){
-    if(!state.bagHotbar[8])state.bagHotbar[8]={id:'berries',count:6,shape:'Cube'};
-    state.survivalSeedRevision=1;
+  if(state.survivalSeedRevision!==2){
+    for(const x of allSlots())if(x.s?.id==='berries')x.list[x.i]=null;
+    if(!state.bagHotbar[8])state.bagHotbar[8]={id:'melon',count:6,shape:'Cube'};
+    state.survivalSeedRevision=2;
   }
 }
 function survival(){return !creativeAccess();}
@@ -53,13 +49,22 @@ function die(cause){
 function respawn(){
   state.vitals={health:rules.maxHealth,hunger:rules.maxHunger,air:rules.maxAir,underwater:false};
   const d=state.death;state.death=null;navigate('play');
-  notice(d?.dropped.length?`Back at the World spawn. Your items are ${d.distance} m away, for ${rules.despawnSeconds/60} minutes.`:'Back at the World spawn.','info',5);
+  const left=d?despawnLeft(d):0;
+  notice(d?.dropped.length?left?`Back at the World spawn. Your items are ${d.distance} m away, for ${clock(left)}.`:'Back at the World spawn. Your items have despawned.':'Back at the World spawn.','info',5);
 }
+/* The Server owns the despawn deadline; the death screen counts down to it and keeps counting while it is open. */
+function despawnLeft(d){return Math.max(0,Math.ceil(rules.despawnSeconds-(Date.now()-(d.diedAt??Date.now()))/1000));}
+function clock(s){return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;}
+setInterval(()=>{
+  const el=$('#despawn-left');if(!el||state.screen!=='death')return;
+  const left=despawnLeft(state.death||deathScreen.sample);
+  el.textContent=left?`They stay for ${clock(left)}.`:'They have despawned.';
+},1000);
 function tickTime(seconds,sprinting){
   const v=state.vitals;
   if(!survival()){log('Creative: hunger does not drain.');return;}
   v.hunger=Math.max(0,v.hunger-(sprinting?rules.sprintDrain*2:rules.idleDrain));
-  if(v.hunger>=rules.regenAbove&&v.health<rules.maxHealth)v.health=Math.min(rules.maxHealth,v.health+1);
+  if(v.hunger>=rules.regenAbove)v.health=Math.min(rules.maxHealth,v.health+Math.floor(seconds*rules.regenPerSecond));
   log(`${seconds} s ${sprinting?'sprinting':'idle'}.`);
   if(!v.hunger){hurt(1,{title:'You starved',detail:'Hunger reached zero',short:'Starved'});return;}
   render();
@@ -68,7 +73,6 @@ function tickTime(seconds,sprinting){
 function placeHeld(){
   const stack=state.bagHotbar[state.quickSlot],item=stackItem(stack);
   if(!stack){notice(`Nothing to place in hotbar slot ${state.quickSlot+1}.`,'warn');return;}
-  if(item.food){notice(`${item.name} can’t be placed. Press G to eat.`,'warn');return;}
   if(survival()){stack.count--;if(!stack.count)state.bagHotbar[state.quickSlot]=null;state.pickupRefused=null;}
   state.journal.push({kind:'place',id:item.id,free:!survival()});
   log(`Placed ${item.material}${survival()?'':' (free)'}.`);render();
@@ -145,12 +149,13 @@ function survivalHud(){
 
 function deathScreen(){
   ensureSurvival();
-  const d=state.death||{cause:{title:'You fell too far',detail:'Fell 25 m',short:'Fell 25 m'},dropped:[{id:'rock',count:40},{id:'dirt',count:24}],at:'412, 63, −88',distance:140};
+  const d=state.death||(deathScreen.sample ||= {cause:{title:'You fell too far',detail:'Fell 25 m',short:'Fell 25 m'},dropped:[{id:'rock',count:40},{id:'dirt',count:24}],at:'412, 63, −88',distance:140,diedAt:Date.now()});
+  const left=despawnLeft(d);
   const kept=state.keepInventory,count=d.dropped.reduce((n,s)=>n+s.count,0);
-  const items=kept?'You keep your Inventory: this Game declares keep_inventory.':d.dropped.length?`${count} items in ${d.dropped.length} stacks lie where you fell, at ${d.at}. They stay for ${rules.despawnSeconds/60} minutes.`:'You carried nothing.';
+  const items=kept?'You keep your Inventory: this Game declares keep_inventory.':d.dropped.length?`${count} items in ${d.dropped.length} stacks lie where you fell, at ${d.at}.`:'You carried nothing.';
   const actions=`${button('Respawn <span>Enter</span>','respawn',{primary:true})}${button('Return to Worlds','leave',{ghost:true})}`;
   const where=`${activeWorld()?.name||'Your World'} · ${d.distance} m from the World spawn`;
-  return `<div class="death-screen"><section class="death-centre" role="alertdialog" aria-labelledby="death-title"><p class="eyebrow">${esc(where).toUpperCase()}</p><h1 id="death-title">${esc(d.cause.title)}</h1><p class="death-cause">${esc(d.cause.detail)}</p><div class="notice">${esc(items)}</div><div class="death-actions">${actions}</div></section></div>`;
+  return `<div class="death-screen"><section class="death-centre" role="alertdialog" aria-labelledby="death-title"><p class="eyebrow">${esc(where).toUpperCase()}</p><h1 id="death-title">${esc(d.cause.title)}</h1><p class="death-cause">${esc(d.cause.detail)}</p><div class="notice">${esc(items)}${!kept&&d.dropped.length?` <span id="despawn-left" aria-live="off">${left?`They stay for ${clock(left)}.`:'They have despawned.'}</span>`:''}</div><div class="death-actions">${actions}</div></section></div>`;
 }
 
 function modePicks(key,value,{legend,hint,compact}){
@@ -162,7 +167,7 @@ function simPanel(){
   if(!['play'].includes(state.screen))return '';
   const v=state.vitals,mode=survival()?'Survival':'Creative';
   const b=(label,act,val)=>`<button data-action="${act}" ${val!==undefined?`data-value="${val}"`:''}>${label}</button>`;
-  return `<aside class="sim-panel" aria-label="Prototype simulation"><header><b>Simulate</b><span>${mode} · not part of the design</span><button data-action="sim-toggle" aria-expanded="${!state.simCollapsed}">${state.simCollapsed?'Show':'Hide'}</button></header>${state.simCollapsed?'':`<div class="sim-group"><small>Items</small>${b('Place held (right-click)','sim-place')}${b('Break Stone','sim-break')}${b('Undo (Z)','sim-undo')}${b('Pick up 12 Dirt','sim-pickup','dirt:12')}${b('Fill every slot','sim-fill')}</div><div class="sim-group"><small>Body</small>${b('Fall 9 m','sim-fall',9)}${b('Fall 25 m','sim-fall',25)}${b(v.underwater?'Surface':'Dive','sim-dive')}${b('2 s underwater','sim-breath')}${b('Touch lava 1 s','sim-lava')}${b('Sprint 10 s','sim-time','sprint')}${b('Wait 60 s','sim-time','idle')}${b('Eat held (G)','sim-eat')}</div><div class="sim-group"><small>Game declares</small><label><input type="checkbox" data-bind="keepInventory" ${state.keepInventory?'checked':''}> keep_inventory</label></div><pre class="sim-state">health ${v.health}/${rules.maxHealth}  hunger ${v.hunger}/${rules.maxHunger}  air ${v.air}/${rules.maxAir}${v.underwater?' (underwater)':''}
+  return `<aside class="sim-panel" aria-label="Prototype simulation"><header><b>Simulate</b><span>${mode} · not part of the design</span><button data-action="sim-toggle" aria-expanded="${!state.simCollapsed}">${state.simCollapsed?'Show':'Hide'}</button></header>${state.simCollapsed?'':`<div class="sim-group"><small>Items</small>${b('Place held (right-click)','sim-place')}${b('Break Stone','sim-break')}${b('Undo (Z)','sim-undo')}${b('Pick up 12 Dirt','sim-pickup','dirt:12')}${b('Fill every slot','sim-fill')}</div><div class="sim-group"><small>Body</small>${b('Fall 9 m','sim-fall',9)}${b('Fall 25 m','sim-fall',25)}${b(v.underwater?'Surface':'Dive','sim-dive')}${b('2 s underwater','sim-breath')}${b('Touch lava 1 s','sim-lava')}${b('Sprint 10 s','sim-time','sprint')}${b('Wait 60 s','sim-time','idle')}${b('Eat held (G)','sim-eat')}</div><div class="sim-group"><small>Game declares</small><small>Melon: food 6 · regeneration ${rules.regenPerSecond} health/s at hunger ${rules.regenAbove}+</small><label><input type="checkbox" data-bind="keepInventory" ${state.keepInventory?'checked':''}> keep_inventory</label></div><pre class="sim-state">health ${v.health}/${rules.maxHealth}  hunger ${v.hunger}/${rules.maxHunger}  air ${v.air}/${rules.maxAir}${v.underwater?' (underwater)':''}
 journal ${state.journal.map(j=>j.kind+':'+j.id).slice(-4).join(' ')||'empty'}
 last ${state.simLog||'—'}
 held ${state.bagHotbar[state.quickSlot]?itemName(state.bagHotbar[state.quickSlot].id)+' × '+state.bagHotbar[state.quickSlot].count:'nothing'}  ·  ${allSlots().filter(x=>x.s).length}/36 slots used</pre>`}</aside>`;

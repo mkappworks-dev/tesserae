@@ -5,6 +5,7 @@ const catalogueItems=[
   {id:'sand',itemId:'sand',name:'Sand',group:'Terrain',color:'#d7c49c'},
   {id:'snow',itemId:'snow',name:'Snow',group:'Terrain',color:'#e0e8e4'},
   {id:'iron',itemId:'iron',name:'Iron ore',group:'Ores',color:'#b59a85'},
+  {id:'melon',itemId:'melon',name:'Melon',group:'Terrain',color:'#54963a'},
   {id:'lamp',itemId:'lamp',name:'Lamp',group:'Lighting',color:'#efce8d'},
   {id:'water',itemId:'water',name:'Water source',group:'Fluids',color:'#75a9be'},
   {id:'lava',itemId:'lava',name:'Lava source',group:'Fluids',color:'#dc9160'},
