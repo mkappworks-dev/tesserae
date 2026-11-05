@@ -76,6 +76,7 @@ color = [30, 80, 200, 128]
 [survival]
 max-health = 30
 safe-fall-m = 4.5
+regeneration-per-s = 0.5
 keep-inventory = true
 
 [view]

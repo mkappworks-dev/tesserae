@@ -22,6 +22,8 @@ pub struct SurvivalRules {
     pub sprinting_hunger_per_min: f32,
     /// Health regenerates while hunger is at least this.
     pub regeneration_hunger: f32,
+    /// Health per second while hunger is at least `regeneration_hunger`.
+    pub regeneration_per_s: f32,
     /// At zero hunger.
     pub starvation_damage_per_s: f32,
     pub keep_inventory: bool,
@@ -39,6 +41,7 @@ impl Default for SurvivalRules {
             hunger_per_min: 1.0,
             sprinting_hunger_per_min: 2.0,
             regeneration_hunger: 18.0,
+            regeneration_per_s: 0.25,
             starvation_damage_per_s: 0.25,
             keep_inventory: false,
         }
@@ -84,6 +87,12 @@ impl SurvivalRules {
                 self.regeneration_hunger,
                 0.0..=self.max_hunger,
                 "must be finite and from 0 to max-hunger",
+            ),
+            (
+                "regeneration-per-s",
+                self.regeneration_per_s,
+                0.0..=max,
+                RATE,
             ),
             (
                 "starvation-damage-per-s",

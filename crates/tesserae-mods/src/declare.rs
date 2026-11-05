@@ -480,6 +480,7 @@ fn survival_rules(p: content::SurvivalParams) -> SurvivalRules {
             .sprinting_hunger_per_min
             .unwrap_or(d.sprinting_hunger_per_min),
         regeneration_hunger: p.regeneration_hunger.unwrap_or(d.regeneration_hunger),
+        regeneration_per_s: p.regeneration_per_s.unwrap_or(d.regeneration_per_s),
         starvation_damage_per_s: p
             .starvation_damage_per_s
             .unwrap_or(d.starvation_damage_per_s),

@@ -58,6 +58,7 @@ pub(super) struct Survival {
     hunger_per_min: Option<f32>,
     sprinting_hunger_per_min: Option<f32>,
     regeneration_hunger: Option<f32>,
+    regeneration_per_s: Option<f32>,
     starvation_damage_per_s: Option<f32>,
     keep_inventory: Option<bool>,
 }
@@ -74,6 +75,7 @@ impl From<Survival> for content::SurvivalParams {
             hunger_per_min: s.hunger_per_min,
             sprinting_hunger_per_min: s.sprinting_hunger_per_min,
             regeneration_hunger: s.regeneration_hunger,
+            regeneration_per_s: s.regeneration_per_s,
             starvation_damage_per_s: s.starvation_damage_per_s,
             keep_inventory: s.keep_inventory,
         }

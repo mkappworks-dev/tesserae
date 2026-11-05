@@ -1215,6 +1215,7 @@ fn survival() -> content::SurvivalParams {
         hunger_per_min: None,
         sprinting_hunger_per_min: None,
         regeneration_hunger: None,
+        regeneration_per_s: None,
         starvation_damage_per_s: None,
         keep_inventory: None,
     }
@@ -1249,10 +1250,11 @@ fn a_game_with_no_survival_record_keeps_the_engines_rules() {
             rules.hunger_per_min,
             rules.sprinting_hunger_per_min,
             rules.regeneration_hunger,
+            rules.regeneration_per_s,
             rules.starvation_damage_per_s,
             rules.keep_inventory,
         ),
-        (1.0, 2.0, 18.0, 0.25, false)
+        (1.0, 2.0, 18.0, 0.25, 0.25, false)
     );
 }
 
@@ -1261,6 +1263,7 @@ fn a_games_survival_record_overrides_only_the_fields_it_sets() {
     let rules = game_survival(content::SurvivalParams {
         max_health: Some(40.0),
         safe_fall_m: Some(5.5),
+        regeneration_per_s: Some(1.5),
         keep_inventory: Some(true),
         ..survival()
     })
@@ -1272,6 +1275,7 @@ fn a_games_survival_record_overrides_only_the_fields_it_sets() {
         SurvivalRules {
             max_health: 40.0,
             safe_fall_m: 5.5,
+            regeneration_per_s: 1.5,
             keep_inventory: true,
             ..SurvivalRules::default()
         }
@@ -1349,6 +1353,27 @@ fn a_bad_survival_value_names_the_game_and_the_field() {
                 ..survival()
             },
             "regeneration-hunger",
+        ),
+        (
+            content::SurvivalParams {
+                regeneration_per_s: some(-0.5),
+                ..survival()
+            },
+            "regeneration-per-s",
+        ),
+        (
+            content::SurvivalParams {
+                regeneration_per_s: some(f32::NAN),
+                ..survival()
+            },
+            "regeneration-per-s",
+        ),
+        (
+            content::SurvivalParams {
+                regeneration_per_s: some(1001.0),
+                ..survival()
+            },
+            "regeneration-per-s",
         ),
         (
             content::SurvivalParams {

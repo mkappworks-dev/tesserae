@@ -21,10 +21,6 @@ use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
 
-/// Health per second while hunger is at or above the Game's threshold. An
-/// engine rule: the 0.3 contract declares only the threshold.
-pub const REGENERATION_PER_S: f32 = 0.25;
-
 /// Health and hunger in points, air in seconds.
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 pub struct Vitals {
@@ -208,7 +204,7 @@ pub(super) fn tick(
             DamageCause::Starvation,
         );
     } else if now.hunger >= rules.regeneration_hunger {
-        now.health += REGENERATION_PER_S * dt;
+        now.health += rules.regeneration_per_s * dt;
     }
     now.health = now.health.clamp(0.0, rules.max_health);
     now.hunger = now.hunger.clamp(0.0, rules.max_hunger);
@@ -635,6 +631,19 @@ mod tests {
         let now = vitals(&mut app).health;
         assert!(close(now, 9.0), "starving, 1 per 4 s: {now}");
         assert_eq!(last_damage(&mut app), Some(DamageCause::Starvation));
+    }
+
+    #[test]
+    fn health_regenerates_at_the_games_declared_rate() {
+        let rules = SurvivalRules {
+            regeneration_per_s: 1.5,
+            ..no_drain()
+        };
+        let mut app = field(rules, GameMode::Survival);
+        set_vitals(&mut app, 10.0, 18.0);
+        seconds(&mut app, 2.0);
+        let now = vitals(&mut app).health;
+        assert!(close(now, 13.0), "1.5 per second: {now}");
     }
 
     #[test]

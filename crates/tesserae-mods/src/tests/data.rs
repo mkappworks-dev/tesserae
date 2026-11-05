@@ -355,6 +355,7 @@ fn component() -> Declaration {
             hunger_per_min: None,
             sprinting_hunger_per_min: None,
             regeneration_hunger: None,
+            regeneration_per_s: Some(0.5),
             starvation_damage_per_s: None,
             keep_inventory: Some(true),
         }),

@@ -385,6 +385,9 @@ interface content {
         /// Whether a dead Player keeps their Inventory instead of dropping it
         /// [false].
         keep-inventory: option<bool>,
+        /// Health regained per second while hunger is at least
+        /// `regeneration-hunger`, 0 to 1000 [0.25].
+        regeneration-per-s: option<f32>,
     }
 
     /// A kind of ground: a point in the unit square of Climate, where the

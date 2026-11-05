@@ -44,6 +44,11 @@ Line 0.3 gained what Survival needs in the same way: an optional
 only. Every `survival-params` field is optional and an absent one keeps the
 engine's default. A Declaration for 0.1 or 0.2 loads with none of them.
 
+`survival-params` then gained `regeneration-per-s`, appended in the same way:
+the health a Player regains per second while hunger is at or above
+`regeneration-hunger`, from 0 to 1000, and 0.25 when absent, the rate the engine
+used before the Game could declare it.
+
 ## What is not frozen
 
 Line `0.x` is pre-release. Later gameplay steps may add new lines, and
