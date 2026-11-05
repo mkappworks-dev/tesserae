@@ -356,6 +356,64 @@ pub(crate) fn load(
     })
 }
 
+/// What a World made from `found` would declare about its Biomes, read by the
+/// declaration pass alone: no instance starts and nothing is saved. Trust
+/// applies as when opening; `check_trust` off trusts them for this read only.
+pub(crate) fn preview(
+    found: Vec<tesserae_mods::Found>,
+    trust_file: &Path,
+    check_trust: bool,
+) -> Result<crate::launch::BiomePreview, String> {
+    use tesserae_core::biome_edits::{BiomeChoice, GroundNames};
+    let plan = plan(found).map_err(|e| e.to_string())?;
+    let mut trust = Trust::load(trust_file);
+    if !check_trust {
+        for found in &plan {
+            trust.grant_for_run(found).map_err(|e| e.to_string())?;
+        }
+    }
+    let host = ModHost::new().map_err(|e| e.to_string())?;
+    let compiled = host.load(plan, &trust).map_err(|e| e.to_string())?;
+    let loaded = bevy::tasks::block_on(declare_all(&host, &compiled, &WorldSettings::default()))?;
+    let params = super::worldgen_params(loaded.world);
+    let name = |id: MaterialId| {
+        loaded
+            .registry
+            .names(Kind::Material)
+            .find(|(at, _)| *at == id as usize)
+            .map_or_else(String::new, |(_, name)| name.to_owned())
+    };
+    let ground = |g: tesserae_core::GroundParams| GroundNames {
+        rock: name(g.rock),
+        soil: name(g.soil),
+        surface: name(g.surface),
+    };
+    Ok(crate::launch::BiomePreview {
+        biomes: params
+            .biomes
+            .as_slice()
+            .iter()
+            .map(|b| BiomeChoice {
+                name: b.name.as_str().to_owned(),
+                enabled: true,
+                temperature: b.temperature,
+                humidity: b.humidity,
+                cave_scale: b.cave_scale,
+                ground: b.ground.map(ground),
+                sky_fog: b.sky_fog,
+            })
+            .collect(),
+        climate: params.climate,
+        ground: params.ground.map(ground),
+        materials: loaded
+            .registry
+            .names(Kind::Material)
+            .filter(|(id, _)| loaded.tables.materials.def(*id as MaterialId).solid)
+            .map(|(_, name)| name.to_owned())
+            .collect(),
+    })
+}
+
 /// Saves `loaded` as a first commit at `path`, as a World created from it would be.
 #[cfg(test)]
 pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {

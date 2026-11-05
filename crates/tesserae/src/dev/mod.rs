@@ -1162,6 +1162,7 @@ printf '\000\003\001a%s' "$variant" >> target/out/mod.wasm
             world: WorldId::new(),
             pending: true,
             game_mode: Default::default(),
+            biomes: None,
         };
         library::create(&worlds, &sidecar).unwrap();
         let installed = rig.s.0.join("installed");

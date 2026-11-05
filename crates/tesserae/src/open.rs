@@ -487,6 +487,7 @@ mod tests {
             world: WorldId::new(),
             pending: true,
             game_mode: Default::default(),
+            biomes: None,
         };
         let folder = library::create(&worlds.0, &sidecar).unwrap();
         let before = snapshot(&folder);
@@ -521,6 +522,7 @@ mod tests {
             world: WorldId::new(),
             pending: true,
             game_mode: Default::default(),
+            biomes: None,
         };
         let folder = library::create(&worlds.0, &sidecar).unwrap();
         let prepare = || {

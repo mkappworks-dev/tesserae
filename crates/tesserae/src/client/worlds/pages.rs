@@ -54,6 +54,7 @@ pub(super) fn spawn(
                     Screen::Library => library_page(main, installed, scroll),
                     Screen::Create(Step::World) => form(main, l, installed, scroll),
                     Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
+                    Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
                     Screen::Create(Step::Review) => review(main, l, installed, scroll),
                     Screen::Discard(_) => discard(main),
                     Screen::Edit(path) => edit(main, l, installed, path, scroll),
@@ -1306,8 +1307,8 @@ fn trust(
                 focus = Some(cine::button(
                     foot,
                     match next {
-                        Next::Create if !installed.mods.is_empty() => "Back to Mods",
-                        Next::Create => "Back",
+                        Next::Create => "Back to Review",
+                        Next::Biomes => "Back to Mods",
                         Next::Open(_) => "Cancel",
                     },
                     "",
@@ -1326,6 +1327,7 @@ fn trust(
                         match next {
                             Next::Open(_) => "open",
                             Next::Create => "create",
+                            Next::Biomes => "show their Biomes",
                         }
                     ),
                     "",
@@ -1357,6 +1359,10 @@ fn step_frame(
         Step::Mods => (
             "Make it your kind of World",
             "Add materials and possibilities. You can keep it simple.",
+        ),
+        Step::Biomes => (
+            "Find your natural balance",
+            "Choose Biomes, then tune how they appear.",
         ),
         Step::Review => (
             "Ready for a new beginning?",
@@ -1526,11 +1532,376 @@ fn review(
                 cine::MUTED,
             );
         });
+        summary(col, "BIOMES", Step::Biomes, |card| match &f.biomes {
+            Some(draft) => {
+                let on: Vec<_> = draft.choices.iter().filter(|c| c.enabled).collect();
+                let customised = draft
+                    .choices
+                    .iter()
+                    .zip(&draft.declared.biomes)
+                    .filter(|(c, d)| c.enabled && c != d)
+                    .count();
+                ui::weighted_text(
+                    card,
+                    format!("{} of {} enabled", on.len(), draft.choices.len()),
+                    16.0,
+                    500,
+                    cine::INK,
+                );
+                ui::paragraph(
+                    card,
+                    format!(
+                        "{} \u{00b7} {customised} customised",
+                        on.iter()
+                            .map(|c| ui::declared_title(&c.name))
+                            .collect::<Vec<_>>()
+                            .join(" \u{00b7} ")
+                    ),
+                    13.0,
+                    cine::MUTED,
+                );
+                ui::paragraph(
+                    card,
+                    format!(
+                        "Climate size: {} m temperature / {} m humidity",
+                        draft.climate.temperature_size_m, draft.climate.humidity_size_m
+                    ),
+                    13.0,
+                    cine::MUTED,
+                );
+            }
+            None => ui::paragraph(
+                card,
+                "As the Game and Mods declare them.",
+                13.0,
+                cine::MUTED,
+            ),
+        });
         cine::notice(
             col,
             "Your seed, Voxel size and generation settings are fixed at creation. Make a new World to explore a different setup.",
         );
     })
+}
+
+/// The third step: every declared Biome, turned on or off, and the selected
+/// one's Climate point, caves, ground and colours.
+fn biomes_page(
+    main: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    scroll: Vec2,
+) -> Option<Entity> {
+    let f = &l.form;
+    step_frame(main, l, installed, Step::Biomes, scroll, |col| {
+        problem(col, f.problem.as_ref());
+        let Some(draft) = &f.biomes else {
+            return;
+        };
+        if draft.choices.is_empty() {
+            cine::notice(
+                col,
+                "This Game and its Mods declare no Biomes. The World generates as it always has.",
+            );
+            return;
+        }
+        row(col, 10.0, |r| {
+            ui::text(
+                r,
+                format!(
+                    "{} / {} enabled",
+                    draft.choices.iter().filter(|c| c.enabled).count(),
+                    draft.choices.len()
+                ),
+                13.0,
+                cine::MUTED,
+            );
+            if draft.resetting {
+                ui::text(
+                    r,
+                    "Restore every Biome and the Climate sizes to the Game\u{2019}s defaults?",
+                    13.0,
+                    cine::INK,
+                );
+                cine::button(r, "Keep changes", "", Act::KeepBiomes, Kind::Ghost);
+                cine::button(r, "Reset defaults", "", Act::ConfirmReset, Kind::Primary);
+            } else {
+                cine::button(r, "Reset biome defaults", "", Act::ResetBiomes, Kind::Ghost);
+            }
+        });
+        col.spawn(Node {
+            column_gap: Val::Px(18.0),
+            align_items: AlignItems::FlexStart,
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|split| {
+            split
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(7.0),
+                    width: Val::Percent(42.0),
+                    ..default()
+                })
+                .with_children(|list| {
+                    for (at, choice) in draft.choices.iter().enumerate() {
+                        biome_row(list, at, choice, at == draft.selected);
+                    }
+                });
+            split
+                .spawn((
+                    BackgroundColor(cine::SHEET_HEADER),
+                    BorderColor::all(cine::EDGE),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        padding: UiRect::all(Val::Px(17.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(5.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|editor| biome_editor(editor, draft));
+        });
+        label(col, "World climate scale");
+        row(col, 10.0, |r| {
+            for (field, title, at) in [
+                (Field::TemperatureSize, "Temperature size (m)", 0),
+                (Field::HumiditySize, "Humidity size (m)", 1),
+            ] {
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    width: Val::Px(220.0),
+                    ..default()
+                })
+                .with_children(|c| {
+                    ui::text(c, title, 12.0, cine::MUTED);
+                    text_field(c, field, &draft.sizes[at], "", "");
+                });
+            }
+        });
+        ui::paragraph(
+            col,
+            "Larger values make broader climate regions, in metres at any Voxel size.",
+            12.0,
+            cine::MUTED,
+        );
+    })
+}
+
+fn biome_row(list: &mut ChildSpawnerCommands, at: usize, choice: &BiomeChoice, selected: bool) {
+    list.spawn((
+        BackgroundColor(cine::RAISED),
+        BorderColor::all(if selected { cine::SAGE } else { cine::EDGE }),
+        Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(9.0),
+            padding: UiRect::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(5.0)),
+            ..default()
+        },
+    ))
+    .with_children(|card| {
+        cine::choice(
+            card,
+            if choice.enabled { "On" } else { "Off" },
+            Act::ToggleBiome(at),
+            choice.enabled,
+        );
+        let name = cine::choice(
+            card,
+            ui::declared_title(&choice.name),
+            Act::SelectBiome(at),
+            selected,
+        );
+        card.commands().entity(name).insert(Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(40.0),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(5.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::FlexStart,
+            ..default()
+        });
+    });
+}
+
+fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
+    let Some(choice) = draft.choices.get(draft.selected) else {
+        return;
+    };
+    cine::eyebrow(editor, "BIOME SETTINGS");
+    ui::weighted_text(
+        editor,
+        ui::declared_title(&choice.name),
+        16.0,
+        550,
+        cine::INK,
+    );
+    ui::text(
+        editor,
+        if choice.enabled {
+            "Enabled in this World"
+        } else {
+            "Off \u{00b7} turn it on to include it in this World"
+        },
+        12.0,
+        cine::MUTED,
+    );
+    climate_map(editor, draft);
+    let stepper = |editor: &mut ChildSpawnerCommands, title: &str, value: String, knob: Knob| {
+        editor
+            .spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|r| {
+                ui::text(r, title, 13.0, cine::INK);
+                r.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|s| {
+                    cine::button(s, "-", "", Act::Nudge(knob, -1), Kind::Ghost);
+                    ui::text(s, value, 13.0, cine::INK);
+                    cine::button(s, "+", "", Act::Nudge(knob, 1), Kind::Ghost);
+                });
+            });
+    };
+    stepper(
+        editor,
+        "Temperature",
+        format!("{:.2}", choice.temperature),
+        Knob::Temperature,
+    );
+    stepper(
+        editor,
+        "Humidity",
+        format!("{:.2}", choice.humidity),
+        Knob::Humidity,
+    );
+    stepper(
+        editor,
+        "Cave scale",
+        match choice.cave_scale {
+            Some(0.0) => "Off".to_owned(),
+            Some(scale) => format!("\u{00d7} {scale:.2}"),
+            None => "\u{00d7} 1.00".to_owned(),
+        },
+        Knob::Caves,
+    );
+    ui::paragraph(
+        editor,
+        "0 turns caves off. 1 keeps the Game\u{2019}s caves.",
+        12.0,
+        cine::MUTED,
+    );
+    let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
+    for (title, layer, name) in [
+        ("Rock", Layer::Rock, ground.map(|g| g.rock.as_str())),
+        ("Soil", Layer::Soil, ground.map(|g| g.soil.as_str())),
+        (
+            "Surface",
+            Layer::Surface,
+            ground.map(|g| g.surface.as_str()),
+        ),
+    ] {
+        let Some(name) = name else {
+            continue;
+        };
+        editor
+            .spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|r| {
+                ui::text(r, title, 13.0, cine::INK);
+                cine::button(
+                    r,
+                    ui::declared_title(name),
+                    "",
+                    Act::CycleGround(layer),
+                    Kind::Plain,
+                );
+            });
+    }
+    for (title, field, at) in [("Sky colour", Field::Sky, 0), ("Fog colour", Field::Fog, 1)] {
+        ui::text(editor, title, 12.0, cine::MUTED);
+        text_field(editor, field, &draft.colours[at], "", "Game default");
+    }
+}
+
+/// Every Biome's point on temperature and humidity; the selected one is larger.
+fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
+    editor
+        .spawn((
+            BackgroundColor(Color::srgb_u8(0x4d, 0x74, 0x70)),
+            BorderColor::all(cine::EDGE),
+            Node {
+                height: Val::Px(110.0),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                margin: UiRect::vertical(Val::Px(6.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|map| {
+            for (at, choice) in draft.choices.iter().enumerate() {
+                let current = at == draft.selected;
+                let size = if current { 16.0 } else { 12.0 };
+                map.spawn((
+                    BackgroundColor(if choice.enabled {
+                        cine::SAGE
+                    } else {
+                        cine::SAGE.with_alpha(0.4)
+                    }),
+                    BorderColor::all(if current { cine::INK } else { Color::BLACK }),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(choice.temperature * 100.0),
+                        bottom: Val::Percent(choice.humidity * 100.0),
+                        width: Val::Px(size),
+                        height: Val::Px(size),
+                        margin: UiRect::new(
+                            Val::Px(-size / 2.0),
+                            Val::Px(0.0),
+                            Val::Px(0.0),
+                            Val::Px(-size / 2.0),
+                        ),
+                        border: UiRect::all(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
+        });
+    editor
+        .spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        })
+        .with_children(|axis| {
+            ui::text(axis, "Colder", 11.0, cine::MUTED);
+            ui::text(axis, "Temperature", 11.0, cine::MUTED);
+            ui::text(axis, "Warmer", 11.0, cine::MUTED);
+        });
+    ui::text(
+        editor,
+        "Humidity increases from bottom to top.",
+        11.0,
+        cine::MUTED,
+    );
 }
 
 /// One part of the Review, with an Edit link back to its step.
