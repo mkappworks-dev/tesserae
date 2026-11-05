@@ -721,19 +721,45 @@ fn make_logo(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     };
     let size = 152;
     let mut data = vec![0; size * size * 4];
+    // The five tiles of the mosaic T on a 38-unit grid, as `brand.svg` draws them.
+    let tile = |u: f32, v: f32| -> Option<usize> {
+        if (2.0..12.0).contains(&u) && (2.0..12.0).contains(&v) && u + v >= 8.0 {
+            Some(0)
+        } else if (14.0..24.0).contains(&u) && (2.0..12.0).contains(&v) {
+            Some(1)
+        } else if (26.0..36.0).contains(&u) && (2.0..12.0).contains(&v) && u - v <= 30.0 {
+            Some(2)
+        } else if (14.0..24.0).contains(&u) && (14.0..24.0).contains(&v) {
+            Some(3)
+        } else if (14.0..24.0).contains(&u) && (26.0..36.0).contains(&v) && u + v <= 56.0 {
+            Some(4)
+        } else {
+            None
+        }
+    };
+    const SAGE: [[u8; 4]; 5] = [
+        [168, 183, 156, 255],
+        [219, 228, 208, 255],
+        [168, 183, 156, 255],
+        [193, 205, 181, 255],
+        [147, 164, 135, 255],
+    ];
+    const GROUT: [u8; 4] = [22, 27, 22, 255];
     for y in 0..size {
         for x in 0..size {
             let u = (x as f32 + 0.5) / 4.0;
             let v = (y as f32 + 0.5) / 4.0;
-            let tile = ((2.0..12.0).contains(&u) && (2.0..12.0).contains(&v) && u + v >= 8.0)
-                || ((14.0..24.0).contains(&u) && (2.0..12.0).contains(&v))
-                || ((26.0..36.0).contains(&u) && (2.0..12.0).contains(&v) && u - v <= 30.0)
-                || ((14.0..24.0).contains(&u) && (14.0..24.0).contains(&v))
-                || ((14.0..24.0).contains(&u) && (26.0..36.0).contains(&v) && u + v <= 56.0);
-            if tile {
-                data[(y * size + x) * 4..(y * size + x) * 4 + 4]
-                    .copy_from_slice(&[73, 178, 98, 255]);
-            }
+            let Some(index) = tile(u, v) else {
+                continue;
+            };
+            let edge = [(-0.5, 0.0), (0.5, 0.0), (0.0, -0.5), (0.0, 0.5)]
+                .iter()
+                .any(|(du, dv)| tile(u + du, v + dv) != Some(index));
+            data[(y * size + x) * 4..(y * size + x) * 4 + 4].copy_from_slice(if edge {
+                &GROUT
+            } else {
+                &SAGE[index]
+            });
         }
     }
     commands.insert_resource(Mosaic(images.add(Image::new(

@@ -11,6 +11,7 @@ pub mod camera;
 mod capture;
 pub mod chunk_mesh;
 pub mod chunk_view;
+mod cinematic;
 pub mod drawn_mask;
 mod drops;
 pub mod edit;
@@ -74,6 +75,7 @@ pub fn plugin(app: &mut App) {
         render_scale::plugin,
         settings::plugin,
         menu_ui::plugin,
+        cinematic::plugin,
         actions::plugin,
         input::plugin,
         pad::plugin,

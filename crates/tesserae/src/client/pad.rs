@@ -328,6 +328,7 @@ type Context<'w> = (
     Res<'w, Ownership>,
     Res<'w, super::actions::Labels>,
     Res<'w, super::settings::Settings>,
+    Option<Res<'w, ButtonInput<KeyCode>>>,
 );
 type Structure<'w, 's> = (
     Query<'w, 's, (Entity, &'static TabGroup)>,
@@ -335,6 +336,7 @@ type Structure<'w, 's> = (
     Query<'w, 's, (), With<InteractionDisabled>>,
     Sliders<'w, 's>,
     Query<'w, 's, (Entity, &'static super::settings::Operation)>,
+    Query<'w, 's, (), With<bevy::ui_widgets::TextInput>>,
 );
 struct Candidate {
     area: FocusableArea,
@@ -353,11 +355,11 @@ fn area(entity: Entity, node: &ComputedNode, transform: &UiGlobalTransform) -> F
 
 fn navigate(
     mut commands: Commands,
-    (input, ownership, labels, settings): Context,
+    (input, ownership, labels, settings, keys): Context,
     (time, config): (Res<Time>, Res<AutoNavigationConfig>),
     (mut focus, mut visible): (ResMut<InputFocus>, ResMut<InputFocusVisible>),
     focusables: Focusables,
-    (groups, parents, disabled, sliders, tabs): Structure,
+    (groups, parents, disabled, sliders, tabs, typing): Structure,
     (mut repeat, mut last): (Local<Repeat>, Local<Option<Vec2>>),
 ) {
     let owner = ownership.owner;
@@ -396,9 +398,23 @@ fn navigate(
     let current = focus
         .get()
         .and_then(|entity| candidates.iter().find(|c| c.area.entity == entity));
+    // Arrows move menu focus as the D-pad does, except in a text field, where they move the caret.
+    let arrow = keys
+        .filter(|_| !focus.get().is_some_and(|entity| typing.contains(entity)))
+        .and_then(|keys| {
+            [
+                (KeyCode::ArrowUp, CompassOctant::North),
+                (KeyCode::ArrowDown, CompassOctant::South),
+                (KeyCode::ArrowLeft, CompassOctant::West),
+                (KeyCode::ArrowRight, CompassOctant::East),
+            ]
+            .into_iter()
+            .find(|(key, _)| keys.just_pressed(*key))
+            .map(|(_, direction)| direction)
+        });
     if let Some(current) = current {
         *last = Some(current.area.position);
-    } else if labels.device == Device::Pad
+    } else if (labels.device == Device::Pad || arrow.is_some())
         && let Some(entity) = initial(&candidates, *last)
     {
         focus.set(entity, FocusCause::Navigated);
@@ -452,6 +468,10 @@ fn navigate(
             }
             due
         }
+    };
+    let (direction, step) = match arrow {
+        Some(arrow) => (Some(arrow), true),
+        None => (direction, step),
     };
     let Some(current) = current else {
         return;
