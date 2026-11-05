@@ -346,8 +346,9 @@ pub(super) fn sort_blended(
         })
         .collect();
     stale.sort_by(|a, b| a.0.total_cmp(&b.0));
-    for (_, local, mut order, mesh) in stale {
-        if started.elapsed() > FRAME_BUDGET {
+    for (n, (_, local, mut order, mesh)) in stale.into_iter().enumerate() {
+        // The nearest mesh always sorts, so a slow frame cannot starve it.
+        if n > 0 && started.elapsed() > FRAME_BUDGET {
             break;
         }
         let Some(indices) = order.resort(local) else {
