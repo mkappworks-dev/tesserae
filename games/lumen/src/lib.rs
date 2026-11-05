@@ -4,6 +4,8 @@
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
+mod food;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
@@ -75,7 +77,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (146, 168, 180),
             }),
             cave_scale: None,
-            surface_features: Vec::new(),
+            surface_features: vec![food::feature()],
         },
         BiomeDef {
             name: "arid_court".into(),
@@ -99,7 +101,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (178, 192, 212),
             }),
             cave_scale: None,
-            surface_features: Vec::new(),
+            surface_features: vec![food::feature()],
         },
     ]
 }
@@ -410,16 +412,16 @@ impl Guest for Lumen {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         Declaration {
-            materials: Vec::new(),
+            materials: vec![food::material()],
             shapes: Vec::new(),
-            appearance: Vec::new(),
+            appearance: vec![food::appearance()],
             world: Some(world),
             view: None,
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
             tools: Vec::new(),
-            items: Vec::new(),
+            items: vec![food::item()],
             biomes: biomes(),
             survival: None,
             ores: vec![OreDef {

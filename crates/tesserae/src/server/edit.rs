@@ -1529,7 +1529,10 @@ pub(in crate::server) mod tests {
         app_with_tables(chunks, watered())
     }
 
-    fn app_with_tables(chunks: &[(ChunkCoord, Chunk)], tables: Tables) -> App {
+    pub(in crate::server) fn app_with_tables(
+        chunks: &[(ChunkCoord, Chunk)],
+        tables: Tables,
+    ) -> App {
         let mut app = App::new();
         app.insert_resource(WorldSettings::default())
             .insert_resource(ContentTables(Arc::new(tables)))

@@ -119,7 +119,7 @@ pub(super) fn drop_one(
     )
 }
 
-fn step_entities(
+pub(super) fn step_entities(
     mut entities: ResMut<EntityStore>,
     (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
 ) {

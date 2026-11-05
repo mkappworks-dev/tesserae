@@ -12,7 +12,8 @@ use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
     Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
     GroundParams, HeatDef, ItemDef, MaterialDef, Occlusion, OreDef, Reactant, ReactionDef,
-    ReactionSide, RenderClass, ShapeDef, SkyFog, ToolDef, ToolKind, ViewParams, WaterParams,
+    ReactionSide, RenderClass, ShapeDef, SkyFog, SurfaceFeature, ToolDef, ToolKind, ViewParams,
+    WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -446,7 +447,11 @@ impl Guest for Terra {
                         fog: (136, 160, 190),
                     }),
                     cave_scale: None,
-                    surface_features: Vec::new(),
+                    // One in every 16 by 16 m of grass: found while exploring, not a carpet.
+                    surface_features: vec![SurfaceFeature {
+                        material: "terra:melon".into(),
+                        spacing_m: 16.0,
+                    }],
                 },
                 BiomeDef {
                     name: "dry".into(),

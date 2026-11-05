@@ -4,6 +4,8 @@
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
 
+mod food;
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
@@ -240,16 +242,16 @@ impl Guest for Tidewater {
             humidity_size_m: 256.0,
         });
         Declaration {
-            materials: Vec::new(),
+            materials: vec![food::material()],
             shapes: Vec::new(),
-            appearance: Vec::new(),
+            appearance: vec![food::appearance()],
             world: Some(world),
             view: None,
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
             tools: Vec::new(),
-            items: Vec::new(),
+            items: vec![food::item()],
             biomes: vec![
                 BiomeDef {
                     name: "lagoon".into(),
@@ -261,7 +263,7 @@ impl Guest for Tidewater {
                         fog: (132, 172, 192),
                     }),
                     cave_scale: Some(1.4),
-                    surface_features: Vec::new(),
+                    surface_features: vec![food::feature()],
                 },
                 BiomeDef {
                     name: "salt_flats".into(),
@@ -277,7 +279,7 @@ impl Guest for Tidewater {
                         fog: (190, 184, 166),
                     }),
                     cave_scale: Some(0.0),
-                    surface_features: Vec::new(),
+                    surface_features: vec![food::feature()],
                 },
                 BiomeDef {
                     name: "cold_shallows".into(),

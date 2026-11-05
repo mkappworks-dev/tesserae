@@ -15,10 +15,16 @@ sets the scene and starts the eruptions.
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
 [flora](../../mods/flora/), [hearth](../../mods/hearth/), and it suggests
-[golem](../../mods/golem/) for its character. This Game declares no Material,
-Shape or fluid of its own; every name it uses is `<mod id>:<name>` from those
-Mods. It declares only its World (ground, sea level, relief, climate and the
-like), its Biomes and ore, and one behaviour.
+[golem](../../mods/golem/) for its character. Its one Material is its food,
+`ember:pepper`; every other name it uses is `<mod id>:<name>` from those Mods.
+It declares only its World (ground, sea level, relief, climate and the like),
+its Biomes and ore, its food and one behaviour.
+
+## Food
+
+`ember:pepper`, a fire pepper worth 4 hunger, lies on the surface of `ash_flats`
+and `highland`, about one in every 16 by 16 m. Break it to pick it up and press
+G to eat it.
 
 ## Biomes
 

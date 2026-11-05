@@ -121,7 +121,7 @@ fn announce(
     }
 }
 
-fn eat(
+pub(super) fn eat(
     mut intents: MessageReader<EatIntent>,
     survival: Res<Survival>,
     items: Option<Res<Items>>,

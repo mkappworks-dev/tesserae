@@ -16,6 +16,7 @@ use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
 
 mod biomes;
+mod food;
 
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -236,18 +237,28 @@ fn every_demo_game_draws_the_character_of_the_mod_it_suggests() {
 }
 
 #[test]
-fn meadow_declares_no_material_and_takes_its_ground_from_strata() {
+fn meadow_declares_only_its_pumpkin_and_takes_its_ground_from_strata() {
     let (_install, loaded) = loaded("meadow", 0.5);
     assert!(loaded.game);
     assert_eq!(
         ids(&loaded),
         ["flora", "glassworks", "strata", "meadow", "wanderer"]
     );
-    assert!(
-        loaded
-            .registry
-            .names(Kind::Material)
-            .all(|(_, name)| !name.starts_with("meadow:"))
+    let own: Vec<_> = loaded
+        .registry
+        .names(Kind::Material)
+        .filter(|(_, name)| name.starts_with("meadow:"))
+        .map(|(id, name)| (id, name.to_owned()))
+        .collect();
+    let last = loaded
+        .registry
+        .names(Kind::Material)
+        .map(|(id, _)| id)
+        .max();
+    assert_eq!(
+        own,
+        [(last.unwrap(), "meadow:pumpkin".to_owned())],
+        "appended last"
     );
     let ground = loaded.world.unwrap().ground.unwrap();
     assert_eq!(ground.rock, material(&loaded, "strata:stone"));

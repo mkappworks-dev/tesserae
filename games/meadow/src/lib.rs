@@ -1,7 +1,10 @@
-//! Gentle land and a glade of trees. Every Material and Shape comes from the Mods it depends on
-//! (strata, flora, glassworks); this Game declares only its World and one behaviour.
+//! Gentle land and a glade of trees. Every Material but its pumpkin, and every Shape, comes from
+//! the Mods it depends on (strata, flora, glassworks); this Game declares its World, its food and
+//! one behaviour.
 
 wit_bindgen::generate!({ path: "../../crates/tesserae-mods/wit/0.3", world: "mod" });
+
+mod food;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -63,7 +66,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (142, 168, 192),
             }),
             cave_scale: None,
-            surface_features: Vec::new(),
+            surface_features: vec![food::feature()],
         },
         BiomeDef {
             name: "heath".into(),
@@ -75,7 +78,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (170, 168, 170),
             }),
             cave_scale: None,
-            surface_features: Vec::new(),
+            surface_features: vec![food::feature()],
         },
         BiomeDef {
             name: "dunes".into(),
@@ -349,16 +352,16 @@ impl Guest for Meadow {
             humidity_size_m: CLIMATE_SIZE_M,
         });
         Declaration {
-            materials: Vec::new(),
+            materials: vec![food::material()],
             shapes: Vec::new(),
-            appearance: Vec::new(),
+            appearance: vec![food::appearance()],
             world: Some(world),
             view: None,
             fluids: Vec::new(),
             reactions: Vec::new(),
             combustion: Vec::new(),
             tools: Vec::new(),
-            items: Vec::new(),
+            items: vec![food::item()],
             biomes: biomes(),
             survival: None,
             ores: vec![OreDef {

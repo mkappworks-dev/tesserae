@@ -13,10 +13,15 @@ gazebo posts are `flora:wood` in the `glassworks:fence` Shape.
 
 [strata](../../mods/strata/), [flora](../../mods/flora/),
 [glassworks](../../mods/glassworks/), and it suggests
-[wanderer](../../mods/wanderer/) for its character. This Game declares no
-Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
-from those Mods. It declares only its World (ground, sea level, relief, climate
-and the like), its Biomes and ore, and one behaviour.
+[wanderer](../../mods/wanderer/) for its character. Its one Material is its
+food, `meadow:pumpkin`; every other name it uses is `<mod id>:<name>` from those
+Mods. It declares only its World (ground, sea level, relief, climate and the
+like), its Biomes and ore, its food and one behaviour.
+
+## Food
+
+`meadow:pumpkin`, worth 8 hunger, lies on the surface of `meadow` and `heath`,
+about one in every 20 by 20 m. Break it to pick it up and press G to eat it.
 
 ## Biomes
 
