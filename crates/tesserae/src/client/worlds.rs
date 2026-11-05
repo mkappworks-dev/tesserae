@@ -146,6 +146,8 @@ struct Form {
     mods: std::collections::BTreeSet<String>,
     /// Filled when the Biomes step is first reached for this Game and Mods.
     biomes: Option<BiomesDraft>,
+    /// Another World's Biome changes, laid over the declarations once they are read.
+    seeded: Option<BiomeEdits>,
 }
 
 /// The Biomes step's working copy: what the selection declares, and the
@@ -188,6 +190,23 @@ impl BiomesDraft {
             self.climate.temperature_size_m.to_string(),
             self.climate.humidity_size_m.to_string(),
         ];
+        self.select(self.selected);
+    }
+
+    /// Lays another World's changes over the declarations, Biome by name.
+    fn seed(&mut self, edits: &BiomeEdits) {
+        for choice in &mut self.choices {
+            if let Some(seeded) = edits.biomes.iter().find(|e| e.name == choice.name) {
+                *choice = seeded.clone();
+            }
+        }
+        if let Some(climate) = edits.climate {
+            self.climate = climate;
+            self.sizes = [
+                climate.temperature_size_m.to_string(),
+                climate.humidity_size_m.to_string(),
+            ];
+        }
         self.select(self.selected);
     }
 
@@ -279,6 +298,7 @@ impl Default for Form {
             game: None,
             mods: Default::default(),
             biomes: None,
+            seeded: None,
         }
     }
 }
@@ -311,6 +331,8 @@ struct Launcher {
     /// The form as Create World opened it, to tell whether leaving loses anything.
     initial: Form,
     rename: String,
+    /// Edit World's choice of the World's default mode, then the player's own.
+    modes: [GameMode; 2],
     search: String,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
@@ -391,6 +413,8 @@ pub(super) enum Act {
     Step(Step),
     KeepEditing,
     DiscardSetup,
+    DefaultMode(GameMode),
+    OwnMode(GameMode),
     ToggleBiome(usize),
     SelectBiome(usize),
     Nudge(Knob, i8),
@@ -662,6 +686,7 @@ fn start(
         form: Form::default(),
         initial: Form::default(),
         rename: String::new(),
+        modes: [GameMode::Creative; 2],
         search: String::new(),
         problem: None,
         clashes: Default::default(),
@@ -902,7 +927,10 @@ fn handle(
                 let Some(entry) = l.entry(&path) else {
                     continue;
                 };
-                l.rename = entry.name().unwrap_or_default().to_owned();
+                let name = entry.name().unwrap_or_default().to_owned();
+                let chosen = entry.details().map_or([GameMode::Creative; 2], modes);
+                l.rename = name;
+                l.modes = chosen;
                 l.selected = Some(path.clone());
                 l.show(Screen::Edit(path));
             }
@@ -939,6 +967,7 @@ fn handle(
                     game_mode: details.game_mode,
                     game: details.game.as_ref().map(|g| g.id.clone()),
                     mods: details.mods.iter().map(|m| m.id.clone()).collect(),
+                    seeded: details.biomes.clone(),
                     ..Form::default()
                 };
                 if let Some(game) = l.form.game.clone() {
@@ -1051,6 +1080,14 @@ fn handle(
             Act::ResetBiomes => edit_biomes(&mut l, |d| d.resetting = true),
             Act::ConfirmReset => edit_biomes(&mut l, BiomesDraft::reset),
             Act::KeepBiomes => edit_biomes(&mut l, |d| d.resetting = false),
+            Act::DefaultMode(mode) => {
+                l.modes[0] = mode;
+                l.version += 1;
+            }
+            Act::OwnMode(mode) => {
+                l.modes[1] = mode;
+                l.version += 1;
+            }
             Act::KeepEditing => {
                 if let Screen::Discard(step) = l.screen {
                     l.show(Screen::Create(step));
@@ -1112,9 +1149,20 @@ fn handle(
                 let Screen::Edit(path) = l.screen.clone() else {
                     continue;
                 };
+                let current = l.entry(&path).and_then(Entry::details).map(saved_modes);
+                let [default, own] = l.modes;
                 let result = library::valid_name(&l.rename)
                     .map_err(|e| e.to_string())
-                    .and_then(|name| library::rename(&path, &name).map_err(describe));
+                    .and_then(|name| library::rename(&path, &name).map_err(describe))
+                    .and_then(|()| {
+                        // Applied by the Server when the World next opens; nothing changes in play.
+                        let [was_default, was_own] = current.unwrap_or(l.modes);
+                        let changes = library::ModeChanges {
+                            default: (default != was_default).then_some(default),
+                            own: (own != was_own).then_some(own),
+                        };
+                        library::request_modes(&path, changes).map_err(describe)
+                    });
                 match result {
                     Ok(()) => {
                         l.show(Screen::Worlds);
@@ -1192,7 +1240,11 @@ fn read_biomes(l: &mut Launcher, installed: &mut Installed, previewer: Previewer
     }
     match (previewer.0)(installed, &ids) {
         Ok(declared) => {
-            l.form.biomes = Some(BiomesDraft::new(ids, declared));
+            let mut draft = BiomesDraft::new(ids, declared);
+            if let Some(seeded) = l.form.seeded.take() {
+                draft.seed(&seeded);
+            }
+            l.form.biomes = Some(draft);
             true
         }
         Err(e) => {
@@ -1201,6 +1253,23 @@ fn read_biomes(l: &mut Launcher, installed: &mut Installed, previewer: Previewer
             false
         }
     }
+}
+
+/// A World's default mode and the player's own, as its save holds them.
+fn saved_modes(details: &Sidecar) -> [GameMode; 2] {
+    [
+        details.game_mode,
+        details.player_mode.unwrap_or(details.game_mode),
+    ]
+}
+
+/// The same once any requested change has applied.
+fn modes(details: &Sidecar) -> [GameMode; 2] {
+    let [default, own] = saved_modes(details);
+    [
+        details.mode_changes.default.unwrap_or(default),
+        details.mode_changes.own.unwrap_or(own),
+    ]
 }
 
 fn edit_biomes(l: &mut Launcher, change: impl FnOnce(&mut BiomesDraft)) {
@@ -1403,6 +1472,8 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         pending: true,
         game_mode: l.form.game_mode,
         biomes: l.form.biomes.as_ref().and_then(BiomesDraft::edits),
+        player_mode: None,
+        mode_changes: Default::default(),
     };
     match library::create(worlds, &sidecar) {
         Ok(path) => {
@@ -1648,6 +1719,8 @@ mod tests {
             pending: false,
             game_mode: Default::default(),
             biomes: None,
+            player_mode: None,
+            mode_changes: Default::default(),
         }
     }
 
@@ -2689,6 +2762,102 @@ mod tests {
         act(&mut app, Act::Trust);
         assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
         assert!(shown(&mut app, "Meadow"));
+    }
+
+    #[test]
+    fn edit_world_renames_without_touching_the_save_and_records_modes_for_the_next_open() {
+        let worlds = Directory::new();
+        let path = library::create(&worlds.0, &details("Old", true)).unwrap();
+        std::fs::write(path.join("00000001.commit"), b"terrain").unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::Worlds);
+        act(&mut app, Act::Edit(path.clone()));
+        for locked in ["Terra 0.1.0", "Seed: 42", "0.5 m"] {
+            assert!(shown(&mut app, locked), "{locked} is shown locked");
+        }
+        type_into(&mut app, Field::Rename, "New name");
+        act(&mut app, Act::DefaultMode(GameMode::Survival));
+        act(&mut app, Act::OwnMode(GameMode::Survival));
+        act(&mut app, Act::SaveName);
+        assert_eq!(launcher(&app).screen, Screen::Worlds);
+        let saved = library::read(&path).unwrap().unwrap();
+        assert_eq!(saved.name, "New name");
+        assert_eq!(
+            std::fs::read(path.join("00000001.commit")).unwrap(),
+            b"terrain",
+            "renaming keeps the terrain"
+        );
+        assert_eq!(
+            saved.game_mode,
+            GameMode::Creative,
+            "not before the next open"
+        );
+        assert_eq!(
+            saved.mode_changes,
+            library::ModeChanges {
+                default: Some(GameMode::Survival),
+                own: Some(GameMode::Survival),
+            }
+        );
+
+        act(&mut app, Act::Edit(path.clone()));
+        act(&mut app, Act::DefaultMode(GameMode::Creative));
+        act(&mut app, Act::OwnMode(GameMode::Creative));
+        act(&mut app, Act::SaveName);
+        assert!(
+            library::read(&path)
+                .unwrap()
+                .unwrap()
+                .mode_changes
+                .is_empty(),
+            "choosing the current modes asks for nothing"
+        );
+    }
+
+    #[test]
+    fn create_from_these_settings_prefills_every_step() {
+        let worlds = Directory::new();
+        let world = Sidecar {
+            game_mode: GameMode::Survival,
+            biomes: Some(BiomeEdits {
+                biomes: vec![BiomeChoice {
+                    enabled: false,
+                    ..declared("t:ash_flats", 0.7)
+                }],
+                climate: Some(ClimateParams {
+                    temperature_size_m: 800.0,
+                    humidity_size_m: 512.0,
+                }),
+            }),
+            ..details("Liked", true)
+        };
+        let path = library::create(&worlds.0, &world).unwrap();
+        let mut app = app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("glassworks", &[]),
+        );
+        app.update();
+        act(&mut app, Act::Worlds);
+        act(&mut app, Act::Edit(path));
+        act(&mut app, Act::ReCreate);
+        let form = launcher(&app).form.clone();
+        assert_eq!(
+            (form.name.as_str(), form.seed.as_str(), form.voxel_size_m),
+            ("Liked (copy)", "42", 0.5)
+        );
+        assert_eq!(form.game_mode, GameMode::Survival);
+        act(&mut app, Act::Next);
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+        let draft = launcher(&app).form.biomes.clone().unwrap();
+        assert!(!draft.choices[0].enabled, "the Biome stays off");
+        assert_eq!(draft.climate.temperature_size_m, 800.0);
+        act(&mut app, Act::Next);
+        act(&mut app, Act::Create);
+        let copy = created(&app);
+        assert_eq!(copy.biomes, world.biomes);
+        assert_eq!(copy.game_mode, GameMode::Survival);
     }
 
     #[test]

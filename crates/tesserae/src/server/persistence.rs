@@ -373,6 +373,14 @@ impl Persistence {
             (None, Some(d)) => d.game_mode,
             (None, None) => save::GameMode::default(),
         };
+        // Edit World's requests take effect now, at the open, and only here.
+        let changes = opening
+            .details
+            .as_ref()
+            .map(|d| d.mode_changes)
+            .unwrap_or_default();
+        let game_mode = changes.default.unwrap_or(game_mode);
+        let reopened_game_mode = changes.own.or(reopened_game_mode);
         let mut restored_entities = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
@@ -462,6 +470,7 @@ impl Persistence {
                 d.world = opening.id.clone();
                 d.last_played_unix_s = library::now_unix_s();
                 d.game_mode = game_mode;
+                d.player_mode = Some(reopened_game_mode.unwrap_or(game_mode));
                 // Display data only: failing to record last-played never blocks play.
                 if !d.pending
                     && let Err(e) = library::write(&path, &d)
@@ -689,6 +698,7 @@ fn drive(
                     && let Some((_, d)) = p.details.as_mut()
                 {
                     d.pending = false;
+                    d.mode_changes = library::ModeChanges::default();
                 }
                 status.detail = "Last save complete".into();
                 status.error = None;
@@ -713,7 +723,12 @@ fn drive(
             }
         }
     }
-    status.dirty = p.saved_revisions != store.revisions
+    // A mode change applied at the open is unsaved until a commit holds it.
+    status.dirty = p
+        .details
+        .as_ref()
+        .is_some_and(|(_, d)| !d.mode_changes.is_empty())
+        || p.saved_revisions != store.revisions
         || p.saved_eye != Some(player.eye())
         || p.saved_extensions.as_ref() != extensions.as_ref().ok()
         || p.saved_simulation != sim.revision
@@ -810,7 +825,10 @@ fn drive(
     let game_mode = p.game_mode;
     let settings = p.settings;
     let id = p.id.clone();
-    let pending = p.details.clone().filter(|(_, d)| d.pending);
+    let pending = p
+        .details
+        .clone()
+        .filter(|(_, d)| d.pending || !d.mode_changes.is_empty());
     #[cfg(feature = "profiling")]
     {
         profile.chunks = chunks.len();
@@ -857,6 +875,7 @@ fn drive(
         let details_completed = result.is_ok()
             && pending.is_some_and(|(path, mut d)| {
                 d.pending = false;
+                d.mode_changes = library::ModeChanges::default();
                 library::write(&path, &d)
                     .inspect_err(|e| warn!("could not record World creation: {e}"))
                     .is_ok()
