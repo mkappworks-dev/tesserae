@@ -33,6 +33,7 @@ pub mod mods;
 pub mod persistence;
 pub mod player;
 mod priority;
+mod sky;
 pub mod streaming;
 pub mod tool;
 pub mod undo;
@@ -98,6 +99,7 @@ pub fn plugin(app: &mut App) {
             tool::plugin,
             fluids::plugin,
             player::plugin,
+            sky::plugin,
         ));
     app.add_plugins(persistence::plugin);
     app.add_plugins(entities::plugin);

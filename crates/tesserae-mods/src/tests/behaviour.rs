@@ -88,6 +88,8 @@ fn empty() -> Declaration {
         combustion: vec![],
         tools: vec![],
         items: vec![],
+        biomes: vec![],
+        ores: vec![],
     }
 }
 

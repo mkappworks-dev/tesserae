@@ -129,6 +129,7 @@ fn world(p: old::WorldParams, log: &LogHandle) -> content::WorldParams {
         }),
         ground: None,
         water: None,
+        climate: None,
     }
 }
 
@@ -227,6 +228,8 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         combustion: d.combustion.into_iter().map(combustion).collect(),
         tools: Vec::new(),
         items: Vec::new(),
+        biomes: Vec::new(),
+        ores: Vec::new(),
     }
 }
 

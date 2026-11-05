@@ -10,13 +10,18 @@ use exports::tesserae::mods::guest::{
     Command, Declaration, Guest, Registered, TickContext, WorldInfo,
 };
 use tesserae::mods::commands::Fill;
-use tesserae::mods::content::{GroundParams, MovementPolicy};
+use tesserae::mods::content::{
+    BiomeDef, ClimateParams, GroundParams, MovementPolicy, OreDef, SkyFog,
+};
 use tesserae::mods::types::{BoxM, Vec3, Voxel};
 
 /// Ground spans `SEA_LEVEL_M` to `SEA_LEVEL_M + RELIEF_M`, so a trunk or pad cut at fixed heights
 /// lands in or above the ground at any seed: a Mod cannot read the terrain it will build on.
 const SEA_LEVEL_M: f32 = 24.0;
 const RELIEF_M: f32 = 10.0;
+
+/// Wide enough that the glade seldom stands across a Biome border.
+const CLIMATE_SIZE_M: f32 = 400.0;
 
 /// The glade: ground levelled to `GLADE_TOP_M`, clear of the origin where the Player spawns.
 const GLADE_X_M: (f32, f32) = (8.0, 24.0);
@@ -36,6 +41,53 @@ const POST_HEIGHT_M: f32 = 3.0;
 /// The host's caps on one `fill` and on one batch.
 const MAX_FILL_VOXELS: u64 = 32_768;
 const MAX_BATCH_VOXELS: u64 = 65_536;
+
+/// Climate clusters near the middle of its square: points outside 0.2 to 0.8 seldom win.
+/// The World has no caves, so no Biome sets a `cave_scale`.
+fn biomes() -> Vec<BiomeDef> {
+    let ground = |rock: &str, soil: &str, surface: &str| {
+        Some(GroundParams {
+            rock: rock.into(),
+            soil: soil.into(),
+            surface: surface.into(),
+        })
+    };
+    vec![
+        BiomeDef {
+            name: "meadow".into(),
+            temperature: 0.5,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: Some(SkyFog {
+                sky: (128, 152, 172),
+                fog: (142, 168, 192),
+            }),
+            cave_scale: None,
+        },
+        BiomeDef {
+            name: "heath".into(),
+            temperature: 0.3,
+            humidity: 0.7,
+            ground: ground("strata:stone", "strata:clay", "strata:soil"),
+            sky_fog: Some(SkyFog {
+                sky: (150, 148, 150),
+                fog: (170, 168, 170),
+            }),
+            cave_scale: None,
+        },
+        BiomeDef {
+            name: "dunes".into(),
+            temperature: 0.75,
+            humidity: 0.25,
+            ground: ground("strata:stone", "strata:sand", "strata:sand"),
+            sky_fog: Some(SkyFog {
+                sky: (174, 160, 134),
+                fog: (194, 178, 150),
+            }),
+            cave_scale: None,
+        },
+    ]
+}
 
 #[derive(Default)]
 struct State {
@@ -289,6 +341,10 @@ impl Guest for Meadow {
             soil: "strata:clay".into(),
             surface: "strata:turf".into(),
         });
+        world.climate = Some(ClimateParams {
+            temperature_size_m: CLIMATE_SIZE_M,
+            humidity_size_m: CLIMATE_SIZE_M,
+        });
         Declaration {
             materials: Vec::new(),
             shapes: Vec::new(),
@@ -300,6 +356,15 @@ impl Guest for Meadow {
             combustion: Vec::new(),
             tools: Vec::new(),
             items: Vec::new(),
+            biomes: biomes(),
+            ores: vec![OreDef {
+                material: "strata:basalt".into(),
+                min_depth_m: 6.0,
+                max_depth_m: 36.0,
+                vein_size_m: 5.0,
+                rarity: 0.3,
+                biomes: Vec::new(),
+            }],
         }
     }
 

@@ -66,6 +66,8 @@ impl Guest for Lake {
             combustion: vec![],
             tools: vec![],
             items: vec![],
+            biomes: vec![],
+            ores: vec![],
         }
     }
 

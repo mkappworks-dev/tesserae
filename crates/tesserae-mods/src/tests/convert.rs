@@ -1,8 +1,8 @@
 //! A Declaration converts to `tesserae-core`'s own types without loss.
 
 use tesserae_core::{
-    CaveParams, CollisionBox, MaterialDef, NodeBox, Occlusion, RenderClass, ShapeDef,
-    SmoothingParams, WorldgenParams,
+    CaveParams, ClimateParams, CollisionBox, MaterialDef, NodeBox, Occlusion, RenderClass,
+    ShapeDef, SmoothingParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, WorldParams};
@@ -184,6 +184,10 @@ fn world_params_field_for_field_with_the_lake_apart() {
             level_m: 10.5,
             material: "game:brine".into(),
         }),
+        climate: Some(content::ClimateParams {
+            temperature_size_m: 300.0,
+            humidity_size_m: 900.0,
+        }),
     };
     let (terrain, lake) = world_params(wit.clone());
     assert_eq!(
@@ -203,6 +207,12 @@ fn world_params_field_for_field_with_the_lake_apart() {
             smoothing: Some(SmoothingParams { min_rise_m: 0.5 }),
             ground: None,
             water: None,
+            climate: ClimateParams {
+                temperature_size_m: 300.0,
+                humidity_size_m: 900.0,
+            },
+            generator: 2,
+            ..WorldgenParams::default()
         }
     );
     assert_eq!(lake, wit.water);
@@ -210,10 +220,13 @@ fn world_params_field_for_field_with_the_lake_apart() {
         caves: None,
         smoothing: None,
         water: None,
+        climate: None,
         ..wit
     };
     let (terrain, lake) = world_params(bare);
     assert!(terrain.caves.is_none() && terrain.smoothing.is_none() && lake.is_none());
+    assert_eq!(terrain.climate, ClimateParams::default());
+    assert!(terrain.biomes.is_empty() && terrain.ores.is_empty());
 }
 
 /// What `default-world-params` returns: the engine's parameters, which have

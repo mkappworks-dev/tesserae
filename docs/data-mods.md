@@ -76,6 +76,48 @@ declare `world`, `view` and `tools`, except that a Mod may supply
 ([ADR-0021](adr/0021-a-mod-may-supply-the-character.md)); a World has one
 character source, and two fail the load naming both.
 
+Any Mod may add `[[biomes]]` and `[[ores]]` to the Game's World;
+`[world.climate]` is the Game's alone. Biomes and ores append in load order
+(dependencies first), so a Biome's id is its place in that order, and the World
+holds at most 16 Biomes and 32 ores. A Biome row is `name`, `temperature` and
+`humidity`, the last two from 0 to 1; its full name is `<mod id>:<name>`, at
+most 32 bytes. An ore row is `material` (a solid Material, by full name),
+`min-depth-m` and `max-depth-m` (the band below the surface, shallow end first),
+`vein-size-m`, `rarity` (above 0, at most 1) and an optional `biomes` list of
+full Biome names from any Mod; omitted, the ore is in every Biome.
+`[world.climate]` is `temperature-size-m` and `humidity-size-m`, in metres. A
+Biome row may add `ground = { rock, soil, surface }`, solid Materials by full
+name from any Mod, checked as `[world.ground]` is. A column takes the ground of
+its Biome, switching hard at the border, and a Biome without `ground` has the
+World's; surface height, relief, sea level and lakes are never a Biome's. A
+World with no ground is empty air whatever its Biomes name.
+
+An ore is a blob of `vein-size-m` metres at most, in a cube of that edge; a
+`rarity` fraction of the cubes hold one. It replaces rock only, never soil, the
+surface, water or air, inside its depth band and its Biomes. Caves carve the ore
+with the rock, the farthest LOD levels carry none, and a World on Generator
+version 1 has none.
+
+A Biome row may also add `sky-fog = { sky = [r, g, b], fog = [r, g, b] }`, sRGB
+bytes, both together or neither. `sky` is the colour behind the terrain and
+`fog` is what distant terrain fades toward, a little lighter than `sky` because
+the tonemapper darkens the fog on its way to the screen. The Server blends the
+pairs of the Biomes near the Eye by closeness in Climate, so the air changes
+smoothly and never in a step, and sends the Client the pair when it has moved a
+visible step; the Client eases to it, sky and fog together, and underwater fog
+still wins below a surface. A Biome without `sky-fog` has no say in the blend,
+and a World where none has one keeps the Look pack's haze.
+
+A Biome row may also add `cave-scale`, a multiplier from 0 to 4 on the World's
+`caves.radius_m`: 2 carves much more rock with wider tunnels, 0.5 less, and 0
+switches caves off in that Biome. Omitted, the Biome keeps the World's caves.
+Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
+where a cave field meets a solid one. It does nothing in a World without
+`[world.caves]`, and caves still only turn solid into air.
+
+Tables that are absent change nothing: a World with no Biomes generates as it
+always did.
+
 A combustion `end` is `"permanent"` or
 `{ after = { seconds = 8, residue = "mod:ash" } }`; `residue` omitted removes
 the solid. Fluid, reaction, combustion, ground and water names are full

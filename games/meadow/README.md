@@ -15,8 +15,22 @@ gazebo posts are `flora:wood` in the `glassworks:fence` Shape.
 [glassworks](../../mods/glassworks/), and it suggests
 [wanderer](../../mods/wanderer/) for its character. This Game declares no
 Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
-from those Mods. It declares only its World (ground, sea level, relief and the
-like) and one behaviour.
+from those Mods. It declares only its World (ground, sea level, relief, climate
+and the like), its Biomes and ore, and one behaviour.
+
+## Biomes
+
+Three Biomes, each with a sky and fog pair that eases as the Player walks
+between them. The climate regions are 400 m across.
+
+| Biome    | Ground (rock, soil, surface)      | Sky and fog   |
+| -------- | --------------------------------- | ------------- |
+| `meadow` | the Game's own: stone, clay, turf | clear blue    |
+| `heath`  | stone, clay, `strata:soil`        | overcast grey |
+| `dunes`  | stone, sand, sand                 | warm sand     |
+
+`strata:basalt` forms dark veins in the rock of every Biome, 6 to 36 m down. The
+World has no caves, so no Biome tunes them.
 
 ## Behaviour
 
@@ -29,7 +43,9 @@ on.
 
 The test builds the Game, loads it with its three Mods and checks that no
 Material is declared in Rust, that the ground names `strata` Materials, and that
-the trees and gazebo are placed at 0.5 m and 0.25 m Voxels.
+the trees and gazebo are placed at 0.5 m and 0.25 m Voxels. Others check the
+three Biomes' sky and fog and ground, and that the basalt veins lie in rock
+within their band.
 
 ## Run it
 

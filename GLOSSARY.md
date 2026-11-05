@@ -155,6 +155,18 @@ size, one height per column (ADR-0011).
 **World generation** — producing a Chunk's contents from a seed and a position.
 Never produces a mesh.
 
+**Climate** — continuous fields, temperature and humidity, that are a pure
+function of the seed and a position in metres. They choose the Biome; they are
+not a Biome.
+
+**Biome** — a region type a Game or Mod declares and Climate selects. It owns
+the ground Materials, ores, cave tuning and the sky and fog colours of the
+columns it covers.
+
+**Generator version** — the revision of the world generation algorithm a World
+was created under. A World keeps it for life, so a later revision never changes
+its terrain for the same seed.
+
 ## Runtime
 
 **Server** — the authority over World state. The only thing permitted to mutate

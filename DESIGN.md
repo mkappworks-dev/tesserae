@@ -550,7 +550,7 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Done            |
 | 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done |
 | 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Done            |
-| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, biome caves          | -          | Not started     |
+| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, biome caves          | -          | Done            |
 | 14  | Audio                   | Audio engine, Server-driven events, mixing                                                        | Sound and music assets             | -          | Not started     |
 | 15  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19)                | Stack sizes, item rules            | 11, 12     | Not started     |
 | 16  | Crafting                | Recipe schema, station interaction, UI host                                                       | Recipes, stations                  | 15         | Not started     |
@@ -576,9 +576,14 @@ Notes:
   when a tool is used. Terra declares one, Measure: it reads two corners of
   drawn Shapes in metres and Voxels and edits nothing. Taking a Voxel into an
   inventory is step 15, and using a Voxel (a door, a container) is later work.
-- **Step 13** feeds the sky and fog colours from step 9. A World pins its
-  generator version so a new biome never changes an existing World's terrain for
-  the same seed.
+- **Step 13** is done. Climate (temperature and humidity, in metres) chooses a
+  Biome, and a Biome owns ground Materials, ores, a cave scale and a sky and fog
+  pair; it never changes surface height. A World pins its Generator version and
+  a snapshot of its Biome table, so a new biome never changes an existing
+  World's terrain for the same seed. The Server sends the Client the sky and fog
+  pair for where the Eye is. All five demo Games declare three Biomes and one
+  ore. See
+  [ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md).
 - **Step 10** is the gate for "ready for Mods" and has no dependency on the
   later gameplay systems. Folder loading and versioned WIT contracts already
   exist; this step completes the authoring workflow, starting with data-only

@@ -32,7 +32,7 @@ fn lattice(xi: i32, zi: i32, seed: u32) -> f32 {
 
 /// [`lattice`] in three dimensions.
 #[inline]
-fn lattice3(xi: i32, yi: i32, zi: i32, seed: u32) -> f32 {
+pub(crate) fn lattice3(xi: i32, yi: i32, zi: i32, seed: u32) -> f32 {
     let h = mix(mix(
         mix(xi as u32 ^ 0x9e37_79b9).wrapping_add((yi as u32).wrapping_mul(0xc2b2_ae35))
     )

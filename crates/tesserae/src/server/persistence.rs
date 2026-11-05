@@ -282,6 +282,8 @@ pub struct Persistence {
     pub(super) mapping: Mapping,
     content: Content,
     generation: Generation,
+    /// The Generator version this World was created with; a reopened one keeps it.
+    generator: u32,
     settings: WorldSettings,
     task: Option<Task<Completed>>,
     failed: bool,
@@ -333,6 +335,10 @@ impl Persistence {
             .transpose()
             .map_err(|e| e.to_string())?
             .flatten();
+        let generator = opening
+            .recovered
+            .as_ref()
+            .map_or(save::GENERATOR_VERSION, |r| r.commit.generator);
         let mut restored_entities = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
@@ -353,7 +359,11 @@ impl Persistence {
                         .map_err(|e| e.to_string())?,
                     c.player.carried().map_err(|e| e.to_string())?,
                 ));
-                loaded.world = Some(c.parameters.restore(&mapping).map_err(|e| e.to_string())?);
+                loaded.world = Some(
+                    c.parameters
+                        .restore(&mapping, c.generator)
+                        .map_err(|e| e.to_string())?,
+                );
                 let revisions = c
                     .chunks
                     .iter()
@@ -415,6 +425,7 @@ impl Persistence {
             mapping,
             content,
             generation,
+            generator,
             settings,
             task: None,
             failed: false,
@@ -717,6 +728,7 @@ fn drive(
     let mapping = p.mapping.clone();
     let content = p.content.clone();
     let generation = p.generation.clone();
+    let generator = p.generator;
     let settings = p.settings;
     let id = p.id.clone();
     let pending = p.details.clone().filter(|(_, d)| d.pending);
@@ -740,7 +752,7 @@ fn drive(
                 .map_err(|_| save::Error::Corrupt("save worker lock poisoned".into()))?;
             let commit = Commit {
                 format: save::FORMAT_VERSION,
-                generator: save::GENERATOR_VERSION,
+                generator,
                 world: id,
                 sequence: writer.next_sequence()?,
                 seed: settings.seed,

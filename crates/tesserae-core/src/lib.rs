@@ -7,6 +7,7 @@
 
 pub mod agenda;
 pub mod chunk;
+pub mod climate;
 pub mod collide;
 pub mod combustion;
 pub mod entity;
@@ -21,6 +22,7 @@ pub mod material;
 pub mod mesh;
 pub mod noise;
 pub mod occupants;
+pub mod ore;
 pub mod reaction;
 pub mod save;
 pub mod seed;
@@ -32,6 +34,10 @@ pub mod voxel;
 pub mod worldgen;
 
 pub use chunk::{CHUNK_SIZE, CHUNK_VOLUME, Chunk};
+pub use climate::{
+    Biome, BiomeId, BiomeName, BiomeTable, Climate, ClimateParams, MAX_BIOME_NAME_BYTES,
+    MAX_BIOMES, MAX_CAVE_SCALE, SkyFog, SkyFogBlend,
+};
 pub use combustion::{Burn, CombustionDef, CombustionError, CombustionTable, Heat, MAX_HEAT};
 pub use fluid::{FluidDef, FluidError, FluidTable};
 pub use light::{
@@ -49,6 +55,7 @@ pub use mesh::{
 pub use occupants::{
     Burning, ChunkOverlay, Fluid, Level, Occupants, Overlay, optical, optical_chunk,
 };
+pub use ore::{BiomeSet, MAX_ORES, Ore, OreTable};
 pub use reaction::{
     Outcome, Participant, Phase, Reactant, ReactionDef, ReactionError, ReactionTable, Side,
 };

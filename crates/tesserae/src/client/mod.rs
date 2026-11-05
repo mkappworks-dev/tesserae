@@ -42,6 +42,7 @@ mod save;
 mod settings;
 #[cfg(feature = "profiling")]
 pub mod sight;
+mod sky;
 #[cfg(feature = "dev")]
 mod soak;
 mod tile_preview;
@@ -95,6 +96,7 @@ pub fn plugin(app: &mut App) {
         loading::plugin,
         tool::plugin,
         underwater::plugin,
+        sky::plugin,
         layout::plugin,
         layout_menu::plugin,
         drops::plugin,

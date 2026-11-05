@@ -9,7 +9,7 @@ Glowing, see-through gems and a cluster Shape.
 
 **Depends on:** nothing.
 
-**Used by:** nothing yet.
+**Used by:** `lumen`.
 
 ## Licence and artwork
 

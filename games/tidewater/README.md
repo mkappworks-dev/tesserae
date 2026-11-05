@@ -7,16 +7,21 @@ Islands and shallow seas whose sea level rises and falls, slowly.
 World parameters: `sea-level-m`, `relief-m`, a `caves` table for sea caves, a
 `smoothing` table that eases one-Voxel steps into stairs and slabs, and a
 standing `water` level of `waters:water` that makes islands of the high ground.
-The tide itself is Commands, not terrain: layers of water sources added and
-removed above the sea.
+It also declares `world.climate`, three Biomes and an ore: `lagoon` (the main
+one, with the Game's own ground and wider sea caves), `salt_flats` (sand over
+clay, with no caves) and `cold_shallows` (basalt and stone). Each carries its
+own sky and fog pair, and `crystals:aquamarine` grows in veins in the rock. The
+tide itself is Commands, not terrain: layers of water sources added and removed
+above the sea.
 
 ## Dependencies
 
 [strata](../../mods/strata/), [waters](../../mods/waters/),
-[flora](../../mods/flora/), and it suggests [sprite](../../mods/sprite/) for its
-character. This Game declares no Material, Shape or fluid of its own; every name
-it uses is `<mod id>:<name>` from those Mods. It declares only its World
-(ground, sea level, relief and the like) and one behaviour.
+[flora](../../mods/flora/), [crystals](../../mods/crystals/) (for the ore), and
+it suggests [sprite](../../mods/sprite/) for its character. This Game declares
+no Material, Shape or fluid of its own; every name it uses is `<mod id>:<name>`
+from those Mods. It declares only its World (ground, sea level, relief, Climate
+and Biomes), an ore and one behaviour.
 
 ## Behaviour
 
@@ -41,7 +46,7 @@ and point the Engine at it:
 
 ```sh
 ./scripts/build-guests
-tesserae package mods/strata mods/waters mods/flora mods/sprite --out dist
+tesserae package mods/strata mods/waters mods/flora mods/crystals mods/sprite --out dist
 tesserae package games/tidewater --mods mods --out dist --trust-for-run
 tesserae --mods dist/mods
 ```

@@ -30,6 +30,10 @@ struct Data {
     tools: Vec<behaviour::Tool>,
     #[serde(default)]
     items: Vec<behaviour::Item>,
+    #[serde(default)]
+    biomes: Vec<behaviour::Biome>,
+    #[serde(default)]
+    ores: Vec<behaviour::Ore>,
 }
 
 #[derive(Deserialize)]
@@ -80,6 +84,7 @@ struct World {
     smoothing: Option<world::Smoothing>,
     water: Option<world::Water>,
     ground: Option<Ground>,
+    climate: Option<world::Climate>,
     movement: Option<world::Movement>,
     character: Option<character::Character>,
 }
@@ -90,6 +95,16 @@ struct Ground {
     rock: String,
     soil: String,
     surface: String,
+}
+
+impl From<Ground> for content::GroundParams {
+    fn from(g: Ground) -> Self {
+        Self {
+            rock: g.rock,
+            soil: g.soil,
+            surface: g.surface,
+        }
+    }
 }
 
 /// Every artwork file a Declaration names, as (field, Mod-relative path), in Declaration order.
@@ -192,11 +207,8 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                     feature_size_m: w.feature_size_m.unwrap_or(defaults.feature_size_m),
                     soil_depth_m: w.soil_depth_m.unwrap_or(defaults.soil_depth_m),
                     octaves: w.octaves.unwrap_or(defaults.octaves),
-                    ground: w.ground.map(|g| content::GroundParams {
-                        rock: g.rock,
-                        soil: g.soil,
-                        surface: g.surface,
-                    }),
+                    ground: w.ground.map(Into::into),
+                    climate: w.climate.map(Into::into),
                     caves: w.caves.map(Into::into),
                     smoothing: w.smoothing.map(Into::into),
                     water: w.water.map(Into::into),
@@ -212,5 +224,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         combustion: data.combustion.into_iter().map(Into::into).collect(),
         tools: data.tools.into_iter().map(Into::into).collect(),
         items: data.items.into_iter().map(Into::into).collect(),
+        biomes: data.biomes.into_iter().map(Into::into).collect(),
+        ores: data.ores.into_iter().map(Into::into).collect(),
     })
 }

@@ -1,4 +1,4 @@
-//! The demo Games (meadow, ember, tidewater, lumen) loaded with the shared Mods they depend on,
+//! The demo Games (terra, meadow, ember, tidewater, lumen) loaded with the shared Mods they depend on,
 //! then ticked the way the Server does: each batch validated, each outcome reported back.
 //! Needs `./scripts/build-guests`, which puts each Game's component in its project folder.
 
@@ -7,11 +7,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bevy::tasks::block_on;
-use tesserae_core::{Burn, RenderClass, Voxel, Worldgen};
+use tesserae_core::{
+    Biome, BiomeName, Burn, CHUNK_SIZE, Ore, RenderClass, Voxel, Worldgen, WorldgenParams,
+};
 use tesserae_mods::{BatchReport, Command, Kind, Resolved, TickContext, validate};
 
 use super::{LoadedMods, TrustMode, load};
 use crate::world::WorldSettings;
+
+mod biomes;
 
 fn checkout() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -395,7 +399,14 @@ fn tidewater_exercises_sea_level_caves_and_smoothing() {
     let (_install, loaded) = loaded("tidewater", 0.5);
     assert_eq!(
         ids(&loaded),
-        ["flora", "sprite", "strata", "waters", "tidewater"]
+        [
+            "crystals",
+            "flora",
+            "sprite",
+            "strata",
+            "waters",
+            "tidewater"
+        ]
     );
     let world = loaded.world.unwrap();
     assert_eq!((world.sea_level_m, world.relief_m), (16.0, 24.0));
@@ -480,7 +491,17 @@ fn tidewater_steps_come_every_declared_interval() {
 #[test]
 fn lumen_builds_blended_glass_light_and_all_three_shapes() {
     let (_install, mut loaded) = loaded("lumen", 0.5);
-    assert_eq!(ids(&loaded), ["glassworks", "strata", "lumen", "wanderer"]);
+    assert_eq!(
+        ids(&loaded),
+        [
+            "crystals",
+            "frost",
+            "glassworks",
+            "strata",
+            "lumen",
+            "wanderer"
+        ]
+    );
     let batches = run(&mut loaded, 0.5, 0.05, 40);
     let all: Vec<&Command> = batches.iter().flat_map(|b| &b.commands).collect();
     let has = |wanted: &dyn Fn(Voxel) -> bool| {
@@ -604,4 +625,222 @@ fn builds_go_up_nearest_the_spawn_first() {
         (Some(&17.0), Some(&6.0)),
         "the chimney nearest the spawn first, the farthest last: {columns:?}"
     );
+}
+
+fn palette(world: &WorldgenParams) -> Vec<(&str, [u8; 3], [u8; 3])> {
+    world
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| {
+            let colours = b.sky_fog.expect("every Biome of these Games has a pair");
+            (b.name.as_str(), colours.sky, colours.fog)
+        })
+        .collect()
+}
+
+fn biome<'a>(world: &'a WorldgenParams, name: &str) -> &'a Biome {
+    let name = BiomeName::new(name).unwrap();
+    world
+        .biomes
+        .as_slice()
+        .iter()
+        .find(|b| b.name == name)
+        .unwrap_or_else(|| panic!("{name} is declared"))
+}
+
+/// Each ore Voxel's depth below the surface, in metres.
+fn ore_depths(world: WorldgenParams, size: f32, ore: &Ore) -> Vec<f32> {
+    let generator = Worldgen::new(7, size, world);
+    let cell_m = CHUNK_SIZE as f32 * size;
+    let (lowest, highest) = generator.surface_bounds_m();
+    let rows = (
+        ((lowest - ore.max_depth_m) / cell_m).floor() as i32,
+        (highest / cell_m).ceil() as i32,
+    );
+    let reach = (24.0 / cell_m).ceil() as i32;
+    let mut depths = Vec::new();
+    for cy in rows.0..=rows.1 {
+        for cz in -reach..reach {
+            for cx in -reach..reach {
+                let chunk = generator.chunk(cx, cy, cz);
+                for z in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            if chunk.get(x, y, z).material() != ore.material {
+                                continue;
+                            }
+                            let at =
+                                |c: i32, n: usize| (c * CHUNK_SIZE as i32 + n as i32) as f32 * size;
+                            depths
+                                .push(generator.surface_height_m(at(cx, x), at(cz, z)) - at(cy, y));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    depths
+}
+
+fn shares(world: WorldgenParams, seed: u64, half_m: f32, step_m: f32) -> Vec<f32> {
+    let generator = Worldgen::new(seed, 0.5, world);
+    let mut counts = vec![0u32; world.biomes.len()];
+    let n = (2.0 * half_m / step_m) as i32;
+    for i in 0..n {
+        for j in 0..n {
+            let (x, z) = (-half_m + i as f32 * step_m, -half_m + j as f32 * step_m);
+            counts[generator.biome_at(x, z).unwrap().index()] += 1;
+        }
+    }
+    let total = (n * n) as f32;
+    counts.iter().map(|&c| c as f32 / total).collect()
+}
+
+fn assert_ore_in_band(game: &str, material_name: &str) {
+    let (_install, loaded) = loaded(game, 0.5);
+    let world = loaded.world.unwrap();
+    assert_eq!(world.ores.len(), 1, "{game} declares one ore");
+    let ore = world.ores.as_slice()[0];
+    assert_eq!(ore.material, material(&loaded, material_name));
+    let depths = ore_depths(world, 0.5, &ore);
+    assert!(depths.len() > 100, "{game}: {} ore Voxels", depths.len());
+    let slack = 0.5;
+    for depth in depths {
+        assert!(
+            (ore.min_depth_m - slack..=ore.max_depth_m + slack).contains(&depth),
+            "{game}: ore {depth} m down, outside {}..{}",
+            ore.min_depth_m,
+            ore.max_depth_m
+        );
+    }
+}
+
+#[test]
+fn terra_has_no_dependencies_and_declares_its_own_sand_snow_and_ore() {
+    assert!(depends("terra").is_empty());
+    let (_install, loaded) = loaded("terra", 0.5);
+    assert_eq!(ids(&loaded), ["terra"]);
+    for name in ["terra:sand", "terra:snow", "terra:iron"] {
+        material(&loaded, name);
+    }
+}
+
+#[test]
+fn terra_shows_a_temperate_a_dry_and_a_cold_biome_with_the_approved_sky_and_fog() {
+    let (_install, loaded) = loaded("terra", 0.5);
+    let world = loaded.world.unwrap();
+    assert_eq!(
+        palette(&world),
+        [
+            ("terra:temperate", [126, 146, 168], [136, 160, 190]),
+            ("terra:dry", [176, 160, 128], [196, 178, 142]),
+            ("terra:cold", [150, 164, 184], [176, 190, 208]),
+        ]
+    );
+    for b in world.biomes.as_slice() {
+        assert!(
+            (0.2..=0.8).contains(&b.temperature) && (0.2..=0.8).contains(&b.humidity),
+            "{b:?} sits where Climate actually goes"
+        );
+    }
+    assert_ne!(
+        world.climate,
+        Default::default(),
+        "terra sizes its own Climate"
+    );
+
+    let ground = world.ground.unwrap();
+    assert_eq!(biome(&world, "terra:temperate").ground, None);
+    let dry = biome(&world, "terra:dry").ground.unwrap();
+    assert_eq!(dry.surface, material(&loaded, "terra:sand"));
+    assert_eq!(dry.rock, ground.rock);
+    let cold = biome(&world, "terra:cold").ground.unwrap();
+    assert_eq!(cold.surface, material(&loaded, "terra:snow"));
+    assert_eq!(cold.rock, ground.rock);
+    assert!(
+        world
+            .biomes
+            .as_slice()
+            .iter()
+            .any(|b| b.cave_scale.is_some()),
+        "a Biome tunes the caves"
+    );
+}
+
+#[test]
+fn terra_biomes_all_cover_ground_and_the_temperate_one_most() {
+    let (_install, loaded) = loaded("terra", 0.5);
+    let world = loaded.world.unwrap();
+    for seed in [7, 1, 2024] {
+        let shares = shares(world, seed, 4000.0, 50.0);
+        assert!(
+            shares.iter().all(|&s| s > 0.08) && shares[0] > shares[1] && shares[0] > shares[2],
+            "seed {seed}: {shares:?}"
+        );
+    }
+}
+
+#[test]
+fn terra_iron_appears_in_rock_within_its_band() {
+    assert_ore_in_band("terra", "terra:iron");
+}
+
+#[test]
+fn tidewater_shows_a_lagoon_salt_flats_and_cold_shallows_with_the_approved_sky_and_fog() {
+    let (_install, loaded) = loaded("tidewater", 0.5);
+    let world = loaded.world.unwrap();
+    assert_eq!(
+        palette(&world),
+        [
+            ("tidewater:lagoon", [118, 150, 170], [132, 172, 192]),
+            ("tidewater:salt_flats", [170, 164, 150], [190, 184, 166]),
+            ("tidewater:cold_shallows", [144, 160, 180], [168, 186, 206]),
+        ]
+    );
+    for b in world.biomes.as_slice() {
+        assert!(
+            (0.2..=0.8).contains(&b.temperature) && (0.2..=0.8).contains(&b.humidity),
+            "{b:?} sits where Climate actually goes"
+        );
+    }
+    assert_ne!(
+        world.climate,
+        Default::default(),
+        "tidewater sizes its own Climate"
+    );
+
+    let ground = world.ground.unwrap();
+    assert_eq!(biome(&world, "tidewater:lagoon").ground, None);
+    let flats = biome(&world, "tidewater:salt_flats").ground.unwrap();
+    assert_eq!(flats.surface, material(&loaded, "strata:sand"));
+    let shallows = biome(&world, "tidewater:cold_shallows").ground.unwrap();
+    assert_ne!(shallows.surface, ground.surface);
+
+    let caves = world.caves.unwrap();
+    assert!(caves.radius_m > 0.0);
+    assert!(
+        biome(&world, "tidewater:lagoon")
+            .cave_scale
+            .is_some_and(|s| s > 1.0),
+        "the lagoon is where the sea caves are"
+    );
+}
+
+#[test]
+fn tidewater_biomes_all_cover_ground_and_the_lagoon_most() {
+    let (_install, loaded) = loaded("tidewater", 0.5);
+    let world = loaded.world.unwrap();
+    for seed in [7, 1, 2024] {
+        let shares = shares(world, seed, 4000.0, 50.0);
+        assert!(
+            shares.iter().all(|&s| s > 0.08) && shares[0] > shares[1] && shares[0] > shares[2],
+            "seed {seed}: {shares:?}"
+        );
+    }
+}
+
+#[test]
+fn tidewater_aquamarine_appears_in_rock_within_its_band() {
+    assert_ore_in_band("tidewater", "crystals:aquamarine");
 }

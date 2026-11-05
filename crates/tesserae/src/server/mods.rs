@@ -15,7 +15,7 @@ use bevy::prelude::*;
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE, ShapeId, Tables, WorldgenParams};
 use tesserae_mods::{
     Kind, ModHost, ModInstance, Registered, Registry, Scan, Trust, Verdict, ViewParams, WorldInfo,
-    apply, games_dir, migrate_legacy_games, plan, resolve, resolve_items, scan,
+    apply, games_dir, migrate_legacy_games, plan, resolve, resolve_biomes, resolve_items, scan,
 };
 
 use crate::content::{
@@ -505,11 +505,19 @@ pub(crate) async fn declare_all(
     // before any Mod starts and the World opens.
     loaded.items =
         resolve_items(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    let (biomes, ores) =
+        resolve_biomes(&behaviours, &loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
+    if !biomes.is_empty() || !ores.is_empty() {
+        // A Mod's Biomes need a World to live in even when the Game sets no terrain.
+        loaded.world.get_or_insert_with(WorldgenParams::default);
+    }
     let (ground, lake) =
         resolve(behaviours, &mut loaded.tables, &loaded.registry).map_err(|e| e.to_string())?;
     if let Some(world) = &mut loaded.world {
         world.water = lake;
         world.ground = ground;
+        world.biomes = biomes;
+        world.ores = ores;
     }
     Ok(loaded)
 }
@@ -1074,6 +1082,82 @@ surface = "plain:rock"
         let material = |m: MaterialId| catalogue.materials.iter().find(|c| c.id == m).unwrap();
         assert!(material(lava).fluid.is_some() && !material(lava).solid);
         assert!(material(wood).burns && material(wood).solid);
+    }
+
+    const WET: &str = r#"
+[[materials]]
+name = "gem"
+emission = 0
+dimming = 15
+occlusion = "opaque"
+render = "opaque"
+solid = true
+[[biomes]]
+name = "wet"
+temperature = 0.3
+humidity = 0.9
+[[ores]]
+material = "base:gem"
+min-depth-m = 5.0
+max-depth-m = 50.0
+vein-size-m = 2.0
+rarity = 0.1
+biomes = ["plain:dry"]
+"#;
+
+    #[test]
+    fn a_mod_adds_biomes_and_ores_after_the_games_in_dependency_order() {
+        let s = Scratch::new();
+        let game = format!(
+            "{DATA_GAME}\n[world.climate]\ntemperature-size-m = 300.0\nhumidity-size-m = 700.0\n\
+             [[biomes]]\nname = \"dry\"\ntemperature = 0.8\nhumidity = 0.1\n"
+        );
+        data(&s, "plain", true, "depends = ['base']", &game);
+        data(&s, "base", false, "", WET);
+        let world = s.load(TrustMode::All).unwrap().world.unwrap();
+        let names: Vec<_> = world
+            .biomes
+            .as_slice()
+            .iter()
+            .map(|b| b.name.as_str())
+            .collect();
+        assert_eq!(names, ["base:wet", "plain:dry"]);
+        assert_eq!(world.climate.temperature_size_m, 300.0);
+        let ore = world.ores.as_slice();
+        assert_eq!(ore.len(), 1);
+        assert_eq!(
+            ore[0].biomes.ids().map(|id| id.index()).collect::<Vec<_>>(),
+            [1]
+        );
+        assert_eq!(world.generator, 2);
+    }
+
+    #[test]
+    fn a_mod_may_add_biomes_to_a_game_that_declares_no_world() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "depends = ['base']", "");
+        data(&s, "base", false, "", &WET.replace("plain:dry", "base:wet"));
+        let world = s.load(TrustMode::All).unwrap().world.unwrap();
+        assert_eq!(world.biomes.len(), 1);
+        assert_eq!(world.ores.len(), 1);
+        let bare = tesserae_core::WorldgenParams::default();
+        assert_eq!(
+            tesserae_core::WorldgenParams {
+                biomes: bare.biomes,
+                ores: bare.ores,
+                ..world
+            },
+            bare
+        );
+    }
+
+    #[test]
+    fn a_game_with_no_biomes_loads_exactly_as_before() {
+        let s = Scratch::new();
+        data(&s, "plain", true, "", DATA_GAME);
+        let world = s.load(TrustMode::All).unwrap().world.unwrap();
+        assert!(world.biomes.is_empty() && world.ores.is_empty());
+        assert_eq!(world.climate, tesserae_core::ClimateParams::default());
     }
 
     #[test]
@@ -1765,7 +1849,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
         );
         assert!(!turnable.iter().any(|(name, _)| name.starts_with("dev:")));
         let ids: Vec<_> = catalogue.materials.iter().map(|m| m.id).collect();
-        assert_eq!(ids, std::iter::once(0).chain(8..20).collect::<Vec<_>>());
+        assert_eq!(ids, std::iter::once(0).chain(8..23).collect::<Vec<_>>());
     }
 
     #[test]
@@ -1785,7 +1869,7 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .drain()
             .next()
             .unwrap();
-        assert_eq!(textures.0.len(), 12);
+        assert_eq!(textures.0.len(), 15);
         for material in catalogue.materials.iter().filter(|m| m.id != 0) {
             let (_, pixels) = textures
                 .0

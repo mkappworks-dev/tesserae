@@ -10,9 +10,9 @@ use std::cell::RefCell;
 use std::collections::VecDeque;
 use tesserae::mods::commands::{Fill, Placement, SourceFill};
 use tesserae::mods::content::{
-    Appearance, BurnAfter, BurnEnd, CombustionDef, FluidDef, FluidState, GroundParams, HeatDef,
-    ItemDef, MaterialDef, Occlusion, Reactant, ReactionDef, ReactionSide, RenderClass, ShapeDef,
-    ToolDef, ToolKind, ViewParams, WaterParams,
+    Appearance, BiomeDef, BurnAfter, BurnEnd, ClimateParams, CombustionDef, FluidDef, FluidState,
+    GroundParams, HeatDef, ItemDef, MaterialDef, Occlusion, OreDef, Reactant, ReactionDef,
+    ReactionSide, RenderClass, ShapeDef, SkyFog, ToolDef, ToolKind, ViewParams, WaterParams,
 };
 use tesserae::mods::types::{
     Arm, BoxM, CollisionBox, ConnectDef, LogLevel, NodeBox, Srgba, Vec3, Voxel,
@@ -191,6 +191,11 @@ impl Guest for Terra {
             soil: "terra:dirt".into(),
             surface: "terra:grass".into(),
         });
+        // Smaller than the engine's 512 m, so a walk across the stage meets a border.
+        world.climate = Some(ClimateParams {
+            temperature_size_m: 256.0,
+            humidity_size_m: 256.0,
+        });
         Declaration {
             materials: vec![
                 MaterialDef {
@@ -250,6 +255,9 @@ impl Guest for Terra {
                     render: RenderClass::Cutout,
                     ..solid("leaves")
                 },
+                solid("sand"),
+                solid("snow"),
+                solid("iron"),
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -265,6 +273,9 @@ impl Guest for Terra {
                 appearance("grass", [84, 143, 61, 255]),
                 appearance("glass", [164, 210, 250, 89]),
                 appearance("leaves", [41, 107, 36, 255]),
+                appearance("sand", [214, 196, 140, 255]),
+                appearance("snow", [236, 240, 246, 255]),
+                appearance("iron", [150, 120, 104, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -398,6 +409,57 @@ impl Guest for Terra {
                     material: Some("terra:grass".into()),
                 },
             ],
+            biomes: vec![
+                BiomeDef {
+                    name: "temperate".into(),
+                    temperature: 0.5,
+                    humidity: 0.5,
+                    ground: None,
+                    sky_fog: Some(SkyFog {
+                        sky: (126, 146, 168),
+                        fog: (136, 160, 190),
+                    }),
+                    cave_scale: None,
+                },
+                BiomeDef {
+                    name: "dry".into(),
+                    temperature: 0.7,
+                    humidity: 0.3,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:sand".into(),
+                        surface: "terra:sand".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (176, 160, 128),
+                        fog: (196, 178, 142),
+                    }),
+                    cave_scale: Some(1.5),
+                },
+                BiomeDef {
+                    name: "cold".into(),
+                    temperature: 0.3,
+                    humidity: 0.55,
+                    ground: Some(GroundParams {
+                        rock: "terra:stone".into(),
+                        soil: "terra:dirt".into(),
+                        surface: "terra:snow".into(),
+                    }),
+                    sky_fog: Some(SkyFog {
+                        sky: (150, 164, 184),
+                        fog: (176, 190, 208),
+                    }),
+                    cave_scale: Some(0.0),
+                },
+            ],
+            ores: vec![OreDef {
+                material: "terra:iron".into(),
+                min_depth_m: 5.0,
+                max_depth_m: 28.0,
+                vein_size_m: 5.0,
+                rarity: 0.1,
+                biomes: Vec::new(),
+            }],
         }
     }
 

@@ -189,6 +189,17 @@ interface content {
         smoothing: option<smoothing-params>,
         water: option<water-params>,
         ground: option<ground-params>,
+        /// How large the Climate regions are. `none` keeps the engine's default.
+        /// Only the Game may set it: a `climate` from a Mod that is not the Game
+        /// is a load error, like the rest of `world` beyond the character.
+        climate: option<climate-params>,
+    }
+
+    /// The size of the Climate regions, in metres: the horizontal period of the
+    /// lowest octave of each field, finite and greater than zero.
+    record climate-params {
+        temperature-size-m: f32,
+        humidity-size-m: f32,
     }
 
     /// How far the Client streams, in metres. Only the Game may set it; the
@@ -338,6 +349,56 @@ interface content {
         material: option<string>,
     }
 
+    /// A kind of ground: a point in the unit square of Climate, where the
+    /// nearest point to a column wins it.
+    record biome-def {
+        /// Local to the Mod, like a Material's; the engine adds `<mod id>:`, and
+        /// the whole name is at most 32 bytes.
+        name: string,
+        /// Both from 0 to 1.
+        temperature: f32,
+        humidity: f32,
+
+        /// The ground this Biome's columns are made of. `none` uses the Game's
+        /// `world.ground`. Switches hard at the Biome's border.
+        ground: option<ground-params>,
+
+        /// The sky and fog colours over this Biome, easing as the Player walks
+        /// between Biomes. `none` leaves the Biome out of the blend.
+        sky-fog: option<sky-fog>,
+
+        /// A multiplier on the Game's cave radius in this Biome, from 0 to 4:
+        /// `none` and 1 leave the caves as they are, 0 switches them off. It
+        /// blends smoothly across the Biome's border, unlike `ground`.
+        cave-scale: option<f32>,
+    }
+
+    /// A sky colour and the fog that matches it, as sRGB bytes. A pair, so a
+    /// Biome gives both or neither. `sky` is the colour behind the terrain; `fog`
+    /// is what distant terrain fades toward, a little lighter than `sky`.
+    record sky-fog {
+        sky: tuple<u8, u8, u8>,
+        fog: tuple<u8, u8, u8>,
+    }
+
+    /// A vein of one Material in the rock, centred within a band of depth
+    /// below the surface.
+    record ore-def {
+        /// A solid Material, `<mod id>:<name>`, resolved after every Mod's
+        /// Declaration.
+        material: string,
+        /// The band, in metres below the surface, shallow end first; both from
+        /// 0 to 65536.
+        min-depth-m: f32,
+        max-depth-m: f32,
+        /// Finite and greater than zero.
+        vein-size-m: f32,
+        /// Greater than 0 and at most 1.
+        rarity: f32,
+        /// Biomes, `<mod id>:<name>`, from any loaded Mod. Empty is every Biome.
+        biomes: list<string>,
+    }
+
     /// Everything a Mod adds, in registration order: a name's id is its index
     /// after the engine's built-ins, so Materials start at 8 (7 is retired and
     /// never handed out) and Shapes at 4. A `world` or `view` from a Mod that is
@@ -362,5 +423,11 @@ interface content {
         tools: list<tool-def>,
         /// At most 64 rows per Mod and 256 in a World, from any Mod.
         items: list<item-def>,
+        /// At most 16 rows per Mod and 16 in a World, from any Mod. A Biome's id
+        /// is its place in load order, so a Mod only ever appends. Climate comes
+        /// from the Game's `world`.
+        biomes: list<biome-def>,
+        /// At most 16 rows per Mod and 32 in a World, from any Mod.
+        ores: list<ore-def>,
     }
 }

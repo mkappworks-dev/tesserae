@@ -2,6 +2,6 @@ id = "lumen"
 version = "0.1.0"
 api = "0.3"
 root = true
-depends = ["strata", "glassworks"]
+depends = ["strata", "glassworks", "frost", "crystals"]
 suggests = ["wanderer"]
 wasm = "lumen.wasm"

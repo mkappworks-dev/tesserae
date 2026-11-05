@@ -1,13 +1,16 @@
 //! A Declaration into `tesserae-core`'s tables and the Registry.
 
 use std::collections::HashSet;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
 use tesserae_core::{
-    AIR, Burn, CombustionDef, FluidDef, GroundParams, Heat, MaterialId, ParamError, Phase,
-    Reactant, ReactionDef, Side, Tables, Voxel, WaterParams, WorldgenParams,
+    AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
+    GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
+    ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, Tables, Voxel, WaterParams,
+    WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -29,6 +32,9 @@ pub const MATERIAL_TEXTURE_BYTES: usize = MATERIAL_TEXTURE_EDGE * MATERIAL_TEXTU
 pub const MAX_TOOLS_PER_MOD: usize = 8;
 pub const MAX_ITEMS_PER_MOD: usize = 64;
 pub const MAX_ITEMS: usize = 256;
+pub const MAX_BIOMES_PER_MOD: usize = MAX_BIOMES;
+/// Half the World's table, so no one Mod can fill it.
+pub const MAX_ORES_PER_MOD: usize = MAX_ORES / 2;
 /// Bounds of an item's cube edge in metres.
 pub const ITEM_SIZE_M: (f32, f32) = (0.05, 0.5);
 
@@ -127,6 +133,8 @@ pub struct Behaviour {
     reactions: Vec<content::ReactionDef>,
     combustion: Vec<content::CombustionDef>,
     items: Vec<content::ItemDef>,
+    biomes: Vec<content::BiomeDef>,
+    ores: Vec<content::OreDef>,
     lake: Option<content::WaterParams>,
     ground: Option<content::GroundParams>,
 }
@@ -141,6 +149,7 @@ fn beyond_character(world: &content::WorldParams) -> Option<&'static str> {
         (world.smoothing.is_some(), "world.smoothing"),
         (world.water.is_some(), "world.water"),
         (world.ground.is_some(), "world.ground"),
+        (world.climate.is_some(), "world.climate"),
         (world.sea_level_m != bare.sea_level_m, "world.sea-level-m"),
         (world.relief_m != bare.relief_m, "world.relief-m"),
         (
@@ -208,6 +217,8 @@ pub fn apply(
         ),
         ("tool", declaration.tools.len(), MAX_TOOLS_PER_MOD),
         ("item", declaration.items.len(), MAX_ITEMS_PER_MOD),
+        ("biome", declaration.biomes.len(), MAX_BIOMES_PER_MOD),
+        ("ore", declaration.ores.len(), MAX_ORES_PER_MOD),
     ] {
         if count > max {
             return Err(ModError::TooManyRows {
@@ -317,6 +328,7 @@ pub fn apply(
     }
 
     check_items(mod_id, &declaration.items)?;
+    check_biomes(mod_id, &declaration.biomes)?;
 
     let mut remove_times = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
@@ -372,6 +384,8 @@ pub fn apply(
             reactions: declaration.reactions,
             combustion: declaration.combustion,
             items: declaration.items,
+            biomes: declaration.biomes,
+            ores: declaration.ores,
             lake,
             ground,
         },
@@ -397,6 +411,147 @@ fn check_items(mod_id: &str, items: &[content::ItemDef]) -> Result<(), ModError>
         }
     }
     Ok(())
+}
+
+fn check_biomes(mod_id: &str, biomes: &[content::BiomeDef]) -> Result<(), ModError> {
+    for (row, biome) in biomes.iter().enumerate() {
+        let bad = |field, rule| ModError::Params {
+            id: mod_id.to_owned(),
+            what: "biome",
+            source: ParamError { field, rule },
+        };
+        if !valid_local(&biome.name) {
+            return Err(bad("name", NAME_RULE));
+        }
+        if biomes[..row].iter().any(|b| b.name == biome.name) {
+            return Err(bad("name", "must be unique among the Mod's biomes"));
+        }
+        for (field, value) in [
+            ("temperature", biome.temperature),
+            ("humidity", biome.humidity),
+        ] {
+            if !(0.0..=1.0).contains(&value) {
+                return Err(bad(field, "must be from 0 to 1"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// An ore may name a Material or Biome of any Mod, so this runs once every Declaration is in, like
+/// [`resolve_items`].
+pub fn resolve_biomes(
+    behaviours: &[Behaviour],
+    tables: &Tables,
+    registry: &Registry,
+) -> Result<(BiomeTable, OreTable), ModError> {
+    let mut biomes: Vec<Biome> = Vec::new();
+    for b in behaviours {
+        for (row, def) in b.biomes.iter().enumerate() {
+            let bad = |source| ModError::Params {
+                id: b.mod_id.clone(),
+                what: "biome",
+                source,
+            };
+            if biomes.len() == MAX_BIOMES {
+                // `ParamError::rule` is `&'static str`, so format a constant-derived one once.
+                static RULE: OnceLock<String> = OnceLock::new();
+                return Err(bad(ParamError {
+                    field: "biomes",
+                    rule: RULE
+                        .get_or_init(|| format!("holds at most {MAX_BIOMES} Biomes in a World")),
+                }));
+            }
+            let ground = def
+                .ground
+                .as_ref()
+                .map(|names| {
+                    let ground = GroundParams {
+                        rock: lookup(b, registry, "biome", row, &names.rock)?,
+                        soil: lookup(b, registry, "biome", row, &names.soil)?,
+                        surface: lookup(b, registry, "biome", row, &names.surface)?,
+                    };
+                    WorldgenParams {
+                        ground: Some(ground),
+                        ..WorldgenParams::default()
+                    }
+                    .validate_ground(tables)
+                    .map_err(bad)?;
+                    Ok(ground)
+                })
+                .transpose()?;
+            if let Some(scale) = def.cave_scale
+                && !(0.0..=MAX_CAVE_SCALE).contains(&scale)
+            {
+                static RULE: OnceLock<String> = OnceLock::new();
+                return Err(bad(ParamError {
+                    field: "biomes.cave_scale",
+                    rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CAVE_SCALE}")),
+                }));
+            }
+            biomes.push(Biome {
+                name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
+                temperature: def.temperature,
+                humidity: def.humidity,
+                ground,
+                sky_fog: def.sky_fog.as_ref().map(|c| SkyFog {
+                    sky: c.sky.into(),
+                    fog: c.fog.into(),
+                }),
+                cave_scale: def.cave_scale,
+            });
+        }
+    }
+    let mut ores: Vec<Ore> = Vec::new();
+    for b in behaviours {
+        for (row, def) in b.ores.iter().enumerate() {
+            let bad = |field, rule| ModError::Params {
+                id: b.mod_id.clone(),
+                what: "ore",
+                source: ParamError { field, rule },
+            };
+            let material = lookup(b, registry, "ore", row, &def.material)?;
+            if !tables.materials.solid(Voxel::cube(material)) {
+                return Err(bad("material", "must be a solid Material"));
+            }
+            let ids = def
+                .biomes
+                .iter()
+                .map(|name| {
+                    biomes
+                        .iter()
+                        .position(|biome| biome.name.as_str() == name)
+                        .map(|at| BiomeId::new(at as u8))
+                        .ok_or_else(|| bad("biomes", "names no declared Biome"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let ore = Ore {
+                material,
+                min_depth_m: def.min_depth_m,
+                max_depth_m: def.max_depth_m,
+                vein_size_m: def.vein_size_m,
+                rarity: def.rarity,
+                biomes: BiomeSet::new(&ids).map_err(|e| bad(e.field, e.rule))?,
+            };
+            ore.validate().map_err(|e| bad(e.field, e.rule))?;
+            if ores.len() == MAX_ORES {
+                static RULE: OnceLock<String> = OnceLock::new();
+                let rule = RULE.get_or_init(|| format!("holds at most {MAX_ORES} ores in a World"));
+                return Err(bad("ores", rule));
+            }
+            ores.push(ore);
+        }
+    }
+    let table = |e: ParamError, id: &str, what| ModError::Params {
+        id: id.to_owned(),
+        what,
+        source: e,
+    };
+    let last = behaviours.last().map_or("", |b| b.mod_id.as_str());
+    Ok((
+        BiomeTable::new(&biomes).map_err(|e| table(e, last, "biome"))?,
+        OreTable::new(&ores).map_err(|e| table(e, last, "ore"))?,
+    ))
 }
 
 /// Every Mod's items in load order, their Materials resolved. Called once

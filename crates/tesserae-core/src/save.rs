@@ -14,7 +14,10 @@ use sha2::{Digest, Sha256};
 use crate::{CHUNK_SIZE, CHUNK_VOLUME, Chunk, ChunkOverlay, Fluid, Level, Overlay, Voxel};
 
 pub const FORMAT_VERSION: u32 = 1;
-pub const GENERATOR_VERSION: u32 = 1;
+pub const GENERATOR_VERSION: u32 = 2;
+/// Every version that ever shipped stays until a migration exists: a World keeps the one it was
+/// created with.
+pub const SUPPORTED_GENERATORS: [u32; 2] = [1, GENERATOR_VERSION];
 const MAGIC: &[u8; 8] = b"TESSAVE1";
 const MAX_COMMIT_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -445,12 +448,53 @@ pub struct Generation {
     pub smoothing: Option<crate::SmoothingParams>,
     pub lake: Option<(f32, String)>,
     pub ground: Option<[String; 3]>,
+    /// A snapshot, so a Game that later gains a Biome never reshapes the World. All three are
+    /// absent together: before Biomes, for Generator version 1 and for an empty table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub climate: Option<crate::ClimateParams>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub biomes: Option<Vec<SavedBiome>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ores: Option<Vec<SavedOre>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedBiome {
+    pub name: String,
+    pub temperature: f32,
+    pub humidity: f32,
+    /// Rock, soil and surface by name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ground: Option<[String; 3]>,
+    /// Absent is a Biome with no say in the air.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sky_fog: Option<crate::SkyFog>,
+    /// Absent is the World's own caves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cave_scale: Option<f32>,
+}
+
+/// Material and Biomes by name, since ids are only meaningful beside the tables that made them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedOre {
+    pub material: String,
+    pub min_depth_m: f32,
+    pub max_depth_m: f32,
+    pub vein_size_m: f32,
+    pub rarity: f32,
+    /// Empty is every Biome, as in [`crate::BiomeSet`].
+    pub biomes: Vec<String>,
 }
 
 impl Generation {
     pub fn capture(p: crate::WorldgenParams, mapping: &Mapping) -> Result<Self, Error> {
         mapping.validate()?;
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
+        // Version 1 ignores all three, so saving them would pin nothing.
+        let has_biomes = p.generator >= crate::climate::BIOMES_SINCE && !p.biomes.is_empty();
+        let has_ores = p.generator >= crate::climate::BIOMES_SINCE && !p.ores.is_empty();
         Ok(Self {
             sea_level_m: p.sea_level_m,
             relief_m: p.relief_m,
@@ -463,22 +507,55 @@ impl Generation {
                 .water
                 .map(|w| Ok::<_, Error>((w.level_m, mapping.material_name(w.material)?)))
                 .transpose()?,
-            ground: p
-                .ground
-                .map(|g| {
-                    Ok::<_, Error>([
-                        mapping.material_name(g.rock)?,
-                        mapping.material_name(g.soil)?,
-                        mapping.material_name(g.surface)?,
-                    ])
+            ground: p.ground.map(|g| ground_names(g, mapping)).transpose()?,
+            climate: has_biomes.then_some(p.climate),
+            biomes: has_biomes
+                .then(|| {
+                    p.biomes
+                        .as_slice()
+                        .iter()
+                        .map(|b| saved_biome(b, mapping))
+                        .collect::<Result<_, _>>()
+                })
+                .transpose()?,
+            ores: has_ores
+                .then(|| {
+                    p.ores
+                        .as_slice()
+                        .iter()
+                        .map(|o| saved_ore(o, &p.biomes, mapping))
+                        .collect::<Result<_, _>>()
                 })
                 .transpose()?,
         })
     }
 
-    pub fn restore(&self, mapping: &Mapping) -> Result<crate::WorldgenParams, Error> {
+    /// `generator` is the Commit's pin, not a generation parameter: the Server owns which algorithm
+    /// a World runs.
+    pub fn restore(
+        &self,
+        mapping: &Mapping,
+        generator: u32,
+    ) -> Result<crate::WorldgenParams, Error> {
         mapping.validate()?;
+        let biomes_apply = generator >= crate::climate::BIOMES_SINCE;
+        let biomes = self
+            .biomes
+            .as_deref()
+            .filter(|_| biomes_apply)
+            .map(|saved| restored_biomes(saved, mapping))
+            .transpose()?
+            .unwrap_or_default();
+        let ores = self
+            .ores
+            .as_deref()
+            .filter(|_| biomes_apply)
+            .unwrap_or_default()
+            .iter()
+            .map(|o| restored_ore(o, &biomes, mapping))
+            .collect::<Result<Vec<_>, _>>()?;
         let p = crate::WorldgenParams {
+            generator,
             sea_level_m: self.sea_level_m,
             relief_m: self.relief_m,
             feature_size_m: self.feature_size_m,
@@ -499,18 +576,114 @@ impl Generation {
             ground: self
                 .ground
                 .as_ref()
-                .map(|names| {
-                    Ok::<_, Error>(crate::GroundParams {
-                        rock: mapping.material_id(&names[0])?,
-                        soil: mapping.material_id(&names[1])?,
-                        surface: mapping.material_id(&names[2])?,
-                    })
-                })
+                .map(|names| ground_ids(names, mapping))
                 .transpose()?,
+            climate: self.climate.filter(|_| biomes_apply).unwrap_or_default(),
+            biomes,
+            ores: crate::OreTable::new(&ores).map_err(|e| Error::Corrupt(e.to_string()))?,
         };
         p.validate().map_err(|e| Error::Corrupt(e.to_string()))?;
         Ok(p)
     }
+}
+
+fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error> {
+    Ok(SavedBiome {
+        name: b.name.to_string(),
+        temperature: b.temperature,
+        humidity: b.humidity,
+        ground: b.ground.map(|g| ground_names(g, mapping)).transpose()?,
+        sky_fog: b.sky_fog,
+        cave_scale: b.cave_scale,
+    })
+}
+
+fn ground_names(g: crate::GroundParams, mapping: &Mapping) -> Result<[String; 3], Error> {
+    Ok([
+        mapping.material_name(g.rock)?,
+        mapping.material_name(g.soil)?,
+        mapping.material_name(g.surface)?,
+    ])
+}
+
+fn ground_ids(names: &[String; 3], mapping: &Mapping) -> Result<crate::GroundParams, Error> {
+    Ok(crate::GroundParams {
+        rock: mapping.material_id(&names[0])?,
+        soil: mapping.material_id(&names[1])?,
+        surface: mapping.material_id(&names[2])?,
+    })
+}
+
+fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::BiomeTable, Error> {
+    let biomes = saved
+        .iter()
+        .map(|b| {
+            Ok(crate::Biome {
+                name: crate::BiomeName::new(&b.name).map_err(|e| Error::Corrupt(e.to_string()))?,
+                temperature: b.temperature,
+                humidity: b.humidity,
+                ground: b
+                    .ground
+                    .as_ref()
+                    .map(|names| ground_ids(names, mapping))
+                    .transpose()?,
+                sky_fog: b.sky_fog,
+                cave_scale: b.cave_scale,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::BiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))
+}
+
+fn saved_ore(
+    o: &crate::Ore,
+    biomes: &crate::BiomeTable,
+    mapping: &Mapping,
+) -> Result<SavedOre, Error> {
+    Ok(SavedOre {
+        material: mapping.material_name(o.material)?,
+        min_depth_m: o.min_depth_m,
+        max_depth_m: o.max_depth_m,
+        vein_size_m: o.vein_size_m,
+        rarity: o.rarity,
+        biomes: o
+            .biomes
+            .ids()
+            .map(|id| {
+                biomes
+                    .get(id)
+                    .map(|b| b.name.to_string())
+                    .ok_or_else(|| Error::Corrupt("an ore names a missing Biome".into()))
+            })
+            .collect::<Result<_, _>>()?,
+    })
+}
+
+fn restored_ore(
+    o: &SavedOre,
+    biomes: &crate::BiomeTable,
+    mapping: &Mapping,
+) -> Result<crate::Ore, Error> {
+    let ids = o
+        .biomes
+        .iter()
+        .map(|name| {
+            biomes
+                .as_slice()
+                .iter()
+                .position(|b| b.name.as_str() == name)
+                .map(|at| crate::BiomeId::new(at as u8))
+                .ok_or_else(|| Error::Corrupt(format!("an ore names the unknown Biome {name}")))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(crate::Ore {
+        material: mapping.material_id(&o.material)?,
+        min_depth_m: o.min_depth_m,
+        max_depth_m: o.max_depth_m,
+        vein_size_m: o.vein_size_m,
+        rarity: o.rarity,
+        biomes: crate::BiomeSet::new(&ids).map_err(|e| Error::Corrupt(e.to_string()))?,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -535,7 +708,7 @@ pub struct Commit {
 
 impl Commit {
     pub fn compatible(&self, installed: &Content) -> Result<(), Error> {
-        if self.format != FORMAT_VERSION || self.generator != GENERATOR_VERSION {
+        if self.format != FORMAT_VERSION || !SUPPORTED_GENERATORS.contains(&self.generator) {
             return Err(Error::Incompatible(format!(
                 "unsupported save/generator version {}/{}",
                 self.format, self.generator
@@ -555,7 +728,7 @@ impl Commit {
         self.entities.validate()?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;
-        self.parameters.restore(&mapping)?;
+        self.parameters.restore(&mapping, self.generator)?;
         let mut coords = BTreeSet::new();
         for chunk in &self.chunks {
             if !coords.insert(chunk.coord) {

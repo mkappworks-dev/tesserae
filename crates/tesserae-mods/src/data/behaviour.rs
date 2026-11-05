@@ -203,3 +203,85 @@ impl From<Item> for content::ItemDef {
         }
     }
 }
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Biome {
+    name: String,
+    temperature: f32,
+    humidity: f32,
+
+    ground: Option<super::Ground>,
+
+    sky_fog: Option<SkyFog>,
+
+    cave_scale: Option<f32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct SkyFog {
+    #[serde(deserialize_with = "rgb")]
+    sky: [u8; 3],
+    #[serde(deserialize_with = "rgb")]
+    fog: [u8; 3],
+}
+
+/// Through a `Vec`: serde stops an array at its length and would pass an RGBA colour off as RGB.
+fn rgb<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[u8; 3], D::Error> {
+    let bytes = Vec::<u8>::deserialize(d)?;
+    <[u8; 3]>::try_from(bytes)
+        .map_err(|b| serde::de::Error::invalid_length(b.len(), &"an RGB colour of 3 bytes"))
+}
+
+impl From<SkyFog> for content::SkyFog {
+    fn from(c: SkyFog) -> Self {
+        let [s0, s1, s2] = c.sky;
+        let [f0, f1, f2] = c.fog;
+        Self {
+            sky: (s0, s1, s2),
+            fog: (f0, f1, f2),
+        }
+    }
+}
+
+impl From<Biome> for content::BiomeDef {
+    fn from(b: Biome) -> Self {
+        Self {
+            name: b.name,
+            temperature: b.temperature,
+            humidity: b.humidity,
+
+            ground: b.ground.map(Into::into),
+
+            sky_fog: b.sky_fog.map(Into::into),
+
+            cave_scale: b.cave_scale,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Ore {
+    material: String,
+    min_depth_m: f32,
+    max_depth_m: f32,
+    vein_size_m: f32,
+    rarity: f32,
+    #[serde(default)]
+    biomes: Vec<String>,
+}
+
+impl From<Ore> for content::OreDef {
+    fn from(o: Ore) -> Self {
+        Self {
+            material: o.material,
+            min_depth_m: o.min_depth_m,
+            max_depth_m: o.max_depth_m,
+            vein_size_m: o.vein_size_m,
+            rarity: o.rarity,
+            biomes: o.biomes,
+        }
+    }
+}

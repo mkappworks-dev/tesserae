@@ -10,8 +10,13 @@
 //! feeds the benches a fixed surface and makes no World.
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkBuilder};
+use crate::climate::{
+    BIOMES_SINCE, BiomeId, BiomeTable, Climate, ClimateField, ClimateParams, MAX_BIOMES,
+    SkyFogBlend,
+};
 use crate::mesh::POS_Y;
 use crate::noise::{Fbm3Cache, fbm2, fbm3_cached, fbm3_range};
+use crate::ore::{OreField, OreMask, OreTable};
 use crate::shape::{MAX_SHAPED_PER_CHUNK, Orientation, SHAPE_SLAB, SHAPE_STAIR};
 use crate::tables::Tables;
 use crate::voxel::{MaterialId, Voxel};
@@ -42,6 +47,14 @@ pub struct WorldgenParams {
     /// `None` is a World without lakes.
     pub water: Option<WaterParams>,
     pub ground: Option<GroundParams>,
+    /// Read by every Generator version, but only version 2 selects Biomes from it.
+    pub climate: ClimateParams,
+    /// Empty is a World with no Biomes. Ignored by Generator version 1.
+    pub biomes: BiomeTable,
+    /// Empty is a World without ore. Ignored by Generator version 1.
+    pub ores: OreTable,
+    /// A World pins the version it was created with, so a revision never reshapes existing terrain.
+    pub generator: u32,
 }
 
 /// A fluid filling the open air above the ground up to one height: the World's
@@ -138,6 +151,10 @@ impl Default for WorldgenParams {
             // The engine declares no fluid, so standing fluid is a Game's to add.
             water: None,
             ground: None,
+            climate: ClimateParams::default(),
+            biomes: BiomeTable::default(),
+            ores: OreTable::default(),
+            generator: crate::save::GENERATOR_VERSION,
         }
     }
 }
@@ -247,11 +264,34 @@ impl WorldgenParams {
         if let Some(water) = self.water {
             require(water.level_m.is_finite(), "water.level_m", "must be finite")?;
         }
+        positive_size(
+            "climate.temperature_size_m",
+            self.climate.temperature_size_m,
+        )?;
+        positive_size("climate.humidity_size_m", self.climate.humidity_size_m)?;
+        require(
+            self.ores
+                .as_slice()
+                .iter()
+                .all(|o| o.biomes.ids().all(|id| id.index() < self.biomes.len())),
+            "ores.biomes",
+            "must name Biomes the World declares",
+        )?;
+        require(
+            crate::save::SUPPORTED_GENERATORS.contains(&self.generator),
+            "generator",
+            "must be a supported Generator version",
+        )?;
         Ok(())
     }
 
+    /// Checks the World's ground and every Biome's alike.
     pub fn validate_ground(&self, tables: &Tables) -> Result<(), ParamError> {
-        if let Some(ground) = self.ground {
+        let grounds = self
+            .ground
+            .into_iter()
+            .chain(self.biomes.as_slice().iter().filter_map(|b| b.ground));
+        for ground in grounds {
             for (field, material) in [
                 ("ground.rock", ground.rock),
                 ("ground.soil", ground.soil),
@@ -342,19 +382,28 @@ impl CaveField {
         }
     }
 
-    fn carves(&self, x_m: f32, y_m: f32, z_m: f32) -> bool {
-        self.carves_near(&mut Default::default(), x_m, y_m, z_m)
+    /// `scale` multiplies the tunnel radius; 1 is the World's own caves.
+    fn carves(&self, x_m: f32, y_m: f32, z_m: f32, scale: f32) -> bool {
+        self.carves_near(&mut Default::default(), x_m, y_m, z_m, scale)
     }
 
     /// [`CaveField::carves`] for a run of nearby samples sharing `cache`.
-    fn carves_near(&self, cache: &mut [Fbm3Cache; 2], x_m: f32, y_m: f32, z_m: f32) -> bool {
+    fn carves_near(
+        &self,
+        cache: &mut [Fbm3Cache; 2],
+        x_m: f32,
+        y_m: f32,
+        z_m: f32,
+        scale: f32,
+    ) -> bool {
         if y_m < self.floor_m {
             return false;
         }
         let k = self.inv_feature_size;
+        let half_width = self.half_width * scale;
         self.seeds.iter().zip(cache).all(|(&s, cache)| {
             (fbm3_cached(x_m * k, y_m * k, z_m * k, s, self.octaves, cache) - 0.5).abs()
-                < self.half_width
+                < half_width
         })
     }
 
@@ -362,7 +411,9 @@ impl CaveField {
     /// is a proof, and the generator relies on it: it skips the box and gets
     /// what sampling every point would have. `true` only means it was not ruled
     /// out.
-    fn may_carve(&self, lo: [f32; 3], hi: [f32; 3]) -> bool {
+    ///
+    /// `scale` must be at least the scale of every column in the box.
+    fn may_carve(&self, lo: [f32; 3], hi: [f32; 3], scale: f32) -> bool {
         if hi[1] < self.floor_m {
             return false;
         }
@@ -376,7 +427,7 @@ impl CaveField {
             } else {
                 (min - 0.5).abs().min((max - 0.5).abs())
             };
-            nearest < self.half_width
+            nearest < self.half_width * scale
         })
     }
 }
@@ -442,7 +493,80 @@ pub struct Worldgen {
     smoothing: bool,
     /// The lake, its level already clamped to the surface band.
     water: Option<WaterParams>,
+    climate: ClimateField,
+    biome_grounds: Option<BiomeGrounds>,
+    /// `None` without ores, and under a Generator version from before them.
+    ores: Option<OreField>,
+    cave_tuning: Option<CaveTuning>,
 }
+
+/// Offsets from the World's scale of 1, so untuned Biomes blend to exactly 1. Built only when some
+/// Biome tunes the caves: otherwise no column needs its Climate.
+#[derive(Clone, Copy, Debug)]
+struct CaveTuning {
+    offsets: [f32; MAX_BIOMES],
+    /// Every early-out must hold to this: a blend never leaves the range of the scales it mixes.
+    max_scale: f32,
+}
+
+impl CaveTuning {
+    fn new(params: &WorldgenParams) -> Option<Self> {
+        let tuned = |b: &crate::Biome| b.cave_scale.filter(|&s| s != 1.0);
+        if params.caves.is_none()
+            || params.generator < BIOMES_SINCE
+            || !params.biomes.as_slice().iter().any(|b| tuned(b).is_some())
+        {
+            return None;
+        }
+        let mut offsets = [0.0; MAX_BIOMES];
+        for (slot, biome) in offsets.iter_mut().zip(params.biomes.as_slice()) {
+            *slot = biome.cave_scale.unwrap_or(1.0) - 1.0;
+        }
+        let max_scale = 1.0 + offsets.iter().copied().fold(0.0, f32::max);
+        Some(CaveTuning { offsets, max_scale })
+    }
+}
+
+struct ColumnCaves {
+    scales: [f32; CHUNK_SIZE * CHUNK_SIZE],
+    max: f32,
+}
+
+/// Omissions filled from the World's, so a column's Materials are one index away. Built only when
+/// some Biome's ground differs: otherwise no column needs its Biome looked up.
+#[derive(Clone, Copy, Debug)]
+struct BiomeGrounds {
+    world: GroundParams,
+    by_biome: [GroundParams; MAX_BIOMES],
+    /// Lets the deep early-out answer without asking which Biome each column is in.
+    same_rock: bool,
+}
+
+impl BiomeGrounds {
+    fn new(params: &WorldgenParams) -> Option<Self> {
+        let world = params.ground?;
+        if params.generator < BIOMES_SINCE
+            || !params
+                .biomes
+                .as_slice()
+                .iter()
+                .any(|b| b.ground.is_some_and(|g| g != world))
+        {
+            return None;
+        }
+        let mut by_biome = [world; MAX_BIOMES];
+        for (slot, biome) in by_biome.iter_mut().zip(params.biomes.as_slice()) {
+            *slot = biome.ground.unwrap_or(world);
+        }
+        Some(BiomeGrounds {
+            world,
+            same_rock: by_biome.iter().all(|g| g.rock == world.rock),
+            by_biome,
+        })
+    }
+}
+
+type ColumnGrounds = [GroundParams; CHUNK_SIZE * CHUNK_SIZE];
 
 impl Worldgen {
     pub fn new(seed: u64, voxel_size: f32, params: WorldgenParams) -> Self {
@@ -462,6 +586,10 @@ impl Worldgen {
                 level_m: w.level_m.min(params.sea_level_m + params.relief_m),
                 ..w
             }),
+            climate: ClimateField::new(folded, params.climate),
+            biome_grounds: BiomeGrounds::new(&params),
+            ores: OreField::new(folded, &params.ores).filter(|_| params.generator >= BIOMES_SINCE),
+            cave_tuning: CaveTuning::new(&params),
         }
     }
 
@@ -477,6 +605,69 @@ impl Worldgen {
     /// The lake, its level clamped as generation clamps it.
     pub fn water(&self) -> Option<WaterParams> {
         self.water
+    }
+
+    pub fn climate_at(&self, x_m: f32, z_m: f32) -> Climate {
+        self.climate.at(x_m, z_m)
+    }
+
+    /// `None` where the World has no Biomes or runs a Generator version from before them. Pure in
+    /// the seed and the position, so the same at every Voxel size and LOD level.
+    pub fn biome_at(&self, x_m: f32, z_m: f32) -> Option<BiomeId> {
+        if self.params.generator < BIOMES_SINCE {
+            return None;
+        }
+        self.climate.biome_at(&self.params.biomes, x_m, z_m)
+    }
+
+    /// `None` where no Biome has colours or the Generator version predates them. Pure like
+    /// [`Self::biome_at`].
+    pub fn sky_fog_at(&self, x_m: f32, z_m: f32) -> Option<SkyFogBlend> {
+        if self.params.generator < BIOMES_SINCE {
+            return None;
+        }
+        self.climate.sky_fog_at(&self.params.biomes, x_m, z_m)
+    }
+
+    /// `None` when every column has the World's. Asked at the metre position of the column's
+    /// surface, so every LOD level reads the same Biome there.
+    fn column_grounds(&self, cx: i32, cz: i32) -> Option<ColumnGrounds> {
+        let grounds = self.biome_grounds.as_ref()?;
+        Some(std::array::from_fn(|i| {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            self.biome_at(self.axis_m(cx, x), self.axis_m(cz, z))
+                .map_or(grounds.world, |id| grounds.by_biome[id.index()])
+        }))
+    }
+
+    /// 1 where no Biome tunes the caves, otherwise a mean that moves continuously across a border,
+    /// unlike the ground it sits beside.
+    fn cave_scale_at(&self, x_m: f32, z_m: f32) -> f32 {
+        self.cave_tuning.as_ref().map_or(1.0, |t| {
+            1.0 + self
+                .climate
+                .blend(&self.params.biomes, x_m, z_m, &t.offsets)
+        })
+    }
+
+    /// Lets a box be ruled out before its columns are asked.
+    fn cave_scale_bound(&self) -> f32 {
+        self.cave_tuning.as_ref().map_or(1.0, |t| t.max_scale)
+    }
+
+    /// `None` when no Biome tunes the caves. Asked at the same metre position as the Voxels.
+    fn column_caves(&self, cx: i32, cz: i32) -> Option<ColumnCaves> {
+        self.cave_tuning.as_ref()?;
+        let mut columns = ColumnCaves {
+            scales: [1.0; CHUNK_SIZE * CHUNK_SIZE],
+            max: 0.0,
+        };
+        for (i, scale) in columns.scales.iter_mut().enumerate() {
+            let (x, z) = ((i % CHUNK_SIZE) as i32, (i / CHUNK_SIZE) as i32);
+            *scale = self.cave_scale_at(self.axis_m(cx, x), self.axis_m(cz, z));
+            columns.max = columns.max.max(*scale);
+        }
+        Some(columns)
     }
 
     /// The metre height of the surface over a point on the ground plane.
@@ -531,7 +722,10 @@ impl Worldgen {
             return Chunk::air();
         }
         if ceiling_m < lowest - self.params.soil_depth_m {
-            let mut chunk = Chunk::filled(Voxel::cube(ground.rock));
+            let mut chunk = self.deep_rock(cx, cz, ground);
+            if let Some((field, ores)) = self.ores_reaching(floor_m, ceiling_m) {
+                self.sow_deep_rock(&mut chunk, [cx, cz], origin_m, field, ores);
+            }
             // A Chunk that only *might* hold a tunnel stays `filled` unless a
             // Voxel is actually carved, so the light and mesh fast paths that
             // key off `uniform()` still fire for it.
@@ -539,9 +733,11 @@ impl Worldgen {
                 && caves.may_carve(
                     origin_m,
                     [origin_m[0] + reach_m, ceiling_m, origin_m[2] + reach_m],
+                    self.cave_scale_bound(),
                 )
             {
-                self.carve(&mut chunk, caves, origin_m, ceiling_m);
+                let columns = self.column_caves(cx, cz);
+                self.carve(&mut chunk, caves, origin_m, ceiling_m, columns.as_ref());
             }
             return chunk;
         }
@@ -562,19 +758,46 @@ impl Worldgen {
             .flat_map(|z| (0..CHUNK_SIZE as i32).map(move |x| surface_index(x, z)))
             .map(|i| surface_m[i])
             .fold(f32::MIN, f32::max);
+        // A Chunk above every column holds only air and water, which take nothing from a Biome.
+        let columns = if floor_m <= top_m {
+            self.column_grounds(cx, cz)
+        } else {
+            None
+        };
+        let reach_box = |caves: &CaveField, scale| {
+            let ceiling_m = ceiling_m.min(top_m);
+            floor_m <= ceiling_m
+                && caves.may_carve(
+                    origin_m,
+                    [origin_m[0] + reach_m, ceiling_m, origin_m[2] + reach_m],
+                    scale,
+                )
+        };
+        let cave_columns = self
+            .caves
+            .as_ref()
+            .filter(|caves| reach_box(caves, self.cave_scale_bound()))
+            .and_then(|_| self.column_caves(cx, cz));
         let reachable = self
             .caves
             .as_ref()
             .filter(|caves| {
-                let ceiling_m = ceiling_m.min(top_m);
-                floor_m <= ceiling_m
-                    && caves.may_carve(
-                        origin_m,
-                        [origin_m[0] + reach_m, ceiling_m, origin_m[2] + reach_m],
-                    )
+                reach_box(
+                    caves,
+                    cave_columns
+                        .as_ref()
+                        .map_or(self.cave_scale_bound(), |c| c.max),
+                )
             })
-            .map(|caves| (caves, self.reachable_blocks(caves, origin_m, top_m)));
+            .map(|caves| {
+                let max = cave_columns.as_ref().map(|c| c.max);
+                (
+                    caves,
+                    self.reachable_blocks(caves, origin_m, top_m, max.unwrap_or(1.0)),
+                )
+            });
 
+        let ores = self.ores_reaching(floor_m, ceiling_m);
         let mut chunk = ChunkBuilder::new();
         let mut cave_cache = Default::default();
         for z in 0..CHUNK_SIZE {
@@ -582,6 +805,10 @@ impl Worldgen {
                 let x_m = origin_m[0] + x as f32 * self.voxel_size;
                 let z_m = origin_m[2] + z as f32 * self.voxel_size;
                 let surface_m = surface_m[surface_index(x as i32, z as i32)];
+                let ground = columns
+                    .as_ref()
+                    .map_or(ground, |columns| columns[z * CHUNK_SIZE + x]);
+                let biome = self.column_biome([cx, cz], [x, z]);
 
                 for y in 0..CHUNK_SIZE {
                     let y_m = floor_m + y as f32 * self.voxel_size;
@@ -600,7 +827,15 @@ impl Worldgen {
                     // which is what a mouth is.
                     if let Some((caves, blocks)) = &reachable
                         && blocks[block_of(x, y, z)]
-                        && caves.carves_near(&mut cave_cache, x_m, y_m, z_m)
+                        && caves.carves_near(
+                            &mut cave_cache,
+                            x_m,
+                            y_m,
+                            z_m,
+                            cave_columns
+                                .as_ref()
+                                .map_or(1.0, |c| c.scales[z * CHUNK_SIZE + x]),
+                        )
                     {
                         continue;
                     }
@@ -609,7 +844,10 @@ impl Worldgen {
                     } else if below_m < self.params.soil_depth_m {
                         ground.soil
                     } else {
-                        ground.rock
+                        ores.and_then(|(field, mask)| {
+                            field.at(mask, [x_m, y_m, z_m], below_m, &biome)
+                        })
+                        .unwrap_or(ground.rock)
                     };
                     chunk.set(x, y, z, Voxel::cube(material));
                 }
@@ -617,9 +855,88 @@ impl Worldgen {
         }
         let mut chunk = chunk.build();
         if self.smoothing {
-            self.smooth(&mut chunk, &surface_m, [cx, cy, cz], floor_m);
+            self.smooth(
+                &mut chunk,
+                &surface_m,
+                [cx, cy, cz],
+                floor_m,
+                columns.as_ref(),
+            );
         }
         chunk
+    }
+
+    /// Each column's own rock where Biomes disagree: the one case that must ask all 1024 columns
+    /// for their Biome.
+    fn deep_rock(&self, cx: i32, cz: i32, ground: GroundParams) -> Chunk {
+        let columns = self
+            .biome_grounds
+            .filter(|g| !g.same_rock)
+            .and_then(|_| self.column_grounds(cx, cz));
+        let Some(columns) = columns else {
+            return Chunk::filled(Voxel::cube(ground.rock));
+        };
+        if columns.iter().all(|g| g.rock == columns[0].rock) {
+            return Chunk::filled(Voxel::cube(columns[0].rock));
+        }
+        let mut chunk = ChunkBuilder::new();
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let rock = Voxel::cube(columns[z * CHUNK_SIZE + x].rock);
+                for y in 0..CHUNK_SIZE {
+                    chunk.set(x, y, z, rock);
+                }
+            }
+        }
+        chunk.build()
+    }
+
+    /// Depth is measured from a surface somewhere in the surface band, so this only errs towards
+    /// reaching.
+    fn ores_reaching(&self, floor_m: f32, ceiling_m: f32) -> Option<(&OreField, OreMask)> {
+        let field = self.ores.as_ref()?;
+        let (lowest, highest) = self.surface_bounds_m();
+        let mask = field.reaching((lowest - ceiling_m).max(0.0), highest - floor_m);
+        (!mask.is_empty()).then_some((field, mask))
+    }
+
+    /// Looked up on first ask, so not at all in a column no ore vein touches.
+    fn column_biome(
+        &self,
+        [cx, cz]: [i32; 2],
+        [x, z]: [usize; 2],
+    ) -> impl Fn() -> Option<BiomeId> + '_ {
+        let cell = std::cell::OnceCell::new();
+        move || {
+            *cell
+                .get_or_init(|| self.biome_at(self.axis_m(cx, x as i32), self.axis_m(cz, z as i32)))
+        }
+    }
+
+    /// Depth needs each column's own surface.
+    fn sow_deep_rock(
+        &self,
+        chunk: &mut Chunk,
+        coord: [i32; 2],
+        origin_m: [f32; 3],
+        field: &OreField,
+        ores: OreMask,
+    ) {
+        for z in 0..CHUNK_SIZE {
+            for x in 0..CHUNK_SIZE {
+                let x_m = origin_m[0] + x as f32 * self.voxel_size;
+                let z_m = origin_m[2] + z as f32 * self.voxel_size;
+                let surface_m = self.surface_height_m(x_m, z_m);
+                let biome = self.column_biome(coord, [x, z]);
+                for y in 0..CHUNK_SIZE {
+                    let y_m = origin_m[1] + y as f32 * self.voxel_size;
+                    if let Some(material) = field.at(ores, [x_m, y_m, z_m], surface_m - y_m, &biome)
+                    {
+                        chunk.set(x, y, z, Voxel::cube(material));
+                    }
+                }
+            }
+        }
     }
 
     /// Eases every one-Voxel step in the ground with a stair or slab on top of
@@ -633,6 +950,7 @@ impl Worldgen {
         surface_m: &[f32; SURFACE_W * SURFACE_W],
         coord: [i32; 3],
         floor_m: f32,
+        columns: Option<&ColumnGrounds>,
     ) {
         let Some(ground) = self.params.ground else {
             return;
@@ -662,10 +980,13 @@ impl Worldgen {
                         turn = quarter;
                     }
                 }
+                let cap = columns
+                    .map_or(ground, |c| c[z as usize * CHUNK_SIZE + x as usize])
+                    .surface;
                 let voxel = match rising {
                     0 => continue,
-                    1 => Voxel::shaped(ground.surface, SHAPE_STAIR, Orientation::new(POS_Y, turn)),
-                    _ => Voxel::shaped(ground.surface, SHAPE_SLAB, Orientation::IDENTITY),
+                    1 => Voxel::shaped(cap, SHAPE_STAIR, Orientation::new(POS_Y, turn)),
+                    _ => Voxel::shaped(cap, SHAPE_SLAB, Orientation::IDENTITY),
                 };
                 chunk.set(x as usize, y as usize, z as usize, voxel);
                 placed += 1;
@@ -700,10 +1021,12 @@ impl Worldgen {
                 .is_air();
         }
         self.caves.as_ref().is_none_or(|caves| {
+            let (x_m, z_m) = (self.axis_m(coord[0], at[0]), self.axis_m(coord[2], at[2]));
             !caves.carves(
-                self.axis_m(coord[0], at[0]),
+                x_m,
                 self.axis_m(coord[1], at[1]),
-                self.axis_m(coord[2], at[2]),
+                z_m,
+                self.cave_scale_at(x_m, z_m),
             )
         })
     }
@@ -720,6 +1043,7 @@ impl Worldgen {
         caves: &CaveField,
         origin_m: [f32; 3],
         top_m: f32,
+        scale: f32,
     ) -> [bool; BLOCKS * BLOCKS * BLOCKS] {
         let step_m = (BLOCK as f32) * self.voxel_size;
         let reach_m = (BLOCK - 1) as f32 * self.voxel_size;
@@ -738,7 +1062,7 @@ impl Worldgen {
                         lo[2] + reach_m,
                     ];
                     reachable[(bz * BLOCKS + by) * BLOCKS + bx] =
-                        lo[1] <= hi[1] && caves.may_carve(lo, hi);
+                        lo[1] <= hi[1] && caves.may_carve(lo, hi, scale);
                 }
             }
         }
@@ -747,8 +1071,16 @@ impl Worldgen {
 
     /// Carves a Chunk that is solid rock throughout, visiting only the
     /// sub-blocks a tunnel can reach.
-    fn carve(&self, chunk: &mut Chunk, caves: &CaveField, origin_m: [f32; 3], top_m: f32) {
-        let reachable = self.reachable_blocks(caves, origin_m, top_m);
+    fn carve(
+        &self,
+        chunk: &mut Chunk,
+        caves: &CaveField,
+        origin_m: [f32; 3],
+        top_m: f32,
+        columns: Option<&ColumnCaves>,
+    ) {
+        let reachable =
+            self.reachable_blocks(caves, origin_m, top_m, columns.map_or(1.0, |c| c.max));
         let mut cache = Default::default();
         for z in 0..CHUNK_SIZE {
             for y in 0..CHUNK_SIZE {
@@ -759,6 +1091,7 @@ impl Worldgen {
                             origin_m[0] + x as f32 * self.voxel_size,
                             origin_m[1] + y as f32 * self.voxel_size,
                             origin_m[2] + z as f32 * self.voxel_size,
+                            columns.map_or(1.0, |c| c.scales[z * CHUNK_SIZE + x]),
                         )
                     {
                         chunk.set(x, y, z, Voxel::AIR);
@@ -1147,7 +1480,11 @@ mod tests {
                 for y in 0..CHUNK_SIZE {
                     let y_m = (cy * size + y as i32) as f32 * g.voxel_size;
                     let below_m = surface_m - y_m;
-                    if below_m < 0.0 || g.caves.as_ref().is_some_and(|c| c.carves(x_m, y_m, z_m)) {
+                    if below_m < 0.0
+                        || g.caves
+                            .as_ref()
+                            .is_some_and(|c| c.carves(x_m, y_m, z_m, g.cave_scale_at(x_m, z_m)))
+                    {
                         continue;
                     }
                     let material = if below_m < g.voxel_size {
@@ -1183,6 +1520,197 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn voxels(chunk: &Chunk) -> Vec<Voxel> {
+        (0..CHUNK_SIZE)
+            .flat_map(|z| {
+                (0..CHUNK_SIZE).flat_map(move |y| (0..CHUNK_SIZE).map(move |x| (x, y, z)))
+            })
+            .map(|(x, y, z)| chunk.get(x, y, z))
+            .collect()
+    }
+
+    /// Regions small enough that a sweep crosses several borders.
+    fn tuned(voxel_size: f32) -> Worldgen {
+        let biome = |name: &str, temperature, cave_scale| crate::Biome {
+            name: crate::BiomeName::new(name).unwrap(),
+            temperature,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: None,
+            cave_scale: Some(cave_scale),
+        };
+        Worldgen::new(
+            SEED,
+            voxel_size,
+            WorldgenParams {
+                smoothing: None,
+                water: None,
+                climate: ClimateParams {
+                    temperature_size_m: 24.0,
+                    humidity_size_m: 24.0,
+                },
+                biomes: BiomeTable::new(&[biome("none", 0.1, 0.0), biome("wide", 0.9, 3.0)])
+                    .unwrap(),
+                ..crate::testgen::world_params()
+            },
+        )
+    }
+
+    #[test]
+    fn ruling_a_box_out_never_changes_a_tuned_chunk() {
+        // A bound taken at the World's own scale would rule out boxes a wider
+        // Biome carves.
+        for voxel_size in [1.0, 0.5] {
+            let g = tuned(voxel_size);
+            let untuned = caved(voxel_size);
+            let mut changed = 0;
+            for (cx, cy, cz) in sweep(voxel_size) {
+                let (fast, reference) = (g.chunk(cx, cy, cz), slow(&g, cx, cy, cz));
+                for z in 0..CHUNK_SIZE {
+                    for y in 0..CHUNK_SIZE {
+                        for x in 0..CHUNK_SIZE {
+                            assert_eq!(
+                                fast.get(x, y, z),
+                                reference.get(x, y, z),
+                                "{voxel_size}m Voxels, {cx},{cy},{cz} at {x},{y},{z}"
+                            );
+                        }
+                    }
+                }
+                changed += usize::from(voxels(&fast) != voxels(&untuned.chunk(cx, cy, cz)));
+            }
+            assert!(changed > 0, "tuning changed no Chunk at {voxel_size} m");
+        }
+    }
+
+    #[test]
+    fn cave_scale_has_no_step_across_a_border() {
+        let g = tuned(1.0);
+        let (mut previous, mut largest_step, mut between) = (None::<f32>, 0.0f32, 0);
+        let (mut lowest, mut highest) = (f32::MAX, f32::MIN);
+        let mut biomes = std::collections::HashSet::new();
+        for i in 0..8000 {
+            let x_m = -500.0 + i as f32 * 0.25;
+            let scale = g.cave_scale_at(x_m, 37.0);
+            biomes.insert(g.biome_at(x_m, 37.0));
+            if let Some(was) = previous {
+                largest_step = largest_step.max((scale - was).abs());
+            }
+            previous = Some(scale);
+            (lowest, highest) = (lowest.min(scale), highest.max(scale));
+            between += usize::from(scale > 0.3 && scale < 2.7);
+        }
+        assert!(biomes.len() == 2, "the line crosses no border");
+        // The Biomes differ by 3; a step at the ground's border would be all of it.
+        assert!(largest_step < 0.5, "a step of {largest_step}");
+        assert!(between > 100, "only {between} samples are a blend");
+        assert!(lowest < 0.01 && highest > 2.99, "{lowest}..{highest}");
+    }
+
+    #[test]
+    fn where_the_scale_is_zero_there_is_no_cave() {
+        let g = tuned(1.0);
+        let off: Vec<_> = (-60..60)
+            .flat_map(|x| (-60..60).map(move |z| (x as f32 * 2.0, z as f32 * 2.0)))
+            .filter(|&(x, z)| g.cave_scale_at(x, z) == 0.0)
+            .collect();
+        assert!(off.len() > 500, "{} columns have caves off", off.len());
+        let caves = g.caves.as_ref().unwrap();
+        for (x, z) in off {
+            for y in -24..20 {
+                assert!(
+                    !caves.carves(x, y as f32, z, g.cave_scale_at(x, z)),
+                    "{x},{y},{z}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tuning_that_is_not_asked_for_changes_nothing() {
+        let tuned_params = tuned(1.0).params;
+        let table = |scales: [Option<f32>; 2]| {
+            let mut biomes = tuned_params.biomes.as_slice().to_vec();
+            for (b, s) in biomes.iter_mut().zip(scales) {
+                b.cave_scale = s;
+            }
+            BiomeTable::new(&biomes).unwrap()
+        };
+        let chunks = |params: WorldgenParams| -> Vec<Voxel> {
+            let g = Worldgen::new(SEED, 1.0, params);
+            sweep(1.0)
+                .into_iter()
+                .flat_map(|(x, y, z)| voxels(&g.chunk(x, y, z)))
+                .collect()
+        };
+        let plain = chunks(WorldgenParams {
+            biomes: table([None, None]),
+            ..tuned_params
+        });
+        // Scale 1 is the World's own caves, and Generator version 1 knows no
+        // Biomes, so neither moves a single Voxel.
+        for params in [
+            WorldgenParams {
+                biomes: table([Some(1.0), Some(1.0)]),
+                ..tuned_params
+            },
+            WorldgenParams {
+                generator: 1,
+                ..tuned_params
+            },
+        ] {
+            assert!(plain == chunks(params));
+        }
+        // A World without caves has nothing to tune; coarse LOD levels are built
+        // that way.
+        let bare = |biomes| WorldgenParams {
+            caves: None,
+            biomes,
+            ..tuned_params
+        };
+        assert!(chunks(bare(tuned_params.biomes)) == chunks(bare(table([None, None]))));
+    }
+
+    #[test]
+    fn a_tuned_world_still_only_removes_voxels() {
+        let (with, without) = (tuned(1.0), terrain(1.0));
+        let mut carved = 0;
+        for (cx, cy, cz) in sweep(1.0) {
+            let (a, b) = (with.chunk(cx, cy, cz), without.chunk(cx, cy, cz));
+            for z in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for x in 0..CHUNK_SIZE {
+                        let (got, was) = (a.get(x, y, z), b.get(x, y, z));
+                        if got != was {
+                            assert!(got.is_air(), "{cx},{cy},{cz} {x},{y},{z}");
+                            carved += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(carved > 0);
+        assert_eq!(with.surface_bounds_m(), without.surface_bounds_m());
+    }
+
+    #[test]
+    fn a_biomes_scale_carves_the_same_metre_point_at_any_voxel_size() {
+        let (coarse, fine) = (tuned(1.0), tuned(0.5));
+        let (mut carved, mut checked) = (0, 0);
+        for i in 0..2000 {
+            let (x, z) = (i * 7 % 61 - 30, i * 13 % 67 - 33);
+            let y = -20 + (i * 5) % 70;
+            if (y as f32) > coarse.surface_height_m(x as f32, z as f32) - 2.0 {
+                continue;
+            }
+            checked += 1;
+            let (a, b) = (solid_at(&coarse, x, y, z), solid_at(&fine, x, y, z));
+            assert_eq!(a, b, "{x},{y},{z}");
+            carved += usize::from(!a);
+        }
+        assert!(carved > 0 && carved < checked, "{carved} of {checked}");
     }
 
     /// Which of the metre points `0..` (whole metres) are solid: the same
@@ -1236,7 +1764,7 @@ mod tests {
                     g.caves
                         .as_ref()
                         .unwrap()
-                        .carves(x as f32, y as f32, z as f32),
+                        .carves(x as f32, y as f32, z as f32, 1.0),
                 );
             }
             air as f32 / under as f32
@@ -1731,7 +2259,7 @@ mod tests {
                 }
             }
         }
-        g.smooth(&mut chunk, &surface, [0, 0, 0], 0.0);
+        g.smooth(&mut chunk, &surface, [0, 0, 0], 0.0, None);
         // A stair's cell has to be in the Chunk, so columns 26 and up have none
         // to place: 26 candidates a row.
         let per_row = CHUNK_SIZE - 6;

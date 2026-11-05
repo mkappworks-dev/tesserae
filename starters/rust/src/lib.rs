@@ -57,6 +57,8 @@ impl Guest for Starter {
             combustion: Vec::new(),
             tools: Vec::new(),
             items: Vec::new(),
+            biomes: Vec::new(),
+            ores: Vec::new(),
         }
     }
 

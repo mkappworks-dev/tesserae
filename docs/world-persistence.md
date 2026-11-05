@@ -72,6 +72,16 @@ records preserve source identity and each Void's surface, reach and descent.
 Burning records preserve fuel. Generation records resolve named ground and lake
 content.
 
+A World also snapshots its own Climate, Biome table and ores in its generation
+parameters, so a Game that gains a Biome later cannot reshape it. The three
+fields are optional on read and written only for Generator version 2 and a
+non-empty table, so a version 1 commit, or one written before Biomes, restores
+with none. Ores name their Material and Biomes, and a Biome names its ground
+Materials, all through the Mapping like the World's own ground. A Biome's
+optional sky and fog colours and cave scale ride in its snapshot, absent when it
+has none. The snapshot is separate from `entities` and changes neither the
+format nor the generator version.
+
 Simulation checkpoints contain the logical step, count bounds, flow deadlines
 and desired changes, running and frozen fire clocks, ignition/burn-out changes,
 Agenda wakes, current and next rescan passes, exact cursors, parked spans and
@@ -115,9 +125,11 @@ must be rebuilt. A saved revision is data identity, not a reusable Lifetime.
 A World directory has immutable `00000000000000000001.commit` files and one
 OS-locked `writer.lock` file. A commit contains an eight-byte `TESSAVE1` magic,
 32-byte SHA-256 of the remaining bytes, and UTF-8 JSON. JSON records reject
-unknown fields. Sequence in the filename must agree with the body. Format and
-generator version 1 have no implicit migrations. The current prototype caps a
-whole commit at 256 MiB; exceeding it reports an error, not successful saving.
+unknown fields. Sequence in the filename must agree with the body. Format 1 has
+no implicit migrations. A commit's generator version is 1 or 2 and any other is
+refused: a World keeps the version it was created with, new Worlds are stamped
+2, and a version 1 World keeps its version 1 terrain. The current prototype caps
+a whole commit at 256 MiB; exceeding it reports an error, not successful saving.
 
 Writing uses a unique create-new `.pending` file, writes header/checksum/body,
 syncs the complete file, renames it to its final sequence, then syncs the parent
