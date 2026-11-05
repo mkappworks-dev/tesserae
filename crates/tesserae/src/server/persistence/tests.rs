@@ -1,6 +1,7 @@
 use super::*;
-use crate::server::{ContentTables, edit, streaming::MeshState, undo::Journal};
+use crate::server::{ContentTables, edit, entities::Carried, streaming::MeshState, undo::Journal};
 use bevy::ecs::message::Messages;
+use bevy::ecs::system::EntityCommands;
 use std::time::{Duration, Instant};
 use tesserae_core::{Burning, Chunk, Fluid, Occupants, Voxel, WorldgenParams};
 use tesserae_mods::Kind;
@@ -883,7 +884,10 @@ fn dropped_items_and_carried_survive_save_and_reopen() {
 
     let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
     assert_eq!(commit.entities.dropped.len(), 2);
-    assert_eq!(commit.player.carried().unwrap()["terra:rock"], 7);
+    assert_eq!(
+        commit.player.get::<save::CarriedV1>().unwrap().unwrap().0["terra:rock"],
+        7
+    );
 
     let reopened = Rig::new(&dir);
     let after: Vec<_> = reopened
@@ -1168,4 +1172,96 @@ fn a_version_1_world_reopens_without_biomes_even_if_its_game_declares_them() {
     let reopened = prepared_world(&dir, declares_biomes(["terra:dry", "terra:wet"]));
     assert!(reopened.biomes.is_empty() && reopened.ores.is_empty());
     assert_eq!(reopened.generator, 1);
+}
+
+/// Stands in for a Player extension a later step registers.
+#[derive(Component, Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
+pub(super) struct Probe(pub u32);
+impl save::PlayerExtension for Probe {
+    const KEY: &'static str = "probe_v1";
+}
+impl extensions::PlayerState for Probe {
+    fn capture(player: EntityRef) -> Option<Self> {
+        player.get::<Probe>().copied()
+    }
+    fn restore(self, player: &mut EntityCommands) {
+        player.insert(self);
+    }
+}
+
+fn probe(rig: &mut Rig) -> Option<Probe> {
+    rig.app
+        .world_mut()
+        .query_filtered::<Option<&Probe>, With<Player>>()
+        .single(rig.app.world())
+        .unwrap()
+        .copied()
+}
+
+fn set_probe(rig: &mut Rig, value: u32) {
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert(Probe(value));
+}
+
+#[test]
+fn a_registered_player_extension_marks_the_world_dirty_and_survives_save_and_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.settled_save();
+    rig.tick();
+    assert!(!rig.app.world().resource::<SaveStatus>().dirty);
+    set_probe(&mut rig, 41);
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    rig.tick();
+    assert!(!rig.app.world().resource::<SaveStatus>().dirty);
+    drop(rig);
+
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert_eq!(commit.player.get::<Probe>().unwrap(), Some(Probe(41)));
+    let mut reopened = Rig::new(&dir);
+    assert_eq!(probe(&mut reopened), Some(Probe(41)));
+    reopened.tick();
+    assert!(!reopened.app.world().resource::<SaveStatus>().dirty);
+}
+
+#[test]
+fn a_save_holding_an_unregistered_player_extension_is_refused_as_incompatible() {
+    let dir = Directory::new();
+    Rig::new(&dir).settled_save();
+    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    commit
+        .player
+        .extensions
+        .insert("vitals_v9".into(), serde_json::json!({"health": 20}));
+    commit.sequence += 1;
+    Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+    let before = folder_bytes(&dir.0);
+    let refused = |e: String| {
+        assert!(e.contains("cannot open World"), "{e}");
+        assert!(e.contains("Player extension"), "{e}");
+    };
+    refused(Opening::from_folder(&dir.0).err().unwrap());
+    let opening = Opening {
+        directory: Some(dir.0.clone()),
+        id: commit.world.clone(),
+        recovered: save::inspect(&dir.0).unwrap(),
+        details: None,
+    };
+    let mut loaded = crate::server::mods::terra_for_save(&opening, &WorldSettings::default());
+    refused(
+        Persistence::prepare(opening, &mut loaded, WorldSettings::default())
+            .err()
+            .unwrap(),
+    );
+    assert_eq!(folder_bytes(&dir.0), before);
 }

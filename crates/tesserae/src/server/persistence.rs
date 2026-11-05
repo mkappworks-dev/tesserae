@@ -3,11 +3,12 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use bevy::ecs::resource::IsResource;
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures::check_ready};
 use tesserae_core::save::{self, Commit, Content, Generation, Mapping, WorldId, Writer, library};
 
-use super::entities::{Carried, EntityStore};
+use super::entities::EntityStore;
 use super::fluids::FluidSim;
 use super::items::Items;
 use super::mods::LoadedMods;
@@ -57,12 +58,7 @@ impl Opening {
                     .ok_or("cannot resolve World directory; set TESSERAE_WORLD_DIR")?,
             )
         };
-        let recovered = directory
-            .as_ref()
-            .map(|p| save::inspect(p))
-            .transpose()
-            .map_err(|e| e.to_string())?
-            .flatten();
+        let recovered = directory.as_deref().map(inspect).transpose()?.flatten();
         let id = recovered
             .as_ref()
             .map_or_else(WorldId::new, |r| r.commit.world.clone());
@@ -78,7 +74,7 @@ impl Opening {
     /// landed takes its identity from its details; any other folder without a
     /// save is refused rather than silently becoming a new World.
     pub fn from_folder(directory: &Path) -> Result<Self, String> {
-        let recovered = save::inspect(directory).map_err(|e| e.to_string())?;
+        let recovered = inspect(directory)?;
         // Commits are authoritative: unreadable details never block a saved World.
         let details = match library::read(directory) {
             Ok(details) => details,
@@ -195,6 +191,16 @@ impl Opening {
     }
 }
 
+/// The newest valid save, refused before any Mod loads when it holds Player
+/// state this build does not register.
+fn inspect(directory: &Path) -> Result<Option<save::Recovered>, String> {
+    let recovered = save::inspect(directory).map_err(|e| e.to_string())?;
+    if let Some(r) = &recovered {
+        extensions::read(&r.commit.player).map_err(|e| e.to_string())?;
+    }
+    Ok(recovered)
+}
+
 pub(super) fn content(loaded: &LoadedMods) -> (Content, Mapping) {
     use tesserae_mods::Kind;
     let mapping = Mapping {
@@ -256,9 +262,8 @@ struct Completed {
     revisions: BTreeMap<ChunkCoord, u64>,
     simulation_revision: u64,
     eye: Vec3,
-    movement: save::MovementV1,
+    extensions: extensions::Saved,
     entities: u64,
-    carried: BTreeMap<String, u32>,
     details_completed: bool,
     #[cfg(feature = "profiling")]
     write_ms: f64,
@@ -292,11 +297,10 @@ pub struct Persistence {
     saved_revisions: BTreeMap<ChunkCoord, u64>,
     saved_simulation: u64,
     saved_eye: Option<Vec3>,
-    saved_movement: Option<save::MovementV1>,
+    saved_extensions: Option<extensions::Saved>,
     saved_entities: u64,
-    saved_carried: Option<BTreeMap<String, u32>>,
     initial_entities: Option<tesserae_core::entity::Entities>,
-    restored_carried: Option<BTreeMap<String, u32>>,
+    restored_extensions: extensions::Saved,
     pub(super) reopened_mode: Option<super::player::MovementMode>,
     pub(super) reopened_view: Option<save::MovementV1>,
     pub(super) reopened_eye: Option<Vec3>,
@@ -308,15 +312,6 @@ pub struct Persistence {
 }
 
 impl Persistence {
-    pub(super) fn has_carried_to_restore(&self) -> bool {
-        self.restored_carried.is_some()
-    }
-
-    /// What a reopened Player carried, handed over once the Player exists.
-    pub(super) fn take_carried(&mut self) -> Option<BTreeMap<String, u32>> {
-        self.restored_carried.take()
-    }
-
     pub fn prepare(
         opening: Opening,
         loaded: &mut LoadedMods,
@@ -328,10 +323,16 @@ impl Persistence {
             .as_ref()
             .filter(|r| !r.skipped.is_empty())
             .map(|_| "Opened an older save; a newer save was damaged".to_owned());
+        let saved_extensions = opening
+            .recovered
+            .as_ref()
+            .map(|r| extensions::read(&r.commit.player))
+            .transpose()
+            .map_err(|e| e.to_string())?;
         let restored = opening
             .recovered
             .as_ref()
-            .map(|r| r.commit.player.movement())
+            .map(|r| r.commit.player.get::<save::MovementV1>())
             .transpose()
             .map_err(|e| e.to_string())?
             .flatten();
@@ -348,7 +349,7 @@ impl Persistence {
                     .map_err(|e| e.to_string())?;
                 let c = recovered.commit;
                 let items = &loaded.items;
-                restored_entities = Some((
+                restored_entities = Some(
                     c.entities
                         .restore(settings.voxel_size, |name| {
                             items
@@ -357,8 +358,7 @@ impl Persistence {
                                 .map(|at| (at as u32, items[at].size_m))
                         })
                         .map_err(|e| e.to_string())?,
-                    c.player.carried().map_err(|e| e.to_string())?,
-                ));
+                );
                 loaded.world = Some(
                     c.parameters
                         .restore(&mapping, c.generator)
@@ -434,11 +434,10 @@ impl Persistence {
             saved_revisions,
             saved_simulation: 0,
             saved_eye: reopened_eye,
-            saved_movement: restored,
+            restored_extensions: saved_extensions.clone().unwrap_or_default(),
+            saved_extensions,
             saved_entities: 0,
-            saved_carried: restored_entities.as_ref().map(|(_, c)| c.clone()),
-            initial_entities: restored_entities.as_ref().map(|(e, _)| e.clone()),
-            restored_carried: restored_entities.map(|(_, c)| c),
+            initial_entities: restored_entities,
             reopened_mode: restored
                 .map(|s| {
                     if s.flight {
@@ -466,6 +465,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<SaveAction>()
         .on_session_start(install)
         .add_session_systems(FixedFirst, requests.run_if(resource_exists::<Persistence>))
+        .add_session_systems(Update, restore_player.run_if(restoring))
         .add_session_systems(
             FixedPreUpdate,
             drive
@@ -511,6 +511,22 @@ fn install(world: &mut World) {
         world.insert_resource(EntityStore(entities));
     }
     world.insert_resource(p);
+}
+
+/// Checks through the shared reference so `Persistence` is not marked changed
+/// every frame.
+fn restoring(persistence: Option<Res<Persistence>>) -> bool {
+    persistence.is_some_and(|p| !p.restored_extensions.is_empty())
+}
+
+/// A reopened World's Player extensions, once its Player exists.
+fn restore_player(
+    mut persistence: ResMut<Persistence>,
+    player: Single<Entity, With<Player>>,
+    mut commands: Commands,
+) {
+    let saved = std::mem::take(&mut persistence.restored_extensions);
+    extensions::restore(saved, &mut commands.entity(*player));
 }
 
 /// The writer lock is released only when the last clone of the writer drops,
@@ -567,7 +583,7 @@ fn requests(
 /// What a save reads of the Player's side of the World.
 #[derive(bevy::ecs::system::SystemParam)]
 struct Held<'w, 's> {
-    player: Query<'w, 's, (&'static Player, &'static Carried)>,
+    player: Query<'w, 's, EntityRef<'static>, (With<Player>, Without<IsResource>)>,
     entities: Res<'w, EntityStore>,
     items: Res<'w, Items>,
 }
@@ -581,9 +597,11 @@ fn drive(
     mut leave: crate::launch::Leave,
     #[cfg(feature = "profiling")] mut profile: ResMut<SaveProfile>,
 ) {
-    let Ok((player, carried)) = held.player.single() else {
+    let Ok(held_player) = held.player.single() else {
         return;
     };
+    let player = held_player.get::<Player>().expect("filtered on Player");
+    let extensions = extensions::capture(held_player);
     let (entities, items) = (&held.entities, &held.items);
     let now = time.elapsed_secs_f64();
     p.elapsed += (now - p.last_clock).max(0.0);
@@ -606,11 +624,10 @@ fn drive(
                     }
                 }
                 p.saved_revisions = done.revisions;
+                p.saved_extensions = Some(done.extensions);
                 p.saved_simulation = done.simulation_revision;
                 p.saved_eye = Some(done.eye);
-                p.saved_movement = Some(done.movement);
                 p.saved_entities = done.entities;
-                p.saved_carried = Some(done.carried);
                 if done.details_completed
                     && let Some((_, d)) = p.details.as_mut()
                 {
@@ -621,10 +638,9 @@ fn drive(
                 if status.quitting
                     && p.saved_revisions == store.revisions
                     && done.eye == player.eye()
-                    && done.movement == player.saved_movement()
+                    && extensions.as_ref().ok() == p.saved_extensions.as_ref()
                     && p.saved_simulation == sim.revision
                     && p.saved_entities == entities.revision()
-                    && p.saved_carried.as_ref() == Some(&carried.0)
                 {
                     leave.now();
                 } else if status.quitting {
@@ -642,10 +658,9 @@ fn drive(
     }
     status.dirty = p.saved_revisions != store.revisions
         || p.saved_eye != Some(player.eye())
-        || p.saved_movement != Some(player.saved_movement())
+        || p.saved_extensions.as_ref() != extensions.as_ref().ok()
         || p.saved_simulation != sim.revision
-        || p.saved_entities != entities.revision()
-        || p.saved_carried.as_ref() != Some(&carried.0);
+        || p.saved_entities != entities.revision();
     if p.elapsed >= 30.0 {
         p.elapsed = 0.0;
         if status.dirty && !status.quitting {
@@ -720,10 +735,16 @@ fn drive(
             return;
         }
     };
+    let extensions = match extensions {
+        Ok(saved) => saved,
+        Err(error) => {
+            status.error = Some(error.to_string());
+            p.failed = true;
+            return;
+        }
+    };
     let entities_revision = entities.revision();
-    let carried = carried.0.clone();
     let eye = player.eye();
-    let movement = player.saved_movement();
     let writer = Arc::clone(p.writer.as_ref().expect("persistent"));
     let mapping = p.mapping.clone();
     let content = p.content.clone();
@@ -761,19 +782,7 @@ fn drive(
                 content,
                 player: save::Player {
                     eye_m: eye.to_array(),
-                    extensions: {
-                        let mut extensions = BTreeMap::from([(
-                            "movement_v1".into(),
-                            serde_json::to_value(movement).expect("finite movement"),
-                        )]);
-                        if !carried.is_empty() {
-                            extensions.insert(
-                                save::CARRIED_V1.into(),
-                                serde_json::to_value(&carried).expect("plain counts"),
-                            );
-                        }
-                        extensions
-                    },
+                    extensions: extensions.clone(),
                 },
                 chunks,
                 simulation,
@@ -800,9 +809,8 @@ fn drive(
             revisions,
             simulation_revision,
             eye,
-            movement,
+            extensions,
             entities: entities_revision,
-            carried,
             #[cfg(feature = "profiling")]
             write_ms: write_started.elapsed().as_secs_f64() * 1e3,
         }
@@ -823,5 +831,6 @@ pub(super) fn coord(c: [i32; 3]) -> ChunkCoord {
     ChunkCoord::new(c[0], c[1], c[2])
 }
 
+pub(in crate::server) mod extensions;
 #[cfg(test)]
 mod tests;

@@ -374,6 +374,26 @@ pub struct Rescan {
     pub parked: Option<([i32; 3], [i32; 3])>,
 }
 
+/// Player state saved under its own versioned key. Which keys a build opens
+/// is the Server's registry, not this module's.
+pub trait PlayerExtension: Serialize + serde::de::DeserializeOwned {
+    const KEY: &'static str;
+
+    /// Refuses a value that parses but cannot be opened.
+    fn validate(&self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// A value of another shape under a known key was written by another
+    /// build, so it is incompatible rather than damaged.
+    fn read(value: &serde_json::Value) -> Result<Self, Error> {
+        let parsed: Self = serde_json::from_value(value.clone())
+            .map_err(|e| Error::Incompatible(format!("Player extension {}: {e}", Self::KEY)))?;
+        parsed.validate()?;
+        Ok(parsed)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MovementV1 {
@@ -383,47 +403,35 @@ pub struct MovementV1 {
     pub yaw: f32,
     pub pitch: f32,
 }
-/// The Player extension holding what Pickup collected, by Item name.
-pub const CARRIED_V1: &str = "carried_v1";
+
+impl PlayerExtension for MovementV1 {
+    const KEY: &'static str = "movement_v1";
+
+    fn validate(&self) -> Result<(), Error> {
+        if !self.yaw.is_finite()
+            || !self.pitch.is_finite()
+            || self.pitch.abs() > std::f32::consts::FRAC_PI_2
+            || (self.flight && self.crouching)
+        {
+            return Err(Error::Corrupt("invalid Player movement/view".into()));
+        }
+        Ok(())
+    }
+}
+
+/// What Pickup collected, by Item name.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CarriedV1(pub BTreeMap<String, u32>);
+
+impl PlayerExtension for CarriedV1 {
+    const KEY: &'static str = "carried_v1";
+}
 
 impl Player {
-    /// What the Player carried, empty when the extension is absent.
-    pub fn carried(&self) -> Result<BTreeMap<String, u32>, Error> {
-        self.extensions
-            .get(CARRIED_V1)
-            .map(|value| {
-                serde_json::from_value::<BTreeMap<String, u32>>(value.clone())
-                    .map_err(|e| Error::Corrupt(format!("invalid carried items: {e}")))
-            })
-            .transpose()
-            .map(Option::unwrap_or_default)
-    }
-
-    pub fn movement(&self) -> Result<Option<MovementV1>, Error> {
-        if self
-            .extensions
-            .keys()
-            .any(|key| key != "movement_v1" && key != CARRIED_V1)
-        {
-            return Err(Error::Incompatible(
-                "unknown Player extensions require migration".into(),
-            ));
-        }
-        self.extensions
-            .get("movement_v1")
-            .map(|value| {
-                let state: MovementV1 = serde_json::from_value(value.clone())
-                    .map_err(|e| Error::Incompatible(e.to_string()))?;
-                if !state.yaw.is_finite()
-                    || !state.pitch.is_finite()
-                    || state.pitch.abs() > std::f32::consts::FRAC_PI_2
-                    || (state.flight && state.crouching)
-                {
-                    return Err(Error::Corrupt("invalid Player movement/view".into()));
-                }
-                Ok(state)
-            })
-            .transpose()
+    /// The value saved under `E::KEY`, `None` when the key is absent.
+    pub fn get<E: PlayerExtension>(&self) -> Result<Option<E>, Error> {
+        self.extensions.get(E::KEY).map(E::read).transpose()
     }
 }
 
@@ -431,8 +439,8 @@ impl Player {
 #[serde(deny_unknown_fields)]
 pub struct Player {
     pub eye_m: [f32; 3],
-    /// Independently versioned controller/view fields.
-    /// Unknown nonempty fields require explicit migration, never guessed modes.
+    /// [`PlayerExtension`] values by key. A key the opening build does not
+    /// register refuses the World rather than being dropped by its next save.
     pub extensions: BTreeMap<String, serde_json::Value>,
 }
 
@@ -723,8 +731,6 @@ impl Commit {
         {
             return Err(Error::Corrupt("invalid World or Player coordinates".into()));
         }
-        self.player.movement()?;
-        self.player.carried()?;
         self.entities.validate()?;
         self.content.require(installed)?;
         let mapping = self.content.validation_mapping()?;

@@ -944,13 +944,14 @@ fn pre_crouch_movement_defaults_to_standing_and_new_stance_round_trips() {
             serde_json::json!({"flight":false,"yaw":1.0,"pitch":0.0}),
         )]),
     };
-    assert!(!player.movement().unwrap().unwrap().crouching);
+    let movement = |p: &Player| p.get::<MovementV1>().unwrap().unwrap();
+    assert!(!movement(&player).crouching);
     player.extensions.get_mut("movement_v1").unwrap()["crouching"] = true.into();
     let bytes = serde_json::to_vec(&player).unwrap();
     let restored: Player = serde_json::from_slice(&bytes).unwrap();
-    assert!(restored.movement().unwrap().unwrap().crouching);
+    assert!(movement(&restored).crouching);
     player.extensions.get_mut("movement_v1").unwrap()["flight"] = true.into();
-    assert!(player.movement().is_err());
+    assert!(matches!(player.get::<MovementV1>(), Err(Error::Corrupt(_))));
 }
 
 #[test]
@@ -1105,22 +1106,20 @@ mod dropped_items {
     }
 
     #[test]
-    fn carried_is_an_extension_and_an_unknown_one_still_refuses() {
+    fn carried_is_an_extension_and_a_value_of_another_shape_is_incompatible() {
         let mut player = fixture().player;
-        assert!(player.carried().unwrap().is_empty());
+        assert_eq!(player.get::<CarriedV1>().unwrap(), None);
         player.extensions.insert(
             "carried_v1".into(),
             serde_json::json!({"t:rock": 14, "t:dust": 3}),
         );
-        assert!(player.movement().is_ok());
-        assert_eq!(player.carried().unwrap()["t:rock"], 14);
+        assert_eq!(player.get::<CarriedV1>().unwrap().unwrap().0["t:rock"], 14);
         player
             .extensions
             .insert("carried_v1".into(), serde_json::json!("many"));
-        assert!(matches!(player.carried(), Err(Error::Corrupt(_))));
-        player
-            .extensions
-            .insert("other_v1".into(), serde_json::json!(1));
-        assert!(matches!(player.movement(), Err(Error::Incompatible(_))));
+        assert!(matches!(
+            player.get::<CarriedV1>(),
+            Err(Error::Incompatible(_))
+        ));
     }
 }

@@ -393,6 +393,15 @@ impl Player {
         self.eye = Vec3::from_array(moved.aabb.min) + Vec3::new(0.3, self.eye_height(), 0.3);
     }
 }
+impl super::persistence::extensions::PlayerState for tesserae_core::save::MovementV1 {
+    fn capture(player: EntityRef) -> Option<Self> {
+        player.get::<Player>().map(Player::saved_movement)
+    }
+
+    /// Applied by `spawn_player` instead: the saved mode decides the spawn
+    /// height.
+    fn restore(self, _: &mut bevy::ecs::system::EntityCommands) {}
+}
 #[derive(SystemSet, Hash, PartialEq, Eq, Clone, Debug)]
 pub(super) struct PlayerInput;
 pub(super) fn plugin(app: &mut App) {

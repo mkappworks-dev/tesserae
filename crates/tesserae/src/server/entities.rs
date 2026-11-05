@@ -6,12 +6,15 @@
 
 use std::collections::{BTreeMap, HashMap};
 
+use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use tesserae_core::entity::{DropSpec, Entities, EntityId, WorldEntity};
+use tesserae_core::save::CarriedV1;
 
 use super::ContentTables;
 use super::edit::{self, VoxelRemoved};
 use super::items::Items;
+use super::persistence::extensions::PlayerState;
 use super::player::Player;
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
@@ -78,7 +81,6 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<Announced>()
         .add_session_message::<EntityDelta>()
         .add_session_message::<CarriedChanged>()
-        .add_session_systems(Update, restore_carried)
         .add_session_systems(
             FixedPreUpdate,
             (
@@ -91,20 +93,16 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-/// A reopened World's Carried count, once its Player exists. Checks through
-/// the shared reference first so the resource is not marked changed every frame.
-fn restore_carried(
-    mut persistence: Option<ResMut<super::persistence::Persistence>>,
-    mut carried: Single<&mut Carried>,
-) {
-    if !persistence
-        .as_deref()
-        .is_some_and(|p| p.has_carried_to_restore())
-    {
-        return;
+impl PlayerState for CarriedV1 {
+    fn capture(player: EntityRef) -> Option<Self> {
+        player
+            .get::<Carried>()
+            .filter(|c| !c.0.is_empty())
+            .map(|c| CarriedV1(c.0.clone()))
     }
-    if let Some(held) = persistence.as_mut().and_then(|p| p.take_carried()) {
-        carried.0 = held;
+
+    fn restore(self, player: &mut EntityCommands) {
+        player.insert(Carried(self.0));
     }
 }
 

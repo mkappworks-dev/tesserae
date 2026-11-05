@@ -29,6 +29,10 @@ const TERMINAL_M_S: f32 = 24.0;
 /// Low enough that two drops from one Voxel land within [`MERGE_RADIUS_M`].
 const POP_SPEED_M_S: f32 = 0.4;
 const POP_LIFT_M_S: f32 = 2.5;
+/// The outermost stack's throw; with the lift and the slide it lands about a
+/// metre out.
+const SPREAD_SPEED_M_S: f32 = 2.0;
+const GOLDEN_ANGLE: f32 = 2.399_963;
 /// Horizontal speed kept after a step on the ground.
 const GROUND_KEEP: f32 = 0.85;
 const REST_SPEED_M_S: f32 = 0.05;
@@ -178,11 +182,42 @@ impl Entities {
         at: [i32; 3],
         spec: DropSpec,
     ) -> EntityId {
-        let DropSpec {
-            item,
-            count,
-            size_m,
-        } = spec;
+        let id = self.claim_id();
+        let angle = pop_angle(id, self.step);
+        let pos_m = at.map(|i| (i as f32 + 0.5) * voxel_size);
+        let drop = thrown(spec, pos_m, angle, POP_SPEED_M_S);
+        self.insert_drop(vol, tables, voxel_size, id, drop);
+        id
+    }
+
+    /// Spawns each stack at `centre_m`, thrown outwards on its own bearing
+    /// and speed so the pile lands spread across about a metre, which keeps
+    /// stacks of one Item from merging back into one. In spawn order.
+    pub fn spawn_drops_around(
+        &mut self,
+        vol: &impl VoxelVolume,
+        tables: &Tables,
+        voxel_size: f32,
+        centre_m: [f32; 3],
+        stacks: impl IntoIterator<Item = DropSpec>,
+    ) -> Vec<EntityId> {
+        let stacks: Vec<_> = stacks.into_iter().collect();
+        let mut ids = Vec::with_capacity(stacks.len());
+        let bearing = pop_angle(EntityId(self.next_id), self.step);
+        for (i, spec) in stacks.iter().enumerate() {
+            let id = self.claim_id();
+            let angle = bearing + i as f32 * GOLDEN_ANGLE;
+            // Sunflower spacing: equal area per stack whatever the count.
+            let speed = SPREAD_SPEED_M_S * ((i as f32 + 0.5) / stacks.len() as f32).sqrt();
+            let drop = thrown(*spec, centre_m, angle, speed);
+            self.insert_drop(vol, tables, voxel_size, id, drop);
+            ids.push(id);
+        }
+        ids
+    }
+
+    /// The next id, making room for it by despawning the oldest entity.
+    fn claim_id(&mut self) -> EntityId {
         if self.all.len() >= MAX_ENTITIES
             && let Some(&oldest) = self.all.keys().next()
         {
@@ -190,39 +225,35 @@ impl Entities {
         }
         let id = EntityId(self.next_id);
         self.next_id += 1;
-        let mut pos_m = at.map(|i| (i as f32 + 0.5) * voxel_size);
+        id
+    }
+
+    /// A drop that would start inside solid terrain is lifted clear of it, by
+    /// at most a metre.
+    fn insert_drop(
+        &mut self,
+        vol: &impl VoxelVolume,
+        tables: &Tables,
+        voxel_size: f32,
+        id: EntityId,
+        mut drop: DroppedItem,
+    ) {
         let tries = (LIFT_MAX_M / voxel_size).ceil().clamp(1.0, 256.0) as u32;
         for _ in 0..tries {
-            if !collide::overlaps(vol, tables, voxel_size, cube(pos_m, size_m)) {
+            if !collide::overlaps(vol, tables, voxel_size, cube(drop.pos_m, drop.size_m)) {
                 break;
             }
-            pos_m[1] += voxel_size;
+            drop.pos_m[1] += voxel_size;
         }
-        let angle = pop_angle(id, self.step);
-        let drop = DroppedItem {
-            item,
-            count,
-            size_m,
-            pos_m,
-            vel_m_s: [
-                POP_SPEED_M_S * angle.cos(),
-                POP_LIFT_M_S,
-                POP_SPEED_M_S * angle.sin(),
-            ],
-            resting: false,
-            steps_left: DESPAWN_STEPS,
-            pickup_in: PICKUP_DELAY_STEPS,
-        };
         self.all.insert(
             id,
             WorldEntity {
                 id,
-                chunk: chunk_of(pos_m, voxel_size),
+                chunk: chunk_of(drop.pos_m, voxel_size),
                 kind: EntityKind::Dropped(drop),
             },
         );
         self.revision += 1;
-        id
     }
 
     /// Advances every entity one logical step. One whose Chunk is not held
@@ -312,6 +343,23 @@ impl Entities {
             d.count = d.count.saturating_add(added);
         }
         self.revision += 1;
+    }
+}
+
+fn thrown(spec: DropSpec, pos_m: [f32; 3], angle: f32, speed_m_s: f32) -> DroppedItem {
+    DroppedItem {
+        item: spec.item,
+        count: spec.count,
+        size_m: spec.size_m,
+        pos_m,
+        vel_m_s: [
+            speed_m_s * angle.cos(),
+            POP_LIFT_M_S,
+            speed_m_s * angle.sin(),
+        ],
+        resting: false,
+        steps_left: DESPAWN_STEPS,
+        pickup_in: PICKUP_DELAY_STEPS,
     }
 }
 
@@ -586,6 +634,37 @@ mod tests {
         assert!(e.get(id).is_some());
         run(&mut e, &grid, 1);
         assert!(e.get(id).is_none());
+    }
+
+    #[test]
+    fn stacks_dropped_at_a_point_in_metres_land_apart_and_despawn_after_five_minutes() {
+        let grid = Grid::floor();
+        let mut e = Entities::default();
+        let centre_m = [1.3, 0.8, 1.7];
+        let stacks = (0..6).map(|count| DropSpec {
+            item: 0,
+            count: count + 1,
+            size_m: 0.25,
+        });
+        let ids = e.spawn_drops_around(&grid, tables(), SIZE, centre_m, stacks);
+        assert_eq!(ids.len(), 6);
+        run(&mut e, &grid, 600);
+        let landed: Vec<_> = ids.iter().map(|&id| at_rest(&e, id)).collect();
+        let mut counts: Vec<_> = landed.iter().map(|d| d.count).collect();
+        counts.sort();
+        assert_eq!(counts, [1, 2, 3, 4, 5, 6]);
+        for (i, a) in landed.iter().enumerate() {
+            let from_centre = (a.pos_m[0] - centre_m[0]).hypot(a.pos_m[2] - centre_m[2]);
+            assert!(from_centre < 2.0, "{a:?}");
+            for b in &landed[i + 1..] {
+                let apart = (a.pos_m[0] - b.pos_m[0]).hypot(a.pos_m[2] - b.pos_m[2]);
+                assert!(apart > MERGE_RADIUS_M, "{a:?} {b:?}");
+            }
+        }
+        run(&mut e, &grid, DESPAWN_STEPS - 601);
+        assert!(ids.iter().all(|&id| e.get(id).is_some()));
+        run(&mut e, &grid, 1);
+        assert!(e.is_empty());
     }
 
     #[test]
