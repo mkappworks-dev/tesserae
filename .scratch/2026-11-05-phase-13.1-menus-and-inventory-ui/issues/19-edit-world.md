@@ -1,6 +1,6 @@
 # 19: Edit World
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 16, 06
 
@@ -12,7 +12,7 @@ Edit World offers the name, the World's default game mode and the player's own m
 
 ## Acceptance criteria
 
-- [ ] Renaming keeps the terrain.
-- [ ] A changed default or own mode is in effect after the next open, and not before.
-- [ ] Create from these settings prefills every step.
-- [ ] Delete needs confirmation and refuses an open World, as today.
+- [x] Renaming keeps the terrain.
+- [x] A changed default or own mode is in effect after the next open, and not before.
+- [x] Create from these settings prefills every step.
+- [x] Delete needs confirmation and refuses an open World, as today.

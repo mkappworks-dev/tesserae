@@ -666,6 +666,8 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
         pending: true,
         game_mode: GameMode::Creative,
         biomes: None,
+        player_mode: None,
+        mode_changes: Default::default(),
     }
 }
 
@@ -1674,4 +1676,38 @@ fn biome_edits_that_cannot_apply_refuse_the_open() {
         let refused = Persistence::prepare(opening, &mut loaded, settings);
         assert!(refused.is_err(), "{name}");
     }
+}
+
+#[test]
+fn mode_changes_from_edit_world_apply_at_the_next_open_and_not_before() {
+    let worlds = Directory::new();
+    let path = with_biomes(&worlds, "Modes", None);
+    let mut rig = reopen(&path);
+    rig.settled_save();
+    drop(rig);
+    library::request_modes(
+        &path,
+        library::ModeChanges {
+            default: Some(GameMode::Survival),
+            own: Some(GameMode::Survival),
+        },
+    )
+    .unwrap();
+    let saved = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(saved.game_mode, GameMode::Creative, "not before the open");
+
+    let mut rig = reopen(&path);
+    assert_eq!(player_mode(&mut rig), GameMode::Survival);
+    rig.settled_save();
+    drop(rig);
+    let commit = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(commit.game_mode, GameMode::Survival);
+    assert_eq!(
+        commit.player.get::<GameModeV1>().unwrap(),
+        Some(GameModeV1(GameMode::Survival))
+    );
+    let details = library::read(&path).unwrap().unwrap();
+    assert!(details.mode_changes.is_empty(), "applied once");
+    assert_eq!(details.game_mode, GameMode::Survival);
+    assert_eq!(details.player_mode, Some(GameMode::Survival));
 }

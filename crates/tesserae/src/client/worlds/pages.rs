@@ -655,14 +655,13 @@ fn edit(
                 problem(body, l.problem.as_ref());
                 match details {
                     Some(d) => {
-                        ui::text(
-                            body,
-                            format!("Game: {}", game_label(d.game.as_ref())),
-                            13.0,
-                            cine::INK,
-                        );
+                        row(body, 8.0, |r| {
+                            label(r, "Generation settings");
+                            cine::pill(r, "Locked");
+                        });
+                        locked(body, format!("Game: {}", game_label(d.game.as_ref())));
                         if !d.mods.is_empty() {
-                            ui::paragraph(
+                            locked(
                                 body,
                                 format!(
                                     "Mods: {}",
@@ -670,26 +669,50 @@ fn edit(
                                         .iter()
                                         .map(|m| ui::title(&m.id))
                                         .collect::<Vec<_>>()
-                                        .join(" · ")
+                                        .join(" \u{00b7} ")
                                 ),
-                                13.0,
-                                cine::INK,
                             );
                         }
+                        locked(body, format!("Voxel size: {} m", d.voxel_size_m));
                         row(body, 8.0, |r| {
-                            ui::text(r, format!("Seed: {}", d.seed), 13.0, cine::INK);
+                            locked(r, format!("Seed: {}", d.seed));
                             cine::button(r, "Copy", "", Act::CopySeed, Kind::Ghost);
                         });
-                        ui::text(
+                        locked(
                             body,
-                            format!("Voxel size: {} m", d.voxel_size_m),
-                            13.0,
-                            cine::INK,
+                            match &d.biomes {
+                                Some(edits) => {
+                                    format!("Biomes: {} changed at creation", edits.biomes.len())
+                                }
+                                None => "Biomes: as the Game declared them".to_owned(),
+                            },
                         );
+                        mode_picks(
+                            body,
+                            "Default game mode",
+                            "For Players joining this World for the first time. Changing it moves nobody.",
+                            l.modes[0],
+                            Act::DefaultMode,
+                        );
+                        mode_picks(
+                            body,
+                            "Your game mode",
+                            "Switching to Survival keeps what you carry. Health and hunger start full.",
+                            l.modes[1],
+                            Act::OwnMode,
+                        );
+                        if !d.mode_changes.is_empty() {
+                            ui::paragraph(
+                                body,
+                                "Mode changes take effect when the World next opens.",
+                                12.0,
+                                cine::MUTED,
+                            );
+                        }
                         ui::paragraph(
                             body,
                             format!(
-                                "Created {} · last played {}",
+                                "Created {} \u{00b7} last played {}",
                                 relative(d.created_unix_s),
                                 relative(d.last_played_unix_s)
                             ),
@@ -744,6 +767,43 @@ fn edit(
         );
     });
     focus
+}
+
+/// A value fixed when the World was created, shown but not editable.
+fn locked(parent: &mut ChildSpawnerCommands, value: String) {
+    parent
+        .spawn((
+            BackgroundColor(cine::FIELD),
+            BorderColor::all(cine::FIELD_EDGE),
+            Node {
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(9.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|field| ui::text(field, value, 13.0, cine::MUTED));
+}
+
+/// Creative and Survival side by side, each with what it means.
+fn mode_picks(
+    parent: &mut ChildSpawnerCommands,
+    legend: &str,
+    hint: &str,
+    chosen: GameMode,
+    act: fn(GameMode) -> Act,
+) {
+    label(parent, legend);
+    row(parent, 7.0, |r| {
+        for (mode, name) in [
+            (GameMode::Creative, "Creative"),
+            (GameMode::Survival, "Survival"),
+        ] {
+            cine::choice(r, name, act(mode), chosen == mode);
+        }
+    });
+    ui::paragraph(parent, hint, 12.0, cine::MUTED);
 }
 
 fn row(
