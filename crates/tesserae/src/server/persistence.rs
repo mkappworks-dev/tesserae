@@ -419,12 +419,29 @@ impl Persistence {
                     detail,
                 )
             } else {
+                let mut params = super::worldgen_params(loaded.world);
+                // A Create-time Biome choice changes only this World's snapshot (ADR-0022).
+                if let Some(edits) = opening.details.as_ref().and_then(|d| d.biomes.as_ref()) {
+                    let registry = &loaded.registry;
+                    params = edits
+                        .apply(params, |name| {
+                            registry
+                                .id_of(tesserae_mods::Kind::Material, name)
+                                .map(|id| id as tesserae_core::MaterialId)
+                        })
+                        .and_then(|p| {
+                            p.validate_ground(&loaded.tables)
+                                .map(|()| p)
+                                .map_err(|e| e.to_string())
+                        })
+                        .map_err(|e| format!("This World's Biome choices cannot apply: {e}"))?;
+                    loaded.world = Some(params);
+                }
                 (
                     None,
                     None,
                     vec![],
-                    Generation::capture(super::worldgen_params(loaded.world), &mapping)
-                        .map_err(|e| e.to_string())?,
+                    Generation::capture(params, &mapping).map_err(|e| e.to_string())?,
                     BTreeMap::new(),
                     "New World - unsaved".into(),
                 )

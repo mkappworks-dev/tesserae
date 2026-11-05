@@ -12,11 +12,13 @@ use bevy::prelude::*;
 use crate::session::{AppState, has_state, in_list};
 use bevy::text::EditableText;
 use bevy::ui_widgets::Activate;
+use tesserae_core::biome_edits::{BiomeChoice, BiomeEdits, CLIMATE_SIZES_M};
+use tesserae_core::climate::{ClimateParams, SkyFog};
 use tesserae_core::save::GameMode;
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
 use super::menu_ui::{self as ui, Tone};
-use crate::launch::Installed;
+use crate::launch::{BiomePreview, Installed};
 use crate::launch::{Switch, Target};
 use crate::open::{OpenRequest, What};
 
@@ -44,6 +46,17 @@ impl Default for Remover {
     }
 }
 
+/// Reads what the chosen Game and Mods declare about their Biomes; a fixed
+/// answer in tests, where nothing is installed.
+#[derive(Resource, Clone, Copy)]
+pub(super) struct Previewer(pub(super) fn(&Installed, &[String]) -> Result<BiomePreview, String>);
+
+impl Default for Previewer {
+    fn default() -> Self {
+        Self(Installed::preview_biomes)
+    }
+}
+
 /// Set once the launcher has handed a World to the loader, so coming back
 /// from it lands on the Worlds rather than the title screen.
 #[derive(Resource, Default)]
@@ -65,13 +78,47 @@ enum Screen {
     Worlds,
     /// The installed Mods, from the title screen.
     Library,
-    Create,
-    /// Step two of Create World: the Mods.
-    Mods,
+    Create(Step),
+    /// Leaving a changed setup, which asks first; it returns to the step.
+    Discard(Step),
     Edit(PathBuf),
     Delete(PathBuf),
     Trust(Next),
     Opening(String),
+}
+
+/// The steps of Create World, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Step {
+    World,
+    Mods,
+    Biomes,
+    Review,
+}
+
+impl Step {
+    const ORDER: [Step; 4] = [Step::World, Step::Mods, Step::Biomes, Step::Review];
+
+    fn label(self) -> &'static str {
+        match self {
+            Step::World => "World",
+            Step::Mods => "Mods",
+            Step::Biomes => "Biomes",
+            Step::Review => "Review",
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::ORDER.iter().position(|s| *s == self).unwrap_or(0)
+    }
+
+    fn next(self) -> Option<Step> {
+        Self::ORDER.get(self.index() + 1).copied()
+    }
+
+    fn previous(self) -> Option<Step> {
+        self.index().checked_sub(1).map(|i| Self::ORDER[i])
+    }
 }
 
 /// What runs once every Mod it needs is trusted.
@@ -79,6 +126,8 @@ enum Screen {
 enum Next {
     Open(PathBuf),
     Create,
+    /// Reading the Biomes runs the chosen Mods' declarations, so it waits for Trust too.
+    Biomes,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,6 +144,126 @@ struct Form {
     game: Option<String>,
     /// Mods ticked by hand; their dependencies are added when the World is created.
     mods: std::collections::BTreeSet<String>,
+    /// Filled when the Biomes step is first reached for this Game and Mods.
+    biomes: Option<BiomesDraft>,
+}
+
+/// The Biomes step's working copy: what the selection declares, and the
+/// player's version of it.
+#[derive(Clone, Debug, PartialEq)]
+struct BiomesDraft {
+    /// The Game and Mods it was read for; a different set reads again.
+    ids: Vec<String>,
+    declared: BiomePreview,
+    choices: Vec<BiomeChoice>,
+    climate: ClimateParams,
+    selected: usize,
+    resetting: bool,
+    /// Typed text, kept while it does not parse: Climate sizes, then sky and fog.
+    sizes: [String; 2],
+    colours: [String; 2],
+}
+
+impl BiomesDraft {
+    fn new(ids: Vec<String>, declared: BiomePreview) -> Self {
+        let mut draft = Self {
+            ids,
+            choices: declared.biomes.clone(),
+            climate: declared.climate,
+            declared,
+            selected: 0,
+            resetting: false,
+            sizes: Default::default(),
+            colours: Default::default(),
+        };
+        draft.reset();
+        draft
+    }
+
+    fn reset(&mut self) {
+        self.choices = self.declared.biomes.clone();
+        self.climate = self.declared.climate;
+        self.resetting = false;
+        self.sizes = [
+            self.climate.temperature_size_m.to_string(),
+            self.climate.humidity_size_m.to_string(),
+        ];
+        self.select(self.selected);
+    }
+
+    fn select(&mut self, at: usize) {
+        self.selected = at.min(self.choices.len().saturating_sub(1));
+        let sky_fog = self.choices.get(self.selected).and_then(|c| c.sky_fog);
+        self.colours = [
+            sky_fog.map_or_else(String::new, |s| hex(s.sky)),
+            sky_fog.map_or_else(String::new, |s| hex(s.fog)),
+        ];
+    }
+
+    /// What differs from the declarations, or `None` for a World made as declared.
+    fn edits(&self) -> Option<BiomeEdits> {
+        let biomes: Vec<_> = self
+            .choices
+            .iter()
+            .zip(&self.declared.biomes)
+            .filter(|(choice, declared)| choice != declared)
+            .map(|(choice, _)| choice.clone())
+            .collect();
+        let climate = (self.climate != self.declared.climate).then_some(self.climate);
+        (!biomes.is_empty() || climate.is_some()).then_some(BiomeEdits { biomes, climate })
+    }
+
+    fn problem(&self) -> Option<String> {
+        if !self.choices.is_empty() && self.choices.iter().all(|c| !c.enabled) {
+            return Some("Turn on at least one Biome to continue.".into());
+        }
+        let size = |text: &str| {
+            text.trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|m| CLIMATE_SIZES_M.contains(m))
+        };
+        if self.sizes.iter().any(|text| size(text).is_none()) {
+            return Some("Climate sizes must be from 1 to 100000 m.".into());
+        }
+        if self
+            .colours
+            .iter()
+            .any(|t| !t.trim().is_empty() && colour(t).is_none())
+        {
+            return Some("Write colours as #rrggbb.".into());
+        }
+        None
+    }
+}
+
+fn hex(rgb: [u8; 3]) -> String {
+    format!("#{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2])
+}
+
+fn colour(text: &str) -> Option<[u8; 3]> {
+    let digits = text.trim().trim_start_matches('#');
+    if digits.len() != 6 {
+        return None;
+    }
+    let byte = |at: usize| u8::from_str_radix(digits.get(at..at + 2)?, 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
+}
+
+/// A Biome's value the player steps up or down.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Knob {
+    Temperature,
+    Humidity,
+    Caves,
+}
+
+/// One of a Biome's three ground layers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Layer {
+    Rock,
+    Soil,
+    Surface,
 }
 
 impl Default for Form {
@@ -109,6 +278,7 @@ impl Default for Form {
             problem: None,
             game: None,
             mods: Default::default(),
+            biomes: None,
         }
     }
 }
@@ -138,6 +308,8 @@ struct Launcher {
     selected: Option<PathBuf>,
     card: Option<Card>,
     form: Form,
+    /// The form as Create World opened it, to tell whether leaving loses anything.
+    initial: Form,
     rename: String,
     search: String,
     problem: Option<String>,
@@ -212,10 +384,20 @@ pub(super) enum Act {
     Quit,
     Back,
     Create,
-    NextMods,
     Randomize,
     CopyResolved,
     More,
+    Next,
+    Step(Step),
+    KeepEditing,
+    DiscardSetup,
+    ToggleBiome(usize),
+    SelectBiome(usize),
+    Nudge(Knob, i8),
+    CycleGround(Layer),
+    ResetBiomes,
+    ConfirmReset,
+    KeepBiomes,
     Voxel(f32),
     Mode(GameMode),
     PickGame(usize),
@@ -235,6 +417,10 @@ enum Field {
     Seed,
     Rename,
     Search,
+    Sky,
+    Fog,
+    TemperatureSize,
+    HumiditySize,
 }
 
 #[derive(Component)]
@@ -348,7 +534,7 @@ fn review_capture(
                 "recreate" => Act::ReCreate,
                 "open" => Act::Play(first.clone()),
                 "create" => Act::Create,
-                "mods" => Act::NextMods,
+                "next" => Act::Next,
                 other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
             });
         }
@@ -390,6 +576,7 @@ fn logic(app: &mut App) {
     app.init_resource::<Queue>()
         .init_resource::<LastFailure>()
         .init_resource::<Remover>()
+        .init_resource::<Previewer>()
         .init_resource::<Returning>()
         .init_resource::<InputFocus>()
         .add_observer(activate)
@@ -473,6 +660,7 @@ fn start(
         selected: None,
         card: None,
         form: Form::default(),
+        initial: Form::default(),
         rename: String::new(),
         search: String::new(),
         problem: None,
@@ -540,7 +728,12 @@ fn keys(
         && let Some(field) = focus.get().and_then(|e| fields.get(e).ok())
     {
         match field {
-            Field::Name | Field::Seed => queue.0.push(Act::Create),
+            Field::Name
+            | Field::Seed
+            | Field::Sky
+            | Field::Fog
+            | Field::TemperatureSize
+            | Field::HumiditySize => queue.0.push(Act::Next),
             Field::Rename => queue.0.push(Act::SaveName),
             Field::Search => {}
         }
@@ -561,6 +754,13 @@ fn sync_fields(
             Field::Name => launcher.form.name = value,
             Field::Seed => launcher.form.seed = value,
             Field::Rename => launcher.rename = value,
+            Field::Sky | Field::Fog | Field::TemperatureSize | Field::HumiditySize => {
+                // The page keeps the field; rebuilding it would take the focus.
+                let launcher = launcher.bypass_change_detection();
+                if let Some(draft) = launcher.form.biomes.as_mut() {
+                    typed(draft, *field, value);
+                }
+            }
             // Typing filters the cards in place; a rebuild would take the field's focus.
             Field::Search => launcher.bypass_change_detection().search = value,
         }
@@ -619,6 +819,39 @@ fn placeholders(
     }
 }
 
+/// What typing in one of the Biomes step's fields changes.
+fn typed(draft: &mut BiomesDraft, field: Field, value: String) {
+    match field {
+        Field::TemperatureSize | Field::HumiditySize => {
+            let at = usize::from(field == Field::HumiditySize);
+            if let Ok(metres) = value.trim().parse::<f32>() {
+                if at == 0 {
+                    draft.climate.temperature_size_m = metres;
+                } else {
+                    draft.climate.humidity_size_m = metres;
+                }
+            }
+            draft.sizes[at] = value;
+        }
+        _ => {
+            let at = usize::from(field == Field::Fog);
+            let parsed = colour(&value);
+            draft.colours[at] = value;
+            let selected = draft.selected;
+            if let (Some(rgb), Some(choice)) = (parsed, draft.choices.get_mut(selected)) {
+                // A Biome carries both colours or neither, so the other starts equal.
+                let mut pair = choice.sky_fog.unwrap_or(SkyFog { sky: rgb, fog: rgb });
+                if at == 0 {
+                    pair.sky = rgb;
+                } else {
+                    pair.fog = rgb;
+                }
+                choice.sky_fog = Some(pair);
+            }
+        }
+    }
+}
+
 impl Form {
     fn seed(&self) -> Result<u64, String> {
         tesserae_core::seed::resolve(&self.seed)
@@ -641,7 +874,7 @@ fn handle(
     mut queue: ResMut<Queue>,
     launcher: Option<ResMut<Launcher>>,
     mut installed: ResMut<Installed>,
-    worlds: Res<WorldsDir>,
+    (worlds, previewer): (Res<WorldsDir>, Res<Previewer>),
     remover: Res<Remover>,
     mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
@@ -686,7 +919,8 @@ fn handle(
                         .unwrap_or_default(),
                     ..Form::default()
                 };
-                l.show(Screen::Create);
+                l.initial = l.form.clone();
+                l.show(Screen::Create(Step::World));
             }
             Act::ReCreate => {
                 let Some(details) = l.selected().and_then(Entry::details).cloned() else {
@@ -707,13 +941,11 @@ fn handle(
                     mods: details.mods.iter().map(|m| m.id.clone()).collect(),
                     ..Form::default()
                 };
-                match l.form.game.clone() {
-                    Some(game) if !installed.mods.is_empty() => {
-                        l.clashes = installed.clashes(&game, &l.form.mods);
-                        l.show(Screen::Mods);
-                    }
-                    _ => l.show(Screen::Create),
+                if let Some(game) = l.form.game.clone() {
+                    l.clashes = installed.clashes(&game, &l.form.mods);
                 }
+                l.initial = l.form.clone();
+                l.show(Screen::Create(Step::World));
             }
             Act::Delete => {
                 if let Screen::Edit(path) = l.screen.clone() {
@@ -740,16 +972,16 @@ fn handle(
                 exit.write(AppExit::Success);
             }
             Act::Back => match l.screen.clone() {
-                Screen::Trust(Next::Create) => l.show(if installed.mods.is_empty() {
-                    Screen::Create
-                } else {
-                    Screen::Mods
-                }),
-                Screen::Mods => l.show(Screen::Create),
+                Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
+                Screen::Trust(Next::Biomes) => l.show(Screen::Create(Step::Mods)),
+                Screen::Create(step) => match step.previous() {
+                    Some(previous) => l.show(Screen::Create(previous)),
+                    None if l.form.unchanged_from(&l.initial) => l.show(Screen::Worlds),
+                    None => l.show(Screen::Discard(step)),
+                },
+                Screen::Discard(step) => l.show(Screen::Create(step)),
                 Screen::Delete(path) => l.show(Screen::Edit(path)),
-                Screen::Create | Screen::Edit(_) | Screen::Trust(Next::Open(_)) => {
-                    l.show(Screen::Worlds)
-                }
+                Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
                 Screen::Worlds | Screen::Library => l.show(Screen::Title),
                 Screen::Opening(_) | Screen::Title => {}
             },
@@ -800,17 +1032,34 @@ fn handle(
                 l.clashes = installed.clashes(&game, &l.form.mods);
                 l.version += 1;
             }
-            Act::NextMods => {
-                if l.screen != Screen::Create {
-                    continue;
+            Act::Next => {
+                if let Screen::Create(step) = l.screen
+                    && let Some(next) = step.next()
+                {
+                    go(&mut l, &mut installed, *previewer, next);
                 }
-                let Some(game) = l.form.game.clone() else {
-                    l.problem = Some(NO_GAME.into());
-                    l.version += 1;
-                    continue;
-                };
-                l.clashes = installed.clashes(&game, &l.form.mods);
-                l.show(Screen::Mods);
+            }
+            Act::Step(target) => go(&mut l, &mut installed, *previewer, target),
+            Act::ToggleBiome(at) => edit_biomes(&mut l, |d| {
+                if let Some(choice) = d.choices.get_mut(at) {
+                    choice.enabled = !choice.enabled;
+                }
+            }),
+            Act::SelectBiome(at) => edit_biomes(&mut l, |d| d.select(at)),
+            Act::Nudge(knob, by) => edit_biomes(&mut l, |d| nudge(d, knob, by)),
+            Act::CycleGround(layer) => edit_biomes(&mut l, |d| cycle(d, layer)),
+            Act::ResetBiomes => edit_biomes(&mut l, |d| d.resetting = true),
+            Act::ConfirmReset => edit_biomes(&mut l, BiomesDraft::reset),
+            Act::KeepBiomes => edit_biomes(&mut l, |d| d.resetting = false),
+            Act::KeepEditing => {
+                if let Screen::Discard(step) = l.screen {
+                    l.show(Screen::Create(step));
+                }
+            }
+            Act::DiscardSetup => {
+                if matches!(l.screen, Screen::Discard(_)) {
+                    l.show(Screen::Worlds);
+                }
             }
             Act::Voxel(size) => {
                 l.form.voxel_size_m = size;
@@ -821,7 +1070,7 @@ fn handle(
                 l.version += 1;
             }
             Act::Create => {
-                if !matches!(l.screen, Screen::Create | Screen::Mods) {
+                if !matches!(l.screen, Screen::Create(_)) {
                     continue;
                 }
                 let ids = chosen_ids(&l.form, &installed);
@@ -853,6 +1102,10 @@ fn handle(
                 match next {
                     Next::Open(path) => open(&mut l, &mut relaunch, path),
                     Next::Create => create(&mut l, &installed, &worlds.0, &mut relaunch),
+                    Next::Biomes => {
+                        l.screen = Screen::Create(Step::Mods);
+                        go(&mut l, &mut installed, *previewer, Step::Biomes);
+                    }
                 }
             }
             Act::SaveName => {
@@ -892,6 +1145,153 @@ fn handle(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Moves Create World to `target`. Moving forward passes every step before it,
+/// so an invalid one holds the player there with its message.
+fn go(l: &mut Launcher, installed: &mut Installed, previewer: Previewer, target: Step) {
+    let Screen::Create(current) = l.screen else {
+        return;
+    };
+    if target > current {
+        for step in Step::ORDER.iter().copied().filter(|s| *s < target) {
+            if let Err(problem) = check(step, &l.form, installed) {
+                l.form.problem = Some(problem);
+                l.show(Screen::Create(step));
+                return;
+            }
+        }
+    }
+    l.form.problem = None;
+    if let Some(game) = l.form.game.clone() {
+        l.clashes = installed.clashes(&game, &l.form.mods);
+    }
+    if target == Step::Biomes && !read_biomes(l, installed, previewer) {
+        return;
+    }
+    l.show(Screen::Create(target));
+}
+
+/// Reads the Biomes the chosen Game and Mods declare, unless already read for
+/// exactly them. `false` when the player must first trust them, or stay on Mods.
+fn read_biomes(l: &mut Launcher, installed: &mut Installed, previewer: Previewer) -> bool {
+    let ids = chosen_ids(&l.form, installed);
+    if l.form.biomes.as_ref().is_some_and(|d| d.ids == ids) {
+        return true;
+    }
+    if let Err(e) = installed.prepare_trust(&ids) {
+        l.form.problem = Some(format!("Could not check Trust: {e}"));
+        l.show(Screen::Create(Step::Mods));
+        return false;
+    }
+    if !installed.untrusted.is_empty() {
+        l.show(Screen::Trust(Next::Biomes));
+        return false;
+    }
+    match (previewer.0)(installed, &ids) {
+        Ok(declared) => {
+            l.form.biomes = Some(BiomesDraft::new(ids, declared));
+            true
+        }
+        Err(e) => {
+            l.form.problem = Some(format!("Could not read the Biomes: {e}"));
+            l.show(Screen::Create(Step::Mods));
+            false
+        }
+    }
+}
+
+fn edit_biomes(l: &mut Launcher, change: impl FnOnce(&mut BiomesDraft)) {
+    if l.screen != Screen::Create(Step::Biomes) {
+        return;
+    }
+    if let Some(draft) = l.form.biomes.as_mut() {
+        change(draft);
+        l.version += 1;
+    }
+}
+
+const POINT_STEP: f32 = 0.05;
+const CAVE_STEP: f32 = 0.25;
+
+fn nudge(draft: &mut BiomesDraft, knob: Knob, by: i8) {
+    let Some(choice) = draft.choices.get_mut(draft.selected) else {
+        return;
+    };
+    let hundredths = |v: f32| (v * 100.0).round() / 100.0;
+    let by = f32::from(by);
+    match knob {
+        Knob::Temperature => {
+            choice.temperature = hundredths((choice.temperature + by * POINT_STEP).clamp(0.0, 1.0))
+        }
+        Knob::Humidity => {
+            choice.humidity = hundredths((choice.humidity + by * POINT_STEP).clamp(0.0, 1.0))
+        }
+        Knob::Caves => {
+            let scale = choice.cave_scale.unwrap_or(1.0) + by * CAVE_STEP;
+            choice.cave_scale = Some(hundredths(
+                scale.clamp(0.0, tesserae_core::climate::MAX_CAVE_SCALE),
+            ));
+        }
+    }
+}
+
+/// The next of the selection's solid Materials for one ground layer; a Biome
+/// still on the World's ground starts from it.
+fn cycle(draft: &mut BiomesDraft, layer: Layer) {
+    let materials = &draft.declared.materials;
+    let fallback = draft.declared.ground.clone();
+    let Some(choice) = draft.choices.get_mut(draft.selected) else {
+        return;
+    };
+    let Some(mut ground) = choice.ground.clone().or(fallback) else {
+        return;
+    };
+    let slot = match layer {
+        Layer::Rock => &mut ground.rock,
+        Layer::Soil => &mut ground.soil,
+        Layer::Surface => &mut ground.surface,
+    };
+    let at = materials.iter().position(|m| m == slot);
+    if let Some(next) = materials.get(at.map_or(0, |i| (i + 1) % materials.len())) {
+        *slot = next.clone();
+        choice.ground = Some(ground);
+    }
+}
+
+/// Why a step cannot be left forward, if it cannot.
+fn check(step: Step, form: &Form, installed: &Installed) -> Result<(), String> {
+    match step {
+        Step::World => {
+            let installed_game = form
+                .game
+                .as_ref()
+                .is_some_and(|id| installed.games.iter().any(|g| &g.id == id));
+            if !installed_game {
+                return Err(NO_GAME.into());
+            }
+            validate(form).map(|_| ())
+        }
+        Step::Biomes => form
+            .biomes
+            .as_ref()
+            .and_then(BiomesDraft::problem)
+            .map_or(Ok(()), Err),
+        Step::Mods | Step::Review => Ok(()),
+    }
+}
+
+impl Form {
+    /// Equal but for a problem shown on it.
+    fn unchanged_from(&self, initial: &Form) -> bool {
+        Form {
+            problem: None,
+            ..self.clone()
+        } == Form {
+            problem: None,
+            ..initial.clone()
         }
     }
 }
@@ -959,7 +1359,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         .cloned()
     else {
         l.form.problem = Some(NO_GAME.into());
-        l.show(Screen::Create);
+        l.show(Screen::Create(Step::World));
         return;
     };
     let missing = installed.missing(&game.id);
@@ -970,7 +1370,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
             missing.join(", "),
             if missing.len() == 1 { "is" } else { "are" }
         ));
-        l.show(Screen::Create);
+        l.show(Screen::Create(Step::World));
         return;
     }
     let mods: Vec<_> = installed
@@ -986,7 +1386,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         Ok(valid) => valid,
         Err(e) => {
             l.form.problem = Some(e);
-            l.show(Screen::Create);
+            l.show(Screen::Create(Step::World));
             return;
         }
     };
@@ -1002,6 +1402,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         world: tesserae_core::save::WorldId::new(),
         pending: true,
         game_mode: l.form.game_mode,
+        biomes: l.form.biomes.as_ref().and_then(BiomesDraft::edits),
     };
     match library::create(worlds, &sidecar) {
         Ok(path) => {
@@ -1010,7 +1411,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         }
         Err(e) => {
             l.form.problem = Some(format!("Could not create the World folder: {e}"));
-            l.show(Screen::Create);
+            l.show(Screen::Create(Step::World));
         }
     }
 }
@@ -1137,6 +1538,7 @@ mod tests {
     use crate::launch::Switch;
     use bevy::ecs::message::Messages;
     use bevy::input_focus::tab_navigation::TabGroup;
+    use tesserae_core::biome_edits::GroundNames;
     use tesserae_core::save::WorldId;
 
     struct Directory(PathBuf);
@@ -1162,7 +1564,8 @@ mod tests {
     }
 
     fn launcher_on(app: &mut App, worlds: &Directory, installed: Installed) {
-        app.init_resource::<super::super::settings::Settings>()
+        app.insert_resource(Previewer(fake_preview))
+            .init_resource::<super::super::settings::Settings>()
             .init_resource::<super::super::actions::Bindings>()
             .init_resource::<super::super::profile::Preferences>()
             .insert_resource(super::super::profile::Store {
@@ -1179,6 +1582,7 @@ mod tests {
                 std::fs::remove_dir_all(path).map_err(|e| e.to_string())
             }));
         logic(app);
+        app.insert_resource(Previewer(fake_preview));
     }
 
     fn launcher(app: &App) -> &Launcher {
@@ -1243,6 +1647,7 @@ mod tests {
             world: WorldId::new(),
             pending: false,
             game_mode: Default::default(),
+            biomes: None,
         }
     }
 
@@ -1296,7 +1701,7 @@ mod tests {
         type_into(&mut app, Field::Seed, "-1");
         act(&mut app, Act::More);
         act(&mut app, Act::Voxel(0.25));
-        act(&mut app, Act::Create);
+        finish(&mut app);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no World to open");
         };
@@ -1341,7 +1746,7 @@ mod tests {
                 act(&mut app, Act::Mode(GameMode::Survival));
                 act(&mut app, Act::Mode(mode));
             }
-            act(&mut app, Act::Create);
+            finish(&mut app);
             let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
                 panic!("no World to open");
             };
@@ -1357,16 +1762,18 @@ mod tests {
         app.update();
         act(&mut app, Act::New);
         type_into(&mut app, Field::Seed, "18446744073709551616");
-        act(&mut app, Act::Create);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        finish(&mut app);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(launcher(&app).form.problem.is_some());
         type_into(&mut app, Field::Seed, "");
         type_into(&mut app, Field::Name, &"x".repeat(65));
-        act(&mut app, Act::Create);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        finish(&mut app);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
         assert!(app.world().resource::<Switch>().0.is_none());
         press(&mut app, KeyCode::Escape);
+        assert_eq!(launcher(&app).screen, Screen::Discard(Step::World));
+        act(&mut app, Act::DiscardSetup);
         assert_eq!(launcher(&app).screen, Screen::Worlds);
     }
 
@@ -1595,7 +2002,7 @@ mod tests {
             .clone();
         let random = launcher(&app).form.random_seed;
         assert_eq!(shown, format!("Random seed: {random}"));
-        act(&mut app, Act::Create);
+        finish(&mut app);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no World to open");
         };
@@ -1629,14 +2036,14 @@ mod tests {
         );
         app.update();
         act(&mut app, Act::New);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         act(&mut app, Act::PickGame(0));
-        act(&mut app, Act::NextMods);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
         act(&mut app, Act::ToggleMod(1));
         assert!(launcher(&app).form.mods.contains("lamps"));
         act(&mut app, Act::Back);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(launcher(&app).form.mods.contains("lamps"));
         assert_eq!(launcher(&app).form.game.as_deref(), Some("terra"));
     }
@@ -1666,7 +2073,7 @@ mod tests {
             .any(|t| t.0 == "Mods: Glassworks");
         assert!(listed, "the World's Mods are named");
         act(&mut app, Act::ReCreate);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(launcher(&app).form.mods.contains("glassworks"));
         assert!(!launcher(&app).form.mods.contains("lamps"));
     }
@@ -1684,7 +2091,7 @@ mod tests {
         app.update();
         act(&mut app, Act::New);
         assert!(launcher(&app).form.mods.contains("wanderer"));
-        act(&mut app, Act::NextMods);
+        act(&mut app, Act::Next);
         act(&mut app, Act::ToggleMod(0));
         assert!(
             !launcher(&app).form.mods.contains("wanderer"),
@@ -1709,12 +2116,12 @@ mod tests {
         );
         app.update();
         act(&mut app, Act::New);
-        act(&mut app, Act::NextMods);
+        act(&mut app, Act::Next);
         act(&mut app, Act::ToggleMod(0));
-        act(&mut app, Act::Create);
+        finish(&mut app);
         assert_eq!(launcher(&app).screen, Screen::Trust(Next::Create));
         act(&mut app, Act::Back);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
         assert!(
             launcher(&app).form.mods.contains("lamps"),
             "the picks are kept"
@@ -1847,10 +2254,14 @@ mod tests {
         let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         assert_eq!(focused_act(&app), Some(Act::New));
         tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         reach(&mut app, pad, Act::Randomize);
         tap(&mut app, pad, GamepadButton::South);
         assert!(!launcher(&app).form.seed.is_empty());
+        for _ in 0..3 {
+            reach(&mut app, pad, Act::Next);
+            tap(&mut app, pad, GamepadButton::South);
+        }
         reach(&mut app, pad, Act::Create);
         tap(&mut app, pad, GamepadButton::South);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
@@ -1874,7 +2285,7 @@ mod tests {
         app.update();
         act(&mut app, Act::New);
         assert!(launcher(&app).form.mods.is_empty(), "Mods start unticked");
-        act(&mut app, Act::NextMods);
+        act(&mut app, Act::Next);
         act(&mut app, Act::ToggleMod(0));
         assert_eq!(launcher(&app).form.mods.len(), 1);
         // reeds is needed by lake: shown locked, with nothing to toggle.
@@ -1893,7 +2304,7 @@ mod tests {
             .push(Act::ToggleMod(2));
         app.update();
         assert_eq!(launcher(&app).form.mods.len(), 1);
-        act(&mut app, Act::Create);
+        finish(&mut app);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no World to open");
         };
@@ -1912,7 +2323,7 @@ mod tests {
         let worlds = Directory::new();
         let (mut app, pad) = pad_app(&worlds, mod_installed());
         tap(&mut app, pad, GamepadButton::South);
-        reach(&mut app, pad, Act::NextMods);
+        reach(&mut app, pad, Act::Next);
         tap(&mut app, pad, GamepadButton::South);
         reach(&mut app, pad, Act::ToggleMod(1));
         tap(&mut app, pad, GamepadButton::South);
@@ -2032,7 +2443,7 @@ mod tests {
                 "create",
                 Screen::Worlds,
                 Some(Act::New),
-                vec!["Name", "Seed", "Randomize", "NextMods", "Back"],
+                vec!["Name", "Seed", "Randomize", "Next", "Back"],
             ),
             (
                 "edit",
@@ -2070,6 +2481,267 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_keyboard_walks_world_mods_biomes_and_review_and_creates_the_world() {
+        let worlds = Directory::new();
+        let (mut app, _) = pad_app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
+        );
+        app.add_plugins((
+            bevy::input_focus::InputDispatchPlugin,
+            bevy::ui_widgets::ButtonPlugin,
+        ));
+        assert_eq!(focused_act(&app), Some(Act::New));
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        type_into(&mut app, Field::Name, "Ridge");
+        type_into(&mut app, Field::Seed, "42");
+        launcher_mut(&mut app).form.game_mode = GameMode::Survival;
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+        assert_eq!(focused_act(&app), Some(Act::Next));
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+        assert_eq!(focused_act(&app), Some(Act::Next));
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+        assert!(shown(&mut app, "Ridge"));
+        assert_eq!(focused_act(&app), Some(Act::Create));
+        key(&mut app, KeyCode::Enter);
+        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
+            panic!("no World to open");
+        };
+        let created = library::read(&path).unwrap().unwrap();
+        assert_eq!(
+            (created.name.as_str(), created.seed, created.voxel_size_m),
+            ("Ridge", 42, 1.0)
+        );
+        assert_eq!(created.game_mode, GameMode::Survival);
+        assert_eq!(created.game.unwrap().id, "terra");
+    }
+
+    /// Through the remaining steps to Create World, which runs only from Review.
+    fn finish(app: &mut App) {
+        act(app, Act::Step(Step::Review));
+        if launcher(app).screen == Screen::Create(Step::Review) {
+            act(app, Act::Create);
+        }
+    }
+
+    fn launcher_mut(app: &mut App) -> Mut<'_, Launcher> {
+        app.world_mut().resource_mut::<Launcher>()
+    }
+
+    fn declared(name: &str, temperature: f32) -> BiomeChoice {
+        BiomeChoice {
+            name: name.into(),
+            enabled: true,
+            temperature,
+            humidity: 0.5,
+            cave_scale: None,
+            ground: None,
+            sky_fog: None,
+        }
+    }
+
+    fn fake_preview(_: &Installed, _: &[String]) -> Result<BiomePreview, String> {
+        Ok(BiomePreview {
+            biomes: vec![declared("t:ash_flats", 0.7), declared("t:meadow", 0.3)],
+            climate: ClimateParams {
+                temperature_size_m: 512.0,
+                humidity_size_m: 512.0,
+            },
+            ground: Some(GroundNames {
+                rock: "t:stone".into(),
+                soil: "t:dirt".into(),
+                surface: "t:grass".into(),
+            }),
+            materials: ["t:stone", "t:dirt", "t:grass", "t:sand"]
+                .map(String::from)
+                .to_vec(),
+        })
+    }
+
+    fn to_biomes(installed: Installed) -> (App, Directory) {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, installed);
+        app.insert_resource(Previewer(fake_preview));
+        app.update();
+        act(&mut app, Act::New);
+        act(&mut app, Act::Next);
+        act(&mut app, Act::Next);
+        (app, worlds)
+    }
+
+    fn created(app: &App) -> Sidecar {
+        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
+            panic!("no World to open");
+        };
+        library::read(&path).unwrap().unwrap()
+    }
+
+    #[test]
+    fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
+        let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+        assert!(shown(&mut app, "Ash flats") && shown(&mut app, "Meadow"));
+        act(&mut app, Act::ToggleBiome(0));
+        act(&mut app, Act::SelectBiome(1));
+        act(&mut app, Act::Nudge(Knob::Temperature, 1));
+        for _ in 0..4 {
+            act(&mut app, Act::Nudge(Knob::Caves, -1));
+        }
+        act(&mut app, Act::CycleGround(Layer::Surface));
+        type_into(&mut app, Field::Sky, "#0a141e");
+        type_into(&mut app, Field::TemperatureSize, "800");
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+        assert!(shown(&mut app, "1 of 2 enabled"));
+        act(&mut app, Act::Create);
+        let edits = created(&app).biomes.expect("the edits are stored");
+        assert_eq!(
+            edits.biomes,
+            [
+                BiomeChoice {
+                    enabled: false,
+                    ..declared("t:ash_flats", 0.7)
+                },
+                BiomeChoice {
+                    temperature: 0.35,
+                    cave_scale: Some(0.0),
+                    ground: Some(GroundNames {
+                        rock: "t:stone".into(),
+                        soil: "t:dirt".into(),
+                        surface: "t:sand".into(),
+                    }),
+                    sky_fog: Some(tesserae_core::climate::SkyFog {
+                        sky: [10, 20, 30],
+                        fog: [10, 20, 30],
+                    }),
+                    ..declared("t:meadow", 0.3)
+                },
+            ]
+        );
+        assert_eq!(
+            edits.climate,
+            Some(ClimateParams {
+                temperature_size_m: 800.0,
+                humidity_size_m: 512.0,
+            })
+        );
+    }
+
+    #[test]
+    fn no_biome_left_or_a_bad_climate_size_holds_the_biomes_step() {
+        let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+        act(&mut app, Act::ToggleBiome(0));
+        act(&mut app, Act::ToggleBiome(1));
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+        assert!(launcher(&app).form.problem.is_some());
+        act(&mut app, Act::ToggleBiome(1));
+        type_into(&mut app, Field::HumiditySize, "0");
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+        type_into(&mut app, Field::HumiditySize, "300");
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+    }
+
+    #[test]
+    fn reset_restores_the_declared_biomes_and_untouched_biomes_store_nothing() {
+        let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+        act(&mut app, Act::ToggleBiome(0));
+        act(&mut app, Act::ResetBiomes);
+        act(&mut app, Act::ConfirmReset);
+        act(&mut app, Act::Next);
+        act(&mut app, Act::Create);
+        assert_eq!(
+            created(&app).biomes,
+            None,
+            "the same World as without the step"
+        );
+
+        let worlds = Directory::new();
+        let mut skipped = app_with_previewer(&worlds);
+        act(&mut skipped, Act::New);
+        finish(&mut skipped);
+        assert_eq!(created(&skipped).biomes, None);
+    }
+
+    fn app_with_previewer(worlds: &Directory) -> App {
+        let mut app = app(worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.insert_resource(Previewer(fake_preview));
+        app.update();
+        app
+    }
+
+    #[test]
+    fn the_biomes_preview_waits_for_trust_as_opening_does() {
+        let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &["terra"]));
+        assert_eq!(launcher(&app).screen, Screen::Trust(Next::Biomes));
+        act(&mut app, Act::Back);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+        act(&mut app, Act::Next);
+        act(&mut app, Act::Trust);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Biomes));
+        assert!(shown(&mut app, "Meadow"));
+    }
+
+    #[test]
+    fn a_long_name_or_a_missing_game_holds_the_world_step() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::New);
+        type_into(&mut app, Field::Name, &"x".repeat(65));
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        assert!(launcher(&app).form.problem.is_some());
+        type_into(&mut app, Field::Name, "Fine");
+        launcher_mut(&mut app).form.game = None;
+        launcher_mut(&mut app).version += 1;
+        app.update();
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        assert_eq!(launcher(&app).form.problem.as_deref(), Some(NO_GAME));
+        act(&mut app, Act::Step(Step::Review));
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::Create(Step::World),
+            "the rail cannot skip an invalid step"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_changed_setup_asks_before_discarding() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::New);
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(launcher(&app).screen, Screen::Worlds, "nothing to lose");
+        act(&mut app, Act::New);
+        type_into(&mut app, Field::Name, "Half done");
+        act(&mut app, Act::Next);
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::Create(Step::World),
+            "back a step"
+        );
+        press(&mut app, KeyCode::Escape);
+        assert!(matches!(launcher(&app).screen, Screen::Discard(_)));
+        act(&mut app, Act::KeepEditing);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        assert_eq!(launcher(&app).form.name, "Half done");
+        press(&mut app, KeyCode::Escape);
+        act(&mut app, Act::DiscardSetup);
+        assert_eq!(launcher(&app).screen, Screen::Worlds);
+        assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
     }
 
     #[test]
@@ -2205,7 +2877,7 @@ mod tests {
         for (opener, there, back) in [
             (Act::Worlds, Screen::Worlds, Screen::Title),
             (Act::Library, Screen::Library, Screen::Title),
-            (Act::New, Screen::Create, Screen::Worlds),
+            (Act::New, Screen::Create(Step::World), Screen::Worlds),
             (
                 Act::Edit(path.clone()),
                 Screen::Edit(path.clone()),
@@ -2286,7 +2958,7 @@ mod tests {
         assert_eq!(launcher(&app).screen, Screen::Title);
         pad_button(&mut app, pad, GamepadButton::South, 0.0);
         tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
     }
 
     #[test]

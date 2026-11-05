@@ -1,6 +1,6 @@
 # 18: Biomes step
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 17
 
@@ -12,7 +12,7 @@ Create World gains a Biomes step. The launcher previews the declarations of the 
 
 ## Acceptance criteria
 
-- [ ] A World created with a Biome off never generates that Biome; the Game's table is unchanged for the next World.
-- [ ] Edited Climate points, cave scale, ground and colours appear in the snapshotted table.
-- [ ] Invalid edits are refused at Create and at open.
-- [ ] A World created without visiting the step matches today's output for the same seed.
+- [x] A World created with a Biome off never generates that Biome; the Game's table is unchanged for the next World.
+- [x] Edited Climate points, cave scale, ground and colours appear in the snapshotted table.
+- [x] Invalid edits are refused at Create and at open.
+- [x] A World created without visiting the step matches today's output for the same seed.

@@ -7,6 +7,7 @@ use crate::server::{ContentTables, edit, streaming::MeshState, undo::Journal};
 use bevy::ecs::message::Messages;
 use bevy::ecs::system::EntityCommands;
 use std::time::{Duration, Instant};
+use tesserae_core::biome_edits::{BiomeChoice, BiomeEdits, GroundNames};
 use tesserae_core::save::{GameMode, GameModeV1};
 use tesserae_core::{Burning, Chunk, Fluid, Occupants, Voxel, WorldgenParams};
 use tesserae_mods::Kind;
@@ -665,6 +666,7 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
         world: WorldId::new(),
         pending: true,
         game_mode: GameMode::Creative,
+        biomes: None,
     }
 }
 
@@ -1593,4 +1595,136 @@ fn only_a_world_opened_without_a_save_is_announced_as_new() {
     assert_eq!(announced(&mut rig), 0, "once");
     drop(rig);
     assert_eq!(announced(&mut Rig::new(&dir)), 0, "a reopened World");
+}
+
+fn terra_biomes(opening: &Opening) -> Vec<String> {
+    crate::server::mods::terra_for_save(opening, &WorldSettings::default())
+        .world
+        .unwrap()
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.name.as_str().to_owned())
+        .collect()
+}
+
+fn with_biomes(worlds: &Directory, name: &str, edits: Option<BiomeEdits>) -> PathBuf {
+    library::create(
+        &worlds.0,
+        &library::Sidecar {
+            biomes: edits,
+            ..details(name, 7, 1.0)
+        },
+    )
+    .unwrap()
+}
+
+fn choice(name: &str) -> BiomeChoice {
+    BiomeChoice {
+        name: name.into(),
+        enabled: true,
+        temperature: 0.9,
+        humidity: 0.1,
+        cave_scale: Some(0.0),
+        ground: Some(GroundNames {
+            rock: "terra:stone".into(),
+            soil: "terra:wood".into(),
+            surface: "terra:wood".into(),
+        }),
+        sky_fog: Some(tesserae_core::climate::SkyFog {
+            sky: [10, 20, 30],
+            fog: [40, 50, 60],
+        }),
+    }
+}
+
+fn snapshot(rig: &Rig) -> WorldgenParams {
+    let p = rig.app.world().resource::<Persistence>();
+    p.generation.restore(&p.mapping, p.generator).unwrap()
+}
+
+#[test]
+fn create_time_biome_edits_shape_the_snapshot_and_leave_the_game_alone() {
+    let worlds = Directory::new();
+    let plain = with_biomes(&worlds, "Plain", None);
+    let declared = terra_biomes(&Opening::from_folder(&plain).unwrap());
+    assert!(declared.len() >= 2, "Terra declares Biomes: {declared:?}");
+    let untouched = snapshot(&reopen(&plain));
+    let edits = BiomeEdits {
+        biomes: vec![
+            BiomeChoice {
+                enabled: false,
+                ..choice(&declared[0])
+            },
+            choice(&declared[1]),
+        ],
+        climate: Some(tesserae_core::climate::ClimateParams {
+            temperature_size_m: 900.0,
+            humidity_size_m: 300.0,
+        }),
+    };
+    let tuned = with_biomes(&worlds, "Tuned", Some(edits));
+    let rig = reopen(&tuned);
+    let edited = snapshot(&rig);
+    let names: Vec<_> = edited
+        .biomes
+        .as_slice()
+        .iter()
+        .map(|b| b.name.as_str())
+        .collect();
+    assert!(!names.contains(&declared[0].as_str()), "never generated");
+    let kept = edited.biomes.as_slice()[0];
+    assert_eq!(kept.name.as_str(), declared[1]);
+    assert_eq!((kept.temperature, kept.humidity), (0.9, 0.1));
+    assert_eq!(kept.cave_scale, Some(0.0));
+    assert_eq!(kept.ground.unwrap().rock, rig.stone);
+    assert_eq!(kept.ground.unwrap().soil, rig.wood);
+    assert_eq!(kept.sky_fog.unwrap().sky, [10, 20, 30]);
+    assert_eq!(edited.climate.temperature_size_m, 900.0);
+    drop(rig);
+
+    // The Game's table is unchanged for the next World, which matches one made before.
+    let next = with_biomes(&worlds, "Next", None);
+    assert_eq!(
+        terra_biomes(&Opening::from_folder(&next).unwrap()),
+        declared
+    );
+    assert_eq!(snapshot(&reopen(&next)), untouched);
+}
+
+#[test]
+fn biome_edits_that_cannot_apply_refuse_the_open() {
+    let worlds = Directory::new();
+    let plain = with_biomes(&worlds, "Plain", None);
+    let declared = terra_biomes(&Opening::from_folder(&plain).unwrap());
+    let unknown = BiomeChoice {
+        ground: Some(GroundNames {
+            rock: "terra:stone".into(),
+            soil: "terra:moonrock".into(),
+            surface: "terra:stone".into(),
+        }),
+        ..choice(&declared[0])
+    };
+    let none_left = declared
+        .iter()
+        .map(|name| BiomeChoice {
+            enabled: false,
+            ..choice(name)
+        })
+        .collect();
+    for (name, biomes) in [("Unknown", vec![unknown]), ("Empty", none_left)] {
+        let path = with_biomes(
+            &worlds,
+            name,
+            Some(BiomeEdits {
+                biomes,
+                climate: None,
+            }),
+        );
+        let opening = Opening::from_folder(&path).unwrap();
+        let settings = opening.settings(WorldSettings::default());
+        let mut loaded = crate::server::mods::terra_for_save(&opening, &settings);
+        let refused = Persistence::prepare(opening, &mut loaded, settings);
+        assert!(refused.is_err(), "{name}");
+    }
 }

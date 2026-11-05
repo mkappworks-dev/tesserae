@@ -52,8 +52,11 @@ pub(super) fn spawn(
                     Screen::Title => title(main, l, installed),
                     Screen::Worlds => worlds(main, l, installed, scroll),
                     Screen::Library => library_page(main, installed, scroll),
-                    Screen::Create => form(main, l, installed, scroll),
-                    Screen::Mods => mods_page(main, l, installed, scroll),
+                    Screen::Create(Step::World) => form(main, l, installed, scroll),
+                    Screen::Create(Step::Mods) => mods_page(main, l, installed, scroll),
+                    Screen::Create(Step::Biomes) => biomes_page(main, l, installed, scroll),
+                    Screen::Create(Step::Review) => review(main, l, installed, scroll),
+                    Screen::Discard(_) => discard(main),
                     Screen::Edit(path) => edit(main, l, installed, path, scroll),
                     Screen::Delete(path) => delete(main, l, path),
                     Screen::Trust(next) => trust(main, l, installed, next, scroll),
@@ -882,91 +885,72 @@ fn form(
 ) -> Option<Entity> {
     let f = &l.form;
     let mut focus = None;
-    workspace(main, |w| {
-        cine::sheet(
-            w,
-            Sheet {
-                eyebrow: "CREATE WORLD / WORLD",
-                title: "A World of your own",
-                subtitle: "Choose a Game, give it a name, and plant a seed.",
-            },
-            page_scroll(scroll),
-            |col| {
-                problem(col, f.problem.as_ref());
-                label(col, "World name");
-                focus = Some(text_field(
-                    col,
-                    Field::Name,
-                    &f.name,
-                    "Give it a name you\u{2019}ll want to come back to. Up to 64 characters.",
-                    "New World",
-                ));
-                game_picker(col, f, installed);
-                mode_picker(col, f.game_mode);
-                label(col, "World seed");
-                row(col, 7.0, |r| {
-                    r.spawn(Node {
-                        flex_grow: 1.0,
-                        min_width: Val::Px(240.0),
-                        flex_direction: FlexDirection::Column,
-                        ..default()
-                    })
-                    .with_children(|c| {
-                        text_field(c, Field::Seed, &f.seed, "", "Words or a number");
-                    });
-                    cine::button(r, "Randomize", "", Act::Randomize, Kind::Ghost);
-                });
-                ui::paragraph(
-                    col,
-                    "Words or a number. The same seed and generation settings create the same terrain. Blank picks a random seed.",
-                    12.0,
-                    cine::MUTED,
-                );
-                row(col, 8.0, |r| {
-                    r.spawn((
-                        Resolved,
-                        Text::new(f.seed_label()),
-                        ui::font(12.0),
-                        TextColor(cine::MUTED),
-                        Pickable::IGNORE,
-                    ));
-                    cine::button(r, "Copy", "", Act::CopyResolved, Kind::Ghost);
-                });
-                row(col, 0.0, |r| {
-                    cine::button(
-                        r,
-                        if f.more {
-                            "Hide World options"
-                        } else {
-                            "More World options"
-                        },
-                        "",
-                        Act::More,
-                        Kind::Ghost,
-                    );
-                });
-                if f.more {
-                    label(col, "Voxel size");
-                    row(col, 7.0, |r| {
-                        for (size, text) in VOXEL_SIZES {
-                            cine::choice(r, text, Act::Voxel(size), f.voxel_size_m == size);
-                        }
-                    });
-                    cine::notice(
-                        col,
-                        "1 m is the default. Finer voxels reduce view distance. This choice is fixed when the World is created.",
-                    );
-                }
-            },
-            |foot| {
-                cine::button(foot, "Cancel", "", Act::Back, Kind::Ghost);
-                if installed.mods.is_empty() {
-                    cine::button(foot, "Create World", "", Act::Create, Kind::Primary);
-                } else {
-                    cine::button(foot, "Next: Mods", "", Act::NextMods, Kind::Primary);
-                }
-            },
+    step_frame(main, l, installed, Step::World, scroll, |col| {
+        problem(col, f.problem.as_ref());
+        label(col, "World name");
+        focus = Some(text_field(
+            col,
+            Field::Name,
+            &f.name,
+            "Give it a name you\u{2019}ll want to come back to. Up to 64 characters.",
+            "New World",
+        ));
+        game_picker(col, f, installed);
+        mode_picker(col, f.game_mode);
+        label(col, "World seed");
+        row(col, 7.0, |r| {
+            r.spawn(Node {
+                flex_grow: 1.0,
+                min_width: Val::Px(240.0),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            })
+            .with_children(|c| {
+                text_field(c, Field::Seed, &f.seed, "", "Words or a number");
+            });
+            cine::button(r, "Randomize", "", Act::Randomize, Kind::Ghost);
+        });
+        ui::paragraph(
+            col,
+            "Words or a number. The same seed and generation settings create the same terrain. Blank picks a random seed.",
+            12.0,
+            cine::MUTED,
         );
+        row(col, 8.0, |r| {
+            r.spawn((
+                Resolved,
+                Text::new(f.seed_label()),
+                ui::font(12.0),
+                TextColor(cine::MUTED),
+                Pickable::IGNORE,
+            ));
+            cine::button(r, "Copy", "", Act::CopyResolved, Kind::Ghost);
+        });
+        row(col, 0.0, |r| {
+            cine::button(
+                r,
+                if f.more {
+                    "Hide World options"
+                } else {
+                    "More World options"
+                },
+                "",
+                Act::More,
+                Kind::Ghost,
+            );
+        });
+        if f.more {
+            label(col, "Voxel size");
+            row(col, 7.0, |r| {
+                for (size, text) in VOXEL_SIZES {
+                    cine::choice(r, text, Act::Voxel(size), f.voxel_size_m == size);
+                }
+            });
+            cine::notice(
+                col,
+                "1 m is the default. Finer voxels reduce view distance. This choice is fixed when the World is created.",
+            );
+        }
     });
     focus
 }
@@ -1038,91 +1022,73 @@ fn mods_page(
 ) -> Option<Entity> {
     let f = &l.form;
     let game = f.game.clone().unwrap_or_default();
-    workspace(main, |w| {
-        cine::sheet(
-            w,
-            Sheet {
-                eyebrow: "CREATE WORLD / MODS",
-                title: "Make it your kind of World",
-                subtitle: "Required Mods are locked on. Optional ones load after them.",
-            },
-            page_scroll(scroll),
-            |col| {
-                problem(col, f.problem.as_ref());
-                let required = installed.required(&game);
-                let locked = installed.closure_for(&game, &f.mods);
-                if !required.is_empty() {
-                    label(col, &format!("Required by {}", ui::title(&game)));
-                    for id in &required {
-                        if let Some(m) = installed.mods.iter().find(|m| &m.id == id) {
-                            let (_, about) = installed.about(id);
-                            mod_card(
-                                col,
-                                ModCard {
-                                    act: None,
-                                    border: cine::EDGE,
-                                    selected: false,
-                                    title: format!("{} {}", ui::title(&m.id), m.version),
-                                    detail: about.unwrap_or_default().to_owned(),
-                                    tag: Some(("Required".to_owned(), cine::MUTED)),
-                                },
-                            );
-                        }
-                    }
-                }
-                for section in sections(installed, &required) {
-                    label(col, &section.0);
-                    for i in section.1 {
-                        let m = &installed.mods[i];
-                        let (_, about) = installed.about(&m.id);
-                        let title = format!("{} {}", ui::title(&m.id), m.version);
-                        let mut shown = ModCard {
-                            act: Some(Act::ToggleMod(i)),
+    step_frame(main, l, installed, Step::Mods, scroll, |col| {
+        problem(col, f.problem.as_ref());
+        let required = installed.required(&game);
+        let locked = installed.closure_for(&game, &f.mods);
+        if !required.is_empty() {
+            label(col, &format!("Required by {}", ui::title(&game)));
+            for id in &required {
+                if let Some(m) = installed.mods.iter().find(|m| &m.id == id) {
+                    let (_, about) = installed.about(id);
+                    mod_card(
+                        col,
+                        ModCard {
+                            act: None,
                             border: cine::EDGE,
-                            selected: f.mods.contains(&m.id),
-                            title,
+                            selected: false,
+                            title: format!("{} {}", ui::title(&m.id), m.version),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: None,
-                        };
-                        if let Some(why) = installed.blocked(&game, &m.id) {
-                            shown.act = None;
-                            shown.detail = format!("Unavailable: {why}");
-                            shown.tag = Some(("Unavailable".to_owned(), cine::MUTED));
-                        } else if let Some(clash) = l.clashes.get(&m.id) {
-                            shown.border = cine::WARNING;
-                            shown.detail = format!("Conflicts: {}", clash.reason);
-                            match &clash.replaces {
-                                Some(out) => {
-                                    shown.tag = Some((
-                                        format!("Replaces {}", ui::title(out)),
-                                        cine::WARNING,
-                                    ));
-                                }
-                                None => {
-                                    shown.act = None;
-                                    shown.tag = Some(("Conflict".to_owned(), cine::WARNING));
-                                }
-                            }
-                        } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
-                            shown.act = None;
-                            shown.tag = Some(("Needed by another Mod".to_owned(), cine::MUTED));
-                        } else if shown.selected {
-                            shown.tag = Some(("Added".to_owned(), cine::SAGE));
+                            tag: Some(("Required".to_owned(), cine::MUTED)),
+                        },
+                    );
+                }
+            }
+        }
+        for section in sections(installed, &required) {
+            label(col, &section.0);
+            for i in section.1 {
+                let m = &installed.mods[i];
+                let (_, about) = installed.about(&m.id);
+                let title = format!("{} {}", ui::title(&m.id), m.version);
+                let mut shown = ModCard {
+                    act: Some(Act::ToggleMod(i)),
+                    border: cine::EDGE,
+                    selected: f.mods.contains(&m.id),
+                    title,
+                    detail: about.unwrap_or_default().to_owned(),
+                    tag: None,
+                };
+                if let Some(why) = installed.blocked(&game, &m.id) {
+                    shown.act = None;
+                    shown.detail = format!("Unavailable: {why}");
+                    shown.tag = Some(("Unavailable".to_owned(), cine::MUTED));
+                } else if let Some(clash) = l.clashes.get(&m.id) {
+                    shown.border = cine::WARNING;
+                    shown.detail = format!("Conflicts: {}", clash.reason);
+                    match &clash.replaces {
+                        Some(out) => {
+                            shown.tag =
+                                Some((format!("Replaces {}", ui::title(out)), cine::WARNING));
                         }
-                        mod_card(col, shown);
+                        None => {
+                            shown.act = None;
+                            shown.tag = Some(("Conflict".to_owned(), cine::WARNING));
+                        }
                     }
+                } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
+                    shown.act = None;
+                    shown.tag = Some(("Needed by another Mod".to_owned(), cine::MUTED));
+                } else if shown.selected {
+                    shown.tag = Some(("Added".to_owned(), cine::SAGE));
                 }
-                for line in &installed.rejected {
-                    ui::paragraph(col, format!("Skipped: {line}"), 12.0, cine::WARNING);
-                }
-            },
-            |foot| {
-                cine::button(foot, "Back", "", Act::Back, Kind::Ghost);
-                cine::button(foot, "Create World", "", Act::Create, Kind::Primary);
-            },
-        );
-    });
-    None
+                mod_card(col, shown);
+            }
+        }
+        for line in &installed.rejected {
+            ui::paragraph(col, format!("Skipped: {line}"), 12.0, cine::WARNING);
+        }
+    })
 }
 
 /// What one Mod card shows. `act` makes it a button; without one it only informs.
@@ -1341,8 +1307,8 @@ fn trust(
                 focus = Some(cine::button(
                     foot,
                     match next {
-                        Next::Create if !installed.mods.is_empty() => "Back to Mods",
-                        Next::Create => "Back",
+                        Next::Create => "Back to Review",
+                        Next::Biomes => "Back to Mods",
                         Next::Open(_) => "Cancel",
                     },
                     "",
@@ -1361,6 +1327,7 @@ fn trust(
                         match next {
                             Next::Open(_) => "open",
                             Next::Create => "create",
+                            Next::Biomes => "show their Biomes",
                         }
                     ),
                     "",
@@ -1369,6 +1336,627 @@ fn trust(
                 );
             },
         );
+    });
+    focus
+}
+
+/// Create World's frame: the step rail beside a sheet, with Cancel or Back,
+/// where the player is, and the way forward in the footer. Returns that way
+/// forward, which takes focus on every step after the first.
+fn step_frame(
+    main: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    step: Step,
+    scroll: Vec2,
+    body: impl FnOnce(&mut ChildSpawnerCommands),
+) -> Option<Entity> {
+    let (title, subtitle) = match step {
+        Step::World => (
+            "A World of your own",
+            "Choose a Game, give it a name, and plant a seed.",
+        ),
+        Step::Mods => (
+            "Make it your kind of World",
+            "Add materials and possibilities. You can keep it simple.",
+        ),
+        Step::Biomes => (
+            "Find your natural balance",
+            "Choose Biomes, then tune how they appear.",
+        ),
+        Step::Review => (
+            "Ready for a new beginning?",
+            "A last look at the place you\u{2019}re about to call yours.",
+        ),
+    };
+    let eyebrow = format!("CREATE WORLD / {}", step.label().to_uppercase());
+    let mut forward = None;
+    workspace(main, |w| {
+        step_rail(w, l, installed, step);
+        cine::sheet(
+            w,
+            Sheet {
+                eyebrow: &eyebrow,
+                title,
+                subtitle,
+            },
+            page_scroll(scroll),
+            body,
+            |foot| {
+                match step.previous() {
+                    Some(_) => cine::button(foot, "Back", "", Act::Back, Kind::Ghost),
+                    None => cine::button(foot, "Cancel", "", Act::Back, Kind::Ghost),
+                };
+                ui::text(
+                    foot,
+                    format!("{} of {}", step.index() + 1, Step::ORDER.len()),
+                    12.0,
+                    cine::MUTED,
+                );
+                forward = Some(match step.next() {
+                    Some(next) => cine::button(
+                        foot,
+                        format!("Next: {}", next.label()),
+                        "",
+                        Act::Next,
+                        Kind::Primary,
+                    ),
+                    None => cine::button(foot, "Create World", "", Act::Create, Kind::Primary),
+                });
+            },
+        );
+    });
+    forward
+}
+
+fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, current: Step) {
+    w.spawn((
+        cine::surface(cine::PANEL),
+        Node {
+            width: Val::Px(190.0),
+            flex_shrink: 0.0,
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(7.0),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(20.0)),
+            border: UiRect::all(Val::Px(2.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+            ..default()
+        },
+    ))
+    .with_children(|rail| {
+        rail.spawn(Node {
+            padding: UiRect::new(Val::Px(9.0), Val::Px(0.0), Val::Px(0.0), Val::Px(10.0)),
+            ..default()
+        })
+        .with_children(|title| cine::eyebrow(title, "NEW WORLD"));
+        for step in Step::ORDER {
+            let done = step < current && check(step, &l.form, installed).is_ok();
+            let label = format!(
+                "{}  {}{}",
+                step.index() + 1,
+                step.label(),
+                if done { " \u{00b7} done" } else { "" }
+            );
+            let entry = cine::choice(rail, label, Act::Step(step), step == current);
+            rail.commands().entity(entry).insert(Node {
+                min_height: Val::Px(44.0),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(5.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::FlexStart,
+                ..default()
+            });
+        }
+        rail.spawn(Node {
+            margin: UiRect::top(Val::Auto),
+            padding: UiRect::horizontal(Val::Px(9.0)),
+            ..default()
+        })
+        .with_children(|note| {
+            ui::paragraph(
+                note,
+                "Yours to shape.\nOne choice at a time.",
+                12.0,
+                cine::MUTED,
+            )
+        });
+    });
+}
+
+/// The last step: what the World will be, with a way back to each part.
+fn review(
+    main: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    scroll: Vec2,
+) -> Option<Entity> {
+    let f = &l.form;
+    step_frame(main, l, installed, Step::Review, scroll, |col| {
+        problem(col, f.problem.as_ref());
+        let game = f
+            .game
+            .as_ref()
+            .and_then(|id| installed.games.iter().find(|g| &g.id == id));
+        summary(col, "YOUR WORLD", Step::World, |card| {
+            let name = if f.name.trim().is_empty() {
+                library::DEFAULT_NAME.to_owned()
+            } else {
+                f.name.trim().to_owned()
+            };
+            ui::weighted_text(card, name, 16.0, 500, cine::INK);
+            ui::paragraph(
+                card,
+                format!(
+                    "{} \u{00b7} {} \u{00b7} Voxel size {} m",
+                    game_label(game),
+                    match f.game_mode {
+                        GameMode::Creative => "Creative",
+                        GameMode::Survival => "Survival",
+                    },
+                    f.voxel_size_m
+                ),
+                13.0,
+                cine::MUTED,
+            );
+            ui::paragraph(card, f.seed_label(), 13.0, cine::MUTED);
+        });
+        let mods: Vec<_> = f
+            .game
+            .as_ref()
+            .map(|g| installed.closure_for(g, &f.mods))
+            .unwrap_or_default();
+        summary(col, "MODS", Step::Mods, |card| {
+            ui::weighted_text(
+                card,
+                match mods.len() {
+                    0 => "Just the essentials".to_owned(),
+                    1 => "1 enabled".to_owned(),
+                    n => format!("{n} enabled"),
+                },
+                16.0,
+                500,
+                cine::INK,
+            );
+            ui::paragraph(
+                card,
+                if mods.is_empty() {
+                    format!("{}, with no optional Mods.", game_label(game))
+                } else {
+                    mods.iter()
+                        .map(|m| ui::title(m))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                },
+                13.0,
+                cine::MUTED,
+            );
+        });
+        summary(col, "BIOMES", Step::Biomes, |card| match &f.biomes {
+            Some(draft) => {
+                let on: Vec<_> = draft.choices.iter().filter(|c| c.enabled).collect();
+                let customised = draft
+                    .choices
+                    .iter()
+                    .zip(&draft.declared.biomes)
+                    .filter(|(c, d)| c.enabled && c != d)
+                    .count();
+                ui::weighted_text(
+                    card,
+                    format!("{} of {} enabled", on.len(), draft.choices.len()),
+                    16.0,
+                    500,
+                    cine::INK,
+                );
+                ui::paragraph(
+                    card,
+                    format!(
+                        "{} \u{00b7} {customised} customised",
+                        on.iter()
+                            .map(|c| ui::declared_title(&c.name))
+                            .collect::<Vec<_>>()
+                            .join(" \u{00b7} ")
+                    ),
+                    13.0,
+                    cine::MUTED,
+                );
+                ui::paragraph(
+                    card,
+                    format!(
+                        "Climate size: {} m temperature / {} m humidity",
+                        draft.climate.temperature_size_m, draft.climate.humidity_size_m
+                    ),
+                    13.0,
+                    cine::MUTED,
+                );
+            }
+            None => ui::paragraph(
+                card,
+                "As the Game and Mods declare them.",
+                13.0,
+                cine::MUTED,
+            ),
+        });
+        cine::notice(
+            col,
+            "Your seed, Voxel size and generation settings are fixed at creation. Make a new World to explore a different setup.",
+        );
+    })
+}
+
+/// The third step: every declared Biome, turned on or off, and the selected
+/// one's Climate point, caves, ground and colours.
+fn biomes_page(
+    main: &mut ChildSpawnerCommands,
+    l: &Launcher,
+    installed: &Installed,
+    scroll: Vec2,
+) -> Option<Entity> {
+    let f = &l.form;
+    step_frame(main, l, installed, Step::Biomes, scroll, |col| {
+        problem(col, f.problem.as_ref());
+        let Some(draft) = &f.biomes else {
+            return;
+        };
+        if draft.choices.is_empty() {
+            cine::notice(
+                col,
+                "This Game and its Mods declare no Biomes. The World generates as it always has.",
+            );
+            return;
+        }
+        row(col, 10.0, |r| {
+            ui::text(
+                r,
+                format!(
+                    "{} / {} enabled",
+                    draft.choices.iter().filter(|c| c.enabled).count(),
+                    draft.choices.len()
+                ),
+                13.0,
+                cine::MUTED,
+            );
+            if draft.resetting {
+                ui::text(
+                    r,
+                    "Restore every Biome and the Climate sizes to the Game\u{2019}s defaults?",
+                    13.0,
+                    cine::INK,
+                );
+                cine::button(r, "Keep changes", "", Act::KeepBiomes, Kind::Ghost);
+                cine::button(r, "Reset defaults", "", Act::ConfirmReset, Kind::Primary);
+            } else {
+                cine::button(r, "Reset biome defaults", "", Act::ResetBiomes, Kind::Ghost);
+            }
+        });
+        col.spawn(Node {
+            column_gap: Val::Px(18.0),
+            align_items: AlignItems::FlexStart,
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|split| {
+            split
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(7.0),
+                    width: Val::Percent(42.0),
+                    ..default()
+                })
+                .with_children(|list| {
+                    for (at, choice) in draft.choices.iter().enumerate() {
+                        biome_row(list, at, choice, at == draft.selected);
+                    }
+                });
+            split
+                .spawn((
+                    BackgroundColor(cine::SHEET_HEADER),
+                    BorderColor::all(cine::EDGE),
+                    Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        padding: UiRect::all(Val::Px(17.0)),
+                        border: UiRect::all(Val::Px(1.0)),
+                        border_radius: BorderRadius::all(Val::Px(5.0)),
+                        ..default()
+                    },
+                ))
+                .with_children(|editor| biome_editor(editor, draft));
+        });
+        label(col, "World climate scale");
+        row(col, 10.0, |r| {
+            for (field, title, at) in [
+                (Field::TemperatureSize, "Temperature size (m)", 0),
+                (Field::HumiditySize, "Humidity size (m)", 1),
+            ] {
+                r.spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    width: Val::Px(220.0),
+                    ..default()
+                })
+                .with_children(|c| {
+                    ui::text(c, title, 12.0, cine::MUTED);
+                    text_field(c, field, &draft.sizes[at], "", "");
+                });
+            }
+        });
+        ui::paragraph(
+            col,
+            "Larger values make broader climate regions, in metres at any Voxel size.",
+            12.0,
+            cine::MUTED,
+        );
+    })
+}
+
+fn biome_row(list: &mut ChildSpawnerCommands, at: usize, choice: &BiomeChoice, selected: bool) {
+    list.spawn((
+        BackgroundColor(cine::RAISED),
+        BorderColor::all(if selected { cine::SAGE } else { cine::EDGE }),
+        Node {
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(9.0),
+            padding: UiRect::all(Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(5.0)),
+            ..default()
+        },
+    ))
+    .with_children(|card| {
+        cine::choice(
+            card,
+            if choice.enabled { "On" } else { "Off" },
+            Act::ToggleBiome(at),
+            choice.enabled,
+        );
+        let name = cine::choice(
+            card,
+            ui::declared_title(&choice.name),
+            Act::SelectBiome(at),
+            selected,
+        );
+        card.commands().entity(name).insert(Node {
+            flex_grow: 1.0,
+            min_height: Val::Px(40.0),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::all(Val::Px(5.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::FlexStart,
+            ..default()
+        });
+    });
+}
+
+fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
+    let Some(choice) = draft.choices.get(draft.selected) else {
+        return;
+    };
+    cine::eyebrow(editor, "BIOME SETTINGS");
+    ui::weighted_text(
+        editor,
+        ui::declared_title(&choice.name),
+        16.0,
+        550,
+        cine::INK,
+    );
+    ui::text(
+        editor,
+        if choice.enabled {
+            "Enabled in this World"
+        } else {
+            "Off \u{00b7} turn it on to include it in this World"
+        },
+        12.0,
+        cine::MUTED,
+    );
+    climate_map(editor, draft);
+    let stepper = |editor: &mut ChildSpawnerCommands, title: &str, value: String, knob: Knob| {
+        editor
+            .spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(8.0),
+                ..default()
+            })
+            .with_children(|r| {
+                ui::text(r, title, 13.0, cine::INK);
+                r.spawn(Node {
+                    align_items: AlignItems::Center,
+                    column_gap: Val::Px(8.0),
+                    ..default()
+                })
+                .with_children(|s| {
+                    cine::button(s, "-", "", Act::Nudge(knob, -1), Kind::Ghost);
+                    ui::text(s, value, 13.0, cine::INK);
+                    cine::button(s, "+", "", Act::Nudge(knob, 1), Kind::Ghost);
+                });
+            });
+    };
+    stepper(
+        editor,
+        "Temperature",
+        format!("{:.2}", choice.temperature),
+        Knob::Temperature,
+    );
+    stepper(
+        editor,
+        "Humidity",
+        format!("{:.2}", choice.humidity),
+        Knob::Humidity,
+    );
+    stepper(
+        editor,
+        "Cave scale",
+        match choice.cave_scale {
+            Some(0.0) => "Off".to_owned(),
+            Some(scale) => format!("\u{00d7} {scale:.2}"),
+            None => "\u{00d7} 1.00".to_owned(),
+        },
+        Knob::Caves,
+    );
+    ui::paragraph(
+        editor,
+        "0 turns caves off. 1 keeps the Game\u{2019}s caves.",
+        12.0,
+        cine::MUTED,
+    );
+    let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
+    for (title, layer, name) in [
+        ("Rock", Layer::Rock, ground.map(|g| g.rock.as_str())),
+        ("Soil", Layer::Soil, ground.map(|g| g.soil.as_str())),
+        (
+            "Surface",
+            Layer::Surface,
+            ground.map(|g| g.surface.as_str()),
+        ),
+    ] {
+        let Some(name) = name else {
+            continue;
+        };
+        editor
+            .spawn(Node {
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|r| {
+                ui::text(r, title, 13.0, cine::INK);
+                cine::button(
+                    r,
+                    ui::declared_title(name),
+                    "",
+                    Act::CycleGround(layer),
+                    Kind::Plain,
+                );
+            });
+    }
+    for (title, field, at) in [("Sky colour", Field::Sky, 0), ("Fog colour", Field::Fog, 1)] {
+        ui::text(editor, title, 12.0, cine::MUTED);
+        text_field(editor, field, &draft.colours[at], "", "Game default");
+    }
+}
+
+/// Every Biome's point on temperature and humidity; the selected one is larger.
+fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
+    editor
+        .spawn((
+            BackgroundColor(Color::srgb_u8(0x4d, 0x74, 0x70)),
+            BorderColor::all(cine::EDGE),
+            Node {
+                height: Val::Px(110.0),
+                border: UiRect::all(Val::Px(1.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                margin: UiRect::vertical(Val::Px(6.0)),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|map| {
+            for (at, choice) in draft.choices.iter().enumerate() {
+                let current = at == draft.selected;
+                let size = if current { 16.0 } else { 12.0 };
+                map.spawn((
+                    BackgroundColor(if choice.enabled {
+                        cine::SAGE
+                    } else {
+                        cine::SAGE.with_alpha(0.4)
+                    }),
+                    BorderColor::all(if current { cine::INK } else { Color::BLACK }),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Percent(choice.temperature * 100.0),
+                        bottom: Val::Percent(choice.humidity * 100.0),
+                        width: Val::Px(size),
+                        height: Val::Px(size),
+                        margin: UiRect::new(
+                            Val::Px(-size / 2.0),
+                            Val::Px(0.0),
+                            Val::Px(0.0),
+                            Val::Px(-size / 2.0),
+                        ),
+                        border: UiRect::all(Val::Px(2.0)),
+                        border_radius: BorderRadius::all(Val::Px(3.0)),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
+        });
+    editor
+        .spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        })
+        .with_children(|axis| {
+            ui::text(axis, "Colder", 11.0, cine::MUTED);
+            ui::text(axis, "Temperature", 11.0, cine::MUTED);
+            ui::text(axis, "Warmer", 11.0, cine::MUTED);
+        });
+    ui::text(
+        editor,
+        "Humidity increases from bottom to top.",
+        11.0,
+        cine::MUTED,
+    );
+}
+
+/// One part of the Review, with an Edit link back to its step.
+fn summary(
+    col: &mut ChildSpawnerCommands,
+    title: &str,
+    step: Step,
+    fill: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    col.spawn((
+        BorderColor::all(cine::EDGE.with_alpha(0.5)),
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(6.0),
+            padding: UiRect::vertical(Val::Px(14.0)),
+            border: UiRect::bottom(Val::Px(1.0)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
+    .with_children(|card| {
+        card.spawn(Node {
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            ..default()
+        })
+        .with_children(|head| {
+            cine::eyebrow(head, title);
+            cine::button(head, "Edit", "", Act::Step(step), Kind::Ghost);
+        });
+        fill(card);
+    });
+}
+
+/// Leaving a changed setup asks first.
+fn discard(main: &mut ChildSpawnerCommands) -> Option<Entity> {
+    let mut focus = None;
+    centered(main, true, |card| {
+        ui::weighted_text(card, "Leave this setup?", 22.0, 500, cine::INK);
+        ui::paragraph(
+            card,
+            "Your new World has not been created. Leaving will discard this setup.",
+            13.0,
+            cine::MUTED,
+        );
+        row(card, 8.0, |r| {
+            focus = Some(cine::button(
+                r,
+                "Keep editing",
+                "",
+                Act::KeepEditing,
+                Kind::Ghost,
+            ));
+            cine::button(r, "Discard setup", "", Act::DiscardSetup, Kind::Danger);
+        });
     });
     focus
 }

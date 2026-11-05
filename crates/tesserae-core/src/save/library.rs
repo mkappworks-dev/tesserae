@@ -49,6 +49,10 @@ pub struct Sidecar {
     /// game modes.
     #[serde(default)]
     pub game_mode: super::GameMode,
+    /// The player's Create-time Biome changes, applied once when the World is
+    /// first opened. Absent leaves the Game's Biomes as declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub biomes: Option<crate::biome_edits::BiomeEdits>,
 }
 
 /// The name given to the single World that predates the World list.
@@ -115,6 +119,7 @@ impl Sidecar {
             world: commit.world.clone(),
             pending: false,
             game_mode: commit.game_mode,
+            biomes: None,
         }
     }
 }
@@ -332,6 +337,7 @@ mod tests {
             world: WorldId::new(),
             pending: true,
             game_mode: Default::default(),
+            biomes: None,
         }
     }
 

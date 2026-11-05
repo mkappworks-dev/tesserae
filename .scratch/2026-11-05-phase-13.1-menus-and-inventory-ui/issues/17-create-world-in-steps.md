@@ -1,6 +1,6 @@
 # 17: Create World in steps
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 16, 06
 
@@ -12,7 +12,7 @@ Create World becomes steps with a rail: World (name, Game, game mode, seed, Voxe
 
 ## Acceptance criteria
 
-- [ ] Creating through the steps produces the same World as today for the same inputs, plus its default mode.
-- [ ] A name over 64 characters or a missing Game is held on the World step.
-- [ ] Cancel on a changed setup asks before discarding.
-- [ ] Client App tests walk the steps by keyboard.
+- [x] Creating through the steps produces the same World as today for the same inputs, plus its default mode.
+- [x] A name over 64 characters or a missing Game is held on the World step.
+- [x] Cancel on a changed setup asks before discarding.
+- [x] Client App tests walk the steps by keyboard.
