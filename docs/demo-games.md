@@ -27,6 +27,11 @@ Every Game has a food that lies in its World: a solid Material whose Item has a
 food value, scattered by world generation as a surface feature of the Biomes
 whose surface suits it. Break one to pick it up and press G to eat it.
 
+The four SDK Games declare their food through [`games/kit`](../games/kit/), a
+small crate, linked by path, of the texture noise, the texture layout and the
+food declarations they share; each keeps only its own numbers and pattern.
+`terra` does not use it, so it stays self-contained.
+
 | Game      | Food                | Hunger | On the surface of                                      | Spacing |
 | --------- | ------------------- | ------ | ------------------------------------------------------ | ------- |
 | terra     | `terra:melon`       | 6      | `temperate` (`terra:grass`)                            | 16 m    |

@@ -247,3 +247,43 @@ fn every_demo_games_food_places_breaks_picks_up_and_eats() {
         assert_eq!(held(&mut app, food.item), 0);
     }
 }
+
+/// FNV-1a, enough to tell whether any texture byte moved.
+fn fingerprint(textures: &[(String, Vec<u8>)]) -> u64 {
+    textures
+        .iter()
+        .flat_map(|(name, pixels)| name.bytes().chain(pixels.iter().copied()))
+        .fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+        })
+}
+
+/// Pins every texture the demo Games make, so code they share cannot change what they draw.
+#[test]
+fn the_demo_games_textures_are_unchanged() {
+    let pinned = [
+        ("terra", 0x8315_f438_70b3_1396),
+        ("meadow", 0x5a2b_6c07_7a9e_ec3d),
+        ("ember", 0xf36d_dd1c_3496_4938),
+        ("tidewater", 0xb185_0251_6959_e86a),
+        ("lumen", 0xc983_25a8_ef29_a087),
+    ];
+    for (game, expected) in pinned {
+        let (_install, loaded) = loaded(game, 1.0);
+        let mut textures: Vec<_> = loaded
+            .textures
+            .iter()
+            .map(|(id, pixels)| {
+                let name = loaded
+                    .registry
+                    .names(Kind::Material)
+                    .find(|&(at, _)| at == usize::from(*id))
+                    .map(|(_, name)| name.to_owned())
+                    .unwrap();
+                (name, pixels.clone())
+            })
+            .collect();
+        textures.sort();
+        assert_eq!(fingerprint(&textures), expected, "{game}");
+    }
+}
