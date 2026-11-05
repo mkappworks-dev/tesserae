@@ -1179,6 +1179,51 @@ fn quitting_while_dead_reopens_still_dead() {
     assert_eq!(vitals(&reopened).health, 0.0);
 }
 
+/// The death happened; a switch to Creative in Edit World does not undo it.
+#[test]
+fn a_survival_death_reopens_dead_after_edit_world_switches_the_player_to_creative() {
+    let worlds = Directory::new();
+    let path = survival_world(&worlds);
+    let mut rig = reopen(&path);
+    assert_eq!(player_mode(&mut rig), GameMode::Survival);
+    let died = Death {
+        cause: Some(save::DeathCause::Starvation),
+        at_m: Vec3::new(1.5, 2.0, 1.5),
+        dropped: Vec::new(),
+        drops: Vec::new(),
+        kept_inventory: false,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert((
+        died.clone(),
+        Vitals {
+            health: 0.0,
+            ..Vitals::default()
+        },
+    ));
+    rig.tick();
+    rig.settled_save();
+    drop(rig);
+    library::request_modes(
+        &path,
+        library::ModeChanges {
+            default: None,
+            own: Some(GameMode::Creative),
+        },
+    )
+    .unwrap();
+
+    let mut reopened = reopen(&path);
+    assert_eq!(player_mode(&mut reopened), GameMode::Creative);
+    assert_eq!(death(&reopened), Some(died));
+    assert_eq!(vitals(&reopened).health, 0.0);
+}
+
 #[test]
 fn a_deaths_despawn_countdown_continues_after_save_and_reopen() {
     use tesserae_core::entity::{DESPAWN_STEPS, DropSpec, STEP_S};

@@ -600,6 +600,25 @@ mod tests {
         assert!(eye(&mut app).x > from.x + 1.0, "moves again");
     }
 
+    /// As a World reopened in Creative after a Survival death holds it.
+    #[test]
+    fn a_player_dead_in_creative_respawns_with_full_vitals() {
+        let mut app = app(false);
+        fall_to_death(&mut app);
+        let mut mode = app.world_mut().query::<&mut PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = GameMode::Creative;
+        app.update();
+        assert!(last_report(&app).death.cause.is_some(), "still dead");
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        let told = &app.world().resource::<Told>().deaths;
+        assert_eq!(told.last(), Some(&DeathChanged(None)));
+        let rules = app.world().resource::<Survival>().rules;
+        assert_eq!(vitals(&mut app), Vitals::full(&rules));
+        let at = eye(&mut app);
+        assert!((at.with_y(0.0) - SPAWN.with_y(0.0)).length() < 1e-3, "{at}");
+    }
+
     #[test]
     fn undo_after_a_respawn_has_nothing_from_before_the_death() {
         let mut app = app(false);
