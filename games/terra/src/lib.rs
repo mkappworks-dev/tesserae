@@ -446,6 +446,7 @@ impl Guest for Terra {
                         fog: (136, 160, 190),
                     }),
                     cave_scale: None,
+                    surface_features: Vec::new(),
                 },
                 BiomeDef {
                     name: "dry".into(),
@@ -461,6 +462,7 @@ impl Guest for Terra {
                         fog: (196, 178, 142),
                     }),
                     cave_scale: Some(1.5),
+                    surface_features: Vec::new(),
                 },
                 BiomeDef {
                     name: "cold".into(),
@@ -476,6 +478,7 @@ impl Guest for Terra {
                         fog: (176, 190, 208),
                     }),
                     cave_scale: Some(0.0),
+                    surface_features: Vec::new(),
                 },
             ],
             survival: None,

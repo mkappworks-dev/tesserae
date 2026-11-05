@@ -1,6 +1,6 @@
 # 21: Surface features
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 08
 
@@ -12,12 +12,48 @@ A Biome can declare surface features: a Material scattered one Voxel above that 
 
 ## Acceptance criteria
 
-- [ ] A Biome declares surface features in the 0.3 contract and the data-only form; out-of-range spacing, an unknown or non-solid Material, and too many features are refused at load.
-- [ ] Generation places features one Voxel above the Biome's full solid surface at the declared mean spacing, deterministically from the seed, and never floating, underground, under a fluid or on a smoothed surface.
-- [ ] Features are absent at coarse distance levels.
-- [ ] A World saved before this ticket generates identical terrain after it.
-- [ ] Removing a feature drops its Item, as for any Voxel.
+- [x] A Biome declares surface features in the 0.3 contract and the data-only form; out-of-range spacing, an unknown or non-solid Material, and too many features are refused at load.
+- [x] Generation places features one Voxel above the Biome's full solid surface at the declared mean spacing, deterministically from the seed, and never floating, underground, under a fluid or on a smoothed surface.
+- [x] Features are absent at coarse distance levels.
+- [x] A World saved before this ticket generates identical terrain after it.
+- [x] Removing a feature drops its Item, as for any Voxel.
 
 ## Comments
 
 - Maintainer, 2026-11-05: chosen over a breaking drop, a starter kit or waiting for step 18, so that food lies in the World. Plants (step 18) adds growth and harvesting on top.
+- The contract appends `surface-features: list<surface-feature>` to
+  `biome-def`, where `surface-feature` is `{ material: string, spacing-m: f32 }`;
+  the data-only form takes
+  `surface-features = [{ material = "...", spacing-m = 16.0 }]`. No list of
+  surface Materials to stand on: a feature stands on its Biome's own surface
+  Material (the Biome's `ground`, or the World's for a Biome without one), which
+  covers every demo Game.
+- Load refuses, naming the Mod and `biome`: more than 4 features in a Biome, a
+  spacing outside 4 to 1024 m (4 m at 1 m Voxels is one column in 16, already a
+  carpet; 1024 m is one in a square kilometre), and a Material that is unknown,
+  Air, not solid or a fluid. A saved snapshot is checked the same way when it
+  reopens.
+- A column's draw is a uniform number from a hash of the folded World seed and
+  the column's metre position. Each feature's chance is
+  `(voxel size / spacing)²`, the features' chances laid end to end so each keeps
+  its own density, so the mean spacing is the declared metres at any Voxel size.
+  The Biome is looked up only for a draw below the largest total. A feature
+  stands in the cell over the cube pass's top Voxel when that Voxel is a full
+  cube of the Biome's surface Material and the cell is still air after the lake
+  and smoothing: never under a fluid, on a stair or slab, or where a cave carved
+  the top. The cell's floor must also be inside the surface band, so the
+  open-sky early-outs (`surface_bounds_m`) stay true; only a column within one
+  Voxel of the very top of the relief is skipped. Like a stair, a cell over the
+  last Voxel of the Chunk below is made by the Chunk above.
+- The LOD source generators run on `WorldgenParams::without_surface_features`:
+  the level 0 that level 1 downsamples, every coarser source and the column
+  generators. Downsampling a level 0 with features let two of them in one octant
+  win a coarse Voxel's vote. A Chunk a player changed keeps the features it
+  held, and downsamples like any other edit.
+- No Generator version change: without features no pass runs, and a saved
+  Biome omits an empty `surface_features`. `tesserae-core/tests/surface_features.rs`
+  pins digests recorded before this ticket for a Biome World with caves,
+  smoothing, a lake, Biome grounds and ore, generated directly and through a
+  saved snapshot.
+- Create World Biome edits keep a Biome's features; the step has no control for
+  them.

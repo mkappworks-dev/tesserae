@@ -10,8 +10,8 @@ use tesserae_core::survival::MAX_SURVIVAL_VALUE;
 use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
     GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
-    ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurvivalRules, Tables, Voxel,
-    WaterParams, WorldgenParams,
+    ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurfaceFeature, SurfaceFeatures,
+    SurvivalRules, Tables, Voxel, WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -564,6 +564,25 @@ pub fn resolve_biomes(
                     rule: RULE.get_or_init(|| format!("must be from 0 to {MAX_CAVE_SCALE}")),
                 }));
             }
+            let features = def
+                .surface_features
+                .iter()
+                .map(|f| {
+                    let material = lookup(b, registry, "biome", row, &f.material)?;
+                    if !tables.materials.solid(Voxel::cube(material))
+                        || tables.fluids.contains(material)
+                    {
+                        return Err(bad(ParamError {
+                            field: "biomes.surface_features.material",
+                            rule: "must be a solid Material",
+                        }));
+                    }
+                    Ok(SurfaceFeature {
+                        material,
+                        spacing_m: f.spacing_m,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             biomes.push(Biome {
                 name: BiomeName::new(&format!("{}:{}", b.mod_id, def.name)).map_err(bad)?,
                 temperature: def.temperature,
@@ -574,6 +593,7 @@ pub fn resolve_biomes(
                     fog: c.fog.into(),
                 }),
                 cave_scale: def.cave_scale,
+                surface_features: SurfaceFeatures::new(&features).map_err(bad)?,
             });
         }
     }

@@ -589,6 +589,16 @@ pub struct SavedBiome {
     /// Absent is the World's own caves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cave_scale: Option<f32>,
+    /// Absent is bare ground, as every Biome was before it could declare features.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub surface_features: Vec<SavedSurfaceFeature>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SavedSurfaceFeature {
+    pub material: String,
+    pub spacing_m: f32,
 }
 
 /// Material and Biomes by name, since ids are only meaningful beside the tables that made them.
@@ -711,6 +721,17 @@ fn saved_biome(b: &crate::Biome, mapping: &Mapping) -> Result<SavedBiome, Error>
         ground: b.ground.map(|g| ground_names(g, mapping)).transpose()?,
         sky_fog: b.sky_fog,
         cave_scale: b.cave_scale,
+        surface_features: b
+            .surface_features
+            .as_slice()
+            .iter()
+            .map(|f| {
+                Ok(SavedSurfaceFeature {
+                    material: mapping.material_name(f.material)?,
+                    spacing_m: f.spacing_m,
+                })
+            })
+            .collect::<Result<_, Error>>()?,
     })
 }
 
@@ -745,10 +766,27 @@ fn restored_biomes(saved: &[SavedBiome], mapping: &Mapping) -> Result<crate::Bio
                     .transpose()?,
                 sky_fog: b.sky_fog,
                 cave_scale: b.cave_scale,
+                surface_features: restored_features(&b.surface_features, mapping)?,
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
     crate::BiomeTable::new(&biomes).map_err(|e| Error::Corrupt(e.to_string()))
+}
+
+fn restored_features(
+    saved: &[SavedSurfaceFeature],
+    mapping: &Mapping,
+) -> Result<crate::SurfaceFeatures, Error> {
+    let features = saved
+        .iter()
+        .map(|f| {
+            Ok(crate::SurfaceFeature {
+                material: mapping.material_id(&f.material)?,
+                spacing_m: f.spacing_m,
+            })
+        })
+        .collect::<Result<Vec<_>, Error>>()?;
+    crate::SurfaceFeatures::new(&features).map_err(|e| Error::Corrupt(e.to_string()))
 }
 
 fn saved_ore(

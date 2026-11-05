@@ -62,6 +62,7 @@ mod tests {
             ground: None,
             sky_fog,
             cave_scale: None,
+            surface_features: Default::default(),
         }
     }
 

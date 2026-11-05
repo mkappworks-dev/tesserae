@@ -145,7 +145,10 @@ World's. A Biome never changes the surface height. A Biome may scale the caves
 with `cave-scale` (0 to 4, a multiplier on `caves.radius_m`; 0 is no caves),
 which eases across the border where `ground` switches. A Biome may also name a
 `sky-fog` pair of sRGB colours (see [Data Mods](data-mods.md)); the sky and fog
-ease to the blend of the Biomes around the Player.
+ease to the blend of the Biomes around the Player. A Biome may list up to four
+`surface-features`, solid Materials the Engine stands one Voxel above the
+Biome's surface Material at a mean spacing in metres (see
+[Data Mods](data-mods.md)); a Mod still places no terrain itself.
 
 | Table                       | Fields                                                                                                                                                                                                                                                                                                                                                        |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -170,7 +173,7 @@ ease to the blend of the Biomes around the Player.
 | `[[combustion]]`            | `fuel`, `ignition-threshold`, `ignition-delay-s`, `emission`, optional `heat`, `end`                                                                                                                                                                                                                                                                          |
 | `[[tools]]` (Game)          | `name`, `kind`                                                                                                                                                                                                                                                                                                                                                |
 | `[[items]]`                 | `name`, `size-m` (0.05 to 0.5 m), `color`, optional `material` (solid; at most one item per Material; removing a Voxel of it drops the item), optional `max-stack` (1 to 64; omitted is 64), optional `food` (hunger restored, above 0 and at most 1000)                                                                                                      |
-| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4); at most 16 per Mod and in a World                                                                                                          |
+| `[[biomes]]`                | `name`, `temperature`, `humidity` (both 0 to 1), optional `ground` (`rock`, `soil`, `surface`: solid Materials by full name), optional `sky-fog` (`sky`, `fog`: sRGB `[r, g, b]`), optional `cave-scale` (0 to 4), optional `surface-features` (at most 4, each `material`: a solid by full name, `spacing-m`: 4 to 1024); at most 16 per Mod and in a World  |
 | `[survival]` (Game)         | each optional, omitted keeps the engine's default: `max-health` (20), `max-hunger` (20), `max-air-s` (10), `safe-fall-m` (3), `fall-damage-per-m` (1), `drowning-damage-per-s` (2), `hunger-per-min` (1), `sprinting-hunger-per-min` (2), `regeneration-hunger` (18), `regeneration-per-s` (0.25), `starvation-damage-per-s` (0.25), `keep-inventory` (false) |
 | `[[ores]]`                  | `material` (solid), `min-depth-m`, `max-depth-m`, `vein-size-m`, `rarity`, optional `biomes`; 16 per Mod, 32 in a World                                                                                                                                                                                                                                       |
 
@@ -183,9 +186,9 @@ tool `kind` is `measure`. A combustion `end` is `"permanent"` or
 removes the solid.
 
 Materials, Shapes and Biomes are declared by local name. Ground, water, fluid,
-reaction, combustion and ore names, and the Biomes an ore lists, are full
-`<mod id>:<name>` names and resolve after every Mod has declared, whether the
-Material came from data or from a component.
+reaction, combustion, ore and surface feature names, and the Biomes an ore
+lists, are full `<mod id>:<name>` names and resolve after every Mod has
+declared, whether the Material came from data or from a component.
 
 ### A Declaration using every table
 
@@ -389,6 +392,7 @@ temperature = 0.1
 humidity = 0.4
 ground = { rock = "showcase:stone", soil = "showcase:ash", surface = "showcase:wood" }
 sky-fog = { sky = [150, 164, 184], fog = [176, 190, 208] }
+surface-features = [{ material = "showcase:iron", spacing-m = 32.0 }]
 
 [[ores]]
 material = "showcase:iron"

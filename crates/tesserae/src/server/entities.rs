@@ -275,6 +275,80 @@ mod tests {
         assert!(voxel_at(&app, [5, 7, 5]).is_air());
     }
 
+    /// World generation stands a feature like any other Voxel, so removing one drops its Item.
+    #[test]
+    fn removing_a_generated_surface_feature_drops_its_item() {
+        use tesserae_core::{
+            Biome, BiomeName, BiomeTable, CHUNK_SIZE, SurfaceFeature, SurfaceFeatures, Worldgen,
+            WorldgenParams,
+        };
+        let lantern = tesserae_core::testgen::fixtures().lantern;
+        let field = Biome {
+            name: BiomeName::new("t:field").unwrap(),
+            temperature: 0.5,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: None,
+            cave_scale: None,
+            surface_features: SurfaceFeatures::new(&[SurfaceFeature {
+                material: lantern,
+                spacing_m: 4.0,
+            }])
+            .unwrap(),
+        };
+        let params = WorldgenParams {
+            caves: None,
+            smoothing: None,
+            biomes: BiomeTable::new(&[field]).unwrap(),
+            ..tesserae_core::testgen::world_params()
+        };
+        let generator = Worldgen::new(7, 1.0, params);
+        let size = CHUNK_SIZE as i32;
+        let (coord, chunk, at) = (0..4)
+            .find_map(|cy| {
+                let chunk = generator.chunk(0, cy, 0);
+                let local = (0..size - 4).find_map(|y| {
+                    (2..size - 2).find_map(|z| {
+                        (2..size - 2)
+                            .find(|&x| {
+                                chunk.get(x as usize, y as usize, z as usize).material() == lantern
+                            })
+                            .map(|x| [x, y, z])
+                    })
+                })?;
+                Some((crate::world::ChunkCoord::new(0, cy, 0), chunk, local))
+            })
+            .expect("a feature near the origin");
+        let at = [at[0], coord.y * size + at[1], at[2]];
+        let mut app = app_with(&[(coord, chunk)]);
+        survival(&mut app);
+        app.insert_resource(Items(vec![ItemDef {
+            name: "t:lamp".into(),
+            size_m: 0.25,
+            color: [1, 2, 3, 255],
+            material: Some(lantern),
+            max_stack: 64,
+            food: None,
+        }]));
+        app.init_resource::<EntityStore>()
+            .init_resource::<Refused>()
+            .add_message::<Pickup>();
+        let above = Vec3::new(at[0] as f32 + 0.5, at[1] as f32 + 3.0, at[2] as f32 + 0.5);
+        send(
+            &mut app,
+            super::super::edit::EditIntent {
+                action: EditAction::Remove,
+                origin: above,
+                direction: Vec3::NEG_Y,
+            },
+        );
+        tick(&mut app);
+        assert!(voxel_at(&app, at).is_air());
+        let store = app.world().resource::<EntityStore>();
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.iter().next().unwrap().as_dropped().item, 0);
+    }
+
     #[test]
     fn a_creative_removal_drops_nothing() {
         let mut app = game();

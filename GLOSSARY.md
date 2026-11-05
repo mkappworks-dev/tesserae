@@ -160,8 +160,12 @@ function of the seed and a position in metres. They choose the Biome; they are
 not a Biome.
 
 **Biome** — a region type a Game or Mod declares and Climate selects. It owns
-the ground Materials, ores, cave tuning and the sky and fog colours of the
-columns it covers.
+the ground Materials, surface features, ores, cave tuning and the sky and fog
+colours of the columns it covers.
+
+**Surface feature** — a Material a Biome declares and world generation stands
+one Voxel above that Biome's full surface Voxels, from the seed, at a mean
+spacing in metres. Level 0 only; a Mod still places no terrain.
 
 **Generator version** — the revision of the world generation algorithm a World
 was created under. A World keeps it for life, so a later revision never changes

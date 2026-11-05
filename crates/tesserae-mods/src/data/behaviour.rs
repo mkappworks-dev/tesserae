@@ -220,6 +220,16 @@ pub(super) struct Biome {
     sky_fog: Option<SkyFog>,
 
     cave_scale: Option<f32>,
+
+    #[serde(default)]
+    surface_features: Vec<SurfaceFeature>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+struct SurfaceFeature {
+    material: String,
+    spacing_m: f32,
 }
 
 #[derive(Deserialize)]
@@ -261,6 +271,15 @@ impl From<Biome> for content::BiomeDef {
             sky_fog: b.sky_fog.map(Into::into),
 
             cave_scale: b.cave_scale,
+
+            surface_features: b
+                .surface_features
+                .into_iter()
+                .map(|f| content::SurfaceFeature {
+                    material: f.material,
+                    spacing_m: f.spacing_m,
+                })
+                .collect(),
         }
     }
 }

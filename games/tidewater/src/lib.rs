@@ -261,6 +261,7 @@ impl Guest for Tidewater {
                         fog: (132, 172, 192),
                     }),
                     cave_scale: Some(1.4),
+                    surface_features: Vec::new(),
                 },
                 BiomeDef {
                     name: "salt_flats".into(),
@@ -276,6 +277,7 @@ impl Guest for Tidewater {
                         fog: (190, 184, 166),
                     }),
                     cave_scale: Some(0.0),
+                    surface_features: Vec::new(),
                 },
                 BiomeDef {
                     name: "cold_shallows".into(),
@@ -291,6 +293,7 @@ impl Guest for Tidewater {
                         fog: (168, 186, 206),
                     }),
                     cave_scale: None,
+                    surface_features: Vec::new(),
                 },
             ],
             survival: None,

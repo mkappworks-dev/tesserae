@@ -412,6 +412,23 @@ interface content {
         /// `none` and 1 leave the caves as they are, 0 switches them off. It
         /// blends smoothly across the Biome's border, unlike `ground`.
         cave-scale: option<f32>,
+
+        /// At most 4 Materials the engine stands one Voxel above this Biome's
+        /// surface Material, where the column's top is a full Voxel of it with
+        /// air above: never under a fluid, on a smoothed step or in a cave
+        /// mouth. Distance levels leave them out.
+        surface-features: list<surface-feature>,
+    }
+
+    /// A Material scattered over a Biome's surface, deterministically from the
+    /// World seed. Removing one drops its Item as any Voxel does.
+    record surface-feature {
+        /// A solid Material, `<mod id>:<name>`, resolved after every Mod's
+        /// Declaration.
+        material: string,
+        /// About one in every `spacing-m` by `spacing-m` metres of the Biome's
+        /// surface, at any Voxel size; from 4 to 1024.
+        spacing-m: f32,
     }
 
     /// A sky colour and the fog that matches it, as sRGB bytes. A pair, so a

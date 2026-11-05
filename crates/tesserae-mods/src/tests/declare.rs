@@ -3,7 +3,8 @@
 use tesserae_core::shape::examples;
 use tesserae_core::{
     Arm, BiomeId, BiomeSet, BiomeTable, ConnectDef, Connections, GroundParams, MaterialError,
-    OreTable, Orientation, ShapeDef, ShapeError, SkyFog, Tables, Voxel, WorldgenParams,
+    MaterialId, OreTable, Orientation, ShapeDef, ShapeError, SkyFog, SurfaceFeature, Tables, Voxel,
+    WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -1421,6 +1422,7 @@ fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {
         ground: None,
         sky_fog: None,
         cave_scale: None,
+        surface_features: Vec::new(),
     }
 }
 
@@ -1658,6 +1660,117 @@ fn a_bad_cave_scale_names_the_mod_that_declared_it() {
             }
             other => panic!("{scale}: {other:?}"),
         }
+    }
+}
+
+fn feature(material: &str, spacing_m: f32) -> content::SurfaceFeature {
+    content::SurfaceFeature {
+        material: material.into(),
+        spacing_m,
+    }
+}
+
+#[test]
+fn a_biomes_surface_features_resolve_to_any_mods_solid_in_order() {
+    let mut load = Load::new();
+    let (biomes, _) = resolved_biomes(
+        &mut load,
+        &[
+            ("a", declaring(&["melon"], &[])),
+            (
+                "b",
+                with_biomes(
+                    &["gourd"],
+                    vec![
+                        content::BiomeDef {
+                            surface_features: vec![
+                                feature("b:gourd", 24.0),
+                                feature("a:melon", 16.0),
+                            ],
+                            ..biome("field", 0.5, 0.5)
+                        },
+                        biome("bare", 0.2, 0.2),
+                    ],
+                    vec![],
+                ),
+            ),
+        ],
+    )
+    .unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as MaterialId;
+    assert_eq!(
+        biomes.as_slice()[0].surface_features.as_slice(),
+        [
+            SurfaceFeature {
+                material: id("b:gourd"),
+                spacing_m: 24.0
+            },
+            SurfaceFeature {
+                material: id("a:melon"),
+                spacing_m: 16.0
+            },
+        ]
+    );
+    assert!(biomes.as_slice()[1].surface_features.is_empty());
+}
+
+#[test]
+fn a_bad_surface_feature_names_the_mod_and_the_field() {
+    let refused = |features: Vec<content::SurfaceFeature>| {
+        let mut d = with_biomes(
+            &["melon"],
+            vec![content::BiomeDef {
+                surface_features: features,
+                ..biome("field", 0.5, 0.5)
+            }],
+            vec![],
+        );
+        d.materials.push(content::MaterialDef {
+            name: "mist".into(),
+            solid: false,
+            ..material("mist")
+        });
+        let mut load = Load::new();
+        let applied = load.apply("m", d).unwrap();
+        resolve_biomes(&[applied.behaviour], &load.tables, &load.registry).unwrap_err()
+    };
+    for (bad, field) in [
+        (
+            vec![feature("m:melon", 3.0)],
+            "biomes.surface_features.spacing_m",
+        ),
+        (
+            vec![feature("m:melon", 2048.0)],
+            "biomes.surface_features.spacing_m",
+        ),
+        (
+            vec![feature("m:melon", f32::NAN)],
+            "biomes.surface_features.spacing_m",
+        ),
+        (
+            vec![feature("m:mist", 16.0)],
+            "biomes.surface_features.material",
+        ),
+        (
+            vec![feature("core:air", 16.0)],
+            "biomes.surface_features.material",
+        ),
+        (vec![feature("m:melon", 16.0); 5], "biomes.surface_features"),
+    ] {
+        match refused(bad) {
+            ModError::Params { id, what, source } => {
+                assert_eq!((id.as_str(), what), ("m", "biome"), "{field}");
+                assert_eq!(source.field, field);
+            }
+            other => panic!("{field}: {other:?}"),
+        }
+    }
+    match refused(vec![feature("m:nothing", 16.0)]) {
+        ModError::UnknownName { id, what, name, .. } => assert_eq!(
+            (id.as_str(), what, name.as_str()),
+            ("m", "biome", "m:nothing")
+        ),
+        other => panic!("{other:?}"),
     }
 }
 

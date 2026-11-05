@@ -115,6 +115,17 @@ Unlike `ground`, it blends smoothly across a Biome's border, so there is no wall
 where a cave field meets a solid one. It does nothing in a World without
 `[world.caves]`, and caves still only turn solid into air.
 
+A Biome row may also add `surface-features`, at most four
+`{ material, spacing-m }` entries: a solid Material by full name from any Mod,
+and the mean distance between two of them in metres, from 4 to 1024. The Engine
+stands one, deterministically from the World seed, about once in every
+`spacing-m` by `spacing-m` metres of the Biome's surface at any Voxel size, one
+Voxel above a column whose top is a full Voxel of the Biome's surface Material
+with air above it: never under water or another fluid, on a smoothed stair or
+slab, or in a cave mouth. Removing one drops its Item like any Voxel. The coarse
+LOD levels leave them out. The World's saved Biome table carries them, so a
+World saved before a Game added features keeps its bare ground.
+
 Tables that are absent change nothing: a World with no Biomes generates as it
 always did.
 

@@ -63,6 +63,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (142, 168, 192),
             }),
             cave_scale: None,
+            surface_features: Vec::new(),
         },
         BiomeDef {
             name: "heath".into(),
@@ -74,6 +75,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (170, 168, 170),
             }),
             cave_scale: None,
+            surface_features: Vec::new(),
         },
         BiomeDef {
             name: "dunes".into(),
@@ -85,6 +87,7 @@ fn biomes() -> Vec<BiomeDef> {
                 fog: (194, 178, 150),
             }),
             cave_scale: None,
+            surface_features: Vec::new(),
         },
     ]
 }

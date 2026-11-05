@@ -155,12 +155,12 @@ fn edited(
         None => None,
     };
     Ok(Biome {
-        name: biome.name,
         temperature: choice.temperature,
         humidity: choice.humidity,
         ground,
         sky_fog: choice.sky_fog,
         cave_scale: choice.cave_scale,
+        ..*biome
     })
 }
 
@@ -181,6 +181,7 @@ mod tests {
             ground: None,
             sky_fog: None,
             cave_scale: None,
+            surface_features: Default::default(),
         }
     }
 
@@ -303,6 +304,35 @@ mod tests {
         assert_eq!(plain.sky_fog, Some(sky_fog));
         assert_eq!(edited.climate.temperature_size_m, 800.0);
         assert_eq!(edited.biomes.as_slice()[1], params().biomes.as_slice()[1]);
+    }
+
+    #[test]
+    fn an_edited_biome_keeps_its_surface_features() {
+        let mut declared = params();
+        let table = declared.biomes.as_slice().to_vec();
+        let features = crate::SurfaceFeatures::new(&[crate::SurfaceFeature {
+            material: SAND,
+            spacing_m: 16.0,
+        }])
+        .unwrap();
+        declared.biomes = BiomeTable::new(&[
+            Biome {
+                surface_features: features,
+                ..table[0]
+            },
+            table[1],
+            table[2],
+        ])
+        .unwrap();
+        let edits = BiomeEdits {
+            biomes: vec![BiomeChoice {
+                temperature: 0.9,
+                ..choice("t:plain")
+            }],
+            climate: None,
+        };
+        let edited = edits.apply(declared, material).unwrap();
+        assert_eq!(edited.biomes.as_slice()[0].surface_features, features);
     }
 
     #[test]
