@@ -400,7 +400,11 @@ fn render(
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Frame,
-    (mode, hotbar): (Res<super::game_mode::Mode>, Res<super::edit::Hotbar>),
+    (mode, hotbar, preferences): (
+        Res<super::game_mode::Mode>,
+        Res<super::edit::Hotbar>,
+        Res<super::profile::Preferences>,
+    ),
     focus: Option<Res<InputFocus>>,
     mut built: Local<Option<Built>>,
 ) {
@@ -466,7 +470,11 @@ fn render(
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    BackgroundColor(SCRIM),
+                    BackgroundColor(if preferences.solid_background {
+                        super::cinematic::SCENE
+                    } else {
+                        SCRIM
+                    }),
                 ))
                 .add_child(row);
             row
@@ -1315,6 +1323,28 @@ mod tests {
             turnable,
             geometry: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_text_field_takes_i_and_c_as_letters() {
+        let mut app = app();
+        let typing = |app: &mut App, on: bool| {
+            app.world_mut()
+                .resource_mut::<super::super::input::UiInput>()
+                .text_entry = on;
+        };
+        app.init_resource::<super::super::input::UiInput>();
+        typing(&mut app, true);
+        press(&mut app, KeyCode::KeyI);
+        press(&mut app, KeyCode::KeyC);
+        assert!(!shown(&mut app), "typed into the field, not a shortcut");
+        typing(&mut app, false);
+        press(&mut app, KeyCode::KeyC);
+        assert!(shown(&mut app));
+        typing(&mut app, true);
+        press(&mut app, KeyCode::KeyI);
+        press(&mut app, KeyCode::KeyC);
+        assert!(shown(&mut app), "the search keeps its letters");
     }
 
     #[test]

@@ -223,6 +223,7 @@ fn receive_facts(mut messages: MessageReader<WorldFacts>, mut facts: ResMut<Fact
     }
 }
 
+/// Whether World details show, and whether the background is solid.
 type Shown = (bool, bool);
 
 fn render(
@@ -233,11 +234,13 @@ fn render(
         Option<Res<super::settings::Settings>>,
     ),
     own: Option<Res<super::game_mode::Mode>>,
+    preferences: Option<Res<super::profile::Preferences>>,
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
     mut shown: Local<Option<Shown>>,
 ) {
-    let wanted = (menu.open && !settings.is_some_and(|s| s.open)).then_some((menu.details, true));
+    let solid = preferences.is_some_and(|p| p.solid_background);
+    let wanted = (menu.open && !settings.is_some_and(|s| s.open)).then_some((menu.details, solid));
     if *shown == wanted && !facts.is_changed() && !own.as_ref().is_some_and(|o| o.is_changed()) {
         return;
     }
@@ -245,7 +248,7 @@ fn render(
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some((details, _)) = wanted else {
+    let Some((details, solid)) = wanted else {
         return;
     };
     let facts = facts.0.as_ref();
@@ -255,7 +258,11 @@ fn render(
         .spawn((
             MenuRoot,
             GlobalZIndex(8),
-            BackgroundColor(Color::BLACK.with_alpha(0.45)),
+            BackgroundColor(if solid {
+                cine::SCENE
+            } else {
+                Color::BLACK.with_alpha(0.45)
+            }),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -616,6 +623,26 @@ mod tests {
             app.world().resource::<crate::launch::Switch>().0,
             Some(crate::launch::Target::List)
         );
+    }
+
+    #[test]
+    fn the_menu_sits_on_a_solid_background_when_chosen() {
+        let mut app = app();
+        let backdrop = |app: &mut App| {
+            app.world_mut()
+                .query_filtered::<&BackgroundColor, With<MenuRoot>>()
+                .single(app.world())
+                .unwrap()
+                .0
+        };
+        press(&mut app, KeyCode::Tab);
+        assert!(backdrop(&mut app).alpha() < 1.0, "the World shows through");
+        press(&mut app, KeyCode::Escape);
+        app.world_mut()
+            .resource_mut::<super::super::profile::Preferences>()
+            .solid_background = true;
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(backdrop(&mut app).alpha(), 1.0);
     }
 
     #[test]

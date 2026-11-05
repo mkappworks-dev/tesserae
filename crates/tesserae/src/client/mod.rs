@@ -1,6 +1,7 @@
 //! The Client: rendering, input and camera. Never mutates World state, and has
 //! no access to it — see `docs/adr/0002-client-server-from-day-one.md`.
 
+mod accessibility;
 mod actions;
 mod aim;
 pub(crate) mod anti_alias;
@@ -77,6 +78,7 @@ pub fn plugin(app: &mut App) {
         settings::plugin,
         menu_ui::plugin,
         cinematic::plugin,
+        accessibility::plugin,
         actions::plugin,
         input::plugin,
         pad::plugin,

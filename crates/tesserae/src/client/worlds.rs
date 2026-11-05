@@ -201,6 +201,7 @@ pub(super) enum Act {
     Home,
     Worlds,
     Library,
+    Settings,
     Play(PathBuf),
     Edit(PathBuf),
     New,
@@ -268,12 +269,19 @@ pub fn plugin(app: &mut App) {
 /// `TESSERAE_SCREENSHOT_OFFSCREEN` renders into an image, as the World capture
 /// does, because a locked display presents nothing and the capture is black.
 #[cfg(feature = "dev")]
+type Script<'w, 's> = (
+    ResMut<'w, Queue>,
+    Option<Res<'w, Launcher>>,
+    Query<'w, 's, (Entity, &'static Act)>,
+);
+
+#[cfg(feature = "dev")]
 type Untargeted<'w, 's> = Query<'w, 's, Entity, (With<Camera2d>, Without<IsDefaultUiCamera>)>;
 
 #[cfg(feature = "dev")]
 fn review_capture(
     mut commands: Commands,
-    (mut queue, launcher): (ResMut<Queue>, Option<Res<Launcher>>),
+    (mut queue, launcher, acts): Script,
     mut relaunch: ResMut<Switch>,
     mut exit: MessageWriter<AppExit>,
     (pending, failure): (
@@ -326,6 +334,13 @@ fn review_capture(
             queue.0.push(match step {
                 "worlds" => Act::Worlds,
                 "library" => Act::Library,
+                // Settings opens through its button, as a click would.
+                "settings" => {
+                    if let Some((button, _)) = acts.iter().find(|(_, a)| **a == Act::Settings) {
+                        commands.trigger(Activate { entity: button });
+                    }
+                    continue;
+                }
                 "new" => Act::New,
                 "more" => Act::More,
                 "edit" => Act::Edit(first.clone()),
@@ -378,6 +393,7 @@ fn logic(app: &mut App) {
         .init_resource::<Returning>()
         .init_resource::<InputFocus>()
         .add_observer(activate)
+        .add_observer(open_settings)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(
             Update,
@@ -491,8 +507,16 @@ fn activate(event: On<Activate>, acts: Query<&Act>, mut queue: ResMut<Queue>) {
     }
 }
 
+/// Settings is one screen with the game's, drawn over the launcher.
+fn open_settings(event: On<Activate>, acts: Query<&Act>, mut settings: super::settings::Opener) {
+    if acts.get(event.entity) == Ok(&Act::Settings) {
+        settings.open();
+    }
+}
+
 fn keys(
     keys: Res<ButtonInput<KeyCode>>,
+    settings: Option<Res<super::settings::Settings>>,
     launcher: Option<Res<Launcher>>,
     focus: Res<InputFocus>,
     fields: Query<&Field>,
@@ -502,6 +526,9 @@ fn keys(
     let Some(launcher) = launcher else {
         return;
     };
+    if settings.is_some_and(|s| s.open) {
+        return;
+    }
     if keys.just_pressed(KeyCode::Escape) || pad.is_some_and(|pad| pad.cancel) {
         queue.0.push(match launcher.screen {
             Screen::Title | Screen::Worlds if launcher.card.is_some() => Act::Dismiss,
@@ -637,6 +664,7 @@ fn handle(
                 l.show(Screen::Worlds);
             }
             Act::Library => l.show(Screen::Library),
+            Act::Settings => {}
             Act::Edit(path) => {
                 let Some(entry) = l.entry(&path) else {
                     continue;
@@ -1045,17 +1073,23 @@ fn opening(
 
 fn render(
     mut commands: Commands,
-    launcher: Option<Res<Launcher>>,
+    (launcher, settings): (
+        Option<Res<Launcher>>,
+        Option<Res<super::settings::Settings>>,
+    ),
     installed: Res<Installed>,
     roots: Query<Entity, With<Root>>,
     scrolled: Query<&ScrollPosition, With<PageScroll>>,
     logo: Option<Res<ui::Mosaic>>,
-    (mut built, mut shown): (Local<Option<u64>>, Local<Option<Screen>>),
+    (mut built, mut shown, mut covered): (Local<Option<u64>>, Local<Option<Screen>>, Local<bool>),
 ) {
     let Some(l) = launcher else {
         return;
     };
-    if *built == Some(l.version) {
+    // Closing Settings rebuilds the page under it, so focus lands on it again.
+    let open = settings.is_some_and(|s| s.open);
+    let uncovered = std::mem::replace(&mut *covered, open) && !open;
+    if *built == Some(l.version) && !uncovered {
         return;
     }
     *built = Some(l.version);
@@ -1128,7 +1162,14 @@ mod tests {
     }
 
     fn launcher_on(app: &mut App, worlds: &Directory, installed: Installed) {
-        app.init_resource::<ButtonInput<KeyCode>>()
+        app.init_resource::<super::super::settings::Settings>()
+            .init_resource::<super::super::actions::Bindings>()
+            .init_resource::<super::super::profile::Preferences>()
+            .insert_resource(super::super::profile::Store {
+                path: worlds.0.join("profile.json"),
+                error: None,
+            })
+            .init_resource::<ButtonInput<KeyCode>>()
             .add_message::<AppExit>()
             .add_message::<bevy::window::WindowCloseRequested>()
             .init_resource::<Switch>()
@@ -1973,7 +2014,7 @@ mod tests {
                 "title",
                 Screen::Title,
                 None,
-                vec!["Continue", "Worlds", "New", "Library", "Quit"],
+                vec!["Continue", "Worlds", "New", "Library", "Settings", "Quit"],
             ),
             (
                 "worlds",
@@ -2029,6 +2070,32 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn settings_open_from_the_title_and_take_its_keys_until_closed() {
+        let worlds = Directory::new();
+        library::create(&worlds.0, &details("Mine", true)).unwrap();
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::Settings);
+        assert!(
+            app.world()
+                .resource::<super::super::settings::Settings>()
+                .open
+        );
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(launcher(&app).screen, Screen::Title, "Settings took Escape");
+        app.world_mut()
+            .resource_mut::<super::super::settings::Settings>()
+            .open = false;
+        app.update();
+        app.update();
+        assert_eq!(
+            focused_act(&app),
+            Some(Act::Continue),
+            "focus returns to the title"
+        );
     }
 
     #[test]
@@ -2093,6 +2160,8 @@ mod tests {
         ));
         assert_eq!(focused_act(&app), Some(Act::Continue));
         // The headless layout stacks buttons in reverse spawn order.
+        key(&mut app, KeyCode::ArrowDown);
+        assert_eq!(focused_act(&app), Some(Act::Settings));
         key(&mut app, KeyCode::ArrowDown);
         assert_eq!(focused_act(&app), Some(Act::Library));
         key(&mut app, KeyCode::ArrowDown);

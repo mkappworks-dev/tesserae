@@ -60,6 +60,7 @@ pub(super) enum Action {
     SearchCatalogue,
     ReleaseCursor,
     Help,
+    Settings,
     Diagnostics,
 }
 use Action::*;
@@ -289,6 +290,7 @@ impl Bindings {
             (Inventory, KeyCode::KeyI),
             (SearchCatalogue, KeyCode::KeyC),
             (Help, KeyCode::F1),
+            (Settings, KeyCode::F10),
             (Diagnostics, KeyCode::F3),
             (Layout, KeyCode::KeyL),
             (LayoutReverse, KeyCode::KeyT),

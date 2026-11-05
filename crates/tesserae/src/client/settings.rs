@@ -25,6 +25,8 @@ pub(super) struct Settings {
     pub(super) dirty: bool,
     pub(super) tab: super::menu_ui::Tab,
     last_controls: super::menu_ui::Tab,
+    /// The category F10 reopens.
+    last: super::menu_ui::Tab,
     pending: Option<super::menu_ui::Tab>,
 }
 impl Settings {
@@ -113,6 +115,9 @@ pub(super) enum Operation {
     Cap(Option<u32>),
     AntiAliasing(super::anti_alias::AntiAliasing),
     Scale(u32),
+    TextScale(u32),
+    ReducedMotion(bool),
+    SolidBackground(bool),
 }
 
 pub(super) fn plugin(app: &mut App) {
@@ -121,11 +126,13 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<bevy::input_focus::InputFocus>()
         .add_observer(activate)
         .add_observer(scalar_changed)
-        .add_session_systems(
+        .add_systems(
             PreUpdate,
-            capture_focus.before(bevy::input_focus::InputFocusSystems::Dispatch),
+            capture_focus
+                .before(bevy::input_focus::InputFocusSystems::Dispatch)
+                .run_if(crate::session::in_menus),
         )
-        .add_session_systems(Update, slider_visuals)
+        .add_systems(Update, slider_visuals.run_if(crate::session::in_menus))
         .add_session_systems(Startup, launch)
         .add_session_systems(
             Update,
@@ -134,9 +141,12 @@ pub(super) fn plugin(app: &mut App) {
                 .before(capture)
                 .before(super::input::resolve),
         )
-        .add_session_systems(
+        .add_systems(
             Update,
-            (capture, render).chain().before(super::input::resolve),
+            (capture, render)
+                .chain()
+                .before(super::input::resolve)
+                .run_if(crate::session::in_menus),
         );
 }
 fn button(parent: &mut ChildSpawnerCommands, text: String, operation: Operation) {
@@ -195,11 +205,17 @@ pub(super) struct Opener<'w, 's> {
 }
 
 impl Opener<'_, '_> {
+    /// At the category used last.
     pub(super) fn open(&mut self) {
+        let last = self.settings.last;
+        self.open_at(last);
+    }
+
+    fn open_at(&mut self, tab: super::menu_ui::Tab) {
         let settings = &mut *self.settings;
         settings.open = true;
         settings.notice = self.store.error.clone().unwrap_or_default();
-        settings.tab = settings.last_controls;
+        settings.tab = tab;
         settings.draft = Some((self.bindings.clone(), self.preferences.clone()));
         settings.dirty = true;
         for mut cursor in &mut self.cursor {
@@ -225,7 +241,6 @@ fn open_shortcut(
             ownership.owner,
             super::input::Owner::Unfocused | super::input::Owner::TextEntry
         )
-        || !actions.started(Action::Help)
         || ui.text_entry
         || status.modal()
         || opener.settings.open
@@ -233,7 +248,12 @@ fn open_shortcut(
     {
         return;
     }
-    opener.open();
+    if actions.started(Action::Settings) {
+        opener.open();
+    } else if actions.started(Action::Help) {
+        let tab = opener.settings.last_controls;
+        opener.open_at(tab);
+    }
 }
 
 fn apply(
@@ -368,6 +388,7 @@ fn activate(
                 }
                 settings.open = true;
                 settings.tab = tab;
+                settings.last = tab;
                 if tab != super::menu_ui::Tab::Display {
                     settings.last_controls = tab;
                 }
@@ -488,6 +509,9 @@ fn activate(
                 Operation::Cap(value) => p.fps_cap = value,
                 Operation::AntiAliasing(value) => p.anti_aliasing = value,
                 Operation::Scale(value) => p.render_scale = value,
+                Operation::TextScale(value) => p.text_scale = value,
+                Operation::ReducedMotion(value) => p.reduced_motion = value,
+                Operation::SolidBackground(value) => p.solid_background = value,
                 _ => {}
             }
         }
@@ -755,6 +779,7 @@ pub(super) fn action_name(action: Action) -> &'static str {
         LayoutReverse => "Layout: reverse the axis",
         LayoutActive => "Layout: next axis",
         Menu => "Open the Menu",
+        Settings => "Open Settings",
         Inventory => "Open Inventory",
         SearchCatalogue => "Search the Catalogue",
         ReleaseCursor => "Release cursor",
@@ -788,7 +813,10 @@ type RenderContext<'w, 's> = (
 pub(super) fn render(
     mut commands: Commands,
     mut settings: ResMut<Settings>,
-    panels: Query<Entity, With<Panel>>,
+    (panels, body): (
+        Query<Entity, With<Panel>>,
+        Query<Entity, With<super::menu_ui::SettingsBody>>,
+    ),
     (labels, searches, active): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
@@ -825,6 +853,11 @@ pub(super) fn render(
     if !settings.open {
         return;
     }
+    let Ok(body) = body.single() else {
+        // The frame is built this frame; the page follows it next frame.
+        settings.dirty = true;
+        return;
+    };
     if settings.notice == "Applied" {
         super::menu_ui::notify(
             &mut commands,
@@ -846,19 +879,11 @@ pub(super) fn render(
     commands
         .spawn((
             Panel,
-            GlobalZIndex(20),
+            ChildOf(body),
             Node {
-                position_type: PositionType::Absolute,
-                left: Val::Percent(5.0),
-                right: Val::Percent(5.0),
-                top: Val::Px(if settings.tab == Tab::Bindings {
-                    295.0
-                } else {
-                    235.0
-                }),
-                bottom: Val::Px(20.0),
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(0.0),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
                 ..default()
             },
         ))
@@ -880,11 +905,7 @@ pub(super) fn render(
                     flex_grow: 1.0,
                     flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
-                    padding: UiRect {
-                        top: Val::Px(2.0),
-                        right: Val::Px(5.0),
-                        ..default()
-                    },
+                    padding: UiRect::axes(Val::Px(26.0), Val::Px(18.0)),
                     overflow: Overflow::scroll_y(),
                     ..default()
                 },
@@ -923,6 +944,7 @@ fn page(
         Tab::Display => display(list, p),
         Tab::Bindings => bindings_page(list, settings, bindings, labels, searches),
         Tab::Controller => controller(list, bindings, p, labels),
+        Tab::Accessibility => accessibility(list, p),
         Tab::Catalogue => {}
     }
 }
@@ -1322,6 +1344,55 @@ fn behavior(
             super::menu_ui::MUTED,
         );
     }
+}
+
+fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
+    group(list, "COMFORT & READABILITY", |card| {
+        setting_row(
+            card,
+            "Reduced motion",
+            "Use immediate interface transitions, and still the HUD's pulses and slides.",
+            false,
+            |row| {
+                switch(
+                    row,
+                    p.reduced_motion,
+                    Operation::ReducedMotion(!p.reduced_motion),
+                )
+            },
+        );
+        setting_row(
+            card,
+            "Simple menu background",
+            "Show menus over a solid background instead of the dimmed World.",
+            false,
+            |row| {
+                switch(
+                    row,
+                    p.solid_background,
+                    Operation::SolidBackground(!p.solid_background),
+                )
+            },
+        );
+        setting_row(
+            card,
+            "Text size",
+            "100% is standard; 200% doubles the text in menus and the HUD.",
+            true,
+            |row| {
+                segment(row, |buttons| {
+                    for scale in super::profile::TEXT_SCALES {
+                        option(
+                            buttons,
+                            format!("{scale}%"),
+                            Operation::TextScale(scale),
+                            p.text_scale == scale,
+                        );
+                    }
+                })
+            },
+        );
+    });
 }
 
 fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
@@ -1887,108 +1958,55 @@ fn binding_row(
 }
 
 fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
+    use super::cinematic::{self as cine, Kind};
     use super::menu_ui as ui;
     parent
         .spawn((
+            BackgroundColor(cine::SHEET_FOOTER),
+            BorderColor::all(cine::EDGE.with_alpha(0.5)),
             Node {
-                min_height: Val::Px(73.0),
-                margin: UiRect::top(Val::Auto),
-                padding: UiRect::top(Val::Px(16.0)),
+                padding: UiRect::axes(Val::Px(26.0), Val::Px(14.0)),
                 border: UiRect::top(Val::Px(1.0)),
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
+                column_gap: Val::Px(10.0),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BorderColor::all(ui::EDGE),
         ))
         .with_children(|footer| {
+            cine::button(footer, "Back", "", Operation::Back, Kind::Ghost);
             footer
                 .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(8.0),
-                    ..default()
-                })
-                .with_children(|left| {
-                    left.spawn(Node {
-                        align_items: AlignItems::Center,
-                        column_gap: Val::Px(7.0),
-                        ..default()
-                    })
-                    .with_children(|status| {
-                        let color = if changed {
-                            Color::srgb(254.0 / 255.0, 154.0 / 255.0, 0.0)
-                        } else {
-                            ui::MUTED
-                        };
-                        status.spawn((
-                            BackgroundColor(color),
-                            Node {
-                                width: Val::Px(5.0),
-                                height: Val::Px(5.0),
-                                border_radius: BorderRadius::all(Val::Px(3.0)),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ));
-                        ui::text(
-                            status,
-                            if changed {
-                                "Changes not applied"
-                            } else {
-                                "No pending changes"
-                            },
-                            11.0,
-                            color,
-                        );
-                    });
-                    let reset = ui::button(
-                        left,
-                        "Restore defaults",
-                        Operation::Reset,
-                        false,
-                        false,
-                        false,
-                    );
-                    left.commands().entity(reset).insert(ui::Danger);
-                });
-            footer
-                .spawn(Node {
-                    column_gap: Val::Px(8.0),
+                    column_gap: Val::Px(10.0),
                     align_items: AlignItems::Center,
                     ..default()
                 })
                 .with_children(|actions| {
-                    let cancel =
-                        ui::button(actions, "Cancel", Operation::Cancel, false, false, false);
-                    actions.commands().entity(cancel).insert(Node {
-                        min_height: Val::Px(39.0),
-                        padding: UiRect::axes(Val::Px(16.0), Val::Px(9.0)),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    });
-                    let apply = ui::button(
+                    ui::text(
+                        actions,
+                        if changed {
+                            "Unapplied changes"
+                        } else {
+                            "All changes applied"
+                        },
+                        12.0,
+                        if changed { cine::WARNING } else { cine::MUTED },
+                    );
+                    cine::button(
+                        actions,
+                        "Restore defaults",
+                        "",
+                        Operation::Reset,
+                        Kind::Ghost,
+                    );
+                    let apply = cine::button(
                         actions,
                         "Apply changes",
+                        "",
                         Operation::Apply,
-                        false,
-                        false,
-                        changed,
+                        Kind::Primary,
                     );
-                    actions.commands().entity(apply).insert(Node {
-                        min_width: Val::Px(136.0),
-                        min_height: Val::Px(39.0),
-                        padding: UiRect::axes(Val::Px(16.0), Val::Px(9.0)),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    });
                     if !changed {
                         actions
                             .commands()
@@ -2084,6 +2102,7 @@ fn binding_order(action: Action) -> usize {
         Inventory,
         SearchCatalogue,
         Help,
+        Settings,
         ReleaseCursor,
         Undo,
         Redo,
@@ -2284,6 +2303,72 @@ mod tests {
                 .invert_y
         );
     }
+    #[test]
+    fn accessibility_choices_wait_for_apply_and_are_saved() {
+        use super::super::menu_ui::Tab;
+        let mut app = app();
+        activate_operation(&mut app, Operation::Navigate(Tab::Accessibility));
+        activate_operation(&mut app, Operation::TextScale(150));
+        activate_operation(&mut app, Operation::ReducedMotion(true));
+        activate_operation(&mut app, Operation::SolidBackground(true));
+        activate_operation(&mut app, Operation::Navigate(Tab::Behavior));
+        activate_operation(&mut app, Operation::Navigate(Tab::Accessibility));
+        assert_eq!(app.world().resource::<Preferences>().text_scale, 100);
+        let draft = app.world().resource::<Settings>().draft.clone().unwrap().1;
+        assert_eq!(
+            (
+                draft.text_scale,
+                draft.reduced_motion,
+                draft.solid_background
+            ),
+            (150, true, true),
+            "the draft survives a category change"
+        );
+        activate_operation(&mut app, Operation::Apply);
+        let applied = app.world().resource::<Preferences>().clone();
+        assert_eq!(
+            (
+                applied.text_scale,
+                applied.reduced_motion,
+                applied.solid_background
+            ),
+            (150, true, true)
+        );
+        let path = app.world().resource::<Store>().path.clone();
+        let (_, _, saved) = Store::load(path);
+        assert_eq!(saved, applied);
+    }
+
+    #[test]
+    fn f10_opens_settings_at_the_category_used_last() {
+        use super::super::menu_ui::Tab;
+        use bevy::window::{CursorOptions, PrimaryWindow};
+        let mut app = app();
+        app.init_resource::<crate::server::persistence::SaveStatus>()
+            .init_resource::<super::super::input::UiInput>()
+            .insert_resource(super::super::input::Ownership::playing())
+            .add_plugins(super::super::actions::test_plugin)
+            .add_systems(Update, open_shortcut);
+        app.world_mut().spawn((
+            PrimaryWindow,
+            Window {
+                focused: true,
+                ..default()
+            },
+            CursorOptions::default(),
+        ));
+        activate_operation(&mut app, Operation::Navigate(Tab::Accessibility));
+        activate_operation(&mut app, Operation::Back);
+        assert!(!app.world().resource::<Settings>().open);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::F10);
+        app.update();
+        let settings = app.world().resource::<Settings>();
+        assert!(settings.open);
+        assert_eq!(settings.tab, Tab::Accessibility);
+    }
+
     #[test]
     fn tab_navigation_keeps_the_draft_and_requires_a_choice_before_leaving() {
         use super::super::menu_ui::Tab;
