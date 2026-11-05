@@ -7,13 +7,14 @@ use std::collections::BTreeMap;
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
+use tesserae_core::MaterialId;
 use tesserae_core::entity::DropSpec;
-use tesserae_core::inventory::{self, Refusal, Slot};
+use tesserae_core::inventory::{self, Destination, Refusal, Slot};
 use tesserae_core::save::{CarriedV1, InventoryV1};
 
 use super::ContentTables;
 use super::entities::EntityStore;
-use super::items::Items;
+use super::items::{Items, PlacingItems};
 use super::persistence::extensions::PlayerState;
 use super::player::Player;
 use super::world_state::ChunkStore;
@@ -43,14 +44,31 @@ pub enum InventoryIntent {
     Split(Slot),
     /// Merges and orders the backpack.
     Sort,
+    /// From the Catalogue: a new stack of the Item that places `material`.
+    Take {
+        material: MaterialId,
+        count: u32,
+        into: Destination,
+    },
+}
+
+/// Why the Server declined an intent.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Reason {
+    Rule(Refusal),
+    /// A take of a Material no Item places.
+    NotInCatalogue,
 }
 
 /// An intent the Server declined; the Inventory is as it was.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
-pub struct InventoryRefused(pub Refusal);
+pub struct InventoryRefused(pub Reason);
 
 /// For the Client to put on screen.
-pub fn message(refusal: Refusal) -> &'static str {
+pub fn message(reason: Reason) -> &'static str {
+    let Reason::Rule(refusal) = reason else {
+        return "That Material is not in the Catalogue.";
+    };
     match refusal {
         Refusal::NoSuchSlot => "That slot does not exist.",
         Refusal::Empty => "That slot is empty.",
@@ -58,6 +76,8 @@ pub fn message(refusal: Refusal) -> &'static str {
         Refusal::TooFewToSplit => "A single Item cannot be split.",
         Refusal::NoEmptySlot => "An empty backpack slot is needed to split this stack.",
         Refusal::NoRoom => "Not enough room for this stack.",
+        Refusal::BackpackFull => "The backpack is full. Make room first.",
+        Refusal::BadCount => "Choose a count from 1 to the stack limit.",
     }
 }
 
@@ -78,6 +98,7 @@ pub(crate) fn plugin(app: &mut App) {
 fn arrange(
     mut intents: MessageReader<InventoryIntent>,
     mut inventory: Single<&mut Inventory>,
+    placing: Option<Res<PlacingItems>>,
     mut refused: MessageWriter<InventoryRefused>,
 ) {
     for intent in intents.read() {
@@ -88,13 +109,25 @@ fn arrange(
             InventoryIntent::QuickTransfer(from) => next.quick_transfer(from, limit),
             InventoryIntent::Split(from) => next.split(from),
             InventoryIntent::Sort => next.sort(limit),
+            InventoryIntent::Take {
+                material,
+                count,
+                into,
+            } => {
+                // TODO(game mode): refuse a take unless the Player is in Creative.
+                let Some(item) = placing.as_ref().and_then(|p| p.item(material)) else {
+                    refused.write(InventoryRefused(Reason::NotInCatalogue));
+                    continue;
+                };
+                next.take(item, count, into, limit)
+            }
         };
         match result {
             Ok(()) => {
                 inventory.set_if_neq(Inventory(next));
             }
             Err(refusal) => {
-                refused.write(InventoryRefused(refusal));
+                refused.write(InventoryRefused(Reason::Rule(refusal)));
             }
         }
     }
@@ -190,13 +223,24 @@ pub(super) fn drop_beside(
 #[cfg(test)]
 mod tests {
     use bevy::ecs::message::Messages;
-    use tesserae_core::inventory::{Refusal, Slot, Stack};
+    use tesserae_core::MaterialId;
+    use tesserae_core::inventory::{Destination, Refusal, Slot, Stack};
 
     use super::*;
+
+    const ROCK: MaterialId = 3;
+    const SAND: MaterialId = 4;
 
     fn game() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins).add_plugins(plugin);
+        app.insert_resource(PlacingItems(vec![
+            None,
+            None,
+            None,
+            Some("t:rock".into()),
+            Some("t:sand".into()),
+        ]));
         app.world_mut().spawn(Player::at(Vec3::ZERO));
         tick(&mut app);
         app.world_mut()
@@ -229,7 +273,7 @@ mod tests {
     }
 
     /// The Server's answers to one intent: the Inventories sent and the refusals.
-    fn ask(app: &mut App, intent: InventoryIntent) -> (Vec<inventory::Inventory>, Vec<Refusal>) {
+    fn ask(app: &mut App, intent: InventoryIntent) -> (Vec<inventory::Inventory>, Vec<Reason>) {
         app.world_mut().write_message(intent);
         tick(app);
         let changed = app
@@ -346,8 +390,8 @@ mod tests {
         ] {
             let (sent, refused) = ask(&mut app, intent);
             assert!(sent.is_empty(), "{intent:?} sent {sent:?}");
-            assert_eq!(refused, [refusal]);
-            assert!(!message(refusal).is_empty());
+            assert_eq!(refused, [Reason::Rule(refusal)]);
+            assert!(!message(Reason::Rule(refusal)).is_empty());
         }
         let after = app
             .world_mut()
@@ -357,5 +401,61 @@ mod tests {
             .0
             .clone();
         assert_eq!(after, before);
+    }
+
+    fn take(material: MaterialId, count: u32, into: Destination) -> InventoryIntent {
+        InventoryIntent::Take {
+            material,
+            count,
+            into,
+        }
+    }
+
+    #[test]
+    fn a_take_lands_the_item_that_places_the_material_with_its_count() {
+        let mut app = game();
+        let (sent, refused) = ask(&mut app, take(ROCK, 16, Destination::Slot(Slot::Hotbar(2))));
+        assert!(refused.is_empty(), "{refused:?}");
+        assert_eq!(sent[0].get(Slot::Hotbar(2)).cloned(), stack("t:rock", 16));
+        let (sent, _) = ask(&mut app, take(SAND, 64, Destination::Backpack));
+        assert_eq!(sent[0].get(Slot::Backpack(0)).cloned(), stack("t:sand", 64));
+        let (sent, _) = ask(&mut app, take(SAND, 5, Destination::Slot(Slot::Hotbar(2))));
+        assert_eq!(sent[0].get(Slot::Hotbar(2)).cloned(), stack("t:sand", 5));
+        assert_eq!(
+            sent[0].get(Slot::Backpack(1)).cloned(),
+            stack("t:rock", 16),
+            "the displaced stack moves to the backpack"
+        );
+    }
+
+    #[test]
+    fn a_take_into_a_full_backpack_or_of_what_nothing_places_is_refused() {
+        let mut app = game();
+        let full: Vec<_> = (0..27)
+            .map(|at| (Slot::Backpack(at), "t:dust", 64))
+            .chain([(Slot::Hotbar(0), "t:dust", 64)])
+            .collect();
+        holding(&mut app, &full);
+        for (intent, reason) in [
+            (
+                take(ROCK, 1, Destination::Backpack),
+                Reason::Rule(Refusal::BackpackFull),
+            ),
+            (
+                take(ROCK, 1, Destination::Slot(Slot::Hotbar(0))),
+                Reason::Rule(Refusal::BackpackFull),
+            ),
+            (
+                take(ROCK, 65, Destination::Slot(Slot::Hotbar(1))),
+                Reason::Rule(Refusal::BadCount),
+            ),
+            (take(0, 1, Destination::Backpack), Reason::NotInCatalogue),
+            (take(99, 1, Destination::Backpack), Reason::NotInCatalogue),
+        ] {
+            let (sent, refused) = ask(&mut app, intent);
+            assert!(sent.is_empty(), "{intent:?} sent {sent:?}");
+            assert_eq!(refused, [reason], "{intent:?}");
+            assert!(!message(reason).is_empty());
+        }
     }
 }

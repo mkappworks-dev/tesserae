@@ -40,6 +40,18 @@ pub enum Refusal {
     NoEmptySlot,
     /// The other area cannot take the whole stack.
     NoRoom,
+    /// A take, or the stack it displaces, does not fit in the backpack whole.
+    BackpackFull,
+    /// A take of none, or of more than one stack holds.
+    BadCount,
+}
+
+/// Where a take lands.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Destination {
+    /// Into matching stacks, then empty slots.
+    Backpack,
+    Slot(Slot),
 }
 
 /// Adds `count` of `item` into `areas`, matching stacks first and then empty
@@ -204,6 +216,59 @@ impl Inventory {
             }
         }
         self.backpack = sorted;
+        Ok(())
+    }
+
+    /// Adds a new stack of 1 to the limit of `item`, whole or not at all. Onto
+    /// a slot it tops up the same Item to the limit, or sends the stack there
+    /// to the backpack.
+    pub fn take(
+        &mut self,
+        item: &str,
+        count: u32,
+        into: Destination,
+        limit: impl Fn(&str) -> u32,
+    ) -> Result<(), Refusal> {
+        let max_stack = limit(item);
+        if count == 0 || count > max_stack {
+            return Err(Refusal::BadCount);
+        }
+        let mut next = self.clone();
+        let displaced = match into {
+            Destination::Backpack => Some(Stack {
+                item: item.into(),
+                count,
+            }),
+            Destination::Slot(slot) => {
+                let target = next.slot_mut(slot)?;
+                match target.take() {
+                    Some(onto) if onto.item == item => {
+                        if onto.count >= max_stack {
+                            return Err(Refusal::StackFull);
+                        }
+                        *target = Some(Stack {
+                            count: (onto.count + count).min(max_stack),
+                            ..onto
+                        });
+                        None
+                    }
+                    other => {
+                        *target = Some(Stack {
+                            item: item.into(),
+                            count,
+                        });
+                        other
+                    }
+                }
+            }
+        };
+        if let Some(stack) = displaced {
+            let max = limit(&stack.item);
+            if stash(&mut [&mut next.backpack], &stack.item, stack.count, max) > 0 {
+                return Err(Refusal::BackpackFull);
+            }
+        }
+        *self = next;
         Ok(())
     }
 
@@ -454,6 +519,108 @@ mod tests {
         );
         assert!(inventory.backpack[3..].iter().all(Option::is_none));
         assert_eq!(inventory.hotbar[0], stack("t:zinc", 1));
+    }
+
+    #[test]
+    fn a_take_into_the_backpack_fills_matching_stacks_then_empty_slots() {
+        let mut inventory = Inventory::default();
+        inventory.hotbar[0] = stack("t:rock", 1);
+        inventory.backpack[0] = stack("t:dust", 3);
+        inventory.backpack[1] = stack("t:rock", 60);
+        assert_eq!(
+            inventory.take("t:rock", 10, Destination::Backpack, limit),
+            Ok(())
+        );
+        assert_eq!(inventory.backpack[1], stack("t:rock", 64));
+        assert_eq!(inventory.backpack[2], stack("t:rock", 6));
+        assert_eq!(inventory.hotbar[0], stack("t:rock", 1), "not the hotbar");
+    }
+
+    #[test]
+    fn a_take_into_a_full_backpack_is_refused_and_changes_nothing() {
+        let mut inventory = Inventory::default();
+        for slot in &mut inventory.backpack {
+            *slot = stack("t:dust", 64);
+        }
+        inventory.backpack[26] = stack("t:rock", 60);
+        let before = inventory.clone();
+        assert_eq!(
+            inventory.take("t:rock", 5, Destination::Backpack, limit),
+            Err(Refusal::BackpackFull),
+            "four fit, so the take of five is refused whole"
+        );
+        assert_eq!(inventory, before);
+    }
+
+    #[test]
+    fn a_take_onto_a_slot_fills_it_merges_or_sends_the_stack_there_to_the_backpack() {
+        let mut inventory = Inventory::default();
+        let onto = |slot| Destination::Slot(slot);
+        assert_eq!(
+            inventory.take("t:rock", 16, onto(Slot::Hotbar(2)), limit),
+            Ok(())
+        );
+        assert_eq!(inventory.hotbar[2], stack("t:rock", 16));
+        assert_eq!(
+            inventory.take("t:rock", 64, onto(Slot::Hotbar(2)), limit),
+            Ok(()),
+            "the same Item tops up to its limit"
+        );
+        assert_eq!(inventory.hotbar[2], stack("t:rock", 64));
+        assert_eq!(inventory.backpack(), &Inventory::default().backpack);
+        inventory.backpack[0] = stack("t:rock", 10);
+        assert_eq!(
+            inventory.take("t:dust", 1, onto(Slot::Hotbar(2)), limit),
+            Ok(())
+        );
+        assert_eq!(inventory.hotbar[2], stack("t:dust", 1));
+        assert_eq!(inventory.backpack[0], stack("t:rock", 64));
+        assert_eq!(inventory.backpack[1], stack("t:rock", 10));
+        assert_eq!(
+            inventory.take("t:zinc", 2, onto(Slot::Backpack(1)), limit),
+            Ok(())
+        );
+        assert_eq!(inventory.backpack[1], stack("t:zinc", 2));
+        assert_eq!(
+            inventory.backpack[2],
+            stack("t:rock", 10),
+            "the displaced stack never lands back in its own slot"
+        );
+    }
+
+    #[test]
+    fn a_take_that_cannot_land_whole_is_refused_and_changes_nothing() {
+        let mut inventory = Inventory::default();
+        for slot in &mut inventory.backpack {
+            *slot = stack("t:dust", 64);
+        }
+        inventory.hotbar[0] = stack("t:rock", 5);
+        inventory.hotbar[1] = stack("t:zinc", 64);
+        let before = inventory.clone();
+        for (count, slot, refusal) in [
+            (3, Slot::Hotbar(0), Refusal::BackpackFull),
+            (3, Slot::Backpack(4), Refusal::BackpackFull),
+            (1, Slot::Hotbar(1), Refusal::StackFull),
+            (1, Slot::Hotbar(9), Refusal::NoSuchSlot),
+            (0, Slot::Hotbar(5), Refusal::BadCount),
+            (65, Slot::Hotbar(5), Refusal::BadCount),
+        ] {
+            let item = if slot == Slot::Hotbar(1) {
+                "t:zinc"
+            } else {
+                "t:clay"
+            };
+            assert_eq!(
+                inventory.take(item, count, Destination::Slot(slot), limit),
+                Err(refusal),
+                "{count} onto {slot:?}"
+            );
+        }
+        assert_eq!(
+            inventory.take("t:clay", 0, Destination::Backpack, limit),
+            Err(Refusal::BadCount)
+        );
+        assert_eq!(inventory, before);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # 04: Catalogue beside the Inventory
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03
 
@@ -12,7 +12,7 @@ The Catalogue becomes a side panel beside the Inventory: search, categories, and
 
 ## Acceptance criteria
 
-- [ ] Each take path (drag, count to backpack, count to hotbar slot, double-click, Shift-click) lands the right Item and count through the Server.
-- [ ] A take into a full backpack is refused and changes nothing.
-- [ ] C opens the Inventory with the search focused.
-- [ ] A new World's hotbar is seeded from the stored quick slots, by name; missing content is skipped.
+- [x] Each take path (drag, count to backpack, count to hotbar slot, double-click, Shift-click) lands the right Item and count through the Server.
+- [x] A take into a full backpack is refused and changes nothing.
+- [x] C opens the Inventory with the search focused.
+- [x] A new World's hotbar is seeded from the stored quick slots, by name; missing content is skipped.

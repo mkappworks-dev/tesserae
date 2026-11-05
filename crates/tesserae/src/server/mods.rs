@@ -695,7 +695,15 @@ fn install(world: &mut World) {
             })
             .collect(),
     ));
-    world.insert_resource(super::items::Items(loaded.items));
+    let items = super::items::Items(loaded.items);
+    world.insert_resource(super::items::PlacingItems::new(
+        catalogue
+            .materials
+            .iter()
+            .map(|m| (m.id, m.name.as_str(), m.fluid.is_some() || m.solid)),
+        &items,
+    ));
+    world.insert_resource(items);
     world.insert_resource(WorldParameters(params));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));

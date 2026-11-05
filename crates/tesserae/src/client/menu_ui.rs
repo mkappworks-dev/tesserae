@@ -578,24 +578,23 @@ fn chrome(root: &mut ChildSpawnerCommands, tab: Tab, logo: &Handle<Image>) {
         ));
     });
 }
-fn search_row(root: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
-    root.spawn(Node {
-        height: Val::Px(42.0),
-        margin: UiRect::bottom(Val::Px(18.0)),
-        flex_shrink: 0.0,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(14.0),
-        ..default()
-    })
-    .with_children(|row| {
-        row.spawn((
+/// The search box without the result count beside it; returns its text input.
+pub(super) fn search_frame(
+    parent: &mut ChildSpawnerCommands,
+    tab: Tab,
+    value: &str,
+    height: f32,
+) -> Entity {
+    let mut id = Entity::PLACEHOLDER;
+    parent
+        .spawn((
             SearchFrame,
             BackgroundColor(CARD),
             BorderColor::all(EDGE),
             Node {
                 flex_grow: 1.0,
                 min_width: Val::Px(0.0),
-                height: Val::Px(42.0),
+                height: Val::Px(height),
                 border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(6.0)),
                 padding: UiRect::axes(Val::Px(11.0), Val::Px(0.0)),
@@ -610,30 +609,32 @@ fn search_row(root: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
                 .spawn(Node {
                     flex_grow: 1.0,
                     min_width: Val::Px(0.0),
-                    height: Val::Px(40.0),
+                    height: Val::Px(height - 2.0),
                     align_items: AlignItems::Center,
                     ..default()
                 })
                 .with_children(|input| {
-                    input.spawn((
-                        SearchField(tab),
-                        TextInput,
-                        EditableText::new(value),
-                        TabIndex(0),
-                        font(12.0),
-                        TextColor(INK),
-                        bevy::text::TextCursorStyle {
-                            color: LEAF,
-                            selection_color: Color::srgba(0.286745, 0.696314, 0.384471, 0.3),
-                            ..default()
-                        },
-                        TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
-                        Node {
-                            width: Val::Percent(100.0),
-                            height: Val::Px(20.0),
-                            ..default()
-                        },
-                    ));
+                    id = input
+                        .spawn((
+                            SearchField(tab),
+                            TextInput,
+                            EditableText::new(value),
+                            TabIndex(0),
+                            font(12.0),
+                            TextColor(INK),
+                            bevy::text::TextCursorStyle {
+                                color: LEAF,
+                                selection_color: Color::srgba(0.286745, 0.696314, 0.384471, 0.3),
+                                ..default()
+                            },
+                            TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                            Node {
+                                width: Val::Percent(100.0),
+                                height: Val::Px(20.0),
+                                ..default()
+                            },
+                        ))
+                        .id();
                     input.spawn((
                         SearchPlaceholder,
                         Text::new(if tab == Tab::Catalogue {
@@ -685,6 +686,19 @@ fn search_row(root: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
                 Pickable::IGNORE,
             ));
         });
+    id
+}
+fn search_row(root: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
+    root.spawn(Node {
+        height: Val::Px(42.0),
+        margin: UiRect::bottom(Val::Px(18.0)),
+        flex_shrink: 0.0,
+        align_items: AlignItems::Center,
+        column_gap: Val::Px(14.0),
+        ..default()
+    })
+    .with_children(|row| {
+        search_frame(row, tab, value, 42.0);
         row.spawn((
             SearchCount(tab),
             Text::default(),

@@ -14,9 +14,11 @@ use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS, Inventory, Slot, Stack};
 
+mod catalogue;
+
 use super::actions::{Action, Actions};
 use super::drops::Looks;
-use super::edit::Catalogue;
+use super::edit::{Catalogue, Holding};
 use super::menu_ui::{self as ui, font};
 use crate::server::inventory::{InventoryChanged, InventoryIntent, InventoryRefused, MAX_STACK};
 use crate::session::SessionApp;
@@ -82,6 +84,15 @@ struct Held(Inventory);
 #[derive(Component)]
 struct WindowRoot;
 
+/// Holds the Catalogue and the Inventory side by side at one height.
+#[derive(Component)]
+struct WindowRow;
+
+/// The Inventory itself, rebuilt whenever it changes; the Catalogue beside it
+/// is not.
+#[derive(Component)]
+struct Card;
+
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
 enum Control {
     Slot(Slot),
@@ -111,6 +122,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(drag_start)
         .add_observer(drag_end)
         .add_observer(drop_on_slot)
+        .add_plugins(catalogue::plugin)
         .add_session_systems(
             Update,
             (
@@ -120,7 +132,16 @@ pub(super) fn plugin(app: &mut App) {
                     .after(super::layout_menu::toggle)
                     .before(super::input::resolve)
                     .before(super::camera::grab_cursor),
-                (receive, render, paint).chain().after(toggle),
+                (
+                    receive,
+                    render,
+                    catalogue::fill,
+                    catalogue::focus_search,
+                    paint,
+                    catalogue::paint,
+                )
+                    .chain()
+                    .after(toggle),
             ),
         );
 }
@@ -137,10 +158,11 @@ type Blockers<'w> = (
 );
 
 /// The Inventory key opens the window and closes it into play; Escape closes
-/// it into play too, and is spent so the cursor stays grabbed.
+/// it into play too, and is spent so the cursor stays grabbed. The Catalogue
+/// key opens it, or keeps it open, with the cursor in the Catalogue search.
 fn toggle(
     mut actions: ResMut<Actions>,
-    mut window: ResMut<InventoryWindow>,
+    (mut window, mut side): (ResMut<InventoryWindow>, ResMut<catalogue::Side>),
     (menu, layout_menu, settings, ui): Blockers,
     focused: Single<&Window, With<PrimaryWindow>>,
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
@@ -154,14 +176,16 @@ fn toggle(
         return;
     }
     let key = actions.started(Action::Inventory);
+    let search = actions.started(Action::SearchCatalogue);
     let escape = window.open && actions.cancel_requested();
-    if !key && !escape {
+    if !key && !search && !escape {
         return;
     }
     if escape {
         actions.consume_cancel();
     }
-    if window.open {
+    side.focus_search = search;
+    if window.open && !search {
         close(&mut window, &mut cursor);
     } else {
         window.open = true;
@@ -286,9 +310,14 @@ fn drag_start(
     }
 }
 
-fn drag_end(event: On<PointerDragEnd>, mut window: ResMut<InventoryWindow>) {
+fn drag_end(
+    event: On<PointerDragEnd>,
+    mut window: ResMut<InventoryWindow>,
+    mut side: ResMut<catalogue::Side>,
+) {
     if event.button == PointerButton::Primary {
         window.dragging = None;
+        side.taking = None;
     }
 }
 
@@ -296,6 +325,7 @@ fn drop_on_slot(
     event: On<PointerDragDrop>,
     controls: Query<&Control>,
     mut window: ResMut<InventoryWindow>,
+    mut side: ResMut<catalogue::Side>,
     mut intents: MessageWriter<InventoryIntent>,
 ) {
     if !window.open || event.button != PointerButton::Primary {
@@ -304,7 +334,10 @@ fn drop_on_slot(
     let Ok(&Control::Slot(to)) = controls.get(event.entity) else {
         return;
     };
-    if let Some(from) = window.dragging.take()
+    if let Some(material) = side.taking.take() {
+        window.inspected = Some(to);
+        intents.write(side.take(material, to));
+    } else if let Some(from) = window.dragging.take()
         && from != to
     {
         window.inspected = Some(to);
@@ -322,14 +355,26 @@ struct Built {
     key: String,
 }
 
+type Frame<'w, 's> = (
+    Query<'w, 's, Entity, With<WindowRoot>>,
+    Query<'w, 's, Entity, With<WindowRow>>,
+    Query<'w, 's, Entity, With<Card>>,
+    Query<'w, 's, &'static Control>,
+);
+
 #[allow(clippy::too_many_arguments)]
 fn render(
     mut commands: Commands,
     window: Res<InventoryWindow>,
     held: Res<Held>,
-    (looks, catalogue): (Res<Looks>, Res<Catalogue>),
+    (looks, catalogue, searches, swatches): (
+        Res<Looks>,
+        Res<Catalogue>,
+        Res<super::menu_ui::Searches>,
+        Option<Res<super::menu::Swatches>>,
+    ),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
-    (roots, controls): (Query<Entity, With<WindowRoot>>, Query<&Control>),
+    (roots, rows, cards, controls): Frame,
     focus: Option<Res<InputFocus>>,
     mut built: Local<Option<Built>>,
 ) {
@@ -348,64 +393,91 @@ fn render(
         .and_then(|f| f.get())
         .and_then(|entity| controls.get(entity).ok())
         .copied();
-    for root in &roots {
-        commands.entity(root).despawn();
-    }
     *built = wanted.clone();
     let Some(state) = wanted else {
+        for root in &roots {
+            commands.entity(root).despawn();
+        }
         return;
+    };
+    for card in &cards {
+        commands.entity(card).despawn();
+    }
+    let opening = rows.is_empty();
+    let row = match rows.iter().next() {
+        Some(row) => row,
+        None => {
+            let row = commands
+                .spawn((
+                    WindowRow,
+                    Node {
+                        max_height: Val::Percent(96.0),
+                        column_gap: Val::Px(14.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|row| catalogue::panel(row, &searches.catalogue))
+                .id();
+            commands
+                .spawn((
+                    WindowRoot,
+                    GlobalZIndex(20),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: Val::Percent(100.0),
+                        height: Val::Percent(100.0),
+                        align_items: AlignItems::Center,
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    },
+                    BackgroundColor(SCRIM),
+                ))
+                .add_child(row);
+            row
+        }
     };
     let names = Names {
         looks: &looks,
         catalogue: &catalogue,
+        swatches: swatches.as_deref(),
     };
     commands
         .spawn((
-            WindowRoot,
-            GlobalZIndex(20),
+            Card,
+            ChildOf(row),
             Node {
-                position_type: PositionType::Absolute,
-                width: Val::Percent(100.0),
-                height: Val::Percent(100.0),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(9.0)),
+                overflow: Overflow::clip(),
                 ..default()
             },
-            BackgroundColor(SCRIM),
+            BackgroundColor(SURFACE),
+            BorderColor::all(Color::BLACK),
+            BoxShadow::new(
+                Color::BLACK.with_alpha(0.65),
+                Val::Px(0.0),
+                Val::Px(20.0),
+                Val::Px(0.0),
+                Val::Px(60.0),
+            ),
         ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    flex_direction: FlexDirection::Column,
-                    max_height: Val::Percent(96.0),
-                    border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(9.0)),
-                    overflow: Overflow::clip(),
-                    ..default()
-                },
-                BackgroundColor(SURFACE),
-                BorderColor::all(Color::BLACK),
-                BoxShadow::new(
-                    Color::BLACK.with_alpha(0.65),
-                    Val::Px(0.0),
-                    Val::Px(20.0),
-                    Val::Px(0.0),
-                    Val::Px(60.0),
-                ),
-            ))
-            .with_children(|card| {
-                header(card, &state.key);
-                card.spawn(Node::default()).with_children(|main| {
-                    backpack(main, &state, &names);
-                    if state.details {
-                        details(main, &state, &names);
-                    }
-                });
-                footer(card, &state, &names);
+        .with_children(|card| {
+            header(card, &state.key);
+            card.spawn(Node::default()).with_children(|main| {
+                backpack(main, &state, &names);
+                if state.details {
+                    details(main, &state, &names);
+                }
             });
+            footer(card, &state, &names);
         });
-    let target = focused.unwrap_or(Control::Slot(Slot::Backpack(0)));
+    // Focus elsewhere, in the Catalogue's search or tiles, outlives the card.
+    let target = focused.or(opening.then_some(Control::Slot(Slot::Backpack(0))));
     commands.queue(move |world: &mut World| {
+        let Some(target) = target else {
+            return;
+        };
         let found = world
             .query::<(Entity, &Control)>()
             .iter(world)
@@ -420,6 +492,7 @@ fn render(
 struct Names<'a> {
     looks: &'a Looks,
     catalogue: &'a Catalogue,
+    swatches: Option<&'a super::menu::Swatches>,
 }
 
 impl Names<'_> {
@@ -428,10 +501,24 @@ impl Names<'_> {
     }
 
     fn color(&self, item: &str) -> Color {
-        self.look(item).map_or(Color::WHITE, |look| {
+        if let Some(look) = self.look(item) {
             let [r, g, b, a] = look.color;
-            Color::srgba_u8(r, g, b, a)
-        })
+            return Color::srgba_u8(r, g, b, a);
+        }
+        // An implicit Item is named after its Material and drawn in its colour.
+        let material = self.catalogue.0.materials.iter().find(|m| m.name == item);
+        match (material, self.swatches) {
+            (Some(m), Some(swatches)) => {
+                let held = if m.fluid.is_some() {
+                    Holding::Fluid(m.id)
+                } else {
+                    Holding::solid(m.id, tesserae_core::SHAPE_FULL_CUBE)
+                };
+                let [r, g, b, a] = swatches.rgba(held).to_array();
+                Color::linear_rgba(r, g, b, a)
+            }
+            _ => Color::WHITE,
+        }
     }
 
     /// The Material's declared name, when it differs from the Item's.
@@ -920,7 +1007,7 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
 
 /// Hover, inspected, picked and drop-target state, without a rebuild.
 fn paint(
-    window: Res<InventoryWindow>,
+    (window, side): (Res<InventoryWindow>, Res<catalogue::Side>),
     mut slots: Query<(&Control, &Hovered, &Children, &mut BackgroundColor)>,
     mut rims: Query<&mut BorderColor, With<SlotRim>>,
 ) {
@@ -933,7 +1020,7 @@ fn paint(
         };
         let rim = if window.picked == Some(slot) || window.dragging == Some(slot) {
             PICKED
-        } else if hovered.get() && window.dragging.is_some() {
+        } else if hovered.get() && (window.dragging.is_some() || side.taking.is_some()) {
             DROP_TARGET
         } else if hovered.get() {
             RIM_HOVER
@@ -961,19 +1048,63 @@ mod tests {
     use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
     use tesserae_core::inventory::Slot;
 
+    use super::catalogue::{CatalogueControl, SearchBox};
     use super::*;
+    use crate::content::{CatalogueMaterial, ContentCatalogue};
     use crate::server::player::Player;
+    use bevy::camera::NormalizedRenderTarget;
+    use bevy::picking::backend::HitData;
+    use bevy::picking::events::Pointer;
+    use bevy::picking::pointer::{Location, PointerId};
+    use tesserae_core::MaterialId;
 
-    /// The Client with the Server's Inventory behind it and a Player holding
-    /// rock in the backpack and dust on the hotbar.
+    const ROCK: MaterialId = 3;
+    const SAND: MaterialId = 4;
+    const WATER: MaterialId = 5;
+
+    fn material(id: MaterialId, name: &str, fluid: bool) -> CatalogueMaterial {
+        CatalogueMaterial {
+            id,
+            name: name.into(),
+            solid: !fluid,
+            fluid: fluid.then_some(0),
+            burns: false,
+            remove_time: std::time::Duration::from_secs(1),
+        }
+    }
+
+    /// The Client with the Server's Inventory behind it, a Player holding rock
+    /// in the backpack and dust on the hotbar, and hotbar slot 4 selected.
     fn app() -> App {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)
             .init_resource::<super::super::menu::Menu>()
             .init_resource::<bevy::input_focus::InputFocus>()
             .init_resource::<super::super::drops::Looks>()
-            .init_resource::<super::super::edit::Catalogue>()
+            .init_resource::<super::super::menu_ui::Searches>()
+            .init_resource::<Time<Real>>()
+            .insert_resource(super::super::edit::Catalogue(ContentCatalogue {
+                materials: vec![
+                    material(0, "core:air", false),
+                    material(ROCK, "t:stone", false),
+                    material(SAND, "t:sand", false),
+                    material(WATER, "t:water", true),
+                ],
+                ..default()
+            }))
+            .init_resource::<super::super::edit::Hotbar>()
+            .insert_resource(crate::server::items::PlacingItems(vec![
+                None,
+                None,
+                None,
+                Some("t:rock".into()),
+                Some("t:sand".into()),
+                Some("t:water".into()),
+            ]))
             .add_plugins((plugin, crate::server::inventory::plugin));
+        app.world_mut()
+            .resource_mut::<super::super::edit::Hotbar>()
+            .selected = 3;
         app.world_mut().spawn((
             Window {
                 focused: true,
@@ -1113,5 +1244,142 @@ mod tests {
         click(&mut app, Slot::Hotbar(0));
         assert_eq!(count(&mut app, Slot::Hotbar(0)), None);
         assert_eq!(count(&mut app, Slot::Backpack(1)).as_deref(), Some("6"));
+    }
+
+    fn find<C: Component + PartialEq>(app: &mut App, wanted: C) -> Entity {
+        app.world_mut()
+            .query::<(Entity, &C)>()
+            .iter(app.world())
+            .find_map(|(entity, c)| (*c == wanted).then_some(entity))
+            .expect("on screen")
+    }
+
+    fn activate(app: &mut App, control: CatalogueControl) {
+        let entity = find(app, control);
+        app.world_mut().trigger(Activate { entity });
+        server(app);
+    }
+
+    /// Lets enough time pass that the next click is not a double-click.
+    fn later(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<Time<Real>>()
+            .advance_by(std::time::Duration::from_secs(1));
+    }
+
+    fn drag(app: &mut App, material: MaterialId, onto: Slot) {
+        let pointer = || {
+            Pointer::new(
+                PointerId::Mouse,
+                Location {
+                    target: NormalizedRenderTarget::None {
+                        width: 800,
+                        height: 600,
+                    },
+                    position: Vec2::ZERO,
+                },
+            )
+        };
+        let hit = || HitData::new(Entity::PLACEHOLDER, 0.0, None, None);
+        let tile = find(app, CatalogueControl::Tile(material));
+        let slot = find(app, Control::Slot(onto));
+        app.world_mut().trigger(PointerDragStart {
+            entity: tile,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            hit: hit(),
+        });
+        app.world_mut().trigger(PointerDragDrop {
+            entity: slot,
+            dropped: tile,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            hit: hit(),
+        });
+        app.world_mut().trigger(PointerDragEnd {
+            entity: tile,
+            pointer: pointer(),
+            button: PointerButton::Primary,
+            distance: Vec2::ZERO,
+        });
+        server(app);
+    }
+
+    #[test]
+    fn c_opens_the_inventory_with_the_catalogue_search_focused() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyC);
+        assert!(shown(&mut app));
+        assert_eq!(cursor(&mut app), (CursorGrabMode::None, true));
+        let search = app
+            .world_mut()
+            .query_filtered::<Entity, With<SearchBox>>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(
+            app.world()
+                .resource::<bevy::input_focus::InputFocus>()
+                .get(),
+            Some(search)
+        );
+    }
+
+    #[test]
+    fn each_take_gesture_lands_the_item_and_count_through_the_server() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        activate(&mut app, CatalogueControl::Tile(SAND));
+        activate(&mut app, CatalogueControl::Count(16));
+        activate(&mut app, CatalogueControl::ToBackpack);
+        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("16"));
+        activate(&mut app, CatalogueControl::ToHotbar);
+        assert_eq!(count(&mut app, Slot::Hotbar(3)).as_deref(), Some("16"));
+
+        activate(&mut app, CatalogueControl::Count(1));
+        later(&mut app);
+        activate(&mut app, CatalogueControl::Tile(WATER));
+        assert_eq!(count(&mut app, Slot::Hotbar(3)).as_deref(), Some("16"));
+        activate(&mut app, CatalogueControl::Tile(WATER));
+        assert_eq!(
+            count(&mut app, Slot::Hotbar(3)).as_deref(),
+            Some("1"),
+            "a double-click takes into the selected hotbar slot"
+        );
+        assert_eq!(
+            count(&mut app, Slot::Backpack(2)).as_deref(),
+            Some("32"),
+            "and the sand there moves to the backpack"
+        );
+
+        later(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        activate(&mut app, CatalogueControl::Tile(SAND));
+        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("33"));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::ShiftLeft);
+
+        activate(&mut app, CatalogueControl::Count(64));
+        drag(&mut app, ROCK, Slot::Backpack(10));
+        assert_eq!(count(&mut app, Slot::Backpack(10)).as_deref(), Some("64"));
+    }
+
+    #[test]
+    fn the_count_steps_between_one_and_the_stack_limit() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        activate(&mut app, CatalogueControl::Tile(SAND));
+        activate(&mut app, CatalogueControl::Count(1));
+        activate(&mut app, CatalogueControl::Fewer);
+        activate(&mut app, CatalogueControl::More);
+        activate(&mut app, CatalogueControl::More);
+        activate(&mut app, CatalogueControl::ToBackpack);
+        assert_eq!(count(&mut app, Slot::Backpack(2)).as_deref(), Some("3"));
+        activate(&mut app, CatalogueControl::Count(64));
+        activate(&mut app, CatalogueControl::More);
+        activate(&mut app, CatalogueControl::ToHotbar);
+        assert_eq!(count(&mut app, Slot::Hotbar(3)).as_deref(), Some("64"));
     }
 }

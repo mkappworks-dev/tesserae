@@ -1370,3 +1370,22 @@ fn a_save_holding_an_unregistered_player_extension_is_refused_as_incompatible() 
     );
     assert_eq!(folder_bytes(&dir.0), before);
 }
+
+#[test]
+fn only_a_world_opened_without_a_save_is_announced_as_new() {
+    let announced = |rig: &mut Rig| {
+        rig.app
+            .world_mut()
+            .resource_mut::<Messages<NewWorld>>()
+            .drain()
+            .count()
+    };
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    assert_eq!(announced(&mut rig), 1);
+    rig.insert();
+    rig.settled_save();
+    assert_eq!(announced(&mut rig), 0, "once");
+    drop(rig);
+    assert_eq!(announced(&mut Rig::new(&dir)), 0, "a reopened World");
+}

@@ -252,6 +252,10 @@ impl SaveStatus {
     }
 }
 
+/// Sent once when a World opens with no save behind it.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct NewWorld;
+
 pub fn playing(status: Option<Res<SaveStatus>>) -> bool {
     status.is_none_or(|s| !s.modal())
 }
@@ -463,6 +467,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<SaveProfile>();
     app.init_session_resource::<SaveStatus>()
         .add_session_message::<SaveAction>()
+        .add_session_message::<NewWorld>()
         .on_session_start(install)
         .add_session_systems(FixedFirst, requests.run_if(resource_exists::<Persistence>))
         .add_session_systems(Update, restore_player.run_if(restoring))
@@ -488,6 +493,9 @@ fn install(world: &mut World) {
         p.opening_detail.clone()
     };
     status.notice = p.recovered_notice.take();
+    if p.reopened_eye.is_none() {
+        world.write_message(NewWorld);
+    }
     let mut store = world.resource_mut::<ChunkStore>();
     store.persistent = p.writer.is_some();
     store.checkpoint = store.persistent && p.reopened_eye.is_none();

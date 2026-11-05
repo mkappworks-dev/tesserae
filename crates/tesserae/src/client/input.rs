@@ -165,6 +165,7 @@ pub(super) fn resolve(
             action,
             Action::Catalogue
                 | Action::Inventory
+                | Action::SearchCatalogue
                 | Action::ReleaseCursor
                 | Action::Help
                 | Action::Diagnostics

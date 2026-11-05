@@ -21,6 +21,38 @@ impl Items {
     }
 }
 
+/// The Item a Catalogue take of each Material gives, by Material id: the
+/// declared Item that places it, else an implicit Item of the Material's own
+/// name. `None` for a Material nothing places, such as air.
+#[derive(Resource, Default, Debug)]
+pub struct PlacingItems(pub Vec<Option<String>>);
+
+impl PlacingItems {
+    /// `materials` are every registered Material's id, name and whether a
+    /// Player can place it.
+    pub fn new<'a>(
+        materials: impl IntoIterator<Item = (MaterialId, &'a str, bool)>,
+        items: &Items,
+    ) -> Self {
+        let mut placing = Vec::new();
+        for (id, name, placeable) in materials {
+            let at = usize::from(id);
+            placing.resize(placing.len().max(at + 1), None);
+            placing[at] = placeable.then(|| {
+                items
+                    .dropped_by(id)
+                    .map_or(name, |item| items.0[item].name.as_str())
+                    .to_owned()
+            });
+        }
+        Self(placing)
+    }
+
+    pub fn item(&self, material: MaterialId) -> Option<&str> {
+        self.0.get(usize::from(material))?.as_deref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,5 +71,23 @@ mod tests {
         let items = Items(vec![item("m:dust", None), item("m:chunk", Some(9))]);
         assert_eq!(items.dropped_by(9), Some(1));
         assert_eq!(items.dropped_by(10), None);
+    }
+
+    #[test]
+    fn a_material_is_taken_as_its_declared_item_else_one_of_its_own_name() {
+        let items = Items(vec![item("m:chunk", Some(2))]);
+        let placing = PlacingItems::new(
+            [
+                (0, "core:air", false),
+                (2, "m:ore", true),
+                (5, "m:sand", true),
+            ],
+            &items,
+        );
+        assert_eq!(placing.item(2), Some("m:chunk"));
+        assert_eq!(placing.item(5), Some("m:sand"));
+        assert_eq!(placing.item(0), None);
+        assert_eq!(placing.item(3), None);
+        assert_eq!(placing.item(9), None);
     }
 }
