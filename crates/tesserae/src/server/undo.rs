@@ -3,7 +3,7 @@ use super::{
     ContentTables,
     edit::{self, EditRejected, RejectReason},
     entities::{self, EntityStore},
-    inventory::{self, Inventory, MAX_STACK},
+    inventory::{self, Inventory},
     items::Items,
     mods::EditHistory,
     player::Player,
@@ -252,7 +252,8 @@ fn restore(
         match (&entry.cost, undoing) {
             (Cost::Free, _) => {}
             (Cost::Paid(item), true) => {
-                if settle.inventory.receive(item, 1, MAX_STACK) > 0 {
+                let limit = settle.items.stack_limit(item);
+                if settle.inventory.receive(item, 1, limit) > 0 {
                     refused.push((item.clone(), 1));
                 }
             }
@@ -438,6 +439,8 @@ mod tests {
                 size_m: 0.25,
                 color: [0; 4],
                 material: Some(stone().material()),
+                max_stack: 64,
+                food: None,
             }]));
             if survival_mode {
                 survival(&mut app);

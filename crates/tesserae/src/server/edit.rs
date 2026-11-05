@@ -1989,6 +1989,8 @@ pub(in crate::server) mod tests {
             size_m: 0.25,
             color: [0; 4],
             material: None,
+            max_stack: 64,
+            food: None,
         }]);
         let soil = tesserae_core::testgen::fixtures().ground.soil;
         app.insert_resource(super::super::items::PlacingItems::new(

@@ -37,6 +37,7 @@ pub mod player;
 mod priority;
 mod sky;
 pub mod streaming;
+pub mod survival;
 pub mod tool;
 pub mod undo;
 pub mod world_state;

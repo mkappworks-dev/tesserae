@@ -62,6 +62,7 @@ fn material(
         render,
         solid,
         remove_time_s: remove,
+        contact_damage_per_s: None,
     }
 }
 
@@ -91,7 +92,10 @@ fn component() -> Declaration {
         materials: vec![
             material("rock", 15, O::Opaque, R::Opaque, true, 0, None),
             material("water", 2, O::SameMaterial, R::Blend, false, 0, Some(0.5)),
-            material("lava", 2, O::Never, R::Blend, false, 12, None),
+            content::MaterialDef {
+                contact_damage_per_s: Some(4.0),
+                ..material("lava", 2, O::Never, R::Blend, false, 12, None)
+            },
             material("wood", 15, O::SameMaterial, R::Cutout, true, 0, None),
             material("ash", 15, O::Opaque, R::Opaque, true, 0, None),
         ],
@@ -281,6 +285,8 @@ fn component() -> Declaration {
                     a: 255,
                 },
                 material: Some("full:wood".into()),
+                max_stack: Some(16),
+                food: None,
             },
             content::ItemDef {
                 name: "pebble".into(),
@@ -292,6 +298,8 @@ fn component() -> Declaration {
                     a: 255,
                 },
                 material: None,
+                max_stack: None,
+                food: Some(2.5),
             },
         ],
         biomes: vec![
@@ -337,6 +345,19 @@ fn component() -> Declaration {
                 biomes: vec![],
             },
         ],
+        survival: Some(content::SurvivalParams {
+            max_health: Some(30.0),
+            max_hunger: None,
+            max_air_s: None,
+            safe_fall_m: Some(4.5),
+            fall_damage_per_m: None,
+            drowning_damage_per_s: None,
+            hunger_per_min: None,
+            sprinting_hunger_per_min: None,
+            regeneration_hunger: None,
+            starvation_damage_per_s: None,
+            keep_inventory: Some(true),
+        }),
     }
 }
 
@@ -362,6 +383,8 @@ fn equivalent_declarations_register_equivalent_content_and_simulation() {
     assert_eq!(data.character, native.character);
     assert_eq!(data.movement, native.movement);
     assert_eq!(data.view, native.view);
+    assert_eq!(data.survival, native.survival);
+    assert_eq!(data.contact_damage, native.contact_damage);
     assert_eq!(data.world, native.world);
     assert_eq!(
         data.world.unwrap().climate,
@@ -399,9 +422,10 @@ fn absent_optional_values_stay_absent_rather_than_defaulting() {
     assert!(world.caves.is_none() && world.smoothing.is_none() && world.water.is_none());
     assert!(world.movement.is_none() && world.character.is_none() && world.ground.is_none());
     assert!(d.view.is_none() && d.fluids.is_empty() && d.tools.is_empty());
-    assert!(d.items.is_empty());
+    assert!(d.items.is_empty() && d.survival.is_none());
     assert!(world.climate.is_none() && d.biomes.is_empty() && d.ores.is_empty());
     assert_eq!(d.materials[0].remove_time_s, None);
+    assert_eq!(d.materials[0].contact_damage_per_s, None);
 }
 
 fn refused(replace: &str, with: &str, field: &str) {
@@ -480,6 +504,14 @@ fn unknown_fields_variants_and_bad_optionals_name_the_mod_and_field() {
             "haze",
         ),
         ("rarity = 0.05", "rarity = 0.05\nluck = 1", "luck"),
+        ("max-health = 30", "max-health = 30\nmana = 5", "mana"),
+        (
+            "keep-inventory = true",
+            "keep-inventory = 1",
+            "keep-inventory",
+        ),
+        ("max-stack = 16", "max-stack = -1", "max-stack"),
+        ("food = 2.5", "food = \"bread\"", "food"),
         ("rarity = 0.05", "rarity = \"rare\"", "rarity"),
         (
             "biomes = [\"full:dry\"]",
@@ -551,6 +583,15 @@ fn shared_validation_bounds_apply_to_data() {
             "combustion",
         ),
         ("fuel = \"full:ash\"", "fuel = \"full:wood\"", "combustion"),
+        ("max-stack = 16", "max-stack = 65", "max-stack"),
+        ("food = 2.5", "food = 0", "food"),
+        (
+            "contact-damage-per-s = 4.0",
+            "contact-damage-per-s = -1",
+            "contact-damage-per-s",
+        ),
+        ("max-health = 30", "max-health = 0", "max-health"),
+        ("safe-fall-m = 4.5", "safe-fall-m = 1001", "safe-fall-m"),
     ] {
         refused(replace, with, field);
     }
@@ -564,6 +605,7 @@ fn a_mod_that_is_not_the_game_may_not_declare_game_only_fields() {
             "view",
         ),
         ("[[tools]]\nname = 'ruler'\nkind = 'measure'", "tools"),
+        ("[survival]\nkeep-inventory = true", "survival"),
         (
             "[world.movement]\nallow-flight = true\nallow-physics = true\nstart-in-flight = false",
             "world.movement",

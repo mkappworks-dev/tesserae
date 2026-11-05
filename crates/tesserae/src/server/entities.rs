@@ -11,7 +11,7 @@ use tesserae_core::entity::{DropSpec, Entities, EntityId, WorldEntity};
 
 use super::ContentTables;
 use super::edit;
-use super::inventory::{Inventory, MAX_STACK};
+use super::inventory::Inventory;
 use super::items::Items;
 use super::player::Player;
 use super::world_state::ChunkStore;
@@ -171,7 +171,7 @@ pub(super) fn pick_up(
         // which is what keeps a refusal from being told every tick.
         let left = inventory
             .bypass_change_detection()
-            .receive(&item.name, count, MAX_STACK);
+            .receive(&item.name, count, item.max_stack);
         let taken = count - left;
         if taken > 0 {
             inventory.set_changed();
@@ -241,6 +241,8 @@ mod tests {
             size_m: 0.25,
             color: [1, 2, 3, 255],
             material: Some(stone().material()),
+            max_stack: 64,
+            food: None,
         }])
     }
 
@@ -438,6 +440,17 @@ mod tests {
         let held = inventory(&mut app);
         assert_eq!(held.hotbar()[2], rock(64));
         assert_eq!(held.hotbar()[3], rock(6));
+        assert_eq!(drops(&app), 0);
+    }
+
+    #[test]
+    fn a_declared_stack_limit_of_one_keeps_every_picked_up_item_separate() {
+        let mut app = game();
+        app.world_mut().resource_mut::<Items>().0[0].max_stack = 1;
+        rocks_at_hand(&mut app, 3);
+        app.world_mut().run_system_once(pick_up).unwrap();
+        let held = inventory(&mut app);
+        assert_eq!(held.hotbar()[..4], [rock(1), rock(1), rock(1), None]);
         assert_eq!(drops(&app), 0);
     }
 

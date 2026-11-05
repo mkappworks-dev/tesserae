@@ -1,6 +1,6 @@
 # 08: Survival declarations
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
@@ -12,8 +12,8 @@ Game and Mod authors can declare what Survival needs. Items gain an optional sta
 
 ## Acceptance criteria
 
-- [ ] Each field parses from WIT and from the data-only form, with range checks.
-- [ ] Omitted fields take the engine defaults listed in the spec.
-- [ ] A Mod declaring a Survival record is refused with a clear message.
-- [ ] Stacks never exceed a declared limit; a limit of 1 keeps every Item separate.
-- [ ] No per-voxel host call is added.
+- [x] Each field parses from WIT and from the data-only form, with range checks.
+- [x] Omitted fields take the engine defaults listed in the spec.
+- [x] A Mod declaring a Survival record is refused with a clear message.
+- [x] Stacks never exceed a declared limit; a limit of 1 keeps every Item separate.
+- [x] No per-voxel host call is added.

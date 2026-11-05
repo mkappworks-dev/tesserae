@@ -63,6 +63,8 @@ impl Rig {
             size_m: 0.25,
             color: [1, 2, 3, 255],
             material: None,
+            max_stack: 64,
+            food: None,
         }];
         let items = Items(loaded.items.clone());
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();

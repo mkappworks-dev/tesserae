@@ -28,6 +28,7 @@ pub mod reaction;
 pub mod save;
 pub mod seed;
 pub mod shape;
+pub mod survival;
 pub mod tables;
 pub mod testgen;
 pub mod visibility;
@@ -64,6 +65,7 @@ pub use shape::{
     Arm, CollisionBox, ConnectDef, Connections, MAX_SHAPED_PER_CHUNK, NodeBox, Orientation,
     SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR, ShapeDef, ShapeError, ShapeTable,
 };
+pub use survival::SurvivalRules;
 pub use tables::{PlaceFault, Tables};
 pub use voxel::{AIR, MaterialId, SHAPE_FULL_CUBE, ShapeId, Voxel};
 pub use worldgen::{

@@ -22,6 +22,7 @@ pub struct ItemLook {
     pub color: [u8; 4],
     /// Its Material's appearance is drawn when set.
     pub material: Option<MaterialId>,
+    pub max_stack: u32,
 }
 
 impl ItemLook {

@@ -6,11 +6,12 @@ use std::time::Duration;
 
 pub const DEFAULT_REMOVE_TIME: Duration = Duration::from_millis(350);
 
+use tesserae_core::survival::MAX_SURVIVAL_VALUE;
 use tesserae_core::{
     AIR, Biome, BiomeId, BiomeName, BiomeSet, BiomeTable, Burn, CombustionDef, FluidDef,
     GroundParams, Heat, MAX_BIOMES, MAX_CAVE_SCALE, MAX_ORES, MaterialId, Ore, OreTable,
-    ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, Tables, Voxel, WaterParams,
-    WorldgenParams,
+    ParamError, Phase, Reactant, ReactionDef, Side, SkyFog, SurvivalRules, Tables, Voxel,
+    WaterParams, WorldgenParams,
 };
 
 use crate::bindings::tesserae::mods::content::{self, Declaration};
@@ -37,6 +38,9 @@ pub const MAX_BIOMES_PER_MOD: usize = MAX_BIOMES;
 pub const MAX_ORES_PER_MOD: usize = MAX_ORES / 2;
 /// Bounds of an item's cube edge in metres.
 pub const ITEM_SIZE_M: (f32, f32) = (0.05, 0.5);
+/// The most one Inventory slot holds of any Item, and the stack limit of an
+/// Item that declares none.
+pub const MAX_STACK: u32 = 64;
 
 /// A declared item, named `<mod id>:<name>`, with the Material that drops it
 /// resolved once every Mod has declared.
@@ -46,6 +50,9 @@ pub struct ItemDef {
     pub size_m: f32,
     pub color: [u8; 4],
     pub material: Option<MaterialId>,
+    pub max_stack: u32,
+    /// Hunger eating one restores; `None` is not food.
+    pub food: Option<f32>,
 }
 
 /// What a tool does when used; mirrors the contract's closed `tool-kind`.
@@ -113,6 +120,8 @@ impl From<content::ViewParams> for ViewParams {
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct Applied {
     pub remove_times: Vec<(MaterialId, Duration)>,
+    /// Health per second, only for Materials that declare it.
+    pub contact_damage: Vec<(MaterialId, f32)>,
     /// Validated appearance data, transferred without copying texture pixels.
     pub appearance: Vec<content::Appearance>,
     /// With no lake: [`resolve`] returns the one it names.
@@ -121,6 +130,8 @@ pub struct Applied {
     pub movement: Option<content::MovementPolicy>,
     pub character: Option<crate::character::Character>,
     pub tools: Vec<ToolDef>,
+    /// The Game's, with its omitted fields at the engine's defaults.
+    pub survival: Option<SurvivalRules>,
     pub behaviour: Behaviour,
 }
 
@@ -187,6 +198,7 @@ pub fn apply(
         for (set, field) in [
             (declaration.view.is_some(), "view"),
             (!declaration.tools.is_empty(), "tools"),
+            (declaration.survival.is_some(), "survival"),
         ] {
             if set {
                 return Err(ModError::NotAGame { id: id(), field });
@@ -304,6 +316,15 @@ pub fn apply(
         })?;
     }
 
+    let survival = declaration.survival.map(survival_rules);
+    if let Some(rules) = &survival {
+        rules.validate().map_err(|source| ModError::Params {
+            id: id(),
+            what: "survival",
+            source,
+        })?;
+    }
+
     let mut tools: Vec<ToolDef> = Vec::new();
     for tool in &declaration.tools {
         let bad = |rule| ModError::Params {
@@ -331,8 +352,20 @@ pub fn apply(
     check_biomes(mod_id, &declaration.biomes)?;
 
     let mut remove_times = Vec::new();
+    let mut contact_damage = Vec::new();
     for (row, material) in declaration.materials.into_iter().enumerate() {
         let name = qualified(mod_id, Kind::Material, row, &material.name)?;
+        let damage = material.contact_damage_per_s;
+        if damage.is_some_and(|d| !(0.0..=MAX_SURVIVAL_VALUE).contains(&d)) {
+            return Err(ModError::Params {
+                id: id(),
+                what: "material",
+                source: ParamError {
+                    field: "contact-damage-per-s",
+                    rule: "must be finite and from 0 to 1000",
+                },
+            });
+        }
         let seconds = material.remove_time_s.unwrap_or(0.35);
         if !(0.05..=60.0).contains(&seconds) {
             return Err(ModError::RemoveTime {
@@ -355,6 +388,9 @@ pub fn apply(
                 source,
             })?;
         remove_times.push((material_id, duration));
+        if let Some(damage) = damage {
+            contact_damage.push((material_id, damage));
+        }
         registry.push(Kind::Material, name);
     }
     for (row, shape) in declaration.shapes.into_iter().enumerate() {
@@ -372,12 +408,14 @@ pub fn apply(
     }
     Ok(Applied {
         remove_times,
+        contact_damage,
         appearance: declaration.appearance,
         world,
         view,
         movement,
         character,
         tools,
+        survival,
         behaviour: Behaviour {
             mod_id: id(),
             fluids: declaration.fluids,
@@ -409,8 +447,44 @@ fn check_items(mod_id: &str, items: &[content::ItemDef]) -> Result<(), ModError>
         if !(min..=max).contains(&item.size_m) {
             return Err(bad("size-m", "must be finite and from 0.05 to 0.5 m"));
         }
+        if item
+            .max_stack
+            .is_some_and(|n| !(1..=MAX_STACK).contains(&n))
+        {
+            return Err(bad("max-stack", "must be from 1 to 64"));
+        }
+        if item
+            .food
+            .is_some_and(|f| !(f > 0.0 && f <= MAX_SURVIVAL_VALUE))
+        {
+            return Err(bad(
+                "food",
+                "must be finite, greater than 0 and at most 1000",
+            ));
+        }
     }
     Ok(())
+}
+
+fn survival_rules(p: content::SurvivalParams) -> SurvivalRules {
+    let d = SurvivalRules::default();
+    SurvivalRules {
+        max_health: p.max_health.unwrap_or(d.max_health),
+        max_hunger: p.max_hunger.unwrap_or(d.max_hunger),
+        max_air_s: p.max_air_s.unwrap_or(d.max_air_s),
+        safe_fall_m: p.safe_fall_m.unwrap_or(d.safe_fall_m),
+        fall_damage_per_m: p.fall_damage_per_m.unwrap_or(d.fall_damage_per_m),
+        drowning_damage_per_s: p.drowning_damage_per_s.unwrap_or(d.drowning_damage_per_s),
+        hunger_per_min: p.hunger_per_min.unwrap_or(d.hunger_per_min),
+        sprinting_hunger_per_min: p
+            .sprinting_hunger_per_min
+            .unwrap_or(d.sprinting_hunger_per_min),
+        regeneration_hunger: p.regeneration_hunger.unwrap_or(d.regeneration_hunger),
+        starvation_damage_per_s: p
+            .starvation_damage_per_s
+            .unwrap_or(d.starvation_damage_per_s),
+        keep_inventory: p.keep_inventory.unwrap_or(d.keep_inventory),
+    }
 }
 
 fn check_biomes(mod_id: &str, biomes: &[content::BiomeDef]) -> Result<(), ModError> {
@@ -596,6 +670,8 @@ pub fn resolve_items(
                 size_m: item.size_m,
                 color: [c.r, c.g, c.b, c.a],
                 material,
+                max_stack: item.max_stack.unwrap_or(MAX_STACK),
+                food: item.food,
             });
         }
     }

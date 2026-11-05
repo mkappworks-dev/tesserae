@@ -529,6 +529,11 @@ impl Names<'_> {
         }
     }
 
+    /// An Item no Mod declares stacks to the engine's limit.
+    fn stack_limit(&self, item: &str) -> u32 {
+        self.look(item).map_or(MAX_STACK, |look| look.max_stack)
+    }
+
     /// The Material's declared name, when it differs from the Item's.
     fn places(&self, item: &str) -> Option<&str> {
         let material = self.look(item)?.material?;
@@ -879,7 +884,7 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     .with_child(weighted(source, 11.0, 400, SOURCE));
                 for (term, value) in [
                     ("Count", stack.count.to_string()),
-                    ("Stack limit", MAX_STACK.to_string()),
+                    ("Stack limit", names.stack_limit(&stack.item).to_string()),
                 ] {
                     panel
                         .spawn((

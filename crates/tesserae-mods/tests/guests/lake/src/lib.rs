@@ -35,6 +35,7 @@ impl Guest for Lake {
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: false,
                 },
                 MaterialDef {
@@ -44,6 +45,7 @@ impl Guest for Lake {
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: true,
                 },
             ],
@@ -67,6 +69,7 @@ impl Guest for Lake {
             tools: vec![],
             items: vec![],
             biomes: vec![],
+            survival: None,
             ores: vec![],
         }
     }

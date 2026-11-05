@@ -21,6 +21,7 @@ fn wit_material(
         occlusion,
         render,
         remove_time_s: None,
+        contact_damage_per_s: None,
         solid,
     }
 }

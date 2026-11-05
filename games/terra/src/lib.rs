@@ -95,6 +95,7 @@ fn solid(name: &str) -> MaterialDef {
         occlusion: Occlusion::Opaque,
         render: RenderClass::Opaque,
         remove_time_s: Some(0.35),
+        contact_damage_per_s: None,
         solid: true,
     }
 }
@@ -205,6 +206,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: true,
                 },
                 MaterialDef {
@@ -214,6 +216,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: false,
                 },
                 solid("wood"),
@@ -228,6 +231,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: false,
                 },
                 solid("brick"),
@@ -238,6 +242,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::SameMaterial,
                     render: RenderClass::Blend,
                     remove_time_s: None,
+                    contact_damage_per_s: None,
                     solid: false,
                 },
                 solid("stone"),
@@ -385,6 +390,8 @@ impl Guest for Terra {
                         a: 255,
                     },
                     material: Some("terra:stone".into()),
+                    max_stack: None,
+                    food: None,
                 },
                 ItemDef {
                     name: "dirt".into(),
@@ -396,6 +403,8 @@ impl Guest for Terra {
                         a: 255,
                     },
                     material: Some("terra:dirt".into()),
+                    max_stack: None,
+                    food: None,
                 },
                 ItemDef {
                     name: "grass".into(),
@@ -407,6 +416,8 @@ impl Guest for Terra {
                         a: 255,
                     },
                     material: Some("terra:grass".into()),
+                    max_stack: None,
+                    food: None,
                 },
             ],
             biomes: vec![
@@ -452,6 +463,7 @@ impl Guest for Terra {
                     cave_scale: Some(0.0),
                 },
             ],
+            survival: None,
             ores: vec![OreDef {
                 material: "terra:iron".into(),
                 min_depth_m: 5.0,

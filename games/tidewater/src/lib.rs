@@ -293,6 +293,7 @@ impl Guest for Tidewater {
                     cave_scale: None,
                 },
             ],
+            survival: None,
             ores: vec![OreDef {
                 material: "crystals:aquamarine".into(),
                 min_depth_m: 6.0,

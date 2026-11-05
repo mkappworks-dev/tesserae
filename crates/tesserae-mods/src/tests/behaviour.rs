@@ -24,6 +24,7 @@ fn material(name: &str, solid: bool) -> MaterialDef {
         occlusion: Occlusion::Never,
         render: RenderClass::Blend,
         remove_time_s: None,
+        contact_damage_per_s: None,
         solid,
     }
 }
@@ -90,6 +91,7 @@ fn empty() -> Declaration {
         items: vec![],
         biomes: vec![],
         ores: vec![],
+        survival: None,
     }
 }
 
@@ -654,6 +656,7 @@ fn a_games_ground_resolves_after_all_declarations_and_generates_its_materials() 
             occlusion: content::Occlusion::Opaque,
             render: content::RenderClass::Opaque,
             remove_time_s: None,
+            contact_damage_per_s: None,
             solid: true,
         });
     }

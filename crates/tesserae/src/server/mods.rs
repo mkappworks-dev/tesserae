@@ -118,6 +118,8 @@ pub struct LoadedMods {
     pub tools: Vec<tesserae_mods::ToolDef>,
     pub items: Vec<tesserae_mods::ItemDef>,
     pub required: Vec<tesserae_core::save::RequiredMod>,
+    pub survival: Option<tesserae_core::SurvivalRules>,
+    pub contact_damage: Vec<(MaterialId, f32)>,
 }
 
 impl Default for LoadedMods {
@@ -137,6 +139,8 @@ impl Default for LoadedMods {
             tools: Vec::new(),
             items: Vec::new(),
             required: Vec::new(),
+            survival: None,
+            contact_damage: Vec::new(),
         }
     }
 }
@@ -469,6 +473,7 @@ pub(crate) async fn declare_all(
         )
         .map_err(|e| e.to_string())?;
         loaded.remove_times.extend(applied.remove_times);
+        loaded.contact_damage.extend(applied.contact_damage);
         behaviours.push(applied.behaviour);
         for row in applied.appearance {
             if let Some(index) = loaded
@@ -490,6 +495,7 @@ pub(crate) async fn declare_all(
             loaded.game = true;
             loaded.movement = applied.movement;
             loaded.tools = applied.tools;
+            loaded.survival = applied.survival;
         }
         if let Some(character) = applied.character {
             if let Some(first) = &character_from {
@@ -684,6 +690,10 @@ fn install(world: &mut World) {
     }
     world.insert_resource(tables);
     world.insert_resource(super::tool::Tools(loaded.tools));
+    world.insert_resource(super::survival::Survival::new(
+        loaded.survival.unwrap_or_default(),
+        loaded.contact_damage,
+    ));
     world.write_message(crate::content::ItemLooks(
         loaded
             .items
@@ -693,6 +703,7 @@ fn install(world: &mut World) {
                 size_m: item.size_m,
                 color: item.color,
                 material: item.material,
+                max_stack: item.max_stack,
             })
             .collect(),
     ));
@@ -1799,6 +1810,33 @@ cubes = [{{ origin = [-4.0, 12.0, -2.0], size = [8, 12, 4], uv = [16, 16] }}]
             .collect();
         assert_eq!(sent.len(), 1);
         sent.pop().unwrap()
+    }
+
+    #[test]
+    fn the_games_survival_rules_and_harmful_materials_are_installed() {
+        let installed = |loaded: LoadedMods| {
+            let mut app = App::new();
+            app.insert_non_send(loaded).add_plugins(plugin);
+            app.world()
+                .resource::<super::super::survival::Survival>()
+                .clone()
+        };
+        let rules = tesserae_core::SurvivalRules {
+            max_health: 40.0,
+            keep_inventory: true,
+            ..Default::default()
+        };
+        let survival = installed(LoadedMods {
+            survival: Some(rules),
+            contact_damage: vec![(9, 4.0)],
+            ..LoadedMods::default()
+        });
+        assert_eq!(survival.rules, rules);
+        assert_eq!(survival.contact_damage_per_s(9), 4.0);
+        assert_eq!(survival.contact_damage_per_s(8), 0.0);
+        assert_eq!(survival.contact_damage_per_s(200), 0.0);
+        let defaults = installed(LoadedMods::default());
+        assert_eq!(defaults.rules, tesserae_core::SurvivalRules::default());
     }
 
     #[test]
