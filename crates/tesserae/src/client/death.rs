@@ -482,6 +482,34 @@ mod tests {
     }
 
     #[test]
+    fn f10_and_f1_do_not_open_settings_over_the_death_screen() {
+        let mut app = app();
+        app.init_resource::<super::super::pad::PadInput>()
+            .init_resource::<super::super::touch::TouchFrame>()
+            .init_resource::<super::super::input::UiInput>()
+            .init_resource::<super::super::input::Ownership>()
+            .add_systems(
+                Update,
+                (
+                    super::super::settings::open_shortcut,
+                    super::super::input::resolve,
+                )
+                    .chain(),
+            );
+        tell(&mut app, fell(stones(), false));
+        for key in [KeyCode::F10, KeyCode::F1] {
+            press(&mut app, key);
+            assert!(
+                !app.world()
+                    .resource::<super::super::settings::Settings>()
+                    .open,
+                "{key:?}"
+            );
+            assert!(shown(&mut app), "{key:?}");
+        }
+    }
+
+    #[test]
     fn enter_respawns_and_the_servers_answer_closes_the_screen_with_a_notice() {
         let mut app = app();
         tell(&mut app, fell(stones(), false));

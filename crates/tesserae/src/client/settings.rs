@@ -225,7 +225,7 @@ impl Opener<'_, '_> {
     }
 }
 
-fn open_shortcut(
+pub(super) fn open_shortcut(
     actions: Res<super::actions::Actions>,
     mut opener: Opener,
     (ui, status, ownership, inventory): (
@@ -239,7 +239,9 @@ fn open_shortcut(
     if !window.focused
         || matches!(
             ownership.owner,
-            super::input::Owner::Unfocused | super::input::Owner::TextEntry
+            super::input::Owner::Unfocused
+                | super::input::Owner::TextEntry
+                | super::input::Owner::Dead
         )
         || ui.text_entry
         || status.modal()
