@@ -1326,6 +1326,28 @@ mod tests {
     }
 
     #[test]
+    fn a_text_field_takes_i_and_c_as_letters() {
+        let mut app = app();
+        let typing = |app: &mut App, on: bool| {
+            app.world_mut()
+                .resource_mut::<super::super::input::UiInput>()
+                .text_entry = on;
+        };
+        app.init_resource::<super::super::input::UiInput>();
+        typing(&mut app, true);
+        press(&mut app, KeyCode::KeyI);
+        press(&mut app, KeyCode::KeyC);
+        assert!(!shown(&mut app), "typed into the field, not a shortcut");
+        typing(&mut app, false);
+        press(&mut app, KeyCode::KeyC);
+        assert!(shown(&mut app));
+        typing(&mut app, true);
+        press(&mut app, KeyCode::KeyI);
+        press(&mut app, KeyCode::KeyC);
+        assert!(shown(&mut app), "the search keeps its letters");
+    }
+
+    #[test]
     fn the_details_shape_row_chooses_the_shape_the_selected_slot_places_in() {
         use tesserae_core::{SHAPE_FULL_CUBE, SHAPE_SLAB};
         let mut app = app();

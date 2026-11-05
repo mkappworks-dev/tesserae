@@ -1,6 +1,6 @@
 # 15: New key map and profile migration
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04, 14
 
@@ -12,6 +12,6 @@ The default keys become Tab → Menu, I → Inventory, C → Inventory with the 
 
 ## Acceptance criteria
 
-- [ ] A fresh profile gets the new defaults.
-- [ ] A version-1 profile with old defaults is remapped once; custom bindings survive unchanged.
-- [ ] Text entry in menus still receives I and C as letters.
+- [x] A fresh profile gets the new defaults.
+- [x] A version-1 profile with old defaults is remapped once; custom bindings survive unchanged.
+- [x] Text entry in menus still receives I and C as letters.
