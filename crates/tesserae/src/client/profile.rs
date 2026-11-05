@@ -32,6 +32,8 @@ pub(crate) struct Preferences {
     pub view: super::view::View,
     pub zoom_m: f32,
     pub layout: super::layout::LayoutPreferences,
+    /// Stills the HUD's pulses and flashes.
+    pub reduced_motion: bool,
 }
 /// Controller feel, kept apart from the mouse so neither overwrites the other.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -106,6 +108,7 @@ impl Default for Preferences {
             view: default(),
             zoom_m: super::view::DEFAULT_ZOOM_M,
             layout: default(),
+            reduced_motion: false,
         }
     }
 }

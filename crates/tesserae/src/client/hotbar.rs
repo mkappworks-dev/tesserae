@@ -22,9 +22,21 @@ const FRAME_PX: f32 = 2.0;
 const NAME_PX: f32 = 22.0;
 /// How far the selected slot stands above the rest.
 const LIFT_PX: f32 = 4.0;
-/// Where the hotbar and the name above it end, for what sits over them.
-pub(super) const TOP_PX: f32 =
+const BAR_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32
+    + GAP_PX * (HOTBAR_SLOTS - 1) as f32
+    + 2.0 * (PADDING_PX + FRAME_PX);
+const TOP_PX: f32 =
     BOTTOM_PX + SLOT_PX + 2.0 * (PADDING_PX + FRAME_PX) + LIFT_PX + GAP_PX * 2.0 + NAME_PX;
+
+/// Where the hotbar, the Vitals over it in Survival and the name above them
+/// end, for what sits over them.
+pub(super) fn top_px(survival: bool) -> f32 {
+    if survival {
+        TOP_PX + super::vitals::ROWS_PX + GAP_PX * 2.0
+    } else {
+        TOP_PX
+    }
+}
 
 const BAR: Color = Color::srgba_u8(6, 7, 8, 0xc7);
 const SLOT_FILL: Color = Color::srgb_u8(23, 24, 26);
@@ -107,6 +119,15 @@ pub(super) fn rebuild(
                 },
                 Node {
                     min_height: Val::Px(NAME_PX),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+            root.spawn((
+                super::vitals::VitalsAnchor,
+                Node {
+                    display: Display::None,
+                    width: Val::Px(BAR_PX),
                     ..default()
                 },
                 Pickable::IGNORE,

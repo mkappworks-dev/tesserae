@@ -127,7 +127,12 @@ pub struct RespawnIntent;
 pub struct RestoreView(pub f32, pub f32);
 
 #[derive(Component, Debug)]
-#[require(super::inventory::Inventory, super::game_mode::PlayerMode)]
+#[require(
+    super::inventory::Inventory,
+    super::game_mode::PlayerMode,
+    super::vitals::Vitals,
+    super::vitals::LastDamage
+)]
 pub struct Player {
     eye: Vec3,
     mode: MovementMode,
@@ -144,6 +149,8 @@ pub struct Player {
     swim_hold_s: f32,
     /// A horizontal axis was blocked on the last step.
     against_bank: bool,
+    /// The fastest landing since the Vitals last took it.
+    impact_mps: f32,
 }
 impl Player {
     fn new(eye: Vec3, mode: MovementMode) -> Self {
@@ -161,6 +168,7 @@ impl Player {
             swimming: false,
             swim_hold_s: 0.0,
             against_bank: false,
+            impact_mps: 0.0,
         }
     }
     pub fn eye(&self) -> Vec3 {
@@ -210,6 +218,16 @@ impl Player {
         p.view = [saved.yaw, saved.pitch];
         p.crouching = saved.crouching;
         p
+    }
+    /// The height in metres a free fall lands from at the speed of the
+    /// hardest landing since the last call: v² / 2g.
+    pub(in crate::server) fn take_fall_m(&mut self) -> f32 {
+        let v = std::mem::take(&mut self.impact_mps);
+        v * v / (2.0 * GRAVITY_MPS2)
+    }
+    pub(in crate::server) fn eye_submerged(&self) -> bool {
+        self.immersion
+            .is_some_and(|fluid| self.eye.y < fluid.surface_y_m)
     }
     pub fn body_state(&self) -> BodyState {
         BodyState {
@@ -390,6 +408,9 @@ impl Player {
         }
         self.against_bank = moved.blocked[0] || moved.blocked[2];
         self.grounded = moved.blocked[1] && self.velocity_y <= 0.0;
+        if self.grounded {
+            self.impact_mps = self.impact_mps.max(-self.velocity_y);
+        }
         if moved.blocked[1] {
             self.velocity_y = 0.0;
         }
@@ -449,6 +470,7 @@ fn spawn_player(
     generator: Option<Res<super::WorldGenerator>>,
     policy: Res<MovementPolicy>,
     persistence: Option<Res<super::persistence::Persistence>>,
+    survival: Option<Res<super::survival::Survival>>,
 ) {
     let game_mode = super::game_mode::PlayerMode(
         persistence
@@ -492,7 +514,8 @@ fn spawn_player(
         "Player spawned: movement={:?}, eye={:?}, view=first_person, fixed_hz=64",
         player.mode, player.eye
     );
-    commands.spawn((player, game_mode));
+    let vitals = super::vitals::Vitals::full(&survival.map(|s| s.rules).unwrap_or_default());
+    commands.spawn((player, game_mode, vitals));
 }
 /// First standing position over `spawn` whose body is clear, so a Voxel placed
 /// at the spawn lifts the respawn rather than embedding it. `None` when the
@@ -604,7 +627,7 @@ fn publish(mut player: Single<&mut Player>, mut poses: MessageWriter<PoseCorrect
         body: player.body_state(),
     });
 }
-fn simulate(
+pub(super) fn simulate(
     status: Option<Res<super::persistence::SaveStatus>>,
     policy: Res<MovementPolicy>,
     mut player: Single<&mut Player>,

@@ -40,6 +40,7 @@ pub mod streaming;
 pub mod survival;
 pub mod tool;
 pub mod undo;
+pub mod vitals;
 pub mod world_state;
 
 #[cfg(test)]
@@ -105,7 +106,12 @@ pub fn plugin(app: &mut App) {
             sky::plugin,
         ));
     app.add_plugins(persistence::plugin);
-    app.add_plugins((entities::plugin, inventory::plugin, game_mode::plugin));
+    app.add_plugins((
+        entities::plugin,
+        inventory::plugin,
+        game_mode::plugin,
+        vitals::plugin,
+    ));
     #[cfg(feature = "dev")]
     if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
         app.add_plugins(gallery::plugin);

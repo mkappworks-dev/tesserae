@@ -1,6 +1,6 @@
 # 09: Vitals and damage
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 06, 08
 
@@ -12,8 +12,8 @@ Survival Players have health and air on the Server, ticked at 64 Hz in metres an
 
 ## Acceptance criteria
 
-- [ ] The same fall in metres deals the same damage at two Voxel sizes.
-- [ ] Air drains only with the Eye under a fluid; drowning starts at zero air.
-- [ ] Contact damage applies per second of overlap and stops on leaving.
-- [ ] Creative Players take no damage.
-- [ ] Vitals survive save and reopen; the HUD follows Server messages only.
+- [x] The same fall in metres deals the same damage at two Voxel sizes.
+- [x] Air drains only with the Eye under a fluid; drowning starts at zero air.
+- [x] Contact damage applies per second of overlap and stops on leaving.
+- [x] Creative Players take no damage.
+- [x] Vitals survive save and reopen; the HUD follows Server messages only.

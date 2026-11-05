@@ -17,7 +17,6 @@ const FEED_S: f32 = 3.0;
 const FEED_FADE_S: f32 = 0.4;
 const FEED_ROWS: usize = 5;
 const ROW_ALPHA: f32 = 0xc7 as f32 / 255.0;
-const NOTICE_BOTTOM_PX: f32 = super::hotbar::TOP_PX + 4.0;
 
 #[derive(Clone, PartialEq, Debug)]
 struct FeedRow {
@@ -264,13 +263,16 @@ fn show_notice(
     mut commands: Commands,
     notice: Res<FullNotice>,
     (menu, settings): (Res<Menu>, Option<Res<Settings>>),
+    mode: Option<Res<super::game_mode::Mode>>,
     nodes: Query<Entity, With<NoticeNode>>,
-    mut shown: Local<Option<String>>,
+    mut shown: Local<Option<(String, bool)>>,
 ) {
+    let survival = mode.is_some_and(|m| m.survival());
     let wanted = notice
         .text
         .clone()
-        .filter(|_| in_play(&menu, settings.as_deref()));
+        .filter(|_| in_play(&menu, settings.as_deref()))
+        .map(|text| (text, survival));
     if *shown == wanted {
         return;
     }
@@ -278,7 +280,7 @@ fn show_notice(
         commands.entity(node).despawn();
     }
     *shown = wanted.clone();
-    let Some(text) = wanted else {
+    let Some((text, survival)) = wanted else {
         return;
     };
     commands
@@ -287,7 +289,7 @@ fn show_notice(
             Pickable::IGNORE,
             Node {
                 position_type: PositionType::Absolute,
-                bottom: Val::Px(NOTICE_BOTTOM_PX),
+                bottom: Val::Px(super::hotbar::top_px(survival) + 4.0),
                 width: Val::Percent(100.0),
                 justify_content: JustifyContent::Center,
                 ..default()
