@@ -216,7 +216,7 @@ impl Guest for Terra {
                     occlusion: Occlusion::Opaque,
                     render: RenderClass::Opaque,
                     remove_time_s: None,
-                    contact_damage_per_s: None,
+                    contact_damage_per_s: Some(4.0),
                     solid: false,
                 },
                 solid("wood"),
@@ -263,6 +263,7 @@ impl Guest for Terra {
                 solid("sand"),
                 solid("snow"),
                 solid("iron"),
+                solid("melon"),
             ],
             shapes: vec![fence()],
             appearance: vec![
@@ -281,6 +282,7 @@ impl Guest for Terra {
                 appearance("sand", [214, 196, 140, 255]),
                 appearance("snow", [236, 240, 246, 255]),
                 appearance("iron", [150, 120, 104, 255]),
+                appearance("melon", [84, 150, 56, 255]),
             ],
             world: Some(world),
             view: Some(ViewParams {
@@ -418,6 +420,19 @@ impl Guest for Terra {
                     material: Some("terra:grass".into()),
                     max_stack: None,
                     food: None,
+                },
+                ItemDef {
+                    name: "melon".into(),
+                    size_m: 0.25,
+                    color: Srgba {
+                        r: 84,
+                        g: 150,
+                        b: 56,
+                        a: 255,
+                    },
+                    material: Some("terra:melon".into()),
+                    max_stack: None,
+                    food: Some(6.0),
                 },
             ],
             biomes: vec![

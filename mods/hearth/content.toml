@@ -5,6 +5,7 @@ dimming = 15
 occlusion = "opaque"
 render = "opaque"
 solid = false
+contact-damage-per-s = 4.0
 
 [[materials]]
 name = "ash"

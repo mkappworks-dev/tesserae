@@ -1,6 +1,6 @@
 # 12: Terra Survival content
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 08
 
@@ -12,6 +12,13 @@ Terra declares at least one food Item with its food value, so hunger can be surv
 
 ## Acceptance criteria
 
-- [ ] Terra has a food Item that can be gathered or taken from the Catalogue.
-- [ ] Lava hurts on contact in every Game that declares it.
-- [ ] Existing World saves of every Game still open.
+- [x] Terra has a food Item that can be gathered or taken from the Catalogue.
+- [x] Lava hurts on contact in every Game that declares it.
+- [x] Existing World saves of every Game still open.
+
+## Comments
+
+- Terra declares a solid `melon` Material and a `melon` Item that places it, with a food value of 6 (of the default 20 hunger). The Catalogue gives it in Creative, and removing a placed melon drops it for Pickup. Terra generates none: ores sow only rock, and new generation would change the terrain of every Terra World, so a fresh Survival Terra World has no food until a Creative player places some.
+- Lava hurts 4 health per second on contact: `terra:lava`, and `hearth:lava`, which is where Ember's lava comes from. No other Game has a lava Material.
+- No Game's Survival numbers change: every Game keeps `survival: None` and the engine defaults.
+- Every change is additive (a new Material, Item and Material field; no Material renamed, removed or reordered), so the Terra persistence round trips still open. A World saved with an earlier build of Terra or hearth is still refused as a changed build, as for every rebuild (ADR-0018); that is not this ticket's to change.

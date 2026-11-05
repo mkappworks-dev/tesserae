@@ -4,7 +4,7 @@ Heat: lava, ash, and the rules that join them to water and wood.
 
 | Declares   | Name                                                                                                                  |
 | ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| Materials  | `lava` (fluid, emission 15), `ash`                                                                                    |
+| Materials  | `lava` (fluid, emission 15, 4 health per second on contact), `ash`                                                    |
 | Fluids     | `hearth:lava`: reach 3 m, hot (strength 12 over 2 m), stays out of Shapes                                             |
 | Reactions  | lava source + water → `waters:obsidian`; flowing lava + water → `strata:basalt`; the lava is consumed, the water kept |
 | Items      | `ash`, dropped by a removed `hearth:ash` Voxel                                                                        |
