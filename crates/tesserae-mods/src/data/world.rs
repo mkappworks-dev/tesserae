@@ -46,6 +46,40 @@ pub(super) struct View {
     lod_distance_m: f32,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub(super) struct Survival {
+    max_health: Option<f32>,
+    max_hunger: Option<f32>,
+    max_air_s: Option<f32>,
+    safe_fall_m: Option<f32>,
+    fall_damage_per_m: Option<f32>,
+    drowning_damage_per_s: Option<f32>,
+    hunger_per_min: Option<f32>,
+    sprinting_hunger_per_min: Option<f32>,
+    regeneration_hunger: Option<f32>,
+    starvation_damage_per_s: Option<f32>,
+    keep_inventory: Option<bool>,
+}
+
+impl From<Survival> for content::SurvivalParams {
+    fn from(s: Survival) -> Self {
+        Self {
+            max_health: s.max_health,
+            max_hunger: s.max_hunger,
+            max_air_s: s.max_air_s,
+            safe_fall_m: s.safe_fall_m,
+            fall_damage_per_m: s.fall_damage_per_m,
+            drowning_damage_per_s: s.drowning_damage_per_s,
+            hunger_per_min: s.hunger_per_min,
+            sprinting_hunger_per_min: s.sprinting_hunger_per_min,
+            regeneration_hunger: s.regeneration_hunger,
+            starvation_damage_per_s: s.starvation_damage_per_s,
+            keep_inventory: s.keep_inventory,
+        }
+    }
+}
+
 impl From<Caves> for content::CaveParams {
     fn from(c: Caves) -> Self {
         Self {

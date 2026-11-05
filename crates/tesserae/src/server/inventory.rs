@@ -14,6 +14,7 @@ use tesserae_core::save::{CarriedV1, InventoryV1};
 
 use super::ContentTables;
 use super::entities::EntityStore;
+use super::game_mode::PlayerMode;
 use super::items::{Items, PlacingItems};
 use super::persistence::extensions::PlayerState;
 use super::player::Player;
@@ -21,8 +22,7 @@ use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
 
-/// Every Item's stack limit until Items declare their own.
-pub const MAX_STACK: u32 = 64;
+pub use tesserae_mods::MAX_STACK;
 
 #[derive(Component, Default, Clone, PartialEq, Debug, Deref, DerefMut)]
 pub struct Inventory(pub inventory::Inventory);
@@ -60,16 +60,23 @@ pub enum Reason {
     Rule(Refusal),
     /// A take of a Material no Item places.
     NotInCatalogue,
+    /// A take outside Creative.
+    CreativeOnly,
 }
 
 /// An intent the Server declined; the Inventory is as it was.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InventoryRefused(pub Reason);
 
+/// Also what the Client says when the Catalogue is asked for in Survival.
+pub const CREATIVE_ONLY: &str = "The Catalogue is Creative-only.";
+
 /// For the Client to put on screen.
 pub fn message(reason: Reason) -> &'static str {
-    let Reason::Rule(refusal) = reason else {
-        return "That Material is not in the Catalogue.";
+    let refusal = match reason {
+        Reason::Rule(refusal) => refusal,
+        Reason::NotInCatalogue => return "That Material is not in the Catalogue.",
+        Reason::CreativeOnly => return CREATIVE_ONLY,
     };
     match refusal {
         Refusal::NoSuchSlot => "That slot does not exist.",
@@ -80,6 +87,7 @@ pub fn message(reason: Reason) -> &'static str {
         Refusal::NoRoom => "Not enough room for this stack.",
         Refusal::BackpackFull => "The backpack is full. Make room first.",
         Refusal::BadCount => "Choose a count from 1 to the stack limit.",
+        Refusal::TooFew => "Not enough Items.",
     }
 }
 
@@ -99,13 +107,15 @@ pub(crate) fn plugin(app: &mut App) {
 
 fn arrange(
     mut intents: MessageReader<InventoryIntent>,
-    mut inventory: Single<&mut Inventory>,
+    player: Single<(&mut Inventory, &PlayerMode)>,
     placing: Option<Res<PlacingItems>>,
+    items: Option<Res<Items>>,
     mut refused: MessageWriter<InventoryRefused>,
 ) {
+    let (mut inventory, mode) = player.into_inner();
+    let limit = |item: &str| items.as_ref().map_or(MAX_STACK, |i| i.stack_limit(item));
     for intent in intents.read() {
         let mut next = inventory.0.clone();
-        let limit = |_: &str| MAX_STACK;
         let result = match *intent {
             InventoryIntent::Move { from, to } => next.move_stack(from, to, limit),
             InventoryIntent::QuickTransfer(from) => next.quick_transfer(from, limit),
@@ -117,12 +127,16 @@ fn arrange(
                 count,
                 into,
             } => {
-                // TODO(game mode): refuse a take unless the Player is in Creative.
+                if mode.survival() {
+                    refused.write(InventoryRefused(Reason::CreativeOnly));
+                    continue;
+                }
                 let Some(item) = placing.as_ref().and_then(|p| p.item(material)) else {
                     refused.write(InventoryRefused(Reason::NotInCatalogue));
                     continue;
                 };
-                next.take(item, count, into, limit)
+                // At most one stack, so the Catalogue's full stack fits any Item.
+                next.take(item, count.min(limit(item)), into, limit)
             }
         };
         match result {
@@ -173,13 +187,21 @@ impl PlayerState for CarriedV1 {
 }
 
 fn pack_carried(world: &mut World, player: Entity, carried: BTreeMap<String, u32>) {
+    let limits: Vec<_> = {
+        let items = world.get_resource::<Items>();
+        carried
+            .keys()
+            .map(|item| items.map_or(MAX_STACK, |i| i.stack_limit(item)))
+            .collect()
+    };
     let Some(mut inventory) = world.get_mut::<Inventory>(player) else {
         return;
     };
     let overflow: Vec<_> = carried
         .into_iter()
-        .filter_map(|(item, count)| {
-            let left = inventory.receive(&item, count, MAX_STACK);
+        .zip(limits)
+        .filter_map(|((item, count), limit)| {
+            let left = inventory.receive(&item, count, limit);
             (left > 0).then_some((item, left))
         })
         .collect();
@@ -196,7 +218,29 @@ pub(super) fn drop_beside(
     let Some(body) = world.get::<Player>(player).map(Player::body) else {
         return;
     };
-    let items = world.resource::<Items>();
+    world.resource_scope(|world, mut entities: Mut<EntityStore>| {
+        drop_around(
+            &mut entities,
+            world.resource::<ChunkStore>(),
+            &world.resource::<ContentTables>().0,
+            world.resource::<WorldSettings>().voxel_size,
+            world.resource::<Items>(),
+            &body,
+            stacks,
+        );
+    });
+}
+
+/// [`drop_beside`] for a system that holds the resources it needs.
+pub(super) fn drop_around(
+    entities: &mut EntityStore,
+    store: &ChunkStore,
+    tables: &tesserae_core::Tables,
+    voxel_size: f32,
+    items: &Items,
+    body: &tesserae_core::collide::Aabb,
+    stacks: impl IntoIterator<Item = (String, u32)>,
+) {
     let specs: Vec<_> = stacks
         .into_iter()
         .filter_map(|(name, count)| {
@@ -212,15 +256,7 @@ pub(super) fn drop_beside(
         return;
     }
     let centre = [0, 1, 2].map(|a| (body.min[a] + body.max[a]) / 2.0);
-    world.resource_scope(|world, mut entities: Mut<EntityStore>| {
-        entities.spawn_drops_around(
-            world.resource::<ChunkStore>(),
-            &world.resource::<ContentTables>().0,
-            world.resource::<WorldSettings>().voxel_size,
-            centre,
-            specs,
-        );
-    });
+    entities.spawn_drops_around(store, tables, voxel_size, centre, specs);
 }
 
 #[cfg(test)]
@@ -446,6 +482,69 @@ mod tests {
     }
 
     #[test]
+    fn a_declared_stack_limit_bounds_every_stack_the_server_forms() {
+        let mut app = game();
+        let item = |name: &str, max_stack| tesserae_mods::ItemDef {
+            name: name.into(),
+            size_m: 0.25,
+            color: [1, 2, 3, 255],
+            material: None,
+            max_stack,
+            food: None,
+        };
+        app.insert_resource(Items(vec![item("t:rock", 1), item("t:sand", 16)]));
+        let (sent, refused) = ask(&mut app, take(SAND, 64, Destination::Backpack));
+        assert!(refused.is_empty());
+        assert_eq!(sent[0].get(Slot::Backpack(0)).cloned(), stack("t:sand", 16));
+        let (sent, _) = ask(&mut app, take(ROCK, 2, Destination::Slot(Slot::Hotbar(0))));
+        assert_eq!(sent[0].get(Slot::Hotbar(0)).cloned(), stack("t:rock", 1));
+        let (_, refused) = ask(&mut app, take(ROCK, 1, Destination::Slot(Slot::Hotbar(0))));
+        assert_eq!(refused, [Reason::Rule(Refusal::StackFull)]);
+        holding(
+            &mut app,
+            &[
+                (Slot::Backpack(0), "t:rock", 1),
+                (Slot::Backpack(1), "t:rock", 1),
+                (Slot::Backpack(2), "t:sand", 10),
+                (Slot::Backpack(3), "t:sand", 10),
+            ],
+        );
+        let (_, refused) = ask(
+            &mut app,
+            InventoryIntent::Move {
+                from: Slot::Backpack(0),
+                to: Slot::Backpack(1),
+            },
+        );
+        assert_eq!(refused, [Reason::Rule(Refusal::StackFull)]);
+        let (sent, _) = ask(&mut app, InventoryIntent::Sort);
+        assert_eq!(
+            [0, 1, 2, 3].map(|at| sent[0].get(Slot::Backpack(at)).cloned()),
+            [
+                stack("t:rock", 1),
+                stack("t:rock", 1),
+                stack("t:sand", 16),
+                stack("t:sand", 4)
+            ]
+        );
+        let (sent, _) = ask(&mut app, InventoryIntent::QuickTransfer(Slot::Backpack(2)));
+        assert_eq!(sent[0].get(Slot::Hotbar(0)).cloned(), stack("t:sand", 16));
+    }
+
+    #[test]
+    fn a_take_in_survival_is_refused_as_creative_only() {
+        let mut app = game();
+        let mut mode = app
+            .world_mut()
+            .query::<&mut super::super::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Survival;
+        let (sent, refused) = ask(&mut app, take(ROCK, 16, Destination::Backpack));
+        assert!(sent.is_empty(), "{sent:?}");
+        assert_eq!(refused, [Reason::CreativeOnly]);
+        assert!(!message(Reason::CreativeOnly).is_empty());
+    }
+
+    #[test]
     fn a_take_into_a_full_backpack_or_of_what_nothing_places_is_refused() {
         let mut app = game();
         let full: Vec<_> = (0..27)
@@ -463,7 +562,7 @@ mod tests {
                 Reason::Rule(Refusal::BackpackFull),
             ),
             (
-                take(ROCK, 65, Destination::Slot(Slot::Hotbar(1))),
+                take(ROCK, 0, Destination::Slot(Slot::Hotbar(1))),
                 Reason::Rule(Refusal::BadCount),
             ),
             (take(0, 1, Destination::Backpack), Reason::NotInCatalogue),

@@ -17,6 +17,7 @@ mod builder;
 pub mod edit;
 pub mod entities;
 mod fluids;
+pub mod game_mode;
 #[cfg(feature = "profiling")]
 mod profile_fixture;
 #[cfg(feature = "profiling")]
@@ -36,6 +37,7 @@ pub mod player;
 mod priority;
 mod sky;
 pub mod streaming;
+pub mod survival;
 pub mod tool;
 pub mod undo;
 pub mod world_state;
@@ -103,7 +105,7 @@ pub fn plugin(app: &mut App) {
             sky::plugin,
         ));
     app.add_plugins(persistence::plugin);
-    app.add_plugins((entities::plugin, inventory::plugin));
+    app.add_plugins((entities::plugin, inventory::plugin, game_mode::plugin));
     #[cfg(feature = "dev")]
     if std::env::var_os("TESSERAE_PROFILE_FIXTURE").is_none() {
         app.add_plugins(gallery::plugin);

@@ -18,6 +18,7 @@ fn solid(name: &str) -> MaterialDef {
         occlusion: Occlusion::Opaque,
         render: RenderClass::Opaque,
         remove_time_s: Some(0.35),
+        contact_damage_per_s: None,
         solid: true,
     }
 }
@@ -58,6 +59,7 @@ impl Guest for Starter {
             tools: Vec::new(),
             items: Vec::new(),
             biomes: Vec::new(),
+            survival: None,
             ores: Vec::new(),
         }
     }

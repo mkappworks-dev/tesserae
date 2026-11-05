@@ -190,6 +190,8 @@ pub(super) struct Item {
     size_m: f32,
     color: [u8; 4],
     material: Option<String>,
+    max_stack: Option<u32>,
+    food: Option<f32>,
 }
 
 impl From<Item> for content::ItemDef {
@@ -200,6 +202,8 @@ impl From<Item> for content::ItemDef {
             size_m: i.size_m,
             color: crate::bindings::tesserae::mods::types::Srgba { r, g, b, a },
             material: i.material,
+            max_stack: i.max_stack,
+            food: i.food,
         }
     }
 }

@@ -357,6 +357,7 @@ impl Guest for Meadow {
             tools: Vec::new(),
             items: Vec::new(),
             biomes: biomes(),
+            survival: None,
             ores: vec![OreDef {
                 material: "strata:basalt".into(),
                 min_depth_m: 6.0,

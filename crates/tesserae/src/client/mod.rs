@@ -15,6 +15,7 @@ mod cinematic;
 pub mod drawn_mask;
 mod drops;
 pub mod edit;
+mod game_mode;
 mod help;
 mod history;
 #[cfg(feature = "profiling")]
@@ -108,6 +109,7 @@ pub fn plugin(app: &mut App) {
         pickup::plugin,
         inventory_window::plugin,
         hotbar::plugin,
+        game_mode::plugin,
     ));
     app.add_session_systems(
         Update,

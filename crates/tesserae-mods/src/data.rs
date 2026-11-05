@@ -34,6 +34,7 @@ struct Data {
     biomes: Vec<behaviour::Biome>,
     #[serde(default)]
     ores: Vec<behaviour::Ore>,
+    survival: Option<world::Survival>,
 }
 
 #[derive(Deserialize)]
@@ -46,6 +47,7 @@ struct Material {
     render: Render,
     solid: bool,
     remove_time_s: Option<f32>,
+    contact_damage_per_s: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -164,6 +166,7 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
                 },
                 solid: m.solid,
                 remove_time_s: m.remove_time_s,
+                contact_damage_per_s: m.contact_damage_per_s,
             })
             .collect(),
         appearance: data
@@ -226,5 +229,6 @@ pub(crate) fn parse(id: &str, payload: &CheckedPayload) -> Result<Declaration, M
         items: data.items.into_iter().map(Into::into).collect(),
         biomes: data.biomes.into_iter().map(Into::into).collect(),
         ores: data.ores.into_iter().map(Into::into).collect(),
+        survival: data.survival.map(Into::into),
     })
 }

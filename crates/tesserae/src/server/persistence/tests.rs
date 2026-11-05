@@ -1,9 +1,11 @@
 use super::*;
+use crate::server::game_mode::PlayerMode;
 use crate::server::inventory::Inventory;
 use crate::server::{ContentTables, edit, streaming::MeshState, undo::Journal};
 use bevy::ecs::message::Messages;
 use bevy::ecs::system::EntityCommands;
 use std::time::{Duration, Instant};
+use tesserae_core::save::{GameMode, GameModeV1};
 use tesserae_core::{Burning, Chunk, Fluid, Occupants, Voxel, WorldgenParams};
 use tesserae_mods::Kind;
 
@@ -61,9 +63,12 @@ impl Rig {
             size_m: 0.25,
             color: [1, 2, 3, 255],
             material: None,
+            max_stack: 64,
+            food: None,
         }];
         let items = Items(loaded.items.clone());
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
+        let mode = PlayerMode(p.player_mode());
         let eye = p.reopened_eye.unwrap_or(Vec3::new(8.0, 4.0, 8.0));
         let restored_player = p
             .reopened_view
@@ -80,14 +85,13 @@ impl Rig {
             .init_resource::<Journal>()
             .insert_resource(items)
             .insert_resource(p)
-            .add_message::<edit::VoxelRemoved>()
             .add_plugins((
                 plugin,
                 super::super::entities::plugin,
                 super::super::inventory::plugin,
             ))
             .add_systems(FixedPreUpdate, super::super::fluids::simulate);
-        app.world_mut().spawn(restored_player);
+        app.world_mut().spawn((restored_player, mode));
         app.world_mut().run_schedule(Update);
         Self {
             app,
@@ -465,6 +469,7 @@ fn real_terra_new_builds_but_reopened_guest_never_replays_construction() {
         simulation,
         paused: paused.into_iter().map(|(h, s)| (h, (*s).clone())).collect(),
         entities: Default::default(),
+        game_mode: Default::default(),
     };
     Writer::acquire(&dir.0, &opening.id, &content)
         .unwrap()
@@ -657,7 +662,110 @@ fn details(name: &str, seed: u64, voxel_size_m: f32) -> library::Sidecar {
         last_played_unix_s: 1,
         world: WorldId::new(),
         pending: true,
+        game_mode: GameMode::Creative,
     }
+}
+
+fn player_mode(rig: &mut Rig) -> GameMode {
+    rig.app
+        .world_mut()
+        .query::<&PlayerMode>()
+        .single(rig.app.world())
+        .unwrap()
+        .0
+}
+
+fn rewrite(dir: &std::path::Path, change: impl FnOnce(&mut Commit)) {
+    let mut commit = save::inspect(dir).unwrap().unwrap().commit;
+    change(&mut commit);
+    commit.sequence += 1;
+    Writer::acquire(dir, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+}
+
+fn survival_world(worlds: &Directory) -> PathBuf {
+    let created = library::Sidecar {
+        game_mode: GameMode::Survival,
+        ..details("Hard", 7, 1.0)
+    };
+    library::create(&worlds.0, &created).unwrap()
+}
+
+fn reopen(path: &std::path::Path) -> Rig {
+    let opening = Opening::from_folder(path).unwrap();
+    let settings = opening.settings(WorldSettings::default());
+    Rig::open(opening, settings)
+}
+
+#[test]
+fn a_survival_world_starts_its_player_in_survival_and_both_survive_save_and_reopen() {
+    let worlds = Directory::new();
+    let path = survival_world(&worlds);
+    let mut rig = reopen(&path);
+    assert_eq!(player_mode(&mut rig), GameMode::Survival);
+    rig.settled_save();
+    drop(rig);
+    let commit = save::inspect(&path).unwrap().unwrap().commit;
+    assert_eq!(commit.game_mode, GameMode::Survival);
+    assert_eq!(
+        commit.player.get::<GameModeV1>().unwrap(),
+        Some(GameModeV1(GameMode::Survival))
+    );
+    let mut reopened = reopen(&path);
+    assert_eq!(player_mode(&mut reopened), GameMode::Survival);
+    assert_eq!(
+        library::read(&path).unwrap().unwrap().game_mode,
+        GameMode::Survival,
+        "the World list shows the saved default"
+    );
+}
+
+#[test]
+fn a_players_own_mode_outlives_the_worlds_default() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    assert_eq!(player_mode(&mut rig), GameMode::Creative);
+    rig.settled_save();
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app
+        .world_mut()
+        .entity_mut(player)
+        .insert(PlayerMode(GameMode::Survival));
+    rig.tick();
+    assert!(rig.app.world().resource::<SaveStatus>().dirty);
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(
+        save::inspect(&dir.0).unwrap().unwrap().commit.game_mode,
+        GameMode::Creative
+    );
+    assert_eq!(player_mode(&mut Rig::new(&dir)), GameMode::Survival);
+}
+
+#[test]
+fn a_save_without_a_players_mode_starts_them_in_the_worlds_default() {
+    let worlds = Directory::new();
+    let path = survival_world(&worlds);
+    reopen(&path).settled_save();
+    rewrite(&path, |c| {
+        c.player
+            .extensions
+            .remove(<GameModeV1 as save::PlayerExtension>::KEY);
+    });
+    assert_eq!(player_mode(&mut reopen(&path)), GameMode::Survival);
+    rewrite(&path, |c| c.game_mode = GameMode::Creative);
+    assert_eq!(
+        player_mode(&mut reopen(&path)),
+        GameMode::Creative,
+        "the save wins over the World list"
+    );
 }
 
 #[test]

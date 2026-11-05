@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 use tesserae_core::MaterialId;
-use tesserae_mods::ItemDef;
+use tesserae_mods::{ItemDef, MAX_STACK};
 
 /// Every declared Item, in load order; an Item's id is its index.
 #[derive(Resource, Default, Debug)]
@@ -18,6 +18,12 @@ impl Items {
 
     pub fn named(&self, name: &str) -> Option<usize> {
         self.0.iter().position(|item| item.name == name)
+    }
+
+    /// The most one slot holds of `item`; an implicit Item declares none.
+    pub fn stack_limit(&self, item: &str) -> u32 {
+        self.named(item)
+            .map_or(MAX_STACK, |at| self.0[at].max_stack)
     }
 }
 
@@ -69,6 +75,8 @@ mod tests {
             size_m: 0.25,
             color: [0, 0, 0, 255],
             material,
+            max_stack: 64,
+            food: None,
         }
     }
 

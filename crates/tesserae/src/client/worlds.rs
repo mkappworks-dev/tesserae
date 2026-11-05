@@ -12,6 +12,7 @@ use bevy::prelude::*;
 use crate::session::{AppState, has_state, in_list};
 use bevy::text::EditableText;
 use bevy::ui_widgets::Activate;
+use tesserae_core::save::GameMode;
 use tesserae_core::save::library::{self, Entry, GameRef, Sidecar};
 
 use super::menu_ui::{self as ui, Tone};
@@ -88,6 +89,7 @@ struct Form {
     random_seed: u64,
     voxel_size_m: f32,
     more: bool,
+    game_mode: GameMode,
     problem: Option<String>,
     /// The chosen Game's id; `None` until the form opens on an installed one.
     game: Option<String>,
@@ -103,6 +105,7 @@ impl Default for Form {
             random_seed: tesserae_core::seed::random(),
             voxel_size_m: 1.0,
             more: false,
+            game_mode: GameMode::Creative,
             problem: None,
             game: None,
             mods: Default::default(),
@@ -213,6 +216,7 @@ pub(super) enum Act {
     CopyResolved,
     More,
     Voxel(f32),
+    Mode(GameMode),
     PickGame(usize),
     ToggleMod(usize),
     SaveName,
@@ -670,6 +674,7 @@ fn handle(
                     seed: details.seed.to_string(),
                     voxel_size_m: details.voxel_size_m,
                     more: details.voxel_size_m != 1.0,
+                    game_mode: details.game_mode,
                     game: details.game.as_ref().map(|g| g.id.clone()),
                     mods: details.mods.iter().map(|m| m.id.clone()).collect(),
                     ..Form::default()
@@ -781,6 +786,10 @@ fn handle(
             }
             Act::Voxel(size) => {
                 l.form.voxel_size_m = size;
+                l.version += 1;
+            }
+            Act::Mode(mode) => {
+                l.form.game_mode = mode;
                 l.version += 1;
             }
             Act::Create => {
@@ -964,6 +973,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         last_played_unix_s: now,
         world: tesserae_core::save::WorldId::new(),
         pending: true,
+        game_mode: l.form.game_mode,
     };
     match library::create(worlds, &sidecar) {
         Ok(path) => {
@@ -1191,6 +1201,7 @@ mod tests {
             last_played_unix_s: 1,
             world: WorldId::new(),
             pending: false,
+            game_mode: Default::default(),
         }
     }
 
@@ -1270,6 +1281,32 @@ mod tests {
             *app.world().resource::<State<AppState>>().get(),
             AppState::Loading
         );
+    }
+
+    #[test]
+    fn a_new_world_is_creative_unless_survival_is_chosen() {
+        for chosen in [None, Some(GameMode::Survival), Some(GameMode::Creative)] {
+            let worlds = Directory::new();
+            let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+            app.add_plugins(bevy::state::app::StatesPlugin)
+                .init_state::<AppState>();
+            app.world_mut()
+                .resource_mut::<NextState<AppState>>()
+                .set(AppState::List);
+            app.update();
+            app.update();
+            act(&mut app, Act::New);
+            if let Some(mode) = chosen {
+                act(&mut app, Act::Mode(GameMode::Survival));
+                act(&mut app, Act::Mode(mode));
+            }
+            act(&mut app, Act::Create);
+            let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
+                panic!("no World to open");
+            };
+            let created = library::read(&path).unwrap().unwrap();
+            assert_eq!(created.game_mode, chosen.unwrap_or(GameMode::Creative));
+        }
     }
 
     #[test]

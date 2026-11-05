@@ -78,6 +78,7 @@ pub(super) fn fixture() -> Commit {
             landing_cursors: vec![],
         },
         entities: Default::default(),
+        game_mode: GameMode::Creative,
     }
 }
 
@@ -1119,6 +1120,42 @@ mod dropped_items {
             .insert("carried_v1".into(), serde_json::json!("many"));
         assert!(matches!(
             player.get::<CarriedV1>(),
+            Err(Error::Incompatible(_))
+        ));
+    }
+
+    #[test]
+    fn a_commit_without_a_game_mode_opens_as_creative_and_survival_is_kept() {
+        let mut value = serde_json::to_value(fixture()).unwrap();
+        value.as_object_mut().unwrap().remove("game_mode");
+        let old: Commit = serde_json::from_value(value).unwrap();
+        assert_eq!(old.game_mode, GameMode::Creative);
+        let survival = Commit {
+            game_mode: GameMode::Survival,
+            ..fixture()
+        };
+        let json = serde_json::to_value(&survival).unwrap();
+        assert_eq!(json["game_mode"], "survival");
+        let back: Commit = serde_json::from_value(json).unwrap();
+        assert_eq!(back.game_mode, GameMode::Survival);
+    }
+
+    #[test]
+    fn a_players_game_mode_is_an_extension_and_an_unknown_mode_is_incompatible() {
+        let mut player = fixture().player;
+        assert_eq!(player.get::<GameModeV1>().unwrap(), None);
+        player
+            .extensions
+            .insert("game_mode_v1".into(), serde_json::json!("survival"));
+        assert_eq!(
+            player.get::<GameModeV1>().unwrap(),
+            Some(GameModeV1(GameMode::Survival))
+        );
+        player
+            .extensions
+            .insert("game_mode_v1".into(), serde_json::json!("spectator"));
+        assert!(matches!(
+            player.get::<GameModeV1>(),
             Err(Error::Incompatible(_))
         ));
     }

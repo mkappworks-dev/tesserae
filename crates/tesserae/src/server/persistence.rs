@@ -308,6 +308,9 @@ pub struct Persistence {
     pub(super) reopened_mode: Option<super::player::MovementMode>,
     pub(super) reopened_view: Option<save::MovementV1>,
     pub(super) reopened_eye: Option<Vec3>,
+    /// The World's default: the mode a Player with none saved starts in.
+    game_mode: save::GameMode,
+    reopened_game_mode: Option<save::GameMode>,
     initial_simulation: Option<RestoredSimulation>,
     initial_chunks: Vec<save::SavedChunk>,
     opening_detail: String,
@@ -316,6 +319,11 @@ pub struct Persistence {
 }
 
 impl Persistence {
+    /// The mode the Player opens in: their own if saved, else the World's.
+    pub(super) fn player_mode(&self) -> save::GameMode {
+        self.reopened_game_mode.unwrap_or(self.game_mode)
+    }
+
     pub fn prepare(
         opening: Opening,
         loaded: &mut LoadedMods,
@@ -344,6 +352,19 @@ impl Persistence {
             .recovered
             .as_ref()
             .map_or(save::GENERATOR_VERSION, |r| r.commit.generator);
+        let reopened_game_mode = opening
+            .recovered
+            .as_ref()
+            .map(|r| r.commit.player.get::<save::GameModeV1>())
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|m| m.0);
+        let game_mode = match (&opening.recovered, &opening.details) {
+            (Some(r), _) => r.commit.game_mode,
+            (None, Some(d)) => d.game_mode,
+            (None, None) => save::GameMode::default(),
+        };
         let mut restored_entities = None;
         let (reopened_eye, initial_simulation, initial_chunks, generation, saved_revisions, detail) =
             if let Some(recovered) = opening.recovered {
@@ -415,6 +436,7 @@ impl Persistence {
             .map(|(path, mut d)| {
                 d.world = opening.id.clone();
                 d.last_played_unix_s = library::now_unix_s();
+                d.game_mode = game_mode;
                 // Display data only: failing to record last-played never blocks play.
                 if !d.pending
                     && let Err(e) = library::write(&path, &d)
@@ -453,6 +475,8 @@ impl Persistence {
                 .or(reopened_eye.map(|_| super::player::MovementMode::Flight)),
             reopened_view: restored,
             reopened_eye,
+            game_mode,
+            reopened_game_mode,
             initial_simulation,
             initial_chunks,
             opening_detail: detail,
@@ -758,6 +782,7 @@ fn drive(
     let content = p.content.clone();
     let generation = p.generation.clone();
     let generator = p.generator;
+    let game_mode = p.game_mode;
     let settings = p.settings;
     let id = p.id.clone();
     let pending = p.details.clone().filter(|(_, d)| d.pending);
@@ -799,6 +824,7 @@ fn drive(
                     .map(|(home, saved)| (home, (*saved).clone()))
                     .collect(),
                 entities: saved_entities,
+                game_mode,
             };
             writer.write(&commit)
         })()

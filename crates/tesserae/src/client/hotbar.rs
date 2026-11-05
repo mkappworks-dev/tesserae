@@ -338,6 +338,7 @@ mod tests {
                 size_m: 0.25,
                 color: [200, 180, 90, 255],
                 material: None,
+                max_stack: 64,
             }]))
             .init_resource::<super::super::menu::Menu>()
             .add_message::<InventoryChanged>()

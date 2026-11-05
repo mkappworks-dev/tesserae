@@ -51,6 +51,8 @@ pub enum Refusal {
     BackpackFull,
     /// A take of none, or of more than one stack holds.
     BadCount,
+    /// A spend of more Items than the Inventory holds.
+    TooFew,
 }
 
 /// Where a take lands.
@@ -311,6 +313,44 @@ impl Inventory {
 
     pub fn is_empty(&self) -> bool {
         self.slots().all(Option::is_none)
+    }
+
+    /// How many of `item` every slot holds together.
+    pub fn count(&self, item: &str) -> u32 {
+        self.slots()
+            .flatten()
+            .filter(|s| s.item == item)
+            .map(|s| s.count)
+            .sum()
+    }
+
+    /// Removes `count` of `item`, all of them or none: the held stack first,
+    /// then the others hotbar before backpack.
+    pub fn spend(&mut self, item: &str, count: u32) -> Result<(), Refusal> {
+        if self.count(item) < count {
+            return Err(Refusal::TooFew);
+        }
+        let held = self.selected;
+        let order = std::iter::once(Slot::Hotbar(held))
+            .chain((0..HOTBAR_SLOTS).filter(|&at| at != held).map(Slot::Hotbar))
+            .chain((0..BACKPACK_SLOTS).map(Slot::Backpack));
+        let mut left = count;
+        for slot in order {
+            if left == 0 {
+                break;
+            }
+            let target = self.slot_mut(slot)?;
+            let Some(stack) = target.as_mut().filter(|s| s.item == item) else {
+                continue;
+            };
+            let spent = stack.count.min(left);
+            stack.count -= spent;
+            left -= spent;
+            if stack.count == 0 {
+                *target = None;
+            }
+        }
+        Ok(())
     }
 
     /// Adds `count` of `item` up to `max_stack` per slot: into matching stacks,
@@ -659,6 +699,37 @@ mod tests {
             inventory.take("t:clay", 0, Destination::Backpack, limit),
             Err(Refusal::BadCount)
         );
+        assert_eq!(inventory, before);
+    }
+
+    #[test]
+    fn spending_takes_from_the_held_stack_first_then_the_others_in_slot_order() {
+        let mut inventory = Inventory::default();
+        inventory.hotbar[1] = stack("t:rock", 2);
+        inventory.hotbar[3] = stack("t:rock", 3);
+        inventory.backpack[0] = stack("t:rock", 10);
+        inventory.backpack[1] = stack("t:dust", 4);
+        inventory.select(3).unwrap();
+        assert_eq!(inventory.count("t:rock"), 15);
+        assert_eq!(inventory.spend("t:rock", 1), Ok(()));
+        assert_eq!(inventory.hotbar[3], stack("t:rock", 2));
+        assert_eq!(inventory.spend("t:rock", 5), Ok(()));
+        assert_eq!(inventory.hotbar[3], None, "an emptied slot is empty");
+        assert_eq!(inventory.hotbar[1], None);
+        assert_eq!(inventory.backpack[0], stack("t:rock", 9));
+        assert_eq!(inventory.count("t:rock"), 9);
+    }
+
+    #[test]
+    fn spending_more_than_is_held_spends_nothing() {
+        let mut inventory = Inventory::default();
+        inventory.hotbar[0] = stack("t:rock", 2);
+        inventory.backpack[5] = stack("t:rock", 1);
+        let before = inventory.clone();
+        assert_eq!(inventory.spend("t:rock", 4), Err(Refusal::TooFew));
+        assert_eq!(inventory.spend("t:sand", 1), Err(Refusal::TooFew));
+        assert_eq!(inventory, before);
+        assert_eq!(inventory.spend("t:rock", 0), Ok(()));
         assert_eq!(inventory, before);
     }
 

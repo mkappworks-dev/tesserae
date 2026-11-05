@@ -95,6 +95,7 @@ fn material(m: old::MaterialDef) -> content::MaterialDef {
         },
         remove_time_s: None,
         solid: m.solid,
+        contact_damage_per_s: None,
     }
 }
 
@@ -230,6 +231,7 @@ pub(crate) fn declaration(d: old::Declaration, log: &LogHandle) -> content::Decl
         items: Vec::new(),
         biomes: Vec::new(),
         ores: Vec::new(),
+        survival: None,
     }
 }
 

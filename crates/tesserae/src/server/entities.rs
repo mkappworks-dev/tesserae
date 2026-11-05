@@ -10,8 +10,8 @@ use bevy::prelude::*;
 use tesserae_core::entity::{DropSpec, Entities, EntityId, WorldEntity};
 
 use super::ContentTables;
-use super::edit::{self, VoxelRemoved};
-use super::inventory::{Inventory, MAX_STACK};
+use super::edit;
+use super::inventory::Inventory;
 use super::items::Items;
 use super::player::Player;
 use super::world_state::ChunkStore;
@@ -87,7 +87,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_systems(
             FixedPreUpdate,
             (
-                (spawn_drops, step_entities, pick_up).run_if(super::persistence::playing),
+                (step_entities, pick_up).run_if(super::persistence::playing),
                 announce_entities,
             )
                 .chain()
@@ -95,32 +95,27 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-fn spawn_drops(
-    mut removed: MessageReader<VoxelRemoved>,
-    mut entities: ResMut<EntityStore>,
-    (store, tables, world, items): (
-        Res<ChunkStore>,
-        Res<ContentTables>,
-        Res<WorldSettings>,
-        Res<Items>,
-    ),
-) {
-    for gone in removed.read() {
-        let Some(item) = items.dropped_by(gone.material) else {
-            continue;
-        };
-        entities.spawn_drop(
-            &*store,
-            &tables.0,
-            world.voxel_size,
-            gone.at,
-            DropSpec {
-                item: item as u32,
-                count: 1,
-                size_m: items.0[item].size_m,
-            },
-        );
-    }
+/// Spawns one of the Item at `item` popping out of the Voxel `at`.
+pub(super) fn drop_one(
+    entities: &mut Entities,
+    store: &ChunkStore,
+    tables: &tesserae_core::Tables,
+    voxel_size: f32,
+    items: &Items,
+    at: [i32; 3],
+    item: usize,
+) -> EntityId {
+    entities.spawn_drop(
+        store,
+        tables,
+        voxel_size,
+        at,
+        DropSpec {
+            item: item as u32,
+            count: 1,
+            size_m: items.0[item].size_m,
+        },
+    )
 }
 
 fn step_entities(
@@ -176,7 +171,7 @@ pub(super) fn pick_up(
         // which is what keeps a refusal from being told every tick.
         let left = inventory
             .bypass_change_detection()
-            .receive(&item.name, count, MAX_STACK);
+            .receive(&item.name, count, item.max_stack);
         let taken = count - left;
         if taken > 0 {
             inventory.set_changed();
@@ -234,7 +229,9 @@ mod tests {
     use super::super::inventory::{InventoryChanged, announce_inventory};
     use tesserae_mods::ItemDef;
 
-    use super::super::edit::tests::{app_with, down, ground, send, stone, tick, voxel_at};
+    use super::super::edit::tests::{
+        app_with, down, ground, send, stone, survival, tick, voxel_at,
+    };
     use super::super::edit::{EditAction, apply_intent};
     use super::*;
 
@@ -244,11 +241,15 @@ mod tests {
             size_m: 0.25,
             color: [1, 2, 3, 255],
             material: Some(stone().material()),
+            max_stack: 64,
+            food: None,
         }])
     }
 
+    /// In Survival, where a removal drops.
     fn game() -> App {
         let mut app = app_with(&[(Default::default(), ground())]);
+        survival(&mut app);
         app.insert_resource(dropping_stone());
         app.init_resource::<EntityStore>()
             .init_resource::<Refused>()
@@ -259,7 +260,6 @@ mod tests {
     fn remove_the_ground(app: &mut App) {
         send(app, down(EditAction::Remove));
         tick(app);
-        app.world_mut().run_system_once(spawn_drops).unwrap();
     }
 
     fn drops(app: &App) -> usize {
@@ -272,6 +272,18 @@ mod tests {
         remove_the_ground(&mut app);
         assert_eq!(drops(&app), 1);
         assert!(voxel_at(&app, [5, 7, 5]).is_air());
+    }
+
+    #[test]
+    fn a_creative_removal_drops_nothing() {
+        let mut app = game();
+        let mut mode = app
+            .world_mut()
+            .query::<&mut super::super::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Creative;
+        remove_the_ground(&mut app);
+        assert!(voxel_at(&app, [5, 7, 5]).is_air());
+        assert_eq!(drops(&app), 0);
     }
 
     #[test]
@@ -302,7 +314,6 @@ mod tests {
                 },
             )
             .unwrap();
-        world.run_system_once(spawn_drops).unwrap();
         assert_eq!(drops(&app), 0);
     }
 
@@ -429,6 +440,17 @@ mod tests {
         let held = inventory(&mut app);
         assert_eq!(held.hotbar()[2], rock(64));
         assert_eq!(held.hotbar()[3], rock(6));
+        assert_eq!(drops(&app), 0);
+    }
+
+    #[test]
+    fn a_declared_stack_limit_of_one_keeps_every_picked_up_item_separate() {
+        let mut app = game();
+        app.world_mut().resource_mut::<Items>().0[0].max_stack = 1;
+        rocks_at_hand(&mut app, 3);
+        app.world_mut().run_system_once(pick_up).unwrap();
+        let held = inventory(&mut app);
+        assert_eq!(held.hotbar()[..4], [rock(1), rock(1), rock(1), None]);
         assert_eq!(drops(&app), 0);
     }
 

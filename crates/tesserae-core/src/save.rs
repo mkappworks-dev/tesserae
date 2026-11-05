@@ -450,6 +450,24 @@ impl PlayerExtension for InventoryV1 {
     }
 }
 
+/// Creative or Survival: a World's default for new Players, and each Player's
+/// own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GameMode {
+    #[default]
+    Creative,
+    Survival,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct GameModeV1(pub GameMode);
+
+impl PlayerExtension for GameModeV1 {
+    const KEY: &'static str = "game_mode_v1";
+}
+
 impl Player {
     /// The value saved under `E::KEY`, `None` when the key is absent.
     pub fn get<E: PlayerExtension>(&self) -> Result<Option<E>, Error> {
@@ -734,6 +752,10 @@ pub struct Commit {
     /// Absent in commits written before dropped items: opens with none.
     #[serde(default)]
     pub entities: entities::SavedEntities,
+    /// The mode a new Player starts in. Absent in commits written before game
+    /// modes: those Worlds were Creative.
+    #[serde(default)]
+    pub game_mode: GameMode,
 }
 
 impl Commit {

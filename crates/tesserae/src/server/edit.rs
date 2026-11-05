@@ -40,8 +40,10 @@ pub use layout::LayoutCell;
 pub use layout::{CellState, LayoutAim, LayoutAnswer, LayoutIntent, LayoutParams, Span};
 
 use super::ContentTables;
+use super::game_mode::PlayerMode;
 use super::player::{self, Player};
 use super::streaming::MeshState;
+use super::undo::Cost;
 use super::world_state::{ChunkStore, LightLattice, VoxelCoord};
 use crate::world::{ChunkCoord, WorldSettings};
 
@@ -77,14 +79,6 @@ const MAX_DEFERRED_TICKS: u32 = 64;
 
 /// Intents queued at once. A Server that stalls must not grow without bound.
 const MAX_PENDING: usize = 256;
-
-/// A Player's single deliberate Remove took this solid out of the World. Not
-/// written for undo, Layout, fluid, fire or a Mod's Commands.
-#[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub struct VoxelRemoved {
-    pub at: [i32; 3],
-    pub material: MaterialId,
-}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EditAction {
@@ -252,6 +246,13 @@ pub enum RejectReason {
     NothingHeld,
     /// A Place with an Item that places no Material.
     PlacesNothing,
+    /// A Place of a Voxel the Player names rather than holds, outside Creative.
+    CreativeOnly,
+    /// A Layout in Survival that the Inventory cannot pay for in full.
+    TooFewItems,
+    /// An undo or redo that puts back a Voxel whose Item the Player does not
+    /// hold.
+    ItemNeeded,
 }
 
 impl RejectReason {
@@ -288,6 +289,9 @@ impl RejectReason {
             RejectReason::LayoutPartial => "some Voxels of the layout were skipped",
             RejectReason::NothingHeld => "nothing held",
             RejectReason::PlacesNothing => "the held item places nothing",
+            RejectReason::CreativeOnly => "only Creative places without an item",
+            RejectReason::TooFewItems => "not enough items for this layout",
+            RejectReason::ItemNeeded => "putting that back needs an item you do not hold",
         }
     }
 }
@@ -319,6 +323,8 @@ struct Pending {
     intent: EditIntent,
     waited: u32,
     reach: Reach,
+    /// The Item spent when it lands, in Survival.
+    pay: Option<String>,
 }
 
 /// Intents received and not yet applied. Server-private: nothing outside this
@@ -354,7 +360,8 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<super::mods::EditHistory>()
         .add_session_message::<EditIntent>()
         .add_session_message::<EditRejected>()
-        .add_session_message::<VoxelRemoved>()
+        .init_session_resource::<super::entities::EntityStore>()
+        .init_session_resource::<super::items::Items>()
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_session_systems(
             RunFixedMainLoop,
@@ -580,10 +587,10 @@ pub(in crate::server) fn receive(
     mut intents: MessageReader<EditIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
-    player: Single<(&Player, &super::inventory::Inventory)>,
+    player: Single<(&Player, &super::inventory::Inventory, &PlayerMode)>,
     (placing, tables): (Option<Res<super::items::PlacingItems>>, Res<ContentTables>),
 ) {
-    let (player, inventory) = *player;
+    let (player, inventory, mode) = *player;
     for intent in intents.read() {
         // Here and not in `apply_pending`: an intent can wait a second there, by
         // when the Player has moved on from where the Client meant.
@@ -594,17 +601,22 @@ pub(in crate::server) fn receive(
                 continue;
             }
         };
-        let action = match intent.action {
+        let paid = match intent.action {
             EditAction::PlaceHeld { shape, orientation } => {
-                match held_placement(inventory, placing.as_deref(), &tables.0, shape, orientation) {
-                    Ok(action) => action,
-                    Err(reason) => {
-                        rejected.write(EditRejected { reason });
-                        continue;
-                    }
-                }
+                held_placement(inventory, placing.as_deref(), &tables.0, shape, orientation)
+                    .map(|(action, item)| (action, mode.survival().then_some(item)))
             }
-            action => action,
+            EditAction::Place(_) | EditAction::PlaceSource(_) if mode.survival() => {
+                Err(RejectReason::CreativeOnly)
+            }
+            action => Ok((action, None)),
+        };
+        let (action, pay) = match paid {
+            Ok(paid) => paid,
+            Err(reason) => {
+                rejected.write(EditRejected { reason });
+                continue;
+            }
         };
         if pending.0.len() + pending.1.len() >= MAX_PENDING {
             rejected.write(EditRejected {
@@ -616,27 +628,39 @@ pub(in crate::server) fn receive(
             intent: EditIntent { action, ..*intent },
             waited: 0,
             reach,
+            pay,
         });
     }
 }
 
-/// What the selected slot's Item places, as the Place it stands for.
+/// What the selected slot's Item places, as the Place it stands for, and
+/// the Item.
 fn held_placement(
     inventory: &super::inventory::Inventory,
     placing: Option<&super::items::PlacingItems>,
     tables: &Tables,
     shape: ShapeId,
     orientation: Orientation,
-) -> Result<EditAction, RejectReason> {
+) -> Result<(EditAction, String), RejectReason> {
+    let (item, material) = held_material(inventory, placing)?;
+    let action = if tables.fluids.contains(material) {
+        EditAction::PlaceSource(material)
+    } else {
+        EditAction::Place(Voxel::shaped(material, shape, orientation))
+    };
+    Ok((action, item))
+}
+
+/// The Item in the selected slot and the Material it places.
+fn held_material(
+    inventory: &super::inventory::Inventory,
+    placing: Option<&super::items::PlacingItems>,
+) -> Result<(String, MaterialId), RejectReason> {
     let stack = inventory.held().ok_or(RejectReason::NothingHeld)?;
     let material = placing
         .and_then(|placing| placing.material(&stack.item))
         .ok_or(RejectReason::PlacesNothing)?;
-    Ok(if tables.fluids.contains(material) {
-        EditAction::PlaceSource(material)
-    } else {
-        EditAction::Place(Voxel::shaped(material, shape, orientation))
-    })
+    Ok((stack.item.clone(), material))
 }
 
 /// The part of the intent's ray within [`EDIT_REACH_M`] of the Eye, if its
@@ -719,21 +743,34 @@ pub(in crate::server) fn apply_pending(
         ResMut<super::mods::EditHistory>,
         ResMut<super::undo::Journal>,
     ),
-    mut store: ResMut<ChunkStore>,
-    mut meshes: ResMut<MeshState>,
-    (mut rejected, mut removed): (MessageWriter<EditRejected>, MessageWriter<VoxelRemoved>),
+    (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),
+    mut rejected: MessageWriter<EditRejected>,
     (tables, world): (Res<ContentTables>, Res<WorldSettings>),
-    players: Query<&Player>,
+    (mut entities, items): (
+        ResMut<super::entities::EntityStore>,
+        Res<super::items::Items>,
+    ),
+    mut players: Query<(&Player, &mut super::inventory::Inventory, &PlayerMode)>,
 ) {
-    let body = players.single().ok().and_then(Player::solid_body);
+    let Ok((player, mut inventory, mode)) = players.single_mut() else {
+        return;
+    };
+    let body = player.solid_body();
     let mut applied = 0;
     let mut waiting = VecDeque::new();
     while applied < EDITS_PER_TICK {
         let Some(mut p) = pending.0.pop_front() else {
             break;
         };
-        let outcome =
-            resolve(&store, &tables, &world, &p.intent, p.reach).and_then(|(at, change)| {
+        let outcome = resolve(&store, &tables, &world, &p.intent, p.reach)
+            .and_then(|landing| {
+                // Checked before the Voxel changes, so nothing lands unpaid.
+                match &p.pay {
+                    Some(item) if inventory.count(item) == 0 => Err(RejectReason::NothingHeld),
+                    _ => Ok(landing),
+                }
+            })
+            .and_then(|(at, change)| {
                 land(
                     &mut store,
                     &mut meshes,
@@ -745,9 +782,29 @@ pub(in crate::server) fn apply_pending(
                     change,
                     p.intent.action,
                 )
-                .map(|entry| {
-                    if let Some(gone) = removal(p.intent.action, &entry) {
-                        removed.write(gone);
+                .map(|mut entry| {
+                    if let Some(item) = &p.pay {
+                        inventory
+                            .spend(item, 1)
+                            .expect("counted before the Voxel changed");
+                        entry.cost = Cost::Paid(item.clone());
+                    }
+                    // Spawned here rather than from a message so the Entry
+                    // holds the Dropped item an undo takes back.
+                    if mode.survival()
+                        && let Some(material) = removal(p.intent.action, &entry)
+                        && let Some(item) = items.dropped_by(material)
+                    {
+                        let id = super::entities::drop_one(
+                            &mut entities,
+                            &store,
+                            &tables.0,
+                            world.voxel_size,
+                            &items,
+                            entry.at,
+                            item,
+                        );
+                        entry.cost = Cost::Dropped(items.0[item].name.clone(), id);
                     }
                     journal.record(entry)
                 })
@@ -780,6 +837,7 @@ pub(in crate::server) fn apply_pending(
         &tables,
         &world,
         body,
+        &mut inventory,
     );
 }
 
@@ -847,18 +905,18 @@ fn land(
         before: was,
         after: now,
         event,
+        cost: Cost::Free,
     })
 }
 
-fn removal(action: EditAction, entry: &super::undo::Entry) -> Option<VoxelRemoved> {
+/// The solid a Player's single deliberate Remove took out of the World, which
+/// is what drops an Item: undo, Layouts, fluid, fire and Mods' Commands do not.
+fn removal(action: EditAction, entry: &super::undo::Entry) -> Option<MaterialId> {
     match (action, entry.event.kind) {
         (EditAction::Remove | EditAction::RemoveAt(_), EditKind::Solid { before, after })
             if after.is_air() && !before.is_air() =>
         {
-            Some(VoxelRemoved {
-                at: entry.at,
-                material: before.material(),
-            })
+            Some(before.material())
         }
         _ => None,
     }
@@ -1505,7 +1563,7 @@ pub(in crate::server) mod tests {
         app.world().resource::<ChunkStore>().voxel(at).unwrap()
     }
 
-    pub(super) fn rejections(app: &mut App) -> Vec<RejectReason> {
+    pub(in crate::server) fn rejections(app: &mut App) -> Vec<RejectReason> {
         app.world_mut()
             .resource_mut::<Messages<EditRejected>>()
             .drain()
@@ -1923,7 +1981,7 @@ pub(in crate::server) mod tests {
     /// The Player holds `stacks` in the hotbar with `selected` in hand; stone
     /// and the fixture water are placed by Items of their own names and
     /// `t:dust` places nothing.
-    fn stocked(stacks: &[(usize, &str)], selected: usize) -> App {
+    pub(in crate::server) fn stocked(stacks: &[(usize, &str)], selected: usize) -> App {
         let mut app = app_with(&[(origin(), ground())]);
         let rock = tesserae_core::testgen::fixtures().ground.rock;
         let items = super::super::items::Items(vec![tesserae_mods::ItemDef {
@@ -1931,9 +1989,16 @@ pub(in crate::server) mod tests {
             size_m: 0.25,
             color: [0; 4],
             material: None,
+            max_stack: 64,
+            food: None,
         }]);
+        let soil = tesserae_core::testgen::fixtures().ground.soil;
         app.insert_resource(super::super::items::PlacingItems::new(
-            [(rock, "t:stone", true), (water(), "t:water", true)],
+            [
+                (rock, "t:stone", true),
+                (soil, "t:soil", true),
+                (water(), "t:water", true),
+            ],
             &items,
         ));
         let mut inventory = tesserae_core::inventory::Inventory::default();
@@ -1957,7 +2022,69 @@ pub(in crate::server) mod tests {
         app
     }
 
-    fn place_held(shape: ShapeId, orientation: Orientation) -> EditIntent {
+    pub(in crate::server) fn survival(app: &mut App) {
+        let mut mode = app
+            .world_mut()
+            .query::<&mut super::super::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Survival;
+    }
+
+    pub(in crate::server) fn held(app: &mut App, item: &str) -> u32 {
+        let mut held = app
+            .world_mut()
+            .query::<&super::super::inventory::Inventory>();
+        held.single(app.world()).unwrap().count(item)
+    }
+
+    #[test]
+    fn survival_placing_spends_one_item_per_voxel_and_creative_spends_none() {
+        for (survival_mode, left) in [(false, 3), (true, 2)] {
+            let mut app = stocked(&[(4, "t:stone")], 4);
+            if survival_mode {
+                survival(&mut app);
+            }
+            send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+            tick(&mut app);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(voxel_at(&app, [5, 8, 5]), stone());
+            assert_eq!(held(&mut app, "t:stone"), left, "survival: {survival_mode}");
+        }
+    }
+
+    #[test]
+    fn survival_places_nothing_it_cannot_pay_for_when_the_edit_lands() {
+        let mut app = stocked(&[(4, "t:stone")], 4);
+        survival(&mut app);
+        for _ in 0..4 {
+            send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+        }
+        tick(&mut app);
+        assert_eq!(held(&mut app, "t:stone"), 0);
+        assert_eq!(rejections(&mut app), [RejectReason::NothingHeld]);
+        assert_eq!(
+            (8..12)
+                .filter(|&y| voxel_at(&app, [5, y, 5]) == stone())
+                .count(),
+            3,
+            "one Voxel per Item"
+        );
+    }
+
+    #[test]
+    fn survival_refuses_a_place_that_names_its_own_voxel_and_creative_allows_it() {
+        let mut app = stocked(&[(4, "t:stone")], 4);
+        survival(&mut app);
+        for action in [EditAction::Place(stone()), EditAction::PlaceSource(water())] {
+            send(&mut app, down(action));
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), [RejectReason::CreativeOnly]);
+        }
+        assert!(voxel_at(&app, [5, 8, 5]).is_air());
+        assert_eq!(held(&mut app, "t:stone"), 3);
+        assert!(!RejectReason::CreativeOnly.message().is_empty());
+    }
+
+    pub(in crate::server) fn place_held(shape: ShapeId, orientation: Orientation) -> EditIntent {
         down(EditAction::PlaceHeld { shape, orientation })
     }
 
@@ -3467,7 +3594,7 @@ pub(in crate::server) mod tests {
         assert!(occupants_at(&app, [5, 7, 5]).solid.is_air());
         assert!(rejections(&mut app).is_empty());
     }
-    pub(super) fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
+    pub(in crate::server) fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
         use super::super::undo;
         app.world_mut().write_message(action);
         app.world_mut().run_system_once(undo::receive).unwrap();

@@ -418,6 +418,7 @@ impl Guest for Lumen {
             tools: Vec::new(),
             items: Vec::new(),
             biomes: biomes(),
+            survival: None,
             ores: vec![OreDef {
                 material: "crystals:amethyst".into(),
                 min_depth_m: 8.0,

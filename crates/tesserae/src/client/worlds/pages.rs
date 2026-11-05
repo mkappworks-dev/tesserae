@@ -901,6 +901,7 @@ fn form(
                     "New World",
                 ));
                 game_picker(col, f, installed);
+                mode_picker(col, f.game_mode);
                 label(col, "World seed");
                 row(col, 7.0, |r| {
                     r.spawn(Node {
@@ -967,6 +968,32 @@ fn form(
         );
     });
     focus
+}
+
+/// Until the Create World steps replace this screen.
+fn mode_picker(col: &mut ChildSpawnerCommands, chosen: GameMode) {
+    label(col, "Game mode");
+    row(col, 7.0, |r| {
+        for (mode, name) in [
+            (GameMode::Creative, "Creative"),
+            (GameMode::Survival, "Survival"),
+        ] {
+            cine::choice(r, name, Act::Mode(mode), chosen == mode);
+        }
+    });
+    ui::paragraph(
+        col,
+        match chosen {
+            GameMode::Creative => {
+                "Take any Material from the Catalogue. Placing is free. No damage or hunger."
+            }
+            GameMode::Survival => {
+                "Gather what you place. Health and hunger matter, and the Catalogue is closed."
+            }
+        },
+        12.0,
+        cine::MUTED,
+    );
 }
 
 fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) {

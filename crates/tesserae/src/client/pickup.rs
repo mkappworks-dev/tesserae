@@ -336,6 +336,7 @@ mod tests {
                 size_m: 0.25,
                 color: [1, 2, 3, 255],
                 material: None,
+                max_stack: 64,
             }]))
             .init_resource::<Menu>()
             .init_resource::<Feed>()

@@ -12,6 +12,7 @@ use crate::{
     Applied, Kind, MAX_ITEMS, MAX_ITEMS_PER_MOD, MAX_TOOLS_PER_MOD, ModError, Registry,
     RegistryMismatch, ToolDef, ToolKind, ViewParams, apply, resolve_biomes, resolve_items,
 };
+use tesserae_core::SurvivalRules;
 
 fn material(name: &str) -> content::MaterialDef {
     content::MaterialDef {
@@ -22,6 +23,7 @@ fn material(name: &str) -> content::MaterialDef {
         render: content::RenderClass::Opaque,
         remove_time_s: None,
         solid: true,
+        contact_damage_per_s: None,
     }
 }
 
@@ -51,6 +53,7 @@ fn declaring(materials: &[&str], shapes: &[&str]) -> Declaration {
         items: Vec::new(),
         biomes: Vec::new(),
         ores: Vec::new(),
+        survival: None,
     }
 }
 
@@ -943,6 +946,8 @@ fn item(name: &str, material: Option<&str>) -> content::ItemDef {
             a: 255,
         },
         material: material.map(Into::into),
+        max_stack: None,
+        food: None,
     }
 }
 
@@ -1109,6 +1114,278 @@ fn items_are_bounded_per_mod_and_per_world() {
             ..
         })
     ));
+}
+
+#[test]
+fn an_items_stack_limit_and_food_resolve_and_omitted_ones_take_the_defaults() {
+    let items = resolved(
+        &mut Load::new(),
+        &[(
+            "m",
+            with_items(
+                &[],
+                vec![
+                    item("dust", None),
+                    content::ItemDef {
+                        max_stack: Some(1),
+                        food: Some(4.5),
+                        ..item("bread", None)
+                    },
+                    content::ItemDef {
+                        max_stack: Some(64),
+                        ..item("seed", None)
+                    },
+                ],
+            ),
+        )],
+    )
+    .unwrap();
+    let survival: Vec<_> = items.iter().map(|i| (i.max_stack, i.food)).collect();
+    assert_eq!(survival, [(64, None), (1, Some(4.5)), (64, None)]);
+}
+
+#[test]
+fn a_bad_stack_limit_or_food_value_names_the_mod_and_the_field() {
+    for (bad, field) in [
+        (Some(0), None, "max-stack"),
+        (Some(65), None, "max-stack"),
+        (None, Some(0.0), "food"),
+        (None, Some(-1.0), "food"),
+        (None, Some(1000.5), "food"),
+        (None, Some(f32::NAN), "food"),
+    ]
+    .map(|(max_stack, food, field)| {
+        (
+            content::ItemDef {
+                max_stack,
+                food,
+                ..item("dust", None)
+            },
+            field,
+        )
+    }) {
+        let error = Load::new()
+            .apply("m", with_items(&[], vec![bad]))
+            .unwrap_err();
+        assert!(
+            matches!(&error, ModError::Params { what: "item", source, .. } if source.field == field),
+            "{error}"
+        );
+        assert!(error.to_string().contains("`m`"), "{error}");
+    }
+}
+
+#[test]
+fn a_materials_contact_damage_is_kept_by_id_and_an_omitted_one_is_none() {
+    let mut load = Load::new();
+    let mut d = declaring(&["stone", "lava", "nettle"], &[]);
+    d.materials[1].contact_damage_per_s = Some(4.0);
+    d.materials[2].contact_damage_per_s = Some(0.0);
+    let applied = load.apply("m", d).unwrap();
+    let id = |name| load.registry.id_of(Kind::Material, name).unwrap() as tesserae_core::MaterialId;
+    assert_eq!(
+        applied.contact_damage,
+        vec![(id("m:lava"), 4.0), (id("m:nettle"), 0.0)]
+    );
+}
+
+#[test]
+fn a_bad_contact_damage_names_the_mod_and_the_material() {
+    for bad in [-0.1, 1000.5, f32::NAN, f32::INFINITY] {
+        let mut d = declaring(&["lava"], &[]);
+        d.materials[0].contact_damage_per_s = Some(bad);
+        let error = Load::new().apply("m", d).unwrap_err();
+        assert!(
+            matches!(&error, ModError::Params { what: "material", source, .. }
+                if source.field == "contact-damage-per-s"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("`m`"), "{error}");
+    }
+}
+
+fn survival() -> content::SurvivalParams {
+    content::SurvivalParams {
+        max_health: None,
+        max_hunger: None,
+        max_air_s: None,
+        safe_fall_m: None,
+        fall_damage_per_m: None,
+        drowning_damage_per_s: None,
+        hunger_per_min: None,
+        sprinting_hunger_per_min: None,
+        regeneration_hunger: None,
+        starvation_damage_per_s: None,
+        keep_inventory: None,
+    }
+}
+
+fn game_survival(params: content::SurvivalParams) -> Result<Applied, ModError> {
+    let mut d = declaring(&[], &[]);
+    d.survival = Some(params);
+    as_the_game("game", d)
+}
+
+#[test]
+fn a_game_with_no_survival_record_keeps_the_engines_rules() {
+    assert_eq!(
+        as_the_game("game", declaring(&[], &[])).unwrap().survival,
+        None
+    );
+    let rules = SurvivalRules::default();
+    assert_eq!(
+        (
+            rules.max_health,
+            rules.max_hunger,
+            rules.max_air_s,
+            rules.safe_fall_m,
+            rules.fall_damage_per_m,
+            rules.drowning_damage_per_s,
+        ),
+        (20.0, 20.0, 10.0, 3.0, 1.0, 2.0)
+    );
+    assert_eq!(
+        (
+            rules.hunger_per_min,
+            rules.sprinting_hunger_per_min,
+            rules.regeneration_hunger,
+            rules.starvation_damage_per_s,
+            rules.keep_inventory,
+        ),
+        (1.0, 2.0, 18.0, 0.25, false)
+    );
+}
+
+#[test]
+fn a_games_survival_record_overrides_only_the_fields_it_sets() {
+    let rules = game_survival(content::SurvivalParams {
+        max_health: Some(40.0),
+        safe_fall_m: Some(5.5),
+        keep_inventory: Some(true),
+        ..survival()
+    })
+    .unwrap()
+    .survival
+    .unwrap();
+    assert_eq!(
+        rules,
+        SurvivalRules {
+            max_health: 40.0,
+            safe_fall_m: 5.5,
+            keep_inventory: true,
+            ..SurvivalRules::default()
+        }
+    );
+    assert_eq!(
+        game_survival(survival()).unwrap().survival,
+        Some(SurvivalRules::default())
+    );
+}
+
+#[test]
+fn a_bad_survival_value_names_the_game_and_the_field() {
+    let some = Some;
+    for (params, field) in [
+        (
+            content::SurvivalParams {
+                max_health: some(0.5),
+                ..survival()
+            },
+            "max-health",
+        ),
+        (
+            content::SurvivalParams {
+                max_hunger: some(1001.0),
+                ..survival()
+            },
+            "max-hunger",
+        ),
+        (
+            content::SurvivalParams {
+                max_air_s: some(601.0),
+                ..survival()
+            },
+            "max-air-s",
+        ),
+        (
+            content::SurvivalParams {
+                safe_fall_m: some(-1.0),
+                ..survival()
+            },
+            "safe-fall-m",
+        ),
+        (
+            content::SurvivalParams {
+                fall_damage_per_m: some(f32::NAN),
+                ..survival()
+            },
+            "fall-damage-per-m",
+        ),
+        (
+            content::SurvivalParams {
+                drowning_damage_per_s: some(f32::INFINITY),
+                ..survival()
+            },
+            "drowning-damage-per-s",
+        ),
+        (
+            content::SurvivalParams {
+                hunger_per_min: some(-0.1),
+                ..survival()
+            },
+            "hunger-per-min",
+        ),
+        (
+            content::SurvivalParams {
+                sprinting_hunger_per_min: some(1e4),
+                ..survival()
+            },
+            "sprinting-hunger-per-min",
+        ),
+        (
+            content::SurvivalParams {
+                max_hunger: some(10.0),
+                regeneration_hunger: some(18.0),
+                ..survival()
+            },
+            "regeneration-hunger",
+        ),
+        (
+            content::SurvivalParams {
+                starvation_damage_per_s: some(-1.0),
+                ..survival()
+            },
+            "starvation-damage-per-s",
+        ),
+    ] {
+        let error = game_survival(params).unwrap_err();
+        assert!(
+            matches!(&error, ModError::Params { what: "survival", source, .. } if source.field == field),
+            "{field}: {error}"
+        );
+        assert!(error.to_string().contains("`game`"), "{error}");
+    }
+}
+
+#[test]
+fn a_mod_that_is_not_the_game_may_not_declare_survival() {
+    let mut d = declaring(&[], &[]);
+    d.survival = Some(survival());
+    let error = Load::new().apply("content", d).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            ModError::NotAGame {
+                field: "survival",
+                ..
+            }
+        ),
+        "{error}"
+    );
+    assert_eq!(
+        error.to_string(),
+        "mod `content` sets `survival`, but only the Game (`root = true`) may"
+    );
 }
 
 fn biome(name: &str, temperature: f32, humidity: f32) -> content::BiomeDef {

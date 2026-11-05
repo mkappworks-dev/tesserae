@@ -82,6 +82,8 @@ pub struct MovementIntent {
 pub enum MovementFeedback {
     Switched(MovementMode),
     Forbidden,
+    /// Flight asked for in Survival.
+    CreativeOnly,
     Obstructed,
     RespawnBlocked,
 }
@@ -91,6 +93,7 @@ impl MovementFeedback {
             Self::Switched(MovementMode::Physics) => "Physics mode",
             Self::Switched(MovementMode::Flight) => "Free flight mode",
             Self::Forbidden => "Movement mode forbidden by Server policy",
+            Self::CreativeOnly => "Flight is Creative-only",
             Self::Obstructed => "Physics requires a clear body in loaded terrain",
             Self::RespawnBlocked => "Respawn blocked: no clear space over the spawn",
         }
@@ -124,7 +127,7 @@ pub struct RespawnIntent;
 pub struct RestoreView(pub f32, pub f32);
 
 #[derive(Component, Debug)]
-#[require(super::inventory::Inventory)]
+#[require(super::inventory::Inventory, super::game_mode::PlayerMode)]
 pub struct Player {
     eye: Vec3,
     mode: MovementMode,
@@ -447,6 +450,11 @@ fn spawn_player(
     policy: Res<MovementPolicy>,
     persistence: Option<Res<super::persistence::Persistence>>,
 ) {
+    let game_mode = super::game_mode::PlayerMode(
+        persistence
+            .as_ref()
+            .map_or_else(default, |p| p.player_mode()),
+    );
     let mode = persistence
         .as_ref()
         .and_then(|p| p.reopened_mode)
@@ -462,6 +470,11 @@ fn spawn_player(
                 MovementMode::Flight
             }
         });
+    let mode = if game_mode.survival() {
+        MovementMode::Physics
+    } else {
+        mode
+    };
     let mut player = Player::new(
         spawn.entry_eye_at_height(if mode == MovementMode::Physics {
             EYE_HEIGHT
@@ -472,13 +485,14 @@ fn spawn_player(
     );
     if let Some(view) = persistence.as_ref().and_then(|p| p.reopened_view) {
         player = Player::from_saved(spawn.entry_eye(), view);
+        player.mode = mode;
         commands.write_message(RestoreView(view.yaw, view.pitch));
     }
     info!(
         "Player spawned: movement={:?}, eye={:?}, view=first_person, fixed_hz=64",
         player.mode, player.eye
     );
-    commands.spawn(player);
+    commands.spawn((player, game_mode));
 }
 /// First standing position over `spawn` whose body is clear, so a Voxel placed
 /// at the spawn lifts the respawn rather than embedding it. `None` when the
@@ -502,12 +516,13 @@ fn clear_respawn_eye(
 pub(super) fn receive(
     mut intents: MessageReader<MovementIntent>,
     mut respawn: MessageReader<RespawnIntent>,
-    mut player: Single<&mut Player>,
+    player: Single<(&mut Player, &super::game_mode::PlayerMode)>,
     policy: Res<MovementPolicy>,
     spawn: Res<SpawnPoint>,
     (store, tables, world): (Res<ChunkStore>, Res<ContentTables>, Res<WorldSettings>),
     mut feedback: MessageWriter<MovementFeedback>,
 ) {
+    let (mut player, game_mode) = player.into_inner();
     for intent in intents.read() {
         if !intent.direction.is_finite()
             || !intent.speed_mps.is_finite()
@@ -543,6 +558,8 @@ pub(super) fn receive(
             };
             if !allowed {
                 feedback.write(MovementFeedback::Forbidden);
+            } else if next == MovementMode::Flight && game_mode.survival() {
+                feedback.write(MovementFeedback::CreativeOnly);
             } else if next == MovementMode::Physics
                 && collide::overlaps(&*store, &tables, world.voxel_size, player.body())
             {
@@ -1285,6 +1302,42 @@ mod tests {
                 .unwrap(),
             MovementFeedback::Forbidden
         );
+    }
+    #[test]
+    fn a_survival_player_is_refused_flight() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(WorldSettings::default())
+            .insert_resource(SpawnPoint::for_tests(Vec3::ZERO))
+            .init_resource::<ChunkStore>()
+            .insert_resource(ContentTables::default())
+            .add_plugins(plugin);
+        app.update();
+        let (mut p, mut mode) = app
+            .world_mut()
+            .query::<(&mut Player, &mut super::super::game_mode::PlayerMode)>()
+            .single_mut(app.world_mut())
+            .unwrap();
+        p.mode = MovementMode::Physics;
+        mode.0 = super::super::game_mode::GameMode::Survival;
+        app.world_mut().write_message(MovementIntent {
+            switch_mode: true,
+            ..default()
+        });
+        app.update();
+        let p = app
+            .world_mut()
+            .query::<&Player>()
+            .single(app.world())
+            .unwrap();
+        assert_eq!(p.mode, MovementMode::Physics);
+        let feedback: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<MovementFeedback>>()
+            .drain()
+            .collect();
+        assert_eq!(feedback, [MovementFeedback::CreativeOnly]);
+        assert!(MovementFeedback::CreativeOnly.refused());
     }
     #[test]
     fn noclip_speed_is_server_capped_and_mode_changes_never_move_the_eye() {

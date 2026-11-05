@@ -325,6 +325,7 @@ impl Guest for Ember {
             tools: Vec::new(),
             items: Vec::new(),
             biomes: biomes(),
+            survival: None,
             ores: vec![OreDef {
                 material: "waters:obsidian".into(),
                 min_depth_m: 6.0,
