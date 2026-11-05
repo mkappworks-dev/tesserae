@@ -73,6 +73,10 @@ pub enum UseRefusal {
     /// The struck Voxel's Chunk is not held.
     NotLoaded,
     UnknownTool,
+    /// Eating with hunger full.
+    NotHungry,
+    /// Eating with no food in the selected slot.
+    NotFood,
 }
 
 impl UseRefusal {
@@ -84,6 +88,8 @@ impl UseRefusal {
             UseRefusal::TargetChanged => "that changed; aim again",
             UseRefusal::NotLoaded => "that part of the world is not loaded",
             UseRefusal::UnknownTool => "that tool is not available",
+            UseRefusal::NotHungry => "you aren’t hungry",
+            UseRefusal::NotFood => "that is not food",
         }
     }
 }

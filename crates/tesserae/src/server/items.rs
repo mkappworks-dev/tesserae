@@ -20,6 +20,11 @@ impl Items {
         self.0.iter().position(|item| item.name == name)
     }
 
+    /// The hunger eating one `item` restores; `None` when it is not food.
+    pub fn food(&self, item: &str) -> Option<f32> {
+        self.named(item).and_then(|at| self.0[at].food)
+    }
+
     /// The most one slot holds of `item`; an implicit Item declares none.
     pub fn stack_limit(&self, item: &str) -> u32 {
         self.named(item)

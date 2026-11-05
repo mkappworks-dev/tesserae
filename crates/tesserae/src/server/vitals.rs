@@ -11,12 +11,19 @@ use tesserae_core::{Fluid, MaterialId, Occupants, SurvivalRules, Tables};
 
 use super::ContentTables;
 use super::game_mode::PlayerMode;
+use super::inventory::Inventory;
+use super::items::Items;
 use super::persistence::extensions::PlayerState;
 use super::player::Player;
 use super::survival::Survival;
+use super::tool::{UseOutcome, UseRefusal};
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
+
+/// Health per second while hunger is at or above the Game's threshold. An
+/// engine rule: the 0.3 contract declares only the threshold.
+pub const REGENERATION_PER_S: f32 = 0.25;
 
 /// Health and hunger in points, air in seconds.
 #[derive(Component, Clone, Copy, PartialEq, Debug)]
@@ -47,6 +54,7 @@ pub enum DamageCause {
     Fall { height_m: f32 },
     Drowning,
     Contact(MaterialId),
+    Starvation,
 }
 
 #[derive(Component, Clone, Copy, Default, PartialEq, Debug)]
@@ -60,8 +68,21 @@ pub struct VitalsChanged {
     pub cause: Option<DamageCause>,
 }
 
+/// Use with no tool in hand: eat one of the Item in the selected hotbar slot.
+/// Answered only when refused; the Vitals and the Inventory show success.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct EatIntent;
+
 pub(crate) fn plugin(app: &mut App) {
     app.add_session_message::<VitalsChanged>()
+        .add_session_message::<EatIntent>()
+        .add_session_message::<UseOutcome>()
+        .add_session_systems(
+            FixedPreUpdate,
+            eat.run_if(super::persistence::playing)
+                .run_if(resource_exists::<Survival>)
+                .before(super::inventory::announce_inventory),
+        )
         .add_session_systems(
             FixedUpdate,
             (tick, announce)
@@ -101,6 +122,33 @@ fn announce(
             full: Vitals::full(&survival.rules),
             cause: last.0,
         });
+    }
+}
+
+fn eat(
+    mut intents: MessageReader<EatIntent>,
+    survival: Res<Survival>,
+    items: Option<Res<Items>>,
+    player: Single<(&mut Inventory, &mut Vitals)>,
+    mut outcomes: MessageWriter<UseOutcome>,
+) {
+    let (mut inventory, mut vitals) = player.into_inner();
+    let max = survival.rules.max_hunger;
+    for _ in intents.read() {
+        let food = inventory
+            .held()
+            .and_then(|stack| Some((stack.item.clone(), items.as_ref()?.food(&stack.item)?)));
+        let Some((item, food)) = food else {
+            outcomes.write(UseOutcome(Err(UseRefusal::NotFood)));
+            continue;
+        };
+        if vitals.hunger >= max {
+            outcomes.write(UseOutcome(Err(UseRefusal::NotHungry)));
+            continue;
+        }
+        if inventory.spend(&item, 1).is_ok() {
+            vitals.hunger = (vitals.hunger + food).min(max);
+        }
     }
 }
 
@@ -146,6 +194,21 @@ fn tick(
         contact(&*store, &tables, world.voxel_size, player.body(), &survival)
     {
         hurt(&mut now, per_s * dt, DamageCause::Contact(material));
+    }
+    let hunger_per_min = if player.sprinting() {
+        rules.sprinting_hunger_per_min
+    } else {
+        rules.hunger_per_min
+    };
+    now.hunger = (now.hunger - hunger_per_min / 60.0 * dt).max(0.0);
+    if now.hunger <= 0.0 {
+        hurt(
+            &mut now,
+            rules.starvation_damage_per_s * dt,
+            DamageCause::Starvation,
+        );
+    } else if now.hunger >= rules.regeneration_hunger {
+        now.health += REGENERATION_PER_S * dt;
     }
     now.health = now.health.clamp(0.0, rules.max_health);
     now.hunger = now.hunger.clamp(0.0, rules.max_hunger);
@@ -221,18 +284,27 @@ mod tests {
         Voxel::cube(tesserae_core::testgen::fixtures().ground.rock)
     }
 
+    /// Between starving and healing, so a damage test sees damage alone.
+    const HELD_HUNGER: f32 = 10.0;
+
+    fn hold_hunger(mut app: App) -> App {
+        let mut vitals = app.world_mut().query::<&mut Vitals>();
+        vitals.single_mut(app.world_mut()).unwrap().hunger = HELD_HUNGER;
+        app
+    }
+
     /// A Server ticking once per update, holding one Chunk filled with rock
     /// below `floor_m`, and a walking Player in `mode` with their feet at
     /// `feet`.
     fn app(size: f32, floor_m: f32, feet: Vec3, mode: GameMode) -> App {
         let eye = feet + Vec3::Y * super::super::player::EYE_HEIGHT;
-        app_with(
+        hold_hunger(app_with(
             size,
             (floor_m, floor_m),
             Player::physics_at(eye),
             mode,
             Survival::default(),
-        )
+        ))
     }
 
     fn water() -> tesserae_core::MaterialId {
@@ -253,7 +325,7 @@ mod tests {
         mode: GameMode,
         survival: Survival,
     ) -> App {
-        app_with(size, levels, Player::at(eye), mode, survival)
+        hold_hunger(app_with(size, levels, Player::at(eye), mode, survival))
     }
 
     fn put_eye(app: &mut App, eye: Vec3) {
@@ -395,7 +467,8 @@ mod tests {
             GameMode::Survival,
         );
         seconds(&mut app, 3.0);
-        assert_eq!(vitals(&mut app), Vitals::default());
+        let now = vitals(&mut app);
+        assert_eq!((now.health, now.air_s), (20.0, 10.0));
     }
 
     #[test]
@@ -426,11 +499,12 @@ mod tests {
 
     #[test]
     fn the_vitals_are_sent_on_arrival_and_on_change_with_the_last_cause() {
-        let mut app = lake(
+        let mut app = lake_with(
             1.0,
             (2.0, 6.0),
             Vec3::new(4.0, 7.0, 4.0),
             GameMode::Survival,
+            Survival::new(no_drain(), Vec::new()),
         );
         let sent = |app: &mut App| {
             app.world_mut()
@@ -443,7 +517,10 @@ mod tests {
         assert_eq!(
             sent(&mut app).last(),
             Some(&VitalsChanged {
-                vitals: full,
+                vitals: Vitals {
+                    hunger: HELD_HUNGER,
+                    ..full
+                },
                 full,
                 cause: None
             })
@@ -464,7 +541,7 @@ mod tests {
             max_health: 30.0,
             max_hunger: 12.0,
             max_air_s: 15.0,
-            ..default()
+            ..no_drain()
         };
         let mut app = app_with(
             1.0,
@@ -477,6 +554,182 @@ mod tests {
         assert_eq!(vitals(&mut app), Vitals::full(&rules));
     }
 
+    fn no_drain() -> SurvivalRules {
+        SurvivalRules {
+            hunger_per_min: 0.0,
+            sprinting_hunger_per_min: 0.0,
+            ..default()
+        }
+    }
+
+    /// A walking Player standing on a rock floor, under `rules`.
+    fn field(rules: SurvivalRules, mode: GameMode) -> App {
+        let feet = Vec3::new(4.0, 2.0, 4.0);
+        app_with(
+            1.0,
+            (2.0, 2.0),
+            Player::physics_at(feet + Vec3::Y * super::super::player::EYE_HEIGHT),
+            mode,
+            Survival::new(rules, Vec::new()),
+        )
+    }
+
+    fn set_vitals(app: &mut App, health: f32, hunger: f32) {
+        let mut vitals = app.world_mut().query::<&mut Vitals>();
+        let mut vitals = vitals.single_mut(app.world_mut()).unwrap();
+        vitals.health = health;
+        vitals.hunger = hunger;
+    }
+
+    fn walk(app: &mut App, direction: Vec3, sprint: bool) {
+        app.world_mut()
+            .write_message(super::super::player::MovementIntent {
+                direction,
+                sprint,
+                ..default()
+            });
+    }
+
+    #[test]
+    fn hunger_drains_at_the_declared_rate_and_faster_only_while_sprinting() {
+        let rules = SurvivalRules {
+            hunger_per_min: 60.0,
+            sprinting_hunger_per_min: 120.0,
+            ..default()
+        };
+        let mut app = field(rules, GameMode::Survival);
+        seconds(&mut app, 3.0);
+        let now = vitals(&mut app).hunger;
+        assert!(close(now, 17.0), "idle: {now}");
+
+        walk(&mut app, Vec3::ZERO, true);
+        seconds(&mut app, 1.0);
+        let now = vitals(&mut app).hunger;
+        assert!(close(now, 16.0), "sprint held while standing: {now}");
+
+        walk(&mut app, Vec3::X, true);
+        seconds(&mut app, 2.0);
+        let now = vitals(&mut app).hunger;
+        assert!(close(now, 12.0), "sprinting: {now}");
+
+        walk(&mut app, Vec3::X, false);
+        seconds(&mut app, 2.0);
+        let now = vitals(&mut app).hunger;
+        assert!(close(now, 10.0), "walking: {now}");
+    }
+
+    #[test]
+    fn health_regenerates_at_the_threshold_and_starvation_hurts_at_zero() {
+        let mut app = field(no_drain(), GameMode::Survival);
+        set_vitals(&mut app, 10.0, 18.0);
+        seconds(&mut app, 4.0);
+        let now = vitals(&mut app).health;
+        assert!(close(now, 11.0), "at the threshold, 1 per 4 s: {now}");
+
+        set_vitals(&mut app, 10.0, 17.9);
+        seconds(&mut app, 4.0);
+        assert_eq!(vitals(&mut app).health, 10.0, "below it");
+
+        set_vitals(&mut app, 10.0, 0.0);
+        seconds(&mut app, 4.0);
+        let now = vitals(&mut app).health;
+        assert!(close(now, 9.0), "starving, 1 per 4 s: {now}");
+        assert_eq!(last_damage(&mut app), Some(DamageCause::Starvation));
+    }
+
+    #[test]
+    fn creative_players_neither_hunger_nor_starve() {
+        let rules = SurvivalRules {
+            hunger_per_min: 60.0,
+            sprinting_hunger_per_min: 120.0,
+            ..default()
+        };
+        let mut app = field(rules, GameMode::Creative);
+        walk(&mut app, Vec3::X, true);
+        seconds(&mut app, 2.0);
+        assert_eq!(vitals(&mut app), Vitals::default());
+        set_vitals(&mut app, 10.0, 0.0);
+        seconds(&mut app, 2.0);
+        assert_eq!(vitals(&mut app).health, 10.0);
+    }
+
+    fn pantry(app: &mut App, stacks: &[(&str, u32)]) {
+        let def = |name: &str, food| tesserae_mods::ItemDef {
+            name: name.into(),
+            size_m: 0.25,
+            color: [0, 0, 0, 255],
+            material: None,
+            max_stack: 64,
+            food,
+        };
+        app.insert_resource(super::super::items::Items(vec![
+            def("m:bread", Some(6.0)),
+            def("m:pebble", None),
+        ]));
+        let mut inventory = app
+            .world_mut()
+            .query::<&mut super::super::inventory::Inventory>();
+        let mut inventory = inventory.single_mut(app.world_mut()).unwrap();
+        for &(item, count) in stacks {
+            inventory.receive(item, count, 64);
+        }
+    }
+
+    fn eat(app: &mut App) -> Vec<super::super::tool::UseOutcome> {
+        app.world_mut().write_message(EatIntent);
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<super::super::tool::UseOutcome>>()
+            .drain()
+            .collect()
+    }
+
+    fn held(app: &mut App) -> Option<(String, u32)> {
+        let mut inventory = app
+            .world_mut()
+            .query::<&super::super::inventory::Inventory>();
+        inventory
+            .single(app.world())
+            .unwrap()
+            .held()
+            .map(|s| (s.item.clone(), s.count))
+    }
+
+    #[test]
+    fn eating_spends_one_held_food_and_refills_hunger_up_to_the_maximum() {
+        use super::super::tool::{UseOutcome, UseRefusal};
+        let mut app = field(no_drain(), GameMode::Survival);
+        pantry(&mut app, &[("m:bread", 2)]);
+        set_vitals(&mut app, 20.0, 10.0);
+        assert!(eat(&mut app).is_empty(), "no message for a routine success");
+        assert_eq!(vitals(&mut app).hunger, 16.0);
+        assert_eq!(held(&mut app), Some(("m:bread".into(), 1)));
+
+        eat(&mut app);
+        assert_eq!(vitals(&mut app).hunger, 20.0, "capped at the maximum");
+        assert_eq!(held(&mut app), None);
+
+        pantry(&mut app, &[("m:bread", 1)]);
+        assert_eq!(
+            eat(&mut app),
+            [UseOutcome(Err(UseRefusal::NotHungry))],
+            "full"
+        );
+        assert_eq!(held(&mut app), Some(("m:bread".into(), 1)));
+    }
+
+    #[test]
+    fn eating_what_is_not_food_or_nothing_is_refused() {
+        use super::super::tool::{UseOutcome, UseRefusal};
+        let mut app = field(no_drain(), GameMode::Survival);
+        set_vitals(&mut app, 20.0, 10.0);
+        assert_eq!(eat(&mut app), [UseOutcome(Err(UseRefusal::NotFood))]);
+        pantry(&mut app, &[("m:pebble", 3)]);
+        assert_eq!(eat(&mut app), [UseOutcome(Err(UseRefusal::NotFood))]);
+        assert_eq!(held(&mut app), Some(("m:pebble".into(), 3)));
+        assert_eq!(vitals(&mut app).hunger, 10.0);
+    }
+
     #[test]
     fn creative_players_take_no_damage_and_keep_their_air() {
         let mut app = lake(
@@ -486,7 +739,13 @@ mod tests {
             GameMode::Creative,
         );
         seconds(&mut app, 12.0);
-        assert_eq!(vitals(&mut app), Vitals::default());
+        assert_eq!(
+            vitals(&mut app),
+            Vitals {
+                hunger: HELD_HUNGER,
+                ..default()
+            }
+        );
         assert_eq!(last_damage(&mut app), None);
     }
 }
