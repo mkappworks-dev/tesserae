@@ -8,7 +8,7 @@ use bevy::prelude::*;
 
 use super::game_mode::Mode;
 use super::profile::Preferences;
-use crate::server::vitals::VitalsChanged;
+use crate::server::vitals::{VitalsChanged, drawn_points};
 use crate::session::SessionApp;
 
 const TILE_PX: f32 = 16.0;
@@ -99,10 +99,9 @@ fn receive(mut changes: MessageReader<VitalsChanged>, mut shown: ResMut<Shown>, 
     shown.clock_s += dt;
     shown.hit_s = shown.hit_s.map(|s| s + dt).filter(|s| *s < FLASH_S);
     for change in changes.read() {
-        if shown
-            .last
-            .is_some_and(|last| change.vitals.health < last.vitals.health)
-        {
+        if shown.last.is_some_and(|last| {
+            drawn_points(change.vitals.health) < drawn_points(last.vitals.health)
+        }) {
             shown.hit_s = Some(0.0);
         }
         shown.last = Some(*change);
@@ -119,8 +118,7 @@ fn tiles(points: f32) -> usize {
 }
 
 fn fill(points: f32, at: usize) -> Fill {
-    // A part point shows as the next half, so any loss shows.
-    let points = points.ceil() as usize;
+    let points = drawn_points(points) as usize;
     if points >= 2 * at + 2 {
         Fill::Full
     } else if points == 2 * at + 1 {
@@ -569,6 +567,22 @@ mod tests {
             (count::<Vignette>(&mut app), count::<HitFlash>(&mut app)),
             (0, 0)
         );
+    }
+
+    #[test]
+    fn a_hit_flashes_once_per_half_tile_lost_not_per_part_point() {
+        let mut app = app();
+        mode(&mut app, GameMode::Survival);
+        send(&mut app, 12.0, 10.0);
+        send(&mut app, 11.6, 10.0);
+        assert_eq!(count::<HitFlash>(&mut app), 0, "still drawn as 12");
+        send(&mut app, 10.8, 10.0);
+        assert_eq!(count::<HitFlash>(&mut app), 1, "drawn as 11");
+        for _ in 0..5 {
+            app.update();
+        }
+        send(&mut app, 10.5, 10.0);
+        assert_eq!(count::<HitFlash>(&mut app), 0, "the same half tile");
     }
 
     fn flash_alpha(app: &mut App) -> f32 {

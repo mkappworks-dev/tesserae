@@ -10,6 +10,7 @@ use tesserae_core::save::VitalsV1;
 use tesserae_core::{Fluid, MaterialId, Occupants, SurvivalRules, Tables};
 
 use super::ContentTables;
+use super::death::Death;
 use super::game_mode::PlayerMode;
 use super::inventory::Inventory;
 use super::items::Items;
@@ -45,6 +46,34 @@ impl Default for Vitals {
     }
 }
 
+/// Points as the HUD draws them, a half tile each: a part point shows as the
+/// next whole one, so any loss shows.
+pub fn drawn_points(points: f32) -> u32 {
+    points.max(0.0).ceil() as u32
+}
+
+/// What the HUD draws of the Vitals, so a message is sent only when it moves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Drawn {
+    health: u32,
+    hunger: u32,
+    air: u32,
+    air_full: bool,
+    dead: bool,
+}
+
+impl Drawn {
+    fn of(vitals: &Vitals, full: &Vitals, dead: bool) -> Self {
+        Self {
+            health: drawn_points(vitals.health),
+            hunger: drawn_points(vitals.hunger),
+            air: drawn_points(2.0 * vitals.air_s),
+            air_full: vitals.air_s >= full.air_s,
+            dead,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum DamageCause {
     Fall { height_m: f32 },
@@ -56,7 +85,8 @@ pub enum DamageCause {
 #[derive(Component, Clone, Copy, Default, PartialEq, Debug)]
 pub struct LastDamage(pub Option<DamageCause>);
 
-/// The Player's Vitals, sent when they arrive and whenever they change.
+/// The Player's Vitals, sent when they arrive, when their mode, death or last
+/// damage changes, and when what the HUD draws of them does.
 #[derive(Message, Clone, Copy, PartialEq, Debug)]
 pub struct VitalsChanged {
     pub vitals: Vitals,
@@ -106,16 +136,32 @@ impl PlayerState for VitalsV1 {
     }
 }
 
+type Announced<'a> = (
+    Ref<'a, Vitals>,
+    Ref<'a, LastDamage>,
+    Ref<'a, PlayerMode>,
+    Has<Death>,
+);
+
 fn announce(
     survival: Res<Survival>,
-    player: Single<(Ref<Vitals>, Ref<LastDamage>)>,
+    player: Single<Announced>,
+    mut told: Local<Option<Drawn>>,
     mut changed: MessageWriter<VitalsChanged>,
 ) {
-    let (vitals, last) = player.into_inner();
-    if vitals.is_changed() || last.is_changed() || survival.is_changed() {
+    let (vitals, last, mode, dead) = player.into_inner();
+    let full = Vitals::full(&survival.rules);
+    let drawn = Drawn::of(&vitals, &full, dead);
+    if vitals.is_added()
+        || last.is_changed()
+        || mode.is_changed()
+        || survival.is_changed()
+        || *told != Some(drawn)
+    {
+        *told = Some(drawn);
         changed.write(VitalsChanged {
             vitals: *vitals,
-            full: Vitals::full(&survival.rules),
+            full,
             cause: last.0,
         });
     }
@@ -529,6 +575,42 @@ mod tests {
         assert_eq!(last.cause, Some(DamageCause::Drowning));
         assert_eq!(last.vitals, vitals(&mut app));
         assert_eq!(last.full, full);
+    }
+
+    /// Every Vitals message the Server sent, kept across updates.
+    #[derive(Resource, Default)]
+    struct Heard(Vec<VitalsChanged>);
+
+    fn listen(mut heard: ResMut<Heard>, mut sent: ResMut<Messages<VitalsChanged>>) {
+        heard.0.extend(sent.drain());
+    }
+
+    #[test]
+    fn draining_hunger_is_sent_once_per_point_the_hud_draws_not_every_tick() {
+        let rules = SurvivalRules {
+            hunger_per_min: 60.0,
+            ..default()
+        };
+        let mut app = field(rules, GameMode::Survival);
+        app.init_resource::<Heard>().add_systems(Last, listen);
+        let heard = |app: &mut App| std::mem::take(&mut app.world_mut().resource_mut::<Heard>().0);
+        app.update();
+        assert!(!heard(&mut app).is_empty(), "on arrival");
+        seconds(&mut app, 3.0);
+        let drained = heard(&mut app);
+        assert!(
+            (2..=4).contains(&drained.len()),
+            "a point a second for 3 s: {}",
+            drained.len()
+        );
+        let now = vitals(&mut app);
+        let last = drained.last().unwrap().vitals;
+        assert_eq!(last.hunger.ceil(), now.hunger.ceil(), "{last:?} {now:?}");
+
+        let mut mode = app.world_mut().query::<&mut PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = GameMode::Creative;
+        app.update();
+        assert_eq!(heard(&mut app).len(), 1, "on a mode change");
     }
 
     #[test]
