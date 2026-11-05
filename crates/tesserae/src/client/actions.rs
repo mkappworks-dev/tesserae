@@ -53,7 +53,9 @@ pub(super) enum Action {
     LayoutLess,
     LayoutReverse,
     LayoutActive,
-    Catalogue,
+    /// Saved as `catalogue` before the Menu replaced the Catalogue page.
+    #[serde(alias = "catalogue")]
+    Menu,
     Inventory,
     SearchCatalogue,
     ReleaseCursor,
@@ -240,7 +242,7 @@ impl Bindings {
         for (action, button) in [
             (Ascend, GamepadButton::South),
             (Descend, GamepadButton::East),
-            (Catalogue, GamepadButton::North),
+            (Menu, GamepadButton::North),
             (Shape, GamepadButton::West),
             (Sprint, GamepadButton::LeftThumb),
             (Sample, GamepadButton::RightThumb),
@@ -282,7 +284,7 @@ impl Bindings {
             (CycleTool, KeyCode::KeyM),
             (Use, KeyCode::KeyG),
             (ClearTool, KeyCode::Backspace),
-            (Catalogue, KeyCode::Tab),
+            (Menu, KeyCode::Tab),
             (ReleaseCursor, KeyCode::Escape),
             (Inventory, KeyCode::KeyI),
             (SearchCatalogue, KeyCode::KeyC),

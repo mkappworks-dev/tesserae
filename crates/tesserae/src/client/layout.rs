@@ -1276,7 +1276,7 @@ mod tests {
     fn leaving_gameplay_keeps_the_mode_and_a_return_does_not_commit() {
         let mut app = app();
         turn_on(&mut app);
-        app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Catalogue;
+        app.world_mut().resource_mut::<Ownership>().owner = super::super::input::Owner::Menu;
         step(&mut app);
         assert!(mode(&app).on, "the Layout menu is one of these contexts");
         assert!(

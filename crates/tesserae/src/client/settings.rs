@@ -183,11 +183,35 @@ fn launch(
     }
 }
 
+/// Opens Settings at the category used last, drafting what is applied now.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(super) struct Opener<'w, 's> {
+    settings: ResMut<'w, Settings>,
+    bindings: Res<'w, Bindings>,
+    preferences: Res<'w, Preferences>,
+    store: Res<'w, Store>,
+    cursor:
+        Query<'w, 's, &'static mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
+}
+
+impl Opener<'_, '_> {
+    pub(super) fn open(&mut self) {
+        let settings = &mut *self.settings;
+        settings.open = true;
+        settings.notice = self.store.error.clone().unwrap_or_default();
+        settings.tab = settings.last_controls;
+        settings.draft = Some((self.bindings.clone(), self.preferences.clone()));
+        settings.dirty = true;
+        for mut cursor in &mut self.cursor {
+            cursor.grab_mode = bevy::window::CursorGrabMode::None;
+            cursor.visible = true;
+        }
+    }
+}
+
 fn open_shortcut(
     actions: Res<super::actions::Actions>,
-    mut settings: ResMut<Settings>,
-    mut menu: ResMut<super::menu::Menu>,
-    (bindings, preferences, store): (Res<Bindings>, Res<Preferences>, Res<Store>),
+    mut opener: Opener,
     (ui, status, ownership, inventory): (
         Res<super::input::UiInput>,
         Res<crate::server::persistence::SaveStatus>,
@@ -195,7 +219,6 @@ fn open_shortcut(
         Option<Res<super::inventory_window::InventoryWindow>>,
     ),
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
-    mut cursor: Query<&mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
 ) {
     if !window.focused
         || matches!(
@@ -205,21 +228,12 @@ fn open_shortcut(
         || !actions.started(Action::Help)
         || ui.text_entry
         || status.modal()
-        || settings.open
+        || opener.settings.open
         || inventory.is_some_and(|window| window.open)
     {
         return;
     }
-    settings.open = true;
-    settings.notice = store.error.clone().unwrap_or_default();
-    settings.tab = settings.last_controls;
-    settings.draft = Some((bindings.clone(), preferences.clone()));
-    settings.dirty = true;
-    menu.open = false;
-    for mut cursor in &mut cursor {
-        cursor.grab_mode = bevy::window::CursorGrabMode::None;
-        cursor.visible = true;
-    }
+    opener.open();
 }
 
 fn apply(
@@ -500,7 +514,7 @@ pub(super) fn capture(
     if !settings.open {
         return;
     }
-    let close_shortcut = actions.started(Action::Catalogue)
+    let close_shortcut = actions.started(Action::Menu)
         && !settings.modal()
         && !settings.capturing()
         && !ui.as_ref().is_some_and(|ui| ui.text_entry)
@@ -740,7 +754,7 @@ pub(super) fn action_name(action: Action) -> &'static str {
         LayoutLess => "Layout: fewer Voxels",
         LayoutReverse => "Layout: reverse the axis",
         LayoutActive => "Layout: next axis",
-        Catalogue => "Open Catalogue",
+        Menu => "Open the Menu",
         Inventory => "Open Inventory",
         SearchCatalogue => "Search the Catalogue",
         ReleaseCursor => "Release cursor",
@@ -2066,7 +2080,7 @@ fn binding_order(action: Action) -> usize {
         LayoutLess,
         LayoutReverse,
         LayoutActive,
-        Catalogue,
+        Menu,
         Inventory,
         SearchCatalogue,
         Help,

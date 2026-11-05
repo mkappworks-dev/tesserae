@@ -1,33 +1,29 @@
-//! Content tiles for quick picking into the Server's hotbar.
-//! Tab opens and closes the engine's menu; Escape closes it too.
+//! The in-game Menu: Resume, Inventory, Settings, World details and Return to
+//! Worlds. The Menu key or Escape opens it from play; an open overlay takes
+//! Escape first, and Escape in the Menu resumes. Inside it, Tab moves focus.
 //!
 //! While it is open the cursor is free, so mouse look is off and a click edits
 //! nothing: both already wait on a grabbed cursor.
 
-use bevy::picking::events::{
-    PointerDrag, PointerDragDrop, PointerDragEnd, PointerDragStart, PointerOut, PointerOver,
-    PointerPress,
-};
-use bevy::picking::pointer::PointerButton;
+use bevy::input_focus::tab_navigation::TabGroup;
+use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
-
-use crate::session::SessionApp;
-use bevy::ui_widgets::{Activate, Button, ScrollArea};
+use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use tesserae_core::{MaterialId, ShapeId};
 
-use super::edit::{self, Catalogue, Holding, Hotbar};
-use crate::content::{ContentCatalogue, MaterialPalette};
+use super::actions::{Action, Actions};
+use super::cinematic::{self as cine, Kind};
+use super::menu_ui as ui;
+use crate::content::{MaterialPalette, WorldFacts};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
-use crate::server::inventory::InventoryIntent;
-use tesserae_core::inventory::Slot;
+use crate::server::game_mode::GameMode;
+use crate::session::SessionApp;
 
 #[derive(Resource, Default)]
 pub(super) struct Menu {
     pub(super) open: bool,
-    /// The solid whose Shapes are listed. Unset, it is the held solid's
-    /// Material, or else the first solid.
-    material: Option<MaterialId>,
+    /// World details, shown over the Menu.
+    details: bool,
 }
 
 impl Menu {
@@ -35,46 +31,13 @@ impl Menu {
     pub(super) fn opened() -> Self {
         Menu {
             open: true,
-            material: None,
+            details: false,
         }
-    }
-
-    fn material(&self, hotbar: &Hotbar, catalogue: &ContentCatalogue) -> Option<MaterialId> {
-        self.material
-            .or(match hotbar.held() {
-                Holding::Solid { material, .. } => Some(material),
-                _ => None,
-            })
-            .or_else(|| catalogue.materials.iter().find(|m| m.solid).map(|m| m.id))
     }
 }
 
 pub(super) fn closed(menu: Res<Menu>) -> bool {
     !menu.open
-}
-
-/// What choosing an entry does.
-#[derive(Component, Clone, Copy, PartialEq, Debug)]
-pub(super) enum Entry {
-    /// Inspect this solid, initially as a cube.
-    Material(MaterialId),
-    Fluid(MaterialId),
-    Fire,
-    /// Selects this hotbar slot.
-    Slot(usize),
-}
-
-impl Entry {
-    pub(super) fn holding(self) -> Option<Holding> {
-        match self {
-            Entry::Fluid(material) => Some(Holding::Fluid(material)),
-            Entry::Fire => Some(Holding::Fire),
-            Entry::Material(material) => {
-                Some(Holding::solid(material, tesserae_core::SHAPE_FULL_CUBE))
-            }
-            Entry::Slot(_) => None,
-        }
-    }
 }
 
 /// The Server's placeholder colours, as `chunk_view` applies them.
@@ -91,7 +54,8 @@ impl Default for Swatches {
 }
 
 impl Swatches {
-    pub(super) fn rgba(&self, holding: Holding) -> Vec4 {
+    pub(super) fn rgba(&self, holding: super::edit::Holding) -> Vec4 {
+        use super::edit::Holding;
         let slot = match holding {
             Holding::Solid { material, .. } | Holding::Fluid(material) => material as usize,
             Holding::Fire => FLAME_SLOT,
@@ -102,60 +66,29 @@ impl Swatches {
     }
 }
 
+/// What the Server reported about the open World.
+#[derive(Resource, Default)]
+struct Facts(Option<WorldFacts>);
+
+#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Choice {
+    Resume,
+    Inventory,
+    Settings,
+    Details,
+    CloseDetails,
+}
+
 #[derive(Component)]
 struct MenuRoot;
-#[derive(Component)]
-struct MenuSelection;
-#[derive(Component)]
-struct MenuSlots;
-#[derive(Component)]
-pub(super) struct CatalogueItem;
-#[derive(Component)]
-pub(super) struct TileState {
-    pub(super) selected: bool,
-}
-#[derive(Component)]
-struct ShapePanel;
-#[derive(Component)]
-pub(super) struct Inspect(MaterialId);
-#[derive(Component)]
-pub(super) enum DetailAction {
-    Shape(ShapeId),
-    Clear,
-    Assign(Holding),
-}
-#[derive(Component)]
-pub(super) struct DragPreview;
-
-#[derive(Resource, Default)]
-pub(super) struct PointerState {
-    pub(super) hovered: Option<Entry>,
-    drag: Option<Entry>,
-    dragged: Option<Holding>,
-    pinned: bool,
-    item: Option<Holding>,
-    shape: Option<ShapeId>,
-    pub(super) assigning: Option<Holding>,
-    cursor: Vec2,
-    suppress_click: bool,
-}
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Menu>()
-        .init_session_state::<super::menu_ui::Searches>()
         .init_session_state::<Swatches>()
-        .init_session_state::<PointerState>()
-        .init_resource::<UiScale>()
+        .init_session_state::<Facts>()
+        .add_session_message::<WorldFacts>()
         .add_observer(choose)
-        .add_observer(inspect)
-        .add_observer(detail_action)
-        .add_observer(hover)
-        .add_observer(unhover)
-        .add_observer(press)
-        .add_observer(drag_start)
-        .add_observer(drag_move)
-        .add_observer(drag_end)
-        .add_observer(drop_on_slot)
+        .add_observer(choose_settings)
         .add_session_systems(
             Update,
             (
@@ -165,70 +98,109 @@ pub(super) fn plugin(app: &mut App) {
                     .run_if(crate::server::persistence::playing)
                     .before(super::edit::send_intents),
                 receive_palette,
-                rebuild.after(super::edit::send_intents),
-                rebuild_shapes,
-                drag_preview,
-                highlight_tiles,
+                receive_facts,
+                render,
             )
                 .chain(),
         );
 }
 
-/// Tab opens and closes; closing grabs the cursor for building. Escape closes
-/// and leaves the cursor free, as it does outside the menu, so the next click
-/// grabs it and edits nothing.
-/// The other contexts that can hold the input while the Catalogue key is read.
 type Overlays<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::input::UiInput>>,
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
     Option<Res<'w, super::inventory_window::InventoryWindow>>,
+    Option<Res<'w, crate::server::persistence::SaveStatus>>,
 );
 
+/// Runs before the overlays' own toggles: while one is open it takes Escape
+/// itself, so the Menu opens only from play.
 pub(super) fn toggle(
-    actions: Res<super::actions::Actions>,
+    mut actions: ResMut<Actions>,
     mut menu: ResMut<Menu>,
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
-    mut pointer: ResMut<PointerState>,
     window: Single<&Window, With<PrimaryWindow>>,
-    (settings, ui, layout_menu, inventory): Overlays,
+    (settings, ui, layout_menu, inventory, save): Overlays,
 ) {
-    if ui.is_some_and(|ui| ui.text_entry)
+    if !window.focused
+        || ui.is_some_and(|ui| ui.text_entry)
+        || settings.is_some_and(|settings| settings.open)
+        || save.is_some_and(|save| save.modal())
         || layout_menu.is_some_and(|menu| menu.open)
         || inventory.is_some_and(|window| window.open)
     {
         return;
     }
-    if !window.focused {
+    let escape = actions.cancel_requested();
+    if menu.open {
+        if escape {
+            actions.consume_cancel();
+            if menu.details {
+                menu.details = false;
+            } else {
+                resume(&mut menu, &mut cursor.into_inner());
+            }
+        } else if actions.started(Action::Inventory) {
+            // The Inventory's own toggle runs next and opens it.
+            *menu = Menu::default();
+        }
         return;
     }
-    if settings.is_some_and(|settings| settings.open) {
-        return;
+    if actions.started(Action::Menu) || escape {
+        if escape {
+            actions.consume_cancel();
+        }
+        menu.open = true;
+        menu.details = false;
+        let mut cursor = cursor.into_inner();
+        cursor.grab_mode = CursorGrabMode::None;
+        cursor.visible = true;
     }
-    let tab = actions.started(super::actions::Action::Catalogue);
-    let escape = actions.cancel_requested() && menu.open;
-    if !tab && !escape {
+}
+
+fn resume(menu: &mut Menu, cursor: &mut CursorOptions) {
+    *menu = Menu::default();
+    cursor.grab_mode = CursorGrabMode::Locked;
+    cursor.visible = false;
+}
+
+fn choose(
+    event: On<Activate>,
+    choices: Query<&Choice>,
+    mut menu: ResMut<Menu>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    mut inventory: Option<ResMut<super::inventory_window::InventoryWindow>>,
+) {
+    let Ok(choice) = choices.get(event.entity) else {
         return;
-    }
-    pointer.drag = None;
-    pointer.dragged = None;
-    pointer.pinned = false;
-    pointer.item = None;
-    pointer.shape = None;
-    pointer.assigning = None;
-    let open = tab && !menu.open;
-    let grab = tab && menu.open;
-    *menu = Menu {
-        open,
-        material: None,
     };
-    let mut cursor = cursor.into_inner();
-    cursor.grab_mode = if grab {
-        CursorGrabMode::Locked
-    } else {
-        CursorGrabMode::None
-    };
-    cursor.visible = !grab;
+    match choice {
+        Choice::Resume => {
+            if let Ok(mut cursor) = cursor.single_mut() {
+                resume(&mut menu, &mut cursor);
+            }
+        }
+        Choice::Inventory => {
+            *menu = Menu::default();
+            if let Some(window) = inventory.as_mut() {
+                window.open = true;
+            }
+        }
+        Choice::Settings => {}
+        Choice::Details => menu.details = true,
+        Choice::CloseDetails => menu.details = false,
+    }
+}
+
+/// The Menu stays open under Settings and shows again when they close.
+fn choose_settings(
+    event: On<Activate>,
+    choices: Query<&Choice>,
+    mut settings: super::settings::Opener,
+) {
+    if choices.get(event.entity) == Ok(&Choice::Settings) {
+        settings.open();
+    }
 }
 
 pub(super) fn receive_palette(
@@ -245,1460 +217,439 @@ pub(super) fn receive_palette(
     }
 }
 
-/// Picking runs before `Update`, so a choice lands before this frame's edit
-/// path reads the hotbar.
-fn choose(
-    activate: On<Activate>,
-    entries: Query<&Entry>,
-    mut menu: ResMut<Menu>,
-    mut hotbar: ResMut<Hotbar>,
-    mut pointer: ResMut<PointerState>,
-    mut intents: MessageWriter<InventoryIntent>,
-) {
-    if pointer.suppress_click {
-        return;
-    }
-    let Ok(&entry) = entries.get(activate.entity) else {
-        return;
-    };
-    if !menu.open {
-        return;
-    }
-    match entry {
-        Entry::Slot(slot) => {
-            if let Some(holding) = pointer.assigning.take() {
-                edit::assign(slot, holding, &mut intents);
-            } else {
-                edit::select(&mut hotbar, slot, &mut intents);
-                pointer.item = None;
-                pointer.shape = None;
-                menu.material = None;
-            }
-        }
-        _ => {
-            if matches_content(hotbar.held(), entry) {
-                hotbar.outside = Some(Holding::Empty);
-            } else {
-                edit::hold(&mut hotbar, entry.holding().unwrap(), &mut intents);
-            }
-            pointer.shape = None;
-            pointer.item = entry.holding();
-            pointer.pinned = true;
-            pointer.assigning = None;
-            if let Entry::Material(material) = entry {
-                menu.material = Some(material);
-            }
-        }
+fn receive_facts(mut messages: MessageReader<WorldFacts>, mut facts: ResMut<Facts>) {
+    if let Some(latest) = messages.read().last() {
+        facts.0 = Some(latest.clone());
     }
 }
 
-fn detail_action(
-    event: On<Activate>,
-    actions: Query<&DetailAction>,
-    menu: Res<Menu>,
-    mut pointer: ResMut<PointerState>,
-    mut hotbar: ResMut<Hotbar>,
-    catalogue: Res<Catalogue>,
-    mut intents: MessageWriter<InventoryIntent>,
-) {
-    if !menu.open {
-        return;
-    }
-    let Ok(action) = actions.get(event.entity) else {
-        return;
-    };
-    match *action {
-        DetailAction::Shape(shape) => {
-            pointer.shape = Some(shape);
-            if let Some(Holding::Solid {
-                material,
-                orientation,
-                ..
-            }) = selected_holding(&menu, &pointer, &hotbar, &catalogue.0)
-            {
-                let holding = Holding::Solid {
-                    material,
-                    shape,
-                    orientation,
-                };
-                pointer.item = Some(holding);
-                edit::hold(&mut hotbar, holding, &mut intents);
-            }
-            pointer.pinned = true;
-        }
-        DetailAction::Assign(holding) => {
-            pointer.assigning = Some(holding);
-            pointer.pinned = true;
-        }
-        DetailAction::Clear => {
-            hotbar.outside = Some(Holding::Empty);
-            pointer.assigning = None;
-        }
-    }
-}
-fn selected_shape(pointer: &PointerState, hotbar: &Hotbar) -> ShapeId {
-    pointer.shape.unwrap_or(match hotbar.held() {
-        Holding::Solid { shape, .. } => shape,
-        _ => tesserae_core::SHAPE_FULL_CUBE,
-    })
-}
-fn selected_holding(
-    menu: &Menu,
-    pointer: &PointerState,
-    hotbar: &Hotbar,
-    catalogue: &ContentCatalogue,
-) -> Option<Holding> {
-    pointer.item.or_else(|| {
-        if menu.material.is_none() && pointer.shape.is_none() && hotbar.held() != Holding::Empty {
-            return Some(hotbar.held());
-        }
-        menu.material(hotbar, catalogue)
-            .map(|material| Holding::solid(material, selected_shape(pointer, hotbar)))
-    })
-}
-fn matches_content(holding: Holding, entry: Entry) -> bool {
-    match (holding, entry) {
-        (Holding::Solid { material, .. }, Entry::Material(id)) => material == id,
-        _ => entry.holding() == Some(holding),
-    }
-}
-fn inspect(
-    event: On<Activate>,
-    entries: Query<&Inspect>,
-    mut menu: ResMut<Menu>,
-    mut pointer: ResMut<PointerState>,
-) {
-    if !menu.open {
-        return;
-    }
-    if let Ok(inspect) = entries.get(event.entity) {
-        menu.material = Some(inspect.0);
-        pointer.pinned = true;
-        pointer.item = Some(Holding::solid(inspect.0, tesserae_core::SHAPE_FULL_CUBE));
-        pointer.shape = Some(tesserae_core::SHAPE_FULL_CUBE);
-    }
-}
-fn hover(
-    event: On<PointerOver>,
-    entries: Query<&Entry>,
-    mut state: ResMut<PointerState>,
-    mut menu: ResMut<Menu>,
-) {
-    if !menu.open {
-        return;
-    }
-    if let Ok(&entry) = entries.get(event.entity) {
-        state.hovered = Some(entry);
-        if !state.pinned
-            && let Some(holding) = entry.holding()
-        {
-            state.item = Some(holding);
-        }
-        if let Entry::Material(material) = entry
-            && !state.pinned
-        {
-            menu.material = Some(material);
-        }
-    }
-}
-fn unhover(event: On<PointerOut>, entries: Query<&Entry>, mut state: ResMut<PointerState>) {
-    if entries
-        .get(event.entity)
-        .is_ok_and(|entry| state.hovered == Some(*entry))
-    {
-        state.hovered = None;
-    }
-}
-fn press(event: On<PointerPress>, mut state: ResMut<PointerState>) {
-    if event.button == PointerButton::Primary {
-        state.suppress_click = false;
-    }
-}
-fn drag_start(
-    event: On<PointerDragStart>,
-    entries: Query<&Entry>,
-    menu: Res<Menu>,
-    hotbar: Res<Hotbar>,
-    mut state: ResMut<PointerState>,
-) {
-    if menu.open
-        && event.button == PointerButton::Primary
-        && let Ok(&entry) = entries.get(event.entity)
-    {
-        state.drag = Some(entry);
-        state.dragged = match entry {
-            Entry::Slot(slot) => Some(hotbar.slot(slot)),
-            item => item.holding(),
-        };
-        state.cursor = event.pointer.position;
-        state.suppress_click = true;
-    }
-}
-fn drag_move(event: On<PointerDrag>, mut state: ResMut<PointerState>) {
-    if event.button == PointerButton::Primary && state.drag.is_some() {
-        state.cursor = event.pointer.position;
-    }
-}
-fn drag_end(event: On<PointerDragEnd>, mut state: ResMut<PointerState>) {
-    if event.button == PointerButton::Primary {
-        state.drag = None;
-        state.dragged = None;
-    }
-}
+type Shown = (bool, bool);
 
-fn drop_on_slot(
-    event: On<PointerDragDrop>,
-    entries: Query<&Entry>,
-    menu: Res<Menu>,
-    mut state: ResMut<PointerState>,
-    mut intents: MessageWriter<InventoryIntent>,
-) {
-    if !menu.open || event.button != PointerButton::Primary {
-        return;
-    }
-    let Ok(&Entry::Slot(target)) = entries.get(event.entity) else {
-        return;
-    };
-    let source = state
-        .drag
-        .or_else(|| entries.get(event.dropped).ok().copied());
-    if let Some(source) = source {
-        match source {
-            Entry::Slot(from) if from == target => {}
-            Entry::Slot(from) => {
-                intents.write(InventoryIntent::Move {
-                    from: Slot::Hotbar(from),
-                    to: Slot::Hotbar(target),
-                });
-            }
-            item => {
-                if let Some(held) = item.holding() {
-                    edit::assign(target, held, &mut intents);
-                }
-            }
-        }
-        state.drag = None;
-        state.dragged = None;
-        state.suppress_click = true;
-    }
-}
-
-fn rebuild(
+fn render(
     mut commands: Commands,
-    (menu, hotbar, bindings, labels): (
+    (menu, facts, settings): (
         Res<Menu>,
-        Res<Hotbar>,
-        Res<super::actions::Bindings>,
-        Res<super::actions::Labels>,
+        Res<Facts>,
+        Option<Res<super::settings::Settings>>,
     ),
-    (catalogue, searches): (Res<Catalogue>, Res<super::menu_ui::Searches>),
+    own: Option<Res<super::game_mode::Mode>>,
+    (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     roots: Query<Entity, With<MenuRoot>>,
-    selection: Query<&ScrollPosition, With<MenuSelection>>,
-    mut state: ResMut<PointerState>,
-    (mut shown, mut query): (Local<Option<Hotbar>>, Local<String>),
+    mut shown: Local<Option<Shown>>,
 ) {
-    let wanted = menu.open.then(|| hotbar.clone());
-    if *shown == wanted
-        && !catalogue.is_changed()
-        && !bindings.is_changed()
-        && !labels.is_changed()
-        && !searches.is_changed()
-    {
-        return;
-    }
-    if state.drag.is_some() && menu.open {
+    let wanted = (menu.open && !settings.is_some_and(|s| s.open)).then_some((menu.details, true));
+    if *shown == wanted && !facts.is_changed() && !own.as_ref().is_some_and(|o| o.is_changed()) {
         return;
     }
     *shown = wanted;
-    let scroll = if *query != searches.catalogue {
-        *query = searches.catalogue.clone();
-        Vec2::ZERO
-    } else {
-        selection.iter().next().map_or(Vec2::ZERO, |p| p.0)
-    };
-    state.hovered = None;
-    if !menu.open {
-        state.drag = None;
-        state.dragged = None;
-        state.pinned = false;
-        state.item = None;
-        state.shape = None;
-        state.assigning = None;
-    }
     for root in &roots {
         commands.entity(root).despawn();
     }
-    if shown.is_some() {
-        spawn_menu(
-            &mut commands,
-            (
-                selected_holding(&menu, &state, &hotbar, &catalogue.0),
-                state.assigning,
-            ),
-            &hotbar,
-            &catalogue.0,
-            scroll,
-            &searches.catalogue,
-            format!(
-                "Click to select/clear | {}: clear selection | {}-{}: assign | {}: close | {}: release cursor",
-                bindings.label(super::actions::Action::EmptyHand, &labels),
-                bindings.label(super::actions::Action::Slot1, &labels),
-                bindings.label(super::actions::Action::Slot9, &labels),
-                bindings.label(super::actions::Action::Catalogue, &labels),
-                bindings.label(super::actions::Action::ReleaseCursor, &labels)
-            ),
-        );
-    }
-}
-
-type DetailSelection = (Option<Holding>, Option<Holding>);
-fn rebuild_shapes(
-    mut commands: Commands,
-    menu: Res<Menu>,
-    hotbar: Res<Hotbar>,
-    (catalogue, pointer): (Res<Catalogue>, Res<PointerState>),
-    panels: Query<Entity, With<ShapePanel>>,
-    mut shown: Local<Option<DetailSelection>>,
-) {
-    // Keep the source entity alive until Bevy finishes the drag.
-    if pointer.drag.is_some() {
+    let Some((details, _)) = wanted else {
         return;
-    }
-    let wanted = (
-        selected_holding(&menu, &pointer, &hotbar, &catalogue.0),
-        pointer.assigning,
-    );
-    if *shown == Some(wanted) && !catalogue.is_changed() {
-        return;
-    }
-    *shown = Some(wanted);
-    for panel in &panels {
-        commands
-            .entity(panel)
-            .despawn_children()
-            .with_children(|list| {
-                detail(list, wanted.0, wanted.1, &catalogue.0);
-            });
-    }
-}
-
-fn font(size: f32) -> TextFont {
-    super::menu_ui::font(size)
-}
-
-fn spawn_menu(
-    commands: &mut Commands,
-    selection: DetailSelection,
-    hotbar: &Hotbar,
-    catalogue: &ContentCatalogue,
-    scroll: Vec2,
-    search: &str,
-    heading: String,
-) {
-    use super::menu_ui as ui;
+    };
+    let facts = facts.0.as_ref();
+    let own = own.and_then(|o| o.0);
+    let mut focus = None;
     commands
         .spawn((
             MenuRoot,
-            GlobalZIndex(10),
+            GlobalZIndex(8),
+            BackgroundColor(Color::BLACK.with_alpha(0.45)),
             Node {
                 position_type: PositionType::Absolute,
-                left: Val::Percent(5.0),
-                right: Val::Percent(5.0),
-                top: Val::Px(295.0),
-                bottom: Val::Px(20.0),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                padding: UiRect::horizontal(Val::Percent(5.0)),
+                align_items: AlignItems::Center,
                 ..default()
             },
         ))
         .with_children(|root| {
-            root.spawn(Node {
-                flex_grow: 1.0,
-                flex_basis: Val::Px(0.0),
-                min_height: Val::Px(0.0),
-                column_gap: Val::Px(18.0),
-                ..default()
-            })
-            .with_children(|area| {
-                area.spawn((
-                    MenuSelection,
-                    ScrollArea,
-                    ScrollPosition(scroll),
-                    Node {
-                        flex_grow: 1.0,
-                        min_width: Val::Px(0.0),
-                        min_height: Val::Px(0.0),
-                        overflow: Overflow::scroll_y(),
-                        padding: UiRect::right(Val::Px(2.0)),
-                        ..default()
-                    },
-                ))
-                .with_children(|list| menu_choices(list, hotbar, catalogue, search));
-                area.spawn((
-                    ShapePanel,
-                    ScrollArea,
-                    BackgroundColor(ui::CARD),
-                    BorderColor::all(ui::EDGE),
-                    Node {
-                        width: Val::Px(202.0),
-                        padding: UiRect::all(Val::Px(16.0)),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(8.0)),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(13.0),
-                        overflow: Overflow::scroll_y(),
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                ))
-                .with_children(|panel| detail(panel, selection.0, selection.1, catalogue));
-            });
             root.spawn((
-                MenuSlots,
-                ScrollPosition::default(),
-                Node {
-                    flex_shrink: 0.0,
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(10.0),
-                    border: UiRect::top(Val::Px(1.0)),
-                    padding: UiRect::top(Val::Px(17.0)),
+                TabGroup {
+                    modal: !details,
                     ..default()
                 },
-                BorderColor::all(ui::EDGE),
+                cine::surface(cine::PANEL),
+                Node {
+                    width: Val::Px(300.0),
+                    padding: UiRect::all(Val::Px(25.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                },
             ))
-            .with_children(|footer| {
-                footer
+            .with_children(|panel| {
+                cine::eyebrow(panel, "TAKE A MOMENT");
+                ui::weighted_text(panel, "Menu", 31.0, 450, cine::INK);
+                let place = facts
+                    .and_then(|f| f.name.clone())
+                    .unwrap_or_else(|| "Your World".into());
+                let subtitle = match own {
+                    Some(mode) => format!("{place} · {}", mode_name(mode)),
+                    None => place,
+                };
+                ui::paragraph(panel, subtitle, 13.0, cine::MUTED);
+                panel
                     .spawn(Node {
-                        justify_content: JustifyContent::SpaceBetween,
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(8.0),
+                        margin: UiRect::top(Val::Px(16.0)),
                         ..default()
                     })
-                    .with_children(|row| {
-                        ui::eyebrow(row, "QUICK SLOTS");
-                        ui::text(
-                            row,
-                            if selection.1.is_some() {
-                                "Choose a destination slot".to_owned()
-                            } else {
-                                selection_summary(hotbar.held(), catalogue)
-                            },
-                            11.0,
-                            ui::MUTED,
+                    .with_children(|list| {
+                        let key = |action| bindings.label(action, &labels);
+                        let resume = cine::menu_button(
+                            list,
+                            "Resume",
+                            &key(Action::ReleaseCursor),
+                            Choice::Resume,
+                            Kind::Primary,
                         );
-                    });
-                footer
-                    .spawn((
-                        ScrollArea,
-                        Node {
-                            display: Display::Grid,
-                            grid_template_columns: RepeatedGridTrack::flex(9, 1.0),
-                            column_gap: Val::Px(6.0),
-                            min_height: Val::Px(64.0),
-                            overflow: Overflow::scroll_x(),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|slots| {
-                        for index in 0..tesserae_core::inventory::HOTBAR_SLOTS {
-                            menu_card(
-                                slots,
-                                Entry::Slot(index),
-                                "",
-                                hotbar.slot(index),
-                                hotbar.outside.is_none() && hotbar.selected == index,
-                                Some(index + 1),
-                            );
+                        if !details {
+                            focus = Some(resume);
                         }
-                    });
-                footer
-                    .spawn(Node {
-                        justify_content: JustifyContent::SpaceBetween,
-                        column_gap: Val::Px(12.0),
-                        align_items: AlignItems::Center,
-                        ..default()
-                    })
-                    .with_children(|row| {
-                        ui::text(row, heading, 10.0, ui::MUTED);
-                        super::save::quit_button(row);
+                        cine::menu_button(
+                            list,
+                            "Inventory",
+                            &key(Action::Inventory),
+                            Choice::Inventory,
+                            Kind::Plain,
+                        );
+                        cine::menu_button(list, "Settings", "", Choice::Settings, Kind::Plain);
+                        cine::menu_button(list, "World details", "", Choice::Details, Kind::Plain);
+                        super::save::return_buttons(list);
                     });
             });
+            if details {
+                focus = world_details(root, facts, own);
+            }
         });
-}
-fn selection_summary(holding: Holding, catalogue: &ContentCatalogue) -> String {
-    use super::menu_ui::title;
-    match holding {
-        Holding::Empty => "Nothing selected".into(),
-        Holding::Solid {
-            material, shape, ..
-        } => format!(
-            "Selected: {} · {}",
-            title(
-                catalogue
-                    .material(material)
-                    .map_or("unknown", |m| m.name.as_str())
-            ),
-            title(
-                catalogue
-                    .shape(shape)
-                    .map_or("unknown", |s| s.name.as_str())
-            ),
-        ),
-        Holding::Fluid(material) => format!(
-            "Selected: {}",
-            title(
-                catalogue
-                    .material(material)
-                    .map_or("unknown", |m| m.name.as_str())
-            )
-        ),
-        Holding::Fire => "Selected: Fire".into(),
-        Holding::Tool(tool) => format!("Selected: {}", title(catalogue.tool_label(tool))),
+    if let Some(entity) = focus {
+        commands.queue(move |world: &mut World| {
+            if let Some(mut focus) = world.get_resource_mut::<InputFocus>() {
+                focus.set(entity, FocusCause::Auto);
+            }
+        });
     }
 }
 
-fn menu_choices(
+/// The World's facts in a dialog over the Menu.
+fn world_details(
     root: &mut ChildSpawnerCommands,
-    hotbar: &Hotbar,
-    catalogue: &ContentCatalogue,
-    search: &str,
-) {
-    use super::menu_ui as ui;
-    let mut items: Vec<_> = catalogue
-        .materials
-        .iter()
-        .filter(|m| m.solid && m.fluid.is_none())
-        .map(|m| (Entry::Material(m.id), m.name.as_str()))
-        .collect();
-    let mut fluids: Vec<_> = catalogue
-        .materials
-        .iter()
-        .filter_map(|m| Some((m.fluid?, m)))
-        .collect();
-    fluids.sort_by_key(|(rank, _)| *rank);
-    items.extend(
-        fluids
-            .iter()
-            .map(|(_, m)| (Entry::Fluid(m.id), m.name.as_str())),
-    );
-    if catalogue.anything_burns() {
-        items.push((Entry::Fire, "fire"));
-    }
-    items.retain(|(_, name)| ui::matches(search, name));
-    if items.is_empty() {
-        ui::text(
-            root,
-            "No matches. Try another Material or clear your search.",
-            13.0,
-            ui::INK,
-        );
-        return;
-    }
+    facts: Option<&WorldFacts>,
+    own: Option<GameMode>,
+) -> Option<Entity> {
+    let mut close = None;
     root.spawn(Node {
+        position_type: PositionType::Absolute,
         width: Val::Percent(100.0),
-        flex_wrap: FlexWrap::Wrap,
-        column_gap: Val::Px(9.0),
-        row_gap: Val::Px(9.0),
-        align_content: AlignContent::Start,
+        height: Val::Percent(100.0),
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
         ..default()
     })
-    .with_children(|grid| {
-        for (entry, name) in items {
-            menu_card(
-                grid,
-                entry,
-                &ui::title(name),
-                entry.holding().unwrap(),
-                matches_content(hotbar.held(), entry),
-                None,
-            );
-        }
-    });
-}
-fn menu_card(
-    parent: &mut ChildSpawnerCommands,
-    entry: Entry,
-    label: &str,
-    holding: Holding,
-    selected: bool,
-    number: Option<usize>,
-) {
-    use super::menu_ui as ui;
-    let slot = number.is_some();
-    let card = parent
-        .spawn((
-            Button,
-            entry,
-            TileState { selected },
-            Node {
-                width: if slot { Val::Auto } else { Val::Px(128.0) },
-                height: Val::Px(if slot { 64.0 } else { 113.0 }),
-                flex_shrink: 0.0,
-                min_width: Val::Px(if slot { 44.0 } else { 0.0 }),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(if slot { 5.0 } else { 7.0 })),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                row_gap: Val::Px(9.0),
-                ..default()
-            },
-            BackgroundColor(ui::CARD),
-            BorderColor::all(if selected { ui::LEAF } else { ui::EDGE }),
-        ))
-        .with_children(|card| {
-            if holding != Holding::Empty {
-                card.spawn((
-                    super::tile_preview::TilePreview(holding),
-                    bevy::ui::UiTransform::from_scale(Vec2::splat(1.4)),
-                    Node {
-                        width: Val::Px(if slot { 30.0 } else { 48.0 }),
-                        height: Val::Px(if slot { 30.0 } else { 48.0 }),
-                        flex_shrink: 0.0,
-                        ..default()
-                    },
-                    Visibility::Hidden,
-                    Pickable::IGNORE,
-                ));
-            }
-            if !slot {
-                ui::text(card, label, 11.0, ui::INK);
-            }
-            if let Some(number) = number {
-                card.spawn((
-                    Text::new(number.to_string()),
-                    font(9.0),
-                    TextColor(ui::MUTED),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        left: Val::Px(3.0),
-                        top: Val::Px(2.0),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
-            }
-            if let Entry::Material(material) = entry {
-                card.spawn((
-                    Button,
-                    Inspect(material),
-                    Visibility::Hidden,
-                    Node {
-                        position_type: PositionType::Absolute,
-                        right: Val::Px(5.0),
-                        top: Val::Px(4.0),
-                        width: Val::Px(24.0),
-                        height: Val::Px(22.0),
-                        align_items: AlignItems::Center,
-                        justify_content: JustifyContent::Center,
-                        ..default()
-                    },
-                ))
-                .with_child((
-                    ui::Icon(ui::IconKind::More, ui::MUTED),
-                    Node {
-                        width: Val::Px(16.0),
-                        height: Val::Px(16.0),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
-            }
-        })
-        .id();
-    if !slot {
-        parent.commands().entity(card).insert(CatalogueItem);
-    }
-}
-fn detail(
-    parent: &mut ChildSpawnerCommands,
-    held: Option<Holding>,
-    assigning: Option<Holding>,
-    catalogue: &ContentCatalogue,
-) {
-    use super::menu_ui as ui;
-    let Some(held) = held.filter(|held| *held != Holding::Empty) else {
-        return;
-    };
-    let (kind, name) = match held {
-        Holding::Solid { material, .. } => (
-            "MATERIAL",
-            catalogue
-                .material(material)
-                .map_or("Unknown Material", |m| m.name.as_str()),
-        ),
-        Holding::Fluid(material) => (
-            "FLUID",
-            catalogue
-                .material(material)
-                .map_or("Unknown fluid", |m| m.name.as_str()),
-        ),
-        Holding::Fire => ("TOOL", "fire"),
-        Holding::Tool(tool) => ("TOOL", catalogue.tool_label(tool)),
-        Holding::Empty => unreachable!(),
-    };
-    parent
-        .spawn((
-            BackgroundColor(Color::srgb(0.085, 0.085, 0.085)),
-            BorderColor::all(ui::EDGE),
-            Node {
-                height: Val::Px(113.0),
-                flex_shrink: 0.0,
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
-                ..default()
-            },
-        ))
-        .with_child((
-            super::tile_preview::TilePreview(held),
-            Node {
-                width: Val::Px(98.0),
-                height: Val::Px(98.0),
-                ..default()
-            },
-            Visibility::Hidden,
-            Pickable::IGNORE,
-        ));
-    parent
-        .spawn(Node {
-            flex_direction: FlexDirection::Column,
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|identity| {
-            ui::eyebrow(identity, kind);
-            identity
-                .spawn(Node {
-                    margin: UiRect::top(Val::Px(6.0)),
+    .with_children(|center| {
+        center
+            .spawn((
+                TabGroup {
+                    modal: true,
                     ..default()
-                })
-                .with_children(|title| {
-                    ui::weighted_text(title, ui::title(name), 19.0, 600, ui::INK)
-                });
-            identity
-                .spawn(Node {
-                    margin: UiRect::top(Val::Px(5.0)),
-                    ..default()
-                })
-                .with_children(|name_row| ui::technical_text(name_row, name, 10.0, ui::MUTED));
-        });
-    if let Holding::Solid { shape, .. } = held {
-        parent
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                min_height: Val::Px(0.0),
-                flex_shrink: 1.0,
-                row_gap: Val::Px(9.0),
-                ..default()
-            })
-            .with_children(|shapes| {
-                ui::eyebrow(shapes, "SHAPE");
-                shapes
-                    .spawn((
-                        ScrollArea,
-                        Node {
-                            display: Display::Grid,
-                            grid_template_columns: RepeatedGridTrack::flex(2, 1.0),
-                            column_gap: Val::Px(5.0),
-                            row_gap: Val::Px(5.0),
-                            min_height: Val::Px(0.0),
-                            overflow: Overflow::scroll_y(),
-                            ..default()
-                        },
-                    ))
-                    .with_children(|choices| {
-                        for entry in &catalogue.shapes {
-                            ui::compact_button(
-                                choices,
-                                ui::title(&entry.name),
-                                DetailAction::Shape(entry.id),
-                                shape == entry.id,
-                                32.0,
-                                10.0,
-                            );
-                        }
-                    });
-            });
-    }
-    parent
-        .spawn(Node {
-            margin: UiRect::top(Val::Auto),
-            flex_direction: FlexDirection::Column,
-            row_gap: Val::Px(7.0),
-            flex_shrink: 0.0,
-            ..default()
-        })
-        .with_children(|actions| {
-            ui::compact_button(
-                actions,
-                if assigning.is_some() {
-                    "Choose a slot below"
-                } else {
-                    "Assign to slot"
                 },
-                DetailAction::Assign(held),
-                assigning.is_some(),
-                36.0,
-                11.0,
-            );
-            ui::compact_button(
-                actions,
-                "Clear selection",
-                DetailAction::Clear,
-                false,
-                36.0,
-                11.0,
-            );
-        });
+                cine::surface(cine::PANEL),
+                Node {
+                    width: Val::Px(420.0),
+                    max_width: Val::Percent(92.0),
+                    padding: UiRect::all(Val::Px(25.0)),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(8.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(8.0),
+                    ..default()
+                },
+            ))
+            .with_children(|dialog| {
+                cine::eyebrow(dialog, "WORLD DETAILS");
+                let Some(facts) = facts else {
+                    ui::paragraph(
+                        dialog,
+                        "The Server has not described this World yet.",
+                        13.0,
+                        cine::MUTED,
+                    );
+                    close = Some(cine::button(
+                        dialog,
+                        "Close",
+                        "",
+                        Choice::CloseDetails,
+                        Kind::Primary,
+                    ));
+                    return;
+                };
+                ui::weighted_text(
+                    dialog,
+                    facts.name.as_deref().unwrap_or("This World"),
+                    22.0,
+                    500,
+                    cine::INK,
+                );
+                for line in lines(facts, own) {
+                    ui::paragraph(dialog, line, 13.0, cine::MUTED);
+                }
+                close = Some(cine::button(
+                    dialog,
+                    "Close",
+                    "",
+                    Choice::CloseDetails,
+                    Kind::Primary,
+                ));
+            });
+    });
+    close
 }
 
-pub(super) fn drag_preview(
-    mut commands: Commands,
-    menu: Res<Menu>,
-    pointer: Res<PointerState>,
-    scale: Res<UiScale>,
-    mut previews: Query<(Entity, &mut Node, &super::tile_preview::TilePreview), With<DragPreview>>,
-) {
-    let held = menu
-        .open
-        .then_some(pointer.dragged)
-        .flatten()
-        .filter(|held| *held != Holding::Empty);
-    let position = pointer.cursor / scale.0 - Vec2::splat(32.0);
-    for (entity, mut node, item) in &mut previews {
-        if held == Some(item.0) {
-            if node.left != Val::Px(position.x) {
-                node.left = Val::Px(position.x);
-            }
-            if node.top != Val::Px(position.y) {
-                node.top = Val::Px(position.y);
-            }
-            return;
-        }
-        commands.entity(entity).despawn();
-    }
-    if let Some(held) = held {
-        commands.spawn((
-            DragPreview,
-            super::tile_preview::TilePreview(held),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(position.x),
-                top: Val::Px(position.y),
-                width: Val::Px(64.0),
-                height: Val::Px(64.0),
-                ..default()
-            },
-            GlobalZIndex(100),
-            Visibility::Hidden,
-            Pickable::IGNORE,
-        ));
+fn mode_name(mode: GameMode) -> &'static str {
+    match mode {
+        GameMode::Creative => "Creative",
+        GameMode::Survival => "Survival",
     }
 }
 
-type Tiles<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        &'static Entry,
-        &'static TileState,
-        Has<CatalogueItem>,
-        &'static mut BackgroundColor,
-        &'static mut BorderColor,
-    ),
->;
-pub(super) fn highlight_tiles(
-    menu: Res<Menu>,
-    pointer: Res<PointerState>,
-    hotbar: Res<Hotbar>,
-    mut tiles: Tiles,
-    mut inspectors: Query<(&Inspect, &mut Visibility)>,
-    focus: Option<Res<bevy::input_focus::InputFocus>>,
-    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
-) {
-    let focused = super::menu_ui::visible_focus(focus.as_deref(), visible.as_deref());
-    for (inspect, mut visibility) in &mut inspectors {
-        *visibility = if pointer.hovered == Some(Entry::Material(inspect.0)) {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
-    }
-    for (entity, entry, tile, catalogue_item, mut background, mut border) in &mut tiles {
-        let selected = if catalogue_item {
-            matches_content(hotbar.held(), *entry)
-        } else {
-            tile.selected
-        };
-        let hovered = menu.open && (pointer.hovered == Some(*entry) || focused == Some(entity));
-        let colour = if selected {
-            Color::srgb(0.084273, 0.117038, 0.092091)
-        } else if hovered {
-            Color::srgb(0.09, 0.09, 0.09)
-        } else {
-            crate::client::menu_ui::CARD
-        };
-        let edge = if selected {
-            super::menu_ui::INK
-        } else if hovered {
-            super::menu_ui::MUTED
-        } else {
-            super::menu_ui::EDGE
-        };
-        if background.0 != colour {
-            background.0 = colour;
-        }
-        let edge = BorderColor::all(edge);
-        if *border != edge {
-            *border = edge;
-        }
-    }
+/// The World details, one fact per line.
+fn lines(facts: &WorldFacts, own: Option<GameMode>) -> Vec<String> {
+    let game = facts.game.as_ref().map_or_else(
+        || "No Game".to_owned(),
+        |(id, version)| format!("{} {version}", ui::title(id)),
+    );
+    let biomes: Vec<_> = facts.biomes.iter().map(|b| ui::declared_title(b)).collect();
+    vec![
+        format!("Game: {game}"),
+        format!("Voxel size: {} m", facts.voxel_size_m),
+        format!("Seed: {}", facts.seed),
+        match biomes.len() {
+            0 => "Biomes: none declared".to_owned(),
+            n => format!("{n} Biomes: {}", biomes.join(" · ")),
+        },
+        format!("Default mode: {}", mode_name(facts.default_mode)),
+        format!("Your mode: {}", own.map_or("not yet known", mode_name)),
+    ]
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy::camera::NormalizedRenderTarget;
-    use bevy::ecs::system::RunSystemOnce;
-    use bevy::input::mouse::MouseWheel;
-    use bevy::picking::{
-        backend::HitData,
-        events::Pointer,
-        pointer::{Location, PointerId},
-    };
+    use crate::server::persistence::SaveAction;
+    use bevy::ecs::message::Messages;
 
-    fn pointer() -> Pointer {
-        Pointer::new(
-            PointerId::Mouse,
-            Location {
-                target: NormalizedRenderTarget::None {
-                    width: 800,
-                    height: 600,
-                },
-                position: Vec2::ZERO,
-            },
-        )
-    }
-    fn hit() -> HitData {
-        HitData::new(Entity::PLACEHOLDER, 0.0, None, None)
-    }
+    /// A Player in play with the cursor grabbed, the Inventory window and
+    /// Settings beside the Menu.
     fn app() -> App {
         let mut app = App::new();
-        app.add_plugins(super::super::actions::test_plugin);
-        app.insert_resource(super::super::input::Ownership::playing());
-        app.insert_resource(Menu {
-            open: true,
-            material: None,
-        })
-        .init_resource::<Hotbar>()
-        .init_resource::<PointerState>()
-        .init_resource::<crate::client::menu_ui::Searches>()
-        .init_resource::<Catalogue>()
-        .init_resource::<UiScale>()
-        .init_resource::<ButtonInput<KeyCode>>()
-        .add_message::<MouseWheel>()
-        .add_message::<InventoryIntent>()
-        .add_observer(choose)
-        .add_observer(inspect)
-        .add_observer(detail_action)
-        .add_observer(hover)
-        .add_observer(unhover)
-        .add_observer(press)
-        .add_observer(drag_start)
-        .add_observer(drag_move)
-        .add_observer(drag_end)
-        .add_observer(drop_on_slot);
-        app.world_mut()
-            .spawn((PrimaryWindow, Window::default(), CursorOptions::default()));
+        let profile = std::env::temp_dir().join(format!(
+            "tesserae-menu-{}.json",
+            tesserae_core::save::WorldId::new().as_str()
+        ));
+        app.add_plugins(super::super::actions::test_plugin)
+            .init_resource::<InputFocus>()
+            .init_resource::<super::super::game_mode::Mode>()
+            .init_resource::<super::super::drops::Looks>()
+            .init_resource::<super::super::menu_ui::Searches>()
+            .init_resource::<Time<Real>>()
+            .init_resource::<super::super::edit::Catalogue>()
+            .init_resource::<super::super::edit::Hotbar>()
+            .init_resource::<super::super::settings::Settings>()
+            .insert_resource(super::super::profile::Store {
+                path: profile,
+                error: None,
+            })
+            .insert_resource(crate::server::items::PlacingItems(Vec::new()))
+            .add_message::<SaveAction>()
+            .add_message::<MaterialPalette>()
+            .add_message::<bevy::window::WindowCloseRequested>()
+            .add_message::<crate::server::game_mode::GameModeChanged>()
+            .init_resource::<crate::server::persistence::SaveStatus>()
+            .init_resource::<crate::launch::Switch>()
+            .add_plugins((
+                plugin,
+                super::super::save::plugin,
+                super::super::inventory_window::plugin,
+                crate::server::inventory::plugin,
+            ));
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+            CursorOptions {
+                grab_mode: CursorGrabMode::Locked,
+                visible: false,
+                ..default()
+            },
+        ));
+        app.world_mut().spawn((
+            crate::server::player::Player::at(Vec3::ZERO),
+            crate::server::inventory::Inventory::default(),
+        ));
+        app.update();
         app
     }
-    /// What the menu asked of the Server since last asked.
-    fn intents(app: &mut App) -> Vec<InventoryIntent> {
+
+    fn press(app: &mut App, key: KeyCode) {
         app.world_mut()
-            .resource_mut::<bevy::ecs::message::Messages<InventoryIntent>>()
-            .drain()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(key);
+        keys.clear();
+        app.update();
+    }
+
+    fn open(app: &App) -> bool {
+        app.world().resource::<Menu>().open
+    }
+
+    fn inventory_open(app: &App) -> bool {
+        app.world()
+            .resource::<super::super::inventory_window::InventoryWindow>()
+            .open
+    }
+
+    fn grabbed(app: &mut App) -> bool {
+        app.world_mut()
+            .query::<&CursorOptions>()
+            .single(app.world())
+            .unwrap()
+            .grab_mode
+            == CursorGrabMode::Locked
+    }
+
+    fn choose(app: &mut App, choice: Choice) {
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &Choice)>()
+            .iter(app.world())
+            .find_map(|(e, c)| (*c == choice).then_some(e))
+            .unwrap_or_else(|| panic!("no {choice:?} on screen"));
+        app.world_mut().trigger(Activate { entity });
+        app.update();
+    }
+
+    fn texts(app: &mut App) -> Vec<String> {
+        app.world_mut()
+            .query::<&Text>()
+            .iter(app.world())
+            .map(|t| t.0.clone())
             .collect()
     }
-    fn take(material: MaterialId, at: usize) -> InventoryIntent {
-        InventoryIntent::Take {
-            material,
-            count: crate::server::inventory::MAX_STACK,
-            into: tesserae_core::inventory::Destination::Slot(Slot::Hotbar(at)),
-        }
-    }
+
     #[test]
-    fn detail_assignment_asks_for_the_item_and_keeps_the_hand() {
+    fn tab_and_escape_open_the_menu_and_escape_from_an_overlay_closes_only_it() {
         let mut app = app();
-        let before = app.world().resource::<Hotbar>().clone();
-        let holding = Holding::solid(23, tesserae_core::SHAPE_STAIR);
-        let assign = app.world_mut().spawn(DetailAction::Assign(holding)).id();
-        let destination = app.world_mut().spawn(Entry::Slot(4)).id();
-        app.world_mut().trigger(Activate { entity: assign });
-        app.world_mut().trigger(Activate {
-            entity: destination,
-        });
-        assert_eq!(intents(&mut app), [take(23, 4)]);
-        assert_eq!(*app.world().resource::<Hotbar>(), before);
-        assert!(app.world().resource::<Menu>().open);
-        assert!(app.world().resource::<PointerState>().assigning.is_none());
+        press(&mut app, KeyCode::Tab);
+        assert!(open(&app) && !grabbed(&mut app));
+        press(&mut app, KeyCode::Tab);
+        assert!(open(&app), "inside the Menu, Tab moves focus");
+        press(&mut app, KeyCode::Escape);
+        assert!(!open(&app) && grabbed(&mut app), "Escape resumes");
+        press(&mut app, KeyCode::Escape);
+        assert!(open(&app), "Escape from play opens the Menu");
+        press(&mut app, KeyCode::Escape);
+        press(&mut app, KeyCode::KeyI);
+        assert!(inventory_open(&app));
+        press(&mut app, KeyCode::Escape);
+        assert!(!inventory_open(&app));
+        assert!(!open(&app), "the overlay took the Escape");
     }
+
     #[test]
-    fn filtering_uses_real_materials_without_reindexing_entries_or_hotbar_slots() {
-        use crate::content::CatalogueMaterial;
+    fn each_entry_reaches_its_destination_and_return_saves_first() {
         let mut app = app();
-        app.world_mut().resource_mut::<Catalogue>().0.materials = vec![
-            CatalogueMaterial {
-                id: 23,
-                name: "Stone".into(),
-                solid: true,
-                fluid: None,
-                remove_time: std::time::Duration::from_secs(1),
-                burns: false,
-            },
-            CatalogueMaterial {
-                id: 24,
-                name: "Wood".into(),
-                solid: true,
-                fluid: None,
-                remove_time: std::time::Duration::from_secs(1),
-                burns: false,
-            },
-        ];
-        app.add_systems(Update, rebuild);
-        app.world_mut()
-            .resource_mut::<crate::client::menu_ui::Searches>()
-            .catalogue = "WOOD".into();
-        app.update();
-        let entries: Vec<_> = app
-            .world_mut()
-            .query::<&Entry>()
-            .iter(app.world())
-            .copied()
-            .collect();
-        assert!(entries.contains(&Entry::Material(24)));
-        assert!(!entries.contains(&Entry::Material(23)));
-        assert_eq!(
-            entries
-                .iter()
-                .filter(|entry| matches!(entry, Entry::Slot(_)))
-                .count(),
-            9
+        press(&mut app, KeyCode::Tab);
+        choose(&mut app, Choice::Resume);
+        assert!(!open(&app) && grabbed(&mut app));
+
+        press(&mut app, KeyCode::Tab);
+        choose(&mut app, Choice::Inventory);
+        assert!(!open(&app) && inventory_open(&app));
+        press(&mut app, KeyCode::Escape);
+
+        press(&mut app, KeyCode::Tab);
+        choose(&mut app, Choice::Settings);
+        assert!(
+            app.world()
+                .resource::<super::super::settings::Settings>()
+                .open
         );
-        app.world_mut()
-            .resource_mut::<crate::client::menu_ui::Searches>()
-            .catalogue = "zzzz".into();
-        app.update();
+        assert!(open(&app), "the Menu waits under Settings");
         assert!(
             app.world_mut()
-                .query::<&Text>()
+                .query::<&MenuRoot>()
                 .iter(app.world())
-                .any(|text| text.0.starts_with("No matches"))
+                .next()
+                .is_none(),
+            "hidden while Settings show"
         );
-    }
-    #[test]
-    fn text_entry_owns_the_catalogue_toggle_key() {
-        let mut app = app();
-        app.insert_resource(super::super::input::UiInput {
-            text_entry: true,
-            ..default()
-        });
-        let before = app.world().resource::<Menu>().open;
         app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Tab);
-        app.world_mut().run_schedule(PreUpdate);
-        app.world_mut().run_system_once(toggle).unwrap();
-        assert_eq!(app.world().resource::<Menu>().open, before);
+            .resource_mut::<super::super::settings::Settings>()
+            .open = false;
+        app.update();
+
+        let back = app
+            .world_mut()
+            .query_filtered::<Entity, With<super::super::save::ToList>>()
+            .single(app.world())
+            .unwrap();
+        app.world_mut().trigger(Activate { entity: back });
+        app.update();
+        let saves: Vec<_> = app
+            .world_mut()
+            .resource_mut::<Messages<SaveAction>>()
+            .drain()
+            .collect();
+        assert_eq!(saves, [SaveAction::SaveQuit]);
+        assert_eq!(
+            app.world().resource::<crate::launch::Switch>().0,
+            Some(crate::launch::Target::List)
+        );
     }
 
     #[test]
-    fn choosing_catalogue_content_asks_for_its_item_or_toggles_a_hand_state() {
-        for (entry, asked) in [
-            (Entry::Material(23), vec![take(23, 0)]),
-            (Entry::Fluid(24), vec![take(24, 0)]),
-            (Entry::Fire, vec![]),
+    fn world_details_show_what_the_server_reported() {
+        let mut app = app();
+        app.world_mut().write_message(WorldFacts {
+            name: Some("River bend".into()),
+            game: Some(("terra".into(), "0.1.0".into())),
+            voxel_size_m: 0.5,
+            seed: 42,
+            biomes: vec!["terra:ash_flats".into(), "terra:meadow".into()],
+            default_mode: GameMode::Survival,
+        });
+        app.world_mut()
+            .write_message(crate::server::game_mode::GameModeChanged(
+                GameMode::Creative,
+            ));
+        app.add_systems(Update, super::super::game_mode::receive);
+        press(&mut app, KeyCode::Tab);
+        choose(&mut app, Choice::Details);
+        let shown = texts(&mut app);
+        for line in [
+            "River bend",
+            "Game: Terra 0.1.0",
+            "Voxel size: 0.5 m",
+            "Seed: 42",
+            "2 Biomes: Ash flats · Meadow",
+            "Default mode: Survival",
+            "Your mode: Creative",
         ] {
-            let mut app = app();
-            let item = app.world_mut().spawn(entry).id();
-            app.world_mut().trigger(Activate { entity: item });
-            assert!(app.world().resource::<Menu>().open);
-            assert_eq!(intents(&mut app), asked, "{entry:?}");
-            if entry == Entry::Fire {
-                assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Fire);
-                app.world_mut().trigger(Activate { entity: item });
-                assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-                app.world_mut().trigger(Activate { entity: item });
-            }
-            let clear = app.world_mut().spawn(DetailAction::Clear).id();
-            app.world_mut().trigger(Activate { entity: clear });
-            let hand = app.world().resource::<Hotbar>();
-            assert_eq!(hand.held(), Holding::Empty);
-            assert_eq!(hand.selected, 0);
-            assert!(app.world().resource::<Menu>().open);
-            let cursor = app
-                .world_mut()
-                .query::<&CursorOptions>()
-                .single(app.world())
-                .unwrap();
-            assert_eq!(cursor.grab_mode, CursorGrabMode::None);
-            assert!(cursor.visible);
+            assert!(shown.iter().any(|t| t == line), "{line} in {shown:?}");
         }
-    }
-    #[test]
-    fn dragging_assigns_and_swaps_without_quick_picking() {
-        let mut app = app();
-        let item = app.world_mut().spawn(Entry::Fluid(24)).id();
-        let slot = app.world_mut().spawn(Entry::Slot(2)).id();
-        app.world_mut().trigger(PointerDragStart {
-            entity: item,
-            pointer: pointer(),
-            button: PointerButton::Primary,
-            hit: hit(),
-        });
-        app.world_mut().trigger(PointerDragDrop {
-            entity: slot,
-            dropped: item,
-            pointer: pointer(),
-            button: PointerButton::Primary,
-            hit: hit(),
-        });
-        app.world_mut().trigger(Activate { entity: item });
-        assert!(app.world().resource::<Menu>().open);
-        assert_eq!(
-            intents(&mut app),
-            [take(24, 2)],
-            "a drop is not also a pick"
-        );
-        let other = app.world_mut().spawn(Entry::Slot(6)).id();
-        // A second drag starts from the slot, independently of the prior item.
-        app.world_mut().trigger(PointerDragStart {
-            entity: slot,
-            pointer: pointer(),
-            button: PointerButton::Primary,
-            hit: hit(),
-        });
-        app.world_mut().trigger(PointerDragDrop {
-            entity: other,
-            dropped: slot,
-            pointer: pointer(),
-            button: PointerButton::Primary,
-            hit: hit(),
-        });
-        assert_eq!(
-            intents(&mut app),
-            [InventoryIntent::Move {
-                from: Slot::Hotbar(2),
-                to: Slot::Hotbar(6),
-            }]
-        );
-    }
-    #[test]
-    fn number_over_an_item_asks_for_it_in_that_slot_without_changing_selection() {
-        let mut app = app();
-        let item = app.world_mut().spawn(Entry::Material(23)).id();
-        app.world_mut().trigger(PointerOver {
-            entity: item,
-            pointer: pointer(),
-            hit: hit(),
-        });
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Digit5);
-        app.world_mut().run_schedule(PreUpdate);
-        app.world_mut()
-            .run_system_once(super::super::edit::select_held)
-            .unwrap();
-        assert_eq!(app.world().resource::<Hotbar>().selected, 0);
-        assert_eq!(intents(&mut app), [take(23, 4)]);
-    }
-    #[test]
-    fn dragging_carries_the_actual_model_with_the_cursor_and_asks_for_the_slot_on_drop() {
-        use crate::content::CatalogueMaterial;
-        use tesserae_core::{Orientation, SHAPE_STAIR};
-        let turned = Holding::Solid {
-            material: 23,
-            shape: SHAPE_STAIR,
-            orientation: Orientation::IDENTITY.turned(),
-        };
-        for (source, expected, asked, scale, first, moved) in [
-            (
-                Entry::Material(23),
-                Holding::solid(23, 0),
-                take(23, 4),
-                1.0,
-                Vec2::new(88.0, 148.0),
-                Vec2::new(388.0, 328.0),
-            ),
-            (
-                Entry::Slot(0),
-                turned,
-                InventoryIntent::Move {
-                    from: Slot::Hotbar(0),
-                    to: Slot::Hotbar(4),
-                },
-                1.5,
-                Vec2::new(48.0, 88.0),
-                Vec2::new(248.0, 208.0),
-            ),
-        ] {
-            let mut app = app();
-            app.world_mut().resource_mut::<UiScale>().0 = scale;
-            app.insert_resource(Hotbar::holding(0, turned));
-            app.world_mut()
-                .resource_mut::<Catalogue>()
-                .0
-                .materials
-                .push(CatalogueMaterial {
-                    remove_time: tesserae_mods::DEFAULT_REMOVE_TIME,
-                    id: 23,
-                    name: "test:block".into(),
-                    solid: true,
-                    fluid: None,
-                    burns: false,
-                });
-            app.add_systems(Update, (rebuild, drag_preview, highlight_tiles).chain());
-            app.update();
-            let find = |app: &mut App, wanted| {
-                app.world_mut()
-                    .query::<(Entity, &Entry)>()
-                    .iter(app.world())
-                    .find(|(_, entry)| **entry == wanted)
-                    .unwrap()
-                    .0
-            };
-            let source = find(&mut app, source);
-            let mut cursor = pointer();
-            cursor.position = Vec2::new(120.0, 180.0);
-            app.world_mut().trigger(PointerDragStart {
-                entity: source,
-                pointer: cursor.clone(),
-                button: PointerButton::Primary,
-                hit: hit(),
-            });
-            app.update();
-            let preview = app
-                .world_mut()
-                .query_filtered::<Entity, With<DragPreview>>()
-                .single(app.world())
-                .unwrap();
-            let node = app.world().get::<Node>(preview).unwrap();
-            assert_eq!((node.left, node.top), (Val::Px(first.x), Val::Px(first.y)));
-            assert_eq!(
-                app.world()
-                    .get::<super::super::tile_preview::TilePreview>(preview)
-                    .unwrap()
-                    .0,
-                expected
-            );
-            assert_eq!(
-                *app.world().get::<Pickable>(preview).unwrap(),
-                Pickable::IGNORE
-            );
-            cursor.position = Vec2::new(420.0, 360.0);
-            app.world_mut().trigger(PointerDrag {
-                entity: source,
-                pointer: cursor.clone(),
-                button: PointerButton::Primary,
-                distance: Vec2::new(300.0, 180.0),
-                delta: Vec2::new(300.0, 180.0),
-            });
-            app.update();
-            let node = app.world().get::<Node>(preview).unwrap();
-            assert_eq!((node.left, node.top), (Val::Px(moved.x), Val::Px(moved.y)));
-            let target = find(&mut app, Entry::Slot(4));
-            app.world_mut().trigger(PointerOver {
-                entity: target,
-                pointer: cursor.clone(),
-                hit: hit(),
-            });
-            app.update();
-            assert_eq!(
-                *app.world().get::<BorderColor>(target).unwrap(),
-                BorderColor::all(crate::client::menu_ui::MUTED)
-            );
-            app.world_mut().trigger(PointerDragDrop {
-                entity: target,
-                dropped: source,
-                pointer: cursor,
-                button: PointerButton::Primary,
-                hit: hit(),
-            });
-            app.update();
-            assert!(app.world().resource::<Menu>().open);
-            assert_eq!(intents(&mut app), [asked]);
-            assert_eq!(
-                app.world_mut()
-                    .query::<&DragPreview>()
-                    .iter(app.world())
-                    .count(),
-                0
-            );
-        }
-    }
-
-    #[test]
-    fn closing_the_menu_cancels_the_drag_model() {
-        let mut app = app();
-        app.add_systems(Update, drag_preview);
-        let item = app.world_mut().spawn(Entry::Material(23)).id();
-        app.world_mut().trigger(PointerDragStart {
-            entity: item,
-            pointer: pointer(),
-            button: PointerButton::Primary,
-            hit: hit(),
-        });
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&DragPreview>()
-                .iter(app.world())
-                .count(),
-            1
-        );
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Tab);
-        app.world_mut().run_schedule(PreUpdate);
-        app.world_mut().run_system_once(toggle).unwrap();
-        app.update();
-        assert!(app.world().resource::<PointerState>().drag.is_none());
-        assert_eq!(
-            app.world_mut()
-                .query::<&DragPreview>()
-                .iter(app.world())
-                .count(),
-            0
-        );
-    }
-
-    #[test]
-    fn hover_highlights_items_and_restores_the_selected_slot_on_exit() {
-        let mut app = app();
-        app.add_systems(Update, highlight_tiles);
-        let make = |app: &mut App, entry, selected| {
-            app.world_mut()
-                .spawn((
-                    entry,
-                    TileState { selected },
-                    BackgroundColor(crate::client::menu_ui::CARD),
-                    BorderColor::all(if selected {
-                        crate::client::menu_ui::LEAF
-                    } else {
-                        crate::client::menu_ui::EDGE
-                    }),
-                ))
-                .id()
-        };
-        let item = make(&mut app, Entry::Material(23), false);
-        let slot = make(&mut app, Entry::Slot(0), true);
-        app.update();
-        let edge = *app.world().get::<BorderColor>(item).unwrap();
-        for target in [item, slot] {
-            let normal = app.world().get::<BackgroundColor>(target).unwrap().0;
-            app.world_mut().trigger(PointerOver {
-                entity: target,
-                pointer: pointer(),
-                hit: hit(),
-            });
-            app.update();
-            if target == item {
-                assert_ne!(
-                    app.world().get::<BackgroundColor>(target).unwrap().0,
-                    normal
-                );
-            }
-            if target == item {
-                assert_ne!(*app.world().get::<BorderColor>(target).unwrap(), edge);
-            }
-            assert_eq!(
-                *app.world().get::<BorderColor>(slot).unwrap(),
-                BorderColor::all(crate::client::menu_ui::INK)
-            );
-            app.world_mut().trigger(PointerOut {
-                entity: target,
-                pointer: pointer(),
-                hit: hit(),
-            });
-            app.update();
-            assert_eq!(
-                app.world().get::<BackgroundColor>(target).unwrap().0,
-                normal
-            );
-        }
-        assert_eq!(*app.world().get::<BorderColor>(item).unwrap(), edge);
-    }
-
-    #[test]
-    fn item_scrolling_leaves_slots_in_a_fixed_footer_and_survives_assignment() {
-        use bevy::input::{
-            mouse::{MouseScrollPixelsPerLine, MouseScrollUnit},
-            touch::TouchPhase,
-        };
-        use bevy::picking::events::PointerScroll;
-        let mut app = app();
-        app.insert_resource(MouseScrollPixelsPerLine::default())
-            .add_plugins(bevy::ui_widgets::ScrollAreaPlugin)
-            .add_systems(Update, rebuild);
-        app.update();
-        let selection = app
-            .world_mut()
-            .query_filtered::<Entity, With<MenuSelection>>()
-            .single(app.world())
-            .unwrap();
-        let footer = app
-            .world_mut()
-            .query_filtered::<Entity, With<MenuSlots>>()
-            .single(app.world())
-            .unwrap();
-        let root = app
-            .world_mut()
-            .query_filtered::<Entity, With<MenuRoot>>()
-            .single(app.world())
-            .unwrap();
-        assert_eq!(app.world().get::<ChildOf>(footer).unwrap().parent(), root);
-        assert_eq!(app.world().get::<ScrollPosition>(footer).unwrap().y, 0.0);
-        assert_eq!(
-            app.world().get::<Node>(footer).unwrap().align_items,
-            AlignItems::Default
-        );
-        app.world_mut().entity_mut(selection).insert(ComputedNode {
-            size: Vec2::new(400.0, 200.0),
-            content_size: Vec2::new(400.0, 700.0),
-            inverse_scale_factor: 1.0,
-            ..default()
-        });
-        let item = app
-            .world_mut()
-            .spawn((Entry::Material(23), Node::default(), ChildOf(selection)))
-            .id();
-        for (unit, y, expected) in [
-            (MouseScrollUnit::Line, -2.0, 200.0),
-            (MouseScrollUnit::Pixel, -35.0, 235.0),
-        ] {
-            app.world_mut().trigger(PointerScroll {
-                entity: item,
-                pointer: pointer(),
-                unit,
-                x: 0.0,
-                y,
-                hit: hit(),
-                phase: TouchPhase::Moved,
-            });
-            assert_eq!(
-                app.world().get::<ScrollPosition>(selection).unwrap().y,
-                expected
-            );
-            assert_eq!(app.world().resource::<Hotbar>().selected, 0);
-            assert_eq!(app.world().get::<ScrollPosition>(footer).unwrap().y, 0.0);
-        }
-        app.insert_resource(Hotbar::holding(4, Holding::Fluid(24)));
-        app.update();
-        let selection = app
-            .world_mut()
-            .query_filtered::<&ScrollPosition, With<MenuSelection>>()
-            .single(app.world())
-            .unwrap();
-        assert_eq!(selection.y, 235.0);
+        press(&mut app, KeyCode::Escape);
+        assert!(open(&app), "Escape closes the details only");
+        assert!(!app.world().resource::<Menu>().details);
     }
 }

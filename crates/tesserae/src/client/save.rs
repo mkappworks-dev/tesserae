@@ -12,25 +12,25 @@ struct Panel;
 struct Action(SaveAction);
 /// Saves like Save & Quit, then restarts on the World list.
 #[derive(Component)]
-struct ToList;
+pub(super) struct ToList;
 
-pub(super) fn quit_button(parent: &mut ChildSpawnerCommands) {
-    parent
-        .spawn(Node {
-            column_gap: Val::Px(6.0),
-            ..default()
-        })
-        .with_children(|row| {
-            super::menu_ui::compact_button(row, "Return to World list", ToList, false, 24.0, 10.0);
-            super::menu_ui::compact_button(
-                row,
-                "Save & Quit",
-                Action(SaveAction::SaveQuit),
-                false,
-                24.0,
-                10.0,
-            );
-        });
+/// Quits to the desktop; only a World opened without the list offers it.
+#[derive(Component)]
+struct DirectQuit;
+
+/// The Menu's way out: back to the Worlds, or for a World opened directly,
+/// which has no list to return to, Save & Quit.
+pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
+    use super::cinematic::{self as cine, Kind};
+    cine::menu_button(parent, "Return to Worlds", "", ToList, Kind::Plain);
+    let quit = cine::menu_button(
+        parent,
+        "Save & Quit",
+        "",
+        Action(SaveAction::SaveQuit),
+        Kind::Plain,
+    );
+    parent.commands().entity(quit).insert(DirectQuit);
 }
 
 #[derive(Clone, PartialEq)]
@@ -113,12 +113,16 @@ fn activate(
 /// Only a World opened from the list has a list to return to.
 fn hide_list_return(
     launched: Option<Res<crate::open::Opened>>,
-    mut buttons: Query<&mut Node, Added<ToList>>,
+    mut to_list: Query<&mut Node, (Added<ToList>, Without<DirectQuit>)>,
+    mut direct: Query<&mut Node, Added<DirectQuit>>,
 ) {
-    if launched.is_some_and(|l| l.from_list) {
-        return;
-    }
-    for mut node in &mut buttons {
+    let from_list = launched.is_some_and(|l| l.from_list);
+    let hidden = if from_list {
+        direct.iter_mut().next()
+    } else {
+        to_list.iter_mut().next()
+    };
+    if let Some(mut node) = hidden {
         node.display = Display::None;
     }
 }
