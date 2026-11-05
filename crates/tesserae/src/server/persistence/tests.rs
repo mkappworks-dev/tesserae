@@ -1143,6 +1143,7 @@ fn quitting_while_dead_reopens_still_dead() {
             item: "terra:rock".into(),
             count: 40,
         }],
+        drops: Vec::new(),
         kept_inventory: false,
     };
     let player = rig
@@ -1174,6 +1175,65 @@ fn quitting_while_dead_reopens_still_dead() {
     let reopened = Rig::new(&dir);
     assert_eq!(death(&reopened), Some(died));
     assert_eq!(vitals(&reopened).health, 0.0);
+}
+
+#[test]
+fn a_deaths_despawn_countdown_continues_after_save_and_reopen() {
+    use tesserae_core::entity::{DESPAWN_STEPS, DropSpec, STEP_S};
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    let drops = rig
+        .app
+        .world_mut()
+        .resource_scope(|world, mut entities: Mut<EntityStore>| {
+            let store = world.resource::<ChunkStore>();
+            let tables = world.resource::<ContentTables>();
+            let spec = DropSpec {
+                item: 0,
+                count: 40,
+                size_m: 0.25,
+            };
+            entities.spawn_drops_around(store, &tables.0, 1.0, [6.0, 2.5, 6.0], [spec])
+        });
+    let died = Death {
+        cause: Some(save::DeathCause::Starvation),
+        at_m: Vec3::new(6.0, 1.0, 6.0),
+        dropped: vec![tesserae_core::inventory::Stack {
+            item: "terra:rock".into(),
+            count: 40,
+        }],
+        drops,
+        kept_inventory: false,
+    };
+    let player = rig
+        .app
+        .world_mut()
+        .query_filtered::<Entity, With<Player>>()
+        .single(rig.app.world())
+        .unwrap();
+    rig.app.world_mut().entity_mut(player).insert(died.clone());
+    let minute = (60.0 / STEP_S) as usize;
+    for _ in 0..minute {
+        rig.tick();
+    }
+    let left = |rig: &Rig| {
+        let death = death(rig).expect("still dead");
+        crate::server::death::despawns_in_s(&death, &rig.app.world().resource::<EntityStore>().0)
+    };
+    let before = left(&rig).expect("the drop lies there");
+    let full = (DESPAWN_STEPS as f32 * STEP_S) as u32;
+    assert!((full - 61..=full - 59).contains(&before), "{before}");
+    rig.settled_save();
+    drop(rig);
+
+    let reopened = Rig::new(&dir);
+    assert_eq!(death(&reopened).map(|d| d.drops), Some(died.drops));
+    let after = left(&reopened).expect("the drop survived the save");
+    assert!(
+        after <= before && after + 2 >= before,
+        "continues from {before}, not from {full}: {after}"
+    );
 }
 
 fn inventory(rig: &Rig) -> tesserae_core::inventory::Inventory {

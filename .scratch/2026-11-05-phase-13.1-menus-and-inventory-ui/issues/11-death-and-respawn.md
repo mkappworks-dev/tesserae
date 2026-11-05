@@ -17,3 +17,7 @@ At zero health the Player dies. The Server records the cause, the position in me
 - [x] Quitting while dead and reopening shows the death screen.
 - [x] Respawn restores full Vitals at the World spawn and shows the distance notice.
 - [x] Undo after a respawn has nothing from before the death.
+
+## Comments
+
+- Maintainer, 2026-11-05: the death screen shows a live despawn countdown. The Death records the ids of the Dropped items it made, saved in `death_v1` as `drops`, and the Server reports the whole seconds left on the first of them still lying there, from their own despawn timers (which pause while their Chunk is not held), re-sending the report each time that passes a second. The screen says "They stay for 4:12." and rewrites only that line as it ticks, and the respawn notice gives the same time. A reopened World continues from the saved timers, not from 5 minutes. Kept or empty Inventories say nothing about despawn; drops that despawn while the Player is still dead are said to have despawned.

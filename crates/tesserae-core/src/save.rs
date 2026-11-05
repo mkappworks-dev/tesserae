@@ -511,6 +511,9 @@ pub struct DeathV1 {
     pub at_m: [f32; 3],
     /// Dropped where they fell; empty when the Game keeps the Inventory.
     pub dropped: Vec<crate::inventory::Stack>,
+    /// The ids of the Dropped items `dropped` became.
+    #[serde(default)]
+    pub drops: Vec<u64>,
     pub kept_inventory: bool,
 }
 

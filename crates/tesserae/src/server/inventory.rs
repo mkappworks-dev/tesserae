@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use tesserae_core::MaterialId;
-use tesserae_core::entity::DropSpec;
+use tesserae_core::entity::{DropSpec, EntityId};
 use tesserae_core::inventory::{self, Destination, Refusal, Slot};
 use tesserae_core::save::{CarriedV1, InventoryV1};
 
@@ -240,7 +240,7 @@ pub(super) fn drop_around(
     items: &Items,
     body: &tesserae_core::collide::Aabb,
     stacks: impl IntoIterator<Item = (String, u32)>,
-) {
+) -> Vec<EntityId> {
     let specs: Vec<_> = stacks
         .into_iter()
         .filter_map(|(name, count)| {
@@ -253,10 +253,10 @@ pub(super) fn drop_around(
         })
         .collect();
     if specs.is_empty() {
-        return;
+        return Vec::new();
     }
     let centre = [0, 1, 2].map(|a| (body.min[a] + body.max[a]) / 2.0);
-    entities.spawn_drops_around(store, tables, voxel_size, centre, specs);
+    entities.spawn_drops_around(store, tables, voxel_size, centre, specs)
 }
 
 #[cfg(test)]

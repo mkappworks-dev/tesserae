@@ -10,7 +10,6 @@ use bevy::prelude::*;
 use bevy::text::{Justify, TextLayout};
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
-use tesserae_core::entity::{DESPAWN_STEPS, STEP_S};
 use tesserae_core::save::DeathCause;
 
 use super::actions::{Actions, Bindings};
@@ -39,6 +38,11 @@ struct Screen;
 #[derive(Component)]
 struct Respawn;
 
+/// Holds where the Items lie and for how long, rewritten as the countdown
+/// ticks.
+#[derive(Component)]
+struct ItemsLine;
+
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Dead>()
         .add_session_message::<DeathChanged>()
@@ -62,8 +66,28 @@ fn receive(
     mut dead: ResMut<Dead>,
     mut commands: Commands,
     mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+    (lines, children, mut texts): (
+        Query<Entity, With<ItemsLine>>,
+        Query<&Children>,
+        Query<&mut Text>,
+    ),
 ) {
     for change in changes.read() {
+        if let (Some(was), Some(now)) = (&dead.0, &change.0)
+            && was.death == now.death
+            && was.from_spawn_m == now.from_spawn_m
+        {
+            // Rebuilding the screen for a tick would drop the buttons' focus.
+            dead.bypass_change_detection().0.clone_from(&change.0);
+            for line in &lines {
+                for part in children.iter_descendants(line) {
+                    if let Ok(mut text) = texts.get_mut(part) {
+                        text.0 = items_line(now);
+                    }
+                }
+            }
+            continue;
+        }
         if let (Some(was), None) = (&dead.0, &change.0) {
             ui::notify_for(
                 &mut commands,
@@ -125,19 +149,18 @@ fn choose(
     }
 }
 
-fn despawn_minutes() -> u32 {
-    (DESPAWN_STEPS as f32 * STEP_S / 60.0).round() as u32
+fn clock(s: u32) -> String {
+    format!("{}:{:02}", s / 60, s % 60)
 }
 
 fn respawn_notice(report: &DeathReport) -> String {
-    if report.death.dropped.is_empty() {
-        "Back at the World spawn.".into()
-    } else {
-        format!(
-            "Back at the World spawn. Your Items are {} m away, for {} minutes.",
+    match report.despawns_in_s {
+        Some(left) if !report.death.dropped.is_empty() => format!(
+            "Back at the World spawn. Your Items are {} m away, for {}.",
             report.from_spawn_m.round(),
-            despawn_minutes()
-        )
+            clock(left)
+        ),
+        _ => "Back at the World spawn.".into(),
     }
 }
 
@@ -181,13 +204,16 @@ fn items_line(report: &DeathReport) -> String {
         return "You carried nothing.".into();
     }
     let items: u32 = death.dropped.iter().map(|s| s.count).sum();
+    let items = counted(items as usize, "Item", "Items");
+    let stacks = counted(death.dropped.len(), "stack", "stacks");
     let [x, y, z] = death.at_m.to_array().map(|m| m.round() as i64);
-    format!(
-        "{} in {} lie where you fell, at {x}, {y}, {z}. They stay for {} minutes.",
-        counted(items as usize, "Item", "Items"),
-        counted(death.dropped.len(), "stack", "stacks"),
-        despawn_minutes()
-    )
+    match report.despawns_in_s {
+        Some(left) => format!(
+            "{items} in {stacks} lie where you fell, at {x}, {y}, {z}. They stay for {}.",
+            clock(left)
+        ),
+        None => format!("{items} in {stacks} fell at {x}, {y}, {z} and have despawned."),
+    }
 }
 
 fn centred(parent: &mut ChildSpawnerCommands, value: String, font: TextFont, color: Color) {
@@ -283,7 +309,9 @@ fn render(
                             ..default()
                         })
                         .with_children(|cause| centred(cause, detail, ui::font(16.0), CAUSE));
-                    cine::notice(centre, items_line(report));
+                    centre
+                        .spawn((ItemsLine, Node::default()))
+                        .with_children(|line| cine::notice(line, items_line(report)));
                     centre
                         .spawn(Node {
                             column_gap: Val::Px(10.0),
@@ -367,15 +395,24 @@ mod tests {
     }
 
     fn fell(dropped: Vec<Stack>, kept_inventory: bool) -> DeathChanged {
+        let despawns_in_s = (!dropped.is_empty()).then_some(300);
         DeathChanged(Some(DeathReport {
             death: Death {
                 cause: Some(DeathCause::Fall { height_m: 25.2 }),
                 at_m: Vec3::new(412.4, 63.0, -88.3),
                 dropped,
+                drops: Vec::new(),
                 kept_inventory,
             },
             from_spawn_m: 140.3,
+            despawns_in_s,
         }))
+    }
+
+    fn with_left(change: DeathChanged, left: Option<u32>) -> DeathChanged {
+        let mut report = change.0.unwrap();
+        report.despawns_in_s = left;
+        DeathChanged(Some(report))
     }
 
     fn stones() -> Vec<Stack> {
@@ -457,7 +494,7 @@ mod tests {
             "RIVER BEND · 140 M FROM THE WORLD SPAWN",
             "You fell too far",
             "Fell 25 m. A long fall hurts in proportion to its height.",
-            "64 Items in 2 stacks lie where you fell, at 412, 63, -88. They stay for 5 minutes.",
+            "64 Items in 2 stacks lie where you fell, at 412, 63, -88. They stay for 5:00.",
             "Respawn",
             "Enter",
             "Return to Worlds",
@@ -523,7 +560,7 @@ mod tests {
         assert!(
             texts(&mut app)
                 .iter()
-                .any(|t| t == "Back at the World spawn. Your Items are 140 m away, for 5 minutes."),
+                .any(|t| t == "Back at the World spawn. Your Items are 140 m away, for 5:00."),
             "{:?}",
             texts(&mut app)
         );
@@ -531,6 +568,63 @@ mod tests {
         assert!(
             app.world().resource::<super::super::menu::Menu>().open,
             "Escape opens the Menu again"
+        );
+    }
+
+    fn screen(app: &mut App) -> Entity {
+        app.world_mut()
+            .query_filtered::<Entity, With<Screen>>()
+            .single(app.world())
+            .unwrap()
+    }
+
+    #[test]
+    fn the_despawn_countdown_ticks_with_the_server_and_the_notice_reports_what_is_left() {
+        let mut app = app();
+        tell(&mut app, with_left(fell(stones(), false), Some(300)));
+        let first = screen(&mut app);
+        tell(&mut app, with_left(fell(stones(), false), Some(252)));
+        let on_screen = texts(&mut app);
+        assert!(
+            on_screen.iter().any(|t| t
+                == "64 Items in 2 stacks lie where you fell, at 412, 63, -88. They stay for 4:12."),
+            "{on_screen:?}"
+        );
+        assert!(
+            !on_screen.iter().any(|t| t.contains("5:00")),
+            "{on_screen:?}"
+        );
+        assert_eq!(screen(&mut app), first, "the screen and its focus stay");
+
+        tell(&mut app, DeathChanged(None));
+        assert!(
+            texts(&mut app)
+                .iter()
+                .any(|t| t == "Back at the World spawn. Your Items are 140 m away, for 4:12."),
+            "{:?}",
+            texts(&mut app)
+        );
+    }
+
+    #[test]
+    fn drops_that_despawned_while_dead_are_said_to_be_gone() {
+        let mut app = app();
+        tell(&mut app, with_left(fell(stones(), false), Some(1)));
+        tell(&mut app, with_left(fell(stones(), false), None));
+        assert!(
+            texts(&mut app)
+                .iter()
+                .any(|t| t == "64 Items in 2 stacks fell at 412, 63, -88 and have despawned."),
+            "{:?}",
+            texts(&mut app)
+        );
+        tell(&mut app, DeathChanged(None));
+        assert!(
+            texts(&mut app)
+                .iter()
+                .any(|t| t == "Back at the World spawn."),
+            "{:?}",
+            texts(&mut app)
         );
     }
 

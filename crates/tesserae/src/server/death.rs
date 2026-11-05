@@ -5,6 +5,7 @@
 use bevy::ecs::message::Messages;
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
+use tesserae_core::entity::{Entities, EntityId, STEP_S};
 use tesserae_core::inventory::Stack;
 use tesserae_core::save::{DeathCause, DeathV1};
 
@@ -31,6 +32,8 @@ pub struct Death {
     /// Dropped where they fell, as Dropped items; empty when the Game keeps
     /// the Inventory.
     pub dropped: Vec<Stack>,
+    /// The Dropped items `dropped` became, so their despawn can be told.
+    pub drops: Vec<EntityId>,
     pub kept_inventory: bool,
 }
 
@@ -39,10 +42,26 @@ pub struct Death {
 pub struct DeathReport {
     pub death: Death,
     pub from_spawn_m: f32,
+    /// Whole seconds, rounded up, until the first of the death's Dropped items
+    /// still lying there despawns; `None` when none are.
+    pub despawns_in_s: Option<u32>,
 }
 
-/// The Player's death, sent when it happens or a reopened World holds one;
-/// `None` once they respawn.
+/// The time left on the death's drops, from their own despawn timers: they
+/// age only while their Chunk is held, so no deadline taken at death holds.
+pub(crate) fn despawns_in_s(death: &Death, entities: &Entities) -> Option<u32> {
+    let steps = death
+        .drops
+        .iter()
+        .filter_map(|&id| entities.get(id))
+        .map(|e| e.as_dropped().steps_left)
+        .min()?;
+    Some((steps as f32 * STEP_S).ceil() as u32)
+}
+
+/// The Player's death, sent when it happens or a reopened World holds one, and
+/// again each time its despawn countdown passes a whole second; `None` once
+/// they respawn.
 #[derive(Message, Clone, PartialEq, Debug)]
 pub struct DeathChanged(pub Option<DeathReport>);
 
@@ -122,7 +141,7 @@ fn die(
     } else {
         inventory.take_all()
     };
-    drop_around(
+    let drops = drop_around(
         &mut entities,
         &store,
         &tables.0,
@@ -143,6 +162,7 @@ fn die(
         cause: last.0.map(|cause| saved_cause(cause, &survival)),
         at_m,
         dropped,
+        drops,
         kept_inventory,
     });
 }
@@ -180,25 +200,38 @@ fn revive(
     }
 }
 
+/// What the Client was last told: nothing, or a death with its countdown.
+#[derive(Default, PartialEq)]
+enum Told {
+    #[default]
+    Alive,
+    Dead(Option<u32>),
+}
+
 fn announce(
     player: Single<Option<Ref<Death>>, With<Player>>,
     spawn: Res<SpawnPoint>,
-    mut told: Local<bool>,
+    entities: Res<EntityStore>,
+    mut told: Local<Told>,
     mut changed: MessageWriter<DeathChanged>,
 ) {
     match player.into_inner() {
-        Some(death) if death.is_changed() || !*told => {
-            *told = true;
-            changed.write(DeathChanged(Some(DeathReport {
-                from_spawn_m: death.at_m.distance(spawn.metres()),
-                death: Death::clone(&death),
-            })));
+        Some(death) => {
+            let left = despawns_in_s(&death, &entities.0);
+            if death.is_changed() || *told != Told::Dead(left) {
+                *told = Told::Dead(left);
+                changed.write(DeathChanged(Some(DeathReport {
+                    from_spawn_m: death.at_m.distance(spawn.metres()),
+                    death: Death::clone(&death),
+                    despawns_in_s: left,
+                })));
+            }
         }
-        None if *told => {
-            *told = false;
+        None if *told != Told::Alive => {
+            *told = Told::Alive;
             changed.write(DeathChanged(None));
         }
-        _ => {}
+        None => {}
     }
 }
 
@@ -208,6 +241,7 @@ impl PlayerState for DeathV1 {
             cause: death.cause.clone(),
             at_m: death.at_m.to_array(),
             dropped: death.dropped.clone(),
+            drops: death.drops.iter().map(|id| id.0).collect(),
             kept_inventory: death.kept_inventory,
         })
     }
@@ -217,6 +251,7 @@ impl PlayerState for DeathV1 {
             cause: self.cause,
             at_m: Vec3::from_array(self.at_m),
             dropped: self.dropped,
+            drops: self.drops.into_iter().map(EntityId).collect(),
             kept_inventory: self.kept_inventory,
         });
     }
@@ -362,8 +397,13 @@ mod tests {
         player.set_eye(eye + Vec3::Y * 20.0);
         seconds(app, 3.0);
         let told = &app.world().resource::<Told>().deaths;
-        assert_eq!(told.len(), 1, "{told:?}");
+        assert!(told.iter().all(|d| d.0.is_some()), "{told:?}");
         told[0].0.clone().expect("died")
+    }
+
+    fn last_report(app: &App) -> DeathReport {
+        let told = &app.world().resource::<Told>().deaths;
+        told.last().and_then(|d| d.0.clone()).expect("dead")
     }
 
     fn stack(item: &str, count: u32) -> Stack {
@@ -428,12 +468,41 @@ mod tests {
     }
 
     #[test]
+    fn the_despawn_countdown_falls_as_the_server_ticks_and_ends_with_the_drops() {
+        let mut app = app(false);
+        let at_death = fall_to_death(&mut app);
+        assert_eq!(at_death.despawns_in_s, Some(300));
+
+        let before = last_report(&app);
+        let told_before = app.world().resource::<Told>().deaths.len();
+        seconds(&mut app, 10.0);
+        let after = last_report(&app);
+        assert_eq!(after.death, before.death);
+        assert_eq!(
+            before.despawns_in_s.unwrap() - after.despawns_in_s.unwrap(),
+            10
+        );
+        let sent = app.world().resource::<Told>().deaths.len() - told_before;
+        assert!(
+            (9..=11).contains(&sent),
+            "once a second, not a tick: {sent}"
+        );
+
+        seconds(&mut app, after.despawns_in_s.unwrap() as f32 + 1.0);
+        assert!(app.world().resource::<EntityStore>().0.is_empty());
+        let gone = last_report(&app);
+        assert_eq!(gone.despawns_in_s, None, "the drops are gone");
+        assert_eq!(gone.death.dropped, before.death.dropped);
+    }
+
+    #[test]
     fn a_game_that_keeps_the_inventory_drops_nothing_on_death() {
         let mut app = app(true);
         let before = inventory(&mut app);
         let report = fall_to_death(&mut app);
         assert!(report.death.kept_inventory);
         assert!(report.death.dropped.is_empty());
+        assert_eq!(report.despawns_in_s, None);
         assert!(app.world().resource::<Told>().spawned.is_empty());
         assert_eq!(inventory(&mut app), before);
     }
