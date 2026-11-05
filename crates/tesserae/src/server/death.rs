@@ -136,31 +136,28 @@ fn die(
     }
     let body = player.body();
     let kept_inventory = survival.rules.keep_inventory;
-    let dropped = if kept_inventory {
+    let held = if kept_inventory {
         Vec::new()
     } else {
         inventory.take_all()
     };
-    let drops = drop_around(
+    let (dropped, drops) = drop_around(
         &mut entities,
         &store,
         &tables.0,
         world.voxel_size,
         &items,
         &body,
-        dropped.iter().map(|s| (s.item.clone(), s.count)),
-    );
+        held,
+    )
+    .into_iter()
+    .unzip();
     journal.clear();
     pending.clear();
     player.stop();
-    let at_m = Vec3::new(
-        (body.min[0] + body.max[0]) / 2.0,
-        body.min[1],
-        (body.min[2] + body.max[2]) / 2.0,
-    );
     commands.entity(id).insert(Death {
         cause: last.0.map(|cause| saved_cause(cause, &survival)),
-        at_m,
+        at_m: Vec3::from_array(body.feet()),
         dropped,
         drops,
         kept_inventory,
@@ -334,10 +331,15 @@ mod tests {
                 },
                 Vec::new(),
             ))
-            .insert_resource(Items(vec![
-                item("t:rock", None),
-                item("t:bread", Some(6.0)),
-            ]))
+            .insert_resource(Items::with_implicit(
+                vec![item("t:rock", None), item("t:bread", Some(6.0))],
+                [(
+                    tesserae_core::testgen::fixtures().water,
+                    "t:water",
+                    [0, 0, 255, 128],
+                )],
+                1.0,
+            ))
             .init_resource::<Told>()
             .add_plugins((
                 super::super::player::plugin,
@@ -465,6 +467,35 @@ mod tests {
             inventory(&mut app).is_empty(),
             "a dead body picks nothing up"
         );
+    }
+
+    #[test]
+    fn an_implicit_item_drops_on_death_and_the_death_reports_only_what_lies_there() {
+        let mut app = app(false);
+        let mut held = app.world_mut().query::<&mut Inventory>();
+        let mut held = held.single_mut(app.world_mut()).unwrap();
+        held.receive("t:water", 5, 64);
+        held.receive("t:gone", 2, 64);
+        let report = fall_to_death(&mut app);
+        assert_eq!(
+            report.death.dropped,
+            [
+                stack("t:rock", 64),
+                stack("t:rock", 6),
+                stack("t:bread", 3),
+                stack("t:water", 5)
+            ],
+            "an Item no content names has nothing to drop as"
+        );
+        let spawned = &app.world().resource::<Told>().spawned;
+        assert_eq!(
+            spawned
+                .iter()
+                .map(|v| (v.item, v.count))
+                .collect::<Vec<_>>(),
+            [(0, 64), (0, 6), (1, 3), (2, 5)]
+        );
+        assert_eq!(report.death.drops.len(), report.death.dropped.len());
     }
 
     #[test]

@@ -209,7 +209,8 @@ Catalogue: while one is held, Place and Remove are its verbs instead of Edits.
 
 **Item** — a thing a Game or Mod declares by name, with a size in metres. Not a
 Voxel and not a Tool. A Material may be tied to one Item: removing a Voxel of it
-drops that Item.
+drops that Item. A placeable Material no declared Item is tied to has an
+implicit Item of its own name.
 
 **Entity** — a Server-owned thing with a position in metres that is not a Voxel,
 fluid or Player. Not a Bevy `Entity`.

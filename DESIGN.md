@@ -595,9 +595,10 @@ Notes:
   refused. Undo pays and refunds Items in the same Server transaction, by the
   mode each entry was made in, and anything that does not fit drops at the
   Player. A Material with no declared Item has an implicit one, so every
-  placeable Material is an Item. Carried is retired: a save's totals pack into
-  slots once. In Creative the Catalogue sits beside the Inventory and gives
-  Items. Games declare stack limits (`max-stack`, 64 when absent). See
+  placeable Material is an Item and drops as one. Carried is retired: a save's
+  totals pack into slots once. In Creative the Catalogue sits beside the
+  Inventory and gives Items. Games declare stack limits (`max-stack`, 64 when
+  absent). See
   [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
 - **Step 21** is done. A World has a default game mode and each Player their
   own, Creative or Survival; Edit World's changes wait in the sidecar until the

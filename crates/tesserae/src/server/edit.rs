@@ -1981,29 +1981,32 @@ pub(in crate::server) mod tests {
         assert!(app.world().resource::<PendingEdits>().0.is_empty());
     }
 
-    /// The Player holds `stacks` in the hotbar with `selected` in hand; stone
-    /// and the fixture water are placed by Items of their own names and
-    /// `t:dust` places nothing.
+    /// The Player holds `stacks` in the hotbar with `selected` in hand; stone,
+    /// soil and the fixture water are placed by implicit Items of their own
+    /// names, Items 1 to 3, and `t:dust`, Item 0, places nothing.
     pub(in crate::server) fn stocked(stacks: &[(usize, &str)], selected: usize) -> App {
         let mut app = app_with(&[(origin(), ground())]);
         let rock = tesserae_core::testgen::fixtures().ground.rock;
-        let items = super::super::items::Items(vec![tesserae_mods::ItemDef {
-            name: "t:dust".into(),
-            size_m: 0.25,
-            color: [0; 4],
-            material: None,
-            max_stack: 64,
-            food: None,
-        }]);
         let soil = tesserae_core::testgen::fixtures().ground.soil;
+        let materials = [(rock, "t:stone"), (soil, "t:soil"), (water(), "t:water")];
+        let items = super::super::items::Items::with_implicit(
+            vec![tesserae_mods::ItemDef {
+                name: "t:dust".into(),
+                size_m: 0.25,
+                color: [0; 4],
+                material: None,
+                max_stack: 64,
+                food: None,
+            }],
+            materials.map(|(id, name)| (id, name, [0; 4])),
+            1.0,
+        );
         app.insert_resource(super::super::items::PlacingItems::new(
-            [
-                (rock, "t:stone", true),
-                (soil, "t:soil", true),
-                (water(), "t:water", true),
-            ],
+            materials.map(|(id, name)| (id, name, true)),
             &items,
         ));
+        app.insert_resource(items)
+            .init_resource::<super::super::entities::EntityStore>();
         let mut inventory = tesserae_core::inventory::Inventory::default();
         for &(at, item) in stacks {
             inventory

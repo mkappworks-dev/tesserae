@@ -389,14 +389,15 @@ impl Persistence {
                     .compatible(&content)
                     .map_err(|e| e.to_string())?;
                 let c = recovered.commit;
-                let items = &loaded.items;
+                let items = loaded.every_item(settings.voxel_size);
                 restored_entities = Some(
                     c.entities
                         .restore(settings.voxel_size, |name| {
                             items
+                                .0
                                 .iter()
                                 .position(|i| i.name == name)
-                                .map(|at| (at as u32, items[at].size_m))
+                                .map(|at| (at as u32, items.0[at].size_m))
                         })
                         .map_err(|e| e.to_string())?,
                 );

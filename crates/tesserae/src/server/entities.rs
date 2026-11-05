@@ -506,6 +506,34 @@ mod tests {
     }
 
     #[test]
+    fn breaking_what_an_implicit_item_placed_drops_it_and_pickup_takes_it_back() {
+        use super::super::edit::tests::{held, place_held, stocked};
+        let mut app = stocked(&[(4, "t:soil")], 4);
+        survival(&mut app);
+        app.init_resource::<Refused>().add_message::<Pickup>();
+        send(
+            &mut app,
+            place_held(
+                tesserae_core::SHAPE_FULL_CUBE,
+                tesserae_core::Orientation::IDENTITY,
+            ),
+        );
+        tick(&mut app);
+        assert_eq!(held(&mut app, "t:soil"), 2);
+        send(&mut app, down(EditAction::Remove));
+        tick(&mut app);
+        assert!(voxel_at(&app, [5, 8, 5]).is_air());
+        let store = app.world().resource::<EntityStore>();
+        assert_eq!(store.len(), 1);
+        assert_eq!(store.iter().next().unwrap().as_dropped().item, 2, "t:soil");
+        after_the_pickup_delay(&mut app);
+        near_the_drop(&mut app);
+        app.world_mut().run_system_once(pick_up).unwrap();
+        assert_eq!(drops(&app), 0);
+        assert_eq!(held(&mut app, "t:soil"), 3);
+    }
+
+    #[test]
     fn pickup_merges_into_a_matching_stack_before_an_empty_slot() {
         let mut app = game();
         give(&mut app, "t:dust", 64 * 2);

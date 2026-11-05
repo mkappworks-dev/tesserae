@@ -63,8 +63,8 @@ single-player would hide.
 
 ## Consequences
 
-A Dropped item is a declared Item, with a size and a colour, so an implicit Item
-has nothing to become: one that must drop is lost. Only a Creative take or a
-Sample gives an implicit Item, so a Survival Player loses one only after a
-switch from Creative. Throwing an Item away, containers and crafting are later
-work.
+An implicit Item is an Item like any declared one: it drops as a quarter-Voxel
+cube drawn as its Material, and Pickup takes it back, so death, an undo refund,
+a redo and a save's Carried overflow lose nothing. Only an Item that no content
+names has nothing to become; it is lost, and a death does not report it.
+Throwing an Item away, containers and crafting are later work.

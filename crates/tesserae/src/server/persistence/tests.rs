@@ -69,7 +69,7 @@ impl Rig {
             max_stack: 64,
             food: None,
         }];
-        let items = Items(loaded.items.clone());
+        let items = loaded.every_item(settings.voxel_size);
         let p = Persistence::prepare(opening, &mut loaded, settings).unwrap();
         let mode = PlayerMode(p.player_mode());
         let eye = p.reopened_eye.unwrap_or(Vec3::new(8.0, 4.0, 8.0));
@@ -1298,6 +1298,48 @@ fn a_save_with_carried_opens_packed_into_slots_with_the_overflow_dropped_beside_
         packed
     );
     assert_eq!(commit.entities.dropped.len(), 1);
+}
+
+#[test]
+fn an_implicit_items_carried_overflow_drops_beside_the_player_and_survives_a_reopen() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.settled_save();
+    drop(rig);
+    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    commit.player.extensions.insert(
+        "carried_v1".into(),
+        serde_json::json!({"terra:rock": 36 * 64, "terra:stone": 5}),
+    );
+    commit.sequence += 1;
+    Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+
+    let dropped = |rig: &Rig| -> Vec<(String, u32)> {
+        let items = rig.app.world().resource::<Items>();
+        rig.app
+            .world()
+            .resource::<EntityStore>()
+            .iter()
+            .map(|e| {
+                let d = e.as_dropped();
+                (items.0[d.item as usize].name.clone(), d.count)
+            })
+            .collect()
+    };
+    let mut reopened = Rig::new(&dir);
+    assert_eq!(dropped(&reopened), [("terra:stone".to_owned(), 5)]);
+    reopened.tick();
+    reopened.settled_save();
+    drop(reopened);
+
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert_eq!(commit.entities.dropped.len(), 1);
+    assert_eq!(commit.entities.dropped[0].item, "terra:stone");
+    assert_eq!(dropped(&Rig::new(&dir)), [("terra:stone".to_owned(), 5)]);
 }
 
 #[test]

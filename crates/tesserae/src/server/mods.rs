@@ -145,6 +145,28 @@ impl Default for LoadedMods {
     }
 }
 
+impl LoadedMods {
+    /// The declared Items and an implicit one for each placeable Material none
+    /// places, in the order a Dropped item's id indexes.
+    pub(super) fn every_item(&self, voxel_size: f32) -> super::items::Items {
+        let colour = |id| {
+            self.appearance
+                .iter()
+                .find(|&&(material, _)| material == id)
+                .map_or([128, 128, 128, 255], |&(_, c)| c)
+        };
+        let placeable = self
+            .registry
+            .names(Kind::Material)
+            .map(|(id, name)| (id as MaterialId, name))
+            .filter(|&(id, _)| {
+                self.tables.materials.def(id).solid || self.tables.fluids.rank(id).is_some()
+            })
+            .map(|(id, name)| (id, name, colour(id)));
+        super::items::Items::with_implicit(self.items.clone(), placeable, voxel_size)
+    }
+}
+
 #[derive(Resource)]
 pub(super) struct WorldParameters(pub WorldgenParams);
 
@@ -701,6 +723,10 @@ fn release_mods(world: &mut World) {
 
 fn install(world: &mut World) {
     let loaded = world.remove_non_send::<LoadedMods>().unwrap_or_default();
+    let voxel_size = world
+        .get_resource::<WorldSettings>()
+        .map_or(WorldSettings::default().voxel_size, |w| w.voxel_size);
+    let items = loaded.every_item(voxel_size);
     let tables = super::ContentTables::from_loaded(loaded.tables, loaded.game);
     let reopened = world
         .get_resource::<super::persistence::Persistence>()
@@ -760,8 +786,8 @@ fn install(world: &mut World) {
             }),
     );
     world.write_message(crate::content::ItemLooks(
-        loaded
-            .items
+        items
+            .0
             .iter()
             .map(|item| crate::content::ItemLook {
                 name: item.name.clone(),
@@ -772,7 +798,6 @@ fn install(world: &mut World) {
             })
             .collect(),
     ));
-    let items = super::items::Items(loaded.items);
     world.insert_resource(super::items::PlacingItems::new(
         catalogue
             .materials

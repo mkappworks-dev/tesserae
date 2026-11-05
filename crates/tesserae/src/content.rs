@@ -10,7 +10,8 @@ pub struct MaterialPalette(pub Vec<(MaterialId, [u8; 4])>);
 #[derive(Message, Clone, Debug, Default, PartialEq, Eq)]
 pub struct MaterialTextures(pub Vec<(MaterialId, Vec<u8>)>);
 
-/// How the Client draws each declared Item, in the Server's item order.
+/// How the Client draws each Item, declared or implicit, in the Server's item
+/// order.
 #[derive(Message, Clone, Debug, Default, PartialEq)]
 pub struct ItemLooks(pub Vec<ItemLook>);
 

@@ -9,7 +9,7 @@ use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use tesserae_core::MaterialId;
 use tesserae_core::entity::{DropSpec, EntityId};
-use tesserae_core::inventory::{self, Destination, Refusal, Slot};
+use tesserae_core::inventory::{self, Destination, Refusal, Slot, Stack};
 use tesserae_core::save::{CarriedV1, InventoryV1};
 
 use super::ContentTables;
@@ -202,19 +202,15 @@ fn pack_carried(world: &mut World, player: Entity, carried: BTreeMap<String, u32
         .zip(limits)
         .filter_map(|((item, count), limit)| {
             let left = inventory.receive(&item, count, limit);
-            (left > 0).then_some((item, left))
+            (left > 0).then_some(Stack { item, count: left })
         })
         .collect();
     drop_beside(world, player, overflow);
 }
 
-/// Drops stacks around the Player's body, by Item name. An Item the Game no
-/// longer declares has no drop to become, so it is lost.
-pub(super) fn drop_beside(
-    world: &mut World,
-    player: Entity,
-    stacks: impl IntoIterator<Item = (String, u32)>,
-) {
+/// Drops stacks around the Player's body. An Item the World's content does not
+/// name has no drop to become, so it is lost.
+fn drop_beside(world: &mut World, player: Entity, stacks: Vec<Stack>) {
     let Some(body) = world.get::<Player>(player).map(Player::body) else {
         return;
     };
@@ -231,7 +227,8 @@ pub(super) fn drop_beside(
     });
 }
 
-/// [`drop_beside`] for a system that holds the resources it needs.
+/// [`drop_beside`] for a system that holds the resources it needs, returning
+/// each stack that dropped with the Dropped item it became.
 pub(super) fn drop_around(
     entities: &mut EntityStore,
     store: &ChunkStore,
@@ -239,24 +236,25 @@ pub(super) fn drop_around(
     voxel_size: f32,
     items: &Items,
     body: &tesserae_core::collide::Aabb,
-    stacks: impl IntoIterator<Item = (String, u32)>,
-) -> Vec<EntityId> {
-    let specs: Vec<_> = stacks
+    stacks: Vec<Stack>,
+) -> Vec<(Stack, EntityId)> {
+    let (dropped, specs): (Vec<_>, Vec<_>) = stacks
         .into_iter()
-        .filter_map(|(name, count)| {
-            let at = items.named(&name)?;
-            Some(DropSpec {
+        .filter_map(|stack| {
+            let at = items.named(&stack.item)?;
+            let spec = DropSpec {
                 item: at as u32,
-                count,
+                count: stack.count,
                 size_m: items.0[at].size_m,
-            })
+            };
+            Some((stack, spec))
         })
-        .collect();
+        .unzip();
     if specs.is_empty() {
         return Vec::new();
     }
-    let centre = [0, 1, 2].map(|a| (body.min[a] + body.max[a]) / 2.0);
-    entities.spawn_drops_around(store, tables, voxel_size, centre, specs)
+    let ids = entities.spawn_drops_around(store, tables, voxel_size, body.centre(), specs);
+    dropped.into_iter().zip(ids).collect()
 }
 
 #[cfg(test)]

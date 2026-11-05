@@ -2,13 +2,44 @@
 
 use bevy::prelude::*;
 use tesserae_core::MaterialId;
-use tesserae_mods::{ItemDef, MAX_STACK};
+use tesserae_mods::{ITEM_SIZE_M, ItemDef, MAX_STACK};
 
-/// Every declared Item, in load order; an Item's id is its index.
+/// Every Item, an Item's id being its index: the declared ones in load order,
+/// then the implicit ones in Material order.
 #[derive(Resource, Default, Debug)]
 pub struct Items(pub Vec<ItemDef>);
 
 impl Items {
+    /// `placeable` are the id, name and colour of each Material a Player can
+    /// place. One no declared Item places gets an implicit Item of its own
+    /// name, so it can drop like any other.
+    pub fn with_implicit<'a>(
+        mut declared: Vec<ItemDef>,
+        placeable: impl IntoIterator<Item = (MaterialId, &'a str, [u8; 4])>,
+        voxel_size: f32,
+    ) -> Self {
+        let (min, max) = ITEM_SIZE_M;
+        let size_m = (voxel_size / 4.0).clamp(min, max);
+        let implicit: Vec<_> = placeable
+            .into_iter()
+            .filter(|&(id, name, _)| {
+                !declared
+                    .iter()
+                    .any(|item| item.material == Some(id) || item.name == name)
+            })
+            .map(|(id, name, color)| ItemDef {
+                name: name.to_owned(),
+                size_m,
+                color,
+                material: Some(id),
+                max_stack: MAX_STACK,
+                food: None,
+            })
+            .collect();
+        declared.extend(implicit);
+        Self(declared)
+    }
+
     /// The Item a removed Voxel of `material` drops, if any.
     pub fn dropped_by(&self, material: MaterialId) -> Option<usize> {
         self.0
@@ -25,7 +56,7 @@ impl Items {
         self.named(item).and_then(|at| self.0[at].food)
     }
 
-    /// The most one slot holds of `item`; an implicit Item declares none.
+    /// The most one slot holds of `item`.
     pub fn stack_limit(&self, item: &str) -> u32 {
         self.named(item)
             .map_or(MAX_STACK, |at| self.0[at].max_stack)
@@ -90,6 +121,36 @@ mod tests {
         let items = Items(vec![item("m:dust", None), item("m:chunk", Some(9))]);
         assert_eq!(items.dropped_by(9), Some(1));
         assert_eq!(items.dropped_by(10), None);
+    }
+
+    #[test]
+    fn a_placeable_material_no_item_places_gets_an_implicit_item_after_the_declared_ones() {
+        let items = Items::with_implicit(
+            vec![item("m:chunk", Some(2)), item("m:sand", None)],
+            [
+                (2, "m:ore", [9, 9, 9, 255]),
+                (5, "m:sand", [8, 8, 8, 255]),
+                (7, "m:water", [10, 20, 30, 200]),
+            ],
+            2.0,
+        );
+        let names: Vec<_> = items.0.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["m:chunk", "m:sand", "m:water"],
+            "a declared Item keeps its name and its Material's place"
+        );
+        let water = &items.0[2];
+        assert_eq!(water.material, Some(7));
+        assert_eq!(water.color, [10, 20, 30, 200]);
+        assert_eq!(
+            water.size_m, 0.5,
+            "a quarter Voxel, within the declared range"
+        );
+        assert_eq!((water.max_stack, water.food), (MAX_STACK, None));
+        assert_eq!(items.dropped_by(7), Some(2));
+        let tiny = Items::with_implicit(Vec::new(), [(7, "m:water", [0; 4])], 0.1);
+        assert_eq!(tiny.0[0].size_m, 0.05);
     }
 
     #[test]

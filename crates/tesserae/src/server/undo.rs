@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use std::collections::{BTreeMap, VecDeque};
 use tesserae_core::Occupants;
 use tesserae_core::entity::EntityId;
+use tesserae_core::inventory::Stack;
 use tesserae_mods::{EditEvent, EditKind};
 
 const LIMIT: usize = 128;
@@ -258,7 +259,10 @@ fn restore(
             (Cost::Paid(item), true) => {
                 let limit = settle.items.stack_limit(item);
                 if settle.inventory.receive(item, 1, limit) > 0 {
-                    refused.push((item.clone(), 1));
+                    refused.push(Stack {
+                        item: item.clone(),
+                        count: 1,
+                    });
                 }
             }
             (Cost::Paid(item), false) => {
@@ -563,6 +567,45 @@ mod tests {
             assert_eq!(voxel_at(&app, GROUND), stone());
             assert_eq!(inventory(&mut app), Inventory::default());
             assert_eq!(drops(&app), []);
+        }
+
+        /// Soil in hand, placed and dropped by its implicit Item, Item 2.
+        fn implicit() -> App {
+            let mut app = stocked(&[(4, "t:soil")], 4);
+            survival(&mut app);
+            app
+        }
+
+        #[test]
+        fn an_implicit_items_refund_with_no_room_drops_at_the_player() {
+            let mut app = implicit();
+            place(&mut app);
+            let mut full = Inventory::default();
+            let slots = (HOTBAR_SLOTS + BACKPACK_SLOTS) as u32;
+            assert_eq!(full.receive("t:dust", 64 * slots, 64), 0);
+            set_inventory(&mut app, full.clone());
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, ABOVE).is_air());
+            assert_eq!(inventory(&mut app), full);
+            assert_eq!(drops(&app), [(2, 1)]);
+        }
+
+        #[test]
+        fn redoing_the_removal_of_an_implicit_items_voxel_drops_it_again() {
+            let mut app = implicit();
+            place(&mut app);
+            send(&mut app, down(EditAction::Remove));
+            tick(&mut app);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(drops(&app), [(2, 1)]);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(drops(&app), []);
+            replay(&mut app, Redo);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, ABOVE).is_air());
+            assert_eq!(drops(&app), [(2, 1)]);
         }
 
         #[test]
