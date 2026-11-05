@@ -115,7 +115,7 @@ pub(super) fn controls(size: Vec2, prefs: &TouchPreferences, ui_scale: f32) -> V
     const SECOND: [(Action, f32, f32); 9] = [
         (PreviousSlot, 0.0, 0.0),
         (NextSlot, 1.0, 0.0),
-        (Catalogue, 2.0, 0.0),
+        (Menu, 2.0, 0.0),
         (Turn, 0.0, 1.0),
         (Flip, 1.0, 1.0),
         (MovementMode, 2.0, 1.0),
@@ -308,7 +308,7 @@ pub(super) fn label(action: Action) -> &'static str {
         PreviousSlot => "Prev",
         NextSlot => "Next",
         Help => "Menu",
-        Catalogue => "Items",
+        Menu => "Menu",
         Turn => "Turn",
         Flip => "Flip",
         MovementMode => "Mode",
@@ -657,7 +657,7 @@ mod tests {
             .open = false;
         app.update();
         assert!(!state(&app, Action::Remove).held);
-        assert_ne!(app.world().resource::<Ownership>().owner, Owner::Catalogue);
+        assert_ne!(app.world().resource::<Ownership>().owner, Owner::Menu);
     }
 
     #[test]

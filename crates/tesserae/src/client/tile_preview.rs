@@ -2,7 +2,6 @@
 use super::{
     edit::Holding,
     material_textures::{PreviewContent, Textures},
-    menu::DragPreview,
     preview::item_mesh,
 };
 use crate::render::tile_icon::TileIcon;
@@ -25,7 +24,7 @@ pub(super) struct AtlasCamera;
 
 #[derive(Resource, Default)]
 struct Atlas {
-    entries: Vec<(Holding, Handle<TileIcon>, Handle<TileIcon>)>,
+    entries: Vec<(Holding, Handle<TileIcon>)>,
     root: Option<Entity>,
     image: Handle<Image>,
     meshes: Vec<Handle<Mesh>>,
@@ -36,12 +35,7 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Atlas>()
         .init_session_state::<Textures>()
         .init_resource::<Assets<TileIcon>>()
-        .add_session_systems(
-            Update,
-            update
-                .after(super::menu::drag_preview)
-                .after(super::material_textures::receive),
-        );
+        .add_session_systems(Update, update.after(super::material_textures::receive));
 }
 
 fn key(holding: Holding) -> (u8, u16, u8, u8) {
@@ -64,7 +58,6 @@ type Icons<'w, 's> = Query<
     (
         Entity,
         &'static TilePreview,
-        Has<DragPreview>,
         Option<&'static MaterialNode<TileIcon>>,
         &'static mut Visibility,
     ),
@@ -79,7 +72,7 @@ fn update(
     mut meshes: ResMut<Assets<Mesh>>,
     (mut materials, mut ui_materials): (ResMut<Assets<StandardMaterial>>, ResMut<Assets<TileIcon>>),
 ) {
-    let mut wanted: Vec<_> = icons.iter().map(|(_, item, _, _, _)| item.0).collect();
+    let mut wanted: Vec<_> = icons.iter().map(|(_, item, _, _)| item.0).collect();
     wanted.sort_unstable_by_key(|&holding| key(holding));
     wanted.dedup();
     let same = wanted.iter().copied().eq(atlas.entries.iter().map(|e| e.0));
@@ -94,9 +87,8 @@ fn update(
         for material in atlas.materials.drain(..) {
             materials.remove(material.id());
         }
-        for (_, normal, drag) in atlas.entries.drain(..) {
-            ui_materials.remove(normal.id());
-            ui_materials.remove(drag.id());
+        for (_, icon) in atlas.entries.drain(..) {
+            ui_materials.remove(icon.id());
         }
         if !wanted.is_empty() {
             let side = (wanted.len() as f32).sqrt().ceil() as u32;
@@ -145,17 +137,12 @@ fn update(
                     ICON_PX as f32 / size,
                     ICON_PX as f32 / size,
                 );
-                let normal = ui_materials.add(TileIcon {
+                let icon = ui_materials.add(TileIcon {
                     frame,
                     opacity: 1.0,
                     image: atlas.image.clone(),
                 });
-                let drag = ui_materials.add(TileIcon {
-                    frame,
-                    opacity: 0.9,
-                    image: atlas.image.clone(),
-                });
-                atlas.entries.push((holding, normal, drag));
+                atlas.entries.push((holding, icon));
                 let Some(mesh) = item_mesh(holding, &content.catalogue.0) else {
                     continue;
                 };
@@ -185,11 +172,10 @@ fn update(
             }
         }
     }
-    for (entity, item, dragging, shown, mut visibility) in &mut icons {
-        let Some((_, normal, drag)) = atlas.entries.iter().find(|e| e.0 == item.0) else {
+    for (entity, item, shown, mut visibility) in &mut icons {
+        let Some((_, material)) = atlas.entries.iter().find(|e| e.0 == item.0) else {
             continue;
         };
-        let material = if dragging { drag } else { normal };
         if shown.is_none_or(|shown| &shown.0 != material) {
             commands
                 .entity(entity)
@@ -256,7 +242,7 @@ mod tests {
         assert_ne!(icon(&app, 2), icon(&app, 3));
         assert_eq!(app.world().resource::<Assets<Image>>().len(), 1);
         assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 3);
-        assert_eq!(app.world().resource::<Assets<TileIcon>>().len(), 6);
+        assert_eq!(app.world().resource::<Assets<TileIcon>>().len(), 3);
         let first = icon(&app, 0);
         app.update();
         assert_eq!(icon(&app, 0), first);
@@ -272,7 +258,7 @@ mod tests {
         assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
         assert_eq!(app.world().resource::<Assets<StandardMaterial>>().len(), 1);
         assert_eq!(app.world().resource::<Assets<Image>>().len(), 1);
-        assert_eq!(app.world().resource::<Assets<TileIcon>>().len(), 2);
+        assert_eq!(app.world().resource::<Assets<TileIcon>>().len(), 1);
         assert!(
             app.world()
                 .resource::<Assets<TileIcon>>()

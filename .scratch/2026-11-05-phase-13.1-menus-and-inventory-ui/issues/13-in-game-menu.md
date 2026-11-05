@@ -1,6 +1,6 @@
 # 13: In-game Menu
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 03
 
@@ -12,6 +12,6 @@ Tab or Escape opens the in-game Menu over the World: Resume, Inventory, Settings
 
 ## Acceptance criteria
 
-- [ ] Tab and Escape open the Menu from play; Escape from an overlay closes only the overlay.
-- [ ] Each Menu entry reaches its destination; Return to Worlds saves first.
-- [ ] World details shows the World's facts as the Server reports them.
+- [x] Tab and Escape open the Menu from play; Escape from an overlay closes only the overlay.
+- [x] Each Menu entry reaches its destination; Return to Worlds saves first.
+- [x] World details shows the World's facts as the Server reports them.

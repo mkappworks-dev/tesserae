@@ -519,7 +519,7 @@ mod tests {
         frame(&mut app, &[GamepadButton::LeftThumb], forward);
         app.world_mut()
             .resource_mut::<super::super::input::Ownership>()
-            .owner = super::super::input::Owner::Catalogue;
+            .owner = super::super::input::Owner::Menu;
         assert!(!frame(&mut app, &[], forward).sprint);
         app.world_mut()
             .resource_mut::<super::super::input::Ownership>()
@@ -598,7 +598,7 @@ mod tests {
         assert_eq!(intent.direction, Vec3::NEG_Y);
         app.world_mut()
             .resource_mut::<super::super::input::Ownership>()
-            .owner = super::super::input::Owner::Catalogue;
+            .owner = super::super::input::Owner::Menu;
         app.update();
         let intent = app
             .world_mut()
@@ -664,7 +664,7 @@ mod tests {
         assert!(app.world().resource::<Sprint>().0);
         app.world_mut()
             .resource_mut::<super::super::input::Ownership>()
-            .owner = super::super::input::Owner::Catalogue;
+            .owner = super::super::input::Owner::Menu;
         app.update();
         assert!(!app.world().resource::<Sprint>().0);
     }
@@ -674,7 +674,6 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(super::super::actions::test_plugin)
             .init_resource::<super::super::menu::Menu>()
-            .init_resource::<super::super::menu::PointerState>()
             .insert_resource(super::super::input::Ownership::playing())
             .init_resource::<Time>()
             .init_resource::<super::super::pose::PublishedBody>()
@@ -739,10 +738,14 @@ mod tests {
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear();
         app.update();
+        // Escape resumes; Tab inside the Menu only moves focus.
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::Tab);
+            .press(KeyCode::Escape);
         app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::Escape);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .clear();

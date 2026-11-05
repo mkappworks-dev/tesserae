@@ -225,7 +225,7 @@ pub(super) fn content(loaded: &LoadedMods) -> (Content, Mapping) {
     )
 }
 
-#[derive(Message, Clone, Copy)]
+#[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SaveAction {
     SaveQuit,
     Retry,
@@ -319,6 +319,14 @@ pub struct Persistence {
 }
 
 impl Persistence {
+    pub(super) fn name(&self) -> Option<&str> {
+        self.details.as_ref().map(|(_, d)| d.name.as_str())
+    }
+
+    pub(super) fn default_mode(&self) -> save::GameMode {
+        self.game_mode
+    }
+
     /// The mode the Player opens in: their own if saved, else the World's.
     pub(super) fn player_mode(&self) -> save::GameMode {
         self.reopened_game_mode.unwrap_or(self.game_mode)

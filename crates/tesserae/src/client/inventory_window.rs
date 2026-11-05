@@ -103,6 +103,8 @@ enum Control {
     QuickTransfer(Slot),
     Split(Slot),
     CancelMove,
+    /// The Shape the selected slot's Material is placed in.
+    Shape(tesserae_core::ShapeId),
 }
 
 #[derive(Component)]
@@ -246,10 +248,12 @@ fn shift_held(keys: &ButtonInput<KeyCode>) -> bool {
     keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn activate(
     event: On<Activate>,
     controls: Query<&Control>,
     mut window: ResMut<InventoryWindow>,
+    mut hotbar: ResMut<super::edit::Hotbar>,
     held: Res<Held>,
     keys: Res<ButtonInput<KeyCode>>,
     mut intents: MessageWriter<InventoryIntent>,
@@ -304,6 +308,10 @@ fn activate(
             intents.write(InventoryIntent::Split(slot));
         }
         Control::CancelMove => window.picked = None,
+        Control::Shape(shape) => match &mut hotbar.outside {
+            Some(Holding::Solid { shape: chosen, .. }) => *chosen = shape,
+            _ => hotbar.shape = shape,
+        },
     }
 }
 
@@ -373,6 +381,8 @@ struct Built {
     inspected: Option<Slot>,
     details: bool,
     key: String,
+    /// The Material the selected slot places and the Shape chosen for it.
+    shaping: Option<(tesserae_core::MaterialId, tesserae_core::ShapeId)>,
 }
 
 type Frame<'w, 's> = (
@@ -390,7 +400,7 @@ fn render(
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Frame,
-    mode: Res<super::game_mode::Mode>,
+    (mode, hotbar): (Res<super::game_mode::Mode>, Res<super::edit::Hotbar>),
     focus: Option<Res<InputFocus>>,
     mut built: Local<Option<Built>>,
 ) {
@@ -400,6 +410,12 @@ fn render(
         inspected: window.inspected,
         details: window.details,
         key: bindings.label(Action::Inventory, &labels),
+        shaping: match hotbar.held() {
+            Holding::Solid {
+                material, shape, ..
+            } => Some((material, shape)),
+            _ => None,
+        },
     });
     if *built == wanted && !looks.is_changed() && !catalogue.is_changed() {
         return;
@@ -982,7 +998,57 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 400,
                 SOFT,
             ));
+        if let Some((material, chosen)) = state.shaping {
+            shape_row(panel, material, chosen, names);
+        }
     });
+}
+
+/// The Shapes the selected slot's Material can be placed in. The choice is the
+/// Player's, not the stack's, so it shows whichever stack is inspected.
+fn shape_row(
+    panel: &mut ChildSpawnerCommands,
+    material: tesserae_core::MaterialId,
+    chosen: tesserae_core::ShapeId,
+    names: &Names,
+) {
+    let shapes = &names.catalogue.0.shapes;
+    if shapes.len() < 2 {
+        return;
+    }
+    let placed = names
+        .catalogue
+        .0
+        .material(material)
+        .map_or_else(String::new, |m| ui::title(&m.name));
+    panel
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(8.0),
+            margin: UiRect::top(Val::Px(16.0)),
+            ..default()
+        })
+        .with_children(|row| {
+            eyebrow(row, &format!("SHAPE · {}", placed.to_uppercase()));
+            row.spawn(Node {
+                flex_wrap: FlexWrap::Wrap,
+                column_gap: Val::Px(6.0),
+                row_gap: Val::Px(6.0),
+                ..default()
+            })
+            .with_children(|choices| {
+                for shape in shapes {
+                    ui::compact_button(
+                        choices,
+                        ui::title(&shape.name),
+                        Control::Shape(shape.id),
+                        shape.id == chosen,
+                        30.0,
+                        12.0,
+                    );
+                }
+            });
+        });
 }
 
 fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
@@ -1236,6 +1302,63 @@ mod tests {
             .iter()
             .find_map(|child| world.get::<TilePreview>(child))
             .map(|tile| tile.0)
+    }
+
+    fn shape(
+        id: tesserae_core::ShapeId,
+        name: &str,
+        turnable: bool,
+    ) -> crate::content::CatalogueShape {
+        crate::content::CatalogueShape {
+            id,
+            name: name.into(),
+            turnable,
+            geometry: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn the_details_shape_row_chooses_the_shape_the_selected_slot_places_in() {
+        use tesserae_core::{SHAPE_FULL_CUBE, SHAPE_SLAB};
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<super::super::edit::Catalogue>()
+            .0
+            .shapes = vec![
+            shape(SHAPE_FULL_CUBE, "cube", false),
+            shape(SHAPE_SLAB, "slab", true),
+        ];
+        app.insert_resource(super::super::edit::Hotbar::holding(
+            3,
+            Holding::solid(ROCK, SHAPE_FULL_CUBE),
+        ));
+        press(&mut app, KeyCode::KeyI);
+        assert!(shown(&mut app));
+        if !app.world().resource::<InventoryWindow>().details {
+            let details = app
+                .world_mut()
+                .query::<(Entity, &Control)>()
+                .iter(app.world())
+                .find_map(|(e, c)| (*c == Control::Details).then_some(e))
+                .unwrap();
+            app.world_mut().trigger(Activate { entity: details });
+            app.update();
+        }
+        let slab = app
+            .world_mut()
+            .query::<(Entity, &Control)>()
+            .iter(app.world())
+            .find_map(|(e, c)| (*c == Control::Shape(SHAPE_SLAB)).then_some(e))
+            .expect("a Shape row in the details");
+        app.world_mut().trigger(Activate { entity: slab });
+        app.update();
+        let hotbar = app.world().resource::<super::super::edit::Hotbar>();
+        assert_eq!(hotbar.shape, SHAPE_SLAB);
+        assert_eq!(
+            hotbar.held(),
+            Holding::solid(ROCK, SHAPE_SLAB),
+            "the selected slot now places a slab"
+        );
     }
 
     #[test]

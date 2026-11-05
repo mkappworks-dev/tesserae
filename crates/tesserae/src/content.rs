@@ -122,3 +122,18 @@ pub struct SkyFogTarget {
     pub sky: [f32; 3],
     pub fog: [f32; 3],
 }
+
+/// What the Server says about the open World when a session starts, for the
+/// Menu's World details.
+#[derive(Message, Clone, Debug, PartialEq)]
+pub struct WorldFacts {
+    pub name: Option<String>,
+    /// The Game's id and version.
+    pub game: Option<(String, String)>,
+    pub voxel_size_m: f32,
+    pub seed: u64,
+    /// The snapshotted Biome table's declared names, in table order.
+    pub biomes: Vec<String>,
+    /// The mode a Player new to this World starts in.
+    pub default_mode: tesserae_core::save::GameMode,
+}

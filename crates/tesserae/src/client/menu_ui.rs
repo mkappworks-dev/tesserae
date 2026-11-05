@@ -28,13 +28,7 @@ pub(super) enum Tab {
 }
 impl Tab {
     /// Page order in the header, which LB/RB also follow.
-    pub const ORDER: [Tab; 5] = [
-        Tab::Catalogue,
-        Tab::Behavior,
-        Tab::Bindings,
-        Tab::Controller,
-        Tab::Display,
-    ];
+    pub const ORDER: [Tab; 4] = [Tab::Behavior, Tab::Bindings, Tab::Controller, Tab::Display];
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue => "Catalogue",
@@ -57,6 +51,11 @@ pub(super) fn title(name: &str) -> String {
         first.to_uppercase().collect::<String>() + letters.as_str()
     })
 }
+/// A declared name as a player reads it: `terra:ash_flats` is "Ash flats".
+pub(super) fn declared_title(name: &str) -> String {
+    title(&name.rsplit(':').next().unwrap_or(name).replace('_', " "))
+}
+
 pub(super) fn matches(query: &str, text: &str) -> bool {
     let text = text.to_lowercase();
     query
@@ -406,7 +405,7 @@ fn style(
 }
 fn shell(
     mut commands: Commands,
-    (menu, settings): (Res<super::menu::Menu>, Res<Settings>),
+    settings: Res<Settings>,
     searches: Res<Searches>,
     roots: Query<Entity, With<Shell>>,
     mut previous: Local<Option<Option<(Tab, bool)>>>,
@@ -414,13 +413,7 @@ fn shell(
     mut focus: ResMut<InputFocus>,
 ) {
     let modal = settings.capturing() || settings.modal();
-    let wanted = if settings.open {
-        Some(settings.tab)
-    } else if menu.open {
-        Some(Tab::Catalogue)
-    } else {
-        None
-    };
+    let wanted = settings.open.then_some(settings.tab);
     let wanted = wanted.map(|tab| (tab, modal));
     if *previous == Some(wanted) {
         return;
@@ -977,7 +970,6 @@ pub(super) fn quiet_button(
 #[derive(Clone, Copy)]
 pub(super) enum IconKind {
     Search,
-    More,
     Reset,
     Close,
     Sync,
@@ -995,13 +987,13 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         asset::RenderAssetUsages,
         render::render_resource::{Extent3d, TextureDimension, TextureFormat},
     };
-    let mut data = vec![0; 384 * 64 * 4];
+    let mut data = vec![0; 320 * 64 * 4];
     let segment = |p: Vec2, a: Vec2, b: Vec2| {
         let along = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
         p.distance(a + (b - a) * along) < 0.6
     };
     for y in 0..64 {
-        for x in 0..384 {
+        for x in 0..320 {
             let i = x / 64;
             let p = Vec2::new(((x % 64) as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
             let ink = match i {
@@ -1009,20 +1001,17 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                     (p.distance(Vec2::new(6.5, 6.5)) - 3.5).abs() < 0.6
                         || segment(p, Vec2::new(9.0, 9.0), Vec2::new(13.0, 13.0))
                 }
-                1 => [4.0, 8.0, 12.0]
-                    .iter()
-                    .any(|u| p.distance(Vec2::new(*u, 8.0)) < 0.8),
-                2 => {
+                1 => {
                     let d = p - Vec2::splat(8.0);
                     (d.length() - 4.8).abs() < 0.6 && !(d.x < 0.0 && d.y < 0.0)
                         || segment(p, Vec2::new(3.0, 3.0), Vec2::new(3.0, 7.0))
                         || segment(p, Vec2::new(3.0, 3.0), Vec2::new(7.0, 3.0))
                 }
-                3 => {
+                2 => {
                     segment(p, Vec2::splat(5.0), Vec2::splat(11.0))
                         || segment(p, Vec2::new(5.0, 11.0), Vec2::new(11.0, 5.0))
                 }
-                4 => {
+                3 => {
                     segment(p, Vec2::new(2.0, 8.0), Vec2::new(14.0, 8.0))
                         || segment(p, Vec2::new(2.0, 8.0), Vec2::new(5.0, 5.0))
                         || segment(p, Vec2::new(2.0, 8.0), Vec2::new(5.0, 11.0))
@@ -1036,13 +1025,13 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                 }
             };
             if ink {
-                data[(y * 384 + x) * 4..(y * 384 + x) * 4 + 4].copy_from_slice(&[255; 4]);
+                data[(y * 320 + x) * 4..(y * 320 + x) * 4 + 4].copy_from_slice(&[255; 4]);
             }
         }
     }
     let icons = images.add(Image::new(
         Extent3d {
-            width: 384,
+            width: 320,
             height: 64,
             depth_or_array_layers: 1,
         },
@@ -1456,9 +1445,9 @@ mod tests {
             .init_resource::<Assets<Image>>()
             .add_systems(Startup, make_logo)
             .add_systems(Update, (sync_search, shell).chain());
-        app.world_mut()
-            .resource_mut::<super::super::menu::Menu>()
-            .open = true;
+        let mut settings = app.world_mut().resource_mut::<Settings>();
+        settings.open = true;
+        settings.tab = Tab::Bindings;
         app
     }
     fn field(app: &mut App) -> Entity {
@@ -1555,25 +1544,7 @@ mod tests {
         app.update();
         assert_eq!(field(&mut app), editor);
         assert_eq!(app.world().resource::<InputFocus>().get(), Some(editor));
-        assert_eq!(app.world().resource::<Searches>().catalogue, "Stone");
-        {
-            let mut settings = app.world_mut().resource_mut::<Settings>();
-            settings.open = true;
-            settings.tab = Tab::Bindings;
-        }
-        app.world_mut()
-            .resource_mut::<super::super::menu::Menu>()
-            .open = false;
-        app.update();
-        assert!(app.world().resource::<Searches>().bindings.is_empty());
-        let bindings = field(&mut app);
-        app.world_mut()
-            .get_mut::<EditableText>(bindings)
-            .unwrap()
-            .editor
-            .set_text("mouse");
-        app.update();
-        assert_eq!(app.world().resource::<Searches>().bindings, "mouse");
+        assert_eq!(app.world().resource::<Searches>().bindings, "Stone");
         app.world_mut().resource_mut::<Settings>().tab = Tab::Display;
         app.update();
         assert_eq!(
@@ -1583,10 +1554,7 @@ mod tests {
                 .count(),
             0
         );
-        app.world_mut().resource_mut::<Settings>().open = false;
-        app.world_mut()
-            .resource_mut::<super::super::menu::Menu>()
-            .open = true;
+        app.world_mut().resource_mut::<Settings>().tab = Tab::Bindings;
         app.update();
         let restored = field(&mut app);
         assert_eq!(

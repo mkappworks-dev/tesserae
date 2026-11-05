@@ -495,7 +495,6 @@ pub(super) fn select_held(
     // further steps count from it until the Server answers.
     (mut scrolled, mut asked): (Local<f32>, Local<Option<(usize, usize)>>),
     menu: Option<Res<super::menu::Menu>>,
-    mut pointer: Option<ResMut<super::menu::PointerState>>,
 ) {
     if ownership.owner == super::input::Owner::Unfocused {
         *scrolled = 0.0;
@@ -503,18 +502,9 @@ pub(super) fn select_held(
     }
     let menu_open = menu.as_ref().is_some_and(|m| m.open);
     for (slot, action) in super::actions::SLOTS.iter().enumerate() {
-        if actions.started(*action) {
-            if menu_open
-                && let Some(item) = pointer
-                    .as_ref()
-                    .and_then(|p| p.hovered)
-                    .and_then(|e| e.holding())
-            {
-                assign(slot, item, &mut intents);
-            } else {
-                select(&mut hotbar, slot, &mut intents);
-                *asked = Some((slot, hotbar.selected));
-            }
+        if actions.started(*action) && !menu_open {
+            select(&mut hotbar, slot, &mut intents);
+            *asked = Some((slot, hotbar.selected));
         }
     }
     let mut by = 0;
@@ -560,9 +550,6 @@ pub(super) fn select_held(
     }
     if actions.started(super::actions::Action::EmptyHand) {
         hotbar.outside = Some(Holding::Empty);
-        if let Some(pointer) = pointer.as_mut() {
-            pointer.assigning = None;
-        }
     }
     let Holding::Solid {
         shape, orientation, ..
@@ -757,7 +744,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
         (Turn, "turn"),
         (Flip, "flip"),
         (Shape, "Shape"),
-        (Catalogue, "menu"),
+        (Menu, "menu"),
         (Forward, "forward"),
         (Backward, "backward"),
         (Left, "left"),
@@ -795,7 +782,7 @@ fn pad_hints(bindings: &super::actions::Bindings, labels: &super::actions::Label
     ];
     for (action, verb) in [
         (Help, "controls"),
-        (Catalogue, "menu"),
+        (Menu, "menu"),
         (EmptyHand, "empty hand"),
         (CycleTool, "tool"),
         (Sample, "pick block"),
@@ -867,7 +854,7 @@ mod tests {
     use super::super::actions::PIXELS_PER_NOTCH;
     use super::*;
     use crate::client::camera::look;
-    use crate::client::menu::{self, Entry};
+    use crate::client::menu;
     use crate::content::{CatalogueMaterial, CatalogueShape, MaterialPalette};
     use crate::server::edit::RejectReason;
     use crate::server::player::{MovementFeedback, Player, PoseCorrection};
@@ -877,7 +864,6 @@ mod tests {
         mouse::{MouseScrollUnit, MouseWheel},
         touch::TouchPhase,
     };
-    use bevy::ui_widgets::Activate;
     use tesserae_core::{SHAPE_POST, SHAPE_SLAB, SHAPE_STAIR};
 
     #[test]
@@ -1569,67 +1555,6 @@ mod tests {
         assert_eq!(notice.text(), "");
     }
 
-    fn cursor(app: &mut App) -> CursorGrabMode {
-        let mut q = app.world_mut().query::<&CursorOptions>();
-        q.single(app.world()).unwrap().grab_mode
-    }
-
-    /// Every entry the open menu shows, bar slots aside.
-    fn offered(app: &mut App) -> Vec<Entry> {
-        if !app.world().resource::<menu::Menu>().open {
-            return Vec::new();
-        }
-        let mut q = app.world_mut().query::<&Entry>();
-        q.iter(app.world())
-            .copied()
-            .filter(|e| !matches!(e, Entry::Slot(_)))
-            .collect()
-    }
-
-    fn texts(app: &mut App) -> Vec<String> {
-        let mut q = app.world_mut().query::<&Text>();
-        q.iter(app.world()).map(|t| t.0.clone()).collect()
-    }
-
-    fn hover(app: &mut App, entry: Entry) {
-        use bevy::picking::{
-            backend::HitData,
-            events::{Pointer, PointerOver},
-            pointer::{Location, PointerId},
-        };
-        let entity = app
-            .world_mut()
-            .query::<(Entity, &Entry)>()
-            .iter(app.world())
-            .find(|(_, e)| **e == entry)
-            .unwrap()
-            .0;
-        app.world_mut().trigger(PointerOver {
-            entity,
-            pointer: Pointer::new(
-                PointerId::Mouse,
-                Location {
-                    target: bevy::camera::NormalizedRenderTarget::None {
-                        width: 800,
-                        height: 600,
-                    },
-                    position: Vec2::ZERO,
-                },
-            ),
-            hit: HitData::new(Entity::PLACEHOLDER, 0.0, None, None),
-        });
-        frame(app);
-    }
-
-    fn id(catalogue: &ContentCatalogue, name: &str) -> MaterialId {
-        catalogue
-            .materials
-            .iter()
-            .find(|m| m.name == name)
-            .unwrap_or_else(|| panic!("{name}"))
-            .id
-    }
-
     #[test]
     fn the_hud_names_a_tools_verbs_as_presses() {
         let mut catalogue = terra();
@@ -1655,110 +1580,6 @@ mod tests {
             kind: tesserae_mods::ToolKind::Measure,
         }];
         catalogue
-    }
-
-    #[test]
-    fn the_menu_offers_every_solid_in_every_shape_every_fluid_and_fire() {
-        let catalogue = terra();
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        assert!(offered(&mut app).is_empty(), "closed");
-        key(&mut app, KeyCode::Tab);
-        assert_eq!(cursor(&mut app), CursorGrabMode::None);
-
-        let solids: Vec<_> = catalogue.materials.iter().filter(|m| m.solid).collect();
-        for name in ["terra:wood", "terra:brick", "terra:lamp"] {
-            assert!(solids.iter().any(|m| m.name == name), "{name}");
-        }
-        for solid in &solids {
-            assert!(offered(&mut app).contains(&Entry::Material(solid.id)));
-            hover(&mut app, Entry::Material(solid.id));
-            let shapes: Vec<_> = app
-                .world_mut()
-                .query::<&menu::DetailAction>()
-                .iter(app.world())
-                .filter_map(|action| {
-                    if let menu::DetailAction::Shape(id) = action {
-                        Some(*id)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            for shape in &catalogue.shapes {
-                assert!(shapes.contains(&shape.id), "{} {}", solid.name, shape.name);
-            }
-            assert_eq!(shapes.len(), catalogue.shapes.len());
-        }
-        let offered = offered(&mut app);
-        assert_eq!(
-            offered
-                .iter()
-                .filter(|e| matches!(e, Entry::Material(_)))
-                .count(),
-            solids.len(),
-            "solids only"
-        );
-        for fluid in ["terra:water", "terra:lava", "terra:mud"] {
-            assert!(
-                offered.contains(&Entry::Fluid(id(&catalogue, fluid))),
-                "{fluid}"
-            );
-        }
-        assert!(offered.contains(&Entry::Fire));
-
-        let texts = texts(&mut app);
-        for name in [
-            "terra:wood",
-            "terra:brick",
-            "terra:lamp",
-            "core:stair",
-            "dev:fence",
-            "terra:water",
-            "terra:lava",
-            "terra:mud",
-            "fire",
-        ] {
-            assert!(
-                texts
-                    .iter()
-                    .any(|t| t == &super::super::menu_ui::title(name)),
-                "{name} by its display name"
-            );
-        }
-    }
-
-    #[test]
-    fn with_no_fluid_and_no_fuel_the_menu_offers_the_builtin_solids_and_shapes_only() {
-        let mut app = app_with(CursorGrabMode::Locked, dry());
-        frame(&mut app);
-        key(&mut app, KeyCode::Tab);
-        let offered = offered(&mut app);
-        let solids: Vec<_> = dry()
-            .materials
-            .iter()
-            .filter(|m| m.solid)
-            .map(|m| Entry::Material(m.id))
-            .collect();
-        let shapes: Vec<_> = app
-            .world_mut()
-            .query::<&menu::DetailAction>()
-            .iter(app.world())
-            .filter_map(|action| {
-                if let menu::DetailAction::Shape(id) = action {
-                    Some(*id)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert_eq!(shapes.len(), 5);
-        assert_eq!(offered.len(), solids.len());
-        for entry in &solids {
-            assert!(offered.contains(entry), "{entry:?}");
-        }
-        let texts = texts(&mut app);
-        assert!(!texts.iter().any(|t| t == "Fluids" || t == "Fire"));
     }
 
     #[test]
@@ -1790,7 +1611,7 @@ mod tests {
         let fly = camera.single(app.world()).unwrap();
         assert_eq!((fly.yaw, fly.pitch), (0.0, 0.0));
 
-        key(&mut app, KeyCode::Tab);
+        key(&mut app, KeyCode::Escape);
         moved(&mut app);
         frame(&mut app);
         assert_ne!(
@@ -1996,183 +1817,6 @@ mod tests {
         key(&mut app, KeyCode::KeyM);
         key(&mut app, KeyCode::KeyX);
         assert_eq!(held(&app), Holding::Empty);
-    }
-
-    fn activate(app: &mut App, entry: Entry) {
-        let entity = app
-            .world_mut()
-            .query::<(Entity, &Entry)>()
-            .iter(app.world())
-            .find(|(_, value)| **value == entry)
-            .unwrap_or_else(|| panic!("{entry:?} is not offered"))
-            .0;
-        app.world_mut().trigger(Activate { entity });
-    }
-
-    fn choose_shape(app: &mut App, shape: ShapeId) {
-        let entity = app
-            .world_mut()
-            .query::<(Entity, &menu::DetailAction)>()
-            .iter(app.world())
-            .find_map(|(entity, action)| {
-                matches!(action, menu::DetailAction::Shape(id) if *id == shape).then_some(entity)
-            })
-            .expect("Shape offered");
-        app.world_mut().trigger(Activate { entity });
-        frame(app);
-    }
-
-    fn stack(app: &App, at: usize) -> Option<(String, u32)> {
-        app.world().resource::<Hotbar>().stacks[at]
-            .as_ref()
-            .map(|s| (s.item.clone(), s.count))
-    }
-
-    #[test]
-    fn choosing_catalogue_content_holds_its_item_through_the_server_without_editing() {
-        for (entry, item) in [
-            (Entry::Material(wood()), Some("terra:wood")),
-            (Entry::Fluid(terra_water()), None),
-            (Entry::Fire, None),
-        ] {
-            let mut app = app(CursorGrabMode::Locked);
-            frame(&mut app);
-            key(&mut app, KeyCode::Digit4);
-            key(&mut app, KeyCode::Tab);
-            press(&mut app, MouseButton::Left);
-            activate(&mut app, entry);
-            assert!(frame(&mut app).is_empty());
-            frame(&mut app);
-            assert!(app.world().resource::<menu::Menu>().open);
-            assert_eq!(cursor(&mut app), CursorGrabMode::None);
-            let hand = app.world().resource::<Hotbar>();
-            let slot = if matches!(entry, Entry::Fluid(_)) {
-                7
-            } else {
-                3
-            };
-            assert_eq!(
-                hand.selected, slot,
-                "the slot holding its Item, else the selected one"
-            );
-            match entry {
-                Entry::Fire => assert_eq!(hand.outside, Some(Holding::Fire)),
-                _ => assert_eq!(hand.outside, None),
-            }
-            if let Some(item) = item {
-                assert_eq!(stack(&app, 3), Some((item.into(), MAX_STACK)));
-            }
-            let cards: Vec<_> = app
-                .world_mut()
-                .query_filtered::<&Node, With<menu::CatalogueItem>>()
-                .iter(app.world())
-                .collect();
-            assert!(!cards.is_empty());
-            assert!(
-                cards
-                    .iter()
-                    .all(|node| node.width == Val::Px(128.0) && node.height == Val::Px(113.0))
-            );
-            let expected = match entry {
-                Entry::Material(_) => "Selected: Wood · Cube",
-                Entry::Fluid(_) => "Selected: Water",
-                _ => "Selected: Fire",
-            };
-            assert!(texts(&mut app).iter().any(|text| text == expected));
-            activate(&mut app, entry);
-            assert!(frame(&mut app).is_empty());
-            assert_eq!(held(&app), Holding::Empty, "a second choice clears");
-            assert!(
-                texts(&mut app)
-                    .iter()
-                    .any(|text| text == "Nothing selected")
-            );
-            activate(&mut app, entry);
-            assert!(frame(&mut app).is_empty());
-            let clear = app
-                .world_mut()
-                .query::<(Entity, &menu::DetailAction)>()
-                .iter(app.world())
-                .find_map(|(entity, action)| {
-                    matches!(action, menu::DetailAction::Clear).then_some(entity)
-                })
-                .unwrap();
-            app.world_mut().trigger(Activate { entity: clear });
-            assert!(frame(&mut app).is_empty());
-            assert_eq!(held(&app), Holding::Empty);
-            assert!(app.world().resource::<menu::Menu>().open);
-        }
-    }
-
-    #[test]
-    fn catalogue_clear_shortcut_respects_search_ownership_in_the_edit_schedule() {
-        let mut app = app(CursorGrabMode::Locked);
-        app.init_resource::<super::super::input::UiInput>()
-            .add_systems(
-                Update,
-                super::super::input::resolve
-                    .after(menu::toggle)
-                    .before(select_held),
-            );
-        frame(&mut app);
-        key(&mut app, KeyCode::Digit1);
-        key(&mut app, KeyCode::Tab);
-        let before = held(&app);
-        assert_ne!(before, Holding::Empty);
-        app.world_mut()
-            .resource_mut::<super::super::input::UiInput>()
-            .text_entry = true;
-        key(&mut app, KeyCode::KeyX);
-        assert_eq!(held(&app), before);
-        app.world_mut()
-            .resource_mut::<super::super::input::UiInput>()
-            .text_entry = false;
-        frame(&mut app);
-        key(&mut app, KeyCode::KeyX);
-        assert_eq!(held(&app), Holding::Empty);
-        assert!(app.world().resource::<menu::Menu>().open);
-        assert!(frame(&mut app).is_empty());
-    }
-
-    #[test]
-    fn a_chosen_shape_takes_its_material_and_the_next_click_places_it_in_that_shape() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        key(&mut app, KeyCode::Digit2);
-        key(&mut app, KeyCode::Tab);
-        hover(&mut app, Entry::Material(wood()));
-        choose_shape(&mut app, SHAPE_STAIR);
-        key(&mut app, KeyCode::Tab);
-        assert_eq!(stack(&app, 1), Some(("terra:wood".into(), MAX_STACK)));
-        assert_eq!(held(&app), Holding::solid(wood(), SHAPE_STAIR));
-        assert_eq!(cursor(&mut app), CursorGrabMode::Locked);
-        press(&mut app, MouseButton::Right);
-        let sent = frame(&mut app);
-        assert_eq!(sent.len(), 1);
-        assert_eq!(
-            sent[0].action,
-            EditAction::PlaceHeld {
-                shape: SHAPE_STAIR,
-                orientation: Orientation::IDENTITY,
-            }
-        );
-    }
-
-    #[test]
-    fn clicking_a_hotbar_slot_while_the_menu_is_open_selects_it() {
-        let mut app = app(CursorGrabMode::Locked);
-        frame(&mut app);
-        key(&mut app, KeyCode::Tab);
-        activate(&mut app, Entry::Slot(4));
-        frame(&mut app);
-        frame(&mut app);
-        assert_eq!(app.world().resource::<Hotbar>().selected, 4);
-        assert!(app.world().resource::<menu::Menu>().open);
-        hover(&mut app, Entry::Fluid(terra_water()));
-        key(&mut app, KeyCode::Digit1);
-        assert_eq!(stack(&app, 0), Some(("terra:water".into(), MAX_STACK)));
-        assert_eq!(app.world().resource::<Hotbar>().selected, 4);
-        assert!(app.world().resource::<menu::Menu>().open);
     }
 
     #[test]

@@ -630,6 +630,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_message::<CharacterModel>()
         .add_session_message::<MaterialPalette>()
         .add_session_message::<ContentCatalogue>()
+        .add_session_message::<crate::content::WorldFacts>()
         .on_session_start(install)
         .add_session_systems(SessionTeardown, release_mods);
 }
@@ -719,6 +720,33 @@ fn install(world: &mut World) {
     world.insert_resource(WorldParameters(params));
     world.insert_resource(super::streaming::streaming_settings(loaded.view));
     world.insert_resource(runtime::ModJobs::new(loaded.registry, loaded.mods));
+    let (name, default_mode) = world
+        .get_resource::<super::persistence::Persistence>()
+        .map(|p| (p.name().map(str::to_owned), p.default_mode()))
+        .unwrap_or_default();
+    let settings = world
+        .get_resource::<WorldSettings>()
+        .copied()
+        .unwrap_or_default();
+    world.write_message(crate::content::WorldFacts {
+        name,
+        game: loaded
+            .required
+            .iter()
+            .find(|m| m.game)
+            .map(|m| (m.id.clone(), m.version.clone())),
+        voxel_size_m: settings.voxel_size,
+        seed: settings.seed,
+        biomes: world
+            .resource::<WorldParameters>()
+            .0
+            .biomes
+            .as_slice()
+            .iter()
+            .map(|b| b.name.as_str().to_owned())
+            .collect(),
+        default_mode,
+    });
     world.write_message(MaterialPalette(loaded.appearance));
     world.write_message(MaterialTextures(loaded.textures));
     world.write_message(CharacterModel(loaded.character.map(std::sync::Arc::new)));
@@ -1150,6 +1178,41 @@ biomes = ["plain:dry"]
             [1]
         );
         assert_eq!(world.generator, 2);
+    }
+
+    #[test]
+    fn the_session_reports_the_world_s_facts_for_the_menu() {
+        let s = Scratch::new();
+        let game =
+            format!("{DATA_GAME}\n[[biomes]]\nname = \"dry\"\ntemperature = 0.8\nhumidity = 0.1\n");
+        data(&s, "plain", true, "depends = ['base']", &game);
+        data(&s, "base", false, "", WET);
+        let loaded = s.load(TrustMode::All).unwrap();
+        let mut app = App::new();
+        app.insert_non_send(loaded)
+            .insert_resource(WorldSettings {
+                seed: 123,
+                voxel_size: 0.5,
+            })
+            .add_plugins(plugin)
+            .add_systems(Startup, super::super::open_world);
+        let facts = app
+            .world_mut()
+            .resource_mut::<Messages<crate::content::WorldFacts>>()
+            .drain()
+            .next()
+            .expect("the facts are sent at session start");
+        assert_eq!(
+            facts,
+            crate::content::WorldFacts {
+                name: None,
+                game: Some(("plain".into(), "0.1.0".into())),
+                voxel_size_m: 0.5,
+                seed: 123,
+                biomes: vec!["base:wet".into(), "plain:dry".into()],
+                default_mode: crate::server::game_mode::GameMode::Creative,
+            }
+        );
     }
 
     #[test]
