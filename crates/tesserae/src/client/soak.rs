@@ -101,14 +101,16 @@ fn soak(world: &mut World) {
                     soak.left -= 1;
                     soak.cycle += 1;
                     soak.frames = 0;
-                    if std::env::var_os("TESSERAE_SOAK_ALTERNATE").is_some() {
-                        let worlds = listed(world);
-                        if !worlds.is_empty() {
-                            let pick = worlds[cycle as usize % worlds.len()].clone();
-                            world.resource_mut::<Queue>().0.push(Act::Select(pick));
-                        }
+                    let worlds = listed(world);
+                    let turn = if std::env::var_os("TESSERAE_SOAK_ALTERNATE").is_some() {
+                        cycle as usize
+                    } else {
+                        0
+                    };
+                    if !worlds.is_empty() {
+                        let pick = worlds[turn % worlds.len()].clone();
+                        world.resource_mut::<Queue>().0.push(Act::Play(pick));
                     }
-                    world.resource_mut::<Queue>().0.push(Act::Open);
                 }
             }
         }

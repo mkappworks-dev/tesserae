@@ -1,6 +1,6 @@
 # 16: Title screen and Worlds
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: None (can start immediately)
 
@@ -12,7 +12,7 @@ The launcher opens on the title screen: the engine's mosaic mark and wordmark, C
 
 ## Acceptance criteria
 
-- [ ] Continue opens the last played World.
-- [ ] Search filters Worlds by name or Game.
-- [ ] Every screen is usable by keyboard alone.
-- [ ] Existing World list journeys (open, rename, delete, trust) still work.
+- [x] Continue opens the last played World.
+- [x] Search filters Worlds by name or Game.
+- [x] Every screen is usable by keyboard alone.
+- [x] Existing World list journeys (open, rename, delete, trust) still work.
