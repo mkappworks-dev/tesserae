@@ -94,46 +94,32 @@ fn paint(
     }
 }
 
-/// A labelled button. The label goes left and `glyph`, if any, right, as the
-/// prototype's menu buttons have it.
+/// Where a button's label sits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Align<'a> {
+    Centre,
+    /// As the other labels of a stacked menu do.
+    Left,
+    /// Left, with a glyph such as a key or `+` at the right.
+    Glyph(&'a str),
+}
+
 pub(super) fn button(
     parent: &mut ChildSpawnerCommands,
     label: impl Into<String>,
-    glyph: &str,
+    align: Align,
     act: impl Bundle,
     kind: Kind,
 ) -> Entity {
     spawn(
         parent,
         label,
-        glyph,
+        align,
         act,
         Look {
             kind,
             selected: false,
         },
-        !glyph.is_empty(),
-    )
-}
-
-/// A button in a stacked menu: its label sits left, as the stack's other labels do.
-pub(super) fn menu_button(
-    parent: &mut ChildSpawnerCommands,
-    label: impl Into<String>,
-    glyph: &str,
-    act: impl Bundle,
-    kind: Kind,
-) -> Entity {
-    spawn(
-        parent,
-        label,
-        glyph,
-        act,
-        Look {
-            kind,
-            selected: false,
-        },
-        true,
     )
 }
 
@@ -147,16 +133,15 @@ pub(super) fn choice(
         kind: Kind::Plain,
         selected,
     };
-    spawn(parent, label, "", act, look, false)
+    spawn(parent, label, Align::Centre, act, look)
 }
 
 fn spawn(
     parent: &mut ChildSpawnerCommands,
     label: impl Into<String>,
-    glyph: &str,
+    align: Align,
     act: impl Bundle,
     look: Look,
-    spread: bool,
 ) -> Entity {
     let kind = look.kind;
     let ink = match kind {
@@ -177,10 +162,10 @@ fn spawn(
                 border: UiRect::all(Val::Px(1.0)),
                 border_radius: BorderRadius::all(Val::Px(5.0)),
                 align_items: AlignItems::Center,
-                justify_content: if spread {
-                    JustifyContent::SpaceBetween
-                } else {
+                justify_content: if align == Align::Centre {
                     JustifyContent::Center
+                } else {
+                    JustifyContent::SpaceBetween
                 },
                 column_gap: Val::Px(12.0),
                 flex_shrink: 0.0,
@@ -191,7 +176,9 @@ fn spawn(
         ))
         .with_children(|b| {
             ui::weighted_text(b, label, 14.0, weight, ink);
-            if !glyph.is_empty() {
+            if let Align::Glyph(glyph) = align
+                && !glyph.is_empty()
+            {
                 ui::weighted_text(b, glyph, 14.0, weight, ink);
             }
         })
@@ -212,7 +199,7 @@ pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, value: &str) {
     ));
 }
 
-/// A raised surface with the prototype's black grout edge.
+/// A raised surface with a black grout edge.
 pub(super) fn surface(background: Color) -> impl Bundle {
     (
         BackgroundColor(background),
@@ -306,7 +293,7 @@ pub(super) fn sheet(
     });
 }
 
-/// A quiet bordered note, as the prototype's `.notice`.
+/// A quiet bordered note.
 pub(super) fn notice(parent: &mut ChildSpawnerCommands, value: impl Into<String>) {
     parent
         .spawn((
@@ -322,7 +309,7 @@ pub(super) fn notice(parent: &mut ChildSpawnerCommands, value: impl Into<String>
         .with_children(|n| ui::paragraph(n, value.into(), 13.0, MUTED));
 }
 
-/// A small outlined tag, as the prototype's `.pill`.
+/// A small outlined tag.
 pub(super) fn pill(parent: &mut ChildSpawnerCommands, value: impl Into<String>) {
     parent
         .spawn((

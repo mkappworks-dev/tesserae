@@ -258,7 +258,7 @@ pub(super) fn tick(
     vitals.set_if_neq(now);
 }
 
-/// The most harmful Material the body overlaps, by cell for a solid and up to
+/// The most harmful Material the body overlaps, by Voxel for a solid and up to
 /// its surface for a fluid.
 fn contact(
     store: &impl CellView,
@@ -270,17 +270,17 @@ fn contact(
     if !survival.any_contact_damage() {
         return None;
     }
-    // Shrunk so a body resting on a cell, or flush against one, does not
+    // Shrunk so a body resting on a Voxel, or flush against one, does not
     // touch it.
     const EPS_M: f32 = 1e-3;
-    let cells = |a: usize| {
+    let voxels = |a: usize| {
         ((body.min[a] + EPS_M) / size).floor() as i32
             ..=((body.max[a] - EPS_M) / size).floor() as i32
     };
     let mut worst: Option<(MaterialId, f32)> = None;
-    for z in cells(2) {
-        for y in cells(1) {
-            for x in cells(0) {
+    for z in voxels(2) {
+        for y in voxels(1) {
+            for x in voxels(0) {
                 let Some((voxel, overlay)) = store.stored([x, y, z]) else {
                     continue;
                 };

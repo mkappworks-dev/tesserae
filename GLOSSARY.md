@@ -199,7 +199,8 @@ metres. Drawn terrain shortens it; nothing lengthens an Edit's reach along it.
 **Edit** — a change to one Voxel, its solid or its source, applied by the
 Server. A Client sends an intent; it never makes an Edit.
 
-**Use** — a Player pressing a held Tool's action. Answered by the Server, never
+**Use** — a Player pressing a held Tool's action, or, with no Tool in hand,
+eating the food in the selected Hotbar slot. Answered by the Server, never
 applied: it changes no Voxel and enters no history. Not an Edit, not Sample, and
 not Pickup.
 

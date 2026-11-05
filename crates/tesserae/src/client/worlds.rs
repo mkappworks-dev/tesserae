@@ -331,8 +331,8 @@ struct Launcher {
     /// The form as Create World opened it, to tell whether leaving loses anything.
     initial: Form,
     rename: String,
-    /// Edit World's choice of the World's default mode, then the player's own.
-    modes: [GameMode; 2],
+    /// Edit World's choice of modes.
+    modes: Modes,
     search: String,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
@@ -686,7 +686,7 @@ fn start(
         form: Form::default(),
         initial: Form::default(),
         rename: String::new(),
-        modes: [GameMode::Creative; 2],
+        modes: Modes::default(),
         search: String::new(),
         problem: None,
         clashes: Default::default(),
@@ -928,7 +928,7 @@ fn handle(
                     continue;
                 };
                 let name = entry.name().unwrap_or_default().to_owned();
-                let chosen = entry.details().map_or([GameMode::Creative; 2], modes);
+                let chosen = entry.details().map_or_else(Modes::default, modes);
                 l.rename = name;
                 l.modes = chosen;
                 l.selected = Some(path.clone());
@@ -1081,11 +1081,11 @@ fn handle(
             Act::ConfirmReset => edit_biomes(&mut l, BiomesDraft::reset),
             Act::KeepBiomes => edit_biomes(&mut l, |d| d.resetting = false),
             Act::DefaultMode(mode) => {
-                l.modes[0] = mode;
+                l.modes.default = mode;
                 l.version += 1;
             }
             Act::OwnMode(mode) => {
-                l.modes[1] = mode;
+                l.modes.own = mode;
                 l.version += 1;
             }
             Act::KeepEditing => {
@@ -1150,16 +1150,15 @@ fn handle(
                     continue;
                 };
                 let current = l.entry(&path).and_then(Entry::details).map(saved_modes);
-                let [default, own] = l.modes;
                 let result = library::valid_name(&l.rename)
                     .map_err(|e| e.to_string())
                     .and_then(|name| library::rename(&path, &name).map_err(describe))
                     .and_then(|()| {
                         // Applied by the Server when the World next opens; nothing changes in play.
-                        let [was_default, was_own] = current.unwrap_or(l.modes);
+                        let (now, was) = (l.modes, current.unwrap_or(l.modes));
                         let changes = library::ModeChanges {
-                            default: (default != was_default).then_some(default),
-                            own: (own != was_own).then_some(own),
+                            default: (now.default != was.default).then_some(now.default),
+                            own: (now.own != was.own).then_some(now.own),
                         };
                         library::request_modes(&path, changes).map_err(describe)
                     });
@@ -1255,21 +1254,28 @@ fn read_biomes(l: &mut Launcher, installed: &mut Installed, previewer: Previewer
     }
 }
 
-/// A World's default mode and the player's own, as its save holds them.
-fn saved_modes(details: &Sidecar) -> [GameMode; 2] {
-    [
-        details.game_mode,
-        details.player_mode.unwrap_or(details.game_mode),
-    ]
+/// A World's default game mode, for Players new to it, and the player's own.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Modes {
+    default: GameMode,
+    own: GameMode,
+}
+
+/// The modes as a World's save holds them.
+fn saved_modes(details: &Sidecar) -> Modes {
+    Modes {
+        default: details.game_mode,
+        own: details.player_mode.unwrap_or(details.game_mode),
+    }
 }
 
 /// The same once any requested change has applied.
-fn modes(details: &Sidecar) -> [GameMode; 2] {
-    let [default, own] = saved_modes(details);
-    [
-        details.mode_changes.default.unwrap_or(default),
-        details.mode_changes.own.unwrap_or(own),
-    ]
+fn modes(details: &Sidecar) -> Modes {
+    let saved = saved_modes(details);
+    Modes {
+        default: details.mode_changes.default.unwrap_or(saved.default),
+        own: details.mode_changes.own.unwrap_or(saved.own),
+    }
 }
 
 fn edit_biomes(l: &mut Launcher, change: impl FnOnce(&mut BiomesDraft)) {

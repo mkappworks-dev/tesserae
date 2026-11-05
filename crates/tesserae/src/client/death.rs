@@ -320,7 +320,13 @@ fn render(
                             ..default()
                         })
                         .with_children(|actions| {
-                            cine::button(actions, "Respawn", "Enter", Respawn, Kind::Primary);
+                            cine::button(
+                                actions,
+                                "Respawn",
+                                cine::Align::Glyph("Enter"),
+                                Respawn,
+                                Kind::Primary,
+                            );
                             super::save::return_buttons(actions);
                         });
                 });

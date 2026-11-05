@@ -1,4 +1,4 @@
-//! What each launcher screen shows, in the prototype's Cinematic layout.
+//! What each launcher screen shows, in the Cinematic layout.
 
 use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
 use bevy::prelude::*;
@@ -117,7 +117,7 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
             ));
         });
         cine::eyebrow(row, "A WORLD OF YOUR OWN");
-        cine::button(row, "Quit", "", Act::Quit, Kind::Ghost);
+        cine::button(row, "Quit", cine::Align::Centre, Act::Quit, Kind::Ghost);
     });
 }
 
@@ -204,10 +204,34 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             },
         ))
         .with_children(|actions| {
-            let worlds = cine::menu_button(actions, "Your Worlds", "", Act::Worlds, Kind::Primary);
-            let create = cine::menu_button(actions, "Create a World", "+", Act::New, Kind::Plain);
-            cine::menu_button(actions, "Mods", "", Act::Library, Kind::Ghost);
-            cine::menu_button(actions, "Settings", "", Act::Settings, Kind::Ghost);
+            let worlds = cine::button(
+                actions,
+                "Your Worlds",
+                cine::Align::Left,
+                Act::Worlds,
+                Kind::Primary,
+            );
+            let create = cine::button(
+                actions,
+                "Create a World",
+                cine::Align::Glyph("+"),
+                Act::New,
+                Kind::Plain,
+            );
+            cine::button(
+                actions,
+                "Mods",
+                cine::Align::Left,
+                Act::Library,
+                Kind::Ghost,
+            );
+            cine::button(
+                actions,
+                "Settings",
+                cine::Align::Left,
+                Act::Settings,
+                Kind::Ghost,
+            );
             if installed.game.is_none() {
                 actions
                     .commands()
@@ -270,7 +294,13 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             for line in &unmet {
                 ui::paragraph(card, line, 12.0, cine::WARNING);
             }
-            let button = cine::menu_button(card, "Continue", "", Act::Continue, Kind::Primary);
+            let button = cine::button(
+                card,
+                "Continue",
+                cine::Align::Left,
+                Act::Continue,
+                Kind::Primary,
+            );
             if unmet.is_empty() {
                 focus = Some(button);
             } else {
@@ -283,7 +313,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
     focus
 }
 
-/// A sheet, centred and no wider than the prototype's workspace.
+/// A sheet, centred and bounded so a wide window does not stretch its lines.
 fn workspace(main: &mut ChildSpawnerCommands, children: impl FnOnce(&mut ChildSpawnerCommands)) {
     main.spawn(Node {
         flex_grow: 1.0,
@@ -340,7 +370,13 @@ fn worlds(
                             "Find a World by name or Game…",
                         );
                     });
-                    let create = cine::button(line, "Create World", "+", Act::New, Kind::Primary);
+                    let create = cine::button(
+                        line,
+                        "Create World",
+                        cine::Align::Glyph("+"),
+                        Act::New,
+                        Kind::Primary,
+                    );
                     if installed.game.is_none() {
                         line.commands()
                             .entity(create)
@@ -387,7 +423,7 @@ fn worlds(
                 });
             },
             |f| {
-                cine::button(f, "Main menu", "", Act::Home, Kind::Ghost);
+                cine::button(f, "Main menu", cine::Align::Centre, Act::Home, Kind::Ghost);
                 ui::text(f, "Stored on this device", 12.0, cine::MUTED);
                 ui::text(
                     f,
@@ -432,7 +468,7 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
                 ui::paragraph(words, "Nothing was changed in its save.", 12.0, cine::MUTED);
             }
         });
-        cine::button(c, "Dismiss", "", Act::Dismiss, Kind::Ghost);
+        cine::button(c, "Dismiss", cine::Align::Centre, Act::Dismiss, Kind::Ghost);
     });
 }
 
@@ -541,7 +577,7 @@ fn world_card(
                 play = Some(cine::button(
                     actions,
                     if entry.incomplete() { "Retry" } else { "Play" },
-                    "",
+                    cine::Align::Centre,
                     Act::Play(entry.path.clone()),
                     Kind::Primary,
                 ));
@@ -549,7 +585,7 @@ fn world_card(
             cine::button(
                 actions,
                 "Edit",
-                "",
+                cine::Align::Centre,
                 Act::Edit(entry.path.clone()),
                 Kind::Ghost,
             );
@@ -602,7 +638,13 @@ fn library_page(
                 }
             },
             |f| {
-                focus = Some(cine::button(f, "Main menu", "", Act::Home, Kind::Ghost));
+                focus = Some(cine::button(
+                    f,
+                    "Main menu",
+                    cine::Align::Centre,
+                    Act::Home,
+                    Kind::Ghost,
+                ));
                 ui::text(
                     f,
                     match installed.mods.len() {
@@ -612,7 +654,13 @@ fn library_page(
                     12.0,
                     cine::MUTED,
                 );
-                let create = cine::button(f, "Create World", "", Act::New, Kind::Primary);
+                let create = cine::button(
+                    f,
+                    "Create World",
+                    cine::Align::Centre,
+                    Act::New,
+                    Kind::Primary,
+                );
                 if installed.game.is_none() {
                     f.commands()
                         .entity(create)
@@ -676,7 +724,13 @@ fn edit(
                         locked(body, format!("Voxel size: {} m", d.voxel_size_m));
                         row(body, 8.0, |r| {
                             locked(r, format!("Seed: {}", d.seed));
-                            cine::button(r, "Copy", "", Act::CopySeed, Kind::Ghost);
+                            cine::button(
+                                r,
+                                "Copy",
+                                cine::Align::Centre,
+                                Act::CopySeed,
+                                Kind::Ghost,
+                            );
                         });
                         locked(
                             body,
@@ -691,14 +745,14 @@ fn edit(
                             body,
                             "Default game mode",
                             "For Players joining this World for the first time. Changing it moves nobody.",
-                            l.modes[0],
+                            l.modes.default,
                             Act::DefaultMode,
                         );
                         mode_picks(
                             body,
                             "Your game mode",
                             "Switching to Survival keeps what you carry. Health and hunger start full.",
-                            l.modes[1],
+                            l.modes.own,
                             Act::OwnMode,
                         );
                         if !d.mode_changes.is_empty() {
@@ -744,13 +798,25 @@ fn edit(
                         cine::button(
                             r,
                             "Create from these settings",
-                            "",
+                            cine::Align::Centre,
                             Act::ReCreate,
                             Kind::Plain,
                         );
                     }
-                    cine::button(r, "Show folder", "", Act::ShowFolder, Kind::Plain);
-                    cine::button(r, "Delete World…", "", Act::Delete, Kind::Danger);
+                    cine::button(
+                        r,
+                        "Show folder",
+                        cine::Align::Centre,
+                        Act::ShowFolder,
+                        Kind::Plain,
+                    );
+                    cine::button(
+                        r,
+                        "Delete World…",
+                        cine::Align::Centre,
+                        Act::Delete,
+                        Kind::Danger,
+                    );
                 });
                 ui::paragraph(
                     body,
@@ -760,9 +826,15 @@ fn edit(
                 );
             },
             |f| {
-                cine::button(f, "Cancel", "", Act::Back, Kind::Ghost);
+                cine::button(f, "Cancel", cine::Align::Centre, Act::Back, Kind::Ghost);
                 ui::text(f, "Generation is pinned", 12.0, cine::MUTED);
-                cine::button(f, "Save changes", "", Act::SaveName, Kind::Primary);
+                cine::button(
+                    f,
+                    "Save changes",
+                    cine::Align::Centre,
+                    Act::SaveName,
+                    Kind::Primary,
+                );
             },
         );
     });
@@ -968,7 +1040,13 @@ fn form(
             .with_children(|c| {
                 text_field(c, Field::Seed, &f.seed, "", "Words or a number");
             });
-            cine::button(r, "Randomize", "", Act::Randomize, Kind::Ghost);
+            cine::button(
+                r,
+                "Randomize",
+                cine::Align::Centre,
+                Act::Randomize,
+                Kind::Ghost,
+            );
         });
         ui::paragraph(
             col,
@@ -984,7 +1062,13 @@ fn form(
                 TextColor(cine::MUTED),
                 Pickable::IGNORE,
             ));
-            cine::button(r, "Copy", "", Act::CopyResolved, Kind::Ghost);
+            cine::button(
+                r,
+                "Copy",
+                cine::Align::Centre,
+                Act::CopyResolved,
+                Kind::Ghost,
+            );
         });
         row(col, 0.0, |r| {
             cine::button(
@@ -994,7 +1078,7 @@ fn form(
                 } else {
                     "More World options"
                 },
-                "",
+                cine::Align::Centre,
                 Act::More,
                 Kind::Ghost,
             );
@@ -1279,8 +1363,20 @@ fn delete(main: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
         );
         problem(card, l.problem.as_ref());
         row(card, 8.0, |r| {
-            focus = Some(cine::button(r, "Keep World", "", Act::Back, Kind::Ghost));
-            cine::button(r, "Delete World", "", Act::ConfirmDelete, Kind::Danger);
+            focus = Some(cine::button(
+                r,
+                "Keep World",
+                cine::Align::Centre,
+                Act::Back,
+                Kind::Ghost,
+            ));
+            cine::button(
+                r,
+                "Delete World",
+                cine::Align::Centre,
+                Act::ConfirmDelete,
+                Kind::Danger,
+            );
         });
     });
     focus
@@ -1371,7 +1467,7 @@ fn trust(
                         Next::Biomes => "Back to Mods",
                         Next::Open(_) => "Cancel",
                     },
-                    "",
+                    cine::Align::Centre,
                     Act::Back,
                     Kind::Ghost,
                 ));
@@ -1390,7 +1486,7 @@ fn trust(
                             Next::Biomes => "show their Biomes",
                         }
                     ),
-                    "",
+                    cine::Align::Centre,
                     Act::Trust,
                     Kind::Primary,
                 );
@@ -1444,8 +1540,12 @@ fn step_frame(
             body,
             |foot| {
                 match step.previous() {
-                    Some(_) => cine::button(foot, "Back", "", Act::Back, Kind::Ghost),
-                    None => cine::button(foot, "Cancel", "", Act::Back, Kind::Ghost),
+                    Some(_) => {
+                        cine::button(foot, "Back", cine::Align::Centre, Act::Back, Kind::Ghost)
+                    }
+                    None => {
+                        cine::button(foot, "Cancel", cine::Align::Centre, Act::Back, Kind::Ghost)
+                    }
                 };
                 ui::text(
                     foot,
@@ -1457,11 +1557,17 @@ fn step_frame(
                     Some(next) => cine::button(
                         foot,
                         format!("Next: {}", next.label()),
-                        "",
+                        cine::Align::Centre,
                         Act::Next,
                         Kind::Primary,
                     ),
-                    None => cine::button(foot, "Create World", "", Act::Create, Kind::Primary),
+                    None => cine::button(
+                        foot,
+                        "Create World",
+                        cine::Align::Centre,
+                        Act::Create,
+                        Kind::Primary,
+                    ),
                 });
             },
         );
@@ -1683,10 +1789,28 @@ fn biomes_page(
                     13.0,
                     cine::INK,
                 );
-                cine::button(r, "Keep changes", "", Act::KeepBiomes, Kind::Ghost);
-                cine::button(r, "Reset defaults", "", Act::ConfirmReset, Kind::Primary);
+                cine::button(
+                    r,
+                    "Keep changes",
+                    cine::Align::Centre,
+                    Act::KeepBiomes,
+                    Kind::Ghost,
+                );
+                cine::button(
+                    r,
+                    "Reset defaults",
+                    cine::Align::Centre,
+                    Act::ConfirmReset,
+                    Kind::Primary,
+                );
             } else {
-                cine::button(r, "Reset biome defaults", "", Act::ResetBiomes, Kind::Ghost);
+                cine::button(
+                    r,
+                    "Reset biome defaults",
+                    cine::Align::Centre,
+                    Act::ResetBiomes,
+                    Kind::Ghost,
+                );
             }
         });
         col.spawn(Node {
@@ -1830,9 +1954,21 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                     ..default()
                 })
                 .with_children(|s| {
-                    cine::button(s, "-", "", Act::Nudge(knob, -1), Kind::Ghost);
+                    cine::button(
+                        s,
+                        "-",
+                        cine::Align::Centre,
+                        Act::Nudge(knob, -1),
+                        Kind::Ghost,
+                    );
                     ui::text(s, value, 13.0, cine::INK);
-                    cine::button(s, "+", "", Act::Nudge(knob, 1), Kind::Ghost);
+                    cine::button(
+                        s,
+                        "+",
+                        cine::Align::Centre,
+                        Act::Nudge(knob, 1),
+                        Kind::Ghost,
+                    );
                 });
             });
     };
@@ -1888,7 +2024,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 cine::button(
                     r,
                     ui::declared_title(name),
-                    "",
+                    cine::Align::Centre,
                     Act::CycleGround(layer),
                     Kind::Plain,
                 );
@@ -1990,7 +2126,13 @@ fn summary(
         })
         .with_children(|head| {
             cine::eyebrow(head, title);
-            cine::button(head, "Edit", "", Act::Step(step), Kind::Ghost);
+            cine::button(
+                head,
+                "Edit",
+                cine::Align::Centre,
+                Act::Step(step),
+                Kind::Ghost,
+            );
         });
         fill(card);
     });
@@ -2011,11 +2153,17 @@ fn discard(main: &mut ChildSpawnerCommands) -> Option<Entity> {
             focus = Some(cine::button(
                 r,
                 "Keep editing",
-                "",
+                cine::Align::Centre,
                 Act::KeepEditing,
                 Kind::Ghost,
             ));
-            cine::button(r, "Discard setup", "", Act::DiscardSetup, Kind::Danger);
+            cine::button(
+                r,
+                "Discard setup",
+                cine::Align::Centre,
+                Act::DiscardSetup,
+                Kind::Danger,
+            );
         });
     });
     focus

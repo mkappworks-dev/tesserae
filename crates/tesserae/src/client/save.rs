@@ -22,11 +22,17 @@ struct DirectQuit;
 /// which has no list to return to, Save & Quit.
 pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
     use super::cinematic::{self as cine, Kind};
-    cine::menu_button(parent, "Return to Worlds", "", ToList, Kind::Plain);
-    let quit = cine::menu_button(
+    cine::button(
+        parent,
+        "Return to Worlds",
+        cine::Align::Left,
+        ToList,
+        Kind::Plain,
+    );
+    let quit = cine::button(
         parent,
         "Save & Quit",
-        "",
+        cine::Align::Left,
         Action(SaveAction::SaveQuit),
         Kind::Plain,
     );

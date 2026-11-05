@@ -309,25 +309,37 @@ fn render(
                     })
                     .with_children(|list| {
                         let key = |action| bindings.label(action, &labels);
-                        let resume = cine::menu_button(
+                        let resume = cine::button(
                             list,
                             "Resume",
-                            &key(Action::ReleaseCursor),
+                            cine::Align::Glyph(&key(Action::ReleaseCursor)),
                             Choice::Resume,
                             Kind::Primary,
                         );
                         if !details {
                             focus = Some(resume);
                         }
-                        cine::menu_button(
+                        cine::button(
                             list,
                             "Inventory",
-                            &key(Action::Inventory),
+                            cine::Align::Glyph(&key(Action::Inventory)),
                             Choice::Inventory,
                             Kind::Plain,
                         );
-                        cine::menu_button(list, "Settings", "", Choice::Settings, Kind::Plain);
-                        cine::menu_button(list, "World details", "", Choice::Details, Kind::Plain);
+                        cine::button(
+                            list,
+                            "Settings",
+                            cine::Align::Left,
+                            Choice::Settings,
+                            Kind::Plain,
+                        );
+                        cine::button(
+                            list,
+                            "World details",
+                            cine::Align::Left,
+                            Choice::Details,
+                            Kind::Plain,
+                        );
                         super::save::return_buttons(list);
                     });
             });
@@ -390,7 +402,7 @@ fn world_details(
                     close = Some(cine::button(
                         dialog,
                         "Close",
-                        "",
+                        cine::Align::Centre,
                         Choice::CloseDetails,
                         Kind::Primary,
                     ));
@@ -409,7 +421,7 @@ fn world_details(
                 close = Some(cine::button(
                     dialog,
                     "Close",
-                    "",
+                    cine::Align::Centre,
                     Choice::CloseDetails,
                     Kind::Primary,
                 ));

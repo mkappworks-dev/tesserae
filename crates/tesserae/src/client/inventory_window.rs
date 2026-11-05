@@ -29,8 +29,7 @@ const SLOT_GAP_PX: f32 = 4.0;
 const GRID_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32 + SLOT_GAP_PX * (HOTBAR_SLOTS - 1) as f32;
 const INSPECTOR_PX: f32 = 220.0;
 
-/// A heavier dim than the prototype's, standing in for its blur, which Bevy's
-/// UI cannot draw behind a node.
+/// The World dims without blur, as Minecraft and Luanti do; only menus blur.
 const SCRIM: Color = Color::srgba_u8(3, 4, 5, 0x9e);
 const SURFACE: Color = Color::srgb_u8(11, 11, 13);
 const HEADER: Color = Color::srgb_u8(17, 17, 19);

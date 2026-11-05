@@ -1977,7 +1977,13 @@ fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
             },
         ))
         .with_children(|footer| {
-            cine::button(footer, "Back", "", Operation::Back, Kind::Ghost);
+            cine::button(
+                footer,
+                "Back",
+                cine::Align::Centre,
+                Operation::Back,
+                Kind::Ghost,
+            );
             footer
                 .spawn(Node {
                     column_gap: Val::Px(10.0),
@@ -1998,14 +2004,14 @@ fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                     cine::button(
                         actions,
                         "Restore defaults",
-                        "",
+                        cine::Align::Centre,
                         Operation::Reset,
                         Kind::Ghost,
                     );
                     let apply = cine::button(
                         actions,
                         "Apply changes",
-                        "",
+                        cine::Align::Centre,
                         Operation::Apply,
                         Kind::Primary,
                     );

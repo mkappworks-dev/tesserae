@@ -48,39 +48,39 @@ impl Default for SurvivalRules {
     }
 }
 
+/// Each validation rule that names a bound, worded from the bound itself.
+static RULES: std::sync::LazyLock<[String; 4]> = std::sync::LazyLock::new(|| {
+    [
+        format!("must be finite and from 1 to {MAX_SURVIVAL_VALUE}"),
+        format!("must be finite and from 0 to {MAX_SURVIVAL_VALUE}"),
+        format!("must be finite and from 1 to {MAX_AIR_S} s"),
+        format!("must be finite and from 0 to {MAX_SURVIVAL_VALUE} m"),
+    ]
+});
+
 impl SurvivalRules {
     pub fn validate(&self) -> Result<(), ParamError> {
-        const POINTS: &str = "must be finite and from 1 to 1000";
-        const RATE: &str = "must be finite and from 0 to 1000";
+        let [points, rate, air, fall] = &*RULES;
+        let (points, rate) = (points.as_str(), rate.as_str());
         let max = MAX_SURVIVAL_VALUE;
         for (field, value, range, rule) in [
-            ("max-health", self.max_health, 1.0..=max, POINTS),
-            ("max-hunger", self.max_hunger, 1.0..=max, POINTS),
-            (
-                "max-air-s",
-                self.max_air_s,
-                1.0..=MAX_AIR_S,
-                "must be finite and from 1 to 600 s",
-            ),
-            (
-                "safe-fall-m",
-                self.safe_fall_m,
-                0.0..=max,
-                "must be finite and from 0 to 1000 m",
-            ),
-            ("fall-damage-per-m", self.fall_damage_per_m, 0.0..=max, RATE),
+            ("max-health", self.max_health, 1.0..=max, points),
+            ("max-hunger", self.max_hunger, 1.0..=max, points),
+            ("max-air-s", self.max_air_s, 1.0..=MAX_AIR_S, air.as_str()),
+            ("safe-fall-m", self.safe_fall_m, 0.0..=max, fall.as_str()),
+            ("fall-damage-per-m", self.fall_damage_per_m, 0.0..=max, rate),
             (
                 "drowning-damage-per-s",
                 self.drowning_damage_per_s,
                 0.0..=max,
-                RATE,
+                rate,
             ),
-            ("hunger-per-min", self.hunger_per_min, 0.0..=max, RATE),
+            ("hunger-per-min", self.hunger_per_min, 0.0..=max, rate),
             (
                 "sprinting-hunger-per-min",
                 self.sprinting_hunger_per_min,
                 0.0..=max,
-                RATE,
+                rate,
             ),
             (
                 "regeneration-hunger",
@@ -92,13 +92,13 @@ impl SurvivalRules {
                 "regeneration-per-s",
                 self.regeneration_per_s,
                 0.0..=max,
-                RATE,
+                rate,
             ),
             (
                 "starvation-damage-per-s",
                 self.starvation_damage_per_s,
                 0.0..=max,
-                RATE,
+                rate,
             ),
         ] {
             if !range.contains(&value) {
