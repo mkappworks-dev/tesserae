@@ -43,7 +43,7 @@ Changing them later needs version 3.
 
 ## Surface features
 
-Amended 2026-11-05, from the phase 13.1 spec's ticket 21. A Biome also owns its
+Amended 2026-11-05, from the phase 15 spec's ticket 21. A Biome also owns its
 surface features: at most four solid Materials, each with a mean spacing from 4
 to 1024 metres, that generation stands one Voxel above the Biome's surface
 Material. A column's draw is a hash of the folded seed and its position in

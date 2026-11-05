@@ -49,8 +49,8 @@ alternatives above. Readiness awaits the final shared-understanding check.
 ### 2026-11-05: superseded
 
 Superseded by the
-[phase 13.1 spec](../../2026-11-05-phase-13.1-menus-and-inventory-ui/spec.md),
+[phase 15 spec](../../2026-11-05-phase-15-menus-and-inventory-ui/spec.md),
 which decided the owned-inventory policies this ticket deferred
-([decisions](../../2026-11-05-phase-13.1-menus-and-inventory-ui/decisions.md))
+([decisions](../../2026-11-05-phase-15-menus-and-inventory-ui/decisions.md))
 and built them as roadmap step 15. Closed here; see
 [ADR-0023](../../../docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).

@@ -1,4 +1,4 @@
-# Phase 13.1 decisions, before the spec
+# Phase 15 decisions, before the spec
 
 Taken with the maintainer on 2026-11-05, ahead of `/to-spec`. The spec cites
 these; it does not reopen them.

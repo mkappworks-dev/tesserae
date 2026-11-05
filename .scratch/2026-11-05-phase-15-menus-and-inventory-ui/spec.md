@@ -1,6 +1,6 @@
 Status: ready-for-agent
 
-# Phase 13.1: Menus, Inventory and the Survival loop
+# Phase 15: Menus, Inventory and the Survival loop
 
 The approved menu and HUD prototype, DESIGN.md roadmap step 15 (Inventory) and
 step 21 (Survival loop), built together on one branch. Stacked on phase 13

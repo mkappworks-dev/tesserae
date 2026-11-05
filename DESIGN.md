@@ -618,7 +618,7 @@ Notes:
   has its own food as a surface feature of its Biomes: the terra melon, meadow
   pumpkin, ember pepper, tidewater coconut and lumen glowberry. Lava hurts on
   contact in terra and in `hearth`. Spec and tickets:
-  `.scratch/2026-11-05-phase-13.1-menus-and-inventory-ui/`.
+  `.scratch/2026-11-05-phase-15-menus-and-inventory-ui/`.
 - **Step 10** is the gate for "ready for Mods" and has no dependency on the
   later gameplay systems. Folder loading and versioned WIT contracts already
   exist; this step completes the authoring workflow, starting with data-only
