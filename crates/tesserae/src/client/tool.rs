@@ -16,6 +16,7 @@ use super::aim::{Sent, Target};
 use super::camera::FlyCamera;
 use super::edit::{Catalogue, Holding, Hotbar};
 use crate::server::tool::{ToolKind, UseIntent, UseOutcome, UseResult, UseTarget};
+use crate::server::vitals::EatIntent;
 use crate::world::WorldSettings;
 
 /// The corners the Server resolved: one being placed and one finished.
@@ -107,14 +108,20 @@ fn measuring(hotbar: &Hotbar, catalogue: &Catalogue) -> bool {
 }
 
 /// Remove uses the held tool and Place clears it; the keys that mean the same
-/// do too. Like an Edit, nothing is sent by the click that grabs the cursor.
+/// do too. Use with a hotbar stack in hand asks to eat it, and the Server
+/// judges whether it is food. Like an Edit, nothing is sent by the click that
+/// grabs the cursor.
 pub(super) fn use_tool(
     (ownership, actions): (Res<super::input::Ownership>, Res<super::actions::Actions>),
     cursor: Single<&CursorOptions, With<PrimaryWindow>>,
     camera: Single<&GlobalTransform, With<FlyCamera>>,
     hotbar: Res<Hotbar>,
     (target, sent, time): (Res<Target>, Res<Sent>, Res<Time>),
-    (mut measurement, mut intents): (ResMut<Measurement>, MessageWriter<UseIntent>),
+    (mut measurement, mut intents, mut eat): (
+        ResMut<Measurement>,
+        MessageWriter<UseIntent>,
+        MessageWriter<EatIntent>,
+    ),
     mut was_grabbed: Local<bool>,
 ) {
     use super::actions::Action;
@@ -124,6 +131,12 @@ pub(super) fn use_tool(
         return;
     }
     let Holding::Tool(tool) = hotbar.held() else {
+        if actions.started(Action::Use)
+            && hotbar.outside.is_none()
+            && hotbar.stacks[hotbar.selected].is_some()
+        {
+            eat.write(EatIntent);
+        }
         return;
     };
     if actions.started(Action::ClearTool) || actions.started(Action::Place) {
@@ -364,6 +377,7 @@ mod tests {
             .init_resource::<Measurement>()
             .add_message::<UseIntent>()
             .add_message::<UseOutcome>()
+            .add_message::<EatIntent>()
             .add_systems(Update, (use_tool, accept).chain());
         app.insert_resource(Catalogue(catalogue()));
         app.world_mut().resource_mut::<Hotbar>().outside = Some(held);
@@ -514,6 +528,42 @@ mod tests {
                 assert!(frame(&mut app, key, button).is_empty(), "{held:?}");
             }
         }
+    }
+
+    fn eats(app: &mut App, key: Option<KeyCode>, button: Option<MouseButton>) -> usize {
+        frame(app, key, button);
+        app.world_mut()
+            .resource_mut::<Messages<EatIntent>>()
+            .drain()
+            .count()
+    }
+
+    #[test]
+    fn use_with_an_item_from_the_hotbar_in_hand_asks_to_eat_it() {
+        let mut app = app(Holding::Empty);
+        let mut hotbar = app.world_mut().resource_mut::<Hotbar>();
+        hotbar.outside = None;
+        hotbar.stacks[0] = Some(tesserae_core::inventory::Stack {
+            item: "m:bread".into(),
+            count: 1,
+        });
+        assert_eq!(eats(&mut app, Some(KeyCode::KeyG), None), 1);
+        assert_eq!(eats(&mut app, None, Some(MouseButton::Left)), 0);
+
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Empty);
+        assert_eq!(
+            eats(&mut app, Some(KeyCode::KeyG), None),
+            0,
+            "hand put aside"
+        );
+        let mut hotbar = app.world_mut().resource_mut::<Hotbar>();
+        hotbar.outside = None;
+        hotbar.selected = 1;
+        assert_eq!(
+            eats(&mut app, Some(KeyCode::KeyG), None),
+            0,
+            "an empty slot"
+        );
     }
 
     #[test]

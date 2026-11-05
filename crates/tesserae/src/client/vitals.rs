@@ -1,5 +1,6 @@
-//! The Vitals in Survival: health tiles left and the air row above the hunger
-//! side over the hotbar, a vignette at low health and a flash when hurt.
+//! The Vitals in Survival: health tiles left, hunger tiles right and the air
+//! row above hunger over the hotbar, a vignette at low health and a flash when
+//! hurt.
 //! Drawn from Server messages only
 //! (`docs/adr/0002-client-server-from-day-one.md`).
 
@@ -24,6 +25,7 @@ const THROB_S: f32 = 0.8;
 const THROB_PX: f32 = 2.0;
 
 const HEALTH: Color = Color::srgb_u8(0xc8, 0x64, 0x5a);
+const HUNGER: Color = Color::srgb_u8(0xc9, 0xa3, 0x5a);
 const AIR: Color = Color::srgb_u8(0x8f, 0xb6, 0xc9);
 const EMPTY: Color = Color::srgb_u8(0x1a, 0x1b, 0x1e);
 const TILE_EDGE: Color = Color::srgb_u8(5, 5, 6);
@@ -50,11 +52,12 @@ struct Shown {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Health,
+    Hunger,
     Air,
 }
 
 /// One tile, counted from the row's outer end: the left for health, the right
-/// for air.
+/// for hunger and air.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 struct Tile(Kind, usize);
 
@@ -66,9 +69,9 @@ enum Fill {
     Full,
 }
 
-/// Tiles per row, health then air.
+/// Tiles per row: health, hunger and air.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
-struct Rows(usize, usize);
+struct Rows(usize, usize, usize);
 
 #[derive(Component)]
 struct AirRow;
@@ -142,10 +145,13 @@ fn build(
     mut anchors: Query<(Entity, &mut Node, Option<&Children>), With<VitalsAnchor>>,
     built: Query<&Rows>,
 ) {
-    let wanted = shown
-        .last
-        .filter(|_| mode.survival())
-        .map(|last| Rows(tiles(last.full.health), tiles(2.0 * last.full.air_s)));
+    let wanted = shown.last.filter(|_| mode.survival()).map(|last| {
+        Rows(
+            tiles(last.full.health),
+            tiles(last.full.hunger),
+            tiles(2.0 * last.full.air_s),
+        )
+    });
     for (anchor, mut node, children) in &mut anchors {
         let display = if wanted.is_some() {
             Display::Flex
@@ -202,13 +208,11 @@ fn spawn_rows(parent: &mut ChildSpawnerCommands, rows: Rows) {
                 .with_children(|air| {
                     air.spawn((tiles(FlexDirection::RowReverse), Pickable::IGNORE))
                         .with_children(|air| {
-                            for at in 0..rows.1 {
+                            for at in 0..rows.2 {
                                 tile(air, Tile(Kind::Air, at));
                             }
                         });
                 });
-            // The hunger side stays empty until hunger is drawn; the air row
-            // above it already holds its place.
             rows_node
                 .spawn((row(JustifyContent::SpaceBetween), Pickable::IGNORE))
                 .with_children(|main| {
@@ -218,13 +222,19 @@ fn spawn_rows(parent: &mut ChildSpawnerCommands, rows: Rows) {
                                 tile(health, Tile(Kind::Health, at));
                             }
                         });
+                    main.spawn((tiles(FlexDirection::RowReverse), Pickable::IGNORE))
+                        .with_children(|hunger| {
+                            for at in 0..rows.1 {
+                                tile(hunger, Tile(Kind::Hunger, at));
+                            }
+                        });
                 });
         });
 }
 
 fn tile(parent: &mut ChildSpawnerCommands, tile: Tile) {
     let radius = match tile.0 {
-        Kind::Health => BorderRadius::all(Val::Px(2.0)),
+        Kind::Health | Kind::Hunger => BorderRadius::all(Val::Px(2.0)),
         Kind::Air => BorderRadius::all(Val::Percent(50.0)),
     };
     parent
@@ -290,6 +300,7 @@ fn paint(
     for (tile, mut shown_fill, mut background, mut gradient, mut transform) in &mut tiles {
         let (points, color, angle) = match tile.0 {
             Kind::Health => (last.vitals.health, HEALTH, LinearGradient::TO_BOTTOM_RIGHT),
+            Kind::Hunger => (last.vitals.hunger, HUNGER, LinearGradient::TO_BOTTOM_LEFT),
             Kind::Air => (2.0 * last.vitals.air_s, AIR, LinearGradient::TO_BOTTOM_LEFT),
         };
         let now = fill(points, tile.1);
@@ -512,6 +523,26 @@ mod tests {
             fills(&mut app, Kind::Health).is_empty(),
             "hidden in the menu"
         );
+    }
+
+    #[test]
+    fn hunger_is_drawn_from_the_right_beside_health() {
+        let mut app = app();
+        mode(&mut app, GameMode::Survival);
+        app.world_mut().write_message(VitalsChanged {
+            vitals: Vitals {
+                hunger: 7.0,
+                ..FULL
+            },
+            full: Vitals {
+                hunger: 12.0,
+                ..FULL
+            },
+            cause: None,
+        });
+        app.update();
+        assert_eq!(fills(&mut app, Kind::Hunger), [F, F, F, H, E, E]);
+        assert_eq!(fills(&mut app, Kind::Health), [F; 10]);
     }
 
     #[test]

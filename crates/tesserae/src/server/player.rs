@@ -225,6 +225,11 @@ impl Player {
         let v = std::mem::take(&mut self.impact_mps);
         v * v / (2.0 * GRAVITY_MPS2)
     }
+    /// Sprint held and the body travelling, not merely the key down.
+    pub(in crate::server) fn sprinting(&self) -> bool {
+        const STANDING_MPS: f32 = 0.1;
+        self.body_state().sprinting && self.travel_mps.with_y(0.0).length() > STANDING_MPS
+    }
     pub(in crate::server) fn eye_submerged(&self) -> bool {
         self.immersion
             .is_some_and(|fluid| self.eye.y < fluid.surface_y_m)

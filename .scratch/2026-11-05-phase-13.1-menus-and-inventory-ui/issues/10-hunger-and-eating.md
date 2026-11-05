@@ -1,6 +1,6 @@
 # 10: Hunger and eating
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 09
 
@@ -12,6 +12,6 @@ Survival Players get hunger. It drains per minute, faster while sprinting; healt
 
 ## Acceptance criteria
 
-- [ ] Idle and sprinting drain at the declared rates; regeneration and starvation happen at their thresholds.
-- [ ] Eating spends one food Item and refills hunger, capped at the maximum; eating when full is refused.
-- [ ] Creative Players' hunger does not drain.
+- [x] Idle and sprinting drain at the declared rates; regeneration and starvation happen at their thresholds.
+- [x] Eating spends one food Item and refills hunger, capped at the maximum; eating when full is refused.
+- [x] Creative Players' hunger does not drain.
