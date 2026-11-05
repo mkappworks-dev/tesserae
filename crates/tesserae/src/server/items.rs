@@ -15,6 +15,10 @@ impl Items {
             .iter()
             .position(|item| item.material == Some(material))
     }
+
+    pub fn named(&self, name: &str) -> Option<usize> {
+        self.0.iter().position(|item| item.name == name)
+    }
 }
 
 #[cfg(test)]

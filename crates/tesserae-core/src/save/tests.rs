@@ -1122,4 +1122,31 @@ mod dropped_items {
             Err(Error::Incompatible(_))
         ));
     }
+
+    #[test]
+    fn an_inventory_is_saved_by_slot_and_item_name_and_an_empty_stack_is_corrupt() {
+        let mut player = fixture().player;
+        let hotbar = vec![serde_json::Value::Null; 9];
+        let mut backpack = vec![serde_json::Value::Null; 27];
+        backpack[3] = serde_json::json!({"item": "t:rock", "count": 12});
+        let saved = |backpack: &[serde_json::Value]| serde_json::json!({"hotbar": hotbar.clone(), "backpack": backpack});
+        player
+            .extensions
+            .insert("inventory_v1".into(), saved(&backpack));
+        let read = player.get::<InventoryV1>().unwrap().unwrap().0;
+        assert_eq!(read.backpack()[3].as_ref().unwrap().item, "t:rock");
+        assert_eq!(read.slots().flatten().map(|s| s.count).sum::<u32>(), 12);
+        assert_eq!(
+            serde_json::to_value(InventoryV1(read)).unwrap(),
+            saved(&backpack)
+        );
+        backpack[3]["count"] = 0.into();
+        player
+            .extensions
+            .insert("inventory_v1".into(), saved(&backpack));
+        assert!(matches!(
+            player.get::<InventoryV1>(),
+            Err(Error::Corrupt(_))
+        ));
+    }
 }

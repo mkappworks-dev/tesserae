@@ -1,6 +1,6 @@
 # 02: Pickup fills a Server-owned Inventory
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01
 
@@ -12,8 +12,8 @@ Pickup puts Items into slots. A pure Inventory module in `tesserae-core` holds 2
 
 ## Acceptance criteria
 
-- [ ] Pickup merges into matching stacks first, then empty slots, hotbar before backpack.
-- [ ] A Pickup into a full Inventory takes what fits; the rest stays as a Dropped item with the reduced count, and the notice names it.
-- [ ] The Inventory survives save and reopen; a phase 13 save with Carried opens with those Items in slots and the overflow dropped beside the Player, and Carried is not written again.
-- [ ] The pickup feed and the notice follow Server messages only; no Client system changes the Inventory.
-- [ ] Unit tests cover the Inventory module's fit and merge rules; Server tests cover Pickup through the headless App.
+- [x] Pickup merges into matching stacks first, then empty slots, hotbar before backpack.
+- [x] A Pickup into a full Inventory takes what fits; the rest stays as a Dropped item with the reduced count, and the notice names it.
+- [x] The Inventory survives save and reopen; a phase 13 save with Carried opens with those Items in slots and the overflow dropped beside the Player, and Carried is not written again.
+- [x] The pickup feed and the notice follow Server messages only; no Client system changes the Inventory.
+- [x] Unit tests cover the Inventory module's fit and merge rules; Server tests cover Pickup through the headless App.

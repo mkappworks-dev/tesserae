@@ -32,6 +32,7 @@ mod overlay;
 mod pad;
 mod palette;
 mod pick;
+mod pickup;
 mod pose;
 pub(crate) mod presentation;
 mod preview;
@@ -100,6 +101,7 @@ pub fn plugin(app: &mut App) {
         layout::plugin,
         layout_menu::plugin,
         drops::plugin,
+        pickup::plugin,
     ));
     app.add_session_systems(
         Update,

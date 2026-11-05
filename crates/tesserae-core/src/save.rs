@@ -419,13 +419,30 @@ impl PlayerExtension for MovementV1 {
     }
 }
 
-/// What Pickup collected, by Item name.
+/// What Pickup collected before the Inventory, by Item name. Opened, never
+/// written.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct CarriedV1(pub BTreeMap<String, u32>);
 
 impl PlayerExtension for CarriedV1 {
     const KEY: &'static str = "carried_v1";
+}
+
+/// The Player's Inventory, by slot.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct InventoryV1(pub crate::inventory::Inventory);
+
+impl PlayerExtension for InventoryV1 {
+    const KEY: &'static str = "inventory_v1";
+
+    fn validate(&self) -> Result<(), Error> {
+        if self.0.slots().flatten().any(|s| s.count == 0) {
+            return Err(Error::Corrupt("an Inventory slot holds no Items".into()));
+        }
+        Ok(())
+    }
 }
 
 impl Player {

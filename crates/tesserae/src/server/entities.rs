@@ -4,17 +4,15 @@
 //! which then falls and rests on the logical step. The motion is
 //! `tesserae_core::entity`; this plugin only feeds it the World.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use tesserae_core::entity::{DropSpec, Entities, EntityId, WorldEntity};
-use tesserae_core::save::CarriedV1;
 
 use super::ContentTables;
 use super::edit::{self, VoxelRemoved};
+use super::inventory::{Inventory, MAX_STACK};
 use super::items::Items;
-use super::persistence::extensions::PlayerState;
 use super::player::Player;
 use super::world_state::ChunkStore;
 use crate::session::SessionApp;
@@ -26,12 +24,6 @@ pub const PICKUP_RADIUS_M: f32 = 1.5;
 
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct EntityStore(pub Entities);
-
-/// What a Player holds after Pickup, by Item name. The smallest sink that makes
-/// Pickup observable, not an inventory: no slots, no limits, no way to put an
-/// item down. Step 15 replaces it.
-#[derive(Component, Default, Clone, PartialEq, Debug)]
-pub struct Carried(pub BTreeMap<String, u32>);
 
 /// What the Client is told about one entity.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -67,9 +59,19 @@ pub enum EntityDelta {
     Removed(EntityId),
 }
 
-/// The Player's whole Carried count, sent whenever it changes.
+/// One drop's Pickup: what the Inventory took and what stayed on the ground.
 #[derive(Message, Clone, PartialEq, Debug)]
-pub struct CarriedChanged(pub BTreeMap<String, u32>);
+pub struct Pickup {
+    pub item: String,
+    pub taken: u32,
+    pub left: u32,
+}
+
+/// Drops the Client was told the Inventory had no room for, with the count
+/// left then. Cleared when the Inventory changes, so standing by a drop tells
+/// once and making room tells again.
+#[derive(Resource, Default)]
+pub(super) struct Refused(HashMap<EntityId, u32>);
 
 /// What the Client was last told, so each tick sends only the difference.
 #[derive(Resource, Default)]
@@ -79,31 +81,18 @@ pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<EntityStore>()
         .init_session_resource::<Items>()
         .init_session_resource::<Announced>()
+        .init_session_resource::<Refused>()
         .add_session_message::<EntityDelta>()
-        .add_session_message::<CarriedChanged>()
+        .add_session_message::<Pickup>()
         .add_session_systems(
             FixedPreUpdate,
             (
                 (spawn_drops, step_entities, pick_up).run_if(super::persistence::playing),
                 announce_entities,
-                announce_carried,
             )
                 .chain()
                 .after(edit::apply_pending),
         );
-}
-
-impl PlayerState for CarriedV1 {
-    fn capture(player: EntityRef) -> Option<Self> {
-        player
-            .get::<Carried>()
-            .filter(|c| !c.0.is_empty())
-            .map(|c| CarriedV1(c.0.clone()))
-    }
-
-    fn restore(self, player: &mut EntityCommands) {
-        player.insert(Carried(self.0));
-    }
 }
 
 fn spawn_drops(
@@ -156,35 +145,56 @@ fn distance_to_box(point: [f32; 3], body: &tesserae_core::collide::Aabb) -> f32 
         .sqrt()
 }
 
-fn pick_up(
+pub(super) fn pick_up(
     mut entities: ResMut<EntityStore>,
     items: Res<Items>,
-    mut player: Single<(&Player, &mut Carried)>,
+    mut player: Single<(&Player, &mut Inventory)>,
+    mut refused: ResMut<Refused>,
+    mut told: MessageWriter<Pickup>,
 ) {
     if entities.is_empty() {
         return;
     }
-    let (player, carried) = &mut *player;
+    let (player, inventory) = &mut *player;
+    if inventory.is_changed() {
+        refused.0.clear();
+    }
     let body = player.body();
-    let taken: Vec<_> = entities
+    let near: Vec<_> = entities
         .iter()
         .filter(|e| {
             let d = e.as_dropped();
             d.pickup_in == 0 && distance_to_box(d.pos_m, &body) <= PICKUP_RADIUS_M
         })
-        .map(|e| e.id)
+        .map(|e| (e.id, e.as_dropped().item, e.as_dropped().count))
         .collect();
-    for id in taken {
-        let Some(gone) = entities.remove(id) else {
+    for (id, item, count) in near {
+        let Some(item) = items.0.get(item as usize) else {
             continue;
         };
-        let d = gone.as_dropped();
-        let Some(item) = items.0.get(d.item as usize) else {
+        // Bypassed so a Pickup with no room leaves the Inventory unchanged,
+        // which is what keeps a refusal from being told every tick.
+        let left = inventory
+            .bypass_change_detection()
+            .receive(&item.name, count, MAX_STACK);
+        let taken = count - left;
+        if taken > 0 {
+            inventory.set_changed();
+            entities.take(id, taken);
+            refused.0.clear();
+        } else if refused.0.get(&id) == Some(&left) {
             continue;
-        };
-        let held = carried.0.entry(item.name.clone()).or_insert(0);
-        *held = held.saturating_add(d.count);
+        }
+        if left > 0 {
+            refused.0.insert(id, left);
+        }
+        told.write(Pickup {
+            item: item.name.clone(),
+            taken,
+            left,
+        });
     }
+    refused.0.retain(|id, _| entities.get(*id).is_some());
 }
 
 fn announce_entities(
@@ -216,15 +226,12 @@ fn announce_entities(
     });
 }
 
-fn announce_carried(carried: Single<Ref<Carried>>, mut changed: MessageWriter<CarriedChanged>) {
-    if carried.is_changed() {
-        changed.write(CarriedChanged(carried.0.clone()));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use bevy::ecs::system::RunSystemOnce;
+    use tesserae_core::inventory::Stack;
+
+    use super::super::inventory::{InventoryChanged, announce_inventory};
     use tesserae_mods::ItemDef;
 
     use super::super::edit::tests::{app_with, down, ground, send, stone, tick, voxel_at};
@@ -243,7 +250,9 @@ mod tests {
     fn game() -> App {
         let mut app = app_with(&[(Default::default(), ground())]);
         app.insert_resource(dropping_stone());
-        app.init_resource::<EntityStore>();
+        app.init_resource::<EntityStore>()
+            .init_resource::<Refused>()
+            .add_message::<Pickup>();
         app
     }
 
@@ -311,9 +320,25 @@ mod tests {
         assert!((drop.pos_m[1] - (7.0 + 0.125)).abs() < 0.2, "{drop:?}");
     }
 
-    fn carried(app: &mut App) -> BTreeMap<String, u32> {
-        let mut q = app.world_mut().query::<&Carried>();
+    fn inventory(app: &mut App) -> tesserae_core::inventory::Inventory {
+        let mut q = app.world_mut().query::<&Inventory>();
         q.single(app.world()).unwrap().0.clone()
+    }
+
+    fn give(app: &mut App, item: &str, count: u32) {
+        let mut q = app.world_mut().query::<&mut Inventory>();
+        let left = q
+            .single_mut(app.world_mut())
+            .unwrap()
+            .receive(item, count, 64);
+        assert_eq!(left, 0);
+    }
+
+    fn pickups(app: &mut App) -> Vec<Pickup> {
+        app.world_mut()
+            .resource_mut::<Messages<Pickup>>()
+            .drain()
+            .collect()
     }
 
     fn deltas(app: &mut App) -> Vec<EntityDelta> {
@@ -333,28 +358,77 @@ mod tests {
         super::super::edit::tests::set_eye(app, Vec3::new(5.5, 9.0, 5.5));
     }
 
+    /// A resting drop of `count` rocks where the Player can reach it.
+    fn rocks_at_hand(app: &mut App, count: u32) -> EntityId {
+        let id = app
+            .world_mut()
+            .resource_scope(|world, mut entities: Mut<EntityStore>| {
+                let tables = world.resource::<ContentTables>();
+                entities.spawn_drop(
+                    world.resource::<ChunkStore>(),
+                    &tables.0,
+                    1.0,
+                    [5, 8, 5],
+                    DropSpec {
+                        item: 0,
+                        count,
+                        size_m: 0.25,
+                    },
+                )
+            });
+        after_the_pickup_delay(app);
+        near_the_drop(app);
+        id
+    }
+
     fn game_with_messages() -> App {
         let mut app = game();
         app.init_resource::<Announced>()
             .add_message::<EntityDelta>()
-            .add_message::<CarriedChanged>();
+            .add_message::<InventoryChanged>();
         app
     }
 
+    fn rock(count: u32) -> Option<Stack> {
+        Some(Stack {
+            item: "t:rock".into(),
+            count,
+        })
+    }
+
     #[test]
-    fn a_drop_near_the_player_is_picked_up_into_carried_after_its_delay() {
+    fn a_drop_near_the_player_is_picked_up_into_the_inventory_after_its_delay() {
         let mut app = game();
         remove_the_ground(&mut app);
         near_the_drop(&mut app);
         app.world_mut().run_system_once(pick_up).unwrap();
-        assert!(carried(&mut app).is_empty(), "before the delay");
+        assert!(inventory(&mut app).is_empty(), "before the delay");
         assert_eq!(drops(&app), 1);
+        assert!(pickups(&mut app).is_empty());
         after_the_pickup_delay(&mut app);
         app.world_mut().run_system_once(pick_up).unwrap();
+        assert_eq!(inventory(&mut app).hotbar()[0], rock(1));
+        assert_eq!(drops(&app), 0);
         assert_eq!(
-            carried(&mut app),
-            BTreeMap::from([("t:rock".to_owned(), 1)])
+            pickups(&mut app),
+            [Pickup {
+                item: "t:rock".into(),
+                taken: 1,
+                left: 0
+            }]
         );
+    }
+
+    #[test]
+    fn pickup_merges_into_a_matching_stack_before_an_empty_slot() {
+        let mut app = game();
+        give(&mut app, "t:dust", 64 * 2);
+        give(&mut app, "t:rock", 60);
+        rocks_at_hand(&mut app, 10);
+        app.world_mut().run_system_once(pick_up).unwrap();
+        let held = inventory(&mut app);
+        assert_eq!(held.hotbar()[2], rock(64));
+        assert_eq!(held.hotbar()[3], rock(6));
         assert_eq!(drops(&app), 0);
     }
 
@@ -365,23 +439,53 @@ mod tests {
         after_the_pickup_delay(&mut app);
         super::super::edit::tests::set_eye(&mut app, Vec3::new(40.5, 12.0, 5.5));
         app.world_mut().run_system_once(pick_up).unwrap();
-        assert!(carried(&mut app).is_empty());
+        assert!(inventory(&mut app).is_empty());
         assert_eq!(drops(&app), 1);
     }
 
     #[test]
-    fn a_whole_stack_is_taken_and_counts_saturate() {
+    fn pickup_into_a_full_inventory_takes_what_fits_and_leaves_a_smaller_drop() {
         let mut app = game();
-        remove_the_ground(&mut app);
-        after_the_pickup_delay(&mut app);
-        near_the_drop(&mut app);
-        let mut q = app.world_mut().query::<&mut Carried>();
-        q.single_mut(app.world_mut())
-            .unwrap()
-            .0
-            .insert("t:rock".into(), u32::MAX);
+        give(&mut app, "t:dust", 64 * 35);
+        give(&mut app, "t:rock", 60);
+        let id = rocks_at_hand(&mut app, 10);
         app.world_mut().run_system_once(pick_up).unwrap();
-        assert_eq!(carried(&mut app)["t:rock"], u32::MAX);
+        assert_eq!(inventory(&mut app).backpack()[26], rock(64));
+        let left = app.world().resource::<EntityStore>().get(id).unwrap();
+        assert_eq!(left.as_dropped().count, 6);
+        assert_eq!(
+            pickups(&mut app),
+            [Pickup {
+                item: "t:rock".into(),
+                taken: 4,
+                left: 6
+            }]
+        );
+    }
+
+    #[test]
+    fn a_refused_pickup_is_told_once_until_the_inventory_changes() {
+        let mut app = game();
+        give(&mut app, "t:dust", 64 * 36);
+        let id = rocks_at_hand(&mut app, 3);
+        // A schedule keeps the system's last-run tick; `run_system_once` builds
+        // a fresh one every call, which would see the Inventory as changed.
+        let mut schedule = Schedule::default();
+        schedule.add_systems(pick_up);
+        let refused = Pickup {
+            item: "t:rock".into(),
+            taken: 0,
+            left: 3,
+        };
+        schedule.run(app.world_mut());
+        assert_eq!(pickups(&mut app), std::slice::from_ref(&refused));
+        assert!(app.world().resource::<EntityStore>().get(id).is_some());
+        schedule.run(app.world_mut());
+        assert!(pickups(&mut app).is_empty(), "standing by it says nothing");
+        let mut q = app.world_mut().query::<&mut Inventory>();
+        q.single_mut(app.world_mut()).unwrap().set_changed();
+        schedule.run(app.world_mut());
+        assert_eq!(pickups(&mut app), [refused]);
     }
 
     #[test]
@@ -420,27 +524,21 @@ mod tests {
     }
 
     #[test]
-    fn carried_is_sent_when_it_changes_and_not_otherwise() {
+    fn the_inventory_is_sent_when_it_changes_and_not_otherwise() {
         let mut app = game_with_messages();
-        // A schedule keeps the system's last-run tick; `run_system_once` builds
-        // a fresh one every call, which would see everything as changed.
         let mut schedule = Schedule::default();
-        schedule.add_systems(announce_carried);
+        schedule.add_systems(announce_inventory);
         let mut sent = |app: &mut App| {
             schedule.run(app.world_mut());
             app.world_mut()
-                .resource_mut::<Messages<CarriedChanged>>()
+                .resource_mut::<Messages<InventoryChanged>>()
                 .drain()
-                .count()
+                .collect::<Vec<_>>()
         };
-        assert_eq!(sent(&mut app), 1, "the first tick tells the Client");
-        assert_eq!(sent(&mut app), 0);
-        let mut q = app.world_mut().query::<&mut Carried>();
-        q.single_mut(app.world_mut())
-            .unwrap()
-            .0
-            .insert("t:rock".into(), 1);
-        assert_eq!(sent(&mut app), 1);
-        assert_eq!(sent(&mut app), 0);
+        assert_eq!(sent(&mut app).len(), 1, "the first tick tells the Client");
+        assert!(sent(&mut app).is_empty());
+        give(&mut app, "t:rock", 2);
+        assert_eq!(sent(&mut app), [InventoryChanged(inventory(&mut app))]);
+        assert!(sent(&mut app).is_empty());
     }
 }

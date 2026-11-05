@@ -170,6 +170,19 @@ impl Entities {
         gone
     }
 
+    /// Takes `count` from a drop, despawning it once nothing is left.
+    pub fn take(&mut self, id: EntityId, count: u32) {
+        let Some(entity) = self.all.get_mut(&id) else {
+            return;
+        };
+        let d = entity.dropped();
+        d.count = d.count.saturating_sub(count);
+        if d.count == 0 {
+            self.all.remove(&id);
+        }
+        self.revision += 1;
+    }
+
     /// Spawns a drop of `count` of `item` at the centre of the Voxel `at`,
     /// popping out in a direction fixed by its id and the step. A drop that
     /// would start inside solid terrain is lifted clear of it, by at most a
@@ -623,6 +636,24 @@ mod tests {
         assert!(e.get(b).is_none());
         assert_eq!(e.get(a).unwrap().as_dropped().count, 2);
         assert!(e.get(other).is_some());
+    }
+
+    #[test]
+    fn taking_part_of_a_drop_leaves_the_rest_and_taking_all_despawns_it() {
+        let grid = Grid::floor();
+        let mut e = Entities::default();
+        let spec = DropSpec {
+            item: 0,
+            count: 5,
+            size_m: 0.25,
+        };
+        let id = e.spawn_drop(&grid, tables(), SIZE, [3, 1, 3], spec);
+        let revision = e.revision();
+        e.take(id, 2);
+        assert_eq!(e.get(id).unwrap().as_dropped().count, 3);
+        assert!(e.revision() > revision, "a save must notice");
+        e.take(id, 3);
+        assert!(e.get(id).is_none());
     }
 
     #[test]

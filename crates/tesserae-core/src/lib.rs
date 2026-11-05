@@ -15,6 +15,7 @@ pub mod fire;
 pub mod flow;
 pub mod fluid;
 pub mod immersion;
+pub mod inventory;
 pub mod layout;
 pub mod light;
 pub mod lod;

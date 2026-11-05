@@ -124,7 +124,7 @@ pub struct RespawnIntent;
 pub struct RestoreView(pub f32, pub f32);
 
 #[derive(Component, Debug)]
-#[require(super::entities::Carried)]
+#[require(super::inventory::Inventory)]
 pub struct Player {
     eye: Vec3,
     mode: MovementMode,

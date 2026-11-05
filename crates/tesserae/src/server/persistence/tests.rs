@@ -1,5 +1,6 @@
 use super::*;
-use crate::server::{ContentTables, edit, entities::Carried, streaming::MeshState, undo::Journal};
+use crate::server::inventory::Inventory;
+use crate::server::{ContentTables, edit, streaming::MeshState, undo::Journal};
 use bevy::ecs::message::Messages;
 use bevy::ecs::system::EntityCommands;
 use std::time::{Duration, Instant};
@@ -841,7 +842,7 @@ fn the_writer_lock_is_free_as_soon_as_the_session_ends() {
 }
 
 #[test]
-fn dropped_items_and_carried_survive_save_and_reopen() {
+fn dropped_items_and_the_inventory_survive_save_and_reopen() {
     use tesserae_core::entity::DropSpec;
     let dir = Directory::new();
     let mut rig = Rig::new(&dir);
@@ -864,12 +865,10 @@ fn dropped_items_and_carried_survive_save_and_reopen() {
                 entities.step(store, &tables.0, 1.0);
             }
         });
-    let mut carried = rig.app.world_mut().query::<&mut Carried>();
-    carried
-        .single_mut(rig.app.world_mut())
+    let mut held = rig.app.world_mut().query::<&mut Inventory>();
+    held.single_mut(rig.app.world_mut())
         .unwrap()
-        .0
-        .insert("terra:rock".into(), 7);
+        .receive("terra:rock", 7, 64);
     let before: Vec<_> = rig
         .app
         .world()
@@ -884,10 +883,8 @@ fn dropped_items_and_carried_survive_save_and_reopen() {
 
     let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
     assert_eq!(commit.entities.dropped.len(), 2);
-    assert_eq!(
-        commit.player.get::<save::CarriedV1>().unwrap().unwrap().0["terra:rock"],
-        7
-    );
+    let saved = commit.player.get::<save::InventoryV1>().unwrap().unwrap().0;
+    assert_eq!(saved.hotbar()[0].as_ref().unwrap().count, 7);
 
     let reopened = Rig::new(&dir);
     let after: Vec<_> = reopened
@@ -913,17 +910,69 @@ fn dropped_items_and_carried_survive_save_and_reopen() {
             .zip(&before)
             .all(|(a, b)| a.1.steps_left <= b.1.steps_left)
     );
-    let mut q = reopened
+    assert_eq!(inventory(&reopened), saved);
+}
+
+fn inventory(rig: &Rig) -> tesserae_core::inventory::Inventory {
+    let mut q = rig.app.world().try_query::<&Inventory>().unwrap();
+    q.single(rig.app.world()).unwrap().0.clone()
+}
+
+#[test]
+fn a_save_with_carried_opens_packed_into_slots_with_the_overflow_dropped_beside_the_player() {
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    rig.settled_save();
+    drop(rig);
+    let mut commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    commit.player.extensions.insert(
+        "carried_v1".into(),
+        serde_json::json!({"terra:rock": 36 * 64 + 6}),
+    );
+    commit.sequence += 1;
+    Writer::acquire(&dir.0, &commit.world, &commit.content)
+        .unwrap()
+        .write(&commit)
+        .unwrap();
+
+    let mut reopened = Rig::new(&dir);
+    let packed = inventory(&reopened);
+    assert!(
+        packed
+            .slots()
+            .all(|s| s.as_ref().is_some_and(|s| s.count == 64))
+    );
+    let dropped: Vec<_> = reopened
         .app
         .world()
-        .try_query::<&Carried>()
-        .map(|mut q| {
-            q.iter(reopened.app.world())
-                .map(|c| c.0.clone())
-                .collect::<Vec<_>>()
-        })
-        .unwrap();
-    assert_eq!(q.pop().unwrap()["terra:rock"], 7);
+        .resource::<EntityStore>()
+        .iter()
+        .map(|e| *e.as_dropped())
+        .collect();
+    assert_eq!(dropped.len(), 1);
+    assert_eq!((dropped[0].item, dropped[0].count), (0, 6));
+    let eye = reopened
+        .app
+        .world_mut()
+        .query::<&Player>()
+        .single(reopened.app.world())
+        .unwrap()
+        .eye();
+    let beside = Vec3::from_array(dropped[0].pos_m).distance(eye);
+    assert!(beside < 2.0, "{beside} m from the Eye");
+    reopened.tick();
+    assert!(reopened.app.world().resource::<SaveStatus>().dirty);
+    reopened.settled_save();
+    drop(reopened);
+
+    let commit = save::inspect(&dir.0).unwrap().unwrap().commit;
+    assert!(!commit.player.extensions.contains_key("carried_v1"));
+    assert_eq!(
+        commit.player.get::<save::InventoryV1>().unwrap().unwrap().0,
+        packed
+    );
+    assert_eq!(commit.entities.dropped.len(), 1);
 }
 
 #[test]
