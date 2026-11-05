@@ -109,15 +109,6 @@ impl ContentCatalogue {
         self.shapes.iter().find(|s| s.id == id)
     }
 
-    /// The fluid declared first.
-    pub fn first_fluid(&self) -> Option<MaterialId> {
-        self.materials
-            .iter()
-            .filter_map(|m| Some((m.fluid?, m.id)))
-            .min()
-            .map(|(_, id)| id)
-    }
-
     pub fn anything_burns(&self) -> bool {
         self.materials.iter().any(|m| m.burns)
     }

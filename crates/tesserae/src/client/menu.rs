@@ -1,4 +1,4 @@
-//! Content tiles for quick picking and arranging the nine hotbar slots.
+//! Content tiles for quick picking into the Server's hotbar.
 //! Tab opens and closes the engine's menu; Escape closes it too.
 //!
 //! While it is open the cursor is free, so mouse look is off and a click edits
@@ -16,10 +16,11 @@ use bevy::ui_widgets::{Activate, Button, ScrollArea};
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use tesserae_core::{MaterialId, ShapeId};
 
-use super::edit::{Catalogue, Holding, Hotbar};
+use super::edit::{self, Catalogue, Holding, Hotbar};
 use crate::content::{ContentCatalogue, MaterialPalette};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
-use crate::server::tool::ToolId;
+use crate::server::inventory::InventoryIntent;
+use tesserae_core::inventory::Slot;
 
 #[derive(Resource, Default)]
 pub(super) struct Menu {
@@ -57,13 +58,8 @@ pub(super) fn closed(menu: Res<Menu>) -> bool {
 pub(super) enum Entry {
     /// Inspect this solid, initially as a cube.
     Material(MaterialId),
-    Solid {
-        material: MaterialId,
-        shape: ShapeId,
-    },
     Fluid(MaterialId),
     Fire,
-    Tool(ToolId),
     /// Selects this hotbar slot.
     Slot(usize),
 }
@@ -71,10 +67,8 @@ pub(super) enum Entry {
 impl Entry {
     pub(super) fn holding(self) -> Option<Holding> {
         match self {
-            Entry::Solid { material, shape } => Some(Holding::solid(material, shape)),
             Entry::Fluid(material) => Some(Holding::Fluid(material)),
             Entry::Fire => Some(Holding::Fire),
-            Entry::Tool(tool) => Some(Holding::Tool(tool)),
             Entry::Material(material) => {
                 Some(Holding::solid(material, tesserae_core::SHAPE_FULL_CUBE))
             }
@@ -131,10 +125,6 @@ pub(super) enum DetailAction {
     Assign(Holding),
 }
 #[derive(Component)]
-pub(super) struct PlayBarRoot;
-#[derive(Component)]
-struct HeldName;
-#[derive(Component)]
 pub(super) struct DragPreview;
 
 #[derive(Resource, Default)]
@@ -177,7 +167,6 @@ pub(super) fn plugin(app: &mut App) {
                 receive_palette,
                 rebuild.after(super::edit::send_intents),
                 rebuild_shapes,
-                rebuild_bar,
                 drag_preview,
                 highlight_tiles,
             )
@@ -264,6 +253,7 @@ fn choose(
     mut menu: ResMut<Menu>,
     mut hotbar: ResMut<Hotbar>,
     mut pointer: ResMut<PointerState>,
+    mut intents: MessageWriter<InventoryIntent>,
 ) {
     if pointer.suppress_click {
         return;
@@ -277,25 +267,25 @@ fn choose(
     match entry {
         Entry::Slot(slot) => {
             if let Some(holding) = pointer.assigning.take() {
-                hotbar.slots[slot] = holding;
+                edit::assign(slot, holding, &mut intents);
             } else {
-                hotbar.select(slot);
+                edit::select(&mut hotbar, slot, &mut intents);
                 pointer.item = None;
                 pointer.shape = None;
                 menu.material = None;
             }
         }
         _ => {
-            hotbar.outside = Some(if matches_content(hotbar.held(), entry) {
-                Holding::Empty
+            if matches_content(hotbar.held(), entry) {
+                hotbar.outside = Some(Holding::Empty);
             } else {
-                entry.holding().unwrap()
-            });
+                edit::hold(&mut hotbar, entry.holding().unwrap(), &mut intents);
+            }
             pointer.shape = None;
             pointer.item = entry.holding();
             pointer.pinned = true;
             pointer.assigning = None;
-            if let Entry::Material(material) | Entry::Solid { material, .. } = entry {
+            if let Entry::Material(material) = entry {
                 menu.material = Some(material);
             }
         }
@@ -309,6 +299,7 @@ fn detail_action(
     mut pointer: ResMut<PointerState>,
     mut hotbar: ResMut<Hotbar>,
     catalogue: Res<Catalogue>,
+    mut intents: MessageWriter<InventoryIntent>,
 ) {
     if !menu.open {
         return;
@@ -331,7 +322,7 @@ fn detail_action(
                     orientation,
                 };
                 pointer.item = Some(holding);
-                hotbar.outside = Some(holding);
+                edit::hold(&mut hotbar, holding, &mut intents);
             }
             pointer.pinned = true;
         }
@@ -403,7 +394,7 @@ fn hover(
         {
             state.item = Some(holding);
         }
-        if let Entry::Material(material) | Entry::Solid { material, .. } = entry
+        if let Entry::Material(material) = entry
             && !state.pinned
         {
             menu.material = Some(material);
@@ -436,7 +427,7 @@ fn drag_start(
     {
         state.drag = Some(entry);
         state.dragged = match entry {
-            Entry::Slot(slot) => Some(hotbar.slots[slot]),
+            Entry::Slot(slot) => Some(hotbar.slot(slot)),
             item => item.holding(),
         };
         state.cursor = event.pointer.position;
@@ -460,7 +451,7 @@ fn drop_on_slot(
     entries: Query<&Entry>,
     menu: Res<Menu>,
     mut state: ResMut<PointerState>,
-    mut hotbar: ResMut<Hotbar>,
+    mut intents: MessageWriter<InventoryIntent>,
 ) {
     if !menu.open || event.button != PointerButton::Primary {
         return;
@@ -473,10 +464,16 @@ fn drop_on_slot(
         .or_else(|| entries.get(event.dropped).ok().copied());
     if let Some(source) = source {
         match source {
-            Entry::Slot(from) => hotbar.slots.swap(from, target),
+            Entry::Slot(from) if from == target => {}
+            Entry::Slot(from) => {
+                intents.write(InventoryIntent::Move {
+                    from: Slot::Hotbar(from),
+                    to: Slot::Hotbar(target),
+                });
+            }
             item => {
                 if let Some(held) = item.holding() {
-                    hotbar.slots[target] = held;
+                    edit::assign(target, held, &mut intents);
                 }
             }
         }
@@ -583,93 +580,6 @@ fn rebuild_shapes(
                 detail(list, wanted.0, wanted.1, &catalogue.0);
             });
     }
-}
-
-pub(super) fn rebuild_bar(
-    mut commands: Commands,
-    menu: Res<Menu>,
-    hotbar: Res<Hotbar>,
-    catalogue: Res<Catalogue>,
-    roots: Query<Entity, With<PlayBarRoot>>,
-    settings: Option<Res<super::settings::Settings>>,
-    mut shown: Local<Option<Hotbar>>,
-) {
-    let menu_open = menu.open || settings.is_some_and(|s| s.open);
-    let wanted = (!menu_open).then(|| hotbar.clone());
-    if *shown == wanted && !catalogue.is_changed() {
-        return;
-    }
-    *shown = wanted;
-    for root in &roots {
-        commands.entity(root).despawn();
-    }
-    if menu_open {
-        return;
-    }
-    commands
-        .spawn((
-            PlayBarRoot,
-            Node {
-                position_type: PositionType::Absolute,
-                bottom: Val::Px(10.0),
-                width: Val::Percent(100.0),
-                flex_direction: FlexDirection::Column,
-                align_items: AlignItems::Center,
-                row_gap: Val::Px(6.0),
-                ..default()
-            },
-        ))
-        .with_children(|root| {
-            root.spawn((
-                HeldName,
-                Text::new(hotbar.held().describe(&catalogue.0)),
-                font(15.0),
-                Pickable::IGNORE,
-            ));
-            root.spawn(Node {
-                column_gap: Val::Px(5.0),
-                align_items: AlignItems::FlexStart,
-                ..default()
-            })
-            .with_children(|bar| {
-                for (slot, &holding) in hotbar.slots.iter().enumerate() {
-                    tile(
-                        bar,
-                        Entry::Slot(slot),
-                        &holding.tile_label(&catalogue.0),
-                        holding,
-                        hotbar.outside.is_none() && hotbar.selected == slot,
-                        Some(slot + 1),
-                        64.0,
-                    );
-                }
-                if let Some(held) = hotbar.outside {
-                    bar.spawn(Node {
-                        margin: UiRect::left(Val::Px(12.0)),
-                        ..default()
-                    })
-                    .with_children(|outside| {
-                        let entry = match held {
-                            Holding::Solid {
-                                material, shape, ..
-                            } => Entry::Solid { material, shape },
-                            Holding::Fluid(material) => Entry::Fluid(material),
-                            Holding::Tool(tool) => Entry::Tool(tool),
-                            _ => Entry::Fire,
-                        };
-                        tile(
-                            outside,
-                            entry,
-                            &held.tile_label(&catalogue.0),
-                            held,
-                            true,
-                            None,
-                            64.0,
-                        );
-                    });
-                }
-            });
-        });
 }
 
 fn font(size: f32) -> TextFont {
@@ -788,12 +698,12 @@ fn spawn_menu(
                         },
                     ))
                     .with_children(|slots| {
-                        for (index, &holding) in hotbar.slots.iter().enumerate() {
+                        for index in 0..tesserae_core::inventory::HOTBAR_SLOTS {
                             menu_card(
                                 slots,
                                 Entry::Slot(index),
                                 "",
-                                holding,
+                                hotbar.slot(index),
                                 hotbar.outside.is_none() && hotbar.selected == index,
                                 Some(index + 1),
                             );
@@ -1246,118 +1156,6 @@ pub(super) fn highlight_tiles(
     }
 }
 
-const TILE_NAME_CHARS: usize = 9;
-/// Keeps the preview clear of the name line with a small gap.
-const TILE_NAME_ROOM: f32 = 15.0;
-/// Taller than wide, so the model keeps its size above the name line.
-const TILE_EXTRA_HEIGHT: f32 = 10.0;
-fn one_line(label: &str) -> String {
-    let name = label
-        .lines()
-        .map(super::menu_ui::title)
-        .collect::<Vec<_>>()
-        .join(" ");
-    if name.chars().count() <= TILE_NAME_CHARS {
-        return name;
-    }
-    let mut cut: String = name.chars().take(TILE_NAME_CHARS - 2).collect();
-    cut.push_str("..");
-    cut
-}
-
-pub(super) fn tile(
-    parent: &mut ChildSpawnerCommands,
-    entry: Entry,
-    label: &str,
-    holding: Holding,
-    highlighted: bool,
-    number: Option<usize>,
-    size: f32,
-) {
-    parent
-        .spawn(Node {
-            width: Val::Px(size),
-            flex_direction: FlexDirection::Column,
-            flex_shrink: 0.0,
-            row_gap: Val::Px(3.0),
-            ..default()
-        })
-        .with_children(|wrapper| {
-            wrapper
-                .spawn((
-                    entry,
-                    Button,
-                    TileState {
-                        selected: highlighted,
-                    },
-                    Node {
-                        width: Val::Px(size),
-                        height: Val::Px(size + TILE_EXTRA_HEIGHT),
-                        flex_shrink: 0.0,
-                        border: UiRect::all(Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                        ..default()
-                    },
-                    BackgroundColor(crate::client::menu_ui::CARD),
-                    BorderColor::all(if highlighted {
-                        crate::client::menu_ui::INK
-                    } else {
-                        crate::client::menu_ui::EDGE
-                    }),
-                ))
-                .with_children(|square| {
-                    if holding != Holding::Empty {
-                        square.spawn((
-                            super::tile_preview::TilePreview(holding),
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(0.0),
-                                right: Val::Px(0.0),
-                                top: Val::Px(0.0),
-                                bottom: Val::Px(TILE_NAME_ROOM),
-                                ..default()
-                            },
-                            Visibility::Hidden,
-                            Pickable::IGNORE,
-                        ));
-                    }
-                    square
-                        .spawn((
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(2.0),
-                                right: Val::Px(2.0),
-                                bottom: Val::Px(2.0),
-                                justify_content: JustifyContent::Center,
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ))
-                        .with_child((
-                            Text::new(one_line(label)),
-                            font(10.0),
-                            TextLayout::new(Justify::Center, bevy::text::LineBreak::NoWrap),
-                            ZIndex(1),
-                            Pickable::IGNORE,
-                        ));
-                    if let Some(number) = number {
-                        square.spawn((
-                            Text::new(number.to_string()),
-                            font(12.0),
-                            ZIndex(1),
-                            Node {
-                                position_type: PositionType::Absolute,
-                                left: Val::Px(3.0),
-                                top: Val::Px(3.0),
-                                ..default()
-                            },
-                            Pickable::IGNORE,
-                        ));
-                    }
-                });
-        });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1400,6 +1198,7 @@ mod tests {
         .init_resource::<UiScale>()
         .init_resource::<ButtonInput<KeyCode>>()
         .add_message::<MouseWheel>()
+        .add_message::<InventoryIntent>()
         .add_observer(choose)
         .add_observer(inspect)
         .add_observer(detail_action)
@@ -1414,8 +1213,22 @@ mod tests {
             .spawn((PrimaryWindow, Window::default(), CursorOptions::default()));
         app
     }
+    /// What the menu asked of the Server since last asked.
+    fn intents(app: &mut App) -> Vec<InventoryIntent> {
+        app.world_mut()
+            .resource_mut::<bevy::ecs::message::Messages<InventoryIntent>>()
+            .drain()
+            .collect()
+    }
+    fn take(material: MaterialId, at: usize) -> InventoryIntent {
+        InventoryIntent::Take {
+            material,
+            count: crate::server::inventory::MAX_STACK,
+            into: tesserae_core::inventory::Destination::Slot(Slot::Hotbar(at)),
+        }
+    }
     #[test]
-    fn detail_assignment_keeps_the_current_hand_and_selected_slot() {
+    fn detail_assignment_asks_for_the_item_and_keeps_the_hand() {
         let mut app = app();
         let before = app.world().resource::<Hotbar>().clone();
         let holding = Holding::solid(23, tesserae_core::SHAPE_STAIR);
@@ -1425,10 +1238,8 @@ mod tests {
         app.world_mut().trigger(Activate {
             entity: destination,
         });
-        let hotbar = app.world().resource::<Hotbar>();
-        assert_eq!(hotbar.slots[4], holding);
-        assert_eq!(hotbar.selected, before.selected);
-        assert_eq!(hotbar.outside, before.outside);
+        assert_eq!(intents(&mut app), [take(23, 4)]);
+        assert_eq!(*app.world().resource::<Hotbar>(), before);
         assert!(app.world().resource::<Menu>().open);
         assert!(app.world().resource::<PointerState>().assigning.is_none());
     }
@@ -1502,23 +1313,28 @@ mod tests {
     }
 
     #[test]
-    fn selecting_catalogue_content_toggles_the_hand_without_closing_or_changing_slots() {
-        for entry in [Entry::Material(23), Entry::Fluid(24), Entry::Fire] {
+    fn choosing_catalogue_content_asks_for_its_item_or_toggles_a_hand_state() {
+        for (entry, asked) in [
+            (Entry::Material(23), vec![take(23, 0)]),
+            (Entry::Fluid(24), vec![take(24, 0)]),
+            (Entry::Fire, vec![]),
+        ] {
             let mut app = app();
-            let before = app.world().resource::<Hotbar>().clone();
             let item = app.world_mut().spawn(entry).id();
             app.world_mut().trigger(Activate { entity: item });
             assert!(app.world().resource::<Menu>().open);
-            assert_eq!(app.world().resource::<Hotbar>().outside, entry.holding());
-            app.world_mut().trigger(Activate { entity: item });
-            assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
-            app.world_mut().trigger(Activate { entity: item });
+            assert_eq!(intents(&mut app), asked, "{entry:?}");
+            if entry == Entry::Fire {
+                assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Fire);
+                app.world_mut().trigger(Activate { entity: item });
+                assert_eq!(app.world().resource::<Hotbar>().held(), Holding::Empty);
+                app.world_mut().trigger(Activate { entity: item });
+            }
             let clear = app.world_mut().spawn(DetailAction::Clear).id();
             app.world_mut().trigger(Activate { entity: clear });
             let hand = app.world().resource::<Hotbar>();
             assert_eq!(hand.held(), Holding::Empty);
-            assert_eq!(hand.slots, before.slots);
-            assert_eq!(hand.selected, before.selected);
+            assert_eq!(hand.selected, 0);
             assert!(app.world().resource::<Menu>().open);
             let cursor = app
                 .world_mut()
@@ -1550,8 +1366,9 @@ mod tests {
         app.world_mut().trigger(Activate { entity: item });
         assert!(app.world().resource::<Menu>().open);
         assert_eq!(
-            app.world().resource::<Hotbar>().slots[2],
-            Holding::Fluid(24)
+            intents(&mut app),
+            [take(24, 2)],
+            "a drop is not also a pick"
         );
         let other = app.world_mut().spawn(Entry::Slot(6)).id();
         // A second drag starts from the slot, independently of the prior item.
@@ -1569,13 +1386,15 @@ mod tests {
             hit: hit(),
         });
         assert_eq!(
-            app.world().resource::<Hotbar>().slots[6],
-            Holding::Fluid(24)
+            intents(&mut app),
+            [InventoryIntent::Move {
+                from: Slot::Hotbar(2),
+                to: Slot::Hotbar(6),
+            }]
         );
-        assert_eq!(app.world().resource::<Hotbar>().slots[2], Holding::Empty);
     }
     #[test]
-    fn number_over_an_item_assigns_without_changing_selection() {
+    fn number_over_an_item_asks_for_it_in_that_slot_without_changing_selection() {
         let mut app = app();
         let item = app.world_mut().spawn(Entry::Material(23)).id();
         app.world_mut().trigger(PointerOver {
@@ -1591,13 +1410,10 @@ mod tests {
             .run_system_once(super::super::edit::select_held)
             .unwrap();
         assert_eq!(app.world().resource::<Hotbar>().selected, 0);
-        assert_eq!(
-            app.world().resource::<Hotbar>().slots[4],
-            Holding::solid(23, 0)
-        );
+        assert_eq!(intents(&mut app), [take(23, 4)]);
     }
     #[test]
-    fn dragging_carries_the_actual_model_with_the_cursor_and_updates_the_slot_on_drop() {
+    fn dragging_carries_the_actual_model_with_the_cursor_and_asks_for_the_slot_on_drop() {
         use crate::content::CatalogueMaterial;
         use tesserae_core::{Orientation, SHAPE_STAIR};
         let turned = Holding::Solid {
@@ -1605,10 +1421,11 @@ mod tests {
             shape: SHAPE_STAIR,
             orientation: Orientation::IDENTITY.turned(),
         };
-        for (source, expected, scale, first, moved) in [
+        for (source, expected, asked, scale, first, moved) in [
             (
                 Entry::Material(23),
                 Holding::solid(23, 0),
+                take(23, 4),
                 1.0,
                 Vec2::new(88.0, 148.0),
                 Vec2::new(388.0, 328.0),
@@ -1616,6 +1433,10 @@ mod tests {
             (
                 Entry::Slot(0),
                 turned,
+                InventoryIntent::Move {
+                    from: Slot::Hotbar(0),
+                    to: Slot::Hotbar(4),
+                },
                 1.5,
                 Vec2::new(48.0, 88.0),
                 Vec2::new(248.0, 208.0),
@@ -1623,7 +1444,7 @@ mod tests {
         ] {
             let mut app = app();
             app.world_mut().resource_mut::<UiScale>().0 = scale;
-            app.world_mut().resource_mut::<Hotbar>().slots[0] = turned;
+            app.insert_resource(Hotbar::holding(0, turned));
             app.world_mut()
                 .resource_mut::<Catalogue>()
                 .0
@@ -1705,20 +1526,13 @@ mod tests {
             });
             app.update();
             assert!(app.world().resource::<Menu>().open);
-            assert_eq!(app.world().resource::<Hotbar>().slots[4], expected);
+            assert_eq!(intents(&mut app), [asked]);
             assert_eq!(
                 app.world_mut()
                     .query::<&DragPreview>()
                     .iter(app.world())
                     .count(),
                 0
-            );
-            let target = find(&mut app, Entry::Slot(4));
-            assert!(
-                app.world_mut()
-                    .query::<(&ChildOf, &super::super::tile_preview::TilePreview)>()
-                    .iter(app.world())
-                    .any(|(parent, item)| parent.parent() == target && item.0 == expected)
             );
         }
     }
@@ -1878,7 +1692,7 @@ mod tests {
             assert_eq!(app.world().resource::<Hotbar>().selected, 0);
             assert_eq!(app.world().get::<ScrollPosition>(footer).unwrap().y, 0.0);
         }
-        app.world_mut().resource_mut::<Hotbar>().slots[4] = Holding::Fire;
+        app.insert_resource(Hotbar::holding(4, Holding::Fluid(24)));
         app.update();
         let selection = app
             .world_mut()
@@ -1886,70 +1700,5 @@ mod tests {
             .single(app.world())
             .unwrap();
         assert_eq!(selection.y, 235.0);
-    }
-
-    #[test]
-    fn play_bar_tracks_the_hand_and_is_hidden_in_the_menu() {
-        let mut app = app();
-        app.init_resource::<Swatches>()
-            .add_systems(Update, rebuild_bar);
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&PlayBarRoot>()
-                .iter(app.world())
-                .count(),
-            0
-        );
-        app.world_mut().resource_mut::<Menu>().open = false;
-        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Fluid(24));
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&PlayBarRoot>()
-                .iter(app.world())
-                .count(),
-            1
-        );
-        let squares = app
-            .world_mut()
-            .query::<(&Entry, &Node)>()
-            .iter(app.world())
-            .filter(|(_, node)| node.height == Val::Px(64.0 + TILE_EXTRA_HEIGHT))
-            .count();
-        assert_eq!(squares, 10);
-        app.world_mut().resource_mut::<Hotbar>().select(2);
-        app.update();
-        let squares = app
-            .world_mut()
-            .query::<(&Entry, &Node)>()
-            .iter(app.world())
-            .filter(|(_, node)| node.height == Val::Px(64.0 + TILE_EXTRA_HEIGHT))
-            .count();
-        assert_eq!(squares, 9);
-        app.init_resource::<super::super::settings::Settings>();
-        app.world_mut()
-            .resource_mut::<super::super::settings::Settings>()
-            .open = true;
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&PlayBarRoot>()
-                .iter(app.world())
-                .count(),
-            0
-        );
-        app.world_mut()
-            .resource_mut::<super::super::settings::Settings>()
-            .open = false;
-        app.world_mut().resource_mut::<Menu>().open = true;
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&PlayBarRoot>()
-                .iter(app.world())
-                .count(),
-            0
-        );
     }
 }

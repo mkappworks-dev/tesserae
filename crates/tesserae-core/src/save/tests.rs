@@ -1140,6 +1140,20 @@ mod dropped_items {
             serde_json::to_value(InventoryV1(read)).unwrap(),
             saved(&backpack)
         );
+        let mut selected = saved(&backpack);
+        selected["selected"] = 4.into();
+        player
+            .extensions
+            .insert("inventory_v1".into(), selected.clone());
+        let read = player.get::<InventoryV1>().unwrap().unwrap();
+        assert_eq!(read.0.selected(), 4);
+        assert_eq!(serde_json::to_value(read).unwrap(), selected);
+        selected["selected"] = 9.into();
+        player.extensions.insert("inventory_v1".into(), selected);
+        assert!(matches!(
+            player.get::<InventoryV1>(),
+            Err(Error::Corrupt(_))
+        ));
         backpack[3]["count"] = 0.into();
         player
             .extensions

@@ -30,8 +30,8 @@ use crate::session::SessionApp;
 use tesserae_core::collide::{Aabb, RayHit, VoxelVolume, overlaps, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
 use tesserae_core::{
-    Burning, Fluid, Light, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, PlaceFault,
-    SHAPE_FULL_CUBE, Tables, Voxel, relight_many,
+    Burning, Fluid, Light, MAX_SHAPED_PER_CHUNK, MaterialId, Occupants, Orientation, PlaceFault,
+    SHAPE_FULL_CUBE, ShapeId, Tables, Voxel, relight_many,
 };
 use tesserae_mods::{EditKind, Intent};
 
@@ -100,6 +100,13 @@ pub enum EditAction {
     /// Set the solid the ray strikes alight, by the rule a Mod's ignition
     /// meets.
     Ignite,
+    /// Place what the Item in the selected hotbar slot places: its solid in
+    /// this Shape and Orientation, or a source of its fluid. Resolved when the
+    /// intent arrives.
+    PlaceHeld {
+        shape: ShapeId,
+        orientation: Orientation,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -241,6 +248,10 @@ pub enum RejectReason {
     BadLayout,
     /// Some of a layout's Voxels were skipped; the rest were placed.
     LayoutPartial,
+    /// A Place with an empty hotbar slot selected.
+    NothingHeld,
+    /// A Place with an Item that places no Material.
+    PlacesNothing,
 }
 
 impl RejectReason {
@@ -275,6 +286,8 @@ impl RejectReason {
             RejectReason::TargetChanged => "removal target changed; hold again",
             RejectReason::BadLayout => "that layout is not allowed",
             RejectReason::LayoutPartial => "some Voxels of the layout were skipped",
+            RejectReason::NothingHeld => "nothing held",
+            RejectReason::PlacesNothing => "the held item places nothing",
         }
     }
 }
@@ -567,8 +580,10 @@ pub(in crate::server) fn receive(
     mut intents: MessageReader<EditIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
-    player: Single<&Player>,
+    player: Single<(&Player, &super::inventory::Inventory)>,
+    (placing, tables): (Option<Res<super::items::PlacingItems>>, Res<ContentTables>),
 ) {
+    let (player, inventory) = *player;
     for intent in intents.read() {
         // Here and not in `apply_pending`: an intent can wait a second there, by
         // when the Player has moved on from where the Client meant.
@@ -579,6 +594,18 @@ pub(in crate::server) fn receive(
                 continue;
             }
         };
+        let action = match intent.action {
+            EditAction::PlaceHeld { shape, orientation } => {
+                match held_placement(inventory, placing.as_deref(), &tables.0, shape, orientation) {
+                    Ok(action) => action,
+                    Err(reason) => {
+                        rejected.write(EditRejected { reason });
+                        continue;
+                    }
+                }
+            }
+            action => action,
+        };
         if pending.0.len() + pending.1.len() >= MAX_PENDING {
             rejected.write(EditRejected {
                 reason: RejectReason::Busy,
@@ -586,11 +613,30 @@ pub(in crate::server) fn receive(
             continue;
         }
         pending.0.push_back(Pending {
-            intent: *intent,
+            intent: EditIntent { action, ..*intent },
             waited: 0,
             reach,
         });
     }
+}
+
+/// What the selected slot's Item places, as the Place it stands for.
+fn held_placement(
+    inventory: &super::inventory::Inventory,
+    placing: Option<&super::items::PlacingItems>,
+    tables: &Tables,
+    shape: ShapeId,
+    orientation: Orientation,
+) -> Result<EditAction, RejectReason> {
+    let stack = inventory.held().ok_or(RejectReason::NothingHeld)?;
+    let material = placing
+        .and_then(|placing| placing.material(&stack.item))
+        .ok_or(RejectReason::PlacesNothing)?;
+    Ok(if tables.fluids.contains(material) {
+        EditAction::PlaceSource(material)
+    } else {
+        EditAction::Place(Voxel::shaped(material, shape, orientation))
+    })
 }
 
 /// The part of the intent's ray within [`EDIT_REACH_M`] of the Eye, if its
@@ -973,6 +1019,8 @@ fn resolve(
             let wet = tesserae_core::fire::is_wet(store, tables, hit.at);
             Ok((hit.at, Change::Occupants(ignite(struck()?, wet, tables)?)))
         }
+        // `receive` resolves it before it is queued.
+        EditAction::PlaceHeld { .. } => Err(RejectReason::NothingHeld),
     }
 }
 
@@ -1870,6 +1918,89 @@ pub(in crate::server) mod tests {
         app.update();
         assert!(voxel_at(&app, [5, 7, 5]).is_air());
         assert!(app.world().resource::<PendingEdits>().0.is_empty());
+    }
+
+    /// The Player holds `stacks` in the hotbar with `selected` in hand; stone
+    /// and the fixture water are placed by Items of their own names and
+    /// `t:dust` places nothing.
+    fn stocked(stacks: &[(usize, &str)], selected: usize) -> App {
+        let mut app = app_with(&[(origin(), ground())]);
+        let rock = tesserae_core::testgen::fixtures().ground.rock;
+        let items = super::super::items::Items(vec![tesserae_mods::ItemDef {
+            name: "t:dust".into(),
+            size_m: 0.25,
+            color: [0; 4],
+            material: None,
+        }]);
+        app.insert_resource(super::super::items::PlacingItems::new(
+            [(rock, "t:stone", true), (water(), "t:water", true)],
+            &items,
+        ));
+        let mut inventory = tesserae_core::inventory::Inventory::default();
+        for &(at, item) in stacks {
+            inventory
+                .take(
+                    item,
+                    3,
+                    tesserae_core::inventory::Destination::Slot(
+                        tesserae_core::inventory::Slot::Hotbar(at),
+                    ),
+                    |_| 64,
+                )
+                .unwrap();
+        }
+        inventory.select(selected).unwrap();
+        let mut held = app
+            .world_mut()
+            .query::<&mut super::super::inventory::Inventory>();
+        held.single_mut(app.world_mut()).unwrap().0 = inventory;
+        app
+    }
+
+    fn place_held(shape: ShapeId, orientation: Orientation) -> EditIntent {
+        down(EditAction::PlaceHeld { shape, orientation })
+    }
+
+    #[test]
+    fn placing_lays_what_the_selected_slot_s_item_places_in_the_chosen_shape() {
+        let mut app = stocked(&[(1, "t:water"), (4, "t:stone")], 4);
+        let turned = Orientation::IDENTITY.turned().flipped();
+        send(&mut app, place_held(SHAPE_STAIR, turned));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        assert_eq!(
+            voxel_at(&app, [5, 8, 5]),
+            Voxel::shaped(stone().material(), SHAPE_STAIR, turned)
+        );
+    }
+
+    #[test]
+    fn a_fluid_source_is_placed_from_its_implicit_item() {
+        let mut app = stocked(&[(1, "t:water"), (4, "t:stone")], 1);
+        send(&mut app, place_held(SHAPE_STAIR, Orientation::IDENTITY));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        let store = app.world().resource::<ChunkStore>();
+        let tables = &app.world().resource::<ContentTables>().0;
+        let here = store.occupants([5, 8, 5], &tables.fluids).unwrap();
+        assert!(here.solid.is_air(), "a source, whatever Shape is chosen");
+        assert_eq!(here.fluid.map(|f| f.material), Some(water()));
+    }
+
+    #[test]
+    fn placing_from_an_empty_slot_or_an_item_that_places_nothing_is_refused() {
+        for (stacks, reason) in [
+            (&[(0, "t:stone")][..], RejectReason::NothingHeld),
+            (&[(2, "t:dust")][..], RejectReason::PlacesNothing),
+            (&[(2, "t:gone")][..], RejectReason::PlacesNothing),
+        ] {
+            let mut app = stocked(stacks, 2);
+            send(&mut app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+            tick(&mut app);
+            assert_eq!(rejections(&mut app), [reason]);
+            assert!(voxel_at(&app, [5, 8, 5]).is_air());
+            assert!(!reason.message().is_empty());
+        }
     }
 
     #[test]

@@ -20,6 +20,13 @@ pub struct Stack {
 pub struct Inventory {
     hotbar: [Option<Stack>; HOTBAR_SLOTS],
     backpack: [Option<Stack>; BACKPACK_SLOTS],
+    /// The hotbar slot in hand.
+    #[serde(default, skip_serializing_if = "is_first")]
+    selected: usize,
+}
+
+fn is_first(at: &usize) -> bool {
+    *at == 0
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -272,6 +279,23 @@ impl Inventory {
         Ok(())
     }
 
+    pub fn selected(&self) -> usize {
+        self.selected
+    }
+
+    pub fn select(&mut self, at: usize) -> Result<(), Refusal> {
+        if at >= HOTBAR_SLOTS {
+            return Err(Refusal::NoSuchSlot);
+        }
+        self.selected = at;
+        Ok(())
+    }
+
+    /// The stack in the selected hotbar slot.
+    pub fn held(&self) -> Option<&Stack> {
+        self.get(Slot::Hotbar(self.selected))
+    }
+
     pub fn hotbar(&self) -> &[Option<Stack>; HOTBAR_SLOTS] {
         &self.hotbar
     }
@@ -311,6 +335,21 @@ mod tests {
             item: item.into(),
             count,
         })
+    }
+
+    #[test]
+    fn the_held_stack_is_the_selected_hotbar_slot_s() {
+        let mut inventory = Inventory::default();
+        inventory.receive("m:rock", 5, 64);
+        inventory.receive("m:sand", 64, 64);
+        assert_eq!(inventory.held().cloned(), stack("m:rock", 5));
+        inventory.select(1).unwrap();
+        assert_eq!(inventory.selected(), 1);
+        assert_eq!(inventory.held().cloned(), stack("m:sand", 64));
+        inventory.select(8).unwrap();
+        assert_eq!(inventory.held(), None);
+        assert_eq!(inventory.select(9), Err(Refusal::NoSuchSlot));
+        assert_eq!(inventory.selected(), 8);
     }
 
     #[test]

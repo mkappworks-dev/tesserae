@@ -20,6 +20,7 @@ use super::actions::{Action, Actions};
 use super::drops::Looks;
 use super::edit::{Catalogue, Holding};
 use super::menu_ui::{self as ui, font};
+use super::tile_preview::TilePreview;
 use crate::server::inventory::{InventoryChanged, InventoryIntent, InventoryRefused, MAX_STACK};
 use crate::session::SessionApp;
 
@@ -367,12 +368,7 @@ fn render(
     mut commands: Commands,
     window: Res<InventoryWindow>,
     held: Res<Held>,
-    (looks, catalogue, searches, swatches): (
-        Res<Looks>,
-        Res<Catalogue>,
-        Res<super::menu_ui::Searches>,
-        Option<Res<super::menu::Swatches>>,
-    ),
+    (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Frame,
     focus: Option<Res<InputFocus>>,
@@ -439,7 +435,6 @@ fn render(
     let names = Names {
         looks: &looks,
         catalogue: &catalogue,
-        swatches: swatches.as_deref(),
     };
     commands
         .spawn((
@@ -488,11 +483,10 @@ fn render(
     });
 }
 
-/// How an Item reads on screen: its name, colour and the Material it places.
-struct Names<'a> {
-    looks: &'a Looks,
-    catalogue: &'a Catalogue,
-    swatches: Option<&'a super::menu::Swatches>,
+/// How an Item reads on screen: its name, its icon and the Material it places.
+pub(super) struct Names<'a> {
+    pub(super) looks: &'a Looks,
+    pub(super) catalogue: &'a Catalogue,
 }
 
 impl Names<'_> {
@@ -500,24 +494,14 @@ impl Names<'_> {
         self.looks.0.iter().find(|look| look.name == item)
     }
 
-    fn color(&self, item: &str) -> Color {
-        if let Some(look) = self.look(item) {
-            let [r, g, b, a] = look.color;
-            return Color::srgba_u8(r, g, b, a);
-        }
-        // An implicit Item is named after its Material and drawn in its colour.
-        let material = self.catalogue.0.materials.iter().find(|m| m.name == item);
-        match (material, self.swatches) {
-            (Some(m), Some(swatches)) => {
-                let held = if m.fluid.is_some() {
-                    Holding::Fluid(m.id)
-                } else {
-                    Holding::solid(m.id, tesserae_core::SHAPE_FULL_CUBE)
-                };
-                let [r, g, b, a] = swatches.rgba(held).to_array();
-                Color::linear_rgba(r, g, b, a)
-            }
-            _ => Color::WHITE,
+    /// An Item that places a Material is drawn as it; any other in its colour.
+    pub(super) fn icon(&self, item: &str) -> Result<Holding, Color> {
+        match super::edit::item_holding(item, &self.looks.0, &self.catalogue.0) {
+            Holding::Empty => Err(self.look(item).map_or(Color::WHITE, |look| {
+                let [r, g, b, a] = look.color;
+                Color::srgba_u8(r, g, b, a)
+            })),
+            holding => Ok(holding),
         }
     }
 
@@ -739,7 +723,7 @@ fn slot_button(
                 Pickable::IGNORE,
             ));
             if let Some(stack) = stack {
-                swatch(button, names.color(&stack.item), 30.0, picked);
+                item_icon(button, names.icon(&stack.item), 32.0, picked);
                 button.spawn((
                     SlotCount,
                     Text::new(stack.count.to_string()),
@@ -781,26 +765,45 @@ fn slot_button(
         });
 }
 
-/// The Item's colour as a small tile; the prototype's drawn voxel waits on
-/// Item icons.
-fn swatch(parent: &mut ChildSpawnerCommands, color: Color, size: f32, picked: bool) {
+/// The engine's tile of what the Item places, or a swatch of its colour.
+pub(super) fn item_icon(
+    parent: &mut ChildSpawnerCommands,
+    icon: Result<Holding, Color>,
+    size: f32,
+    picked: bool,
+) {
     let alpha = if picked { 0.6 } else { 1.0 };
-    parent.spawn((
-        Node {
-            width: Val::Px(size),
-            height: Val::Px(size),
-            border: UiRect {
-                bottom: Val::Px(3.0),
-                right: Val::Px(2.0),
-                ..default()
-            },
-            border_radius: BorderRadius::all(Val::Px(3.0)),
-            ..default()
-        },
-        BackgroundColor(color.with_alpha(alpha)),
-        BorderColor::all(Color::BLACK.with_alpha(0.3 * alpha)),
-        Pickable::IGNORE,
-    ));
+    let node = Node {
+        width: Val::Px(size),
+        height: Val::Px(size),
+        ..default()
+    };
+    match icon {
+        Ok(holding) => {
+            parent.spawn((
+                TilePreview(holding),
+                node,
+                Visibility::Hidden,
+                Pickable::IGNORE,
+            ));
+        }
+        Err(color) => {
+            parent.spawn((
+                Node {
+                    border: UiRect {
+                        bottom: Val::Px(3.0),
+                        right: Val::Px(2.0),
+                        ..default()
+                    },
+                    border_radius: BorderRadius::all(Val::Px(3.0)),
+                    ..node
+                },
+                BackgroundColor(color.with_alpha(alpha)),
+                BorderColor::all(Color::BLACK.with_alpha(0.3 * alpha)),
+                Pickable::IGNORE,
+            ));
+        }
+    }
 }
 
 fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
@@ -834,7 +837,7 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                         margin: UiRect::axes(Val::Px(0.0), Val::Px(14.0)),
                         ..default()
                     })
-                    .with_children(|icon| swatch(icon, names.color(&stack.item), 64.0, false));
+                    .with_children(|icon| item_icon(icon, names.icon(&stack.item), 64.0, false));
                 panel.spawn(weighted(ui::title(&stack.item), 22.0, 550, INK));
                 let source = match names.places(&stack.item) {
                     Some(material) => format!("{} · places {}", stack.item, ui::title(material)),
@@ -1186,6 +1189,37 @@ mod tests {
             .iter()
             .find_map(|child| world.get::<SlotCount>(child).and(world.get::<Text>(child)))
             .map(|text| text.0.clone())
+    }
+
+    /// The Material tile drawn in a slot, if it has one.
+    fn tile(app: &mut App, slot: Slot) -> Option<Holding> {
+        let world = app.world_mut();
+        let (_, children) = world
+            .query::<(&Control, &Children)>()
+            .iter(world)
+            .find(|(control, _)| **control == Control::Slot(slot))?;
+        children
+            .iter()
+            .find_map(|child| world.get::<TilePreview>(child))
+            .map(|tile| tile.0)
+    }
+
+    #[test]
+    fn a_slot_draws_its_item_as_the_engine_s_tile_of_the_material_it_places() {
+        let mut app = app();
+        app.world_mut().write_message(InventoryIntent::Take {
+            material: SAND,
+            count: 5,
+            into: tesserae_core::inventory::Destination::Slot(Slot::Hotbar(5)),
+        });
+        server(&mut app);
+        press(&mut app, KeyCode::KeyI);
+        assert_eq!(
+            tile(&mut app, Slot::Hotbar(5)),
+            Some(Holding::solid(SAND, tesserae_core::SHAPE_FULL_CUBE))
+        );
+        assert_eq!(tile(&mut app, Slot::Hotbar(2)), None, "dust places nothing");
+        assert_eq!(count(&mut app, Slot::Hotbar(2)).as_deref(), Some("3"));
     }
 
     #[test]

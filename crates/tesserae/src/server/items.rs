@@ -51,6 +51,12 @@ impl PlacingItems {
     pub fn item(&self, material: MaterialId) -> Option<&str> {
         self.0.get(usize::from(material))?.as_deref()
     }
+
+    /// The Material `item` places, if any.
+    pub fn material(&self, item: &str) -> Option<MaterialId> {
+        let at = self.0.iter().position(|i| i.as_deref() == Some(item))?;
+        MaterialId::try_from(at).ok()
+    }
 }
 
 #[cfg(test)]
@@ -89,5 +95,13 @@ mod tests {
         assert_eq!(placing.item(0), None);
         assert_eq!(placing.item(3), None);
         assert_eq!(placing.item(9), None);
+        assert_eq!(placing.material("m:chunk"), Some(2));
+        assert_eq!(placing.material("m:sand"), Some(5));
+        assert_eq!(
+            placing.material("m:ore"),
+            None,
+            "its declared Item replaces it"
+        );
+        assert_eq!(placing.material("core:air"), None);
     }
 }

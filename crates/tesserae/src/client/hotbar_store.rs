@@ -1,6 +1,6 @@
 //! The per-Game quick slots an older build saved, by name. The file is read,
 //! never written: it seeds a new World's hotbar with Catalogue takes.
-use super::edit::{Catalogue, Holding, Hotbar};
+use super::edit::{Catalogue, Holding};
 use crate::content::ContentCatalogue;
 use crate::server::inventory::{InventoryChanged, InventoryIntent, MAX_STACK};
 use crate::server::persistence::NewWorld;
@@ -109,13 +109,6 @@ impl Store {
     fn layout(&self) -> Option<&Layout> {
         self.document.games.get(self.game.as_ref()?)
     }
-    pub fn restore(&mut self, catalogue: &ContentCatalogue, hotbar: &mut Hotbar) {
-        self.game.clone_from(&catalogue.game);
-        if let Some(layout) = self.layout() {
-            hotbar.slots = std::array::from_fn(|i| layout.slots[i].resolve(catalogue));
-            hotbar.selected = layout.selected;
-        }
-    }
     /// Each stored slot's Material, by name in this Game; Fire is a Tool.
     fn takes(&self, catalogue: &ContentCatalogue) -> Vec<(usize, tesserae_core::MaterialId)> {
         let Some(layout) = self.layout() else {
@@ -157,6 +150,9 @@ fn offer_stored(
     // before it has an Inventory expires unread.
     if held.read().count() > 0 {
         store.announced = true;
+    }
+    if catalogue.is_changed() {
+        store.game.clone_from(&catalogue.0.game);
     }
     if !store.offer || !store.announced || store.game.is_none() {
         return;
@@ -257,7 +253,7 @@ mod tests {
     fn app(path: PathBuf) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<Hotbar>()
+            .init_resource::<super::super::edit::Hotbar>()
             .init_resource::<Catalogue>()
             .insert_resource(Store::load(path))
             .insert_resource(crate::server::items::PlacingItems::new(
@@ -325,39 +321,16 @@ mod tests {
         frame(&mut app);
         frame(&mut app);
         assert!(hotbar(&mut app).iter().all(Option::is_none));
-        {
-            let mut bar = app.world_mut().resource_mut::<Hotbar>();
-            bar.slots[5] = Holding::Fire;
-            bar.selected = 5;
-        }
+        app.world_mut().write_message(InventoryIntent::Select(5));
         frame(&mut app);
         assert_eq!(fs::read(dir.path()).unwrap(), bytes);
         let fresh = Directory::new();
         let mut app = super::tests::app(fresh.path());
         arrive(&mut app);
-        app.world_mut().resource_mut::<Hotbar>().slots[1] = Holding::Fire;
+        app.world_mut().write_message(NewWorld);
+        frame(&mut app);
         frame(&mut app);
         assert!(!fresh.path().exists());
-    }
-
-    #[test]
-    fn the_play_bar_still_reads_the_stored_slots_by_name() {
-        let dir = Directory::new();
-        stored(&dir);
-        let mut app = app(dir.path());
-        frame(&mut app);
-        let bar = app.world().resource::<Hotbar>();
-        assert_eq!(
-            bar.slots[0],
-            Holding::Solid {
-                material: 11,
-                shape: 8,
-                orientation: Orientation::from_bits(6).unwrap(),
-            }
-        );
-        assert_eq!(bar.slots[2], Holding::Fluid(13));
-        assert_eq!(bar.slots[4], Holding::Empty);
-        assert_eq!(bar.held(), Holding::Empty, "a World opens empty-handed");
     }
 
     #[test]

@@ -326,7 +326,7 @@ pub(super) fn plugin(app: &mut App) {
                 ),
                 capture_holding,
                 menu_view
-                    .after(super::menu::rebuild_bar)
+                    .after(super::hotbar::rebuild)
                     .before(super::menu::drag_preview),
                 menu_drag.before(super::menu::drag_preview),
                 watch_frames,

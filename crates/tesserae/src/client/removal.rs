@@ -409,7 +409,7 @@ mod tests {
         app.world_mut().resource_mut::<Sent>().last = Some(view);
         app.world_mut()
             .resource_mut::<super::super::edit::Hotbar>()
-            .slots = [super::super::edit::Holding::Fire; super::super::edit::SLOT_KEYS.len()];
+            .outside = Some(super::super::edit::Holding::Fire);
         let mut answer = app.world_mut().resource_mut::<Target>();
         answer.0.removal = Some(target(0));
         answer.1 = Some(view);
@@ -479,7 +479,7 @@ mod tests {
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .release_all();
-        app.world_mut().resource_mut::<Hotbar>().outside = None;
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Fire);
         step(&mut app, 0.0);
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()

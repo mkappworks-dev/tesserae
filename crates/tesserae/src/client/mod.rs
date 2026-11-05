@@ -18,6 +18,7 @@ mod help;
 mod history;
 #[cfg(feature = "profiling")]
 pub mod holes;
+mod hotbar;
 mod hotbar_store;
 mod in_flight;
 mod input;
@@ -104,6 +105,7 @@ pub fn plugin(app: &mut App) {
         drops::plugin,
         pickup::plugin,
         inventory_window::plugin,
+        hotbar::plugin,
     ));
     app.add_session_systems(
         Update,

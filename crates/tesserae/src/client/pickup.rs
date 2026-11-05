@@ -17,8 +17,7 @@ const FEED_S: f32 = 3.0;
 const FEED_FADE_S: f32 = 0.4;
 const FEED_ROWS: usize = 5;
 const ROW_ALPHA: f32 = 0xc7 as f32 / 255.0;
-/// Clears the held Item's name over the 64 px hotbar.
-const NOTICE_BOTTOM_PX: f32 = 104.0;
+const NOTICE_BOTTOM_PX: f32 = super::hotbar::TOP_PX + 4.0;
 
 #[derive(Clone, PartialEq, Debug)]
 struct FeedRow {

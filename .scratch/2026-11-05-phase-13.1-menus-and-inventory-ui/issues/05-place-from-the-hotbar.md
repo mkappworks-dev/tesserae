@@ -1,6 +1,6 @@
 # 05: Place from the hotbar's Items
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 04
 
@@ -12,7 +12,7 @@ The hotbar in play is the Inventory's hotbar. Digits 1-9 and the scroll wheel se
 
 ## Acceptance criteria
 
-- [ ] Placing uses the selected slot's Item and the chosen Shape and Orientation.
-- [ ] A fluid source can be placed from its implicit Item.
-- [ ] The hotbar and the held Item's name follow Server messages only.
-- [ ] Existing placement, Layout and Sample journeys still work.
+- [x] Placing uses the selected slot's Item and the chosen Shape and Orientation.
+- [x] A fluid source can be placed from its implicit Item.
+- [x] The hotbar and the held Item's name follow Server messages only.
+- [x] Existing placement, Layout and Sample journeys still work.

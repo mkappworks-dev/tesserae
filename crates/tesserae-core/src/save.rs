@@ -441,6 +441,11 @@ impl PlayerExtension for InventoryV1 {
         if self.0.slots().flatten().any(|s| s.count == 0) {
             return Err(Error::Corrupt("an Inventory slot holds no Items".into()));
         }
+        if self.0.selected() >= crate::inventory::HOTBAR_SLOTS {
+            return Err(Error::Corrupt(
+                "the selected hotbar slot does not exist".into(),
+            ));
+        }
         Ok(())
     }
 }

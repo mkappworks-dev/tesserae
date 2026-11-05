@@ -1069,7 +1069,7 @@ mod tests {
             .init_resource::<Time>()
             .add_message::<LayoutIntent>();
         let mut hotbar = Hotbar::default();
-        hotbar.slots[0] = Holding::solid(8, tesserae_core::SHAPE_FULL_CUBE);
+        hotbar.outside = Some(Holding::solid(8, tesserae_core::SHAPE_FULL_CUBE));
         app.insert_resource(hotbar);
         app.world_mut().spawn((
             Window::default(),
@@ -1631,8 +1631,8 @@ mod tests {
         .init_resource::<Assets<Mesh>>()
         .init_resource::<Assets<StandardMaterial>>();
         let rock = tesserae_core::testgen::fixtures().ground.rock;
-        app.world_mut().resource_mut::<Hotbar>().slots[0] =
-            Holding::solid(rock, tesserae_core::SHAPE_FULL_CUBE);
+        app.world_mut().resource_mut::<Hotbar>().outside =
+            Some(Holding::solid(rock, tesserae_core::SHAPE_FULL_CUBE));
         turn_on(&mut app);
         app
     }
@@ -1804,7 +1804,7 @@ mod tests {
             Holding::solid(rock, tesserae_core::SHAPE_STAIR),
             Holding::solid(rock, tesserae_core::SHAPE_SLAB),
         ] {
-            app.world_mut().resource_mut::<Hotbar>().slots[0] = held;
+            app.world_mut().resource_mut::<Hotbar>().outside = Some(held);
             answer_with(&mut app, &cells);
             let shown = visible(&mut app);
             assert_eq!(shown.len(), 1);
@@ -1814,15 +1814,15 @@ mod tests {
                 "every cell, the new shape"
             );
         }
-        let Holding::Solid { orientation, .. } = app.world().resource::<Hotbar>().slots[0] else {
+        let Holding::Solid { orientation, .. } = app.world().resource::<Hotbar>().held() else {
             panic!("a solid");
         };
         let before = visible(&mut app)[0].centroid;
-        app.world_mut().resource_mut::<Hotbar>().slots[0] = Holding::Solid {
+        app.world_mut().resource_mut::<Hotbar>().outside = Some(Holding::Solid {
             material: rock,
             shape: tesserae_core::SHAPE_STAIR,
             orientation: orientation.turned(),
-        };
+        });
         answer_with(&mut app, &cells);
         let after = visible(&mut app);
         assert_eq!(after[0].vertices, 6 * cube_vertices(&app));

@@ -178,7 +178,7 @@ mod tests {
 
     fn holding_fire() -> Hotbar {
         let mut hotbar = Hotbar::default();
-        hotbar.slots = [Holding::Fire; super::super::edit::SLOT_KEYS.len()];
+        hotbar.outside = Some(Holding::Fire);
         hotbar
     }
 

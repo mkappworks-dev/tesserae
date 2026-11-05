@@ -44,6 +44,8 @@ pub enum InventoryIntent {
     Split(Slot),
     /// Merges and orders the backpack.
     Sort,
+    /// Puts this hotbar slot in hand.
+    Select(usize),
     /// From the Catalogue: a new stack of the Item that places `material`.
     Take {
         material: MaterialId,
@@ -109,6 +111,7 @@ fn arrange(
             InventoryIntent::QuickTransfer(from) => next.quick_transfer(from, limit),
             InventoryIntent::Split(from) => next.split(from),
             InventoryIntent::Sort => next.sort(limit),
+            InventoryIntent::Select(at) => next.select(at),
             InventoryIntent::Take {
                 material,
                 count,
@@ -401,6 +404,20 @@ mod tests {
             .0
             .clone();
         assert_eq!(after, before);
+    }
+
+    #[test]
+    fn selecting_a_hotbar_slot_sends_the_inventory_and_a_slot_past_the_bar_is_refused() {
+        let mut app = game();
+        holding(&mut app, &[(Slot::Hotbar(4), "t:rock", 7)]);
+        let (sent, refused) = ask(&mut app, InventoryIntent::Select(4));
+        assert!(refused.is_empty());
+        assert_eq!(sent[0].held().cloned(), stack("t:rock", 7));
+        let (sent, _) = ask(&mut app, InventoryIntent::Select(4));
+        assert!(sent.is_empty(), "the same slot again changes nothing");
+        let (sent, refused) = ask(&mut app, InventoryIntent::Select(9));
+        assert!(sent.is_empty());
+        assert_eq!(refused, [Reason::Rule(Refusal::NoSuchSlot)]);
     }
 
     fn take(material: MaterialId, count: u32, into: Destination) -> InventoryIntent {
