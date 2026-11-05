@@ -19,6 +19,9 @@ use super::{
     PendingEdits, Reach, RejectReason, land, reach_from, resolve,
 };
 use crate::server::ContentTables;
+use crate::server::game_mode::PlayerMode;
+use crate::server::inventory::Inventory;
+use crate::server::items::PlacingItems;
 use crate::server::mods::EditHistory;
 use crate::server::player::Player;
 use crate::server::streaming::MeshState;
@@ -129,6 +132,8 @@ pub(super) struct PendingLayout {
     skipped: usize,
     first_skip: Option<RejectReason>,
     waited: u32,
+    /// The Item each Voxel spends, in Survival.
+    pay: Option<String>,
 }
 
 fn place_intent(intent: &LayoutIntent) -> EditIntent {
@@ -143,8 +148,10 @@ pub(super) fn receive(
     mut intents: MessageReader<LayoutIntent>,
     mut pending: ResMut<PendingEdits>,
     mut rejected: MessageWriter<EditRejected>,
-    player: Single<&Player>,
+    player: Single<(&Player, &Inventory, &PlayerMode)>,
+    placing: Option<Res<PlacingItems>>,
 ) {
+    let (player, inventory, mode) = *player;
     for intent in intents.read() {
         let reach = match reach_from(&place_intent(intent), player.eye()) {
             Ok(reach) => reach,
@@ -166,8 +173,24 @@ pub(super) fn receive(
             });
             continue;
         }
+        // The Client's Voxel stands only for its Shape and Orientation here.
+        let (intent, pay) = if mode.survival() {
+            match super::held_material(inventory, placing.as_deref()) {
+                Ok((item, material)) => {
+                    let voxel =
+                        Voxel::new(material, intent.voxel.shape(), intent.voxel.orientation());
+                    (LayoutIntent { voxel, ..*intent }, Some(item))
+                }
+                Err(reason) => {
+                    rejected.write(EditRejected { reason });
+                    continue;
+                }
+            }
+        } else {
+            (*intent, None)
+        };
         pending.1.push_back(PendingLayout {
-            intent: *intent,
+            intent,
             reach,
             eye: player.eye(),
             cells: None,
@@ -175,6 +198,7 @@ pub(super) fn receive(
             skipped: 0,
             first_skip: None,
             waited: 0,
+            pay,
         });
     }
 }
@@ -356,6 +380,8 @@ pub(super) fn drain(
     tables: &Tables,
     world: &WorldSettings,
     body: Option<Aabb>,
+    // Not `&mut Inventory`: that would mark it changed, and so sent, every tick.
+    inventory: &mut Mut<Inventory>,
 ) {
     while budget > 0 {
         let Some(mut layout) = layouts.pop_front() else {
@@ -375,6 +401,23 @@ pub(super) fn drain(
                             }
                         }
                     }
+                    if let Some(item) = &layout.pay {
+                        let voxel = layout.intent.voxel;
+                        let cost = kept
+                            .iter()
+                            .filter(|&&at| {
+                                free(store, tables, voxel, at)
+                                    .and_then(|()| clear_of(tables, world, body, voxel, at))
+                                    .is_ok()
+                            })
+                            .count();
+                        if (inventory.count(item) as usize) < cost {
+                            rejected.write(EditRejected {
+                                reason: RejectReason::TooFewItems,
+                            });
+                            continue;
+                        }
+                    }
                     layout.cells = Some(kept);
                 }
                 Err(reason) => {
@@ -388,21 +431,32 @@ pub(super) fn drain(
             let Some(&at) = layout.cells.as_ref().and_then(|cells| cells.front()) else {
                 break;
             };
-            let landed = free(store, tables, layout.intent.voxel, at).and_then(|()| {
-                land(
-                    store,
-                    meshes,
-                    tables,
-                    world,
-                    history,
-                    body,
-                    at,
-                    Change::Solid(layout.intent.voxel),
-                    EditAction::Place(layout.intent.voxel),
-                )
-            });
+            let paid = match &layout.pay {
+                Some(item) if inventory.count(item) == 0 => Err(RejectReason::TooFewItems),
+                _ => Ok(()),
+            };
+            let landed = paid
+                .and_then(|()| free(store, tables, layout.intent.voxel, at))
+                .and_then(|()| {
+                    land(
+                        store,
+                        meshes,
+                        tables,
+                        world,
+                        history,
+                        body,
+                        at,
+                        Change::Solid(layout.intent.voxel),
+                        EditAction::Place(layout.intent.voxel),
+                    )
+                });
             match landed {
                 Ok(entry) => {
+                    if let Some(item) = &layout.pay {
+                        inventory
+                            .spend(item, 1)
+                            .expect("counted before the Voxel changed");
+                    }
                     layout.applied.push(entry);
                     budget -= 1;
                     layout.waited = 0;
@@ -444,7 +498,8 @@ pub(super) fn drain(
 mod tests {
     use super::super::EDITS_PER_TICK;
     use super::super::tests::{
-        DOWN_EYE, app_with, ground, origin, rejections, replay, set_eye, stone, tick, voxel_at,
+        DOWN_EYE, app_with, ground, held, origin, rejections, replay, set_eye, stocked, stone,
+        survival, tick, voxel_at,
     };
     use super::*;
     use crate::server::undo::HistoryAction::{Redo, Undo};
@@ -498,6 +553,63 @@ mod tests {
             }
         }
         count
+    }
+
+    fn soil() -> Voxel {
+        Voxel::cube(tesserae_core::testgen::fixtures().ground.soil)
+    }
+
+    #[test]
+    fn a_survival_layout_lays_the_held_items_material_and_spends_one_per_voxel() {
+        let mut app = stocked(&[(4, "t:soil")], 4);
+        survival(&mut app);
+        send(&mut app, line(3));
+        tick(&mut app);
+        assert!(rejections(&mut app).is_empty());
+        for x in 5..8 {
+            assert_eq!(voxel_at(&app, [x, 8, 5]), soil(), "not the stone it named");
+        }
+        assert_eq!(held(&mut app, "t:soil"), 0);
+    }
+
+    #[test]
+    fn an_unaffordable_survival_layout_is_refused_before_any_voxel_changes() {
+        let mut app = stocked(&[(4, "t:soil")], 4);
+        survival(&mut app);
+        send(&mut app, line(4));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::TooFewItems]);
+        assert!((5..9).all(|x| voxel_at(&app, [x, 8, 5]).is_air()));
+        assert_eq!(held(&mut app, "t:soil"), 3);
+        assert!(app.world().resource::<PendingEdits>().is_empty());
+    }
+
+    #[test]
+    fn a_survival_layout_pays_only_for_the_cells_it_can_fill() {
+        let mut app = stocked(&[(4, "t:soil")], 4);
+        survival(&mut app);
+        let mut chunk = ground();
+        chunk.set(6, 8, 5, stone());
+        app.world_mut()
+            .resource_mut::<ChunkStore>()
+            .insert(origin(), chunk);
+        send(&mut app, line(4));
+        tick(&mut app);
+        assert_eq!(rejections(&mut app), [RejectReason::LayoutPartial]);
+        assert_eq!(held(&mut app, "t:soil"), 0, "three free cells, three Items");
+    }
+
+    #[test]
+    fn a_survival_layout_with_nothing_held_is_refused_and_creative_spends_nothing() {
+        let mut app = stocked(&[(4, "t:soil")], 2);
+        survival(&mut app);
+        send(&mut app, line(2));
+        assert_eq!(rejections(&mut app), [RejectReason::NothingHeld]);
+        let mut app = stocked(&[(4, "t:soil")], 4);
+        send(&mut app, line(3));
+        tick(&mut app);
+        assert_eq!(placed(&app), 3, "Creative lays the Voxel it names");
+        assert_eq!(held(&mut app, "t:soil"), 3);
     }
 
     #[test]

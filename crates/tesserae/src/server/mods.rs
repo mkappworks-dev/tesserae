@@ -378,6 +378,7 @@ pub(crate) fn save_world(loaded: &LoadedMods, path: &Path) {
             .0,
         paused: vec![],
         entities: Default::default(),
+        game_mode: Default::default(),
     };
     Writer::acquire(path, &id, &content)
         .unwrap()
@@ -1289,6 +1290,7 @@ biomes = ["plain:dry"]
                     .0,
                 paused: vec![],
                 entities: Default::default(),
+                game_mode: Default::default(),
             };
             Writer::acquire(&path, &id, &content)
                 .unwrap()

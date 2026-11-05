@@ -97,6 +97,7 @@ pub(super) fn plugin(app: &mut App) {
 
 fn spawn_drops(
     mut removed: MessageReader<VoxelRemoved>,
+    mode: Single<&super::game_mode::PlayerMode>,
     mut entities: ResMut<EntityStore>,
     (store, tables, world, items): (
         Res<ChunkStore>,
@@ -105,6 +106,10 @@ fn spawn_drops(
         Res<Items>,
     ),
 ) {
+    if !mode.survival() {
+        removed.clear();
+        return;
+    }
     for gone in removed.read() {
         let Some(item) = items.dropped_by(gone.material) else {
             continue;
@@ -234,7 +239,9 @@ mod tests {
     use super::super::inventory::{InventoryChanged, announce_inventory};
     use tesserae_mods::ItemDef;
 
-    use super::super::edit::tests::{app_with, down, ground, send, stone, tick, voxel_at};
+    use super::super::edit::tests::{
+        app_with, down, ground, send, stone, survival, tick, voxel_at,
+    };
     use super::super::edit::{EditAction, apply_intent};
     use super::*;
 
@@ -247,8 +254,10 @@ mod tests {
         }])
     }
 
+    /// In Survival, where a removal drops.
     fn game() -> App {
         let mut app = app_with(&[(Default::default(), ground())]);
+        survival(&mut app);
         app.insert_resource(dropping_stone());
         app.init_resource::<EntityStore>()
             .init_resource::<Refused>()
@@ -272,6 +281,18 @@ mod tests {
         remove_the_ground(&mut app);
         assert_eq!(drops(&app), 1);
         assert!(voxel_at(&app, [5, 7, 5]).is_air());
+    }
+
+    #[test]
+    fn a_creative_removal_drops_nothing() {
+        let mut app = game();
+        let mut mode = app
+            .world_mut()
+            .query::<&mut super::super::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Creative;
+        remove_the_ground(&mut app);
+        assert!(voxel_at(&app, [5, 7, 5]).is_air());
+        assert_eq!(drops(&app), 0);
     }
 
     #[test]

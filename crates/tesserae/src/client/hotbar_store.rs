@@ -128,19 +128,24 @@ impl Store {
 pub(super) fn plugin(app: &mut App) {
     let path = super::profile::user_path().with_extension("hotbar.json");
     app.insert_resource(Store::load(path))
-        .add_session_systems(Update, offer_stored.after(super::edit::receive_catalogue))
+        .add_session_systems(
+            Update,
+            offer_stored
+                .after(super::edit::receive_catalogue)
+                .after(super::game_mode::receive),
+        )
         .add_session_systems(SessionTeardown, |mut store: ResMut<Store>| {
             store.game = None;
             store.offer = false;
             store.announced = false;
         });
 }
-/// A new World's hotbar starts as the stored slots, each a full stack the
-/// Server gives or refuses like any Catalogue take.
+/// A new Creative World's hotbar starts as the stored slots, each a full stack
+/// the Server gives or refuses like any Catalogue take.
 fn offer_stored(
     mut store: ResMut<Store>,
     (mut news, mut held): (MessageReader<NewWorld>, MessageReader<InventoryChanged>),
-    catalogue: Res<Catalogue>,
+    (catalogue, mode): (Res<Catalogue>, Res<super::game_mode::Mode>),
     mut intents: MessageWriter<InventoryIntent>,
 ) {
     if news.read().count() > 0 {
@@ -154,10 +159,13 @@ fn offer_stored(
     if catalogue.is_changed() {
         store.game.clone_from(&catalogue.0.game);
     }
-    if !store.offer || !store.announced || store.game.is_none() {
+    if !store.offer || !store.announced || store.game.is_none() || mode.0.is_none() {
         return;
     }
     store.offer = false;
+    if mode.survival() {
+        return;
+    }
     for (at, material) in store.takes(&catalogue.0) {
         intents.write(InventoryIntent::Take {
             material,
@@ -171,6 +179,7 @@ fn offer_stored(
 mod tests {
     use super::*;
     use crate::content::{CatalogueMaterial, CatalogueShape};
+    use crate::server::game_mode::{GameMode, PlayerMode};
     use crate::server::inventory::Inventory;
     use crate::server::persistence::NewWorld;
     use crate::server::player::Player;
@@ -262,17 +271,37 @@ mod tests {
             ))
             .add_message::<ContentCatalogue>()
             .add_message::<NewWorld>()
-            .add_plugins(crate::server::inventory::plugin)
+            .add_plugins((
+                crate::server::inventory::plugin,
+                crate::server::game_mode::plugin,
+                super::super::game_mode::plugin,
+            ))
             .add_systems(
                 Update,
-                (super::super::edit::receive_catalogue, offer_stored).chain(),
-            );
+                (
+                    super::super::edit::receive_catalogue,
+                    offer_stored,
+                    count_asks,
+                )
+                    .chain()
+                    .after(super::super::game_mode::receive),
+            )
+            .init_resource::<Asked>();
         app.world_mut().write_message(catalogue(11, 13, 8));
         app
     }
     /// The Server's Player, which arrives some frames into a session.
+    #[derive(Resource, Default)]
+    struct Asked(usize);
+    fn count_asks(mut intents: MessageReader<InventoryIntent>, mut asked: ResMut<Asked>) {
+        asked.0 += intents.read().count();
+    }
     fn arrive(app: &mut App) {
-        app.world_mut().spawn(Player::at(Vec3::ZERO));
+        arrive_in(app, GameMode::Creative);
+    }
+    fn arrive_in(app: &mut App, mode: GameMode) {
+        app.world_mut()
+            .spawn((Player::at(Vec3::ZERO), PlayerMode(mode)));
     }
     /// One Client frame and one whole Server tick, after which unread messages
     /// expire as they do in play.
@@ -310,6 +339,21 @@ mod tests {
         assert_eq!(hotbar(&mut app), expected);
         frame(&mut app);
         assert_eq!(hotbar(&mut app), expected, "offered once");
+    }
+
+    #[test]
+    fn a_new_survival_world_takes_nothing() {
+        let dir = Directory::new();
+        stored(&dir);
+        let mut app = app(dir.path());
+        app.world_mut().write_message(NewWorld);
+        frame(&mut app);
+        arrive_in(&mut app, GameMode::Survival);
+        for _ in 0..3 {
+            frame(&mut app);
+        }
+        assert!(hotbar(&mut app).iter().all(Option::is_none));
+        assert_eq!(app.world().resource::<Asked>().0, 0, "not even asked");
     }
 
     #[test]

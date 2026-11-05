@@ -165,8 +165,12 @@ fn toggle(
     mut actions: ResMut<Actions>,
     (mut window, mut side): (ResMut<InventoryWindow>, ResMut<catalogue::Side>),
     (menu, layout_menu, settings, ui): Blockers,
-    focused: Single<&Window, With<PrimaryWindow>>,
+    (focused, mode): (
+        Single<&Window, With<PrimaryWindow>>,
+        Res<super::game_mode::Mode>,
+    ),
     mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+    mut commands: Commands,
 ) {
     if !focused.focused
         || menu.open
@@ -185,16 +189,31 @@ fn toggle(
     if escape {
         actions.consume_cancel();
     }
+    if search && mode.survival() {
+        ui::notify(
+            &mut commands,
+            crate::server::inventory::CREATIVE_ONLY,
+            ui::Tone::Alert,
+        );
+        if !window.open {
+            open(&mut window, &mut cursor);
+        }
+        return;
+    }
     side.focus_search = search;
     if window.open && !search {
         close(&mut window, &mut cursor);
     } else {
-        window.open = true;
-        window.picked = None;
-        window.dragging = None;
-        cursor.grab_mode = CursorGrabMode::None;
-        cursor.visible = true;
+        open(&mut window, &mut cursor);
     }
+}
+
+fn open(window: &mut InventoryWindow, cursor: &mut CursorOptions) {
+    window.open = true;
+    window.picked = None;
+    window.dragging = None;
+    cursor.grab_mode = CursorGrabMode::None;
+    cursor.visible = true;
 }
 
 fn close(window: &mut InventoryWindow, cursor: &mut CursorOptions) {
@@ -371,6 +390,7 @@ fn render(
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Frame,
+    mode: Res<super::game_mode::Mode>,
     focus: Option<Res<InputFocus>>,
     mut built: Local<Option<Built>>,
 ) {
@@ -412,7 +432,11 @@ fn render(
                         ..default()
                     },
                 ))
-                .with_children(|row| catalogue::panel(row, &searches.catalogue))
+                .with_children(|row| {
+                    if !mode.survival() {
+                        catalogue::panel(row, &searches.catalogue);
+                    }
+                })
                 .id();
             commands
                 .spawn((
@@ -1104,7 +1128,12 @@ mod tests {
                 Some("t:sand".into()),
                 Some("t:water".into()),
             ]))
-            .add_plugins((plugin, crate::server::inventory::plugin));
+            .add_plugins((
+                plugin,
+                crate::server::inventory::plugin,
+                crate::server::game_mode::plugin,
+                super::super::game_mode::plugin,
+            ));
         app.world_mut()
             .resource_mut::<super::super::edit::Hotbar>()
             .selected = 3;
@@ -1355,6 +1384,32 @@ mod tests {
                 .resource::<bevy::input_focus::InputFocus>()
                 .get(),
             Some(search)
+        );
+    }
+
+    #[test]
+    fn in_survival_c_opens_the_inventory_without_the_catalogue_and_says_why() {
+        let mut app = app();
+        let mut mode = app
+            .world_mut()
+            .query::<&mut crate::server::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = crate::server::game_mode::GameMode::Survival;
+        server(&mut app);
+        press(&mut app, KeyCode::KeyC);
+        assert!(shown(&mut app));
+        let world = app.world_mut();
+        assert_eq!(
+            world
+                .query_filtered::<(), Or<(With<SearchBox>, With<CatalogueControl>)>>()
+                .iter(world)
+                .count(),
+            0
+        );
+        assert!(
+            world
+                .query::<&Text>()
+                .iter(world)
+                .any(|t| t.0 == crate::server::inventory::CREATIVE_ONLY)
         );
     }
 

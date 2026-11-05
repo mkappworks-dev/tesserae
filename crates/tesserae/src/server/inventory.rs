@@ -14,6 +14,7 @@ use tesserae_core::save::{CarriedV1, InventoryV1};
 
 use super::ContentTables;
 use super::entities::EntityStore;
+use super::game_mode::PlayerMode;
 use super::items::{Items, PlacingItems};
 use super::persistence::extensions::PlayerState;
 use super::player::Player;
@@ -60,16 +61,23 @@ pub enum Reason {
     Rule(Refusal),
     /// A take of a Material no Item places.
     NotInCatalogue,
+    /// A take outside Creative.
+    CreativeOnly,
 }
 
 /// An intent the Server declined; the Inventory is as it was.
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct InventoryRefused(pub Reason);
 
+/// Also what the Client says when the Catalogue is asked for in Survival.
+pub const CREATIVE_ONLY: &str = "The Catalogue is Creative-only.";
+
 /// For the Client to put on screen.
 pub fn message(reason: Reason) -> &'static str {
-    let Reason::Rule(refusal) = reason else {
-        return "That Material is not in the Catalogue.";
+    let refusal = match reason {
+        Reason::Rule(refusal) => refusal,
+        Reason::NotInCatalogue => return "That Material is not in the Catalogue.",
+        Reason::CreativeOnly => return CREATIVE_ONLY,
     };
     match refusal {
         Refusal::NoSuchSlot => "That slot does not exist.",
@@ -80,6 +88,7 @@ pub fn message(reason: Reason) -> &'static str {
         Refusal::NoRoom => "Not enough room for this stack.",
         Refusal::BackpackFull => "The backpack is full. Make room first.",
         Refusal::BadCount => "Choose a count from 1 to the stack limit.",
+        Refusal::TooFew => "Not enough Items.",
     }
 }
 
@@ -99,10 +108,11 @@ pub(crate) fn plugin(app: &mut App) {
 
 fn arrange(
     mut intents: MessageReader<InventoryIntent>,
-    mut inventory: Single<&mut Inventory>,
+    player: Single<(&mut Inventory, &PlayerMode)>,
     placing: Option<Res<PlacingItems>>,
     mut refused: MessageWriter<InventoryRefused>,
 ) {
+    let (mut inventory, mode) = player.into_inner();
     for intent in intents.read() {
         let mut next = inventory.0.clone();
         let limit = |_: &str| MAX_STACK;
@@ -117,7 +127,10 @@ fn arrange(
                 count,
                 into,
             } => {
-                // TODO(game mode): refuse a take unless the Player is in Creative.
+                if mode.survival() {
+                    refused.write(InventoryRefused(Reason::CreativeOnly));
+                    continue;
+                }
                 let Some(item) = placing.as_ref().and_then(|p| p.item(material)) else {
                     refused.write(InventoryRefused(Reason::NotInCatalogue));
                     continue;
@@ -443,6 +456,19 @@ mod tests {
             stack("t:rock", 16),
             "the displaced stack moves to the backpack"
         );
+    }
+
+    #[test]
+    fn a_take_in_survival_is_refused_as_creative_only() {
+        let mut app = game();
+        let mut mode = app
+            .world_mut()
+            .query::<&mut super::super::game_mode::PlayerMode>();
+        mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Survival;
+        let (sent, refused) = ask(&mut app, take(ROCK, 16, Destination::Backpack));
+        assert!(sent.is_empty(), "{sent:?}");
+        assert_eq!(refused, [Reason::CreativeOnly]);
+        assert!(!message(Reason::CreativeOnly).is_empty());
     }
 
     #[test]

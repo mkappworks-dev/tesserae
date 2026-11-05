@@ -45,6 +45,10 @@ pub struct Sidecar {
     pub world: WorldId,
     #[serde(default)]
     pub pending: bool,
+    /// Mirrors the commit's, for the World list; absent in Worlds that predate
+    /// game modes.
+    #[serde(default)]
+    pub game_mode: super::GameMode,
 }
 
 /// The name given to the single World that predates the World list.
@@ -110,6 +114,7 @@ impl Sidecar {
             last_played_unix_s: now,
             world: commit.world.clone(),
             pending: false,
+            game_mode: commit.game_mode,
         }
     }
 }
@@ -326,6 +331,7 @@ mod tests {
             last_played_unix_s: 1,
             world: WorldId::new(),
             pending: true,
+            game_mode: Default::default(),
         }
     }
 

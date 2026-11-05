@@ -1,6 +1,6 @@
 # 06: Game mode: Creative and Survival
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 05
 
@@ -12,8 +12,8 @@ Each World has a default game mode, saved as an optional World field (absent mea
 
 ## Acceptance criteria
 
-- [ ] Survival placing spends exactly one Item per Voxel; Creative spends none.
-- [ ] An unaffordable Layout is refused with no Voxel changed.
-- [ ] Catalogue takes and the switch to flight are refused in Survival.
-- [ ] A Creative removal spawns no Dropped item; a Survival removal drops as before.
-- [ ] Both modes survive save and reopen; a save without the field opens as Creative.
+- [x] Survival placing spends exactly one Item per Voxel; Creative spends none.
+- [x] An unaffordable Layout is refused with no Voxel changed.
+- [x] Catalogue takes and the switch to flight are refused in Survival.
+- [x] A Creative removal spawns no Dropped item; a Survival removal drops as before.
+- [x] Both modes survive save and reopen; a save without the field opens as Creative.

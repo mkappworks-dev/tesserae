@@ -25,6 +25,7 @@ const REGISTERED: &[Extension] = &[
     Extension::of::<save::MovementV1>(),
     Extension::of::<save::CarriedV1>(),
     Extension::of::<save::InventoryV1>(),
+    Extension::of::<save::GameModeV1>(),
     #[cfg(test)]
     Extension::of::<super::tests::Probe>(),
 ];
