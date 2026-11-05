@@ -1,6 +1,6 @@
 # 18: I1: Deferred owned inventory policy
 
-Status: needs-info
+Status: wontfix
 Blocked by: 17
 
 Spec: [reconciled desktop gameplay](../spec.md).
@@ -45,3 +45,12 @@ Do not implement until the relevant decisions and readiness are established.
 
 The current spec and What to build section supersede historical draft
 alternatives above. Readiness awaits the final shared-understanding check.
+
+### 2026-11-05: superseded
+
+Superseded by the
+[phase 13.1 spec](../../2026-11-05-phase-13.1-menus-and-inventory-ui/spec.md),
+which decided the owned-inventory policies this ticket deferred
+([decisions](../../2026-11-05-phase-13.1-menus-and-inventory-ui/decisions.md))
+and built them as roadmap step 15. Closed here; see
+[ADR-0023](../../../docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).

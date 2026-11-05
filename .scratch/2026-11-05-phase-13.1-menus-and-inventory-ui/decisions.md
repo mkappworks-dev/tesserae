@@ -129,3 +129,11 @@ The prototype shows the ones with a screen.
 - Any solid Material, food included, can be a Biome's ground.
 - At the end the branch, this folder and these documents are renamed from
   phase 13.1 to phase 15.
+- Every demo Game declares its own food as a surface feature of its Biomes, not
+  only Terra: the terra melon, meadow pumpkin, ember pepper, tidewater coconut
+  and lumen glowberry. Variety (crops, cooking, meat) waits for steps 16, 18 and
+  22.
+- A Biome declares surface features in the 0.3 contract: Materials the Engine
+  stands one Voxel above the Biome's surface at a mean spacing in metres, pinned
+  with the World's Biome table and absent at coarse levels. Mods still place no
+  terrain.

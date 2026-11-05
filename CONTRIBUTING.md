@@ -143,7 +143,7 @@ without a Game it is empty air, with no ground, lakes or fuel. See
 | key                                  | does                                                                        |
 | ------------------------------------ | --------------------------------------------------------------------------- |
 | click, cursor free                   | grab the cursor — mouse look does nothing until you do; it edits nothing    |
-| `Esc`                                | release the cursor, closing the menu if it is open                          |
+| `Esc`                                | close the open overlay, otherwise open the Menu                             |
 | mouse                                | look                                                                        |
 | `W` `A` `S` `D`                      | move; `W`/`S` are how you get closer and further away                       |
 | `Space` / `Left Ctrl`                | up and down                                                                 |
@@ -154,37 +154,37 @@ without a Game it is empty air, with no ground, lakes or fuel. See
 | hold left                            | remove fire first, then solid, then source                                  |
 | `Ctrl`/`Cmd`+`Z`                     | undo the last direct player edit                                            |
 | `Ctrl`/`Cmd`+`Shift`+`Z`, `Ctrl`+`Y` | redo an undone edit                                                         |
-| right click                          | place the held solid, fluid source, or fire on fuel                         |
+| right click                          | place from the selected slot, or fire on fuel; Survival spends one Item     |
 | `F`                                  | cycle the held solid through its Shapes                                     |
 | `Q` / `E`                            | turn the held shape a quarter / flip which way is up                        |
-| `Tab`                                | open or close the tile menu; closing grabs the cursor                       |
+| `Tab`                                | open the Menu: Resume, Inventory, Settings, World details, Return to Worlds |
+| `I`                                  | open or close the Inventory                                                 |
+| `C`                                  | open the Inventory with the Catalogue search focused (Creative only)        |
+| `G`                                  | use the held tool, or eat the selected food                                 |
 | `X`                                  | empty the hand without changing any slot                                    |
 | middle click / `P`                   | sample the aimed Voxel into the hand without removing it                    |
-| `I` / info button                    | show or hide controls                                                       |
+| `F10` / `F1`                         | open Settings at the last category / at the last controls page              |
 | `F3`                                 | show or hide diagnostics in a dev build                                     |
 
-The hotbar starts with the Game's ground rock as a cube, slab, stair and post,
-then other declared solids until seven slots are filled, then its lake fluid (or
-first declared fluid), and fire when anything burns. Remaining slots are empty.
-Without a Game all nine squares are empty. X enters empty hand without changing
-any assigned slot; selecting a slot restores its item. Empty hand has no held
-model or placement ghost. Holding left still removes; right click does nothing.
-Middle click or P samples a solid's Material, Shape and orientation, or a fluid,
-through the Server without changing the World. Physical pickup and inventory
-remain later work. Breaking a waterlogged solid leaves its fluid. A right click
-is the secondary button, a two-finger tap on a Mac trackpad.
+The hotbar is the nine Hotbar slots of the Player's Inventory, which the Server
+holds and saves with the World. It starts empty; in Creative the Catalogue
+beside the Inventory gives Items, and a new Creative World is seeded once from
+the per-Game quick slots an older build saved. In Survival, Pickup fills it and
+placing spends one Item a Voxel. X enters empty hand without changing any slot;
+selecting a slot restores its Item. Empty hand has no held model or placement
+ghost. Holding left still removes; right click does nothing. Middle click or P
+samples a solid's Material, Shape and orientation, or a fluid, through the
+Server without changing the World. Breaking a waterlogged solid leaves its
+fluid. A right click is the secondary button, a two-finger tap on a Mac
+trackpad.
 
-The menu shows square model tiles for solids, the Shapes of the last hovered
-solid, fluids and fire in a vertically scrollable selection area. The nine quick
-slots stay fixed at the bottom centre. Hovering a tile highlights it; the
-selected slot keeps its white border. The wheel and trackpad browse items while
-the menu is open. Clicking an item holds it outside the slots and closes the
-menu. Drag an item onto a slot to assign it, or drag one slot onto another to
-swap. Its model follows the pointer, an accepting slot highlights green, and
-dropping updates the slot's model immediately. Press 1 to 9 over an item to
-assign that slot without moving selection. Clicking a slot selects it and keeps
-the menu open. Selecting a slot by key or click, or scrolling during play,
-returns from an outside item.
+The Inventory window shows the backpack, the Hotbar beneath it and the details
+of one Stack. Click a Stack then a slot to move, merge or swap it, or drag and
+drop; Shift-click moves a Stack between backpack and Hotbar, and Split and Sort
+do what they say. In Creative the Catalogue sits beside it: search, categories
+and square model tiles. Drag a tile onto a slot, double-click it to fill the
+selected Hotbar slot, Shift-click it to send it to the backpack, or pick a count
+and a destination. Every change is an intent the Server accepts or refuses.
 
 Removal needs a deliberate hold, default 350 ms. A progress bar sits above the
 target; release or a changed target resets it, and each hold removes only once.
@@ -194,19 +194,21 @@ Undo/redo keeps the last 128 direct player edits for this session. It restores
 only the edited cell, without rewinding fluid or fire simulation elsewhere. A
 changed cell or a regenerated Chunk is refused with visible feedback; a refusal
 keeps the entry at the top of its stack. A new successful edit clears redo.
+Undoing an Edit made in Survival refunds or spends the Items it paid, as one
+with its Voxels, and death clears the history
+([ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md)).
 
 An outline marks the Server's remove target, a translucent ghost shows an
 accepted placement with a right-click cue, and a small corner model shows the
-held Shape and its orientation. Fire has no ghost. Previews hide in the menu.
+held Shape and its orientation. Fire has no ghost. Previews hide in the menus.
 The Client draws these from content and Server answers and never reads a Chunk.
-The held name sits above the square play bar. The controls panel starts hidden;
-I or the bottom-right information button toggles it. F3 independently toggles
-the dev chunk/FPS readout, also hidden by default. Edit rejections stay visible
-when help is closed. Games supply one pixel texture per Material through
-appearance data. The same texture is used by placed Voxels, generated terrain,
-menu and hotbar tiles, drag feedback, held models and the placement ghost. The
-ghost shows that texture at 75 percent opacity. The last compatible Server aim
-answer remains visible briefly while the next arrives, so movement snaps between
+The held Item's name sits above the hotbar. The controls quick reference is
+under Settings › Behavior. F3 toggles the dev chunk/FPS readout, hidden by
+default. Games supply one pixel texture per Material through appearance data.
+The same texture is used by placed Voxels, generated terrain, Catalogue and
+hotbar tiles, drag feedback, held models and the placement ghost. The ghost
+shows that texture at 75 percent opacity. The last compatible Server aim answer
+remains visible briefly while the next arrives, so movement snaps between
 accepted cells without flickering between them. Expired, out-of-order or
 incompatible answers are hidden. Missing textures use the Material's colour. The
 terra supplies distinct textures for every Material, and fire has a flame

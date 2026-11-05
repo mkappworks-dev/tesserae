@@ -119,14 +119,14 @@ A World with no Game is empty air: it has no ground, lakes, fluid or fuel. See
 The Client sends aim reports beside edit intents. The Server answers with metre
 outline bounds and an acceptable ghost cell through the edit resolver. The
 Client meshes held Shapes from catalogue geometry and draws the outline, ghost
-and corner model. The menu, hotbar and drag follower share a cached model atlas
-from the same geometry. Games supply one optional, bounded texture per Material
-through the Declaration's appearance rows. One GPU texture atlas is shared by
-World surfaces and item models; the Client draws it without naming Materials.
-Greedy terrain faces repeat per Voxel, and colour, depth and shadow passes use
-the same texture alpha. Older contract lines retain colour fallback. Fire uses
-engine flame artwork. The placement ghost uses the held model at 75 percent
-opacity. The Client tracks a bounded history of aim requests and accepts
+and corner model. The Catalogue, hotbar and drag follower share a cached model
+atlas from the same geometry. Games supply one optional, bounded texture per
+Material through the Declaration's appearance rows. One GPU texture atlas is
+shared by World surfaces and item models; the Client draws it without naming
+Materials. Greedy terrain faces repeat per Voxel, and colour, depth and shadow
+passes use the same texture alpha. Older contract lines retain colour fallback.
+Fire uses engine flame artwork. The placement ghost uses the held model at 75
+percent opacity. The Client tracks a bounded history of aim requests and accepts
 monotonic Server replies; it retains a compatible answer for at most 200 ms
 while waiting for the next. Item changes, large turns or Eye displacement hide
 it immediately. Sampling a Voxel is a separate read-only Server intent, not an
@@ -276,6 +276,8 @@ tesserae/
 │   │   │   ├── combustion.rs   heat, fuel and residue, as data              ▸ 8
 │   │   │   ├── fire.rs         exposure, ignition, burning and residue      ▸ 8
 │   │   │   ├── collide.rs      AABB sweep and ray vs grid, in metres        ▸ 5
+│   │   │   ├── inventory.rs    Hotbar and backpack: fit, merge, spend, sort ▸ 15
+│   │   │   ├── survival.rs     Survival rules and the engine's defaults    ▸ 21
 │   │   │   └── layout.rs       line, rectangle, box → Voxel coordinates, ≤256
 │   │   └── benches/        criterion — meshing.rs gates step 1          ▸ 1
 │   │                       lod.rs: downsample, coarse Chunk, mesh, light  ▸ 6
@@ -300,11 +302,15 @@ tesserae/
 │           │   ├── jobs.rs         jobs on the async compute pool           ▸ 3
 │           │   ├── mods.rs         Mod Jobs, fair queues and tick drain      ▸ 7
 │           │   ├── fluids.rs       flow on workers, one step at a time      ▸ 8
-│           │   └── edit.rs         the Voxel-edit path, queued intents      ▸ 5
+│           │   ├── edit.rs         the Voxel-edit path, queued intents      ▸ 5
+│           │   ├── undo.rs         the undo journal, paying in Items        ▸ 15
+│           │   ├── inventory.rs    the Player's Inventory and its intents   ▸ 15
+│           │   └── vitals.rs       health, hunger and air on the tick       ▸ 21
 │           ├── client/         camera, input, UI, mesh upload               ▸ 2
 │           │   ├── chunk_view.rs   one entity per Chunk the Server sent     ▸ 3
 │           │   ├── edit.rs         place/remove intents, hotbar, crosshair   ▸ 5
-│           │   └── menu.rs         tile menu and square play bar      ▸ 8
+│           │   ├── inventory_window.rs  the Inventory and the Catalogue     ▸ 15
+│           │   └── menu.rs         the in-game Menu
 │           └── render/         chunk material, distance fog, look packs   ▸ 2, 9
 │               ├── chunk_material.rs MaterialExtension and its WESL         ▸ 2
 │               └── fog.rs            live FogSettings → one DistanceFog     ▸ 9
@@ -327,11 +333,14 @@ The Client receives save status and sends lifecycle intents. Mods observe
 new/open through WIT, and restored changes also feed coarse derivation. Details
 and limits: [World persistence](world-persistence.md).
 
-The World list (`client/worlds.rs`) runs in a process with no Server and no open
-World. It creates, renames and trashes only closed World folders, through core's
-`save::library`, which refuses any folder whose writer lock another process
-holds. Opening a World restarts the process, so the Server rule above holds for
-everything inside a World.
+The launcher (`client/worlds.rs`: the title screen, the World list, Create
+World, Edit World and the Mods library) runs with no Server and no open World.
+It creates, renames, edits and trashes only closed World folders, through core's
+`save::library`, which refuses any folder whose writer lock is held. What it
+cannot decide alone, Create World's Biome edits and Edit World's game modes, it
+writes to the World's sidecar for the Server to apply when the World opens
+([ADR-0024](adr/0024-game-mode-is-per-player-with-a-world-default.md)), so the
+Server rule above holds for everything inside a World.
 
 Authors do not need this repository to make a Game or Mod: the
 [authoring guide](authoring-guide.md) and the starters are self-contained.

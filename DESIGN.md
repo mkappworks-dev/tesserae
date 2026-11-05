@@ -550,15 +550,15 @@ controls, movement, save, camera and input work already in flight is tracked in
 | 10  | Modding SDK             | Data-only declarations, folder loading, reload loop, SDK docs and WIT compatibility policy        | Example Game                       | -          | Done            |
 | 11  | Use action, first tool  | Server "use" verb, target validation, success and refusal feedback (tickets 20-21)                | Which tools exist and what they do | -          | First tool done |
 | 12  | Dropped items, pickup   | Entity system: Server simulation, pickup, save                                                    | Item definitions                   | -          | Done            |
-| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, biome caves          | -          | Done            |
+| 13  | Biomes, richer worldgen | Biome and climate seam, generator version pinned in the save                                      | Biomes, ores, surface features     | -          | Done            |
 | 14  | Audio                   | Audio engine, Server-driven events, mixing                                                        | Sound and music assets             | -          | Not started     |
-| 15  | Inventory               | Server-owned transactions that compose with the undo journal, save (tickets 18-19)                | Stack sizes, item rules            | 11, 12     | Not started     |
+| 15  | Inventory               | Server-owned transactions that compose with the undo journal, save                                | Stack sizes, item rules            | 11, 12     | Done            |
 | 16  | Crafting                | Recipe schema, station interaction, UI host                                                       | Recipes, stations                  | 15         | Not started     |
 | 17  | Weather                 | Weather state and tick, particles, sky hooks                                                      | Weather types, climate rules       | 13         | Not started     |
 | 18  | Plants                  | Growth on the Server tick, placement rules, harvesting                                            | Plant data                         | 13         | Not started     |
 | 19  | Map, compass            | Server-provided summaries (the Client never reads World storage), map view                        | Map style, markers                 | 13         | Not started     |
 | 20  | Structures              | Template format, deterministic placement by worldgen and tools                                    | Templates                          | 13         | Not started     |
-| 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Not started     |
+| 21  | Survival loop           | Health, damage, hunger, death, respawn, game modes                                                | Numbers and rules                  | 15         | Done            |
 | 22  | Mobs, animals           | Entity AI hooks, spawning, replication shape designed against transport                           | Behaviours, spawn tables           | 12, 13, 21 | Not started     |
 | 23  | NPCs                    | Persistent identity, dialogue and trade plumbing                                                  | NPC definitions, dialogue          | 15, 22     | Not started     |
 | 24  | Logic and machines      | Wiring and automation, then moving and flying Voxel bodies (see below)                            | Machine parts, logic components    | 12, 20     | Not started     |
@@ -582,8 +582,42 @@ Notes:
   a snapshot of its Biome table, so a new biome never changes an existing
   World's terrain for the same seed. The Server sends the Client the sky and fog
   pair for where the Eye is. All five demo Games declare three Biomes and one
-  ore. See
+  ore. A Biome may also declare surface features, Materials stood one Voxel
+  above its surface at a mean spacing in metres; they are pinned in the
+  snapshot, so a World saved before them keeps its bare ground, and coarse
+  levels leave them out. See
   [ADR-0022](docs/adr/0022-biomes-are-column-content-and-a-world-pins-its-generator.md).
+- **Step 15** is done. Each Player has a Server-owned Inventory, a 27-slot
+  backpack and a 9-slot Hotbar of Stacks, whose rules are a pure module in
+  `tesserae-core`; the Client sends intents and draws what the Server sends.
+  Pickup fills it and leaves on the ground what does not fit. In Survival, Place
+  spends one Item from the selected slot and a Layout is paid up front or
+  refused. Undo pays and refunds Items in the same Server transaction, by the
+  mode each entry was made in, and anything that does not fit drops at the
+  Player. A Material with no declared Item has an implicit one, so every
+  placeable Material is an Item. Carried is retired: a save's totals pack into
+  slots once. In Creative the Catalogue sits beside the Inventory and gives
+  Items. Games declare stack limits (`max-stack`, 64 when absent). See
+  [ADR-0023](docs/adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md).
+- **Step 21** is done. A World has a default game mode and each Player their
+  own, Creative or Survival; Edit World's changes wait in the sidecar until the
+  Server applies them at the next open
+  ([ADR-0024](docs/adr/0024-game-mode-is-per-player-with-a-world-default.md)).
+  In Survival the Server keeps health, hunger and air on its 64 Hz tick, in
+  metres and seconds: fall damage above a safe height, drowning, contact damage
+  from a Material that declares it, hunger that drains faster while sprinting,
+  regeneration while hunger is high and starvation at zero. Food is an Item with
+  a food value, eaten with Use. At zero health the Player drops their Inventory
+  where they fell unless the Game keeps it, loses their undo history, and sees a
+  death screen that counts down to the drops' despawn; Respawn is at the World
+  spawn with full Vitals. The Game declares its Survival rules (maximum health,
+  hunger and air, safe fall height and damage rates, hunger drain, the
+  regeneration threshold and `regeneration-per-s`, `keep-inventory`); a Mod may
+  not, and a Game that declares none plays on engine defaults. Every demo Game
+  has its own food as a surface feature of its Biomes: the terra melon, meadow
+  pumpkin, ember pepper, tidewater coconut and lumen glowberry. Lava hurts on
+  contact in terra and in `hearth`. Spec and tickets:
+  `.scratch/2026-11-05-phase-13.1-menus-and-inventory-ui/`.
 - **Step 10** is the gate for "ready for Mods" and has no dependency on the
   later gameplay systems. Folder loading and versioned WIT contracts already
   exist; this step completes the authoring workflow, starting with data-only

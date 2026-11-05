@@ -1,6 +1,6 @@
 # 20: Docs and ADRs
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 01, 02, 03, 04, 05, 06, 07, 08, 09, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22
 
@@ -12,6 +12,6 @@ The glossary gains Inventory, Stack, Hotbar, Catalogue, Game mode and Vitals, an
 
 ## Acceptance criteria
 
-- [ ] Glossary entries use the spec's definitions; Carried points to Inventory.
-- [ ] Both ADRs record the rejected alternatives named in the spec.
-- [ ] `npm run fmt:check` passes.
+- [x] Glossary entries use the spec's definitions; Carried points to Inventory.
+- [x] Both ADRs record the rejected alternatives named in the spec.
+- [x] `npm run fmt:check` passes.

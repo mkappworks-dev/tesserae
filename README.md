@@ -11,17 +11,19 @@ terra Game in `games/terra/`, the starting point for writing your own.
 Steps **1 to 8 of 27** in [DESIGN.md](DESIGN.md)'s build order are done, and
 step 11 (use and a first tool) has started. The Modding SDK (step 10) is done:
 see the [authoring guide](docs/authoring-guide.md) and the
-[demo Games built on shared data Mods](docs/demo-games.md). `cargo run` opens a
-World list; a World is streamed and generated, and you can fly or walk around
-it, swim, edit it and save it. Keyboard and mouse, a gamepad and, on Windows and
-Linux, a touchscreen all play. The Terra Game adds flowing water, lava and fire
-to it.
+[demo Games built on shared data Mods](docs/demo-games.md). Dropped items (step
+12), Biomes (step 13), the Inventory (step 15) and the Survival loop (step 21)
+are done too. `cargo run` opens a title screen; a World is streamed and
+generated, and you can fly or walk around it, swim, edit it and save it, build
+freely in Creative or gather, eat and die in Survival. Keyboard and mouse, a
+gamepad and, on Windows and Linux, a touchscreen all play. The Terra Game adds
+flowing water, lava and fire to it.
 
 | works today                                           | not written yet              |
 | ----------------------------------------------------- | ---------------------------- |
 | Palette-compressed 32³ Chunks, greedy mesher          | Look packs and water shading |
 | Worldgen with caves, Chunk streaming                  | Network play                 |
-| Client/server split, the Server in-process            | Inventory, crafting, mobs    |
+| Client/server split, the Server in-process            | Crafting, mobs               |
 | Per-Voxel light, PBR shading, shadow maps             |                              |
 | Shapes: stairs, slabs, fences, with collision         |                              |
 | LOD out to 4 km                                       |                              |
@@ -29,6 +31,7 @@ to it.
 | Fluids that flow and waterlog Shapes, fuel that burns |                              |
 | Saved Worlds, World list, in-process World sessions   |                              |
 | Keyboard, gamepad and touch input, a first tool       |                              |
+| An Inventory, Creative and Survival, food and death   |                              |
 
 The right-hand column is the roadmap, not a feature list. Nothing in it works.
 

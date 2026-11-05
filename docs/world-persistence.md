@@ -14,13 +14,17 @@ Each World folder is named once from the World's name, sanitized for macOS,
 Linux and Windows and suffixed on a case-insensitive collision; it is never
 renamed. Identity stays the commits' UUID. A copied folder keeps that UUID,
 which is harmless: nothing global is keyed by it, and the list is keyed by path.
-A `world.json` sidecar holds display details only: name, Game, Mods (id and
-version), resolved seed, Voxel size, created and last-played times, the UUID and
-a `pending` flag. Commits stay authoritative, and their required content decides
-what loads: a missing or reversioned Game or Mod refuses the open before any
-write. A missing or corrupt sidecar never hides a folder; Rename rebuilds it
-from the newest commit. The single pre-list `worlds/default` World is adopted as
-"Default World".
+A `world.json` sidecar holds display details: name, Game, Mods (id and version),
+resolved seed, Voxel size, created and last-played times, the UUID, a `pending`
+flag, the World's default game mode and the Player's own as it last opened. It
+also carries requests for the Server: Create World's Biome edits, applied to the
+Biome table before it is snapshotted at the first open, and Edit World's mode
+changes, applied at the next open and cleared by the first commit after it
+([ADR-0024](adr/0024-game-mode-is-per-player-with-a-world-default.md)). Commits
+stay authoritative, and their required content decides what loads: a missing or
+reversioned Game or Mod refuses the open before any write. A missing or corrupt
+sidecar never hides a folder; Rename rebuilds it from the newest commit. The
+single pre-list `worlds/default` World is adopted as "Default World".
 
 Create writes the folder and a `pending` sidecar, then restarts on it. A folder
 without commits takes its UUID, seed and Voxel size from that sidecar and writes
@@ -59,10 +63,9 @@ that cannot safely be evicted.
 identity independent of seed, a monotonic commit sequence, seed, Voxel size,
 named generation parameters, exact required Game/Mod builds, content names,
 current Player Eye, authoritative Chunks and simulation checkpoints. Dropped
-items are a separate `entities` record, below. Global preferences and creative
-shortcuts are separate data. There is no inventory: the one thing a Player holds
-is a `Carried` count, the interim sink for Pickup that the inventory step
-replaces.
+items are a separate `entities` record, below, and the World's default game mode
+is an optional `game_mode`, absent meaning Creative. Global preferences are
+separate data.
 
 Changed Chunks are complete run-length encoded level-0 records, including Air.
 Traversal is x/y/z, z fastest. Material and Shape references are names,
@@ -78,9 +81,10 @@ fields are optional on read and written only for Generator version 2 and a
 non-empty table, so a version 1 commit, or one written before Biomes, restores
 with none. Ores name their Material and Biomes, and a Biome names its ground
 Materials, all through the Mapping like the World's own ground. A Biome's
-optional sky and fog colours and cave scale ride in its snapshot, absent when it
-has none. The snapshot is separate from `entities` and changes neither the
-format nor the generator version.
+optional sky and fog colours, cave scale and surface features ride in its
+snapshot, absent when it has none, so a World saved before a Biome gained
+features keeps its bare ground. The snapshot is separate from `entities` and
+changes neither the format nor the generator version.
 
 Simulation checkpoints contain the logical step, count bounds, flow deadlines
 and desired changes, running and frozen fire clocks, ignition/burn-out changes,
@@ -110,12 +114,24 @@ none, and it changes neither the format nor the generator version. An unknown
 Item name, a non-finite number, a duplicate id or a timer out of range makes the
 commit corrupt. A drop in an unloaded Chunk is saved and still frozen on
 reopening. The live set is capped at 2048, which bounds what each commit adds
-and is why there is no per-Chunk entity storage yet. What a Player carried is
-the Player extension `carried_v1`, a map from Item name to count, written only
-when not empty; older engines refuse it like any unknown extension. Save
-dirtiness includes a revision that moves when a drop spawns, despawns, merges,
-is picked up or comes to rest, and the Player's Carried count. Save & Quit stops
-spawning, stepping and Pickup, so the final commit is what the Player last saw.
+and is why there is no per-Chunk entity storage yet. Save dirtiness includes a
+revision that moves when a drop spawns, despawns, merges, is picked up or comes
+to rest. Save & Quit stops spawning, stepping and Pickup, so the final commit is
+what the Player last saw.
+
+The rest of the Player is one extension per key, each registered once on the
+Server as a key this build opens; an older engine refuses a save with a key it
+does not know: `inventory_v1`, the Hotbar and backpack slots by Item name and
+the selected slot; `game_mode_v1`, the Player's own mode; `vitals_v1`, health,
+hunger and air in seconds; and `death_v1`, while the Player is dead, with the
+cause, where the feet were, what was dropped and the ids of the Dropped items it
+became, so a reopened World shows the death screen and its despawn countdown.
+Every commit carries them with the Chunks, so the Inventory is never saved apart
+from the Edits it paid for, and save dirtiness compares them. `carried_v1`, a
+map from Item name to count written before the Inventory, is read once: its
+totals pack into slots, any overflow drops at the Player, and it is never
+written again
+([ADR-0023](adr/0023-the-inventory-is-server-owned-and-pays-inside-the-undo-journal.md)).
 
 Light, meshes, connections, coarse Chunks, Jobs and Lifetimes are derived and
 must be rebuilt. A saved revision is data identity, not a reusable Lifetime.

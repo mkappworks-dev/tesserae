@@ -47,12 +47,12 @@ Materials and Shapes.
 
 **World** — one save. Owns its Voxel size, its seed and its Chunks.
 
-**World list** — the first screen of a launch: every World folder, before any
-Game runs. Not a "menu" (the in-World catalogue and settings).
+**World list** — the launcher's list of every World folder, reached from the
+title screen before any Game runs. Not the Menu, which opens inside a World.
 
-**World session** — one opening of a World, from loading to Return to World
-list. The window and the app outlive it; everything it added to the ECS, its
-jobs and its Mod instances do not.
+**World session** — one opening of a World, from loading to Return to Worlds.
+The window and the app outlive it; everything it added to the ECS, its jobs and
+its Mod instances do not.
 
 **Voxel** — the atomic unit of world volume. Not "block", not "node".
 
@@ -217,11 +217,27 @@ fluid or Player. Not a Bevy `Entity`.
 **Dropped item** — an Entity holding a count of one Item, falling or at rest,
 until picked up or despawned.
 
-**Carried** — how many of each Item a Player holds after Pickup. Not an
-inventory: it has no slots and no limits.
+**Inventory** — the Server-owned Stacks a Player holds: a 27-slot backpack and a
+9-slot Hotbar. Replaces Carried.
 
-**Pickup** — a Dropped item entering a Player's Carried, by nearness. Distinct
+**Stack** — one Item and a count, at most the Item's stack limit. Shape and
+Orientation are the Player's placement choice, not part of a Stack.
+
+**Hotbar** — the nine Inventory slots usable in play; one is selected.
+
+**Catalogue** — the Creative-only list of Materials a Player can take Items
+from. Not the Inventory and not ownership.
+
+**Carried** — retired: what a Player held after Pickup before the Inventory. Use
+Inventory.
+
+**Pickup** — a Dropped item entering a Player's Inventory, by nearness. Distinct
 from Use and from Sample, which copies what is aimed at into the hand.
+
+**Game mode** — Creative or Survival. A World has a default; each Player has
+their own.
+
+**Vitals** — a Player's health, hunger and air.
 
 **Measurement** — two corners a Tool's Use resolved, kept by the Client for the
 session. A corner is a vertex of the struck face of a Voxel's drawn Shape.

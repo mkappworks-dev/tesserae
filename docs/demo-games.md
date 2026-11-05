@@ -1,12 +1,12 @@
 # Demo Games and shared Mods
 
-The repository ships five Games and twelve Mods. `terra` is the one
+The repository ships five Games and fifteen Mods. `terra` is the one
 self-contained Rust Game, the template
 [ADR-0004](adr/0004-demo-game-in-repo-real-game-out.md) describes. The other
-four Games are small Rust components that declare a World and one behaviour, and
-take every Material, fluid and Shape from the data Mods in [`mods/`](../mods/)
-they depend on. That split is the pattern worth copying: code for behaviour,
-data for content, shared across Games.
+four Games are small Rust components that declare a World, one behaviour and a
+food, and take every other Material, and every fluid and Shape, from the data
+Mods in [`mods/`](../mods/) they depend on. That split is the pattern worth
+copying: code for behaviour, data for content, shared across Games.
 
 ## Games
 
