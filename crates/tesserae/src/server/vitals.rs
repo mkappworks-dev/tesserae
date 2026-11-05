@@ -4,10 +4,10 @@
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
-use tesserae_core::collide::Aabb;
+use tesserae_core::collide::{Aabb, Terrain};
 use tesserae_core::flow::CellView;
 use tesserae_core::save::VitalsV1;
-use tesserae_core::{Fluid, MaterialId, Occupants, SurvivalRules, Tables};
+use tesserae_core::{Fluid, MaterialId, Occupants, SurvivalRules};
 
 use super::ContentTables;
 use super::death::{Death, PlayerIntents};
@@ -232,9 +232,11 @@ pub(super) fn tick(
     } else {
         now.air_s = rules.max_air_s;
     }
-    if let Some((material, per_s)) =
-        contact(&*store, &tables, world.voxel_size, player.body(), &survival)
-    {
+    if let Some((material, per_s)) = contact(
+        &tables.terrain(&store, world.voxel_size),
+        player.body(),
+        &survival,
+    ) {
         hurt(&mut now, per_s * dt, DamageCause::Contact(material));
     }
     let hunger_per_min = if player.sprinting() {
@@ -261,15 +263,18 @@ pub(super) fn tick(
 /// The most harmful Material the body overlaps, by Voxel for a solid and up to
 /// its surface for a fluid.
 fn contact(
-    store: &impl CellView,
-    tables: &Tables,
-    size: f32,
+    terrain: &Terrain<impl CellView>,
     body: Aabb,
     survival: &Survival,
 ) -> Option<(MaterialId, f32)> {
     if !survival.any_contact_damage() {
         return None;
     }
+    let Terrain {
+        voxels: store,
+        tables,
+        voxel_size: size,
+    } = *terrain;
     // Shrunk so a body resting on a Voxel, or flush against one, does not
     // touch it.
     const EPS_M: f32 = 1e-3;

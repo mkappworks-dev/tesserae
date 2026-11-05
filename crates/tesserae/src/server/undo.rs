@@ -14,6 +14,7 @@ use crate::world::WorldSettings;
 use bevy::prelude::*;
 use std::collections::{BTreeMap, VecDeque};
 use tesserae_core::Occupants;
+use tesserae_core::collide::Terrain;
 use tesserae_core::entity::EntityId;
 use tesserae_core::inventory::Stack;
 use tesserae_mods::{EditEvent, EditKind};
@@ -280,9 +281,11 @@ fn restore(
                 if let Some(at) = settle.items.named(&item) {
                     let id = entities::drop_one(
                         settle.entities,
-                        store,
-                        tables,
-                        settle.voxel_size,
+                        &Terrain {
+                            voxels: &*store,
+                            tables,
+                            voxel_size: settle.voxel_size,
+                        },
                         settle.items,
                         entry.at,
                         at,
@@ -294,9 +297,11 @@ fn restore(
     }
     inventory::drop_around(
         settle.entities,
-        store,
-        tables,
-        settle.voxel_size,
+        &Terrain {
+            voxels: &*store,
+            tables,
+            voxel_size: settle.voxel_size,
+        },
         settle.items,
         &settle.body,
         refused,

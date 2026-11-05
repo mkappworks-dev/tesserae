@@ -977,10 +977,10 @@ fn dropped_items_and_the_inventory_survive_save_and_reopen() {
             };
             // Two on the cavity floor, further apart than the merge radius. A
             // drop saved mid-fall is covered where the record is built.
-            entities.spawn_drop(store, &tables.0, 1.0, [4, 3, 4], spec);
-            entities.spawn_drop(store, &tables.0, 1.0, [9, 3, 9], spec);
+            entities.spawn_drop(&tables.terrain(store, 1.0), [4, 3, 4], spec);
+            entities.spawn_drop(&tables.terrain(store, 1.0), [9, 3, 9], spec);
             for _ in 0..200 {
-                entities.step(store, &tables.0, 1.0);
+                entities.step(&tables.terrain(store, 1.0));
             }
         });
     let mut held = rig.app.world_mut().query::<&mut Inventory>();
@@ -1241,7 +1241,7 @@ fn a_deaths_despawn_countdown_continues_after_save_and_reopen() {
                 count: 40,
                 size_m: 0.25,
             };
-            entities.spawn_drops_around(store, &tables.0, 1.0, [6.0, 2.5, 6.0], [spec])
+            entities.spawn_drops_around(&tables.terrain(store, 1.0), [6.0, 2.5, 6.0], [spec])
         });
     let died = Death {
         cause: Some(save::DeathCause::Starvation),
@@ -1402,9 +1402,7 @@ fn a_change_that_only_moves_the_entity_revision_makes_the_world_dirty() {
             let store = world.resource::<ChunkStore>();
             let tables = world.resource::<ContentTables>();
             entities.spawn_drop(
-                store,
-                &tables.0,
-                1.0,
+                &tables.terrain(store, 1.0),
                 [4, 1, 4],
                 DropSpec {
                     item: 0,

@@ -51,6 +51,7 @@ use std::sync::Arc;
 use bevy::prelude::*;
 
 use crate::session::SessionApp;
+use tesserae_core::collide::Terrain;
 use tesserae_core::{Tables, Worldgen, WorldgenParams};
 
 use crate::world::WorldSettings;
@@ -88,6 +89,18 @@ impl Default for ContentTables {
 impl ContentTables {
     fn from_loaded(tables: Tables, _game: bool) -> Self {
         ContentTables(Arc::new(tables))
+    }
+
+    pub(crate) fn terrain<'a>(
+        &'a self,
+        store: &'a world_state::ChunkStore,
+        voxel_size: f32,
+    ) -> Terrain<'a, world_state::ChunkStore> {
+        Terrain {
+            voxels: store,
+            tables: &self.0,
+            voxel_size,
+        }
     }
 }
 

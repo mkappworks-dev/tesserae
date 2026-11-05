@@ -147,9 +147,7 @@ fn die(
     };
     let (dropped, drops) = drop_around(
         &mut entities,
-        &store,
-        &tables.0,
-        world.voxel_size,
+        &tables.terrain(&store, world.voxel_size),
         &items,
         &body,
         held,

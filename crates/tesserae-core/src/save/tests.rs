@@ -1026,6 +1026,7 @@ fn a_newer_format_is_incompatible_not_corrupt_and_is_never_rolled_back_past() {
 
 mod dropped_items {
     use super::*;
+    use crate::collide::Terrain;
     use crate::entity::{DESPAWN_STEPS, DropSpec, Entities};
     use crate::save::entities::SavedEntities;
     use crate::testgen::fixtures;
@@ -1063,9 +1064,11 @@ mod dropped_items {
         let mut e = Entities::default();
         for (i, item) in [0u32, 1, 0].into_iter().enumerate() {
             e.spawn_drop(
-                &Floor,
-                &fixtures().tables,
-                SIZE,
+                &Terrain {
+                    voxels: &Floor,
+                    tables: &fixtures().tables,
+                    voxel_size: SIZE,
+                },
                 [i as i32 * 4, 6, 0],
                 DropSpec {
                     item,
@@ -1074,7 +1077,11 @@ mod dropped_items {
                 },
             );
             for _ in 0..40 {
-                e.step(&Floor, &fixtures().tables, SIZE);
+                e.step(&Terrain {
+                    voxels: &Floor,
+                    tables: &fixtures().tables,
+                    voxel_size: SIZE,
+                });
             }
         }
         e
@@ -1109,8 +1116,16 @@ mod dropped_items {
         let saved = SavedEntities::capture(&live, names).unwrap();
         let mut reopened = saved.restore(SIZE, resolve).unwrap();
         for _ in 0..300 {
-            live.step(&Floor, &fixtures().tables, SIZE);
-            reopened.step(&Floor, &fixtures().tables, SIZE);
+            live.step(&Terrain {
+                voxels: &Floor,
+                tables: &fixtures().tables,
+                voxel_size: SIZE,
+            });
+            reopened.step(&Terrain {
+                voxels: &Floor,
+                tables: &fixtures().tables,
+                voxel_size: SIZE,
+            });
         }
         let all = |e: &Entities| {
             e.iter()

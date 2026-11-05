@@ -52,6 +52,22 @@ impl Aabb {
     }
 }
 
+/// What a body moves through: the Voxels, the tables that say what each one
+/// is, and a Voxel's size in metres.
+pub struct Terrain<'a, V: ?Sized> {
+    pub voxels: &'a V,
+    pub tables: &'a Tables,
+    pub voxel_size: f32,
+}
+
+impl<V: ?Sized> Clone for Terrain<'_, V> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<V: ?Sized> Copy for Terrain<'_, V> {}
+
 /// What a sweep did.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct Sweep {

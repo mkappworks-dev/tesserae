@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+use tesserae_core::collide::Terrain;
 use tesserae_core::entity::{DropSpec, Entities, EntityId, WorldEntity};
 
 use super::ContentTables;
@@ -99,17 +100,13 @@ pub(super) fn plugin(app: &mut App) {
 /// Spawns one of the Item at `item` popping out of the Voxel `at`.
 pub(super) fn drop_one(
     entities: &mut Entities,
-    store: &ChunkStore,
-    tables: &tesserae_core::Tables,
-    voxel_size: f32,
+    terrain: &Terrain<ChunkStore>,
     items: &Items,
     at: [i32; 3],
     item: usize,
 ) -> EntityId {
     entities.spawn_drop(
-        store,
-        tables,
-        voxel_size,
+        terrain,
         at,
         DropSpec {
             item: item as u32,
@@ -126,7 +123,7 @@ pub(super) fn step_entities(
     if entities.is_empty() {
         return;
     }
-    entities.step(&*store, &tables.0, world.voxel_size);
+    entities.step(&tables.terrain(&store, world.voxel_size));
 }
 
 fn distance_to_box(point: [f32; 3], body: &tesserae_core::collide::Aabb) -> f32 {
@@ -451,9 +448,7 @@ mod tests {
             .resource_scope(|world, mut entities: Mut<EntityStore>| {
                 let tables = world.resource::<ContentTables>();
                 entities.spawn_drop(
-                    world.resource::<ChunkStore>(),
-                    &tables.0,
-                    1.0,
+                    &tables.terrain(world.resource::<ChunkStore>(), 1.0),
                     [5, 8, 5],
                     DropSpec {
                         item: 0,

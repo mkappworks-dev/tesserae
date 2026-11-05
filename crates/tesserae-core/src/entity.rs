@@ -9,8 +9,7 @@
 use std::collections::BTreeMap;
 
 use crate::chunk::CHUNK_SIZE;
-use crate::collide::{self, Aabb, VoxelVolume};
-use crate::tables::Tables;
+use crate::collide::{self, Aabb, Terrain, VoxelVolume};
 
 /// The step every Dropped item advances by, the fluids' logical step.
 pub const STEP_S: f32 = 1.0 / 64.0;
@@ -189,17 +188,15 @@ impl Entities {
     /// metre.
     pub fn spawn_drop(
         &mut self,
-        vol: &impl VoxelVolume,
-        tables: &Tables,
-        voxel_size: f32,
+        terrain: &Terrain<impl VoxelVolume>,
         at: [i32; 3],
         spec: DropSpec,
     ) -> EntityId {
         let id = self.claim_id();
         let angle = pop_angle(id, self.step);
-        let pos_m = at.map(|i| (i as f32 + 0.5) * voxel_size);
+        let pos_m = at.map(|i| (i as f32 + 0.5) * terrain.voxel_size);
         let drop = thrown(spec, pos_m, angle, POP_SPEED_M_S);
-        self.insert_drop(vol, tables, voxel_size, id, drop);
+        self.insert_drop(terrain, id, drop);
         id
     }
 
@@ -208,9 +205,7 @@ impl Entities {
     /// stacks of one Item from merging back into one. In spawn order.
     pub fn spawn_drops_around(
         &mut self,
-        vol: &impl VoxelVolume,
-        tables: &Tables,
-        voxel_size: f32,
+        terrain: &Terrain<impl VoxelVolume>,
         centre_m: [f32; 3],
         stacks: impl IntoIterator<Item = DropSpec>,
     ) -> Vec<EntityId> {
@@ -223,7 +218,7 @@ impl Entities {
             // Sunflower spacing: equal area per stack whatever the count.
             let speed = SPREAD_SPEED_M_S * ((i as f32 + 0.5) / stacks.len() as f32).sqrt();
             let drop = thrown(*spec, centre_m, angle, speed);
-            self.insert_drop(vol, tables, voxel_size, id, drop);
+            self.insert_drop(terrain, id, drop);
             ids.push(id);
         }
         ids
@@ -245,12 +240,15 @@ impl Entities {
     /// at most a metre.
     fn insert_drop(
         &mut self,
-        vol: &impl VoxelVolume,
-        tables: &Tables,
-        voxel_size: f32,
+        terrain: &Terrain<impl VoxelVolume>,
         id: EntityId,
         mut drop: DroppedItem,
     ) {
+        let Terrain {
+            voxels: vol,
+            tables,
+            voxel_size,
+        } = *terrain;
         let tries = (LIFT_MAX_M / voxel_size).ceil().clamp(1.0, 256.0) as u32;
         for _ in 0..tries {
             if !collide::overlaps(vol, tables, voxel_size, cube(drop.pos_m, drop.size_m)) {
@@ -272,7 +270,12 @@ impl Entities {
     /// Advances every entity one logical step. One whose Chunk is not held
     /// neither moves nor ages: unknown terrain is solid to a sweep, so moving
     /// it would strand it, and it must outlast the Player's absence.
-    pub fn step(&mut self, vol: &impl VoxelVolume, tables: &Tables, voxel_size: f32) {
+    pub fn step(&mut self, terrain: &Terrain<impl VoxelVolume>) {
+        let Terrain {
+            voxels: vol,
+            tables,
+            voxel_size,
+        } = *terrain;
         self.step += 1;
         let step = self.step;
         let mut rested = Vec::new();
@@ -308,7 +311,7 @@ impl Entities {
                 }
                 continue;
             }
-            if advance(d, vol, tables, voxel_size) {
+            if advance(d, terrain) {
                 rested.push(id);
             }
             let chunk = chunk_of(d.pos_m, voxel_size);
@@ -397,7 +400,12 @@ fn pop_angle(id: EntityId, step: u64) -> f32 {
 }
 
 /// One step of motion. True when the drop has just come to rest.
-fn advance(d: &mut DroppedItem, vol: &impl VoxelVolume, tables: &Tables, voxel_size: f32) -> bool {
+fn advance(d: &mut DroppedItem, terrain: &Terrain<impl VoxelVolume>) -> bool {
+    let Terrain {
+        voxels: vol,
+        tables,
+        voxel_size,
+    } = *terrain;
     d.vel_m_s[1] = (d.vel_m_s[1] - GRAVITY_M_S2 * STEP_S).max(-TERMINAL_M_S);
     let delta = d.vel_m_s.map(|v| v * STEP_S);
     let swept = collide::sweep(vol, tables, voxel_size, cube(d.pos_m, d.size_m), delta);
@@ -430,6 +438,7 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+    use crate::tables::Tables;
     use crate::testgen::fixtures;
     use crate::voxel::Voxel;
 
@@ -474,9 +483,11 @@ mod tests {
 
     fn drop_at(entities: &mut Entities, grid: &Grid, at: [i32; 3], item: u32) -> EntityId {
         entities.spawn_drop(
-            grid,
-            tables(),
-            SIZE,
+            &Terrain {
+                voxels: grid,
+                tables: tables(),
+                voxel_size: SIZE,
+            },
             at,
             DropSpec {
                 item,
@@ -488,7 +499,11 @@ mod tests {
 
     fn run(entities: &mut Entities, grid: &Grid, steps: u32) {
         for _ in 0..steps {
-            entities.step(grid, tables(), SIZE);
+            entities.step(&Terrain {
+                voxels: grid,
+                tables: tables(),
+                voxel_size: SIZE,
+            });
         }
     }
 
@@ -647,7 +662,15 @@ mod tests {
             count: 5,
             size_m: 0.25,
         };
-        let id = e.spawn_drop(&grid, tables(), SIZE, [3, 1, 3], spec);
+        let id = e.spawn_drop(
+            &Terrain {
+                voxels: &grid,
+                tables: tables(),
+                voxel_size: SIZE,
+            },
+            [3, 1, 3],
+            spec,
+        );
         let revision = e.revision();
         e.take(id, 2);
         assert_eq!(e.get(id).unwrap().as_dropped().count, 3);
@@ -677,7 +700,15 @@ mod tests {
             count: count + 1,
             size_m: 0.25,
         });
-        let ids = e.spawn_drops_around(&grid, tables(), SIZE, centre_m, stacks);
+        let ids = e.spawn_drops_around(
+            &Terrain {
+                voxels: &grid,
+                tables: tables(),
+                voxel_size: SIZE,
+            },
+            centre_m,
+            stacks,
+        );
         assert_eq!(ids.len(), 6);
         run(&mut e, &grid, 600);
         let landed: Vec<_> = ids.iter().map(|&id| at_rest(&e, id)).collect();
@@ -742,9 +773,11 @@ mod tests {
         };
         let mut e = Entities::default();
         let id = e.spawn_drop(
-            &grid,
-            tables(),
-            size,
+            &Terrain {
+                voxels: &grid,
+                tables: tables(),
+                voxel_size: size,
+            },
             [0, 10, 0],
             DropSpec {
                 item: 0,
@@ -753,7 +786,11 @@ mod tests {
             },
         );
         for _ in 0..400 {
-            e.step(&grid, tables(), size);
+            e.step(&Terrain {
+                voxels: &grid,
+                tables: tables(),
+                voxel_size: size,
+            });
         }
         let d = *e.get(id).unwrap().as_dropped();
         assert!(d.resting);

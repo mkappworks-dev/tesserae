@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use tesserae_core::MaterialId;
+use tesserae_core::collide::Terrain;
 use tesserae_core::entity::{DropSpec, EntityId};
 use tesserae_core::inventory::{self, Destination, Refusal, Slot, Stack};
 use tesserae_core::save::{CarriedV1, InventoryV1};
@@ -216,11 +217,13 @@ fn drop_beside(world: &mut World, player: Entity, stacks: Vec<Stack>) {
         return;
     };
     world.resource_scope(|world, mut entities: Mut<EntityStore>| {
+        let terrain = world.resource::<ContentTables>().terrain(
+            world.resource::<ChunkStore>(),
+            world.resource::<WorldSettings>().voxel_size,
+        );
         drop_around(
             &mut entities,
-            world.resource::<ChunkStore>(),
-            &world.resource::<ContentTables>().0,
-            world.resource::<WorldSettings>().voxel_size,
+            &terrain,
             world.resource::<Items>(),
             &body,
             stacks,
@@ -232,9 +235,7 @@ fn drop_beside(world: &mut World, player: Entity, stacks: Vec<Stack>) {
 /// each stack that dropped with the Dropped item it became.
 pub(super) fn drop_around(
     entities: &mut EntityStore,
-    store: &ChunkStore,
-    tables: &tesserae_core::Tables,
-    voxel_size: f32,
+    terrain: &Terrain<ChunkStore>,
     items: &Items,
     body: &tesserae_core::collide::Aabb,
     stacks: Vec<Stack>,
@@ -254,7 +255,7 @@ pub(super) fn drop_around(
     if specs.is_empty() {
         return Vec::new();
     }
-    let ids = entities.spawn_drops_around(store, tables, voxel_size, body.centre(), specs);
+    let ids = entities.spawn_drops_around(terrain, body.centre(), specs);
     dropped.into_iter().zip(ids).collect()
 }
 

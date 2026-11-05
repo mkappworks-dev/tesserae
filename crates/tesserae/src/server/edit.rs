@@ -798,9 +798,7 @@ pub(in crate::server) fn apply_pending(
                     {
                         let id = super::entities::drop_one(
                             &mut entities,
-                            &store,
-                            &tables.0,
-                            world.voxel_size,
+                            &tables.terrain(&store, world.voxel_size),
                             &items,
                             entry.at,
                             item,
