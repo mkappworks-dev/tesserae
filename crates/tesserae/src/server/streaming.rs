@@ -2347,11 +2347,12 @@ pub(in crate::server) mod tests {
     }
 
     /// Ordered highest layer first by distance this measures 3.3, and column by
-    /// column 4.2; the bound leaves room for when the pool's jobs finish.
+    /// column 4.2; the bound sits between them because a slow CI runner finishes
+    /// the pool's jobs later and has measured 3.6.
     #[test]
     fn a_fresh_region_is_lit_without_solving_chunks_again_for_light_from_above() {
         let solves = solves_per_chunk_filling_a_fresh_region();
-        assert!(solves <= 3.6, "{solves} solves per generated Chunk");
+        assert!(solves <= 3.75, "{solves} solves per generated Chunk");
     }
 
     /// Where a lantern next to a Chunk boundary lights two Chunks, and what

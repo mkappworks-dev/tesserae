@@ -1,4 +1,4 @@
-Status: ready-for-agent
+Status: done
 
 # Phase 13: Biomes, richer worldgen
 
