@@ -1,6 +1,6 @@
 # 07: Undo pays and refunds Items
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 06
 
@@ -12,8 +12,8 @@ Undo composes with the Inventory. An undo entry records the Item it paid or the 
 
 ## Acceptance criteria
 
-- [ ] Undo then redo of a Survival placement returns the Inventory to each prior state.
-- [ ] A refund with no room appears as a Dropped item at the Player.
-- [ ] A removal undo with the drop still present despawns it and spends nothing; without the drop and without the Item it is refused and nothing changes.
-- [ ] A Layout undo refunds every Voxel's Item as one group.
-- [ ] Creative entries never touch the Inventory.
+- [x] Undo then redo of a Survival placement returns the Inventory to each prior state.
+- [x] A refund with no room appears as a Dropped item at the Player.
+- [x] A removal undo with the drop still present despawns it and spends nothing; without the drop and without the Item it is refused and nothing changes.
+- [x] A Layout undo refunds every Voxel's Item as one group.
+- [x] Creative entries never touch the Inventory.

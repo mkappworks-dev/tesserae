@@ -25,7 +25,7 @@ use crate::server::items::PlacingItems;
 use crate::server::mods::EditHistory;
 use crate::server::player::Player;
 use crate::server::streaming::MeshState;
-use crate::server::undo::{Entry, Journal};
+use crate::server::undo::{Cost, Entry, Journal};
 use crate::server::world_state::ChunkStore;
 use crate::world::WorldSettings;
 
@@ -451,11 +451,12 @@ pub(super) fn drain(
                     )
                 });
             match landed {
-                Ok(entry) => {
+                Ok(mut entry) => {
                     if let Some(item) = &layout.pay {
                         inventory
                             .spend(item, 1)
                             .expect("counted before the Voxel changed");
+                        entry.cost = Cost::Paid(item.clone());
                     }
                     layout.applied.push(entry);
                     budget -= 1;
@@ -597,6 +598,29 @@ mod tests {
         tick(&mut app);
         assert_eq!(rejections(&mut app), [RejectReason::LayoutPartial]);
         assert_eq!(held(&mut app, "t:soil"), 0, "three free cells, three Items");
+    }
+
+    #[test]
+    fn a_survival_layout_undoes_and_redoes_with_its_items_as_one_group() {
+        let mut app = stocked(&[(4, "t:soil")], 4);
+        survival(&mut app);
+        send(&mut app, line(3));
+        tick(&mut app);
+        assert_eq!(held(&mut app, "t:soil"), 0);
+        replay(&mut app, Undo);
+        assert!(rejections(&mut app).is_empty());
+        assert!((5..8).all(|x| voxel_at(&app, [x, 8, 5]).is_air()));
+        assert_eq!(held(&mut app, "t:soil"), 3, "every Voxel's Item refunded");
+        let mut inventory = app.world_mut().query::<&mut Inventory>();
+        inventory
+            .single_mut(app.world_mut())
+            .unwrap()
+            .spend("t:soil", 1)
+            .unwrap();
+        replay(&mut app, Redo);
+        assert_eq!(rejections(&mut app), [RejectReason::ItemNeeded]);
+        assert!((5..8).all(|x| voxel_at(&app, [x, 8, 5]).is_air()));
+        assert_eq!(held(&mut app, "t:soil"), 2);
     }
 
     #[test]

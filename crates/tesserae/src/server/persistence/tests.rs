@@ -83,7 +83,6 @@ impl Rig {
             .init_resource::<Journal>()
             .insert_resource(items)
             .insert_resource(p)
-            .add_message::<edit::VoxelRemoved>()
             .add_plugins((
                 plugin,
                 super::super::entities::plugin,

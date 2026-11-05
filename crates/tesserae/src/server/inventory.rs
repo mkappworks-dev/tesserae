@@ -209,7 +209,29 @@ pub(super) fn drop_beside(
     let Some(body) = world.get::<Player>(player).map(Player::body) else {
         return;
     };
-    let items = world.resource::<Items>();
+    world.resource_scope(|world, mut entities: Mut<EntityStore>| {
+        drop_around(
+            &mut entities,
+            world.resource::<ChunkStore>(),
+            &world.resource::<ContentTables>().0,
+            world.resource::<WorldSettings>().voxel_size,
+            world.resource::<Items>(),
+            &body,
+            stacks,
+        );
+    });
+}
+
+/// [`drop_beside`] for a system that holds the resources it needs.
+pub(super) fn drop_around(
+    entities: &mut EntityStore,
+    store: &ChunkStore,
+    tables: &tesserae_core::Tables,
+    voxel_size: f32,
+    items: &Items,
+    body: &tesserae_core::collide::Aabb,
+    stacks: impl IntoIterator<Item = (String, u32)>,
+) {
     let specs: Vec<_> = stacks
         .into_iter()
         .filter_map(|(name, count)| {
@@ -225,15 +247,7 @@ pub(super) fn drop_beside(
         return;
     }
     let centre = [0, 1, 2].map(|a| (body.min[a] + body.max[a]) / 2.0);
-    world.resource_scope(|world, mut entities: Mut<EntityStore>| {
-        entities.spawn_drops_around(
-            world.resource::<ChunkStore>(),
-            &world.resource::<ContentTables>().0,
-            world.resource::<WorldSettings>().voxel_size,
-            centre,
-            specs,
-        );
-    });
+    entities.spawn_drops_around(store, tables, voxel_size, centre, specs);
 }
 
 #[cfg(test)]

@@ -43,6 +43,7 @@ use super::ContentTables;
 use super::game_mode::PlayerMode;
 use super::player::{self, Player};
 use super::streaming::MeshState;
+use super::undo::Cost;
 use super::world_state::{ChunkStore, LightLattice, VoxelCoord};
 use crate::world::{ChunkCoord, WorldSettings};
 
@@ -78,14 +79,6 @@ const MAX_DEFERRED_TICKS: u32 = 64;
 
 /// Intents queued at once. A Server that stalls must not grow without bound.
 const MAX_PENDING: usize = 256;
-
-/// A Player's single deliberate Remove took this solid out of the World. Not
-/// written for undo, Layout, fluid, fire or a Mod's Commands.
-#[derive(Message, Clone, Copy, Debug, PartialEq)]
-pub struct VoxelRemoved {
-    pub at: [i32; 3],
-    pub material: MaterialId,
-}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum EditAction {
@@ -257,6 +250,9 @@ pub enum RejectReason {
     CreativeOnly,
     /// A Layout in Survival that the Inventory cannot pay for in full.
     TooFewItems,
+    /// An undo or redo that puts back a Voxel whose Item the Player does not
+    /// hold.
+    ItemNeeded,
 }
 
 impl RejectReason {
@@ -295,6 +291,7 @@ impl RejectReason {
             RejectReason::PlacesNothing => "the held item places nothing",
             RejectReason::CreativeOnly => "only Creative places without an item",
             RejectReason::TooFewItems => "not enough items for this layout",
+            RejectReason::ItemNeeded => "putting that back needs an item you do not hold",
         }
     }
 }
@@ -363,7 +360,8 @@ pub(super) fn plugin(app: &mut App) {
         .init_session_resource::<super::mods::EditHistory>()
         .add_session_message::<EditIntent>()
         .add_session_message::<EditRejected>()
-        .add_session_message::<VoxelRemoved>()
+        .init_session_resource::<super::entities::EntityStore>()
+        .init_session_resource::<super::items::Items>()
         // Every frame, so a click is never lost to a frame that runs no tick.
         .add_session_systems(
             RunFixedMainLoop,
@@ -745,13 +743,16 @@ pub(in crate::server) fn apply_pending(
         ResMut<super::mods::EditHistory>,
         ResMut<super::undo::Journal>,
     ),
-    mut store: ResMut<ChunkStore>,
-    mut meshes: ResMut<MeshState>,
-    (mut rejected, mut removed): (MessageWriter<EditRejected>, MessageWriter<VoxelRemoved>),
+    (mut store, mut meshes): (ResMut<ChunkStore>, ResMut<MeshState>),
+    mut rejected: MessageWriter<EditRejected>,
     (tables, world): (Res<ContentTables>, Res<WorldSettings>),
-    mut players: Query<(&Player, &mut super::inventory::Inventory)>,
+    (mut entities, items): (
+        ResMut<super::entities::EntityStore>,
+        Res<super::items::Items>,
+    ),
+    mut players: Query<(&Player, &mut super::inventory::Inventory, &PlayerMode)>,
 ) {
-    let Ok((player, mut inventory)) = players.single_mut() else {
+    let Ok((player, mut inventory, mode)) = players.single_mut() else {
         return;
     };
     let body = player.solid_body();
@@ -781,14 +782,29 @@ pub(in crate::server) fn apply_pending(
                     change,
                     p.intent.action,
                 )
-                .map(|entry| {
+                .map(|mut entry| {
                     if let Some(item) = &p.pay {
                         inventory
                             .spend(item, 1)
                             .expect("counted before the Voxel changed");
+                        entry.cost = Cost::Paid(item.clone());
                     }
-                    if let Some(gone) = removal(p.intent.action, &entry) {
-                        removed.write(gone);
+                    // Spawned here rather than from a message so the Entry
+                    // holds the Dropped item an undo takes back.
+                    if mode.survival()
+                        && let Some(material) = removal(p.intent.action, &entry)
+                        && let Some(item) = items.dropped_by(material)
+                    {
+                        let id = super::entities::drop_one(
+                            &mut entities,
+                            &store,
+                            &tables.0,
+                            world.voxel_size,
+                            &items,
+                            entry.at,
+                            item,
+                        );
+                        entry.cost = Cost::Dropped(items.0[item].name.clone(), id);
                     }
                     journal.record(entry)
                 })
@@ -889,18 +905,18 @@ fn land(
         before: was,
         after: now,
         event,
+        cost: Cost::Free,
     })
 }
 
-fn removal(action: EditAction, entry: &super::undo::Entry) -> Option<VoxelRemoved> {
+/// The solid a Player's single deliberate Remove took out of the World, which
+/// is what drops an Item: undo, Layouts, fluid, fire and Mods' Commands do not.
+fn removal(action: EditAction, entry: &super::undo::Entry) -> Option<MaterialId> {
     match (action, entry.event.kind) {
         (EditAction::Remove | EditAction::RemoveAt(_), EditKind::Solid { before, after })
             if after.is_air() && !before.is_air() =>
         {
-            Some(VoxelRemoved {
-                at: entry.at,
-                material: before.material(),
-            })
+            Some(before.material())
         }
         _ => None,
     }
@@ -1547,7 +1563,7 @@ pub(in crate::server) mod tests {
         app.world().resource::<ChunkStore>().voxel(at).unwrap()
     }
 
-    pub(super) fn rejections(app: &mut App) -> Vec<RejectReason> {
+    pub(in crate::server) fn rejections(app: &mut App) -> Vec<RejectReason> {
         app.world_mut()
             .resource_mut::<Messages<EditRejected>>()
             .drain()
@@ -1965,7 +1981,7 @@ pub(in crate::server) mod tests {
     /// The Player holds `stacks` in the hotbar with `selected` in hand; stone
     /// and the fixture water are placed by Items of their own names and
     /// `t:dust` places nothing.
-    pub(super) fn stocked(stacks: &[(usize, &str)], selected: usize) -> App {
+    pub(in crate::server) fn stocked(stacks: &[(usize, &str)], selected: usize) -> App {
         let mut app = app_with(&[(origin(), ground())]);
         let rock = tesserae_core::testgen::fixtures().ground.rock;
         let items = super::super::items::Items(vec![tesserae_mods::ItemDef {
@@ -2011,7 +2027,7 @@ pub(in crate::server) mod tests {
         mode.single_mut(app.world_mut()).unwrap().0 = super::super::game_mode::GameMode::Survival;
     }
 
-    pub(super) fn held(app: &mut App, item: &str) -> u32 {
+    pub(in crate::server) fn held(app: &mut App, item: &str) -> u32 {
         let mut held = app
             .world_mut()
             .query::<&super::super::inventory::Inventory>();
@@ -2066,7 +2082,7 @@ pub(in crate::server) mod tests {
         assert!(!RejectReason::CreativeOnly.message().is_empty());
     }
 
-    fn place_held(shape: ShapeId, orientation: Orientation) -> EditIntent {
+    pub(in crate::server) fn place_held(shape: ShapeId, orientation: Orientation) -> EditIntent {
         down(EditAction::PlaceHeld { shape, orientation })
     }
 
@@ -3576,7 +3592,7 @@ pub(in crate::server) mod tests {
         assert!(occupants_at(&app, [5, 7, 5]).solid.is_air());
         assert!(rejections(&mut app).is_empty());
     }
-    pub(super) fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
+    pub(in crate::server) fn replay(app: &mut App, action: super::super::undo::HistoryAction) {
         use super::super::undo;
         app.world_mut().write_message(action);
         app.world_mut().run_system_once(undo::receive).unwrap();

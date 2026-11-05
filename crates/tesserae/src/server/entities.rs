@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use tesserae_core::entity::{DropSpec, Entities, EntityId, WorldEntity};
 
 use super::ContentTables;
-use super::edit::{self, VoxelRemoved};
+use super::edit;
 use super::inventory::{Inventory, MAX_STACK};
 use super::items::Items;
 use super::player::Player;
@@ -87,7 +87,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_session_systems(
             FixedPreUpdate,
             (
-                (spawn_drops, step_entities, pick_up).run_if(super::persistence::playing),
+                (step_entities, pick_up).run_if(super::persistence::playing),
                 announce_entities,
             )
                 .chain()
@@ -95,37 +95,27 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-fn spawn_drops(
-    mut removed: MessageReader<VoxelRemoved>,
-    mode: Single<&super::game_mode::PlayerMode>,
-    mut entities: ResMut<EntityStore>,
-    (store, tables, world, items): (
-        Res<ChunkStore>,
-        Res<ContentTables>,
-        Res<WorldSettings>,
-        Res<Items>,
-    ),
-) {
-    if !mode.survival() {
-        removed.clear();
-        return;
-    }
-    for gone in removed.read() {
-        let Some(item) = items.dropped_by(gone.material) else {
-            continue;
-        };
-        entities.spawn_drop(
-            &*store,
-            &tables.0,
-            world.voxel_size,
-            gone.at,
-            DropSpec {
-                item: item as u32,
-                count: 1,
-                size_m: items.0[item].size_m,
-            },
-        );
-    }
+/// Spawns one of the Item at `item` popping out of the Voxel `at`.
+pub(super) fn drop_one(
+    entities: &mut Entities,
+    store: &ChunkStore,
+    tables: &tesserae_core::Tables,
+    voxel_size: f32,
+    items: &Items,
+    at: [i32; 3],
+    item: usize,
+) -> EntityId {
+    entities.spawn_drop(
+        store,
+        tables,
+        voxel_size,
+        at,
+        DropSpec {
+            item: item as u32,
+            count: 1,
+            size_m: items.0[item].size_m,
+        },
+    )
 }
 
 fn step_entities(
@@ -268,7 +258,6 @@ mod tests {
     fn remove_the_ground(app: &mut App) {
         send(app, down(EditAction::Remove));
         tick(app);
-        app.world_mut().run_system_once(spawn_drops).unwrap();
     }
 
     fn drops(app: &App) -> usize {
@@ -323,7 +312,6 @@ mod tests {
                 },
             )
             .unwrap();
-        world.run_system_once(spawn_drops).unwrap();
         assert_eq!(drops(&app), 0);
     }
 

@@ -2,13 +2,19 @@
 use super::{
     ContentTables,
     edit::{self, EditRejected, RejectReason},
+    entities::{self, EntityStore},
+    inventory::{self, Inventory, MAX_STACK},
+    items::Items,
     mods::EditHistory,
+    player::Player,
     streaming::MeshState,
     world_state::{ChunkStore, Lifetime, VoxelCoord},
 };
+use crate::world::WorldSettings;
 use bevy::prelude::*;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use tesserae_core::Occupants;
+use tesserae_core::entity::EntityId;
 use tesserae_mods::{EditEvent, EditKind};
 
 const LIMIT: usize = 128;
@@ -25,13 +31,26 @@ pub enum HistoryAction {
 #[derive(Message, Clone, Copy, Debug)]
 pub struct HistoryApplied(pub HistoryAction);
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) struct Entry {
     pub at: [i32; 3],
     pub lifetime: Lifetime,
     pub before: Occupants,
     pub after: Occupants,
     pub event: EditEvent,
+    pub cost: Cost,
+}
+
+/// What an Entry's Edit did to the Player's Items, settled again by undo and
+/// redo. Kept from when the Edit was made, so a Creative Entry stays free in
+/// Survival.
+#[derive(Clone, PartialEq, Debug)]
+pub(super) enum Cost {
+    Free,
+    /// Placing spent one of this Item.
+    Paid(String),
+    /// Removing dropped one of this Item as this Dropped item.
+    Dropped(String, EntityId),
 }
 /// The Voxels one Edit or one layout changed, undone and redone together.
 type Group = Vec<Entry>;
@@ -87,15 +106,31 @@ pub(super) fn receive(
         }
     }
 }
+/// The Inventory and Dropped items an undo or redo settles with.
+struct Settle<'a> {
+    inventory: Mut<'a, Inventory>,
+    body: tesserae_core::collide::Aabb,
+    entities: &'a mut EntityStore,
+    items: &'a Items,
+    voxel_size: f32,
+}
+
 pub(super) fn apply(
     mut journal: ResMut<Journal>,
     pending: Res<edit::PendingEdits>,
-    mut store: ResMut<ChunkStore>,
-    mut meshes: ResMut<MeshState>,
-    tables: Res<ContentTables>,
+    (mut store, mut meshes, mut entities): (
+        ResMut<ChunkStore>,
+        ResMut<MeshState>,
+        ResMut<EntityStore>,
+    ),
+    (tables, items, world): (Res<ContentTables>, Res<Items>, Res<WorldSettings>),
     mut history: ResMut<EditHistory>,
+    mut players: Query<(&Player, &mut Inventory)>,
     (mut rejected, mut applied): (MessageWriter<EditRejected>, MessageWriter<HistoryApplied>),
 ) {
+    let Ok((player, inventory)) = players.single_mut() else {
+        return;
+    };
     let Some(action) = journal.requests.pop_front() else {
         return;
     };
@@ -104,7 +139,7 @@ pub(super) fn apply(
         HistoryAction::Redo => journal.redo.back(),
     }
     .cloned();
-    let Some(group) = group else {
+    let Some(mut group) = group else {
         rejected.write(EditRejected {
             reason: if action == HistoryAction::Undo {
                 RejectReason::NoUndo
@@ -114,10 +149,24 @@ pub(super) fn apply(
         });
         return;
     };
+    let mut settle = Settle {
+        inventory,
+        body: player.body(),
+        entities: &mut entities,
+        items: &items,
+        voxel_size: world.voxel_size,
+    };
     let result = if !pending.is_empty() {
         Err(RejectReason::Busy)
     } else {
-        restore(&mut store, &mut meshes, &tables, &group, action)
+        restore(
+            &mut store,
+            &mut meshes,
+            &tables,
+            &mut settle,
+            &mut group,
+            action,
+        )
     };
     match result {
         Ok(()) => {
@@ -146,13 +195,15 @@ pub(super) fn apply(
         }
     }
 }
-/// Replays a whole group or none of it: every cell is checked before the first
-/// is changed, and a change that fails midway is taken back.
+/// Replays a whole group or none of it: every cell and every Item it needs is
+/// checked before the first is changed, and a change that fails midway is
+/// taken back.
 fn restore(
     store: &mut ChunkStore,
     meshes: &mut MeshState,
     tables: &tesserae_core::Tables,
-    group: &[Entry],
+    settle: &mut Settle,
+    group: &mut [Entry],
     action: HistoryAction,
 ) -> Result<(), RejectReason> {
     let undoing = action == HistoryAction::Undo;
@@ -163,7 +214,7 @@ fn restore(
             (entry.before, entry.after)
         }
     };
-    for entry in group {
+    for entry in group.iter() {
         let chunk = VoxelCoord::of(entry.at).chunk;
         let lifetime = store.lifetime(chunk).ok_or(RejectReason::NotLoaded)?;
         if lifetime != entry.lifetime {
@@ -175,6 +226,13 @@ fn restore(
         if store.occupants(entry.at, &tables.fluids) != Some(step(entry).0) {
             return Err(RejectReason::HistoryChanged);
         }
+    }
+    let owed = owed(group, action, settle.entities);
+    if owed
+        .iter()
+        .any(|(item, &count)| settle.inventory.count(item) < count)
+    {
+        return Err(RejectReason::ItemNeeded);
     }
     let order: Vec<&Entry> = if undoing {
         group.iter().rev().collect()
@@ -189,7 +247,70 @@ fn restore(
             return Err(reason);
         }
     }
+    let mut refused = Vec::new();
+    for entry in group.iter_mut() {
+        match (&entry.cost, undoing) {
+            (Cost::Free, _) => {}
+            (Cost::Paid(item), true) => {
+                if settle.inventory.receive(item, 1, MAX_STACK) > 0 {
+                    refused.push((item.clone(), 1));
+                }
+            }
+            (Cost::Paid(item), false) => {
+                settle.inventory.spend(item, 1).expect("owed and counted");
+            }
+            (Cost::Dropped(item, id), true) => {
+                if settle.entities.get(*id).is_some() {
+                    settle.entities.take(*id, 1);
+                } else {
+                    settle.inventory.spend(item, 1).expect("owed and counted");
+                }
+            }
+            (Cost::Dropped(item, _), false) => {
+                let item = item.clone();
+                if let Some(at) = settle.items.named(&item) {
+                    let id = entities::drop_one(
+                        settle.entities,
+                        store,
+                        tables,
+                        settle.voxel_size,
+                        settle.items,
+                        entry.at,
+                        at,
+                    );
+                    entry.cost = Cost::Dropped(item, id);
+                }
+            }
+        }
+    }
+    inventory::drop_around(
+        settle.entities,
+        store,
+        tables,
+        settle.voxel_size,
+        settle.items,
+        &settle.body,
+        refused,
+    );
     Ok(())
+}
+/// The Items restoring `group` takes from the Inventory: each placement a redo
+/// lays again, and each removal an undo puts back whose Dropped item is gone.
+fn owed<'a>(
+    group: &'a [Entry],
+    action: HistoryAction,
+    entities: &EntityStore,
+) -> BTreeMap<&'a str, u32> {
+    let mut owed = BTreeMap::new();
+    for entry in group {
+        let item = match (&entry.cost, action) {
+            (Cost::Paid(item), HistoryAction::Redo) => item,
+            (Cost::Dropped(item, id), HistoryAction::Undo) if entities.get(*id).is_none() => item,
+            _ => continue,
+        };
+        *owed.entry(item.as_str()).or_insert(0) += 1;
+    }
+    owed
 }
 fn inverse(kind: EditKind) -> EditKind {
     match kind {
@@ -261,13 +382,14 @@ mod tests {
                     after: Voxel::cube(8),
                 },
             },
+            cost: Cost::Free,
         };
         let mut journal = Journal::default();
         for _ in 0..LIMIT + 10 {
-            journal.record(entry);
+            journal.record(entry.clone());
         }
         assert_eq!(journal.undo.len(), LIMIT);
-        journal.redo.push_back(vec![entry]);
+        journal.redo.push_back(vec![entry.clone()]);
         journal.record(entry);
         assert!(journal.redo.is_empty());
         let mut app = App::new();
@@ -289,6 +411,169 @@ mod tests {
                 .count(),
             4
         );
+    }
+
+    mod survival {
+        use super::super::super::edit::tests::{
+            down, held, place_held, rejections, replay, send, stocked, stone, survival, tick,
+            voxel_at,
+        };
+        use super::super::super::edit::{EditAction, RejectReason};
+        use super::super::super::entities::EntityStore;
+        use super::super::super::inventory::Inventory;
+        use super::super::super::items::Items;
+        use super::super::HistoryAction::{Redo, Undo};
+        use bevy::prelude::*;
+        use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS};
+        use tesserae_core::{Orientation, SHAPE_FULL_CUBE};
+
+        const ABOVE: [i32; 3] = [5, 8, 5];
+        const GROUND: [i32; 3] = [5, 7, 5];
+
+        /// Three `t:stone` in hand, the Item a stone Voxel drops.
+        fn game(survival_mode: bool) -> App {
+            let mut app = stocked(&[(4, "t:stone")], 4);
+            app.insert_resource(Items(vec![tesserae_mods::ItemDef {
+                name: "t:stone".into(),
+                size_m: 0.25,
+                color: [0; 4],
+                material: Some(stone().material()),
+            }]));
+            if survival_mode {
+                survival(&mut app);
+            }
+            app
+        }
+
+        fn place(app: &mut App) {
+            send(app, place_held(SHAPE_FULL_CUBE, Orientation::IDENTITY));
+            tick(app);
+            assert!(rejections(app).is_empty());
+        }
+
+        fn remove(app: &mut App) {
+            send(app, down(EditAction::Remove));
+            tick(app);
+            assert!(rejections(app).is_empty());
+        }
+
+        fn inventory(app: &mut App) -> Inventory {
+            let mut query = app.world_mut().query::<&Inventory>();
+            query.single(app.world()).unwrap().clone()
+        }
+
+        fn set_inventory(app: &mut App, to: Inventory) {
+            let mut query = app.world_mut().query::<&mut Inventory>();
+            *query.single_mut(app.world_mut()).unwrap() = to;
+        }
+
+        fn drops(app: &App) -> Vec<(u32, u32)> {
+            app.world()
+                .resource::<EntityStore>()
+                .iter()
+                .map(|e| (e.as_dropped().item, e.as_dropped().count))
+                .collect()
+        }
+
+        #[test]
+        fn undo_then_redo_of_a_survival_placement_returns_the_inventory_to_each_prior_state() {
+            let mut app = game(true);
+            let before = inventory(&mut app);
+            place(&mut app);
+            let placed = inventory(&mut app);
+            assert_eq!(held(&mut app, "t:stone"), 2);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, ABOVE).is_air());
+            assert_eq!(inventory(&mut app), before);
+            replay(&mut app, Redo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(voxel_at(&app, ABOVE), stone());
+            assert_eq!(inventory(&mut app), placed);
+        }
+
+        #[test]
+        fn a_redo_the_player_cannot_pay_for_is_refused_and_changes_nothing() {
+            let mut app = game(true);
+            place(&mut app);
+            replay(&mut app, Undo);
+            set_inventory(&mut app, Inventory::default());
+            replay(&mut app, Redo);
+            assert_eq!(rejections(&mut app), [RejectReason::ItemNeeded]);
+            assert!(voxel_at(&app, ABOVE).is_air());
+            assert_eq!(inventory(&mut app), Inventory::default());
+            assert!(!RejectReason::ItemNeeded.message().is_empty());
+        }
+
+        #[test]
+        fn a_refund_with_no_room_drops_at_the_player() {
+            let mut app = game(true);
+            place(&mut app);
+            let mut full = Inventory::default();
+            let slots = (HOTBAR_SLOTS + BACKPACK_SLOTS) as u32;
+            assert_eq!(full.receive("t:dust", 64 * slots, 64), 0);
+            set_inventory(&mut app, full.clone());
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, ABOVE).is_air());
+            assert_eq!(inventory(&mut app), full);
+            assert_eq!(drops(&app), [(0, 1)]);
+        }
+
+        #[test]
+        fn undoing_a_removal_despawns_its_drop_and_spends_nothing_and_redo_drops_it_again() {
+            let mut app = game(true);
+            remove(&mut app);
+            assert_eq!(drops(&app), [(0, 1)]);
+            let before = inventory(&mut app);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(voxel_at(&app, GROUND), stone());
+            assert_eq!(drops(&app), []);
+            assert_eq!(inventory(&mut app), before);
+            replay(&mut app, Redo);
+            assert!(rejections(&mut app).is_empty());
+            assert!(voxel_at(&app, GROUND).is_air());
+            assert_eq!(drops(&app), [(0, 1)]);
+            assert_eq!(inventory(&mut app), before);
+        }
+
+        #[test]
+        fn undoing_a_removal_whose_drop_is_gone_spends_the_item_or_is_refused_without_it() {
+            let mut app = game(true);
+            remove(&mut app);
+            app.world_mut().resource_mut::<EntityStore>().0 = Default::default();
+            set_inventory(&mut app, Inventory::default());
+            replay(&mut app, Undo);
+            assert_eq!(rejections(&mut app), [RejectReason::ItemNeeded]);
+            assert!(voxel_at(&app, GROUND).is_air());
+            assert_eq!(inventory(&mut app), Inventory::default());
+            let mut one = Inventory::default();
+            one.receive("t:stone", 1, 64);
+            set_inventory(&mut app, one);
+            replay(&mut app, Undo);
+            assert!(rejections(&mut app).is_empty());
+            assert_eq!(voxel_at(&app, GROUND), stone());
+            assert_eq!(inventory(&mut app), Inventory::default());
+            assert_eq!(drops(&app), []);
+        }
+
+        #[test]
+        fn creative_entries_stay_free_after_a_switch_to_survival() {
+            let mut app = game(false);
+            remove(&mut app);
+            place(&mut app);
+            assert_eq!(drops(&app), []);
+            survival(&mut app);
+            set_inventory(&mut app, Inventory::default());
+            for action in [Undo, Undo, Redo, Redo] {
+                replay(&mut app, action);
+                assert!(rejections(&mut app).is_empty(), "{action:?}");
+            }
+            assert_eq!(voxel_at(&app, GROUND), stone(), "the place filled it back");
+            assert_eq!(inventory(&mut app), Inventory::default());
+            assert_eq!(drops(&app), []);
+        }
     }
 
     #[test]
@@ -313,6 +598,7 @@ mod tests {
                 after,
                 kind: EditKind::Solid { before, after },
             },
+            cost: Cost::Free,
         };
         let mut journal = Journal::default();
         journal.record_group(vec![entry(Voxel::AIR, Voxel::AIR); 4]);
