@@ -188,10 +188,11 @@ fn open_shortcut(
     mut settings: ResMut<Settings>,
     mut menu: ResMut<super::menu::Menu>,
     (bindings, preferences, store): (Res<Bindings>, Res<Preferences>, Res<Store>),
-    (ui, status, ownership): (
+    (ui, status, ownership, inventory): (
         Res<super::input::UiInput>,
         Res<crate::server::persistence::SaveStatus>,
         Res<super::input::Ownership>,
+        Option<Res<super::inventory_window::InventoryWindow>>,
     ),
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
     mut cursor: Query<&mut bevy::window::CursorOptions, With<bevy::window::PrimaryWindow>>,
@@ -205,6 +206,7 @@ fn open_shortcut(
         || ui.text_entry
         || status.modal()
         || settings.open
+        || inventory.is_some_and(|window| window.open)
     {
         return;
     }
@@ -739,6 +741,7 @@ pub(super) fn action_name(action: Action) -> &'static str {
         LayoutReverse => "Layout: reverse the axis",
         LayoutActive => "Layout: next axis",
         Catalogue => "Open Catalogue",
+        Inventory => "Open Inventory",
         ReleaseCursor => "Release cursor",
         Help => "Open input settings",
         Diagnostics => "Diagnostics",
@@ -2063,6 +2066,7 @@ fn binding_order(action: Action) -> usize {
         LayoutReverse,
         LayoutActive,
         Catalogue,
+        Inventory,
         Help,
         ReleaseCursor,
         Undo,
@@ -2324,7 +2328,7 @@ mod tests {
             .press(KeyCode::KeyW);
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyI);
+            .press(KeyCode::F1);
         app.update();
         assert_eq!(app.world().resource::<Settings>().tab, Tab::Bindings);
         assert!(app.world().resource::<Settings>().open);

@@ -12,6 +12,7 @@ pub(super) enum Owner {
     PointerFree,
     Catalogue,
     LayoutMenu,
+    Inventory,
     Settings,
     BindingCapture,
     TextEntry,
@@ -91,12 +92,13 @@ type Contexts<'w> = (
     Option<Res<'w, UiInput>>,
     Option<Res<'w, crate::server::persistence::SaveStatus>>,
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    Option<Res<'w, super::inventory_window::InventoryWindow>>,
 );
 
 pub(super) fn resolve(
     (keys, mouse, pad): super::actions::Devices,
     touch: Res<super::touch::TouchFrame>,
-    (menu, settings, ui, save, layout_menu): Contexts,
+    (menu, settings, ui, save, layout_menu, inventory): Contexts,
     window: Single<(&Window, &CursorOptions), With<PrimaryWindow>>,
     mut ownership: ResMut<Ownership>,
     bindings: Res<super::actions::Bindings>,
@@ -120,6 +122,8 @@ pub(super) fn resolve(
         Owner::Catalogue
     } else if layout_menu.is_some_and(|menu| menu.open) {
         Owner::LayoutMenu
+    } else if inventory.is_some_and(|window| window.open) {
+        Owner::Inventory
     } else if cursor.grab_mode == CursorGrabMode::Locked {
         Owner::Gameplay
     } else {
@@ -159,7 +163,11 @@ pub(super) fn resolve(
     for (&action, alternatives) in &bindings.keyboard {
         if matches!(
             action,
-            Action::Catalogue | Action::ReleaseCursor | Action::Help | Action::Diagnostics
+            Action::Catalogue
+                | Action::Inventory
+                | Action::ReleaseCursor
+                | Action::Help
+                | Action::Diagnostics
         ) {
             if ownership.changed
                 || matches!(

@@ -21,6 +21,7 @@ pub mod holes;
 mod hotbar_store;
 mod in_flight;
 mod input;
+mod inventory_window;
 mod layout;
 mod layout_menu;
 pub(crate) mod loading;
@@ -102,6 +103,7 @@ pub fn plugin(app: &mut App) {
         layout_menu::plugin,
         drops::plugin,
         pickup::plugin,
+        inventory_window::plugin,
     ));
     app.add_session_systems(
         Update,

@@ -1,6 +1,6 @@
 # 03: Inventory window
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 02
 
@@ -12,7 +12,7 @@ I opens the Inventory over the dimmed, blurred World: the backpack, the hotbar b
 
 ## Acceptance criteria
 
-- [ ] Move, merge, swap, split, Sort and Shift-click each work through a Server intent and survive save and reopen.
-- [ ] An impossible change (a split with no empty slot, a merge into a full stack) is refused with a message and changes nothing.
-- [ ] Opening the window frees the cursor; closing it returns to play.
-- [ ] Client App tests open the window with I and drive a move and a Shift-click.
+- [x] Move, merge, swap, split, Sort and Shift-click each work through a Server intent and survive save and reopen.
+- [x] An impossible change (a split with no empty slot, a merge into a full stack) is refused with a message and changes nothing.
+- [x] Opening the window frees the cursor; closing it returns to play.
+- [x] Client App tests open the window with I and drive a move and a Shift-click.

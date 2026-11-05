@@ -1,12 +1,14 @@
-//! The Player's Inventory on the Server: what the Client is told of it, how a
-//! save holds it, and the retired Carried totals packed into it.
+//! The Player's Inventory on the Server: the Client's requests to arrange it,
+//! what the Client is told of it, how a save holds it, and the retired Carried
+//! totals packed into it. The Client only asks; see
+//! `docs/adr/0002-client-server-from-day-one.md`.
 
 use std::collections::BTreeMap;
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
 use tesserae_core::entity::DropSpec;
-use tesserae_core::inventory;
+use tesserae_core::inventory::{self, Refusal, Slot};
 use tesserae_core::save::{CarriedV1, InventoryV1};
 
 use super::ContentTables;
@@ -28,12 +30,74 @@ pub struct Inventory(pub inventory::Inventory);
 #[derive(Message, Clone, PartialEq, Debug)]
 pub struct InventoryChanged(pub inventory::Inventory);
 
-pub(super) fn plugin(app: &mut App) {
+/// A Client's request to arrange the Inventory.
+#[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
+pub enum InventoryIntent {
+    /// Into an empty slot, onto the same Item, or swapping with another.
+    Move {
+        from: Slot,
+        to: Slot,
+    },
+    /// Between the backpack and the hotbar.
+    QuickTransfer(Slot),
+    Split(Slot),
+    /// Merges and orders the backpack.
+    Sort,
+}
+
+/// An intent the Server declined; the Inventory is as it was.
+#[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct InventoryRefused(pub Refusal);
+
+/// For the Client to put on screen.
+pub fn message(refusal: Refusal) -> &'static str {
+    match refusal {
+        Refusal::NoSuchSlot => "That slot does not exist.",
+        Refusal::Empty => "That slot is empty.",
+        Refusal::StackFull => "That stack is full. Choose another slot.",
+        Refusal::TooFewToSplit => "A single Item cannot be split.",
+        Refusal::NoEmptySlot => "An empty backpack slot is needed to split this stack.",
+        Refusal::NoRoom => "Not enough room for this stack.",
+    }
+}
+
+pub(crate) fn plugin(app: &mut App) {
     app.add_session_message::<InventoryChanged>()
+        .add_session_message::<InventoryIntent>()
+        .add_session_message::<InventoryRefused>()
         .add_session_systems(
             FixedPreUpdate,
-            announce_inventory.after(super::entities::pick_up),
+            (
+                arrange.run_if(super::persistence::playing),
+                announce_inventory.after(super::entities::pick_up),
+            )
+                .chain(),
         );
+}
+
+fn arrange(
+    mut intents: MessageReader<InventoryIntent>,
+    mut inventory: Single<&mut Inventory>,
+    mut refused: MessageWriter<InventoryRefused>,
+) {
+    for intent in intents.read() {
+        let mut next = inventory.0.clone();
+        let limit = |_: &str| MAX_STACK;
+        let result = match *intent {
+            InventoryIntent::Move { from, to } => next.move_stack(from, to, limit),
+            InventoryIntent::QuickTransfer(from) => next.quick_transfer(from, limit),
+            InventoryIntent::Split(from) => next.split(from),
+            InventoryIntent::Sort => next.sort(limit),
+        };
+        match result {
+            Ok(()) => {
+                inventory.set_if_neq(Inventory(next));
+            }
+            Err(refusal) => {
+                refused.write(InventoryRefused(refusal));
+            }
+        }
+    }
 }
 
 pub(super) fn announce_inventory(
@@ -121,4 +185,177 @@ pub(super) fn drop_beside(
             specs,
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::message::Messages;
+    use tesserae_core::inventory::{Refusal, Slot, Stack};
+
+    use super::*;
+
+    fn game() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins).add_plugins(plugin);
+        app.world_mut().spawn(Player::at(Vec3::ZERO));
+        tick(&mut app);
+        app.world_mut()
+            .resource_mut::<Messages<InventoryChanged>>()
+            .clear();
+        app
+    }
+
+    fn tick(app: &mut App) {
+        app.world_mut().run_schedule(FixedPreUpdate);
+    }
+
+    fn holding(app: &mut App, stacks: &[(Slot, &str, u32)]) {
+        let empty = |n| vec![serde_json::Value::Null; n];
+        let mut slots = serde_json::json!({"hotbar": empty(9), "backpack": empty(27)});
+        for &(slot, item, count) in stacks {
+            let (area, at) = match slot {
+                Slot::Hotbar(at) => ("hotbar", at),
+                Slot::Backpack(at) => ("backpack", at),
+            };
+            slots[area][at] = serde_json::json!({"item": item, "count": count});
+        }
+        let inventory: inventory::Inventory = serde_json::from_value(slots).unwrap();
+        let mut held = app.world_mut().query::<&mut Inventory>();
+        held.single_mut(app.world_mut()).unwrap().0 = inventory;
+        tick(app);
+        app.world_mut()
+            .resource_mut::<Messages<InventoryChanged>>()
+            .clear();
+    }
+
+    /// The Server's answers to one intent: the Inventories sent and the refusals.
+    fn ask(app: &mut App, intent: InventoryIntent) -> (Vec<inventory::Inventory>, Vec<Refusal>) {
+        app.world_mut().write_message(intent);
+        tick(app);
+        let changed = app
+            .world_mut()
+            .resource_mut::<Messages<InventoryChanged>>()
+            .drain()
+            .map(|m| m.0)
+            .collect();
+        let refused = app
+            .world_mut()
+            .resource_mut::<Messages<InventoryRefused>>()
+            .drain()
+            .map(|m| m.0)
+            .collect();
+        (changed, refused)
+    }
+
+    fn stack(item: &str, count: u32) -> Option<Stack> {
+        Some(Stack {
+            item: item.into(),
+            count,
+        })
+    }
+
+    #[test]
+    fn a_move_merge_and_swap_are_applied_and_the_new_inventory_is_sent() {
+        let mut app = game();
+        holding(
+            &mut app,
+            &[
+                (Slot::Backpack(0), "t:rock", 10),
+                (Slot::Backpack(1), "t:rock", 60),
+                (Slot::Hotbar(4), "t:dust", 3),
+            ],
+        );
+        let (sent, refused) = ask(
+            &mut app,
+            InventoryIntent::Move {
+                from: Slot::Backpack(0),
+                to: Slot::Backpack(1),
+            },
+        );
+        assert!(refused.is_empty());
+        let [now] = &sent[..] else {
+            panic!("one Inventory sent: {sent:?}");
+        };
+        assert_eq!(now.get(Slot::Backpack(1)).cloned(), stack("t:rock", 64));
+        assert_eq!(now.get(Slot::Backpack(0)).cloned(), stack("t:rock", 6));
+        let (sent, _) = ask(
+            &mut app,
+            InventoryIntent::Move {
+                from: Slot::Hotbar(4),
+                to: Slot::Backpack(0),
+            },
+        );
+        assert_eq!(sent[0].get(Slot::Backpack(0)).cloned(), stack("t:dust", 3));
+        assert_eq!(sent[0].get(Slot::Hotbar(4)).cloned(), stack("t:rock", 6));
+    }
+
+    #[test]
+    fn split_sort_and_quick_transfer_are_applied() {
+        let mut app = game();
+        holding(
+            &mut app,
+            &[
+                (Slot::Backpack(5), "t:rock", 9),
+                (Slot::Backpack(2), "t:dust", 4),
+            ],
+        );
+        let (sent, _) = ask(&mut app, InventoryIntent::Split(Slot::Backpack(5)));
+        assert_eq!(sent[0].get(Slot::Backpack(5)).cloned(), stack("t:rock", 5));
+        assert_eq!(sent[0].get(Slot::Backpack(0)).cloned(), stack("t:rock", 4));
+        let (sent, _) = ask(&mut app, InventoryIntent::Sort);
+        assert_eq!(
+            [0, 1, 2].map(|at| sent[0].get(Slot::Backpack(at)).cloned()),
+            [stack("t:dust", 4), stack("t:rock", 9), None]
+        );
+        let (sent, _) = ask(&mut app, InventoryIntent::QuickTransfer(Slot::Backpack(1)));
+        assert_eq!(sent[0].get(Slot::Hotbar(0)).cloned(), stack("t:rock", 9));
+        assert_eq!(sent[0].get(Slot::Backpack(1)).cloned(), None);
+    }
+
+    #[test]
+    fn an_impossible_change_is_refused_with_a_message_and_changes_nothing() {
+        let mut app = game();
+        let full: Vec<_> = (0..27)
+            .map(|at| (Slot::Backpack(at), "t:dust", 2))
+            .chain([
+                (Slot::Hotbar(0), "t:rock", 8),
+                (Slot::Hotbar(1), "t:dust", 64),
+            ])
+            .collect();
+        holding(&mut app, &full);
+        let before = app
+            .world_mut()
+            .query::<&Inventory>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        for (intent, refusal) in [
+            (
+                InventoryIntent::Split(Slot::Hotbar(0)),
+                Refusal::NoEmptySlot,
+            ),
+            (
+                InventoryIntent::Move {
+                    from: Slot::Backpack(0),
+                    to: Slot::Hotbar(1),
+                },
+                Refusal::StackFull,
+            ),
+            (InventoryIntent::Split(Slot::Hotbar(7)), Refusal::Empty),
+        ] {
+            let (sent, refused) = ask(&mut app, intent);
+            assert!(sent.is_empty(), "{intent:?} sent {sent:?}");
+            assert_eq!(refused, [refusal]);
+            assert!(!message(refusal).is_empty());
+        }
+        let after = app
+            .world_mut()
+            .query::<&Inventory>()
+            .single(app.world())
+            .unwrap()
+            .0
+            .clone();
+        assert_eq!(after, before);
+    }
 }

@@ -146,6 +146,7 @@ fn ui_context(owner: Owner) -> bool {
         owner,
         Owner::Catalogue
             | Owner::LayoutMenu
+            | Owner::Inventory
             | Owner::Settings
             | Owner::BindingCapture
             | Owner::Modal
@@ -362,7 +363,7 @@ fn navigate(
     let owner = ownership.owner;
     if !matches!(
         owner,
-        Owner::Catalogue | Owner::LayoutMenu | Owner::Settings | Owner::Modal
+        Owner::Catalogue | Owner::LayoutMenu | Owner::Inventory | Owner::Settings | Owner::Modal
     ) {
         *repeat = default();
         // Capture and dialogs keep the place, so focus returns to the row.

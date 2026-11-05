@@ -81,7 +81,11 @@ impl Rig {
             .insert_resource(items)
             .insert_resource(p)
             .add_message::<edit::VoxelRemoved>()
-            .add_plugins((plugin, super::super::entities::plugin))
+            .add_plugins((
+                plugin,
+                super::super::entities::plugin,
+                super::super::inventory::plugin,
+            ))
             .add_systems(FixedPreUpdate, super::super::fluids::simulate);
         app.world_mut().spawn(restored_player);
         app.world_mut().run_schedule(Update);
@@ -911,6 +915,58 @@ fn dropped_items_and_the_inventory_survive_save_and_reopen() {
             .all(|(a, b)| a.1.steps_left <= b.1.steps_left)
     );
     assert_eq!(inventory(&reopened), saved);
+}
+
+#[test]
+fn an_inventory_arranged_by_intents_survives_save_and_reopen() {
+    use crate::server::inventory::InventoryIntent;
+    use tesserae_core::inventory::Slot;
+    let dir = Directory::new();
+    let mut rig = Rig::new(&dir);
+    rig.insert();
+    // The first save is under way before any intent, so the settled save
+    // below is the one that holds them.
+    rig.settled_save();
+    let mut held = rig.app.world_mut().query::<&mut Inventory>();
+    let mut player = held.single_mut(rig.app.world_mut()).unwrap();
+    player.receive("terra:rock", 64 + 9, 64);
+    player.receive("terra:dirt", 3, 64);
+    for intent in [
+        InventoryIntent::Move {
+            from: Slot::Hotbar(0),
+            to: Slot::Backpack(4),
+        },
+        InventoryIntent::Split(Slot::Hotbar(1)),
+        InventoryIntent::QuickTransfer(Slot::Hotbar(2)),
+        InventoryIntent::Sort,
+    ] {
+        rig.app.world_mut().write_message(intent);
+        rig.tick();
+    }
+    let arranged = inventory(&rig);
+    let rock = |count| {
+        Some(tesserae_core::inventory::Stack {
+            item: "terra:rock".into(),
+            count,
+        })
+    };
+    assert_eq!(arranged.hotbar()[1], rock(5), "split");
+    assert_eq!(
+        arranged.backpack()[..4]
+            .iter()
+            .map(|s| s.as_ref().map(|s| (s.item.as_str(), s.count)))
+            .collect::<Vec<_>>(),
+        [
+            Some(("terra:dirt", 3)),
+            Some(("terra:rock", 64)),
+            Some(("terra:rock", 4)),
+            None
+        ],
+        "moved, transferred and sorted"
+    );
+    rig.settled_save();
+    drop(rig);
+    assert_eq!(inventory(&Rig::new(&dir)), arranged);
 }
 
 fn inventory(rig: &Rig) -> tesserae_core::inventory::Inventory {

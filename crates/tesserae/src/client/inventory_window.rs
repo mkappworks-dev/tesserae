@@ -1,0 +1,1117 @@
+//! The Inventory window: the backpack, the hotbar beneath it and the details
+//! of one stack, over the dimmed World. It draws only what the Server sent and
+//! asks the Server for every change (`docs/adr/0002-client-server-from-day-one.md`).
+//!
+//! It is its own input context, as the Layout menu is: the cursor is free and
+//! gameplay input waits until it closes.
+
+use bevy::input_focus::InputFocus;
+use bevy::picking::events::{PointerDragDrop, PointerDragEnd, PointerDragStart, PointerPress};
+use bevy::picking::hover::Hovered;
+use bevy::picking::pointer::PointerButton;
+use bevy::prelude::*;
+use bevy::ui_widgets::Activate;
+use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+use tesserae_core::inventory::{BACKPACK_SLOTS, HOTBAR_SLOTS, Inventory, Slot, Stack};
+
+use super::actions::{Action, Actions};
+use super::drops::Looks;
+use super::edit::Catalogue;
+use super::menu_ui::{self as ui, font};
+use crate::server::inventory::{InventoryChanged, InventoryIntent, InventoryRefused, MAX_STACK};
+use crate::session::SessionApp;
+
+const SLOT_PX: f32 = 52.0;
+const SLOT_GAP_PX: f32 = 4.0;
+const GRID_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32 + SLOT_GAP_PX * (HOTBAR_SLOTS - 1) as f32;
+const INSPECTOR_PX: f32 = 220.0;
+
+/// A heavier dim than the prototype's, standing in for its blur, which Bevy's
+/// UI cannot draw behind a node.
+const SCRIM: Color = Color::srgba_u8(3, 4, 5, 0x9e);
+const SURFACE: Color = Color::srgb_u8(11, 11, 13);
+const HEADER: Color = Color::srgb_u8(17, 17, 19);
+const FOOTER: Color = Color::srgb_u8(13, 13, 16);
+const INSPECTOR: Color = Color::srgb_u8(19, 19, 21);
+const RULE: Color = Color::srgb_u8(69, 69, 76);
+const FOOTER_RULE: Color = Color::srgb_u8(85, 85, 94);
+const ROW_RULE: Color = Color::srgb_u8(52, 52, 60);
+const SLOT_FILL: Color = Color::srgb_u8(23, 24, 26);
+const SLOT_HOVER: Color = Color::srgb_u8(32, 34, 37);
+const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
+const RIM: Color = Color::srgb_u8(58, 60, 65);
+const RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
+const RIM_INSPECTED: Color = Color::srgb_u8(201, 209, 189);
+const PICKED: Color = Color::srgb_u8(231, 217, 168);
+const DROP_TARGET: Color = Color::srgb_u8(214, 200, 143);
+const FULL: Color = Color::srgb_u8(232, 210, 159);
+const INK: Color = Color::srgb_u8(244, 244, 237);
+const SOFT: Color = Color::srgb_u8(173, 175, 185);
+const EYEBROW: Color = Color::srgb_u8(192, 194, 200);
+const SOURCE: Color = Color::srgb_u8(153, 156, 167);
+
+#[derive(Resource, Default)]
+pub(super) struct InventoryWindow {
+    pub(super) open: bool,
+    /// The stack chosen to move; the next slot clicked receives it.
+    picked: Option<Slot>,
+    inspected: Option<Slot>,
+    details: bool,
+    dragging: Option<Slot>,
+    /// A drag ends in a click on the slot it started from, which is not a pick.
+    suppress_click: bool,
+}
+
+impl InventoryWindow {
+    /// Open from the first frame, for a capture of the window.
+    #[cfg(any(feature = "dev", feature = "profiling"))]
+    pub(super) fn opened() -> Self {
+        Self {
+            open: true,
+            details: true,
+            inspected: Some(Slot::Backpack(0)),
+            ..default()
+        }
+    }
+}
+
+/// The Inventory as the Server last sent it.
+#[derive(Resource, Default)]
+struct Held(Inventory);
+
+#[derive(Component)]
+struct WindowRoot;
+
+#[derive(Component, Clone, Copy, PartialEq, Debug)]
+enum Control {
+    Slot(Slot),
+    Sort,
+    Details,
+    Close,
+    QuickTransfer(Slot),
+    Split(Slot),
+    CancelMove,
+}
+
+#[derive(Component)]
+struct SlotCount;
+
+/// The inner rim of a slot, which carries its hover, inspected and picked state.
+#[derive(Component)]
+struct SlotRim;
+
+pub(super) fn plugin(app: &mut App) {
+    app.init_session_state::<InventoryWindow>()
+        .init_session_state::<Held>()
+        .add_session_message::<InventoryChanged>()
+        .add_session_message::<InventoryIntent>()
+        .add_session_message::<InventoryRefused>()
+        .add_observer(activate)
+        .add_observer(press)
+        .add_observer(drag_start)
+        .add_observer(drag_end)
+        .add_observer(drop_on_slot)
+        .add_session_systems(
+            Update,
+            (
+                toggle
+                    .run_if(crate::server::persistence::playing)
+                    .after(super::menu::toggle)
+                    .after(super::layout_menu::toggle)
+                    .before(super::input::resolve)
+                    .before(super::camera::grab_cursor),
+                (receive, render, paint).chain().after(toggle),
+            ),
+        );
+}
+
+pub(super) fn closed(window: Option<Res<InventoryWindow>>) -> bool {
+    !window.is_some_and(|w| w.open)
+}
+
+type Blockers<'w> = (
+    Res<'w, super::menu::Menu>,
+    Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    Option<Res<'w, super::settings::Settings>>,
+    Option<Res<'w, super::input::UiInput>>,
+);
+
+/// The Inventory key opens the window and closes it into play; Escape closes
+/// it into play too, and is spent so the cursor stays grabbed.
+fn toggle(
+    mut actions: ResMut<Actions>,
+    mut window: ResMut<InventoryWindow>,
+    (menu, layout_menu, settings, ui): Blockers,
+    focused: Single<&Window, With<PrimaryWindow>>,
+    mut cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    if !focused.focused
+        || menu.open
+        || layout_menu.is_some_and(|m| m.open)
+        || settings.is_some_and(|s| s.open)
+        || ui.is_some_and(|ui| ui.text_entry)
+    {
+        return;
+    }
+    let key = actions.started(Action::Inventory);
+    let escape = window.open && actions.cancel_requested();
+    if !key && !escape {
+        return;
+    }
+    if escape {
+        actions.consume_cancel();
+    }
+    if window.open {
+        close(&mut window, &mut cursor);
+    } else {
+        window.open = true;
+        window.picked = None;
+        window.dragging = None;
+        cursor.grab_mode = CursorGrabMode::None;
+        cursor.visible = true;
+    }
+}
+
+fn close(window: &mut InventoryWindow, cursor: &mut CursorOptions) {
+    window.open = false;
+    window.picked = None;
+    window.dragging = None;
+    cursor.grab_mode = CursorGrabMode::Locked;
+    cursor.visible = false;
+}
+
+fn receive(
+    mut commands: Commands,
+    mut changes: MessageReader<InventoryChanged>,
+    mut refusals: MessageReader<InventoryRefused>,
+    mut held: ResMut<Held>,
+) {
+    if let Some(InventoryChanged(now)) = changes.read().last() {
+        held.0 = now.clone();
+    }
+    for InventoryRefused(refusal) in refusals.read() {
+        ui::notify(
+            &mut commands,
+            crate::server::inventory::message(*refusal),
+            ui::Tone::Alert,
+        );
+    }
+}
+
+fn shift_held(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
+}
+
+fn activate(
+    event: On<Activate>,
+    controls: Query<&Control>,
+    mut window: ResMut<InventoryWindow>,
+    held: Res<Held>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut intents: MessageWriter<InventoryIntent>,
+    mut cursor: Query<&mut CursorOptions, With<PrimaryWindow>>,
+) {
+    let Ok(&control) = controls.get(event.entity) else {
+        return;
+    };
+    if !window.open {
+        return;
+    }
+    match control {
+        Control::Slot(slot) => {
+            if std::mem::take(&mut window.suppress_click) {
+                return;
+            }
+            window.inspected = Some(slot);
+            let filled = held.0.get(slot).is_some();
+            if shift_held(&keys) {
+                window.picked = None;
+                if filled {
+                    intents.write(InventoryIntent::QuickTransfer(slot));
+                }
+                return;
+            }
+            match window.picked {
+                None => window.picked = filled.then_some(slot),
+                Some(from) if from == slot => window.picked = None,
+                Some(from) => {
+                    window.picked = None;
+                    intents.write(InventoryIntent::Move { from, to: slot });
+                }
+            }
+        }
+        Control::Sort => {
+            window.picked = None;
+            window.inspected = Some(Slot::Backpack(0));
+            intents.write(InventoryIntent::Sort);
+        }
+        Control::Details => window.details = !window.details,
+        Control::Close => {
+            for mut cursor in &mut cursor {
+                close(&mut window, &mut cursor);
+            }
+        }
+        Control::QuickTransfer(slot) => {
+            window.picked = None;
+            intents.write(InventoryIntent::QuickTransfer(slot));
+        }
+        Control::Split(slot) => {
+            window.picked = None;
+            intents.write(InventoryIntent::Split(slot));
+        }
+        Control::CancelMove => window.picked = None,
+    }
+}
+
+fn press(event: On<PointerPress>, mut window: ResMut<InventoryWindow>) {
+    if event.button == PointerButton::Primary {
+        window.suppress_click = false;
+    }
+}
+
+fn drag_start(
+    event: On<PointerDragStart>,
+    controls: Query<&Control>,
+    held: Res<Held>,
+    mut window: ResMut<InventoryWindow>,
+) {
+    if window.open
+        && event.button == PointerButton::Primary
+        && let Ok(&Control::Slot(slot)) = controls.get(event.entity)
+        && held.0.get(slot).is_some()
+    {
+        window.dragging = Some(slot);
+        window.picked = None;
+        window.suppress_click = true;
+    }
+}
+
+fn drag_end(event: On<PointerDragEnd>, mut window: ResMut<InventoryWindow>) {
+    if event.button == PointerButton::Primary {
+        window.dragging = None;
+    }
+}
+
+fn drop_on_slot(
+    event: On<PointerDragDrop>,
+    controls: Query<&Control>,
+    mut window: ResMut<InventoryWindow>,
+    mut intents: MessageWriter<InventoryIntent>,
+) {
+    if !window.open || event.button != PointerButton::Primary {
+        return;
+    }
+    let Ok(&Control::Slot(to)) = controls.get(event.entity) else {
+        return;
+    };
+    if let Some(from) = window.dragging.take()
+        && from != to
+    {
+        window.inspected = Some(to);
+        intents.write(InventoryIntent::Move { from, to });
+    }
+}
+
+/// What the window was last built from.
+#[derive(Clone, PartialEq)]
+struct Built {
+    held: Inventory,
+    picked: Option<Slot>,
+    inspected: Option<Slot>,
+    details: bool,
+    key: String,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render(
+    mut commands: Commands,
+    window: Res<InventoryWindow>,
+    held: Res<Held>,
+    (looks, catalogue): (Res<Looks>, Res<Catalogue>),
+    (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
+    (roots, controls): (Query<Entity, With<WindowRoot>>, Query<&Control>),
+    focus: Option<Res<InputFocus>>,
+    mut built: Local<Option<Built>>,
+) {
+    let wanted = window.open.then(|| Built {
+        held: held.0.clone(),
+        picked: window.picked,
+        inspected: window.inspected,
+        details: window.details,
+        key: bindings.label(Action::Inventory, &labels),
+    });
+    if *built == wanted && !looks.is_changed() && !catalogue.is_changed() {
+        return;
+    }
+    let focused = focus
+        .as_ref()
+        .and_then(|f| f.get())
+        .and_then(|entity| controls.get(entity).ok())
+        .copied();
+    for root in &roots {
+        commands.entity(root).despawn();
+    }
+    *built = wanted.clone();
+    let Some(state) = wanted else {
+        return;
+    };
+    let names = Names {
+        looks: &looks,
+        catalogue: &catalogue,
+    };
+    commands
+        .spawn((
+            WindowRoot,
+            GlobalZIndex(20),
+            Node {
+                position_type: PositionType::Absolute,
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(SCRIM),
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    flex_direction: FlexDirection::Column,
+                    max_height: Val::Percent(96.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(9.0)),
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+                BackgroundColor(SURFACE),
+                BorderColor::all(Color::BLACK),
+                BoxShadow::new(
+                    Color::BLACK.with_alpha(0.65),
+                    Val::Px(0.0),
+                    Val::Px(20.0),
+                    Val::Px(0.0),
+                    Val::Px(60.0),
+                ),
+            ))
+            .with_children(|card| {
+                header(card, &state.key);
+                card.spawn(Node::default()).with_children(|main| {
+                    backpack(main, &state, &names);
+                    if state.details {
+                        details(main, &state, &names);
+                    }
+                });
+                footer(card, &state, &names);
+            });
+        });
+    let target = focused.unwrap_or(Control::Slot(Slot::Backpack(0)));
+    commands.queue(move |world: &mut World| {
+        let found = world
+            .query::<(Entity, &Control)>()
+            .iter(world)
+            .find_map(|(entity, control)| (*control == target).then_some(entity));
+        if let (Some(entity), Some(mut focus)) = (found, world.get_resource_mut::<InputFocus>()) {
+            focus.set(entity, bevy::input_focus::FocusCause::Auto);
+        }
+    });
+}
+
+/// How an Item reads on screen: its name, colour and the Material it places.
+struct Names<'a> {
+    looks: &'a Looks,
+    catalogue: &'a Catalogue,
+}
+
+impl Names<'_> {
+    fn look(&self, item: &str) -> Option<&crate::content::ItemLook> {
+        self.looks.0.iter().find(|look| look.name == item)
+    }
+
+    fn color(&self, item: &str) -> Color {
+        self.look(item).map_or(Color::WHITE, |look| {
+            let [r, g, b, a] = look.color;
+            Color::srgba_u8(r, g, b, a)
+        })
+    }
+
+    /// The Material's declared name, when it differs from the Item's.
+    fn places(&self, item: &str) -> Option<&str> {
+        let material = self.look(item)?.material?;
+        let name = &self.catalogue.0.material(material)?.name;
+        (name != item).then_some(name.as_str())
+    }
+}
+
+fn weighted(value: impl Into<String>, size: f32, weight: u16, color: Color) -> impl Bundle {
+    (
+        Text::new(value),
+        TextFont {
+            weight: bevy::text::FontWeight(weight),
+            ..font(size)
+        },
+        bevy::text::LineHeight::RelativeToFont(1.25),
+        TextColor(color),
+        Pickable::IGNORE,
+    )
+}
+
+fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str) {
+    parent.spawn((
+        weighted(label, 11.0, 550, EYEBROW),
+        bevy::text::LetterSpacing::Px(1.3),
+    ));
+}
+
+fn header(card: &mut ChildSpawnerCommands, key: &str) {
+    card.spawn((
+        Node {
+            min_height: Val::Px(64.0),
+            padding: UiRect::axes(Val::Px(18.0), Val::Px(0.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
+            column_gap: Val::Px(12.0),
+            border: UiRect::bottom(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(HEADER),
+        BorderColor::all(RULE),
+    ))
+    .with_children(|header| {
+        header
+            .spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(10.0),
+                ..default()
+            })
+            .with_children(|title| {
+                title.spawn(weighted("Inventory", 19.0, 550, INK));
+                title
+                    .spawn((
+                        Node {
+                            min_width: Val::Px(20.0),
+                            padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
+                            border: UiRect {
+                                bottom: Val::Px(2.0),
+                                ..UiRect::all(Val::Px(1.0))
+                            },
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                            justify_content: JustifyContent::Center,
+                            ..default()
+                        },
+                        BackgroundColor(Color::BLACK.with_alpha(0.73)),
+                        BorderColor::all(Color::WHITE.with_alpha(0.3)),
+                        Pickable::IGNORE,
+                    ))
+                    .with_child(weighted(key, 10.0, 600, INK));
+            });
+        header
+            .spawn(Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                ..default()
+            })
+            .with_children(|context| {
+                ui::compact_button(context, "i", Control::Details, false, 38.0, 13.0);
+                ui::compact_button(context, "×", Control::Close, false, 38.0, 13.0);
+            });
+    });
+}
+
+fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
+    let used = state.held.backpack().iter().flatten().count();
+    let full = used == BACKPACK_SLOTS;
+    main.spawn(Node {
+        flex_direction: FlexDirection::Column,
+        padding: UiRect::axes(Val::Px(22.0), Val::Px(20.0)),
+        ..default()
+    })
+    .with_children(|browser| {
+        browser
+            .spawn(Node {
+                width: Val::Px(GRID_PX),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::bottom(Val::Px(16.0)),
+                ..default()
+            })
+            .with_children(|heading| {
+                heading
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        ..default()
+                    })
+                    .with_children(|title| {
+                        eyebrow(title, "YOUR ITEMS");
+                        title.spawn(weighted("Backpack", 23.0, 500, INK));
+                    });
+                heading
+                    .spawn(Node {
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        ..default()
+                    })
+                    .with_children(|row| {
+                        let capacity = format!("{used} / {BACKPACK_SLOTS} slots");
+                        row.spawn(if full {
+                            weighted(format!("Full · {capacity}"), 11.0, 600, FULL)
+                        } else {
+                            weighted(capacity, 11.0, 400, SOFT)
+                        });
+                        ui::compact_button(row, "Sort", Control::Sort, false, 36.0, 12.0);
+                    });
+            });
+        grid(browser, state, names, Slot::Backpack, BACKPACK_SLOTS);
+        browser
+            .spawn(Node {
+                width: Val::Px(GRID_PX),
+                padding: UiRect::axes(Val::Px(0.0), Val::Px(17.0)),
+                ..default()
+            })
+            .with_child(weighted(
+                if state.picked.is_some() {
+                    "Stack selected. Choose a destination, or select the source again to cancel."
+                } else {
+                    "Click to move · Shift-click for quick transfer · Drag and drop supported"
+                },
+                12.0,
+                400,
+                SOFT,
+            ));
+    });
+}
+
+fn grid(
+    parent: &mut ChildSpawnerCommands,
+    state: &Built,
+    names: &Names,
+    slot: impl Fn(usize) -> Slot,
+    count: usize,
+) {
+    parent
+        .spawn(Node {
+            width: Val::Px(GRID_PX),
+            flex_wrap: FlexWrap::Wrap,
+            row_gap: Val::Px(SLOT_GAP_PX),
+            column_gap: Val::Px(SLOT_GAP_PX),
+            ..default()
+        })
+        .with_children(|grid| {
+            for at in 0..count {
+                let slot = slot(at);
+                slot_button(
+                    grid,
+                    slot,
+                    state.held.get(slot),
+                    names,
+                    state.picked == Some(slot),
+                );
+            }
+        });
+}
+
+fn slot_button(
+    parent: &mut ChildSpawnerCommands,
+    slot: Slot,
+    stack: Option<&Stack>,
+    names: &Names,
+    picked: bool,
+) {
+    parent
+        .spawn((
+            bevy::ui_widgets::Button,
+            bevy::input_focus::tab_navigation::TabIndex(0),
+            Control::Slot(slot),
+            Hovered::default(),
+            Node {
+                width: Val::Px(SLOT_PX),
+                height: Val::Px(SLOT_PX),
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(4.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            BackgroundColor(SLOT_FILL),
+            BorderColor::all(SLOT_EDGE),
+        ))
+        .with_children(|button| {
+            button.spawn((
+                SlotRim,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(2.0)),
+                    ..default()
+                },
+                BorderColor::all(RIM),
+                Pickable::IGNORE,
+            ));
+            if let Some(stack) = stack {
+                swatch(button, names.color(&stack.item), 30.0, picked);
+                button.spawn((
+                    SlotCount,
+                    Text::new(stack.count.to_string()),
+                    TextFont {
+                        weight: bevy::text::FontWeight(650),
+                        ..font(13.0)
+                    },
+                    TextColor(INK.with_alpha(if picked { 0.6 } else { 1.0 })),
+                    TextShadow {
+                        offset: Vec2::new(0.0, 1.0),
+                        color: Color::BLACK,
+                    },
+                    Node {
+                        position_type: PositionType::Absolute,
+                        right: Val::Px(4.0),
+                        bottom: Val::Px(1.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
+            if let Slot::Hotbar(at) = slot {
+                button.spawn((
+                    Text::new((at + 1).to_string()),
+                    TextFont {
+                        weight: bevy::text::FontWeight(600),
+                        ..font(9.0)
+                    },
+                    TextColor(Color::WHITE.with_alpha(0.45)),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(4.0),
+                        top: Val::Px(2.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ));
+            }
+        });
+}
+
+/// The Item's colour as a small tile; the prototype's drawn voxel waits on
+/// Item icons.
+fn swatch(parent: &mut ChildSpawnerCommands, color: Color, size: f32, picked: bool) {
+    let alpha = if picked { 0.6 } else { 1.0 };
+    parent.spawn((
+        Node {
+            width: Val::Px(size),
+            height: Val::Px(size),
+            border: UiRect {
+                bottom: Val::Px(3.0),
+                right: Val::Px(2.0),
+                ..default()
+            },
+            border_radius: BorderRadius::all(Val::Px(3.0)),
+            ..default()
+        },
+        BackgroundColor(color.with_alpha(alpha)),
+        BorderColor::all(Color::BLACK.with_alpha(0.3 * alpha)),
+        Pickable::IGNORE,
+    ));
+}
+
+fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
+    let shown = state.picked.or(state.inspected);
+    let stack = shown.and_then(|slot| state.held.get(slot).map(|stack| (slot, stack)));
+    main.spawn((
+        Node {
+            width: Val::Px(INSPECTOR_PX),
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::all(Val::Px(20.0)),
+            border: UiRect::left(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(INSPECTOR),
+        BorderColor::all(RULE),
+    ))
+    .with_children(|panel| {
+        eyebrow(
+            panel,
+            if state.picked.is_some() {
+                "MOVING STACK"
+            } else {
+                "ITEM DETAILS"
+            },
+        );
+        match stack {
+            Some((slot, stack)) => {
+                panel
+                    .spawn(Node {
+                        justify_content: JustifyContent::Center,
+                        margin: UiRect::axes(Val::Px(0.0), Val::Px(14.0)),
+                        ..default()
+                    })
+                    .with_children(|icon| swatch(icon, names.color(&stack.item), 64.0, false));
+                panel.spawn(weighted(ui::title(&stack.item), 22.0, 550, INK));
+                let source = match names.places(&stack.item) {
+                    Some(material) => format!("{} · places {}", stack.item, ui::title(material)),
+                    None => stack.item.clone(),
+                };
+                panel
+                    .spawn(Node {
+                        margin: UiRect {
+                            top: Val::Px(7.0),
+                            bottom: Val::Px(14.0),
+                            ..default()
+                        },
+                        ..default()
+                    })
+                    .with_child(weighted(source, 11.0, 400, SOURCE));
+                for (term, value) in [
+                    ("Count", stack.count.to_string()),
+                    ("Stack limit", MAX_STACK.to_string()),
+                ] {
+                    panel
+                        .spawn((
+                            Node {
+                                justify_content: JustifyContent::SpaceBetween,
+                                padding: UiRect::axes(Val::Px(0.0), Val::Px(7.0)),
+                                border: UiRect::bottom(Val::Px(1.0)),
+                                ..default()
+                            },
+                            BorderColor::all(ROW_RULE),
+                        ))
+                        .with_children(|row| {
+                            row.spawn(weighted(term, 13.0, 400, SOFT));
+                            row.spawn(weighted(value, 13.0, 400, INK));
+                        });
+                }
+                panel
+                    .spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(7.0),
+                        margin: UiRect::top(Val::Px(14.0)),
+                        ..default()
+                    })
+                    .with_children(|actions| {
+                        let other = match slot {
+                            Slot::Hotbar(_) => "Move to backpack",
+                            Slot::Backpack(_) => "Move to hotbar",
+                        };
+                        ui::button(
+                            actions,
+                            other,
+                            Control::QuickTransfer(slot),
+                            false,
+                            false,
+                            false,
+                        );
+                        if stack.count >= 2 {
+                            ui::button(
+                                actions,
+                                "Split stack",
+                                Control::Split(slot),
+                                false,
+                                false,
+                                false,
+                            );
+                        }
+                        if state.picked.is_some() {
+                            ui::button(
+                                actions,
+                                "Cancel move",
+                                Control::CancelMove,
+                                false,
+                                false,
+                                false,
+                            );
+                        }
+                    });
+            }
+            None => {
+                panel.spawn(Node {
+                    height: Val::Px(24.0),
+                    ..default()
+                });
+                panel.spawn(weighted("Choose an item", 22.0, 550, INK));
+                panel
+                    .spawn(Node {
+                        margin: UiRect::top(Val::Px(7.0)),
+                        ..default()
+                    })
+                    .with_child(weighted(
+                        "Select a carried stack to inspect or move it.",
+                        13.0,
+                        400,
+                        SOFT,
+                    ));
+            }
+        }
+        panel
+            .spawn((
+                Node {
+                    margin: UiRect::top(Val::Px(17.0)),
+                    padding: UiRect::top(Val::Px(17.0)),
+                    border: UiRect::top(Val::Px(1.0)),
+                    ..default()
+                },
+                BorderColor::all(ROW_RULE),
+            ))
+            .with_child(weighted(
+                if state.picked.is_some() {
+                    "Choose another slot to move, merge or swap this stack."
+                } else {
+                    "Shift-click moves a stack between your backpack and hotbar."
+                },
+                12.0,
+                400,
+                SOFT,
+            ));
+    });
+}
+
+fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
+    card.spawn((
+        Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::Center,
+            padding: UiRect::axes(Val::Px(22.0), Val::Px(13.0)),
+            border: UiRect::top(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(FOOTER),
+        BorderColor::all(FOOTER_RULE),
+    ))
+    .with_children(|footer| {
+        footer
+            .spawn(Node {
+                width: Val::Px(GRID_PX),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                margin: UiRect::bottom(Val::Px(8.0)),
+                ..default()
+            })
+            .with_children(|caption| {
+                caption.spawn(weighted("Hotbar", 12.0, 500, INK));
+                caption.spawn(weighted(
+                    "Quick access · the same slots you use in game",
+                    11.0,
+                    400,
+                    SOFT,
+                ));
+            });
+        grid(footer, state, names, Slot::Hotbar, HOTBAR_SLOTS);
+        footer
+            .spawn(Node {
+                width: Val::Percent(100.0),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                margin: UiRect::top(Val::Px(12.0)),
+                ..default()
+            })
+            .with_children(|actions| {
+                actions.spawn(weighted(
+                    "Item counts stay intact when switching screens.",
+                    12.0,
+                    400,
+                    SOFT,
+                ));
+                ui::button(actions, "Back to game", Control::Close, false, false, false);
+            });
+    });
+}
+
+/// Hover, inspected, picked and drop-target state, without a rebuild.
+fn paint(
+    window: Res<InventoryWindow>,
+    mut slots: Query<(&Control, &Hovered, &Children, &mut BackgroundColor)>,
+    mut rims: Query<&mut BorderColor, With<SlotRim>>,
+) {
+    if !window.open {
+        return;
+    }
+    for (control, hovered, children, mut fill) in &mut slots {
+        let Control::Slot(slot) = *control else {
+            continue;
+        };
+        let rim = if window.picked == Some(slot) || window.dragging == Some(slot) {
+            PICKED
+        } else if hovered.get() && window.dragging.is_some() {
+            DROP_TARGET
+        } else if hovered.get() {
+            RIM_HOVER
+        } else if window.inspected == Some(slot) {
+            RIM_INSPECTED
+        } else {
+            RIM
+        };
+        fill.set_if_neq(BackgroundColor(if hovered.get() {
+            SLOT_HOVER
+        } else {
+            SLOT_FILL
+        }));
+        for child in children {
+            if let Ok(mut border) = rims.get_mut(*child) {
+                border.set_if_neq(BorderColor::all(rim));
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::ui_widgets::Activate;
+    use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
+    use tesserae_core::inventory::Slot;
+
+    use super::*;
+    use crate::server::player::Player;
+
+    /// The Client with the Server's Inventory behind it and a Player holding
+    /// rock in the backpack and dust on the hotbar.
+    fn app() -> App {
+        let mut app = App::new();
+        app.add_plugins(super::super::actions::test_plugin)
+            .init_resource::<super::super::menu::Menu>()
+            .init_resource::<bevy::input_focus::InputFocus>()
+            .init_resource::<super::super::drops::Looks>()
+            .init_resource::<super::super::edit::Catalogue>()
+            .add_plugins((plugin, crate::server::inventory::plugin));
+        app.world_mut().spawn((
+            Window {
+                focused: true,
+                ..default()
+            },
+            PrimaryWindow,
+            CursorOptions {
+                grab_mode: CursorGrabMode::Locked,
+                visible: false,
+                ..default()
+            },
+        ));
+        let mut held = tesserae_core::inventory::Inventory::default();
+        held.receive("t:rock", 70, 64);
+        held.receive("t:dust", 3, 64);
+        held.quick_transfer(Slot::Hotbar(0), |_| 64).unwrap();
+        held.quick_transfer(Slot::Hotbar(1), |_| 64).unwrap();
+        app.world_mut().spawn((
+            Player::at(Vec3::ZERO),
+            crate::server::inventory::Inventory(held),
+        ));
+        server(&mut app);
+        app
+    }
+
+    /// One Server tick, then one Client frame.
+    fn server(app: &mut App) {
+        app.world_mut().run_schedule(FixedPreUpdate);
+        app.update();
+    }
+
+    fn press(app: &mut App, key: KeyCode) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(key);
+        app.update();
+        let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keys.release(key);
+        keys.clear();
+        app.update();
+    }
+
+    fn cursor(app: &mut App) -> (CursorGrabMode, bool) {
+        let cursor = app
+            .world_mut()
+            .query::<&CursorOptions>()
+            .single(app.world())
+            .unwrap();
+        (cursor.grab_mode, cursor.visible)
+    }
+
+    fn shown(app: &mut App) -> bool {
+        app.world_mut()
+            .query::<&WindowRoot>()
+            .iter(app.world())
+            .count()
+            == 1
+    }
+
+    fn click(app: &mut App, slot: Slot) {
+        let entity = app
+            .world_mut()
+            .query::<(Entity, &Control)>()
+            .iter(app.world())
+            .find_map(|(entity, control)| (*control == Control::Slot(slot)).then_some(entity))
+            .unwrap_or_else(|| panic!("no {slot:?} on screen"));
+        app.world_mut().trigger(Activate { entity });
+        server(app);
+    }
+
+    /// The count drawn in a slot, or `None` when it is drawn empty.
+    fn count(app: &mut App, slot: Slot) -> Option<String> {
+        let world = app.world_mut();
+        let (_, children) = world
+            .query::<(&Control, &Children)>()
+            .iter(world)
+            .find(|(control, _)| **control == Control::Slot(slot))?;
+        children
+            .iter()
+            .find_map(|child| world.get::<SlotCount>(child).and(world.get::<Text>(child)))
+            .map(|text| text.0.clone())
+    }
+
+    #[test]
+    fn i_opens_the_window_with_the_cursor_free_and_again_returns_to_play() {
+        let mut app = app();
+        assert!(!shown(&mut app));
+        press(&mut app, KeyCode::KeyI);
+        assert!(shown(&mut app));
+        assert_eq!(cursor(&mut app), (CursorGrabMode::None, true));
+        assert_eq!(count(&mut app, Slot::Backpack(0)).as_deref(), Some("64"));
+        assert_eq!(count(&mut app, Slot::Backpack(1)).as_deref(), Some("6"));
+        assert_eq!(count(&mut app, Slot::Hotbar(0)), None);
+        press(&mut app, KeyCode::KeyI);
+        assert!(!shown(&mut app));
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
+    #[test]
+    fn escape_closes_the_window_into_play() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        press(&mut app, KeyCode::Escape);
+        assert!(!shown(&mut app));
+        assert_eq!(cursor(&mut app), (CursorGrabMode::Locked, false));
+    }
+
+    #[test]
+    fn a_click_on_a_stack_then_on_a_slot_moves_it_through_the_server() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        click(&mut app, Slot::Backpack(1));
+        assert_eq!(count(&mut app, Slot::Backpack(1)).as_deref(), Some("6"));
+        click(&mut app, Slot::Backpack(8));
+        assert_eq!(count(&mut app, Slot::Backpack(1)), None);
+        assert_eq!(count(&mut app, Slot::Backpack(8)).as_deref(), Some("6"));
+        click(&mut app, Slot::Backpack(8));
+        click(&mut app, Slot::Backpack(0));
+        assert_eq!(
+            count(&mut app, Slot::Backpack(0)).as_deref(),
+            Some("64"),
+            "a full stack refuses the merge"
+        );
+        assert_eq!(count(&mut app, Slot::Backpack(8)).as_deref(), Some("6"));
+    }
+
+    #[test]
+    fn shift_click_sends_a_stack_to_the_hotbar_and_back() {
+        let mut app = app();
+        press(&mut app, KeyCode::KeyI);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        click(&mut app, Slot::Backpack(1));
+        assert_eq!(count(&mut app, Slot::Backpack(1)), None);
+        assert_eq!(count(&mut app, Slot::Hotbar(0)).as_deref(), Some("6"));
+        click(&mut app, Slot::Hotbar(0));
+        assert_eq!(count(&mut app, Slot::Hotbar(0)), None);
+        assert_eq!(count(&mut app, Slot::Backpack(1)).as_deref(), Some("6"));
+    }
+}

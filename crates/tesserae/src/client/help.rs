@@ -59,7 +59,7 @@ mod tests {
             .clear();
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::KeyI);
+            .press(KeyCode::F1);
         app.update();
         assert!(app.world().resource::<Panels>().debug);
         assert_eq!(

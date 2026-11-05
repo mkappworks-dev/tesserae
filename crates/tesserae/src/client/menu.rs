@@ -193,6 +193,7 @@ type Overlays<'w> = (
     Option<Res<'w, super::settings::Settings>>,
     Option<Res<'w, super::input::UiInput>>,
     Option<Res<'w, super::layout_menu::LayoutMenu>>,
+    Option<Res<'w, super::inventory_window::InventoryWindow>>,
 );
 
 pub(super) fn toggle(
@@ -201,9 +202,12 @@ pub(super) fn toggle(
     cursor: Single<&mut CursorOptions, With<PrimaryWindow>>,
     mut pointer: ResMut<PointerState>,
     window: Single<&Window, With<PrimaryWindow>>,
-    (settings, ui, layout_menu): Overlays,
+    (settings, ui, layout_menu, inventory): Overlays,
 ) {
-    if ui.is_some_and(|ui| ui.text_entry) || layout_menu.is_some_and(|menu| menu.open) {
+    if ui.is_some_and(|ui| ui.text_entry)
+        || layout_menu.is_some_and(|menu| menu.open)
+        || inventory.is_some_and(|window| window.open)
+    {
         return;
     }
     if !window.focused {

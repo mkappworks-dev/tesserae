@@ -617,6 +617,7 @@ fn hints(bindings: &super::actions::Bindings, labels: &super::actions::Labels) -
     let mut lines = Vec::new();
     for (action, verb) in [
         (Help, "controls"),
+        (Inventory, "inventory"),
         (EmptyHand, "empty hand"),
         (CycleTool, "tool"),
         (Undo, "undo"),

@@ -98,6 +98,7 @@ pub(super) fn plugin(app: &mut App) {
         grab_cursor
             .run_if(crate::server::persistence::playing)
             .run_if(super::menu::closed)
+            .run_if(super::inventory_window::closed)
             .after(super::menu::toggle),
     );
     let input = (
