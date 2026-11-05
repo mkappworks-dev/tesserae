@@ -65,13 +65,45 @@ enum Screen {
     Worlds,
     /// The installed Mods, from the title screen.
     Library,
-    Create,
-    /// Step two of Create World: the Mods.
-    Mods,
+    Create(Step),
+    /// Leaving a changed setup, which asks first; it returns to the step.
+    Discard(Step),
     Edit(PathBuf),
     Delete(PathBuf),
     Trust(Next),
     Opening(String),
+}
+
+/// The steps of Create World, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Step {
+    World,
+    Mods,
+    Review,
+}
+
+impl Step {
+    const ORDER: [Step; 3] = [Step::World, Step::Mods, Step::Review];
+
+    fn label(self) -> &'static str {
+        match self {
+            Step::World => "World",
+            Step::Mods => "Mods",
+            Step::Review => "Review",
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::ORDER.iter().position(|s| *s == self).unwrap_or(0)
+    }
+
+    fn next(self) -> Option<Step> {
+        Self::ORDER.get(self.index() + 1).copied()
+    }
+
+    fn previous(self) -> Option<Step> {
+        self.index().checked_sub(1).map(|i| Self::ORDER[i])
+    }
 }
 
 /// What runs once every Mod it needs is trusted.
@@ -138,6 +170,8 @@ struct Launcher {
     selected: Option<PathBuf>,
     card: Option<Card>,
     form: Form,
+    /// The form as Create World opened it, to tell whether leaving loses anything.
+    initial: Form,
     rename: String,
     search: String,
     problem: Option<String>,
@@ -212,10 +246,13 @@ pub(super) enum Act {
     Quit,
     Back,
     Create,
-    NextMods,
     Randomize,
     CopyResolved,
     More,
+    Next,
+    Step(Step),
+    KeepEditing,
+    DiscardSetup,
     Voxel(f32),
     Mode(GameMode),
     PickGame(usize),
@@ -348,7 +385,7 @@ fn review_capture(
                 "recreate" => Act::ReCreate,
                 "open" => Act::Play(first.clone()),
                 "create" => Act::Create,
-                "mods" => Act::NextMods,
+                "next" => Act::Next,
                 other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
             });
         }
@@ -473,6 +510,7 @@ fn start(
         selected: None,
         card: None,
         form: Form::default(),
+        initial: Form::default(),
         rename: String::new(),
         search: String::new(),
         problem: None,
@@ -540,7 +578,7 @@ fn keys(
         && let Some(field) = focus.get().and_then(|e| fields.get(e).ok())
     {
         match field {
-            Field::Name | Field::Seed => queue.0.push(Act::Create),
+            Field::Name | Field::Seed => queue.0.push(Act::Next),
             Field::Rename => queue.0.push(Act::SaveName),
             Field::Search => {}
         }
@@ -686,7 +724,8 @@ fn handle(
                         .unwrap_or_default(),
                     ..Form::default()
                 };
-                l.show(Screen::Create);
+                l.initial = l.form.clone();
+                l.show(Screen::Create(Step::World));
             }
             Act::ReCreate => {
                 let Some(details) = l.selected().and_then(Entry::details).cloned() else {
@@ -707,13 +746,11 @@ fn handle(
                     mods: details.mods.iter().map(|m| m.id.clone()).collect(),
                     ..Form::default()
                 };
-                match l.form.game.clone() {
-                    Some(game) if !installed.mods.is_empty() => {
-                        l.clashes = installed.clashes(&game, &l.form.mods);
-                        l.show(Screen::Mods);
-                    }
-                    _ => l.show(Screen::Create),
+                if let Some(game) = l.form.game.clone() {
+                    l.clashes = installed.clashes(&game, &l.form.mods);
                 }
+                l.initial = l.form.clone();
+                l.show(Screen::Create(Step::World));
             }
             Act::Delete => {
                 if let Screen::Edit(path) = l.screen.clone() {
@@ -740,16 +777,15 @@ fn handle(
                 exit.write(AppExit::Success);
             }
             Act::Back => match l.screen.clone() {
-                Screen::Trust(Next::Create) => l.show(if installed.mods.is_empty() {
-                    Screen::Create
-                } else {
-                    Screen::Mods
-                }),
-                Screen::Mods => l.show(Screen::Create),
+                Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
+                Screen::Create(step) => match step.previous() {
+                    Some(previous) => l.show(Screen::Create(previous)),
+                    None if l.form.unchanged_from(&l.initial) => l.show(Screen::Worlds),
+                    None => l.show(Screen::Discard(step)),
+                },
+                Screen::Discard(step) => l.show(Screen::Create(step)),
                 Screen::Delete(path) => l.show(Screen::Edit(path)),
-                Screen::Create | Screen::Edit(_) | Screen::Trust(Next::Open(_)) => {
-                    l.show(Screen::Worlds)
-                }
+                Screen::Edit(_) | Screen::Trust(Next::Open(_)) => l.show(Screen::Worlds),
                 Screen::Worlds | Screen::Library => l.show(Screen::Title),
                 Screen::Opening(_) | Screen::Title => {}
             },
@@ -800,17 +836,23 @@ fn handle(
                 l.clashes = installed.clashes(&game, &l.form.mods);
                 l.version += 1;
             }
-            Act::NextMods => {
-                if l.screen != Screen::Create {
-                    continue;
+            Act::Next => {
+                if let Screen::Create(step) = l.screen
+                    && let Some(next) = step.next()
+                {
+                    go(&mut l, &installed, next);
                 }
-                let Some(game) = l.form.game.clone() else {
-                    l.problem = Some(NO_GAME.into());
-                    l.version += 1;
-                    continue;
-                };
-                l.clashes = installed.clashes(&game, &l.form.mods);
-                l.show(Screen::Mods);
+            }
+            Act::Step(target) => go(&mut l, &installed, target),
+            Act::KeepEditing => {
+                if let Screen::Discard(step) = l.screen {
+                    l.show(Screen::Create(step));
+                }
+            }
+            Act::DiscardSetup => {
+                if matches!(l.screen, Screen::Discard(_)) {
+                    l.show(Screen::Worlds);
+                }
             }
             Act::Voxel(size) => {
                 l.form.voxel_size_m = size;
@@ -821,7 +863,7 @@ fn handle(
                 l.version += 1;
             }
             Act::Create => {
-                if !matches!(l.screen, Screen::Create | Screen::Mods) {
+                if !matches!(l.screen, Screen::Create(_)) {
                     continue;
                 }
                 let ids = chosen_ids(&l.form, &installed);
@@ -896,6 +938,58 @@ fn handle(
     }
 }
 
+/// Moves Create World to `target`. Moving forward passes every step before it,
+/// so an invalid one holds the player there with its message.
+fn go(l: &mut Launcher, installed: &Installed, target: Step) {
+    let Screen::Create(current) = l.screen else {
+        return;
+    };
+    if target > current {
+        for step in Step::ORDER.iter().copied().filter(|s| *s < target) {
+            if let Err(problem) = check(step, &l.form, installed) {
+                l.form.problem = Some(problem);
+                l.show(Screen::Create(step));
+                return;
+            }
+        }
+    }
+    l.form.problem = None;
+    if let Some(game) = l.form.game.clone() {
+        l.clashes = installed.clashes(&game, &l.form.mods);
+    }
+    l.show(Screen::Create(target));
+}
+
+/// Why a step cannot be left forward, if it cannot.
+fn check(step: Step, form: &Form, installed: &Installed) -> Result<(), String> {
+    match step {
+        Step::World => {
+            let installed_game = form
+                .game
+                .as_ref()
+                .is_some_and(|id| installed.games.iter().any(|g| &g.id == id));
+            if !installed_game {
+                return Err(NO_GAME.into());
+            }
+            validate(form).map(|_| ())
+        }
+        Step::Mods | Step::Review => Ok(()),
+    }
+}
+
+impl Form {
+    /// Equal but for a problem shown on it.
+    fn unchanged_from(&self, initial: &Form) -> bool {
+        Form {
+            problem: None,
+            ..self.clone()
+        } == Form {
+            problem: None,
+            ..initial.clone()
+        }
+    }
+}
+
 /// Opens a listed World, through Trust first when its Game or Mods need it.
 fn play(l: &mut Launcher, installed: &mut Installed, relaunch: &mut Switch, path: PathBuf) {
     let Some(entry) = l.entry(&path) else {
@@ -959,7 +1053,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         .cloned()
     else {
         l.form.problem = Some(NO_GAME.into());
-        l.show(Screen::Create);
+        l.show(Screen::Create(Step::World));
         return;
     };
     let missing = installed.missing(&game.id);
@@ -970,7 +1064,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
             missing.join(", "),
             if missing.len() == 1 { "is" } else { "are" }
         ));
-        l.show(Screen::Create);
+        l.show(Screen::Create(Step::World));
         return;
     }
     let mods: Vec<_> = installed
@@ -986,7 +1080,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         Ok(valid) => valid,
         Err(e) => {
             l.form.problem = Some(e);
-            l.show(Screen::Create);
+            l.show(Screen::Create(Step::World));
             return;
         }
     };
@@ -1010,7 +1104,7 @@ fn create(l: &mut Launcher, installed: &Installed, worlds: &Path, relaunch: &mut
         }
         Err(e) => {
             l.form.problem = Some(format!("Could not create the World folder: {e}"));
-            l.show(Screen::Create);
+            l.show(Screen::Create(Step::World));
         }
     }
 }
@@ -1296,7 +1390,7 @@ mod tests {
         type_into(&mut app, Field::Seed, "-1");
         act(&mut app, Act::More);
         act(&mut app, Act::Voxel(0.25));
-        act(&mut app, Act::Create);
+        finish(&mut app);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no World to open");
         };
@@ -1341,7 +1435,7 @@ mod tests {
                 act(&mut app, Act::Mode(GameMode::Survival));
                 act(&mut app, Act::Mode(mode));
             }
-            act(&mut app, Act::Create);
+            finish(&mut app);
             let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
                 panic!("no World to open");
             };
@@ -1357,16 +1451,18 @@ mod tests {
         app.update();
         act(&mut app, Act::New);
         type_into(&mut app, Field::Seed, "18446744073709551616");
-        act(&mut app, Act::Create);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        finish(&mut app);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(launcher(&app).form.problem.is_some());
         type_into(&mut app, Field::Seed, "");
         type_into(&mut app, Field::Name, &"x".repeat(65));
-        act(&mut app, Act::Create);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        finish(&mut app);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
         assert!(app.world().resource::<Switch>().0.is_none());
         press(&mut app, KeyCode::Escape);
+        assert_eq!(launcher(&app).screen, Screen::Discard(Step::World));
+        act(&mut app, Act::DiscardSetup);
         assert_eq!(launcher(&app).screen, Screen::Worlds);
     }
 
@@ -1595,7 +1691,7 @@ mod tests {
             .clone();
         let random = launcher(&app).form.random_seed;
         assert_eq!(shown, format!("Random seed: {random}"));
-        act(&mut app, Act::Create);
+        finish(&mut app);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no World to open");
         };
@@ -1629,14 +1725,14 @@ mod tests {
         );
         app.update();
         act(&mut app, Act::New);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         act(&mut app, Act::PickGame(0));
-        act(&mut app, Act::NextMods);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
         act(&mut app, Act::ToggleMod(1));
         assert!(launcher(&app).form.mods.contains("lamps"));
         act(&mut app, Act::Back);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(launcher(&app).form.mods.contains("lamps"));
         assert_eq!(launcher(&app).form.game.as_deref(), Some("terra"));
     }
@@ -1666,7 +1762,7 @@ mod tests {
             .any(|t| t.0 == "Mods: Glassworks");
         assert!(listed, "the World's Mods are named");
         act(&mut app, Act::ReCreate);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         assert!(launcher(&app).form.mods.contains("glassworks"));
         assert!(!launcher(&app).form.mods.contains("lamps"));
     }
@@ -1684,7 +1780,7 @@ mod tests {
         app.update();
         act(&mut app, Act::New);
         assert!(launcher(&app).form.mods.contains("wanderer"));
-        act(&mut app, Act::NextMods);
+        act(&mut app, Act::Next);
         act(&mut app, Act::ToggleMod(0));
         assert!(
             !launcher(&app).form.mods.contains("wanderer"),
@@ -1709,12 +1805,12 @@ mod tests {
         );
         app.update();
         act(&mut app, Act::New);
-        act(&mut app, Act::NextMods);
+        act(&mut app, Act::Next);
         act(&mut app, Act::ToggleMod(0));
-        act(&mut app, Act::Create);
+        finish(&mut app);
         assert_eq!(launcher(&app).screen, Screen::Trust(Next::Create));
         act(&mut app, Act::Back);
-        assert_eq!(launcher(&app).screen, Screen::Mods);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
         assert!(
             launcher(&app).form.mods.contains("lamps"),
             "the picks are kept"
@@ -1847,10 +1943,14 @@ mod tests {
         let (mut app, pad) = pad_app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
         assert_eq!(focused_act(&app), Some(Act::New));
         tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
         reach(&mut app, pad, Act::Randomize);
         tap(&mut app, pad, GamepadButton::South);
         assert!(!launcher(&app).form.seed.is_empty());
+        for _ in 0..2 {
+            reach(&mut app, pad, Act::Next);
+            tap(&mut app, pad, GamepadButton::South);
+        }
         reach(&mut app, pad, Act::Create);
         tap(&mut app, pad, GamepadButton::South);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
@@ -1874,7 +1974,7 @@ mod tests {
         app.update();
         act(&mut app, Act::New);
         assert!(launcher(&app).form.mods.is_empty(), "Mods start unticked");
-        act(&mut app, Act::NextMods);
+        act(&mut app, Act::Next);
         act(&mut app, Act::ToggleMod(0));
         assert_eq!(launcher(&app).form.mods.len(), 1);
         // reeds is needed by lake: shown locked, with nothing to toggle.
@@ -1893,7 +1993,7 @@ mod tests {
             .push(Act::ToggleMod(2));
         app.update();
         assert_eq!(launcher(&app).form.mods.len(), 1);
-        act(&mut app, Act::Create);
+        finish(&mut app);
         let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
             panic!("no World to open");
         };
@@ -1912,7 +2012,7 @@ mod tests {
         let worlds = Directory::new();
         let (mut app, pad) = pad_app(&worlds, mod_installed());
         tap(&mut app, pad, GamepadButton::South);
-        reach(&mut app, pad, Act::NextMods);
+        reach(&mut app, pad, Act::Next);
         tap(&mut app, pad, GamepadButton::South);
         reach(&mut app, pad, Act::ToggleMod(1));
         tap(&mut app, pad, GamepadButton::South);
@@ -2032,7 +2132,7 @@ mod tests {
                 "create",
                 Screen::Worlds,
                 Some(Act::New),
-                vec!["Name", "Seed", "Randomize", "NextMods", "Back"],
+                vec!["Name", "Seed", "Randomize", "Next", "Back"],
             ),
             (
                 "edit",
@@ -2070,6 +2170,108 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_keyboard_walks_world_mods_and_review_and_creates_the_world() {
+        let worlds = Directory::new();
+        let (mut app, _) = pad_app(
+            &worlds,
+            Installed::fake(Some(("terra", "0.1.0")), &[]).with_mod("lamps", &[]),
+        );
+        app.add_plugins((
+            bevy::input_focus::InputDispatchPlugin,
+            bevy::ui_widgets::ButtonPlugin,
+        ));
+        assert_eq!(focused_act(&app), Some(Act::New));
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        type_into(&mut app, Field::Name, "Ridge");
+        type_into(&mut app, Field::Seed, "42");
+        launcher_mut(&mut app).form.game_mode = GameMode::Survival;
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Mods));
+        assert_eq!(focused_act(&app), Some(Act::Next));
+        key(&mut app, KeyCode::Enter);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
+        assert!(shown(&mut app, "Ridge"));
+        assert_eq!(focused_act(&app), Some(Act::Create));
+        key(&mut app, KeyCode::Enter);
+        let Some(Target::World(path)) = app.world().resource::<Switch>().0.clone() else {
+            panic!("no World to open");
+        };
+        let created = library::read(&path).unwrap().unwrap();
+        assert_eq!(
+            (created.name.as_str(), created.seed, created.voxel_size_m),
+            ("Ridge", 42, 1.0)
+        );
+        assert_eq!(created.game_mode, GameMode::Survival);
+        assert_eq!(created.game.unwrap().id, "terra");
+    }
+
+    /// Through the remaining steps to Create World, which runs only from Review.
+    fn finish(app: &mut App) {
+        act(app, Act::Step(Step::Review));
+        if launcher(app).screen == Screen::Create(Step::Review) {
+            act(app, Act::Create);
+        }
+    }
+
+    fn launcher_mut(app: &mut App) -> Mut<'_, Launcher> {
+        app.world_mut().resource_mut::<Launcher>()
+    }
+
+    #[test]
+    fn a_long_name_or_a_missing_game_holds_the_world_step() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::New);
+        type_into(&mut app, Field::Name, &"x".repeat(65));
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        assert!(launcher(&app).form.problem.is_some());
+        type_into(&mut app, Field::Name, "Fine");
+        launcher_mut(&mut app).form.game = None;
+        launcher_mut(&mut app).version += 1;
+        app.update();
+        act(&mut app, Act::Next);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        assert_eq!(launcher(&app).form.problem.as_deref(), Some(NO_GAME));
+        act(&mut app, Act::Step(Step::Review));
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::Create(Step::World),
+            "the rail cannot skip an invalid step"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_changed_setup_asks_before_discarding() {
+        let worlds = Directory::new();
+        let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
+        app.update();
+        act(&mut app, Act::New);
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(launcher(&app).screen, Screen::Worlds, "nothing to lose");
+        act(&mut app, Act::New);
+        type_into(&mut app, Field::Name, "Half done");
+        act(&mut app, Act::Next);
+        press(&mut app, KeyCode::Escape);
+        assert_eq!(
+            launcher(&app).screen,
+            Screen::Create(Step::World),
+            "back a step"
+        );
+        press(&mut app, KeyCode::Escape);
+        assert!(matches!(launcher(&app).screen, Screen::Discard(_)));
+        act(&mut app, Act::KeepEditing);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
+        assert_eq!(launcher(&app).form.name, "Half done");
+        press(&mut app, KeyCode::Escape);
+        act(&mut app, Act::DiscardSetup);
+        assert_eq!(launcher(&app).screen, Screen::Worlds);
+        assert!(std::fs::read_dir(&worlds.0).unwrap().next().is_none());
     }
 
     #[test]
@@ -2205,7 +2407,7 @@ mod tests {
         for (opener, there, back) in [
             (Act::Worlds, Screen::Worlds, Screen::Title),
             (Act::Library, Screen::Library, Screen::Title),
-            (Act::New, Screen::Create, Screen::Worlds),
+            (Act::New, Screen::Create(Step::World), Screen::Worlds),
             (
                 Act::Edit(path.clone()),
                 Screen::Edit(path.clone()),
@@ -2286,7 +2488,7 @@ mod tests {
         assert_eq!(launcher(&app).screen, Screen::Title);
         pad_button(&mut app, pad, GamepadButton::South, 0.0);
         tap(&mut app, pad, GamepadButton::South);
-        assert_eq!(launcher(&app).screen, Screen::Create);
+        assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
     }
 
     #[test]
