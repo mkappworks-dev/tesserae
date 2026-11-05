@@ -198,13 +198,16 @@ fn open_world(
     commands.insert_resource(WorldGenerator(generator));
 }
 
-/// Over the origin, clear of the ground and of any lake standing on it.
+/// Over the origin, clear of the ground and of any lake standing on it, and
+/// no lower than the top of anything generated under the Player's body.
 fn spawn_eye(generator: &Worldgen) -> Vec3 {
     let ground_m = generator.surface_height_m(0.0, 0.0);
     let top_m = generator
         .water()
         .map_or(ground_m, |w| w.level_m.max(ground_m));
-    Vec3::new(0.0, top_m + SPAWN_CLEARANCE_M, 0.0)
+    let half = player::BODY_HALF_WIDTH_M;
+    let clear_m = generator.clear_height_m([-half; 2], [half; 2]);
+    Vec3::new(0.0, (top_m + SPAWN_CLEARANCE_M).max(clear_m), 0.0)
 }
 
 #[cfg(test)]
@@ -220,6 +223,7 @@ pub(crate) fn fixture_tables() -> Tables {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tesserae_core::CHUNK_SIZE;
 
     #[cfg(feature = "dev")]
     #[test]
@@ -343,6 +347,81 @@ mod tests {
             "the fixture floods the spawn"
         );
         assert_eq!(spawn_eye(&generator).y, 70.0 + SPAWN_CLEARANCE_M);
+    }
+
+    /// Whether a Player standing at `feet` overlaps anything `generator`
+    /// makes, and whether a surface feature stands under their body.
+    fn standing_at(generator: &Worldgen, feet: Vec3) -> (bool, bool) {
+        let fixtures = tesserae_core::testgen::fixtures();
+        let size = CHUNK_SIZE as f32;
+        let mut store = world_state::ChunkStore::default();
+        let floor = ((feet.y - 1.0) / size).floor() as i32;
+        let ceiling = ((feet.y + 2.0) / size).floor() as i32;
+        let mut featured = false;
+        for cz in [-1, 0] {
+            for cx in [-1, 0] {
+                for cy in floor..=ceiling {
+                    let chunk = generator.chunk(cx, cy, cz);
+                    let local = |c: i32| if c == 0 { 0 } else { CHUNK_SIZE - 1 };
+                    featured |= (0..CHUNK_SIZE)
+                        .any(|y| chunk.get(local(cx), y, local(cz)).material() == fixtures.lantern);
+                    store.insert(crate::world::ChunkCoord::new(cx, cy, cz), chunk);
+                }
+            }
+        }
+        let body = tesserae_core::collide::Aabb::new(
+            (feet - Vec3::new(player::BODY_HALF_WIDTH_M, 0.0, player::BODY_HALF_WIDTH_M))
+                .to_array(),
+            (feet
+                + Vec3::new(
+                    player::BODY_HALF_WIDTH_M,
+                    player::BODY_HEIGHT_M,
+                    player::BODY_HALF_WIDTH_M,
+                ))
+            .to_array(),
+        );
+        (
+            tesserae_core::collide::overlaps(&store, &fixtures.tables, 1.0, body),
+            featured,
+        )
+    }
+
+    #[test]
+    fn the_first_spawn_stands_clear_of_a_surface_feature_under_the_body() {
+        use tesserae_core::{Biome, BiomeName, BiomeTable, SurfaceFeature, SurfaceFeatures};
+        let field = Biome {
+            name: BiomeName::new("t:field").unwrap(),
+            temperature: 0.5,
+            humidity: 0.5,
+            ground: None,
+            sky_fog: None,
+            cave_scale: None,
+            surface_features: SurfaceFeatures::new(&[SurfaceFeature {
+                material: tesserae_core::testgen::fixtures().lantern,
+                spacing_m: 4.0,
+            }])
+            .unwrap(),
+        };
+        let mut featured = 0;
+        for seed in 0..256 {
+            let generator = Worldgen::new(
+                seed,
+                1.0,
+                WorldgenParams {
+                    caves: None,
+                    smoothing: None,
+                    water: None,
+                    relief_m: 48.0,
+                    feature_size_m: 16.0,
+                    biomes: BiomeTable::new(std::slice::from_ref(&field)).unwrap(),
+                    ..tesserae_core::testgen::world_params()
+                },
+            );
+            let (overlaps, under) = standing_at(&generator, spawn_eye(&generator));
+            assert!(!overlaps, "seed {seed}: the Player spawns inside something");
+            featured += usize::from(under);
+        }
+        assert!(featured > 0, "no seed stood a feature under the spawn");
     }
 
     #[test]

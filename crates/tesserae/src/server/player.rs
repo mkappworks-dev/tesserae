@@ -15,6 +15,7 @@ pub const FLY_SPEED_CEILING_MPS: f32 = 64.0;
 pub const EYE_HEIGHT: f32 = 1.62;
 pub const CROUCH_EYE_HEIGHT: f32 = 1.02;
 pub const BODY_HEIGHT_M: f32 = 1.8;
+pub const BODY_HALF_WIDTH_M: f32 = 0.3;
 pub const CROUCH_BODY_HEIGHT_M: f32 = 1.2;
 /// How far below the eye a fluid still counts, so a third-person boom that
 /// dips under a surface the eye is above still reads the water.
@@ -270,8 +271,9 @@ impl Player {
         let eye_height = self.eye_height();
         let height = self.body_height();
         Aabb::new(
-            (self.eye - Vec3::new(0.3, eye_height, 0.3)).to_array(),
-            (self.eye + Vec3::new(0.3, height - eye_height, 0.3)).to_array(),
+            (self.eye - Vec3::new(BODY_HALF_WIDTH_M, eye_height, BODY_HALF_WIDTH_M)).to_array(),
+            (self.eye + Vec3::new(BODY_HALF_WIDTH_M, height - eye_height, BODY_HALF_WIDTH_M))
+                .to_array(),
         )
     }
     fn update_stance(
@@ -285,8 +287,8 @@ impl Player {
         }
         let feet = self.eye - Vec3::Y * self.eye_height();
         let standing = Aabb::new(
-            (feet - Vec3::new(0.3, 0.0, 0.3)).to_array(),
-            (feet + Vec3::new(0.3, BODY_HEIGHT_M, 0.3)).to_array(),
+            (feet - Vec3::new(BODY_HALF_WIDTH_M, 0.0, BODY_HALF_WIDTH_M)).to_array(),
+            (feet + Vec3::new(BODY_HALF_WIDTH_M, BODY_HEIGHT_M, BODY_HALF_WIDTH_M)).to_array(),
         );
         if !self.intent.crouch && collide::overlaps(store, tables, size, standing) {
             return;
@@ -426,7 +428,8 @@ impl Player {
         if moved.blocked[1] {
             self.velocity_y = 0.0;
         }
-        self.eye = Vec3::from_array(moved.aabb.min) + Vec3::new(0.3, self.eye_height(), 0.3);
+        self.eye = Vec3::from_array(moved.aabb.min)
+            + Vec3::new(BODY_HALF_WIDTH_M, self.eye_height(), BODY_HALF_WIDTH_M);
     }
 }
 impl super::persistence::extensions::PlayerState for tesserae_core::save::MovementV1 {
@@ -543,8 +546,8 @@ fn clear_respawn_eye(
         let eye = spawn + Vec3::Y * (step as f32 * RESPAWN_LIFT_STEP_M + EYE_HEIGHT);
         let feet = eye - Vec3::Y * EYE_HEIGHT;
         let body = Aabb::new(
-            (feet - Vec3::new(0.3, 0.0, 0.3)).to_array(),
-            (feet + Vec3::new(0.3, BODY_HEIGHT_M, 0.3)).to_array(),
+            (feet - Vec3::new(BODY_HALF_WIDTH_M, 0.0, BODY_HALF_WIDTH_M)).to_array(),
+            (feet + Vec3::new(BODY_HALF_WIDTH_M, BODY_HEIGHT_M, BODY_HALF_WIDTH_M)).to_array(),
         );
         (!collide::overlaps(store, tables, size, body)).then_some(eye)
     })

@@ -784,6 +784,34 @@ impl Worldgen {
         self.params.sea_level_m + n * self.params.relief_m
     }
 
+    /// The metre height above which nothing generated stands in any column
+    /// under a footprint on the ground plane: each column's top Voxel, and a
+    /// surface feature on it. Caves only take away and a lake is apart.
+    pub fn clear_height_m(&self, min_m: [f32; 2], max_m: [f32; 2]) -> f32 {
+        let size = self.voxel_size;
+        let columns =
+            |a: usize| (min_m[a] / size).floor() as i32..=(max_m[a] / size).floor() as i32;
+        let mut clear_m = f32::MIN;
+        for z in columns(1) {
+            for x in columns(0) {
+                let (x_m, z_m) = (self.axis_m(0, x), self.axis_m(0, z));
+                let top = top_index(self.surface_height_m(x_m, z_m), 0.0, size);
+                let featured = self.scatter.is_some_and(|scatter| {
+                    let draw = SurfaceScatter::draw(self.seed, x_m, z_m);
+                    draw < scatter.most
+                        && self
+                            .biome_at(x_m, z_m)
+                            .and_then(|id| self.params.biomes.get(id))
+                            .and_then(|biome| scatter.pick(&biome.surface_features, draw))
+                            .is_some()
+                });
+                let voxels = top + 1 + i32::from(featured);
+                clear_m = clear_m.max(voxels as f32 * size);
+            }
+        }
+        clear_m
+    }
+
     /// The band `surface_height_m` is confined to, as `(lowest, highest)` in
     /// metres. Sound because [`fbm2`] is normalised to `[0, 1)`; the two
     /// early-outs in [`Worldgen::chunk`] and the Server's vertical streaming
