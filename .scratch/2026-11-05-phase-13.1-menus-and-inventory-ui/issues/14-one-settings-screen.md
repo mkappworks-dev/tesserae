@@ -1,6 +1,6 @@
 # 14: One Settings screen
 
-Status: ready-for-agent
+Status: done
 
 Blocked by: 13
 
@@ -12,7 +12,7 @@ Settings becomes one screen reached from the title screen and from the Menu, wit
 
 ## Acceptance criteria
 
-- [ ] Every existing setting is reachable in its new category and keeps its saved value.
-- [ ] Apply, Discard and Reset behave as today across category changes.
-- [ ] Text scale, reduced motion and solid background take effect in menus and the HUD.
-- [ ] F10 reopens the last category.
+- [x] Every existing setting is reachable in its new category and keeps its saved value.
+- [x] Apply, Discard and Reset behave as today across category changes.
+- [x] Text scale, reduced motion and solid background take effect in menus and the HUD.
+- [x] F10 reopens the last category.

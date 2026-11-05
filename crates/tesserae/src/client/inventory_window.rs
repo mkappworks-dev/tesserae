@@ -400,7 +400,11 @@ fn render(
     (looks, catalogue, searches): (Res<Looks>, Res<Catalogue>, Res<super::menu_ui::Searches>),
     (bindings, labels): (Res<super::actions::Bindings>, Res<super::actions::Labels>),
     (roots, rows, cards, controls): Frame,
-    (mode, hotbar): (Res<super::game_mode::Mode>, Res<super::edit::Hotbar>),
+    (mode, hotbar, preferences): (
+        Res<super::game_mode::Mode>,
+        Res<super::edit::Hotbar>,
+        Res<super::profile::Preferences>,
+    ),
     focus: Option<Res<InputFocus>>,
     mut built: Local<Option<Built>>,
 ) {
@@ -466,7 +470,11 @@ fn render(
                         justify_content: JustifyContent::Center,
                         ..default()
                     },
-                    BackgroundColor(SCRIM),
+                    BackgroundColor(if preferences.solid_background {
+                        super::cinematic::SCENE
+                    } else {
+                        SCRIM
+                    }),
                 ))
                 .add_child(row);
             row

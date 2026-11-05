@@ -204,6 +204,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             let worlds = cine::menu_button(actions, "Your Worlds", "", Act::Worlds, Kind::Primary);
             let create = cine::menu_button(actions, "Create a World", "+", Act::New, Kind::Plain);
             cine::menu_button(actions, "Mods", "", Act::Library, Kind::Ghost);
+            cine::menu_button(actions, "Settings", "", Act::Settings, Kind::Ghost);
             if installed.game.is_none() {
                 actions
                     .commands()

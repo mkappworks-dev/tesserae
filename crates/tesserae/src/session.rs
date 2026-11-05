@@ -41,6 +41,11 @@ pub fn in_list(state: Option<Res<State<AppState>>>) -> bool {
     state.is_none_or(|s| *s.get() == AppState::List)
 }
 
+/// Run condition for what both the launcher and a World show, such as Settings.
+pub fn in_menus(state: Option<Res<State<AppState>>>) -> bool {
+    state.is_none_or(|s| matches!(s.get(), AppState::List | AppState::InWorld))
+}
+
 pub fn has_state(world: &World) -> bool {
     world.contains_resource::<State<AppState>>()
 }

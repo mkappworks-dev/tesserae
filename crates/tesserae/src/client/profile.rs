@@ -34,7 +34,13 @@ pub(crate) struct Preferences {
     pub layout: super::layout::LayoutPreferences,
     /// Stills the HUD's pulses and flashes.
     pub reduced_motion: bool,
+    /// Percent of each font's size, one of [`TEXT_SCALES`].
+    pub text_scale: u32,
+    /// Menus over a solid background instead of the dimmed World.
+    pub solid_background: bool,
 }
+
+pub(super) const TEXT_SCALES: [u32; 5] = [100, 125, 150, 175, 200];
 /// Controller feel, kept apart from the mouse so neither overwrites the other.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -109,6 +115,8 @@ impl Default for Preferences {
             zoom_m: super::view::DEFAULT_ZOOM_M,
             layout: default(),
             reduced_motion: false,
+            text_scale: 100,
+            solid_background: false,
         }
     }
 }
@@ -194,6 +202,7 @@ fn decode(bytes: &[u8]) -> io::Result<(Bindings, Preferences)> {
         || !TOUCH_OPACITY.contains(&p.touch.opacity)
         || !super::view::ZOOM_M.contains(&p.zoom_m)
         || !p.layout.valid()
+        || !TEXT_SCALES.contains(&p.text_scale)
     {
         return Err(io::Error::other("invalid preference value"));
     }

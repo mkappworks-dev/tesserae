@@ -25,10 +25,17 @@ pub(super) enum Tab {
     Bindings,
     Controller,
     Display,
+    Accessibility,
 }
 impl Tab {
     /// Page order in the header, which LB/RB also follow.
-    pub const ORDER: [Tab; 4] = [Tab::Behavior, Tab::Bindings, Tab::Controller, Tab::Display];
+    pub const ORDER: [Tab; 5] = [
+        Tab::Behavior,
+        Tab::Bindings,
+        Tab::Controller,
+        Tab::Display,
+        Tab::Accessibility,
+    ];
     pub fn label(self) -> &'static str {
         match self {
             Self::Catalogue => "Catalogue",
@@ -36,6 +43,7 @@ impl Tab {
             Self::Bindings => "Key bindings",
             Self::Controller => "Controller",
             Self::Display => "Display",
+            Self::Accessibility => "Accessibility",
         }
     }
 }
@@ -223,24 +231,43 @@ pub(super) fn plugin(app: &mut App) {
                 .after(super::settings::render),
         )
         .add_systems(Update, age_notifications.after(button_label_colors));
+    use crate::session::in_menus;
     app.init_session_state::<Searches>()
         .add_observer(clear_search)
-        .add_session_systems(Update, (search_presentation, heading_status).after(shell))
-        .add_session_systems(
+        .add_systems(
+            Update,
+            (search_presentation, heading_status)
+                .after(shell)
+                .run_if(in_menus),
+        )
+        .add_systems(
             PreUpdate,
             focus
                 .after(InputFocusSystems::Dispatch)
-                .after(bevy::picking::PickingSystems::Last),
+                .after(bevy::picking::PickingSystems::Last)
+                .run_if(in_menus),
         )
-        .add_session_systems(Update, dashed_border_colors.after(button_label_colors))
-        .add_session_systems(
+        .add_systems(
+            Update,
+            dashed_border_colors
+                .after(button_label_colors)
+                .run_if(in_menus),
+        )
+        .add_systems(
             Update,
             (search_keys, sync_search)
                 .chain()
                 .before(super::menu::toggle)
-                .before(super::settings::capture),
+                .before(super::settings::capture)
+                .run_if(in_menus),
         )
-        .add_session_systems(Update, shell.before(style).after(super::settings::render));
+        .add_systems(
+            Update,
+            shell
+                .before(style)
+                .before(super::settings::render)
+                .run_if(in_menus),
+        );
 }
 
 /// A destructive action: red label and border instead of the neutral ones.
@@ -403,175 +430,233 @@ fn style(
         });
     }
 }
+/// Where the Settings page's body goes, under the sheet's header.
+#[derive(Component)]
+pub(super) struct SettingsBody;
+
+/// The Settings frame: the category rail beside a sheet whose body the page
+/// fills. It is rebuilt only when the category or a dialog changes, so the
+/// focused search field survives a page rebuild.
+#[allow(clippy::too_many_arguments)]
 fn shell(
     mut commands: Commands,
-    settings: Res<Settings>,
+    mut settings: ResMut<Settings>,
     searches: Res<Searches>,
+    preferences: Res<super::profile::Preferences>,
     roots: Query<Entity, With<Shell>>,
-    mut previous: Local<Option<Option<(Tab, bool)>>>,
-    logo: Res<Mosaic>,
+    mut previous: Local<Option<Option<(Tab, bool, bool)>>>,
     mut focus: ResMut<InputFocus>,
+    playing: Option<Res<State<crate::session::AppState>>>,
 ) {
+    use super::cinematic as cine;
     let modal = settings.capturing() || settings.modal();
-    let wanted = settings.open.then_some(settings.tab);
-    let wanted = wanted.map(|tab| (tab, modal));
+    let wanted = settings
+        .open
+        .then_some((settings.tab, modal, preferences.solid_background));
     if *previous == Some(wanted) {
         return;
     }
     let previous_tab = previous
         .as_ref()
-        .and_then(|state| state.map(|(tab, _)| tab));
-    if previous_tab != wanted.map(|(tab, _)| tab) {
+        .and_then(|state| state.map(|(tab, ..)| tab));
+    if previous_tab != wanted.map(|(tab, ..)| tab) {
         focus.clear();
     }
     *previous = Some(wanted);
     for root in &roots {
         commands.entity(root).despawn();
     }
-    let Some((tab, _modal)) = wanted else {
+    let Some((tab, _modal, solid)) = wanted else {
         return;
     };
+    // The page lands in the new body this frame.
+    settings.dirty = true;
+    let over_world = playing.is_some_and(|s| *s.get() == crate::session::AppState::InWorld);
     commands
         .spawn((
             Shell,
             GlobalZIndex(9),
-            BackgroundColor(BG),
+            bevy::input_focus::tab_navigation::TabGroup {
+                modal: true,
+                ..default()
+            },
+            BackgroundColor(if over_world && !solid {
+                Color::BLACK.with_alpha(0.55)
+            } else {
+                cine::SCENE
+            }),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                padding: UiRect::axes(Val::Percent(5.0), Val::Px(20.0)),
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(0.0),
+                padding: UiRect::axes(Val::Px(34.0), Val::Px(28.0)),
+                justify_content: JustifyContent::Center,
                 ..default()
             },
         ))
         .with_children(|root| {
-            chrome(root, tab, &logo.0);
-            if matches!(tab, Tab::Catalogue | Tab::Bindings) {
-                search_row(
-                    root,
-                    tab,
-                    if tab == Tab::Catalogue {
-                        &searches.catalogue
-                    } else {
-                        &searches.bindings
-                    },
-                );
-            }
-        });
-}
-fn chrome(root: &mut ChildSpawnerCommands, tab: Tab, logo: &Handle<Image>) {
-    root.spawn((
-        Node {
-            height: Val::Px(108.0),
-            flex_direction: FlexDirection::Column,
-            flex_shrink: 0.0,
-            padding: UiRect::bottom(Val::Px(18.0)),
-            border: UiRect::bottom(Val::Px(1.0)),
-            ..default()
-        },
-        BorderColor::all(EDGE),
-    ))
-    .with_children(|header| {
-        header
-            .spawn(Node {
-                height: Val::Px(36.0),
-                flex_shrink: 0.0,
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
+            root.spawn(Node {
+                flex_grow: 1.0,
+                max_width: Val::Px(1180.0),
+                min_height: Val::Px(0.0),
+                column_gap: Val::Px(24.0),
                 ..default()
             })
-            .with_children(|row| {
-                row.spawn(Node {
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    ..default()
-                })
-                .with_children(|brand| {
-                    brand.spawn((
-                        ImageNode::new(logo.clone()),
+            .with_children(|workspace| {
+                rail(workspace, tab);
+                workspace
+                    .spawn((
+                        cine::surface(cine::PANEL),
                         Node {
-                            width: Val::Px(29.0),
-                            height: Val::Px(29.0),
+                            flex_direction: FlexDirection::Column,
+                            flex_grow: 1.0,
+                            min_width: Val::Px(0.0),
+                            min_height: Val::Px(0.0),
+                            border: UiRect::all(Val::Px(2.0)),
+                            border_radius: BorderRadius::all(Val::Px(8.0)),
+                            overflow: Overflow::clip(),
                             ..default()
                         },
-                        Pickable::IGNORE,
-                    ));
-                    weighted_text(brand, "Tesserae", 17.0, 650, INK);
-                });
-                compact_button(row, "Back to game", Operation::Back, false, 36.0, 11.0);
+                    ))
+                    .with_children(|sheet| {
+                        heading(sheet, tab);
+                        if tab == Tab::Bindings {
+                            sheet
+                                .spawn(Node {
+                                    padding: UiRect::new(
+                                        Val::Px(26.0),
+                                        Val::Px(26.0),
+                                        Val::Px(16.0),
+                                        Val::Px(0.0),
+                                    ),
+                                    flex_shrink: 0.0,
+                                    ..default()
+                                })
+                                .with_children(|row| search_row(row, tab, &searches.bindings));
+                        }
+                        sheet.spawn((
+                            SettingsBody,
+                            Node {
+                                flex_direction: FlexDirection::Column,
+                                flex_grow: 1.0,
+                                min_height: Val::Px(0.0),
+                                ..default()
+                            },
+                        ));
+                    });
             });
-        header
-            .spawn(Node {
-                height: Val::Px(39.0),
-                margin: UiRect::top(Val::Px(14.0)),
-                column_gap: Val::Px(24.0),
-                flex_shrink: 0.0,
-                ..default()
-            })
-            .with_children(|nav| {
-                for page in Tab::ORDER {
-                    button(
-                        nav,
-                        page.label(),
-                        Operation::Navigate(page),
-                        page == tab,
-                        true,
-                        false,
-                    );
-                }
-            });
-    });
-    root.spawn(Node {
-        height: Val::Px(107.0),
-        padding: UiRect::vertical(Val::Px(22.0)),
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::SpaceBetween,
-        column_gap: Val::Px(12.0),
-        flex_shrink: 0.0,
-        ..default()
-    })
-    .with_children(|heading| {
-        heading
-            .spawn(Node {
-                flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(6.0),
-                ..default()
-            })
-            .with_children(|title| {
-                weighted_text(title, tab.label(), 25.0, 620, INK);
-                text(
-                    title,
-                    match tab {
-                        Tab::Catalogue => "Materials and Shapes for your World.",
-                        Tab::Behavior => "Tune how you move, look, and build.",
-                        Tab::Bindings => "Find an action and choose up to two bindings.",
-                        Tab::Controller => "Tune the sticks and choose controller buttons.",
-                        Tab::Display => "Choose frame pacing without changing visual quality.",
-                    },
-                    12.0,
-                    MUTED,
-                );
-            });
-        heading.spawn((
-            HeadingPill(tab),
-            Text::default(),
-            font(9.0),
-            TextColor(MUTED),
-            bevy::text::LetterSpacing::Px(0.9),
-            BorderColor::all(EDGE),
+        });
+}
+
+fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
+    use super::cinematic as cine;
+    workspace
+        .spawn((
+            cine::surface(cine::PANEL),
             Node {
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(12.0)),
-                padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
+                width: Val::Px(220.0),
+                flex_shrink: 0.0,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(7.0),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(20.0)),
+                border: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
-            Pickable::IGNORE,
-        ));
-    });
+        ))
+        .with_children(|nav| {
+            nav.spawn(Node {
+                padding: UiRect::new(Val::Px(9.0), Val::Px(0.0), Val::Px(0.0), Val::Px(10.0)),
+                ..default()
+            })
+            .with_children(|title| cine::eyebrow(title, "SETTINGS"));
+            for page in Tab::ORDER {
+                let entry = cine::choice(nav, page.label(), Operation::Navigate(page), page == tab);
+                nav.commands().entity(entry).insert(Node {
+                    min_height: Val::Px(44.0),
+                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(5.0)),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::FlexStart,
+                    ..default()
+                });
+            }
+            nav.spawn(Node {
+                margin: UiRect::top(Val::Auto),
+                padding: UiRect::horizontal(Val::Px(9.0)),
+                ..default()
+            })
+            .with_children(|note| {
+                paragraph(
+                    note,
+                    "Your preferences, across every World.",
+                    12.0,
+                    cine::MUTED,
+                )
+            });
+        });
 }
-/// The search box without the result count beside it; returns its text input.
+
+fn heading(sheet: &mut ChildSpawnerCommands, tab: Tab) {
+    use super::cinematic as cine;
+    sheet
+        .spawn((
+            BackgroundColor(cine::SHEET_HEADER),
+            BorderColor::all(cine::EDGE.with_alpha(0.5)),
+            Node {
+                padding: UiRect::new(Val::Px(26.0), Val::Px(26.0), Val::Px(20.0), Val::Px(18.0)),
+                border: UiRect::bottom(Val::Px(1.0)),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                flex_shrink: 0.0,
+                ..default()
+            },
+        ))
+        .with_children(|header| {
+            header
+                .spawn(Node {
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(6.0),
+                    ..default()
+                })
+                .with_children(|title| {
+                    cine::eyebrow(title, "MENU / SETTINGS");
+                    weighted_text(title, tab.label(), 25.0, 500, cine::INK);
+                    paragraph(
+                        title,
+                        match tab {
+                            Tab::Catalogue | Tab::Behavior => "Tune how you move, look, and build.",
+                            Tab::Bindings => "Find an action and choose up to two bindings.",
+                            Tab::Controller => {
+                                "Tune the sticks and choose controller buttons, and the touch controls."
+                            }
+                            Tab::Display => "Choose frame pacing without changing visual quality.",
+                            Tab::Accessibility => "Comfort and readability, in menus and in play.",
+                        },
+                        13.0,
+                        cine::MUTED,
+                    );
+                });
+            header.spawn((
+                HeadingPill(tab),
+                Text::default(),
+                font(10.0),
+                TextColor(cine::MUTED),
+                bevy::text::LetterSpacing::Px(0.9),
+                BorderColor::all(cine::EDGE),
+                Node {
+                    border: UiRect::all(Val::Px(1.0)),
+                    border_radius: BorderRadius::all(Val::Px(12.0)),
+                    padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+        });
+}
+
 pub(super) fn search_frame(
     parent: &mut ChildSpawnerCommands,
     tab: Tab,
@@ -1306,13 +1391,17 @@ fn age_notifications(
     mut commands: Commands,
     time: Option<Res<Time>>,
     mut notifications: Query<(Entity, &mut Notification, &mut Node)>,
+    preferences: Option<Res<super::profile::Preferences>>,
 ) {
     let Some(time) = time else {
         return;
     };
+    let still = preferences.is_some_and(|p| p.reduced_motion);
     for (entity, mut notice, mut node) in &mut notifications {
         if notice.0.tick(time.delta()).is_finished() {
             commands.entity(entity).despawn();
+        } else if still {
+            node.right = Val::Px(NOTICE_INSET_PX);
         } else {
             node.right = Val::Px(notice_right_px(
                 notice.0.elapsed_secs(),
@@ -1393,6 +1482,31 @@ mod tests {
     }
 
     #[test]
+    fn reduced_motion_shows_a_notice_in_place_without_sliding() {
+        let mut app = App::new();
+        app.init_resource::<Time>()
+            .insert_resource(super::super::profile::Preferences {
+                reduced_motion: true,
+                ..default()
+            })
+            .add_systems(Update, super::age_notifications);
+        super::notify(
+            &mut app.world_mut().commands(),
+            "Saved",
+            super::Tone::Change,
+        );
+        app.world_mut().flush();
+        app.update();
+        let right = app
+            .world_mut()
+            .query_filtered::<&Node, With<super::Notification>>()
+            .single(app.world())
+            .unwrap()
+            .right;
+        assert_eq!(right, Val::Px(super::NOTICE_INSET_PX));
+    }
+
+    #[test]
     fn notifications_replace_previous_messages_and_expire() {
         let mut app = App::new();
         app.init_resource::<Time>()
@@ -1457,49 +1571,23 @@ mod tests {
             .unwrap()
     }
     #[test]
-    fn native_button_factories_subscribe_to_hover_and_keep_tab_and_button_borders_distinct() {
+    fn the_rail_marks_the_open_category_and_quiet_buttons_stay_borderless() {
         let mut app = app();
         app.add_systems(Update, (style, button_label_colors).chain().after(shell));
         app.update();
-        let (tab, back) = {
-            let mut operations = app.world_mut().query::<(Entity, &Operation)>();
-            let tab = operations
-                .iter(app.world())
-                .find_map(|(e, op)| matches!(op, Operation::Navigate(Tab::Behavior)).then_some(e))
-                .unwrap();
-            let back = operations
-                .iter(app.world())
-                .find_map(|(e, op)| matches!(op, Operation::Back).then_some(e))
-                .unwrap();
-            (tab, back)
-        };
-        for entity in [tab, back] {
-            assert!(
-                app.world()
-                    .get::<bevy::picking::hover::Hovered>(entity)
-                    .is_some()
-            );
-            app.world_mut()
-                .entity_mut(entity)
-                .insert(bevy::picking::hover::Hovered(true));
+        let looks: Vec<(Tab, bool)> = app
+            .world_mut()
+            .query::<(&Operation, &super::super::cinematic::Look)>()
+            .iter(app.world())
+            .filter_map(|(op, look)| match op {
+                Operation::Navigate(tab) => Some((*tab, look.selected)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(looks.len(), Tab::ORDER.len());
+        for (tab, selected) in looks {
+            assert_eq!(selected, tab == Tab::Bindings, "{tab:?}");
         }
-        app.update();
-        assert_eq!(
-            *app.world().get::<BorderColor>(tab).unwrap(),
-            BorderColor::all(LEAF)
-        );
-        assert_eq!(
-            app.world().get::<Node>(tab).unwrap().border,
-            UiRect::bottom(Val::Px(2.0))
-        );
-        assert_eq!(
-            *app.world().get::<BorderColor>(back).unwrap(),
-            BorderColor::all(LEAF)
-        );
-        assert_eq!(
-            app.world().get::<Node>(back).unwrap().border,
-            UiRect::all(Val::Px(1.0))
-        );
         let parent = app.world_mut().spawn(Node::default()).id();
         app.world_mut()
             .commands()
