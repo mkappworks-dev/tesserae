@@ -13,6 +13,7 @@ use tesserae_core::inventory::{self, Destination, Refusal, Slot, Stack};
 use tesserae_core::save::{CarriedV1, InventoryV1};
 
 use super::ContentTables;
+use super::death::PlayerIntents;
 use super::entities::EntityStore;
 use super::game_mode::PlayerMode;
 use super::items::{Items, PlacingItems};
@@ -93,7 +94,7 @@ pub fn message(reason: Reason) -> &'static str {
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_session_message::<InventoryChanged>()
-        .add_session_message::<InventoryIntent>()
+        .add_player_intent::<InventoryIntent>()
         .add_session_message::<InventoryRefused>()
         .add_session_systems(
             FixedPreUpdate,

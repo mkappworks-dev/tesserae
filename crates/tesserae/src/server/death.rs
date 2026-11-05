@@ -10,16 +10,15 @@ use tesserae_core::inventory::Stack;
 use tesserae_core::save::{DeathCause, DeathV1};
 
 use super::ContentTables;
-use super::edit::{EditIntent, LayoutIntent, PendingEdits};
+use super::edit::PendingEdits;
 use super::entities::EntityStore;
-use super::inventory::{Inventory, InventoryIntent, drop_around};
+use super::inventory::{Inventory, drop_around};
 use super::items::Items;
 use super::persistence::extensions::PlayerState;
-use super::player::{MovementIntent, Player, PlayerInput, Respawned};
+use super::player::{Player, PlayerInput, Respawned};
 use super::survival::Survival;
-use super::tool::UseIntent;
-use super::undo::{HistoryAction, Journal};
-use super::vitals::{DamageCause, EatIntent, LastDamage, Vitals};
+use super::undo::Journal;
+use super::vitals::{DamageCause, LastDamage, Vitals};
 use super::world_state::{ChunkStore, SpawnPoint};
 use crate::session::SessionApp;
 use crate::world::WorldSettings;
@@ -65,24 +64,29 @@ pub(crate) fn despawns_in_s(death: &Death, entities: &Entities) -> Option<u32> {
 #[derive(Message, Clone, PartialEq, Debug)]
 pub struct DeathChanged(pub Option<DeathReport>);
 
+/// How a Player's intent is registered, so it is ignored while they are dead.
+pub(super) trait PlayerIntents {
+    fn add_player_intent<M: Message>(&mut self) -> &mut Self;
+}
+
+impl PlayerIntents for App {
+    fn add_player_intent<M: Message>(&mut self) -> &mut Self {
+        self.add_session_message::<M>().add_session_systems(
+            RunFixedMainLoop,
+            discard::<M>
+                .run_if(dead)
+                .before(PlayerInput)
+                .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
+        )
+    }
+}
+
 pub(crate) fn plugin(app: &mut App) {
     app.add_session_message::<DeathChanged>()
         .add_session_systems(
             RunFixedMainLoop,
-            (
-                (
-                    discard::<MovementIntent>,
-                    discard::<EditIntent>,
-                    discard::<LayoutIntent>,
-                    discard::<HistoryAction>,
-                    discard::<InventoryIntent>,
-                    discard::<EatIntent>,
-                    discard::<UseIntent>,
-                )
-                    .run_if(dead)
-                    .before(PlayerInput),
-                revive.after(PlayerInput),
-            )
+            revive
+                .after(PlayerInput)
                 .in_set(RunFixedMainLoopSystems::BeforeFixedMainLoop),
         )
         .add_session_systems(
@@ -264,11 +268,15 @@ mod tests {
     use tesserae_core::{Chunk, SurvivalRules, Voxel};
 
     use super::*;
-    use crate::server::edit::{EditAction, EditRejected};
+    use crate::server::edit::{EditAction, EditIntent, EditRejected};
     use crate::server::entities::{EntityDelta, EntityView};
     use crate::server::game_mode::{GameMode, PlayerMode};
+    use crate::server::inventory::InventoryIntent;
+    use crate::server::player::MovementIntent;
     use crate::server::player::{EYE_HEIGHT, RespawnIntent};
     use crate::server::streaming::MeshState;
+    use crate::server::undo::HistoryAction;
+    use crate::server::vitals::EatIntent;
     use crate::world::ChunkCoord;
 
     const SPAWN: Vec3 = Vec3::new(20.5, 8.0, 20.5);
@@ -571,6 +579,36 @@ mod tests {
         assert_eq!(app.world().resource::<Told>().rejected, 0, "nor a refusal");
         assert_eq!(inventory(&mut app).selected(), 0);
         assert_eq!(vitals(&mut app).health, 0.0);
+    }
+
+    #[derive(Message)]
+    struct Poke;
+
+    #[derive(Resource, Default)]
+    struct Poked(usize);
+
+    fn read_pokes(mut pokes: MessageReader<Poke>, mut poked: ResMut<Poked>) {
+        poked.0 += pokes.read().count();
+    }
+
+    #[test]
+    fn any_player_intent_is_ignored_while_dead_and_read_again_after() {
+        let mut app = app(false);
+        app.add_player_intent::<Poke>()
+            .init_resource::<Poked>()
+            .add_systems(FixedUpdate, read_pokes);
+        fall_to_death(&mut app);
+        for _ in 0..4 {
+            app.world_mut().write_message(Poke);
+            app.update();
+        }
+        app.world_mut().write_message(RespawnIntent);
+        app.update();
+        app.update();
+        assert_eq!(app.world().resource::<Poked>().0, 0, "none read once alive");
+        app.world_mut().write_message(Poke);
+        app.update();
+        assert_eq!(app.world().resource::<Poked>().0, 1);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 use bevy::prelude::*;
 
+use super::death::PlayerIntents;
 use crate::session::SessionApp;
 use tesserae_core::collide::{RayHit, VoxelVolume};
 use tesserae_core::{NodeBox, Tables, Voxel};
@@ -109,7 +110,7 @@ impl From<RejectReason> for UseRefusal {
 pub struct UseOutcome(pub Result<UseResult, UseRefusal>);
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_session_message::<UseIntent>()
+    app.add_player_intent::<UseIntent>()
         .add_session_message::<UseOutcome>()
         // Every frame, like an Edit's receive: an answer is never lost to a
         // frame that runs no tick, and it touches no World state.

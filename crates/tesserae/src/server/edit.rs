@@ -26,6 +26,7 @@ use std::collections::{HashMap, VecDeque};
 
 use bevy::prelude::*;
 
+use super::death::PlayerIntents;
 use crate::session::SessionApp;
 use tesserae_core::collide::{Aabb, RayHit, VoxelVolume, overlaps, raycast_until};
 use tesserae_core::mesh::{FACE_STEPS, NEG_X, NEG_Y, NEG_Z, POS_X, POS_Y, POS_Z};
@@ -344,21 +345,21 @@ impl PendingEdits {
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<super::undo::Journal>()
-        .add_session_message::<super::undo::HistoryAction>()
+        .add_player_intent::<super::undo::HistoryAction>()
         .add_session_message::<super::undo::HistoryApplied>()
         .init_session_resource::<AimState>()
         .init_session_resource::<super::tool::Tools>()
         .init_session_resource::<layout::LayoutAimState>()
-        .add_session_message::<LayoutIntent>()
+        .add_player_intent::<LayoutIntent>()
         .add_session_message::<LayoutAim>()
         .add_session_message::<LayoutAnswer>()
         .add_session_message::<AimReport>()
         .add_session_message::<AimTarget>()
-        .add_session_message::<PickIntent>()
+        .add_player_intent::<PickIntent>()
         .add_session_message::<PickedItem>()
         .init_session_resource::<PendingEdits>()
         .init_session_resource::<super::mods::EditHistory>()
-        .add_session_message::<EditIntent>()
+        .add_player_intent::<EditIntent>()
         .add_session_message::<EditRejected>()
         .init_session_resource::<super::entities::EntityStore>()
         .init_session_resource::<super::items::Items>()

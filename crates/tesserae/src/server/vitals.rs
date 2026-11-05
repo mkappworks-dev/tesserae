@@ -10,7 +10,7 @@ use tesserae_core::save::VitalsV1;
 use tesserae_core::{Fluid, MaterialId, Occupants, SurvivalRules, Tables};
 
 use super::ContentTables;
-use super::death::Death;
+use super::death::{Death, PlayerIntents};
 use super::game_mode::PlayerMode;
 use super::inventory::Inventory;
 use super::items::Items;
@@ -101,7 +101,7 @@ pub struct EatIntent;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_session_message::<VitalsChanged>()
-        .add_session_message::<EatIntent>()
+        .add_player_intent::<EatIntent>()
         .add_session_message::<UseOutcome>()
         .add_session_systems(
             FixedPreUpdate,

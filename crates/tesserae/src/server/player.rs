@@ -6,6 +6,7 @@ use super::{
 use crate::world::WorldSettings;
 use bevy::prelude::*;
 
+use super::death::PlayerIntents;
 use crate::session::SessionApp;
 use tesserae_core::collide::{self, Aabb};
 use tesserae_core::flow::CellView;
@@ -446,7 +447,7 @@ pub(super) struct PlayerInput;
 pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<MovementPolicy>()
         .add_session_message::<RestoreView>()
-        .add_session_message::<MovementIntent>()
+        .add_player_intent::<MovementIntent>()
         .add_session_message::<MovementFeedback>()
         .add_session_message::<PoseCorrection>()
         .add_session_message::<RespawnIntent>()
