@@ -579,7 +579,10 @@ fn points(body: &mut ChildSpawnerCommands) {
         ..default()
     })
     .with_children(|line| {
-        for (i, caption) in ["A · Start", "B · Plane", "C · Depth"].into_iter().enumerate() {
+        for (i, caption) in ["A · Start", "B · Plane", "C · Depth"]
+            .into_iter()
+            .enumerate()
+        {
             line.spawn(Node {
                 flex_grow: 1.0,
                 flex_basis: Val::ZERO,
@@ -620,15 +623,13 @@ fn points(body: &mut ChildSpawnerCommands) {
             });
         }
     });
-    body.spawn((
-        look::paragraph(
-            "Set A, then B for a flat rectangle. C adds depth and completes the layout.",
-            theme::TEXT_CAPTION,
-            theme::REGULAR,
-            theme::LAYOUT_NOTE,
-            NOTE_LINE_HEIGHT,
-        ),
-    ));
+    body.spawn((look::paragraph(
+        "Set A, then B for a flat rectangle. C adds depth and completes the layout.",
+        theme::TEXT_CAPTION,
+        theme::REGULAR,
+        theme::LAYOUT_NOTE,
+        NOTE_LINE_HEIGHT,
+    ),));
 }
 
 /// The gap between Voxels, with its stepper always to hand.
@@ -725,11 +726,21 @@ fn value_with(value: impl Into<String>, after: impl Into<String>) -> impl Bundle
 }
 
 fn term(value: impl Into<String>) -> impl Bundle {
-    look::label(value, theme::TEXT_EYEBROW, theme::REGULAR, theme::TOTALS_TERM)
+    look::label(
+        value,
+        theme::TEXT_EYEBROW,
+        theme::REGULAR,
+        theme::TOTALS_TERM,
+    )
 }
 
 fn value(value: impl Into<String>) -> impl Bundle {
-    look::label(value, theme::TEXT_EYEBROW, theme::LABEL, theme::TOTALS_VALUE)
+    look::label(
+        value,
+        theme::TEXT_EYEBROW,
+        theme::LABEL,
+        theme::TOTALS_VALUE,
+    )
 }
 
 /// How many, how big and at what Voxel size: what the controls above make.
@@ -763,7 +774,11 @@ fn sums(body: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_size:
 fn in_the_world(body: &mut ChildSpawnerCommands, between: bool) {
     totals(body, |rows| {
         // One run of text, so the number and its word share a baseline.
-        total_row(rows, term("In the World"), (Info::Count, value_with("0", " Voxels")));
+        total_row(
+            rows,
+            term("In the World"),
+            (Info::Count, value_with("0", " Voxels")),
+        );
         if between {
             info_row(rows, Info::Size);
         }
@@ -800,15 +815,13 @@ fn cap_note(body: &mut ChildSpawnerCommands, note: &str) {
         BackgroundColor(theme::LAYOUT_ERROR),
         BorderColor::all(theme::LAYOUT_ERROR_EDGE),
     ))
-    .with_child((
-        look::paragraph(
-            note,
-            theme::TEXT_EYEBROW,
-            theme::REGULAR,
-            theme::LAYOUT_ERROR_INK,
-            theme::LINE_HEIGHT,
-        ),
-    ));
+    .with_child((look::paragraph(
+        note,
+        theme::TEXT_EYEBROW,
+        theme::REGULAR,
+        theme::LAYOUT_ERROR_INK,
+        theme::LINE_HEIGHT,
+    ),));
 }
 
 /// Back to play ready to build, or out of the mode.
@@ -825,8 +838,20 @@ fn footer(card: &mut ChildSpawnerCommands) {
         BorderColor::all(theme::LAYOUT_RULE),
     ))
     .with_children(|foot| {
-        look::button(foot, "Ready to build", Control::Ready, cine::Kind::Primary, look::WIDE);
-        look::button(foot, "Exit layout", Control::Exit, cine::Kind::Ghost, look::WIDE);
+        look::button(
+            foot,
+            "Ready to build",
+            Control::Ready,
+            cine::Kind::Primary,
+            look::WIDE,
+        );
+        look::button(
+            foot,
+            "Exit layout",
+            Control::Exit,
+            cine::Kind::Ghost,
+            look::WIDE,
+        );
     });
 }
 
@@ -877,7 +902,12 @@ fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_s
                 theme::REGULAR,
                 theme::LAYOUT_STATUS_INK,
             ));
-            card.spawn(look::label(what, theme::TEXT_BODY, theme::MEDIUM, theme::INK));
+            card.spawn(look::label(
+                what,
+                theme::TEXT_BODY,
+                theme::MEDIUM,
+                theme::INK,
+            ));
             if let Some(size) = size {
                 card.spawn(look::label(
                     size,
@@ -919,7 +949,15 @@ type Steps<'w, 's> = (
             &'static mut BorderColor,
         ),
     >,
-    Query<'w, 's, (&'static StepLetter, &'static mut Text, &'static mut TextColor)>,
+    Query<
+        'w,
+        's,
+        (
+            &'static StepLetter,
+            &'static mut Text,
+            &'static mut TextColor,
+        ),
+    >,
     Query<'w, 's, (&'static StepCaption, &'static mut TextColor), Without<StepLetter>>,
 );
 
@@ -1526,7 +1564,10 @@ mod tests {
     #[test]
     fn every_axis_has_its_own_line_with_a_way_to_turn_round_and_a_count() {
         let mut app = render_app();
-        app.world_mut().resource_mut::<Preferences>().layout.negative[1] = true;
+        app.world_mut()
+            .resource_mut::<Preferences>()
+            .layout
+            .negative[1] = true;
         open(&mut app);
         let shown = controls(&mut app);
         for axis in 0..3 {

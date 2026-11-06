@@ -255,7 +255,10 @@ fn paint_flat(
     for (flat, hovered, mut background, mut border, children) in &mut controls {
         let (fill, edge, ink) = flat_colours(*flat);
         let (fill, edge) = if hovered.get() && !flat.selected {
-            (lit(fill), if edge.alpha() == 0.0 { edge } else { lit(edge) })
+            (
+                lit(fill),
+                if edge.alpha() == 0.0 { edge } else { lit(edge) },
+            )
         } else {
             (fill, edge)
         };
@@ -528,11 +531,7 @@ pub(in crate::client) fn paint_frame(
 
 /// A focused slot or tile is ringed tighter than a button.
 pub(in crate::client) fn slot_focus() -> Outline {
-    Outline::new(
-        Val::Px(theme::FRAME),
-        Val::Px(theme::FRAME),
-        Color::NONE,
-    )
+    Outline::new(Val::Px(theme::FRAME), Val::Px(theme::FRAME), Color::NONE)
 }
 
 /// The bag beside the Inventory's title: a handle over a rounded body with a

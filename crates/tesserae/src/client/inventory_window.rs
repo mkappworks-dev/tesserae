@@ -400,7 +400,10 @@ fn render(
         Res<super::edit::Hotbar>,
         Res<super::profile::Preferences>,
     ),
-    (focus, screen): (Option<Res<InputFocus>>, Single<&Window, With<PrimaryWindow>>),
+    (focus, screen): (
+        Option<Res<InputFocus>>,
+        Single<&Window, With<PrimaryWindow>>,
+    ),
     mut built: Local<Option<Built>>,
 ) {
     let wanted = window.open.then(|| Built {
@@ -776,19 +779,17 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 padding: UiRect::axes(Val::ZERO, Val::Px(8.0)),
                 ..default()
             })
-            .with_child((
-                look::paragraph(
-                    if state.picked.is_some() {
-                        "Stack selected. Choose a destination, or select the source again to cancel."
-                    } else {
-                        "Click to move · Shift-click for quick transfer · Drag and drop supported"
-                    },
-                    theme::TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::ITEM_SOFT,
-                    theme::LINE_HEIGHT,
-                ),
-            ));
+            .with_child((look::paragraph(
+                if state.picked.is_some() {
+                    "Stack selected. Choose a destination, or select the source again to cancel."
+                } else {
+                    "Click to move · Shift-click for quick transfer · Drag and drop supported"
+                },
+                theme::TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::ITEM_SOFT,
+                theme::LINE_HEIGHT,
+            ),));
     });
 }
 
@@ -1012,19 +1013,17 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 },
                 BorderColor::all(theme::ITEM_ROW_RULE),
             ))
-            .with_child((
-                look::paragraph(
-                    if state.picked.is_some() {
-                        "Choose another slot to move, merge or swap this stack."
-                    } else {
-                        "Shift-click moves a stack between your backpack and hotbar."
-                    },
-                    theme::TEXT_EYEBROW,
-                    theme::REGULAR,
-                    theme::ITEM_NOTE,
-                    NOTE_LINE_HEIGHT,
-                ),
-            ));
+            .with_child((look::paragraph(
+                if state.picked.is_some() {
+                    "Choose another slot to move, merge or swap this stack."
+                } else {
+                    "Shift-click moves a stack between your backpack and hotbar."
+                },
+                theme::TEXT_EYEBROW,
+                theme::REGULAR,
+                theme::ITEM_NOTE,
+                NOTE_LINE_HEIGHT,
+            ),));
     });
 }
 
@@ -1043,9 +1042,7 @@ fn inspected(
             flex_shrink: 0.0,
             ..default()
         })
-        .with_children(|icon| {
-            item_icon(icon, names.icon(&stack.item), INSPECTOR_ICON_PX, false)
-        });
+        .with_children(|icon| item_icon(icon, names.icon(&stack.item), INSPECTOR_ICON_PX, false));
     panel.spawn(look::label(
         ui::title(&stack.item),
         theme::ITEM_TEXT_NAME,
@@ -1251,19 +1248,17 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 ..default()
             })
             .with_children(|actions| {
-                actions.spawn((
-                    look::paragraph(
-                        if state.survival {
-                            "Item counts stay intact when switching screens."
-                        } else {
-                            "Drag from the Catalogue into any slot, or set a count and transfer."
-                        },
-                        theme::TEXT_EYEBROW,
-                        theme::REGULAR,
-                        theme::ITEM_SOFT,
-                        theme::LINE_HEIGHT,
-                    ),
-                ));
+                actions.spawn((look::paragraph(
+                    if state.survival {
+                        "Item counts stay intact when switching screens."
+                    } else {
+                        "Drag from the Catalogue into any slot, or set a count and transfer."
+                    },
+                    theme::TEXT_EYEBROW,
+                    theme::REGULAR,
+                    theme::ITEM_SOFT,
+                    theme::LINE_HEIGHT,
+                ),));
                 look::button(
                     actions,
                     "Back to game",
@@ -1306,8 +1301,7 @@ fn paint(
         return;
     }
     let focused = ui::visible_focus(focus.as_deref(), visible.as_deref());
-    for (entity, control, hovered, children, gradient, border, shadow, mut outline) in &mut slots
-    {
+    for (entity, control, hovered, children, gradient, border, shadow, mut outline) in &mut slots {
         let Control::Slot(slot) = *control else {
             continue;
         };

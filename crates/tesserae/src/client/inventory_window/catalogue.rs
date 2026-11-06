@@ -605,7 +605,11 @@ fn transfer_rows(
                 return;
             };
             for (label, control, kind) in [
-                ("To backpack".to_owned(), CatalogueControl::ToBackpack, Kind::Ghost),
+                (
+                    "To backpack".to_owned(),
+                    CatalogueControl::ToBackpack,
+                    Kind::Ghost,
+                ),
                 (
                     format!("To hotbar {}", at + 1),
                     CatalogueControl::ToHotbar,
@@ -617,7 +621,10 @@ fn transfer_rows(
                     flex_grow: 1.0,
                     flex_basis: Val::ZERO,
                     min_height: Val::Px(theme::ITEM_BUTTON_HEIGHT),
-                    padding: UiRect::axes(Val::Px(theme::BUTTON_PAD_X), Val::Px(theme::BUTTON_PAD_Y)),
+                    padding: UiRect::axes(
+                        Val::Px(theme::BUTTON_PAD_X),
+                        Val::Px(theme::BUTTON_PAD_Y),
+                    ),
                     border: UiRect::all(Val::Px(theme::RULE)),
                     border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                     align_items: AlignItems::Center,
