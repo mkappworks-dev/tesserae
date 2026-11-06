@@ -254,3 +254,6 @@ pub(super) const TEXT_DEATH_TITLE: f32 = 46.0;
 pub(super) const DEATH_TITLE_TRACKING: f32 = -0.46;
 /// The cursor hint and the F3 readout.
 pub(super) const READOUT: Color = Color::srgba(1.0, 1.0, 1.0, 0.7);
+/// CSS `brightness(.5)` halves sRGB values; Bevy UI blends in linear light,
+/// where that is black at 1 − 0.5^2.2.
+pub(super) const DEATH_DIM: Color = Color::srgba(0.0, 0.0, 0.0, 0.78);

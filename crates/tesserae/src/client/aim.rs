@@ -63,9 +63,10 @@ fn crosshair(
     time: Res<Time>,
     (hotbar, layout): (Res<Hotbar>, Option<Res<super::layout::LayoutMode>>),
     mut crosshair: Query<&mut TextColor, With<super::edit::Crosshair>>,
+    dead: Option<Res<super::death::Dead>>,
 ) {
     let current = target.current(&sent, time.elapsed_secs_f64());
-    let alpha = if !super::edit::building(&hotbar, layout.as_deref()) {
+    let alpha = if !super::edit::building(&hotbar, layout.as_deref()) || !super::death::alive(dead) {
         0.0
     } else if target.0.blocked && current {
         super::edit::BLOCKED_CROSSHAIR_ALPHA

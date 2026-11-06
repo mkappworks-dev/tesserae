@@ -23,9 +23,9 @@ use crate::server::player::RespawnIntent;
 use crate::session::SessionApp;
 
 const RESPAWN_NOTICE_S: f32 = 5.0;
-/// The prototype's `grayscale(.75) brightness(.5)` on the World behind.
+/// The prototype's `grayscale(.75)` on the World behind; its `brightness(.5)`
+/// is [`theme::DEATH_DIM`], which reaches the sky as grading does not.
 const DEAD_SATURATION: f32 = 0.25;
-const DEAD_EXPOSURE_EV: f32 = -1.0;
 
 /// The Server's last word on the Player's death; `None` while alive.
 #[derive(Resource, Default)]
@@ -65,8 +65,8 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
-/// UI cannot filter the 3D view, so the camera's own colour grading greys and
-/// darkens the World while dead; there is no blur.
+/// UI cannot filter the 3D view, so the camera's own colour grading greys the
+/// World while dead; there is no blur.
 fn grade_world(
     mut commands: Commands,
     dead: Res<Dead>,
@@ -78,7 +78,6 @@ fn grade_world(
     let mut grading = bevy::render::view::ColorGrading::default();
     if dead.0.is_some() {
         grading.global.post_saturation = DEAD_SATURATION;
-        grading.global.exposure = DEAD_EXPOSURE_EV;
     }
     for camera in &cameras {
         commands.entity(camera).insert(grading.clone());
@@ -283,6 +282,7 @@ fn render(
         .spawn((
             Screen,
             GlobalZIndex(9),
+            BackgroundColor(theme::DEATH_DIM),
             BackgroundGradient::from(LinearGradient::to_bottom(vec![
                 ColorStop::auto(top),
                 ColorStop::auto(bottom),
