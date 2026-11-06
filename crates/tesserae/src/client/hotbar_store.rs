@@ -1,5 +1,8 @@
 //! The per-Game quick slots an older build saved, by name. The file is read,
 //! never written: it seeds a new World's hotbar with Catalogue takes.
+//!
+//! Beside it, the hotbar slot last chosen in any World, which every World opens
+//! on. It is the Player's habit, not World state, so the Client keeps it.
 use super::edit::{Catalogue, Holding};
 use crate::content::ContentCatalogue;
 use crate::server::inventory::{InventoryChanged, InventoryIntent, MAX_STACK};
@@ -7,10 +10,10 @@ use crate::server::persistence::NewWorld;
 use bevy::prelude::*;
 
 use crate::session::{SessionApp, SessionTeardown};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, io, path::PathBuf};
 use tesserae_core::Orientation;
-use tesserae_core::inventory::{Destination, Slot};
+use tesserae_core::inventory::{Destination, HOTBAR_SLOTS, Slot};
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -125,20 +128,98 @@ impl Store {
             .collect()
     }
 }
+/// The hotbar slot the Player last asked for.
+#[derive(Resource)]
+pub(super) struct LastSlot {
+    path: PathBuf,
+    selected: usize,
+    /// This World's Server has been asked for it.
+    restored: bool,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SlotDocument {
+    version: u32,
+    selected: usize,
+}
+impl LastSlot {
+    fn load(path: PathBuf) -> Self {
+        let selected = fs::read(&path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<SlotDocument>(&bytes).ok())
+            .filter(|doc| doc.version == 1 && doc.selected < HOTBAR_SLOTS)
+            .map_or(0, |doc| doc.selected);
+        Self {
+            path,
+            selected,
+            restored: false,
+        }
+    }
+    fn remember(&mut self, at: usize) {
+        if at == self.selected || at >= HOTBAR_SLOTS {
+            return;
+        }
+        self.selected = at;
+        let saved = serde_json::to_vec(&SlotDocument {
+            version: 1,
+            selected: at,
+        })
+        .map_err(io::Error::other)
+        .and_then(|bytes| super::profile::atomic_write(&self.path, &bytes));
+        if let Err(e) = saved {
+            warn!(
+                "Could not remember the hotbar slot at {}: {e}",
+                self.path.display()
+            );
+        }
+    }
+}
 pub(super) fn plugin(app: &mut App) {
     let path = super::profile::user_path().with_extension("hotbar.json");
+    let slot = super::profile::user_path().with_extension("slot.json");
     app.insert_resource(Store::load(path))
+        .insert_resource(LastSlot::load(slot))
         .add_session_systems(
             Update,
             offer_stored
                 .after(super::edit::receive_catalogue)
                 .after(super::game_mode::receive),
         )
+        .add_session_systems(Update, (restore_slot, remember_slot).chain())
         .add_session_systems(SessionTeardown, |mut store: ResMut<Store>| {
             store.game = None;
             store.offer = false;
             store.announced = false;
+        })
+        .add_session_systems(SessionTeardown, |mut slot: ResMut<LastSlot>| {
+            slot.restored = false;
         });
+}
+/// Once the Server has an Inventory, asks it for the slot last chosen.
+fn restore_slot(
+    mut slot: ResMut<LastSlot>,
+    mut held: MessageReader<InventoryChanged>,
+    mut intents: MessageWriter<InventoryIntent>,
+) {
+    let Some(InventoryChanged(now)) = held.read().last() else {
+        return;
+    };
+    if slot.restored {
+        return;
+    }
+    slot.restored = true;
+    if now.selected() != slot.selected {
+        intents.write(InventoryIntent::Select(slot.selected));
+    }
+}
+/// What the Player asks for, not what the Server answers, so a reply still on
+/// its way from before the restore cannot overwrite it.
+fn remember_slot(mut slot: ResMut<LastSlot>, mut asked: MessageReader<InventoryIntent>) {
+    for intent in asked.read() {
+        if let InventoryIntent::Select(at) = intent {
+            slot.remember(*at);
+        }
+    }
 }
 /// A new Creative World's hotbar starts as the stored slots, each a full stack
 /// the Server gives or refuses like any Catalogue take.
@@ -390,5 +471,38 @@ mod tests {
             assert!(hotbar(&mut app).iter().all(Option::is_none));
             assert_eq!(fs::read(dir.path()).unwrap(), bytes);
         }
+    }
+
+    fn selected(app: &mut App) -> usize {
+        let mut held = app.world_mut().query::<&Inventory>();
+        held.single(app.world()).unwrap().selected()
+    }
+
+    #[test]
+    fn every_world_opens_on_the_slot_last_chosen() {
+        let dir = Directory::new();
+        let path = dir.0.join("slot.json");
+        let open = |path: &std::path::Path| {
+            let mut app = app(dir.path());
+            app.insert_resource(LastSlot::load(path.to_path_buf()))
+                .add_systems(Update, (restore_slot, remember_slot).chain());
+            arrive(&mut app);
+            for _ in 0..3 {
+                frame(&mut app);
+            }
+            app
+        };
+        let mut app = open(&path);
+        assert_eq!(selected(&mut app), 0, "nothing chosen yet");
+        assert!(!path.exists(), "nothing to remember");
+        app.world_mut().write_message(InventoryIntent::Select(5));
+        frame(&mut app);
+        assert_eq!(selected(&mut app), 5);
+
+        let mut app = open(&path);
+        assert_eq!(selected(&mut app), 5, "the next World opens on it");
+        fs::write(&path, b"broken").unwrap();
+        let mut app = open(&path);
+        assert_eq!(selected(&mut app), 0, "a broken file is ignored");
     }
 }

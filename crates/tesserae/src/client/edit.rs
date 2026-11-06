@@ -447,8 +447,9 @@ pub(super) fn receive_catalogue(
         if catalogue.0 == *message {
             continue;
         }
-        // Every World opens empty-handed; a slot key or click picks one up.
-        hotbar.outside = Some(Holding::Empty);
+        // Every World opens holding its selected slot; `hotbar_store` asks for
+        // the one last chosen.
+        hotbar.outside = None;
         catalogue.0 = message.clone();
     }
 }
