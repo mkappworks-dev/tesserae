@@ -2038,6 +2038,9 @@ fn mods_page(
             theme::TEXT_SMALL,
             theme::MUTED,
         );
+        if l.trust_asked && !installed.untrusted.is_empty() {
+            trust_panel(col, installed);
+        }
     })
 }
 
@@ -2283,6 +2286,118 @@ fn delete(root: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
     )
 }
 
+/// One card per item: what it is and whether it runs code.
+fn trust_rows(parent: &mut ChildSpawnerCommands, items: &[crate::launch::Untrusted]) {
+    parent
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|col| {
+            for item in items {
+                let manifest = &item.found.manifest;
+                let data = manifest.declaration.is_some();
+                // A component's requested limits are worth reading; a data Mod has none to show.
+                let detail = if data {
+                    format!("Build {}", &item.sha256[..12.min(item.sha256.len())])
+                } else {
+                    item.prompt
+                        .trim_end()
+                        .trim_end_matches("Trust this exact build? [y/N]")
+                        .trim_end()
+                        .to_owned()
+                };
+                col.spawn((
+                    BackgroundColor(theme::CARD),
+                    BorderColor::all(theme::EDGE),
+                    Node {
+                        padding: UiRect::all(Val::Px(17.0)),
+                        border: UiRect::all(Val::Px(theme::RULE)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(15.0),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                ))
+                .with_children(|card| {
+                    card.spawn(Node {
+                        flex_direction: FlexDirection::Column,
+                        row_gap: Val::Px(5.0),
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    })
+                    .with_children(|info| {
+                        ui::weighted_text(
+                            info,
+                            format!("{} {}", ui::title(&manifest.id), manifest.version),
+                            theme::TEXT_BODY,
+                            theme::LABEL,
+                            theme::INK,
+                        );
+                        info.spawn((
+                            Text::new(detail),
+                            theme::font(theme::TEXT_CAPTION),
+                            bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                            TextColor(theme::MUTED),
+                            Pickable::IGNORE,
+                        ));
+                    });
+                    cine::pill(card, if data { "Data only" } else { "Runs code" });
+                });
+            }
+        });
+}
+
+/// The Mods step's Trust panel: what the next step would run, to grant before leaving.
+fn trust_panel(col: &mut ChildSpawnerCommands, installed: &Installed) {
+    let items = &installed.untrusted;
+    col.spawn((
+        BackgroundColor(theme::TRUST_PANEL),
+        BorderColor::all(theme::EDGE),
+        Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(10.0),
+            margin: UiRect::top(Val::Px(8.0)),
+            padding: UiRect::all(Val::Px(16.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+            flex_shrink: 0.0,
+            ..default()
+        },
+    ))
+    .with_children(|panel| {
+        ui::weighted_text(
+            panel,
+            if items.len() == 1 {
+                "Trust this item to continue".to_owned()
+            } else {
+                format!("Trust {} items to continue", items.len())
+            },
+            theme::TEXT_BODY,
+            theme::LABEL,
+            theme::INK,
+        );
+        ui::paragraph(
+            panel,
+            "The next step reads the Biomes these items declare, which runs them. Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
+                .to_owned(),
+            theme::TEXT_SMALL,
+            theme::MUTED,
+        );
+        trust_rows(panel, items);
+        ui::paragraph(
+            panel,
+            "Trust is for these exact files.".to_owned(),
+            theme::TEXT_CAPTION,
+            theme::MUTED,
+        );
+    });
+}
+
 /// Trust for the whole set on one scrolling page, with its buttons in the footer so they stay
 /// in view however many items there are.
 fn trust(
@@ -2318,82 +2433,35 @@ fn trust(
             Sheet {
                 eyebrow: "TRUST",
                 title: &title,
-                subtitle: if code == 0 {
-                    "Data only: none of it runs code. Trust is for these exact files."
-                } else {
-                    "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
+                subtitle: match (code, next) {
+                    (0, _) => "Data only: none of it runs code. Trust is for these exact files.",
+                    (_, Next::Open(_)) => {
+                        "This World needs these items before it opens. Items marked \u{201c}runs code\u{201d} run their own code."
+                    }
+                    _ => {
+                        "Items marked \u{201c}runs code\u{201d} run their own code. Trust them only if you know where they came from."
+                    }
                 },
             },
             page_scroll(scroll),
             |col| {
                 problem(col, l.problem.as_ref());
-                for (at, item) in items.iter().enumerate() {
-                    let manifest = &item.found.manifest;
-                    let data = manifest.declaration.is_some();
-                    // A component's requested limits are worth reading; a data Mod has none to show.
-                    let detail = if data {
-                        format!("Build {}", &item.sha256[..12.min(item.sha256.len())])
-                    } else {
-                        item.prompt
-                            .trim_end()
-                            .trim_end_matches("Trust this exact build? [y/N]")
-                            .trim_end()
-                            .to_owned()
-                    };
-                    col.spawn((
-                        BackgroundColor(theme::CARD),
-                        BorderColor::all(theme::EDGE),
-                        Node {
-                            margin: UiRect::top(Val::Px(if at == 0 { 0.0 } else { 10.0 })),
-                            padding: UiRect::all(Val::Px(17.0)),
-                            border: UiRect::all(Val::Px(theme::RULE)),
-                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
-                            align_items: AlignItems::Center,
-                            column_gap: Val::Px(15.0),
-                            flex_shrink: 0.0,
-                            ..default()
-                        },
-                    ))
-                    .with_children(|card| {
-                        card.spawn(Node {
-                            flex_direction: FlexDirection::Column,
-                            row_gap: Val::Px(5.0),
-                            flex_grow: 1.0,
-                            min_width: Val::Px(0.0),
-                            ..default()
-                        })
-                        .with_children(|info| {
-                            ui::weighted_text(
-                                info,
-                                format!("{} {}", ui::title(&manifest.id), manifest.version),
-                                theme::TEXT_BODY,
-                                theme::LABEL,
-                                theme::INK,
-                            );
-                            info.spawn((
-                                Text::new(detail),
-                                theme::font(theme::TEXT_CAPTION),
-                                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
-                                TextColor(theme::MUTED),
-                                Pickable::IGNORE,
-                            ));
-                        });
-                        cine::pill(card, if data { "Data only" } else { "Runs code" });
-                    });
-                }
+                trust_rows(col, items);
             },
             |foot| {
                 focus = Some(buttons::button(
                     foot,
                     match next {
                         Next::Create => "Back to Review",
-                        Next::Biomes => "Back to Mods",
-                        Next::Open(_) => "Cancel",
+                        Next::Open(_) => "Your Worlds",
                     },
                     Act::Back,
                     ButtonStyle::Cinematic {
                         kind: Kind::Ghost,
-                        align: Align::Centre,
+                        align: match next {
+                            Next::Open(_) => Align::Before("\u{2190}"),
+                            Next::Create => Align::Centre,
+                        },
                     },
                 ));
                 footer_hint(foot, "Trust is for these exact files");
@@ -2409,7 +2477,6 @@ fn trust(
                         match next {
                             Next::Open(_) => "open",
                             Next::Create => "create",
-                            Next::Biomes => "show their Biomes",
                         }
                     ),
                     Act::Trust,
@@ -2488,7 +2555,22 @@ fn step_frame(
                     foot,
                     format!("{} of {}", step.index() + 1, Step::ORDER.len()),
                 );
+                let trusting =
+                    step == Step::Mods && l.trust_asked && !installed.untrusted.is_empty();
                 forward = Some(match step.next() {
+                    Some(_) if trusting => buttons::button(
+                        foot,
+                        if installed.untrusted.len() == 1 {
+                            "Trust it and continue".to_owned()
+                        } else {
+                            format!("Trust {} and continue", installed.untrusted.len())
+                        },
+                        Act::TrustMods,
+                        ButtonStyle::Cinematic {
+                            kind: Kind::Primary,
+                            align: Align::After("\u{2192}"),
+                        },
+                    ),
                     Some(next) => buttons::button(
                         foot,
                         format!("Next: {}", next.label()),

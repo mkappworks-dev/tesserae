@@ -28,10 +28,6 @@ pub(super) fn on_open(l: &mut Launcher, cx: &mut Acting, act: Act) {
             match next {
                 Next::Open(path) => open(l, cx.relaunch, path),
                 Next::Create => create(l, cx.installed, cx.worlds, cx.relaunch),
-                Next::Biomes => {
-                    l.screen = Screen::Create(Step::Mods);
-                    go(l, cx.installed, cx.previewer, Step::Biomes);
-                }
             }
         }
         _ => {}

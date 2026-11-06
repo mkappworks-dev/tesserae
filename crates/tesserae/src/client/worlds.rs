@@ -129,13 +129,13 @@ impl Step {
     }
 }
 
-/// What runs once every Mod it needs is trusted.
+/// What runs once every Mod it needs is trusted. Create World's Mods step asks for Trust inline
+/// instead, see [`Launcher::trust_asked`].
 #[derive(Clone, Debug, PartialEq)]
 enum Next {
     Open(PathBuf),
+    /// Only when Trust was revoked after the Mods step granted it.
     Create,
-    /// Reading the Biomes runs the chosen Mods' declarations, so it waits for Trust too.
-    Biomes,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -350,6 +350,9 @@ struct Launcher {
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
+    /// The Mods step shows its Trust panel: leaving it runs the chosen Game and Mods to read their
+    /// Biomes. Cleared by every screen change and by every change to the picks it lists.
+    trust_asked: bool,
     /// Bumped whenever the screen must be rebuilt.
     version: u64,
     opening_frames: u32,
@@ -401,6 +404,7 @@ impl Launcher {
     fn show(&mut self, screen: Screen) {
         self.screen = screen;
         self.problem = None;
+        self.trust_asked = false;
         self.version += 1;
     }
 
@@ -461,6 +465,8 @@ pub(super) enum Act {
     SaveName,
     ConfirmDelete,
     Trust,
+    /// The Mods step's primary button: trusts what the panel lists, then shows the Biomes.
+    TrustMods,
     Dismiss,
     Disclose(Disclosure),
     ModTab(Option<String>),
@@ -751,6 +757,7 @@ fn start(
         problem: None,
         clashes: Default::default(),
         version: 0,
+        trust_asked: false,
         opening_frames: 0,
     };
     launcher.refresh(&worlds.0);
@@ -1023,6 +1030,7 @@ fn handle(
             | Act::DiscardSetup
             | Act::Voxel(..)
             | Act::Mode(..)
+            | Act::TrustMods
             | Act::Create => on_create_world(l, &mut cx, act),
             Act::Home
             | Act::Worlds
@@ -1082,7 +1090,6 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
         }
         Act::Back => match l.screen.clone() {
             Screen::Trust(Next::Create) => l.show(Screen::Create(Step::Review)),
-            Screen::Trust(Next::Biomes) => l.show(Screen::Create(Step::Mods)),
             Screen::Create(step) => match step.previous() {
                 Some(previous) => l.show(Screen::Create(previous)),
                 None if l.form.unchanged_from(&l.initial) => l.show(Screen::Worlds),

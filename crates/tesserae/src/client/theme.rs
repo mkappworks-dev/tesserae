@@ -9,6 +9,7 @@ pub(super) const RAISED: Color = Color::srgb_u8(0x18, 0x18, 0x1b);
 pub(super) const SHEET_HEADER: Color = Color::srgb_u8(0x11, 0x11, 0x13);
 pub(super) const SHEET_FOOTER: Color = PANEL;
 /// World, Game, Mod and Biome cards.
+pub(super) const TRUST_PANEL: Color = Color::srgb_u8(0x0f, 0x0f, 0x11);
 pub(super) const CARD: Color = Color::srgb_u8(0x19, 0x19, 0x1c);
 pub(super) const CHOSEN: Color = Color::srgb_u8(0x27, 0x27, 0x2b);
 pub(super) const CHOSEN_EDGE: Color = Color::srgb_u8(0xa8, 0xb0, 0xa2);
