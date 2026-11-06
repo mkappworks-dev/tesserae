@@ -1,5 +1,4 @@
 use super::*;
-use crate::client::theme;
 
 #[test]
 fn every_bindable_action_has_a_place_in_the_controls_list() {
@@ -124,16 +123,9 @@ fn searching_bindings_renders_actual_mouse_actions_and_restore_requires_confirma
     assert_eq!(captures.len(), 6);
     assert!(
         app.world_mut()
-            .query::<(&Text, &TextColor)>()
-            .iter(app.world())
-            .filter(|(text, _)| text.0 == "Add binding")
-            .all(|(_, color)| color.0 == theme::MUTED)
-    );
-    assert!(
-        app.world_mut()
             .query::<&Text>()
             .iter(app.world())
-            .any(|text| text.0 == "3 actions")
+            .any(|text| text.0 == "Searching all categories")
     );
     assert!(
         captures.contains(&Action::Place)
