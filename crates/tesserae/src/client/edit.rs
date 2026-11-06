@@ -700,19 +700,10 @@ pub(super) fn send_intents(
 fn show_rejections(
     mut commands: Commands,
     mut rejected: MessageReader<EditRejected>,
-    mut applied: MessageReader<crate::server::undo::HistoryApplied>,
     mut notice: ResMut<Notice>,
     quiet: Res<QuietUntil>,
     time: Res<Time>,
 ) {
-    for message in applied.read() {
-        let text = match message.0 {
-            crate::server::undo::HistoryAction::Undo => "Undone",
-            crate::server::undo::HistoryAction::Redo => "Redone",
-        };
-        notice.show(text);
-        super::menu_ui::notify(&mut commands, text, super::menu_ui::Tone::Change);
-    }
     for message in rejected.read() {
         if time.elapsed_secs_f64() < quiet.0 {
             continue;
