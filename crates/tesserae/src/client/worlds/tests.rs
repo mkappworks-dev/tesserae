@@ -1108,16 +1108,15 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
     assert!(shown(&mut app, "Ash flats") && shown(&mut app, "Meadow"));
     act(&mut app, Act::ToggleBiome(0));
     act(&mut app, Act::SelectBiome(1));
-    act(&mut app, Act::Nudge(Knob::Temperature, 1));
-    for _ in 0..4 {
-        act(&mut app, Act::Nudge(Knob::Caves, -1));
-    }
+    slide(&mut app, Knob::Temperature, 0.35);
+    slide(&mut app, Knob::Caves, 0.0);
+    act(&mut app, Act::Disclose(Disclosure::Ground));
     act(&mut app, Act::CycleGround(Layer::Surface));
     type_into(&mut app, Field::Sky, "#0a141e");
     type_into(&mut app, Field::TemperatureSize, "800");
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::Review));
-    assert!(shown(&mut app, "1 of 2 enabled"));
+    assert!(shown(&mut app, "1 enabled"));
     act(&mut app, Act::Create);
     let edits = created(&app).biomes.expect("the edits are stored");
     assert_eq!(
@@ -1150,6 +1149,64 @@ fn the_biomes_step_lists_the_declared_biomes_and_its_edits_go_with_the_world() {
             humidity_size_m: 512.0,
         })
     );
+}
+
+/// Moves the selected Biome's slider as a drag or an arrow key would.
+fn slide(app: &mut App, knob: Knob, value: f32) {
+    let slider = app
+        .world_mut()
+        .query::<(Entity, &pages::KnobSlider)>()
+        .iter(app.world())
+        .find_map(|(e, k)| (k.0 == knob).then_some(e))
+        .unwrap_or_else(|| panic!("no {knob:?} slider on screen"));
+    app.world_mut().trigger(bevy::ui_widgets::ValueChange {
+        source: slider,
+        value,
+        is_final: true,
+    });
+    app.update();
+}
+
+#[test]
+fn a_slider_sets_the_selected_biome_on_its_step_without_rebuilding_the_page() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    let version = launcher(&app).version;
+    slide(&mut app, Knob::Humidity, 0.734);
+    slide(&mut app, Knob::Caves, 2.46);
+    let draft = launcher(&app).form.biomes.clone().unwrap();
+    assert_eq!(draft.choices[0].humidity, 0.73);
+    assert_eq!(draft.choices[0].cave_scale, Some(2.5));
+    assert_eq!(launcher(&app).version, version, "a drag keeps its slider");
+}
+
+#[test]
+fn resetting_the_biomes_asks_in_a_dialog_over_the_step() {
+    let (mut app, _worlds) = to_biomes(Installed::fake(Some(("terra", "0.1.0")), &[]));
+    act(&mut app, Act::ToggleBiome(0));
+    act(&mut app, Act::ResetBiomes);
+    assert_eq!(modal_groups(&mut app), 1);
+    assert!(shown(&mut app, "Reset Biome settings?") && shown(&mut app, "Ash flats"));
+    assert_eq!(focused_act(&app), Some(Act::KeepBiomes));
+    press(&mut app, KeyCode::Escape);
+    assert_eq!(
+        launcher(&app).screen,
+        Screen::Create(Step::Biomes),
+        "Escape stays on the step"
+    );
+    assert_eq!(modal_groups(&mut app), 0);
+    assert!(!launcher(&app).form.biomes.as_ref().unwrap().choices[0].enabled);
+    act(&mut app, Act::ResetBiomes);
+    act(&mut app, Act::ConfirmReset);
+    assert_eq!(modal_groups(&mut app), 0);
+    assert!(launcher(&app).form.biomes.as_ref().unwrap().choices[0].enabled);
+}
+
+fn modal_groups(app: &mut App) -> usize {
+    app.world_mut()
+        .query::<&TabGroup>()
+        .iter(app.world())
+        .filter(|group| group.modal)
+        .count()
 }
 
 #[test]
@@ -1311,10 +1368,18 @@ fn a_long_name_or_a_missing_game_holds_the_world_step() {
     let mut app = app(&worlds, Installed::fake(Some(("terra", "0.1.0")), &[]));
     app.update();
     act(&mut app, Act::New);
+    assert!(
+        !shown(&mut app, "64"),
+        "the hint leaves the limit to the message"
+    );
     type_into(&mut app, Field::Name, &"x".repeat(65));
     act(&mut app, Act::Next);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
-    assert!(launcher(&app).form.problem.is_some());
+    assert_eq!(
+        launcher(&app).form.problem.as_deref(),
+        Some("Use a World name of 64 characters or fewer.")
+    );
+    assert_eq!(ticks(&mut app), 0, "the rail ticks no step");
     type_into(&mut app, Field::Name, "Fine");
     launcher_mut(&mut app).form.game = None;
     launcher_mut(&mut app).version += 1;
@@ -1328,6 +1393,19 @@ fn a_long_name_or_a_missing_game_holds_the_world_step() {
         Screen::Create(Step::World),
         "the rail cannot skip an invalid step"
     );
+    type_into(&mut app, Field::Name, "Fine");
+    launcher_mut(&mut app).form.game = Some("terra".into());
+    act(&mut app, Act::Next);
+    assert_eq!(ticks(&mut app), 1, "a valid step is ticked once passed");
+}
+
+/// The rail's ticks: one per earlier step that is valid.
+fn ticks(app: &mut App) -> usize {
+    app.world_mut()
+        .query::<&super::super::menu_ui::Icon>()
+        .iter(app.world())
+        .filter(|icon| icon.0 == super::super::menu_ui::IconKind::Check)
+        .count()
 }
 
 #[test]
@@ -1349,6 +1427,12 @@ fn cancelling_a_changed_setup_asks_before_discarding() {
     );
     press(&mut app, KeyCode::Escape);
     assert!(matches!(launcher(&app).screen, Screen::Discard(_)));
+    assert_eq!(modal_groups(&mut app), 1, "a dialog");
+    assert!(
+        shown(&mut app, "A World of your own"),
+        "over the step it leaves"
+    );
+    assert_eq!(focused_act(&app), Some(Act::KeepEditing));
     act(&mut app, Act::KeepEditing);
     assert_eq!(launcher(&app).screen, Screen::Create(Step::World));
     assert_eq!(launcher(&app).form.name, "Half done");

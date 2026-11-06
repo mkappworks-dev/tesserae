@@ -1,5 +1,6 @@
 id = "lumen"
 version = "0.1.0"
+description = "Crystals & twilight"
 api = "0.3"
 root = true
 depends = ["strata", "glassworks", "frost", "crystals"]

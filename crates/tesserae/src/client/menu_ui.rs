@@ -901,10 +901,27 @@ pub(super) enum IconKind {
     Settings,
     Mods,
     Check,
+    World,
+    Biomes,
+    Review,
+    Chevron,
+    /// A disclosure row's marker, closed and open.
+    Collapsed,
+    Expanded,
 }
-const ICONS: usize = 8;
+const ICONS: usize = 14;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 3] = [IconKind::Settings, IconKind::Mods, IconKind::Check];
+const DRAWN: [IconKind; 9] = [
+    IconKind::Settings,
+    IconKind::Mods,
+    IconKind::Check,
+    IconKind::World,
+    IconKind::Biomes,
+    IconKind::Review,
+    IconKind::Chevron,
+    IconKind::Collapsed,
+    IconKind::Expanded,
+];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
 #[derive(Resource)]
@@ -1023,7 +1040,72 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
     };
     let stroke = |distance: f32| ((0.85 - distance) / UNITS_PER_PIXEL + 0.5).clamp(0.0, 1.0);
     let fill = |signed: f32| (0.5 - signed / UNITS_PER_PIXEL).clamp(0.0, 1.0);
+    let cubic = |a: Vec2, b: Vec2, c: Vec2, d: Vec2| -> Vec<Vec2> {
+        (0..=16)
+            .map(|i| {
+                let t = i as f32 / 16.0;
+                let u = 1.0 - t;
+                a * u * u * u + b * 3.0 * u * u * t + c * 3.0 * u * t * t + d * t * t * t
+            })
+            .collect()
+    };
+    let convex = |corners: &[Vec2]| {
+        (0..corners.len())
+            .map(|i| {
+                let (a, b) = (corners[i], corners[(i + 1) % corners.len()]);
+                let normal = v(b.y - a.y, a.x - b.x).normalize();
+                (p - a).dot(normal)
+            })
+            .fold(f32::MIN, f32::max)
+    };
     match kind {
+        IconKind::World => {
+            let ellipse: Vec<Vec2> = (0..=48)
+                .map(|i| {
+                    let a = i as f32 / 48.0 * std::f32::consts::TAU;
+                    v(12.0 + 4.0 * a.cos(), 12.0 + 9.0 * a.sin())
+                })
+                .collect();
+            stroke(
+                (p.distance(v(12.0, 12.0)) - 9.0)
+                    .abs()
+                    .min(path(&ellipse))
+                    .min(segment(v(3.0, 12.0), v(21.0, 12.0))),
+            )
+        }
+        IconKind::Biomes => {
+            let mut leaf = cubic(v(20.0, 3.0), v(9.0, 2.0), v(3.0, 7.0), v(4.0, 14.0));
+            leaf.extend(cubic(
+                v(4.0, 14.0),
+                v(5.0, 20.0),
+                v(15.0, 21.0),
+                v(18.0, 15.0),
+            ));
+            leaf.extend(cubic(
+                v(18.0, 15.0),
+                v(20.0, 11.0),
+                v(19.0, 8.0),
+                v(20.0, 3.0),
+            ));
+            stroke(path(&leaf).min(segment(v(3.0, 22.0), v(15.0, 10.0))))
+        }
+        IconKind::Review => {
+            let q = (p - v(12.0, 13.0)).abs() - v(5.0, 7.0);
+            let board = (q.max(Vec2::ZERO).length() + q.max_element().min(0.0) - 2.0).abs();
+            stroke(
+                board
+                    .min(path(&[
+                        v(9.0, 4.0),
+                        v(9.0, 2.0),
+                        v(15.0, 2.0),
+                        v(15.0, 4.0),
+                    ]))
+                    .min(path(&[v(9.0, 13.0), v(11.0, 15.0), v(15.0, 11.0)])),
+            )
+        }
+        IconKind::Chevron => stroke(path(&[v(9.0, 5.0), v(16.0, 12.0), v(9.0, 19.0)])),
+        IconKind::Collapsed => fill(convex(&[v(8.0, 6.0), v(17.0, 12.0), v(8.0, 18.0)])),
+        IconKind::Expanded => fill(convex(&[v(6.0, 8.0), v(18.0, 8.0), v(12.0, 17.0)])),
         IconKind::Mods => stroke(
             path(&[
                 v(12.0, 3.0),

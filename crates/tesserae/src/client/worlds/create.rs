@@ -109,7 +109,6 @@ pub(super) fn on_create_world(l: &mut Launcher, cx: &mut Acting, act: Act) {
             }
         }),
         Act::SelectBiome(at) => edit_biomes(l, |d| d.select(at)),
-        Act::Nudge(knob, by) => edit_biomes(l, |d| nudge(d, knob, by)),
         Act::CycleGround(layer) => edit_biomes(l, |d| cycle(d, layer)),
         Act::ResetBiomes => edit_biomes(l, |d| d.resetting = true),
         Act::ConfirmReset => edit_biomes(l, BiomesDraft::reset),
@@ -225,28 +224,35 @@ pub(super) fn edit_biomes(l: &mut Launcher, change: impl FnOnce(&mut BiomesDraft
     }
 }
 
-pub(super) const POINT_STEP: f32 = 0.05;
-pub(super) const CAVE_STEP: f32 = 0.25;
+/// What a Biome's slider ranges over, and its step.
+pub(super) fn knob_range(knob: Knob) -> std::ops::RangeInclusive<f32> {
+    match knob {
+        Knob::Temperature | Knob::Humidity => 0.0..=1.0,
+        Knob::Caves => 0.0..=tesserae_core::climate::MAX_CAVE_SCALE,
+    }
+}
 
-pub(super) fn nudge(draft: &mut BiomesDraft, knob: Knob, by: i8) {
+pub(super) fn knob_step(knob: Knob) -> f32 {
+    match knob {
+        Knob::Temperature | Knob::Humidity => 0.01,
+        Knob::Caves => 0.1,
+    }
+}
+
+/// Sets the selected Biome's value, on its slider's step.
+pub(super) fn set(draft: &mut BiomesDraft, knob: Knob, value: f32) {
     let Some(choice) = draft.choices.get_mut(draft.selected) else {
         return;
     };
-    let hundredths = |v: f32| (v * 100.0).round() / 100.0;
-    let by = f32::from(by);
+    let step = knob_step(knob);
+    let range = knob_range(knob);
+    let value = ((value / step).round() * step).clamp(*range.start(), *range.end());
+    // Rounded again, so 0.35 is stored as 0.35 and not as 0.35000002.
+    let value = (value * 100.0).round() / 100.0;
     match knob {
-        Knob::Temperature => {
-            choice.temperature = hundredths((choice.temperature + by * POINT_STEP).clamp(0.0, 1.0))
-        }
-        Knob::Humidity => {
-            choice.humidity = hundredths((choice.humidity + by * POINT_STEP).clamp(0.0, 1.0))
-        }
-        Knob::Caves => {
-            let scale = choice.cave_scale.unwrap_or(1.0) + by * CAVE_STEP;
-            choice.cave_scale = Some(hundredths(
-                scale.clamp(0.0, tesserae_core::climate::MAX_CAVE_SCALE),
-            ));
-        }
+        Knob::Temperature => choice.temperature = value,
+        Knob::Humidity => choice.humidity = value,
+        Knob::Caves => choice.cave_scale = Some(value),
     }
 }
 
@@ -308,8 +314,16 @@ impl Form {
     }
 }
 
+/// Why a World name was refused; the limit lives here rather than in the hint.
+pub(super) fn too_long() -> String {
+    format!(
+        "Use a World name of {} characters or fewer.",
+        library::MAX_NAME_CHARS
+    )
+}
+
 pub(super) fn validate(form: &Form) -> Result<(String, u64), String> {
-    let name = library::valid_name(&form.name).map_err(|e| e.to_string())?;
+    let name = library::valid_name(&form.name).map_err(|_| too_long())?;
     Ok((name, form.seed()?))
 }
 

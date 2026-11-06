@@ -277,7 +277,7 @@ fn colour(text: &str) -> Option<[u8; 3]> {
     Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
-/// A Biome's value the player steps up or down.
+/// A Biome's value the player sets on a slider.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Knob {
     Temperature,
@@ -345,6 +345,8 @@ struct Launcher {
     /// The Mods step's search and category tab; `None` shows every category.
     mod_search: String,
     mod_tab: Option<String>,
+    /// Disclosure rows the player has flipped from how they start.
+    flipped: std::collections::BTreeSet<Disclosure>,
     problem: Option<String>,
     /// Installed Mods that would clash with the chosen set, by id, and why.
     clashes: std::collections::BTreeMap<String, crate::launch::Clash>,
@@ -353,7 +355,25 @@ struct Launcher {
     opening_frames: u32,
 }
 
+/// A row that shows or hides the settings under it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) enum Disclosure {
+    Ground,
+    ClimateScale,
+    BiomeParameters,
+}
+
+impl Disclosure {
+    fn starts_open(self) -> bool {
+        self == Disclosure::ClimateScale
+    }
+}
+
 impl Launcher {
+    fn open(&self, row: Disclosure) -> bool {
+        row.starts_open() != self.flipped.contains(&row)
+    }
+
     fn entry(&self, path: &Path) -> Option<&Entry> {
         self.entries.iter().find(|e| e.path == path)
     }
@@ -428,7 +448,6 @@ pub(super) enum Act {
     OwnMode(GameMode),
     ToggleBiome(usize),
     SelectBiome(usize),
-    Nudge(Knob, i8),
     CycleGround(Layer),
     ResetBiomes,
     ConfirmReset,
@@ -441,6 +460,7 @@ pub(super) enum Act {
     ConfirmDelete,
     Trust,
     Dismiss,
+    Disclose(Disclosure),
     ModTab(Option<String>),
 }
 
@@ -622,6 +642,7 @@ fn logic(app: &mut App) {
         .init_resource::<Returning>()
         .init_resource::<InputFocus>()
         .add_observer(activate)
+        .add_observer(slide)
         .add_observer(open_settings)
         .add_systems(PreUpdate, close_request.run_if(in_list))
         .add_systems(
@@ -640,6 +661,7 @@ fn logic(app: &mut App) {
                     paint_picks,
                     shape_trees,
                     paint_scenery,
+                    follow_knobs,
                 ),
             )
                 .chain()
@@ -715,6 +737,7 @@ fn start(
         search: String::new(),
         mod_search: String::new(),
         mod_tab: None,
+        flipped: Default::default(),
         problem: None,
         clashes: Default::default(),
         version: 0,
@@ -982,7 +1005,6 @@ fn handle(
             | Act::Step(..)
             | Act::ToggleBiome(..)
             | Act::SelectBiome(..)
-            | Act::Nudge(..)
             | Act::CycleGround(..)
             | Act::ResetBiomes
             | Act::ConfirmReset
@@ -999,6 +1021,7 @@ fn handle(
             | Act::Quit
             | Act::Back
             | Act::Dismiss
+            | Act::Disclose(..)
             | Act::ModTab(..) => navigate(l, &mut cx, act),
         }
     }
@@ -1030,8 +1053,21 @@ fn navigate(l: &mut Launcher, cx: &mut Acting, act: Act) {
             cx.relaunch.0 = None;
             cx.exit.write(AppExit::Success);
         }
+        Act::Disclose(row) => {
+            if !l.flipped.remove(&row) {
+                l.flipped.insert(row);
+            }
+            l.version += 1;
+        }
         Act::ModTab(tab) => {
             l.mod_tab = tab;
+            l.version += 1;
+        }
+        // Escape answers the reset dialog rather than leaving the step under it.
+        Act::Back if l.form.biomes.as_ref().is_some_and(|d| d.resetting) => {
+            if let Some(draft) = l.form.biomes.as_mut() {
+                draft.resetting = false;
+            }
             l.version += 1;
         }
         Act::Back => match l.screen.clone() {
@@ -1234,6 +1270,117 @@ fn shape_trees(
             )
             .in_color_space(InterpolationColorSpace::Srgba),
         ));
+    }
+}
+
+/// A Biome slider moved: the draft changes in place, without a rebuild that
+/// would end the drag.
+fn slide(
+    event: On<bevy::ui_widgets::ValueChange<f32>>,
+    sliders: Query<&pages::KnobSlider>,
+    mut commands: Commands,
+    launcher: Option<ResMut<Launcher>>,
+) {
+    let (Ok(knob), Some(mut launcher)) = (sliders.get(event.source), launcher) else {
+        return;
+    };
+    let launcher = launcher.bypass_change_detection();
+    if launcher.screen != Screen::Create(Step::Biomes) {
+        return;
+    }
+    let Some(draft) = launcher.form.biomes.as_mut() else {
+        return;
+    };
+    set(draft, knob.0, event.value);
+    let Some(choice) = draft.choices.get(draft.selected) else {
+        return;
+    };
+    let value = match knob.0 {
+        Knob::Temperature => choice.temperature,
+        Knob::Humidity => choice.humidity,
+        Knob::Caves => choice.cave_scale.unwrap_or(1.0),
+    };
+    commands
+        .entity(event.source)
+        .insert(bevy::ui_widgets::SliderValue(value));
+}
+
+/// Keeps each Biome slider's thumb, fill and reading, and the selected
+/// Biome's dot, on the draft's values.
+type Knobs = (
+    Entity,
+    &'static pages::KnobSlider,
+    &'static bevy::ui_widgets::SliderValue,
+    &'static mut Outline,
+);
+type KnobParts = (
+    &'static pages::KnobPart,
+    Option<&'static mut Node>,
+    Option<&'static mut Text>,
+);
+
+fn follow_knobs(
+    mut sliders: Query<Knobs, Without<pages::CurrentDot>>,
+    mut parts: Query<KnobParts, Without<pages::CurrentDot>>,
+    mut dots: Query<&mut Node, With<pages::CurrentDot>>,
+    launcher: Option<Res<Launcher>>,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = ui::visible_focus(Some(&focus), visible.as_deref());
+    for (entity, _, _, mut outline) in &mut sliders {
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+    for (part, node, text) in &mut parts {
+        let (pages::KnobPart::Thumb(slider)
+        | pages::KnobPart::Fill(slider)
+        | pages::KnobPart::Reading(slider)) = *part;
+        let Ok((_, knob, value, _)) = sliders.get(slider) else {
+            continue;
+        };
+        let range = knob_range(knob.0);
+        let percent =
+            Val::Percent((value.0 - range.start()) / (range.end() - range.start()) * 100.0);
+        match (part, node, text) {
+            (pages::KnobPart::Thumb(_), Some(mut node), _) => {
+                if node.left != percent {
+                    node.left = percent;
+                }
+            }
+            (pages::KnobPart::Fill(_), Some(mut node), _) => {
+                if node.width != percent {
+                    node.width = percent;
+                }
+            }
+            (pages::KnobPart::Reading(_), _, Some(mut text)) => {
+                text.set_if_neq(Text::new(pages::reading(knob.0, value.0)));
+            }
+            _ => {}
+        }
+    }
+    let Some(choice) = launcher
+        .as_ref()
+        .and_then(|l| l.form.biomes.as_ref())
+        .and_then(|d| d.choices.get(d.selected))
+    else {
+        return;
+    };
+    let (left, bottom) = (
+        Val::Percent(choice.temperature * 100.0),
+        Val::Percent(choice.humidity * 100.0),
+    );
+    for mut node in &mut dots {
+        if node.left != left || node.bottom != bottom {
+            node.left = left;
+            node.bottom = bottom;
+        }
     }
 }
 
