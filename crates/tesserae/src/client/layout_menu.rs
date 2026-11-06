@@ -975,7 +975,7 @@ fn update_info(
         Res<WorldSettings>,
     ),
     time: Res<Time>,
-    mut text: Query<(&Info, &mut Text), (Without<StepLetter>, Without<StepCaption>)>,
+    mut text: Query<(&Info, &mut Text), Without<StepLetter>>,
     (mut dots, mut letters, mut captions): Steps,
 ) {
     let said = super::layout::summary(
