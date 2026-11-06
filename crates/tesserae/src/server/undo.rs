@@ -30,8 +30,6 @@ pub enum HistoryAction {
     Undo,
     Redo,
 }
-#[derive(Message, Clone, Copy, Debug)]
-pub struct HistoryApplied(pub HistoryAction);
 
 #[derive(Clone)]
 pub(super) struct Entry {
@@ -132,7 +130,7 @@ pub(super) fn apply(
     (tables, items, world): (Res<ContentTables>, Res<Items>, Res<WorldSettings>),
     mut history: ResMut<EditHistory>,
     mut players: Query<(&Player, &mut Inventory)>,
-    (mut rejected, mut applied): (MessageWriter<EditRejected>, MessageWriter<HistoryApplied>),
+    mut rejected: MessageWriter<EditRejected>,
 ) {
     let Ok((player, inventory)) = players.single_mut() else {
         return;
@@ -194,7 +192,6 @@ pub(super) fn apply(
             for event in events {
                 history.record(event);
             }
-            applied.write(HistoryApplied(action));
         }
         Err(reason) => {
             rejected.write(EditRejected { reason });

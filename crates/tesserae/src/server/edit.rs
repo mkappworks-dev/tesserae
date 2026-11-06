@@ -357,7 +357,6 @@ impl PendingEdits {
 pub(super) fn plugin(app: &mut App) {
     app.init_session_resource::<super::undo::Journal>()
         .add_player_intent::<super::undo::HistoryAction>()
-        .add_session_message::<super::undo::HistoryApplied>()
         .init_session_resource::<AimState>()
         .init_session_resource::<super::tool::Tools>()
         .init_session_resource::<layout::LayoutAimState>()

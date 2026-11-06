@@ -99,7 +99,6 @@ pub(super) const SLOT_HOVER: Color = Color::srgb_u8(32, 34, 37);
 pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
 pub(super) const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
 pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
-pub(super) const SLOT_ACTIVE_FILL: Color = Color::srgb_u8(38, 42, 37);
 pub(super) const SLOT_ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
 pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x55);
 
