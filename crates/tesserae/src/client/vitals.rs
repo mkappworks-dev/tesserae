@@ -16,8 +16,6 @@ const TILE_PX: f32 = 16.0;
 const TILE_GAP_PX: f32 = 3.0;
 const ROW_GAP_PX: f32 = 5.0;
 const ROWS_PADDING_PX: f32 = 6.0;
-/// The air row and the health row; the air row's height is always held.
-pub(super) const ROWS_PX: f32 = 2.0 * TILE_PX + ROW_GAP_PX;
 /// At or below this share of full health the screen's edge reddens.
 const LOW_HEALTH: f32 = 0.3;
 const FLASH_S: f32 = 0.4;

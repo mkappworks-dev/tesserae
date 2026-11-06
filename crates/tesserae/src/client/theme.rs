@@ -238,3 +238,11 @@ pub(super) const VITAL_EMPTY: Color = Color::srgb_u8(0x1a, 0x1b, 0x1e);
 pub(super) const VITAL_BEVEL: [Color; 2] = [Color::srgba_u8(255, 255, 255, 0x2e), Color::srgba_u8(0, 0, 0, 0x59)];
 pub(super) const LOW_HEALTH_VIGNETTE: Color = Color::srgba_u8(0x5a, 0x0d, 0x0d, 0x8c);
 pub(super) const HIT_FLASH: Color = Color::srgba_u8(0x8a, 0x1d, 0x1d, 0x40);
+pub(super) const HUD_QUIET_INK: Color = Color::srgb_u8(0xc9, 0xcc, 0xd1);
+/// The 1 px light ring inside a pickup feed row, a shade quieter than [`RING`].
+pub(super) const HUD_ROW_RING: Color = Color::srgba_u8(0xff, 0xff, 0xff, 0x1a);
+/// The Inventory-full notice under the held Item's name.
+pub(super) const FULL_NOTICE: Color = Color::srgba_u8(11, 11, 13, 0xcc);
+pub(super) const FULL_NOTICE_EDGE: Color = Color::srgba_u8(0xd6, 0xc8, 0x8f, 0x80);
+pub(super) const FULL_NOTICE_INK: Color = Color::srgb_u8(0xea, 0xdf, 0xb4);
+pub(super) const NOTICE_CARD_INK: Color = Color::srgb_u8(0xf1, 0xf0, 0xed);

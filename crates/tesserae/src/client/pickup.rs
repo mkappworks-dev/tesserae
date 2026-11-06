@@ -1,22 +1,26 @@
 //! What Pickup did, as the Server tells it: the feed at the bottom right and
-//! the Inventory-full notice above the hotbar. Drawn from Server messages only
-//! (`docs/adr/0002-client-server-from-day-one.md`).
+//! the Inventory-full notice under the held Item's name. Drawn from Server
+//! messages only (`docs/adr/0002-client-server-from-day-one.md`).
 
 use bevy::prelude::*;
 use tesserae_core::inventory::Inventory;
 
 use super::drops::Looks;
+use super::edit::Catalogue;
+use super::inventory_window::{Names, item_icon};
 use super::menu::Menu;
-use super::menu_ui::font;
+use super::menu_ui::declared_title;
 use super::settings::Settings;
+use super::theme;
 use crate::server::entities::Pickup;
 use crate::server::inventory::InventoryChanged;
 use crate::session::SessionApp;
 
 const FEED_S: f32 = 3.0;
-const FEED_FADE_S: f32 = 0.4;
+const FEED_IN_S: f32 = 0.18;
+const FEED_IN_PX: f32 = 16.0;
 const FEED_ROWS: usize = 5;
-const ROW_ALPHA: f32 = 0xc7 as f32 / 255.0;
+const ICON_PX: f32 = 22.0;
 
 #[derive(Clone, PartialEq, Debug)]
 struct FeedRow {
@@ -41,6 +45,10 @@ struct FeedRoot;
 struct FeedRowNode(usize);
 #[derive(Component)]
 struct NoticeNode;
+/// Where the hotbar holds the Inventory-full notice, between the held Item's
+/// name and the Vitals.
+#[derive(Component)]
+pub(super) struct FullNoticeAnchor;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_session_state::<Feed>()
@@ -54,8 +62,8 @@ pub(super) fn plugin(app: &mut App) {
                 receive_pickups,
                 age_feed,
                 show_feed,
-                fade_feed,
-                show_notice,
+                slide_feed,
+                show_notice.after(super::hotbar::rebuild),
             )
                 .chain(),
         );
@@ -83,12 +91,14 @@ fn receive_inventory(mut changes: MessageReader<InventoryChanged>, mut notice: R
     }
 }
 
-fn label<'a>(looks: &'a Looks, item: &'a str) -> &'a str {
-    looks
-        .0
-        .iter()
-        .find(|look| look.name == item)
-        .map_or(item, |look| look.label())
+fn label(looks: &Looks, item: &str) -> String {
+    declared_title(
+        looks
+            .0
+            .iter()
+            .find(|look| look.name == item)
+            .map_or(item, |look| look.label()),
+    )
 }
 
 fn receive_pickups(
@@ -131,37 +141,26 @@ fn age_feed(time: Res<Time>, mut feed: ResMut<Feed>) {
     feed.0.retain(|r| r.age_s < FEED_S);
 }
 
-fn in_play(menu: &Menu, settings: Option<&Settings>) -> bool {
-    !menu.open && !settings.is_some_and(|s| s.open)
-}
-
-/// The Item's declared colour.
-fn swatch(looks: &Looks, item: &str) -> Color {
-    looks
-        .0
-        .iter()
-        .find(|look| look.name == item)
-        .map_or(Color::WHITE, |look| {
-            let [r, g, b, a] = look.color;
-            Color::srgba_u8(r, g, b, a)
-        })
+/// The death screen hides the feed and the notice, as the Menu does.
+fn in_play(menu: &Menu, settings: Option<&Settings>, dead: Option<Res<super::death::Dead>>) -> bool {
+    !menu.open && !settings.is_some_and(|s| s.open) && super::death::alive(dead)
 }
 
 fn show_feed(
     mut commands: Commands,
     feed: Res<Feed>,
-    looks: Res<Looks>,
-    (menu, settings): (Res<Menu>, Option<Res<Settings>>),
+    (looks, catalogue): (Res<Looks>, Res<Catalogue>),
+    (menu, settings, dead): (Res<Menu>, Option<Res<Settings>>, Option<Res<super::death::Dead>>),
     roots: Query<Entity, With<FeedRoot>>,
     mut shown: Local<Option<Vec<(String, u32)>>>,
 ) {
-    let wanted = in_play(&menu, settings.as_deref()).then(|| {
+    let wanted = in_play(&menu, settings.as_deref(), dead).then(|| {
         feed.0
             .iter()
             .map(|r| (r.item.clone(), r.count))
             .collect::<Vec<_>>()
     });
-    if *shown == wanted {
+    if *shown == wanted && !catalogue.is_changed() {
         return;
     }
     for root in &roots {
@@ -172,6 +171,10 @@ fn show_feed(
         return;
     };
     *shown = wanted;
+    let names = Names {
+        looks: &looks,
+        catalogue: &catalogue,
+    };
     commands
         .spawn((
             FeedRoot,
@@ -199,122 +202,108 @@ fn show_feed(
                             top: Val::Px(4.0),
                             bottom: Val::Px(4.0),
                         },
-                        border: UiRect::all(Val::Px(2.0)),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
+                        border: UiRect::all(Val::Px(theme::FRAME)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
                         ..default()
                     },
-                    BackgroundColor(Color::srgb_u8(6, 7, 8).with_alpha(ROW_ALPHA)),
-                    BorderColor::all(Color::BLACK),
+                    BackgroundColor(theme::HUD_BAR),
+                    BorderColor::all(theme::GROUT),
+                    UiTransform::default(),
+                    Pickable::IGNORE,
                 ))
                 .with_children(|row| {
-                    row.spawn((
-                        Node {
-                            width: Val::Px(22.0),
-                            height: Val::Px(22.0),
-                            border_radius: BorderRadius::all(Val::Px(3.0)),
-                            ..default()
-                        },
-                        BackgroundColor(swatch(&looks, item)),
-                    ));
+                    row.spawn(theme::ring(theme::RADIUS_MENU))
+                        .insert(BorderColor::all(theme::HUD_ROW_RING));
+                    item_icon(row, names.icon(item), ICON_PX, false);
                     row.spawn((
                         Text::new(format!("+{count}")),
-                        TextFont {
-                            weight: bevy::text::FontWeight(700),
-                            ..font(13.0)
-                        },
-                        TextColor(Color::srgb_u8(0xf6, 0xf7, 0xf1)),
+                        theme::weighted(theme::TEXT_CAPTION, theme::BOLD),
+                        TextColor(theme::HUD_INK),
+                        Pickable::IGNORE,
                     ));
                     row.spawn((
                         Text::new(label(&looks, item)),
-                        font(13.0),
-                        TextColor(Color::srgb_u8(0xc9, 0xcc, 0xd1)),
+                        theme::font(theme::TEXT_CAPTION),
+                        TextColor(theme::HUD_QUIET_INK),
+                        Pickable::IGNORE,
                     ));
                 });
-            }
+        }
         });
 }
 
-fn fade_feed(
+/// A new row slides in from the right; it leaves at once, as it came.
+fn slide_feed(
     feed: Res<Feed>,
-    mut rows: Query<(&FeedRowNode, &mut BackgroundColor, &Children)>,
-    mut paint: Query<(Option<&mut BackgroundColor>, Option<&mut TextColor>), Without<FeedRowNode>>,
+    preferences: Option<Res<super::profile::Preferences>>,
+    mut rows: Query<(&FeedRowNode, &mut UiTransform)>,
 ) {
-    for (row, mut background, children) in &mut rows {
+    let still = preferences.is_some_and(|p| p.reduced_motion);
+    for (row, mut transform) in &mut rows {
         let Some(shown) = feed.0.get(row.0) else {
             continue;
         };
-        let alpha = ((FEED_S - shown.age_s) / FEED_FADE_S).clamp(0.0, 1.0);
-        background.0.set_alpha(ROW_ALPHA * alpha);
-        for child in children.iter() {
-            let Ok((background, text)) = paint.get_mut(child) else {
-                continue;
-            };
-            if let Some(mut c) = background {
-                c.0.set_alpha(alpha);
-            }
-            if let Some(mut c) = text {
-                c.0.set_alpha(alpha);
-            }
-        }
+        let x = if still {
+            0.0
+        } else {
+            let t = (shown.age_s / FEED_IN_S).clamp(0.0, 1.0);
+            FEED_IN_PX * (1.0 - t).powi(2)
+        };
+        transform.set_if_neq(UiTransform::from_translation(Val2::px(x, 0.0)));
     }
 }
 
 fn show_notice(
     mut commands: Commands,
     notice: Res<FullNotice>,
-    (menu, settings): (Res<Menu>, Option<Res<Settings>>),
-    mode: Option<Res<super::game_mode::Mode>>,
-    nodes: Query<Entity, With<NoticeNode>>,
-    mut shown: Local<Option<(String, bool)>>,
+    mut anchors: Query<(Entity, &mut Node, Option<&Children>), With<FullNoticeAnchor>>,
+    nodes: Query<&Children, With<NoticeNode>>,
+    texts: Query<&Text>,
 ) {
-    let survival = mode.is_some_and(|m| m.survival());
-    let wanted = notice
-        .text
-        .clone()
-        .filter(|_| in_play(&menu, settings.as_deref()))
-        .map(|text| (text, survival));
-    if *shown == wanted {
-        return;
-    }
-    for node in &nodes {
-        commands.entity(node).despawn();
-    }
-    *shown = wanted.clone();
-    let Some((text, survival)) = wanted else {
-        return;
-    };
-    commands
-        .spawn((
+    for (anchor, mut node, children) in &mut anchors {
+        let display = if notice.text.is_some() {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        let now = children
+            .and_then(|c| c.iter().find_map(|c| nodes.get(c).ok()))
+            .and_then(|c| c.iter().find_map(|c| texts.get(c).ok()))
+            .map(|text| text.0.clone());
+        if now == notice.text {
+            continue;
+        }
+        commands.entity(anchor).despawn_related::<Children>();
+        let Some(text) = notice.text.clone() else {
+            continue;
+        };
+        commands.entity(anchor).with_child((
             NoticeNode,
-            Pickable::IGNORE,
             Node {
-                position_type: PositionType::Absolute,
-                bottom: Val::Px(super::hotbar::top_px(survival) + 4.0),
-                width: Val::Percent(100.0),
-                justify_content: JustifyContent::Center,
+                padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                 ..default()
             },
-        ))
-        .with_children(|root| {
-            root.spawn((
-                Node {
-                    padding: UiRect::axes(Val::Px(10.0), Val::Px(5.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(4.0)),
-                    ..default()
-                },
-                BackgroundColor(Color::srgba_u8(11, 11, 13, 0xcc)),
-                BorderColor::all(Color::srgba_u8(0xd6, 0xc8, 0x8f, 0x80)),
-            ))
-            .with_child((
+            BackgroundColor(theme::FULL_NOTICE),
+            BorderColor::all(theme::FULL_NOTICE_EDGE),
+            Pickable::IGNORE,
+            children![(
                 Text::new(text),
-                TextFont {
-                    weight: bevy::text::FontWeight(600),
-                    ..font(12.0)
+                theme::weighted(theme::TEXT_EYEBROW, theme::SEMIBOLD),
+                TextColor(theme::FULL_NOTICE_INK),
+                // `text-shadow: 0 1px 2px`, without the blur Bevy lacks.
+                TextShadow {
+                    offset: Vec2::new(0.0, 1.0),
+                    color: theme::GROUT,
                 },
-                TextColor(Color::srgb_u8(0xea, 0xdf, 0xb4)),
-            ));
-        });
+                Pickable::IGNORE,
+            )],
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -341,6 +330,7 @@ mod tests {
                 max_stack: 64,
             }]))
             .init_resource::<Menu>()
+            .init_resource::<Catalogue>()
             .init_resource::<Feed>()
             .init_resource::<FullNotice>()
             .add_message::<Pickup>()
@@ -352,11 +342,12 @@ mod tests {
                     receive_pickups,
                     age_feed,
                     show_feed,
-                    fade_feed,
+                    slide_feed,
                     show_notice,
                 )
                     .chain(),
             );
+        app.world_mut().spawn((FullNoticeAnchor, Node::default()));
         app.update();
         app
     }
@@ -393,26 +384,25 @@ mod tests {
 
     fn notice(app: &mut App) -> Option<String> {
         let world = app.world_mut();
-        let node = world
+        let card = world
             .query_filtered::<&Children, With<NoticeNode>>()
             .single(world)
             .ok()?;
-        let card = node.iter().next()?;
-        texts(world, world.get::<Children>(card)?).pop()
+        texts(world, card).pop()
     }
 
     #[test]
-    fn the_feed_puts_the_newest_on_top_merges_one_item_and_fades_after_three_seconds() {
+    fn the_feed_puts_the_newest_on_top_merges_one_item_and_clears_after_three_seconds() {
         let mut app = app();
         picked(&mut app, "t:rock", 2, 0);
         picked(&mut app, "t:dust", 1, 0);
-        assert_eq!(feed(&mut app), ["+1 t:dust", "+2 rock"]);
+        assert_eq!(feed(&mut app), ["+1 Dust", "+2 Rock"]);
         picked(&mut app, "t:rock", 3, 0);
-        assert_eq!(feed(&mut app), ["+5 rock", "+1 t:dust"]);
+        assert_eq!(feed(&mut app), ["+5 Rock", "+1 Dust"]);
         for _ in 0..10 {
             app.update();
         }
-        assert_eq!(feed(&mut app), ["+5 rock"], "dust is 3 s old");
+        assert_eq!(feed(&mut app), ["+5 Rock"], "dust is 3 s old");
         app.update();
         assert!(feed(&mut app).is_empty());
     }
@@ -427,7 +417,7 @@ mod tests {
         picked(&mut app, "t:rock", 0, 6);
         assert_eq!(
             notice(&mut app).as_deref(),
-            Some("Inventory full · 6 rock left on the ground")
+            Some("Inventory full · 6 Rock left on the ground")
         );
         for _ in 0..10 {
             app.update();

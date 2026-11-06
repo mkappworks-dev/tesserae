@@ -1201,7 +1201,7 @@ pub(super) fn notify_for(commands: &mut Commands, message: &str, tone: Tone, sec
             ))
             .with_children(|card| {
                 card.spawn(theme::ring(theme::RADIUS_MENU));
-                paragraph(card, message, theme::TEXT_CAPTION, theme::INK);
+                paragraph(card, message, theme::TEXT_CAPTION, theme::NOTICE_CARD_INK);
             });
         });
 }
@@ -1210,12 +1210,21 @@ fn age_notifications(
     time: Option<Res<Time>>,
     mut notifications: Query<(Entity, &mut Notification, &mut Node)>,
     preferences: Option<Res<super::profile::Preferences>>,
+    dead: Option<Res<super::death::Dead>>,
 ) {
     let Some(time) = time else {
         return;
     };
     let still = preferences.is_some_and(|p| p.reduced_motion);
+    let display = if super::death::alive(dead) {
+        Display::Flex
+    } else {
+        Display::None
+    };
     for (entity, mut notice, mut node) in &mut notifications {
+        if node.display != display {
+            node.display = display;
+        }
         if notice.0.tick(time.delta()).is_finished() {
             commands.entity(entity).despawn();
         } else if still {

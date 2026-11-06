@@ -26,18 +26,6 @@ const LIFT_PX: f32 = 4.0;
 const BAR_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32
     + GAP_PX * (HOTBAR_SLOTS - 1) as f32
     + 2.0 * (PADDING_PX + FRAME_PX);
-const TOP_PX: f32 =
-    BOTTOM_PX + SLOT_PX + 2.0 * (PADDING_PX + FRAME_PX) + LIFT_PX + GAP_PX * 2.0 + NAME_PX;
-
-/// Where the hotbar, the Vitals over it in Survival and the name above them
-/// end, for what sits over them.
-pub(super) fn top_px(survival: bool) -> f32 {
-    if survival {
-        TOP_PX + super::vitals::ROWS_PX + GAP_PX * 2.0
-    } else {
-        TOP_PX
-    }
-}
 
 #[derive(Component)]
 pub(super) struct HotbarRoot;
@@ -63,10 +51,13 @@ pub(super) fn rebuild(
     (hotbar, catalogue, looks): (Res<Hotbar>, Res<Catalogue>, Res<Looks>),
     menu: Option<Res<super::menu::Menu>>,
     settings: Option<Res<super::settings::Settings>>,
+    dead: Option<Res<super::death::Dead>>,
     roots: Query<Entity, With<HotbarRoot>>,
     mut shown: Local<Option<Hotbar>>,
 ) {
-    let hidden = menu.is_some_and(|m| m.open) || settings.is_some_and(|s| s.open);
+    let hidden = menu.is_some_and(|m| m.open)
+        || settings.is_some_and(|s| s.open)
+        || !super::death::alive(dead);
     let wanted = (!hidden).then(|| hotbar.clone());
     if *shown == wanted && !catalogue.is_changed() && !looks.is_changed() {
         return;
@@ -108,6 +99,14 @@ pub(super) fn rebuild(
                 },
                 Node {
                     min_height: Val::Px(NAME_PX),
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ));
+            root.spawn((
+                super::pickup::FullNoticeAnchor,
+                Node {
+                    display: Display::None,
                     ..default()
                 },
                 Pickable::IGNORE,

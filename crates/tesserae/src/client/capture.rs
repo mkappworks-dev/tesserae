@@ -517,7 +517,7 @@ fn hud_fixture(
         }
     }
     if let Some(text) = notice {
-        super::menu_ui::notify_for(&mut commands, &text, super::menu_ui::Tone::Alert, 10.0);
+        super::menu_ui::notify_for(&mut commands, &text, super::menu_ui::Tone::Change, 10.0);
     }
 }
 
