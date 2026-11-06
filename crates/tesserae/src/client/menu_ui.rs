@@ -364,6 +364,12 @@ fn style(
 #[derive(Component)]
 pub(super) struct SettingsBody;
 
+type ShellContext<'w> = (
+    Option<Res<'w, State<crate::session::AppState>>>,
+    Option<Res<'w, Mosaic>>,
+    Option<Res<'w, super::menu::Facts>>,
+);
+
 /// The Settings frame: the category rail beside a sheet whose body the page
 /// fills, between the launcher's header and footer. It is rebuilt only when
 /// the category or a dialog changes, so the focused search field survives a
@@ -377,11 +383,7 @@ fn shell(
     roots: Query<Entity, With<Shell>>,
     mut previous: Local<Option<Option<(Tab, bool, bool)>>>,
     mut focus: ResMut<InputFocus>,
-    (playing, logo, facts): (
-        Option<Res<State<crate::session::AppState>>>,
-        Option<Res<Mosaic>>,
-        Option<Res<super::menu::Facts>>,
-    ),
+    (playing, logo, facts): ShellContext,
 ) {
     use super::cinematic as cine;
     use super::worlds::pages;
@@ -609,10 +611,12 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
 #[require(bevy::picking::hover::Hovered, Outline = theme::focus_ring())]
 pub(super) struct Bare;
 
+type Quietly = Or<(With<RailEntry>, With<Bare>)>;
+
 /// The rail keeps the prototype's look: no hover fill, and the focus ring
 /// only when focus is being shown.
 fn rail_focus(
-    mut entries: Query<(Entity, &mut Outline), Or<(With<RailEntry>, With<Bare>)>>,
+    mut entries: Query<(Entity, &mut Outline), Quietly>,
     focus: Res<InputFocus>,
     visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {

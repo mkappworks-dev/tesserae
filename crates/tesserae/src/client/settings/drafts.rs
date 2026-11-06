@@ -270,17 +270,19 @@ pub(super) fn activate(
         }
     }
 }
+type CaptureContext<'w, 's> = (
+    Option<Res<'w, crate::client::input::UiInput>>,
+    Option<Res<'w, bevy::input_focus::InputFocus>>,
+    Query<'w, 's, &'static bevy::picking::hover::Hovered, With<CaptureButton>>,
+);
+
 pub(in crate::client) fn capture(
     (keys, mouse, pad): crate::client::actions::Devices,
     mut settings: ResMut<Settings>,
     active: (Res<Bindings>, Res<Preferences>),
     mut actions: ResMut<crate::client::actions::Actions>,
     save: Option<Res<crate::server::persistence::SaveStatus>>,
-    (ui, focus, dialog_buttons): (
-        Option<Res<crate::client::input::UiInput>>,
-        Option<Res<bevy::input_focus::InputFocus>>,
-        Query<&bevy::picking::hover::Hovered, With<CaptureButton>>,
-    ),
+    (ui, focus, dialog_buttons): CaptureContext,
 ) {
     if save.is_some_and(|status| status.modal()) {
         if settings.capture.take().is_some() {
