@@ -160,3 +160,13 @@ screen with the prototype.
   refusals still show.
 - Menus and the launcher keep the key-hint footer; play has none, and the
   hotbar sits near the bottom edge.
+- Delete World and Discard setup are dialogs over the dimmed page, buttons on
+  the right, as the prototype shows; the Game, last-played and Trash lines stay
+  inside the Delete dialog.
+- Resetting the Biome defaults asks in a modal dialog.
+- Every in-play refusal is a sentence that names what is missing ("Nothing to
+  place in hotbar slot 1."), in the notice card with the amber edge.
+- The Quick layout panel has the prototype's header band, and no pill repeats
+  the method switch.
+- The Create World rail marks a step done only once it is valid, as the engine
+  does; the prototype is updated to match.
