@@ -142,7 +142,7 @@ pub(super) const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
 pub(super) const SLOT_RIM: Color = Color::srgb_u8(58, 60, 65);
 pub(super) const SLOT_RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
 pub(super) const SLOT_ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
-pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x55);
+pub(super) const SLOT_GLOW: Color = Color::srgba_u8(230, 238, 214, 0x40);
 
 /// The title screen's headline: 5.5 % of the window's width within these
 /// bounds, and larger again on a wide window.
@@ -394,7 +394,8 @@ pub(super) const ITEM_HEADER_HEIGHT: f32 = 70.0;
 pub(super) const ITEM_GAP: f32 = 14.0;
 pub(super) const CLOSE_SIZE: f32 = 40.0;
 pub(super) const ICON_SIZE: f32 = 20.0;
-pub(super) const SLOT_GLOW_BLUR: f32 = 14.0;
+/// About one slot gap, so a selected slot's glow never reaches its neighbour.
+pub(super) const SLOT_GLOW_BLUR: f32 = 5.0;
 /// A plain `button`'s hover brightness.
 pub(super) const HOVER_LIFT: f32 = 1.15;
 pub(super) const STEP_HEIGHT: f32 = 39.0;

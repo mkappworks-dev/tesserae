@@ -259,7 +259,7 @@ fn slot(
             },
             ShadowStyle {
                 color: theme::SLOT_GLOW,
-                blur_radius: Val::Px(14.0),
+                blur_radius: Val::Px(theme::SLOT_GLOW_BLUR),
                 ..default()
             },
         ]));
