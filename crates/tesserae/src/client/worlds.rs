@@ -566,6 +566,9 @@ fn review_capture(
                 "open" => Act::Play(first.clone()),
                 "create" => Act::Create,
                 "next" => Act::Next,
+                "back" => Act::Back,
+                "randomize" => Act::Randomize,
+                "reset" => Act::ResetBiomes,
                 other => panic!("unknown TESSERAE_LIST_SCRIPT step `{other}`"),
             });
         }
