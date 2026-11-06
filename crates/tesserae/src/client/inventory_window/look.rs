@@ -34,6 +34,23 @@ pub(in crate::client) fn label(
     )
 }
 
+/// A run of text set to a line height of its own.
+pub(in crate::client) fn paragraph(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Color,
+    line_height: f32,
+) -> impl Bundle {
+    (
+        Text::new(value),
+        theme::weighted(size, weight),
+        bevy::text::LineHeight::RelativeToFont(line_height),
+        TextColor(color),
+        Pickable::IGNORE,
+    )
+}
+
 /// A `.btn` at one of the sizes these screens give it.
 #[derive(Clone, Copy)]
 pub(in crate::client) struct Size {

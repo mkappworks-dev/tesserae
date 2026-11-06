@@ -777,7 +777,7 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 ..default()
             })
             .with_child((
-                look::label(
+                look::paragraph(
                     if state.picked.is_some() {
                         "Stack selected. Choose a destination, or select the source again to cancel."
                     } else {
@@ -786,8 +786,8 @@ fn backpack(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     theme::TEXT_EYEBROW,
                     theme::REGULAR,
                     theme::ITEM_SOFT,
+                    theme::LINE_HEIGHT,
                 ),
-                bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
             ));
     });
 }
@@ -1013,7 +1013,7 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                 BorderColor::all(theme::ITEM_ROW_RULE),
             ))
             .with_child((
-                look::label(
+                look::paragraph(
                     if state.picked.is_some() {
                         "Choose another slot to move, merge or swap this stack."
                     } else {
@@ -1022,8 +1022,8 @@ fn details(main: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                     theme::TEXT_EYEBROW,
                     theme::REGULAR,
                     theme::ITEM_NOTE,
+                    NOTE_LINE_HEIGHT,
                 ),
-                bevy::text::LineHeight::RelativeToFont(NOTE_LINE_HEIGHT),
             ));
     });
 }
@@ -1252,7 +1252,7 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
             })
             .with_children(|actions| {
                 actions.spawn((
-                    look::label(
+                    look::paragraph(
                         if state.survival {
                             "Item counts stay intact when switching screens."
                         } else {
@@ -1261,8 +1261,8 @@ fn footer(card: &mut ChildSpawnerCommands, state: &Built, names: &Names) {
                         theme::TEXT_EYEBROW,
                         theme::REGULAR,
                         theme::ITEM_SOFT,
+                        theme::LINE_HEIGHT,
                     ),
-                    bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
                 ));
                 look::button(
                     actions,

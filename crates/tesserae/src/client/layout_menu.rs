@@ -621,13 +621,13 @@ fn points(body: &mut ChildSpawnerCommands) {
         }
     });
     body.spawn((
-        look::label(
+        look::paragraph(
             "Set A, then B for a flat rectangle. C adds depth and completes the layout.",
             theme::TEXT_CAPTION,
             theme::REGULAR,
             theme::LAYOUT_NOTE,
+            NOTE_LINE_HEIGHT,
         ),
-        bevy::text::LineHeight::RelativeToFont(NOTE_LINE_HEIGHT),
     ));
 }
 
@@ -778,8 +778,13 @@ fn info_row(rows: &mut ChildSpawnerCommands, part: Info) {
     })
     .with_child((
         part,
-        look::label("", theme::TEXT_EYEBROW, theme::REGULAR, theme::TOTALS_TERM),
-        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+        look::paragraph(
+            "",
+            theme::TEXT_EYEBROW,
+            theme::REGULAR,
+            theme::TOTALS_TERM,
+            theme::LINE_HEIGHT,
+        ),
     ));
 }
 
@@ -796,13 +801,13 @@ fn cap_note(body: &mut ChildSpawnerCommands, note: &str) {
         BorderColor::all(theme::LAYOUT_ERROR_EDGE),
     ))
     .with_child((
-        look::label(
+        look::paragraph(
             note,
             theme::TEXT_EYEBROW,
             theme::REGULAR,
             theme::LAYOUT_ERROR_INK,
+            theme::LINE_HEIGHT,
         ),
-        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
     ));
 }
 
@@ -891,8 +896,13 @@ fn status(parent: &mut ChildSpawnerCommands, layout: &LayoutPreferences, voxel_s
                 }
                 card.spawn((
                     part,
-                    look::label("", theme::TEXT_EYEBROW, theme::REGULAR, colour),
-                    bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+                    look::paragraph(
+                        "",
+                        theme::TEXT_EYEBROW,
+                        theme::REGULAR,
+                        colour,
+                        theme::LINE_HEIGHT,
+                    ),
                 ));
             }
         });
