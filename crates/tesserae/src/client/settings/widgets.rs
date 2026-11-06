@@ -745,7 +745,7 @@ pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
     parent.spawn(cine::sheet_footer()).with_children(|footer| {
         buttons::button(
             footer,
-            "Back",
+            "← Back",
             Operation::Back,
             ButtonStyle::Cinematic {
                 kind: Kind::Ghost,
@@ -767,20 +767,13 @@ pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
                         "All changes applied"
                     },
                     theme::TEXT_EYEBROW,
-                    if changed {
-                        theme::WARNING
-                    } else {
-                        theme::MUTED
-                    },
+                    theme::MUTED,
                 );
                 buttons::button(
                     actions,
                     "Restore defaults",
                     Operation::Reset,
-                    ButtonStyle::Cinematic {
-                        kind: Kind::Ghost,
-                        align: Align::Centre,
-                    },
+                    ButtonStyle::Small { kind: Kind::Ghost },
                 );
                 let apply = buttons::button(
                     actions,

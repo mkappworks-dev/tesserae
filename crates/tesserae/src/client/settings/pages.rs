@@ -90,7 +90,7 @@ pub(in crate::client) fn render(
     (labels, searches, active): RenderData,
     scrolls: Query<&ScrollPosition, With<SettingsScroll>>,
     (mut positions, mut previous, mut query): (
-        Local<[Vec2; 4]>,
+        Local<[Vec2; crate::client::menu_ui::Tab::ORDER.len()]>,
         Local<Option<crate::client::menu_ui::Tab>>,
         Local<String>,
     ),
@@ -100,19 +100,13 @@ pub(in crate::client) fn render(
     if !pressed.is_empty() || (!settings.dirty && !labels.is_changed()) {
         return;
     }
-    if let Some(tab) = *previous {
-        let index = match tab {
-            Tab::Behavior => 0,
-            Tab::Bindings => 1,
-            Tab::Controller => 3,
-            _ => 2,
-        };
-        if let Some(scroll) = scrolls.iter().next() {
-            positions[index] = scroll.0;
-        }
+    if let Some(tab) = *previous
+        && let Some(scroll) = scrolls.iter().next()
+    {
+        positions[scroll_slot(tab)] = scroll.0;
     }
     if *query != searches.bindings {
-        positions[1] = Vec2::ZERO;
+        positions[scroll_slot(Tab::Bindings)] = Vec2::ZERO;
         *query = searches.bindings.clone();
     }
     *previous = settings.open.then_some(settings.tab);
@@ -140,12 +134,7 @@ pub(in crate::client) fn render(
         return;
     };
     let changed = bindings != &*active.0 || p != &*active.1;
-    let index = match settings.tab {
-        Tab::Behavior => 0,
-        Tab::Bindings => 1,
-        Tab::Controller => 3,
-        _ => 2,
-    };
+    let index = scroll_slot(settings.tab);
     commands
         .spawn((
             Panel,
@@ -170,7 +159,13 @@ pub(in crate::client) fn render(
                     flex_grow: 1.0,
                     flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
-                    padding: UiRect::axes(Val::Px(theme::SHEET_PAD_X), Val::Px(20.0)),
+                    padding: UiRect::new(
+                        Val::Px(theme::SHEET_PAD_X),
+                        Val::Px(theme::SHEET_PAD_X),
+                        // The search field above the body already leaves this gap.
+                        Val::Px(if settings.tab == Tab::Bindings { 0.0 } else { 20.0 }),
+                        Val::Px(20.0),
+                    ),
                     overflow: Overflow::scroll_y(),
                     ..default()
                 },
@@ -189,6 +184,12 @@ pub(in crate::client) fn render(
     if settings.modal() || settings.capturing() {
         modal(&mut commands, &settings);
     }
+}
+
+/// Where each category keeps its scroll position while another shows.
+fn scroll_slot(tab: crate::client::menu_ui::Tab) -> usize {
+    use crate::client::menu_ui::Tab;
+    Tab::ORDER.iter().position(|t| *t == tab).unwrap_or(0)
 }
 
 pub(super) fn page(

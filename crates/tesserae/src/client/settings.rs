@@ -225,7 +225,12 @@ pub(super) struct Opener<'w, 's> {
 
 impl Opener<'_, '_> {
     /// At the category used last.
+    /// Opening Settings again while they show, from the header's button,
+    /// keeps the draft.
     pub(super) fn open(&mut self) {
+        if self.settings.open {
+            return;
+        }
         let last = self.settings.last;
         self.open_at(last);
     }

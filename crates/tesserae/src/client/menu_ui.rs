@@ -1,6 +1,6 @@
 //! Shared menu chrome; page bodies never replace the focused search widget.
 use super::settings::{Operation, Settings};
-use crate::client::buttons::{self, ButtonStyle, Eyebrow};
+use crate::client::buttons::{self, ButtonStyle};
 use crate::session::SessionApp;
 use bevy::{
     input_focus::{FocusCause, InputFocus, InputFocusSystems, tab_navigation::TabIndex},
@@ -38,6 +38,15 @@ impl Tab {
             Self::Controller => "Controller",
             Self::Display => "Display",
             Self::Accessibility => "Accessibility",
+        }
+    }
+    fn icon(self) -> IconKind {
+        match self {
+            Self::Catalogue | Self::Behavior => IconKind::Behavior,
+            Self::Bindings => IconKind::Keyboard,
+            Self::Controller => IconKind::Controller,
+            Self::Display => IconKind::Display,
+            Self::Accessibility => IconKind::Accessibility,
         }
     }
 }
@@ -88,10 +97,6 @@ struct SearchPlaceholder;
 struct SearchSlash;
 #[derive(Component)]
 struct SearchFrame;
-#[derive(Component)]
-struct SearchCount(Tab);
-#[derive(Component)]
-struct HeadingPill(Tab);
 #[derive(Component)]
 #[require(bevy::picking::hover::Hovered, Outline = theme::focus_ring())]
 pub(super) struct Styled {
@@ -149,7 +154,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(clear_search)
         .add_systems(
             Update,
-            (search_presentation, heading_status)
+            (search_presentation, rail_focus)
                 .after(shell)
                 .run_if(in_menus),
         )
@@ -360,8 +365,9 @@ fn style(
 pub(super) struct SettingsBody;
 
 /// The Settings frame: the category rail beside a sheet whose body the page
-/// fills. It is rebuilt only when the category or a dialog changes, so the
-/// focused search field survives a page rebuild.
+/// fills, between the launcher's header and footer. It is rebuilt only when
+/// the category or a dialog changes, so the focused search field survives a
+/// page rebuild.
 #[allow(clippy::too_many_arguments)]
 fn shell(
     mut commands: Commands,
@@ -371,9 +377,14 @@ fn shell(
     roots: Query<Entity, With<Shell>>,
     mut previous: Local<Option<Option<(Tab, bool, bool)>>>,
     mut focus: ResMut<InputFocus>,
-    playing: Option<Res<State<crate::session::AppState>>>,
+    (playing, logo, facts): (
+        Option<Res<State<crate::session::AppState>>>,
+        Option<Res<Mosaic>>,
+        Option<Res<super::menu::Facts>>,
+    ),
 ) {
     use super::cinematic as cine;
+    use super::worlds::pages;
     let modal = settings.capturing() || settings.modal();
     let wanted = settings
         .open
@@ -397,6 +408,11 @@ fn shell(
     // The page lands in the new body this frame.
     settings.dirty = true;
     let over_world = playing.is_some_and(|s| *s.get() == crate::session::AppState::InWorld);
+    let place = if over_world {
+        super::menu::place(facts.as_ref().and_then(|f| f.0.as_ref()))
+    } else {
+        pages::SCENERY_PLACE.to_owned()
+    };
     commands
         .spawn((
             Shell,
@@ -405,77 +421,101 @@ fn shell(
                 modal: true,
                 ..default()
             },
-            BackgroundColor(if over_world && !solid {
-                Color::NONE
-            } else if solid {
+            BackgroundColor(if solid {
                 theme::SOLID_BACKGROUND
+            } else if over_world {
+                Color::NONE
             } else {
                 theme::SCENE
             }),
-            if over_world && !solid {
-                theme::shade()
-            } else {
-                BackgroundGradient::default()
-            },
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                padding: UiRect::axes(Val::Px(theme::SCREEN_PAD_X), Val::Px(28.0)),
-                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
                 ..default()
             },
         ))
         .with_children(|root| {
+            if !solid {
+                if !over_world {
+                    root.spawn((
+                        pages::Backdrop(super::scenery::SOFT),
+                        pages::fill(),
+                        Pickable::IGNORE,
+                    ));
+                }
+                root.spawn((theme::shade(), pages::fill(), Pickable::IGNORE));
+            }
+            pages::header(root, logo.as_deref());
             root.spawn(Node {
                 flex_grow: 1.0,
-                max_width: Val::Px(1180.0),
                 min_height: Val::Px(0.0),
-                column_gap: Val::Px(24.0),
+                padding: UiRect::new(
+                    Val::Px(theme::SCREEN_PAD_X),
+                    Val::Px(theme::SCREEN_PAD_X),
+                    Val::Px(theme::SCREEN_PAD_TOP),
+                    Val::Px(theme::SCREEN_PAD_BOTTOM),
+                ),
+                justify_content: JustifyContent::Center,
                 ..default()
             })
-            .with_children(|workspace| {
-                rail(workspace, tab);
-                workspace
-                    .spawn((
-                        cine::surface(theme::PANEL),
-                        cine::framed(Node {
-                            flex_direction: FlexDirection::Column,
-                            flex_grow: 1.0,
-                            min_width: Val::Px(0.0),
-                            min_height: Val::Px(0.0),
-                            overflow: Overflow::clip(),
-                            ..default()
-                        }),
-                    ))
-                    .with_children(|sheet| {
-                        heading(sheet, tab);
-                        if tab == Tab::Bindings {
-                            sheet
-                                .spawn(Node {
-                                    padding: UiRect::new(
-                                        Val::Px(26.0),
-                                        Val::Px(26.0),
-                                        Val::Px(16.0),
-                                        Val::Px(0.0),
-                                    ),
-                                    flex_shrink: 0.0,
-                                    ..default()
-                                })
-                                .with_children(|row| search_row(row, tab, &searches.bindings));
-                        }
-                        sheet.spawn((
-                            SettingsBody,
-                            Node {
+            .with_children(|main| {
+                main.spawn(Node {
+                    flex_grow: 1.0,
+                    max_width: Val::Px(theme::WORKSPACE_MAX),
+                    min_height: Val::Px(0.0),
+                    column_gap: Val::Px(theme::WORKSPACE_GAP),
+                    ..default()
+                })
+                .with_children(|workspace| {
+                    rail(workspace, tab);
+                    workspace
+                        .spawn((
+                            cine::surface(theme::PANEL),
+                            cine::framed(Node {
                                 flex_direction: FlexDirection::Column,
                                 flex_grow: 1.0,
+                                min_width: Val::Px(0.0),
                                 min_height: Val::Px(0.0),
+                                overflow: Overflow::clip(),
                                 ..default()
-                            },
-                        ));
-                    });
+                            }),
+                        ))
+                        .with_children(|sheet| {
+                            cine::sheet_header(
+                                sheet,
+                                &cine::Sheet {
+                                    eyebrow: "MENU / SETTINGS",
+                                    title: tab.label(),
+                                    subtitle: "Your preferences, across every World.",
+                                },
+                            );
+                            if tab == Tab::Bindings {
+                                search_row(sheet, tab, &searches.bindings);
+                            }
+                            sheet.spawn((
+                                SettingsBody,
+                                Node {
+                                    flex_direction: FlexDirection::Column,
+                                    flex_grow: 1.0,
+                                    min_height: Val::Px(0.0),
+                                    ..default()
+                                },
+                            ));
+                        });
+                });
             });
+            pages::footer(root, &place);
         });
+}
+
+/// A Settings category in the rail: its icon, its name and, when open, a
+/// chevron.
+#[derive(Component)]
+#[require(bevy::picking::hover::Hovered, Outline = theme::focus_ring())]
+pub(super) struct RailEntry {
+    pub selected: bool,
 }
 
 fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
@@ -484,8 +524,9 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
         .spawn((
             cine::surface(theme::PANEL),
             cine::framed(Node {
-                width: Val::Px(220.0),
+                width: Val::Px(theme::RAIL_WIDTH),
                 flex_shrink: 0.0,
+                align_self: AlignSelf::FlexStart,
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(7.0),
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(20.0)),
@@ -493,108 +534,99 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
             }),
         ))
         .with_children(|nav| {
-            nav.spawn(Node {
-                padding: UiRect::new(Val::Px(9.0), Val::Px(0.0), Val::Px(0.0), Val::Px(10.0)),
-                ..default()
-            })
-            .with_children(|title| buttons::eyebrow(title, "SETTINGS", Eyebrow::Cinematic));
-            for page in Tab::ORDER {
-                let entry = buttons::button(
-                    nav,
-                    page.label(),
-                    Operation::Navigate(page),
-                    ButtonStyle::Choice {
-                        selected: page == tab,
-                    },
-                );
-                nav.commands().entity(entry).insert(Node {
-                    min_height: Val::Px(44.0),
-                    padding: UiRect::axes(Val::Px(12.0), Val::Px(8.0)),
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(5.0)),
-                    align_items: AlignItems::Center,
-                    justify_content: JustifyContent::FlexStart,
-                    ..default()
-                });
-            }
-            nav.spawn(Node {
-                margin: UiRect::top(Val::Auto),
-                padding: UiRect::horizontal(Val::Px(9.0)),
-                ..default()
-            })
-            .with_children(|note| {
-                paragraph(
-                    note,
-                    "Your preferences, across every World.",
-                    theme::TEXT_EYEBROW,
-                    theme::CHROME_INK,
-                )
-            });
-        });
-}
-
-fn heading(sheet: &mut ChildSpawnerCommands, tab: Tab) {
-    use super::cinematic as cine;
-    sheet
-        .spawn((
-            BackgroundColor(theme::SHEET_HEADER),
-            BorderColor::all(theme::EDGE),
-            Node {
-                padding: UiRect::new(
-                    Val::Px(theme::SHEET_PAD_X),
-                    Val::Px(theme::SHEET_PAD_X),
-                    Val::Px(20.0),
-                    Val::Px(18.0),
-                ),
-                border: UiRect::bottom(Val::Px(theme::RULE)),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(12.0),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|header| {
-            header
-                .spawn(Node {
-                    flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(7.0),
-                    ..default()
-                })
-                .with_children(|title| {
-                    buttons::eyebrow(title, "MENU / SETTINGS", Eyebrow::Cinematic);
-                    cine::title(title, tab.label());
-                    paragraph(
-                        title,
-                        match tab {
-                            Tab::Catalogue | Tab::Behavior => "Tune how you move, look, and build.",
-                            Tab::Bindings => "Find an action and choose up to two bindings.",
-                            Tab::Controller => {
-                                "Tune the sticks and choose controller buttons, and the touch controls."
-                            }
-                            Tab::Display => "Choose frame pacing without changing visual quality.",
-                            Tab::Accessibility => "Comfort and readability, in menus and in play.",
-                        },
-                        theme::TEXT_SMALL,
-                        theme::MUTED,
-                    );
-                });
-            header.spawn((
-                HeadingPill(tab),
-                Text::default(),
-                font(10.0),
-                TextColor(theme::MUTED),
-                bevy::text::LetterSpacing::Px(0.9),
-                BorderColor::all(theme::EDGE),
+            nav.spawn((
+                Text::new("SETTINGS"),
+                font(theme::TEXT_EYEBROW),
+                bevy::text::LetterSpacing::Px(theme::EYEBROW_TRACKING),
+                bevy::text::LineHeight::RelativeToFont(1.2),
+                TextColor(theme::CHROME_INK),
                 Node {
-                    border: UiRect::all(Val::Px(1.0)),
-                    border_radius: BorderRadius::all(Val::Px(12.0)),
-                    padding: UiRect::axes(Val::Px(9.0), Val::Px(6.0)),
+                    padding: UiRect::horizontal(Val::Px(9.0)),
+                    margin: UiRect::bottom(Val::Px(14.0)),
                     ..default()
                 },
                 Pickable::IGNORE,
             ));
+            for page in Tab::ORDER {
+                let selected = page == tab;
+                let ink = if selected {
+                    theme::INK
+                } else {
+                    theme::CHROME_INK
+                };
+                nav.spawn((
+                    bevy::ui_widgets::Button,
+                    TabIndex(0),
+                    Operation::Navigate(page),
+                    RailEntry { selected },
+                    BackgroundColor(if selected {
+                        theme::CHOSEN
+                    } else {
+                        Color::NONE
+                    }),
+                    BorderColor::all(if selected {
+                        theme::CHOSEN_EDGE
+                    } else {
+                        Color::NONE
+                    }),
+                    Node {
+                        height: Val::Px(theme::RAIL_ENTRY_HEIGHT),
+                        flex_shrink: 0.0,
+                        padding: UiRect::axes(Val::Px(8.0), Val::Px(10.0)),
+                        border: UiRect::all(Val::Px(theme::RULE)),
+                        border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                        align_items: AlignItems::Center,
+                        column_gap: Val::Px(10.0),
+                        ..default()
+                    },
+                ))
+                .with_children(|entry| {
+                    icon(entry, page.icon(), ink, 20.0);
+                    entry.spawn((
+                        Text::new(page.label()),
+                        font(theme::TEXT_BODY),
+                        TextColor(ink),
+                        Node {
+                            flex_grow: 1.0,
+                            min_width: Val::Px(0.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ));
+                    entry
+                        .spawn(Node {
+                            width: Val::Px(12.0),
+                            flex_shrink: 0.0,
+                            ..default()
+                        })
+                        .with_children(|arrow| {
+                            if selected {
+                                icon(arrow, IconKind::Chevron, ink, 12.0);
+                            }
+                        });
+                });
+            }
         });
+}
+
+/// The rail keeps the prototype's look: no hover fill, and the focus ring
+/// only when focus is being shown.
+fn rail_focus(
+    mut entries: Query<(Entity, &mut Outline), With<RailEntry>>,
+    focus: Res<InputFocus>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = visible_focus(Some(&focus), visible.as_deref());
+    for (entity, mut outline) in &mut entries {
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
 }
 
 pub(super) fn search_frame(
@@ -708,30 +740,73 @@ pub(super) fn search_frame(
         });
     id
 }
-fn search_row(root: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
-    root.spawn(Node {
-        height: Val::Px(42.0),
-        margin: UiRect::bottom(Val::Px(18.0)),
-        flex_shrink: 0.0,
-        align_items: AlignItems::Center,
-        column_gap: Val::Px(14.0),
-        ..default()
-    })
-    .with_children(|row| {
-        search_frame(row, tab, value, 42.0);
-        row.spawn((
-            SearchCount(tab),
-            Text::default(),
-            font(theme::TEXT_EYEBROW),
-            TextColor(theme::MUTED),
-            Node {
-                width: Val::Px(72.0),
-                justify_content: JustifyContent::FlexEnd,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ));
-    });
+/// The Key bindings search: a plain field, as the prototype's.
+fn search_row(sheet: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
+    sheet
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            padding: UiRect::new(
+                Val::Px(theme::SHEET_PAD_X),
+                Val::Px(theme::SHEET_PAD_X),
+                Val::Px(20.0),
+                Val::Px(20.0),
+            ),
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|row| {
+            row.spawn((
+                SearchFrame,
+                BackgroundColor(theme::FIELD),
+                BorderColor::all(theme::FIELD_EDGE),
+                Node {
+                    height: Val::Px(theme::CONTROL_HEIGHT),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                    padding: UiRect::horizontal(Val::Px(12.0)),
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+            ))
+            .with_children(|field| {
+                field.spawn((
+                    SearchField(tab),
+                    TextInput,
+                    EditableText::new(value),
+                    TabIndex(0),
+                    font(theme::TEXT_BODY),
+                    TextColor(theme::INK),
+                    bevy::text::TextCursorStyle {
+                        color: theme::SAGE,
+                        selection_color: theme::SAGE.with_alpha(0.3),
+                        ..default()
+                    },
+                    TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
+                    Node {
+                        flex_grow: 1.0,
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    },
+                ));
+                field.spawn((
+                    SearchPlaceholder,
+                    Text::new("Search actions or keys…"),
+                    font(theme::TEXT_BODY),
+                    TextColor(theme::PLACEHOLDER),
+                    Pickable::IGNORE,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(12.0),
+                        ..default()
+                    },
+                    if value.is_empty() {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    },
+                ));
+            });
+        });
 }
 
 fn make_logo(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
@@ -830,10 +905,6 @@ fn search_presentation(
     focus: Res<InputFocus>,
     fields: Query<Entity, With<SearchField>>,
     mut frames: Query<&mut BorderColor, With<SearchFrame>>,
-    mut counts: Query<(&SearchCount, &mut Text)>,
-    searches: Res<Searches>,
-    (catalogue, settings): (Res<super::edit::Catalogue>, Res<Settings>),
-    bindings: (Res<super::actions::Bindings>, Res<super::actions::Labels>),
 ) {
     let focused = focus.get().is_some_and(|entity| fields.contains(entity));
     for mut border in &mut frames {
@@ -842,51 +913,6 @@ fn search_presentation(
         } else {
             theme::FIELD_EDGE
         });
-    }
-    for (count, mut text) in &mut counts {
-        let (number, label) = if count.0 == Tab::Catalogue {
-            (
-                catalogue
-                    .0
-                    .materials
-                    .iter()
-                    .filter(|m| {
-                        (m.solid || m.fluid.is_some()) && matches(&searches.catalogue, &m.name)
-                    })
-                    .count()
-                    + usize::from(
-                        catalogue.0.anything_burns() && matches(&searches.catalogue, "fire"),
-                    ),
-                "materials",
-            )
-        } else {
-            (
-                bindings
-                    .0
-                    .keyboard
-                    .keys()
-                    .filter(|action| {
-                        settings.binding_visible(
-                            **action,
-                            &searches.bindings,
-                            &bindings.0,
-                            &bindings.1,
-                        )
-                    })
-                    .count(),
-                "actions",
-            )
-        };
-        let label = if number == 1 {
-            if label == "materials" {
-                "material"
-            } else {
-                "action"
-            }
-        } else {
-            label
-        };
-        text.set_if_neq(Text::new(format!("{number} {label}")));
     }
 }
 
@@ -908,10 +934,16 @@ pub(super) enum IconKind {
     /// A disclosure row's marker, closed and open.
     Collapsed,
     Expanded,
+    /// The Settings categories' rail icons.
+    Behavior,
+    Keyboard,
+    Controller,
+    Display,
+    Accessibility,
 }
-const ICONS: usize = 14;
+const ICONS: usize = 19;
 /// The icons drawn from the prototype's 24-unit outlines, in atlas order.
-const DRAWN: [IconKind; 9] = [
+const DRAWN: [IconKind; 14] = [
     IconKind::Settings,
     IconKind::Mods,
     IconKind::Check,
@@ -921,6 +953,11 @@ const DRAWN: [IconKind; 9] = [
     IconKind::Chevron,
     IconKind::Collapsed,
     IconKind::Expanded,
+    IconKind::Behavior,
+    IconKind::Keyboard,
+    IconKind::Controller,
+    IconKind::Display,
+    IconKind::Accessibility,
 ];
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
@@ -1058,7 +1095,84 @@ fn drawn(kind: IconKind, p: Vec2) -> f32 {
             })
             .fold(f32::MIN, f32::max)
     };
+    let rounded = |centre: Vec2, half: Vec2, radius: f32| {
+        let q = (p - centre).abs() - (half - Vec2::splat(radius));
+        (q.max(Vec2::ZERO).length() + q.max_element().min(0.0) - radius).abs()
+    };
+    let ring = |centre: Vec2, radius: f32| (p.distance(centre) - radius).abs();
+    let dots = |points: &[Vec2]| {
+        points
+            .iter()
+            .map(|d| p.distance(*d))
+            .fold(f32::MAX, f32::min)
+    };
+    // An SVG small arc from `a` to `b`; `clockwise` is its sweep flag.
+    let arc = |a: Vec2, b: Vec2, radius: f32, clockwise: bool| -> Vec<Vec2> {
+        let mid = (a + b) / 2.0;
+        let chord = b - a;
+        let rise = (radius * radius - chord.length_squared() / 4.0).max(0.0).sqrt();
+        let normal = v(-chord.y, chord.x).normalize();
+        let sign = if clockwise { 1.0 } else { -1.0 };
+        let span = |c: Vec2| {
+            let turn = (b - c).to_angle() - (a - c).to_angle();
+            (sign * turn).rem_euclid(std::f32::consts::TAU)
+        };
+        let centre = [mid + normal * rise, mid - normal * rise]
+            .into_iter()
+            .find(|c| span(*c) <= std::f32::consts::PI)
+            .unwrap_or(mid);
+        let (start, sweep) = ((a - centre).to_angle(), sign * span(centre));
+        (0..=12)
+            .map(|i| centre + Vec2::from_angle(start + sweep * i as f32 / 12.0) * radius)
+            .collect()
+    };
     match kind {
+        IconKind::Behavior => stroke(
+            [6.0, 12.0, 18.0]
+                .iter()
+                .map(|y| segment(v(4.0, *y), v(20.0, *y)))
+                .chain([ring(v(8.0, 6.0), 2.0), ring(v(16.0, 12.0), 2.0), ring(v(10.0, 18.0), 2.0)])
+                .fold(f32::MAX, f32::min),
+        ),
+        IconKind::Keyboard => stroke(
+            rounded(v(12.0, 12.0), v(10.0, 7.0), 2.0)
+                .min(dots(&[
+                    v(6.0, 9.0),
+                    v(10.0, 9.0),
+                    v(14.0, 9.0),
+                    v(18.0, 9.0),
+                    v(6.0, 13.0),
+                    v(10.0, 13.0),
+                    v(14.0, 13.0),
+                    v(18.0, 13.0),
+                ]))
+                .min(segment(v(7.0, 16.0), v(17.0, 16.0))),
+        ),
+        IconKind::Controller => {
+            let mut body = vec![v(7.0, 7.0)];
+            body.extend(arc(v(17.0, 7.0), v(21.0, 10.0), 4.0, true));
+            body.extend(arc(v(22.0, 17.0), v(18.6, 18.7), 2.0, true));
+            body.extend([v(16.0, 16.0), v(8.0, 16.0)]);
+            body.extend(arc(v(5.4, 18.7), v(2.0, 17.0), 2.0, true));
+            body.extend(arc(v(3.0, 10.0), v(7.0, 7.0), 4.0, true));
+            stroke(
+                path(&body)
+                    .min(segment(v(7.0, 10.0), v(7.0, 15.0)))
+                    .min(segment(v(4.5, 12.5), v(9.5, 12.5)))
+                    .min(dots(&[v(16.0, 11.0), v(19.0, 14.0)])),
+            )
+        }
+        IconKind::Display => stroke(
+            rounded(v(12.0, 10.0), v(10.0, 7.0), 2.0)
+                .min(segment(v(8.0, 21.0), v(16.0, 21.0)))
+                .min(segment(v(12.0, 17.0), v(12.0, 21.0))),
+        ),
+        IconKind::Accessibility => stroke(
+            ring(v(12.0, 4.0), 2.0)
+                .min(path(&[v(4.0, 9.0), v(12.0, 11.0), v(20.0, 9.0)]))
+                .min(path(&[v(12.0, 11.0), v(12.0, 16.0), v(7.0, 22.0)]))
+                .min(segment(v(12.0, 16.0), v(17.0, 22.0))),
+        ),
         IconKind::World => {
             let ellipse: Vec<Vec2> = (0..=48)
                 .map(|i| {
@@ -1186,35 +1300,6 @@ pub(super) fn technical_text(
         TextColor(color),
         Pickable::IGNORE,
     ));
-}
-fn heading_status(
-    mut pills: Query<(&HeadingPill, &mut Text)>,
-    settings: Res<Settings>,
-    active: (
-        Res<super::actions::Bindings>,
-        Res<super::profile::Preferences>,
-    ),
-    catalogue: Res<super::edit::Catalogue>,
-) {
-    for (pill, mut text) in &mut pills {
-        let value = if pill.0 == Tab::Catalogue {
-            format!(
-                "{} MATERIALS",
-                catalogue
-                    .0
-                    .materials
-                    .iter()
-                    .filter(|m| m.solid || m.fluid.is_some())
-                    .count()
-                    + usize::from(catalogue.0.anything_burns())
-            )
-        } else if settings.changed(&active.0, &active.1) {
-            "UNSAVED CHANGES".into()
-        } else {
-            "SAVED PREFERENCES".into()
-        };
-        text.set_if_neq(Text::new(value));
-    }
 }
 type ButtonLabels<'w, 's> = Query<
     'w,
@@ -1534,10 +1619,10 @@ mod tests {
         app.update();
         let looks: Vec<(Tab, bool)> = app
             .world_mut()
-            .query::<(&Operation, &super::super::cinematic::Look)>()
+            .query::<(&Operation, &RailEntry)>()
             .iter(app.world())
-            .filter_map(|(op, look)| match op {
-                Operation::Navigate(tab) => Some((*tab, look.selected)),
+            .filter_map(|(op, entry)| match op {
+                Operation::Navigate(tab) => Some((*tab, entry.selected)),
                 _ => None,
             })
             .collect();
