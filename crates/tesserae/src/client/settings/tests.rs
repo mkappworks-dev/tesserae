@@ -1,4 +1,5 @@
 use super::*;
+use crate::client::theme;
 
 #[test]
 fn every_bindable_action_has_a_place_in_the_controls_list() {
@@ -126,7 +127,7 @@ fn searching_bindings_renders_actual_mouse_actions_and_restore_requires_confirma
             .query::<(&Text, &TextColor)>()
             .iter(app.world())
             .filter(|(text, _)| text.0 == "Add binding")
-            .all(|(_, color)| color.0 == super::super::menu_ui::MUTED)
+            .all(|(_, color)| color.0 == theme::MUTED)
     );
     assert!(
         app.world_mut()
@@ -659,4 +660,54 @@ fn capture_waits_for_opening_release_and_conflicts_require_a_choice() {
         draft.keyboard[&Action::Sample],
         Bindings::default().keyboard[&Action::Sample]
     );
+}
+#[test]
+fn a_dropdown_shows_its_choice_opens_on_it_and_closes_on_a_click_outside() {
+    let mut app = app();
+    app.add_observer(toggle_select)
+        .add_systems(Update, (close_selects, place_selects).chain());
+    let root = app.world_mut().spawn(Node::default()).id();
+    app.world_mut()
+        .commands()
+        .entity(root)
+        .with_children(|row| {
+            segment(row, |options| {
+                option(options, "Hold", Operation::Sprint(false), false);
+                option(options, "Toggle", Operation::Sprint(true), true);
+            })
+        });
+    app.update();
+    let (trigger, value) = app
+        .world_mut()
+        .query::<(Entity, &Select)>()
+        .single(app.world())
+        .map(|(entity, select)| (entity, select.value))
+        .unwrap();
+    assert_eq!(app.world().get::<Text>(value).unwrap().0, "Toggle");
+    app.world_mut().trigger(Activate { entity: trigger });
+    app.update();
+    let chosen = app
+        .world_mut()
+        .query_filtered::<Entity, With<Chosen>>()
+        .single(app.world())
+        .unwrap();
+    assert_eq!(
+        app.world()
+            .resource::<bevy::input_focus::InputFocus>()
+            .get(),
+        Some(chosen)
+    );
+    let display = |app: &mut App| {
+        app.world_mut()
+            .query_filtered::<&Node, With<SelectMenu>>()
+            .single(app.world())
+            .unwrap()
+            .display
+    };
+    assert_eq!(display(&mut app), Display::Flex);
+    app.world_mut()
+        .resource_mut::<ButtonInput<MouseButton>>()
+        .press(MouseButton::Left);
+    app.update();
+    assert_eq!(display(&mut app), Display::None);
 }

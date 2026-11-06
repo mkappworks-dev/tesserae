@@ -4,6 +4,7 @@
 //!
 //! It is its own input context beside the Catalogue and the settings: the
 //! cursor is released and the pad navigates it, and gameplay input waits.
+use super::theme;
 use super::{
     actions::{Action, Actions},
     layout::{AXIS_NAMES, Kind, LayoutMode, LayoutPreferences, way_name},
@@ -343,7 +344,7 @@ fn header(card: &mut ChildSpawnerCommands, open: bool, kind: Kind) {
                 title.spawn((
                     Text::new("Layout"),
                     weighted(18.0, 650),
-                    TextColor(ui::INK),
+                    TextColor(theme::INK),
                     Pickable::IGNORE,
                 ));
                 // What the layout is set to, at a glance.
@@ -355,7 +356,7 @@ fn header(card: &mut ChildSpawnerCommands, open: bool, kind: Kind) {
                             border_radius: BorderRadius::all(Val::Px(10.0)),
                             ..default()
                         },
-                        BorderColor::all(ui::LEAF),
+                        BorderColor::all(theme::SAGE),
                         Pickable::IGNORE,
                     ))
                     .with_child((
@@ -365,7 +366,7 @@ fn header(card: &mut ChildSpawnerCommands, open: bool, kind: Kind) {
                         }),
                         weighted(9.0, 650),
                         bevy::text::LetterSpacing::Px(0.8),
-                        TextColor(ui::LEAF),
+                        TextColor(theme::SAGE),
                         Pickable::IGNORE,
                     ));
             });
@@ -390,8 +391,8 @@ fn segmented(parent: &mut ChildSpawnerCommands, children: impl FnOnce(&mut Child
                 border_radius: BorderRadius::all(Val::Px(7.0)),
                 ..default()
             },
-            BackgroundColor(ui::BG),
-            BorderColor::all(ui::EDGE),
+            BackgroundColor(theme::PANEL),
+            BorderColor::all(theme::EDGE),
         ))
         .with_children(children);
 }
@@ -450,7 +451,7 @@ fn fold_row(
                 ..default()
             },
             BackgroundColor(Color::NONE),
-            BorderColor::all(ui::EDGE),
+            BorderColor::all(theme::EDGE),
         ))
         .with_children(|row| {
             row.spawn((
@@ -465,7 +466,7 @@ fn fold_row(
             row.spawn((
                 Text::new(right),
                 ui::font(11.0),
-                TextColor(ui::MUTED),
+                TextColor(theme::MUTED),
                 Pickable::IGNORE,
             ));
         });
@@ -490,7 +491,7 @@ fn stepper(parent: &mut ChildSpawnerCommands, less: Control, value: String, more
                 .with_child((
                     Text::new(value),
                     weighted(14.0, 650),
-                    TextColor(ui::INK),
+                    TextColor(theme::INK),
                     Pickable::IGNORE,
                 ));
             choice(stepper, "+", more, false);
@@ -502,7 +503,7 @@ fn note(parent: &mut ChildSpawnerCommands, text: &str) {
         Text::new(text),
         ui::font(11.0),
         bevy::text::LineHeight::RelativeToFont(1.5),
-        TextColor(ui::MUTED),
+        TextColor(theme::MUTED),
         Pickable::IGNORE,
     ));
 }
@@ -513,7 +514,7 @@ fn axis_line(card: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: 
     let negative = layout.negative[axis];
     let used = layout.lengths[axis] > 1;
     // An axis of one is left out of the layout, so its line is quieter.
-    let letter = if used { ui::INK } else { ui::MUTED };
+    let letter = if used { theme::INK } else { theme::MUTED };
     card.spawn((
         Node {
             width: Val::Percent(100.0),
@@ -524,7 +525,7 @@ fn axis_line(card: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: 
             border_radius: BorderRadius::all(Val::Px(8.0)),
             ..default()
         },
-        BorderColor::all(ui::EDGE),
+        BorderColor::all(theme::EDGE),
     ))
     .with_children(|line| {
         line.spawn(Node {
@@ -542,7 +543,7 @@ fn axis_line(card: &mut ChildSpawnerCommands, layout: &LayoutPreferences, axis: 
             name.spawn((
                 Text::new(way_name(axis, negative)),
                 ui::font(10.0),
-                TextColor(ui::MUTED),
+                TextColor(theme::MUTED),
                 Pickable::IGNORE,
             ));
         });
@@ -587,17 +588,17 @@ fn status_block(parent: &mut ChildSpawnerCommands, between: bool) {
                     Info::Count,
                     Text::new("0"),
                     weighted(30.0, 700),
-                    TextColor(ui::LEAF),
+                    TextColor(theme::SAGE),
                     Pickable::IGNORE,
                 ))
                 .with_child((
                     TextSpan::new(" Voxels"),
                     weighted(13.0, 600),
-                    TextColor(ui::INK),
+                    TextColor(theme::INK),
                 ));
             for (part, font, colour) in [
-                (Info::Size, ui::font(12.0), ui::MUTED),
-                (Info::Body, ui::font(12.0), ui::INK),
+                (Info::Size, ui::font(12.0), theme::MUTED),
+                (Info::Body, ui::font(12.0), theme::INK),
             ] {
                 if part_is_body(&part) && between {
                     steps(block);
@@ -650,20 +651,20 @@ fn steps(parent: &mut ChildSpawnerCommands) {
                             ..default()
                         },
                         BackgroundColor(Color::NONE),
-                        BorderColor::all(ui::MUTED),
+                        BorderColor::all(theme::MUTED),
                         Pickable::IGNORE,
                     ))
                     .with_child((
                         StepLetter(i),
                         Text::new(letter),
                         weighted(11.0, 700),
-                        TextColor(ui::MUTED),
+                        TextColor(theme::MUTED),
                         Pickable::IGNORE,
                     ));
                     step.spawn((
                         Text::new(caption),
                         ui::font(9.5),
-                        TextColor(ui::MUTED),
+                        TextColor(theme::MUTED),
                         Pickable::IGNORE,
                     ));
                 });
@@ -676,7 +677,7 @@ fn steps(parent: &mut ChildSpawnerCommands) {
                             margin: UiRect::bottom(Val::Px(14.0)),
                             ..default()
                         },
-                        BackgroundColor(ui::EDGE),
+                        BackgroundColor(theme::EDGE),
                         Pickable::IGNORE,
                     ));
                 }
@@ -699,7 +700,7 @@ fn footer(parent: &mut ChildSpawnerCommands) {
                 Text::new(""),
                 ui::font(10.5),
                 bevy::text::LineHeight::RelativeToFont(1.5),
-                TextColor(ui::MUTED),
+                TextColor(theme::MUTED),
                 Pickable::IGNORE,
             ));
         });
@@ -761,22 +762,30 @@ fn update_info(
     let picked = mode.points.len();
     for (StepDot(i), mut fill, mut edge) in &mut dots {
         let (done, active) = (picked > *i, picked == *i);
-        let colour = if done || active { ui::LEAF } else { ui::MUTED };
-        fill.set_if_neq(BackgroundColor(if done { ui::LEAF } else { Color::NONE }));
+        let colour = if done || active {
+            theme::SAGE
+        } else {
+            theme::MUTED
+        };
+        fill.set_if_neq(BackgroundColor(if done {
+            theme::SAGE
+        } else {
+            Color::NONE
+        }));
         edge.set_if_neq(BorderColor::all(colour));
     }
     for (StepLetter(i), mut colour) in &mut letters {
         colour.set_if_neq(TextColor(match picked.cmp(i) {
-            std::cmp::Ordering::Greater => ui::BG,
-            std::cmp::Ordering::Equal => ui::LEAF,
-            std::cmp::Ordering::Less => ui::MUTED,
+            std::cmp::Ordering::Greater => theme::SAGE_INK,
+            std::cmp::Ordering::Equal => theme::SAGE,
+            std::cmp::Ordering::Less => theme::MUTED,
         }));
     }
     for (StepLine(i), mut fill) in &mut lines {
         fill.set_if_neq(BackgroundColor(if picked > *i + 1 {
-            ui::LEAF
+            theme::SAGE
         } else {
-            ui::EDGE
+            theme::EDGE
         }));
     }
 }
@@ -856,8 +865,8 @@ fn render(
                         overflow: Overflow::scroll_y(),
                         ..default()
                     },
-                    BackgroundColor(ui::BG),
-                    BorderColor::all(ui::EDGE),
+                    BackgroundColor(theme::PANEL),
+                    BorderColor::all(theme::EDGE),
                 ))
                 .with_children(|card| {
                     header(card, open, layout.kind);
@@ -897,7 +906,7 @@ fn render(
                             left.spawn((
                                 Text::new(format!("{} Voxels", layout.gap)),
                                 weighted(12.0, 600),
-                                TextColor(ui::INK),
+                                TextColor(theme::INK),
                                 Pickable::IGNORE,
                             ));
                             left.spawn((
@@ -906,7 +915,7 @@ fn render(
                                     layout.gap as f32 * world.voxel_size
                                 )),
                                 ui::font(11.0),
-                                TextColor(ui::MUTED),
+                                TextColor(theme::MUTED),
                                 Pickable::IGNORE,
                             ));
                         },
@@ -921,7 +930,7 @@ fn render(
                         );
                     }
                     if !menu.notice.is_empty() {
-                        ui::text(card, menu.notice.clone(), 11.0, ui::AMBER);
+                        ui::text(card, menu.notice.clone(), 11.0, theme::WARNING);
                     }
                     footer(card);
                 });
@@ -1388,7 +1397,7 @@ mod tests {
             let mut dots = app.world_mut().query::<(&StepDot, &BackgroundColor)>();
             let mut found: Vec<_> = dots
                 .iter(app.world())
-                .map(|(StepDot(i), fill)| (*i, fill.0 == ui::LEAF))
+                .map(|(StepDot(i), fill)| (*i, fill.0 == theme::SAGE))
                 .collect();
             found.sort();
             found.into_iter().map(|(_, filled)| filled).collect()

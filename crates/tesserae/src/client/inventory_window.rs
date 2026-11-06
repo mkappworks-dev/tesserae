@@ -21,6 +21,7 @@ use super::actions::{Action, Actions};
 use super::drops::Looks;
 use super::edit::{Catalogue, Holding};
 use super::menu_ui::{self as ui, font};
+use super::theme;
 use super::tile_preview::TilePreview;
 use crate::server::inventory::{InventoryChanged, InventoryIntent, InventoryRefused, MAX_STACK};
 use crate::session::SessionApp;
@@ -31,7 +32,6 @@ const GRID_PX: f32 = SLOT_PX * HOTBAR_SLOTS as f32 + SLOT_GAP_PX * (HOTBAR_SLOTS
 const INSPECTOR_PX: f32 = 220.0;
 
 /// The World dims without blur, as Minecraft and Luanti do; only menus blur.
-const SCRIM: Color = Color::srgba_u8(3, 4, 5, 0x9e);
 const SURFACE: Color = Color::srgb_u8(11, 11, 13);
 const HEADER: Color = Color::srgb_u8(17, 17, 19);
 const FOOTER: Color = Color::srgb_u8(13, 13, 16);
@@ -39,18 +39,12 @@ const INSPECTOR: Color = Color::srgb_u8(19, 19, 21);
 const RULE: Color = Color::srgb_u8(69, 69, 76);
 const FOOTER_RULE: Color = Color::srgb_u8(85, 85, 94);
 const ROW_RULE: Color = Color::srgb_u8(52, 52, 60);
-const SLOT_FILL: Color = Color::srgb_u8(23, 24, 26);
-const SLOT_HOVER: Color = Color::srgb_u8(32, 34, 37);
-const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
-const RIM: Color = Color::srgb_u8(58, 60, 65);
-const RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
 const RIM_INSPECTED: Color = Color::srgb_u8(201, 209, 189);
 const PICKED: Color = Color::srgb_u8(231, 217, 168);
 const DROP_TARGET: Color = Color::srgb_u8(214, 200, 143);
 const FULL: Color = Color::srgb_u8(232, 210, 159);
 const INK: Color = Color::srgb_u8(244, 244, 237);
 const SOFT: Color = Color::srgb_u8(173, 175, 185);
-pub(super) const EYEBROW: Color = Color::srgb_u8(192, 194, 200);
 const SOURCE: Color = Color::srgb_u8(153, 156, 167);
 
 #[derive(Resource, Default)]
@@ -471,9 +465,9 @@ fn render(
                         ..default()
                     },
                     BackgroundColor(if preferences.solid_background {
-                        super::cinematic::SCENE
+                        theme::SOLID_BACKGROUND
                     } else {
-                        SCRIM
+                        theme::INVENTORY_SCRIM
                     }),
                 ))
                 .add_child(row);
@@ -781,8 +775,8 @@ fn slot_button(
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(SLOT_FILL),
-            BorderColor::all(SLOT_EDGE),
+            BackgroundColor(theme::SLOT_FILL),
+            BorderColor::all(theme::SLOT_EDGE),
         ))
         .with_children(|button| {
             button.spawn((
@@ -797,7 +791,7 @@ fn slot_button(
                     border_radius: BorderRadius::all(Val::Px(2.0)),
                     ..default()
                 },
-                BorderColor::all(RIM),
+                BorderColor::all(theme::SLOT_RIM),
                 Pickable::IGNORE,
             ));
             if let Some(stack) = stack {
@@ -1155,16 +1149,16 @@ fn paint(
         } else if hovered.get() && (window.dragging.is_some() || side.taking.is_some()) {
             DROP_TARGET
         } else if hovered.get() {
-            RIM_HOVER
+            theme::SLOT_RIM_HOVER
         } else if window.inspected == Some(slot) {
             RIM_INSPECTED
         } else {
-            RIM
+            theme::SLOT_RIM
         };
         fill.set_if_neq(BackgroundColor(if hovered.get() {
-            SLOT_HOVER
+            theme::SLOT_HOVER
         } else {
-            SLOT_FILL
+            theme::SLOT_FILL
         }));
         for child in children {
             if let Ok(mut border) = rims.get_mut(*child) {

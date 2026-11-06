@@ -2,6 +2,7 @@
 //! segments, the footer and the confirming dialog.
 
 use super::*;
+use crate::client::theme;
 
 pub(super) fn button(parent: &mut ChildSpawnerCommands, text: String, operation: Operation) {
     buttons::button(parent, text, operation, ButtonStyle::Plain);
@@ -10,7 +11,6 @@ pub(super) fn setting_row(
     parent: &mut ChildSpawnerCommands,
     title: &str,
     description: &str,
-    last: bool,
     choices: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     use crate::client::menu_ui as ui;
@@ -19,30 +19,28 @@ pub(super) fn setting_row(
             Node {
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::SpaceBetween,
-                column_gap: Val::Px(18.0),
-                padding: UiRect {
-                    top: Val::Px(17.0),
-                    bottom: Val::Px(if last { 1.0 } else { 17.0 }),
-                    ..default()
-                },
-                border: UiRect::bottom(Val::Px(if last { 0.0 } else { 1.0 })),
+                column_gap: Val::Px(20.0),
+                padding: UiRect::vertical(Val::Px(16.0)),
+                border: UiRect::bottom(Val::Px(theme::RULE)),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BorderColor::all(ui::EDGE),
+            BorderColor::all(theme::EDGE),
         ))
         .with_children(|row| {
             row.spawn(Node {
                 flex_direction: FlexDirection::Column,
-                row_gap: Val::Px(4.0),
-                max_width: Val::Px(340.0),
+                row_gap: Val::Px(5.0),
+                max_width: Val::Px(320.0),
                 min_width: Val::Px(0.0),
                 flex_shrink: 1.0,
                 ..default()
             })
             .with_children(|label| {
-                ui::weighted_text(label, title, 13.0, 550, ui::INK);
-                ui::description(label, description);
+                ui::weighted_text(label, title, theme::TEXT_BODY, theme::LABEL, theme::INK);
+                if !description.is_empty() {
+                    ui::description(label, description);
+                }
             });
             row.spawn(Node {
                 flex_shrink: 0.0,
@@ -51,22 +49,355 @@ pub(super) fn setting_row(
             .with_children(choices);
         });
 }
+
+/// A dropdown's trigger, which shows the chosen option's label.
+#[derive(Component)]
+pub(super) struct Select {
+    menu: Entity,
+    pub(super) value: Entity,
+}
+
+/// A dropdown's options. It sits over every page rather than inside the
+/// trigger's row, so the scrolling body cannot clip it.
+#[derive(Component)]
+pub(super) struct SelectMenu {
+    trigger: Entity,
+    open: bool,
+}
+
+/// One of a dropdown's options.
+#[derive(Component)]
+pub(super) struct SelectOption;
+
+/// The option a dropdown has chosen.
+#[derive(Component)]
+pub(super) struct Chosen;
+
+const SELECT_WIDTH_PX: f32 = 190.0;
+
+/// A dropdown of [`option`]s, as every choice in Settings is.
+pub(super) fn segment(
+    parent: &mut ChildSpawnerCommands,
+    choices: impl FnOnce(&mut ChildSpawnerCommands),
+) {
+    use crate::client::menu_ui as ui;
+    use bevy::input_focus::tab_navigation::TabIndex;
+    let menu = parent
+        .commands()
+        .spawn((
+            Panel,
+            GlobalZIndex(60),
+            bevy::picking::hover::Hovered::default(),
+            BackgroundColor(theme::MENU),
+            BorderColor::all(theme::MENU_EDGE),
+            BoxShadow::new(
+                Color::BLACK.with_alpha(0.6),
+                Val::Px(0.0),
+                Val::Px(12.0),
+                Val::Px(0.0),
+                Val::Px(35.0),
+            ),
+            Node {
+                display: Display::None,
+                position_type: PositionType::Absolute,
+                min_width: Val::Px(SELECT_WIDTH_PX),
+                padding: UiRect::all(Val::Px(5.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
+                flex_direction: FlexDirection::Column,
+                ..default()
+            },
+        ))
+        .id();
+    let mut value = Entity::PLACEHOLDER;
+    let trigger = parent
+        .spawn((
+            bevy::ui_widgets::Button,
+            TabIndex(0),
+            bevy::picking::hover::Hovered::default(),
+            theme::focus_ring(),
+            BackgroundColor(theme::FIELD),
+            BorderColor::all(theme::FIELD_EDGE),
+            Node {
+                width: Val::Px(SELECT_WIDTH_PX),
+                min_height: Val::Px(theme::CONTROL_HEIGHT),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
+                justify_content: JustifyContent::SpaceBetween,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(12.0),
+                ..default()
+            },
+        ))
+        .with_children(|t| {
+            value = t
+                .spawn((
+                    Text::default(),
+                    theme::font(theme::TEXT_BODY),
+                    TextColor(theme::INK),
+                    Node {
+                        flex_shrink: 1.0,
+                        min_width: Val::Px(0.0),
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .id();
+            ui::icon(t, ui::IconKind::Chevron, theme::INK.with_alpha(0.8), 16.0);
+        })
+        .id();
+    parent
+        .commands()
+        .entity(trigger)
+        .insert(Select { menu, value });
+    parent
+        .commands()
+        .entity(menu)
+        .insert(SelectMenu {
+            trigger,
+            open: false,
+        })
+        .with_children(choices);
+}
+
 pub(super) fn option(
     parent: &mut ChildSpawnerCommands,
     label: impl Into<String>,
     operation: Operation,
     selected: bool,
 ) {
-    buttons::button(
-        parent,
-        label,
+    use crate::client::menu_ui as ui;
+    let label = label.into();
+    let menu = parent.target_entity();
+    let mut choice = parent.spawn((
+        SelectOption,
+        bevy::ui_widgets::Button,
+        bevy::input_focus::tab_navigation::TabIndex(0),
         operation,
-        ButtonStyle::Compact {
-            selected,
-            height_px: 31.0,
-            text_px: 11.0,
+        bevy::picking::hover::Hovered::default(),
+        Outline::new(Val::Px(2.0), Val::Px(-2.0), Color::NONE),
+        BackgroundColor(Color::NONE),
+        BorderColor::all(Color::NONE),
+        Node {
+            min_height: Val::Px(48.0),
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
+            justify_content: JustifyContent::SpaceBetween,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(16.0),
+            ..default()
         },
-    );
+    ));
+    choice.with_children(|o| {
+        ui::text(
+            o,
+            label.clone(),
+            theme::TEXT_BODY,
+            if selected {
+                theme::OPTION_CHOSEN_INK
+            } else {
+                theme::INK
+            },
+        );
+        if selected {
+            ui::icon(o, ui::IconKind::Check, theme::OPTION_CHOSEN_INK, 18.0);
+        }
+    });
+    if selected {
+        choice.insert(Chosen);
+        parent.commands().queue(move |world: &mut World| {
+            let value = world
+                .get::<SelectMenu>(menu)
+                .and_then(|menu| world.get::<Select>(menu.trigger))
+                .map(|select| select.value);
+            if let Some(mut text) = value.and_then(|value| world.get_mut::<Text>(value)) {
+                text.0 = label;
+            }
+        });
+    }
+}
+
+/// Opens or closes a dropdown from its trigger, focusing the chosen option.
+pub(super) fn toggle_select(
+    event: On<bevy::ui_widgets::Activate>,
+    triggers: Query<&Select>,
+    mut menus: Query<(&mut SelectMenu, &Children)>,
+    chosen: Query<(), With<Chosen>>,
+    mut focus: ResMut<bevy::input_focus::InputFocus>,
+) {
+    let Ok(select) = triggers.get(event.entity) else {
+        return;
+    };
+    let Ok((mut menu, options)) = menus.get_mut(select.menu) else {
+        return;
+    };
+    menu.open = !menu.open;
+    if menu.open {
+        if let Some(option) = options
+            .iter()
+            .find(|option| chosen.contains(*option))
+            .or_else(|| options.first().copied())
+        {
+            focus.set(option, bevy::input_focus::FocusCause::Navigated);
+        }
+    } else {
+        focus.set(event.entity, bevy::input_focus::FocusCause::Navigated);
+    }
+}
+
+/// Closes an open dropdown on Escape or a click outside it.
+pub(super) fn close_selects(
+    mut menus: Query<(&mut SelectMenu, &bevy::picking::hover::Hovered)>,
+    triggers: Query<&bevy::picking::hover::Hovered, With<Select>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    mut actions: ResMut<crate::client::actions::Actions>,
+    mut focus: ResMut<bevy::input_focus::InputFocus>,
+) {
+    for (mut menu, hovered) in &mut menus {
+        if !menu.open {
+            continue;
+        }
+        let cancel = actions.cancel_requested();
+        let outside = mouse.just_pressed(MouseButton::Left)
+            && !hovered.0
+            && !triggers.get(menu.trigger).is_ok_and(|trigger| trigger.0);
+        if cancel || outside {
+            if cancel {
+                actions.consume_cancel();
+                focus.set(menu.trigger, bevy::input_focus::FocusCause::Navigated);
+            }
+            menu.open = false;
+        }
+    }
+}
+
+type SelectParts<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static SelectMenu,
+        &'static mut Node,
+        Has<bevy::input_focus::tab_navigation::TabGroup>,
+    ),
+>;
+
+/// Shows an open dropdown under its trigger, and keeps keyboard and pad
+/// focus inside it while it is open.
+pub(super) fn place_selects(
+    mut commands: Commands,
+    mut menus: SelectParts,
+    triggers: Query<(&ComputedNode, &bevy::ui::UiGlobalTransform)>,
+) {
+    for (entity, menu, mut node, grouped) in &mut menus {
+        if menu.open != grouped {
+            if menu.open {
+                commands
+                    .entity(entity)
+                    .insert(bevy::input_focus::tab_navigation::TabGroup {
+                        modal: true,
+                        ..default()
+                    });
+            } else {
+                commands
+                    .entity(entity)
+                    .remove::<bevy::input_focus::tab_navigation::TabGroup>();
+            }
+        }
+        let display = if menu.open {
+            Display::Flex
+        } else {
+            Display::None
+        };
+        if node.display != display {
+            node.display = display;
+        }
+        let Ok((trigger, transform)) = triggers.get(menu.trigger) else {
+            continue;
+        };
+        let scale = trigger.inverse_scale_factor();
+        let size = trigger.size() * scale;
+        let centre = transform.to_scale_angle_translation().2 * scale;
+        let (left, top) = (
+            Val::Px(centre.x - size.x / 2.0),
+            Val::Px(centre.y + size.y / 2.0 + 4.0),
+        );
+        if node.left != left || node.top != top {
+            node.left = left;
+            node.top = top;
+        }
+    }
+}
+
+type Painted<'w, 's, F> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static bevy::picking::hover::Hovered,
+        &'static mut BackgroundColor,
+        &'static mut BorderColor,
+        &'static mut Outline,
+    ),
+    F,
+>;
+
+/// Paints dropdown triggers and options for hover, openness and focus.
+pub(super) fn select_visuals(
+    mut triggers: Painted<With<Select>>,
+    selects: Query<&Select>,
+    menus: Query<&SelectMenu>,
+    mut options: Painted<(With<SelectOption>, Without<Select>)>,
+    focus: Option<Res<bevy::input_focus::InputFocus>>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
+) {
+    let focused = crate::client::menu_ui::visible_focus(focus.as_deref(), visible.as_deref());
+    for (entity, hovered, mut fill, mut edge, mut outline) in &mut triggers {
+        let open = selects
+            .get(entity)
+            .is_ok_and(|select| menus.get(select.menu).is_ok_and(|menu| menu.open));
+        fill.set_if_neq(BackgroundColor(if open || hovered.0 {
+            theme::FIELD_HOVER
+        } else {
+            theme::FIELD
+        }));
+        edge.set_if_neq(BorderColor::all(if open {
+            theme::SAGE
+        } else {
+            theme::FIELD_EDGE
+        }));
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+    for (entity, hovered, mut fill, mut edge, mut outline) in &mut options {
+        let lit = hovered.0 || focused == Some(entity);
+        fill.set_if_neq(BackgroundColor(if lit {
+            theme::OPTION_HOVER
+        } else {
+            Color::NONE
+        }));
+        edge.set_if_neq(BorderColor::all(if lit {
+            theme::OPTION_HOVER_EDGE
+        } else {
+            Color::NONE
+        }));
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
+        } else {
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
 }
 #[derive(Component, Clone, Copy)]
 pub(in crate::client) enum Scalar {
@@ -109,18 +440,38 @@ impl Scalar {
 #[derive(Component)]
 pub(super) struct ScalarThumb(Entity, Scalar);
 #[derive(Component)]
+pub(super) struct ScalarFill(Entity, Scalar);
+#[derive(Component)]
 pub(super) struct ScalarLabel(Entity, Scalar);
+
+const TRACK_PX: f32 = 151.0;
+const THUMB_PX: f32 = 16.0;
+
 pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32) {
-    use crate::client::menu_ui as ui;
     use bevy::ui_widgets::{Slider, SliderRange, SliderStep, SliderThumb, SliderValue};
+    let travel = |fraction: f32| fraction * (TRACK_PX - THUMB_PX);
     parent
         .spawn(Node {
-            width: Val::Px(206.0),
+            width: Val::Px(205.0),
             align_items: AlignItems::Center,
             column_gap: Val::Px(12.0),
             ..default()
         })
         .with_children(|row| {
+            let label = row
+                .spawn((
+                    Text::new(kind.display(value)),
+                    theme::font(theme::TEXT_SMALL),
+                    TextColor(theme::MUTED),
+                    TextLayout::justify(Justify::Right),
+                    Node {
+                        width: Val::Px(42.0),
+                        flex_shrink: 0.0,
+                        ..default()
+                    },
+                    Pickable::IGNORE,
+                ))
+                .id();
             let slider = row
                 .spawn((
                     kind,
@@ -129,49 +480,57 @@ pub(super) fn slider(parent: &mut ChildSpawnerCommands, kind: Scalar, value: f32
                     SliderValue(value),
                     SliderStep(kind.step()),
                     bevy::input_focus::tab_navigation::TabIndex(0),
+                    theme::focus_ring(),
                     Node {
-                        width: Val::Px(135.0),
-                        height: Val::Px(22.0),
+                        width: Val::Px(TRACK_PX),
+                        height: Val::Px(theme::CONTROL_HEIGHT),
                         align_items: AlignItems::Center,
                         ..default()
                     },
                 ))
                 .id();
+            row.commands()
+                .entity(label)
+                .insert(ScalarLabel(slider, kind));
             row.commands().entity(slider).with_children(|track| {
-                track.spawn((
-                    BackgroundColor(ui::EDGE),
-                    Node {
-                        width: Val::Percent(100.0),
-                        height: Val::Px(4.0),
-                        border_radius: BorderRadius::all(Val::Px(2.0)),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
+                track
+                    .spawn((
+                        BackgroundColor(theme::TRACK),
+                        Node {
+                            width: Val::Percent(100.0),
+                            height: Val::Px(6.0),
+                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                            overflow: Overflow::clip(),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ))
+                    .with_child((
+                        ScalarFill(slider, kind),
+                        BackgroundColor(theme::SAGE),
+                        Node {
+                            width: Val::Px(travel(kind.fraction(value)) + THUMB_PX / 2.0),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        Pickable::IGNORE,
+                    ));
                 track.spawn((
                     SliderThumb,
                     ScalarThumb(slider, kind),
-                    BackgroundColor(ui::LEAF),
+                    BackgroundColor(theme::SAGE),
+                    BorderColor::all(theme::SAGE_INK.with_alpha(0.35)),
                     Node {
                         position_type: PositionType::Absolute,
-                        width: Val::Px(12.0),
-                        height: Val::Px(12.0),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                        left: Val::Px(kind.fraction(value) * 123.0),
+                        width: Val::Px(THUMB_PX),
+                        height: Val::Px(THUMB_PX),
+                        border: UiRect::all(Val::Px(theme::RULE)),
+                        border_radius: BorderRadius::all(Val::Px(THUMB_PX / 2.0)),
+                        left: Val::Px(travel(kind.fraction(value))),
                         ..default()
                     },
                 ));
             });
-            row.spawn((
-                ScalarLabel(slider, kind),
-                Text::new(kind.display(value)),
-                TextFont {
-                    font: bevy::text::FontSource::family("Aileron"),
-                    ..ui::font(11.0)
-                },
-                TextColor(ui::INK),
-                Pickable::IGNORE,
-            ));
         });
 }
 pub(super) fn scalar_changed(
@@ -211,211 +570,221 @@ pub(super) fn scalar_changed(
     settings.dirty = true;
 }
 pub(super) fn slider_visuals(
-    values: Query<&bevy::ui_widgets::SliderValue>,
-    mut thumbs: Query<(&ScalarThumb, &mut Node, &mut BackgroundColor)>,
+    mut sliders: Query<(Entity, &bevy::ui_widgets::SliderValue, &mut Outline), With<Scalar>>,
+    mut thumbs: Query<(&ScalarThumb, &mut Node), Without<ScalarFill>>,
+    mut fills: Query<(&ScalarFill, &mut Node), Without<ScalarThumb>>,
     mut labels: Query<(&ScalarLabel, &mut Text)>,
     focus: Option<Res<bevy::input_focus::InputFocus>>,
     visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
     let focused = crate::client::menu_ui::visible_focus(focus.as_deref(), visible.as_deref());
-    for (thumb, mut node, mut background) in &mut thumbs {
-        if let Ok(value) = values.get(thumb.0) {
-            node.left = Val::Px(thumb.1.fraction(value.0) * 123.0);
-        }
-        let colour = if focused == Some(thumb.0) {
-            crate::client::menu_ui::INK
+    let travel = |fraction: f32| fraction * (TRACK_PX - THUMB_PX);
+    for (entity, _, mut outline) in &mut sliders {
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
         } else {
-            crate::client::menu_ui::LEAF
+            Color::NONE
         };
-        if background.0 != colour {
-            background.0 = colour;
+        if outline.color != ring {
+            outline.color = ring;
+        }
+    }
+    for (thumb, mut node) in &mut thumbs {
+        if let Ok((_, value, _)) = sliders.get(thumb.0) {
+            node.left = Val::Px(travel(thumb.1.fraction(value.0)));
+        }
+    }
+    for (fill, mut node) in &mut fills {
+        if let Ok((_, value, _)) = sliders.get(fill.0) {
+            node.width = Val::Px(travel(fill.1.fraction(value.0)) + THUMB_PX / 2.0);
         }
     }
     for (label, mut text) in &mut labels {
-        if let Ok(value) = values.get(label.0) {
+        if let Ok((_, value, _)) = sliders.get(label.0) {
             text.set_if_neq(Text::new(label.1.display(value.0)));
         }
     }
 }
+/// A section: its label, then its rows on the sheet itself.
 pub(super) fn group(
     parent: &mut ChildSpawnerCommands,
     title: &str,
     content: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
-    use crate::client::menu_ui as ui;
     parent
-        .spawn((
-            BackgroundColor(ui::CARD),
-            BorderColor::all(ui::EDGE),
-            Node {
-                width: Val::Percent(100.0),
-                padding: UiRect::all(Val::Px(18.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
-                margin: UiRect::bottom(Val::Px(14.0)),
-                flex_direction: FlexDirection::Column,
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(|card| {
-            card.spawn((
-                Text::new(title),
-                TextFont {
-                    weight: bevy::text::FontWeight(550),
-                    ..ui::font(10.0)
-                },
-                bevy::text::LetterSpacing::Px(1.5),
-                TextColor(ui::MUTED),
+        .spawn(Node {
+            width: Val::Percent(100.0),
+            margin: UiRect::bottom(Val::Px(25.0)),
+            flex_direction: FlexDirection::Column,
+            flex_shrink: 0.0,
+            ..default()
+        })
+        .with_children(|section| {
+            section.spawn((
+                Text::new(title.to_uppercase()),
+                theme::font(theme::TEXT_EYEBROW),
+                bevy::text::LetterSpacing::Px(theme::SECTION_TRACKING),
+                TextColor(theme::MUTED),
                 bevy::text::LineHeight::RelativeToFont(1.5),
+                Pickable::IGNORE,
+            ));
+            content(section);
+        });
+}
+
+/// A checkbox: on, it is sage with a dark check.
+#[derive(Component)]
+pub(super) struct Checkbox {
+    on: bool,
+    ring: Entity,
+}
+
+pub(super) fn switch(parent: &mut ChildSpawnerCommands, on: bool, operation: Operation) {
+    use crate::client::menu_ui as ui;
+    let mut ring = Entity::PLACEHOLDER;
+    let mut checkbox = parent.spawn((
+        bevy::ui_widgets::Button,
+        bevy::input_focus::tab_navigation::TabIndex(0),
+        operation,
+        bevy::picking::hover::Hovered::default(),
+        Outline::new(Val::Px(2.0), Val::Px(2.0), Color::NONE),
+        BorderColor::all(theme::CHECK_EDGE),
+        Node {
+            width: Val::Px(22.0),
+            height: Val::Px(22.0),
+            border: UiRect::all(Val::Px(theme::FRAME)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+    ));
+    if on {
+        checkbox.insert(BackgroundColor(theme::SAGE));
+    } else {
+        checkbox.insert(BackgroundGradient::from(LinearGradient::to_bottom(vec![
+            ColorStop::auto(theme::CHECK_TOP),
+            ColorStop::auto(theme::CHECK_BOTTOM),
+        ])));
+    }
+    checkbox.with_children(|b| {
+        ring = b
+            .spawn((
+                BorderColor::all(theme::CHECK_RING),
                 Node {
-                    margin: UiRect::bottom(Val::Px(3.0)),
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    right: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    bottom: Val::Px(0.0),
+                    border: UiRect::all(Val::Px(theme::RULE)),
+                    border_radius: BorderRadius::all(Val::Px(2.0)),
                     ..default()
                 },
                 Pickable::IGNORE,
-            ));
-            content(card);
-        });
+            ))
+            .id();
+        if on {
+            ui::icon(b, ui::IconKind::Check, theme::SAGE_INK, 16.0);
+        }
+    });
+    checkbox.insert(Checkbox { on, ring });
 }
-pub(super) fn segment(
-    parent: &mut ChildSpawnerCommands,
-    choices: impl FnOnce(&mut ChildSpawnerCommands),
+
+pub(super) fn checkbox_visuals(
+    mut boxes: Query<(
+        Entity,
+        &Checkbox,
+        &bevy::picking::hover::Hovered,
+        &mut Outline,
+    )>,
+    mut rings: Query<&mut BorderColor>,
+    focus: Option<Res<bevy::input_focus::InputFocus>>,
+    visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
-    use crate::client::menu_ui as ui;
-    parent
-        .spawn((
-            ui::Segment,
-            BackgroundColor(ui::BG),
-            BorderColor::all(ui::EDGE),
-            Node {
-                padding: UiRect::all(Val::Px(3.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                column_gap: Val::Px(2.0),
-                flex_shrink: 0.0,
-                ..default()
-            },
-        ))
-        .with_children(choices);
+    let focused = crate::client::menu_ui::visible_focus(focus.as_deref(), visible.as_deref());
+    for (entity, checkbox, hovered, mut outline) in &mut boxes {
+        let ring = if checkbox.on {
+            theme::CHECK_RING_ON
+        } else if hovered.0 {
+            theme::CHECK_RING_HOVER
+        } else {
+            theme::CHECK_RING
+        };
+        if let Ok(mut border) = rings.get_mut(checkbox.ring) {
+            border.set_if_neq(BorderColor::all(ring));
+        }
+        let focus = if focused == Some(entity) {
+            theme::FOCUS_TIGHT
+        } else {
+            Color::NONE
+        };
+        if outline.color != focus {
+            outline.color = focus;
+        }
+    }
 }
-pub(super) fn switch(parent: &mut ChildSpawnerCommands, on: bool, operation: Operation) {
-    use crate::client::menu_ui as ui;
-    parent
-        .spawn((
-            bevy::ui_widgets::Button,
-            bevy::input_focus::tab_navigation::TabIndex(0),
-            operation,
-            Node {
-                min_height: Val::Px(40.0),
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                ..default()
-            },
-        ))
-        .with_children(|button| {
-            ui::text(button, if on { "On" } else { "Off" }, 11.0, ui::INK);
-            button
-                .spawn((
-                    BackgroundColor(if on { ui::LEAF } else { ui::CARD }),
-                    BorderColor::all(if on { ui::LEAF } else { ui::EDGE }),
-                    Node {
-                        width: Val::Px(32.0),
-                        height: Val::Px(18.0),
-                        padding: UiRect::all(Val::Px(2.0)),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(12.0)),
-                        align_items: AlignItems::Center,
-                        justify_content: if on {
-                            JustifyContent::FlexEnd
-                        } else {
-                            JustifyContent::FlexStart
-                        },
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ))
-                .with_child((
-                    BackgroundColor(if on { ui::BG } else { ui::MUTED }),
-                    Node {
-                        width: Val::Px(12.0),
-                        height: Val::Px(12.0),
-                        border_radius: BorderRadius::all(Val::Px(6.0)),
-                        ..default()
-                    },
-                    Pickable::IGNORE,
-                ));
-        });
-}
+
 pub(super) fn footer(parent: &mut ChildSpawnerCommands, changed: bool) {
     use crate::client::cinematic::{self as cine, Kind};
     use crate::client::menu_ui as ui;
-    parent
-        .spawn((
-            BackgroundColor(cine::SHEET_FOOTER),
-            BorderColor::all(cine::EDGE.with_alpha(0.5)),
-            Node {
-                padding: UiRect::axes(Val::Px(26.0), Val::Px(14.0)),
-                border: UiRect::top(Val::Px(1.0)),
-                justify_content: JustifyContent::SpaceBetween,
-                align_items: AlignItems::Center,
-                column_gap: Val::Px(10.0),
-                flex_shrink: 0.0,
-                ..default()
+    parent.spawn(cine::sheet_footer()).with_children(|footer| {
+        buttons::button(
+            footer,
+            "Back",
+            Operation::Back,
+            ButtonStyle::Cinematic {
+                kind: Kind::Ghost,
+                align: Align::Centre,
             },
-        ))
-        .with_children(|footer| {
-            buttons::button(
-                footer,
-                "Back",
-                Operation::Back,
-                ButtonStyle::Cinematic {
-                    kind: Kind::Ghost,
-                    align: Align::Centre,
-                },
-            );
-            footer
-                .spawn(Node {
-                    column_gap: Val::Px(10.0),
-                    align_items: AlignItems::Center,
-                    ..default()
-                })
-                .with_children(|actions| {
-                    ui::text(
-                        actions,
-                        if changed {
-                            "Unapplied changes"
-                        } else {
-                            "All changes applied"
-                        },
-                        12.0,
-                        if changed { cine::WARNING } else { cine::MUTED },
-                    );
-                    buttons::button(
-                        actions,
-                        "Restore defaults",
-                        Operation::Reset,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Ghost,
-                            align: Align::Centre,
-                        },
-                    );
-                    let apply = buttons::button(
-                        actions,
-                        "Apply changes",
-                        Operation::Apply,
-                        ButtonStyle::Cinematic {
-                            kind: Kind::Primary,
-                            align: Align::Centre,
-                        },
-                    );
-                    if !changed {
-                        actions
-                            .commands()
-                            .entity(apply)
-                            .insert(bevy::ui::InteractionDisabled);
-                    }
-                });
-        });
+        );
+        footer
+            .spawn(Node {
+                column_gap: Val::Px(10.0),
+                align_items: AlignItems::Center,
+                ..default()
+            })
+            .with_children(|actions| {
+                ui::text(
+                    actions,
+                    if changed {
+                        "Unapplied changes"
+                    } else {
+                        "All changes applied"
+                    },
+                    theme::TEXT_EYEBROW,
+                    if changed {
+                        theme::WARNING
+                    } else {
+                        theme::MUTED
+                    },
+                );
+                buttons::button(
+                    actions,
+                    "Restore defaults",
+                    Operation::Reset,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Ghost,
+                        align: Align::Centre,
+                    },
+                );
+                let apply = buttons::button(
+                    actions,
+                    "Apply changes",
+                    Operation::Apply,
+                    ButtonStyle::Cinematic {
+                        kind: Kind::Primary,
+                        align: Align::Centre,
+                    },
+                );
+                if !changed {
+                    actions
+                        .commands()
+                        .entity(apply)
+                        .insert(bevy::ui::InteractionDisabled);
+                }
+            });
+    });
 }
 
 #[derive(Component)]
@@ -434,29 +803,175 @@ pub(super) fn capture_focus(
     }
 }
 pub(super) fn modal(commands: &mut Commands, settings: &Settings) {
-    use crate::client::menu_ui as ui;
+    use crate::client::cinematic::{self as cine, Kind};
+    let kind = |kind| ButtonStyle::Cinematic {
+        kind,
+        align: Align::Centre,
+    };
     let mut first = None;
     let mut anchor = None;
-    commands.spawn((Panel,GlobalZIndex(80),BackgroundColor(ui::BG.with_alpha(0.85)),Node {position_type:PositionType::Absolute,left:Val::Px(0.0),right:Val::Px(0.0),top:Val::Px(0.0),bottom:Val::Px(0.0),align_items:AlignItems::Center,justify_content:JustifyContent::Center,..default()})).with_children(|shade| {
-        let dialog=shade.spawn((ModalFocus,bevy::input_focus::tab_navigation::TabGroup {modal:true,..default()},BackgroundColor(ui::CARD),BorderColor::all(ui::EDGE),Node {width:Val::Px(390.0),max_width:Val::Percent(92.0),padding:UiRect::all(Val::Px(26.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(10.0)),flex_direction:FlexDirection::Column,row_gap:Val::Px(10.0),..default()})).with_children(|dialog| {
-            if let Some((device,action,slot,_))=settings.capture {
-                let (prompt,cancel)=match device {Device::KeyboardMouse=>("Press a key or mouse button","Esc cancels. The opening click is ignored."),Device::Pad=>("Press a controller button","Menu or Esc cancels. The opening press is ignored.")};
-                ui::weighted_text(dialog,"Change binding",19.0,620,ui::INK);
-                ui::paragraph(dialog,format!("{} · {}",action_name(action),if slot==0{"Primary"}else{"Alternative"}),12.0,ui::MUTED);
-                dialog.spawn((BackgroundColor(Color::srgb(0.069,0.118,0.081)),BorderColor::all(ui::LEAF),Node {padding:UiRect::all(Val::Px(28.0)),margin:UiRect::vertical(Val::Px(5.0)),border:UiRect::all(Val::Px(1.0)),border_radius:BorderRadius::all(Val::Px(6.0)),justify_content:JustifyContent::Center,..default()})).with_children(|well|ui::technical_text(well,prompt,12.0,ui::LEAF));
-                ui::paragraph(dialog,cancel,12.0,ui::MUTED);
-                dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions|{buttons::button(actions, "Cancel", Operation::Cancel, ButtonStyle::Plain);});
-            }else {
-                let (title,description)=if settings.unsaved {("Keep your changes?","You have unapplied behavior, binding or display changes.".into())}else if settings.resetting {("Restore defaults?","This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into())}else{let names=settings.conflict.as_ref().map(|(_,_,conflicts)|conflicts.iter().map(|(action,_)|action_name(*action)).collect::<Vec<_>>().join(", ")).unwrap_or_default();("Binding already in use",format!("This binding is assigned to {names}. Replace it?"))};
-                ui::weighted_text(dialog,title,19.0,620,ui::INK);ui::paragraph(dialog,description,12.0,ui::MUTED);
-                dialog.spawn(Node {justify_content:JustifyContent::FlexEnd,column_gap:Val::Px(7.0),row_gap:Val::Px(7.0),flex_wrap:FlexWrap::Wrap,margin:UiRect::top(Val::Px(10.0)),..default()}).with_children(|actions| {
-                    if settings.unsaved {first=Some(buttons::button(actions, "Stay", Operation::Stay, ButtonStyle::Plain));let discard=buttons::button(actions, "Discard", Operation::Discard, ButtonStyle::Plain);actions.commands().entity(discard).insert(ui::Danger);buttons::button(actions, "Save changes", Operation::Apply, ButtonStyle::Primary);}
-                    else if settings.resetting {first=Some(buttons::button(actions, "Cancel", Operation::CancelReset, ButtonStyle::Plain));let restore=buttons::button(actions, "Restore defaults", Operation::ConfirmReset, ButtonStyle::Primary);actions.commands().entity(restore).insert(ui::Danger);}
-                    else {first=Some(buttons::button(actions, "Keep existing", Operation::CancelConflict, ButtonStyle::Plain));buttons::button(actions, "Replace binding", Operation::Replace, ButtonStyle::Primary);}
-                });
-            }
-        }).id();anchor=Some(dialog);
-    });
+    commands
+        .spawn((
+            Panel,
+            GlobalZIndex(80),
+            BackgroundColor(theme::OVERLAY),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                right: Val::Px(0.0),
+                top: Val::Px(0.0),
+                bottom: Val::Px(0.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+        ))
+        .with_children(|shade| {
+            let dialog = shade
+                .spawn((
+                    ModalFocus,
+                    bevy::input_focus::tab_navigation::TabGroup {
+                        modal: true,
+                        ..default()
+                    },
+                    cine::dialog_box(),
+                ))
+                .with_children(|dialog| {
+                    if let Some((device, action, slot, _)) = settings.capture {
+                        let (prompt, cancel) = match device {
+                            Device::KeyboardMouse => (
+                                "Press a key or mouse button",
+                                "Esc cancels. The opening click is ignored.",
+                            ),
+                            Device::Pad => (
+                                "Press a controller button",
+                                "Menu or Esc cancels. The opening press is ignored.",
+                            ),
+                        };
+                        cine::dialog_title(dialog, "Change binding");
+                        cine::dialog_text(
+                            dialog,
+                            format!(
+                                "{} · {}",
+                                action_name(action),
+                                if slot == 0 { "Primary" } else { "Alternative" }
+                            ),
+                            theme::MUTED,
+                        );
+                        dialog
+                            .spawn((
+                                BackgroundColor(theme::FIELD),
+                                BorderColor::all(theme::FIELD_EDGE),
+                                Node {
+                                    padding: UiRect::all(Val::Px(28.0)),
+                                    margin: UiRect::vertical(Val::Px(5.0)),
+                                    border: UiRect::all(Val::Px(theme::RULE)),
+                                    border_radius: BorderRadius::all(Val::Px(
+                                        theme::RADIUS_CONTROL,
+                                    )),
+                                    justify_content: JustifyContent::Center,
+                                    ..default()
+                                },
+                            ))
+                            .with_children(|well| {
+                                crate::client::menu_ui::technical_text(
+                                    well,
+                                    prompt,
+                                    theme::TEXT_BODY,
+                                    theme::INK,
+                                )
+                            });
+                        cine::dialog_text(dialog, cancel, theme::MUTED);
+                        dialog
+                            .spawn(cine::dialog_actions())
+                            .with_children(|actions| {
+                                buttons::button(actions, "Cancel", Operation::Cancel, kind(Kind::Plain));
+                            });
+                    } else {
+                        let (title, description) = if settings.unsaved {
+                            (
+                                "Keep your changes?",
+                                "You have unapplied behavior, binding or display changes.".into(),
+                            )
+                        } else if settings.resetting {
+                            (
+                                "Restore defaults?",
+                                "This resets the controls and display draft. Your saved preferences stay unchanged until you apply.".into(),
+                            )
+                        } else {
+                            let names = settings
+                                .conflict
+                                .as_ref()
+                                .map(|(_, _, conflicts)| {
+                                    conflicts
+                                        .iter()
+                                        .map(|(action, _)| action_name(*action))
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                })
+                                .unwrap_or_default();
+                            (
+                                "Binding already in use",
+                                format!("This binding is assigned to {names}. Replace it?"),
+                            )
+                        };
+                        cine::dialog_title(dialog, title);
+                        cine::dialog_text(dialog, description, theme::MUTED);
+                        dialog
+                            .spawn(cine::dialog_actions())
+                            .with_children(|actions| {
+                                if settings.unsaved {
+                                    first = Some(buttons::button(
+                                        actions,
+                                        "Stay",
+                                        Operation::Stay,
+                                        kind(Kind::Ghost),
+                                    ));
+                                    buttons::button(
+                                        actions,
+                                        "Discard",
+                                        Operation::Discard,
+                                        kind(Kind::Danger),
+                                    );
+                                    buttons::button(
+                                        actions,
+                                        "Save changes",
+                                        Operation::Apply,
+                                        kind(Kind::Primary),
+                                    );
+                                } else if settings.resetting {
+                                    first = Some(buttons::button(
+                                        actions,
+                                        "Cancel",
+                                        Operation::CancelReset,
+                                        kind(Kind::Ghost),
+                                    ));
+                                    buttons::button(
+                                        actions,
+                                        "Restore defaults",
+                                        Operation::ConfirmReset,
+                                        kind(Kind::Danger),
+                                    );
+                                } else {
+                                    first = Some(buttons::button(
+                                        actions,
+                                        "Keep existing",
+                                        Operation::CancelConflict,
+                                        kind(Kind::Ghost),
+                                    ));
+                                    buttons::button(
+                                        actions,
+                                        "Replace binding",
+                                        Operation::Replace,
+                                        kind(Kind::Primary),
+                                    );
+                                }
+                            });
+                    }
+                })
+                .id();
+            anchor = Some(dialog);
+        });
     let focused = if settings.capturing() { anchor } else { first };
     if let Some(entity) = focused {
         commands.queue(move |world: &mut World| {

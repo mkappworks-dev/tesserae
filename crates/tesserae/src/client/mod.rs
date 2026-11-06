@@ -53,6 +53,7 @@ pub mod sight;
 mod sky;
 #[cfg(feature = "dev")]
 mod soak;
+mod theme;
 mod tile_preview;
 mod tool;
 mod touch;

@@ -9,14 +9,7 @@ use bevy::{
     ui_widgets::{Activate, TextInput},
 };
 
-pub(super) const LEAF: Color = Color::srgb(0.286745, 0.696314, 0.384471);
-pub(super) const BG: Color = Color::srgb(10.0 / 255.0, 10.0 / 255.0, 10.0 / 255.0);
-pub(super) const CARD: Color = Color::srgb(17.0 / 255.0, 17.0 / 255.0, 17.0 / 255.0);
-pub(super) const EDGE: Color = Color::srgb(25.0 / 255.0, 25.0 / 255.0, 25.0 / 255.0);
-pub(super) const INK: Color = Color::srgb(245.0 / 255.0, 245.0 / 255.0, 245.0 / 255.0);
-pub(super) const AMBER: Color = Color::srgb(1.0, 0.7, 0.3);
-pub(super) const RED: Color = Color::srgb(0.95, 0.3, 0.3);
-pub(super) const MUTED: Color = Color::srgb(129.0 / 255.0, 129.0 / 255.0, 129.0 / 255.0);
+use super::theme;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub(super) enum Tab {
@@ -86,13 +79,9 @@ struct ClearSearch;
 #[derive(Component)]
 pub(super) struct Quiet;
 #[derive(Component)]
-pub(super) struct BindingControl;
-#[derive(Component)]
 pub(super) struct EmptyBinding;
 #[derive(Component)]
 pub(super) struct EmptyBorder(pub Entity);
-#[derive(Component)]
-pub(super) struct Segment;
 #[derive(Component)]
 struct SearchPlaceholder;
 #[derive(Component)]
@@ -104,7 +93,7 @@ struct SearchCount(Tab);
 #[derive(Component)]
 struct HeadingPill(Tab);
 #[derive(Component)]
-#[require(bevy::picking::hover::Hovered)]
+#[require(bevy::picking::hover::Hovered, Outline = theme::focus_ring())]
 pub(super) struct Styled {
     pub selected: bool,
     pub tab: bool,
@@ -123,11 +112,7 @@ pub(super) fn visible_focus(
 }
 
 pub(super) fn font(size: f32) -> TextFont {
-    TextFont {
-        font: bevy::text::FontSource::family("Aileron"),
-        font_size: bevy::text::FontSize::Px(size),
-        ..default()
-    }
+    theme::font(size)
 }
 pub(super) fn text(
     parent: &mut ChildSpawnerCommands,
@@ -154,7 +139,7 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (style, button_label_colors, danger_colors)
+            (style, button_label_colors)
                 .chain()
                 .after(super::settings::render),
         )
@@ -196,24 +181,6 @@ pub(super) fn plugin(app: &mut App) {
                 .before(super::settings::render)
                 .run_if(in_menus),
         );
-}
-
-/// A destructive action: red label and border instead of the neutral ones.
-#[derive(Component)]
-pub(super) struct Danger;
-
-fn danger_colors(
-    mut buttons: Query<(&Children, &mut BorderColor), With<Danger>>,
-    mut labels: Query<&mut TextColor>,
-) {
-    for (children, mut border) in &mut buttons {
-        *border = BorderColor::all(RED.with_alpha(0.6));
-        for child in children {
-            if let Ok(mut text) = labels.get_mut(*child) {
-                text.0 = RED;
-            }
-        }
-    }
 }
 
 fn focus(
@@ -317,11 +284,11 @@ type StyledButtons<'w, 's> = Query<
         &'static Styled,
         &'static bevy::picking::hover::Hovered,
         Has<Quiet>,
-        Has<BindingControl>,
         Has<EmptyBinding>,
         Has<bevy::ui::InteractionDisabled>,
         &'static mut BackgroundColor,
         &'static mut BorderColor,
+        &'static mut Outline,
     ),
 >;
 fn style(
@@ -330,32 +297,62 @@ fn style(
     visible: Option<Res<bevy::input_focus::InputFocusVisible>>,
 ) {
     let focused = visible_focus(Some(&focus), visible.as_deref());
-    for (entity, style, interaction, quiet, binding, empty, disabled, mut background, mut border) in
-        &mut buttons
+    for (
+        entity,
+        style,
+        interaction,
+        quiet,
+        empty,
+        disabled,
+        mut background,
+        mut border,
+        mut outline,
+    ) in &mut buttons
     {
-        let hover = (interaction.0 || focused == Some(entity)) && !disabled;
-        background.0 = if empty {
-            Color::NONE
+        let hover = interaction.0 && !disabled;
+        let (fill, edge) = if empty || style.tab {
+            (
+                Color::NONE,
+                if style.tab && style.selected {
+                    theme::SAGE
+                } else {
+                    Color::NONE
+                },
+            )
+        } else if disabled {
+            (theme::DISABLED, theme::DISABLED_EDGE)
         } else if style.primary {
-            LEAF
-        } else if style.tab || quiet && !hover {
-            Color::NONE
-        } else if style.selected || hover {
-            Color::srgb(0.069, 0.118, 0.081)
-        } else if binding {
-            BG
+            (
+                if hover {
+                    theme::SAGE_HOVER
+                } else {
+                    theme::SAGE
+                },
+                theme::SAGE,
+            )
+        } else if quiet {
+            if hover {
+                (theme::QUIET_HOVER, theme::QUIET_HOVER_EDGE)
+            } else {
+                (Color::NONE, Color::NONE)
+            }
+        } else if style.selected {
+            (theme::SEGMENT_ON, theme::SEGMENT_ON_EDGE)
+        } else if hover {
+            (theme::HOVER, theme::EDGE)
         } else {
-            CARD
+            (theme::RAISED, theme::EDGE)
         };
-        *border = BorderColor::all(if empty {
-            Color::NONE
-        } else if hover || style.selected || style.primary {
-            LEAF
-        } else if style.tab || quiet {
-            Color::NONE
+        background.set_if_neq(BackgroundColor(fill));
+        border.set_if_neq(BorderColor::all(edge));
+        let ring = if focused == Some(entity) {
+            theme::FOCUS
         } else {
-            EDGE
-        });
+            Color::NONE
+        };
+        if outline.color != ring {
+            outline.color = ring;
+        }
     }
 }
 /// Where the Settings page's body goes, under the sheet's header.
@@ -409,15 +406,22 @@ fn shell(
                 ..default()
             },
             BackgroundColor(if over_world && !solid {
-                Color::BLACK.with_alpha(0.55)
+                Color::NONE
+            } else if solid {
+                theme::SOLID_BACKGROUND
             } else {
-                cine::SCENE
+                theme::SCENE
             }),
+            if over_world && !solid {
+                theme::shade()
+            } else {
+                BackgroundGradient::default()
+            },
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                padding: UiRect::axes(Val::Px(34.0), Val::Px(28.0)),
+                padding: UiRect::axes(Val::Px(theme::SCREEN_PAD_X), Val::Px(28.0)),
                 justify_content: JustifyContent::Center,
                 ..default()
             },
@@ -434,17 +438,15 @@ fn shell(
                 rail(workspace, tab);
                 workspace
                     .spawn((
-                        cine::surface(cine::PANEL),
-                        Node {
+                        cine::surface(theme::PANEL),
+                        cine::framed(Node {
                             flex_direction: FlexDirection::Column,
                             flex_grow: 1.0,
                             min_width: Val::Px(0.0),
                             min_height: Val::Px(0.0),
-                            border: UiRect::all(Val::Px(2.0)),
-                            border_radius: BorderRadius::all(Val::Px(8.0)),
                             overflow: Overflow::clip(),
                             ..default()
-                        },
+                        }),
                     ))
                     .with_children(|sheet| {
                         heading(sheet, tab);
@@ -480,17 +482,15 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
     use super::cinematic as cine;
     workspace
         .spawn((
-            cine::surface(cine::PANEL),
-            Node {
+            cine::surface(theme::PANEL),
+            cine::framed(Node {
                 width: Val::Px(220.0),
                 flex_shrink: 0.0,
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(7.0),
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(20.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
-            },
+            }),
         ))
         .with_children(|nav| {
             nav.spawn(Node {
@@ -526,8 +526,8 @@ fn rail(workspace: &mut ChildSpawnerCommands, tab: Tab) {
                 paragraph(
                     note,
                     "Your preferences, across every World.",
-                    12.0,
-                    cine::MUTED,
+                    theme::TEXT_EYEBROW,
+                    theme::CHROME_INK,
                 )
             });
         });
@@ -537,11 +537,16 @@ fn heading(sheet: &mut ChildSpawnerCommands, tab: Tab) {
     use super::cinematic as cine;
     sheet
         .spawn((
-            BackgroundColor(cine::SHEET_HEADER),
-            BorderColor::all(cine::EDGE.with_alpha(0.5)),
+            BackgroundColor(theme::SHEET_HEADER),
+            BorderColor::all(theme::EDGE),
             Node {
-                padding: UiRect::new(Val::Px(26.0), Val::Px(26.0), Val::Px(20.0), Val::Px(18.0)),
-                border: UiRect::bottom(Val::Px(1.0)),
+                padding: UiRect::new(
+                    Val::Px(theme::SHEET_PAD_X),
+                    Val::Px(theme::SHEET_PAD_X),
+                    Val::Px(20.0),
+                    Val::Px(18.0),
+                ),
+                border: UiRect::bottom(Val::Px(theme::RULE)),
                 justify_content: JustifyContent::SpaceBetween,
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(12.0),
@@ -553,12 +558,12 @@ fn heading(sheet: &mut ChildSpawnerCommands, tab: Tab) {
             header
                 .spawn(Node {
                     flex_direction: FlexDirection::Column,
-                    row_gap: Val::Px(6.0),
+                    row_gap: Val::Px(7.0),
                     ..default()
                 })
                 .with_children(|title| {
                     buttons::eyebrow(title, "MENU / SETTINGS", Eyebrow::Cinematic);
-                    weighted_text(title, tab.label(), 25.0, 500, cine::INK);
+                    cine::title(title, tab.label());
                     paragraph(
                         title,
                         match tab {
@@ -570,17 +575,17 @@ fn heading(sheet: &mut ChildSpawnerCommands, tab: Tab) {
                             Tab::Display => "Choose frame pacing without changing visual quality.",
                             Tab::Accessibility => "Comfort and readability, in menus and in play.",
                         },
-                        13.0,
-                        cine::MUTED,
+                        theme::TEXT_SMALL,
+                        theme::MUTED,
                     );
                 });
             header.spawn((
                 HeadingPill(tab),
                 Text::default(),
                 font(10.0),
-                TextColor(cine::MUTED),
+                TextColor(theme::MUTED),
                 bevy::text::LetterSpacing::Px(0.9),
-                BorderColor::all(cine::EDGE),
+                BorderColor::all(theme::EDGE),
                 Node {
                     border: UiRect::all(Val::Px(1.0)),
                     border_radius: BorderRadius::all(Val::Px(12.0)),
@@ -602,14 +607,14 @@ pub(super) fn search_frame(
     parent
         .spawn((
             SearchFrame,
-            BackgroundColor(CARD),
-            BorderColor::all(EDGE),
+            BackgroundColor(theme::FIELD),
+            BorderColor::all(theme::FIELD_EDGE),
             Node {
                 flex_grow: 1.0,
                 min_width: Val::Px(0.0),
                 height: Val::Px(height),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                 padding: UiRect::axes(Val::Px(11.0), Val::Px(0.0)),
                 align_items: AlignItems::Center,
                 column_gap: Val::Px(9.0),
@@ -617,7 +622,7 @@ pub(super) fn search_frame(
             },
         ))
         .with_children(|field| {
-            icon(field, IconKind::Search, MUTED, 14.0);
+            icon(field, IconKind::Search, theme::MUTED, 16.0);
             field
                 .spawn(Node {
                     flex_grow: 1.0,
@@ -633,11 +638,11 @@ pub(super) fn search_frame(
                             TextInput,
                             EditableText::new(value),
                             TabIndex(0),
-                            font(12.0),
-                            TextColor(INK),
+                            font(theme::TEXT_SMALL),
+                            TextColor(theme::INK),
                             bevy::text::TextCursorStyle {
-                                color: LEAF,
-                                selection_color: Color::srgba(0.286745, 0.696314, 0.384471, 0.3),
+                                color: theme::SAGE,
+                                selection_color: theme::SAGE.with_alpha(0.3),
                                 ..default()
                             },
                             TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
@@ -655,8 +660,8 @@ pub(super) fn search_frame(
                         } else {
                             "Search actions or keys…"
                         }),
-                        font(12.0),
-                        TextColor(MUTED),
+                        font(theme::TEXT_SMALL),
+                        TextColor(theme::PLACEHOLDER),
                         Pickable::IGNORE,
                         Node {
                             position_type: PositionType::Absolute,
@@ -684,12 +689,9 @@ pub(super) fn search_frame(
             field.spawn((
                 SearchSlash,
                 Text::new("/"),
-                TextFont {
-                    font: bevy::text::FontSource::family("Aileron"),
-                    ..font(11.0)
-                },
-                TextColor(MUTED),
-                BorderColor::all(EDGE),
+                font(theme::TEXT_KEY),
+                TextColor(theme::MUTED),
+                BorderColor::all(theme::KEY_EDGE),
                 Node {
                     padding: UiRect::axes(Val::Px(5.0), Val::Px(2.0)),
                     border: UiRect::all(Val::Px(1.0)),
@@ -720,8 +722,8 @@ fn search_row(root: &mut ChildSpawnerCommands, tab: Tab, value: &str) {
         row.spawn((
             SearchCount(tab),
             Text::default(),
-            font(11.0),
-            TextColor(MUTED),
+            font(theme::TEXT_EYEBROW),
+            TextColor(theme::MUTED),
             Node {
                 width: Val::Px(72.0),
                 justify_content: JustifyContent::FlexEnd,
@@ -824,19 +826,9 @@ pub(super) fn weighted_text(
 ) {
     parent.spawn((
         Text::new(value),
-        TextFont {
-            weight: bevy::text::FontWeight(weight),
-            ..font(size)
-        },
+        theme::weighted(size, weight),
         bevy::text::LineHeight::RelativeToFont(1.5),
         TextColor(color),
-        bevy::text::LetterSpacing::Px(if size == 25.0 {
-            -0.7
-        } else if size == 17.0 {
-            -0.5
-        } else {
-            0.0
-        }),
         Pickable::IGNORE,
     ));
 }
@@ -852,7 +844,11 @@ fn search_presentation(
 ) {
     let focused = focus.get().is_some_and(|entity| fields.contains(entity));
     for mut border in &mut frames {
-        *border = BorderColor::all(if focused { LEAF } else { EDGE });
+        *border = BorderColor::all(if focused {
+            theme::SAGE
+        } else {
+            theme::FIELD_EDGE
+        });
     }
     for (count, mut text) in &mut counts {
         let (number, label) = if count.0 == Tab::Catalogue {
@@ -908,7 +904,10 @@ pub(super) enum IconKind {
     Close,
     Sync,
     Uncapped,
+    Check,
+    Chevron,
 }
+const ICONS: usize = 7;
 #[derive(Component)]
 pub(super) struct Icon(pub IconKind, pub Color);
 #[derive(Resource)]
@@ -921,13 +920,15 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         asset::RenderAssetUsages,
         render::render_resource::{Extent3d, TextureDimension, TextureFormat},
     };
-    let mut data = vec![0; 320 * 64 * 4];
-    let segment = |p: Vec2, a: Vec2, b: Vec2| {
+    let width = ICONS * 64;
+    let mut data = vec![0; width * 64 * 4];
+    let stroke = |p: Vec2, a: Vec2, b: Vec2, half: f32| {
         let along = ((p - a).dot(b - a) / (b - a).length_squared()).clamp(0.0, 1.0);
-        p.distance(a + (b - a) * along) < 0.6
+        p.distance(a + (b - a) * along) < half
     };
+    let segment = |p: Vec2, a: Vec2, b: Vec2| stroke(p, a, b, 0.6);
     for y in 0..64 {
-        for x in 0..320 {
+        for x in 0..width {
             let i = x / 64;
             let p = Vec2::new(((x % 64) as f32 + 0.5) / 4.0, (y as f32 + 0.5) / 4.0);
             let ink = match i {
@@ -952,20 +953,28 @@ fn make_icons(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
                         || segment(p, Vec2::new(14.0, 8.0), Vec2::new(11.0, 5.0))
                         || segment(p, Vec2::new(14.0, 8.0), Vec2::new(11.0, 11.0))
                 }
-                _ => {
+                4 => {
                     segment(p, Vec2::new(4.0, 12.0), Vec2::new(12.0, 4.0))
                         || segment(p, Vec2::new(6.0, 4.0), Vec2::new(12.0, 4.0))
                         || segment(p, Vec2::new(12.0, 10.0), Vec2::new(12.0, 4.0))
                 }
+                5 => {
+                    stroke(p, Vec2::new(3.5, 8.5), Vec2::new(6.5, 11.5), 1.2)
+                        || stroke(p, Vec2::new(6.5, 11.5), Vec2::new(12.5, 4.5), 1.2)
+                }
+                _ => {
+                    stroke(p, Vec2::new(4.0, 6.0), Vec2::new(8.0, 10.0), 0.75)
+                        || stroke(p, Vec2::new(8.0, 10.0), Vec2::new(12.0, 6.0), 0.75)
+                }
             };
             if ink {
-                data[(y * 320 + x) * 4..(y * 320 + x) * 4 + 4].copy_from_slice(&[255; 4]);
+                data[(y * width + x) * 4..(y * width + x) * 4 + 4].copy_from_slice(&[255; 4]);
             }
         }
     }
     let icons = images.add(Image::new(
         Extent3d {
-            width: 320,
+            width: width as u32,
             height: 64,
             depth_or_array_layers: 1,
         },
@@ -1025,7 +1034,7 @@ fn materialize_icons(
     for entity in &borders {
         commands.entity(entity).insert(ImageNode {
             image: atlas.empty_border.clone(),
-            color: EDGE,
+            color: theme::EDGE,
             ..default()
         });
     }
@@ -1051,10 +1060,7 @@ pub(super) fn technical_text(
 ) {
     parent.spawn((
         Text::new(label),
-        TextFont {
-            font: bevy::text::FontSource::family("Aileron"),
-            ..font(size)
-        },
+        font(size),
         bevy::text::LineHeight::RelativeToFont(1.5),
         TextColor(color),
         Pickable::IGNORE,
@@ -1108,15 +1114,17 @@ fn button_label_colors(
 ) {
     for (style, hovered, children, disabled, quiet, empty) in &buttons {
         let color = if disabled {
-            MUTED.with_alpha(0.55)
+            theme::DISABLED_INK
         } else if empty {
-            MUTED
+            theme::MUTED
         } else if style.primary {
-            BG
+            theme::SAGE_INK
         } else if (quiet || style.tab && !style.selected) && !hovered.0 {
-            MUTED
+            theme::MUTED
+        } else if style.selected && !style.tab {
+            theme::SEGMENT_ON_INK
         } else {
-            INK
+            theme::INK
         };
         for child in children {
             if let Ok(mut text) = labels.get_mut(*child) {
@@ -1141,8 +1149,8 @@ pub(super) enum Tone {
 impl Tone {
     fn accent(self) -> Color {
         match self {
-            Self::Change => LEAF,
-            Self::Alert => AMBER,
+            Self::Change => theme::ACCENT,
+            Self::Alert => theme::WARN,
         }
     }
 }
@@ -1185,44 +1193,33 @@ pub(super) fn notify_for(commands: &mut Commands, message: &str, tone: Tone, sec
         ))
         .with_children(|root| {
             root.spawn((
-                BackgroundColor(CARD),
+                BackgroundColor(theme::NOTICE_CARD),
+                BorderColor {
+                    left: accent,
+                    ..BorderColor::all(theme::GROUT)
+                },
+                BoxShadow::new(
+                    Color::BLACK.with_alpha(0.53),
+                    Val::Px(0.0),
+                    Val::Px(10.0),
+                    Val::Px(0.0),
+                    Val::Px(30.0),
+                ),
                 Node {
-                    max_width: Val::Px(440.0),
-                    min_height: Val::Px(44.0),
-                    align_items: AlignItems::Center,
-                    column_gap: Val::Px(10.0),
-                    padding: UiRect::axes(Val::Px(14.0), Val::Px(10.0)),
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    max_width: Val::Px(360.0),
+                    padding: UiRect::axes(Val::Px(16.0), Val::Px(11.0)),
+                    border: UiRect {
+                        left: Val::Px(4.0),
+                        ..UiRect::all(Val::Px(theme::FRAME))
+                    },
+                    border_radius: BorderRadius::all(Val::Px(theme::RADIUS_MENU)),
                     ..default()
                 },
                 Pickable::IGNORE,
             ))
-            .with_children(|toast| {
-                toast
-                    .spawn((
-                        Node {
-                            width: Val::Px(22.0),
-                            height: Val::Px(22.0),
-                            flex_shrink: 0.0,
-                            align_items: AlignItems::Center,
-                            justify_content: JustifyContent::Center,
-                            border_radius: BorderRadius::all(Val::Px(4.0)),
-                            ..default()
-                        },
-                        BackgroundColor(accent.with_alpha(0.12)),
-                        Pickable::IGNORE,
-                    ))
-                    .with_child((
-                        Node {
-                            width: Val::Px(6.0),
-                            height: Val::Px(6.0),
-                            border_radius: BorderRadius::all(Val::Px(2.0)),
-                            ..default()
-                        },
-                        BackgroundColor(accent),
-                        Pickable::IGNORE,
-                    ));
-                weighted_text(toast, message, 13.0, 600, INK);
+            .with_children(|card| {
+                card.spawn(theme::ring(theme::RADIUS_MENU));
+                paragraph(card, message, theme::TEXT_CAPTION, theme::INK);
             });
         });
 }
@@ -1253,9 +1250,9 @@ fn age_notifications(
 pub(super) fn description(parent: &mut ChildSpawnerCommands, value: &str) {
     parent.spawn((
         Text::new(value),
-        font(11.0),
-        bevy::text::LineHeight::RelativeToFont(1.65),
-        TextColor(MUTED),
+        font(theme::TEXT_SMALL),
+        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
+        TextColor(theme::MUTED),
         Pickable::IGNORE,
     ));
 }
@@ -1268,7 +1265,7 @@ pub(super) fn paragraph(
     parent.spawn((
         Text::new(value),
         font(size),
-        bevy::text::LineHeight::RelativeToFont(1.6),
+        bevy::text::LineHeight::RelativeToFont(theme::LINE_HEIGHT),
         TextColor(color),
         Pickable::IGNORE,
     ));
@@ -1283,9 +1280,9 @@ fn dashed_border_colors(
     for (border, mut image) in &mut borders {
         image.color =
             if focused == Some(border.0) || buttons.get(border.0).is_ok_and(|hovered| hovered.0) {
-                LEAF
+                theme::SAGE
             } else {
-                EDGE
+                theme::EDGE
             };
     }
 }
@@ -1305,17 +1302,17 @@ mod tests {
     #[test]
     fn alerts_and_changes_carry_distinct_accents() {
         for (tone, accent) in [
-            (super::Tone::Change, super::LEAF),
-            (super::Tone::Alert, super::AMBER),
+            (super::Tone::Change, theme::ACCENT),
+            (super::Tone::Alert, theme::WARN),
         ] {
             let mut app = App::new();
             super::notify(&mut app.world_mut().commands(), "Notice", tone);
             app.world_mut().flush();
             assert!(
                 app.world_mut()
-                    .query::<&BackgroundColor>()
+                    .query::<&BorderColor>()
                     .iter(app.world())
-                    .any(|color| color.0 == accent)
+                    .any(|color| color.left == accent)
             );
         }
     }

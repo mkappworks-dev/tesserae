@@ -136,6 +136,17 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<bevy::input_focus::InputFocus>()
         .add_observer(activate)
         .add_observer(scalar_changed)
+        .add_observer(toggle_select)
+        .add_systems(
+            Update,
+            (
+                close_selects.before(super::menu::toggle).before(capture),
+                place_selects,
+                select_visuals,
+                checkbox_visuals,
+            )
+                .run_if(crate::session::in_menus),
+        )
         .add_systems(
             PreUpdate,
             capture_focus

@@ -11,9 +11,10 @@ use bevy::ui_widgets::{Activate, ScrollArea};
 use tesserae_core::inventory::{Destination, Slot};
 use tesserae_core::{MaterialId, SHAPE_FULL_CUBE};
 
-use super::{INK, InventoryWindow, RULE, SLOT_EDGE, SLOT_FILL, SLOT_HOVER, SOFT, weighted};
+use super::{INK, InventoryWindow, RULE, SOFT, weighted};
 use crate::client::edit::{Catalogue, Holding, Hotbar};
 use crate::client::menu_ui::{self as ui, Searches};
+use crate::client::theme;
 use crate::content::ContentCatalogue;
 use crate::server::inventory::{InventoryIntent, MAX_STACK};
 use crate::session::SessionApp;
@@ -35,8 +36,6 @@ const FOOTER: Color = Color::srgb_u8(14, 14, 17);
 const FOOTER_RULE: Color = Color::srgb_u8(52, 52, 60);
 const SUBTITLE: Color = Color::srgb_u8(169, 173, 182);
 const TILE_SELECTED: Color = Color::srgb_u8(44, 48, 42);
-const RIM_SELECTED: Color = Color::srgb_u8(238, 243, 228);
-const RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
 const MONO: Color = Color::srgb_u8(159, 164, 173);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -464,8 +463,8 @@ fn tile(grid: &mut ChildSpawnerCommands, material: MaterialId, name: &str, holdi
             border_radius: BorderRadius::all(Val::Px(4.0)),
             ..default()
         },
-        BackgroundColor(SLOT_FILL),
-        BorderColor::all(SLOT_EDGE),
+        BackgroundColor(theme::SLOT_FILL),
+        BorderColor::all(theme::SLOT_EDGE),
     ))
     .with_children(|tile| {
         preview(tile, holding, 30.0);
@@ -670,16 +669,16 @@ pub(super) fn paint(
         fill.set_if_neq(BackgroundColor(if selected {
             TILE_SELECTED
         } else if hovered.get() {
-            SLOT_HOVER
+            theme::SLOT_HOVER
         } else {
-            SLOT_FILL
+            theme::SLOT_FILL
         }));
         border.set_if_neq(BorderColor::all(if selected {
-            RIM_SELECTED
+            theme::SLOT_ACTIVE_EDGE
         } else if hovered.get() {
-            RIM_HOVER
+            theme::SLOT_RIM_HOVER
         } else {
-            SLOT_EDGE
+            theme::SLOT_EDGE
         }));
     }
 }

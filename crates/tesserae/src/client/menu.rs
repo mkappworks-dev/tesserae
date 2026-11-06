@@ -15,6 +15,7 @@ use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow};
 use super::actions::{Action, Actions};
 use super::cinematic::{self as cine, Kind};
 use super::menu_ui as ui;
+use super::theme;
 use crate::content::{MaterialPalette, WorldFacts};
 use crate::render::chunk_material::{ChunkMaterialExtension, FLAME_SLOT};
 use crate::server::game_mode::GameMode;
@@ -260,10 +261,15 @@ fn render(
             MenuRoot,
             GlobalZIndex(8),
             BackgroundColor(if solid {
-                cine::SCENE
+                theme::SOLID_BACKGROUND
             } else {
-                Color::BLACK.with_alpha(0.45)
+                Color::NONE
             }),
+            if solid {
+                BackgroundGradient::default()
+            } else {
+                theme::shade()
+            },
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -279,7 +285,7 @@ fn render(
                     modal: !details,
                     ..default()
                 },
-                cine::surface(cine::PANEL),
+                cine::surface(theme::PANEL),
                 Node {
                     width: Val::Px(300.0),
                     padding: UiRect::all(Val::Px(25.0)),
@@ -292,7 +298,7 @@ fn render(
             ))
             .with_children(|panel| {
                 buttons::eyebrow(panel, "TAKE A MOMENT", Eyebrow::Cinematic);
-                ui::weighted_text(panel, "Menu", 31.0, 450, cine::INK);
+                ui::weighted_text(panel, "Menu", 31.0, 450, theme::INK);
                 let place = facts
                     .and_then(|f| f.name.clone())
                     .unwrap_or_else(|| "Your World".into());
@@ -300,7 +306,7 @@ fn render(
                     Some(mode) => format!("{place} · {}", mode_name(mode)),
                     None => place,
                 };
-                ui::paragraph(panel, subtitle, 13.0, cine::MUTED);
+                ui::paragraph(panel, subtitle, 13.0, theme::MUTED);
                 panel
                     .spawn(Node {
                         flex_direction: FlexDirection::Column,
@@ -387,7 +393,7 @@ fn world_details(
                     modal: true,
                     ..default()
                 },
-                cine::surface(cine::PANEL),
+                cine::surface(theme::PANEL),
                 Node {
                     width: Val::Px(420.0),
                     max_width: Val::Percent(92.0),
@@ -406,7 +412,7 @@ fn world_details(
                         dialog,
                         "The Server has not described this World yet.",
                         13.0,
-                        cine::MUTED,
+                        theme::MUTED,
                     );
                     close = Some(buttons::button(
                         dialog,
@@ -424,10 +430,10 @@ fn world_details(
                     facts.name.as_deref().unwrap_or("This World"),
                     22.0,
                     500,
-                    cine::INK,
+                    theme::INK,
                 );
                 for line in lines(facts, own) {
-                    ui::paragraph(dialog, line, 13.0, cine::MUTED);
+                    ui::paragraph(dialog, line, 13.0, theme::MUTED);
                 }
                 close = Some(buttons::button(
                     dialog,

@@ -11,6 +11,7 @@ use super::drops::Looks;
 use super::edit::{Catalogue, Holding, Hotbar};
 use super::inventory_window::{Names, item_icon};
 use super::menu_ui::{font, title};
+use super::theme;
 use crate::session::SessionApp;
 
 const BOTTOM_PX: f32 = 10.0;
@@ -39,14 +40,6 @@ pub(super) fn top_px(survival: bool) -> f32 {
 }
 
 const BAR: Color = Color::srgba_u8(6, 7, 8, 0xc7);
-const SLOT_FILL: Color = Color::srgb_u8(23, 24, 26);
-const SLOT_HOVER: Color = Color::srgb_u8(32, 34, 37);
-const ACTIVE_FILL: Color = Color::srgb_u8(38, 42, 37);
-const SLOT_EDGE: Color = Color::srgb_u8(5, 5, 6);
-const ACTIVE_EDGE: Color = Color::srgb_u8(238, 243, 228);
-const RIM: Color = Color::srgb_u8(58, 60, 65);
-const RIM_HOVER: Color = Color::srgb_u8(154, 159, 147);
-const GLOW: Color = Color::srgba_u8(230, 238, 214, 0x55);
 const NAME: Color = Color::srgb_u8(246, 247, 241);
 
 #[derive(Component)]
@@ -221,12 +214,20 @@ fn slot(
             justify_content: JustifyContent::Center,
             ..default()
         },
-        BackgroundColor(if active { ACTIVE_FILL } else { SLOT_FILL }),
-        BorderColor::all(if active { ACTIVE_EDGE } else { SLOT_EDGE }),
+        BackgroundColor(if active {
+            theme::SLOT_ACTIVE_FILL
+        } else {
+            theme::SLOT_FILL
+        }),
+        BorderColor::all(if active {
+            theme::SLOT_ACTIVE_EDGE
+        } else {
+            theme::SLOT_EDGE
+        }),
     ));
     if active {
         button.insert(BoxShadow::new(
-            GLOW,
+            theme::SLOT_GLOW,
             Val::Px(0.0),
             Val::Px(0.0),
             Val::Px(0.0),
@@ -246,7 +247,11 @@ fn slot(
                 border_radius: BorderRadius::all(Val::Px(2.0)),
                 ..default()
             },
-            BorderColor::all(if active { Color::BLACK } else { RIM }),
+            BorderColor::all(if active {
+                Color::BLACK
+            } else {
+                theme::SLOT_RIM
+            }),
             Pickable::IGNORE,
         ));
         if let Some((icon, count)) = icon {
@@ -308,9 +313,9 @@ fn paint(
             continue;
         }
         let (background, rim) = if hovered.get() {
-            (SLOT_HOVER, RIM_HOVER)
+            (theme::SLOT_HOVER, theme::SLOT_RIM_HOVER)
         } else {
-            (SLOT_FILL, RIM)
+            (theme::SLOT_FILL, theme::SLOT_RIM)
         };
         fill.set_if_neq(BackgroundColor(background));
         for child in children {

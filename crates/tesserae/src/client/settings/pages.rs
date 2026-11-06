@@ -1,6 +1,7 @@
 //! Each category's page and what its rows are called.
 
 use super::*;
+use crate::client::theme;
 
 pub(in crate::client) fn action_name(action: Action) -> &'static str {
     use Action::*;
@@ -158,12 +159,7 @@ pub(in crate::client) fn render(
         ))
         .with_children(|root| {
             if !settings.notice.is_empty() {
-                ui::text(
-                    root,
-                    &settings.notice,
-                    12.0,
-                    Color::srgb(254.0 / 255.0, 154.0 / 255.0, 0.0),
-                );
+                ui::text(root, &settings.notice, 12.0, theme::WARNING);
             }
             root.spawn((
                 SettingsScroll,
@@ -174,7 +170,7 @@ pub(in crate::client) fn render(
                     flex_grow: 1.0,
                     flex_basis: Val::Px(0.0),
                     min_height: Val::Px(0.0),
-                    padding: UiRect::axes(Val::Px(26.0), Val::Px(18.0)),
+                    padding: UiRect::axes(Val::Px(theme::SHEET_PAD_X), Val::Px(20.0)),
                     overflow: Overflow::scroll_y(),
                     ..default()
                 },
@@ -239,7 +235,6 @@ pub(super) fn behavior(
             } else {
                 "Sprint while the binding is held."
             },
-            false,
             |row| {
                 segment(row, |buttons| {
                     option(buttons, "Hold", Operation::Sprint(false), !p.toggle_sprint);
@@ -255,7 +250,6 @@ pub(super) fn behavior(
             } else {
                 "Hold on one target until removal completes."
             },
-            true,
             |row| {
                 segment(row, |buttons| {
                     option(buttons, "Hold", Operation::Removal(false), !p.tap_remove);
@@ -267,7 +261,6 @@ pub(super) fn behavior(
             card,
             "Repeat while held",
             "Keep placing solids, and removing one target after another, while held. Timed tap removal stays one per tap.",
-            true,
             |row| switch(row, p.repeat_held, Operation::Repeat),
         );
     });
@@ -276,14 +269,12 @@ pub(super) fn behavior(
             card,
             "Mouse sensitivity",
             "Relative to the default mouse feel.",
-            false,
             |row| slider(row, Scalar::Mouse, p.sensitivity / 0.003),
         );
         setting_row(
             card,
             "Invert vertical look",
             "Reverse the mouse look direction.",
-            false,
             |row| switch(row, p.invert_y, Operation::Invert),
         );
         setting_row(
@@ -294,7 +285,6 @@ pub(super) fn behavior(
             } else {
                 "Wheel down selects the next quick slot."
             },
-            false,
             |row| {
                 segment(row, |buttons| {
                     option(
@@ -316,7 +306,6 @@ pub(super) fn behavior(
             card,
             "Scroll sensitivity",
             "Higher values move through quick slots faster.",
-            true,
             |row| slider(row, Scalar::Scroll, p.scroll_sensitivity),
         );
     });
@@ -335,7 +324,7 @@ pub(super) fn behavior(
             list,
             crate::client::edit::hud_text(context.0, &context.1.0, context.2, bindings, labels, p),
             12.0,
-            crate::client::menu_ui::MUTED,
+            theme::MUTED,
         );
     }
 }
@@ -346,7 +335,6 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
             card,
             "Reduced motion",
             "Use immediate interface transitions, and still the HUD's pulses and slides.",
-            false,
             |row| {
                 switch(
                     row,
@@ -359,7 +347,6 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
             card,
             "Simple menu background",
             "Show menus over a solid background instead of the dimmed World.",
-            false,
             |row| {
                 switch(
                     row,
@@ -372,7 +359,6 @@ pub(super) fn accessibility(list: &mut ChildSpawnerCommands, p: &Preferences) {
             card,
             "Text size",
             "100% is standard; 200% doubles the text in menus and the HUD.",
-            true,
             |row| {
                 segment(row, |buttons| {
                     for scale in crate::client::profile::TEXT_SCALES {
@@ -396,7 +382,6 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             card,
             "Display sync",
             "Match frame presentation to your display.",
-            false,
             |row| {
                 segment(row, |buttons| {
                     option(
@@ -413,7 +398,6 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             card,
             "Anti-aliasing",
             "Smooths block edges. MSAA 4x also smooths the held item and costs more; Off is fastest.",
-            false,
             |row| {
                 segment(row, |buttons| {
                     for aa in crate::client::anti_alias::CHOICES {
@@ -431,7 +415,6 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             card,
             "Render scale",
             "Draws the World at a fraction of the window and scales it up. Menus and text stay sharp.",
-            false,
             |row| {
                 segment(row, |buttons| {
                     for scale in crate::client::render_scale::SCALES {
@@ -446,7 +429,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             },
         );
         card.spawn((
-            BackgroundColor(Color::srgb(0.09, 0.09, 0.09)),
+            BackgroundColor(theme::NOTICE),
             Node {
                 padding: UiRect::axes(Val::Px(14.0), Val::Px(12.0)),
                 margin: UiRect::top(Val::Px(15.0)),
@@ -464,14 +447,14 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                 },
                 11.0,
                 if p.display_sync {
-                    ui::MUTED
+                    theme::MUTED
                 } else {
-                    Color::srgb(254.0 / 255.0, 154.0 / 255.0, 0.0)
+                    theme::WARNING
                 },
             )
         });
         card.spawn((
-            BorderColor::all(ui::EDGE),
+            BorderColor::all(theme::EDGE),
             Node {
                 flex_direction: FlexDirection::Column,
                 padding: UiRect::vertical(Val::Px(17.0)),
@@ -481,7 +464,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
             },
         ))
         .with_children(|limit| {
-            ui::weighted_text(limit, "Frame rate limit", 13.0, 550, ui::INK);
+            ui::weighted_text(limit, "Frame rate limit", 13.0, 550, theme::INK);
             ui::description(limit, "An optional ceiling, independent of display sync.");
             limit
                 .spawn(Node {
@@ -525,8 +508,8 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
         .with_children(|summary| {
             summary
                 .spawn((
-                    BackgroundColor(Color::srgb(0.069, 0.118, 0.081)),
-                    BorderColor::all(Color::srgb(0.1735, 0.3373, 0.2126)),
+                    BackgroundColor(theme::CHOSEN),
+                    BorderColor::all(theme::CHOSEN_EDGE),
                     Node {
                         width: Val::Px(29.0),
                         height: Val::Px(29.0),
@@ -545,7 +528,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                         } else {
                             ui::IconKind::Uncapped
                         },
-                        ui::LEAF,
+                        theme::SAGE,
                         16.0,
                     )
                 });
@@ -567,7 +550,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                         },
                         12.0,
                         550,
-                        ui::INK,
+                        theme::INK,
                     );
                     ui::text(
                         policy,
@@ -575,7 +558,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
                             format!("{n} FPS ceiling")
                         }),
                         11.0,
-                        ui::MUTED,
+                        theme::MUTED,
                     );
                 });
         });
@@ -584,7 +567,7 @@ pub(super) fn display(list: &mut ChildSpawnerCommands, p: &Preferences) {
         list,
         "View distance, textures, shadows, and simulation settings stay unchanged.",
         12.0,
-        ui::MUTED,
+        theme::MUTED,
     );
 }
 
@@ -598,7 +581,7 @@ pub(super) fn bindings_page(
     use crate::client::menu_ui as ui;
     let searching = !searches.bindings.trim().is_empty();
     if searching {
-        ui::text(list, "Searching all categories", 11.0, ui::MUTED);
+        ui::text(list, "Searching all categories", 11.0, theme::MUTED);
     } else {
         list.spawn((
             Node {
@@ -607,7 +590,7 @@ pub(super) fn bindings_page(
                 margin: UiRect::bottom(Val::Px(14.0)),
                 ..default()
             },
-            BorderColor::all(ui::EDGE),
+            BorderColor::all(theme::EDGE),
         ))
         .with_children(|filters| {
             for category in [Category::Movement, Category::Building, Category::Interface] {
@@ -640,11 +623,11 @@ pub(super) fn bindings_page(
         list,
         "Select a binding to change it. Either alternative activates the action.",
         12.0,
-        ui::MUTED,
+        theme::MUTED,
     );
     binding_row(list, true, |row| {
         for label in ["ACTION", "PRIMARY", "ALTERNATIVE", ""] {
-            ui::text(row, label, 9.0, ui::MUTED);
+            ui::text(row, label, 9.0, theme::MUTED);
         }
     });
     let mut entries: Vec<_> = bindings
@@ -660,7 +643,7 @@ pub(super) fn bindings_page(
             list,
             "No matches. Try another name or clear your search.",
             13.0,
-            ui::INK,
+            theme::INK,
         );
     }
     binding_rows(list, Device::KeyboardMouse, entries, labels, searching);
@@ -681,9 +664,9 @@ pub(super) fn binding_rows(
                 ..default()
             })
             .with_children(|name| {
-                ui::text(name, action_name(action), 12.0, ui::INK);
+                ui::text(name, action_name(action), 12.0, theme::INK);
                 if searching {
-                    ui::text(name, category(action), 9.0, ui::MUTED);
+                    ui::text(name, category(action), 9.0, theme::MUTED);
                 }
             });
             for (slot, binding) in alternatives.iter().enumerate() {
@@ -698,7 +681,6 @@ pub(super) fn binding_rows(
                             bevy::ui_widgets::Button,
                             bevy::input_focus::tab_navigation::TabIndex(0),
                             Operation::Capture(device, action, slot),
-                            ui::BindingControl,
                             ui::Styled {
                                 selected: false,
                                 tab: false,
@@ -715,8 +697,8 @@ pub(super) fn binding_rows(
                                 justify_content: JustifyContent::Center,
                                 ..default()
                             },
-                            BackgroundColor(ui::BG),
-                            BorderColor::all(ui::EDGE),
+                            BackgroundColor(theme::PANEL),
+                            BorderColor::all(theme::EDGE),
                         ))
                         .with_child((
                             Text::new(binding.map_or("Add binding".into(), |b| {
@@ -727,9 +709,9 @@ pub(super) fn binding_rows(
                                 ..ui::font(10.0)
                             },
                             TextColor(if binding.is_some() {
-                                ui::INK
+                                theme::INK
                             } else {
-                                ui::MUTED
+                                theme::MUTED
                             }),
                             bevy::text::LineHeight::RelativeToFont(1.5),
                             Pickable::IGNORE,
@@ -784,28 +766,24 @@ pub(super) fn controller(
             card,
             "Look sensitivity",
             "Turn speed at full right-stick deflection.",
-            false,
             |row| slider(row, Scalar::PadLook, pad.look_sensitivity),
         );
         setting_row(
             card,
             "Invert vertical look",
             "Reverse the right-stick look direction. Mouse look is separate.",
-            false,
             |row| switch(row, pad.invert_y, Operation::PadInvert),
         );
         setting_row(
             card,
             "Movement deadzone",
             "Left-stick travel ignored as drift.",
-            false,
             |row| slider(row, Scalar::MoveDeadzone, pad.move_deadzone),
         );
         setting_row(
             card,
             "Look deadzone",
             "Right-stick travel ignored as drift.",
-            false,
             |row| slider(row, Scalar::LookDeadzone, pad.look_deadzone),
         );
         setting_row(
@@ -816,7 +794,6 @@ pub(super) fn controller(
             } else {
                 "Crouch or descend while the binding is held."
             },
-            true,
             |row| {
                 segment(row, |buttons| {
                     option(
@@ -841,21 +818,18 @@ pub(super) fn controller(
             card,
             "Look sensitivity",
             "How far a drag on the look side turns the view.",
-            false,
             |row| slider(row, Scalar::TouchLook, touch.look_sensitivity),
         );
         setting_row(
             card,
             "Invert vertical look",
             "Reverse the touch look direction. Mouse look is separate.",
-            false,
             |row| switch(row, touch.invert_y, Operation::TouchInvert),
         );
         setting_row(
             card,
             "Layout",
             "Which hand moves. Mirroring also swaps Place and Remove.",
-            true,
             |row| {
                 segment(row, |buttons| {
                     option(
@@ -877,7 +851,6 @@ pub(super) fn controller(
             card,
             "Control size",
             "Every control stays at least 44 pixels.",
-            true,
             |row| {
                 segment(row, |buttons| {
                     use crate::client::profile::TouchSize::*;
@@ -898,7 +871,6 @@ pub(super) fn controller(
             card,
             "Control opacity",
             "How solid the on-screen controls are.",
-            false,
             |row| slider(row, Scalar::TouchOpacity, touch.opacity),
         );
     });
@@ -915,11 +887,11 @@ pub(super) fn controller(
             labels.pad(Start),
         ),
         12.0,
-        ui::MUTED,
+        theme::MUTED,
     );
     binding_row(list, true, |row| {
         for label in ["ACTION", "PRIMARY", "ALTERNATIVE", ""] {
-            ui::text(row, label, 9.0, ui::MUTED);
+            ui::text(row, label, 9.0, theme::MUTED);
         }
     });
     let mut entries: Vec<_> = bindings
@@ -954,11 +926,7 @@ pub(super) fn binding_row(
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(if heading {
-                Color::NONE
-            } else {
-                crate::client::menu_ui::CARD
-            }),
+            BackgroundColor(if heading { Color::NONE } else { theme::RAISED }),
         ))
         .with_children(content);
 }

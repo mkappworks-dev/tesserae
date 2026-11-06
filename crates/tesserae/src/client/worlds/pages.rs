@@ -8,6 +8,7 @@ use bevy::ui_widgets::TextInput;
 
 use super::super::cinematic::{self as cine, Kind, Sheet};
 use super::*;
+use crate::client::theme;
 
 /// Shown in a text field while it is empty.
 #[derive(Component)]
@@ -26,7 +27,8 @@ pub(super) fn spawn(
         .spawn((
             Root,
             TabGroup::default(),
-            BackgroundColor(cine::SCENE),
+            BackgroundColor(theme::SCENE),
+            theme::shade(),
             Node {
                 // Absolute, like the in-game menus' roots: a flow root is as tall as its content,
                 // so a long page would overflow the window instead of scrolling inside it.
@@ -76,12 +78,12 @@ pub(super) fn spawn(
 
 fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
     root.spawn((
-        BackgroundColor(Color::srgba(42.0 / 255.0, 52.0 / 255.0, 59.0 / 255.0, 0.52)),
-        BorderColor::all(cine::EDGE.with_alpha(0.25)),
+        BackgroundColor(theme::BAND),
+        BorderColor::all(theme::BAND_RULE),
         Node {
-            height: Val::Px(64.0),
+            height: Val::Px(73.0),
             flex_shrink: 0.0,
-            padding: UiRect::horizontal(Val::Px(34.0)),
+            padding: UiRect::horizontal(Val::Px(theme::SCREEN_PAD_X)),
             justify_content: JustifyContent::SpaceBetween,
             align_items: AlignItems::Center,
             border: UiRect::bottom(Val::Px(1.0)),
@@ -91,7 +93,7 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
     .with_children(|row| {
         row.spawn(Node {
             align_items: AlignItems::Center,
-            column_gap: Val::Px(12.0),
+            column_gap: Val::Px(10.0),
             ..default()
         })
         .with_children(|brand| {
@@ -109,15 +111,20 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
             brand.spawn((
                 Text::new("Tesserae"),
                 TextFont {
-                    weight: bevy::text::FontWeight(600),
-                    ..ui::font(17.0)
+                    font: bevy::text::FontSource::family(theme::BRAND_FAMILY),
+                    ..theme::weighted(19.0, theme::SEMIBOLD)
                 },
-                bevy::text::LetterSpacing::Px(3.5),
-                TextColor(cine::INK),
+                TextColor(theme::INK),
                 Pickable::IGNORE,
             ));
         });
-        buttons::eyebrow(row, "A WORLD OF YOUR OWN", Eyebrow::Cinematic);
+        row.spawn((
+            Text::new("A WORLD OF YOUR OWN"),
+            theme::font(theme::TEXT_FOOTER),
+            bevy::text::LetterSpacing::Px(2.7),
+            TextColor(theme::CHROME_INK),
+            Pickable::IGNORE,
+        ));
         buttons::button(
             row,
             "Quit",
@@ -132,8 +139,8 @@ fn header(root: &mut ChildSpawnerCommands, logo: Option<&ui::Mosaic>) {
 
 fn footer(root: &mut ChildSpawnerCommands) {
     root.spawn((
-        BackgroundColor(Color::srgba(42.0 / 255.0, 52.0 / 255.0, 59.0 / 255.0, 0.52)),
-        BorderColor::all(cine::EDGE.with_alpha(0.25)),
+        BackgroundColor(theme::BAND),
+        BorderColor::all(theme::BAND_RULE),
         Node {
             height: Val::Px(40.0),
             flex_shrink: 0.0,
@@ -154,16 +161,22 @@ fn footer(root: &mut ChildSpawnerCommands) {
                 })
                 .with_children(|hint| {
                     hint.spawn((
-                        BorderColor::all(cine::EDGE),
+                        BorderColor::all(theme::KEY_EDGE),
                         Node {
-                            padding: UiRect::axes(Val::Px(4.0), Val::Px(1.0)),
-                            border: UiRect::all(Val::Px(1.0)),
-                            border_radius: BorderRadius::all(Val::Px(3.0)),
+                            padding: UiRect::axes(Val::Px(4.0), Val::Px(2.0)),
+                            border: UiRect::all(Val::Px(theme::RULE)),
+                            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_TAG)),
                             ..default()
                         },
                     ))
-                    .with_children(|k| ui::text(k, key, 10.0, cine::MUTED));
-                    ui::text(hint, what, 11.0, cine::MUTED);
+                    .with_children(|k| ui::text(k, key, theme::TEXT_KEY, theme::CHROME_INK));
+                    hint.spawn((
+                        Text::new(what),
+                        theme::font(theme::TEXT_FOOTER),
+                        bevy::text::LetterSpacing::Px(0.9),
+                        TextColor(theme::CHROME_INK),
+                        Pickable::IGNORE,
+                    ));
                 });
         }
     });
@@ -194,23 +207,23 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             },
             bevy::text::LineHeight::RelativeToFont(1.04),
             bevy::text::LetterSpacing::Px(-2.4),
-            TextColor(cine::INK),
+            TextColor(theme::INK),
             Pickable::IGNORE,
         ));
         ui::paragraph(
             hero,
             "A place to explore, build and call your own.\nEvery world begins with a possibility.",
             15.0,
-            cine::MUTED,
+            theme::MUTED,
         );
         hero.spawn((
-            cine::surface(Color::srgba(44.0 / 255.0, 52.0 / 255.0, 59.0 / 255.0, 0.94)),
+            cine::surface(theme::PANEL),
             Node {
                 width: Val::Px(300.0),
                 margin: UiRect::top(Val::Px(18.0)),
                 padding: UiRect::all(Val::Px(10.0)),
-                border: UiRect::all(Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(8.0)),
+                border: UiRect::all(Val::Px(theme::FRAME)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_PANEL)),
                 flex_direction: FlexDirection::Column,
                 row_gap: Val::Px(8.0),
                 ..default()
@@ -266,13 +279,13 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             });
         });
         if installed.game.is_none() {
-            ui::paragraph(hero, NO_GAME, 13.0, cine::WARNING);
+            ui::paragraph(hero, NO_GAME, 13.0, theme::WARNING);
             if let Some(error) = &installed.error {
                 ui::paragraph(
                     hero,
                     format!("Installed Mods could not be read: {error}"),
                     12.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
             }
         }
@@ -283,7 +296,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
             .map(|d| installed.unmet(d))
             .unwrap_or_default();
         main.spawn((
-            cine::surface(cine::PANEL),
+            cine::surface(theme::PANEL),
             Node {
                 position_type: PositionType::Absolute,
                 right: Val::Px(34.0),
@@ -299,7 +312,7 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
         ))
         .with_children(|card| {
             buttons::eyebrow(card, "CONTINUE", Eyebrow::Cinematic);
-            ui::weighted_text(card, entry.name().unwrap_or(UNNAMED), 17.0, 600, cine::INK);
+            ui::weighted_text(card, entry.name().unwrap_or(UNNAMED), 17.0, 600, theme::INK);
             if let Some(d) = entry.details() {
                 ui::paragraph(
                     card,
@@ -309,11 +322,11 @@ fn title(main: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed) -
                         relative(d.last_played_unix_s)
                     ),
                     13.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
             }
             for line in &unmet {
-                ui::paragraph(card, line, 12.0, cine::WARNING);
+                ui::paragraph(card, line, 12.0, theme::WARNING);
             }
             let button = buttons::button(
                 card,
@@ -411,7 +424,7 @@ fn worlds(
                     }
                 });
                 if installed.game.is_none() {
-                    ui::paragraph(body, NO_GAME, 13.0, cine::WARNING);
+                    ui::paragraph(body, NO_GAME, 13.0, theme::WARNING);
                 }
                 for entry in &l.entries {
                     let play = world_card(body, entry, installed);
@@ -443,8 +456,8 @@ fn worlds(
                     } else {
                         ("No Worlds found", "Try a different name or create a World.")
                     };
-                    ui::weighted_text(empty, title, 17.0, 550, cine::INK);
-                    ui::paragraph(empty, detail, 13.0, cine::MUTED);
+                    ui::weighted_text(empty, title, 17.0, 550, theme::INK);
+                    ui::paragraph(empty, detail, 13.0, theme::MUTED);
                 });
             },
             |f| {
@@ -457,7 +470,7 @@ fn worlds(
                         align: Align::Centre,
                     },
                 );
-                ui::text(f, "Stored on this device", 12.0, cine::MUTED);
+                ui::text(f, "Stored on this device", 12.0, theme::MUTED);
                 ui::text(
                     f,
                     match l.entries.len() {
@@ -465,7 +478,7 @@ fn worlds(
                         n => format!("{n} Worlds"),
                     },
                     12.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
             },
         );
@@ -475,8 +488,8 @@ fn worlds(
 
 fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
     body.spawn((
-        BackgroundColor(cine::NOTICE),
-        BorderColor::all(cine::WARNING),
+        BackgroundColor(theme::NOTICE),
+        BorderColor::all(theme::WARNING),
         Node {
             padding: UiRect::all(Val::Px(14.0)),
             border: UiRect::left(Val::Px(2.0)),
@@ -495,10 +508,15 @@ fn failure(body: &mut ChildSpawnerCommands, card: &Card) {
             ..default()
         })
         .with_children(|words| {
-            ui::weighted_text(words, &card.title, 14.0, 620, cine::INK);
-            ui::paragraph(words, &card.detail, 13.0, cine::WARNING);
+            ui::weighted_text(words, &card.title, 14.0, 620, theme::INK);
+            ui::paragraph(words, &card.detail, 13.0, theme::WARNING);
             if card.save_untouched {
-                ui::paragraph(words, "Nothing was changed in its save.", 12.0, cine::MUTED);
+                ui::paragraph(
+                    words,
+                    "Nothing was changed in its save.",
+                    12.0,
+                    theme::MUTED,
+                );
             }
         });
         buttons::button(
@@ -534,8 +552,8 @@ fn world_card(
     let mut play = None;
     body.spawn((
         WorldCard { words },
-        BackgroundColor(cine::RAISED),
-        BorderColor::all(cine::EDGE),
+        BackgroundColor(theme::CARD),
+        BorderColor::all(theme::EDGE),
         Node {
             padding: UiRect::all(Val::Px(16.0)),
             border: UiRect::all(Val::Px(1.0)),
@@ -555,7 +573,7 @@ fn world_card(
             ..default()
         })
         .with_children(|info| {
-            ui::weighted_text(info, name, 16.0, 550, cine::INK);
+            ui::weighted_text(info, name, 16.0, 550, theme::INK);
             match (entry.details(), &entry.sidecar) {
                 (Some(d), _) => {
                     info.spawn(Node {
@@ -569,7 +587,7 @@ fn world_card(
                             facts,
                             format!("{} m voxels", d.voxel_size_m),
                             12.0,
-                            cine::MUTED,
+                            theme::MUTED,
                         );
                     });
                     ui::text(
@@ -581,20 +599,20 @@ fn world_card(
                         },
                         12.0,
                         if entry.incomplete() {
-                            cine::WARNING
+                            theme::WARNING
                         } else {
-                            cine::MUTED
+                            theme::MUTED
                         },
                     );
                     for line in &unmet {
-                        ui::paragraph(info, line, 12.0, cine::WARNING);
+                        ui::paragraph(info, line, 12.0, theme::WARNING);
                     }
                 }
                 (None, Err(reason)) => ui::paragraph(
                     info,
                     format!("Its details could not be read: {reason}. Saving a name in Edit repairs them."),
                     12.0,
-                    cine::WARNING,
+                    theme::WARNING,
                 ),
                 (None, Ok(_)) => ui::paragraph(
                     info,
@@ -603,7 +621,7 @@ fn world_card(
                         entry.folder()
                     ),
                     12.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 ),
             }
         });
@@ -643,7 +661,7 @@ fn library_page(
                     body,
                     "Installed on this device. You choose which ones a World uses when you create it.",
                     13.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
                 if installed.mods.is_empty() {
                     cine::notice(body, "No Mods are installed. Add them to the Mods folder.");
@@ -654,16 +672,16 @@ fn library_page(
                         body,
                         ModCard {
                             act: None,
-                            border: cine::EDGE,
+                            border: theme::EDGE,
                             selected: false,
                             title: format!("{} {}", ui::title(&m.id), m.version),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: category.map(|c| (c.to_owned(), cine::MUTED)),
+                            tag: category.map(|c| (c.to_owned(), theme::MUTED)),
                         },
                     );
                 }
                 for line in &installed.rejected {
-                    ui::paragraph(body, format!("Skipped: {line}"), 12.0, cine::WARNING);
+                    ui::paragraph(body, format!("Skipped: {line}"), 12.0, theme::WARNING);
                 }
             },
             |f| {
@@ -683,7 +701,7 @@ fn library_page(
                         n => format!("{n} Mods installed"),
                     },
                     12.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
                 let create = buttons::button(
                     f,
@@ -795,7 +813,7 @@ fn edit(
                                 body,
                                 "Mode changes take effect when the World next opens.",
                                 12.0,
-                                cine::MUTED,
+                                theme::MUTED,
                             );
                         }
                         ui::paragraph(
@@ -806,17 +824,17 @@ fn edit(
                                 relative(d.last_played_unix_s)
                             ),
                             12.0,
-                            cine::MUTED,
+                            theme::MUTED,
                         );
                         for line in &installed.unmet(d) {
-                            ui::paragraph(body, line, 12.0, cine::WARNING);
+                            ui::paragraph(body, line, 12.0, theme::WARNING);
                         }
                     }
                     None => ui::paragraph(
                         body,
                         "No details are recorded. Saving a name repairs them from the save.",
                         12.0,
-                        cine::MUTED,
+                        theme::MUTED,
                     ),
                 }
                 cine::notice(
@@ -863,7 +881,7 @@ fn edit(
                     body,
                     format!("Folder: {}", entry.map(Entry::folder).unwrap_or_default()),
                     12.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
             },
             |f| {
@@ -876,7 +894,7 @@ fn edit(
                         align: Align::Centre,
                     },
                 );
-                ui::text(f, "Generation is pinned", 12.0, cine::MUTED);
+                ui::text(f, "Generation is pinned", 12.0, theme::MUTED);
                 buttons::button(
                     f,
                     "Save changes",
@@ -896,17 +914,19 @@ fn edit(
 fn locked(parent: &mut ChildSpawnerCommands, value: String) {
     parent
         .spawn((
-            BackgroundColor(cine::FIELD),
-            BorderColor::all(cine::FIELD_EDGE),
+            BackgroundColor(theme::FIELD_LOCKED),
+            BorderColor::all(theme::FIELD_LOCKED_EDGE),
             Node {
-                padding: UiRect::axes(Val::Px(12.0), Val::Px(9.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
+                min_height: Val::Px(theme::CONTROL_HEIGHT),
+                padding: UiRect::axes(Val::Px(12.0), Val::Px(10.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
+                align_items: AlignItems::Center,
                 flex_shrink: 0.0,
                 ..default()
             },
         ))
-        .with_children(|field| ui::text(field, value, 13.0, cine::MUTED));
+        .with_children(|field| ui::text(field, value, theme::TEXT_BODY, theme::FIELD_LOCKED_INK));
 }
 
 /// Creative and Survival side by side, each with what it means.
@@ -933,7 +953,7 @@ fn mode_picks(
             );
         }
     });
-    ui::paragraph(parent, hint, 12.0, cine::MUTED);
+    ui::paragraph(parent, hint, 12.0, theme::MUTED);
 }
 
 fn row(
@@ -969,7 +989,7 @@ fn centered(
         center
             .spawn((
                 TabGroup { modal, ..default() },
-                cine::surface(cine::PANEL),
+                cine::surface(theme::PANEL),
                 Node {
                     width: Val::Px(440.0),
                     max_width: Val::Percent(92.0),
@@ -987,7 +1007,7 @@ fn centered(
 
 fn problem(parent: &mut ChildSpawnerCommands, message: Option<&String>) {
     if let Some(message) = message {
-        ui::paragraph(parent, message.clone(), 13.0, cine::WARNING);
+        ui::paragraph(parent, message.clone(), 13.0, theme::WARNING);
     }
 }
 
@@ -1001,13 +1021,13 @@ fn text_field(
     let mut entity = Entity::PLACEHOLDER;
     parent
         .spawn((
-            BackgroundColor(cine::FIELD),
-            BorderColor::all(cine::FIELD_EDGE),
+            BackgroundColor(theme::FIELD),
+            BorderColor::all(theme::FIELD_EDGE),
             Node {
                 min_width: Val::Px(0.0),
-                height: Val::Px(42.0),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
+                height: Val::Px(theme::CONTROL_HEIGHT),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                 padding: UiRect::axes(Val::Px(12.0), Val::Px(0.0)),
                 align_items: AlignItems::Center,
                 width: Val::Percent(100.0),
@@ -1022,11 +1042,11 @@ fn text_field(
                     TextInput,
                     EditableText::new(value),
                     TabIndex(0),
-                    ui::font(14.0),
-                    TextColor(cine::INK),
+                    ui::font(theme::TEXT_BODY),
+                    TextColor(theme::INK),
                     bevy::text::TextCursorStyle {
-                        color: cine::SAGE,
-                        selection_color: cine::SAGE.with_alpha(0.3),
+                        color: theme::SAGE,
+                        selection_color: theme::SAGE.with_alpha(0.3),
                         ..default()
                     },
                     TextLayout::linebreak(bevy::text::LineBreak::NoWrap),
@@ -1041,8 +1061,8 @@ fn text_field(
                 frame.spawn((
                     Placeholder(entity),
                     Text::new(placeholder),
-                    ui::font(14.0),
-                    TextColor(cine::MUTED.with_alpha(0.7)),
+                    ui::font(theme::TEXT_BODY),
+                    TextColor(theme::PLACEHOLDER),
                     Pickable::IGNORE,
                     Node {
                         position_type: PositionType::Absolute,
@@ -1058,13 +1078,13 @@ fn text_field(
             }
         });
     if !hint.is_empty() {
-        ui::paragraph(parent, hint, 12.0, cine::MUTED);
+        ui::paragraph(parent, hint, theme::TEXT_SMALL, theme::MUTED);
     }
     entity
 }
 
 fn label(parent: &mut ChildSpawnerCommands, value: &str) {
-    ui::weighted_text(parent, value, 13.0, 600, cine::INK);
+    ui::weighted_text(parent, value, theme::TEXT_BODY, theme::LABEL, theme::INK);
 }
 
 fn form(
@@ -1112,14 +1132,14 @@ fn form(
             col,
             "Words or a number. The same seed and generation settings create the same terrain. Blank picks a random seed.",
             12.0,
-            cine::MUTED,
+            theme::MUTED,
         );
         row(col, 8.0, |r| {
             r.spawn((
                 Resolved,
                 Text::new(f.seed_label()),
                 ui::font(12.0),
-                TextColor(cine::MUTED),
+                TextColor(theme::MUTED),
                 Pickable::IGNORE,
             ));
             buttons::button(
@@ -1199,7 +1219,7 @@ fn mode_picker(col: &mut ChildSpawnerCommands, chosen: GameMode) {
             }
         },
         12.0,
-        cine::MUTED,
+        theme::MUTED,
     );
 }
 
@@ -1217,7 +1237,7 @@ fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) 
         }
     });
     if !installed.untrusted.is_empty() {
-        ui::paragraph(col, "Needs Trust before it opens.", 12.0, cine::MUTED);
+        ui::paragraph(col, "Needs Trust before it opens.", 12.0, theme::MUTED);
     }
     if let Some(game) = f.game.as_deref() {
         let needs = installed.required(game).len();
@@ -1229,7 +1249,7 @@ fn game_picker(col: &mut ChildSpawnerCommands, f: &Form, installed: &Installed) 
                     ui::title(game)
                 ),
                 12.0,
-                cine::MUTED,
+                theme::MUTED,
             );
         }
     }
@@ -1257,11 +1277,11 @@ fn mods_page(
                         col,
                         ModCard {
                             act: None,
-                            border: cine::EDGE,
+                            border: theme::EDGE,
                             selected: false,
                             title: format!("{} {}", ui::title(&m.id), m.version),
                             detail: about.unwrap_or_default().to_owned(),
-                            tag: Some(("Required".to_owned(), cine::MUTED)),
+                            tag: Some(("Required".to_owned(), theme::MUTED)),
                         },
                     );
                 }
@@ -1275,7 +1295,7 @@ fn mods_page(
                 let title = format!("{} {}", ui::title(&m.id), m.version);
                 let mut shown = ModCard {
                     act: Some(Act::ToggleMod(i)),
-                    border: cine::EDGE,
+                    border: theme::EDGE,
                     selected: f.mods.contains(&m.id),
                     title,
                     detail: about.unwrap_or_default().to_owned(),
@@ -1284,31 +1304,31 @@ fn mods_page(
                 if let Some(why) = installed.blocked(&game, &m.id) {
                     shown.act = None;
                     shown.detail = format!("Unavailable: {why}");
-                    shown.tag = Some(("Unavailable".to_owned(), cine::MUTED));
+                    shown.tag = Some(("Unavailable".to_owned(), theme::MUTED));
                 } else if let Some(clash) = l.clashes.get(&m.id) {
-                    shown.border = cine::WARNING;
+                    shown.border = theme::WARNING;
                     shown.detail = format!("Conflicts: {}", clash.reason);
                     match &clash.replaces {
                         Some(out) => {
                             shown.tag =
-                                Some((format!("Replaces {}", ui::title(out)), cine::WARNING));
+                                Some((format!("Replaces {}", ui::title(out)), theme::WARNING));
                         }
                         None => {
                             shown.act = None;
-                            shown.tag = Some(("Conflict".to_owned(), cine::WARNING));
+                            shown.tag = Some(("Conflict".to_owned(), theme::WARNING));
                         }
                     }
                 } else if locked.contains(&m.id) && !f.mods.contains(&m.id) {
                     shown.act = None;
-                    shown.tag = Some(("Needed by another Mod".to_owned(), cine::MUTED));
+                    shown.tag = Some(("Needed by another Mod".to_owned(), theme::MUTED));
                 } else if shown.selected {
-                    shown.tag = Some(("Added".to_owned(), cine::SAGE));
+                    shown.tag = Some(("Added".to_owned(), theme::SAGE));
                 }
                 mod_card(col, shown);
             }
         }
         for line in &installed.rejected {
-            ui::paragraph(col, format!("Skipped: {line}"), 12.0, cine::WARNING);
+            ui::paragraph(col, format!("Skipped: {line}"), 12.0, theme::WARNING);
         }
     })
 }
@@ -1342,9 +1362,9 @@ fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
             ..default()
         })
         .with_children(|text| {
-            ui::weighted_text(text, c.title.clone(), 14.0, 550, cine::INK);
+            ui::weighted_text(text, c.title.clone(), 14.0, 550, theme::INK);
             if !c.detail.is_empty() {
-                ui::paragraph(text, c.detail.clone(), 12.0, cine::MUTED);
+                ui::paragraph(text, c.detail.clone(), 12.0, theme::MUTED);
             }
         });
         if let Some((tag, colour)) = c.tag {
@@ -1362,8 +1382,8 @@ fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
                         kind: Kind::Plain,
                         selected: c.selected,
                     },
-                    BackgroundColor(cine::RAISED),
-                    BorderColor::all(if c.selected { cine::SAGE } else { c.border }),
+                    BackgroundColor(theme::RAISED),
+                    BorderColor::all(if c.selected { theme::SAGE } else { c.border }),
                     node,
                 ))
                 .with_children(body);
@@ -1371,7 +1391,7 @@ fn mod_card(parent: &mut ChildSpawnerCommands, c: ModCard) {
         None => {
             parent
                 .spawn((
-                    BackgroundColor(cine::RAISED),
+                    BackgroundColor(theme::CARD),
                     BorderColor::all(c.border),
                     node,
                 ))
@@ -1420,7 +1440,7 @@ fn delete(main: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
     let name = l.display_name(path);
     let mut focus = None;
     centered(main, true, |card| {
-        ui::weighted_text(card, format!("Delete {name}?"), 22.0, 500, cine::INK);
+        ui::weighted_text(card, format!("Delete {name}?"), 22.0, 500, theme::INK);
         if let Some(d) = entry.and_then(Entry::details) {
             ui::text(
                 card,
@@ -1430,14 +1450,14 @@ fn delete(main: &mut ChildSpawnerCommands, l: &Launcher, path: &Path) -> Option<
                     relative(d.last_played_unix_s)
                 ),
                 13.0,
-                cine::MUTED,
+                theme::MUTED,
             );
         }
         ui::paragraph(
             card,
             "Its folder moves to the Trash. You can restore it from there.",
             13.0,
-            cine::MUTED,
+            theme::MUTED,
         );
         problem(card, l.problem.as_ref());
         row(card, 8.0, |r| {
@@ -1528,14 +1548,14 @@ fn trust(
                         col,
                         ModCard {
                             act: None,
-                            border: cine::EDGE,
+                            border: theme::EDGE,
                             selected: false,
                             title: format!("{} {}", ui::title(&manifest.id), manifest.version),
                             detail,
                             tag: Some(if data {
-                                ("Data only".to_owned(), cine::MUTED)
+                                ("Data only".to_owned(), theme::MUTED)
                             } else {
-                                ("Runs code".to_owned(), cine::WARNING)
+                                ("Runs code".to_owned(), theme::WARNING)
                             }),
                         },
                     );
@@ -1633,7 +1653,7 @@ fn step_frame(
                     foot,
                     format!("{} of {}", step.index() + 1, Step::ORDER.len()),
                     12.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
                 forward = Some(match step.next() {
                     Some(next) => buttons::button(
@@ -1663,7 +1683,7 @@ fn step_frame(
 
 fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, current: Step) {
     w.spawn((
-        cine::surface(cine::PANEL),
+        cine::surface(theme::PANEL),
         Node {
             width: Val::Px(190.0),
             flex_shrink: 0.0,
@@ -1717,7 +1737,7 @@ fn step_rail(w: &mut ChildSpawnerCommands, l: &Launcher, installed: &Installed, 
                 note,
                 "Yours to shape.\nOne choice at a time.",
                 12.0,
-                cine::MUTED,
+                theme::MUTED,
             )
         });
     });
@@ -1743,7 +1763,7 @@ fn review(
             } else {
                 f.name.trim().to_owned()
             };
-            ui::weighted_text(card, name, 16.0, 500, cine::INK);
+            ui::weighted_text(card, name, 16.0, 500, theme::INK);
             ui::paragraph(
                 card,
                 format!(
@@ -1756,9 +1776,9 @@ fn review(
                     f.voxel_size_m
                 ),
                 13.0,
-                cine::MUTED,
+                theme::MUTED,
             );
-            ui::paragraph(card, f.seed_label(), 13.0, cine::MUTED);
+            ui::paragraph(card, f.seed_label(), 13.0, theme::MUTED);
         });
         let mods: Vec<_> = f
             .game
@@ -1775,7 +1795,7 @@ fn review(
                 },
                 16.0,
                 500,
-                cine::INK,
+                theme::INK,
             );
             ui::paragraph(
                 card,
@@ -1788,7 +1808,7 @@ fn review(
                         .join(", ")
                 },
                 13.0,
-                cine::MUTED,
+                theme::MUTED,
             );
         });
         summary(col, "BIOMES", Step::Biomes, |card| match &f.biomes {
@@ -1805,7 +1825,7 @@ fn review(
                     format!("{} of {} enabled", on.len(), draft.choices.len()),
                     16.0,
                     500,
-                    cine::INK,
+                    theme::INK,
                 );
                 ui::paragraph(
                     card,
@@ -1817,7 +1837,7 @@ fn review(
                             .join(" \u{00b7} ")
                     ),
                     13.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
                 ui::paragraph(
                     card,
@@ -1826,14 +1846,14 @@ fn review(
                         draft.climate.temperature_size_m, draft.climate.humidity_size_m
                     ),
                     13.0,
-                    cine::MUTED,
+                    theme::MUTED,
                 );
             }
             None => ui::paragraph(
                 card,
                 "As the Game and Mods declare them.",
                 13.0,
-                cine::MUTED,
+                theme::MUTED,
             ),
         });
         cine::notice(
@@ -1873,14 +1893,14 @@ fn biomes_page(
                     draft.choices.len()
                 ),
                 13.0,
-                cine::MUTED,
+                theme::MUTED,
             );
             if draft.resetting {
                 ui::text(
                     r,
                     "Restore every Biome and the Climate sizes to the Game\u{2019}s defaults?",
                     13.0,
-                    cine::INK,
+                    theme::INK,
                 );
                 buttons::button(
                     r,
@@ -1933,8 +1953,8 @@ fn biomes_page(
                 });
             split
                 .spawn((
-                    BackgroundColor(cine::SHEET_HEADER),
-                    BorderColor::all(cine::EDGE),
+                    BackgroundColor(theme::SHEET_HEADER),
+                    BorderColor::all(theme::EDGE),
                     Node {
                         flex_direction: FlexDirection::Column,
                         row_gap: Val::Px(8.0),
@@ -1961,7 +1981,7 @@ fn biomes_page(
                     ..default()
                 })
                 .with_children(|c| {
-                    ui::text(c, title, 12.0, cine::MUTED);
+                    ui::text(c, title, 12.0, theme::MUTED);
                     text_field(c, field, &draft.sizes[at], "", "");
                 });
             }
@@ -1970,15 +1990,15 @@ fn biomes_page(
             col,
             "Larger values make broader climate regions, in metres at any Voxel size.",
             12.0,
-            cine::MUTED,
+            theme::MUTED,
         );
     })
 }
 
 fn biome_row(list: &mut ChildSpawnerCommands, at: usize, choice: &BiomeChoice, selected: bool) {
     list.spawn((
-        BackgroundColor(cine::RAISED),
-        BorderColor::all(if selected { cine::SAGE } else { cine::EDGE }),
+        BackgroundColor(theme::CARD),
+        BorderColor::all(if selected { theme::SAGE } else { theme::EDGE }),
         Node {
             align_items: AlignItems::Center,
             column_gap: Val::Px(9.0),
@@ -2026,7 +2046,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
         ui::declared_title(&choice.name),
         16.0,
         550,
-        cine::INK,
+        theme::INK,
     );
     ui::text(
         editor,
@@ -2036,7 +2056,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
             "Off \u{00b7} turn it on to include it in this World"
         },
         12.0,
-        cine::MUTED,
+        theme::MUTED,
     );
     climate_map(editor, draft);
     let stepper = |editor: &mut ChildSpawnerCommands, title: &str, value: String, knob: Knob| {
@@ -2048,7 +2068,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 ..default()
             })
             .with_children(|r| {
-                ui::text(r, title, 13.0, cine::INK);
+                ui::text(r, title, 13.0, theme::INK);
                 r.spawn(Node {
                     align_items: AlignItems::Center,
                     column_gap: Val::Px(8.0),
@@ -2064,7 +2084,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                             align: Align::Centre,
                         },
                     );
-                    ui::text(s, value, 13.0, cine::INK);
+                    ui::text(s, value, 13.0, theme::INK);
                     buttons::button(
                         s,
                         "+",
@@ -2103,7 +2123,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
         editor,
         "0 turns caves off. 1 keeps the Game\u{2019}s caves.",
         12.0,
-        cine::MUTED,
+        theme::MUTED,
     );
     let ground = choice.ground.as_ref().or(draft.declared.ground.as_ref());
     for (title, layer, name) in [
@@ -2125,7 +2145,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 ..default()
             })
             .with_children(|r| {
-                ui::text(r, title, 13.0, cine::INK);
+                ui::text(r, title, 13.0, theme::INK);
                 buttons::button(
                     r,
                     ui::declared_title(name),
@@ -2138,7 +2158,7 @@ fn biome_editor(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
             });
     }
     for (title, field, at) in [("Sky colour", Field::Sky, 0), ("Fog colour", Field::Fog, 1)] {
-        ui::text(editor, title, 12.0, cine::MUTED);
+        ui::text(editor, title, 12.0, theme::MUTED);
         text_field(editor, field, &draft.colours[at], "", "Game default");
     }
 }
@@ -2148,7 +2168,7 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
     editor
         .spawn((
             BackgroundColor(Color::srgb_u8(0x4d, 0x74, 0x70)),
-            BorderColor::all(cine::EDGE),
+            BorderColor::all(theme::EDGE),
             Node {
                 height: Val::Px(110.0),
                 border: UiRect::all(Val::Px(1.0)),
@@ -2164,11 +2184,11 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
                 let size = if current { 16.0 } else { 12.0 };
                 map.spawn((
                     BackgroundColor(if choice.enabled {
-                        cine::SAGE
+                        theme::SAGE
                     } else {
-                        cine::SAGE.with_alpha(0.4)
+                        theme::SAGE.with_alpha(0.4)
                     }),
-                    BorderColor::all(if current { cine::INK } else { Color::BLACK }),
+                    BorderColor::all(if current { theme::INK } else { Color::BLACK }),
                     Node {
                         position_type: PositionType::Absolute,
                         left: Val::Percent(choice.temperature * 100.0),
@@ -2195,15 +2215,15 @@ fn climate_map(editor: &mut ChildSpawnerCommands, draft: &BiomesDraft) {
             ..default()
         })
         .with_children(|axis| {
-            ui::text(axis, "Colder", 11.0, cine::MUTED);
-            ui::text(axis, "Temperature", 11.0, cine::MUTED);
-            ui::text(axis, "Warmer", 11.0, cine::MUTED);
+            ui::text(axis, "Colder", 11.0, theme::MUTED);
+            ui::text(axis, "Temperature", 11.0, theme::MUTED);
+            ui::text(axis, "Warmer", 11.0, theme::MUTED);
         });
     ui::text(
         editor,
         "Humidity increases from bottom to top.",
         11.0,
-        cine::MUTED,
+        theme::MUTED,
     );
 }
 
@@ -2215,7 +2235,7 @@ fn summary(
     fill: impl FnOnce(&mut ChildSpawnerCommands),
 ) {
     col.spawn((
-        BorderColor::all(cine::EDGE.with_alpha(0.5)),
+        BorderColor::all(theme::EDGE.with_alpha(0.5)),
         Node {
             flex_direction: FlexDirection::Column,
             row_gap: Val::Px(6.0),
@@ -2251,12 +2271,12 @@ fn summary(
 fn discard(main: &mut ChildSpawnerCommands) -> Option<Entity> {
     let mut focus = None;
     centered(main, true, |card| {
-        ui::weighted_text(card, "Leave this setup?", 22.0, 500, cine::INK);
+        ui::weighted_text(card, "Leave this setup?", 22.0, 500, theme::INK);
         ui::paragraph(
             card,
             "Your new World has not been created. Leaving will discard this setup.",
             13.0,
-            cine::MUTED,
+            theme::MUTED,
         );
         row(card, 8.0, |r| {
             focus = Some(buttons::button(

@@ -1,15 +1,13 @@
-//! Every menu button and eyebrow: the in-World menus' chrome and the
-//! launcher's Cinematic look, one builder each.
+//! Every menu button and eyebrow, one builder each, all in the prototype's
+//! look from [`theme`].
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::Button;
 
 use super::cinematic::{self as cine, Kind, Look};
-use super::inventory_window;
-use super::menu_ui::{
-    BG, CARD, EDGE, INK, IconKind, LEAF, MUTED, Quiet, Styled, font, icon, text, weighted_text,
-};
+use super::menu_ui::{IconKind, Quiet, Styled, icon, text};
+use super::theme;
 
 /// Where a button's label sits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,10 +61,14 @@ pub(super) fn button(
         tab,
         primary,
     };
+    let kind = |kind| ButtonStyle::Cinematic {
+        kind,
+        align: Align::Centre,
+    };
     match style {
-        ButtonStyle::Plain => menu(parent, label, act, styled(false, false, false)),
-        ButtonStyle::Primary => menu(parent, label, act, styled(false, false, true)),
-        ButtonStyle::Tab { selected } => menu(parent, label, act, styled(selected, true, false)),
+        ButtonStyle::Plain => button(parent, label, act, kind(Kind::Plain)),
+        ButtonStyle::Primary => button(parent, label, act, kind(Kind::Primary)),
+        ButtonStyle::Tab { selected } => tab(parent, label, act, styled(selected, true, false)),
         ButtonStyle::Compact {
             selected,
             height_px,
@@ -106,28 +108,37 @@ pub(super) enum Eyebrow {
 
 pub(super) fn eyebrow(parent: &mut ChildSpawnerCommands, label: &str, look: Eyebrow) {
     match look {
-        Eyebrow::Menu => menu_eyebrow(parent, label),
-        Eyebrow::Cinematic => cinematic_eyebrow(parent, label),
-        Eyebrow::Inventory => {
-            parent.spawn((
-                inventory_window::weighted(label, 11.0, 550, inventory_window::EYEBROW),
-                bevy::text::LetterSpacing::Px(1.3),
-            ));
-        }
+        Eyebrow::Menu => tracked(
+            parent,
+            label,
+            theme::font(theme::TEXT_EYEBROW),
+            theme::SECTION_TRACKING,
+            theme::MUTED,
+        ),
+        Eyebrow::Cinematic => tracked(
+            parent,
+            label,
+            theme::weighted(theme::TEXT_EYEBROW, theme::STRONG),
+            theme::EYEBROW_TRACKING,
+            theme::EYEBROW,
+        ),
+        Eyebrow::Inventory => tracked(
+            parent,
+            label,
+            theme::weighted(11.0, theme::LABEL),
+            1.32,
+            theme::ITEM_EYEBROW,
+        ),
     }
 }
 
-fn menu(
+fn tab(
     parent: &mut ChildSpawnerCommands,
     label: impl Into<String>,
     operation: impl Bundle,
     styled: Styled,
 ) -> Entity {
-    let Styled {
-        selected,
-        tab,
-        primary,
-    } = styled;
+    let selected = styled.selected;
     parent
         .spawn((
             Button,
@@ -135,56 +146,21 @@ fn menu(
             operation,
             styled,
             Node {
-                min_height: Val::Px(39.0),
-                padding: if tab {
-                    UiRect {
-                        left: Val::Px(2.0),
-                        right: Val::Px(2.0),
-                        top: Val::Px(8.0),
-                        bottom: Val::Px(11.0),
-                    }
-                } else {
-                    UiRect::axes(Val::Px(13.0), Val::Px(9.0))
-                },
-                border: if tab {
-                    UiRect::bottom(Val::Px(2.0))
-                } else {
-                    UiRect::all(Val::Px(1.0))
-                },
-                border_radius: BorderRadius::all(Val::Px(if tab { 0.0 } else { 5.0 })),
+                min_height: Val::Px(theme::CONTROL_HEIGHT),
+                padding: UiRect::new(Val::Px(0.0), Val::Px(0.0), Val::Px(8.0), Val::Px(12.0)),
+                border: UiRect::bottom(Val::Px(theme::FRAME)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(if primary {
-                LEAF
-            } else if tab {
-                Color::NONE
-            } else {
-                CARD
-            }),
-            BorderColor::all(if selected || primary {
-                LEAF
-            } else if tab {
-                Color::NONE
-            } else {
-                EDGE
-            }),
+            BackgroundColor(Color::NONE),
+            BorderColor::all(if selected { theme::SAGE } else { Color::NONE }),
         ))
         .with_child((
             Text::new(label),
-            TextFont {
-                weight: bevy::text::FontWeight(if primary { 650 } else { 400 }),
-                ..font(12.0)
-            },
-            bevy::text::LineHeight::RelativeToFont(1.5),
-            TextColor(if primary {
-                BG
-            } else if tab && !selected {
-                MUTED
-            } else {
-                INK
-            }),
+            theme::font(theme::TEXT_BODY),
+            bevy::text::LineHeight::RelativeToFont(1.25),
+            TextColor(if selected { theme::INK } else { theme::MUTED }),
             Pickable::IGNORE,
         ))
         .id()
@@ -212,14 +188,22 @@ fn compact(
             Node {
                 min_height: Val::Px(height),
                 padding: UiRect::axes(Val::Px(11.0), Val::Px(5.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
                 ..default()
             },
-            BackgroundColor(CARD),
-            BorderColor::all(if selected { LEAF } else { EDGE }),
+            BackgroundColor(if selected {
+                theme::SEGMENT_ON
+            } else {
+                theme::RAISED
+            }),
+            BorderColor::all(if selected {
+                theme::SEGMENT_ON_EDGE
+            } else {
+                theme::EDGE
+            }),
         ))
         .with_children(|button| {
             if label == "×" || label == "↺" {
@@ -230,11 +214,11 @@ fn compact(
                     } else {
                         IconKind::Reset
                     },
-                    MUTED,
+                    theme::MUTED,
                     if label == "×" { 12.0 } else { 16.0 },
                 );
             } else {
-                text(button, label, size, INK);
+                text(button, label, size, theme::INK);
             }
         })
         .id()
@@ -272,8 +256,8 @@ fn quiet(
             } else {
                 UiRect::axes(Val::Px(4.0), Val::Px(2.0))
             },
-            border: UiRect::all(Val::Px(1.0)),
-            border_radius: BorderRadius::all(Val::Px(4.0)),
+            border: UiRect::all(Val::Px(theme::RULE)),
+            border_radius: BorderRadius::all(Val::Px(theme::RADIUS_SMALL)),
             align_items: AlignItems::Center,
             justify_content: JustifyContent::Center,
             ..default()
@@ -289,13 +273,25 @@ fn cinematic(
     act: impl Bundle,
     look: Look,
 ) -> Entity {
-    let kind = look.kind;
-    let ink = match kind {
-        Kind::Primary => cine::SAGE_INK,
-        Kind::Danger => cine::DANGER_INK,
-        _ => cine::INK,
+    let (fill, edge, ink) = cine::colours(look, false, false);
+    let font = theme::weighted(
+        theme::TEXT_BODY,
+        if look.kind == Kind::Primary {
+            theme::STRONG
+        } else {
+            theme::REGULAR
+        },
+    );
+    let spawn_label = |b: &mut ChildSpawnerCommands, value: String| {
+        b.spawn((
+            cine::Label,
+            Text::new(value),
+            font.clone(),
+            bevy::text::LineHeight::RelativeToFont(1.25),
+            TextColor(ink),
+            Pickable::IGNORE,
+        ));
     };
-    let weight = if kind == Kind::Primary { 650 } else { 450 };
     parent
         .spawn((
             Button,
@@ -303,54 +299,47 @@ fn cinematic(
             act,
             look,
             Node {
-                min_height: Val::Px(40.0),
-                padding: UiRect::axes(Val::Px(15.0), Val::Px(8.0)),
-                border: UiRect::all(Val::Px(1.0)),
-                border_radius: BorderRadius::all(Val::Px(5.0)),
+                min_height: Val::Px(theme::CONTROL_HEIGHT),
+                padding: UiRect::axes(Val::Px(theme::BUTTON_PAD_X), Val::Px(theme::BUTTON_PAD_Y)),
+                border: UiRect::all(Val::Px(theme::RULE)),
+                border_radius: BorderRadius::all(Val::Px(theme::RADIUS_CONTROL)),
                 align_items: AlignItems::Center,
                 justify_content: if align == Align::Centre {
                     JustifyContent::Center
                 } else {
                     JustifyContent::SpaceBetween
                 },
-                column_gap: Val::Px(12.0),
+                column_gap: Val::Px(8.0),
                 flex_shrink: 0.0,
                 ..default()
             },
-            BackgroundColor(cine::RAISED),
-            BorderColor::all(cine::EDGE),
+            BackgroundColor(fill),
+            BorderColor::all(edge),
         ))
         .with_children(|b| {
-            weighted_text(b, label, 14.0, weight, ink);
+            spawn_label(b, label.into());
             if let Align::Glyph(glyph) = align
                 && !glyph.is_empty()
             {
-                weighted_text(b, glyph, 14.0, weight, ink);
+                spawn_label(b, glyph.into());
             }
         })
         .id()
 }
 
-fn menu_eyebrow(parent: &mut ChildSpawnerCommands, label: &str) {
+fn tracked(
+    parent: &mut ChildSpawnerCommands,
+    label: &str,
+    font: TextFont,
+    tracking: f32,
+    color: Color,
+) {
     parent.spawn((
         Text::new(label),
-        font(9.0),
+        font,
         bevy::text::LineHeight::RelativeToFont(1.5),
-        bevy::text::LetterSpacing::Px(1.2),
-        TextColor(MUTED),
-        Pickable::IGNORE,
-    ));
-}
-
-fn cinematic_eyebrow(parent: &mut ChildSpawnerCommands, value: &str) {
-    parent.spawn((
-        Text::new(value),
-        TextFont {
-            weight: bevy::text::FontWeight(650),
-            ..font(11.0)
-        },
-        bevy::text::LetterSpacing::Px(2.0),
-        TextColor(cine::MUTED),
+        bevy::text::LetterSpacing::Px(tracking),
+        TextColor(color),
         Pickable::IGNORE,
     ));
 }

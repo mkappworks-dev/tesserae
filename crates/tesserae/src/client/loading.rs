@@ -4,6 +4,7 @@
 use bevy::prelude::*;
 
 use super::menu_ui as ui;
+use super::theme;
 use crate::open::{Load, OpenRequest, Stage};
 use crate::session::AppState;
 
@@ -54,7 +55,7 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                 stage_since_s: time.elapsed_secs(),
             },
             GlobalZIndex(200),
-            BackgroundColor(ui::BG),
+            BackgroundColor(theme::PANEL),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Percent(100.0),
@@ -75,7 +76,7 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                     font_size: bevy::text::FontSize::Px(12.0),
                     ..default()
                 },
-                TextColor(ui::MUTED),
+                TextColor(theme::MUTED),
             ));
             card.spawn((
                 Node {
@@ -84,7 +85,7 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                     margin: UiRect::top(Val::Px(8.0)),
                     ..default()
                 },
-                BackgroundColor(ui::EDGE),
+                BackgroundColor(theme::EDGE),
             ))
             .with_children(|track| {
                 track.spawn((
@@ -94,7 +95,7 @@ fn show_loading(mut commands: Commands, request: Option<Res<OpenRequest>>, time:
                         height: Val::Percent(100.0),
                         ..default()
                     },
-                    BackgroundColor(ui::LEAF),
+                    BackgroundColor(theme::SAGE),
                 ));
             });
         });
@@ -108,8 +109,14 @@ fn drop_camera(mut commands: Commands, cameras: Query<Entity, With<LoadingCamera
 
 /// Also drawn by the World list just before it starts loading.
 pub(super) fn opening(parent: &mut ChildSpawnerCommands, name: &str) {
-    ui::weighted_text(parent, format!("Opening {name}…"), 19.0, 620, ui::INK);
-    ui::paragraph(parent, "Loading the World.", 12.0, ui::MUTED);
+    ui::weighted_text(
+        parent,
+        format!("Opening {name}…"),
+        theme::TEXT_HEADING,
+        theme::SEMIBOLD,
+        theme::INK,
+    );
+    ui::paragraph(parent, "Loading the World.", 12.0, theme::MUTED);
 }
 
 /// Inside a stage the bar sweeps toward the next one without reaching it: the

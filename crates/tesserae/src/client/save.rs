@@ -3,6 +3,8 @@ use crate::client::buttons::{self, Align, ButtonStyle};
 use crate::server::persistence::{SaveAction, SaveStatus};
 use bevy::prelude::*;
 
+use super::cinematic::{self as cine, Kind};
+use super::theme;
 use crate::session::SessionApp;
 use bevy::ui_widgets::Activate;
 use bevy::window::{CursorGrabMode, CursorOptions, PrimaryWindow, WindowCloseRequested};
@@ -22,7 +24,6 @@ struct DirectQuit;
 /// The Menu's way out: back to the Worlds, or for a World opened directly,
 /// which has no list to return to, Save & Quit.
 pub(super) fn return_buttons(parent: &mut ChildSpawnerCommands) {
-    use super::cinematic::Kind;
     buttons::button(
         parent,
         "Return to Worlds",
@@ -177,11 +178,7 @@ fn show(
                 Pickable::default()
             },
             GlobalZIndex(100),
-            BackgroundColor(if modal {
-                ui::BG.with_alpha(0.85)
-            } else {
-                Color::NONE
-            }),
+            BackgroundColor(if modal { theme::OVERLAY } else { Color::NONE }),
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(if modal { 0.0 } else { 20.0 }),
@@ -202,51 +199,37 @@ fn show(
             },
         ))
         .with_children(|shade| {
-            let dialog = shade
-                .spawn((
-                    BackgroundColor(ui::CARD),
-                    BorderColor::all(ui::EDGE),
-                    Node {
-                        width: if modal {
-                            Val::Px(390.0)
-                        } else {
-                            Val::Percent(100.0)
-                        },
-                        max_width: Val::Percent(if modal { 92.0 } else { 100.0 }),
-                        padding: UiRect::all(Val::Px(if modal { 26.0 } else { 14.0 })),
-                        border: UiRect::all(Val::Px(1.0)),
-                        border_radius: BorderRadius::all(Val::Px(if modal { 10.0 } else { 8.0 })),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: Val::Px(10.0),
-                        ..default()
-                    },
-                ))
+            let mut dialog = shade.spawn(cine::dialog_box());
+            if !modal {
+                dialog.insert(Node {
+                    width: Val::Percent(100.0),
+                    padding: UiRect::all(Val::Px(14.0)),
+                    flex_direction: FlexDirection::Column,
+                    row_gap: Val::Px(10.0),
+                    ..cine::framed(default())
+                });
+            }
+            let dialog = dialog
                 .with_children(|dialog| {
                     if status.confirm_unsafe {
-                        ui::weighted_text(dialog, "Exit without saving?", 19.0, 620, ui::INK);
-                        ui::paragraph(
+                        cine::dialog_title(dialog, "Exit without saving?");
+                        cine::dialog_text(
                             dialog,
                             "Unsaved World changes will be lost. This cannot be undone.",
-                            12.0,
-                            Color::srgb(254.0 / 255.0, 154.0 / 255.0, 0.0),
+                            theme::WARNING,
                         );
                         dialog
-                            .spawn(Node {
-                                justify_content: JustifyContent::FlexEnd,
-                                column_gap: Val::Px(7.0),
-                                row_gap: Val::Px(7.0),
-                                flex_wrap: FlexWrap::Wrap,
-                                margin: UiRect::top(Val::Px(10.0)),
-                                ..default()
-                            })
+                            .spawn(cine::dialog_actions())
                             .with_children(|actions| {
-                                let exit = buttons::button(
+                                buttons::button(
                                     actions,
                                     "Exit without saving",
                                     Action(SaveAction::ConfirmUnsafe),
-                                    ButtonStyle::Plain,
+                                    ButtonStyle::Cinematic {
+                                        kind: Kind::Danger,
+                                        align: Align::Centre,
+                                    },
                                 );
-                                actions.commands().entity(exit).insert(ui::Danger);
                                 initial_focus = Some(buttons::button(
                                     actions,
                                     "Cancel",
@@ -255,57 +238,27 @@ fn show(
                                 ));
                             });
                     } else if let Some(error) = &status.error {
-                        ui::weighted_text(
-                            dialog,
-                            "Could not save World",
-                            if modal { 19.0 } else { 14.0 },
-                            620,
-                            ui::INK,
-                        );
-                        ui::paragraph(
+                        if modal {
+                            cine::dialog_title(dialog, "Could not save World");
+                        } else {
+                            ui::weighted_text(
+                                dialog,
+                                "Could not save World",
+                                theme::TEXT_SMALL,
+                                theme::SEMIBOLD,
+                                theme::INK,
+                            );
+                        }
+                        cine::dialog_text(
                             dialog,
                             "Your World is still open. Your latest changes have not been saved.",
-                            12.0,
-                            ui::MUTED,
+                            theme::MUTED,
                         );
+                        dialog.spawn(cine::error_well()).with_children(|well| {
+                            cine::dialog_text(well, error.clone(), theme::DANGER_INK)
+                        });
                         dialog
-                            .spawn((
-                                BackgroundColor(Color::srgba(
-                                    254.0 / 255.0,
-                                    154.0 / 255.0,
-                                    0.0,
-                                    0.06,
-                                )),
-                                BorderColor::all(Color::srgba(
-                                    254.0 / 255.0,
-                                    154.0 / 255.0,
-                                    0.0,
-                                    0.3,
-                                )),
-                                Node {
-                                    padding: UiRect::all(Val::Px(12.0)),
-                                    border: UiRect::all(Val::Px(1.0)),
-                                    border_radius: BorderRadius::all(Val::Px(6.0)),
-                                    ..default()
-                                },
-                            ))
-                            .with_children(|well| {
-                                ui::paragraph(
-                                    well,
-                                    error,
-                                    12.0,
-                                    Color::srgb(254.0 / 255.0, 154.0 / 255.0, 0.0),
-                                )
-                            });
-                        dialog
-                            .spawn(Node {
-                                justify_content: JustifyContent::FlexEnd,
-                                column_gap: Val::Px(7.0),
-                                row_gap: Val::Px(7.0),
-                                flex_wrap: FlexWrap::Wrap,
-                                margin: UiRect::top(Val::Px(10.0)),
-                                ..default()
-                            })
+                            .spawn(cine::dialog_actions())
                             .with_children(|actions| {
                                 if status.quitting {
                                     initial_focus = Some(buttons::button(
@@ -336,13 +289,15 @@ fn show(
                                     ..default()
                                 })
                                 .with_children(|actions| {
-                                    let exit = buttons::button(
+                                    buttons::button(
                                         actions,
                                         "Exit without saving…",
                                         Action(SaveAction::AskUnsafe),
-                                        ButtonStyle::Quiet { text_px: 11.0 },
+                                        ButtonStyle::Cinematic {
+                                            kind: Kind::Danger,
+                                            align: Align::Centre,
+                                        },
                                     );
-                                    actions.commands().entity(exit).insert(ui::Danger);
                                 });
                         }
                     } else {
@@ -353,9 +308,9 @@ fn show(
                             } else {
                                 "Finishing World save…"
                             },
-                            12.0,
-                            500,
-                            ui::INK,
+                            theme::TEXT_EYEBROW,
+                            theme::MEDIUM,
+                            theme::INK,
                         );
                     }
                 })
