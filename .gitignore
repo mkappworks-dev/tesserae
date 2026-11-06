@@ -13,3 +13,5 @@ node_modules/
 __pycache__/
 *.py[cod]
 /dist
+
+.playwright-mcp/
